@@ -1,11 +1,17 @@
 {
   "name": "jbaruch/coding-policy",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "summary": "General-purpose coding policy for Baruch's AI agents",
   "private": false,
   "entrypoint": "README.md",
   "docs": "docs/index.md",
-  "keywords": ["coding", "conventions", "policy", "agents", "quality"],
+  "keywords": [
+    "coding",
+    "conventions",
+    "policy",
+    "agents",
+    "quality"
+  ],
   "skills": {
     "release": {
       "path": "skills/release/SKILL.md"
