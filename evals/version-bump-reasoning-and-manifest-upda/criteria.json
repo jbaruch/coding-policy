@@ -1,0 +1,56 @@
+{
+  "context": "Tests whether the agent correctly reasons about semantic version bump types and knows which bump levels require updating the project manifest versus relying on automation. Also checks that the agent follows the correct readiness checks and thread-reply conventions.",
+  "type": "weighted_checklist",
+  "checklist": [
+    {
+      "name": "Patch: no manifest update",
+      "max_score": 12,
+      "description": "For the bug-fix / patch change, the agent does NOT update the version field in the project manifest (e.g. package.json, tile.json, or equivalent), because patch is handled automatically"
+    },
+    {
+      "name": "Patch: automation mentioned",
+      "max_score": 10,
+      "description": "For the patch change, the output mentions that the version bump is handled automatically by CI automation — not a manual step"
+    },
+    {
+      "name": "Minor: manifest updated",
+      "max_score": 12,
+      "description": "For the new-feature / minor change, the agent DOES update the version field in the project manifest to reflect the minor bump"
+    },
+    {
+      "name": "Major: manifest updated",
+      "max_score": 12,
+      "description": "For the breaking-change / major change, the agent DOES update the version field in the project manifest to reflect the major bump"
+    },
+    {
+      "name": "Readiness: tests",
+      "max_score": 10,
+      "description": "The release process (script, checklist, or documentation) includes running the test suite as a required step before creating the PR, and requires tests to pass"
+    },
+    {
+      "name": "Readiness: linter",
+      "max_score": 10,
+      "description": "The release process includes running the linter as a required step before creating the PR, and requires it to pass with no warnings or errors"
+    },
+    {
+      "name": "PR title convention",
+      "max_score": 8,
+      "description": "PR titles for each change follow the `<type>(<scope>): <imperative summary>` convention"
+    },
+    {
+      "name": "Accepted reply format",
+      "max_score": 8,
+      "description": "When describing how to respond to accepted review feedback, uses the format `Fixed in <sha>` (not just 'done' or 'resolved')"
+    },
+    {
+      "name": "Declined reply format",
+      "max_score": 8,
+      "description": "When describing how to respond to declined/rejected review suggestions, uses the format `Declining — <reason>`"
+    },
+    {
+      "name": "All threads replied",
+      "max_score": 10,
+      "description": "The release process requires a reply on EVERY review thread before merging — does NOT allow dangling/unresolved threads"
+    }
+  ]
+}

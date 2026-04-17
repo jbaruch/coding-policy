@@ -1,0 +1,56 @@
+{
+  "context": "Tests whether the agent uses GraphQL (not REST) to request Copilot review, provides the correct hardcoded bot ID, includes a fallback for when the bot ID is stale, and follows the correct PR title and body format when scripting the PR creation and review request workflow.",
+  "type": "weighted_checklist",
+  "checklist": [
+    {
+      "name": "GraphQL mutation used",
+      "max_score": 15,
+      "description": "Uses `gh api graphql` with a `requestReviews` mutation to add Copilot as a reviewer — does NOT use REST (`gh pr edit --add-reviewer`, `gh api .../requested_reviewers` POST)"
+    },
+    {
+      "name": "Correct Copilot bot ID",
+      "max_score": 15,
+      "description": "Passes bot ID `BOT_kgDOCnlnWA` in the `botIds` field of the `requestReviews` mutation"
+    },
+    {
+      "name": "PR node ID retrieval",
+      "max_score": 10,
+      "description": "Fetches the PR's GraphQL node ID (e.g. via a `pullRequest(number: N) { id }` query) before calling the mutation — does NOT pass the integer PR number directly to `requestReviews`"
+    },
+    {
+      "name": "Bot ID fallback included",
+      "max_score": 10,
+      "description": "Includes (or documents) a fallback GraphQL query that retrieves the Copilot bot ID from past PR reviews when the hardcoded ID is stale"
+    },
+    {
+      "name": "Review request verification",
+      "max_score": 8,
+      "description": "After requesting review, verifies acceptance using `gh api repos/.../pulls/<N>` and inspects `requested_reviewers`"
+    },
+    {
+      "name": "Feature branch guard",
+      "max_score": 10,
+      "description": "Script checks that the current branch is NOT main or master before proceeding"
+    },
+    {
+      "name": "PR title format",
+      "max_score": 8,
+      "description": "PR title in the script follows the pattern `<type>(<scope>): <imperative summary>` (e.g. `fix(auth): handle token expiry`)"
+    },
+    {
+      "name": "PR body Summary section",
+      "max_score": 8,
+      "description": "PR body template includes a `## Summary` section with bullet points describing what changed and why"
+    },
+    {
+      "name": "PR body Test plan section",
+      "max_score": 8,
+      "description": "PR body template includes a `## Test plan` section with markdown checkbox items (`- [ ] ...`)"
+    },
+    {
+      "name": "Pre-push readiness",
+      "max_score": 8,
+      "description": "Script or documentation includes steps to run tests AND linter before pushing/creating the PR, and requires both to pass"
+    }
+  ]
+}

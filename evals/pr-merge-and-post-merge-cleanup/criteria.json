@@ -1,0 +1,56 @@
+{
+  "context": "Tests whether the agent follows the correct merge command with the right flags, uses safe git pull semantics post-merge, properly cleans up local and remote branch refs, and performs the required post-merge verification steps including confirming the publish workflow was triggered.",
+  "type": "weighted_checklist",
+  "checklist": [
+    {
+      "name": "Merge flags: --merge",
+      "max_score": 10,
+      "description": "Uses `gh pr merge` with the `--merge` flag (not `--squash` or `--rebase`)"
+    },
+    {
+      "name": "Merge flags: --delete-branch",
+      "max_score": 10,
+      "description": "Uses `gh pr merge` with the `--delete-branch` flag to delete the remote branch on merge"
+    },
+    {
+      "name": "Fast-forward only pull",
+      "max_score": 12,
+      "description": "After switching to main, uses `git pull --ff-only` (not plain `git pull` or `git pull --rebase`)"
+    },
+    {
+      "name": "Checkout main first",
+      "max_score": 8,
+      "description": "Switches to the main branch (`git checkout main`) before running `git pull`"
+    },
+    {
+      "name": "Local branch deletion",
+      "max_score": 10,
+      "description": "Deletes the local feature branch with `git branch -d` (not force-delete `-D`)"
+    },
+    {
+      "name": "Remote ref pruning",
+      "max_score": 10,
+      "description": "Runs `git remote prune origin` to clean up stale remote-tracking refs"
+    },
+    {
+      "name": "Verify merge on main",
+      "max_score": 10,
+      "description": "Includes a step to verify the merged commit is present on the main branch (e.g. `git log`, `gh pr view`, or checking PR status)"
+    },
+    {
+      "name": "Publish CI check",
+      "max_score": 12,
+      "description": "Includes a step to check that the publish/release CI workflow was triggered after the merge (e.g. checking workflow runs)"
+    },
+    {
+      "name": "Report merged PR URL",
+      "max_score": 8,
+      "description": "Script or documentation includes reporting the merged PR URL as part of the outcome summary"
+    },
+    {
+      "name": "Pre-merge: CI green gate",
+      "max_score": 10,
+      "description": "Script or checklist requires confirming CI is green before merging — does not proceed with merge if CI is failing"
+    }
+  ]
+}
