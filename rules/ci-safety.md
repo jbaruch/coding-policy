@@ -25,6 +25,13 @@ alwaysApply: true
 - Use the convention: `<type>/<description>` (e.g., `feat/add-auth`, `fix/null-pointer`, `chore/update-deps`)
 - Keep branch names lowercase with hyphens
 
+## Always Watch CI
+
+- After every push, watch the CI run to completion — never assume it will pass
+- Use `gh run watch` or equivalent to monitor the run in real time
+- If CI fails, inspect the logs immediately, fix the issue, and push again
+- A task is not done until CI is green
+
 ## Protected Branches
 
 - Don't push directly to `main` or `master`
