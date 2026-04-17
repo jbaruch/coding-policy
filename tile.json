@@ -1,0 +1,48 @@
+{
+  "name": "jbaruch/coding-policy",
+  "version": "0.1.0",
+  "summary": "General-purpose coding policy for Baruch's AI agents",
+  "private": false,
+  "entrypoint": "README.md",
+  "docs": "docs/index.md",
+  "keywords": ["coding", "conventions", "policy", "agents", "quality"],
+  "skills": {
+    "release": {
+      "path": "skills/release/SKILL.md"
+    }
+  },
+  "steering": {
+    "commit-conventions": {
+      "rules": "rules/commit-conventions.md",
+      "alwaysApply": true
+    },
+    "testing-standards": {
+      "rules": "rules/testing-standards.md",
+      "alwaysApply": true
+    },
+    "error-handling": {
+      "rules": "rules/error-handling.md",
+      "alwaysApply": true
+    },
+    "dependency-management": {
+      "rules": "rules/dependency-management.md",
+      "alwaysApply": true
+    },
+    "file-hygiene": {
+      "rules": "rules/file-hygiene.md",
+      "alwaysApply": true
+    },
+    "ci-safety": {
+      "rules": "rules/ci-safety.md",
+      "alwaysApply": true
+    },
+    "no-secrets": {
+      "rules": "rules/no-secrets.md",
+      "alwaysApply": true
+    },
+    "code-formatting": {
+      "rules": "rules/code-formatting.md",
+      "alwaysApply": true
+    }
+  }
+}

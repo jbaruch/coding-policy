@@ -1,0 +1,34 @@
+name: Review & Publish Tile
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: write
+
+concurrency:
+  group: publish-tile
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: tesslio/setup-tessl@v2
+        with:
+          token: ${{ secrets.TESSL_TOKEN }}
+
+      - name: Lint tile
+        run: tessl tile lint
+
+      - name: Review release skill
+        run: tessl skill review --threshold 85 skills/release
+
+      - uses: tesslio/patch-version-publish@v1
+        with:
+          token: ${{ secrets.TESSL_TOKEN }}
