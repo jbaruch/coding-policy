@@ -1,9 +1,12 @@
 ---
 name: release
 description: >
-  Structured workflow for shipping code: PR creation, Copilot review, merge,
-  and cleanup. Covers readiness checks, version reasoning, review requesting
-  via GraphQL, feedback handling, and post-merge verification.
+  Structured workflow for shipping code via GitHub pull requests: PR creation,
+  Copilot code review, merge, and branch cleanup. Covers readiness checks,
+  version reasoning, review requesting via GraphQL, feedback handling, and
+  post-merge verification.
+  Use when the user wants to open a pull request, ship code, request reviews,
+  merge a branch, or handle post-merge cleanup on GitHub.
 ---
 
 # Release Skill
