@@ -10,7 +10,9 @@ The team has tried using `gh pr edit --add-reviewer` in the past but found bot a
 
 Produce a `release.sh` bash script that:
 - Accepts the repository owner, repository name, branch name, PR title, PR body (or constructs one from arguments), and PR number as inputs (via arguments or environment variables — your choice)
-- Pushes the branch and creates the PR
+- Validates the working environment before doing anything destructive (e.g., ensures you're not about to push from the wrong branch)
+- Runs pre-push readiness checks (tests, linter) before creating the PR
+- Pushes the branch and creates the PR, following team conventions for PR title format and body structure
 - Requests a Copilot code review on that PR
 - Verifies the review request was accepted
 - Includes inline comments explaining any non-obvious steps

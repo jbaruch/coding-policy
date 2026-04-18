@@ -29,6 +29,9 @@ jobs:
       - name: Review release skill
         run: tessl skill review --threshold 85 skills/release
 
+      - name: Review eval-authoring skill
+        run: tessl skill review --threshold 85 skills/eval-authoring
+
       - uses: tesslio/patch-version-publish@v1
         with:
           token: ${{ secrets.TESSL_TOKEN }}

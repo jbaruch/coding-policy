@@ -1,0 +1,46 @@
+{
+  "context": "Tests whether the agent can identify missing eval coverage (especially negative cases and untested decision branches) and write structurally correct new scenarios from scratch, as prescribed by the eval-authoring skill Step 7.",
+  "type": "weighted_checklist",
+  "checklist": [
+    {
+      "name": "Identifies missing production-without-approval case",
+      "max_score": 15,
+      "description": "The coverage analysis flags that no scenario tests deploying to production WITHOUT the approval flag — the negative case where the skill should refuse to proceed"
+    },
+    {
+      "name": "Identifies missing unhealthy-rollback case",
+      "max_score": 15,
+      "description": "The coverage analysis flags that no scenario tests the health check failure path — the case where the service is unhealthy and the skill should trigger a rollback"
+    },
+    {
+      "name": "Writes production-rejection scenario",
+      "max_score": 15,
+      "description": "Creates a scenario where a production deploy is attempted without approval, and the criteria check that the skill refuses to proceed — a proper negative case"
+    },
+    {
+      "name": "Writes rollback scenario",
+      "max_score": 15,
+      "description": "Creates a scenario where the health check fails after deployment, and the criteria check that a rollback is triggered"
+    },
+    {
+      "name": "New scenarios have correct structure",
+      "max_score": 10,
+      "description": "Each new scenario is in its own directory with a `task.md` and `criteria.json`, and criteria.json uses the weighted_checklist format with name, description, and max_score fields"
+    },
+    {
+      "name": "No bleeding in new scenarios",
+      "max_score": 10,
+      "description": "The new task.md files describe the situation without revealing the expected behavior — criteria check for behavior the task doesn't spell out"
+    },
+    {
+      "name": "New criteria have meaningful descriptions",
+      "max_score": 10,
+      "description": "Every criterion in the new scenarios has a description that explains what went wrong on failure — no 'mismatch' or vague descriptions"
+    },
+    {
+      "name": "Coverage analysis explains why gaps matter",
+      "max_score": 10,
+      "description": "The analysis doesn't just list gaps — it explains why each missing case is important (e.g., 'without this, a production deploy without approval would pass evals silently')"
+    }
+  ]
+}

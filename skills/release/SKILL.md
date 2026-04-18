@@ -11,18 +11,16 @@ description: >
 
 # Release Skill
 
-Structured workflow for shipping code: PR creation, Copilot review, merge, and cleanup.
+Structured workflow for shipping code: PR creation, Copilot review, merge, and cleanup. Process each step in order — do not skip ahead.
 
-## Steps
-
-### 1. Verify Readiness
+## Step 1 — Verify Readiness
 
 - Confirm you're on a feature branch (not `main`/`master`)
 - Run the test suite — all tests must pass
 - Run the linter — no warnings or errors
 - If anything fails, fix it before proceeding
 
-### 2. Create PR
+## Step 2 — Create PR
 
 - Push the branch: `git push -u origin <branch>`
 - Create the PR with `gh pr create`:
@@ -36,7 +34,7 @@ Structured workflow for shipping code: PR creation, Copilot review, merge, and c
     - [ ] <verification steps>
     ```
 
-### 3. Reason About Versioning
+## Step 3 — Reason About Versioning
 
 Decide the version bump:
 
@@ -44,58 +42,17 @@ Decide the version bump:
 - **Minor**: new features, backward-compatible additions. Update the version in the project manifest
 - **Major**: breaking changes. Update the version in the project manifest
 
-### 4. Request Copilot Review
+## Step 4 — Request Copilot Review
 
 **Must use GraphQL, not REST** — REST silently drops bot reviewers.
 
-```bash
-# Get PR node ID
-PR_NODE_ID=$(gh api graphql -f query='
-  query {
-    repository(owner: "<owner>", name: "<repo>") {
-      pullRequest(number: <N>) { id }
-    }
-  }
-' --jq '.data.repository.pullRequest.id')
+Use the queries in `skills/release/COPILOT_REVIEW_GRAPHQL.md`:
+1. Fetch the PR's GraphQL node ID
+2. Call `requestReviews` mutation with bot ID `BOT_kgDOCnlnWA`
+3. If the bot ID is stale, use the fallback query to retrieve it from past reviews
+4. Verify the request was accepted via the REST reviewers endpoint
 
-# Request Copilot review
-gh api graphql -f query='
-  mutation {
-    requestReviews(input: {
-      pullRequestId: "'"$PR_NODE_ID"'",
-      botIds: ["BOT_kgDOCnlnWA"]
-    }) {
-      clientMutationId
-    }
-  }
-'
-```
-
-**Fallback**: If the bot ID goes stale, retrieve it from a past Copilot review:
-```bash
-gh api graphql -f query='
-  query {
-    repository(owner: "<owner>", name: "<repo>") {
-      pullRequests(last: 20) {
-        nodes {
-          reviews(first: 10) {
-            nodes {
-              author { ... on Bot { id login } }
-            }
-          }
-        }
-      }
-    }
-  }
-'
-```
-
-**Verify** the request was accepted:
-```bash
-gh api repos/<owner>/<repo>/pulls/<N> --jq '.requested_reviewers[].login'
-```
-
-### 5. Wait for Review + CI
+## Step 5 — Wait for Review + CI
 
 Poll until both are complete:
 
@@ -103,7 +60,7 @@ Poll until both are complete:
 - **Copilot review state**: `gh api repos/<owner>/<repo>/pulls/<N>/reviews --jq '.[].state'`
 - **Inline comments**: `gh api repos/<owner>/<repo>/pulls/<N>/comments`
 
-### 6. Address Feedback
+## Step 6 — Address Feedback
 
 - **CI failures**: Fix every one, no exceptions
 - **Copilot suggestions**: Apply what's right and reasonable. Push back with a reply on anything that misreads scope or over-engineers
@@ -112,7 +69,7 @@ Poll until both are complete:
   - Declined: "Declining — `<reason>`"
 - Push fixes to the same branch
 
-### 7. Merge + Cleanup
+## Step 7 — Merge + Cleanup
 
 Only proceed when CI is green AND all review threads have replies.
 

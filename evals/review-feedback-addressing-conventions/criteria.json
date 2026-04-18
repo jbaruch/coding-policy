@@ -1,0 +1,46 @@
+{
+  "context": "Tests whether the agent applies the release skill's specific conventions for addressing review feedback: fixing all CI failures without exception, applying reasonable suggestions, pushing back on over-engineered suggestions, using the exact reply formats for accepted and declined threads, ensuring no thread is left without a reply, and pushing fixes to the same branch.",
+  "type": "weighted_checklist",
+  "checklist": [
+    {
+      "name": "CI failure: fix required",
+      "max_score": 10,
+      "description": "For the CI failure (failing unit test), the guide states the test must be fixed — does NOT suggest ignoring it, skipping it, or deferring it"
+    },
+    {
+      "name": "Accepted reply format",
+      "max_score": 15,
+      "description": "For the accepted suggestion, the reply text follows the format `Fixed in <sha>` — uses this exact phrasing (not 'Done', 'Resolved', 'Applied', or similar alternatives)"
+    },
+    {
+      "name": "Declined reply format",
+      "max_score": 15,
+      "description": "For the declined/over-engineered suggestion, the reply text follows the format `Declining — <reason>` — uses this exact phrasing with the em dash"
+    },
+    {
+      "name": "All threads replied",
+      "max_score": 15,
+      "description": "The guide covers a reply for ALL three feedback threads (CI failure thread, accepted suggestion thread, declined suggestion thread) — no thread is left without a response"
+    },
+    {
+      "name": "Push to same branch",
+      "max_score": 15,
+      "description": "States that any code fixes should be pushed to the same existing branch — NOT to a new branch"
+    },
+    {
+      "name": "Apply reasonable suggestion",
+      "max_score": 10,
+      "description": "For the clearly correct suggestion (simplifying the conditional), the guide says to apply/implement it — does NOT suggest declining it or skipping it"
+    },
+    {
+      "name": "Decline over-engineered suggestion",
+      "max_score": 10,
+      "description": "For the over-engineered suggestion (unnecessary abstraction), the guide says to push back or decline it with a reason — does NOT say to blindly implement it"
+    },
+    {
+      "name": "No dangling threads",
+      "max_score": 10,
+      "description": "The guide explicitly states or implies that every thread must have a reply before the PR can be merged — does NOT leave any thread unaddressed"
+    }
+  ]
+}

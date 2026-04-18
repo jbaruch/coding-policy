@@ -4,7 +4,6 @@
   "summary": "General-purpose coding policy for Baruch's AI agents",
   "private": false,
   "entrypoint": "README.md",
-  "docs": "docs/index.md",
   "keywords": [
     "coding",
     "conventions",
@@ -15,6 +14,9 @@
   "skills": {
     "release": {
       "path": "skills/release/SKILL.md"
+    },
+    "eval-authoring": {
+      "path": "skills/eval-authoring/SKILL.md"
     }
   },
   "steering": {
@@ -48,6 +50,22 @@
     },
     "code-formatting": {
       "rules": "rules/code-formatting.md",
+      "alwaysApply": true
+    },
+    "context-artifacts": {
+      "rules": "rules/context-artifacts.md",
+      "alwaysApply": true
+    },
+    "skill-authoring": {
+      "rules": "rules/skill-authoring.md",
+      "alwaysApply": true
+    },
+    "script-delegation": {
+      "rules": "rules/script-delegation.md",
+      "alwaysApply": true
+    },
+    "plugin-evals": {
+      "rules": "rules/plugin-evals.md",
       "alwaysApply": true
     }
   }

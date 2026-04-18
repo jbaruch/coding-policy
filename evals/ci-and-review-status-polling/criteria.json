@@ -1,0 +1,36 @@
+{
+  "context": "Tests whether the agent uses the correct gh CLI commands to poll CI status and retrieve both Copilot review state and inline comments from a pull request, matching the specific API patterns prescribed in the release skill.",
+  "type": "weighted_checklist",
+  "checklist": [
+    {
+      "name": "CI watch command",
+      "max_score": 20,
+      "description": "Uses `gh pr checks <N> --watch` (with the `--watch` flag) to poll CI until checks complete — not a manual sleep loop or alternative polling approach"
+    },
+    {
+      "name": "Review state API call",
+      "max_score": 20,
+      "description": "Retrieves the Copilot/automated review state via `gh api repos/<owner>/<repo>/pulls/<N>/reviews` with a `--jq '.[].state'` filter (or equivalent jq expression that extracts the state field)"
+    },
+    {
+      "name": "Inline comments API call",
+      "max_score": 20,
+      "description": "Retrieves inline PR comments via `gh api repos/<owner>/<repo>/pulls/<N>/comments` — uses the pull request review comments endpoint, not the issue comments endpoint"
+    },
+    {
+      "name": "PR number parameterized",
+      "max_score": 10,
+      "description": "The PR number is accepted as a script argument or variable rather than hardcoded, so the script is reusable across different PRs"
+    },
+    {
+      "name": "Review state surfaced",
+      "max_score": 15,
+      "description": "The script prints or summarizes the review state value(s) retrieved so the developer can see whether the review is approved, changes requested, etc."
+    },
+    {
+      "name": "Inline comments surfaced",
+      "max_score": 15,
+      "description": "The script prints or summarizes the inline comments content (e.g. body text or count) so the developer can see what feedback was left"
+    }
+  ]
+}

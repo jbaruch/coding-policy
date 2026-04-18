@@ -1,0 +1,59 @@
+---
+alwaysApply: true
+---
+
+# Skill Authoring
+
+## SKILL.md Frontmatter
+
+- Required fields: `name`, `description` (include trigger phrases so the agent knows when to activate)
+- Optional fields: `allowed-tools`, `disable-model-invocation`
+- The `description` field is your discovery surface — write it for the agent, not a human audience
+
+## Mandatory Preamble
+
+- The first line of the body must force sequential execution: process steps in order, do not skip ahead
+- This prevents the agent from parallelizing steps that depend on earlier output
+
+## Step Structure
+
+- Use flat numbered headings with descriptive titles: `## Step 1 — Verify Readiness`, `## Step 2 — Create PR`
+- No decimals, no sub-steps — flat numbering only
+- When inserting a step, renumber all subsequent steps
+- Each step is one action — if a step has an "and", split it
+
+## Keep Skills Compact
+
+- SKILL.md is the execution plan, not a reference manual
+- Move detailed reference material (API docs, long examples, lookup tables) to separate files
+- Reference them with typed code blocks and full relative paths
+
+## Typed Calls
+
+- Invoke other skills with typed `Skill(skill: "name")` calls, never prose references
+- Never call `Skill()` on a rule — rules are auto-loaded, not invoked
+
+## Silence Instructions
+
+- If a step can legitimately produce no output, say so explicitly: "If no issues found, proceed silently"
+- Prevents the agent from fabricating output to fill the gap
+
+## Script References
+
+- Reference scripts via typed code blocks with full paths: `` `scripts/foo.sh` ``
+- Include the expected input/output contract in the step description
+
+## tile.json Manifest Reference
+
+Required fields:
+- `name` — `<workspace>/<tile-name>` format
+- `version` — semver string
+- `summary` — one-line description of the tile
+- `entrypoint` — path to the tile's README (typically `README.md`)
+
+Optional fields:
+- `private` — `true` to prevent publishing to the public registry
+- `docs` — path to extended documentation (avoid — keep docs in the entrypoint to prevent duplicate tables that drift)
+- `keywords` — array of discovery tags
+- `skills` — map of skill names to `{ "path": "skills/<name>/SKILL.md" }`
+- `steering` — map of rule names to `{ "rules": "rules/<name>.md", "alwaysApply": true }`

@@ -1,0 +1,31 @@
+{
+  "context": "Tests whether the agent refuses to proceed with the release workflow when the user is on the main branch, and provides actionable recovery guidance instead of blindly executing steps.",
+  "type": "weighted_checklist",
+  "checklist": [
+    {
+      "name": "Detects main branch",
+      "max_score": 25,
+      "description": "The agent identifies that the user is on the main branch and flags this as a problem — does NOT proceed with pushing and creating a PR from main"
+    },
+    {
+      "name": "Explains why it's blocked",
+      "max_score": 20,
+      "description": "Explains that the release process requires a feature branch, not main — provides the reasoning, not just a refusal"
+    },
+    {
+      "name": "Provides recovery steps",
+      "max_score": 25,
+      "description": "Suggests a concrete fix: create a branch from the current state (e.g., `git checkout -b fix/hotfix-name`), then proceed with the normal release flow from the new branch"
+    },
+    {
+      "name": "Does not create PR from main",
+      "max_score": 20,
+      "description": "The output does NOT include `gh pr create` or `git push -u origin main` — the agent refuses to execute the release steps from main"
+    },
+    {
+      "name": "Preserves the commit",
+      "max_score": 10,
+      "description": "Recovery guidance preserves the existing commit — does NOT suggest discarding the fix or resetting main"
+    }
+  ]
+}

@@ -1,0 +1,43 @@
+---
+alwaysApply: true
+---
+
+# Script Delegation
+
+## The Core Principle
+
+- Everything deterministic → script. Everything requiring reasoning → skill/LLM
+- If the logic can be expressed as a pure function with known inputs and outputs, it's a script
+- If it requires judgment, synthesis, or context-dependent decisions, it stays in the skill
+
+## What Belongs in a Script
+
+- Database queries, math operations, file parsing
+- JSON normalization, fixed-logic API polling, data transformation
+- Any operation where the same input always produces the same output
+
+## What Stays in the LLM
+
+- Synthesis across multiple sources, language generation
+- Branching decisions that require situational context
+- Anything where the "right answer" depends on understanding intent
+
+## The Regex Trap
+
+- LLMs are over-eager declaring things deterministic because they think they can regex it
+- If the input has too many edge cases for a reasonable regex, it's reasoning — not scripting
+- Parsing natural language dates, extracting meaning from unstructured text, classifying ambiguous input — these are **not** scripting tasks
+- A script should only handle patterns that are fully enumerable
+
+## Script Requirements
+
+Scripts follow the baseline in `rules/file-hygiene.md` (exit codes, stderr, idempotency) plus these Tessl-specific requirements:
+
+- **JSON-producing**: output structured data, not prose
+- **Self-error-handling**: exit non-zero on failure, write a diagnostic message to stderr
+- **Single-purpose**: one script does one thing — compose scripts, don't build monoliths
+
+## Precheck Gating
+
+- Use last-line JSON payload with `wake_agent` for precheck gating
+- The script runs first; the agent only wakes if the script signals it should
