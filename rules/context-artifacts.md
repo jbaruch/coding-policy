@@ -7,6 +7,7 @@ alwaysApply: true
 ## Plugin Structure
 
 - Every tile has a `tile.json` manifest with `name`, `version`, `summary`, and `entrypoint` (→ `README.md`). Don't add a separate `docs` field — keep all documentation in the entrypoint to avoid duplicate tables that drift out of sync
+- The tile's entrypoint `README.md` **is** the project's `README.md` — they are the same file. Do not create a separate README for the tile. If the project already has a README, extend it with tile content (rules table, skills table, installation instructions)
 - Include a Tessl registry badge at the top of README: `[![tessl](https://img.shields.io/endpoint?url=https%3A%2F%2Fapi.tessl.io%2Fv1%2Fbadges%2F<workspace>%2F<tile>)](https://tessl.io/registry/<workspace>/<tile>)`
 - Skills live in `skills/<name>/SKILL.md`, rules live in `rules/<name>.md`
 - Standard directories: `rules/`, `skills/<name>/`, `evals/`
