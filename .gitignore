@@ -6,5 +6,6 @@
 .DS_Store
 Thumbs.db
 .codex/
+.github/aw/logs/
 *.bak
 *.tmp
