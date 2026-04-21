@@ -14,6 +14,7 @@ alwaysApply: true
 
 - Never commit generated files (compiled output, bundled assets, rendered docs)
 - If a file can be reproduced from source, it doesn't belong in the repo
+- **Exception — platform-required compiled artifacts:** when the hosting platform must read a compiled file directly and cannot invoke the compiler itself (e.g., gh-aw `.lock.yml` workflow files compiled from `.md` sources by `gh aw compile`; dependency lock files like `package-lock.json`, `Cargo.lock`, `go.sum`), commit both source and compiled form. Mark the compiled file as generated via `.gitattributes` (`linguist-generated=true`, `merge=ours`) so diffs stay readable and merges don't conflict
 
 ## Standalone Scripts
 

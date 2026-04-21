@@ -44,13 +44,11 @@ Decide the version bump:
 
 ## Step 4 — Policy Review Fires Automatically
 
-Pushing the PR branch triggers `.github/workflows/review.md` on the `pull_request` event. No explicit request mutation — the workflow runs on every `opened`, `synchronize`, and `reopened`. The review is submitted by `github-actions[bot]` and uses OpenAI `gpt-5.4` via the gh-aw Codex engine, checking the diff against the in-tree `rules/*.md` from the PR head.
+Pushing the PR branch triggers the runnable GitHub Actions workflow `.github/workflows/review.lock.yml` ("PR Policy Review") on the `pull_request` event. The `.github/workflows/review.md` file is the gh-aw source that compiles into that lock file via `gh aw compile`. The workflow runs on every `opened`, `synchronize`, and `reopened` — no explicit request mutation. The review is submitted by `github-actions[bot]` and uses OpenAI `gpt-5.4` via the gh-aw Codex engine, checking the diff against the in-tree `rules/*.md` from the PR head.
 
 **Proceed immediately to Step 5 — do not stop after creating the PR.** The skill runs end-to-end: once `gh pr create` succeeds, the next action is always to start watching.
 
-### Step 4a — (Trial) Keep Copilot in Parallel
-
-During gh-aw validation, **also** request Copilot review using the GraphQL flow in `skills/release/COPILOT_REVIEW_GRAPHQL.md` (fetch PR node ID, call `requestReviews` with bot ID `BOT_kgDOCnlnWA`). Treat both reviews as gating. Remove Step 4a (and delete `COPILOT_REVIEW_GRAPHQL.md`) in a cleanup PR once gh-aw is validated on 1–2 PRs.
+**Trial — keep Copilot in parallel.** During gh-aw validation, Copilot review is also requested via the GraphQL flow in `skills/release/COPILOT_REVIEW_GRAPHQL.md` (fetch PR node ID, call `requestReviews` with bot ID `BOT_kgDOCnlnWA`). Both reviews are treated as gating. This paragraph and `COPILOT_REVIEW_GRAPHQL.md` are deleted in a cleanup PR once gh-aw is validated on 1–2 PRs.
 
 ## Step 5 — Wait for Reviews + CI
 
