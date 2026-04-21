@@ -1,9 +1,10 @@
 ---
 name: PR Policy Review
 description: |
-  Reviews every PR against this repo's own rules/*.md on the PR head branch.
-  This repo IS the policy — rules proposed in a PR must be enforced against
-  themselves. Posts inline comments plus a consolidated review verdict.
+  Reviews every same-repo pull request against this repo's own rules/*.md on
+  the PR head branch. Fork PRs are skipped by gh-aw's fork-guard. This repo
+  IS the policy — rules proposed in a PR must be enforced against themselves.
+  Posts up to 10 inline comments plus one consolidated review verdict.
 
 on:
   pull_request:
