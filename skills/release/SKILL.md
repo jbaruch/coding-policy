@@ -34,6 +34,8 @@ Structured workflow for shipping code: PR creation, automated policy review, mer
     - [ ] <verification steps>
     ```
 
+Proceed immediately to Step 3 — do not wait for reviews before reasoning about version.
+
 ## Step 3 — Reason About Versioning
 
 Decide the version bump:
@@ -109,3 +111,5 @@ After merge:
 - Verify the merge landed on main
 - Check that the publish CI workflow was triggered
 - Report the outcome: merged PR URL, version published (if applicable)
+
+Finish here — the skill is complete.
