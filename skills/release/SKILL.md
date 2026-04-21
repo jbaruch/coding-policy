@@ -58,7 +58,7 @@ Poll until all are complete:
 - **Review states** — filter by bot login:
   ```bash
   gh api repos/<owner>/<repo>/pulls/<N>/reviews \
-    --jq '.[] | {user: .user.login, state: .state, submitted_at: .submitted_at}'
+    --jq '.[] | select(.user.login == "github-actions[bot]" or .user.login == "copilot-pull-request-reviewer[bot]") | {user: .user.login, state: .state, submitted_at: .submitted_at}'
   ```
   - `github-actions[bot]` → gh-aw policy review
   - `copilot-pull-request-reviewer[bot]` → Copilot (trial only)
