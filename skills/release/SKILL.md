@@ -79,10 +79,10 @@ Loop until `ci.status` is `success` (or `none` if no checks are configured) and 
 ## Step 6 — Address Feedback; No Re-request Needed
 
 - **CI failures**: Fix every one, no exceptions
-- **Review suggestions**: Apply what's right. Push back with a reply on anything that misreads scope or over-engineers
+- **Review suggestions**: Apply what's right and reasonable. Push back on anything that misreads scope or over-engineers — but cite concrete evidence (file:line, log line, spec quote) when declining; never hand-wave
 - **Reply on EVERY thread** — nothing left dangling:
   - Accepted: "Fixed in `<sha>`"
-  - Declined: "Declining — `<reason>`"
+  - Declined: "Declining — `<reason with cited evidence>`"
 - Push fixes to the same branch
 - **Re-run is automatic**: `pull_request: synchronize` re-triggers the gh-aw workflow on every push — no manual re-request. During the trial, Copilot still needs a re-request via `skills/release/request-copilot-review.sh` (same args as Step 4).
 - Repeat Step 5 until every active bot review is `APPROVED` or `COMMENTED` with no blocking items, and every thread has a reply.
