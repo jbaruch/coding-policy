@@ -60,7 +60,14 @@ Poll until both are complete:
 - **Copilot review state**: `gh api repos/<owner>/<repo>/pulls/<N>/reviews --jq '.[].state'`
 - **Inline comments**: `gh api repos/<owner>/<repo>/pulls/<N>/comments`
 
-## Step 6 — Address Feedback
+Interpreting review states:
+- `APPROVED` — Copilot found no issues
+- `CHANGES_REQUESTED` — Copilot left comments that need addressing
+- `COMMENTED` — Copilot left observations; treat as comments to review
+
+If the review never arrives, mention `@copilot` in a PR comment and re-request review using the GraphQL mutation.
+
+## Step 6 — Address Feedback and Re-request
 
 - **CI failures**: Fix every one, no exceptions
 - **Copilot suggestions**: Apply what's right and reasonable. Push back with a reply on anything that misreads scope or over-engineers
@@ -68,10 +75,11 @@ Poll until both are complete:
   - Accepted: "Fixed in `<sha>`"
   - Declined: "Declining — `<reason>`"
 - Push fixes to the same branch
+- **Re-request Copilot review** after pushing fixes (use the same GraphQL mutation from Step 4). Repeat Steps 5–6 until Copilot has zero comments — as many cycles as needed
 
 ## Step 7 — Merge + Cleanup
 
-Only proceed when CI is green AND all review threads have replies.
+Only proceed when CI is green AND Copilot's latest review has zero comments AND all review threads have replies.
 
 ```bash
 # Merge
