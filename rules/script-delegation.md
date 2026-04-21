@@ -29,6 +29,12 @@ alwaysApply: true
 - Parsing natural language dates, extracting meaning from unstructured text, classifying ambiguous input — these are **not** scripting tasks
 - A script should only handle patterns that are fully enumerable
 
+## Scripts Are Real Files
+
+- Scripts are executable files that live in the tile (e.g., `scripts/request-review.sh`) — not code blocks in SKILL.md for the agent to copy-paste
+- The skill references the script and runs it; the script does the work
+- Code blocks in SKILL.md are for showing the agent what command to run, not for embedding logic the agent should reproduce character-by-character
+
 ## Script Requirements
 
 Scripts follow the baseline in `rules/file-hygiene.md` (exit codes, stderr, idempotency) plus these Tessl-specific requirements:

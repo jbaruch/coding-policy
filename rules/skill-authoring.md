@@ -40,7 +40,8 @@ alwaysApply: true
 
 ## Script References
 
-- Reference scripts via typed code blocks with full paths: `` `scripts/foo.sh` ``
+- Deterministic operations must be executable script files, not inline code blocks for the agent to copy-paste — see `rules/script-delegation.md`
+- Reference scripts with full paths: `` `scripts/foo.sh` ``
 - Include the expected input/output contract in the step description
 
 ## tile.json Manifest Reference
