@@ -13,7 +13,7 @@
 
 ### Evals
 
-- **install-reviewer** — 3 scenarios: 1 positive (`consumer-scaffolds-policy-reviewer`) covering the happy path through preflight → branch → copy → compile → commit → PR with secrets instructions, and 2 negative (`install-reviewer-refuses-overwrite`, `install-reviewer-missing-gh-aw`) covering the skill's two decisional guards. (Note: scenarios predate the OpenAI/Anthropic split and will be refreshed in a follow-up once the reviewer evals work from #6 lands.)
+- **install-reviewer** — 3 scenarios graded against the paired-workflow layout: 1 positive (`consumer-scaffolds-policy-reviewer`) covering the happy path through preflight → branch → copy both templates → compile → commit all six artifacts → PR with the three required secrets (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `TESSL_TOKEN`) and the cross-family rationale, and 2 negative (`install-reviewer-refuses-overwrite`, `install-reviewer-missing-gh-aw`) covering the skill's two decisional guards.
 
 ## 0.2.0
 

@@ -20,9 +20,10 @@ alwaysApply: true
 
 ## Precedence
 
+- Every PR **must** carry a signal — the declaration is required, not optional
 - PR body `Author-Model:` wins when both exist (explicit beats implicit)
 - Trailer-only: the reviewer extracts the model from the trailer's display name (e.g., `Claude Opus 4.7` → `claude-opus-4-7`)
-- Neither present: reviewer assumes human — both cross-family reviewers run, double-review is accepted
+- Neither present is a policy violation — the reviewer assumes human as a degraded fallback and runs both families (wasteful double-review), and the missing declaration itself is grounds for `REQUEST_CHANGES` in the review
 
 ## Model Families
 
@@ -34,4 +35,4 @@ alwaysApply: true
 ## Mixed Authorship
 
 - If any AI model contributed, the reviewer family must differ from **every** declared AI family — worst-case matching, not most-permissive
-- `human + claude-opus-4-7` is treated as claude-authored for family-mismatch purposes; the openai-family reviewer runs, the claude-family reviewer skips
+- `**Author-Model:** human claude-opus-4-7` is treated as claude-authored for family-mismatch purposes; the openai-family reviewer runs, the claude-family reviewer skips

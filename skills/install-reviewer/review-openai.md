@@ -99,7 +99,7 @@ Read the PR body and commit trailers to determine the author model, per `rules/a
 
 Decide whether to proceed:
 
-- If **any** declared AI model maps to **openai** → this is a self-review. Stop. Call `submit_pull_request_review` exactly once with `event: COMMENT` and `body: "Skipping review: self-review-bias risk — author declared an openai-family model; the paired anthropic-family reviewer will review this PR. See rules/author-model-declaration.md."` Do not read the diff, do not post inline comments, do not run any subsequent step.
+- If **any** declared AI model maps to **openai** → this is a self-review. Stop. Call `submit_pull_request_review` exactly once with `event: COMMENT` and `body: "Skipping: self-review-bias — author-family openai; see rules/author-model-declaration.md."` Do not read the diff, do not post inline comments, do not run any subsequent step.
 - Otherwise (human-only, anthropic, google, or unknown) → proceed to Step 2.
 
 ## Step 2 — Load the policy

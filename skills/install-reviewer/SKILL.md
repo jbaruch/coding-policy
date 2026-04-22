@@ -27,7 +27,7 @@ Runs every precondition (git worktree, GitHub CLI install + auth, gh-aw extensio
 
 ## Step 2 — Refuse Overwrite
 
-If **any** of `.github/workflows/review-openai.md`, `review-openai.lock.yml`, `review-anthropic.md`, or `review-anthropic.lock.yml` already exists in the repo, stop and report that prior review setup is present. Do not overwrite any of these files — a lock alone (source removed) or a source alone (mid-authoring) both indicate deliberate in-progress configuration that the skill would destroy by compiling over it. If none exist, proceed immediately to Step 3.
+If **any** of `.github/workflows/review-openai.md`, `.github/workflows/review-openai.lock.yml`, `.github/workflows/review-anthropic.md`, or `.github/workflows/review-anthropic.lock.yml` already exists in the repo, stop and report that prior review setup is present. Do not overwrite any of these files — a lock alone (source removed) or a source alone (mid-authoring) both indicate deliberate in-progress configuration that the skill would destroy by compiling over it. If none exist, proceed immediately to Step 3.
 
 ## Step 3 — Create Feature Branch
 
