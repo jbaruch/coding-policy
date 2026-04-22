@@ -20,7 +20,7 @@ Scaffold the gh-aw PR policy reviewer into a consumer repository. Steps are sequ
 .tessl/tiles/jbaruch/coding-policy/skills/install-reviewer/preflight.sh
 ```
 
-Runs six checks — GitHub CLI installed, GitHub CLI authenticated, gh-aw extension installed, tile template present, local branch clear, remote branch clear — and returns one JSON object. Exit 0 with `{"ok": true, "failures": []}` means all checks passed; exit 1 with a populated `failures` array means at least one precondition is missing. Each failure carries a concrete recovery command for the user. If exit non-zero, report every failure's `reason` verbatim and stop. If exit zero, proceed immediately to Step 2.
+Runs every precondition (git worktree, GitHub CLI install + auth, gh-aw extension, tile template, origin remote, local + remote branch clear) and returns one JSON object. Exit 0 with `{"ok": true, "failures": []}` means all checks passed; exit 1 with a populated `failures` array means at least one precondition is missing. Each failure carries a concrete recovery command for the user. If exit non-zero, report every failure's `reason` verbatim and stop. If exit zero, proceed immediately to Step 2.
 
 ## Step 2 — Refuse Overwrite
 
@@ -36,21 +36,17 @@ If **either** `.github/workflows/review.md` **or** `.github/workflows/review.loc
 .tessl/tiles/jbaruch/coding-policy/skills/install-reviewer/scaffold.sh
 ```
 
-Creates `.github/workflows/` if missing, copies the packaged template into `review.md`, and compiles it via `gh aw compile review` to produce the runnable `review.lock.yml`. Emits a JSON summary on success; exits non-zero with a stderr diagnostic and rolls back the source write on compile failure, so the repo is never left half-scaffolded. Proceed immediately to Step 5.
+Creates `.github/workflows/` if missing, copies the packaged template into `review.md`, compiles it via `gh aw compile review` to produce `review.lock.yml`, and ensures `.gitattributes` marks the lock file as generated (`linguist-generated=true`, `merge=ours`) per `rules/file-hygiene.md`. Emits a JSON summary on success; exits non-zero with a stderr diagnostic and rolls back every artifact it touched (including restoring `actions-lock.json` from a snapshot) on compile failure. Proceed immediately to Step 5.
 
-## Step 5 — Stage Files
+## Step 5 — Commit and Push
 
-`git add .github/workflows/review.md .github/workflows/review.lock.yml .github/aw/actions-lock.json` — include `actions-lock.json` because `gh aw compile` creates or updates it; leaving it unstaged would dirty the working tree on every subsequent run. Proceed immediately to Step 6.
+```bash
+.tessl/tiles/jbaruch/coding-policy/skills/install-reviewer/commit-and-push.sh
+```
 
-## Step 6 — Commit
+Stages the four scaffolded files (`review.md`, `review.lock.yml`, `actions-lock.json`, `.gitattributes`), commits with the canonical message `ci(review): add jbaruch/coding-policy PR review workflow`, and pushes `feat/add-coding-policy-review` to origin. Emits a JSON summary with the commit sha. If a pre-commit hook rejects the commit, the script exits non-zero — fix the hook's finding and re-run; do not `--no-verify`. Proceed immediately to Step 6.
 
-`git commit -m "ci(review): add jbaruch/coding-policy PR review workflow"` (title follows `rules/commit-conventions.md` `<type>(<scope>): <imperative summary>` format). If a pre-commit hook rejects either file, fix and re-commit — do not `--no-verify`. Proceed immediately to Step 7.
-
-## Step 7 — Push
-
-`git push -u origin feat/add-coding-policy-review`. Proceed immediately to Step 8.
-
-## Step 8 — Open PR
+## Step 6 — Open PR
 
 `gh pr create` with title `ci(review): add jbaruch/coding-policy PR review workflow` and a body that:
 - Explains the workflow installs `jbaruch/coding-policy` at run time and reviews every PR against it

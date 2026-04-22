@@ -27,6 +27,8 @@ WORKFLOW_DIR=".github/workflows"
 WORKFLOW_DEST="${WORKFLOW_DIR}/review.md"
 WORKFLOW_LOCK="${WORKFLOW_DIR}/review.lock.yml"
 ACTIONS_LOCK=".github/aw/actions-lock.json"
+GITATTRIBUTES=".gitattributes"
+LOCK_GENERATED_RULE='.github/workflows/*.lock.yml linguist-generated=true merge=ours'
 
 main() {
   if [[ ! -f "$TEMPLATE_SRC" ]]; then
@@ -62,10 +64,24 @@ main() {
   # Compile succeeded — discard the snapshot
   [[ -n "$lock_snapshot" ]] && rm -f "$lock_snapshot"
 
+  # Ensure the lock file is marked as a generated artifact per
+  # rules/file-hygiene.md. Idempotent — appends only if the exact line
+  # is not already present, so existing consumer-managed .gitattributes
+  # entries are not clobbered.
+  if [[ ! -f "$GITATTRIBUTES" ]] || ! grep -qxF "$LOCK_GENERATED_RULE" "$GITATTRIBUTES"; then
+    # If the file exists and doesn't end in a newline, add one first so the
+    # appended line lands on its own row.
+    if [[ -f "$GITATTRIBUTES" && -s "$GITATTRIBUTES" && -n "$(tail -c 1 "$GITATTRIBUTES")" ]]; then
+      printf '\n' >> "$GITATTRIBUTES"
+    fi
+    printf '%s\n' "$LOCK_GENERATED_RULE" >> "$GITATTRIBUTES"
+  fi
+
   jq -n \
     --arg source "$WORKFLOW_DEST" \
     --arg lock "$WORKFLOW_LOCK" \
-    '{source: $source, lock: $lock, compiled: true}'
+    --arg gitattributes "$GITATTRIBUTES" \
+    '{source: $source, lock: $lock, gitattributes: $gitattributes, compiled: true}'
 }
 
 [[ "${BASH_SOURCE[0]}" == "${0}" ]] && main "$@"
