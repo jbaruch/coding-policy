@@ -26,7 +26,11 @@ if [[ -n "$repo_root" ]]; then
 fi
 
 BRANCH="feat/add-coding-policy-review"
-TEMPLATE=".tessl/tiles/jbaruch/coding-policy/skills/install-reviewer/review-workflow.md"
+TEMPLATE_DIR=".tessl/tiles/jbaruch/coding-policy/skills/install-reviewer"
+TEMPLATES=(
+  "${TEMPLATE_DIR}/review-openai.md"
+  "${TEMPLATE_DIR}/review-anthropic.md"
+)
 
 declare -a failures=()
 
@@ -59,9 +63,14 @@ check_gh_aw_installed() {
     push_failure "gh-aw-installed" "gh-aw extension missing — run 'gh extension install github/gh-aw'"
 }
 
-check_template_present() {
-  [[ -f "$TEMPLATE" ]] || \
-    push_failure "template-present" "Template not found at ${TEMPLATE} — run 'tessl install jbaruch/coding-policy' first"
+check_templates_present() {
+  local missing=()
+  for t in "${TEMPLATES[@]}"; do
+    [[ -f "$t" ]] || missing+=("$t")
+  done
+  if [[ ${#missing[@]} -gt 0 ]]; then
+    push_failure "templates-present" "Template(s) not found: ${missing[*]} — run 'tessl install jbaruch/coding-policy' first"
+  fi
 }
 
 check_branch_not_local() {
@@ -85,7 +94,7 @@ main() {
     check_gh_authenticated
     check_gh_aw_installed
   fi
-  check_template_present
+  check_templates_present
   # Remaining checks depend on a git worktree with origin; skip if either is missing
   # so we don't leak confusing git-error diagnostics on top of the real failures.
   if git rev-parse --git-dir >/dev/null 2>&1; then

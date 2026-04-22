@@ -6,7 +6,7 @@ Coding policy tile for Baruch's AI agents. Language-agnostic code quality rules 
 
 ## What's New
 
-- 12 always-on steering rules: 8 covering code quality, 4 covering plugin authoring
+- 13 always-on steering rules: 8 covering code quality, 4 covering plugin authoring, 1 covering author-model declaration
 - `release` skill — structured PR + merge workflow with Copilot review
 - `eval-authoring` skill — generate, review, and curate eval scenarios
 - Language-agnostic: works with any stack, no Python/JS assumptions
@@ -35,6 +35,7 @@ tessl install jbaruch/coding-policy
 | Authoring | [skill-authoring](rules/skill-authoring.md) | SKILL.md structure, step numbering, typed calls, tile.json reference |
 | Authoring | [script-delegation](rules/script-delegation.md) | Deterministic → script, reasoning → LLM, the regex trap |
 | Authoring | [plugin-evals](rules/plugin-evals.md) | No bleeding, no leaking, persistent eval coverage |
+| Review | [author-model-declaration](rules/author-model-declaration.md) | PRs declare author model; paired reviewers pick the cross-family one |
 
 ### Skills
 
@@ -42,7 +43,7 @@ tessl install jbaruch/coding-policy
 |-------|-------------|
 | [release](skills/release/SKILL.md) | PR creation, Copilot review, merge + cleanup workflow |
 | [eval-authoring](skills/eval-authoring/SKILL.md) | Generate, review, iterate on eval scenarios with score-driven feedback |
-| [install-reviewer](skills/install-reviewer/SKILL.md) | Scaffold a gh-aw PR review workflow into a consumer repo — reviews every PR against the latest published `jbaruch/coding-policy` |
+| [install-reviewer](skills/install-reviewer/SKILL.md) | Scaffold the paired gh-aw PR review workflows (OpenAI + Anthropic) into a consumer repo — reviews every PR against the latest published `jbaruch/coding-policy` with cross-family enforcement |
 
 ## Philosophy
 

@@ -70,6 +70,10 @@
     "plugin-evals": {
       "rules": "rules/plugin-evals.md",
       "alwaysApply": true
+    },
+    "author-model-declaration": {
+      "rules": "rules/author-model-declaration.md",
+      "alwaysApply": true
     }
   }
 }

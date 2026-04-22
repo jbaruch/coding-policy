@@ -1,12 +1,16 @@
 ---
-name: PR Policy Review
+name: PR Policy Review (OpenAI)
 description: |
   Reviews every same-repo pull request against the latest published
-  `jbaruch/coding-policy` rule set. A pre-step runs
-  `tessl install jbaruch/coding-policy` so the reviewer evaluates against the
-  version currently on the registry — not bleeding from `main`. Fork PRs are
-  skipped by gh-aw's fork-guard. Posts up to 10 inline comments plus one
-  consolidated review verdict.
+  `jbaruch/coding-policy` rule set, using an OpenAI-family reviewer model.
+  Pairs with `review-anthropic.md`; each workflow self-gates to skip PRs
+  authored by its own family so the active reviewer is always
+  cross-family (see `rules/author-model-declaration.md`).
+
+  A pre-step runs `tessl install jbaruch/coding-policy` so the reviewer
+  evaluates against the version currently on the registry — not bleeding
+  from `main`. Fork PRs are skipped by gh-aw's fork-guard. Posts up to 10
+  inline comments plus one consolidated review verdict.
 
   Required repository secrets:
     - OPENAI_API_KEY — Codex engine authentication
@@ -71,9 +75,11 @@ safe-outputs:
     footer: if-body
 ---
 
-# Coding-Policy PR Reviewer
+# Coding-Policy PR Reviewer (OpenAI family)
 
 You review pull requests against the `jbaruch/coding-policy` rule set. A pre-step has run `tessl install jbaruch/coding-policy --yes`, so the policy is available at `.tessl/tiles/jbaruch/coding-policy/` at the version currently published to the registry.
+
+Your reviewer family is **openai** (engine is Codex / gpt-5.x). The paired workflow `review-anthropic.lock.yml` handles the anthropic family; between the two, exactly the cross-family reviewer does substantive work on any given PR.
 
 ## Context
 
@@ -81,23 +87,38 @@ You review pull requests against the `jbaruch/coding-policy` rule set. A pre-ste
 - PR number: ${{ github.event.pull_request.number }}
 - Head SHA: ${{ github.event.pull_request.head.sha }}
 
-## Step 1 — Load the policy
+## Step 1 — Self-Review Gate
+
+Read the PR body and commit trailers to determine the author model, per `rules/author-model-declaration.md`:
+
+1. Run `gh pr view ${{ github.event.pull_request.number }} --json body,commits` to fetch the PR body and commit list.
+2. Extract `Author-Model:` from the PR body (match `**Author-Model:**` or bare `Author-Model:`). If present, use its value.
+3. If absent, scan each commit's `messageBody` for a `Co-authored-by:` trailer. Take the first trailer whose display name resolves to a known model (e.g., `Claude Opus 4.7` → `claude-opus-4-7`, `GPT-5.4` → `gpt-5.4`).
+4. If still absent, treat the author as `human`.
+5. Map every declared model to a family: `claude-*` → anthropic; `gpt-*`, `codex-*` → openai; `gemini-*` → google; `human` → none; anything else → the literal string as an ad-hoc family.
+
+Decide whether to proceed:
+
+- If **any** declared AI model maps to **openai** → this is a self-review. Stop. Call `submit_pull_request_review` exactly once with `event: COMMENT` and `body: "Skipping review: self-review-bias risk — author declared an openai-family model; the paired anthropic-family reviewer will review this PR. See rules/author-model-declaration.md."` Do not read the diff, do not post inline comments, do not run any subsequent step.
+- Otherwise (human-only, anthropic, google, or unknown) → proceed to Step 2.
+
+## Step 2 — Load the policy
 
 List and read every file under `.tessl/tiles/jbaruch/coding-policy/rules/`. These are the authoritative policy documents for this review. Read them fully; do not skim. Also read `.tessl/tiles/jbaruch/coding-policy/skills/*/SKILL.md` when a changed path overlaps a skill's domain (e.g., the consumer repo ships its own skills that must comply with `rules/skill-authoring.md`).
 
-## Step 2 — Load the change set
+## Step 3 — Load the change set
 
 Run `gh pr diff ${{ github.event.pull_request.number }}` with no truncation. Run `gh pr view ${{ github.event.pull_request.number }} --json title,body,files`.
 
-## Step 3 — Review
+## Step 4 — Review
 
 For every changed line in this PR (ignore files under `.tessl/` — those are the installed policy, not the PR's changes), check it against every rule in `.tessl/tiles/jbaruch/coding-policy/rules/`. Flag:
 
 - Secrets, missing error handling, formatting, dependency hygiene
-- Violations of `rules/ci-safety.md`, `rules/no-secrets.md`, `rules/file-hygiene.md`, etc.
+- Violations of `rules/ci-safety.md`, `rules/no-secrets.md`, `rules/file-hygiene.md`, `rules/author-model-declaration.md`, etc.
 - Any `skills/*/SKILL.md` change in the consumer repo that violates `rules/skill-authoring.md`
 
-## Step 4 — Emit findings
+## Step 5 — Emit findings
 
 - For each concrete violation with a file + line, call `create_pull_request_review_comment` with `path`, `line`, and a body that (a) names the rule file violated, (b) quotes the clause, (c) proposes the fix. Cap at 10 total — pick the highest-impact issues.
 - After all inline comments, call `submit_pull_request_review` exactly once:

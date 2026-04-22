@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Stage the four files the install-reviewer skill produces and commit
+# Stage the six files the install-reviewer skill produces and commit
 # them with the canonical message. Call after scaffold.sh has succeeded
 # and before push.sh.
 #
@@ -9,8 +9,10 @@
 # `git commit` would.
 #
 # Staged paths:
-#   .github/workflows/review.md
-#   .github/workflows/review.lock.yml
+#   .github/workflows/review-openai.md
+#   .github/workflows/review-openai.lock.yml
+#   .github/workflows/review-anthropic.md
+#   .github/workflows/review-anthropic.lock.yml
 #   .github/aw/actions-lock.json
 #   .gitattributes
 #
@@ -28,11 +30,13 @@ repo_root=$(git rev-parse --show-toplevel 2>/dev/null) || {
 cd "$repo_root"
 
 BRANCH="feat/add-coding-policy-review"
-COMMIT_MSG="ci(review): add jbaruch/coding-policy PR review workflow"
+COMMIT_MSG="ci(review): add jbaruch/coding-policy PR review workflows"
 
 FILES=(
-  .github/workflows/review.md
-  .github/workflows/review.lock.yml
+  .github/workflows/review-openai.md
+  .github/workflows/review-openai.lock.yml
+  .github/workflows/review-anthropic.md
+  .github/workflows/review-anthropic.lock.yml
   .github/aw/actions-lock.json
   .gitattributes
 )

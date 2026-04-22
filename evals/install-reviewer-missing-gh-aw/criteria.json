@@ -20,7 +20,7 @@
     {
       "name": "Explains why gh-aw is needed",
       "max_score": 15,
-      "description": "Gives a reason — e.g., gh-aw is what compiles the workflow source (`review.md`) into the runnable lock file (`review.lock.yml`) that GitHub Actions executes"
+      "description": "Gives a reason — e.g., gh-aw is what compiles each workflow source (`review-openai.md` / `review-anthropic.md`) into its runnable lock file (`review-openai.lock.yml` / `review-anthropic.lock.yml`) that GitHub Actions executes"
     },
     {
       "name": "Invites re-invocation",

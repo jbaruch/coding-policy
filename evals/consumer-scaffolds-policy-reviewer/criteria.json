@@ -1,46 +1,56 @@
 {
-  "context": "Tests whether the agent, invoking the install-reviewer skill, produces the correct sequence of commands to scaffold the gh-aw PR review workflow into a consumer repository: a feature branch, the template copied to the right path, the workflow compiled, both files committed, a PR opened with secrets instructions in the body.",
+  "context": "Tests whether the agent, invoking the install-reviewer skill, produces the correct sequence of commands to scaffold the paired gh-aw PR review workflows (OpenAI + Anthropic) into a consumer repository: a feature branch, both templates copied to the right paths, both workflows compiled, all files committed, a PR opened with the three required secrets listed in the body.",
   "type": "weighted_checklist",
   "checklist": [
     {
       "name": "Creates a feature branch",
-      "max_score": 10,
+      "max_score": 8,
       "description": "Uses `git checkout -b <branch>` (or equivalent) to create a new branch before making changes — does NOT commit directly to main/master"
     },
     {
-      "name": "Populates .github/workflows with source and lock",
-      "max_score": 35,
-      "description": "Ends with `.github/workflows/review.md` and `.github/workflows/review.lock.yml` both present in the working tree. The source declares a `pull_request` trigger and a pre-step that runs `tessl install jbaruch/coding-policy`; the lock is the compiled form of that source (produced by `gh aw compile`, which is a public gh CLI extension, not typed out by hand or fetched from a URL). Only the final observable state is graded — not the specific command sequence the agent chose to reach it"
+      "name": "Populates .github/workflows with both source + lock pairs",
+      "max_score": 30,
+      "description": "Ends with all four files present in the working tree: `.github/workflows/review-openai.md`, `.github/workflows/review-openai.lock.yml`, `.github/workflows/review-anthropic.md`, `.github/workflows/review-anthropic.lock.yml`. Each source declares a `pull_request` trigger and a pre-step that runs `tessl install jbaruch/coding-policy`; each lock is the compiled form of its source (produced by `gh aw compile`, which is a public gh CLI extension, not typed out by hand or fetched from a URL). Only the final observable state is graded — not the specific command sequence the agent chose to reach it"
     },
     {
-      "name": "Commits both source and lock",
+      "name": "Commits both sources and both locks",
       "max_score": 10,
-      "description": "Stages and commits both `review.md` and `review.lock.yml` — not just the source or just the lock"
+      "description": "Stages and commits all four workflow files — both source files AND both lock files, not a partial set"
     },
     {
       "name": "Pushes and opens a PR",
-      "max_score": 8,
+      "max_score": 7,
       "description": "Pushes the branch and creates a pull request with `gh pr create`"
     },
     {
       "name": "PR body lists OPENAI_API_KEY",
-      "max_score": 10,
-      "description": "The PR body or the plan instructs the reviewer to set `OPENAI_API_KEY` as a repository secret before merge"
+      "max_score": 8,
+      "description": "The PR body or the plan instructs the reviewer to set `OPENAI_API_KEY` as a repository secret before merge (required by the Codex reviewer workflow)"
+    },
+    {
+      "name": "PR body lists ANTHROPIC_API_KEY",
+      "max_score": 8,
+      "description": "The PR body or the plan instructs the reviewer to set `ANTHROPIC_API_KEY` as a repository secret before merge (required by the Claude Code reviewer workflow)"
     },
     {
       "name": "PR body lists TESSL_TOKEN",
-      "max_score": 10,
-      "description": "The PR body or the plan instructs the reviewer to set `TESSL_TOKEN` as a repository secret before merge (required so the workflow's `tessl install` pre-step can authenticate)"
+      "max_score": 8,
+      "description": "The PR body or the plan instructs the reviewer to set `TESSL_TOKEN` as a repository secret before merge (required so each workflow's `tessl install` pre-step can authenticate)"
     },
     {
       "name": "Does not merge",
-      "max_score": 10,
+      "max_score": 9,
       "description": "Does NOT include `gh pr merge` or equivalent. The scaffolding PR is handed to the user for secret validation and merge; the skill stops at PR creation"
     },
     {
       "name": "Does not bypass pre-commit hooks",
       "max_score": 7,
       "description": "Does NOT include `--no-verify` on any git commit (if a pre-commit hook fires, the correct response is to fix and re-commit, not bypass)"
+    },
+    {
+      "name": "Explains the cross-family reviewer rationale",
+      "max_score": 5,
+      "description": "The PR body or the plan mentions that the two reviewers pair with the PR's `Author-Model:` declaration so exactly the cross-family reviewer does substantive work — i.e., the dual install is purposeful, not a hedge"
     }
   ]
 }
