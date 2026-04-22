@@ -53,7 +53,7 @@ Stage both files and commit with message: `ci: add jbaruch/coding-policy PR revi
 
 ## Step 9 — Open PR
 
-`gh pr create` with title `Add coding-policy PR review workflow` and a body that:
+`gh pr create` with title `ci(review): add jbaruch/coding-policy PR review workflow` (follows `rules/commit-conventions.md` `<type>(<scope>): <imperative summary>` format) and a body that:
 - Explains the workflow installs `jbaruch/coding-policy` at run time and reviews every PR against it
 - Lists the two repository secrets the user must set **before merge**: `OPENAI_API_KEY` (OpenAI billing account for Codex) and `TESSL_TOKEN` (created at https://tessl.io/account/api-keys)
 - Notes that merging without the secrets set will cause the workflow to fail on its first run

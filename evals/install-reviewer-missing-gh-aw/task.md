@@ -2,10 +2,10 @@
 
 ## Problem/Feature Description
 
-A developer is new to the team and wants to set up the automated `jbaruch/coding-policy` PR reviewer in their repo. They've run `tessl install jbaruch/coding-policy` successfully — the tile is on disk at `.tessl/tiles/jbaruch/coding-policy/`. They invoke the `install-reviewer` skill to scaffold the workflow.
+A developer new to the team wants to set up the automated `jbaruch/coding-policy` PR reviewer in their repo. They've installed the `jbaruch/coding-policy` tile successfully via tessl, and it's present on disk at its standard location. They invoke the `install-reviewer` skill.
 
-When the skill runs its preflight, `gh --version` returns fine and `gh auth status` succeeds. But `gh aw --version` fails with "unknown command" — they haven't installed the `github/gh-aw` GitHub CLI extension yet, which is what compiles the workflow source file into the runnable lock file.
+When the skill runs its preflight, the GitHub CLI itself is healthy and authenticated, and the installed tile is reachable. However, the GitHub CLI subcommand the skill uses to compile agentic-workflow source files into their runnable form is not available — that subcommand ships as a separate extension the developer hasn't installed yet.
 
 ## Output Specification
 
-Walk through what the skill should do in this situation. Capture your reasoning and the commands (or non-commands) you would produce in a file named `preflight-plan.md`.
+Walk through what the skill should do in this situation. Capture your reasoning and the exact commands (or non-commands) you would produce in a file named `preflight-plan.md`.
