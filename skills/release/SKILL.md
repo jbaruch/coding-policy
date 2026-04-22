@@ -27,7 +27,7 @@ Structured workflow for shipping code: PR creation, automated policy review, mer
   - **Title**: `<type>(<scope>): <imperative summary>`
   - **Body**:
     ```
-    **Author-Model:** <model-id | human>
+    **Author-Model:** <model-id(s) space-separated, or `human`>
 
     ## Summary
     <what changed and why — 1-3 bullet points>
