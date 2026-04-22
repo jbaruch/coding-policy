@@ -30,9 +30,13 @@ main() {
   fi
 
   # If the remote branch already matches local HEAD, skip the push.
+  # ls-remote can fail on network/auth issues — treat that as "unknown remote
+  # state" and proceed with the push so git push can report the real error.
+  # set -o pipefail means a failure in ls-remote would kill us here without
+  # the explicit `|| true` guard.
   local local_sha remote_sha
   local_sha=$(git rev-parse HEAD)
-  remote_sha=$(git ls-remote --heads origin "$BRANCH" 2>/dev/null | awk '{print $1}')
+  remote_sha=$(git ls-remote --heads origin "$BRANCH" 2>/dev/null | awk '{print $1}' || echo "")
   if [[ -n "$remote_sha" && "$remote_sha" == "$local_sha" ]]; then
     jq -n --arg branch "$BRANCH" \
       '{state: "up-to-date", remote_ref: ("origin/" + $branch)}'

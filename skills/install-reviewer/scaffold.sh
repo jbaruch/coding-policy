@@ -59,14 +59,24 @@ main() {
   mkdir -p "$WORKFLOW_DIR"
   cp "$TEMPLATE_SRC" "$WORKFLOW_DEST"
 
+  # Record whether .github/aw/ existed before compile so we can remove the
+  # empty directory on rollback if compile created it just to write the lock.
+  local aw_dir_existed_before=0
+  [[ -d "$(dirname "$ACTIONS_LOCK")" ]] && aw_dir_existed_before=1
+
   if ! gh aw compile review >&2; then
     rm -f "$WORKFLOW_DEST" "$WORKFLOW_LOCK"
     if [[ -n "$lock_snapshot" ]]; then
       cp "$lock_snapshot" "$ACTIONS_LOCK"
       rm -f "$lock_snapshot"
     else
-      # actions-lock.json didn't exist before; if compile created it, remove it
+      # actions-lock.json didn't exist before; if compile created it, remove it.
       rm -f "$ACTIONS_LOCK"
+      # If the directory itself didn't exist before and is now empty, remove
+      # it too so the rollback leaves no trace.
+      if [[ $aw_dir_existed_before -eq 0 ]]; then
+        rmdir "$(dirname "$ACTIONS_LOCK")" 2>/dev/null || true
+      fi
     fi
     echo "error: 'gh aw compile review' failed — rolled back ${WORKFLOW_DEST}, ${WORKFLOW_LOCK}, and restored prior state of ${ACTIONS_LOCK}" >&2
     exit 1

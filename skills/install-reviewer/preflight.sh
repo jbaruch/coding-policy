@@ -79,8 +79,12 @@ check_branch_not_remote() {
 main() {
   check_in_git_worktree
   check_gh_installed
-  check_gh_authenticated
-  check_gh_aw_installed
+  # gh-cli-dependent checks only make sense if gh is present — otherwise they
+  # emit follow-on failures that can't succeed until gh is installed first.
+  if command -v gh >/dev/null 2>&1; then
+    check_gh_authenticated
+    check_gh_aw_installed
+  fi
   check_template_present
   # Remaining checks depend on a git worktree with origin; skip if either is missing
   # so we don't leak confusing git-error diagnostics on top of the real failures.
