@@ -48,28 +48,33 @@ Pushing the PR branch triggers the runnable GitHub Actions workflow `.github/wor
 
 **Proceed immediately to Step 5 — do not stop after creating the PR.** The skill runs end-to-end: once `gh pr create` succeeds, the next action is always to start watching.
 
-**Trial — keep Copilot in parallel.** During gh-aw validation, Copilot review is also requested via the GraphQL flow in `skills/release/COPILOT_REVIEW_GRAPHQL.md` (fetch PR node ID, call `requestReviews` with bot ID `BOT_kgDOCnlnWA`). Both reviews are treated as gating. This paragraph and `COPILOT_REVIEW_GRAPHQL.md` are deleted in a cleanup PR once gh-aw is validated on 1–2 PRs.
+**Trial — keep Copilot in parallel.** During gh-aw validation, also request Copilot:
+
+```
+skills/release/request-copilot-review.sh <owner> <repo> <pr-number>
+```
+
+Uses GraphQL (REST drops bot reviewers), falls back to discovering the bot ID from recent reviews if the pinned `BOT_kgDOCnlnWA` goes stale, verifies Copilot is in `requested_reviewers`. Exits non-zero on failure; emits a JSON summary on success. Both reviews gate the merge. This paragraph and the script are retired in a cleanup PR once gh-aw is validated on 1–2 PRs.
 
 ## Step 5 — Wait for Reviews + CI
 
-Poll until all are complete:
+Poll a single JSON snapshot until both reviews are terminal and CI is non-pending:
 
-- **CI + gh-aw check run**: `gh pr checks <N> --watch` (the gh-aw workflow appears as a check; must succeed)
-- **Review states** — filter by bot login:
-  ```bash
-  gh api repos/<owner>/<repo>/pulls/<N>/reviews \
-    --jq '.[] | select(.user.login == "github-actions[bot]" or .user.login == "copilot-pull-request-reviewer[bot]") | {user: .user.login, state: .state, submitted_at: .submitted_at}'
-  ```
-  - `github-actions[bot]` → gh-aw policy review
-  - `copilot-pull-request-reviewer[bot]` → Copilot (trial only)
-- **Inline comments**: `gh api repos/<owner>/<repo>/pulls/<N>/comments` (same filter by `.user.login`)
+```
+skills/release/poll-pr-reviews.sh <owner> <repo> <pr-number>
+```
 
-Interpreting review states (apply to each bot independently):
+The script returns:
+- `ci.status` — `pending | success | failure | none` (the gh-aw workflow appears here as a check once it has run)
+- `reviews.gh_aw.state` and `reviews.copilot.state` — latest review per bot (`APPROVED | CHANGES_REQUESTED | COMMENTED | none`)
+- `inline_comments.gh_aw` and `inline_comments.copilot` — top-level inline comment counts
+
+Interpreting review states (per bot independently):
 - `APPROVED` — no issues
 - `CHANGES_REQUESTED` — comments need addressing
 - `COMMENTED` — observations; read and decide per thread
 
-If the gh-aw review check ran but no review was posted, inspect logs with `gh run view --log-failed`. Do not retry via GraphQL — gh-aw is event-triggered, not request-triggered.
+Loop until `ci.status` is `success` (or `none` if no checks are configured) and neither review state is `CHANGES_REQUESTED`. If the gh-aw review check ran but no review was posted, inspect logs with `gh run view --log-failed`. Do not retry via GraphQL — gh-aw is event-triggered, not request-triggered.
 
 ## Step 6 — Address Feedback; No Re-request Needed
 
@@ -79,7 +84,7 @@ If the gh-aw review check ran but no review was posted, inspect logs with `gh ru
   - Accepted: "Fixed in `<sha>`"
   - Declined: "Declining — `<reason>`"
 - Push fixes to the same branch
-- **Re-run is automatic**: `pull_request: synchronize` re-triggers the gh-aw workflow on every push — no manual re-request. During the trial, Copilot still needs a re-request via GraphQL per `COPILOT_REVIEW_GRAPHQL.md`.
+- **Re-run is automatic**: `pull_request: synchronize` re-triggers the gh-aw workflow on every push — no manual re-request. During the trial, Copilot still needs a re-request via `skills/release/request-copilot-review.sh` (same args as Step 4).
 - Repeat Step 5 until every active bot review is `APPROVED` or `COMMENTED` with no blocking items, and every thread has a reply.
 
 ## Step 7 — Merge + Cleanup
