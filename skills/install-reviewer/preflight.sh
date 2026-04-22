@@ -22,6 +22,16 @@ push_failure() {
   failures+=("{\"check\":\"$1\",\"reason\":\"$2\"}")
 }
 
+check_in_git_worktree() {
+  git rev-parse --git-dir >/dev/null 2>&1 || \
+    push_failure "in-git-worktree" "Not inside a git worktree — run the skill from the root of the consumer repo's git checkout"
+}
+
+check_origin_remote() {
+  git remote get-url origin >/dev/null 2>&1 || \
+    push_failure "origin-remote" "No git remote named 'origin' — add one with 'git remote add origin <url>' before re-running (Step 7 pushes to origin)"
+}
+
 check_gh_installed() {
   command -v gh >/dev/null 2>&1 || \
     push_failure "gh-installed" "GitHub CLI not found on PATH — install from https://cli.github.com/"
@@ -55,12 +65,20 @@ check_branch_not_remote() {
 }
 
 main() {
+  check_in_git_worktree
   check_gh_installed
   check_gh_authenticated
   check_gh_aw_installed
   check_template_present
-  check_branch_not_local
-  check_branch_not_remote
+  # Remaining checks depend on a git worktree with origin; skip if either is missing
+  # so we don't leak confusing git-error diagnostics on top of the real failures.
+  if git rev-parse --git-dir >/dev/null 2>&1; then
+    check_origin_remote
+    check_branch_not_local
+    if git remote get-url origin >/dev/null 2>&1; then
+      check_branch_not_remote
+    fi
+  fi
 
   local failures_json
   if [[ ${#failures[@]} -eq 0 ]]; then

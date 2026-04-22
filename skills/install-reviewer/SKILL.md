@@ -40,7 +40,7 @@ Creates `.github/workflows/` if missing, copies the packaged template into `revi
 
 ## Step 5 — Stage Files
 
-`git add .github/workflows/review.md .github/workflows/review.lock.yml`. Proceed immediately to Step 6.
+`git add .github/workflows/review.md .github/workflows/review.lock.yml .github/aw/actions-lock.json` — include `actions-lock.json` because `gh aw compile` creates or updates it; leaving it unstaged would dirty the working tree on every subsequent run. Proceed immediately to Step 6.
 
 ## Step 6 — Commit
 

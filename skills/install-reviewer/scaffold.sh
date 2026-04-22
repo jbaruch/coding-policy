@@ -31,9 +31,13 @@ main() {
   cp "$TEMPLATE_SRC" "$WORKFLOW_DEST"
 
   if ! gh aw compile review >&2; then
-    # Roll back the source write so the repo isn't left half-scaffolded.
-    rm -f "$WORKFLOW_DEST"
-    echo "error: 'gh aw compile review' failed — rolled back ${WORKFLOW_DEST}" >&2
+    # Roll back this workflow's artifacts so the repo isn't left half-scaffolded.
+    # Do NOT delete .github/aw/actions-lock.json — it may be shared with other
+    # gh-aw workflows in the consumer repo, and removing it would break their
+    # action pinning. The caller should inspect actions-lock.json diff manually
+    # if they care about it.
+    rm -f "$WORKFLOW_DEST" "$WORKFLOW_LOCK"
+    echo "error: 'gh aw compile review' failed — rolled back ${WORKFLOW_DEST} and ${WORKFLOW_LOCK}; .github/aw/actions-lock.json left untouched (may be shared)" >&2
     exit 1
   fi
 
