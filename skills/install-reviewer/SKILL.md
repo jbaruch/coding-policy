@@ -17,7 +17,7 @@ Scaffold the gh-aw PR policy reviewer into a consumer repository. Steps are sequ
 ## Step 1 — Run Preflight Checks
 
 ```bash
-skills/install-reviewer/preflight.sh
+.tessl/tiles/jbaruch/coding-policy/skills/install-reviewer/preflight.sh
 ```
 
 Runs six checks — GitHub CLI installed, GitHub CLI authenticated, gh-aw extension installed, tile template present, local branch clear, remote branch clear — and returns one JSON object. Exit 0 with `{"ok": true, "failures": []}` means all checks passed; exit 1 with a populated `failures` array means at least one precondition is missing. Each failure carries a concrete recovery command for the user. If exit non-zero, report every failure's `reason` verbatim and stop. If exit zero, proceed immediately to Step 2.
@@ -33,7 +33,7 @@ If **either** `.github/workflows/review.md` **or** `.github/workflows/review.loc
 ## Step 4 — Scaffold Workflow Files
 
 ```bash
-skills/install-reviewer/scaffold.sh
+.tessl/tiles/jbaruch/coding-policy/skills/install-reviewer/scaffold.sh
 ```
 
 Creates `.github/workflows/` if missing, copies the packaged template into `review.md`, and compiles it via `gh aw compile review` to produce the runnable `review.lock.yml`. Emits a JSON summary on success; exits non-zero with a stderr diagnostic and rolls back the source write on compile failure, so the repo is never left half-scaffolded. Proceed immediately to Step 5.

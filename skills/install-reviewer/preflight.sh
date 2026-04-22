@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# Run all six install-reviewer preconditions and report them as one
-# JSON result. The skill invokes this before any mutation so every
-# preflight failure is surfaced together, not one-at-a-time.
+# Run all install-reviewer preconditions and report them as one JSON
+# result. The skill invokes this before any mutation so every preflight
+# failure is surfaced together, not one-at-a-time. Checks cover: git
+# worktree, GitHub CLI installation + auth, gh-aw extension, tile
+# template presence, origin remote, and local + remote branch clear.
 #
 # Usage: preflight.sh
 # Out:   one JSON object on stdout:
