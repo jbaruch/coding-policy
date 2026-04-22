@@ -35,7 +35,7 @@ Structured workflow for shipping code: PR creation, automated policy review, mer
     ## Test plan
     - [ ] <verification steps>
     ```
-- **Author-Model is mandatory** per `rules/author-model-declaration.md`. Use the exact model ID you (the agent) are running under (e.g., `claude-opus-4-7`, `gpt-5.4`), or `human` for a hand-authored PR, or list every contributing model space-separated for mixed authorship (e.g., `human claude-opus-4-7`). The paired gh-aw reviewers read this line to pick the cross-family reviewer; omitting it means both reviewers run and waste budget.
+- **Author-Model is mandatory** per `rules/author-model-declaration.md`. Use the exact model ID you (the agent) are running under (e.g., `claude-opus-4-7`, `gpt-5.4`), or `human` for a hand-authored PR, or list every contributing model space-separated for mixed authorship (e.g., `human claude-opus-4-7`). The paired gh-aw reviewers read this line to pick the cross-family reviewer; omitting it blocks the PR — each reviewer emits `REQUEST_CHANGES` immediately and exits without reading the diff.
 
 Proceed immediately to Step 3 — do not wait for reviews before reasoning about version.
 

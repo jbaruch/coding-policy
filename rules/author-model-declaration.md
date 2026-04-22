@@ -22,7 +22,7 @@ alwaysApply: true
 
 - Every PR **must** carry a signal — the declaration is required, not optional
 - PR body `Author-Model:` wins when both exist (explicit beats implicit)
-- Trailer-only: the reviewer extracts the model from the trailer's display name (e.g., `Claude Opus 4.7` → `claude-opus-4-7`)
+- Trailer-only: the reviewer extracts the model from the trailer's display name — known names normalize to canonical IDs (e.g., `Claude Opus 4.7` → `claude-opus-4-7`); unknown display names are still accepted as ad-hoc model IDs so a trailer is never silently rejected
 - Neither present is a policy violation — the reviewer exits with `REQUEST_CHANGES` before reading the diff (no degraded-fallback review), so the missing declaration blocks the PR until it's added
 
 ## Model Families

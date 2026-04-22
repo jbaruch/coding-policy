@@ -4,7 +4,7 @@
 
 ### Rules
 
-- **author-model-declaration** — Every PR declares its author model via a `**Author-Model:**` line in the body (preferred) or a `Co-authored-by:` git trailer (fallback). Defines model families (anthropic, openai, google, human) and mixed-authorship semantics so the paired reviewers can pick a cross-family reviewer and dodge self-review bias.
+- **author-model-declaration** — Every PR declares its author model via a `**Author-Model:**` line in the body (preferred) or a `Co-authored-by:` git trailer (fallback). Defines model families (anthropic, openai, google), plus a special `human` value that maps to no family, and mixed-authorship semantics so the paired reviewers can pick a cross-family reviewer and dodge self-review bias. Missing declaration blocks the PR via early `REQUEST_CHANGES` before the diff is read.
 
 ### Skills
 

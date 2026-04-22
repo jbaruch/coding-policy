@@ -70,7 +70,7 @@ Per `rules/author-model-declaration.md`, every PR must declare its author model 
 
 1. Run `gh pr view ${{ github.event.pull_request.number }} --json body,commits` to fetch the PR body and commit list.
 2. Look for `Author-Model:` in the PR body (match `**Author-Model:**` or bare `Author-Model:`).
-3. If absent, scan each commit's `messageBody` for a `Co-authored-by:` trailer whose display name resolves to a known model (e.g., `Claude Opus 4.7` → `claude-opus-4-7`, `GPT-5.4` → `gpt-5.4`).
+3. If absent, scan each commit's `messageBody` for a `Co-authored-by:` trailer whose display name identifies a model. Normalize known display names to their canonical model IDs (e.g., `Claude Opus 4.7` → `claude-opus-4-7`, `GPT-5.4` → `gpt-5.4`); if the display name doesn't match a known mapping, still accept the trailer as a valid signal using the display name itself as an ad-hoc model ID (which will map to its own ad-hoc family per `rules/author-model-declaration.md`).
 4. If neither signal is present, this PR violates `rules/author-model-declaration.md`. Stop. Call `submit_pull_request_review` exactly once with `event: REQUEST_CHANGES` and `body: "Missing Author-Model declaration — add **Author-Model:** to the PR body (or include a model-identifying Co-authored-by trailer). See rules/author-model-declaration.md."` Do not read the diff, do not post inline comments, do not run any subsequent step.
 5. If a signal is present, proceed to Step 2.
 
