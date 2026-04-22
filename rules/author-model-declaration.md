@@ -8,7 +8,7 @@ alwaysApply: true
 
 - An LLM reviewing its own output misses its own blind spots and favors its own style — cross-family review catches what same-family review waves through
 - The reviewer workflow can only pick a different-family model if the PR signals which model authored the code
-- Without a signal, reviewers default to treating the PR as human-authored, which is the most permissive case — risky when AI did most of the work
+- Missing declaration is grounds for `REQUEST_CHANGES` — reviewers exit without reading the diff rather than silently reviewing as human, because an unannounced AI author is the exact case the rule exists to catch
 
 ## How to Declare
 
@@ -23,7 +23,7 @@ alwaysApply: true
 - Every PR **must** carry a signal — the declaration is required, not optional
 - PR body `Author-Model:` wins when both exist (explicit beats implicit)
 - Trailer-only: the reviewer extracts the model from the trailer's display name (e.g., `Claude Opus 4.7` → `claude-opus-4-7`)
-- Neither present is a policy violation — the reviewer assumes human as a degraded fallback and runs both families (wasteful double-review), and the missing declaration itself is grounds for `REQUEST_CHANGES` in the review
+- Neither present is a policy violation — the reviewer exits with `REQUEST_CHANGES` before reading the diff (no degraded-fallback review), so the missing declaration blocks the PR until it's added
 
 ## Model Families
 

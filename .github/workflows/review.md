@@ -64,15 +64,27 @@ You review pull requests against this repository's own in-tree rules. This repo 
 - PR number: ${{ github.event.pull_request.number }}
 - Head SHA: ${{ github.event.pull_request.head.sha }}
 
-## Step 1 — Load the policy (from PR head, NOT main)
+## Step 1 — Enforce Author-Model declaration
+
+Per `rules/author-model-declaration.md`, every PR must declare its author model via a `**Author-Model:**` line in the PR body (preferred) or a model-identifying `Co-authored-by:` git trailer (fallback). Before reviewing the diff:
+
+1. Run `gh pr view ${{ github.event.pull_request.number }} --json body,commits` to fetch the PR body and commit list.
+2. Look for `Author-Model:` in the PR body (match `**Author-Model:**` or bare `Author-Model:`).
+3. If absent, scan each commit's `messageBody` for a `Co-authored-by:` trailer whose display name resolves to a known model (e.g., `Claude Opus 4.7` → `claude-opus-4-7`, `GPT-5.4` → `gpt-5.4`).
+4. If neither signal is present, this PR violates `rules/author-model-declaration.md`. Stop. Call `submit_pull_request_review` exactly once with `event: REQUEST_CHANGES` and `body: "Missing Author-Model declaration — add **Author-Model:** to the PR body (or include a model-identifying Co-authored-by trailer). See rules/author-model-declaration.md."` Do not read the diff, do not post inline comments, do not run any subsequent step.
+5. If a signal is present, proceed to Step 2.
+
+Note: this reviewer is single-engine (Codex / gpt-5.4) and does not perform the cross-family self-review skip that the paired `install-reviewer` templates implement — that dogfooding gap is tracked in #8.
+
+## Step 2 — Load the policy (from PR head, NOT main)
 
 The workflow checkout has placed the PR head at the working directory. List and read every file under `rules/` — these are the authoritative policy documents for this review. Read them fully; do not skim. Also read any `skills/*/SKILL.md` that governs a changed path.
 
-## Step 2 — Load the change set
+## Step 3 — Load the change set
 
 Run `gh pr diff ${{ github.event.pull_request.number }}` with no truncation. Run `gh pr view ${{ github.event.pull_request.number }} --json title,body,files`.
 
-## Step 3 — Review
+## Step 4 — Review
 
 For every changed line, check it against every rule in `rules/`. Flag:
 
@@ -80,7 +92,7 @@ For every changed line, check it against every rule in `rules/`. Flag:
 - New/changed `skills/*/SKILL.md` that violates `rules/skill-authoring.md`
 - Secrets, missing error handling, formatting, dependency hygiene, `rules/ci-safety.md`, `rules/no-secrets.md`, etc.
 
-## Step 4 — Emit findings
+## Step 5 — Emit findings
 
 - For each concrete violation with a file + line, call `create_pull_request_review_comment` with `path`, `line`, and a body that (a) names the rule file violated, (b) quotes the clause, (c) proposes the fix. Cap at 10 total — pick the highest-impact issues.
 - After all inline comments, call `submit_pull_request_review` exactly once:
