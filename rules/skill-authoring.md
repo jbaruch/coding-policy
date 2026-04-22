@@ -10,9 +10,10 @@ alwaysApply: true
 - Optional fields: `allowed-tools`, `disable-model-invocation`
 - The `description` field is your discovery surface — write it for the agent, not a human audience
 
-## Mandatory Preamble
+## Title and Preamble
 
-- The first line of the body must force sequential execution: process steps in order, do not skip ahead
+- Start the body with an `# H1` title that names the skill (e.g., `# Release Skill` for `skills/release/SKILL.md`)
+- The first content line after the H1 must force sequential execution: process steps in order, do not skip ahead
 - This prevents the agent from parallelizing steps that depend on earlier output
 
 ## Step Structure
