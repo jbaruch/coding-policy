@@ -42,6 +42,7 @@ tessl install jbaruch/coding-policy
 |-------|-------------|
 | [release](skills/release/SKILL.md) | PR creation, Copilot review, merge + cleanup workflow |
 | [eval-authoring](skills/eval-authoring/SKILL.md) | Generate, review, iterate on eval scenarios with score-driven feedback |
+| [install-reviewer](skills/install-reviewer/SKILL.md) | Scaffold a gh-aw PR review workflow into a consumer repo — reviews every PR against the latest published `jbaruch/coding-policy` |
 
 ## Philosophy
 
