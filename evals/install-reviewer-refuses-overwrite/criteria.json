@@ -1,0 +1,36 @@
+{
+  "context": "Tests whether the agent, invoking the install-reviewer skill, refuses to overwrite an existing `.github/workflows/review.md` rather than clobbering the teammate's prior setup. This validates the overwrite-refusal guard the skill declares.",
+  "type": "weighted_checklist",
+  "checklist": [
+    {
+      "name": "Detects existing workflow",
+      "max_score": 25,
+      "description": "The plan explicitly notices that `.github/workflows/review.md` is already present in the repo and treats that as a blocking precondition, not an acceptable starting state"
+    },
+    {
+      "name": "Refuses to overwrite",
+      "max_score": 25,
+      "description": "States that the skill will NOT proceed and will NOT replace the existing workflow file. A destructive `cp` or `mv` over the existing file is explicitly avoided"
+    },
+    {
+      "name": "No destructive commands",
+      "max_score": 15,
+      "description": "The output contains NO `cp …/review-workflow.md .github/workflows/review.md`, NO `gh aw compile review`, NO `git commit` and NO `gh pr create` — the skill halts before any of those"
+    },
+    {
+      "name": "Explains why the guard matters",
+      "max_score": 15,
+      "description": "Gives a reason for the refusal — e.g., that the existing workflow may be a teammate's intentional configuration and silently replacing it could break their review process or lose work"
+    },
+    {
+      "name": "Offers an actionable next step",
+      "max_score": 10,
+      "description": "Tells the engineer what to do instead — e.g., review the existing file's contents, talk to the teammate who added it, or explicitly remove/back-up the file before re-running the skill"
+    },
+    {
+      "name": "Preserves existing file",
+      "max_score": 10,
+      "description": "The plan does NOT suggest deleting, renaming, or modifying the existing `.github/workflows/review.md` as part of the automatic flow. Any removal must be an explicit user decision, not a skill side effect"
+    }
+  ]
+}
