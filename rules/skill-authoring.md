@@ -23,6 +23,13 @@ alwaysApply: true
 - When inserting a step, renumber all subsequent steps
 - Each step is one action — if a step has an "and", split it
 
+## Step Continuity
+
+- The default handoff between steps is "continue immediately" — never "pause and wait for the user"
+- When a step hands off to the next, state the continuation explicitly ("Proceed immediately to Step N"); don't rely on implicit reading order
+- If a step can legitimately end the skill, say so explicitly ("Finish here"); otherwise the agent will keep going
+- Ambiguity at step boundaries is the most common cause of agents stalling mid-skill waiting for a nudge that was never needed
+
 ## Keep Skills Compact
 
 - SKILL.md is the execution plan, not a reference manual

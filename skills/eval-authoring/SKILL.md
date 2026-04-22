@@ -24,7 +24,7 @@ tessl scenario generate .
 tessl scenario view <id>
 ```
 
-Poll until completed. If it fails, report the error and stop.
+Poll until completed. If it fails, report the error and finish here. When status is completed, proceed immediately to Step 3.
 
 ## Step 3 — Download Scenarios
 
@@ -68,4 +68,4 @@ Baseline and with-context both high (90%+) on positive cases means the eval test
 
 ## Step 10 — Iterate
 
-Fix the identified issues, then re-run from Step 8. Repeat until with-context scores reflect the skill's guidance.
+Fix the identified issues, then re-run from Step 8. Repeat until with-context scores reflect the skill's guidance. Finish here when scores are stable.

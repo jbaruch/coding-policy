@@ -65,3 +65,11 @@ After modifying rules, audit for cross-rule alignment:
 - New rules don't contradict existing ones
 - Skills follow the conventions their own rules prescribe
 - Documentation tables match `tile.json` entries exactly
+
+## Post-Edit Rule Audit
+
+After editing a rule, audit the repo itself against the new rule text and fix any drift in the same PR:
+
+- Grep for every instance of the pattern the rule governs (`.env.example` files, `SKILL.md` step headings, secret names, etc.) and update them to satisfy the new wording
+- A rule that doesn't describe what's already committed in the repo erodes trust in every rule
+- If drift can't be fixed in the same PR (e.g., because it touches a frozen branch), file a follow-up issue that references the rule-edit commit
