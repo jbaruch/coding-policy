@@ -3,14 +3,14 @@
   "type": "weighted_checklist",
   "checklist": [
     {
-      "name": "Identifies the failing preflight",
+      "name": "Identifies the missing dependency",
       "max_score": 25,
-      "description": "The plan explicitly names the missing gh-aw extension as the reason it's halting — points at `gh aw --version` as the failing check, not a later step"
+      "description": "The plan explicitly names the missing gh-aw GitHub CLI extension as the cause of the halt, not some later step or cryptic symptom"
     },
     {
       "name": "Stops before making changes",
       "max_score": 20,
-      "description": "The output contains NO `git checkout -b`, NO `cp`, NO `gh aw compile`, NO `git commit`, NO `gh pr create`. The skill halts at preflight and does not leave the repo in a partial state"
+      "description": "The plan does NOT proceed to create a feature branch, copy or compile workflow files, commit, or open a PR. The halt happens at preflight and leaves the repo in the same state as it started"
     },
     {
       "name": "Provides the install command",

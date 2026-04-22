@@ -38,15 +38,23 @@ If **either** `.github/workflows/review.md` **or** `.github/workflows/review.loc
 
 Creates `.github/workflows/` if missing, copies the packaged template into `review.md`, compiles it via `gh aw compile review` to produce `review.lock.yml`, and ensures `.gitattributes` marks the lock file as generated (`linguist-generated=true`, `merge=ours`) per `rules/file-hygiene.md`. Emits a JSON summary on success; exits non-zero with a stderr diagnostic and rolls back every artifact it touched (including restoring `actions-lock.json` from a snapshot) on compile failure. Proceed immediately to Step 5.
 
-## Step 5 — Commit and Push
+## Step 5 — Commit
 
 ```bash
-.tessl/tiles/jbaruch/coding-policy/skills/install-reviewer/commit-and-push.sh
+.tessl/tiles/jbaruch/coding-policy/skills/install-reviewer/commit.sh
 ```
 
-Stages the four scaffolded files (`review.md`, `review.lock.yml`, `actions-lock.json`, `.gitattributes`), commits with the canonical message `ci(review): add jbaruch/coding-policy PR review workflow`, and pushes `feat/add-coding-policy-review` to origin. Emits a JSON summary with the commit sha. If a pre-commit hook rejects the commit, the script exits non-zero — fix the hook's finding and re-run; do not `--no-verify`. Proceed immediately to Step 6.
+Stages the four scaffolded files (`review.md`, `review.lock.yml`, `actions-lock.json`, `.gitattributes`) and commits with the canonical message `ci(review): add jbaruch/coding-policy PR review workflow`. Idempotent: emits `{"state": "no-op", …}` on re-run when the working tree already matches a prior successful run. If a pre-commit hook rejects the commit, the script exits non-zero — fix the hook's finding and re-run; do not `--no-verify`. Proceed immediately to Step 6.
 
-## Step 6 — Open PR
+## Step 6 — Push
+
+```bash
+.tessl/tiles/jbaruch/coding-policy/skills/install-reviewer/push.sh
+```
+
+Pushes `feat/add-coding-policy-review` to origin with upstream tracking. Idempotent: emits `{"state": "up-to-date", …}` if origin already matches local HEAD. Proceed immediately to Step 7.
+
+## Step 7 — Open PR
 
 `gh pr create` with title `ci(review): add jbaruch/coding-policy PR review workflow` and a body that:
 - Explains the workflow installs `jbaruch/coding-policy` at run time and reviews every PR against it
