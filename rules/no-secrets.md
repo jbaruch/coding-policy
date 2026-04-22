@@ -19,6 +19,7 @@ alwaysApply: true
 
 - Maintain a `.env.example` file listing every required environment variable with placeholder values
 - Document what each variable is for and where to get the value
+- For hosted-CI secrets, include a deep link to the platform's secrets configuration page in the file header so a new maintainer can reach the settings page in one click (GitHub Actions: `https://github.com/<owner>/<repo>/settings/secrets/actions`; GitLab CI: `https://gitlab.com/<group>/<project>/-/settings/ci_cd`)
 
 ## Pre-commit Scanning
 

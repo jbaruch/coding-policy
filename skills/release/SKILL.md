@@ -2,16 +2,16 @@
 name: release
 description: >
   Structured workflow for shipping code via GitHub pull requests: PR creation,
-  Copilot code review, merge, and branch cleanup. Covers readiness checks,
-  version reasoning, review requesting via GraphQL, feedback handling, and
-  post-merge verification.
-  Use when the user wants to open a pull request, ship code, request reviews,
-  merge a branch, or handle post-merge cleanup on GitHub.
+  automated policy review via gh-aw (with Copilot review kept in parallel during
+  the trial), merge, and branch cleanup. Covers readiness checks, version
+  reasoning, review polling, feedback handling, and post-merge verification.
+  Use when the user wants to open a pull request, ship code, merge a branch,
+  or handle post-merge cleanup on GitHub.
 ---
 
 # Release Skill
 
-Structured workflow for shipping code: PR creation, Copilot review, merge, and cleanup. Process each step in order — do not skip ahead.
+Structured workflow for shipping code: PR creation, automated policy review, merge, and cleanup. Process each step in order — do not skip ahead.
 
 ## Step 1 — Verify Readiness
 
@@ -42,44 +42,54 @@ Decide the version bump:
 - **Minor**: new features, backward-compatible additions. Update the version in the project manifest
 - **Major**: breaking changes. Update the version in the project manifest
 
-## Step 4 — Request Copilot Review
+## Step 4 — Policy Review Fires Automatically
 
-**Must use GraphQL, not REST** — REST silently drops bot reviewers.
+Pushing the PR branch triggers the runnable GitHub Actions workflow `.github/workflows/review.lock.yml` ("PR Policy Review") on the `pull_request` event. The `.github/workflows/review.md` file is the gh-aw source that compiles into that lock file via `gh aw compile`. The workflow runs on every `opened`, `synchronize`, and `reopened` — no explicit request mutation. The review is submitted by `github-actions[bot]` and uses OpenAI `gpt-5.4` via the gh-aw Codex engine, checking the diff against the in-tree `rules/*.md` from the PR head.
 
-Use the queries in `skills/release/COPILOT_REVIEW_GRAPHQL.md`:
-1. Fetch the PR's GraphQL node ID
-2. Call `requestReviews` mutation with bot ID `BOT_kgDOCnlnWA`
-3. If the bot ID is stale, use the fallback query to retrieve it from past reviews
-4. Verify the request was accepted via the REST reviewers endpoint
+**Proceed immediately to Step 5 — do not stop after creating the PR.** The skill runs end-to-end: once `gh pr create` succeeds, the next action is always to start watching.
 
-## Step 5 — Wait for Review + CI
+**Trial — keep Copilot in parallel.** During gh-aw validation, also request Copilot:
 
-Poll until both are complete:
+```bash
+skills/release/request-copilot-review.sh <owner> <repo> <pr-number>
+```
 
-- **CI**: `gh pr checks <N> --watch`
-- **Copilot review state**: `gh api repos/<owner>/<repo>/pulls/<N>/reviews --jq '.[].state'`
-- **Inline comments**: `gh api repos/<owner>/<repo>/pulls/<N>/comments`
+Uses GraphQL (REST drops bot reviewers), falls back to discovering the bot ID from recent reviews if the pinned `BOT_kgDOCnlnWA` goes stale, verifies Copilot is in `requested_reviewers`. Exits non-zero on failure; emits a JSON summary on success. Both reviews gate the merge. This paragraph and the script are retired in a cleanup PR once gh-aw is validated on 1–2 PRs.
 
-Interpreting review states:
-- `APPROVED` — Copilot found no issues
-- `CHANGES_REQUESTED` — Copilot left comments that need addressing
-- `COMMENTED` — Copilot left observations; treat as comments to review
+## Step 5 — Poll PR State
 
-If the review never arrives, mention `@copilot` in a PR comment and re-request review using the GraphQL mutation.
+Capture a single JSON snapshot of CI status, bot review states, and inline comment counts:
 
-## Step 6 — Address Feedback and Re-request
+```bash
+skills/release/poll-pr-reviews.sh <owner> <repo> <pr-number>
+```
+
+The script returns:
+- `ci.status` — `pending | success | failure | none` (the gh-aw workflow appears here as a check once it has run)
+- `reviews.gh_aw.state` and `reviews.copilot.state` — latest review per bot (`APPROVED | CHANGES_REQUESTED | COMMENTED | none`)
+- `inline_comments.gh_aw` and `inline_comments.copilot` — top-level inline comment counts
+
+Interpreting review states (per bot independently):
+- `APPROVED` — no issues
+- `CHANGES_REQUESTED` — comments need addressing
+- `COMMENTED` — observations; read and decide per thread
+
+Loop until `ci.status` is `success` (or `none` if no checks are configured) and neither review state is `CHANGES_REQUESTED`. If the gh-aw review check ran but no review was posted, inspect logs with `gh run view --log-failed`. Do not retry via GraphQL — gh-aw is event-triggered, not request-triggered.
+
+## Step 6 — Address Feedback; No Re-request Needed
 
 - **CI failures**: Fix every one, no exceptions
-- **Copilot suggestions**: Apply what's right and reasonable. Push back with a reply on anything that misreads scope or over-engineers
+- **Review suggestions**: Apply what's right. Push back with a reply on anything that misreads scope or over-engineers
 - **Reply on EVERY thread** — nothing left dangling:
   - Accepted: "Fixed in `<sha>`"
   - Declined: "Declining — `<reason>`"
 - Push fixes to the same branch
-- **Re-request Copilot review** after pushing fixes (use the same GraphQL mutation from Step 4). Repeat Steps 5–6 until Copilot has zero comments — as many cycles as needed
+- **Re-run is automatic**: `pull_request: synchronize` re-triggers the gh-aw workflow on every push — no manual re-request. During the trial, Copilot still needs a re-request via `skills/release/request-copilot-review.sh` (same args as Step 4).
+- Repeat Step 5 until every active bot review is `APPROVED` or `COMMENTED` with no blocking items, and every thread has a reply.
 
 ## Step 7 — Merge + Cleanup
 
-Only proceed when CI is green AND Copilot's latest review has zero comments AND all review threads have replies.
+Only proceed when CI is green AND the latest gh-aw review has zero blocking comments AND (during trial) the latest Copilot review has zero comments AND all review threads have replies.
 
 ```bash
 # Merge

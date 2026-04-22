@@ -6,8 +6,9 @@ alwaysApply: true
 
 ## Hands Off CI Config
 
-- **Never modify CI configuration** (workflow files, pipeline configs) without explicitly asking first
-- CI changes affect every contributor and every branch — they require careful review
+- **Never smuggle CI configuration changes** (workflow files, pipeline configs) into a PR whose stated scope is something else — CI changes affect every contributor and every branch
+- A PR whose title and body explicitly scope the work as a CI change **is** the approval artifact; this rule forbids unannounced edits, not CI-scope PRs
+- For unplanned CI edits discovered mid-task, stop and ask before touching the workflow files
 
 ## Never Skip Tests
 
