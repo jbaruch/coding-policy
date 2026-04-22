@@ -1,14 +1,17 @@
 #!/usr/bin/env bash
 # Scaffold the jbaruch/coding-policy PR review workflow into a consumer
 # repo: ensure the workflows dir exists, copy the packaged template,
-# compile it with gh-aw. Call this AFTER creating the feature branch
-# (Step 3 of the install-reviewer skill) and BEFORE committing (Step 6).
+# compile it with gh-aw, and mark the lock file as generated via
+# .gitattributes. Call after creating the feature branch and before
+# committing.
 #
 # Idempotent per rules/file-hygiene.md: re-running is safe — `mkdir -p`
 # no-ops if the dir exists, `cp` rewrites the source from the template,
-# `gh aw compile` rewrites the lock. The overwrite-safety check lives
-# in Step 2 of the install-reviewer skill, which halts before this
-# script is called if prior review setup is present.
+# `gh aw compile` rewrites the lock, and the .gitattributes append
+# only happens when the exact rule line is missing. The overwrite-
+# safety guard for pre-existing user content lives in the
+# install-reviewer skill, which halts before this script runs if the
+# repo already has its own review workflow.
 #
 # If compile fails, all this script's artifacts are rolled back:
 # review.md is removed, review.lock.yml is removed, and
@@ -17,10 +20,18 @@
 # sees a half-scaffolded state.
 #
 # Usage: scaffold.sh
-# Out:   one JSON object on stdout: {"source","lock","compiled"}
+# Out:   one JSON object on stdout: {"source","lock","gitattributes","compiled"}
 # Exit:  0 on success; non-zero with stderr diagnostic on failure
 
 set -euo pipefail
+
+# Run from repo root so all relative paths resolve the same way regardless
+# of the caller's cwd. Refuse to proceed if we're not inside a git repo.
+repo_root=$(git rev-parse --show-toplevel 2>/dev/null) || {
+  echo "error: not inside a git worktree — run from within the consumer repo" >&2
+  exit 1
+}
+cd "$repo_root"
 
 TEMPLATE_SRC=".tessl/tiles/jbaruch/coding-policy/skills/install-reviewer/review-workflow.md"
 WORKFLOW_DIR=".github/workflows"

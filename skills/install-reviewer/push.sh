@@ -12,6 +12,13 @@
 
 set -euo pipefail
 
+# Run from repo root so git commands resolve predictably.
+repo_root=$(git rev-parse --show-toplevel 2>/dev/null) || {
+  echo "error: not inside a git worktree — run from within the consumer repo" >&2
+  exit 1
+}
+cd "$repo_root"
+
 BRANCH="feat/add-coding-policy-review"
 
 main() {

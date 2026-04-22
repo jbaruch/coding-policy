@@ -15,6 +15,16 @@
 
 set -euo pipefail
 
+# If we're inside a git worktree, run from its root so the TEMPLATE path
+# below resolves the same way regardless of the caller's cwd. If we're
+# NOT in a worktree, the check_in_git_worktree step below will fail
+# cleanly; don't exit here — we want to surface all preflight failures
+# as structured JSON, not die early.
+repo_root=$(git rev-parse --show-toplevel 2>/dev/null || true)
+if [[ -n "$repo_root" ]]; then
+  cd "$repo_root"
+fi
+
 BRANCH="feat/add-coding-policy-review"
 TEMPLATE=".tessl/tiles/jbaruch/coding-policy/skills/install-reviewer/review-workflow.md"
 
@@ -31,7 +41,7 @@ check_in_git_worktree() {
 
 check_origin_remote() {
   git remote get-url origin >/dev/null 2>&1 || \
-    push_failure "origin-remote" "No git remote named 'origin' — add one with 'git remote add origin <url>' before re-running (Step 7 pushes to origin)"
+    push_failure "origin-remote" "No git remote named 'origin' — add one with 'git remote add origin <url>' before re-running (the push step assumes origin exists)"
 }
 
 check_gh_installed() {

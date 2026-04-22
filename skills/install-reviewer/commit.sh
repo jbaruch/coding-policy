@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Stage the four files the install-reviewer skill produces and commit
-# them with the canonical message. Call AFTER scaffold.sh has succeeded
-# and BEFORE push.sh.
+# them with the canonical message. Call after scaffold.sh has succeeded
+# and before push.sh.
 #
 # Idempotent per rules/file-hygiene.md: if nothing is staged because
 # the working tree already matches a prior successful run, the script
@@ -20,6 +20,13 @@
 
 set -euo pipefail
 
+# Run from repo root so the relative paths below resolve regardless of cwd.
+repo_root=$(git rev-parse --show-toplevel 2>/dev/null) || {
+  echo "error: not inside a git worktree — run from within the consumer repo" >&2
+  exit 1
+}
+cd "$repo_root"
+
 BRANCH="feat/add-coding-policy-review"
 COMMIT_MSG="ci(review): add jbaruch/coding-policy PR review workflow"
 
@@ -34,7 +41,7 @@ main() {
   local current_branch
   current_branch=$(git rev-parse --abbrev-ref HEAD)
   if [[ "$current_branch" != "$BRANCH" ]]; then
-    echo "error: expected to be on '${BRANCH}' but current branch is '${current_branch}' — run 'git checkout -b ${BRANCH}' (skill Step 3) first" >&2
+    echo "error: expected to be on '${BRANCH}' but current branch is '${current_branch}' — run 'git checkout -b ${BRANCH}' first" >&2
     exit 1
   fi
 
