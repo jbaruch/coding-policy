@@ -42,16 +42,23 @@ main() {
   fi
   local owner="$1" repo="$2" pr_number="$3"
 
-  local checks_json
-  checks_json=$(gh pr checks "$pr_number" --repo "${owner}/${repo}" --json name,status,conclusion 2>/dev/null || echo '[]')
+  # gh pr checks exits 8 when no checks are configured — distinguish that from real errors.
+  local checks_json checks_raw rc=0
+  checks_raw=$(gh pr checks "$pr_number" --repo "${owner}/${repo}" --json name,bucket 2>&1) || rc=$?
+  if [[ $rc -eq 0 ]]; then
+    checks_json="$checks_raw"
+  elif [[ $rc -eq 8 ]] || echo "$checks_raw" | grep -qi "no check"; then
+    checks_json='[]'
+  else
+    echo "error: gh pr checks failed (rc=${rc}): ${checks_raw}" >&2
+    exit 1
+  fi
 
   local ci_status
   ci_status=$(echo "$checks_json" | jq -r '
     if (. | length) == 0 then "none"
-    elif any(.conclusion == "FAILURE" or .conclusion == "failure"
-             or .conclusion == "CANCELLED" or .conclusion == "cancelled"
-             or .conclusion == "TIMED_OUT" or .conclusion == "timed_out") then "failure"
-    elif any(.status != "COMPLETED" and .status != "completed") then "pending"
+    elif any(.bucket == "fail" or .bucket == "cancel") then "failure"
+    elif any(.bucket == "pending") then "pending"
     else "success" end
   ')
 

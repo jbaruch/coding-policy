@@ -50,17 +50,17 @@ Pushing the PR branch triggers the runnable GitHub Actions workflow `.github/wor
 
 **Trial — keep Copilot in parallel.** During gh-aw validation, also request Copilot:
 
-```
+```bash
 skills/release/request-copilot-review.sh <owner> <repo> <pr-number>
 ```
 
 Uses GraphQL (REST drops bot reviewers), falls back to discovering the bot ID from recent reviews if the pinned `BOT_kgDOCnlnWA` goes stale, verifies Copilot is in `requested_reviewers`. Exits non-zero on failure; emits a JSON summary on success. Both reviews gate the merge. This paragraph and the script are retired in a cleanup PR once gh-aw is validated on 1–2 PRs.
 
-## Step 5 — Wait for Reviews + CI
+## Step 5 — Poll PR State
 
-Poll a single JSON snapshot until both reviews are terminal and CI is non-pending:
+Capture a single JSON snapshot of CI status, bot review states, and inline comment counts:
 
-```
+```bash
 skills/release/poll-pr-reviews.sh <owner> <repo> <pr-number>
 ```
 
