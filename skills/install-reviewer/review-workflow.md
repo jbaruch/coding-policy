@@ -15,6 +15,9 @@ description: |
 on:
   pull_request:
     types: [opened, synchronize, reopened]
+  skip-bots:
+    - "dependabot[bot]"
+    - "renovate[bot]"
 
 permissions:
   contents: read
