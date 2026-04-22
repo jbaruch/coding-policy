@@ -50,7 +50,7 @@ safe-outputs:
   submit-pull-request-review:
     max: 1
     target: triggering
-    allowed-events: [APPROVE, REQUEST_CHANGES, COMMENT]
+    allowed-events: [REQUEST_CHANGES, COMMENT]
     footer: if-body
 ---
 
@@ -85,9 +85,9 @@ For every changed line, check it against every rule in `rules/`. Flag:
 - For each concrete violation with a file + line, call `create_pull_request_review_comment` with `path`, `line`, and a body that (a) names the rule file violated, (b) quotes the clause, (c) proposes the fix. Cap at 10 total — pick the highest-impact issues.
 - After all inline comments, call `submit_pull_request_review` exactly once:
   - `event: REQUEST_CHANGES` if any violation was flagged
-  - `event: APPROVE` if clean and changes are in scope
-  - `event: COMMENT` if observations only (style nits, suggestions)
-  - `body`: one short paragraph summarising verdict and which rules applied. Omit `body` on clean APPROVE so the `footer: if-body` rule keeps the review clean.
+  - `event: COMMENT` if clean, with `body: "All rules pass — no violations found."` (GitHub rejects `APPROVE` from `github-actions[bot]` with HTTP 422; `COMMENT` + clear body is how the reviewer signals a pass)
+  - `event: COMMENT` if observations only (style nits, suggestions) with a short summary `body`
+  - On any `REQUEST_CHANGES`, `body` must be one short paragraph summarising the verdict and which rules applied.
 
 ## Guardrails
 
