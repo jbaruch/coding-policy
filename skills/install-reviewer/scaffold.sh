@@ -3,7 +3,14 @@
 # repo: ensure the workflows dir exists, copy the packaged template,
 # compile it with gh-aw. Call this AFTER creating the feature branch
 # (Step 3 of the install-reviewer skill) and BEFORE committing (Step 6).
-# If compile fails, the partially-written source is removed so the
+#
+# Idempotent per rules/file-hygiene.md: re-running is safe — `mkdir -p`
+# no-ops if the dir exists, `cp` rewrites the source from the template,
+# `gh aw compile` rewrites the lock. The overwrite-safety check lives
+# in Step 2 of the install-reviewer skill, which halts before this
+# script is called if prior review setup is present.
+#
+# If compile fails, the partially-written artifacts are removed so the
 # caller never sees a half-scaffolded state.
 #
 # Usage: scaffold.sh
@@ -20,10 +27,6 @@ WORKFLOW_LOCK="${WORKFLOW_DIR}/review.lock.yml"
 main() {
   if [[ ! -f "$TEMPLATE_SRC" ]]; then
     echo "error: template not found at ${TEMPLATE_SRC} — run 'tessl install jbaruch/coding-policy' first" >&2
-    exit 1
-  fi
-  if [[ -f "$WORKFLOW_DEST" || -f "$WORKFLOW_LOCK" ]]; then
-    echo "error: existing review workflow files detected (${WORKFLOW_DEST} or ${WORKFLOW_LOCK}); refusing to overwrite — Step 2 of the skill should have caught this" >&2
     exit 1
   fi
 
