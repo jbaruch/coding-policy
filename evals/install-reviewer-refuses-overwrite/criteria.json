@@ -13,9 +13,9 @@
       "description": "States that the skill will NOT proceed and will NOT replace the existing workflow file. A destructive `cp` or `mv` over the existing file is explicitly avoided"
     },
     {
-      "name": "No destructive commands",
+      "name": "No downstream actions after refusal",
       "max_score": 15,
-      "description": "The output contains NO `cp …/review-workflow.md .github/workflows/review.md`, NO `gh aw compile review`, NO `git commit` and NO `gh pr create` — the skill halts before any of those"
+      "description": "The plan halts at the overwrite-refusal and does NOT proceed to any of the downstream effects: no compile or replace of the existing workflow files, no feature-branch creation, no staging or commit of workflow files, no push, no PR creation. The refusal is the terminal outcome"
     },
     {
       "name": "Explains why the guard matters",
