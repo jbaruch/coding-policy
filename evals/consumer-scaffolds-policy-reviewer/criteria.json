@@ -1,0 +1,46 @@
+{
+  "context": "Tests whether the agent, invoking the install-reviewer skill, produces the correct sequence of commands to scaffold the gh-aw PR review workflow into a consumer repository: a feature branch, the template copied to the right path, the workflow compiled, both files committed, a PR opened with secrets instructions in the body.",
+  "type": "weighted_checklist",
+  "checklist": [
+    {
+      "name": "Creates a feature branch",
+      "max_score": 10,
+      "description": "Uses `git checkout -b <branch>` (or equivalent) to create a new branch before making changes — does NOT commit directly to main/master"
+    },
+    {
+      "name": "Populates .github/workflows with source and lock",
+      "max_score": 35,
+      "description": "Ends with `.github/workflows/review.md` and `.github/workflows/review.lock.yml` both present in the working tree. The source declares a `pull_request` trigger and a pre-step that runs `tessl install jbaruch/coding-policy`; the lock is the compiled form of that source (produced by `gh aw compile`, which is a public gh CLI extension, not typed out by hand or fetched from a URL). Only the final observable state is graded — not the specific command sequence the agent chose to reach it"
+    },
+    {
+      "name": "Commits both source and lock",
+      "max_score": 10,
+      "description": "Stages and commits both `review.md` and `review.lock.yml` — not just the source or just the lock"
+    },
+    {
+      "name": "Pushes and opens a PR",
+      "max_score": 8,
+      "description": "Pushes the branch and creates a pull request with `gh pr create`"
+    },
+    {
+      "name": "PR body lists OPENAI_API_KEY",
+      "max_score": 10,
+      "description": "The PR body or the plan instructs the reviewer to set `OPENAI_API_KEY` as a repository secret before merge"
+    },
+    {
+      "name": "PR body lists TESSL_TOKEN",
+      "max_score": 10,
+      "description": "The PR body or the plan instructs the reviewer to set `TESSL_TOKEN` as a repository secret before merge (required so the workflow's `tessl install` pre-step can authenticate)"
+    },
+    {
+      "name": "Does not merge",
+      "max_score": 10,
+      "description": "Does NOT include `gh pr merge` or equivalent. The scaffolding PR is handed to the user for secret validation and merge; the skill stops at PR creation"
+    },
+    {
+      "name": "Does not bypass pre-commit hooks",
+      "max_score": 7,
+      "description": "Does NOT include `--no-verify` on any git commit (if a pre-commit hook fires, the correct response is to fix and re-commit, not bypass)"
+    }
+  ]
+}

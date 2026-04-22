@@ -17,6 +17,9 @@
     },
     "eval-authoring": {
       "path": "skills/eval-authoring/SKILL.md"
+    },
+    "install-reviewer": {
+      "path": "skills/install-reviewer/SKILL.md"
     }
   },
   "steering": {

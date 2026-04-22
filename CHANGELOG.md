@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Skills
+
+- **install-reviewer** — Scaffold the gh-aw PR policy review workflow into a consumer repo. Ships `skills/install-reviewer/review-workflow.md` as the packaged template; the skill copies it into the consumer's `.github/workflows/`, compiles with `gh aw compile`, commits, and opens a PR. The workflow itself runs `tessl install jbaruch/coding-policy` as a pre-step so every consumer PR is reviewed against the latest published policy — not bleeding from `main`. Clean-verdict reviews use `event: COMMENT` with a pass body (GitHub rejects `APPROVE` from `github-actions[bot]` with HTTP 422).
+
+### Evals
+
+- **install-reviewer** — 3 scenarios: 1 positive (`consumer-scaffolds-policy-reviewer`) covering the happy path through preflight → branch → copy → compile → commit → PR with secrets instructions, and 2 negative (`install-reviewer-refuses-overwrite`, `install-reviewer-missing-gh-aw`) covering the skill's two decisional guards.
+
 ## 0.2.0
 
 Add context artifact authoring rules and eval-authoring skill. Self-audited the tile against its own rules and iterated until 99% eval average.
