@@ -25,7 +25,7 @@ If any check fails, report which and stop.
 
 ## Step 2 — Refuse Overwrite
 
-If `.github/workflows/review.md` already exists in the repo, stop and report that the reviewer is already installed. Do not overwrite.
+If **either** `.github/workflows/review.md` **or** `.github/workflows/review.lock.yml` already exists in the repo, stop and report that prior review setup is present. Do not overwrite either file — the lock alone (source removed) or the source alone (mid-authoring) both indicate deliberate in-progress configuration that the skill would destroy by compiling over it.
 
 ## Step 3 — Create Feature Branch
 
