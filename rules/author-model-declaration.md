@@ -36,3 +36,4 @@ alwaysApply: true
 
 - If any AI model contributed, the reviewer family must differ from **every** declared AI family — worst-case matching, not most-permissive
 - `**Author-Model:** human claude-opus-4-7` is treated as claude-authored for family-mismatch purposes; the openai-family reviewer runs, the claude-family reviewer skips
+- If the declaration spans **both** paired reviewer families (e.g., `gpt-5.4 claude-opus-4-7`), no cross-family reviewer is available — both run as a degraded fallback rather than leaving the PR unreviewed. Author teams that want to preserve cross-family review should avoid co-authoring across both paired families on the same PR

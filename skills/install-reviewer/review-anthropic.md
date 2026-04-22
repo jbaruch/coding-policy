@@ -89,18 +89,18 @@ Your reviewer family is **anthropic** (engine is Claude Code / claude-opus-4-x).
 
 ## Step 1 — Self-Review Gate
 
-Read the PR body and commit trailers to determine the author model, per `rules/author-model-declaration.md`:
+Your reviewer family is **anthropic**; your paired reviewer's family is **openai**. Read the PR body and commit trailers to determine the author-model signal, per `rules/author-model-declaration.md`:
 
 1. Run `gh pr view ${{ github.event.pull_request.number }} --json body,commits` to fetch the PR body and commit list.
-2. Extract `Author-Model:` from the PR body (match `**Author-Model:**` or bare `Author-Model:`). If present, use its value.
-3. If absent, scan each commit's `messageBody` for a `Co-authored-by:` trailer. Take the first trailer whose display name resolves to a known model (e.g., `Claude Opus 4.7` → `claude-opus-4-7`, `GPT-5.4` → `gpt-5.4`).
-4. If still absent, treat the author as `human`.
-5. Map every declared model to a family: `claude-*` → anthropic; `gpt-*`, `codex-*` → openai; `gemini-*` → google; `human` → none; anything else → the literal string as an ad-hoc family.
+2. Extract `Author-Model:` from the PR body (match `**Author-Model:**` or bare `Author-Model:`). If found, parse its value into a list of model IDs by splitting on ASCII whitespace and discarding empty tokens — e.g., `human claude-opus-4-7` → `["human", "claude-opus-4-7"]`.
+3. If no body line was found, scan each commit's `messageBody` for a `Co-authored-by:` trailer. Take the first trailer whose display name resolves to a known model (e.g., `Claude Opus 4.7` → `claude-opus-4-7`, `GPT-5.4` → `gpt-5.4`); this contributes a single-element list.
+4. If neither a body line nor a model-identifying trailer was found, this PR violates `rules/author-model-declaration.md`. Stop. Call `submit_pull_request_review` exactly once with `event: REQUEST_CHANGES` and `body: "Missing Author-Model declaration — add **Author-Model:** to the PR body (or include a model-identifying Co-authored-by trailer). See rules/author-model-declaration.md."` Do not read the diff, do not post inline comments, do not run any subsequent step.
+5. Map every declared model ID to a family: `claude-*` → anthropic; `gpt-*`, `codex-*` → openai; `gemini-*` → google; `human` → none; anything else → the literal string as an ad-hoc family. Build the set F of non-`none` families present in the declaration.
 
 Decide whether to proceed:
 
-- If **any** declared AI model maps to **anthropic** → this is a self-review. Stop. Call `submit_pull_request_review` exactly once with `event: COMMENT` and `body: "Skipping: self-review-bias — author-family anthropic; see rules/author-model-declaration.md."` Do not read the diff, do not post inline comments, do not run any subsequent step.
-- Otherwise (human-only, openai, google, or unknown) → proceed to Step 2.
+- If **anthropic** ∈ F AND **openai** ∉ F → the paired OpenAI-family reviewer is cross-family and will cover this PR. Stop. Call `submit_pull_request_review` exactly once with `event: COMMENT` and `body: "Skipping: self-review-bias — author-family anthropic; see rules/author-model-declaration.md."` Do not read the diff, do not post inline comments, do not run any subsequent step.
+- Otherwise (anthropic ∉ F, **or** both openai and anthropic are in F so the paired reviewer also can't be cross-family) → proceed to Step 2. The both-families-present case is a degraded fallback per `rules/author-model-declaration.md`: both reviewers run, neither is truly cross-family.
 
 ## Step 2 — Load the policy
 

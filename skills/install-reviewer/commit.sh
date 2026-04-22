@@ -49,16 +49,20 @@ main() {
     exit 1
   fi
 
-  local to_stage=()
+  # The paired reviewers must land atomically — refuse to commit a partial
+  # scaffold (e.g., one workflow pair missing because the user deleted a file
+  # between scaffold and commit). If any expected artifact is missing, list
+  # every missing path and fail; do not stage what's present.
+  local missing=()
   for f in "${FILES[@]}"; do
-    [[ -e "$f" ]] && to_stage+=("$f")
+    [[ -e "$f" ]] || missing+=("$f")
   done
-  if [[ ${#to_stage[@]} -eq 0 ]]; then
-    echo "error: none of the expected install-reviewer files are present — run scaffold.sh first" >&2
+  if [[ ${#missing[@]} -gt 0 ]]; then
+    echo "error: partial scaffold — expected files missing: ${missing[*]} — run scaffold.sh first (or restore the missing files) so both reviewer pairs land together" >&2
     exit 1
   fi
 
-  git add "${to_stage[@]}"
+  git add "${FILES[@]}"
 
   # Idempotent re-run: nothing staged means a prior run already committed
   # this state. Emit no-op success instead of letting `git commit` fail.
