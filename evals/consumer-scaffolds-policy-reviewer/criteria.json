@@ -8,19 +8,9 @@
       "description": "Uses `git checkout -b <branch>` (or equivalent) to create a new branch before making changes — does NOT commit directly to main/master"
     },
     {
-      "name": "Creates workflows directory",
-      "max_score": 8,
-      "description": "Uses `mkdir -p .github/workflows` (or equivalent idempotent creation) before copying the template, so the command works in repos that have no existing workflows"
-    },
-    {
-      "name": "Copies template from installed tile path",
-      "max_score": 15,
-      "description": "Copies the workflow template from somewhere under `.tessl/tiles/jbaruch/coding-policy/` (the installed tile location) into `.github/workflows/review.md` — does NOT try to fetch from a URL, type it out, or copy from a non-installed path"
-    },
-    {
-      "name": "Compiles with gh aw",
-      "max_score": 12,
-      "description": "Runs `gh aw compile review` (or equivalent) to produce `.github/workflows/review.lock.yml`, the file GitHub Actions actually executes"
+      "name": "Populates .github/workflows with source and lock",
+      "max_score": 35,
+      "description": "Ends with `.github/workflows/review.md` (the gh-aw source copied from the installed tile, not fetched from a URL or typed out) and `.github/workflows/review.lock.yml` (compiled via `gh aw compile`, the file GitHub Actions actually runs) both present. Either invoking the tile's packaged scaffold script OR running the individual `mkdir` + `cp` + `gh aw compile` commands in sequence qualifies — this criterion tests the outcome, not the command shape"
     },
     {
       "name": "Commits both source and lock",

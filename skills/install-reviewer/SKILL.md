@@ -21,43 +21,41 @@ Scaffold the gh-aw PR policy reviewer into a consumer repository. Steps are sequ
 - `gh aw --version` returns a version (gh-aw extension installed). If missing: `gh extension install github/gh-aw`
 - `.tessl/tiles/jbaruch/coding-policy/skills/install-reviewer/review-workflow.md` exists (the template is present via `tessl install jbaruch/coding-policy`). If missing, stop and ask the user to run `tessl install jbaruch/coding-policy` first
 - `git show-ref --verify --quiet refs/heads/feat/add-coding-policy-review` returns non-zero (the branch the skill creates in Step 3 does not already exist locally, typically left behind by a prior partial run). If it exists, stop and ask the user to delete it (`git branch -D feat/add-coding-policy-review`) or rename it before re-running — do not force-delete automatically
-- `git ls-remote --exit-code --heads origin feat/add-coding-policy-review` returns non-zero (the branch does not already exist on `origin`, typically from a prior run on another machine). If it exists, stop and ask the user to delete it (`git push origin --delete feat/add-coding-policy-review`) or rename it — Step 8 would otherwise fail or force-overwrite on push
+- `git ls-remote --exit-code --heads origin feat/add-coding-policy-review` returns non-zero (the branch does not already exist on `origin`, typically from a prior run on another machine). If it exists, stop and ask the user to delete it (`git push origin --delete feat/add-coding-policy-review`) or rename it — Step 6 would otherwise fail or force-overwrite on push
 
-If any check fails, report which and stop.
+If any check fails, report which and stop. If all checks pass, proceed immediately to Step 2.
 
 ## Step 2 — Refuse Overwrite
 
 If **either** `.github/workflows/review.md` **or** `.github/workflows/review.lock.yml` already exists in the repo, stop and report that prior review setup is present. Do not overwrite either file — the lock alone (source removed) or the source alone (mid-authoring) both indicate deliberate in-progress configuration that the skill would destroy by compiling over it.
 
+If neither file exists, proceed immediately to Step 3.
+
 ## Step 3 — Create Feature Branch
 
-`git checkout -b feat/add-coding-policy-review` from the repo's default branch.
+`git checkout -b feat/add-coding-policy-review` from the repo's default branch. Proceed immediately to Step 4.
 
-## Step 4 — Ensure Workflows Directory
+## Step 4 — Scaffold Workflow Files
 
-`mkdir -p .github/workflows` — idempotent; needed for repos that have no workflows yet.
+```bash
+skills/install-reviewer/scaffold.sh
+```
 
-## Step 5 — Copy Template
+Creates `.github/workflows/` if missing, copies the packaged template into `review.md`, and compiles it via `gh aw compile review` to produce the runnable `review.lock.yml`. Emits a JSON summary on success; exits non-zero with a stderr diagnostic and rolls back the source write on compile failure, so the repo is never left half-scaffolded. Proceed immediately to Step 5.
 
-`cp .tessl/tiles/jbaruch/coding-policy/skills/install-reviewer/review-workflow.md .github/workflows/review.md`
+## Step 5 — Commit
 
-## Step 6 — Compile Workflow
+Stage both files and commit with message `ci(review): add jbaruch/coding-policy PR review workflow` (follows `rules/commit-conventions.md` `<type>(<scope>): <imperative summary>` format). If a pre-commit hook rejects either file, fix and re-commit — do not `--no-verify`. Proceed immediately to Step 6.
 
-`gh aw compile review` — produces `.github/workflows/review.lock.yml`, the file GitHub Actions actually runs.
+## Step 6 — Push
 
-## Step 7 — Commit
+`git push -u origin feat/add-coding-policy-review`. Proceed immediately to Step 7.
 
-Stage both files and commit with message: `ci: add jbaruch/coding-policy PR review workflow`. If a pre-commit hook rejects either file, fix and re-commit — do not `--no-verify`.
+## Step 7 — Open PR
 
-## Step 8 — Push
-
-`git push -u origin feat/add-coding-policy-review`
-
-## Step 9 — Open PR
-
-`gh pr create` with title `ci(review): add jbaruch/coding-policy PR review workflow` (follows `rules/commit-conventions.md` `<type>(<scope>): <imperative summary>` format) and a body that:
+`gh pr create` with title `ci(review): add jbaruch/coding-policy PR review workflow` and a body that:
 - Explains the workflow installs `jbaruch/coding-policy` at run time and reviews every PR against it
 - Lists the two repository secrets the user must set **before merge**: `OPENAI_API_KEY` (OpenAI billing account for Codex) and `TESSL_TOKEN` (created at https://tessl.io/account/api-keys)
 - Notes that merging without the secrets set will cause the workflow to fail on its first run
 
-Return the PR URL. Do not merge — the user validates the secrets and merges.
+Return the PR URL. Finish here — the user validates the secrets and merges.
