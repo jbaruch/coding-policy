@@ -20,6 +20,7 @@ Scaffold the gh-aw PR policy reviewer into a consumer repository. Steps are sequ
 - `gh auth status` succeeds (GitHub CLI authenticated). If not authenticated, stop and ask the user to run `gh auth login`
 - `gh aw --version` returns a version (gh-aw extension installed). If missing: `gh extension install github/gh-aw`
 - `.tessl/tiles/jbaruch/coding-policy/skills/install-reviewer/review-workflow.md` exists (the template is present via `tessl install jbaruch/coding-policy`). If missing, stop and ask the user to run `tessl install jbaruch/coding-policy` first
+- `git show-ref --verify --quiet refs/heads/feat/add-coding-policy-review` returns non-zero (the branch the skill creates in Step 3 does not already exist locally, typically left behind by a prior partial run). If it exists, stop and ask the user to delete it (`git branch -D feat/add-coding-policy-review`) or rename it before re-running — do not force-delete automatically
 
 If any check fails, report which and stop.
 
