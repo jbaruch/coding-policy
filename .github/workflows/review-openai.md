@@ -87,7 +87,7 @@ Decide whether to proceed:
 
 ## Step 2 — Load the policy (from PR head, NOT main)
 
-The workflow checkout has placed the PR head at the working directory. List and read every file under `rules/` — these are the authoritative policy documents for this review. Read them fully; do not skim. Also read any `skills/*/SKILL.md` that governs a changed path.
+The workflow checkout has placed the PR head at the working directory. List and read every file under `rules/` — these are the authoritative policy documents for this review. Read them fully; do not skim. **Count the rule files you loaded (remember the number — you will surface it in Step 5's verdict).** If `rules/` is missing or empty, the policy didn't load: stop and emit `REQUEST_CHANGES` with body `"Policy load failed: rules/ is missing or empty on PR head — cannot review without policy context."` Also read any `skills/*/SKILL.md` that governs a changed path.
 
 ## Step 3 — Load the change set
 
@@ -104,11 +104,11 @@ For every changed line, check it against every rule in `rules/`. Flag:
 ## Step 5 — Emit findings
 
 - For each concrete violation with a file + line, call `create_pull_request_review_comment` with `path`, `line`, and a body that (a) names the rule file violated, (b) quotes the clause, (c) proposes the fix. Cap at 10 total — pick the highest-impact issues.
-- After all inline comments, call `submit_pull_request_review` exactly once:
+- After all inline comments, call `submit_pull_request_review` exactly once. The `body` must begin with a one-line load indicator: `"Policy loaded: N rule files from rules/ (PR head)."` where N is the count from Step 2. Then the verdict:
   - `event: REQUEST_CHANGES` if any violation was flagged
-  - `event: COMMENT` if clean, with `body: "All rules pass — no violations found."` (GitHub rejects `APPROVE` from `github-actions[bot]` with HTTP 422; `COMMENT` + clear body is how the reviewer signals a pass)
-  - `event: COMMENT` if observations only (style nits, suggestions) with a short summary `body`
-  - On any `REQUEST_CHANGES`, `body` must be one short paragraph summarising the verdict and which rules applied.
+  - `event: COMMENT` if clean, with verdict line `"All rules pass — no violations found."` (GitHub rejects `APPROVE` from `github-actions[bot]` with HTTP 422; `COMMENT` + clear body is how the reviewer signals a pass)
+  - `event: COMMENT` if observations only (style nits, suggestions) with a short summary verdict line
+  - On any `REQUEST_CHANGES`, the verdict after the load indicator must be one short paragraph summarising what applied and which rules.
 
 ## Guardrails
 
