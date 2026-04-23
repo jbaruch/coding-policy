@@ -21,6 +21,7 @@ permissions:
 engine:
   id: claude
   model: claude-opus-4-7
+  version: "2.1.118"
   env:
     ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
 
