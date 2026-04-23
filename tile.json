@@ -74,6 +74,10 @@
     "author-model-declaration": {
       "rules": "rules/author-model-declaration.md",
       "alwaysApply": true
+    },
+    "stateful-artifacts": {
+      "rules": "rules/stateful-artifacts.md",
+      "alwaysApply": true
     }
   }
 }
