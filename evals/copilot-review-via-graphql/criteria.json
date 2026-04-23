@@ -10,7 +10,7 @@
     {
       "name": "Explains why REST doesn't work",
       "max_score": 10,
-      "description": "The script's inline comments or the companion documentation cite the concrete reason GraphQL is required: REST drops bot reviewers silently. Without this reasoning, a reader can't judge whether the switch is intentional"
+      "description": "Inline comments in `release.sh` cite the concrete reason GraphQL is required: REST drops bot reviewers silently. The task requires inline comments for non-obvious steps, so the rationale must live in the script itself — a separate doc alone is insufficient"
     },
     {
       "name": "Doesn't depend on a permanently-hardcoded bot ID",
