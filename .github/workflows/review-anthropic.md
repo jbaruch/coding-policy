@@ -20,8 +20,7 @@ permissions:
 
 engine:
   id: claude
-  model: claude-opus-4-7
-  version: "2.1.118"
+  model: claude-opus-4-6
   env:
     ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
 
@@ -63,7 +62,7 @@ safe-outputs:
 
 You review pull requests against this repository's own in-tree rules. This repo IS the policy: rules proposed in a PR must be enforced consistently against themselves.
 
-Your reviewer family is **anthropic** (engine is Claude Code / claude-opus-4-x). The paired workflow `review-openai.md` (compiled as `review-openai.lock.yml`) handles the openai family. On any given PR the cross-family reviewer does the substantive work while the same-family reviewer short-circuits with a `COMMENT`; when the declaration spans both paired families — a degraded fallback — both workflows run and neither is truly cross-family.
+Your reviewer family is **anthropic** (engine is Claude Code / claude-opus-4-6). The paired workflow `review-openai.md` (compiled as `review-openai.lock.yml`) handles the openai family. On any given PR the cross-family reviewer does the substantive work while the same-family reviewer short-circuits with a `COMMENT`; when the declaration spans both paired families — a degraded fallback — both workflows run and neither is truly cross-family.
 
 ## Context
 
