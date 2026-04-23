@@ -63,7 +63,7 @@ Pushes `feat/add-coding-policy-review` to origin with upstream tracking. Idempot
 - Explains the workflows install `jbaruch/coding-policy` at run time and review every PR against it, and that the OpenAI and Anthropic reviewers each self-gate on the PR's `Author-Model:` declaration so the active reviewer is always cross-family (see `rules/author-model-declaration.md`)
 - Lists the three repository secrets the user must set **before merge**: `OPENAI_API_KEY` (OpenAI billing account for Codex), `ANTHROPIC_API_KEY` (Anthropic billing account for Claude Code), and `TESSL_TOKEN` (created at https://tessl.io/account/api-keys)
 - Notes that merging without all three secrets set will cause the workflows to fail on their first run
-- Notes that if the repo has a `.mcp.json` at its root declaring stdio MCP servers that depend on binaries unavailable inside gh-aw's awf sandbox (e.g., `tessl mcp start`), the Anthropic reviewer will fail to launch those servers and gh-aw will fail the job — fix by gitignoring `.mcp.json` and keeping a `.mcp.json.example` for local dev
+- Notes that if the repo has a `.mcp.json` at its root declaring stdio MCP servers that depend on binaries unavailable inside gh-aw's awf sandbox (e.g., `tessl mcp start`), the Anthropic reviewer will fail to launch those servers and gh-aw will fail the job — fix by adding `.mcp.json` to `.gitignore` and keeping a `.mcp.json.example` file for local dev
 - Notes that each reviewer's verdict now begins with a one-line load indicator (`"Policy loaded: N rule files from .tessl/tiles/jbaruch/coding-policy/rules/ (installed tile)."`), making it obvious when `tessl install` ran cleanly vs when the policy didn't reach the runtime
 
 Return the PR URL. Finish here — the user validates the secrets and merges.
