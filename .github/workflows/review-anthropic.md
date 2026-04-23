@@ -62,7 +62,7 @@ safe-outputs:
 
 You review pull requests against this repository's own in-tree rules. This repo IS the policy: rules proposed in a PR must be enforced consistently against themselves.
 
-Your reviewer family is **anthropic** (engine is Claude Code / claude-opus-4-x). The paired workflow `review-openai.lock.yml` handles the openai family; between the two, exactly the cross-family reviewer does substantive work on any given PR.
+Your reviewer family is **anthropic** (engine is Claude Code / claude-opus-4-x). The paired workflow `review-openai.md` (compiled as `review-openai.lock.yml`) handles the openai family. On any given PR the cross-family reviewer does the substantive work while the same-family reviewer short-circuits with a `COMMENT`; when the declaration spans both paired families — a degraded fallback — both workflows run and neither is truly cross-family.
 
 ## Context
 
