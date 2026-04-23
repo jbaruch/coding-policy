@@ -28,9 +28,9 @@
       "description": "The script uses the pull-request review-comments endpoint, NOT the issue-comments endpoint (`/issues/<N>/comments`). These return different objects in GitHub's API — a script that conflates them surfaces wrong data and scores zero here"
     },
     {
-      "name": "PR number parameterized",
+      "name": "Inputs parameterized (PR number, owner, repo)",
       "max_score": 10,
-      "description": "The PR number is a script argument or environment variable, not a hardcoded value. The script is reusable across different PRs without editing"
+      "description": "PR number, repository owner, and repository name are accepted as arguments or environment variables — not hardcoded literals in the script body. The script is reusable across different PRs and repos without editing"
     },
     {
       "name": "Surfaces CI state in the summary",

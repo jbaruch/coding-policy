@@ -44,8 +44,13 @@
     },
     {
       "name": "Graceful failure on unmet preconditions",
-      "max_score": 10,
+      "max_score": 5,
       "description": "When CI is red or reviews are outstanding, the script exits non-zero with a human-readable message on stderr that names the specific unmet condition — does NOT silently skip or mask the failure"
+    },
+    {
+      "name": "Inputs parameterized (PR number, owner, repo)",
+      "max_score": 5,
+      "description": "PR number, repository owner, and repository name are accepted as arguments or environment variables — not hardcoded literals in the script body. The script is reusable across different PRs and repos without editing"
     }
   ]
 }

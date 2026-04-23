@@ -1,5 +1,5 @@
 {
-  "context": "Tests whether the agent reasons about semver classification (patch vs minor vs major) from the change descriptions, applies the correct manifest-update behavior for each (patch is CI-automated; minor and major need a manifest bump), produces the correct target version numbers, and sequences the three releases sensibly. Reply-format conventions and PR-title conventions are tested separately in `review-feedback-addressing-conventions` and `copilot-review-via-graphql` and are NOT re-scored here.",
+  "context": "Tests whether the agent reasons about semver classification (patch vs minor vs major) from the change descriptions, applies the correct manifest-update behavior for each (patch is CI-automated; minor and major need a manifest bump), produces the correct target version numbers, and sequences the three releases sensibly. Reply-format and PR-title conventions are scored elsewhere and not re-scored here.",
   "type": "weighted_checklist",
   "checklist": [
     {
@@ -35,7 +35,7 @@
     {
       "name": "Major: flags the breaking-change impact",
       "max_score": 15,
-      "description": "The runbook calls out that the v1-routes removal will break existing clients and surfaces this in the PR body, CHANGELOG, or a release note — not just as a version bump. An agent who treats it identically to the minor case scores zero"
+      "description": "The runbook calls out that the v1-routes removal will break existing clients — in a location a downstream consumer would see (release notes, migration guidance, or the runbook's own deployment checklist). An agent who treats it identically to the minor case scores zero"
     },
     {
       "name": "Sensible release sequencing",

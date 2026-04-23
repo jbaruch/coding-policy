@@ -17,6 +17,4 @@ Produce a `release.sh` bash script that:
 - Verifies the review request was accepted
 - Includes inline comments explaining any non-obvious steps
 
-Also produce a `usage.md` file documenting how to invoke the script with example commands.
-
 The script does not need to actually run successfully in this environment (no GitHub credentials available) — focus on correctness of the implementation.

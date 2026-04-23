@@ -19,6 +19,4 @@ Produce a `merge-and-cleanup.sh` bash script that:
 - Confirms the publish/release CI workflow was triggered
 - Prints a final summary including the merged PR URL
 
-Also produce a `MERGE_CHECKLIST.md` that describes the manual steps a developer would follow if not using the script, including what to check before merging and what to verify after.
-
 The script does not need to run successfully (no GitHub credentials available) — focus on correctness of the approach and commands used.

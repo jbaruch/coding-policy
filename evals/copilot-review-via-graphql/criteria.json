@@ -44,8 +44,13 @@
     },
     {
       "name": "PR body has summary + verification plan",
-      "max_score": 7,
+      "max_score": 5,
       "description": "The PR body template includes a summary of what changed and a test/verification plan — the substance, not a specific section-heading literal"
+    },
+    {
+      "name": "Inputs parameterized",
+      "max_score": 2,
+      "description": "Repository owner, repository name, branch name, PR title/body source, and PR number are accepted as arguments or environment variables — not hardcoded. The script is reusable across different PRs and repos without editing"
     }
   ]
 }
