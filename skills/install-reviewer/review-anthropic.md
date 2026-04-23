@@ -117,7 +117,7 @@ Decide whether to proceed:
 
 ## Step 2 — Load the policy
 
-List and read every file under `.tessl/tiles/jbaruch/coding-policy/rules/`. These are the authoritative policy documents for this review. Read them fully; do not skim. **Count the rule files you loaded (remember the number — you will surface it in Step 5's verdict).** If the directory is missing or empty, the `tessl install` pre-step must have failed: stop and emit `REQUEST_CHANGES` with body `"Policy load failed: .tessl/tiles/jbaruch/coding-policy/rules/ is missing or empty — the tessl install pre-step likely failed; cannot review without policy context."` Also read `.tessl/tiles/jbaruch/coding-policy/skills/*/SKILL.md` when a changed path overlaps a skill's domain (e.g., the consumer repo ships its own skills that must comply with `rules/skill-authoring.md`).
+List and read every file under `.tessl/tiles/jbaruch/coding-policy/rules/`. These are the authoritative policy documents for this review. Read them fully; do not skim. **Count the rule files you loaded (remember the number — you will surface it in Step 5's verdict).** If the directory is missing or empty, the `tessl install` pre-step must have failed: stop. Call `submit_pull_request_review` exactly once with `event: REQUEST_CHANGES` and `body: "Policy load failed: .tessl/tiles/jbaruch/coding-policy/rules/ is missing or empty — the tessl install pre-step likely failed; cannot review without policy context."` Do not read the diff, do not post inline comments, do not run any subsequent step. Also read `.tessl/tiles/jbaruch/coding-policy/skills/*/SKILL.md` when a changed path overlaps a skill's domain (e.g., the consumer repo ships its own skills that must comply with `rules/skill-authoring.md`).
 
 ## Step 3 — Load the change set
 
