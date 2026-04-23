@@ -23,14 +23,14 @@
       "description": "The guide produces a reply for EVERY thread (CI failure, accept, decline) — not two of three. An empty reply or 'no response needed' on any thread scores zero for this item"
     },
     {
-      "name": "Accept reply references the concrete fix",
+      "name": "Accept reply gives the reviewer a way to locate the fix",
       "max_score": 15,
-      "description": "The accept reply concretely points at where/how the fix landed (a commit sha, a commit message reference, or equivalent pointer a reader can follow). A bare 'Done', 'Resolved', 'Applied', or 'OK' scores zero — no actionable pointer. The specific phrase format is NOT scored; the substance is"
+      "description": "The accept reply includes at least one artifact a reader can follow to the fix in the repo — a commit sha, a file:line pointer, or a diff URL. A reply that only signals completion (no pointer) scores zero. The specific phrase format is NOT scored"
     },
     {
-      "name": "Decline reply cites concrete evidence",
+      "name": "Decline reply names an externally-verifiable reference",
       "max_score": 15,
-      "description": "The decline reply cites concrete evidence (file:line, spec/docs quote, linked precedent, scope constraint) for why the suggestion is being declined. A bare 'No thanks', 'Disagree', or vague 'out of scope' scores zero — the reply must hand the reviewer something they can verify. The specific phrase format is NOT scored"
+      "description": "The decline reply names at least one reference a reviewer can independently verify — e.g., a file path with line number, a quoted sentence from docs or spec, a link to a prior PR or issue, or a named scope constraint from the PR description. A reply made of opinion alone scores zero. The specific phrase format is NOT scored"
     },
     {
       "name": "Fixes pushed to the same branch",
