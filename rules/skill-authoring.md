@@ -7,7 +7,7 @@ alwaysApply: true
 ## SKILL.md Frontmatter
 
 - Required fields: `name`, `description` (include trigger phrases so the agent knows when to activate)
-- Optional fields: `allowed-tools`, `disable-model-invocation`
+- Optional fields: `allowed-tools`, `disable-model-invocation`, `user-invocable` (set to `false` for background-knowledge skills the runtime loads as context but the user should never invoke directly)
 - The `description` field is your discovery surface — write it for the agent, not a human audience
 
 ## Title and Preamble
