@@ -5,12 +5,12 @@
     {
       "name": "Refuses release from main",
       "max_score": 20,
-      "description": "The output does NOT push main or open a PR with main as the head branch. `git push -u origin main` and `gh pr create` against main are both absent from the plan"
+      "description": "The output does NOT push main (`git push -u origin main` or equivalent) and does NOT open a PR whose head is main. A PR with `base=main` and `head=<feature-branch>` is correct and expected; only a head=main PR fails this criterion"
     },
     {
       "name": "Branches from current HEAD, not origin",
       "max_score": 20,
-      "description": "The recovery creates a new branch from the local HEAD (which carries the uncommitted-to-remote fix), e.g. `git checkout -b <branch>`. Branching from `origin/main` or resetting before branching would drop the fix — either is scored zero here"
+      "description": "The recovery creates a new branch from the local HEAD (which carries the fix committed locally but not yet pushed), e.g. `git checkout -b <branch>`. Branching from `origin/main` or resetting before branching would drop the fix — either is scored zero here"
     },
     {
       "name": "Rolls local main back to origin/main",

@@ -35,7 +35,7 @@
     {
       "name": "Surfaces CI state in the summary",
       "max_score": 7,
-      "description": "Final summary prints the CI verdict (success/failure/pending) in a form a human can read at a glance"
+      "description": "Final summary prints the CI verdict (success / failure / cancelled / timed-out) in a form a human can read at a glance. The summary reports a terminal state, consistent with the wait-until-finished criterion — `pending` is not a valid summary outcome"
     },
     {
       "name": "Surfaces review states in the summary",

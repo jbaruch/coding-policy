@@ -13,13 +13,18 @@
       "description": "The script refuses to merge when any blocking review is outstanding or any review thread is unresolved. At minimum, it checks that no review has state `CHANGES_REQUESTED` and that inline-comment threads have replies before proceeding"
     },
     {
-      "name": "Local main matches remote after merge",
-      "max_score": 15,
-      "description": "OUTCOME check: post-merge, local `main` is at the same commit as `origin/main`, with no spurious local merge commit introduced by an unqualified `git pull`. Any approach that reaches this state is acceptable"
+      "name": "Verifies merge landed on main",
+      "max_score": 10,
+      "description": "The script explicitly verifies that the PR's commits are present on `main` after the merge (e.g., `gh pr view <N> --json state,mergeCommit`, `git log origin/main --grep`, or equivalent). A silent assumption that `gh pr merge` succeeded scores zero"
+    },
+    {
+      "name": "Local main matches remote without spurious merge commit",
+      "max_score": 12,
+      "description": "OUTCOME check: post-script, local `main` points at the same commit as `origin/main`. A plain `git pull` that introduces an extra local merge commit scores zero; any mechanism that produces a clean fast-forward or reset-to-origin state is acceptable"
     },
     {
       "name": "Feature branch removed both remotely and locally",
-      "max_score": 15,
+      "max_score": 13,
       "description": "OUTCOME check: after the script runs, the feature branch is gone from origin AND gone from the local repo. The specific mechanism (e.g., `gh pr merge --delete-branch` + `git branch -d`, or `git push origin --delete` + local delete) is not prescribed"
     },
     {
@@ -29,7 +34,7 @@
     },
     {
       "name": "Publish CI verification",
-      "max_score": 15,
+      "max_score": 10,
       "description": "The script verifies that the post-merge publish/release workflow was triggered — not just that the merge succeeded. Acceptable mechanisms include `gh run list` on the publish workflow, `gh run view` on the post-merge run, or equivalent"
     },
     {
