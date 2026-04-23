@@ -8,7 +8,7 @@ alwaysApply: true
 
 - JSON (or similar) state files a skill writes and/or reads across invocations to maintain continuity between runs
 - Distinct from the tile's static context artifacts (rules, skills, scripts per `rules/context-artifacts.md`) — those don't change between runs; these do
-- Packaged as part of the plugin, not dropped ad-hoc — artifacts ship with the tile and inherit the same lifecycle guarantees as rules and skills (versioned, reviewed, tested)
+- Lifecycle and packaging expectations come from `rules/context-artifacts.md`; this rule adds the stateful-specific requirements below
 
 ## Required Attributes
 
