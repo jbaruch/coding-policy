@@ -25,8 +25,9 @@ description: |
   in its own repo). Claude Code CLI 2.1.98 — the version gh-aw v0.68.3
   bundles — has no flag to skip project `.mcp.json` discovery while
   preserving gh-aw's own MCP servers, so the consumer-side workaround
-  is the only current fix. Track in issue #15 for a better solution
-  once gh-aw bumps its CLI.
+  is the only current fix. Tracked upstream in
+  jbaruch/coding-policy#15 for a better solution once gh-aw bumps
+  its CLI.
 
 on:
   pull_request:
