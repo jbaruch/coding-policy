@@ -1,56 +1,56 @@
 {
-  "context": "Tests whether the agent follows the correct merge command with the right flags, uses safe git pull semantics post-merge, properly cleans up local and remote branch refs, and performs the required post-merge verification steps including confirming the publish workflow was triggered.",
+  "context": "Tests whether the agent gates the merge on the right readiness signals and brings the repo to the correct post-merge OUTCOME — without prescribing specific command flags. Command choices (e.g., `--merge` vs `--squash`, `git pull --ff-only` vs `git fetch && git reset`) are team-configurable; the criteria score the observable end state and the reasoning about when merge is allowed, not the exact literal flags.",
   "type": "weighted_checklist",
   "checklist": [
     {
-      "name": "Merge flags: --merge",
-      "max_score": 10,
-      "description": "Uses `gh pr merge` with the `--merge` flag (not `--squash` or `--rebase`)"
+      "name": "Pre-merge CI gate",
+      "max_score": 15,
+      "description": "The script refuses to merge when CI is not green. If CI checks are pending or failing, the script exits non-zero with a diagnostic; it does NOT proceed to `gh pr merge` on red CI"
     },
     {
-      "name": "Merge flags: --delete-branch",
-      "max_score": 10,
-      "description": "Uses `gh pr merge` with the `--delete-branch` flag to delete the remote branch on merge"
+      "name": "Pre-merge review gate",
+      "max_score": 15,
+      "description": "The script refuses to merge when any blocking review is outstanding or any review thread is unresolved. At minimum, it checks that no review has state `CHANGES_REQUESTED` and that inline-comment threads have replies before proceeding"
     },
     {
-      "name": "Fast-forward only pull",
+      "name": "Verifies merge landed on main",
+      "max_score": 10,
+      "description": "The script explicitly verifies that the PR's commits are present on `main` after the merge (e.g., `gh pr view <N> --json state,mergeCommit`, `git log origin/main --grep`, or equivalent). A silent assumption that `gh pr merge` succeeded scores zero"
+    },
+    {
+      "name": "Local main matches remote without spurious merge commit",
       "max_score": 12,
-      "description": "After switching to main, uses `git pull --ff-only` (not plain `git pull` or `git pull --rebase`)"
+      "description": "OUTCOME check: post-script, local `main` points at the same commit as `origin/main`. A plain `git pull` that introduces an extra local merge commit scores zero; any mechanism that produces a clean fast-forward or reset-to-origin state is acceptable"
     },
     {
-      "name": "Checkout main first",
-      "max_score": 8,
-      "description": "Switches to the main branch (`git checkout main`) before running `git pull`"
+      "name": "Feature branch removed both remotely and locally",
+      "max_score": 13,
+      "description": "OUTCOME check: after the script runs, the feature branch is gone from origin AND gone from the local repo. The specific mechanism (e.g., `gh pr merge --delete-branch` + `git branch -d`, or `git push origin --delete` + local delete) is not prescribed"
     },
     {
-      "name": "Local branch deletion",
+      "name": "Stale remote-tracking refs cleaned",
       "max_score": 10,
-      "description": "Deletes the local feature branch with `git branch -d` (not force-delete `-D`)"
+      "description": "The script removes stale `origin/*` refs that point at deleted remote branches (via `git remote prune`, `git fetch --prune`, or equivalent). Leaving stale refs around is a zero here"
     },
     {
-      "name": "Remote ref pruning",
+      "name": "Publish CI verification",
       "max_score": 10,
-      "description": "Runs `git remote prune origin` to clean up stale remote-tracking refs"
+      "description": "The script verifies that the post-merge publish/release workflow was triggered — not just that the merge succeeded. Acceptable mechanisms include `gh run list` on the publish workflow, `gh run view` on the post-merge run, or equivalent"
     },
     {
-      "name": "Verify merge on main",
-      "max_score": 10,
-      "description": "Includes a step to verify the merged commit is present on the main branch (e.g. `git log`, `gh pr view`, or checking PR status)"
+      "name": "Final summary surfaces the merged PR URL and outcome",
+      "max_score": 5,
+      "description": "The script prints a summary including the merged PR URL and the publish-workflow status so the developer doesn't have to re-check manually"
     },
     {
-      "name": "Publish CI check",
-      "max_score": 12,
-      "description": "Includes a step to check that the publish/release CI workflow was triggered after the merge (e.g. checking workflow runs)"
+      "name": "Graceful failure on unmet preconditions",
+      "max_score": 5,
+      "description": "When CI is red or reviews are outstanding, the script exits non-zero with a human-readable message on stderr that names the specific unmet condition — does NOT silently skip or mask the failure"
     },
     {
-      "name": "Report merged PR URL",
-      "max_score": 8,
-      "description": "Script or documentation includes reporting the merged PR URL as part of the outcome summary"
-    },
-    {
-      "name": "Pre-merge: CI green gate",
-      "max_score": 10,
-      "description": "Script or checklist requires confirming CI is green before merging — does not proceed with merge if CI is failing"
+      "name": "Inputs parameterized (PR number, owner, repo)",
+      "max_score": 5,
+      "description": "PR number, repository owner, and repository name are accepted as arguments or environment variables — not hardcoded literals in the script body. The script is reusable across different PRs and repos without editing"
     }
   ]
 }

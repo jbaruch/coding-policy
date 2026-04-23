@@ -1,46 +1,46 @@
 {
-  "context": "Tests whether the agent applies the release skill's specific conventions for addressing review feedback: fixing all CI failures without exception, applying reasonable suggestions, pushing back on over-engineered suggestions, using the exact reply formats for accepted and declined threads, ensuring no thread is left without a reply, and pushing fixes to the same branch.",
+  "context": "Tests whether the agent classifies each feedback type correctly (fix a CI failure, accept a reasonable suggestion, push back on over-engineering), replies to every thread with substantive content, and pushes fixes to the same branch. The SUBSTANCE of the replies is scored — a reply that concretely references the fix or cites evidence for the decline — NOT a specific phrase literal from the release skill.",
   "type": "weighted_checklist",
   "checklist": [
     {
       "name": "CI failure: fix required",
       "max_score": 10,
-      "description": "For the CI failure (failing unit test), the guide states the test must be fixed — does NOT suggest ignoring it, skipping it, or deferring it"
+      "description": "For the CI failure (failing unit test), the guide states the test must be fixed. Does NOT suggest skipping, ignoring, deferring, or `[skip ci]`"
     },
     {
-      "name": "Accepted reply format",
-      "max_score": 15,
-      "description": "For the accepted suggestion, the reply text follows the format `Fixed in <sha>` — uses this exact phrasing (not 'Done', 'Resolved', 'Applied', or similar alternatives)"
-    },
-    {
-      "name": "Declined reply format",
-      "max_score": 15,
-      "description": "For the declined/over-engineered suggestion, the reply text follows the format `Declining — <reason>` — uses this exact phrasing with the em dash"
-    },
-    {
-      "name": "All threads replied",
-      "max_score": 15,
-      "description": "The guide covers a reply for ALL three feedback threads (CI failure thread, accepted suggestion thread, declined suggestion thread) — no thread is left without a response"
-    },
-    {
-      "name": "Push to same branch",
-      "max_score": 15,
-      "description": "States that any code fixes should be pushed to the same existing branch — NOT to a new branch"
-    },
-    {
-      "name": "Apply reasonable suggestion",
+      "name": "Applies the reasonable suggestion",
       "max_score": 10,
-      "description": "For the clearly correct suggestion (simplifying the conditional), the guide says to apply/implement it — does NOT suggest declining it or skipping it"
+      "description": "For the clearly-correct suggestion (simplify the nested conditional), the guide says to apply it — does NOT suggest declining it or deferring"
     },
     {
-      "name": "Decline over-engineered suggestion",
+      "name": "Declines the over-engineered suggestion",
       "max_score": 10,
-      "description": "For the over-engineered suggestion (unnecessary abstraction), the guide says to push back or decline it with a reason — does NOT say to blindly implement it"
+      "description": "For the over-engineered suggestion (unnecessary abstraction for current scope), the guide says to push back — does NOT say to blindly implement it"
     },
     {
-      "name": "No dangling threads",
+      "name": "All three threads get replies",
+      "max_score": 15,
+      "description": "The guide produces a reply for EVERY thread (CI failure, accept, decline) — not two of three. An empty reply or 'no response needed' on any thread scores zero for this item"
+    },
+    {
+      "name": "Accept reply gives the reviewer a way to locate the fix",
+      "max_score": 15,
+      "description": "The accept reply includes at least one artifact a reader can follow to the fix in the repo — a commit sha, a file:line pointer, or a diff URL. A reply that only signals completion (no pointer) scores zero. The specific phrase format is NOT scored"
+    },
+    {
+      "name": "Decline reply names an externally-verifiable reference",
+      "max_score": 15,
+      "description": "The decline reply names at least one reference a reviewer can independently verify — e.g., a file path with line number, a quoted sentence from docs or spec, a link to a prior PR or issue, or a named scope constraint from the PR description. A reply made of opinion alone scores zero. The specific phrase format is NOT scored"
+    },
+    {
+      "name": "Fixes pushed to the same branch",
+      "max_score": 15,
+      "description": "The guide states any code changes go on the EXISTING feature branch of the PR, not a new branch. Opening a second PR for review fixes scores zero"
+    },
+    {
+      "name": "No dangling threads before merge",
       "max_score": 10,
-      "description": "The guide explicitly states or implies that every thread must have a reply before the PR can be merged — does NOT leave any thread unaddressed"
+      "description": "The guide explicitly states that EVERY thread must have a reply before the PR is merged — nothing left unresolved"
     }
   ]
 }

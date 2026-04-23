@@ -8,11 +8,10 @@ You have been asked to write a shell script that a developer can run after openi
 
 ## Output Specification
 
-Produce a shell script named `monitor_pr.sh` that accepts a PR number as its first argument (e.g. `./monitor_pr.sh 42`). The script should be written for a repository whose GitHub owner and repo name are configurable (either hardcoded placeholders or environment variables — your choice). The script should:
+Produce a shell script named `monitor_pr.sh` that:
 
-1. Wait for CI checks to finish
-2. Retrieve the review state(s) from the automated reviewer
-3. Retrieve any inline comments left on the PR
-4. Print a summary of what was found so the developer knows what to address
-
-Also produce a `README.md` explaining how to use the script and what each output section means.
+1. Accepts the PR number, repository owner, and repository name as arguments or environment variables (not hardcoded)
+2. Waits for CI checks to finish
+3. Retrieves the review state(s) from the automated reviewer(s)
+4. Retrieves any inline comments left on the PR
+5. Prints a summary of what was found so the developer knows what to address

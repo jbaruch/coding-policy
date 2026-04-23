@@ -6,14 +6,14 @@ A junior engineer on your team just had their first PR reviewed by an automated 
 
 The engineer needs a concrete, step-by-step guide explaining exactly how to handle each type of feedback, including how to respond to review threads so nothing is left unresolved. They also want to know: if they make code changes to address the feedback, should those changes go on a new branch or the existing one?
 
-The team cares about a consistent reply style in review threads — accepted suggestions and declined suggestions each have a specific format the team uses.
+The team cares about substantive replies — accepted suggestions should point concretely at the fix (so a reader can find it), and declined suggestions should cite concrete evidence (so the reviewer can verify the reasoning).
 
 ## Output Specification
 
 Produce a document named `review-response-guide.md` that walks through how to handle the three feedback types described above. For each type, include:
 
 - What action to take on the code (if any)
-- The exact text to post as a reply in the review thread
+- A sample reply the engineer would post in the review thread — concrete enough that the reviewer can either find the fix (for accepts) or verify the reasoning (for declines)
 - Where to push any code changes
 
-Make the guide concrete: use placeholder values like `<sha>` or `<reason>` where the actual values would depend on the situation, but show the exact reply format the team expects.
+Use placeholder values like `<sha>` or `<file>:<line>` where the actual values would depend on the situation.

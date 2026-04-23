@@ -2,17 +2,14 @@
 
 ## Problem/Feature Description
 
-A small open-source library team is wrapping up a sprint that produced three distinct categories of changes that need to ship as separate PRs. The team is inconsistent about when to bump versions manually versus letting their CI pipeline handle it, and junior contributors often open PRs with vague titles and skip steps before requesting review. The team lead wants a `RELEASE_RUNBOOK.md` that documents the exact steps for releasing each type of change, so anyone on the team can follow it reliably.
-
-The runbook should also explain how to handle feedback left by automated code reviewers — including both cases where a suggestion is accepted and where it should be politely declined — so that PRs don't stall waiting for replies.
+A small open-source library team is wrapping up a sprint that produced three distinct categories of changes that need to ship as separate PRs. The team's CI pipeline automatically bumps the patch segment of the semver on every merge; manual manifest edits are only needed for non-patch bumps. The team is inconsistent about applying that rule correctly and keeps picking the wrong target version number when a manual bump is needed. The team lead wants a `RELEASE_RUNBOOK.md` that documents the versioning decision and the release sequencing for each type of change.
 
 ## Output Specification
 
-Produce a `RELEASE_RUNBOOK.md` file that covers the complete release process for the three change types listed below. For each type, the runbook should describe:
-- Pre-PR readiness steps
-- How to construct the PR title and body
-- What to do about versioning (whether and how to update the project manifest)
-- How to handle automated review feedback before merging
+Produce a `RELEASE_RUNBOOK.md` file that covers, for each of the three change types below:
+- Pre-PR readiness steps (what must be verified before creating the PR)
+- Whether the project manifest's version field should be updated, and if so, to what target version number (the current version is in the manifest fixture below)
+- A reasoned recommendation for the order in which the three PRs should ship, given the relative risk and downstream impact
 
 You may also produce a `release.sh` helper script if you find it useful to illustrate the steps programmatically.
 
