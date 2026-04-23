@@ -16,6 +16,19 @@ description: |
     - ANTHROPIC_API_KEY — Claude Code engine authentication
     - TESSL_TOKEN       — tessl install authentication
 
+  Known limitation: if the consumer repo has a `.mcp.json` at its root
+  declaring any stdio MCP server (including tessl) that depends on a
+  binary not available inside gh-aw's awf sandbox, Claude Code will
+  fail to launch that server and gh-aw will fail the job even when
+  the review itself ran. Workaround: gitignore `.mcp.json` and keep a
+  `.mcp.json.example` for local dev (the same approach this tile uses
+  in its own repo). Claude Code CLI 2.1.98 — the version gh-aw v0.68.3
+  bundles — has no flag to skip project `.mcp.json` discovery while
+  preserving gh-aw's own MCP servers, so the consumer-side workaround
+  is the only current fix. Tracked upstream in
+  jbaruch/coding-policy#15 for a better solution once gh-aw bumps
+  its CLI.
+
 on:
   pull_request:
     types: [opened, synchronize, reopened]
@@ -104,7 +117,11 @@ Decide whether to proceed:
 
 ## Step 2 — Load the policy
 
-List and read every file under `.tessl/tiles/jbaruch/coding-policy/rules/`. These are the authoritative policy documents for this review. Read them fully; do not skim. Also read `.tessl/tiles/jbaruch/coding-policy/skills/*/SKILL.md` when a changed path overlaps a skill's domain (e.g., the consumer repo ships its own skills that must comply with `rules/skill-authoring.md`).
+List and read every file under `.tessl/tiles/jbaruch/coding-policy/rules/`. These are the authoritative policy documents for this review. Read them fully; do not skim. **Count only the `*.md` files under `.tessl/tiles/jbaruch/coding-policy/rules/` — remember that number, you'll surface it verbatim in Step 5's load indicator.**
+
+If the directory is missing, empty, or contains no `*.md` files, the `tessl install` pre-step must have failed: stop here. Call `submit_pull_request_review` exactly once with `event: REQUEST_CHANGES` and `body: "Policy load failed: .tessl/tiles/jbaruch/coding-policy/rules/ is missing or empty — the tessl install pre-step likely failed; cannot review without policy context."` Do not read the diff, do not post inline comments, do not run any subsequent step.
+
+Otherwise (rules loaded successfully), also read `.tessl/tiles/jbaruch/coding-policy/skills/*/SKILL.md` when a changed path overlaps a skill's domain (e.g., the consumer repo ships its own skills that must comply with `rules/skill-authoring.md`). The SKILL.md reads do NOT count toward the rule-file number you remembered.
 
 ## Step 3 — Load the change set
 
@@ -121,11 +138,11 @@ For every changed line in this PR (ignore files under `.tessl/` — those are th
 ## Step 5 — Emit findings
 
 - For each concrete violation with a file + line, call `create_pull_request_review_comment` with `path`, `line`, and a body that (a) names the rule file violated, (b) quotes the clause, (c) proposes the fix. Cap at 10 total — pick the highest-impact issues.
-- After all inline comments, call `submit_pull_request_review` exactly once:
+- After all inline comments, call `submit_pull_request_review` exactly once. The `body` must begin with a one-line load indicator: `"Policy loaded: N rule files from .tessl/tiles/jbaruch/coding-policy/rules/ (installed tile)."` where N is the count from Step 2. Then the verdict:
   - `event: REQUEST_CHANGES` if any violation was flagged
-  - `event: COMMENT` if clean, with `body: "All rules pass — no violations found."` (GitHub rejects `APPROVE` from `github-actions[bot]` with HTTP 422; `COMMENT` + clear body is how the reviewer signals a pass)
-  - `event: COMMENT` if observations only (style nits, suggestions) with a short summary `body`
-  - On any `REQUEST_CHANGES`, `body` must be one short paragraph summarising the verdict and which rules applied.
+  - `event: COMMENT` if clean, with verdict line `"All rules pass — no violations found."` (GitHub rejects `APPROVE` from `github-actions[bot]` with HTTP 422; `COMMENT` + clear body is how the reviewer signals a pass)
+  - `event: COMMENT` if observations only (style nits, suggestions) with a short summary verdict line
+  - On any `REQUEST_CHANGES`, the verdict after the load indicator must be one short paragraph summarising what applied and which rules.
 
 ## Guardrails
 
