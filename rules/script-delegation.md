@@ -45,6 +45,6 @@ Scripts follow the baseline in `rules/file-hygiene.md` (exit codes, stderr, idem
 
 ## Precheck Gating
 
-- For scheduled or recurring tasks where most runs are no-ops, have the script produce a last-line JSON payload of the shape `{"wake_agent": true|false, "data": {...}}`
+- For scheduled or recurring tasks where most runs are no-ops, have the script produce a last-line JSON payload such as `{"wake_agent": false, "data": {}}`; `wake_agent` is a boolean and `data` is an object
 - The scheduler runs the script first and only wakes the agent when `wake_agent` is `true` — no-op runs cost zero model tokens because the LLM is never invoked
 - `data` carries the inputs the agent will need if it does wake, so a single precheck run gates activation *and* supplies the payload — no second fetch

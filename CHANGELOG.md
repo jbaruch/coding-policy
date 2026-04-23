@@ -10,7 +10,7 @@
 ### Rule tightenings
 
 - **skill-authoring** — Document `user-invocable: false` as an optional frontmatter field for background-knowledge skills the runtime loads as context but the user should never invoke directly.
-- **script-delegation** — Spell out the precheck-gating JSON contract (`{"wake_agent": bool, "data": {...}}` on the last line), the zero-token-cost rationale for no-op runs, and the single-fetch gate-and-payload pattern.
+- **script-delegation** — Spell out the precheck-gating JSON contract with `wake_agent` as a boolean and `data` as an object (e.g., `{"wake_agent": true, "data": {}}` on the last line), the zero-token-cost rationale for no-op runs, and the single-fetch gate-and-payload pattern.
 - **context-artifacts** — Enumerate the review rubric: frontmatter validity, sequential-execution preamble, flat step numbering, typed `Skill()` calls, silence-rule compliance, channel-appropriate formatting.
 
 ### Skills
