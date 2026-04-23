@@ -1,36 +1,51 @@
 {
-  "context": "Tests whether the agent uses the correct gh CLI commands to poll CI status and retrieve both Copilot review state and inline comments from a pull request, matching the specific API patterns prescribed in the release skill.",
+  "context": "Tests whether the script retrieves and surfaces the three signals the developer needs — CI status, per-reviewer review decision, and inline review-comments — without prescribing specific gh-CLI endpoints or jq filters. Multiple endpoints can produce the same signal; the criteria score whether the signal is captured and surfaced, and whether the agent avoids the common inline-vs-issue-comments API trap.",
   "type": "weighted_checklist",
   "checklist": [
     {
-      "name": "CI watch command",
-      "max_score": 20,
-      "description": "Uses `gh pr checks <N> --watch` (with the `--watch` flag) to poll CI until checks complete — not a manual sleep loop or alternative polling approach"
+      "name": "Retrieves CI status",
+      "max_score": 15,
+      "description": "The script retrieves the PR's CI state via some command. `gh pr checks`, `gh run list --branch`, `gh api /repos/<o>/<r>/commits/<sha>/check-runs`, or equivalent all pass — the specific endpoint is not prescribed"
     },
     {
-      "name": "Review state API call",
-      "max_score": 20,
-      "description": "Retrieves the Copilot/automated review state via `gh api repos/<owner>/<repo>/pulls/<N>/reviews` with a `--jq '.[].state'` filter (or equivalent jq expression that extracts the state field)"
+      "name": "Waits for CI to finish before surfacing state",
+      "max_score": 15,
+      "description": "The script polls / waits until CI checks are in a terminal state (success / failure / cancelled) before reporting. Surfacing mid-run 'pending' as the final verdict scores zero — any reasonable wait mechanism (`--watch`, a polling loop with a timeout, a `gh run watch` call) is acceptable"
     },
     {
-      "name": "Inline comments API call",
-      "max_score": 20,
-      "description": "Retrieves inline PR comments via `gh api repos/<owner>/<repo>/pulls/<N>/comments` — uses the pull request review comments endpoint, not the issue comments endpoint"
+      "name": "Retrieves review decision per reviewer",
+      "max_score": 15,
+      "description": "The script captures the latest review state for EACH reviewer distinctly (not a single aggregate). Multi-bot setups (e.g., Copilot + gh-aw) each have their own state, and the script must expose them separately"
+    },
+    {
+      "name": "Retrieves inline review comments",
+      "max_score": 15,
+      "description": "The script retrieves inline comments attached to reviews. Mechanism is not prescribed — any endpoint that returns PR review comments passes"
+    },
+    {
+      "name": "Distinguishes inline review comments from issue comments",
+      "max_score": 10,
+      "description": "The script uses the pull-request review-comments endpoint, NOT the issue-comments endpoint (`/issues/<N>/comments`). These return different objects in GitHub's API — a script that conflates them surfaces wrong data and scores zero here"
     },
     {
       "name": "PR number parameterized",
       "max_score": 10,
-      "description": "The PR number is accepted as a script argument or variable rather than hardcoded, so the script is reusable across different PRs"
+      "description": "The PR number is a script argument or environment variable, not a hardcoded value. The script is reusable across different PRs without editing"
     },
     {
-      "name": "Review state surfaced",
-      "max_score": 15,
-      "description": "The script prints or summarizes the review state value(s) retrieved so the developer can see whether the review is approved, changes requested, etc."
+      "name": "Surfaces CI state in the summary",
+      "max_score": 7,
+      "description": "Final summary prints the CI verdict (success/failure/pending) in a form a human can read at a glance"
     },
     {
-      "name": "Inline comments surfaced",
-      "max_score": 15,
-      "description": "The script prints or summarizes the inline comments content (e.g. body text or count) so the developer can see what feedback was left"
+      "name": "Surfaces review states in the summary",
+      "max_score": 7,
+      "description": "Final summary prints each reviewer's latest state — not just raw JSON the developer has to parse"
+    },
+    {
+      "name": "Surfaces inline comment content or count in the summary",
+      "max_score": 6,
+      "description": "Final summary includes inline comment bodies (for low counts) or a count with a pointer to read them — developer can tell whether there's unaddressed feedback"
     }
   ]
 }

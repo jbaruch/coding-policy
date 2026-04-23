@@ -1,31 +1,36 @@
 {
-  "context": "Tests whether the agent refuses to proceed with the release workflow when the user is on the main branch, and provides actionable recovery guidance instead of blindly executing steps.",
+  "context": "Tests whether the agent reasons through the multi-step recovery when a fix is already committed on main: refuse to release from main, branch from the current HEAD (preserving the commit), roll back local main to match origin, then open the PR from the new branch. The task reveals the starting state; the criteria score the recovery sequence, not the observation.",
   "type": "weighted_checklist",
   "checklist": [
     {
-      "name": "Detects main branch",
-      "max_score": 25,
-      "description": "The agent identifies that the user is on the main branch and flags this as a problem — does NOT proceed with pushing and creating a PR from main"
-    },
-    {
-      "name": "Explains why it's blocked",
+      "name": "Refuses release from main",
       "max_score": 20,
-      "description": "Explains that the release process requires a feature branch, not main — provides the reasoning, not just a refusal"
+      "description": "The output does NOT push main or open a PR with main as the head branch. `git push -u origin main` and `gh pr create` against main are both absent from the plan"
     },
     {
-      "name": "Provides recovery steps",
-      "max_score": 25,
-      "description": "Suggests a concrete fix: create a branch from the current state (e.g., `git checkout -b fix/hotfix-name`), then proceed with the normal release flow from the new branch"
-    },
-    {
-      "name": "Does not create PR from main",
+      "name": "Branches from current HEAD, not origin",
       "max_score": 20,
-      "description": "The output does NOT include `gh pr create` or `git push -u origin main` — the agent refuses to execute the release steps from main"
+      "description": "The recovery creates a new branch from the local HEAD (which carries the uncommitted-to-remote fix), e.g. `git checkout -b <branch>`. Branching from `origin/main` or resetting before branching would drop the fix — either is scored zero here"
+    },
+    {
+      "name": "Rolls local main back to origin/main",
+      "max_score": 15,
+      "description": "After moving the commit onto a feature branch, the plan brings local `main` back in sync with `origin/main` (e.g. `git checkout main && git reset --hard origin/main`, or equivalent) so future work doesn't diverge. Skipping this step scores zero"
+    },
+    {
+      "name": "Completes the release from the new branch",
+      "max_score": 15,
+      "description": "After the recovery, the plan pushes the new branch and opens the PR from it — doesn't halt at the rejection and leave the fix stranded locally"
+    },
+    {
+      "name": "Cites concrete reasons for the re-route",
+      "max_score": 15,
+      "description": "Explains WHY main can't be the source branch in terms of concrete risks (branch protection, CI gating, mandatory review, audit trail) — not just 'the skill says so' or a bare 'policy violation'. Reasoning must be traceable to a real guardrail"
     },
     {
       "name": "Preserves the commit",
-      "max_score": 10,
-      "description": "Recovery guidance preserves the existing commit — does NOT suggest discarding the fix or resetting main"
+      "max_score": 15,
+      "description": "The final state has the fix present on the new feature branch with no data loss. A plan that suggests `git reset --hard HEAD~1` on main BEFORE branching, or otherwise risks orphaning the commit, scores zero"
     }
   ]
 }

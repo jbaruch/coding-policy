@@ -1,56 +1,51 @@
 {
-  "context": "Tests whether the agent correctly reasons about semantic version bump types and knows which bump levels require updating the project manifest versus relying on automation. Also checks that the agent follows the correct readiness checks and thread-reply conventions.",
+  "context": "Tests whether the agent reasons about semver classification (patch vs minor vs major) from the change descriptions, applies the correct manifest-update behavior for each (patch is CI-automated; minor and major need a manifest bump), produces the correct target version numbers, and sequences the three releases sensibly. Reply-format conventions and PR-title conventions are tested separately in `review-feedback-addressing-conventions` and `copilot-review-via-graphql` and are NOT re-scored here.",
   "type": "weighted_checklist",
   "checklist": [
     {
       "name": "Patch: no manifest update",
-      "max_score": 12,
-      "description": "For the bug-fix / patch change, the agent does NOT update the version field in the project manifest (e.g. package.json, tile.json, or equivalent), because patch is handled automatically"
+      "max_score": 15,
+      "description": "For the bug-fix change (null-pointer guard, backward-compat, no API change), the runbook does NOT update the manifest version — the patch bump is delegated to CI automation"
     },
     {
-      "name": "Patch: automation mentioned",
+      "name": "Patch: justifies delegation to automation",
       "max_score": 10,
-      "description": "For the patch change, the output mentions that the version bump is handled automatically by CI automation — not a manual step"
+      "description": "The runbook explains WHY the patch case skips a manifest bump — because CI auto-bumps the patch version on merge, making a manual edit redundant or wrong. A silent skip with no reasoning scores zero"
     },
     {
       "name": "Minor: manifest updated",
-      "max_score": 12,
-      "description": "For the new-feature / minor change, the agent DOES update the version field in the project manifest to reflect the minor bump"
+      "max_score": 10,
+      "description": "For the CSV-export change (additive, new public route, backward-compat), the runbook updates the manifest version field to a higher value"
+    },
+    {
+      "name": "Minor: correct semver target",
+      "max_score": 10,
+      "description": "The target version is `1.5.0` (not `1.4.3`, not `2.0.0`). Scores the agent's classification AND its semver arithmetic"
     },
     {
       "name": "Major: manifest updated",
-      "max_score": 12,
-      "description": "For the breaking-change / major change, the agent DOES update the version field in the project manifest to reflect the major bump"
-    },
-    {
-      "name": "Readiness: tests",
       "max_score": 10,
-      "description": "The release process (script, checklist, or documentation) includes running the test suite as a required step before creating the PR, and requires tests to pass"
+      "description": "For the v1-routes removal (breaking change), the runbook updates the manifest version field to a higher value"
     },
     {
-      "name": "Readiness: linter",
+      "name": "Major: correct semver target",
       "max_score": 10,
-      "description": "The release process includes running the linter as a required step before creating the PR, and requires it to pass with no warnings or errors"
+      "description": "The target version is `2.0.0` (not `1.4.3`, not `1.5.0`). Scores the agent's classification AND its semver arithmetic"
     },
     {
-      "name": "PR title convention",
-      "max_score": 8,
-      "description": "PR titles for each change follow the `<type>(<scope>): <imperative summary>` convention"
+      "name": "Major: flags the breaking-change impact",
+      "max_score": 15,
+      "description": "The runbook calls out that the v1-routes removal will break existing clients and surfaces this in the PR body, CHANGELOG, or a release note — not just as a version bump. An agent who treats it identically to the minor case scores zero"
     },
     {
-      "name": "Accepted reply format",
-      "max_score": 8,
-      "description": "When describing how to respond to accepted review feedback, uses the format `Fixed in <sha>` (not just 'done' or 'resolved')"
-    },
-    {
-      "name": "Declined reply format",
-      "max_score": 8,
-      "description": "When describing how to respond to declined/rejected review suggestions, uses the format `Declining — <reason>`"
-    },
-    {
-      "name": "All threads replied",
+      "name": "Sensible release sequencing",
       "max_score": 10,
-      "description": "The release process requires a reply on EVERY review thread before merging — does NOT allow dangling/unresolved threads"
+      "description": "The runbook orders the three PRs thoughtfully — e.g., ship the bug-fix patch first (low risk, quick win), then minor, then major last (gives downstream the longest notice). Any coherent sequencing with stated reasoning passes; no sequencing at all, or reversing it without justification, scores zero"
+    },
+    {
+      "name": "Readiness gate: tests + linter",
+      "max_score": 10,
+      "description": "The runbook requires tests AND linter to pass before creating any of the three PRs — a universal engineering practice, scored once as a general gate rather than duplicated per change"
     }
   ]
 }

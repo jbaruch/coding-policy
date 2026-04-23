@@ -1,56 +1,51 @@
 {
-  "context": "Tests whether the agent uses GraphQL (not REST) to request Copilot review, provides the correct hardcoded bot ID, includes a fallback for when the bot ID is stale, and follows the correct PR title and body format when scripting the PR creation and review request workflow.",
+  "context": "Tests whether the agent reasons through GitHub's bot-reviewer API limitation (REST silently drops bot accounts) and writes a script that (a) uses GraphQL for the review request, (b) doesn't depend on a permanently-hardcoded bot ID, and (c) verifies the request landed. The specific Copilot bot-ID literal is a skill-internal implementation detail and is NOT scored.",
   "type": "weighted_checklist",
   "checklist": [
     {
-      "name": "GraphQL mutation used",
+      "name": "Uses GraphQL requestReviews mutation",
+      "max_score": 20,
+      "description": "The script calls `gh api graphql` with a `requestReviews` mutation to add the bot reviewer. REST paths (`gh pr edit --add-reviewer`, `POST /pulls/<N>/requested_reviewers`) score zero here — those are the approaches that silently drop bots"
+    },
+    {
+      "name": "Explains why REST doesn't work",
+      "max_score": 10,
+      "description": "The script's inline comments or the companion documentation cite the concrete reason GraphQL is required: REST drops bot reviewers silently. Without this reasoning, a reader can't judge whether the switch is intentional"
+    },
+    {
+      "name": "Doesn't depend on a permanently-hardcoded bot ID",
       "max_score": 15,
-      "description": "Uses `gh api graphql` with a `requestReviews` mutation to add Copilot as a reviewer — does NOT use REST (`gh pr edit --add-reviewer`, `gh api .../requested_reviewers` POST)"
+      "description": "The script either (a) discovers the Copilot bot ID dynamically at runtime (e.g., from past reviews, from suggested-reviewers), or (b) includes a fallback discovery path when a pinned ID fails, so the script doesn't silently break when GitHub rotates the bot ID. A plain hardcoded literal with no fallback scores zero"
     },
     {
-      "name": "Correct Copilot bot ID",
-      "max_score": 15,
-      "description": "Passes bot ID `BOT_kgDOCnlnWA` in the `botIds` field of the `requestReviews` mutation"
-    },
-    {
-      "name": "PR node ID retrieval",
+      "name": "Resolves the PR's GraphQL node ID",
       "max_score": 10,
-      "description": "Fetches the PR's GraphQL node ID (e.g. via a `pullRequest(number: N) { id }` query) before calling the mutation — does NOT pass the integer PR number directly to `requestReviews`"
+      "description": "Before calling the mutation, the script fetches the PR's GraphQL node ID (e.g., `pullRequest(number: N) { id }`) rather than passing the integer PR number into a field that expects a node ID"
     },
     {
-      "name": "Bot ID fallback included",
+      "name": "Verifies the review request was registered",
       "max_score": 10,
-      "description": "Includes (or documents) a fallback GraphQL query that retrieves the Copilot bot ID from past PR reviews when the hardcoded ID is stale"
+      "description": "After the mutation, the script inspects the PR state to confirm the bot appears in `requested_reviewers` (or equivalent). Fire-and-forget without verification scores zero"
     },
     {
-      "name": "Review request verification",
-      "max_score": 8,
-      "description": "After requesting review, verifies acceptance using `gh api repos/.../pulls/<N>` and inspects `requested_reviewers`"
-    },
-    {
-      "name": "Feature branch guard",
+      "name": "Feature-branch guard",
       "max_score": 10,
-      "description": "Script checks that the current branch is NOT main or master before proceeding"
+      "description": "Before pushing, the script confirms the current branch is NOT main/master and fails loudly if it is — a widely-standard git safety practice, not skill doctrine"
     },
     {
-      "name": "PR title format",
-      "max_score": 8,
-      "description": "PR title in the script follows the pattern `<type>(<scope>): <imperative summary>` (e.g. `fix(auth): handle token expiry`)"
+      "name": "Pre-push readiness checks",
+      "max_score": 10,
+      "description": "The script runs the project's tests AND linter before pushing/creating the PR, and fails if either fails. Acceptable regardless of how these are invoked (make/npm/cargo/etc.)"
     },
     {
-      "name": "PR body Summary section",
+      "name": "PR title follows conventional-commits format",
       "max_score": 8,
-      "description": "PR body template includes a `## Summary` section with bullet points describing what changed and why"
+      "description": "The PR title the script constructs uses `<type>(<scope>): <imperative summary>` (conventional commits — widely adopted across OSS, not skill-invented)"
     },
     {
-      "name": "PR body Test plan section",
-      "max_score": 8,
-      "description": "PR body template includes a `## Test plan` section with markdown checkbox items (`- [ ] ...`)"
-    },
-    {
-      "name": "Pre-push readiness",
-      "max_score": 8,
-      "description": "Script or documentation includes steps to run tests AND linter before pushing/creating the PR, and requires both to pass"
+      "name": "PR body has summary + verification plan",
+      "max_score": 7,
+      "description": "The PR body template includes a summary of what changed and a test/verification plan — the substance, not a specific section-heading literal"
     }
   ]
 }
