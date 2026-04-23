@@ -30,7 +30,7 @@
     {
       "name": "Script can run unchanged against a different PR or repo",
       "max_score": 10,
-      "description": "OBSERVABLE CHECK: the script body contains no hardcoded literal for the target PR, owner, or repo — all such context is pulled from runtime inputs (args, env vars, or interactive prompt). Running against a new target requires changing only the invocation, not the script source"
+      "description": "OBSERVABLE CHECK: the script body contains no hardcoded literal for the target PR, owner, or repo — all such context is pulled from runtime inputs (args or env vars, per the task's input contract). Running against a new target requires changing only the invocation, not the script source"
     },
     {
       "name": "Surfaces CI state in the summary",
