@@ -5,6 +5,7 @@
 ### Rules
 
 - **author-model-declaration** — Every PR declares its author model via a `**Author-Model:**` line in the body (preferred) or a `Co-authored-by:` git trailer (fallback). Defines model families (anthropic, openai, google), plus a special `human` value that maps to no family, and mixed-authorship semantics so the paired reviewers can pick a cross-family reviewer and dodge self-review bias. Missing declaration blocks the PR via early `REQUEST_CHANGES` before the diff is read.
+- **stateful-artifacts** — Cross-invocation JSON state files a skill writes and reads between runs. Every artifact has a documented schema, a single owner skill, a `schema_version` field, and a writer/reader contract. Artifacts are hints, not authority — verify against the live source before acting on a recalled value. Migrations happen under the owner skill, not as a side effect of unrelated runs.
 
 ### Skills
 
