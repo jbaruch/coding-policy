@@ -9,3 +9,7 @@ Thumbs.db
 .github/aw/logs/
 *.bak
 *.tmp
+# Project-local MCP server config — copy from .mcp.json.example for local dev.
+# Kept out of git so gh-aw reviewer workflows don't try to launch MCP servers
+# that aren't available inside the awf sandbox.
+.mcp.json
