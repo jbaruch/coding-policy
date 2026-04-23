@@ -87,7 +87,11 @@ Decide whether to proceed:
 
 ## Step 2 — Load the policy (from PR head, NOT main)
 
-The workflow checkout has placed the PR head at the working directory. List and read every file under `rules/` — these are the authoritative policy documents for this review. Read them fully; do not skim. **Count only the `rules/*.md` files you loaded (not the SKILL.md files read below) — remember that number, you'll surface it verbatim in Step 5's load indicator.** If `rules/` is missing or empty, the policy didn't load: stop. Call `submit_pull_request_review` exactly once with `event: REQUEST_CHANGES` and `body: "Policy load failed: rules/ is missing or empty on PR head — cannot review without policy context."` Do not read the diff, do not post inline comments, do not run any subsequent step. Also read any `skills/*/SKILL.md` that governs a changed path.
+The workflow checkout has placed the PR head at the working directory. List and read every file under `rules/` — these are the authoritative policy documents for this review. Read them fully; do not skim. **Count only the `rules/*.md` files you loaded — remember that number, you'll surface it verbatim in Step 5's load indicator.**
+
+If `rules/` is missing or empty, the policy didn't load: stop here. Call `submit_pull_request_review` exactly once with `event: REQUEST_CHANGES` and `body: "Policy load failed: rules/ is missing or empty on PR head — cannot review without policy context."` Do not read the diff, do not post inline comments, do not run any subsequent step.
+
+Otherwise (rules loaded successfully), also read any `skills/*/SKILL.md` that governs a changed path — the SKILL.md reads do NOT count toward the rule-file number you remembered.
 
 ## Step 3 — Load the change set
 

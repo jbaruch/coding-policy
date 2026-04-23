@@ -104,7 +104,11 @@ Decide whether to proceed:
 
 ## Step 2 — Load the policy
 
-List and read every file under `.tessl/tiles/jbaruch/coding-policy/rules/`. These are the authoritative policy documents for this review. Read them fully; do not skim. **Count only the files under `.tessl/tiles/jbaruch/coding-policy/rules/` (not the SKILL.md files read below) — remember that number, you'll surface it verbatim in Step 5's load indicator.** If the directory is missing or empty, the `tessl install` pre-step must have failed: stop. Call `submit_pull_request_review` exactly once with `event: REQUEST_CHANGES` and `body: "Policy load failed: .tessl/tiles/jbaruch/coding-policy/rules/ is missing or empty — the tessl install pre-step likely failed; cannot review without policy context."` Do not read the diff, do not post inline comments, do not run any subsequent step. Also read `.tessl/tiles/jbaruch/coding-policy/skills/*/SKILL.md` when a changed path overlaps a skill's domain (e.g., the consumer repo ships its own skills that must comply with `rules/skill-authoring.md`).
+List and read every file under `.tessl/tiles/jbaruch/coding-policy/rules/`. These are the authoritative policy documents for this review. Read them fully; do not skim. **Count only the files under that rules directory — remember that number, you'll surface it verbatim in Step 5's load indicator.**
+
+If the directory is missing or empty, the `tessl install` pre-step must have failed: stop here. Call `submit_pull_request_review` exactly once with `event: REQUEST_CHANGES` and `body: "Policy load failed: .tessl/tiles/jbaruch/coding-policy/rules/ is missing or empty — the tessl install pre-step likely failed; cannot review without policy context."` Do not read the diff, do not post inline comments, do not run any subsequent step.
+
+Otherwise (rules loaded successfully), also read `.tessl/tiles/jbaruch/coding-policy/skills/*/SKILL.md` when a changed path overlaps a skill's domain (e.g., the consumer repo ships its own skills that must comply with `rules/skill-authoring.md`). The SKILL.md reads do NOT count toward the rule-file number you remembered.
 
 ## Step 3 — Load the change set
 
