@@ -8,9 +8,13 @@
 # Usage: preflight.sh
 # Out:   one JSON object on stdout:
 #          {"ok": bool,
-#           "failures": [{"check": "<name>", "reason": "<human text>"}, ...]}
+#           "failures": [{"check": "<name>", "reason": "<human text>"}, ...],
+#           "warnings": [{"check": "<name>", "reason": "<human text>"}, ...]}
 #        When ok is false, each failure includes a concrete recovery
-#        command where applicable.
+#        command where applicable. Warnings are informational only —
+#        they surface advisory findings (e.g. repo-level .mcp.json that
+#        would break the Anthropic reviewer at runtime) and never set
+#        ok to false or change the exit code.
 # Exit:  0 if ok is true; 1 if any check fails
 
 set -euo pipefail
@@ -33,9 +37,14 @@ TEMPLATES=(
 )
 
 declare -a failures=()
+declare -a warnings=()
 
 push_failure() {
   failures+=("{\"check\":\"$1\",\"reason\":\"$2\"}")
+}
+
+push_warning() {
+  warnings+=("{\"check\":\"$1\",\"reason\":\"$2\"}")
 }
 
 check_in_git_worktree() {
@@ -85,6 +94,23 @@ check_branch_not_remote() {
   fi
 }
 
+# Advisory check (not a failure): a committed .mcp.json at the repo root
+# will be auto-loaded by Claude Code in the Anthropic reviewer's sandbox.
+# Any stdio MCP server whose binary isn't on the awf sandbox's PATH
+# (tessl is the common case) fails to launch and gh-aw fails the job
+# even when the review itself would have run cleanly. The install flow
+# can't fix this on the consumer's behalf (gh-aw has no post-checkout
+# hook, Claude Code CLI 2.1.98 has no skip-project-mcp flag), so we
+# surface the finding as a warning and include the workaround in the PR.
+check_root_mcp_json_absent() {
+  # Only flag if the file is tracked by git — an untracked .mcp.json is
+  # a local-dev artifact that won't land in the PR head and won't affect
+  # the workflow runs.
+  if git ls-files --error-unmatch .mcp.json >/dev/null 2>&1; then
+    push_warning "root-mcp-json-present" "Repo contains a committed '.mcp.json' at the root. Claude Code auto-loads it in the Anthropic reviewer's sandbox, and any stdio MCP server it declares (e.g. 'tessl mcp start') will fail to launch because its binary is not on the awf sandbox's PATH — gh-aw will fail the job even though the review would have run. Before the Anthropic reviewer can run cleanly, add '.mcp.json' to .gitignore, rename the committed file to '.mcp.json.example' for local-dev handoff, and commit that change (either in this install-reviewer PR or a follow-up). The install-reviewer skill does NOT do this automatically — it is a consumer-side decision."
+  fi
+}
+
 main() {
   check_in_git_worktree
   check_gh_installed
@@ -103,6 +129,8 @@ main() {
     if git remote get-url origin >/dev/null 2>&1; then
       check_branch_not_remote
     fi
+    # Advisory checks only run in a git worktree (they use `git ls-files`).
+    check_root_mcp_json_absent
   fi
 
   local failures_json
@@ -112,6 +140,13 @@ main() {
     failures_json="[$(IFS=,; echo "${failures[*]}")]"
   fi
 
+  local warnings_json
+  if [[ ${#warnings[@]} -eq 0 ]]; then
+    warnings_json='[]'
+  else
+    warnings_json="[$(IFS=,; echo "${warnings[*]}")]"
+  fi
+
   local ok="true"
   local rc=0
   if [[ ${#failures[@]} -gt 0 ]]; then
@@ -119,8 +154,16 @@ main() {
     rc=1
   fi
 
-  jq -n --argjson ok "$ok" --argjson failures "$failures_json" \
-    '{ok: $ok, failures: $failures}'
+  jq -n --argjson ok "$ok" --argjson failures "$failures_json" --argjson warnings "$warnings_json" \
+    '{ok: $ok, failures: $failures, warnings: $warnings}'
+
+  # Per rules/script-delegation.md ("self-error-handling: exit non-zero on
+  # failure, write a diagnostic message to stderr"), on failure also emit a
+  # short diagnostic to stderr so a caller that only watches stderr notices
+  # the failure rather than relying on structured-stdout parsing.
+  if [[ $rc -ne 0 ]]; then
+    echo "preflight: ${#failures[@]} precondition(s) failed — see the 'failures' array in stdout for recovery commands" >&2
+  fi
   exit "$rc"
 }
 
