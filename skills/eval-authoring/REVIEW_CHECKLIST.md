@@ -6,16 +6,21 @@ Does the task hand the agent the answer?
 
 If the task says "use library X with algorithm Y" and the criteria check "uses library X" and "uses algorithm Y", that's bleeding — the eval tests reading comprehension, not problem-solving. The task should describe the problem; the criteria should check the solution.
 
-**Check**: for each criterion, search the task text for the criterion's expected value. If found verbatim, it's bleeding.
+Tasks themselves can force bleeding too: a task demanding "the exact format" of something, or a companion document whose contents reproduce skill-prescribed conventions, pushes the criteria toward reading-the-skill. Fix both when you find this.
+
+**Check 1 (task overlap)**: for each criterion, search the task text for the criterion's expected value. If found verbatim, it's bleeding.
+
+**Check 2 (skill grep)**: for each criterion, grep the skill files the runtime loads for the evaluated agent — the in-tree `skills/*/SKILL.md` when this tile is the subject, or `.tessl/tiles/<workspace>/<tile>/skills/*/SKILL.md` when the tile is installed as a dependency. If the criterion's expected string appears there, the criterion is testing reading.
 
 ## Leaking
 
 Does the task or criteria reference tile internals?
 
 - File paths, action names, internal terms that only exist in the skill
-- Criteria **may** test for skill-prescribed approaches when those use public tools/APIs
+- Criteria **may** reference public tool/API surfaces that happen to be in the skill — `gh pr create`, `git push`, REST endpoints like `POST /repos/{owner}/{repo}/pulls/{pull_number}/requested_reviewers`, conventional-commits title format. These exist independent of the tile
+- Criteria **may not** reference string conventions the tile invented, even when those look like "conventions" — specific reply templates, bot-ID literals, prescribed section headings. Score the substance (the reply names a verifiable reference; the request uses the API that supports bots) not the literal
 
-**Check**: for each criterion, ask "would someone outside this tile's team understand this term?" If not, it's leaking.
+**Check**: for each criterion, ask "would a competent engineer produce this without having read the skill?" If not, it's leaking.
 
 ## Quality
 
