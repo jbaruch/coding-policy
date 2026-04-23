@@ -26,8 +26,8 @@ alwaysApply: true
 ## Migration Policy
 
 - Bump `schema_version` for any shape change — don't repurpose a field silently
-- Ship the migration step in the owner skill: on read, detect old `schema_version`, upgrade the record, rewrite
-- Migrations happen under the owner's control, not as a side effect of an unrelated run
+- Only the owner skill migrates: on its own read, detect old `schema_version`, upgrade the record, rewrite
+- Reader skills (non-owners) must not migrate — on encountering an old version, treat it as "no usable prior state" (read-only) and let the next owner-skill run perform the upgrade
 
 ## Rename / Removal
 
