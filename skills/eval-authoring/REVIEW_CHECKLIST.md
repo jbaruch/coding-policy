@@ -10,7 +10,7 @@ Tasks themselves can force bleeding too: a task demanding "the exact format" of 
 
 **Check 1 (task overlap)**: for each criterion, search the task text for the criterion's expected value. If found verbatim, it's bleeding.
 
-**Check 2 (skill grep)**: for each criterion, grep the skill files the runtime loads for the evaluated agent — the in-tree `skills/*/SKILL.md` when this tile is the subject, or `.tessl/tiles/<workspace>/<tile>/skills/*/SKILL.md` when the tile is installed as a dependency. If the criterion's expected string appears there, the criterion is testing reading.
+**Check 2 (skill grep)**: for each criterion, grep the skill files the runtime loads for the evaluated agent — the in-tree `skills/*/SKILL.md` when this tile is the subject, or `.tessl/tiles/<workspace>/<tile>/skills/*/SKILL.md` when the tile is installed as a dependency. A grep hit is a mechanical audit hint, not an automatic failure — classify it using the Leaking section below: if the string is a public tool/API surface, the criterion is fine; if it is a tile-invented convention, the criterion is leaking and needs rewriting.
 
 ## Leaking
 
