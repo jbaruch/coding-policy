@@ -9,6 +9,11 @@
       "repo": "github/gh-aw-actions/setup",
       "version": "v0.68.3",
       "sha": "ba90f2186d7ad780ec640f364005fa24e797b360"
+    },
+    "tesslio/setup-tessl@v2": {
+      "repo": "tesslio/setup-tessl",
+      "version": "v2",
+      "sha": "25ec223fc0da33b41b8044ff5ab2b85235f4f91e"
     }
   }
 }

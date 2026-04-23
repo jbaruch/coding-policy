@@ -30,6 +30,12 @@ network:
   allowed:
     - defaults
 
+pre-steps:
+  - name: Install Tessl CLI
+    uses: tesslio/setup-tessl@v2
+    with:
+      token: ${{ secrets.TESSL_TOKEN }}
+
 tools:
   bash:
     - "cat"
