@@ -156,6 +156,14 @@ main() {
 
   jq -n --argjson ok "$ok" --argjson failures "$failures_json" --argjson warnings "$warnings_json" \
     '{ok: $ok, failures: $failures, warnings: $warnings}'
+
+  # Per rules/script-delegation.md ("self-error-handling: exit non-zero on
+  # failure, write a diagnostic message to stderr"), on failure also emit a
+  # short diagnostic to stderr so a caller that only watches stderr notices
+  # the failure rather than relying on structured-stdout parsing.
+  if [[ $rc -ne 0 ]]; then
+    echo "preflight: ${#failures[@]} precondition(s) failed — see the 'failures' array in stdout for recovery commands" >&2
+  fi
   exit "$rc"
 }
 
