@@ -1,26 +1,28 @@
 #!/usr/bin/env bash
-# Scaffold the jbaruch/coding-policy PR review workflow into a consumer
-# repo: ensure the workflows dir exists, copy the packaged template,
-# compile it with gh-aw, and mark the lock file as generated via
-# .gitattributes. Call after creating the feature branch and before
-# committing.
+# Scaffold the jbaruch/coding-policy PR review workflow pair into a
+# consumer repo: ensure the workflows dir exists, copy both packaged
+# templates (OpenAI + Anthropic reviewers), compile them with gh-aw,
+# and mark the lock files as generated via .gitattributes. Call after
+# creating the feature branch and before committing.
 #
 # Idempotent per rules/file-hygiene.md: re-running is safe — `mkdir -p`
-# no-ops if the dir exists, `cp` rewrites the source from the template,
-# `gh aw compile` rewrites the lock, and the .gitattributes append
+# no-ops if the dir exists, `cp` rewrites the sources from the templates,
+# `gh aw compile` rewrites the locks, and the .gitattributes append
 # only happens when the exact rule line is missing. The overwrite-
 # safety guard for pre-existing user content lives in the
 # install-reviewer skill, which halts before this script runs if the
-# repo already has its own review workflow.
+# repo already has its own review workflow files.
 #
-# If compile fails, all this script's artifacts are rolled back:
-# review.md is removed, review.lock.yml is removed, and
+# Atomic: if compile fails for either template, all this script's
+# artifacts are rolled back — every source/lock pair is removed and
 # .github/aw/actions-lock.json is restored from a snapshot taken at
 # the start (or removed if it didn't exist before). The caller never
-# sees a half-scaffolded state.
+# sees a half-scaffolded state, and the two reviewers always land
+# together or not at all.
 #
 # Usage: scaffold.sh
-# Out:   one JSON object on stdout: {"source","lock","gitattributes","compiled"}
+# Out:   one JSON object on stdout:
+#          {"sources":[...], "locks":[...], "gitattributes":"...", "compiled":true}
 # Exit:  0 on success; non-zero with stderr diagnostic on failure
 
 set -euo pipefail
@@ -33,19 +35,27 @@ repo_root=$(git rev-parse --show-toplevel 2>/dev/null) || {
 }
 cd "$repo_root"
 
-TEMPLATE_SRC=".tessl/tiles/jbaruch/coding-policy/skills/install-reviewer/review-workflow.md"
+TEMPLATE_DIR=".tessl/tiles/jbaruch/coding-policy/skills/install-reviewer"
 WORKFLOW_DIR=".github/workflows"
-WORKFLOW_DEST="${WORKFLOW_DIR}/review.md"
-WORKFLOW_LOCK="${WORKFLOW_DIR}/review.lock.yml"
 ACTIONS_LOCK=".github/aw/actions-lock.json"
 GITATTRIBUTES=".gitattributes"
 LOCK_GENERATED_RULE='.github/workflows/*.lock.yml linguist-generated=true merge=ours'
 
+# Paired reviewer workflows — both scaffold together.
+WORKFLOWS=(review-openai review-anthropic)
+
 main() {
-  if [[ ! -f "$TEMPLATE_SRC" ]]; then
-    echo "error: template not found at ${TEMPLATE_SRC} — run 'tessl install jbaruch/coding-policy' first" >&2
-    exit 1
-  fi
+  local sources=()
+  local locks=()
+  for w in "${WORKFLOWS[@]}"; do
+    local src="${TEMPLATE_DIR}/${w}.md"
+    if [[ ! -f "$src" ]]; then
+      echo "error: template not found at ${src} — run 'tessl install jbaruch/coding-policy' first" >&2
+      exit 1
+    fi
+    sources+=("${WORKFLOW_DIR}/${w}.md")
+    locks+=("${WORKFLOW_DIR}/${w}.lock.yml")
+  done
 
   # Snapshot the shared gh-aw action lockfile (if present) so compile-failure
   # rollback can restore it verbatim. Consumer repos with other gh-aw workflows
@@ -57,15 +67,18 @@ main() {
   fi
 
   mkdir -p "$WORKFLOW_DIR"
-  cp "$TEMPLATE_SRC" "$WORKFLOW_DEST"
+  for w in "${WORKFLOWS[@]}"; do
+    cp "${TEMPLATE_DIR}/${w}.md" "${WORKFLOW_DIR}/${w}.md"
+  done
 
   # Record whether .github/aw/ existed before compile so we can remove the
   # empty directory on rollback if compile created it just to write the lock.
   local aw_dir_existed_before=0
   [[ -d "$(dirname "$ACTIONS_LOCK")" ]] && aw_dir_existed_before=1
 
-  if ! gh aw compile review >&2; then
-    rm -f "$WORKFLOW_DEST" "$WORKFLOW_LOCK"
+  if ! gh aw compile "${WORKFLOWS[@]}" >&2; then
+    for s in "${sources[@]}"; do rm -f "$s"; done
+    for l in "${locks[@]}"; do rm -f "$l"; done
     if [[ -n "$lock_snapshot" ]]; then
       cp "$lock_snapshot" "$ACTIONS_LOCK"
       rm -f "$lock_snapshot"
@@ -78,17 +91,17 @@ main() {
         rmdir "$(dirname "$ACTIONS_LOCK")" 2>/dev/null || true
       fi
     fi
-    echo "error: 'gh aw compile review' failed — rolled back ${WORKFLOW_DEST}, ${WORKFLOW_LOCK}, and restored prior state of ${ACTIONS_LOCK}" >&2
+    echo "error: 'gh aw compile ${WORKFLOWS[*]}' failed — rolled back ${sources[*]}, ${locks[*]}, and restored prior state of ${ACTIONS_LOCK}" >&2
     exit 1
   fi
 
   # Compile succeeded — discard the snapshot
   [[ -n "$lock_snapshot" ]] && rm -f "$lock_snapshot"
 
-  # Ensure the lock file is marked as a generated artifact per
+  # Ensure the lock files are marked as generated artifacts per
   # rules/file-hygiene.md. Idempotent — appends only if the exact line
   # is not already present, so existing consumer-managed .gitattributes
-  # entries are not clobbered.
+  # entries are not clobbered. The wildcard pattern covers both lock files.
   if [[ ! -f "$GITATTRIBUTES" ]] || ! grep -qxF "$LOCK_GENERATED_RULE" "$GITATTRIBUTES"; then
     # If the file exists and doesn't end in a newline, add one first so the
     # appended line lands on its own row.
@@ -98,11 +111,13 @@ main() {
     printf '%s\n' "$LOCK_GENERATED_RULE" >> "$GITATTRIBUTES"
   fi
 
+  # Emit a JSON summary — arrays of the scaffolded sources and locks so the
+  # caller (or a watching human) can see exactly which files landed.
   jq -n \
-    --arg source "$WORKFLOW_DEST" \
-    --arg lock "$WORKFLOW_LOCK" \
+    --argjson sources "$(printf '%s\n' "${sources[@]}" | jq -R . | jq -s .)" \
+    --argjson locks "$(printf '%s\n' "${locks[@]}" | jq -R . | jq -s .)" \
     --arg gitattributes "$GITATTRIBUTES" \
-    '{source: $source, lock: $lock, gitattributes: $gitattributes, compiled: true}'
+    '{sources: $sources, locks: $locks, gitattributes: $gitattributes, compiled: true}'
 }
 
 [[ "${BASH_SOURCE[0]}" == "${0}" ]] && main "$@"

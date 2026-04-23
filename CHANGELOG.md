@@ -2,13 +2,18 @@
 
 ## Unreleased
 
+### Rules
+
+- **author-model-declaration** — Every PR declares its author model via a `**Author-Model:**` line in the body (preferred) or a `Co-authored-by:` git trailer (fallback). Defines model families (anthropic, openai, google), plus a special `human` value that maps to no family, and mixed-authorship semantics so the paired reviewers can pick a cross-family reviewer and dodge self-review bias. Missing declaration blocks the PR via early `REQUEST_CHANGES` before the diff is read.
+
 ### Skills
 
-- **install-reviewer** — Scaffold the gh-aw PR policy review workflow into a consumer repo. Ships `skills/install-reviewer/review-workflow.md` as the packaged template; the skill copies it into the consumer's `.github/workflows/`, compiles with `gh aw compile`, commits, and opens a PR. The workflow itself runs `tessl install jbaruch/coding-policy` as a pre-step so every consumer PR is reviewed against the latest published policy — not bleeding from `main`. Clean-verdict reviews use `event: COMMENT` with a pass body (GitHub rejects `APPROVE` from `github-actions[bot]` with HTTP 422).
+- **install-reviewer** — Scaffold the paired gh-aw PR policy reviewers (OpenAI Codex + Anthropic Claude Code) into a consumer repo. Ships `review-openai.md` and `review-anthropic.md` as packaged templates; the skill copies both into the consumer's `.github/workflows/`, compiles atomically with `gh aw compile`, commits all six artifacts, and opens a PR. Each workflow runs `tessl install jbaruch/coding-policy` as a pre-step, then self-gates on the PR's `Author-Model:` declaration: the same-family reviewer emits a one-line "skipping: self-review-bias" COMMENT and exits; the cross-family reviewer reviews. Three secrets required: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `TESSL_TOKEN`. Clean-verdict reviews use `event: COMMENT` with a pass body (GitHub rejects `APPROVE` from `github-actions[bot]` with HTTP 422).
+- **release** — Step 2 PR body template now includes a mandatory `**Author-Model:**` line per `rules/author-model-declaration.md`; Step 4 updated to describe the paired reviewers and their self-gating behavior.
 
 ### Evals
 
-- **install-reviewer** — 3 scenarios: 1 positive (`consumer-scaffolds-policy-reviewer`) covering the happy path through preflight → branch → copy → compile → commit → PR with secrets instructions, and 2 negative (`install-reviewer-refuses-overwrite`, `install-reviewer-missing-gh-aw`) covering the skill's two decisional guards.
+- **install-reviewer** — 3 scenarios graded against the paired-workflow layout: 1 positive (`consumer-scaffolds-policy-reviewer`) covering the happy path through preflight → branch → copy both templates → compile → commit all six artifacts → PR with the three required secrets (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `TESSL_TOKEN`) and the cross-family rationale, and 2 negative (`install-reviewer-refuses-overwrite`, `install-reviewer-missing-gh-aw`) covering the skill's two decisional guards.
 
 ## 0.2.0
 

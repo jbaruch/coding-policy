@@ -1,10 +1,13 @@
 ---
 name: install-reviewer
 description: >
-  Scaffold the `jbaruch/coding-policy` gh-aw PR review workflow into a consumer
-  repository: copies the packaged workflow template, compiles it with `gh aw`,
-  and opens a PR. After merge, every pull request in the repo is reviewed
-  against the latest published `jbaruch/coding-policy` rules.
+  Scaffold the `jbaruch/coding-policy` gh-aw PR review workflows into a consumer
+  repository: copies the packaged paired workflow templates (OpenAI + Anthropic
+  reviewers), compiles them with `gh aw`, and opens a PR. After merge, every
+  pull request in the repo is reviewed against the latest published
+  `jbaruch/coding-policy` rules by the reviewer whose family differs from the
+  PR's declared author model — avoiding self-review bias per
+  `rules/author-model-declaration.md`.
   Use when the user wants to add, install, enable, scaffold, set up, or wire up
   an automated policy review / PR reviewer / coding-policy CI reviewer in a
   consumer repo.
@@ -12,7 +15,7 @@ description: >
 
 # Install Reviewer Skill
 
-Scaffold the gh-aw PR policy reviewer into a consumer repository. Steps are sequential — complete each before moving to the next.
+Scaffold the gh-aw PR policy reviewer pair (OpenAI + Anthropic) into a consumer repository. Steps are sequential — complete each before moving to the next.
 
 ## Step 1 — Run Preflight Checks
 
@@ -24,7 +27,7 @@ Runs every precondition (git worktree, GitHub CLI install + auth, gh-aw extensio
 
 ## Step 2 — Refuse Overwrite
 
-If **either** `.github/workflows/review.md` **or** `.github/workflows/review.lock.yml` already exists in the repo, stop and report that prior review setup is present. Do not overwrite either file — the lock alone (source removed) or the source alone (mid-authoring) both indicate deliberate in-progress configuration that the skill would destroy by compiling over it. If neither file exists, proceed immediately to Step 3.
+If **any** of `.github/workflows/review-openai.md`, `.github/workflows/review-openai.lock.yml`, `.github/workflows/review-anthropic.md`, or `.github/workflows/review-anthropic.lock.yml` already exists in the repo, stop and report that prior review setup is present. Do not overwrite any of these files — a lock alone (source removed) or a source alone (mid-authoring) both indicate deliberate in-progress configuration that the skill would destroy by compiling over it. If none exist, proceed immediately to Step 3.
 
 ## Step 3 — Create Feature Branch
 
@@ -36,7 +39,7 @@ If **either** `.github/workflows/review.md` **or** `.github/workflows/review.loc
 .tessl/tiles/jbaruch/coding-policy/skills/install-reviewer/scaffold.sh
 ```
 
-Creates `.github/workflows/` if missing, copies the packaged template into `review.md`, compiles it via `gh aw compile review` to produce `review.lock.yml`, and ensures `.gitattributes` marks the lock file as generated (`linguist-generated=true`, `merge=ours`) per `rules/file-hygiene.md`. Emits a JSON summary on success; exits non-zero with a stderr diagnostic and rolls back every artifact it touched (including restoring `actions-lock.json` from a snapshot) on compile failure. Proceed immediately to Step 5.
+Creates `.github/workflows/` if missing, copies both packaged templates into `review-openai.md` and `review-anthropic.md`, compiles them via `gh aw compile review-openai review-anthropic` to produce the matching `.lock.yml` files, and ensures `.gitattributes` marks the lock files as generated (`linguist-generated=true`, `merge=ours`) per `rules/file-hygiene.md`. Emits a JSON summary on success; exits non-zero with a stderr diagnostic and rolls back every artifact it touched (including restoring `actions-lock.json` from a snapshot) on compile failure — the two templates scaffold atomically: either both land or neither does. Proceed immediately to Step 5.
 
 ## Step 5 — Commit
 
@@ -44,7 +47,7 @@ Creates `.github/workflows/` if missing, copies the packaged template into `revi
 .tessl/tiles/jbaruch/coding-policy/skills/install-reviewer/commit.sh
 ```
 
-Stages the four scaffolded files (`review.md`, `review.lock.yml`, `actions-lock.json`, `.gitattributes`) and commits with the canonical message `ci(review): add jbaruch/coding-policy PR review workflow`. Idempotent: emits `{"state": "no-op", …}` on re-run when the working tree already matches a prior successful run. If a pre-commit hook rejects the commit, the script exits non-zero — fix the hook's finding and re-run; do not `--no-verify`. Proceed immediately to Step 6.
+Stages the six scaffolded files (`review-openai.md`, `review-openai.lock.yml`, `review-anthropic.md`, `review-anthropic.lock.yml`, `actions-lock.json`, `.gitattributes`) and commits with the canonical message `ci(review): add jbaruch/coding-policy PR review workflows`. Idempotent: emits `{"state": "no-op", …}` on re-run when the working tree already matches a prior successful run. If a pre-commit hook rejects the commit, the script exits non-zero — fix the hook's finding and re-run; do not `--no-verify`. Proceed immediately to Step 6.
 
 ## Step 6 — Push
 
@@ -56,9 +59,9 @@ Pushes `feat/add-coding-policy-review` to origin with upstream tracking. Idempot
 
 ## Step 7 — Open PR
 
-`gh pr create` with title `ci(review): add jbaruch/coding-policy PR review workflow` and a body that:
-- Explains the workflow installs `jbaruch/coding-policy` at run time and reviews every PR against it
-- Lists the two repository secrets the user must set **before merge**: `OPENAI_API_KEY` (OpenAI billing account for Codex) and `TESSL_TOKEN` (created at https://tessl.io/account/api-keys)
-- Notes that merging without the secrets set will cause the workflow to fail on its first run
+`gh pr create` with title `ci(review): add jbaruch/coding-policy PR review workflows` and a body that:
+- Explains the workflows install `jbaruch/coding-policy` at run time and review every PR against it, and that the OpenAI and Anthropic reviewers each self-gate on the PR's `Author-Model:` declaration so the active reviewer is always cross-family (see `rules/author-model-declaration.md`)
+- Lists the three repository secrets the user must set **before merge**: `OPENAI_API_KEY` (OpenAI billing account for Codex), `ANTHROPIC_API_KEY` (Anthropic billing account for Claude Code), and `TESSL_TOKEN` (created at https://tessl.io/account/api-keys)
+- Notes that merging without all three secrets set will cause the workflows to fail on their first run
 
 Return the PR URL. Finish here — the user validates the secrets and merges.

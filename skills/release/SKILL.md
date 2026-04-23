@@ -27,12 +27,15 @@ Structured workflow for shipping code: PR creation, automated policy review, mer
   - **Title**: `<type>(<scope>): <imperative summary>`
   - **Body**:
     ```
+    **Author-Model:** <model-id(s) space-separated, or `human`>
+
     ## Summary
     <what changed and why — 1-3 bullet points>
 
     ## Test plan
     - [ ] <verification steps>
     ```
+- **Author-Model is mandatory** per `rules/author-model-declaration.md`. Use the exact model ID you (the agent) are running under (e.g., `claude-opus-4-7`, `gpt-5.4`), or `human` for a hand-authored PR, or list every contributing model space-separated for mixed authorship (e.g., `human claude-opus-4-7`). The paired gh-aw reviewers read this line to pick the cross-family reviewer; omitting it blocks the PR — each reviewer emits `REQUEST_CHANGES` immediately and exits without reading the diff.
 
 Proceed immediately to Step 3 — do not wait for reviews before reasoning about version.
 
@@ -46,7 +49,7 @@ Decide the version bump:
 
 ## Step 4 — Policy Review Fires Automatically
 
-Pushing the PR branch triggers the runnable GitHub Actions workflow `.github/workflows/review.lock.yml` ("PR Policy Review") on the `pull_request` event. The `.github/workflows/review.md` file is the gh-aw source that compiles into that lock file via `gh aw compile`. The workflow runs on every `opened`, `synchronize`, and `reopened` — no explicit request mutation. The review is submitted by `github-actions[bot]` and uses OpenAI `gpt-5.4` via the gh-aw Codex engine, checking the diff against the in-tree `rules/*.md` from the PR head.
+Pushing the PR branch triggers two paired GitHub Actions workflows — `.github/workflows/review-openai.lock.yml` (Codex / `gpt-5.4`) and `.github/workflows/review-anthropic.lock.yml` (Claude Code / `claude-opus-4-7`) — on the `pull_request` event. Each lock file is compiled from its `.md` gh-aw source via `gh aw compile`. Both run on every `opened`, `synchronize`, and `reopened`. Each reviewer self-gates on the PR's `Author-Model:` declaration per `rules/author-model-declaration.md`: the same-family reviewer posts a one-line "skipping: self-review-bias" COMMENT and exits; the cross-family reviewer checks the diff against the in-tree `rules/*.md` from the PR head. Reviews are submitted by `github-actions[bot]`.
 
 **Proceed immediately to Step 5 — do not stop after creating the PR.** The skill runs end-to-end: once `gh pr create` succeeds, the next action is always to start watching.
 
