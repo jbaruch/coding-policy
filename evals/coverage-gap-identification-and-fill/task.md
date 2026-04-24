@@ -2,22 +2,13 @@
 
 ## Problem/Feature Description
 
-A team has built a Tessl skill called `deploy` that automates a deployment workflow. The skill has three decision points:
+A team has built a Tessl skill called `deploy` that automates a deployment workflow. The skill picks different paths based on the target environment, runs post-deploy verification before declaring success, and emits notifications about the outcome.
 
-1. **Environment gate**: the skill checks whether the target is `staging` or `production`. Staging deploys proceed automatically; production deploys require a manual approval flag.
-2. **Health check**: after deployment, the skill polls a health endpoint. If the service is healthy, it reports success. If unhealthy, it triggers a rollback.
-3. **Notification**: the skill sends a Slack message summarizing the outcome.
+Their existing eval suite has two scenarios, both happy paths: one deploys to staging and reports success, the other deploys to production with an approval flag set and also reports success. The team suspects coverage is thin but isn't sure exactly what's missing.
 
-The team generated eval scenarios and currently has two:
-
-- **Scenario A** ("happy-path staging deploy"): task asks to deploy to staging, criteria check that it proceeds without approval, runs health check, reports success
-- **Scenario B** ("production deploy with approval"): task asks to deploy to production with the approval flag set, criteria check that it proceeds, runs health check, reports success
-
-The team asks you to review the eval coverage, identify what's missing, and write new scenario directories to fill the gaps. Each new scenario needs a `task.md` and `criteria.json` following the standard weighted checklist format.
+They ask you to audit the eval coverage, identify what the existing two scenarios don't exercise, and write new scenarios that fill those gaps.
 
 ## Output Specification
 
-1. Produce a file named `coverage-analysis.md` listing the gaps you identified and why each matters
-2. For each gap, create a new scenario directory (e.g., `evals/scenario-c/`, `evals/scenario-d/`) containing `task.md` and `criteria.json`
-
-Focus on decision branches that aren't covered by the existing scenarios. Do not recreate scenarios A or B.
+- Produce a written coverage analysis describing the gaps you identified and why each one matters. Pick an appropriate filename.
+- For each gap, create a new scenario directory under `evals/`. The file layout and criteria format should follow this tile's conventions for eval scenarios — consult the tile's own rules and existing scenarios rather than guessing.

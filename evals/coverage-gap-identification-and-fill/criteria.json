@@ -1,46 +1,51 @@
 {
-  "context": "Tests whether the agent can identify missing eval coverage (especially negative cases and untested decision branches) and write structurally correct new scenarios from scratch, as prescribed by the eval-authoring skill Step 7.",
+  "context": "Tests whether the agent can audit an existing eval suite for coverage gaps and author new scenarios that follow this tile's eval-authoring conventions. Weight concentrates on tile-specific quality properties (correct criteria format, no bleeding, no leaking, negative-case coverage, meaningful failure descriptions) rather than on whether the agent spotted the gaps — basic QA reasoning is enough to identify gaps from the skill's functional description, so that axis contributes little lift on its own.",
   "type": "weighted_checklist",
   "checklist": [
     {
-      "name": "Identifies missing production-without-approval case",
-      "max_score": 15,
-      "description": "The coverage analysis flags that no scenario tests deploying to production WITHOUT the approval flag — the negative case where the skill should refuse to proceed"
-    },
-    {
-      "name": "Identifies missing unhealthy-rollback case",
-      "max_score": 15,
-      "description": "The coverage analysis flags that no scenario tests the health check failure path — the case where the service is unhealthy and the skill should trigger a rollback"
-    },
-    {
-      "name": "Writes production-rejection scenario",
-      "max_score": 15,
-      "description": "Creates a scenario where a production deploy is attempted without approval, and the criteria check that the skill refuses to proceed — a proper negative case"
-    },
-    {
-      "name": "Writes rollback scenario",
-      "max_score": 15,
-      "description": "Creates a scenario where the health check fails after deployment, and the criteria check that a rollback is triggered"
-    },
-    {
-      "name": "New scenarios have correct structure",
+      "name": "Identifies at least two uncovered decision branches",
       "max_score": 10,
-      "description": "Each new scenario is in its own directory with a `task.md` and `criteria.json`, and criteria.json uses the weighted_checklist format with name, description, and max_score fields"
+      "description": "A written coverage analysis exists (as a file in the working directory; the task lets the agent pick the filename) and it names at least two concrete branches the existing two scenarios don't exercise (any combination of: failure paths, refusals, alternative inputs, edge conditions). Weighted low because identifying gaps from a functional skill description is basic QA reasoning and is not tile-specific"
     },
     {
-      "name": "No bleeding in new scenarios",
+      "name": "Writes new scenario directories",
       "max_score": 10,
-      "description": "The new task.md files describe the situation without revealing the expected behavior — criteria check for behavior the task doesn't spell out"
+      "description": "At least two new directories appear under `evals/`, each containing both a `task.md` and a `criteria.json`. Scenario names must not recreate the two existing happy-path scenarios"
     },
     {
-      "name": "New criteria have meaningful descriptions",
-      "max_score": 10,
-      "description": "Every criterion in the new scenarios has a description that explains what went wrong on failure — no 'mismatch' or vague descriptions"
+      "name": "Criteria files follow the weighted_checklist format prescribed by the tile",
+      "max_score": 15,
+      "description": "Each new `criteria.json` is a valid JSON object with a `context` string, `type: \"weighted_checklist\"`, and a `checklist` array where every entry has `name`, `description`, and `max_score`. Missing any of these fields drops the score proportionally. Tile-specific — the format is prescribed by plugin-evals guidance, not guessable from general practice"
     },
     {
-      "name": "Coverage analysis explains why gaps matter",
+      "name": "Criteria weights sum to 100 and are not equally distributed",
+      "max_score": 5,
+      "description": "Each new scenario's weights sum to exactly 100 AND are not all identical. This tile's convention is that weights sum to 100 and reflect importance, not a flat split — uniform weights or sums other than 100 score zero"
+    },
+    {
+      "name": "New task.md files pass the no-bleeding check",
+      "max_score": 15,
+      "description": "No criterion's expected literal value appears verbatim in its own scenario's task description. For each criterion with a concrete expected value (specific strings, flags, API names), grep the task text — a match is bleeding, per this tile's plugin-evals rule"
+    },
+    {
+      "name": "New criteria don't leak tile internals",
       "max_score": 10,
-      "description": "The analysis doesn't just list gaps — it explains why each missing case is important (e.g., 'without this, a production deploy without approval would pass evals silently')"
+      "description": "Criteria describe observable behaviour, not tile-internal file paths, action names, or invented string conventions. Referencing public tool/API surfaces is fine; referencing `.tessl/tiles/...` paths, internal routing, or prescribed reply templates is leaking"
+    },
+    {
+      "name": "Failure descriptions are specific",
+      "max_score": 10,
+      "description": "Every new criterion's `description` explains what went wrong on failure in a way a grader can act on — not just `mismatch`, `fails`, or a restatement of the criterion name. Generic descriptions score zero on this axis"
+    },
+    {
+      "name": "At least one new scenario exercises a negative case",
+      "max_score": 10,
+      "description": "At least one new scenario tests refusal-to-proceed, produce-silence, or a failure-path recovery — not another happy-path variation. This tile's plugin-evals rule requires both positive and negative cases, and the grading is on whether the author knows it"
+    },
+    {
+      "name": "Coverage analysis justifies each gap",
+      "max_score": 15,
+      "description": "The written coverage analysis doesn't only list gaps — for each one it explains why the missing case matters (e.g., `without this, a production deploy without approval would pass evals despite being a policy violation`). Each gap without justification docks this criterion proportionally"
     }
   ]
 }

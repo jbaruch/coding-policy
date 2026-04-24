@@ -13,6 +13,7 @@
 - **script-delegation** — Spell out the precheck-gating JSON contract with `wake_agent` as a boolean and `data` as an object (e.g., `{"wake_agent": true, "data": {}}` on the last line), the zero-token-cost rationale for no-op runs, and the single-fetch gate-and-payload pattern.
 - **context-artifacts** — Enumerate the review rubric: frontmatter validity, sequential-execution preamble, flat step numbering, typed `Skill()` calls, silence-rule compliance, channel-appropriate formatting.
 - **plugin-evals** — Sharpen the No-Bleeding and No-Leaking clauses after a round of policy-eval cleanup revealed the current wording was too permissive: add a task-level bleeding check (tasks demanding "exact format" or companion-doc contents force criteria to test reading), add a grep-based audit hint (if a criterion can be satisfied by grepping the skill files the runtime loads for a literal, it is testing reading), and replace the single ambiguous "skill-prescribed approaches" carve-out with a pair of explicit clauses — public tool/API surfaces (`gh pr create`, `POST /repos/{owner}/{repo}/pulls/{pull_number}/requested_reviewers`, conventional-commits format) are allowed; tile-invented string conventions (specific reply templates, bot-ID literals, prescribed section headings) are leaking.
+- **plugin-evals** — Add a new "Lift, Not Attainment" section that reframes eval quality around the `with_context - baseline` delta. A scenario whose baseline scores near ceiling (≥ 90% on a positive case) is a null test; aggregate attainment is a vanity metric on its own. Introduces the thought experiment "imagine the tile uninstalled — would a competent off-the-shelf agent pass this criterion?" as the pre-commit check, and carves out negative cases driven by universal-knowledge refusal (which legitimately score zero lift) from negative cases exercising tile-specific refusal reasoning (which must show lift).
 
 ### Skills
 
@@ -22,6 +23,12 @@
 ### Evals
 
 - **install-reviewer** — 3 scenarios graded against the paired-workflow layout: 1 positive (`consumer-scaffolds-policy-reviewer`) covering the happy path through preflight → branch → copy both templates → compile → commit all six artifacts → PR with the three required secrets (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `TESSL_TOKEN`) and the cross-family rationale, and 2 negative (`install-reviewer-refuses-overwrite`, `install-reviewer-missing-gh-aw`) covering the skill's two decisional guards.
+- **Retired zero-lift scenarios** — removed `merge-with-failing-ci-rejection` and `release-on-main-branch-rejection`. Apr 18 eval run on v0.1.1 showed both scored 100/100 baseline, i.e. zero lift: the criteria grade responsible-engineer judgement (don't merge red CI, don't push to main) that any competent baseline LLM produces without this tile. Keeping them inflates the attainment average without measuring tile value.
+- **Reduced task-level hints** — rewrote `coverage-gap-identification-and-fill` and `eval-scenario-quality-review-and-repair` to strip task text that enumerated the tile-specific techniques or defect taxonomy. Baseline agents can no longer pattern-match their way to the criteria from the task alone; the remaining scoring concentrates on tile-specific behaviour (correct weighted_checklist format, no bleeding in authored scenarios, negative-case coverage, discovering defects without being handed a taxonomy).
+
+### Skill updates
+
+- **eval-authoring** — Step 4 (Review) now explicitly treats the null-test / universal-competence check as equal in weight to bleeding and leaking. Step 9 (Analyze Results) now centres on lift rather than attainment — scenarios with lift < 10 on a positive case are null tests (retire or rewrite); lift 10–30 is weak (audit the criteria); lift ≥ 40 is a healthy signal. `REVIEW_CHECKLIST.md` gains a top-level "Null-Test (Universal-Competence Trap)" section describing the two common causes (task names the technique; criteria grade general behaviour) and prescribing the pre-commit thought experiment "imagine the tile uninstalled — would a competent agent pass this criterion by default?"
 
 ## 0.2.0
 

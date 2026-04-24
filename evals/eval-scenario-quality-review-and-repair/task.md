@@ -2,15 +2,15 @@
 
 ## Problem/Feature Description
 
-A batch of automatically generated evaluation scenarios has been flagged for review before they can be used in production. Automated generators sometimes produce scenarios that leak implementation details into the task description (so a graded agent can pass just by reading the task carefully) or reference internal system names that a real agent would not know about. There are also cases where criteria don't match what the task actually asks for, or where failure messages are so vague ("mismatch") that a grader cannot tell what went wrong.
+A batch of automatically generated evaluation scenarios has been flagged for review before it can go into production. Automated generators sometimes produce scenarios that compromise the signal of the eval suite; your job is to find out which scenarios have issues, decide what to do about each, and document what you found.
 
-You have been handed three scenario folders that need to be reviewed and fixed before they go live. Your job is to read each `task.md` and `criteria.json`, identify the specific problems, fix what can be fixed, and delete any scenario that cannot be salvaged. Document your findings in a report so the team knows what was wrong and what was done.
+You have been handed three scenario folders. Read each `task.md` and `criteria.json`, identify any problems against this tile's expectations for eval authoring, fix what can be fixed, and delete any scenario that cannot be salvaged. Produce a written audit report so the team can review your decisions.
 
 ## Output Specification
 
-- For each scenario you fix, update the files in place (edit `task.md` and/or `criteria.json` as needed)
-- For any scenario you delete, remove its directory
-- Produce a file named `audit-report.md` summarizing: what problems were found in each scenario, what was done to fix each one, and why any scenario was deleted if applicable
+- For each scenario you fix, update the files in place (edit `task.md` and/or `criteria.json` as needed).
+- For any scenario that cannot be repaired, delete its directory.
+- Produce a file named `audit-report.md` summarising: what you found in each scenario, what you did (fix vs delete), and your reasoning — so a reviewer can judge your calls.
 
 ## Input Files
 
@@ -95,7 +95,7 @@ Produce `summarize.py` that accepts a filename argument and prints a 3-sentence 
 
 ## Problem Description
 
-An operations team needs to send Slack notifications when deployments complete. The task is too vague.
+An operations team needs to send Slack notifications when deployments complete.
 
 ## Output Specification
 
