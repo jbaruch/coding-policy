@@ -64,10 +64,7 @@ If any scenario fails to run, diagnose and fix before proceeding.
 
 For each scenario, compute `lift = with_context_score - baseline_score`. Lift is the number that matters — aggregate attainment on its own is a vanity metric (a tile scoring 99% with-context and 73% baseline is contributing 26 points of real value, not 99).
 
-- **Lift < 10 on a positive case** → diagnose one of three causes:
-  1. Coincidence with universal competence: the tile prescribes what baseline already does. The rule is documentation, not lift-producing. Accept or retire
-  2. Task leaked the technique: baseline pattern-matched. Fix the task (strip the leaked literal), keep the criterion
-  3. Criteria grade engineering-101 rather than specific tile-prescribed manner. Rewrite the criteria to check the tile's specific prescription — not to test "reasoning" that baseline already does
+- **Lift < 10 on a positive case** → diagnose one of three causes. (a) Coincidence with universal competence: the tile prescribes what baseline already does; the rule is documentation, not lift-producing — accept or retire. (b) Task leaked the technique: baseline pattern-matched — fix the task (strip the leaked literal), keep the criterion. (c) Criteria grade engineering-101 rather than the specific tile-prescribed manner — rewrite the criteria to check the tile's specific prescription, not to test "reasoning" that baseline already does
 - **Lift 10–30 on a positive case** → weak. Audit for the three causes above
 - **Lift ≥ 40 on a positive case** → healthy signal. The tile is doing real work — usually these scenarios check specific tile-prescribed choices (particular bot-ID discovery, particular reply template, particular CLI sequence). Keep them; do NOT soften them toward "testing reasoning"
 - **Negative cases**: near-zero lift is acceptable only when the baseline refusal is driven by universal knowledge (obvious error cases). Tile-specific refusal reasoning must still show lift
