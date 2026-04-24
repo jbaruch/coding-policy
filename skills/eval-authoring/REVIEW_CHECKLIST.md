@@ -9,19 +9,19 @@ Does the task describe a SITUATION or prescribe a TECHNIQUE?
 
 ## Bleeding
 
-Strictly: does a criterion's expected literal appear verbatim in the task description?
+Two forms:
 
-**Check**: for each criterion with a concrete expected value, grep the task text for that literal. A match is bleeding — baseline agents pattern-match the task and pass without the tile.
-
-**Fix**: strip the literal from the task, keep the criterion. Baseline should still be able to attempt the situation (they'll just pick some other manner); if stripping the literal makes the task unsolvable even for a baseline, the scenario is too narrow to evaluate the tile and should be reframed.
+1. **Task/criterion overlap**: a criterion's expected literal appears verbatim in the task description. For each criterion with a concrete expected value, grep the task text for that literal — a match is bleeding. Fix by stripping the literal from the task and keeping the criterion. Baseline should still be able to attempt the situation (they'll just pick some other manner); if stripping the literal makes the task unsolvable even for a baseline, the scenario is too narrow to evaluate the tile and should be reframed.
+2. **Fixture reachable as a skill example**: the scenario's fixture is the same example the skill teaches with. The agent "passes" by recognizing the example, not by applying the lesson. Keep fixtures in a separate namespace from skill examples.
 
 ## Leaking
 
-Would someone outside the tile recognize the term the criterion references?
-
+- **Privacy**: use sanitized or synthetic fixtures. Never live user data (real emails, calendar events, production PRs, internal logs). Use stable synthetic IDs and scrubbed examples — live-data fixtures drift silently and risk accidental exposure.
+- **Tile internals (leaking)**: criteria must not reference internal skill action names, `.tessl/tiles/...` paths, or tile-only identifiers that mean nothing outside the tile.
 - **Public surfaces (allowed)**: `gh pr create`, REST endpoints, conventional-commits format, semver — these exist independent of the tile.
 - **Tile-prescribed conventions (allowed)**: specific reply templates (`Fixed in <sha>`), chosen flags (`--ff-only`), invented format literals, specific sequences. A competent engineer without the tile would not produce these specific choices — checking for them measures tile value, not internal wiring.
-- **Tile internals (leaking)**: internal skill action names, `.tessl/tiles/...` paths, tile-only identifiers that mean nothing outside the tile.
+
+Ask: would someone outside the tile recognize the term? If yes (public surface or tile-prescribed convention), allowed. If no (tile-internal), leaking.
 
 ## Lift
 
