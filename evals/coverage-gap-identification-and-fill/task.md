@@ -10,5 +10,5 @@ They ask you to audit the eval coverage, identify what the existing two scenario
 
 ## Output Specification
 
-- Produce `coverage-analysis.md` describing the gaps you identified and why each one matters.
+- Produce a written coverage analysis describing the gaps you identified and why each one matters. Pick an appropriate filename.
 - For each gap, create a new scenario directory under `evals/`. The file layout and criteria format should follow this tile's conventions for eval scenarios — consult the tile's own rules and existing scenarios rather than guessing.

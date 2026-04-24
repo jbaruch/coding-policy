@@ -5,7 +5,7 @@
     {
       "name": "Identifies at least two uncovered decision branches",
       "max_score": 10,
-      "description": "Some written output exists (in any filename — the task names one but does not require that specific name) and it names at least two concrete branches the existing two scenarios don't exercise (any combination of: failure paths, refusals, alternative inputs, edge conditions). Weighted low because identifying gaps from a functional skill description is basic QA reasoning and is not tile-specific"
+      "description": "A written coverage analysis exists (as a file in the working directory; the task lets the agent pick the filename) and it names at least two concrete branches the existing two scenarios don't exercise (any combination of: failure paths, refusals, alternative inputs, edge conditions). Weighted low because identifying gaps from a functional skill description is basic QA reasoning and is not tile-specific"
     },
     {
       "name": "Writes new scenario directories",
@@ -45,7 +45,7 @@
     {
       "name": "Coverage analysis justifies each gap",
       "max_score": 15,
-      "description": "The analysis doesn't only list gaps — for each one it explains why the missing case matters (e.g., `without this, a production deploy without approval would pass evals despite being a policy violation`). Each gap without justification docks this criterion proportionally. The analysis text must exist as written output; the task names one filename but the score is on content, not the filename"
+      "description": "The written coverage analysis doesn't only list gaps — for each one it explains why the missing case matters (e.g., `without this, a production deploy without approval would pass evals despite being a policy violation`). Each gap without justification docks this criterion proportionally"
     }
   ]
 }
