@@ -1,49 +1,41 @@
 # Eval Scenario Review Checklist
 
-## Null-Test (Universal-Competence Trap)
+## Task and Criteria Shape
 
-Would a competent baseline agent — with the tile uninstalled — already pass this criterion?
+Does the task describe a SITUATION or prescribe a TECHNIQUE?
 
-If yes, the criterion is a null test: it grades universal competence, not the tile's contribution. The symptom at eval-run time is baseline scores near ceiling (≥ 90% on a positive case) and lift ≈ 0 despite with-context looking high.
-
-Two common causes:
-
-1. **The task names the technique or format** (e.g., "use the weighted_checklist format", "deploys via the approval flag", "follow these conventions"). Baseline agents pattern-match the task and produce exactly what the criterion grades.
-2. **The criteria grade generally-known behaviour** (e.g., "refuses to merge red CI", "uses `git checkout -b`", "fixes the failing test properly"). Universal engineering judgement clears the bar regardless of the tile.
-
-**Fix**: rewrite the task to state the *situation* without the technique, and strengthen the criterion so it requires tile-specific reasoning to pass. If the criterion has no tile-specific content left after that rewrite, retire the scenario — a scenario that measures nothing inflates aggregate attainment and hides real tile value.
-
-**Run the thought experiment before committing a scenario**: imagine the tile uninstalled. If a competent off-the-shelf agent would pass the criterion by default, do not commit the criterion as written.
+- **Correct**: task describes what the user needs done ("Ship a hotfix", "Wire up a reviewer"). Criteria check whether the output matches the specific manner the tile prescribes — that conformance IS the tile's contribution.
+- **Wrong**: task names the technique, format, sequence, or literal the criterion grades ("Ship a hotfix using `--ff-only`"). The agent passes by reading the task, not by applying the tile.
 
 ## Bleeding
 
-Does the task hand the agent the answer?
+Strictly: does a criterion's expected literal appear verbatim in the task description?
 
-If the task says "use library X with algorithm Y" and the criteria check "uses library X" and "uses algorithm Y", that's bleeding — the eval tests reading comprehension, not problem-solving. The task should describe the problem; the criteria should check the solution.
+**Check**: for each criterion with a concrete expected value, grep the task text for that literal. A match is bleeding — baseline agents pattern-match the task and pass without the tile.
 
-Tasks themselves can force bleeding too: a task demanding "the exact format" of something, or a companion document whose contents reproduce skill-prescribed conventions, pushes the criteria toward reading-the-skill. Fix both when you find this.
-
-**Check 1 (task overlap)**: for each criterion, search the task text for the criterion's expected value. If found verbatim, it's bleeding.
-
-**Check 2 (skill grep)**: for each criterion, grep the skill files the runtime loads for the evaluated agent — the in-tree `skills/*/SKILL.md` when this tile is the subject, or `.tessl/tiles/<workspace>/<tile>/skills/*/SKILL.md` when the tile is installed as a dependency. A grep hit is a mechanical audit hint, not an automatic failure — classify it using the Leaking section below: if the string is a public tool/API surface, the criterion is fine; if it is a tile-invented convention, the criterion is leaking and needs rewriting.
+**Fix**: strip the literal from the task, keep the criterion. Baseline should still be able to attempt the situation (they'll just pick some other manner); if stripping the literal makes the task unsolvable even for a baseline, the scenario is too narrow to evaluate the tile and should be reframed.
 
 ## Leaking
 
-Does the task or criteria reference tile internals?
+Would someone outside the tile recognize the term the criterion references?
 
-- File paths, action names, internal terms that only exist in the skill
-- Criteria **may** reference public tool/API surfaces that happen to be in the skill — `gh pr create`, `git push`, REST endpoints like `POST /repos/{owner}/{repo}/pulls/{pull_number}/requested_reviewers`, conventional-commits title format. These exist independent of the tile
-- Criteria **may not** reference string conventions the tile invented, even when those look like "conventions" — specific reply templates, bot-ID literals, prescribed section headings. Score the substance (the reply names a verifiable reference; the request uses the API that supports bots) not the literal
+- **Public surfaces (allowed)**: `gh pr create`, REST endpoints, conventional-commits format, semver — these exist independent of the tile.
+- **Tile-prescribed conventions (allowed)**: specific reply templates (`Fixed in <sha>`), chosen flags (`--ff-only`), invented format literals, specific sequences. A competent engineer without the tile would not produce these specific choices — checking for them measures tile value, not internal wiring.
+- **Tile internals (leaking)**: internal skill action names, `.tessl/tiles/...` paths, tile-only identifiers that mean nothing outside the tile.
 
-**Check**: for each criterion, ask "would a competent engineer produce this without having read the skill?" If not, it's leaking.
+## Lift
+
+Every criterion's contribution is the delta between `with-context` and `baseline` scores. If lift is near-zero, diagnose:
+
+1. **Coincidence with universal competence**: the tile prescribes what baseline already does (e.g., "imperative commits", "fix failing tests"). The rule codifies common practice. Retire or accept as documentation — no lift to win.
+2. **Task leaked the technique**: baseline pattern-matched. Fix the task (see Bleeding), keep the criterion.
+3. **Criteria grade universal competence**: testing engineering-101 rather than the tile's specific prescribed manner. Rewrite the criteria to grade the specific convention the tile teaches.
+
+High-lift scenarios typically check specific tile-prescribed choices (a particular bot-ID discovery approach, a particular reply template, a particular CLI sequence). Keep these — do not soften them to "test reasoning" if baseline already reasons to the same outcome.
 
 ## Quality
 
 - Every criterion `description` must explain what went wrong on failure — not just "mismatch"
 - Criteria must be specific and weighted sensibly
-- Weights should reflect importance to the task, not equal distribution
-
-## Consistency
-
-- Every criterion must test something the task's output specification asks for
-- If the task doesn't mention it, the criteria shouldn't check for it
+- Weights should reflect importance, not equal distribution
+- Every criterion must test something the task's output specification asks for; if the task doesn't mention it, the criteria shouldn't check for it
