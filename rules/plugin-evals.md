@@ -26,6 +26,14 @@ alwaysApply: true
 - Criteria **may not** reference string conventions the tile invented, even when those strings look like "conventions" — e.g., a specific reply template (`Fixed in <sha>`), a specific bot-ID literal, a specific section heading the skill prescribes. If a naive agent wouldn't produce the string without having read the skill, it is leaking. Score the substance instead (the reply includes a verifiable reference; the request uses the API that supports bots; etc.)
 - An eval should test observable behavior, not internal wiring
 
+## Lift, Not Attainment
+
+- Every scenario's value is measured as **lift** — the delta between the `with-context` score (agent has the tile loaded) and the `baseline` score (agent does not). A scenario whose baseline already scores near ceiling (≥ 90% on a positive case) is a null test: it grades things a competent agent already does without this tile, and it tells you nothing about the tile's value
+- Two common failure modes cause null tests: (a) the task itself names the tile-specific technique or format, so baseline agents pattern-match their way to the criterion; (b) the criteria grade universal-competence behaviour (basic git safety, obvious engineering judgement, common-knowledge syntax) that no tile contributes
+- Before committing a scenario, do the thought experiment: **imagine the tile is uninstalled**. Would a competent off-the-shelf agent pass this criterion by default? If yes, the criterion tests universal competence — rewrite it to grade tile-specific behaviour, or retire the scenario
+- Aggregate attainment (average with-context score) is a vanity metric on its own. Always report per-scenario lift alongside — a tile averaging 99% attainment with 73% baseline is contributing 26 points of real value, not 99. Low-lift scenarios inflate the attainment average without doing work
+- Negative cases may have legitimate near-zero lift when the baseline's refusal is driven by obvious error (refusing `rm -rf /`, refusing to merge red CI). Keep those only when the refusal is universal; negative cases exercising tile-specific refusal reasoning must still show lift
+
 ## Quality
 
 - Failure messages must explain **what went wrong**, not just "mismatch"
