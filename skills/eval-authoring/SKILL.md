@@ -34,7 +34,7 @@ tessl scenario download --output evals <id>
 
 ## Step 4 — Review Each Scenario
 
-For every scenario in `evals/`, read `task.md` and `criteria.json`. Check against `skills/eval-authoring/REVIEW_CHECKLIST.md` for bleeding, leaking, null-test / universal-competence, quality, and consistency issues. The null-test check is as important as bleeding and leaking — a scenario that passes those cleanly can still contribute zero lift because its criteria grade behaviour a baseline agent produces by default.
+For every scenario in `evals/`, read `task.md` and `criteria.json`. Check against `skills/eval-authoring/REVIEW_CHECKLIST.md`: does the task describe a situation without prescribing the technique? Do the criteria grade the specific manner the tile prescribes (good) rather than restating literals from the task (bleeding)? Any tile-internal leaks in the criteria? Are criteria values public surfaces, tile-prescribed conventions (allowed — they measure tile value), or tile internals (leaking)? Any quality or consistency issues?
 
 If no issues found in a scenario, proceed silently to the next one. Proceed immediately to Step 5.
 
@@ -64,9 +64,9 @@ If any scenario fails to run, diagnose and fix before proceeding.
 
 For each scenario, compute `lift = with_context_score - baseline_score`. Lift is the number that matters — aggregate attainment on its own is a vanity metric (a tile scoring 99% with-context and 73% baseline is contributing 26 points of real value, not 99).
 
-- **Lift < 10 on a positive case** → null test. The baseline already gets the points. Retire the scenario, or rewrite the task and criteria so the tile-specific behaviour is what's being scored
-- **Lift 10–30 on a positive case** → weak. Audit the criteria: is the remaining uplift exercising tile-specific reasoning, or is most of the score already grantable by universal competence? Tighten
-- **Lift ≥ 40 on a positive case** → healthy signal. The tile is doing real work
+- **Lift < 10 on a positive case** → diagnose one of three causes. (a) Coincidence with universal competence: the tile prescribes what baseline already does; the rule is documentation, not lift-producing — accept or retire. (b) Task leaked the technique: baseline pattern-matched — fix the task (strip the leaked literal), keep the criterion. (c) Criteria grade engineering-101 rather than the specific tile-prescribed manner — rewrite the criteria to check the tile's specific prescription, not to test "reasoning" that baseline already does
+- **Lift 10–30 on a positive case** → weak. Audit for the three causes above
+- **Lift ≥ 40 on a positive case** → healthy signal. The tile is doing real work — usually these scenarios check specific tile-prescribed choices (particular bot-ID discovery, particular reply template, particular CLI sequence). Keep them; do NOT soften them toward "testing reasoning"
 - **Negative cases**: near-zero lift is acceptable only when the baseline refusal is driven by universal knowledge (obvious error cases). Tile-specific refusal reasoning must still show lift
 
 For each scenario with non-zero lift but with-context below 100%, identify the failing criteria and decide: is the problem in the **skill** (unclear instruction), the **task** (doesn't ask for what criteria test), or the **criteria** (tests the wrong thing)?

@@ -2,7 +2,7 @@
 
 ## Problem/Feature Description
 
-A small open-source library team is wrapping up a sprint that produced three distinct categories of changes that need to ship as separate PRs. The team's CI pipeline automatically bumps the patch segment of the semver on every merge; manual manifest edits are only needed for non-patch bumps. The team is inconsistent about applying that rule correctly and keeps picking the wrong target version number when a manual bump is needed. The team lead wants a `RELEASE_RUNBOOK.md` that documents the versioning decision and the release sequencing for each type of change.
+A small open-source library team is wrapping up a sprint that produced three distinct categories of changes that need to ship as separate PRs. The team is inconsistent about when and how to update version numbers, and keeps picking wrong target versions or bumping the manifest redundantly. The team lead wants a `RELEASE_RUNBOOK.md` that documents the versioning decision and the release sequencing for each type of change, so contributors stop guessing.
 
 ## Output Specification
 

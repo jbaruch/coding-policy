@@ -1,51 +1,56 @@
 {
-  "context": "Tests whether the agent reasons through GitHub's bot-reviewer API limitation (REST silently drops bot accounts) and writes a script that (a) uses GraphQL for the review request, (b) doesn't depend on a permanently-hardcoded bot ID, and (c) verifies the request landed. The specific Copilot bot-ID literal is a skill-internal implementation detail and is NOT scored.",
+  "context": "Tests whether the agent applies this tile's prescribed approach to requesting Copilot as a PR reviewer. The tile prescribes: GraphQL `requestReviews` mutation (REST drops bot reviewers silently); a pinned-bot-ID-with-fallback pattern (hardcoded `BOT_kgDOCnlnWA` for hot path, dynamic discovery via recent reviews when the pin goes stale); post-request verification that the bot appears in `requested_reviewers`. Baseline agents without the tile would reach for REST, not know the Copilot bot ID, or implement a dynamic-only lookup that drops the fast-path pin. Checking for these specific tile choices measures tile value.",
   "type": "weighted_checklist",
   "checklist": [
     {
-      "name": "Uses GraphQL requestReviews mutation",
-      "max_score": 20,
-      "description": "The script calls `gh api graphql` with a `requestReviews` mutation to add the bot reviewer. REST paths (`gh pr edit --add-reviewer`, `POST /pulls/<N>/requested_reviewers`) score zero here — those are the approaches that silently drop bots"
+      "name": "Uses GraphQL `requestReviews` mutation",
+      "max_score": 18,
+      "description": "The script calls `gh api graphql` with a `requestReviews` mutation. REST paths (`gh pr edit --add-reviewer`, `POST /repos/.../pulls/<N>/requested_reviewers`) score zero — those are the approaches that silently drop bots, which is the specific failure the tile's GraphQL choice exists to prevent"
     },
     {
-      "name": "Explains why REST doesn't work",
-      "max_score": 10,
-      "description": "Inline comments in `release.sh` cite the concrete reason GraphQL is required: REST drops bot reviewers silently. The task requires inline comments for non-obvious steps, so the rationale must live in the script itself — a separate doc alone is insufficient"
+      "name": "Inline comment explains why REST doesn't work",
+      "max_score": 8,
+      "description": "The script's inline comments cite the concrete reason GraphQL is required: REST drops bot reviewers silently. The tile requires inline comments for non-obvious steps; a separate README alone is insufficient"
     },
     {
-      "name": "Doesn't depend on a permanently-hardcoded bot ID",
+      "name": "Pinned bot ID with fallback to dynamic discovery",
       "max_score": 20,
-      "description": "The script either (a) discovers the Copilot bot ID dynamically at runtime (e.g., from past reviews, from suggested-reviewers), or (b) includes a fallback discovery path when a pinned ID fails, so the script doesn't silently break when GitHub rotates the bot ID. A plain hardcoded literal with no fallback scores zero"
+      "description": "The script uses a pinned Copilot bot ID (`BOT_kgDOCnlnWA`) AND a discovery fallback — query recent reviews for the bot's GraphQL node ID when the pinned ID is rejected by the API. Implementations that hardcode with NO fallback score half. Implementations that do dynamic-only discovery with no pin score half — the prescribed pattern uses both, for latency on the hot path and resilience when GitHub rotates the ID"
     },
     {
       "name": "Resolves the PR's GraphQL node ID",
       "max_score": 10,
-      "description": "Before calling the mutation, the script fetches the PR's GraphQL node ID (e.g., `pullRequest(number: N) { id }`) rather than passing the integer PR number into a field that expects a node ID"
+      "description": "Before calling the mutation, the script fetches the PR's GraphQL node ID (via `pullRequest(number: N) { id }` or equivalent) rather than passing the integer PR number into a field that expects a node ID"
     },
     {
       "name": "Verifies the review request was registered",
-      "max_score": 15,
-      "description": "After the mutation, the script inspects the PR state to confirm the bot appears in `requested_reviewers` (or equivalent). Fire-and-forget without verification scores zero"
+      "max_score": 14,
+      "description": "After the mutation, the script inspects the PR state to confirm the bot appears in `requested_reviewers` (or equivalent). Fire-and-forget without verification scores zero — the tile prescribes this post-check because GitHub sometimes accepts the mutation without actually registering the reviewer"
     },
     {
       "name": "Feature-branch guard",
       "max_score": 10,
-      "description": "Before pushing, the script confirms the current branch is NOT main/master and fails loudly if it is — a widely-standard git safety practice, not skill doctrine"
+      "description": "Before pushing, the script confirms the current branch is NOT main/master and fails loudly if it is"
     },
     {
       "name": "PR title follows conventional-commits format",
       "max_score": 8,
-      "description": "The PR title the script constructs uses `<type>(<scope>): <imperative summary>` (conventional commits — widely adopted across OSS, not skill-invented)"
+      "description": "The PR title the script constructs uses `<type>(<scope>): <imperative summary>` (conventional commits — widely adopted, not tile-invented, but the tile prescribes using it here)"
     },
     {
-      "name": "PR body has summary + verification plan",
-      "max_score": 5,
-      "description": "The PR body template includes a summary of what changed and a test/verification plan — the substance, not a specific section-heading literal"
+      "name": "PR body structure",
+      "max_score": 7,
+      "description": "The PR body template includes a Summary bullet list of what changed and why, and a Test plan as a markdown checklist — the tile's prescribed structure for PR bodies"
     },
     {
-      "name": "Inputs parameterized",
+      "name": "Pre-push readiness checks",
+      "max_score": 3,
+      "description": "The script runs the project's tests AND linter before pushing, and fails if either fails. Acceptable regardless of how these are invoked; the tile prescribes this as a cross-cutting readiness gate"
+    },
+    {
+      "name": "No hardcoded inputs in the script body",
       "max_score": 2,
-      "description": "Repository owner, repository name, branch name, PR title/body source, and PR number are accepted as arguments or environment variables — not hardcoded. The script is reusable across different PRs and repos without editing"
+      "description": "OBSERVABLE: the script body contains no literal for the target repository owner, repo name, branch name, PR title, PR body source, or PR number. All of these come from runtime inputs (args or env vars) per the task's input contract. Pinning any of them in the script source scores zero"
     }
   ]
 }

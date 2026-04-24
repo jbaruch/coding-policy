@@ -1,51 +1,56 @@
 {
-  "context": "Tests whether the script retrieves and surfaces the three signals the developer needs — CI status, per-reviewer review decision, and inline review-comments — without prescribing specific gh-CLI endpoints or jq filters. Multiple endpoints can produce the same signal; the criteria score whether the signal is captured and surfaced, and whether the agent avoids the common inline-vs-issue-comments API trap.",
+  "context": "Tests whether the script follows this tile's prescribed mechanisms for polling CI status and scraping reviews. The tile prescribes a specific trio — `gh pr checks <N> --json name,bucket` for CI (structured output the caller parses in a polling loop), `gh api repos/<o>/<r>/pulls/<N>/reviews` for review state, `gh api repos/<o>/<r>/pulls/<N>/comments` (pull-request review comments, NOT `/issues/<N>/comments`) for inline comments. Baseline agents typically pick a different combination: ad-hoc greps of `gh pr view` text output, `gh run list` polling, or the issue-comments endpoint (which returns wrong data). The specific-mechanism criteria below measure whether the tile was applied.",
   "type": "weighted_checklist",
   "checklist": [
     {
-      "name": "Retrieves CI status",
+      "name": "Uses `gh pr checks` with structured output",
       "max_score": 15,
-      "description": "The script retrieves the PR's CI state via some command. `gh pr checks`, `gh run list --branch`, `gh api /repos/<o>/<r>/commits/<sha>/check-runs`, or equivalent all pass — the specific endpoint is not prescribed"
+      "description": "The script retrieves CI state by invoking `gh pr checks <N>` with `--json` (the prescribed mechanism returns structured `name`/`bucket` fields the caller can parse into a terminal state). `gh run list`, ad-hoc greps of `gh pr view` text output, or UI polling score zero — those are different approaches that do not give the caller a structured terminal-state signal"
+    },
+    {
+      "name": "Uses `gh api .../pulls/<N>/reviews` for review state",
+      "max_score": 15,
+      "description": "The script hits the pull-request reviews endpoint (`gh api repos/<owner>/<repo>/pulls/<N>/reviews`) to retrieve per-reviewer state. Other endpoints (`gh pr view`, `gh api` on a different path) score zero — the tile prescribes this endpoint specifically because it returns the per-review structure needed for multi-bot setups"
+    },
+    {
+      "name": "Uses `gh api .../pulls/<N>/comments` for inline comments",
+      "max_score": 15,
+      "description": "The script retrieves inline review comments via the pull-request review-comments endpoint (`gh api repos/<owner>/<repo>/pulls/<N>/comments`). This is a tile-prescribed endpoint choice that avoids the issue-comments trap"
+    },
+    {
+      "name": "Does NOT use `/issues/<N>/comments`",
+      "max_score": 10,
+      "description": "The script must NOT use the issue-comments endpoint (`gh api repos/<o>/<r>/issues/<N>/comments`) for inline review comments. That endpoint returns a different object shape (PR-level comments, not inline review comments) and surfaces wrong data. A script that conflates the two scores zero here — this is a known GitHub-API gotcha the tile exists to prevent"
+    },
+    {
+      "name": "Retrieves per-reviewer state distinctly",
+      "max_score": 10,
+      "description": "The script captures the latest review state for EACH reviewer distinctly, not a single aggregate. Multi-bot setups (Copilot + gh-aw) each have their own state, and the tile prescribes exposing them separately so the developer sees which bot is gating the merge"
+    },
+    {
+      "name": "No hardcoded PR, owner, or repo in the script body",
+      "max_score": 10,
+      "description": "OBSERVABLE: the script body contains no literal for the target PR, owner, or repo — all three are pulled from runtime inputs (args, env vars). Running against a new target requires changing only the invocation, not the script source"
     },
     {
       "name": "Waits for CI to finish before surfacing state",
-      "max_score": 15,
-      "description": "The script polls / waits until CI checks are in a terminal state (success / failure / cancelled) before reporting. Surfacing mid-run 'pending' as the final verdict scores zero — any reasonable wait mechanism (`--watch`, a polling loop with a timeout, a `gh run watch` call) is acceptable"
-    },
-    {
-      "name": "Retrieves review decision per reviewer",
-      "max_score": 15,
-      "description": "The script captures the latest review state for EACH reviewer distinctly (not a single aggregate). Multi-bot setups (e.g., Copilot + gh-aw) each have their own state, and the script must expose them separately"
-    },
-    {
-      "name": "Retrieves inline review comments",
-      "max_score": 15,
-      "description": "The script retrieves inline comments attached to reviews. Mechanism is not prescribed — any endpoint that returns PR review comments passes"
-    },
-    {
-      "name": "Distinguishes inline review comments from issue comments",
-      "max_score": 10,
-      "description": "The script uses the pull-request review-comments endpoint, NOT the issue-comments endpoint (`/issues/<N>/comments`). These return different objects in GitHub's API — a script that conflates them surfaces wrong data and scores zero here"
-    },
-    {
-      "name": "Script can run unchanged against a different PR or repo",
-      "max_score": 10,
-      "description": "OBSERVABLE CHECK: the script body contains no hardcoded literal for the target PR, owner, or repo — all such context is pulled from runtime inputs (args or env vars, per the task's input contract). Running against a new target requires changing only the invocation, not the script source"
+      "max_score": 4,
+      "description": "The script (or the prescribed caller loop around it) polls until CI is in a terminal state before declaring a final verdict. Surfacing mid-run `pending` as the summary outcome scores zero — any reasonable wait mechanism (the caller looping on the script's output, `gh run watch` on the CI run, etc.) is acceptable"
     },
     {
       "name": "Surfaces CI state in the summary",
-      "max_score": 7,
-      "description": "Final summary prints the CI verdict (success / failure / cancelled / timed-out) in a form a human can read at a glance. The summary reports a terminal state, consistent with the wait-until-finished criterion — `pending` is not a valid summary outcome"
+      "max_score": 4,
+      "description": "The final summary prints a terminal CI verdict (success / failure / cancelled / timed-out), parsed from `gh pr checks` JSON output. `pending` is not a valid final verdict"
     },
     {
       "name": "Surfaces review states in the summary",
-      "max_score": 7,
-      "description": "Final summary prints each reviewer's latest state — not just raw JSON the developer has to parse"
+      "max_score": 8,
+      "description": "The final summary prints each reviewer's latest state — not just raw JSON the developer has to parse"
     },
     {
-      "name": "Surfaces inline comment content or count in the summary",
-      "max_score": 6,
-      "description": "Final summary includes inline comment bodies (for low counts) or a count with a pointer to read them — developer can tell whether there's unaddressed feedback"
+      "name": "Surfaces inline comment content or count",
+      "max_score": 9,
+      "description": "The final summary includes inline comment bodies (for low counts) or a count with a pointer to read them, so the developer can tell whether there is unaddressed feedback"
     }
   ]
 }
