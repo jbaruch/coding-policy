@@ -36,7 +36,7 @@ tessl scenario download --output evals <id>
 
 For every scenario in `evals/`, read `task.md` and `criteria.json`. Check against `skills/eval-authoring/REVIEW_CHECKLIST.md` for bleeding, leaking, null-test / universal-competence, quality, and consistency issues. The null-test check is as important as bleeding and leaking — a scenario that passes those cleanly can still contribute zero lift because its criteria grade behaviour a baseline agent produces by default.
 
-If no issues found in a scenario, proceed silently to the next one.
+If no issues found in a scenario, proceed silently to the next one. Proceed immediately to Step 5.
 
 ## Step 5 — Fix Issues
 
@@ -62,7 +62,7 @@ If any scenario fails to run, diagnose and fix before proceeding.
 
 ## Step 9 — Analyze Results (Lift, Not Attainment)
 
-For each scenario, compute `lift = with_context_score − baseline_score`. Lift is the number that matters — aggregate attainment on its own is a vanity metric (a tile scoring 99% with-context and 73% baseline is contributing 26 points of real value, not 99).
+For each scenario, compute `lift = with_context_score - baseline_score`. Lift is the number that matters — aggregate attainment on its own is a vanity metric (a tile scoring 99% with-context and 73% baseline is contributing 26 points of real value, not 99).
 
 - **Lift < 10 on a positive case** → null test. The baseline already gets the points. Retire the scenario, or rewrite the task and criteria so the tile-specific behaviour is what's being scored
 - **Lift 10–30 on a positive case** → weak. Audit the criteria: is the remaining uplift exercising tile-specific reasoning, or is most of the score already grantable by universal competence? Tighten
@@ -70,6 +70,8 @@ For each scenario, compute `lift = with_context_score − baseline_score`. Lift 
 - **Negative cases**: near-zero lift is acceptable only when the baseline refusal is driven by universal knowledge (obvious error cases). Tile-specific refusal reasoning must still show lift
 
 For each scenario with non-zero lift but with-context below 100%, identify the failing criteria and decide: is the problem in the **skill** (unclear instruction), the **task** (doesn't ask for what criteria test), or the **criteria** (tests the wrong thing)?
+
+When the analysis is complete, proceed immediately to Step 10.
 
 ## Step 10 — Iterate
 

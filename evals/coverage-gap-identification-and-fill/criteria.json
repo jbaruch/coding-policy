@@ -3,14 +3,9 @@
   "type": "weighted_checklist",
   "checklist": [
     {
-      "name": "Produces a coverage-analysis document",
-      "max_score": 5,
-      "description": "A file named `coverage-analysis.md` exists and describes the identified coverage gaps. Absence of the file scores zero even if new scenarios were written — the analysis is required, not optional"
-    },
-    {
       "name": "Identifies at least two uncovered decision branches",
       "max_score": 10,
-      "description": "The analysis names at least two concrete branches the existing two scenarios don't exercise (any combination of: failure paths, refusals, alternative inputs, edge conditions). Weighted low because identifying gaps from a functional skill description is basic QA reasoning and is not tile-specific"
+      "description": "Some written output exists (in any filename — the task names one but does not require that specific name) and it names at least two concrete branches the existing two scenarios don't exercise (any combination of: failure paths, refusals, alternative inputs, edge conditions). Weighted low because identifying gaps from a functional skill description is basic QA reasoning and is not tile-specific"
     },
     {
       "name": "Writes new scenario directories",
@@ -23,9 +18,9 @@
       "description": "Each new `criteria.json` is a valid JSON object with a `context` string, `type: \"weighted_checklist\"`, and a `checklist` array where every entry has `name`, `description`, and `max_score`. Missing any of these fields drops the score proportionally. Tile-specific — the format is prescribed by plugin-evals guidance, not guessable from general practice"
     },
     {
-      "name": "Criteria weights sum sensibly and are not equal-distributed",
+      "name": "Criteria weights sum to 100 and are not equally distributed",
       "max_score": 5,
-      "description": "Each new scenario's weights sum to roughly 100 (±5 tolerated) AND are not all identical. This tile's convention is that weights reflect importance, not a flat split — uniform weights or sums far from 100 score zero"
+      "description": "Each new scenario's weights sum to exactly 100 AND are not all identical. This tile's convention is that weights sum to 100 and reflect importance, not a flat split — uniform weights or sums other than 100 score zero"
     },
     {
       "name": "New task.md files pass the no-bleeding check",
@@ -49,8 +44,8 @@
     },
     {
       "name": "Coverage analysis justifies each gap",
-      "max_score": 10,
-      "description": "The analysis doesn't only list gaps — for each one it explains why the missing case matters (e.g., `without this, a production deploy without approval would pass evals despite being a policy violation`). Each gap without justification docks this criterion proportionally"
+      "max_score": 15,
+      "description": "The analysis doesn't only list gaps — for each one it explains why the missing case matters (e.g., `without this, a production deploy without approval would pass evals despite being a policy violation`). Each gap without justification docks this criterion proportionally. The analysis text must exist as written output; the task names one filename but the score is on content, not the filename"
     }
   ]
 }

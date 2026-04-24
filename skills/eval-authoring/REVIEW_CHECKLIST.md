@@ -8,7 +8,7 @@ If yes, the criterion is a null test: it grades universal competence, not the ti
 
 Two common causes:
 
-1. **The task names the technique or format** (e.g., "use the weighted_checklist format", "deploys via the approval flag", "follow this conventions"). Baseline agents pattern-match the task and produce exactly what the criterion grades.
+1. **The task names the technique or format** (e.g., "use the weighted_checklist format", "deploys via the approval flag", "follow these conventions"). Baseline agents pattern-match the task and produce exactly what the criterion grades.
 2. **The criteria grade generally-known behaviour** (e.g., "refuses to merge red CI", "uses `git checkout -b`", "fixes the failing test properly"). Universal engineering judgement clears the bar regardless of the tile.
 
 **Fix**: rewrite the task to state the *situation* without the technique, and strengthen the criterion so it requires tile-specific reasoning to pass. If the criterion has no tile-specific content left after that rewrite, retire the scenario — a scenario that measures nothing inflates aggregate attainment and hides real tile value.
