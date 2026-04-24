@@ -28,7 +28,7 @@
 
 ### Skill updates
 
-- **eval-authoring** — Step 4 (Review) now explicitly treats the null-test / universal-competence check as equal in weight to bleeding and leaking. Step 9 (Analyze Results) now centres on lift rather than attainment — scenarios with lift < 10 on a positive case are null tests (retire or rewrite); lift 10–30 is weak (audit the criteria); lift ≥ 40 is a healthy signal. `REVIEW_CHECKLIST.md` gains a top-level "Null-Test (Universal-Competence Trap)" section describing the two common causes (task names the technique; criteria grade general behaviour) and prescribing the pre-commit thought experiment "imagine the tile uninstalled — would a competent agent pass this criterion by default?"
+- **eval-authoring** — Step 4 (Review) and `REVIEW_CHECKLIST.md` rewritten around the new task/criteria shape: is the task a SITUATION (no technique leak) and do the criteria grade the specific manner the tile prescribes? Leaking narrowed to tile-internal implementation details only; tile-prescribed conventions and invented literals are explicitly allowed. Step 9 (Analyze Results) centres on lift (`with_context - baseline`) rather than attainment, with a three-cause diagnosis for near-zero lift: (1) coincidence with universal competence; (2) task leaked the technique — fix the task, not the criterion; (3) criteria grade engineering-101 rather than tile-specific manner — rewrite to grade the specific prescription, not retire. High-lift scenarios testing specific tile choices must be kept, not softened toward "testing reasoning" that baseline already does.
 
 ## 0.2.0
 
