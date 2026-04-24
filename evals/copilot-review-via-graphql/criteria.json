@@ -44,8 +44,13 @@
     },
     {
       "name": "Pre-push readiness checks",
-      "max_score": 5,
+      "max_score": 3,
       "description": "The script runs the project's tests AND linter before pushing, and fails if either fails. Acceptable regardless of how these are invoked; the tile prescribes this as a cross-cutting readiness gate"
+    },
+    {
+      "name": "No hardcoded inputs in the script body",
+      "max_score": 2,
+      "description": "OBSERVABLE: the script body contains no literal for the target repository owner, repo name, branch name, PR title, PR body source, or PR number. All of these come from runtime inputs (args or env vars) per the task's input contract. Pinning any of them in the script source scores zero"
     }
   ]
 }

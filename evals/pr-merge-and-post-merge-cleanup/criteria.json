@@ -9,7 +9,7 @@
     },
     {
       "name": "Merge includes `--delete-branch`",
-      "max_score": 10,
+      "max_score": 5,
       "description": "The `gh pr merge` invocation passes `--delete-branch` so the remote feature branch is deleted on merge. Separate `git push origin --delete` AFTER merge is acceptable but less clean than the tile's prescribed one-flag approach"
     },
     {
@@ -56,6 +56,11 @@
       "name": "Graceful failure on unmet preconditions",
       "max_score": 5,
       "description": "When CI is red or reviews are outstanding, the script exits non-zero with a stderr diagnostic naming the specific unmet condition — does NOT silently skip or mask the failure"
+    },
+    {
+      "name": "No hardcoded PR, owner, or repo in the script body",
+      "max_score": 5,
+      "description": "OBSERVABLE: the script body contains no literal for the target PR number, owner, or repo — all three come from runtime inputs (args or env vars). Running against a new target requires changing only the invocation, not the script source. Pinning any of them in the script source scores zero"
     }
   ]
 }

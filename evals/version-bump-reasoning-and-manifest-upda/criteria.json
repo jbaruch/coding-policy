@@ -39,13 +39,8 @@
     },
     {
       "name": "Runbook covers all three changes separately",
-      "max_score": 10,
-      "description": "The `RELEASE_RUNBOOK.md` has a distinct section for each of the three pending changes, each answering the readiness / versioning / sequencing questions in the task's output spec. A single conflated section scores zero"
-    },
-    {
-      "name": "PR titles follow conventional-commits format",
-      "max_score": 10,
-      "description": "The runbook prescribes PR titles in the `<type>(<scope>): <imperative summary>` form for each change (conventional commits — widely adopted public convention). A baseline agent familiar with conventional commits will likely produce this, but the runbook should explicitly call it out as the team's chosen style"
+      "max_score": 20,
+      "description": "The `RELEASE_RUNBOOK.md` has a distinct section for each of the three pending changes, each answering the readiness / versioning / sequencing questions in the task's output spec. A single conflated section scores zero. Only two of three sections present scores two-thirds"
     }
   ]
 }

@@ -25,12 +25,12 @@
     {
       "name": "Accept reply uses the `Fixed in <sha>` format",
       "max_score": 15,
-      "description": "The accept reply follows the tile's prescribed format: `Fixed in <sha>` (with the literal word 'Fixed' and a placeholder for the commit sha). This is a tile-prescribed convention — a reply that says 'Done' or 'Resolved' or 'Applied the fix' scores zero even if semantically equivalent, because the tile exists to standardize the specific phrasing across the team"
+      "description": "The accept reply follows the tile's prescribed format — it begins with the literal word 'Fixed in' followed by a sha (either a real commit hash or, per the task's placeholder instruction, the literal `<sha>` marker). A reply that says 'Done' or 'Resolved' or 'Applied the fix' scores zero even if semantically equivalent, because the tile exists to standardize the specific phrasing across the team"
     },
     {
       "name": "Decline reply uses the `Declining — <reason>` format",
       "max_score": 15,
-      "description": "The decline reply follows the tile's prescribed format: `Declining — <reason>` (literal word 'Declining', em dash, reason). A reply that says 'Disagree' or 'No thanks' or 'Not doing this' scores zero — the tile prescribes this specific opening precisely so declines are unambiguous in thread scans"
+      "description": "The decline reply follows the tile's prescribed format — it begins with the literal word 'Declining', an em dash (—), then a reason (either prose or, per the task's placeholder instruction, the literal `<reason>` marker). A reply that says 'Disagree' or 'No thanks' or 'Not doing this' scores zero — the tile prescribes this specific opening precisely so declines are unambiguous in thread scans"
     },
     {
       "name": "Decline reply cites a verifiable reference",

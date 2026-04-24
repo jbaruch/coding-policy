@@ -17,9 +17,9 @@ alwaysApply: true
 
 ## No Bleeding
 
-- Bleeding is strictly: a criterion value appearing verbatim in the task description. Grep each criterion's expected literal against the task text — if you find it there, the criterion is testing reading of the task, not application of the tile
+- The primary form of bleeding is a criterion value appearing verbatim in the task description. Grep each criterion's expected literal against the task text — if you find it there, the criterion is testing reading of the task, not application of the tile
 - Fix bleeding at the task, not at the criterion. Strip the technique/format/literal from the task; keep the criterion checking for the tile-prescribed answer. Baseline agents should be able to attempt the SITUATION described in the task (they'll just pick some other manner); if stripping the leak makes the task unsolvable even for a baseline, the scenario is too narrow to evaluate the tile and should be reframed
-- Fixtures must not be reachable as examples inside the skill prompt — criteria check solutions the skill taught in general, not instances the skill used as teaching examples
+- A second form of bleeding: fixtures reachable as examples inside the skill prompt. If the skill teaches by showing an example, and the eval scenario uses that same example as a fixture, the agent "passes" by recognizing the example rather than applying the lesson. Keep fixtures in a separate namespace from skill examples
 
 ## No Leaking
 
