@@ -23,6 +23,7 @@ alwaysApply: true
 
 ## No Leaking
 
+- Use sanitized or synthetic fixtures — never live user data. Real emails, calendar events, production PRs, or internal logs must never appear in an eval fixture; use stable synthetic IDs and scrubbed examples
 - Criteria must not reference tile-internal implementation details that mean nothing outside the tile — internal skill action names, `.tessl/tiles/...` paths, tile-only identifiers
 - Criteria **may** reference public tool/API surfaces that exist independent of the tile — `gh pr create`, REST endpoints, conventional-commits format, semver
 - Criteria **may** reference tile-prescribed conventions and specific values — reply templates (`Fixed in <sha>`), chosen flags (`--ff-only`), specific sequences, invented format literals. A competent engineer without the tile would not produce those specific choices; that is precisely why they measure tile value. Checking for them is measuring application, not leaking

@@ -3,9 +3,9 @@
   "type": "weighted_checklist",
   "checklist": [
     {
-      "name": "Uses `gh pr checks --watch` for CI",
+      "name": "Uses `gh pr checks` with structured output",
       "max_score": 15,
-      "description": "The script invokes `gh pr checks <N> --watch` (or `gh pr checks` in a loop with `--wait`) to poll CI until terminal state. Tile-prescribed mechanism. A manual sleep loop or `gh run list` polling scores zero — those are different approaches the tile does not prescribe"
+      "description": "The script retrieves CI state by invoking `gh pr checks <N>` with `--json` (the prescribed mechanism returns structured `name`/`bucket` fields the caller can parse into a terminal state). `gh run list`, ad-hoc greps of `gh pr view` text output, or UI polling score zero — those are different approaches that do not give the caller a structured terminal-state signal"
     },
     {
       "name": "Uses `gh api .../pulls/<N>/reviews` for review state",
@@ -33,9 +33,14 @@
       "description": "OBSERVABLE: the script body contains no literal for the target PR, owner, or repo — all three are pulled from runtime inputs (args, env vars). Running against a new target requires changing only the invocation, not the script source"
     },
     {
+      "name": "Waits for CI to finish before surfacing state",
+      "max_score": 4,
+      "description": "The script (or the prescribed caller loop around it) polls until CI is in a terminal state before declaring a final verdict. Surfacing mid-run `pending` as the summary outcome scores zero — any reasonable wait mechanism (the caller looping on the script's output, `gh run watch` on the CI run, etc.) is acceptable"
+    },
+    {
       "name": "Surfaces CI state in the summary",
-      "max_score": 8,
-      "description": "The final summary prints a terminal CI verdict (success / failure / cancelled / timed-out). `pending` is NOT a valid summary outcome — the tile prescribes waiting until CI is in a terminal state before reporting"
+      "max_score": 4,
+      "description": "The final summary prints a terminal CI verdict (success / failure / cancelled / timed-out), parsed from `gh pr checks` JSON output. `pending` is not a valid final verdict"
     },
     {
       "name": "Surfaces review states in the summary",

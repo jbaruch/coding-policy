@@ -15,7 +15,7 @@
     {
       "name": "Pinned bot ID with fallback to dynamic discovery",
       "max_score": 20,
-      "description": "The script uses the tile's prescribed hot-path-plus-fallback pattern: a pinned Copilot bot ID (the tile's release/request-copilot-review.sh uses `BOT_kgDOCnlnWA`) AND a discovery fallback (query recent reviews for the bot's GraphQL node ID) when the pinned ID is rejected by the API. Implementations that hardcode with NO fallback score half. Implementations that do dynamic-only discovery with no pin score half — the tile prescribes both for latency and resilience"
+      "description": "The script uses a pinned Copilot bot ID (`BOT_kgDOCnlnWA`) AND a discovery fallback — query recent reviews for the bot's GraphQL node ID when the pinned ID is rejected by the API. Implementations that hardcode with NO fallback score half. Implementations that do dynamic-only discovery with no pin score half — the prescribed pattern uses both, for latency on the hot path and resilience when GitHub rotates the ID"
     },
     {
       "name": "Resolves the PR's GraphQL node ID",
