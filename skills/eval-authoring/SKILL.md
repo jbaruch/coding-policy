@@ -4,13 +4,14 @@ description: >
   Generate, review, and curate eval scenarios for Tessl skills. Handles scenario
   generation, bleeding/leaking detection, criteria quality checks, coverage gap
   analysis, and score-driven iteration.
-  Use when creating test cases for a skill, evaluating skill quality, reviewing
-  existing evals, or expanding eval coverage.
+  Use when creating test cases or test scenarios for a skill, evaluating or
+  assessing skill quality, running evals or evaluations, reviewing existing
+  evals, expanding eval coverage, or skill testing.
 ---
 
 # Eval Authoring Skill
 
-Generate, review, and iterate on eval scenarios. Steps are sequential — complete each before moving to the next.
+Generate, review, and iterate on eval scenarios for a Tessl skill. The 10-step workflow: generate (1) and download (2–3) scenarios, audit each (4) for bleeding/leaking, fix (5) or delete (6) unsalvageable ones, fill coverage gaps (7), run evals (8), interpret results via lift analysis (9), iterate until stable (10). Steps are sequential — complete each before moving to the next.
 
 ## Step 1 — Generate Scenarios
 
@@ -78,16 +79,15 @@ If any scenario fails to run, diagnose and fix before proceeding.
 
 ## Step 9 — Analyze Results (Lift, Not Attainment)
 
-For each scenario, compute `lift = with_context_score - baseline_score`. Lift is the number that matters — aggregate attainment on its own is a vanity metric (a tile scoring 99% with-context and 73% baseline is contributing 26 points of real value, not 99).
+For each scenario, compute `lift = with_context_score - baseline_score`. Lift is the number that matters — aggregate attainment alone is a vanity metric.
 
-- **Lift < 10 on a positive case** → diagnose one of three causes. (a) Coincidence with universal competence: the tile prescribes what baseline already does; the rule is documentation, not lift-producing — accept or retire. (b) Task leaked the technique: baseline pattern-matched — fix the task (strip the leaked literal), keep the criterion. (c) Criteria grade engineering-101 rather than the specific tile-prescribed manner — rewrite the criteria to check the tile's specific prescription, not to test "reasoning" that baseline already does
-- **Lift 10–30 on a positive case** → weak. Audit for the three causes above
-- **Lift ≥ 40 on a positive case** → healthy signal. The tile is doing real work — usually these scenarios check specific tile-prescribed choices (particular bot-ID discovery, particular reply template, particular CLI sequence). Keep them; do NOT soften them toward "testing reasoning"
-- **Negative cases**: near-zero lift is acceptable only when the baseline refusal is driven by universal knowledge (obvious error cases). Tile-specific refusal reasoning must still show lift
+Classify each scenario by its lift band, run the three-cause diagnosis on weak / no-lift positive cases, decide whether negative-case lift is healthy or null, and triage failing criteria into a skill / task / criteria fix per the reference at:
 
-For each scenario with non-zero lift but with-context below 100%, identify the failing criteria and decide: is the problem in the **skill** (unclear instruction), the **task** (doesn't ask for what criteria test), or the **criteria** (tests the wrong thing)?
+```text
+skills/eval-authoring/LIFT_ANALYSIS.md
+```
 
-When the analysis is complete, proceed immediately to Step 10.
+Bring the results back here, then proceed immediately to Step 10.
 
 ## Step 10 — Iterate
 

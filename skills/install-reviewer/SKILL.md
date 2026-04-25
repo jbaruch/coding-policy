@@ -23,7 +23,11 @@ Scaffold the gh-aw PR policy reviewer pair (OpenAI + Anthropic) into a consumer 
 .tessl/tiles/jbaruch/coding-policy/skills/install-reviewer/preflight.sh
 ```
 
-Runs every precondition (git worktree, GitHub CLI install + auth, gh-aw extension at minimum version, tile template, origin remote, local + remote branch clear) and returns one JSON object: `{"ok": bool, "failures": [...], "warnings": [...]}`. Exit 0 with empty `failures` means every precondition passed (proceed to Step 2). Exit 1 with a populated `failures` array means at least one precondition is missing — report every failure's `reason` verbatim and stop; each failure carries a concrete recovery command. The gh-aw extension is `github/gh-aw` — install with `gh extension install github/gh-aw` (the extension lives under the `github` org, not under this tile's owner) and must be at v0.71.0 or newer. `warnings` is informational and never affects `ok` or the exit code; the array is currently empty by design but the schema field is preserved so future advisory checks can plug in. If the preflight does return warnings, report each one's `reason` verbatim to the user alongside the outcome of Step 1 — remember them, you will surface them again in Step 7's PR body. Do not stop for warnings; proceed to Step 2.
+Runs every precondition (git worktree, GitHub CLI install + auth, gh-aw extension at minimum version, tile template, origin remote, local + remote branch clear) and returns one JSON object: `{"ok": bool, "failures": [...], "warnings": [...]}`.
+
+- **Exit 0, empty `failures`** — every precondition passed; proceed to Step 2.
+- **Exit 1, populated `failures`** — report each failure's `reason` verbatim and stop. Every failure carries a concrete recovery command. The gh-aw extension is `github/gh-aw` (lives under the `github` org, not the tile owner) and must be v0.71.0+. Install with `gh extension install github/gh-aw --pin v0.71.0` — the unpinned form would land on the latest *stable* release (currently below v0.71.0; everything from v0.69.0 onward is marked prerelease) and fail the version check.
+- **Non-empty `warnings`** — informational only; never affects `ok` or the exit code. Report each `reason` verbatim alongside the Step 1 outcome and remember them for Step 7's PR body. Do not stop; proceed to Step 2.
 
 ## Step 2 — Refuse Overwrite
 
@@ -59,11 +63,10 @@ Pushes `feat/add-coding-policy-review` to origin with upstream tracking. Idempot
 
 ## Step 7 — Open PR
 
-`gh pr create` with title `ci(review): add jbaruch/coding-policy PR review workflows` and a body that:
-- Explains the workflows install `jbaruch/coding-policy` at run time and review every PR against it, and that the OpenAI and Anthropic reviewers each self-gate on the PR's `Author-Model:` declaration so the active reviewer is cross-family whenever the declaration permits — when the declaration spans both paired families, or neither paired family, both reviewers run as the documented fallback (see `jbaruch/coding-policy: author-model-declaration` on the registry)
-- Lists the three repository secrets the user must set **before merge**: `OPENAI_API_KEY` (OpenAI billing account for Codex), `ANTHROPIC_API_KEY` (Anthropic billing account for Claude Code), and `TESSL_TOKEN` (created at https://tessl.io/account/api-keys)
-- Notes that merging without all three secrets set will cause the workflows to fail on their first run
-- If Step 1's preflight returned any `warnings`, includes a `## Action required before merge` section that reproduces every warning's `reason` verbatim. These are advisory findings the install-reviewer skill deliberately does NOT auto-fix; the section exists so the consumer sees and acts on the finding instead of discovering it via a failed workflow. The current preflight emits no warnings — the field is preserved so future advisory checks can plug in without changing the SKILL surface
-- Notes that each reviewer's verdict begins with a one-line load indicator (`"Policy loaded: N rule files from /tmp/gh-aw/coding-policy/.tessl/tiles/jbaruch/coding-policy/rules/ (installed tile)."`), making it obvious when the workflow setup `tessl install` ran cleanly vs when the policy didn't reach the runtime
+`gh pr create` with title `ci(review): add jbaruch/coding-policy PR review workflows` and a body that follows the four required content blocks (cross-family rule explainer, required secrets, load-indicator note, conditional warnings section) defined at:
 
-Return the PR URL. If Step 1 emitted any warnings, also surface them inline in your user-facing summary (not only in the PR body) so the user sees them immediately without opening the PR. Finish here — the user validates the secrets, acts on any warnings, and merges.
+```text
+skills/install-reviewer/PR_BODY_TEMPLATE.md
+```
+
+Return the PR URL. If Step 1 emitted any warnings, surface them inline in your user-facing summary too (not only in the PR body) so the user sees them immediately without opening the PR. Finish here — the user validates the secrets, acts on any warnings, and merges.
