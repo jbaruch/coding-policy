@@ -4,15 +4,19 @@ description: |
   Reviews every same-repo pull request against this repository's own in-tree
   `rules/*.md` on the PR head branch, using an OpenAI-family reviewer model.
   Pairs with `review-anthropic.md`; each workflow self-gates to skip PRs
-  authored by its own family so the active reviewer is always cross-family
-  (see `rules/author-model-declaration.md`). This repo IS the policy —
+  authored by its own family so the active reviewer is cross-family
+  whenever the declaration permits — when the declaration spans both
+  paired families (e.g., `gpt-5.4 claude-opus-4-7`), or neither paired
+  family (e.g., `gemini-2.5`, `human`-only), both reviewers run as the
+  documented fallback (see `rules/author-model-declaration.md`).
+  This repo IS the policy —
   rules proposed in a PR must be enforced against themselves. Fork PRs are
   skipped by gh-aw's fork-guard. Posts up to 10 inline comments plus one
   consolidated review verdict.
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened]
+    types: [opened, synchronize, reopened, edited]
 
 permissions:
   contents: read
@@ -27,8 +31,18 @@ engine:
 timeout-minutes: 15
 
 network:
+  # Codex's `defaults` excludes GitHub and ChatGPT telemetry hosts; both must
+  # be listed explicitly. `github` covers github.com / codeload / raw /
+  # objects, `threat-detection` covers api.github.com (gh-aw ecosystem
+  # identifiers — preferred over enumerating individual domains per the
+  # compiler's strict-mode recommendation). Mirrors the consumer-facing
+  # install-reviewer template (skills/install-reviewer/review-openai.md).
   allowed:
     - defaults
+    - github
+    - threat-detection
+    - ab.chatgpt.com
+    - chatgpt.com
 
 tools:
   bash:
