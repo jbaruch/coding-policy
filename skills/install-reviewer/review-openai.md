@@ -145,7 +145,7 @@ Run `gh pr diff ${{ github.event.pull_request.number }}` with no truncation. Run
 
 ## Step 4 — Review
 
-For every changed line in this PR (ignore files under `.tessl/` — those are the installed policy, not the PR's changes), check it against every rule in `$HOME/.tessl/tiles/jbaruch/coding-policy/rules/`. Flag:
+For every changed line in this PR, check it against every rule in `$HOME/.tessl/tiles/jbaruch/coding-policy/rules/`. (The policy is installed globally at `$HOME/.tessl/...`, so it never appears in the PR diff. If the consumer repo happens to ship a workspace-local `.tessl/` from their dev workflow, treat that as a vendored artifact and ignore it — the authoritative policy is the global install, not anything in the repo's working tree.) Flag:
 
 - Secrets, missing error handling, formatting, dependency hygiene
 - Violations of `jbaruch/coding-policy: ci-safety`, `jbaruch/coding-policy: no-secrets`, `jbaruch/coding-policy: file-hygiene`, `jbaruch/coding-policy: author-model-declaration`, etc.
@@ -162,7 +162,7 @@ For every changed line in this PR (ignore files under `.tessl/` — those are th
 
 ## Guardrails
 
-- Ignore files under `.tessl/` — those are the installed policy, not the PR's changes.
+- Treat any workspace-local `.tessl/` directory as a vendored consumer artifact, not as authoritative policy — the rules used for this review live at `$HOME/.tessl/tiles/jbaruch/coding-policy/rules/` (global install, outside the workspace).
 - Do not comment on unchanged lines.
 - Do not propose changes that contradict `$HOME/.tessl/tiles/jbaruch/coding-policy/rules/`. The rules are ground truth.
 - Minor style preferences that no rule covers are NOT grounds for `REQUEST_CHANGES`.
