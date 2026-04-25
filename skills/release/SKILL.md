@@ -74,7 +74,7 @@ The script returns:
 - `reviews.gh_aw.state` and `reviews.copilot.state` — latest review per bot (`APPROVED | CHANGES_REQUESTED | COMMENTED | none`)
 - `inline_comments.gh_aw` and `inline_comments.copilot` — top-level inline comment counts
 
-Loop until `ci.status` is `success` (or `none` if no checks are configured) and no bot has `CHANGES_REQUESTED`. `COMMENTED` is observations only — read and decide per thread, but it doesn't block. If the gh-aw review check ran but no review was posted, inspect logs with `gh run view --log-failed`. Do not retry via GraphQL — gh-aw is event-triggered, not request-triggered.
+Loop until `ci.status` is `success` (or `none` if no checks are configured) and no bot has `CHANGES_REQUESTED`. `COMMENTED` does NOT block the polling loop — exit it and proceed to Step 6. (`COMMENTED` with inline comments still requires reply-per-thread before the Step 7 merge gate, but that's a separate condition the operator confirms at merge time, not a poll-loop exit criterion.) If the gh-aw review check ran but no review was posted, inspect logs with `gh run view --log-failed`. Do not retry via GraphQL — gh-aw is event-triggered, not request-triggered.
 
 ## Step 6 — Address Feedback; No Re-request Needed
 
