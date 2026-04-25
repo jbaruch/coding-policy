@@ -4,8 +4,11 @@ description: |
   Reviews every same-repo pull request against the latest published
   `jbaruch/coding-policy` rule set, using an OpenAI-family reviewer model.
   Pairs with `review-anthropic.md`; each workflow self-gates to skip PRs
-  authored by its own family so the active reviewer is always
-  cross-family (see `jbaruch/coding-policy: author-model-declaration`).
+  authored by its own family so the active reviewer is cross-family
+  whenever the declaration permits — when the declaration spans both
+  paired families (e.g., `gpt-5.4 claude-opus-4-7`), or neither paired
+  family (e.g., `gemini-2.5`, `human`-only), both reviewers run as the
+  documented fallback. See `jbaruch/coding-policy: author-model-declaration`.
 
   A pre-step runs `tessl install jbaruch/coding-policy` so the reviewer
   evaluates against the version currently on the registry — not bleeding
@@ -102,7 +105,7 @@ safe-outputs:
 
 You review pull requests against the `jbaruch/coding-policy` rule set. A pre-step has run `tessl install jbaruch/coding-policy --global --yes`, so the policy is available at `$HOME/.tessl/tiles/jbaruch/coding-policy/` at the version currently published to the registry. The install path is global on the runner (outside the workspace), so it survives `actions/checkout`'s untracked-file cleaning.
 
-Your reviewer family is **openai** (engine is Codex / gpt-5.x). The paired workflow `review-anthropic.lock.yml` handles the anthropic family; between the two, exactly the cross-family reviewer does substantive work on any given PR.
+Your reviewer family is **openai** (engine is Codex / gpt-5.x). The paired workflow `review-anthropic.lock.yml` handles the anthropic family. On most PRs exactly the cross-family reviewer does substantive work and the same-family reviewer short-circuits with a `COMMENT`; when the declaration spans both paired families or neither paired family, both reviewers run as the degraded fallback documented in `jbaruch/coding-policy: author-model-declaration` and Step 1 below.
 
 ## Context
 
