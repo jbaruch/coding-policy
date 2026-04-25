@@ -51,7 +51,7 @@ Decide the bump per semver. Patch is the default and is handled automatically by
 
 ## Step 4 — Policy Review Fires Automatically
 
-Pushing the PR branch automatically triggers the paired gh-aw policy reviewers (OpenAI + Anthropic, cross-family by author-model). See the trigger / self-gating / authorship mechanics, plus the trial-period Copilot details, at:
+Opening the PR, or pushing further commits to an existing PR, automatically triggers the paired gh-aw policy reviewers (OpenAI + Anthropic, cross-family by author-model). The workflows are bound to the `pull_request` event (`opened` / `synchronize` / `reopened` / `edited`); a plain `git push` to a non-PR branch does NOT fire them. See the trigger / self-gating / authorship mechanics, plus the trial-period Copilot details, at:
 
 ```text
 skills/release/GH_AW_DETAILS.md
@@ -90,7 +90,8 @@ Loop until `ci.status` is `success` (or `none` if no checks are configured) and 
 ## Step 7 — Merge + Cleanup
 
 Only proceed when:
-- Step 5's poll returns `ci.status` green and no bot has `CHANGES_REQUESTED`, AND
+- Step 5's poll returns `ci.status` green AND no bot has `CHANGES_REQUESTED`, AND
+- Both `reviews.gh_aw.state` and (during trial) `reviews.copilot.state` are NOT `none` — i.e., each gating reviewer has actually posted a review. A reviewer that hasn't run yet leaves `state: none` and `inline_comments: 0`, which would otherwise satisfy the no-CHANGES_REQUESTED check vacuously, AND
 - Every inline comment from Step 5's `inline_comments` count has a `Fixed in <sha>` or `Declining — <reason>` reply per Step 6 (verify by listing the PR's review comments — the poll script tracks counts, not reply state, so the operator confirms thread closure).
 
 A `COMMENTED` review with zero inline comments is fully non-blocking; a `COMMENTED` review with inline comments is non-blocking once every thread has a reply.

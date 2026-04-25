@@ -4,7 +4,7 @@ Reference for Step 4 of the `release` skill — the internals of how the paired 
 
 ## Trigger
 
-Pushing the PR branch fires two paired GitHub Actions workflows on the `pull_request` event:
+Opening a PR, or pushing further commits to an existing PR, fires two paired GitHub Actions workflows on the `pull_request` event (a plain `git push` to a non-PR branch does NOT fire them):
 
 - `.github/workflows/review-openai.lock.yml` — Codex / `gpt-5.4`
 - `.github/workflows/review-anthropic.lock.yml` — Claude Code / `claude-opus-4-6`
