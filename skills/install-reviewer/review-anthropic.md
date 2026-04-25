@@ -19,18 +19,12 @@ description: |
     - ANTHROPIC_API_KEY — Claude Code engine authentication
     - TESSL_TOKEN       — tessl install authentication
 
-  Known limitation: if the consumer repo has a `.mcp.json` at its root
-  declaring any stdio MCP server (including tessl) that depends on a
-  binary not available inside gh-aw's awf sandbox, Claude Code will
-  fail to launch that server and gh-aw will fail the job even when
-  the review itself ran. Workaround: gitignore `.mcp.json` and keep a
-  `.mcp.json.example` for local dev (the same approach this tile uses
-  in its own repo). The Claude Code CLI version bundled with current
-  gh-aw releases has no flag to skip project `.mcp.json` discovery while
-  preserving gh-aw's own MCP servers, so the consumer-side workaround
-  is the only current fix. Tracked upstream in
-  jbaruch/coding-policy#15 for a better solution once gh-aw bumps
-  its CLI.
+  Project `.mcp.json` is neutralized at runtime: this workflow runs
+  Claude with `--strict-mcp-config` (set under `engine.args` below) so
+  the agent only loads the MCP servers gh-aw injects via its own
+  `--mcp-config`. Any stdio MCP server the consumer repo declares in
+  its checked-in `.mcp.json` is ignored, which sidesteps the awf
+  sandbox's missing-binary failure that would otherwise kill the job.
 
 on:
   # `edited` is intentional: the Step 1 self-review gate parses
@@ -52,6 +46,19 @@ permissions:
 engine:
   id: claude
   model: claude-opus-4-7
+  # `--strict-mcp-config` tells Claude Code to use ONLY the MCP servers
+  # gh-aw injects via `--mcp-config`, ignoring any project-local
+  # `.mcp.json` the consumer repo ships. Without this, Claude auto-loads
+  # the consumer's `.mcp.json` inside the awf sandbox, attempts to launch
+  # any stdio MCP server it declares (e.g., `tessl mcp start`), fails
+  # because the binary isn't on the sandbox's PATH, and gh-aw fails the
+  # whole job — even though the review itself ran cleanly. Closes
+  # jbaruch/coding-policy#15. Requires gh-aw >= v0.71.0 (where
+  # `engine.args` was added) and Claude Code CLI >= 2.1.x (where
+  # `--strict-mcp-config` was added); the preflight already enforces
+  # the gh-aw floor.
+  args:
+    - "--strict-mcp-config"
   env:
     ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
 

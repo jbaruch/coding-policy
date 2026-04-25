@@ -119,23 +119,6 @@ check_branch_not_remote() {
   fi
 }
 
-# Advisory check (not a failure): a committed .mcp.json at the repo root
-# will be auto-loaded by Claude Code in the Anthropic reviewer's sandbox.
-# Any stdio MCP server whose binary isn't on the awf sandbox's PATH
-# (tessl is the common case) fails to launch and gh-aw fails the job
-# even when the review itself would have run cleanly. The install flow
-# can't fix this on the consumer's behalf (gh-aw has no post-checkout
-# hook, Claude Code CLI 2.1.98 has no skip-project-mcp flag), so we
-# surface the finding as a warning and include the workaround in the PR.
-check_root_mcp_json_absent() {
-  # Only flag if the file is tracked by git — an untracked .mcp.json is
-  # a local-dev artifact that won't land in the PR head and won't affect
-  # the workflow runs.
-  if git ls-files --error-unmatch .mcp.json >/dev/null 2>&1; then
-    push_warning "root-mcp-json-present" "Repo contains a committed '.mcp.json' at the root. Claude Code auto-loads it in the Anthropic reviewer's sandbox, and any stdio MCP server it declares (e.g. 'tessl mcp start') will fail to launch because its binary is not on the awf sandbox's PATH — gh-aw will fail the job even though the review would have run. Before the Anthropic reviewer can run cleanly, add '.mcp.json' to .gitignore, rename the committed file to '.mcp.json.example' for local-dev handoff, and commit that change (either in this install-reviewer PR or a follow-up). The install-reviewer skill does NOT do this automatically — it is a consumer-side decision."
-  fi
-}
-
 main() {
   check_in_git_worktree
   check_gh_installed
@@ -157,8 +140,6 @@ main() {
     if git remote get-url origin >/dev/null 2>&1; then
       check_branch_not_remote
     fi
-    # Advisory checks only run in a git worktree (they use `git ls-files`).
-    check_root_mcp_json_absent
   fi
 
   local failures_json
