@@ -81,7 +81,13 @@ If any scenario fails to run, diagnose and fix before proceeding.
 
 For each scenario, compute `lift = with_context_score - baseline_score`. Lift is the number that matters — aggregate attainment alone is a vanity metric.
 
-Apply `skills/eval-authoring/LIFT_ANALYSIS.md` to classify each scenario by its lift band, run the three-cause diagnosis on weak / no-lift positive cases, decide whether negative-case lift is healthy or null, and triage failing criteria into a skill / task / criteria fix. Bring the results back here, then proceed immediately to Step 10.
+Classify each scenario by its lift band, run the three-cause diagnosis on weak / no-lift positive cases, decide whether negative-case lift is healthy or null, and triage failing criteria into a skill / task / criteria fix per the reference at:
+
+```text
+skills/eval-authoring/LIFT_ANALYSIS.md
+```
+
+Bring the results back here, then proceed immediately to Step 10.
 
 ## Step 10 — Iterate
 

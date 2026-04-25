@@ -8,7 +8,7 @@ The script MUST enforce all of:
 
 - **Step-1 readiness gate** — run the project's tests AND linter before pushing. Fail loudly if either fails. Never push from a script that doesn't gate on green tests + clean lint.
 - **Conventional-commits PR title** — construct or validate the title against `<type>(<scope>): <imperative summary>`. Taking the title as a raw argument and passing it straight to `gh pr create` defeats the convention; either build the title from `<type>`, `<scope>`, `<summary>` inputs, or regex-validate the supplied title before push.
-- **`**Author-Model:**` line, exact** — the script must preserve or emit the literal `**Author-Model:**` marker (with the bold-marker asterisks). The paired-reviewer family-mismatch logic in `rules/author-model-declaration.md` keys off that exact form; an unstyled `Author-Model:` will still parse but a wrapper script that drops the marker entirely turns every reviewer run into an early `REQUEST_CHANGES`.
+- **`**Author-Model:**` line, preferred bold form** — the script should preserve or emit the bold marker (`**Author-Model:**`) per `rules/author-model-declaration.md`'s "Explicit (preferred)" form. The reviewer prompts also accept bare `Author-Model:` as a fallback, so the script won't break by emitting the unstyled form, but a wrapper that drops the marker line entirely turns every reviewer run into an early `REQUEST_CHANGES` (the rule's "Neither present is a policy violation" clause).
 
 ## Wrapping Step 7 (merge + cleanup) in a script
 

@@ -37,7 +37,13 @@ Structured workflow for shipping code: PR creation, automated policy review, mer
     ```
 - **Author-Model is mandatory** per `rules/author-model-declaration.md`. Use the exact model ID you're running under (e.g., `claude-opus-4-7`, `gpt-5.4`), `human` for a hand-authored PR, or every contributing model space-separated for mixed authorship.
 
-When this step is wrapped in a reusable script (e.g., `release.sh` that other devs run unattended), see `skills/release/SCRIPTING.md` for the gates the script must enforce.
+When this step is wrapped in a reusable script (e.g., `release.sh` that other devs run unattended), see the script-wrapping gates at:
+
+```text
+skills/release/SCRIPTING.md
+```
+
+Proceed immediately to Step 3.
 
 ## Step 3 — Reason About Versioning
 
@@ -45,9 +51,15 @@ Decide the bump per semver. Patch is the default and is handled automatically by
 
 ## Step 4 — Policy Review Fires Automatically
 
-Pushing the PR branch automatically triggers the paired gh-aw policy reviewers (OpenAI + Anthropic, cross-family by author-model). See `skills/release/GH_AW_DETAILS.md` for the trigger / self-gating / authorship mechanics.
+Pushing the PR branch automatically triggers the paired gh-aw policy reviewers (OpenAI + Anthropic, cross-family by author-model). See the trigger / self-gating / authorship mechanics, plus the trial-period Copilot details, at:
 
-**Trial — keep Copilot in parallel.** During gh-aw validation, also request Copilot via `skills/release/request-copilot-review.sh <owner> <repo> <pr-number>`. Both reviews gate the merge. See `skills/release/GH_AW_DETAILS.md` for trial scope, retirement criteria, and the script's mechanics.
+```text
+skills/release/GH_AW_DETAILS.md
+```
+
+**Trial — keep Copilot in parallel.** During gh-aw validation, also request Copilot via `skills/release/request-copilot-review.sh <owner> <repo> <pr-number>`. Both reviews gate the merge.
+
+Proceed immediately to Step 5.
 
 ## Step 5 — Poll PR State
 
@@ -77,7 +89,7 @@ Loop until `ci.status` is `success` (or `none` if no checks are configured) and 
 
 ## Step 7 — Merge + Cleanup
 
-Only proceed when CI is green AND the latest gh-aw review has zero blocking comments AND (during trial) the latest Copilot review has zero comments AND all review threads have replies.
+Only proceed when CI is green, no bot has `CHANGES_REQUESTED`, and every review thread has a reply. `COMMENTED` reviews with inline comments are non-blocking IF every inline comment has a `Fixed in <sha>` or `Declining — <reason>` reply (per Step 6); a `COMMENTED` review with zero inline comments is fully non-blocking. This is the same gate Step 5 polls for, applied at merge time.
 
 ```bash
 # Merge

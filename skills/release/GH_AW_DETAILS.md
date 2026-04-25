@@ -7,7 +7,7 @@ Reference for Step 4 of the `release` skill — the internals of how the paired 
 Pushing the PR branch fires two paired GitHub Actions workflows on the `pull_request` event:
 
 - `.github/workflows/review-openai.lock.yml` — Codex / `gpt-5.4`
-- `.github/workflows/review-anthropic.lock.yml` — Claude Code / `claude-opus-4-7`
+- `.github/workflows/review-anthropic.lock.yml` — Claude Code / `claude-opus-4-6`
 
 Both run on every `opened`, `synchronize`, `reopened`, and `edited` event. Each lock file is compiled from its `.md` gh-aw source via `gh aw compile` — the lock is what GitHub Actions executes; the `.md` is what humans edit.
 

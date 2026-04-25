@@ -26,7 +26,7 @@ Scaffold the gh-aw PR policy reviewer pair (OpenAI + Anthropic) into a consumer 
 Runs every precondition (git worktree, GitHub CLI install + auth, gh-aw extension at minimum version, tile template, origin remote, local + remote branch clear) and returns one JSON object: `{"ok": bool, "failures": [...], "warnings": [...]}`.
 
 - **Exit 0, empty `failures`** — every precondition passed; proceed to Step 2.
-- **Exit 1, populated `failures`** — report each failure's `reason` verbatim and stop. Every failure carries a concrete recovery command. The gh-aw extension is `github/gh-aw` (lives under the `github` org, not the tile owner) and must be v0.71.0+ — install with `gh extension install github/gh-aw`.
+- **Exit 1, populated `failures`** — report each failure's `reason` verbatim and stop. Every failure carries a concrete recovery command. The gh-aw extension is `github/gh-aw` (lives under the `github` org, not the tile owner) and must be v0.71.0+. Install with `gh extension install github/gh-aw --pin v0.71.0` — the unpinned form would land on the latest *stable* release (currently below v0.71.0; everything from v0.69.0 onward is marked prerelease) and fail the version check.
 - **Non-empty `warnings`** — informational only; never affects `ok` or the exit code. Report each `reason` verbatim alongside the Step 1 outcome and remember them for Step 7's PR body. Do not stop; proceed to Step 2.
 
 ## Step 2 — Refuse Overwrite
@@ -63,6 +63,10 @@ Pushes `feat/add-coding-policy-review` to origin with upstream tracking. Idempot
 
 ## Step 7 — Open PR
 
-`gh pr create` with title `ci(review): add jbaruch/coding-policy PR review workflows` and a body that follows `skills/install-reviewer/PR_BODY_TEMPLATE.md` — that file lists the four required content blocks (cross-family rule explainer, required secrets, load-indicator note, conditional warnings section) the body must carry.
+`gh pr create` with title `ci(review): add jbaruch/coding-policy PR review workflows` and a body that follows the four required content blocks (cross-family rule explainer, required secrets, load-indicator note, conditional warnings section) defined at:
+
+```text
+skills/install-reviewer/PR_BODY_TEMPLATE.md
+```
 
 Return the PR URL. If Step 1 emitted any warnings, surface them inline in your user-facing summary too (not only in the PR body) so the user sees them immediately without opening the PR. Finish here — the user validates the secrets, acts on any warnings, and merges.
