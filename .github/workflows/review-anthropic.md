@@ -25,6 +25,13 @@ permissions:
 engine:
   id: claude
   model: claude-opus-4-6
+  # `--strict-mcp-config` tells Claude Code to use ONLY the MCP servers
+  # gh-aw injects via `--mcp-config`, ignoring any project-local
+  # `.mcp.json`. Mirrors the same fix applied to the consumer-facing
+  # install-reviewer template (skills/install-reviewer/review-anthropic.md);
+  # see jbaruch/coding-policy#15 for the underlying issue.
+  args:
+    - "--strict-mcp-config"
   env:
     ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
 
