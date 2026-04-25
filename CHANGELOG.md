@@ -2,7 +2,22 @@
 
 ## Unreleased
 
+## 0.2.0
+
+First formal minor since 0.1.0 — promotes everything accumulated across the 0.1.x patch line into a tagged release, plus eval-driven skill tuning that lifted the with-context aggregate from 93 to 98 (lift +17 → +22). Per-scenario wins from the tuning pass: Coverage Gap 74 → 100 (+26), Review Response 85 → 97 (+12), Copilot via GraphQL 89 → 97 (+8), PR Merge Cleanup verified at 99 (held). Three negative-lift / low-with-context regressions in v0.1.20 were diagnosed against the run-019dbffe artifacts and fixed at the skill layer rather than by softening criteria.
+
+### Skill tuning (driven by eval log analysis)
+
+- **eval-authoring** — Step 7 (Fill Coverage Gaps) now spells out the `criteria.json` wrapper format (`{context, type: "weighted_checklist", checklist: [...]}`) with a code example, requires `max_score` weights to sum to exactly 100, and warns against mirroring plain-array seed fixtures from the test repo under evaluation. Step 7 also makes the Steps-4–5 review/fix loop explicit for newly-authored scenarios — the prior "Repeat Steps 4–6" got skipped on self-authored content. Step 5 (Fix Issues) now states that a misaligned, leaking, or otherwise unsalvageable criterion must be **removed and the remaining criteria reweighted to sum to 100** — bumping a bad criterion's weight to keep the math tidy makes the scenario worse, not better. Eliminated the Coverage Gap regression (74 → 100) and the Quality Audit "increase the misaligned criterion's weight" failure mode.
+- **install-reviewer** — Step 1 (Preflight) now states the gh-aw extension's canonical owner in SKILL.md prose (`gh extension install github/gh-aw`, with an explicit note that the extension lives under the `github` org, not the tile owner). Previously this string lived only inside `preflight.sh`'s failure message, where the agent overlooked it and substituted `jbaruch/gh-aw` from tile-owner pattern-matching.
+- **release** — Step 2 (Create PR) and Step 7 (Merge + Cleanup) each gained a "When wrapping this step in a reusable script" paragraph: scripts that automate PR creation must enforce the tile's readiness gate (tests + linter), construct/validate the conventional-commits title format, and pass through the `Author-Model:` line; scripts that automate merge must enforce the same pre-merge gates the agent does (CI green, every bot review `APPROVED` or non-blocking `COMMENTED`, no unresolved threads), use `git branch -d` (never `-D`) for the local-branch delete, and verify the publish workflow fired before printing the final summary. Step 6 (Address Feedback) reinforces the prescribed reply literals: accept replies must begin with the literal phrase `Fixed in <sha>` (`Done` / `Resolved` / `Accepted and fixed` do NOT satisfy); decline replies must begin with `Declining — <reason>` using a U+2014 em dash followed by a space (NOT a period, hyphen, or en dash). Eliminated the Copilot-via-GraphQL low-with-context regression and the PR Merge Cleanup mid-iteration regression; recovered Review Response Guide to ~100.
+
 ### Rules
+
+- **author-model-declaration** — Every PR declares its author model via a `**Author-Model:**` line in the body (preferred) or a `Co-authored-by:` git trailer (fallback). Defines model families (anthropic, openai, google), plus a special `human` value that maps to no family, and mixed-authorship semantics so the paired reviewers can pick a cross-family reviewer and dodge self-review bias. Missing declaration blocks the PR via early `REQUEST_CHANGES` before the diff is read.
+- **stateful-artifacts** — Cross-invocation JSON state files a skill writes and reads between runs. Every artifact has a documented schema, a single owner skill, a `schema_version` field, and a writer/reader contract. Artifacts are hints, not authority — verify against the live source before acting on a recalled value. Migrations happen under the owner skill, not as a side effect of unrelated runs.
+
+### Rule tightenings
 
 - **author-model-declaration** — Every PR declares its author model via a `**Author-Model:**` line in the body (preferred) or a `Co-authored-by:` git trailer (fallback). Defines model families (anthropic, openai, google), plus a special `human` value that maps to no family, and mixed-authorship semantics so the paired reviewers can pick a cross-family reviewer and dodge self-review bias. Missing declaration blocks the PR via early `REQUEST_CHANGES` before the diff is read.
 - **stateful-artifacts** — Cross-invocation JSON state files a skill writes and reads between runs. Every artifact has a documented schema, a single owner skill, a `schema_version` field, and a writer/reader contract. Artifacts are hints, not authority — verify against the live source before acting on a recalled value. Migrations happen under the owner skill, not as a side effect of unrelated runs.
@@ -30,9 +45,9 @@
 
 - **eval-authoring** — Step 4 (Review) and `REVIEW_CHECKLIST.md` rewritten around the new task/criteria shape: is the task a SITUATION (no technique leak) and do the criteria grade the specific manner the tile prescribes? Leaking narrowed to tile-internal implementation details only; tile-prescribed conventions and invented literals are explicitly allowed. Step 9 (Analyze Results) centres on lift (`with_context - baseline`) rather than attainment, with a three-cause diagnosis for near-zero lift: (1) coincidence with universal competence; (2) task leaked the technique — fix the task, not the criterion; (3) criteria grade engineering-101 rather than tile-specific manner — rewrite to grade the specific prescription, not retire. High-lift scenarios testing specific tile choices must be kept, not softened toward "testing reasoning" that baseline already does.
 
-## 0.2.0
+## 0.1.3
 
-Add context artifact authoring rules and eval-authoring skill. Self-audited the tile against its own rules and iterated until 99% eval average.
+Add context artifact authoring rules and eval-authoring skill. Self-audited the tile against its own rules and iterated until 99% eval average. (Originally drafted as `## 0.2.0` in this changelog but actually shipped as patch 0.1.3 by the auto-bumper; relabelled in the 0.2.0 release to make the version timeline consistent with the registry — patches 0.1.4 through 0.1.20 fall between this entry and the new 0.2.0 above.)
 
 ### Rules
 

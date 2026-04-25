@@ -37,6 +37,8 @@ Structured workflow for shipping code: PR creation, automated policy review, mer
     ```
 - **Author-Model is mandatory** per `rules/author-model-declaration.md`. Use the exact model ID you (the agent) are running under (e.g., `claude-opus-4-7`, `gpt-5.4`), or `human` for a hand-authored PR, or list every contributing model space-separated for mixed authorship (e.g., `human claude-opus-4-7`). The paired gh-aw reviewers read this line to pick the cross-family reviewer; omitting it blocks the PR — each reviewer emits `REQUEST_CHANGES` immediately and exits without reading the diff.
 
+**When wrapping this step in a reusable script** (e.g., `release.sh` that other devs run): the script itself must enforce the Step 1 readiness gate (run tests AND linter before pushing; fail if either fails) and must construct or validate the PR title against `<type>(<scope>): <imperative summary>` — taking the title as a raw argument and passing it straight to `gh pr create` bypasses the convention this skill exists to hold. The script must also pass through the `Author-Model:` line.
+
 Proceed immediately to Step 3 — do not wait for reviews before reasoning about version.
 
 ## Step 3 — Reason About Versioning
@@ -85,9 +87,9 @@ Loop until `ci.status` is `success` (or `none` if no checks are configured) and 
 
 - **CI failures**: Fix every one, no exceptions
 - **Review suggestions**: Apply what's right and reasonable. Push back on anything that misreads scope or over-engineers — but cite concrete evidence (file:line, log line, spec quote) when declining; never hand-wave
-- **Reply on EVERY thread** — nothing left dangling:
-  - Accepted: "Fixed in `<sha>`"
-  - Declined: "Declining — `<reason with cited evidence>`"
+- **Reply on EVERY thread** — nothing left dangling. Use these exact opening literals so threads scan consistently across the team:
+  - Accepted — reply begins with the literal phrase `Fixed in <sha>` (substitute the real commit hash, or keep the `<sha>` marker if you're drafting a template). `Done`, `Resolved`, `Applied the fix`, or `Accepted and fixed` do NOT satisfy the convention, even when semantically equivalent
+  - Declined — reply begins with the literal phrase `Declining — <reason with cited evidence>`. The separator is an em dash (`—`, U+2014) followed by a space, NOT a period, a hyphen (`-`), or an en dash (`–`). Follow the em dash with a concrete reference (file:line, quoted spec clause, linked prior issue)
 - Push fixes to the same branch
 - **Re-run is automatic**: `pull_request: synchronize` re-triggers the gh-aw workflow on every push — no manual re-request. During the trial, Copilot still needs a re-request via `skills/release/request-copilot-review.sh` (same args as Step 4).
 - Repeat Step 5 until every active bot review is `APPROVED` or `COMMENTED` with no blocking items, and every thread has a reply.
@@ -114,5 +116,7 @@ After merge:
 - Verify the merge landed on main
 - Check that the publish CI workflow was triggered
 - Report the outcome: merged PR URL, version published (if applicable)
+
+**When wrapping this step in a reusable script** (e.g., `merge-and-cleanup.sh` that other devs run): the script must enforce the same pre-merge gates the agent does — CI status is `success` (or `none`), every bot review is `APPROVED` or non-blocking `COMMENTED`, no review thread is unresolved — and fail loudly if any gate is red instead of proceeding with the merge. The local-branch delete uses `git branch -d` (safe delete that refuses to drop unmerged work), never `git branch -D`. Post-merge, the script verifies main advanced to the merge commit and confirms the publish/release workflow fired before printing the final summary — fire-and-forget scoring zero because a silent publish failure is the exact problem the cleanup automation exists to catch.
 
 Finish here — the skill is complete.

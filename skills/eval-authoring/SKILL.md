@@ -42,15 +42,31 @@ If no issues found in a scenario, proceed silently to the next one. Proceed imme
 
 Edit `criteria.json` and `task.md` to remove bleeding, remove leaking, improve failure messages, and align criteria with task. See `skills/eval-authoring/REVIEW_CHECKLIST.md` for definitions.
 
+When a criterion is misaligned, leaking, or otherwise unsalvageable, **remove it** and reweight the remaining criteria so the checklist still sums to 100 — do NOT keep a bad criterion just to preserve the existing weights. Bumping a misaligned criterion's `max_score` to keep the math tidy makes the scenario worse, not better. If a fix removes the only criterion that gave the scenario tile-specific signal, the scenario itself is unsalvageable — delete it per Step 6.
+
 ## Step 6 — Delete Unsalvageable Scenarios
 
 Remove scenario directories that can't be fixed: task tests an internal detail, task is too vague, or fixing bleeding would rewrite the entire task.
 
 ## Step 7 — Fill Coverage Gaps
 
-Write new scenarios directly rather than re-generating — you have full plugin context, the cloud generator doesn't. Each scenario is a directory in `evals/` with `task.md` and `criteria.json` (weighted checklist with `name`, `description`, `max_score` per criterion).
+Write new scenarios directly rather than re-generating — you have full plugin context, the cloud generator doesn't. Each scenario is a directory in `evals/<name>/` with two files: `task.md` and `criteria.json`.
 
-Repeat Steps 4–6 for new scenarios.
+`criteria.json` MUST use the weighted-checklist wrapper — the scorer rejects bare arrays:
+
+```json
+{
+  "context": "<one-paragraph rationale: what this scenario tests and why it measures tile value (not baseline reasoning)>",
+  "type": "weighted_checklist",
+  "checklist": [
+    { "name": "<short-criterion-name>", "max_score": <int>, "description": "<what passes and what failure looks like>" }
+  ]
+}
+```
+
+Weights in `checklist[].max_score` MUST sum to exactly 100. Do not distribute evenly — weight the criteria that most specifically grade tile-prescribed behaviour. Look at a sibling `evals/*/criteria.json` in this tile to anchor on the exact shape; ignore any pre-existing plain-array files in the test repo under evaluation — those are seed data, not the format to emit.
+
+After writing each new scenario, run the Step 4 review against it and apply Step 5 fixes before moving on — new scenarios need the same no-bleeding / no-leaking audit as generated ones, and the failure mode on this step is to skip review on content you authored yourself.
 
 ## Step 8 — Run Evals
 
