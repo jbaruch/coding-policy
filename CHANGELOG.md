@@ -19,11 +19,6 @@ First formal minor since 0.1.0 — promotes everything accumulated across the 0.
 
 ### Rule tightenings
 
-- **author-model-declaration** — Every PR declares its author model via a `**Author-Model:**` line in the body (preferred) or a `Co-authored-by:` git trailer (fallback). Defines model families (anthropic, openai, google), plus a special `human` value that maps to no family, and mixed-authorship semantics so the paired reviewers can pick a cross-family reviewer and dodge self-review bias. Missing declaration blocks the PR via early `REQUEST_CHANGES` before the diff is read.
-- **stateful-artifacts** — Cross-invocation JSON state files a skill writes and reads between runs. Every artifact has a documented schema, a single owner skill, a `schema_version` field, and a writer/reader contract. Artifacts are hints, not authority — verify against the live source before acting on a recalled value. Migrations happen under the owner skill, not as a side effect of unrelated runs.
-
-### Rule tightenings
-
 - **skill-authoring** — Document `user-invocable: false` as an optional frontmatter field for background-knowledge skills the runtime loads as context but the user should never invoke directly.
 - **script-delegation** — Spell out the precheck-gating JSON contract with `wake_agent` as a boolean and `data` as an object (e.g., `{"wake_agent": true, "data": {}}` on the last line), the zero-token-cost rationale for no-op runs, and the single-fetch gate-and-payload pattern.
 - **context-artifacts** — Enumerate the review rubric: frontmatter validity, sequential-execution preamble, flat step numbering, typed `Skill()` calls, silence-rule compliance, channel-appropriate formatting.
