@@ -90,7 +90,7 @@ Loop until `ci.status` is `success` (or `none` if no checks are configured) and 
 ## Step 7 — Merge + Cleanup
 
 Only proceed when:
-- Step 5's poll returns `ci.status` green AND no bot has `CHANGES_REQUESTED`, AND
+- Step 5's poll returns `ci.status` as `success` (or `none` if no checks are configured) AND no bot has `CHANGES_REQUESTED`, AND
 - Both `reviews.gh_aw.state` and (during trial) `reviews.copilot.state` are NOT `none` — i.e., each gating reviewer has actually posted a review. A reviewer that hasn't run yet leaves `state: none` and `inline_comments: 0`, which would otherwise satisfy the no-CHANGES_REQUESTED check vacuously, AND
 - Every inline comment from Step 5's `inline_comments` count has a `Fixed in <sha>` or `Declining — <reason>` reply per Step 6 (verify by listing the PR's review comments — the poll script tracks counts, not reply state, so the operator confirms thread closure).
 
