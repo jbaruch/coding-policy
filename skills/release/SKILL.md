@@ -89,7 +89,11 @@ Loop until `ci.status` is `success` (or `none` if no checks are configured) and 
 
 ## Step 7 — Merge + Cleanup
 
-Only proceed when CI is green, no bot has `CHANGES_REQUESTED`, and every review thread has a reply. `COMMENTED` reviews with inline comments are non-blocking IF every inline comment has a `Fixed in <sha>` or `Declining — <reason>` reply (per Step 6); a `COMMENTED` review with zero inline comments is fully non-blocking. This is the same gate Step 5 polls for, applied at merge time.
+Only proceed when:
+- Step 5's poll returns `ci.status` green and no bot has `CHANGES_REQUESTED`, AND
+- Every inline comment from Step 5's `inline_comments` count has a `Fixed in <sha>` or `Declining — <reason>` reply per Step 6 (verify by listing the PR's review comments — the poll script tracks counts, not reply state, so the operator confirms thread closure).
+
+A `COMMENTED` review with zero inline comments is fully non-blocking; a `COMMENTED` review with inline comments is non-blocking once every thread has a reply.
 
 ```bash
 # Merge
