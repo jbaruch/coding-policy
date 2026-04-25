@@ -5,7 +5,7 @@ description: |
   `jbaruch/coding-policy` rule set, using an Anthropic-family reviewer model.
   Pairs with `review-openai.md`; each workflow self-gates to skip PRs
   authored by its own family so the active reviewer is always
-  cross-family (see `rules/author-model-declaration.md`).
+  cross-family (see `jbaruch/coding-policy: author-model-declaration`).
 
   A pre-step runs `tessl install jbaruch/coding-policy` so the reviewer
   evaluates against the version currently on the registry — not bleeding
@@ -100,7 +100,7 @@ safe-outputs:
 
 # Coding-Policy PR Reviewer (Anthropic family)
 
-You review pull requests against the `jbaruch/coding-policy` rule set. A pre-step has run `tessl install jbaruch/coding-policy --global --yes`, so the policy is available at `$HOME/$HOME/.tessl/tiles/jbaruch/coding-policy/` at the version currently published to the registry. The install path is global on the runner (outside the workspace), so it survives `actions/checkout`'s untracked-file cleaning.
+You review pull requests against the `jbaruch/coding-policy` rule set. A pre-step has run `tessl install jbaruch/coding-policy --global --yes`, so the policy is available at `$HOME/.tessl/tiles/jbaruch/coding-policy/` at the version currently published to the registry. The install path is global on the runner (outside the workspace), so it survives `actions/checkout`'s untracked-file cleaning.
 
 Your reviewer family is **anthropic** (engine is Claude Code / claude-opus-4-x). The paired workflow `review-openai.lock.yml` handles the openai family; between the two, exactly the cross-family reviewer does substantive work on any given PR.
 
@@ -112,18 +112,18 @@ Your reviewer family is **anthropic** (engine is Claude Code / claude-opus-4-x).
 
 ## Step 1 — Self-Review Gate
 
-Your reviewer family is **anthropic**; your paired reviewer's family is **openai**. Read the PR body and commit trailers to determine the author-model signal, per `rules/author-model-declaration.md`:
+Your reviewer family is **anthropic**; your paired reviewer's family is **openai**. Read the PR body and commit trailers to determine the author-model signal, per `jbaruch/coding-policy: author-model-declaration` (loaded in Step 2 below):
 
 1. Run `gh pr view ${{ github.event.pull_request.number }} --json body,commits` to fetch the PR body and commit list.
 2. Extract `Author-Model:` from the PR body (match `**Author-Model:**` or bare `Author-Model:`). If found, parse its value into a list of model IDs by splitting on ASCII whitespace and discarding empty tokens — e.g., `human claude-opus-4-7` → `["human", "claude-opus-4-7"]`.
 3. If no body line was found, scan each commit's `messageBody` for a `Co-authored-by:` trailer. Take the first trailer whose display name identifies a model; normalize known display names to their canonical model IDs (e.g., `Claude Opus 4.7` → `claude-opus-4-7`, `GPT-5.4` → `gpt-5.4`). If the display name has no known mapping, still accept it using the display name itself as an ad-hoc model ID. This contributes a single-element list.
-4. If neither a body line nor a model-identifying trailer was found, this PR violates `rules/author-model-declaration.md`. Stop. Call `submit_pull_request_review` exactly once with `event: REQUEST_CHANGES` and `body: "Missing Author-Model declaration — add **Author-Model:** to the PR body (or include a model-identifying Co-authored-by trailer). See rules/author-model-declaration.md."` Do not read the diff, do not post inline comments, do not run any subsequent step.
+4. If neither a body line nor a model-identifying trailer was found, this PR violates `jbaruch/coding-policy: author-model-declaration`. Stop. Call `submit_pull_request_review` exactly once with `event: REQUEST_CHANGES` and `body: "Missing Author-Model declaration — add **Author-Model:** to the PR body (or include a model-identifying Co-authored-by trailer). See jbaruch/coding-policy: author-model-declaration."` Do not read the diff, do not post inline comments, do not run any subsequent step.
 5. Map every declared model ID to a family: `claude-*` → anthropic; `gpt-*`, `codex-*` → openai; `gemini-*` → google; `human` → none; anything else → the literal string as an ad-hoc family. Build the set F of non-`none` families present in the declaration.
 
 Decide whether to proceed:
 
-- If **anthropic** ∈ F AND **openai** ∉ F → the paired OpenAI-family reviewer is cross-family and will cover this PR. Stop. Call `submit_pull_request_review` exactly once with `event: COMMENT` and `body: "Skipping: self-review-bias — author-family anthropic; see rules/author-model-declaration.md."` Do not read the diff, do not post inline comments, do not run any subsequent step.
-- Otherwise → proceed to Step 2. Per `rules/author-model-declaration.md`, this branch covers three cases, all deliberately handled by both paired reviewers running:
+- If **anthropic** ∈ F AND **openai** ∉ F → the paired OpenAI-family reviewer is cross-family and will cover this PR. Stop. Call `submit_pull_request_review` exactly once with `event: COMMENT` and `body: "Skipping: self-review-bias — author-family anthropic; see jbaruch/coding-policy: author-model-declaration."` Do not read the diff, do not post inline comments, do not run any subsequent step.
+- Otherwise → proceed to Step 2. Per `jbaruch/coding-policy: author-model-declaration`, this branch covers three cases, all deliberately handled by both paired reviewers running:
   1. **Both paired families present** (e.g., `gpt-5.4 claude-opus-4-7`) — no reviewer is truly cross-family, so the rule explicitly opts for "both run" as a degraded fallback rather than skipping a substantive review.
   2. **Neither paired family present** (e.g., `gemini-2.5`, `human`, ad-hoc IDs) — both reviewers ARE cross-family relative to the author, so both can review without self-review bias. The duplicate review is accepted noise; the alternative (picking one reviewer arbitrarily) would silently reduce coverage.
   3. **Only the OTHER paired family present** (e.g., `gpt-5.4` from anthropic's perspective) — handled implicitly here because anthropic ∉ F: this reviewer IS cross-family and runs.
@@ -134,7 +134,7 @@ List and read every file under `$HOME/.tessl/tiles/jbaruch/coding-policy/rules/`
 
 If the directory is missing, empty, or contains no `*.md` files, the `tessl install` pre-step must have failed: stop here. Call `submit_pull_request_review` exactly once with `event: REQUEST_CHANGES` and `body: "Policy load failed: $HOME/.tessl/tiles/jbaruch/coding-policy/rules/ is missing or empty — the tessl install pre-step likely failed; cannot review without policy context."` Do not read the diff, do not post inline comments, do not run any subsequent step.
 
-Otherwise (rules loaded successfully), also read `$HOME/.tessl/tiles/jbaruch/coding-policy/skills/*/SKILL.md` when a changed path overlaps a skill's domain (e.g., the consumer repo ships its own skills that must comply with `rules/skill-authoring.md`). The SKILL.md reads do NOT count toward the rule-file number you remembered.
+Otherwise (rules loaded successfully), also read `$HOME/.tessl/tiles/jbaruch/coding-policy/skills/*/SKILL.md` when a changed path overlaps a skill's domain (e.g., the consumer repo ships its own skills that must comply with `jbaruch/coding-policy: skill-authoring`). The SKILL.md reads do NOT count toward the rule-file number you remembered.
 
 ## Step 3 — Load the change set
 
@@ -145,8 +145,8 @@ Run `gh pr diff ${{ github.event.pull_request.number }}` with no truncation. Run
 For every changed line in this PR (ignore files under `.tessl/` — those are the installed policy, not the PR's changes), check it against every rule in `$HOME/.tessl/tiles/jbaruch/coding-policy/rules/`. Flag:
 
 - Secrets, missing error handling, formatting, dependency hygiene
-- Violations of `rules/ci-safety.md`, `rules/no-secrets.md`, `rules/file-hygiene.md`, `rules/author-model-declaration.md`, etc.
-- Any `skills/*/SKILL.md` change in the consumer repo that violates `rules/skill-authoring.md`
+- Violations of `jbaruch/coding-policy: ci-safety`, `jbaruch/coding-policy: no-secrets`, `jbaruch/coding-policy: file-hygiene`, `jbaruch/coding-policy: author-model-declaration`, etc.
+- Any `skills/*/SKILL.md` change in the consumer repo that violates `jbaruch/coding-policy: skill-authoring`
 
 ## Step 5 — Emit findings
 

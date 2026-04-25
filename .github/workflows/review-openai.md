@@ -12,7 +12,7 @@ description: |
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened]
+    types: [opened, synchronize, reopened, edited]
 
 permissions:
   contents: read
@@ -27,8 +27,18 @@ engine:
 timeout-minutes: 15
 
 network:
+  # Codex's `defaults` excludes GitHub and ChatGPT telemetry hosts; both must
+  # be listed explicitly. `github` covers github.com / codeload / raw /
+  # objects, `threat-detection` covers api.github.com (gh-aw ecosystem
+  # identifiers — preferred over enumerating individual domains per the
+  # compiler's strict-mode recommendation). Mirrors the consumer-facing
+  # install-reviewer template (skills/install-reviewer/review-openai.md).
   allowed:
     - defaults
+    - github
+    - threat-detection
+    - ab.chatgpt.com
+    - chatgpt.com
 
 tools:
   bash:
