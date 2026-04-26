@@ -2,8 +2,9 @@
 name: release
 description: >
   Structured workflow for shipping code via GitHub pull requests: PR creation,
-  automated policy review via gh-aw (with Copilot review kept in parallel during
-  the trial), merge, and branch cleanup. Covers readiness checks, version
+  dual-lens automated review (gh-aw for `rules/*.md` compliance + Copilot for
+  doc accuracy and cross-step consistency), merge, and branch cleanup. Covers
+  readiness checks, version
   reasoning, review polling, feedback handling, and post-merge verification.
   Use when the user wants to open a pull request, ship code, merge a branch,
   or handle post-merge cleanup on GitHub.
@@ -51,13 +52,17 @@ Decide the bump per semver. Patch is the default and is handled automatically by
 
 ## Step 4 — Policy Review Fires Automatically
 
-Opening the PR, or pushing further commits to an existing PR, automatically triggers the paired gh-aw policy reviewers (OpenAI + Anthropic, cross-family by author-model). The workflows are bound to the `pull_request` event (`opened` / `synchronize` / `reopened` / `edited`); a plain `git push` to a non-PR branch does NOT fire them. See the trigger / self-gating / authorship mechanics, plus the trial-period Copilot details, at:
+Opening the PR, or pushing further commits to an existing PR, automatically triggers the paired gh-aw policy reviewers (OpenAI + Anthropic, cross-family by author-model). The workflows are bound to the `pull_request` event (`opened` / `synchronize` / `reopened` / `edited`); a plain `git push` to a non-PR branch does NOT fire them. See the trigger / self-gating / authorship mechanics at:
 
 ```text
 skills/release/GH_AW_DETAILS.md
 ```
 
-**Trial — keep Copilot in parallel.** During gh-aw validation, also request Copilot via `skills/release/request-copilot-review.sh <owner> <repo> <pr-number>`. Both reviews gate the merge.
+**Also request Copilot.** Copilot is a deliberate second reviewer with a different lens — gh-aw enforces `rules/*.md` compliance, Copilot reads for doc accuracy, cross-step consistency, and ambiguity. Both reviewers gate the merge:
+
+```bash
+skills/release/request-copilot-review.sh <owner> <repo> <pr-number>
+```
 
 Proceed immediately to Step 5.
 
@@ -84,14 +89,14 @@ Loop until `ci.status` is `success` (or `none` if no checks are configured) and 
   - Accepted: `Fixed in <sha>` (literal phrase; semantically-equivalent variants like `Done` or `Accepted and fixed` do not satisfy)
   - Declined: `Declining — <reason with cited evidence>` (em dash `—`, not a hyphen or period)
 - Push fixes to the same branch
-- **Re-run is automatic**: `pull_request: synchronize` re-triggers the gh-aw workflow on every push — no manual re-request. During the trial, Copilot still needs a re-request via `skills/release/request-copilot-review.sh` (same args as Step 4).
+- **gh-aw re-runs automatically on every push** (`pull_request: synchronize`); Copilot needs a manual re-request each push via `skills/release/request-copilot-review.sh` (same args as Step 4).
 - Repeat Step 5 until every active bot review is `APPROVED` or `COMMENTED` with no blocking items, and every thread has a reply.
 
 ## Step 7 — Merge + Cleanup
 
 Only proceed when:
 - Step 5's poll returns `ci.status` as `success` (or `none` if no checks are configured) AND no bot has `CHANGES_REQUESTED`, AND
-- Both `reviews.gh_aw.state` and (during trial) `reviews.copilot.state` are NOT `none` — i.e., each gating reviewer has actually posted a review. A reviewer that hasn't run yet leaves `state: none` and `inline_comments: 0`, which would otherwise satisfy the no-CHANGES_REQUESTED check vacuously, AND
+- Both `reviews.gh_aw.state` and `reviews.copilot.state` are NOT `none` — i.e., each gating reviewer has actually posted a review. A reviewer that hasn't run yet leaves `state: none` and `inline_comments: 0`, which would otherwise satisfy the no-CHANGES_REQUESTED check vacuously, AND
 - Every inline comment from Step 5's `inline_comments` count has a `Fixed in <sha>` or `Declining — <reason>` reply per Step 6 (verify by listing the PR's review comments — the poll script tracks counts, not reply state, so the operator confirms thread closure).
 
 A `COMMENTED` review with zero inline comments is fully non-blocking; a `COMMENTED` review with inline comments is non-blocking once every thread has a reply.
