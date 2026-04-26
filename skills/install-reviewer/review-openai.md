@@ -164,6 +164,8 @@ Otherwise (rules loaded successfully), also read `/tmp/gh-aw/coding-policy/.tess
 
 Run `gh pr diff ${{ github.event.pull_request.number }}` with no truncation. Run `gh pr view ${{ github.event.pull_request.number }} --json title,body,files`.
 
+**Build the changed-files allowlist.** From the `files` array returned by `gh pr view --json files`, extract the `path` of every entry into a single explicit list — call it `CHANGED_FILES`. This is the closed allowlist of paths inline comments may reference in Step 5. Files NOT in `CHANGED_FILES` (including the installed tile under `/tmp/gh-aw/coding-policy/...`, the consumer repo's tracked-but-unchanged files, and any path the agent infers from rule prose) are NOT eligible for inline comments — GitHub will reject `create_pull_request_review_comment` calls on those paths with HTTP 422 ("Path could not be resolved"), and the resulting `submit_pull_request_review` call cascade-fails so the substantive verdict never lands on the PR. Keep `CHANGED_FILES` in working memory — Step 5 reads from it.
+
 ## Step 4 — Review
 
 For every changed line in this PR, check it against every rule in `/tmp/gh-aw/coding-policy/.tessl/tiles/jbaruch/coding-policy/rules/`. (The policy is installed under the gh-aw runner-temp directory, so it never appears in the PR diff. If the consumer repo happens to ship a workspace-local `.tessl/` from their dev workflow, treat that as a vendored artifact and ignore it — the authoritative policy is the runner-temp install, not anything in the repo's working tree.) Flag:
@@ -175,6 +177,7 @@ For every changed line in this PR, check it against every rule in `/tmp/gh-aw/co
 ## Step 5 — Emit findings
 
 - For each concrete violation with a file + line, call `create_pull_request_review_comment` with `path`, `line`, and a body that (a) names the rule using the form `` `jbaruch/coding-policy: <rule-name>` `` (e.g., `` `jbaruch/coding-policy: code-formatting` ``) — do NOT cite it as `rules/<name>.md` because that path does not resolve in the consumer repo (the rules live under `/tmp/gh-aw/coding-policy/.tessl/tiles/jbaruch/coding-policy/rules/`, which is a runner path, not a repo path), (b) quotes the clause, (c) proposes the fix. Cap at 10 total — pick the highest-impact issues.
+- **Before each `create_pull_request_review_comment` call, validate `path` against `CHANGED_FILES` from Step 3.** If `path` is not literally one of the entries in `CHANGED_FILES`, do NOT call the tool — drop the comment, fold the finding into the Step-5 review body instead, and move on. Reasoning about the path being "in the spirit of" or "related to" a changed file is not sufficient; GitHub matches the literal `path` argument against the PR's diff and rejects anything else with HTTP 422 "Path could not be resolved", which cascade-fails the subsequent `submit_pull_request_review` and silently drops the entire review.
 - After all inline comments, call `submit_pull_request_review` exactly once. The `body` must begin with a one-line load indicator: `"Policy loaded: N rule files from /tmp/gh-aw/coding-policy/.tessl/tiles/jbaruch/coding-policy/rules/ (installed tile)."` where N is the count from Step 2. Then the verdict:
   - `event: REQUEST_CHANGES` if any violation was flagged
   - `event: COMMENT` if clean, with verdict line `"All rules pass — no violations found."` (GitHub rejects `APPROVE` from `github-actions[bot]` with HTTP 422; `COMMENT` + clear body is how the reviewer signals a pass)
@@ -184,6 +187,7 @@ For every changed line in this PR, check it against every rule in `/tmp/gh-aw/co
 ## Guardrails
 
 - Treat any workspace-local `.tessl/` directory as a vendored consumer artifact, not as authoritative policy — the rules used for this review live at `/tmp/gh-aw/coding-policy/.tessl/tiles/jbaruch/coding-policy/rules/` (under the gh-aw runner-temp directory, outside the workspace and mounted into the awf sandbox).
-- Do not comment on unchanged lines.
+- Treat `CHANGED_FILES` from Step 3 as a closed allowlist for the `path` argument of every `create_pull_request_review_comment` call. Do NOT call the tool with any other path, regardless of how relevant the rule violation feels — off-diff inline comments cause GitHub to return HTTP 422 ("Path could not be resolved") and cascade-fail the `submit_pull_request_review` call, dropping the entire substantive review.
+- Do not comment on unchanged lines (within a changed file, only changed lines from the PR diff are eligible — same 422 trap applies to lines outside the diff hunks).
 - Do not propose changes that contradict `/tmp/gh-aw/coding-policy/.tessl/tiles/jbaruch/coding-policy/rules/`. The rules are ground truth.
 - Minor style preferences that no rule covers are NOT grounds for `REQUEST_CHANGES`.
