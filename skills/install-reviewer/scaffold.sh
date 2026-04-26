@@ -107,12 +107,23 @@ main() {
   # Stripping both here keeps the consumer's working tree compliant
   # immediately after scaffold; without it, the consumer's first PR review
   # would flag its own freshly-scaffolded lockfiles as a formatting violation.
+  #
+  # Sanitization runs AFTER the compile-success rollback boundary above, so
+  # any tool failure here is best-effort cleanup, not grounds for hard-failing
+  # and leaving the consumer with half-sanitized locks. perl is standard on
+  # Linux/macOS runners but the contract shouldn't rely on that — the
+  # `|| true` opts out of `set -e` so a missing perl/sed (or any cleanup
+  # error) still lets the scaffold complete. If sanitization is skipped,
+  # the upstream gh-aw drift remains in the lock file and the reviewer
+  # flags it on the consumer's first PR; that's a worse experience than
+  # the sanitization landing, but a strictly better experience than rolling
+  # back the whole scaffold after compile succeeded.
   for l in "${locks[@]}"; do
-    sed -i.bak -E 's/[[:space:]]+$//' "$l" && rm -f "${l}.bak"
+    sed -i.bak -E 's/[[:space:]]+$//' "$l" 2>/dev/null && rm -f "${l}.bak" || true
     # Collapse trailing whitespace at EOF (including blank trailing lines)
     # to a single newline. perl -0 reads the whole file as one record;
     # \s+\z matches any run of whitespace at the absolute end.
-    perl -i -0pe 's/\s+\z/\n/' "$l"
+    perl -i -0pe 's/\s+\z/\n/' "$l" 2>/dev/null || true
   done
 
   # Ensure the lock files are marked as generated artifacts per

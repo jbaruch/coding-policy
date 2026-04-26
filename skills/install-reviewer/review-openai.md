@@ -16,8 +16,9 @@ description: |
   inline comments plus one consolidated review verdict.
 
   Required repository secrets:
-    - OPENAI_API_KEY — Codex engine authentication
-    - TESSL_TOKEN    — tessl install authentication
+    - OPENAI_API_KEY or CODEX_API_KEY — Codex engine authentication
+      (either name is accepted; the workflow coalesces them at runtime)
+    - TESSL_TOKEN — tessl install authentication
 
 on:
   # `edited` is intentional: the Step 1 self-review gate parses
