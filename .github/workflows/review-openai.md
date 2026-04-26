@@ -111,6 +111,8 @@ Otherwise (rules loaded successfully), also read any `skills/*/SKILL.md` that go
 
 Run `gh pr diff ${{ github.event.pull_request.number }}` with no truncation. Run `gh pr view ${{ github.event.pull_request.number }} --json title,body,files`.
 
+**Build the changed-files allowlist.** From the `files` array returned by `gh pr view --json files`, extract the `path` of every entry into a single explicit list — call it `CHANGED_FILES`. This is the closed allowlist of paths inline comments may reference in Step 5. Files NOT in `CHANGED_FILES` are NOT eligible for inline comments — GitHub will reject `create_pull_request_review_comment` calls on those paths with HTTP 422 ("Path could not be resolved"), and the resulting `submit_pull_request_review` call cascade-fails so the substantive verdict never lands on the PR. Keep `CHANGED_FILES` in working memory — Step 5 reads from it.
+
 ## Step 4 — Review
 
 For every changed line, check it against every rule in `rules/`. Flag:
@@ -122,6 +124,7 @@ For every changed line, check it against every rule in `rules/`. Flag:
 ## Step 5 — Emit findings
 
 - For each concrete violation with a file + line, call `create_pull_request_review_comment` with `path`, `line`, and a body that (a) names the rule file violated, (b) quotes the clause, (c) proposes the fix. Cap at 10 total — pick the highest-impact issues.
+- **Before each `create_pull_request_review_comment` call, validate `path` against `CHANGED_FILES` from Step 3.** If `path` is not literally one of the entries in `CHANGED_FILES`, do NOT call the tool — drop the inline comment, fold the finding into the Step-5 review body instead, and move on. GitHub rejects off-diff inline-comment paths with HTTP 422, which cascade-fails `submit_pull_request_review` and silently drops the entire review.
 - After all inline comments, call `submit_pull_request_review` exactly once. The `body` must begin with a one-line load indicator: `"Policy loaded: N rule files from rules/ (PR head)."` where N is the count from Step 2. Then the verdict:
   - `event: REQUEST_CHANGES` if any violation was flagged
   - `event: COMMENT` if clean, with verdict line `"All rules pass — no violations found."` (GitHub rejects `APPROVE` from `github-actions[bot]` with HTTP 422; `COMMENT` + clear body is how the reviewer signals a pass)
@@ -130,6 +133,7 @@ For every changed line, check it against every rule in `rules/`. Flag:
 
 ## Guardrails
 
-- Do not comment on unchanged lines.
+- Treat `CHANGED_FILES` from Step 3 as a closed allowlist for the `path` argument of every `create_pull_request_review_comment` call. Off-diff paths cascade-fail the entire review with a 422.
+- Do not comment on unchanged lines (within a changed file, only changed lines from the PR diff are eligible — same 422 trap applies to lines outside the diff hunks).
 - Do not propose changes that contradict `rules/`. The rules are ground truth.
 - Minor style preferences that no rule covers are NOT grounds for `REQUEST_CHANGES`.
