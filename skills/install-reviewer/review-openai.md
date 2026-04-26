@@ -40,20 +40,30 @@ engine:
   id: codex
   model: gpt-5.4
   env:
-    OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+    # gh-aw's compiled validation step accepts EITHER CODEX_API_KEY or
+    # OPENAI_API_KEY as the credential, but the Codex CLI / API-proxy
+    # path only reads OPENAI_API_KEY at runtime. Without the fallback,
+    # a consumer who set CODEX_API_KEY only would pass validation and
+    # then fail with an empty-credential error after burning setup time.
+    # Coalescing here makes both names work from end to end.
+    OPENAI_API_KEY: ${{ secrets.CODEX_API_KEY || secrets.OPENAI_API_KEY }}
 
 timeout-minutes: 15
 
 network:
-  # `defaults` for the Codex engine doesn't include GitHub or ChatGPT
-  # telemetry hosts, so `tessl install` (which fetches the tile from the
-  # registry over GitHub) and the engine's own UI/telemetry calls are
-  # blocked. Both must be explicit. `github` and `threat-detection` are
+  # This allowlist applies to the AGENT runtime inside the awf firewall
+  # sandbox — NOT to the earlier runner-side `tessl install` step (that
+  # runs in the workflow's `steps:` on the runner host, before the
+  # sandbox starts, and is unaffected by this list). The hosts here cover
+  # agent-initiated GitHub access (gh / MCP / API calls and related
+  # Codex/GitHub service traffic) and Codex UI/telemetry that Codex's
+  # `defaults` doesn't include. `github` and `threat-detection` are
   # gh-aw ecosystem identifiers (preferred over enumerating individual
   # domains): `github` covers github.com / codeload / raw / objects,
-  # `threat-detection` covers api.github.com. The Anthropic-side template
-  # inherits GitHub via its own `defaults`; this list is the OpenAI-side
-  # equivalent.
+  # `threat-detection` covers api.github.com. `ab.chatgpt.com` and
+  # `chatgpt.com` are Codex UI/telemetry. The Anthropic-side template
+  # inherits GitHub via its own engine `defaults`; this list is the
+  # OpenAI-side equivalent.
   allowed:
     - defaults
     - github

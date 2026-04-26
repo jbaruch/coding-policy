@@ -98,15 +98,21 @@ main() {
   # Compile succeeded — discard the snapshot
   [[ -n "$lock_snapshot" ]] && rm -f "$lock_snapshot"
 
-  # Strip trailing whitespace from the generated lock files. gh-aw's compiler
-  # emits some blank lines with trailing spaces, which violates
-  # rules/code-formatting.md ("Remove trailing whitespace") in any consumer
-  # repo that runs this tile's reviewers against itself. Doing the cleanup
-  # here keeps the consumer's working tree compliant immediately after scaffold;
-  # without it, the consumer's first PR review would flag its own freshly-scaffolded
-  # lockfiles as a formatting violation.
+  # Sanitize the generated lock files. `gh aw compile` emits two formatting
+  # drifts that violate rules/code-formatting.md "Basics" in any consumer
+  # repo that runs this tile's reviewers against itself:
+  #   1. Trailing whitespace on every line of the leading ASCII-art banner
+  #      (and a few blank lines elsewhere).
+  #   2. Files end with two trailing newlines (\n\n) instead of a single \n.
+  # Stripping both here keeps the consumer's working tree compliant
+  # immediately after scaffold; without it, the consumer's first PR review
+  # would flag its own freshly-scaffolded lockfiles as a formatting violation.
   for l in "${locks[@]}"; do
     sed -i.bak -E 's/[[:space:]]+$//' "$l" && rm -f "${l}.bak"
+    # Collapse trailing whitespace at EOF (including blank trailing lines)
+    # to a single newline. perl -0 reads the whole file as one record;
+    # \s+\z matches any run of whitespace at the absolute end.
+    perl -i -0pe 's/\s+\z/\n/' "$l"
   done
 
   # Ensure the lock files are marked as generated artifacts per
