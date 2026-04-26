@@ -26,7 +26,11 @@ engine:
   id: codex
   model: gpt-5.4
   env:
-    OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+    # Mirrors the consumer-facing install-reviewer template: gh-aw's
+    # compiled validation step accepts CODEX_API_KEY or OPENAI_API_KEY,
+    # but only OPENAI_API_KEY is read at runtime — coalesce here so
+    # either secret name works end-to-end.
+    OPENAI_API_KEY: ${{ secrets.CODEX_API_KEY || secrets.OPENAI_API_KEY }}
 
 timeout-minutes: 15
 
