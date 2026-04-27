@@ -86,13 +86,17 @@ main() {
   # if any target file exists. Re-check here so the script is independently
   # safe — calling scaffold.sh directly without --override should refuse to
   # silently overwrite scaffolded files even if the caller skipped Step 2.
+  # Use `-e` (exists, any type) rather than `-f` (regular file only) so a
+  # directory, symlink-to-dir, or other non-regular entry at the target path
+  # is also caught — the subsequent `cp`/compile would behave unexpectedly
+  # otherwise.
   if (( OVERRIDE_MODE == 0 )); then
     local existing=()
     for f in "${sources[@]}" "${locks[@]}"; do
-      [[ -f "$f" ]] && existing+=("$f")
+      [[ -e "$f" ]] && existing+=("$f")
     done
     if [[ ${#existing[@]} -gt 0 ]]; then
-      echo "error: target file(s) already exist: ${existing[*]} — pass --override to upgrade in place, or remove them first" >&2
+      echo "error: target path(s) already exist: ${existing[*]} — pass --override to upgrade in place, or remove them first" >&2
       exit 1
     fi
   fi
