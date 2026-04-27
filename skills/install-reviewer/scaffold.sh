@@ -82,11 +82,26 @@ main() {
     cp "$ACTIONS_LOCK" "$lock_snapshot"
   fi
 
-  # Snapshot every existing target (sources + locks). In install mode the
-  # skill's Step 2 has already refused if any target exists, so this is a
-  # no-op. In override mode every target may already exist with the
-  # consumer's previously-scaffolded content — without the snapshot, a
-  # compile failure mid-upgrade would leave the consumer with a partially-
+  # Defense-in-depth: in install mode the skill's Step 2 has already refused
+  # if any target file exists. Re-check here so the script is independently
+  # safe — calling scaffold.sh directly without --override should refuse to
+  # silently overwrite scaffolded files even if the caller skipped Step 2.
+  if (( OVERRIDE_MODE == 0 )); then
+    local existing=()
+    for f in "${sources[@]}" "${locks[@]}"; do
+      [[ -f "$f" ]] && existing+=("$f")
+    done
+    if [[ ${#existing[@]} -gt 0 ]]; then
+      echo "error: target file(s) already exist: ${existing[*]} — pass --override to upgrade in place, or remove them first" >&2
+      exit 1
+    fi
+  fi
+
+  # Snapshot every existing target (sources + locks) so the compile-failure
+  # rollback can restore them. In install mode the guard above means this
+  # loop is always a no-op. In override mode every target may already exist
+  # with the consumer's previously-scaffolded content — without the snapshot,
+  # a compile failure mid-upgrade would leave the consumer with a partially-
   # written workspace and no recovery path.
   local -a target_paths=()
   local -a target_snapshots=()

@@ -148,10 +148,13 @@ check_branch_not_remote() {
 }
 
 # Override-mode safety check: refuse to upgrade if the consumer has dirty
-# working-tree state on any of the four target files. Mirrors how `git pull`
-# refuses to overwrite uncommitted changes — forces the consumer to commit,
-# stash, or remove the local content before the scaffold replaces their
-# files. "Dirty" here covers two states the override could clobber:
+# working-tree state on any path the upgrade flow can rewrite — the four
+# reviewer source/lock files plus `.github/aw/actions-lock.json` (rewritten
+# by `gh aw compile`) and `.gitattributes` (the LOCK_GENERATED_RULE marker
+# may be appended). Mirrors how `git pull` refuses to overwrite uncommitted
+# changes — forces the consumer to commit, stash, or remove the local
+# content before the scaffold replaces their files. "Dirty" here covers
+# two states the override could clobber:
 #   - tracked file with staged or unstaged edits relative to HEAD
 #   - untracked file at the target path (consumer hand-rolled a reviewer
 #     that was never staged); without this case the override would
