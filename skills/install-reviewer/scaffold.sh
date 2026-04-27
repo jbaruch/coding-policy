@@ -89,16 +89,32 @@ main() {
   # Use `-e` (exists, any type) rather than `-f` (regular file only) so a
   # directory, symlink-to-dir, or other non-regular entry at the target path
   # is also caught — the subsequent `cp`/compile would behave unexpectedly
-  # otherwise.
+  # otherwise. `-L` covers broken symlinks (whose targets don't exist), which
+  # `-e` would miss.
   if (( OVERRIDE_MODE == 0 )); then
     local existing=()
     for f in "${sources[@]}" "${locks[@]}"; do
-      [[ -e "$f" ]] && existing+=("$f")
+      { [[ -e "$f" ]] || [[ -L "$f" ]]; } && existing+=("$f")
     done
     if [[ ${#existing[@]} -gt 0 ]]; then
       echo "error: target path(s) already exist: ${existing[*]} — pass --override to upgrade in place, or remove them first" >&2
       exit 1
     fi
+  fi
+
+  # Refuse symlinks at target paths in BOTH modes. A symlink (e.g.,
+  # review-openai.md → some file outside the repo) is an unexpected manual
+  # configuration that this skill doesn't manage; the subsequent `cp` would
+  # follow the link and overwrite its target rather than replace the link
+  # itself, which can clobber an arbitrary file. Forces the consumer to
+  # remove the symlink explicitly before running the skill.
+  local symlinks=()
+  for f in "${sources[@]}" "${locks[@]}"; do
+    [[ -L "$f" ]] && symlinks+=("$f")
+  done
+  if [[ ${#symlinks[@]} -gt 0 ]]; then
+    echo "error: target path(s) are symlinks: ${symlinks[*]} — this skill does not manage symlinked reviewer files; remove the symlink(s) and re-run" >&2
+    exit 1
   fi
 
   # Snapshot every existing target (sources + locks) so the compile-failure
