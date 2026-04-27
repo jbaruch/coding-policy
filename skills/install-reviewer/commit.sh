@@ -16,11 +16,22 @@
 #   .github/aw/actions-lock.json
 #   .gitattributes
 #
-# Usage: commit.sh
-# Out:   one JSON object on stdout: {"state": "committed|no-op", "commit": "<sha>"}
+# Usage: commit.sh [--override]
+#   --override    Upgrade-mode commit. Uses the upgrade branch name and
+#                 a different commit message ("upgrade" vs "add"); same
+#                 staged paths.
+# Out:   one JSON object on stdout: {"state": "committed|no-op", "commit": "<sha>", "override": bool}
 # Exit:  0 on success (including no-op); non-zero with stderr diagnostic on failure
 
 set -euo pipefail
+
+OVERRIDE_MODE=0
+for arg in "$@"; do
+  case "$arg" in
+    --override) OVERRIDE_MODE=1 ;;
+    *) echo "error: unknown argument '$arg' (only --override is recognized)" >&2; exit 2 ;;
+  esac
+done
 
 # Run from repo root so the relative paths below resolve regardless of cwd.
 repo_root=$(git rev-parse --show-toplevel 2>/dev/null) || {
@@ -29,8 +40,13 @@ repo_root=$(git rev-parse --show-toplevel 2>/dev/null) || {
 }
 cd "$repo_root"
 
-BRANCH="feat/add-coding-policy-review"
-COMMIT_MSG="ci(review): add jbaruch/coding-policy PR review workflows"
+if (( OVERRIDE_MODE == 1 )); then
+  BRANCH="feat/upgrade-coding-policy-review"
+  COMMIT_MSG="ci(review): upgrade jbaruch/coding-policy PR review workflows"
+else
+  BRANCH="feat/add-coding-policy-review"
+  COMMIT_MSG="ci(review): add jbaruch/coding-policy PR review workflows"
+fi
 
 FILES=(
   .github/workflows/review-openai.md
@@ -66,9 +82,12 @@ main() {
 
   # Idempotent re-run: nothing staged means a prior run already committed
   # this state. Emit no-op success instead of letting `git commit` fail.
+  local override_json="false"
+  (( OVERRIDE_MODE == 1 )) && override_json="true"
+
   if git diff --cached --quiet; then
-    jq -n --arg commit "$(git rev-parse HEAD)" \
-      '{state: "no-op", commit: $commit}'
+    jq -n --arg commit "$(git rev-parse HEAD)" --argjson override "$override_json" \
+      '{state: "no-op", commit: $commit, override: $override}'
     return 0
   fi
 
@@ -77,8 +96,8 @@ main() {
     exit 1
   fi
 
-  jq -n --arg commit "$(git rev-parse HEAD)" \
-    '{state: "committed", commit: $commit}'
+  jq -n --arg commit "$(git rev-parse HEAD)" --argjson override "$override_json" \
+    '{state: "committed", commit: $commit, override: $override}'
 }
 
 [[ "${BASH_SOURCE[0]}" == "${0}" ]] && main "$@"

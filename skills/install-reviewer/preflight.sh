@@ -3,21 +3,37 @@
 # result. The skill invokes this before any mutation so every preflight
 # failure is surfaced together, not one-at-a-time. Checks cover: git
 # worktree, GitHub CLI installation + auth, gh-aw extension, tile
-# template presence, origin remote, and local + remote branch clear.
+# template presence, origin remote, and (mode-dependent) branch state.
 #
-# Usage: preflight.sh
+# Usage: preflight.sh [--override]
+#   --override    Upgrade existing scaffolded reviewers in place (instead
+#                 of failing on their existence per the install-mode
+#                 safety gate). Skips the branch-not-local /
+#                 branch-not-remote checks (the upgrade branch can
+#                 legitimately already exist from a prior in-flight
+#                 attempt) and adds a no-uncommitted-target-edits check
+#                 so the consumer commits or stashes their dirty
+#                 working tree before the upgrade overwrites it.
 # Out:   one JSON object on stdout:
 #          {"ok": bool,
+#           "override": bool,
 #           "failures": [{"check": "<name>", "reason": "<human text>"}, ...],
 #           "warnings": [{"check": "<name>", "reason": "<human text>"}, ...]}
 #        When ok is false, each failure includes a concrete recovery
 #        command where applicable. Warnings are informational only —
-#        they surface advisory findings (e.g. repo-level .mcp.json that
-#        would break the Anthropic reviewer at runtime) and never set
-#        ok to false or change the exit code.
+#        they surface advisory findings and never set ok to false or
+#        change the exit code.
 # Exit:  0 if ok is true; 1 if any check fails
 
 set -euo pipefail
+
+OVERRIDE_MODE=0
+for arg in "$@"; do
+  case "$arg" in
+    --override) OVERRIDE_MODE=1 ;;
+    *) echo "error: unknown argument '$arg' (only --override is recognized)" >&2; exit 2 ;;
+  esac
+done
 
 # If we're inside a git worktree, run from its root so the TEMPLATE path
 # below resolves the same way regardless of the caller's cwd. If we're
@@ -29,11 +45,23 @@ if [[ -n "$repo_root" ]]; then
   cd "$repo_root"
 fi
 
-BRANCH="feat/add-coding-policy-review"
+if (( OVERRIDE_MODE == 1 )); then
+  BRANCH="feat/upgrade-coding-policy-review"
+else
+  BRANCH="feat/add-coding-policy-review"
+fi
 TEMPLATE_DIR=".tessl/tiles/jbaruch/coding-policy/skills/install-reviewer"
 TEMPLATES=(
   "${TEMPLATE_DIR}/review-openai.md"
   "${TEMPLATE_DIR}/review-anthropic.md"
+)
+TARGETS=(
+  ".github/workflows/review-openai.md"
+  ".github/workflows/review-openai.lock.yml"
+  ".github/workflows/review-anthropic.md"
+  ".github/workflows/review-anthropic.lock.yml"
+  ".github/aw/actions-lock.json"
+  ".gitattributes"
 )
 
 declare -a failures=()
@@ -119,6 +147,34 @@ check_branch_not_remote() {
   fi
 }
 
+# Override-mode safety check: refuse to upgrade if the consumer has dirty
+# working-tree state on any of the four target files. Mirrors how `git pull`
+# refuses to overwrite uncommitted changes — forces the consumer to commit,
+# stash, or remove the local content before the scaffold replaces their
+# files. "Dirty" here covers two states the override could clobber:
+#   - tracked file with staged or unstaged edits relative to HEAD
+#   - untracked file at the target path (consumer hand-rolled a reviewer
+#     that was never staged); without this case the override would
+#     silently clobber an intentional local file.
+check_no_dirty_target_edits() {
+  local dirty=()
+  for t in "${TARGETS[@]}"; do
+    [[ -e "$t" ]] || continue
+    if git ls-files --error-unmatch -- "$t" >/dev/null 2>&1; then
+      # Tracked: flag if uncommitted edits exist relative to HEAD
+      if ! git diff --quiet HEAD -- "$t" 2>/dev/null; then
+        dirty+=("$t (uncommitted edits)")
+      fi
+    else
+      # Untracked file at the target path
+      dirty+=("$t (untracked)")
+    fi
+  done
+  if [[ ${#dirty[@]} -gt 0 ]]; then
+    push_failure "no-dirty-target-edits" "--override refuses to overwrite local changes in: ${dirty[*]} — commit, stash, or remove these first, then re-run"
+  fi
+}
+
 main() {
   check_in_git_worktree
   check_gh_installed
@@ -136,9 +192,21 @@ main() {
   # so we don't leak confusing git-error diagnostics on top of the real failures.
   if git rev-parse --git-dir >/dev/null 2>&1; then
     check_origin_remote
-    check_branch_not_local
-    if git remote get-url origin >/dev/null 2>&1; then
-      check_branch_not_remote
+    if (( OVERRIDE_MODE == 1 )); then
+      # Override mode: the upgrade branch may legitimately exist locally
+      # (from a prior in-flight upgrade) or remotely (from an open
+      # upgrade PR). Skip the branch-clear checks and instead refuse if
+      # the consumer's working tree has uncommitted changes to the
+      # target files we're about to replace.
+      check_no_dirty_target_edits
+    else
+      # Install mode: the install branch must NOT already exist locally
+      # or remotely — Step 2's overwrite refusal in the skill assumes a
+      # fresh branch.
+      check_branch_not_local
+      if git remote get-url origin >/dev/null 2>&1; then
+        check_branch_not_remote
+      fi
     fi
   fi
 
@@ -163,8 +231,11 @@ main() {
     rc=1
   fi
 
-  jq -n --argjson ok "$ok" --argjson failures "$failures_json" --argjson warnings "$warnings_json" \
-    '{ok: $ok, failures: $failures, warnings: $warnings}'
+  local override_json="false"
+  (( OVERRIDE_MODE == 1 )) && override_json="true"
+
+  jq -n --argjson ok "$ok" --argjson override "$override_json" --argjson failures "$failures_json" --argjson warnings "$warnings_json" \
+    '{ok: $ok, override: $override, failures: $failures, warnings: $warnings}'
 
   # Per rules/script-delegation.md ("self-error-handling: exit non-zero on
   # failure, write a diagnostic message to stderr"), on failure also emit a
