@@ -102,36 +102,43 @@ main() {
     fi
   fi
 
-  # Refuse symlinks at target paths in BOTH modes. A symlink (e.g.,
-  # review-openai.md → some file outside the repo) is an unexpected manual
-  # configuration that this skill doesn't manage; the subsequent `cp` would
-  # follow the link and overwrite its target rather than replace the link
-  # itself, which can clobber an arbitrary file. Forces the consumer to
-  # remove the symlink explicitly before running the skill.
+  # Refuse symlinks at any path this script can write to, in BOTH modes.
+  # Coverage extends beyond the four reviewer source/lock files to also
+  # include `.github/aw/actions-lock.json` (rewritten by `gh aw compile`)
+  # and `.gitattributes` (the LOCK_GENERATED_RULE marker may be appended).
+  # A symlink at any of these (e.g., review-openai.md → some file outside
+  # the repo, or .gitattributes → a shared global config) is an
+  # unexpected manual configuration this skill doesn't manage: the
+  # subsequent `cp`/compile/append would follow the link and overwrite
+  # the target rather than replace the link itself, which can clobber an
+  # arbitrary file. Forces the consumer to remove the symlink explicitly
+  # before running the skill.
+  local writable_paths=("${sources[@]}" "${locks[@]}" "$ACTIONS_LOCK" "$GITATTRIBUTES")
   local symlinks=()
-  for f in "${sources[@]}" "${locks[@]}"; do
+  for f in "${writable_paths[@]}"; do
     [[ -L "$f" ]] && symlinks+=("$f")
   done
   if [[ ${#symlinks[@]} -gt 0 ]]; then
-    echo "error: target path(s) are symlinks: ${symlinks[*]} — this skill does not manage symlinked reviewer files; remove the symlink(s) and re-run" >&2
+    echo "error: writable path(s) are symlinks: ${symlinks[*]} — this skill does not manage symlinked reviewer/config files; remove the symlink(s) and re-run" >&2
     exit 1
   fi
 
-  # Refuse non-regular target paths in BOTH modes (after the symlink filter
-  # above). A directory, named pipe, socket, or other non-regular entry at
-  # a target path is an unexpected configuration the skill doesn't manage;
-  # the snapshot loop below only handles regular files (`-f`), so a non-
-  # regular target would slip past snapshotting and cause `cp`/compile to
-  # behave unexpectedly with no rollback covering it. Same posture as the
+  # Refuse non-regular paths at any path this script can write to, in
+  # BOTH modes (after the symlink filter above). A directory, named pipe,
+  # socket, or other non-regular entry at a writable path is an
+  # unexpected configuration the skill doesn't manage; the snapshot loop
+  # below only handles regular files (`-f`), so a non-regular target
+  # would slip past snapshotting and cause `cp`/compile/append to behave
+  # unexpectedly with no rollback covering it. Same posture as the
   # symlink refusal — force the consumer to clean up before the upgrade.
   local nonregular=()
-  for f in "${sources[@]}" "${locks[@]}"; do
+  for f in "${writable_paths[@]}"; do
     if [[ -e "$f" ]] && [[ ! -f "$f" ]]; then
       nonregular+=("$f")
     fi
   done
   if [[ ${#nonregular[@]} -gt 0 ]]; then
-    echo "error: target path(s) are not regular files: ${nonregular[*]} — this skill expects regular file targets; remove the non-regular entry/entries and re-run" >&2
+    echo "error: writable path(s) are not regular files: ${nonregular[*]} — this skill expects regular file targets; remove the non-regular entry/entries and re-run" >&2
     exit 1
   fi
 

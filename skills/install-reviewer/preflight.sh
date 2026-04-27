@@ -162,14 +162,20 @@ check_branch_not_remote() {
 check_no_dirty_target_edits() {
   local dirty=()
   for t in "${TARGETS[@]}"; do
-    [[ -e "$t" ]] || continue
+    # `-e` follows symlinks, so a broken symlink (target nonexistent)
+    # returns false; `-L` is true for any symlink, broken or not. The
+    # OR catches every form of "something is at this path" the override
+    # could clobber.
+    [[ -e "$t" || -L "$t" ]] || continue
     if git ls-files --error-unmatch -- "$t" >/dev/null 2>&1; then
       # Tracked: flag if uncommitted edits exist relative to HEAD
       if ! git diff --quiet HEAD -- "$t" 2>/dev/null; then
         dirty+=("$t (uncommitted edits)")
       fi
     else
-      # Untracked file at the target path
+      # Untracked entry at the target path (regular file the consumer
+      # never staged, broken symlink, etc.) — the override would
+      # silently clobber it without this case.
       dirty+=("$t (untracked)")
     fi
   done
