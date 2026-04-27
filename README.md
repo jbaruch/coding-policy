@@ -10,6 +10,7 @@ Coding policy tile for Baruch's AI agents. Language-agnostic code quality rules 
 - `release` skill — structured PR + merge workflow with Copilot review and paired-reviewer cross-family enforcement
 - `eval-authoring` skill — generate, review, and curate eval scenarios with score-driven iteration
 - `install-reviewer` skill — scaffold the paired gh-aw PR review workflows (OpenAI + Anthropic) into a consumer repo
+- 0.3.0 added `install-reviewer` upgrade mode (`--override`) — refreshes scaffolded reviewer files in place instead of requiring a manual `git rm`-and-rerun
 - 0.2.0 lifted with-context attainment from 93 to 98 (3× avg, lift +17 → +22) by tuning skill prose against eval log analysis
 - Language-agnostic: works with any stack, no Python/JS assumptions
 
@@ -46,7 +47,7 @@ tessl install jbaruch/coding-policy
 |-------|-------------|
 | [release](skills/release/SKILL.md) | PR creation, Copilot review, merge + cleanup workflow |
 | [eval-authoring](skills/eval-authoring/SKILL.md) | Generate, review, iterate on eval scenarios with score-driven feedback |
-| [install-reviewer](skills/install-reviewer/SKILL.md) | Scaffold the paired gh-aw PR review workflows (OpenAI + Anthropic) into a consumer repo — reviews every PR against the latest published `jbaruch/coding-policy` with cross-family enforcement |
+| [install-reviewer](skills/install-reviewer/SKILL.md) | Scaffold the paired gh-aw PR review workflows (OpenAI + Anthropic) into a consumer repo — reviews every PR against the latest published `jbaruch/coding-policy` with cross-family enforcement. Supports `--override` for in-place upgrades. |
 
 ## Philosophy
 
