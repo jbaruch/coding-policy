@@ -22,7 +22,7 @@ Scaffold the gh-aw PR policy reviewer pair (OpenAI + Anthropic) into a consumer 
 The skill runs in one of two modes determined by the user's request:
 
 - **install** (default) — the consumer hasn't run the skill before, no scaffolded reviewer files exist. The current behavior of every step.
-- **upgrade** (`--override`) — the consumer ran the skill on a prior tile version and now wants to refresh to the current one. Triggered by user phrases like "upgrade", "update", "refresh", "pull latest reviewer templates", or "override". Each script in this skill takes an optional `--override` flag; pass it to ALL FOUR scripts (preflight, scaffold, commit, push) when in upgrade mode, none of them when in install mode. The branch name and commit message change accordingly (`feat/upgrade-coding-policy-review` and `ci(review): upgrade ...`); preflight skips the branch-clear checks (the upgrade branch may legitimately exist from a prior in-flight upgrade) and instead refuses if any of the six paths the upgrade flow can rewrite (the four reviewer source/lock files plus `.github/aw/actions-lock.json` and `.gitattributes`) have uncommitted local edits or are untracked, so the consumer commits, stashes, or removes the local content before the scaffold replaces them; scaffold snapshots and restores the four reviewer source/lock files on compile failure (in addition to its existing `actions-lock.json` snapshot+restore).
+- **upgrade** (`--override`) — the consumer ran the skill on a prior tile version and now wants to refresh to the current one. Triggered by user phrases like "upgrade", "update", "refresh", "pull latest reviewer templates", or "override". Each script in this skill takes an optional `--override` flag; pass it to ALL FIVE scripts (preflight, branch, scaffold, commit, push) when in upgrade mode, none of them when in install mode. The branch name and commit message change accordingly (`feat/upgrade-coding-policy-review` and `ci(review): upgrade ...`); preflight skips the branch-clear checks (the upgrade branch may legitimately exist from a prior in-flight upgrade) and instead refuses if any of the six paths the upgrade flow can rewrite (the four reviewer source/lock files plus `.github/aw/actions-lock.json` and `.gitattributes`) have uncommitted local edits or are untracked, so the consumer commits, stashes, or removes the local content before the scaffold replaces them; scaffold snapshots and restores the four reviewer source/lock files on compile failure (in addition to its existing `actions-lock.json` snapshot+restore).
 
 ## Step 1 — Run Preflight Checks
 
@@ -46,19 +46,17 @@ In **install mode**: if **any** of `.github/workflows/review-openai.md`, `.githu
 
 In **upgrade mode**: skip this step entirely. The targets are expected to exist; preflight's `no-dirty-target-edits` check has already verified the consumer's working tree is clean on those paths, and scaffold.sh will snapshot and restore them on compile failure.
 
-## Step 3 — Create or Switch Feature Branch
+## Step 3 — Establish Feature Branch
 
-In **install mode**: `git checkout -b feat/add-coding-policy-review` from the repo's default branch.
+```bash
+# install mode
+.tessl/tiles/jbaruch/coding-policy/skills/install-reviewer/branch.sh
 
-In **upgrade mode**: target branch is `feat/upgrade-coding-policy-review`. Pick the path based on what's already there — running this skill from a fresh clone while a prior upgrade PR is still open is a real case, and naively running `git checkout -b` from default would create a divergent local branch that can't fast-forward push.
+# upgrade mode
+.tessl/tiles/jbaruch/coding-policy/skills/install-reviewer/branch.sh --override
+```
 
-- Probe remote first with `git ls-remote --exit-code --heads origin feat/upgrade-coding-policy-review` (exit 0 → remote branch exists; exit 2 → it doesn't; any other exit → real network/auth error, abort and report).
-- If remote branch exists, run `git fetch origin feat/upgrade-coding-policy-review` to surface it as `origin/feat/upgrade-coding-policy-review`. Real fetch errors (network, permission) propagate verbatim.
-- Local branch exists → `git checkout feat/upgrade-coding-policy-review` and append commits.
-- Local doesn't exist but remote does → `git checkout -b feat/upgrade-coding-policy-review --track origin/feat/upgrade-coding-policy-review` so the local branch tracks the remote and the upcoming push is fast-forward.
-- Neither exists → `git checkout -b feat/upgrade-coding-policy-review` from the repo's default branch.
-
-Proceed immediately to Step 4.
+Establishes the feature branch the rest of the steps commit on. Install mode creates `feat/add-coding-policy-review` from origin's default branch. Upgrade mode targets `feat/upgrade-coding-policy-review` and probes both remote (`git ls-remote --exit-code --heads`) and local state to handle the fresh-clone-while-upgrade-PR-open case: if the local branch exists it's checked out (state `checked-out`); else if the remote branch exists it's checked out with upstream tracking so the upcoming push fast-forwards (state `checked-out-tracking`); else it's created from the default branch (state `created`). Idempotent: emits `{"state": "already-on-branch", ...}` on re-run when HEAD already matches the target. Real `ls-remote`/`fetch` errors (network, auth) propagate verbatim with non-zero exit. Proceed immediately to Step 4.
 
 ## Step 4 — Scaffold Workflow Files
 
