@@ -11,21 +11,37 @@
 # only happens when the exact rule line is missing. The overwrite-
 # safety guard for pre-existing user content lives in the
 # install-reviewer skill, which halts before this script runs if the
-# repo already has its own review workflow files.
+# repo already has its own review workflow files (install mode); in
+# upgrade mode (--override) the existing files are explicitly snapshot
+# and replaced.
 #
 # Atomic: if compile fails for either template, all this script's
-# artifacts are rolled back — every source/lock pair is removed and
-# .github/aw/actions-lock.json is restored from a snapshot taken at
-# the start (or removed if it didn't exist before). The caller never
-# sees a half-scaffolded state, and the two reviewers always land
-# together or not at all.
+# artifacts are rolled back — every target file is restored to its
+# pre-scaffold state from a snapshot (or removed if it didn't exist
+# before), and .github/aw/actions-lock.json is restored from its own
+# snapshot. The caller never sees a half-scaffolded state, and the
+# two reviewers always land together or not at all.
 #
-# Usage: scaffold.sh
+# Usage: scaffold.sh [--override]
+#   --override    Upgrade existing scaffolded reviewers in place. The
+#                 four target files (sources + locks) are snapshot
+#                 before being replaced; on compile failure they are
+#                 restored to their pre-scaffold contents. Without the
+#                 flag, this script assumes Step 2's overwrite refusal
+#                 in the skill has already verified no targets exist.
 # Out:   one JSON object on stdout:
-#          {"sources":[...], "locks":[...], "gitattributes":"...", "compiled":true}
+#          {"sources":[...], "locks":[...], "gitattributes":"...", "compiled":true, "override":bool}
 # Exit:  0 on success; non-zero with stderr diagnostic on failure
 
 set -euo pipefail
+
+OVERRIDE_MODE=0
+for arg in "$@"; do
+  case "$arg" in
+    --override) OVERRIDE_MODE=1 ;;
+    *) echo "error: unknown argument '$arg' (only --override is recognized)" >&2; exit 2 ;;
+  esac
+done
 
 # Run from repo root so all relative paths resolve the same way regardless
 # of the caller's cwd. Refuse to proceed if we're not inside a git repo.
@@ -66,6 +82,84 @@ main() {
     cp "$ACTIONS_LOCK" "$lock_snapshot"
   fi
 
+  # Defense-in-depth: in install mode the skill's Step 2 has already refused
+  # if any target file exists. Re-check here so the script is independently
+  # safe — calling scaffold.sh directly without --override should refuse to
+  # silently overwrite scaffolded files even if the caller skipped Step 2.
+  # Use `-e` (exists, any type) rather than `-f` (regular file only) so a
+  # directory, symlink-to-dir, or other non-regular entry at the target path
+  # is also caught — the subsequent `cp`/compile would behave unexpectedly
+  # otherwise. `-L` covers broken symlinks (whose targets don't exist), which
+  # `-e` would miss.
+  if (( OVERRIDE_MODE == 0 )); then
+    local existing=()
+    for f in "${sources[@]}" "${locks[@]}"; do
+      { [[ -e "$f" ]] || [[ -L "$f" ]]; } && existing+=("$f")
+    done
+    if [[ ${#existing[@]} -gt 0 ]]; then
+      echo "error: target path(s) already exist: ${existing[*]} — pass --override to upgrade in place, or remove them first" >&2
+      exit 1
+    fi
+  fi
+
+  # Refuse symlinks at any path this script can write to, in BOTH modes.
+  # Coverage extends beyond the four reviewer source/lock files to also
+  # include `.github/aw/actions-lock.json` (rewritten by `gh aw compile`)
+  # and `.gitattributes` (the LOCK_GENERATED_RULE marker may be appended).
+  # A symlink at any of these (e.g., review-openai.md → some file outside
+  # the repo, or .gitattributes → a shared global config) is an
+  # unexpected manual configuration this skill doesn't manage: the
+  # subsequent `cp`/compile/append would follow the link and overwrite
+  # the target rather than replace the link itself, which can clobber an
+  # arbitrary file. Forces the consumer to remove the symlink explicitly
+  # before running the skill.
+  local writable_paths=("${sources[@]}" "${locks[@]}" "$ACTIONS_LOCK" "$GITATTRIBUTES")
+  local symlinks=()
+  for f in "${writable_paths[@]}"; do
+    [[ -L "$f" ]] && symlinks+=("$f")
+  done
+  if [[ ${#symlinks[@]} -gt 0 ]]; then
+    echo "error: writable path(s) are symlinks: ${symlinks[*]} — this skill does not manage symlinked reviewer/config files; remove the symlink(s) and re-run" >&2
+    exit 1
+  fi
+
+  # Refuse non-regular paths at any path this script can write to, in
+  # BOTH modes (after the symlink filter above). A directory, named pipe,
+  # socket, or other non-regular entry at a writable path is an
+  # unexpected configuration the skill doesn't manage; the snapshot loop
+  # below only handles regular files (`-f`), so a non-regular target
+  # would slip past snapshotting and cause `cp`/compile/append to behave
+  # unexpectedly with no rollback covering it. Same posture as the
+  # symlink refusal — force the consumer to clean up before the upgrade.
+  local nonregular=()
+  for f in "${writable_paths[@]}"; do
+    if [[ -e "$f" ]] && [[ ! -f "$f" ]]; then
+      nonregular+=("$f")
+    fi
+  done
+  if [[ ${#nonregular[@]} -gt 0 ]]; then
+    echo "error: writable path(s) are not regular files: ${nonregular[*]} — this skill expects regular file targets; remove the non-regular entry/entries and re-run" >&2
+    exit 1
+  fi
+
+  # Snapshot every existing target (sources + locks) so the compile-failure
+  # rollback can restore them. In install mode the guard above means this
+  # loop is always a no-op. In override mode every target may already exist
+  # with the consumer's previously-scaffolded content — without the snapshot,
+  # a compile failure mid-upgrade would leave the consumer with a partially-
+  # written workspace and no recovery path.
+  local -a target_paths=()
+  local -a target_snapshots=()
+  for f in "${sources[@]}" "${locks[@]}"; do
+    if [[ -f "$f" ]]; then
+      local snap
+      snap=$(mktemp -t aw-target-snap.XXXXXX)
+      cp "$f" "$snap"
+      target_paths+=("$f")
+      target_snapshots+=("$snap")
+    fi
+  done
+
   mkdir -p "$WORKFLOW_DIR"
   for w in "${WORKFLOWS[@]}"; do
     cp "${TEMPLATE_DIR}/${w}.md" "${WORKFLOW_DIR}/${w}.md"
@@ -77,8 +171,29 @@ main() {
   [[ -d "$(dirname "$ACTIONS_LOCK")" ]] && aw_dir_existed_before=1
 
   if ! gh aw compile "${WORKFLOWS[@]}" >&2; then
-    for s in "${sources[@]}"; do rm -f "$s"; done
-    for l in "${locks[@]}"; do rm -f "$l"; done
+    # Rollback: restore each target file from its snapshot if we took one;
+    # remove targets that didn't exist before (and thus have no snapshot).
+    # Linear lookup against the target_paths/target_snapshots parallel arrays;
+    # we deliberately avoid `declare -A` (associative arrays) because Bash 3.2
+    # — the default on macOS — doesn't support them, and consumers running
+    # the skill locally on macOS would syntax-error here. With at most 4
+    # targets the linear scan is trivially fast.
+    local f i snap
+    for f in "${sources[@]}" "${locks[@]}"; do
+      snap=""
+      for (( i=0; i < ${#target_paths[@]}; i++ )); do
+        if [[ "${target_paths[$i]}" == "$f" ]]; then
+          snap="${target_snapshots[$i]}"
+          break
+        fi
+      done
+      if [[ -n "$snap" ]]; then
+        cp "$snap" "$f"
+        rm -f "$snap"
+      else
+        rm -f "$f"
+      fi
+    done
     if [[ -n "$lock_snapshot" ]]; then
       cp "$lock_snapshot" "$ACTIONS_LOCK"
       rm -f "$lock_snapshot"
@@ -95,8 +210,11 @@ main() {
     exit 1
   fi
 
-  # Compile succeeded — discard the snapshot
+  # Compile succeeded — discard every snapshot.
   [[ -n "$lock_snapshot" ]] && rm -f "$lock_snapshot"
+  for snap in "${target_snapshots[@]}"; do
+    rm -f "$snap"
+  done
 
   # Sanitize the generated lock files. `gh aw compile` emits two formatting
   # drifts that violate rules/code-formatting.md "Basics" in any consumer
@@ -139,13 +257,17 @@ main() {
     printf '%s\n' "$LOCK_GENERATED_RULE" >> "$GITATTRIBUTES"
   fi
 
+  local override_json="false"
+  (( OVERRIDE_MODE == 1 )) && override_json="true"
+
   # Emit a JSON summary — arrays of the scaffolded sources and locks so the
   # caller (or a watching human) can see exactly which files landed.
   jq -n \
     --argjson sources "$(printf '%s\n' "${sources[@]}" | jq -R . | jq -s .)" \
     --argjson locks "$(printf '%s\n' "${locks[@]}" | jq -R . | jq -s .)" \
     --arg gitattributes "$GITATTRIBUTES" \
-    '{sources: $sources, locks: $locks, gitattributes: $gitattributes, compiled: true}'
+    --argjson override "$override_json" \
+    '{sources: $sources, locks: $locks, gitattributes: $gitattributes, compiled: true, override: $override}'
 }
 
 [[ "${BASH_SOURCE[0]}" == "${0}" ]] && main "$@"
