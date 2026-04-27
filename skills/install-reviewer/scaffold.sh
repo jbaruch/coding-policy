@@ -117,6 +117,24 @@ main() {
     exit 1
   fi
 
+  # Refuse non-regular target paths in BOTH modes (after the symlink filter
+  # above). A directory, named pipe, socket, or other non-regular entry at
+  # a target path is an unexpected configuration the skill doesn't manage;
+  # the snapshot loop below only handles regular files (`-f`), so a non-
+  # regular target would slip past snapshotting and cause `cp`/compile to
+  # behave unexpectedly with no rollback covering it. Same posture as the
+  # symlink refusal — force the consumer to clean up before the upgrade.
+  local nonregular=()
+  for f in "${sources[@]}" "${locks[@]}"; do
+    if [[ -e "$f" ]] && [[ ! -f "$f" ]]; then
+      nonregular+=("$f")
+    fi
+  done
+  if [[ ${#nonregular[@]} -gt 0 ]]; then
+    echo "error: target path(s) are not regular files: ${nonregular[*]} — this skill expects regular file targets; remove the non-regular entry/entries and re-run" >&2
+    exit 1
+  fi
+
   # Snapshot every existing target (sources + locks) so the compile-failure
   # rollback can restore them. In install mode the guard above means this
   # loop is always a no-op. In override mode every target may already exist
