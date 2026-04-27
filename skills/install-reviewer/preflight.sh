@@ -154,11 +154,13 @@ check_branch_not_remote() {
 # may be appended). Mirrors how `git pull` refuses to overwrite uncommitted
 # changes — forces the consumer to commit, stash, or remove the local
 # content before the scaffold replaces their files. "Dirty" here covers
-# two states the override could clobber:
+# three states the override could clobber:
+#   - symlink at the target path (working or broken); refuse outright so
+#     `cp`/compile/append never follows or replaces an unexpected link
 #   - tracked file with staged or unstaged edits relative to HEAD
-#   - untracked file at the target path (consumer hand-rolled a reviewer
-#     that was never staged); without this case the override would
-#     silently clobber an intentional local file.
+#   - untracked regular file at the target path (consumer hand-rolled a
+#     reviewer that was never staged); without this case the override
+#     would silently clobber an intentional local file.
 check_no_dirty_target_edits() {
   local dirty=()
   for t in "${TARGETS[@]}"; do
@@ -167,14 +169,20 @@ check_no_dirty_target_edits() {
     # OR catches every form of "something is at this path" the override
     # could clobber.
     [[ -e "$t" || -L "$t" ]] || continue
-    if git ls-files --error-unmatch -- "$t" >/dev/null 2>&1; then
+    if [[ -L "$t" ]]; then
+      # Symlinks (working or broken) get their own diagnostic so the
+      # consumer sees what the actual problem is — falling through to
+      # the "(untracked)" branch below would mislabel a broken symlink
+      # as merely untracked content. scaffold.sh refuses symlinks too;
+      # this just surfaces it earlier with a clearer reason.
+      dirty+=("$t (symlink target)")
+    elif git ls-files --error-unmatch -- "$t" >/dev/null 2>&1; then
       # Tracked: flag if uncommitted edits exist relative to HEAD
       if ! git diff --quiet HEAD -- "$t" 2>/dev/null; then
         dirty+=("$t (uncommitted edits)")
       fi
     else
-      # Untracked entry at the target path (regular file the consumer
-      # never staged, broken symlink, etc.) — the override would
+      # Untracked regular file at the target path — override would
       # silently clobber it without this case.
       dirty+=("$t (untracked)")
     fi
