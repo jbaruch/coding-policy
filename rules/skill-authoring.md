@@ -23,7 +23,7 @@ alwaysApply: true
 - The same flat-numbering format applies to both sequential workflows and action routers — in routers, "Step N" labels each alternative action rather than each phase of a workflow
 - No decimals, no sub-steps — flat numbering only
 - When inserting a step, renumber all subsequent steps
-- Each step is one action — if a step has an "and", split it
+- Each step is one action — if the step's **title** combines two verbs with "and" or "&" (e.g., "Build and Deploy", "Build & Deploy"), split it. The check is a title heuristic, not a body-atomization mandate: a step's body MAY list sub-tasks or supporting bullets that all serve one cohesive action. Splitting on every body bullet produces micro-steps for what is logically one phase
 - Action-router preambles are exhaustive on chaining: if any step is meant to chain to another (e.g. "after registering a group, also configure mounts"), say so explicitly in the preamble or at the end of the originating step. The default in routers remains "execute only the chosen step and finish"
 
 ## Step Continuity
