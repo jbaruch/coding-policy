@@ -18,6 +18,7 @@ alwaysApply: true
 
 - Pin versions or use a lock file to ensure reproducible builds
 - Lock files are committed to the repo
+- **Narrow exception for runtime-managed manifests**: if a tool the deployment relies on rewrites a manifest in-place at runtime AND the resolved-version state is gitignored, pin-or-lock produces silent drift where git and the running deployment disagree across every restart. In that one case the manifest may use a floating-but-explicit specifier (e.g. `"version": "latest"`) and skip the lock file, **only when** the project documents an authority-of-record rule in its own tile naming the carve-out (filename, scope, why the rewrite-in-place violates pin/lock semantics); AND a deploy-time check fails the deployment if a literal pin reappears in that manifest; AND the carve-out is narrowly scoped to a single named manifest. Every other manifest in the repo still pins. Reference incident: NanoClaw's `tessl-workspace/tessl.json` accumulated a 22-day silent drift on 2026-04-27 because `tessl update` rewrites the manifest in-place; authority-of-record rule is `nanoclaw-host: tessl-version-floating`.
 
 ## No Vendoring
 
