@@ -13,15 +13,18 @@ alwaysApply: true
 ## Title and Preamble
 
 - Start the body with an `# H1` title that names the skill (e.g., `# Release Skill` for `skills/release/SKILL.md`)
-- The first content line after the H1 must force sequential execution: process steps in order, do not skip ahead
-- This prevents the agent from parallelizing steps that depend on earlier output
+- The first content line after the H1 must declare the skill's execution mode and prevent the agent from parallelizing or freelancing
+- For **sequential workflows** (the default — release, deploy, migrate): force in-order execution: *"Process steps in order. Do not skip ahead."*
+- For **action routers** (group-management, scheduler-config, anything where the agent picks one of several alternatives by user intent): force single-step execution: *"This skill is an action router — pick the step that matches the user's intent and execute only that step. Do not run other steps; do not parallelize."* Action-router skills must list the available actions in the skill's `description` so the runtime can match intent
 
 ## Step Structure
 
 - Use flat numbered headings with descriptive titles: `## Step 1 — Verify Readiness`, `## Step 2 — Create PR`
+- The same flat-numbering format applies to both sequential workflows and action routers — in routers, "Step N" labels each alternative action rather than each phase of a workflow
 - No decimals, no sub-steps — flat numbering only
 - When inserting a step, renumber all subsequent steps
 - Each step is one action — if a step has an "and", split it
+- Action-router preambles are exhaustive on chaining: if any step is meant to chain to another (e.g. "after registering a group, also configure mounts"), say so explicitly in the preamble or at the end of the originating step. The default in routers remains "execute only the chosen step and finish"
 
 ## Step Continuity
 
