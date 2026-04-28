@@ -83,11 +83,16 @@ no_jq_path() {
 t_missing_jq_emits_structured_failure_install_mode() {
   local path
   path=$(no_jq_path) || return 0  # SKIP returns 0 to avoid noisy fail
-  local out
-  set +e
+  # The script-under-test is expected to exit 1 here; this file does not
+  # run with errexit (`set -uo pipefail` only), so the failure does not
+  # abort the function. Earlier revisions wrapped this in `set +e` /
+  # `set -e`, but since errexit was never on, the only effect was
+  # globally enabling errexit for every test that ran afterwards —
+  # exactly the kind of cross-test state leak rules/testing-standards.md
+  # warns against.
+  local out rc
   out=$(env -i PATH="$path" HOME="$HOME" "$SCRIPT" 2>/dev/null)
-  local rc=$?
-  set -e
+  rc=$?
   assert_eq "exit code" "1" "$rc" || return 1
   # Must be valid JSON
   echo "$out" | env -i PATH="$PATH" jq -e . >/dev/null || { echo "    FAIL: stdout is not valid JSON: $out" >&2; return 1; }
@@ -104,14 +109,12 @@ t_missing_jq_emits_structured_failure_install_mode() {
 t_missing_jq_emits_structured_failure_override_mode() {
   local path
   path=$(no_jq_path) || return 0
-  local out
-  set +e
+  local out rc
   out=$(env -i PATH="$path" HOME="$HOME" "$SCRIPT" --override 2>/dev/null)
-  local rc=$?
-  set -e
+  rc=$?
   assert_eq "exit code" "1" "$rc" || return 1
   echo "$out" | env -i PATH="$PATH" jq -e . >/dev/null || { echo "    FAIL: stdout is not valid JSON: $out" >&2; return 1; }
-  assert_eq "override" "true" "$(echo "$out" | jq -r .override)"
+  assert_eq "override" "true" "$(echo "$out" | jq -r .override)" || return 1
 }
 
 # --- driver ---

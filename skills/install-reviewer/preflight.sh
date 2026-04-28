@@ -152,7 +152,7 @@ check_templates_present() {
 
 check_branch_not_local() {
   if git show-ref --verify --quiet "refs/heads/${BRANCH}"; then
-    push_failure "branch-not-local" "Local branch '${BRANCH}' already exists — delete with 'git branch -d ${BRANCH}' (refuses if unmerged) or rename with 'git branch -m ${BRANCH} ${BRANCH}.bak' before re-running"
+    push_failure "branch-not-local" "Local branch '${BRANCH}' already exists — delete with: git branch -d '${BRANCH}' (refuses if unmerged); or rename with: git branch -m '${BRANCH}' '${BRANCH}.bak' before re-running"
   fi
 }
 
