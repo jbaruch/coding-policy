@@ -14,6 +14,14 @@ COPILOT_BOT_ID_DEFAULT="BOT_kgDOCnlnWA"
 
 fetch_pr_node_id() {
   local owner="$1" repo="$2" pr_number="$3"
+  # Validate pr_number is numeric BEFORE building the query: a
+  # non-numeric value would either break the GraphQL `Int!` argument
+  # or, in a more pathological case, get interpreted as additional
+  # query syntax. Refuse early with a clear diagnostic.
+  if [[ ! "$pr_number" =~ ^[0-9]+$ ]]; then
+    echo "error: pr-number must be a positive integer; got '${pr_number}'" >&2
+    return 1
+  fi
   local pr_id
   # `// empty` collapses null to nothing, so a missing/invalid PR
   # produces an empty string rather than the literal "null" that --jq
@@ -26,7 +34,13 @@ fetch_pr_node_id() {
     } }
   " --jq '.data.repository.pullRequest.id // empty')
   if [[ -z "$pr_id" ]]; then
-    echo "error: PR #${pr_number} not found in ${owner}/${repo} (no node ID returned)" >&2
+    # Empty pr_id can come from any of: missing repository, missing
+    # PR within an existing repository, insufficient permissions, or
+    # a GraphQL error that still returned HTTP 200 with a partial
+    # body. The diagnostic stays generic so the operator knows to
+    # check all four; pinpointing the exact cause would require
+    # parsing the GraphQL `errors` array, which is out of scope here.
+    echo "error: failed to resolve PR node ID for PR #${pr_number} in ${owner}/${repo} (repository, permissions, GraphQL, or PR lookup may have failed)" >&2
     return 1
   fi
   echo "$pr_id"

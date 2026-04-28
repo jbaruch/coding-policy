@@ -107,6 +107,21 @@ t_fetch_pr_node_id_returns_empty_and_nonzero_on_null_pr() {
   assert_eq "stdout"     ""   "$out" || return 1
 }
 
+t_fetch_pr_node_id_refuses_non_numeric_pr_number() {
+  # `gh` should never be called when the input is rejected upfront.
+  # Override the mock inside a subshell so a future regression where
+  # the validation gate is skipped surfaces as a loud test failure
+  # without leaking the override into the rest of the test file.
+  local err rc
+  err=$(
+    gh() { echo "mock gh: should not be called for non-numeric input" >&2; return 99; }
+    fetch_pr_node_id "owner" "repo" "abc" 2>&1 >/dev/null
+  )
+  rc=$?
+  assert_eq "exit code" "1" "$rc" || return 1
+  [[ "$err" == *"must be a positive integer"* ]] || { echo "    FAIL: stderr missing 'must be a positive integer': $err" >&2; return 1; }
+}
+
 t_fetch_pr_node_id_returns_id_on_real_pr() {
   MOCK_GH_FIXTURE=pr_found
   local out rc
@@ -141,6 +156,7 @@ t_discover_returns_empty_when_no_copilot_review() {
 
 echo "== request-copilot-review.sh tests =="
 run "fetch_pr_node_id refuses null PR with non-zero exit"            t_fetch_pr_node_id_returns_empty_and_nonzero_on_null_pr
+run "fetch_pr_node_id refuses non-numeric pr-number argument"        t_fetch_pr_node_id_refuses_non_numeric_pr_number
 run "fetch_pr_node_id returns ID for a real PR"                      t_fetch_pr_node_id_returns_id_on_real_pr
 run "discover_copilot_bot_id matches Bot.login with [bot] suffix"    t_discover_matches_bot_suffix_login
 run "discover_copilot_bot_id matches Bot.login without suffix"       t_discover_matches_bare_login
