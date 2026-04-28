@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Rules
+
+- **dependency-management** — Adds a narrow exception clause to the Pinning section for runtime-managed manifests: when a tool rewrites a manifest in-place at runtime AND the resolved-version state is gitignored, pin-or-lock produces silent drift between git and the running deployment, so the manifest may use floating-but-explicit specifiers (e.g. `"version": "latest"`) and skip the lock file. The exception is gated on three preconditions: the consuming project documents an authority-of-record rule in its own tile, a deploy-time check fails the deployment if a literal pin reappears, and the carve-out is narrowly scoped to a single named manifest. Triggered by NanoClaw's `tessl-workspace/tessl.json` 22-day silent-drift incident on 2026-04-27; authority-of-record rule is `nanoclaw-host: tessl-version-floating`.
+
 ## 0.3.0
 
 Second formal minor since 0.1.0 — `install-reviewer` gains an in-place upgrade path (`--override`) so consumers no longer have to manually `git rm` four files (or hand-backport fixes, defeating the managed-scaffold contract) every time a fix lands in this changelog. The skill description's "Use when..." clause now lists upgrade trigger phrases (`upgrade`, `update`, `refresh`, `pull latest reviewer templates`, `override`); each of the five scripts (`preflight.sh`, `branch.sh`, `scaffold.sh`, `commit.sh`, `push.sh`) accepts `--override` and emits an `override: bool` field in its JSON output. Step 3's branch-selection logic moved out of SKILL.md prose into a new `branch.sh` script per `rules/script-delegation.md` (deterministic operations belong in scripts, not embedded decision trees the agent reproduces) and `rules/skill-authoring.md` (flat one-action steps, no sub-step bullets).
