@@ -13,11 +13,37 @@ set -euo pipefail
 COPILOT_BOT_ID_DEFAULT="BOT_kgDOCnlnWA"
 
 fetch_pr_node_id() {
-  gh api graphql -f query="
-    query { repository(owner: \"$1\", name: \"$2\") {
-      pullRequest(number: $3) { id }
+  local owner="$1" repo="$2" pr_number="$3"
+  # Validate pr_number is numeric BEFORE building the query: a
+  # non-numeric value would either break the GraphQL `Int!` argument
+  # or, in a more pathological case, get interpreted as additional
+  # query syntax. Refuse early with a clear diagnostic.
+  if [[ ! "$pr_number" =~ ^[0-9]+$ ]]; then
+    echo "error: pr-number must be a positive integer; got '${pr_number}'" >&2
+    return 1
+  fi
+  local pr_id
+  # `// empty` collapses null to nothing, so a missing/invalid PR
+  # produces an empty string rather than the literal "null" that --jq
+  # would otherwise emit. Without this guard the downstream mutation
+  # runs with `pullRequestId: "null"` and surfaces as a confusing
+  # GraphQL error several steps removed from the actual root cause.
+  pr_id=$(gh api graphql -f query="
+    query { repository(owner: \"${owner}\", name: \"${repo}\") {
+      pullRequest(number: ${pr_number}) { id }
     } }
-  " --jq '.data.repository.pullRequest.id'
+  " --jq '.data.repository.pullRequest.id // empty')
+  if [[ -z "$pr_id" ]]; then
+    # Empty pr_id can come from any of: missing repository, missing
+    # PR within an existing repository, insufficient permissions, or
+    # a GraphQL error that still returned HTTP 200 with a partial
+    # body. The diagnostic stays generic so the operator knows to
+    # check all four; pinpointing the exact cause would require
+    # parsing the GraphQL `errors` array, which is out of scope here.
+    echo "error: failed to resolve PR node ID for PR #${pr_number} in ${owner}/${repo} (repository, permissions, GraphQL, or PR lookup may have failed)" >&2
+    return 1
+  fi
+  echo "$pr_id"
 }
 
 request_with_bot_id() {
@@ -29,6 +55,11 @@ request_with_bot_id() {
 }
 
 discover_copilot_bot_id() {
+  # The Bot type's `login` is reported with the `[bot]` suffix in some
+  # GraphQL contexts and without it in others (the REST surface keeps
+  # the suffix; GraphQL is inconsistent). Match either form so the
+  # filter does not silently miss a real Copilot review and run the
+  # mutation against an empty/wrong actor ID.
   gh api graphql -f query="
     query { repository(owner: \"$1\", name: \"$2\") {
       pullRequests(last: 20) { nodes { reviews(first: 10) {
@@ -36,7 +67,8 @@ discover_copilot_bot_id() {
       } } }
     } }
   " --jq '[.data.repository.pullRequests.nodes[].reviews.nodes[]
-           | select(.author.login == "copilot-pull-request-reviewer")
+           | select(.author.login == "copilot-pull-request-reviewer"
+                    or .author.login == "copilot-pull-request-reviewer[bot]")
            | .author.id] | unique | .[0] // empty'
 }
 
