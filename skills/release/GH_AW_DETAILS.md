@@ -6,8 +6,8 @@ Reference for Step 4 of the `release` skill — the internals of how the paired 
 
 Opening a PR, or pushing further commits to an existing PR, fires two paired GitHub Actions workflows on the `pull_request` event (a plain `git push` to a non-PR branch does NOT fire them):
 
-- `.github/workflows/review-openai.lock.yml` — Codex / `gpt-5.4`
-- `.github/workflows/review-anthropic.lock.yml` — Claude Code / `claude-opus-4-6`
+- `.github/workflows/review-openai.lock.yml` — Codex (the engine; the exact model is declared as `engine.model` in the workflow source `review-openai.md` so model bumps live in one place)
+- `.github/workflows/review-anthropic.lock.yml` — Claude Code (the engine; the exact model is declared as `engine.model` in the workflow source `review-anthropic.md` so model bumps live in one place)
 
 Both run on every `opened`, `synchronize`, `reopened`, and `edited` event. Each lock file is compiled from its `.md` gh-aw source via `gh aw compile` — the lock is what GitHub Actions executes; the `.md` is what humans edit.
 

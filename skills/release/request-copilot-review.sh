@@ -13,11 +13,23 @@ set -euo pipefail
 COPILOT_BOT_ID_DEFAULT="BOT_kgDOCnlnWA"
 
 fetch_pr_node_id() {
-  gh api graphql -f query="
-    query { repository(owner: \"$1\", name: \"$2\") {
-      pullRequest(number: $3) { id }
+  local owner="$1" repo="$2" pr_number="$3"
+  local pr_id
+  # `// empty` collapses null to nothing, so a missing/invalid PR
+  # produces an empty string rather than the literal "null" that --jq
+  # would otherwise emit. Without this guard the downstream mutation
+  # runs with `pullRequestId: "null"` and surfaces as a confusing
+  # GraphQL error several steps removed from the actual root cause.
+  pr_id=$(gh api graphql -f query="
+    query { repository(owner: \"${owner}\", name: \"${repo}\") {
+      pullRequest(number: ${pr_number}) { id }
     } }
-  " --jq '.data.repository.pullRequest.id'
+  " --jq '.data.repository.pullRequest.id // empty')
+  if [[ -z "$pr_id" ]]; then
+    echo "error: PR #${pr_number} not found in ${owner}/${repo} (no node ID returned)" >&2
+    return 1
+  fi
+  echo "$pr_id"
 }
 
 request_with_bot_id() {
@@ -29,6 +41,11 @@ request_with_bot_id() {
 }
 
 discover_copilot_bot_id() {
+  # The Bot type's `login` is reported with the `[bot]` suffix in some
+  # GraphQL contexts and without it in others (the REST surface keeps
+  # the suffix; GraphQL is inconsistent). Match either form so the
+  # filter does not silently miss a real Copilot review and run the
+  # mutation against an empty/wrong actor ID.
   gh api graphql -f query="
     query { repository(owner: \"$1\", name: \"$2\") {
       pullRequests(last: 20) { nodes { reviews(first: 10) {
@@ -36,7 +53,8 @@ discover_copilot_bot_id() {
       } } }
     } }
   " --jq '[.data.repository.pullRequests.nodes[].reviews.nodes[]
-           | select(.author.login == "copilot-pull-request-reviewer")
+           | select(.author.login == "copilot-pull-request-reviewer"
+                    or .author.login == "copilot-pull-request-reviewer[bot]")
            | .author.id] | unique | .[0] // empty'
 }
 
