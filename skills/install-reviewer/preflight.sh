@@ -35,6 +35,21 @@ for arg in "$@"; do
   esac
 done
 
+# jq is required for emitting the structured JSON contract documented
+# above. Without this early gate the script would die at the final jq
+# invocation with `jq: command not found` and the agent parsing our
+# stdout would have nothing to work with. Hand-roll the missing-jq
+# diagnostic so the failure still satisfies the contract — every
+# other failure mode below depends on jq being present.
+if ! command -v jq >/dev/null 2>&1; then
+  override_json="false"
+  (( OVERRIDE_MODE == 1 )) && override_json="true"
+  cat <<EOF
+{"ok": false, "override": ${override_json}, "failures": [{"check": "jq-installed", "reason": "jq is not installed; install with 'brew install jq' (macOS) or 'apt install jq' (Debian/Ubuntu) and re-run"}], "warnings": []}
+EOF
+  exit 1
+fi
+
 # If we're inside a git worktree, run from its root so the TEMPLATE path
 # below resolves the same way regardless of the caller's cwd. If we're
 # NOT in a worktree, the check_in_git_worktree step below will fail
@@ -137,7 +152,7 @@ check_templates_present() {
 
 check_branch_not_local() {
   if git show-ref --verify --quiet "refs/heads/${BRANCH}"; then
-    push_failure "branch-not-local" "Local branch '${BRANCH}' already exists — delete with 'git branch -D ${BRANCH}' or rename before re-running"
+    push_failure "branch-not-local" "Local branch '${BRANCH}' already exists — delete with: git branch -d '${BRANCH}' (refuses if unmerged); or rename with: git branch -m '${BRANCH}' '${BRANCH}.bak' before re-running"
   fi
 }
 
