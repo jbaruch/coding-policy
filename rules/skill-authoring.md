@@ -54,7 +54,7 @@ alwaysApply: true
 - Deterministic operations must be executable script files, not inline code blocks for the agent to copy-paste — see `rules/script-delegation.md`
 - In rule prose, documentation, and skill cross-references, use repo-relative paths (`skills/<name>/<file>.<ext>`) — stable, greppable, runtime-agnostic
 - In step bodies the agent executes, use the path that resolves at the **invocation site**: repo-relative when the skill runs from a clone of this repo (e.g., `skills/release/poll-pr-reviews.sh`); the consumer's tile-mount path when the skill runs inside a consumer repo (e.g., `.tessl/tiles/jbaruch/coding-policy/skills/install-reviewer/preflight.sh`, or whichever absolute path the consumer's runtime documents — container mounts like `/home/node/.claude/...` are common for hosted runners). The two shipped skills in this tile each exemplify one case: `release/SKILL.md` runs from a clone (repo-relative), `install-reviewer/SKILL.md` runs inside a consumer (mount path)
-- Don't mix conventions inside one SKILL.md — if Step 3 invokes via a mount path, every other step must too
+- Don't mix conventions inside one SKILL.md — if one step invokes a script via a mount path, every other script-invoking step must too
 - Include the expected input/output contract in the step description
 
 ## tile.json Manifest Reference
