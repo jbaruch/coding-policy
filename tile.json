@@ -78,6 +78,10 @@
     "stateful-artifacts": {
       "rules": "rules/stateful-artifacts.md",
       "alwaysApply": true
+    },
+    "agent-worktree-isolation": {
+      "rules": "rules/agent-worktree-isolation.md",
+      "alwaysApply": true
     }
   }
 }
