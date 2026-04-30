@@ -6,7 +6,7 @@ Coding policy tile for Baruch's AI agents. Language-agnostic code quality rules 
 
 ## What's New
 
-- 14 always-on steering rules: 8 covering code quality, 5 covering plugin authoring, 1 covering author-model declaration
+- 15 always-on steering rules: 8 covering code quality, 5 covering plugin authoring, 1 covering author-model declaration, 1 covering concurrency
 - `release` skill — structured PR + merge workflow with Copilot review and paired-reviewer cross-family enforcement
 - `eval-authoring` skill — generate, review, and curate eval scenarios with score-driven iteration
 - `install-reviewer` skill — scaffold the paired gh-aw PR review workflows (OpenAI + Anthropic) into a consumer repo
