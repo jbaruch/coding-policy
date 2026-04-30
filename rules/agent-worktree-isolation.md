@@ -18,9 +18,10 @@ alwaysApply: true
 
 ## How to Isolate
 
-- The Agent tool's `isolation: "worktree"` parameter is the canonical mechanism for spawned subagents — it provisions a fresh worktree on its own branch and cleans up on exit if the agent made no changes
-- For non-agent parallel work or human-launched second sessions, use `git worktree add ../<repo>-<task> <branch>` to create the isolated checkout, then `cd` into it before any mutating operation
-- Worktrees share the same `.git` object store — branch creation is cheap and disk usage stays small. The cost of an isolated worktree is trivial against the cost of a corrupted concurrent edit
+- Throughout this rule, "worktree" means an **additional working tree** created via `git worktree add` — distinct from the base checkout you cloned into, on its own branch, sharing the same `.git` object store. This is narrower than the generic "any git checkout" sense the word sometimes carries
+- The Agent tool's `isolation: "worktree"` parameter is the canonical mechanism for spawned subagents — it provisions a fresh additional worktree on its own branch and cleans up on exit if the agent made no changes
+- For non-agent parallel work or human-launched second sessions, use `git worktree add -b <task-branch> ../<repo>-<task>` to create an isolated checkout on a **new** branch (or `git worktree add ../<repo>-<task> <existing-branch>` to attach to one that already exists), then `cd` into it before any mutating operation
+- Additional worktrees share the same `.git` object store — branch creation is cheap and disk usage stays small. The cost of isolation is trivial against the cost of a corrupted concurrent edit
 
 ## Cleanup
 
