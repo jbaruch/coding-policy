@@ -101,6 +101,10 @@ Only proceed when:
 
 A `COMMENTED` review with zero inline comments is fully non-blocking; a `COMMENTED` review with inline comments is non-blocking once every thread has a reply.
 
+Pick the right cleanup path based on where you ran the skill from.
+
+**(A) From the base checkout (no additional worktree):**
+
 ```bash
 # Merge
 gh pr merge <N> --merge --delete-branch
@@ -114,6 +118,28 @@ git branch -d <branch>
 # Prune stale remote refs
 git remote prune origin
 ```
+
+**(B) From an additional worktree** (per `rules/agent-worktree-isolation.md`):
+
+```bash
+# Merge (running from inside the worktree is fine)
+gh pr merge <N> --merge --delete-branch
+
+# Return to the base checkout, fast-forward main
+cd <path-to-base-checkout>
+git checkout main && git pull --ff-only
+
+# Tear down the worktree — directory + `.git/worktrees/` metadata
+git worktree remove <path-to-worktree>
+
+# Now safe: branch is no longer checked out anywhere and is fully merged
+git branch -d <branch>
+
+# Prune stale remote refs
+git remote prune origin
+```
+
+Order in (B) is mandatory: `git branch -d` refuses to delete a branch that is checked out in any worktree, so the `git worktree remove` step must come before `git branch -d`. Reversing the order produces a "checked out at `<path>`" error and leaves a stranded branch.
 
 After merge:
 - Verify the merge landed on main

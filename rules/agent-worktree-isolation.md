@@ -28,6 +28,7 @@ alwaysApply: true
 - A worktree's lifecycle ends when its branch merges or is abandoned — remove the worktree at that point, do not leave orphans accumulating in `git worktree list`
 - Use `git worktree remove <path>` so the metadata under `.git/worktrees/` is cleaned up too — never `rm -rf` the directory directly, which strands the metadata and makes the path unreusable
 - If `git worktree list` shows entries from finished tasks, the workflow that creates worktrees is missing its cleanup step — fix the workflow, not just the symptom
+- When the worktree's branch lands via `skills/release/SKILL.md` Step 7, the post-merge order is mandatory: `cd` back to the base checkout → fast-forward base `main` → `git worktree remove <worktree-path>` → `git branch -d <branch>`. The teardown must precede the branch delete because `git branch -d` refuses to delete a branch that's still checked out in any worktree — reversing the order leaves a stranded branch
 
 ## Exception — Single-Reader Inspection
 
