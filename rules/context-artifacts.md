@@ -43,6 +43,13 @@ alwaysApply: true
 - The review rubric verifies frontmatter validity, an execution-mode preamble appropriate to the skill's shape (sequential-workflow preamble for in-order skills, action-router preamble for skills where the agent picks one of several alternatives by user intent — both forms specified in `rules/skill-authoring.md`), flat step numbering, typed `Skill()` calls (no prose invocations), silence-rule compliance, and channel-appropriate formatting (e.g., no Markdown in HTML-only channels)
 - Read the reviewer's suggestions — the review tool is a development aid, not just a gate. Act on concrete feedback (improve trigger terms, extract reference material, tighten descriptions) and re-review until you've addressed the actionable suggestions
 
+## Disagreeing With the Reviewer
+
+- The threshold and the gate are non-negotiable — never drop `--threshold 85` to make a failing skill pass, and never publish from a local machine to bypass CI. Both moves shift the burden from "fix the skill" to "hide the failure" and rot the gate
+- When you disagree with the reviewer's conclusions, the response is `tessl skill review --optimize <skill>` run **locally** — not arguing with the CI gate. Back up `SKILL.md` (and any reference files `--optimize` may rewrite) before invoking, so you can diff against the pre-optimization state
+- `--optimize` is a learning tool, not a take-it-or-leave-it patch. The reviewer's judge is not a subject-matter expert and routinely strips load-bearing context, examples, and edge-case handling that the local agent (with project context) knows are necessary. Diff the optimized output against the backup, keep the genuinely-improving moves (tighter triggers, less prose, better `Skill()` typing, removed redundancy), reject the over-aggressive cuts, then re-run the review against the curated result and iterate
+- The point is to learn the reviewer's optimization patterns and re-apply them with subject-matter expertise the judge lacks — not to mechanically accept whatever `--optimize` produces. A skill that scores 92 with critical context preserved beats a skill that scores 98 because the reviewer cut the load-bearing bits
+
 ## Mandatory Evals
 
 - Every skill with decisional logic ships eval cases
