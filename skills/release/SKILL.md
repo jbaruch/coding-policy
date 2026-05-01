@@ -141,10 +141,12 @@ git remote prune origin
 
 Order in (B) is mandatory: `git branch -d` refuses to delete a branch that is checked out in any worktree, so the `git worktree remove` step must come before `git branch -d`. Reversing the order produces a "checked out at `<path>`" error and leaves a stranded branch.
 
-After merge:
-- Verify the merge landed on main
-- Check that the publish CI workflow was triggered
-- Report the outcome: merged PR URL, version published (if applicable)
+After merge — per `rules/ci-safety.md`'s Always-Watch-CI duty extended through release:
+
+- Verify the merge landed on main (`git pull --ff-only` succeeds; `git log -1 --oneline` shows the merge commit)
+- **Watch the publish workflow to completion** — not just "check it triggered". Find the run with `gh run list --branch main --workflow "<publish-workflow-name>" --limit 1 --json databaseId --jq '.[0].databaseId'`, then `gh run watch <run-id> --exit-status`. A failed publish workflow means the version did not land — treat it like any other CI failure and diagnose before reporting the release as done
+- **Verify the new version is live in the registry** — for Tessl tiles, `tessl tile info <workspace>/<tile>` returns the bumped version under `Latest Version`; for other artifact types, hit the registry's equivalent (npm view, pypi JSON, etc.). The publish workflow can succeed while the registry still rejects the package (silent post-workflow failure, moderation hold) — verifying the registry catches that
+- Report the outcome: merged PR URL, version published, registry confirmation
 
 When this step is wrapped in a reusable script (e.g., `merge-and-cleanup.sh` that other devs run unattended), see `skills/release/SCRIPTING.md` for the gates the script must enforce.
 
