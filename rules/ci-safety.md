@@ -32,7 +32,7 @@ alwaysApply: true
 - Use `gh run watch` or equivalent to monitor the run in real time
 - If CI fails, inspect the logs immediately, fix the issue, and push again
 - A task is not done until CI is green
-- For plugin/tile/package releases, the duty extends past merge: watch the publish workflow that fires on the merge commit to completion (not just "check it triggered" — fire-and-forget scoring is zero), AND verify the new version is actually live in the registry (`tessl tile info <tile>` for Tessl tiles, or the equivalent registry endpoint for other artifact types). The publish workflow can succeed while the registry still rejects the package — silent post-workflow failures are the exact case the registry-verification step catches
+- For plugin/tile/package releases, the duty extends past merge: watch the publish workflow that fires on the merge commit to completion (not just "check it triggered" — fire-and-forget scoring is zero), AND verify the new version is actually live in the registry (`tessl tile info <workspace>/<tile>` for Tessl tiles, or the equivalent registry endpoint for other artifact types). The publish workflow can succeed while the registry still rejects the package — silent post-workflow failures are the exact case the registry-verification step catches
 
 ## Protected Branches
 
