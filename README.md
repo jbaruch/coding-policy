@@ -28,7 +28,7 @@ tessl install jbaruch/coding-policy
 |----------|------|---------|
 | Git | [commit-conventions](rules/commit-conventions.md) | Imperative mood, one change per commit, PR hygiene |
 | Testing | [testing-standards](rules/testing-standards.md) | Outcome-based, deterministic, no binary fixtures |
-| Errors | [error-handling](rules/error-handling.md) | Specific exceptions, actionable messages, structured logging |
+| Errors | [error-handling](rules/error-handling.md) | Specific exceptions (with outer-boundary process-contract carve-out), actionable messages, structured logging |
 | Deps | [dependency-management](rules/dependency-management.md) | Stdlib-first, pinned versions, lock files |
 | Files | [file-hygiene](rules/file-hygiene.md) | Proper .gitignore, no generated files committed |
 | CI | [ci-safety](rules/ci-safety.md) | Never skip tests, never modify CI without asking |
