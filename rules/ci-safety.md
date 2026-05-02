@@ -32,7 +32,7 @@ alwaysApply: true
 - Use `gh run watch` or equivalent to monitor the run in real time
 - If CI fails, inspect the logs immediately, fix the issue, and push again
 - A task is not done until CI is green
-- For plugin/tile/package releases, the duty extends past merge: watch the publish workflow that fires on the merge commit to completion (not just "check it triggered" — fire-and-forget scoring is zero), AND verify the new version is actually live in the registry (`tessl tile info <workspace>/<tile>` for Tessl tiles, or the equivalent registry endpoint for other artifact types). The publish workflow can succeed while the registry still rejects the package — silent post-workflow failures are the exact case the registry-verification step catches
+- For plugin/tile/package releases, the duty extends past merge: watch the publish workflow that fires on the merge commit to completion (not just "check it triggered" — fire-and-forget scoring is zero), AND verify the new version is live in the registry (`tessl tile info <workspace>/<tile>` for Tessl tiles, or the equivalent registry endpoint for other artifact types). If the registry does not show the new version after the publish workflow returned `success`, treat that as **CI failed** — diagnose the publish run and re-trigger. **Do not invent intermediate states.** The Tessl registry has no moderation queue, no moderation hold, and no moderation rejection step; agents have repeatedly hallucinated these as plausible-sounding failure modes when the real answer is always "CI failed, go look at the run." Registry verification is the explicit end-to-end confirmation that the publish workflow actually succeeded, not a check against any phantom moderation state
 
 ## Protected Branches
 
