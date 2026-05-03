@@ -24,6 +24,7 @@ alwaysApply: true
 
 - Don't copy library source code into the repo
 - Use the language's package manager to install dependencies
+- Tessl tiles count as dependencies — never vendor them. Don't commit tile content (e.g., `.tessl/tiles/<workspace>/<tile>/...`) into the consumer repo; install via `tessl install` at runtime. A vendored copy silently drifts from the registry version, and a workspace-local `.tessl/` is also wiped by `actions/checkout`'s default `clean: true` before CI agents read it — both failure modes have surfaced on real consumer installs (see `install-reviewer` 0.2.x changelog entries)
 
 ## Dependency Groups
 
