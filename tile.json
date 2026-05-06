@@ -82,6 +82,10 @@
     "agent-worktree-isolation": {
       "rules": "rules/agent-worktree-isolation.md",
       "alwaysApply": true
+    },
+    "boy-scout": {
+      "rules": "rules/boy-scout.md",
+      "alwaysApply": true
     }
   }
 }
