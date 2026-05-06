@@ -10,7 +10,7 @@ alwaysApply: true
 - "Pre-existing" is not a valid concept. The state you observed is the state you own, regardless of who or what put it there
 - Applies to anything you'd flag if a colleague had just written it: failing tests, broken docs, dead code, stale comments, lying type signatures, leaked secrets, missing newlines, unbumped versions
 
-## Why "Pre-Existing" Is Cope
+## Why "Pre-existing" Is Cope
 
 - Most bypass attempts and gate-evasion patterns ("not my regression", "pre-existing", "out of scope for this PR") share this framing. Patching the bypass paths individually plays whack-a-mole; ruling out the framing closes the source. The bypass paths themselves are forbidden separately by `rules/ci-safety.md`'s "Never Skip Tests" and `rules/context-artifacts.md`'s "Disagreeing With the Reviewer"
 - "I didn't break it" is true and irrelevant — the question is whether you'll leave it broken when you walk away. The repo doesn't care who broke it; it cares whether it's broken when the next person reads it
