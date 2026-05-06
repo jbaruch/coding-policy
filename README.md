@@ -6,7 +6,7 @@ Coding policy tile for Baruch's AI agents. Language-agnostic code quality rules 
 
 ## What's New
 
-- 15 always-on steering rules: 8 covering code quality, 5 covering plugin authoring, 1 covering author-model declaration, 1 covering concurrency
+- 16 always-on steering rules: 8 covering code quality, 5 covering plugin authoring, 1 covering author-model declaration, 1 covering concurrency, 1 covering review discipline
 - `release` skill — structured PR + merge workflow with Copilot review and paired-reviewer cross-family enforcement
 - `eval-authoring` skill — generate, review, and curate eval scenarios with score-driven iteration
 - `install-reviewer` skill — scaffold the paired gh-aw PR review workflows (OpenAI + Anthropic) into a consumer repo
@@ -41,6 +41,7 @@ tessl install jbaruch/coding-policy
 | Authoring | [stateful-artifacts](rules/stateful-artifacts.md) | Cross-invocation state: schema, owner skill, schema_version, hints-not-authority, migration |
 | Review | [author-model-declaration](rules/author-model-declaration.md) | PRs declare author model; paired reviewers pick the cross-family one |
 | Concurrency | [agent-worktree-isolation](rules/agent-worktree-isolation.md) | Mandatory git worktrees for concurrent agent work; cleanup; read-only exception |
+| Discipline | [boy-scout](rules/boy-scout.md) | Leave it better than you found it; "pre-existing" is not a valid concept; in-scope cleanups bundle, out-of-scope ones get filed |
 
 ### Skills
 
