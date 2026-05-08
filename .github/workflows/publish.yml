@@ -18,6 +18,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Need history reachable from `github.event.before` so the
+          # changed-skills detection below can run `git diff $BEFORE..HEAD`.
+          fetch-depth: 0
 
       - uses: tesslio/setup-tessl@v2
         with:
@@ -26,14 +30,38 @@ jobs:
       - name: Lint tile
         run: tessl tile lint
 
-      - name: Review release skill
-        run: tessl skill review --threshold 85 skills/release
-
-      - name: Review eval-authoring skill
-        run: tessl skill review --threshold 85 skills/eval-authoring
-
-      - name: Review install-reviewer skill
-        run: tessl skill review --threshold 85 skills/install-reviewer
+      # Per `rules/context-artifacts.md`: "Every skill change must pass
+      # `tessl skill review`". Interpreted strictly: only changed skills
+      # need to pass per publish — not every skill in the tile every time.
+      # Reviews are LLM-backed and consume Tessl credits, so reviewing
+      # untouched skills on every merge wastes both runner time and tokens.
+      - name: Skill review (changed only)
+        env:
+          EVENT_BEFORE: ${{ github.event.before }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          if [ "$EVENT_NAME" = "workflow_dispatch" ] \
+             || [ -z "$EVENT_BEFORE" ] \
+             || [ "$EVENT_BEFORE" = "0000000000000000000000000000000000000000" ]; then
+            # Manual trigger or initial push to a new branch: review every skill.
+            mapfile -t skills < <(find skills -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort)
+            echo "Reviewing all ${#skills[@]} skill(s) (manual trigger or initial push)."
+          else
+            # Push from a merged PR: review skills whose files changed.
+            mapfile -t skills < <(git diff --name-only "$EVENT_BEFORE..HEAD" -- 'skills/' \
+              | awk -F/ 'NF>=2 && $1=="skills"{print $2}' | sort -u)
+            echo "Detected ${#skills[@]} changed skill(s) since ${EVENT_BEFORE:0:7}."
+          fi
+          if [ "${#skills[@]}" -eq 0 ]; then
+            echo "No skill changes — review skipped."
+            exit 0
+          fi
+          for skill in "${skills[@]}"; do
+            [ -f "skills/$skill/SKILL.md" ] || { echo "  - $skill: deleted, skipping"; continue; }
+            echo "::group::Reviewing $skill"
+            tessl skill review --threshold 85 "skills/$skill/SKILL.md"
+            echo "::endgroup::"
+          done
 
       - uses: tesslio/patch-version-publish@v1
         with:
