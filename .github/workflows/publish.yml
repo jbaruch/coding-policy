@@ -18,6 +18,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Need history reachable from `github.event.before` so the
+          # changed-skills detection below can run `git diff $BEFORE..HEAD`.
+          fetch-depth: 0
 
       - uses: tesslio/setup-tessl@v2
         with:
@@ -26,14 +30,14 @@ jobs:
       - name: Lint tile
         run: tessl tile lint
 
-      - name: Review release skill
-        run: tessl skill review --threshold 85 skills/release
-
-      - name: Review eval-authoring skill
-        run: tessl skill review --threshold 85 skills/eval-authoring
-
-      - name: Review install-reviewer skill
-        run: tessl skill review --threshold 85 skills/install-reviewer
+      # Reviews only the skills whose files changed since the previous
+      # push. Action is dogfooded from this repo via the local path
+      # `./.github/actions/skill-review`; consumer repos call it as
+      # `uses: jbaruch/coding-policy/.github/actions/skill-review@<ref>`.
+      - name: Skill review (changed only)
+        uses: ./.github/actions/skill-review
+        with:
+          threshold: '85'
 
       - uses: tesslio/patch-version-publish@v1
         with:
