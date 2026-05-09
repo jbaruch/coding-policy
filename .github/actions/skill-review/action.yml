@@ -69,8 +69,16 @@ runs:
             mapfile -t skills < <(find "$SKILLS_DIR" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort)
             echo "Reviewing all ${#skills[@]} skill(s) (base unreachable)."
           else
+            # Strip the SKILLS_DIR prefix from each diff path and pull
+            # out the first path component beneath it — works for any
+            # depth (single-component `skills` or nested `pkg/skills`).
             mapfile -t skills < <(git diff --name-only "$base..HEAD" -- "$SKILLS_DIR/" \
-              | awk -F/ -v dir="$SKILLS_DIR" 'NF>=2 && $1==dir {print $2}' | sort -u)
+              | awk -v prefix="$SKILLS_DIR/" '
+                  index($0, prefix) == 1 {
+                    rest = substr($0, length(prefix) + 1)
+                    slash = index(rest, "/")
+                    if (slash > 0) print substr(rest, 1, slash - 1)
+                  }' | sort -u)
             echo "Detected ${#skills[@]} changed skill(s) since ${base:0:7}."
           fi
         fi
