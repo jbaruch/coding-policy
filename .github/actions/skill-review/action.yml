@@ -1,0 +1,86 @@
+name: 'Skill review (changed only)'
+description: |
+  Runs `tessl skill review --threshold N` on every skill whose files
+  changed since the previous push, instead of every skill in the tile.
+  Per `jbaruch/coding-policy: context-artifacts` "Mandatory Review":
+  every skill change must pass review, but unchanged skills do not
+  need to be re-reviewed on every publish — that just burns runner
+  time and Tessl credits.
+
+  Detection: `git diff $BASE..HEAD -- $skills-dir/`. BASE is the input
+  `base-ref` if provided, else `github.event.before` for push events.
+  On `workflow_dispatch` or initial push (no usable base), reviews
+  every skill (manual triggers expect a full re-review).
+
+  Requirements (consumer must arrange):
+    - `tessl` CLI on PATH (typically via `tesslio/setup-tessl@v2`).
+    - Repository checked out with full history reachable from BASE
+      (typically `actions/checkout@v4` with `fetch-depth: 0`).
+
+inputs:
+  threshold:
+    description: 'Minimum score required for a skill to pass review'
+    required: false
+    default: '85'
+  skills-dir:
+    description: 'Directory containing skill subdirectories (relative to workspace root)'
+    required: false
+    default: 'skills'
+  base-ref:
+    description: |
+      Override the base ref/SHA for the diff. When empty, the action falls
+      back to `github.event.before` (push events) or "review all"
+      (workflow_dispatch / initial push).
+    required: false
+    default: ''
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Identify changed skills and review them
+      shell: bash
+      env:
+        EVENT_BEFORE: ${{ github.event.before }}
+        EVENT_NAME: ${{ github.event_name }}
+        BASE_OVERRIDE: ${{ inputs.base-ref }}
+        THRESHOLD: ${{ inputs.threshold }}
+        SKILLS_DIR: ${{ inputs.skills-dir }}
+      run: |
+        if [ -n "$BASE_OVERRIDE" ]; then
+          base="$BASE_OVERRIDE"
+        elif [ "$EVENT_NAME" = "workflow_dispatch" ] \
+             || [ -z "$EVENT_BEFORE" ] \
+             || [ "$EVENT_BEFORE" = "0000000000000000000000000000000000000000" ]; then
+          base=""
+        else
+          base="$EVENT_BEFORE"
+        fi
+        if [ -z "$base" ]; then
+          mapfile -t skills < <(find "$SKILLS_DIR" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort)
+          echo "Reviewing all ${#skills[@]} skill(s) (manual trigger or initial push)."
+        else
+          if ! git rev-parse --verify "$base" >/dev/null 2>&1; then
+            echo "Base $base not reachable in shallow clone; fetching..."
+            git fetch --no-tags --depth=50 origin "$base" 2>/dev/null \
+              || git fetch --unshallow origin 2>/dev/null \
+              || { echo "::warning::Could not fetch $base — falling back to review-all."; base=""; }
+          fi
+          if [ -z "$base" ]; then
+            mapfile -t skills < <(find "$SKILLS_DIR" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort)
+            echo "Reviewing all ${#skills[@]} skill(s) (base unreachable)."
+          else
+            mapfile -t skills < <(git diff --name-only "$base..HEAD" -- "$SKILLS_DIR/" \
+              | awk -F/ -v dir="$SKILLS_DIR" 'NF>=2 && $1==dir {print $2}' | sort -u)
+            echo "Detected ${#skills[@]} changed skill(s) since ${base:0:7}."
+          fi
+        fi
+        if [ "${#skills[@]}" -eq 0 ]; then
+          echo "No skill changes — review skipped."
+          exit 0
+        fi
+        for skill in "${skills[@]}"; do
+          [ -f "$SKILLS_DIR/$skill/SKILL.md" ] || { echo "  - $skill: deleted, skipping"; continue; }
+          echo "::group::Reviewing $skill"
+          tessl skill review --threshold "$THRESHOLD" "$SKILLS_DIR/$skill/SKILL.md"
+          echo "::endgroup::"
+        done
