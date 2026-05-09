@@ -46,6 +46,11 @@ runs:
         THRESHOLD: ${{ inputs.threshold }}
         SKILLS_DIR: ${{ inputs.skills-dir }}
       run: |
+        # Pipefail so a failing `git diff` propagates instead of silently
+        # producing an empty changed-skills set (which would skip the
+        # mandatory review per `rules/context-artifacts.md`).
+        set -eo pipefail
+
         if [ -n "$BASE_OVERRIDE" ]; then
           base="$BASE_OVERRIDE"
         elif [ "$EVENT_NAME" = "workflow_dispatch" ] \
@@ -59,28 +64,32 @@ runs:
           mapfile -t skills < <(find "$SKILLS_DIR" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort)
           echo "Reviewing all ${#skills[@]} skill(s) (manual trigger or initial push)."
         else
-          if ! git rev-parse --verify "$base" >/dev/null 2>&1; then
-            echo "Base $base not reachable in shallow clone; fetching..."
+          # Validate the base is a real commit before relying on it for
+          # the diff. If not reachable in the local clone, try a shallow
+          # fetch; if that fails too, hard-fail rather than silently
+          # converting an unreachable base into "no changes".
+          if ! git rev-parse --verify "${base}^{commit}" >/dev/null 2>&1; then
+            echo "Base $base not reachable in clone; fetching..."
             git fetch --no-tags --depth=50 origin "$base" 2>/dev/null \
               || git fetch --unshallow origin 2>/dev/null \
-              || { echo "::warning::Could not fetch $base — falling back to review-all."; base=""; }
+              || true
           fi
-          if [ -z "$base" ]; then
-            mapfile -t skills < <(find "$SKILLS_DIR" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort)
-            echo "Reviewing all ${#skills[@]} skill(s) (base unreachable)."
-          else
-            # Strip the SKILLS_DIR prefix from each diff path and pull
-            # out the first path component beneath it — works for any
-            # depth (single-component `skills` or nested `pkg/skills`).
-            mapfile -t skills < <(git diff --name-only "$base..HEAD" -- "$SKILLS_DIR/" \
-              | awk -v prefix="$SKILLS_DIR/" '
-                  index($0, prefix) == 1 {
-                    rest = substr($0, length(prefix) + 1)
-                    slash = index(rest, "/")
-                    if (slash > 0) print substr(rest, 1, slash - 1)
-                  }' | sort -u)
-            echo "Detected ${#skills[@]} changed skill(s) since ${base:0:7}."
+          if ! git rev-parse --verify "${base}^{commit}" >/dev/null 2>&1; then
+            echo "::error::Base $base is not a reachable commit; refusing to silently skip skill review."
+            echo "::error::Set actions/checkout fetch-depth: 0 in the calling workflow, or pass an explicit base-ref."
+            exit 1
           fi
+          # Strip the SKILLS_DIR prefix from each diff path and pull
+          # out the first path component beneath it — works for any
+          # depth (single-component `skills` or nested `pkg/skills`).
+          mapfile -t skills < <(git diff --name-only "$base..HEAD" -- "$SKILLS_DIR/" \
+            | awk -v prefix="$SKILLS_DIR/" '
+                index($0, prefix) == 1 {
+                  rest = substr($0, length(prefix) + 1)
+                  slash = index(rest, "/")
+                  if (slash > 0) print substr(rest, 1, slash - 1)
+                }' | sort -u)
+          echo "Detected ${#skills[@]} changed skill(s) since ${base:0:7}."
         fi
         if [ "${#skills[@]}" -eq 0 ]; then
           echo "No skill changes — review skipped."
