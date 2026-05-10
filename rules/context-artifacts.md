@@ -53,7 +53,7 @@ alwaysApply: true
 
 ## Mandatory Evals
 
-- Every skill with decisional logic ships eval cases
+- Every skill with decisional logic ships eval cases, subject to the closed-loop carve-out in `rules/plugin-evals.md`
 - No bleeding, no leaking — full guardrails in `rules/plugin-evals.md`
 - Process details live in the `eval-authoring` skill — invoke it to generate and curate scenarios
 
