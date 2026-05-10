@@ -10,7 +10,7 @@ alwaysApply: true
 - The tile's entrypoint `README.md` **is** the project's `README.md` — they are the same file. Do not create a separate README for the tile. If the project already has a README, extend it with tile content (rules table, skills table, installation instructions)
 - Include a Tessl registry badge at the top of README: `[![tessl](https://img.shields.io/endpoint?url=https%3A%2F%2Fapi.tessl.io%2Fv1%2Fbadges%2F<workspace>%2F<tile>)](https://tessl.io/registry/<workspace>/<tile>)`
 - Skills live in `skills/<name>/SKILL.md`, rules live in `rules/<name>.md`
-- Standard directories: `rules/`, `skills/<name>/`, `evals/`
+- Standard directories: `rules/`, `skills/<name>/`, `evals/` — `evals/` is omitted in tiles claiming the closed-loop carve-out in `rules/plugin-evals.md`
 - Use `.tileignore` to exclude build artifacts and CI files from the published tile
 - Validate structure with `tessl tile lint` before every publish
 - Standard repo files like `CHANGELOG.md` will show as orphaned in lint — this is expected; lint only tracks manifest-declared paths
@@ -53,7 +53,7 @@ alwaysApply: true
 
 ## Mandatory Evals
 
-- Every skill with decisional logic ships eval cases
+- Every skill with decisional logic ships eval cases, subject to the closed-loop carve-out in `rules/plugin-evals.md`
 - No bleeding, no leaking — full guardrails in `rules/plugin-evals.md`
 - Process details live in the `eval-authoring` skill — invoke it to generate and curate scenarios
 
