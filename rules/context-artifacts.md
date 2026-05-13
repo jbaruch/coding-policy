@@ -37,10 +37,9 @@ alwaysApply: true
 
 ## Mandatory Review
 
-- Every skill change must pass `tessl skill review --threshold 85` before that skill is republished
+- Every skill change must pass `tessl skill review --threshold 85` before the publish that ships that change
 - Below-threshold scores block the pipeline — no exceptions
-- When adding a skill, add a `tessl skill review --threshold 85 skills/<name>` step to the CI workflow — the review gate is only real if CI enforces it
-- Scope the workflow's review loop to **changed** skills only, not every skill on every publish. `tessl skill review` is LLM-backed and credit-consuming; running it against unchanged content reproduces the prior rubric output and adds zero signal. Use `git diff --name-only <prev-sha>..HEAD -- 'skills/*'` (or equivalent) to drive the loop; fall back to all-skills only when the diff base is undefined (manual `workflow_dispatch`, initial push, force-push that rewrote the previous head). The fallback is an absence-of-base safeguard, not a free pass to skip in normal pushes. Reference implementation: `.github/actions/skill-review/action.yml` in this tile, consumed via `uses: jbaruch/coding-policy/.github/actions/skill-review@<ref>` from consumer repos
+- Wire `tessl skill review` into CI as a **changed-skills loop**, not as static per-skill steps. One workflow step drives the loop and iterates over the skills whose files changed since the previous push (`git diff --name-only <prev-sha>..HEAD -- 'skills/*'` or equivalent); the loop reviews only those. `tessl skill review` is LLM-backed and credit-consuming, and running it against unchanged content reproduces the prior rubric output, so per-skill static steps are both costlier and lower-signal than the diff-driven loop. Reference implementation: `.github/actions/skill-review/action.yml` in this tile, consumed via `uses: jbaruch/coding-policy/.github/actions/skill-review@<ref>` from consumer repos. Adding a skill therefore requires no CI YAML edit — the loop picks the new path up automatically the first time it appears in the diff. The loop reviews every skill only when the diff base is absent (manual `workflow_dispatch`, initial push, the all-zeros sentinel SHA); when the diff base is set but unreachable in the local clone the loop hard-fails rather than silently degrading to either "review all" or "no changes" — both would mask a missing review under the changed-only contract
 - The review rubric verifies frontmatter validity, an execution-mode preamble appropriate to the skill's shape (sequential-workflow preamble for in-order skills, action-router preamble for skills where the agent picks one of several alternatives by user intent — both forms specified in `rules/skill-authoring.md`), flat step numbering, typed `Skill()` calls (no prose invocations), silence-rule compliance, and channel-appropriate formatting (e.g., no Markdown in HTML-only channels)
 - Read the reviewer's suggestions — the review tool is a development aid, not just a gate. Act on concrete feedback (improve trigger terms, extract reference material, tighten descriptions) and re-review until you've addressed the actionable suggestions
 
@@ -63,7 +62,7 @@ alwaysApply: true
 When you add, remove, or rename a rule or skill, update **all** of these:
 
 - `tile.json` — add/remove the steering or skill entry
-- CI workflow — add/remove the `tessl skill review` step for each skill
+- CI workflow — no edit needed when the canonical changed-skills loop is in use (it picks new/removed paths up automatically via `git diff`); for bespoke workflows, confirm the path glob covers the added skill or excludes the removed one
 - `README.md` — update the rules table and/or skills table
 - `CHANGELOG.md` — add an entry describing the change
 
