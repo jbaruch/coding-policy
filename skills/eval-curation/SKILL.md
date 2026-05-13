@@ -36,10 +36,8 @@ Proceed immediately to Step 2.
 ## Step 2 — Pull Per-Scenario Lift
 
 ```bash
-tessl eval view --json <run-id> | python3 skills/eval-curation/compute-lift.py
+tessl eval view --json <run-id> | python3 .tessl/tiles/jbaruch/coding-policy/skills/eval-curation/compute-lift.py
 ```
-
-(When the skill runs from a consumer tile via `tessl install jbaruch/coding-policy`, the invocation path is `.tessl/tiles/jbaruch/coding-policy/skills/eval-curation/compute-lift.py` — whichever path the consumer's runtime documents.)
 
 The script reads a `tessl eval view --json` payload from stdin (or a path argument), pairs each scenario's `with-context`/`usage-spec` variant against its `baseline`/`without-context` variant, sums the `assessmentResults` scores per side, and emits the per-scenario lift trio as JSON:
 
