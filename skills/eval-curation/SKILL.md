@@ -71,7 +71,7 @@ Record the decision per scenario: `retire`, `fix-task`, or `rewrite-criteria`. P
 
 ## Step 5 — Apply Decisions
 
-For each `retire`: `rm -rf evals/<scenario-dir>` and note the removal in the tile's `CHANGELOG.md` under Unreleased.
+For each `retire`: `git rm -r evals/<scenario-dir>` (stages the deletion in the same step so the curation pass can't ship with the disk delete unstaged) and note the removal in the tile's `CHANGELOG.md` under Unreleased.
 
 For each `fix-task`: edit `task.md` per the No Bleeding rules — strip the technique / format / literal that leaked; keep the situation the user actually needs done.
 
