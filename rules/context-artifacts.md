@@ -37,9 +37,10 @@ alwaysApply: true
 
 ## Mandatory Review
 
-- Every skill change must pass `tessl skill review --threshold 85` before publish
+- Every skill change must pass `tessl skill review --threshold 85` before that skill is republished
 - Below-threshold scores block the pipeline — no exceptions
 - When adding a skill, add a `tessl skill review --threshold 85 skills/<name>` step to the CI workflow — the review gate is only real if CI enforces it
+- Scope the workflow's review loop to **changed** skills only, not every skill on every publish. `tessl skill review` is LLM-backed and credit-consuming; running it against unchanged content reproduces the prior rubric output and adds zero signal. Use `git diff --name-only <prev-sha>..HEAD -- 'skills/*'` (or equivalent) to drive the loop; fall back to all-skills only when the diff base is undefined (manual `workflow_dispatch`, initial push, force-push that rewrote the previous head). The fallback is an absence-of-base safeguard, not a free pass to skip in normal pushes. Reference implementation: `.github/actions/skill-review/action.yml` in this tile, consumed via `uses: jbaruch/coding-policy/.github/actions/skill-review@<ref>` from consumer repos
 - The review rubric verifies frontmatter validity, an execution-mode preamble appropriate to the skill's shape (sequential-workflow preamble for in-order skills, action-router preamble for skills where the agent picks one of several alternatives by user intent — both forms specified in `rules/skill-authoring.md`), flat step numbering, typed `Skill()` calls (no prose invocations), silence-rule compliance, and channel-appropriate formatting (e.g., no Markdown in HTML-only channels)
 - Read the reviewer's suggestions — the review tool is a development aid, not just a gate. Act on concrete feedback (improve trigger terms, extract reference material, tighten descriptions) and re-review until you've addressed the actionable suggestions
 
