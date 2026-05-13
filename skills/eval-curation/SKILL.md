@@ -41,17 +41,17 @@ Proceed immediately to Step 3.
 
 ## Step 3 — Classify by Lift Band
 
-Bucket each scenario into the lift bands defined in `skills/eval-authoring/LIFT_ANALYSIS.md`. Healthy bands stay as-is; weak / no-lift positive cases and ambiguous negative cases need Step 4.
+Bucket each scenario into the lift bands defined in `skills/eval-authoring/LIFT_ANALYSIS.md`. Healthy positive-case bands and negative cases whose near-zero lift is acceptable per that file's Negative Cases section stay as-is.
 
-If no scenarios sit in the weak / no-lift bands, the suite is clean. Proceed silently and finish here.
+If no scenarios sit in the actionable bands (no weak / no-lift positive cases, no tile-specific negative case that fails the lift expectation), the suite is clean. Produce a one-line `curation-summary.md` stating "no curation needed" and finish here — do not fabricate diagnoses for scenarios that don't need them.
 
-Otherwise proceed immediately to Step 4.
+Otherwise proceed immediately to Step 4 with: the weak / no-lift positive cases (each routed to the three-cause diagnosis), AND any tile-specific negative case whose lift fell below the acceptable band (also routed to the three-cause diagnosis — the rule's framework applies because the underspecification lives in the same three places).
 
-## Step 4 — Diagnose Every Weak / No-Lift Scenario
+## Step 4 — Diagnose Every Actionable Scenario
 
-Apply the three-cause diagnosis from `rules/plugin-evals.md` "Lift, Not Attainment" to each weak scenario:
+Apply the three-cause diagnosis from `rules/plugin-evals.md` "Lift, Not Attainment" to each scenario routed in from Step 3:
 
-1. **Coincidence with universal competence** — the tile's prescribed manner matches what baseline agents already produce by default. Decision: retire (or accept as documentation if the criterion has secondary regression-safety value).
+1. **Coincidence with universal competence** — the tile's prescribed manner matches what baseline agents already produce by default (positive case) OR baseline already refuses under universal knowledge so the tile's refusal reasoning isn't adding signal (negative case). Decision: retire (or accept as documentation if the criterion has secondary regression-safety value).
 2. **Task leaked the technique** — baseline pattern-matched its way to the criterion because the task mentioned it. Decision: fix the task per `skills/eval-authoring/REVIEW_CHECKLIST.md`'s No Bleeding rules; keep the criterion. Do NOT drop the criterion.
 3. **Criteria grade universal competence** — the criteria test things baseline always does (basic git safety, obvious engineering judgement), not tile-specific choices. Decision: rewrite the criteria to test the specific manner the tile prescribes, or retire the scenario.
 
