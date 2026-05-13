@@ -10,7 +10,7 @@
     {
       "name": "prescribes retire",
       "max_score": 35,
-      "description": "The recommended action is `retire` (or `accept-as-documentation` with explicit reasoning). `fix-task` and `rewrite-criteria` are wrong for this cause and do not satisfy this criterion"
+      "description": "The primary recommended action is `retire` (the task's allowed action set). `fix-task` and `rewrite-criteria` are wrong for this cause and do not satisfy this criterion. `accept-as-documentation` is allowed only as a nuance attached to `retire` (e.g., 'retire — or accept as documentation if the criterion has secondary regression-safety value'), not as a standalone primary action outside the task's enumerated set"
     },
     {
       "name": "reasoning cites baseline equivalence",
