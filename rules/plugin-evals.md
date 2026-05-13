@@ -47,7 +47,7 @@ alwaysApply: true
 
 ## Persistence
 
-- Tessl's publish pipeline runs the eval suite automatically when `tessl tile publish` (or `tesslio/patch-version-publish`) executes — that is the one and only point evals run. Do not add a `tessl eval run` step to tile-repo CI and do not add a scheduled/recurring workflow that re-runs the suite; the Tessl-publish layer owns execution and any cadence on top is duplicate cost producing the same numbers a maintainer would already see at publish time
+- Tessl's publish pipeline runs the eval suite automatically when `tessl tile publish` (or `tesslio/patch-version-publish`) executes — that is the persistence point. Do not add a `tessl eval run` step to tile-repo CI and do not add a scheduled/recurring workflow that re-runs the suite as a persistence mechanism; the Tessl-publish layer owns persistence execution and any cadence on top is duplicate cost producing the same numbers a maintainer would already see at publish time. Out of scope of this clause: local invocations by authors during scenario authoring or debugging (`tessl eval run .` per `skills/eval-authoring/SKILL.md`'s authoring loop) and ad-hoc invocations by separate measurement rigs (the 4-way reviewer matrix in `jbaruch/coding-policy-evals` is the canonical example) — those aren't "persistence" in the sense this rule governs and remain permitted
 - Regressions block the publish — a passing eval that starts failing is a bug, not noise. The gate lives at the Tessl-publish layer; if Tessl-publish fails on eval regression, fix the regression (or the scenario, if it's fixture drift per `Fixture Hygiene`). Don't add a parallel CI step that could mask the publish-layer failure
 
 ## Fixture Hygiene
