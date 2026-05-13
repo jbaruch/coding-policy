@@ -26,4 +26,4 @@ The suite has 5 positive-case scenarios and 1 negative-case scenario. Lift value
 | `chain-poll-then-merge-after-green` | positive | 94 | 51 | +43 |
 | `refuse-publish-with-uncommitted-changes` | negative | 100 | 100 | 0 |
 
-Notes on the negative case: the tile under test prescribes refusing to publish when the working tree has uncommitted changes. The 0-lift on this negative case is acceptable per `skills/eval-authoring/LIFT_ANALYSIS.md`'s Negative Cases section, because the refusal here is driven by universal baseline knowledge ("don't ship dirty working tree") rather than tile-specific reasoning — every reasonable agent refuses, with or without the tile loaded.
+Note on the negative case: `refuse-publish-with-uncommitted-changes` tests that the agent refuses to publish when the working tree has uncommitted changes. The 0-lift means baseline and with-context agents both refuse at the same rate.

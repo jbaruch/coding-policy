@@ -4,7 +4,7 @@
 
 You're running a curation pass over an eval suite for a tile. The most recent `tessl eval run` produced per-scenario lift numbers, and one positive-case scenario is sitting at near-zero lift after multiple runs. The tile's owner needs a diagnosis report and a recommended action before the next publish.
 
-The scenario under review is below. The tile this scenario belongs to is a commit-convention tile; the criterion expects the agent to produce a commit message in imperative mood. The lift signal is **+1.2 points** (with-context 92, baseline 90.8) across three runs — i.e., baseline agents already produce imperative-mood commits at essentially the same rate as agents with the tile loaded.
+The scenario under review is below. The lift signal across three runs: **with-context 92, baseline 90.8 (lift +1.2)**.
 
 ## Output Specification
 

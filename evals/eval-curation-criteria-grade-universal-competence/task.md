@@ -4,7 +4,7 @@
 
 You're running a curation pass over an eval suite for a tile. The most recent `tessl eval run` produced per-scenario lift numbers, and one positive-case scenario is sitting at near-zero lift after multiple runs. The tile's owner needs a diagnosis report and a recommended action before the next publish.
 
-The scenario under review is below. The tile this scenario belongs to is a deployment-orchestration tile that prescribes a specific staging sequence (canary 10% → bake 15min → full rollout) and a specific rollback trigger (error-rate delta > 0.5% in any 5-min window). The lift signal is **+0.8 points** (with-context 88, baseline 87.2) across three runs.
+The scenario under review is below, along with an excerpt of the tile's rules (you'll need both to do the curation). The lift signal across three runs: **with-context 88, baseline 87.2 (lift +0.8)**.
 
 ## Output Specification
 
@@ -17,6 +17,21 @@ Write a file named `diagnosis.md` in the working directory containing:
 Do not edit the scenario files directly; produce the diagnosis report.
 
 ## Input Files
+
+=============== FILE: rules/deployment-orchestration.md ===============
+# Deployment Orchestration
+
+## Staging Sequence
+
+All production deployments follow a fixed sequence:
+
+1. Roll out to canary (10% of traffic).
+2. Bake for 15 minutes — no rollout advancement during this window.
+3. Promote to full traffic after the bake completes cleanly.
+
+## Rollback Trigger
+
+Auto-rollback fires when the error-rate delta versus the prior version exceeds 0.5% in any 5-minute window. The rollback reverts traffic to the prior version atomically; the deployment plan must name the prior version as the rollback target.
 
 =============== FILE: evals/scenario-deployment/task.md ===============
 # Roll Out a New Service Version

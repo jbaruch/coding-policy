@@ -4,7 +4,7 @@
 
 You're running a curation pass over an eval suite for a tile. The most recent `tessl eval run` produced per-scenario lift numbers, and one positive-case scenario is sitting at near-zero lift after multiple runs. The tile's owner needs a diagnosis report and a recommended action before the next publish.
 
-The scenario under review is below. The tile this scenario belongs to is a merge-workflow tile; the criterion expects the agent to use a specific merge flag the tile prescribes. The lift signal is **+2.4 points** (with-context 94, baseline 91.6) across three runs — agents without the tile loaded perform almost as well as agents with the tile loaded.
+The scenario under review is below. The lift signal across three runs: **with-context 94, baseline 91.6 (lift +2.4)**.
 
 ## Output Specification
 
