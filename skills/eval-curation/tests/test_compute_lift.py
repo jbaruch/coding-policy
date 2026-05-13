@@ -226,6 +226,37 @@ class TestCLI(unittest.TestCase):
         finally:
             Path(path).unlink()
 
+    def test_cli_missing_file_exits_2_with_actionable_message(self):
+        # Per `rules/script-delegation.md` self-error-handling + error-handling's
+        # "actionable messages": missing path must produce a clear stderr
+        # diagnostic + non-zero exit, never a raw Python traceback.
+        result = subprocess.run(
+            [sys.executable, str(SCRIPT), "/tmp/eval-curation-does-not-exist-xxxxxx.json"],
+            capture_output=True, text=True,
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("not found", result.stderr.lower())
+        self.assertNotIn("traceback", result.stderr.lower())
+        # The message must hint at recovery, not just state the failure.
+        self.assertIn("check the path", result.stderr.lower())
+
+    def test_cli_permission_denied_exits_2_with_actionable_message(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+            json.dump({"data": {"attributes": {"scenarios": []}}}, f)
+            path = f.name
+        try:
+            Path(path).chmod(0o000)
+            result = subprocess.run(
+                [sys.executable, str(SCRIPT), path],
+                capture_output=True, text=True,
+            )
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("permission", result.stderr.lower())
+            self.assertNotIn("traceback", result.stderr.lower())
+        finally:
+            Path(path).chmod(0o600)
+            Path(path).unlink()
+
     def test_cli_wrong_envelope_exits_2(self):
         with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
             json.dump({"wrong_shape": []}, f)

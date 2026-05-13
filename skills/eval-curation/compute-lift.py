@@ -141,15 +141,42 @@ def main(argv=None) -> int:
     )
     args = parser.parse_args(argv)
 
-    src = sys.stdin if args.payload == "-" else open(args.payload)
-    try:
-        payload = json.load(src)
-    except json.JSONDecodeError as e:
-        print(f"error: input is not valid JSON: {e}", file=sys.stderr)
-        return 2
-    finally:
-        if src is not sys.stdin:
-            src.close()
+    if args.payload == "-":
+        try:
+            payload = json.load(sys.stdin)
+        except json.JSONDecodeError as e:
+            print(f"error: stdin is not valid JSON: {e}", file=sys.stderr)
+            return 2
+    else:
+        try:
+            with open(args.payload) as f:
+                payload = json.load(f)
+        except FileNotFoundError:
+            print(
+                f"error: payload file not found: {args.payload} — "
+                f"check the path, or pass '-' to read from stdin",
+                file=sys.stderr,
+            )
+            return 2
+        except PermissionError:
+            print(
+                f"error: permission denied reading {args.payload} — "
+                f"check file permissions",
+                file=sys.stderr,
+            )
+            return 2
+        except OSError as e:
+            print(
+                f"error: could not read {args.payload}: {e}",
+                file=sys.stderr,
+            )
+            return 2
+        except json.JSONDecodeError as e:
+            print(
+                f"error: {args.payload} is not valid JSON: {e}",
+                file=sys.stderr,
+            )
+            return 2
 
     try:
         result = compute_lifts(payload)
