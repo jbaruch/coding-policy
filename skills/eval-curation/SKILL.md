@@ -17,8 +17,6 @@ Prune an existing eval suite down to the scenarios that actually pull weight. Pr
 
 The diagnostic vocabulary (lift bands, three-cause diagnosis) lives in `skills/eval-authoring/LIFT_ANALYSIS.md` — read it before Step 3. The obligation to prune is set by `rules/plugin-evals.md` "Lift, Not Attainment".
 
-This skill is the curation half of the evals workflow. For first-author scenario generation, use `eval-authoring` instead. The two share `LIFT_ANALYSIS.md` and `REVIEW_CHECKLIST.md`.
-
 ## Step 1 — Run the Suite
 
 ```bash
@@ -69,12 +67,8 @@ For each `rewrite-criteria`: edit `criteria.json` so the checklist grades the sp
 
 Proceed immediately to Step 6.
 
-## Step 6 — Re-run and Verify
+## Step 6 — Verify the Curated Suite
 
-```bash
-tessl eval run .
-```
-
-Re-fetch per-scenario lift via Step 2's mechanism. Verify three things: retired scenarios are gone from the run, fixed scenarios now show meaningful lift, the lift distribution is denser than before the curation pass.
+Re-run the suite (`tessl eval run .`) and re-fetch per-scenario lift via Step 2's mechanism. Verify three things: retired scenarios are gone from the run, fixed scenarios now show meaningful lift, the lift distribution is denser than before the curation pass.
 
 If any fixed scenario still produces near-zero lift, return to Step 4 with that scenario alone — the diagnosis was wrong or the fix didn't take. Otherwise finish here when the distribution is stable and every kept scenario contributes signal.

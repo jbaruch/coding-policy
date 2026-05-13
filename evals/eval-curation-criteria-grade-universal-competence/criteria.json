@@ -1,0 +1,26 @@
+{
+  "context": "Tests whether the agent applies the three-cause diagnosis to a near-zero-lift scenario where the criteria grade universal competence (any reasonable engineer would 'mention deployment' / 'consider rollback' / 'address production' without the tile loaded) rather than tile-prescribed specifics (the canary 10% → 15min bake → full sequence and the 0.5%-in-5min rollback trigger). The correct cause is 'Criteria grade universal competence' and the prescribed action is `rewrite-criteria` to test the tile-prescribed specifics, or `retire` if nothing tile-specific can be salvaged. The tile's contribution being measured is the discriminating judgment between rewrite-criteria (correct, the task itself is fine) and fix-task (wrong — the task isn't the problem).",
+  "type": "weighted_checklist",
+  "checklist": [
+    {
+      "name": "names canonical cause",
+      "max_score": 30,
+      "description": "The diagnosis identifies the cause as 'Criteria grade universal competence' (or an unmistakable paraphrase naming the criteria-test-baseline-behavior mechanism). Generic 'the criteria are vague' or 'the test is weak' without naming the canonical cause does not satisfy this criterion"
+    },
+    {
+      "name": "prescribes rewrite-criteria or retire",
+      "max_score": 30,
+      "description": "The recommended action is `rewrite-criteria` (preferred when tile-specific replacement criteria exist) or `retire` (when nothing tile-specific can be salvaged). `fix-task` is wrong for this cause — the task is fine; the problem is in the criteria — and does not satisfy this criterion"
+    },
+    {
+      "name": "rejects fix-task",
+      "max_score": 20,
+      "description": "The diagnosis explicitly does not propose editing the task as the primary intervention. The task describes a legitimate situation and is not where the bleed/leak/grade-fail lives — surfacing this distinction is what the cause-#3 diagnosis is for"
+    },
+    {
+      "name": "if rewriting, replacement criteria are tile-specific",
+      "max_score": 20,
+      "description": "If the agent chose `rewrite-criteria`, the proposed replacement criteria reference the tile's specific prescribed values (the canary 10% / 15min bake / 0.5%-in-5min trigger, or close paraphrases of those specifics), not further generic platitudes. Replacement criteria sum to 100. If the agent chose `retire`, the reasoning explicitly states that nothing tile-specific can be salvaged from the existing scenario — also satisfies this criterion"
+    }
+  ]
+}
