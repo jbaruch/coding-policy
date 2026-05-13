@@ -11,7 +11,7 @@ The scenario under review is below, along with an excerpt of the tile's rules (y
 Write a file named `diagnosis.md` in the working directory containing:
 
 1. **Cause identification** — name the cause of the near-zero lift (use the canonical name from the tile's eval-curation guidance).
-2. **Recommended action** — one of `retire`, `fix-task`, `rewrite-criteria`. Note that the cause-#3 rule prescribes `retire` only when nothing tile-specific can be salvaged from the scenario; check whether the task above supplies replacements before choosing the fallback. If you choose `rewrite-criteria`, include the proposed replacement criteria inline (weights summing to 100).
+2. **Recommended action** — one of `retire`, `fix-task`, `rewrite-criteria`. If you choose `rewrite-criteria`, include the proposed replacement criteria inline (weights summing to 100).
 3. **Reasoning** — one or two sentences citing why the cause is what you identified, and why the chosen action is the one prescribed for that cause.
 
 Do not edit the scenario files directly; produce the diagnosis report.

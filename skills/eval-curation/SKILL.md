@@ -36,10 +36,21 @@ Proceed immediately to Step 2.
 ## Step 2 — Pull Per-Scenario Lift
 
 ```bash
-tessl eval view --json <run-id>
+tessl eval view --json <run-id> | python3 skills/eval-curation/compute-lift.py
 ```
 
-For each scenario in the output, locate the per-variant totals and compute `lift = with_context_total - baseline_total`. The exact JSON shape depends on the CLI version; the canonical parsing implementation that adapts to it is `scoring/compute-lift.py --from-tessl-run-id <UUID>` in `jbaruch/coding-policy-evals` (use it when present in the tile). When no scoring driver ships, walk the run's per-scenario solutions and sum each variant's per-criterion scores; record the (scenario, lift) pairs.
+(When the skill runs from a consumer tile via `tessl install jbaruch/coding-policy`, the invocation path is `.tessl/tiles/jbaruch/coding-policy/skills/eval-curation/compute-lift.py` — whichever path the consumer's runtime documents.)
+
+The script reads a `tessl eval view --json` payload from stdin (or a path argument), pairs each scenario's `with-context`/`usage-spec` variant against its `baseline`/`without-context` variant, sums the `assessmentResults` scores per side, and emits the per-scenario lift trio as JSON:
+
+```json
+{
+  "lifts": [{ "scenario_id": "<uuid>", "lift": <float>, "with_context_total": <float>, "baseline_total": <float> }],
+  "skipped": [{ "scenario_id": "<uuid>", "reason": "<diagnostic>" }]
+}
+```
+
+Scenarios missing a paired variant land in `skipped` with a diagnostic; the script does not silently drop them. The deterministic JSON walk + arithmetic live in the script per `rules/script-delegation.md` so this step is reproducible and testable independently of any agent.
 
 Proceed immediately to Step 3.
 
