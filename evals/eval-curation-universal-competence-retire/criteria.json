@@ -1,0 +1,26 @@
+{
+  "context": "Tests whether the agent applies the three-cause diagnosis from `rules/plugin-evals.md` 'Lift, Not Attainment' to a near-zero-lift scenario whose prescribed manner coincides with universal baseline competence (imperative-mood commits). The correct cause is 'Coincidence with universal competence' and the prescribed action is `retire` — the rule prose itself already documents the prescription, so a perpetually-passing eval scenario adds no documentation value and only pays Tessl run-cost. The tile's contribution being measured is the disciplined application of the three-cause framework; baseline agents may correctly recognize the scenario is unhelpful but won't necessarily name the canonical cause or follow the rule's prescribed action.",
+  "type": "weighted_checklist",
+  "checklist": [
+    {
+      "name": "names canonical cause",
+      "max_score": 35,
+      "description": "The diagnosis identifies the cause as 'Coincidence with universal competence' (or an unmistakable paraphrase that names baseline-already-does-this as the mechanism). Generic 'the scenario is bad' or 'the test isn't useful' without naming the canonical cause does not satisfy this criterion"
+    },
+    {
+      "name": "prescribes retire",
+      "max_score": 35,
+      "description": "The recommended action is `retire`. `fix-task` and `rewrite-criteria` are wrong for this cause and do not satisfy this criterion. A response that proposes preserving the scenario for any reason (including documentation / regression-safety / null-test value) does not satisfy this criterion — the rule's mandatory-pruning bullet forbids that escape hatch"
+    },
+    {
+      "name": "reasoning cites baseline equivalence",
+      "max_score": 20,
+      "description": "The reasoning explicitly cites that baseline agents already produce the prescribed behavior at essentially the same rate as agents with the tile loaded — i.e., the tile is not adding signal on this scenario because the manner it prescribes coincides with baseline default"
+    },
+    {
+      "name": "no spurious fix-task or rewrite-criteria",
+      "max_score": 10,
+      "description": "The diagnosis does not recommend fixing the task or rewriting the criteria as the primary action. For this cause, both are mistaken interventions — the rule prescribes retirement, not patching"
+    }
+  ]
+}

@@ -18,6 +18,9 @@
     "eval-authoring": {
       "path": "skills/eval-authoring/SKILL.md"
     },
+    "eval-curation": {
+      "path": "skills/eval-curation/SKILL.md"
+    },
     "install-reviewer": {
       "path": "skills/install-reviewer/SKILL.md"
     }
