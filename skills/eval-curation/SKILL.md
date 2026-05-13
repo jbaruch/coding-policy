@@ -39,9 +39,7 @@ Proceed immediately to Step 2.
 tessl eval view --json <run-id>
 ```
 
-For each scenario, compute `lift = with_context_score - baseline_score` from the `solutions` array's `with-context` (or `usage-spec`) and `baseline` variant totals. Record the (scenario, lift) pairs.
-
-If the tile ships a scoring driver (e.g., `scoring/compute-lift.py` in `jbaruch/coding-policy-evals`), use its `--from-tessl-run-id <UUID>` flag to compute the lift trio; otherwise the formula above is sufficient.
+For each scenario in the output, locate the per-variant totals and compute `lift = with_context_total - baseline_total`. The exact JSON shape depends on the CLI version; the canonical parsing implementation that adapts to it is `scoring/compute-lift.py --from-tessl-run-id <UUID>` in `jbaruch/coding-policy-evals` (use it when present in the tile). When no scoring driver ships, walk the run's per-scenario solutions and sum each variant's per-criterion scores; record the (scenario, lift) pairs.
 
 Proceed immediately to Step 3.
 
@@ -63,7 +61,7 @@ Otherwise proceed immediately to Step 4 with: the weak / no-lift positive cases 
 
 Apply the three-cause diagnosis from `rules/plugin-evals.md` "Lift, Not Attainment" to each scenario routed in from Step 3:
 
-1. **Coincidence with universal competence** — the tile's prescribed manner matches what baseline agents already produce by default (positive case) OR baseline already refuses under universal knowledge so the tile's refusal reasoning isn't adding signal (negative case). Decision: retire (or accept as documentation if the criterion has secondary regression-safety value).
+1. **Coincidence with universal competence** — the tile's prescribed manner matches what baseline agents already produce by default (positive case), or for a tile-specific negative case routed in from Step 3: baseline refuses for tile-independent reasons so the tile's refusal isn't adding signal. Decision: retire. (Universal-knowledge negative cases at acceptable lift do NOT reach this step — they're filtered in Step 3 per LIFT_ANALYSIS.md's Negative Cases carve-out, which preserves them as documented refusal checks of a kind the rule prose doesn't carry on its own.)
 2. **Task leaked the technique** — baseline pattern-matched its way to the criterion because the task mentioned it. Decision: fix the task per `skills/eval-authoring/REVIEW_CHECKLIST.md`'s No Bleeding rules; keep the criterion. Do NOT drop the criterion.
 3. **Criteria grade universal competence** — the criteria test things baseline always does (basic git safety, obvious engineering judgement), not tile-specific choices. Decision: rewrite the criteria to test the specific manner the tile prescribes, or retire the scenario.
 

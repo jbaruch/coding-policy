@@ -33,7 +33,7 @@ alwaysApply: true
 ## Lift, Not Attainment
 
 - Every scenario's value is measured as **lift** — the delta between the `with-context` score (tile loaded) and the `baseline` score (tile not loaded). A scenario with near-zero lift on a positive case is telling you one of three things:
-  1. **Coincidence with universal competence**: the tile's prescribed manner matches what baseline agents already produce by default (e.g. a rule saying "use imperative mood in commits" when agents already do that). The rule codifies common practice; lift won't show because output is the same. Retire or accept as documentation
+  1. **Coincidence with universal competence**: the tile's prescribed manner matches what baseline agents already produce by default (e.g. a rule saying "use imperative mood in commits" when agents already do that). The rule codifies common practice; lift won't show because output is the same. Retire — the rule prose itself documents the prescription, so a perpetually-passing eval scenario adds no documentation value beyond the rule, only pays Tessl run-cost
   2. **Task leaked the technique**: baseline pattern-matched its way to the criterion because the task mentioned the technique. Fix the task per No Bleeding above — do NOT drop the criterion
   3. **Criteria grade universal competence**: the criteria test things baseline always does (basic git safety, obvious engineering judgement) rather than tile-specific choices. Rewrite the criteria to test the specific manner the tile prescribes, or retire the scenario
 - Aggregate attainment on its own is a vanity metric. A tile averaging 95% attainment with 82% baseline is contributing 13 points of real value, not 95. Always report per-scenario lift alongside the average

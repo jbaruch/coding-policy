@@ -1,5 +1,5 @@
 {
-  "context": "Tests whether the agent applies the three-cause diagnosis from `rules/plugin-evals.md` 'Lift, Not Attainment' to a near-zero-lift scenario whose prescribed manner coincides with universal baseline competence (imperative-mood commits). The correct cause is 'Coincidence with universal competence' and the prescribed action is `retire` (or accept-as-documentation). The tile's contribution being measured is the disciplined application of the three-cause framework; baseline agents may correctly recognize the scenario is unhelpful but won't necessarily name the canonical cause or follow the rule's prescribed action.",
+  "context": "Tests whether the agent applies the three-cause diagnosis from `rules/plugin-evals.md` 'Lift, Not Attainment' to a near-zero-lift scenario whose prescribed manner coincides with universal baseline competence (imperative-mood commits). The correct cause is 'Coincidence with universal competence' and the prescribed action is `retire` — the rule prose itself already documents the prescription, so a perpetually-passing eval scenario adds no documentation value and only pays Tessl run-cost. The tile's contribution being measured is the disciplined application of the three-cause framework; baseline agents may correctly recognize the scenario is unhelpful but won't necessarily name the canonical cause or follow the rule's prescribed action.",
   "type": "weighted_checklist",
   "checklist": [
     {
@@ -10,7 +10,7 @@
     {
       "name": "prescribes retire",
       "max_score": 35,
-      "description": "The primary recommended action is `retire` (the task's allowed action set). `fix-task` and `rewrite-criteria` are wrong for this cause and do not satisfy this criterion. `accept-as-documentation` is allowed only as a nuance attached to `retire` (e.g., 'retire — or accept as documentation if the criterion has secondary regression-safety value'), not as a standalone primary action outside the task's enumerated set"
+      "description": "The recommended action is `retire`. `fix-task` and `rewrite-criteria` are wrong for this cause and do not satisfy this criterion. A response that proposes preserving the scenario for any reason (including documentation / regression-safety / null-test value) does not satisfy this criterion — the rule's mandatory-pruning bullet forbids that escape hatch"
     },
     {
       "name": "reasoning cites baseline equivalence",

@@ -11,7 +11,7 @@ The scenario under review is below. The tile this scenario belongs to is a commi
 Write a file named `diagnosis.md` in the working directory containing:
 
 1. **Cause identification** — name the cause of the near-zero lift (use the canonical name from the tile's eval-curation guidance).
-2. **Recommended action** — one of `retire`, `fix-task`, `rewrite-criteria` (plus any nuance: e.g., retire vs accept-as-documentation).
+2. **Recommended action** — one of `retire`, `fix-task`, `rewrite-criteria`.
 3. **Reasoning** — one or two sentences citing why the cause is what you identified, and why the chosen action is the one prescribed for that cause.
 
 Do not edit the scenario itself in this task — your output is the diagnosis report only.
