@@ -15,7 +15,13 @@ description: >
 
 Prune an existing eval suite down to the scenarios that actually pull weight. Process steps in order. Do not skip ahead.
 
-The diagnostic vocabulary (lift bands, three-cause diagnosis) lives in `skills/eval-authoring/LIFT_ANALYSIS.md` — read it before Step 3. The obligation to prune is set by `rules/plugin-evals.md` "Lift, Not Attainment".
+The diagnostic vocabulary (lift bands, three-cause diagnosis) lives in:
+
+```text
+skills/eval-authoring/LIFT_ANALYSIS.md
+```
+
+Read it before Step 3. The obligation to prune is set by `rules/plugin-evals.md` "Lift, Not Attainment".
 
 ## Step 1 — Run the Suite
 
@@ -41,7 +47,13 @@ Proceed immediately to Step 3.
 
 ## Step 3 — Classify by Lift Band
 
-Bucket each scenario into the lift bands defined in `skills/eval-authoring/LIFT_ANALYSIS.md`. Healthy positive-case bands and negative cases whose near-zero lift is acceptable per that file's Negative Cases section stay as-is.
+Bucket each scenario into the lift bands defined in:
+
+```text
+skills/eval-authoring/LIFT_ANALYSIS.md
+```
+
+Healthy positive-case bands and negative cases whose near-zero lift is acceptable per that file's Negative Cases section stay as-is.
 
 If no scenarios sit in the actionable bands (no weak / no-lift positive cases, no tile-specific negative case that fails the lift expectation), the suite is clean. Produce a one-line `curation-summary.md` stating "no curation needed" and finish here — do not fabricate diagnoses for scenarios that don't need them.
 

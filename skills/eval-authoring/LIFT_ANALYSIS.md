@@ -20,7 +20,7 @@ Lift is the number that matters. Aggregate attainment on its own is a vanity met
 
 1. **Coincidence with universal competence** — the tile prescribes what baseline already does. The rule is documentation, not lift-producing. Accept the no-lift result, or retire the scenario as a null test.
 2. **Task leaked the technique** — baseline pattern-matched the answer from the task text. Fix the task (strip the leaked literal); keep the criterion.
-3. **Criteria grade engineering-101 rather than the specific tile-prescribed manner** — rewrite the criteria to check the tile's specific prescription (e.g., the exact reply template, the chosen flag, the named CLI sequence), not to test "reasoning" baseline already does. Do NOT retire — a weak criterion is a fix-the-criterion problem, not a fix-the-tile problem.
+3. **Criteria grade universal competence** — the criteria test things baseline always does (basic git safety, obvious engineering judgement, general engineering-101) rather than the specific manner the tile prescribes. Rewrite the criteria to check the tile's specific prescription (e.g., the exact reply template, the chosen flag, the named CLI sequence), or retire the scenario if nothing tile-specific can be salvaged from it. The default action is `rewrite-criteria` (the task itself is fine; the bleed lives in the criteria); `retire` is the fallback when no tile-specific replacement criteria exist.
 
 ## Negative Cases (Refusal-Based Scenarios)
 
