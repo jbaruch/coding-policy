@@ -35,7 +35,7 @@ tessl install jbaruch/coding-policy
 | Secrets | [no-secrets](rules/no-secrets.md) | No credentials in code, env vars or secrets manager |
 | Style | [code-formatting](rules/code-formatting.md) | Use project's formatter, don't mix style with logic |
 | Authoring | [context-artifacts](rules/context-artifacts.md) | Plugin structure, rule format, review iteration, surface sync, consistency checks |
-| Authoring | [context-writing-style](rules/context-writing-style.md) | Prose discipline for rules, skills, READMEs, CHANGELOG entries — what to cut, what to keep, structural format |
+| Authoring | [context-writing-style](rules/context-writing-style.md) | Prose discipline for auto-loaded context artifacts (rules, skills, READMEs) — what to cut, what to keep, structural format. CHANGELOG entries follow looser archive discipline |
 | Authoring | [skill-authoring](rules/skill-authoring.md) | SKILL.md structure, step numbering, typed calls, tile.json reference |
 | Authoring | [script-delegation](rules/script-delegation.md) | Deterministic → script, reasoning → LLM, the regex trap |
 | Authoring | [plugin-evals](rules/plugin-evals.md) | No bleeding, no leaking, persistent eval coverage |
