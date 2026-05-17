@@ -45,7 +45,7 @@ alwaysApply: true
 
 - Lift = `with-context` score (tile loaded) minus `baseline` score (tile not loaded). Near-zero lift on a positive case has three causes:
   1. Coincidence with universal competence — tile's prescribed manner matches what baseline agents already produce. Retire the scenario; the rule prose documents the prescription
-  2. Task leaked the technique — baseline pattern-matched the criterion because the task mentioned the technique. Fix the task per No Bleeding; keep the criterion
+  2. Task leaked the technique — the task mentioned the technique and baseline pattern-matched the criterion. Fix the task per No Bleeding; keep the criterion
   3. Criteria grade universal competence — criteria test things baseline always does (basic git safety, obvious judgement) instead of tile-specific choices. Rewrite the criteria or retire the scenario
 - Aggregate attainment alone is vanity — always report per-scenario lift alongside the average
 - High-lift scenarios test tile-prescribed choices where baseline picks something different (bot-ID discovery, reply format, CLI sequence). Keep them — do not rewrite toward "testing reasoning" if baseline already reasons to the same outcome
