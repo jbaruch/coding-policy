@@ -7,7 +7,8 @@ alwaysApply: true
 ## Scope
 
 - Applies to artifacts that load into agent context: rules (always-on per `tile.json` steering), skills (loaded on invocation), READMEs (loaded on tile fetch)
-- CHANGELOG entries are the archive — they carry the motivation and incident references stripped from rules, and follow looser discipline because they load only on demand
+- CHANGELOG entries load only on demand, not always-on
+- CHANGELOG entries are the archive — they carry the motivation and incident references stripped from rules, and follow looser discipline
 - Line-count and section-count budgets target single-concept rules; rules that cover one coherent policy area with several sub-aspects (e.g., `plugin-evals` covering coverage/lift/persistence/naming/hygiene; `context-artifacts` covering structure/review/sync/audit; `skill-authoring` covering frontmatter/preamble/steps/calls) may run larger
 - Lists and quoted literals naming the forbidden terms themselves (e.g., this rule's own bullets enumerating the connectives and intensifiers) are not violations — the directive is the list, not prose use of the listed words
 
