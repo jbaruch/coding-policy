@@ -27,7 +27,7 @@ alwaysApply: true
 - LLMs are over-eager declaring things deterministic because they think they can regex it
 - If the input has too many edge cases for a reasonable regex, it's reasoning — not scripting
 - Parsing natural language dates, extracting meaning from unstructured text, classifying ambiguous input — these are **not** scripting tasks
-- A script should only handle patterns that are fully enumerable
+- A script should only handle patterns that are enumerable
 
 ## Scripts Are Real Files
 

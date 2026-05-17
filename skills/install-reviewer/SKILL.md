@@ -22,7 +22,7 @@ Scaffold the gh-aw PR policy reviewer pair (OpenAI + Anthropic) into a consumer 
 The skill runs in one of two modes determined by the user's request:
 
 - **install** (default) — the consumer hasn't run the skill before, no scaffolded reviewer files exist. The current behavior of every step.
-- **upgrade** (`--override`) — the consumer ran the skill on a prior tile version and now wants to refresh to the current one. Triggered by user phrases like "upgrade", "update", "refresh", "pull latest reviewer templates", or "override". Each script in this skill takes an optional `--override` flag; pass it to ALL FIVE scripts (preflight, branch, scaffold, commit, push) when in upgrade mode, none of them when in install mode. The branch name and commit message change accordingly (`feat/upgrade-coding-policy-review` and `ci(review): upgrade ...`); preflight skips the branch-clear checks (the upgrade branch may legitimately exist from a prior in-flight upgrade) and instead refuses if any of the six paths the upgrade flow can rewrite (the four reviewer source/lock files plus `.github/aw/actions-lock.json` and `.gitattributes`) have uncommitted local edits or are untracked, so the consumer commits, stashes, or removes the local content before the scaffold replaces them; scaffold snapshots and restores the four reviewer source/lock files on compile failure (in addition to its existing `actions-lock.json` snapshot+restore).
+- **upgrade** (`--override`) — refresh a previously-installed reviewer to the current tile version. Triggered by user phrases like "upgrade", "update", "refresh", "pull latest reviewer templates", "override". Pass `--override` to all five scripts (preflight, branch, scaffold, commit, push). Branch becomes `feat/upgrade-coding-policy-review`; commit message becomes `ci(review): upgrade ...`. Preflight skips branch-clear checks and instead refuses if any of the six rewritable paths (the four reviewer source/lock files plus `.github/aw/actions-lock.json` and `.gitattributes`) has uncommitted local edits or is untracked. Scaffold snapshots and restores all four reviewer files on compile failure.
 
 ## Step 1 — Run Preflight Checks
 
@@ -34,7 +34,7 @@ The skill runs in one of two modes determined by the user's request:
 .tessl/tiles/jbaruch/coding-policy/skills/install-reviewer/preflight.sh --override
 ```
 
-Runs every precondition (git worktree, GitHub CLI install + auth, gh-aw extension at minimum version, tile template, origin remote, plus mode-dependent branch state — install mode requires the install branch to be clear locally and remotely; upgrade mode skips that and instead refuses if any of the six paths the upgrade flow can rewrite (the four reviewer source/lock files plus `.github/aw/actions-lock.json` and `.gitattributes`) have local edits or are untracked) and returns one JSON object: `{"ok": bool, "override": bool, "failures": [...], "warnings": [...]}`.
+Runs every precondition (git worktree, GitHub CLI install + auth, gh-aw extension at minimum version, tile template, origin remote, plus mode-dependent branch state) and returns one JSON object: `{"ok": bool, "override": bool, "failures": [...], "warnings": [...]}`.
 
 - **Exit 0, empty `failures`** — every precondition passed; proceed to Step 2.
 - **Exit 1, populated `failures`** — report each failure's `reason` verbatim and stop. Every failure carries a concrete recovery command. The gh-aw extension is `github/gh-aw` (lives under the `github` org, not the tile owner) and must be v0.71.0+. Install with `gh extension install github/gh-aw --pin v0.71.0` — the unpinned form would land on the latest *stable* release (currently below v0.71.0; everything from v0.69.0 onward is marked prerelease) and fail the version check.
@@ -42,9 +42,9 @@ Runs every precondition (git worktree, GitHub CLI install + auth, gh-aw extensio
 
 ## Step 2 — Refuse Overwrite (install mode only)
 
-In **install mode**: if **any** of `.github/workflows/review-openai.md`, `.github/workflows/review-openai.lock.yml`, `.github/workflows/review-anthropic.md`, or `.github/workflows/review-anthropic.lock.yml` already exists in the repo, stop and report that prior review setup is present. Do not overwrite any of these files — a lock alone (source removed) or a source alone (mid-authoring) both indicate deliberate in-progress configuration that the skill would destroy by compiling over it. If none exist, proceed immediately to Step 3.
+In **install mode**: if any of `.github/workflows/review-openai.md`, `.github/workflows/review-openai.lock.yml`, `.github/workflows/review-anthropic.md`, or `.github/workflows/review-anthropic.lock.yml` exists, stop and report that prior review setup is present. Do not overwrite — a lock alone or a source alone indicates deliberate in-progress configuration. If none exist, proceed to Step 3.
 
-In **upgrade mode**: skip this step entirely. The targets are expected to exist; preflight's `no-dirty-target-edits` check has already verified the consumer's working tree is clean on those paths, and scaffold.sh will snapshot and restore them on compile failure.
+In **upgrade mode**: skip this step. Preflight has verified working tree cleanliness on those paths; scaffold.sh snapshots and restores them on compile failure.
 
 ## Step 3 — Establish Feature Branch
 

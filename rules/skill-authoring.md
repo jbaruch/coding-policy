@@ -12,10 +12,10 @@ alwaysApply: true
 
 ## Title and Preamble
 
-- Start the body with an `# H1` title that names the skill (e.g., `# Release Skill` for `skills/release/SKILL.md`)
-- The first content line after the H1 must declare the skill's execution mode and prevent the agent from parallelizing or freelancing
-- For **sequential workflows** (the default — release, deploy, migrate): force in-order execution: *"Process steps in order. Do not skip ahead."*
-- For **action routers** (group-management, scheduler-config, anything where the agent picks one of several alternatives by user intent): force single-step execution: *"This skill is an action router — pick the step that matches the user's intent and execute only that step. Do not run other steps; do not parallelize."* Action-router skills must list the available actions in the skill's `description` so the runtime can match intent
+- Start the body with an `# H1` title naming the skill (e.g., `# Release Skill` for `skills/release/SKILL.md`)
+- The first content line after the H1 declares the execution mode and prevents the agent from parallelizing or freelancing
+- Sequential workflows (default — release, deploy, migrate): preamble `Process steps in order. Do not skip ahead.`
+- Action routers (group-management, scheduler-config — agent picks one of several alternatives by user intent): preamble `This skill is an action router — pick the step that matches the user's intent and execute only that step. Do not run other steps; do not parallelize.` List the available actions in the skill's `description` so the runtime can match intent
 
 ## Step Structure
 
@@ -23,15 +23,14 @@ alwaysApply: true
 - The same flat-numbering format applies to both sequential workflows and action routers — in routers, "Step N" labels each alternative action rather than each phase of a workflow
 - No decimals, no sub-steps — flat numbering only
 - When inserting a step, renumber all subsequent steps
-- Each step is one action — if the step's **title** combines two verbs with "and" or "&" (e.g., "Build and Deploy", "Build & Deploy"), split it. The check is a title heuristic, not a body-atomization mandate: a step's body MAY list sub-tasks or supporting bullets that all serve one cohesive action. Splitting on every body bullet produces micro-steps for what is logically one phase
-- Action-router preambles are exhaustive on chaining: if any step is meant to chain to another (e.g. "after registering a group, also configure mounts"), say so explicitly in the preamble or at the end of the originating step. The default in routers remains "execute only the chosen step and finish"
+- Each step is one action. The check is a title heuristic: if the step's title combines two verbs with "and" or "&" (e.g., "Build and Deploy"), split it. A step's body may list sub-tasks all serving one cohesive action
+- Action-router preambles are exhaustive on chaining: if a step chains to another ("after registering a group, also configure mounts"), say so explicitly. Default in routers: execute only the chosen step and finish
 
 ## Step Continuity
 
-- The default handoff between steps is "continue immediately" — never "pause and wait for the user"
-- When a step hands off to the next, state the continuation explicitly ("Proceed immediately to Step N"); don't rely on implicit reading order
-- If a step can legitimately end the skill, say so explicitly ("Finish here"); otherwise the agent will keep going
-- Ambiguity at step boundaries is the most common cause of agents stalling mid-skill waiting for a nudge that was never needed
+- Default handoff between steps is "continue immediately" — never "pause and wait for the user"
+- State continuations explicitly ("Proceed immediately to Step N"); do not rely on implicit reading order
+- If a step can legitimately end the skill, say so explicitly ("Finish here")
 
 ## Keep Skills Compact
 
@@ -47,14 +46,13 @@ alwaysApply: true
 ## Silence Instructions
 
 - If a step can legitimately produce no output, say so explicitly: "If no issues found, proceed silently"
-- Prevents the agent from fabricating output to fill the gap
 
 ## Script References
 
 - Deterministic operations must be executable script files, not inline code blocks for the agent to copy-paste — see `rules/script-delegation.md`
 - In rule prose, documentation, and skill cross-references, use repo-relative paths (`skills/<name>/<file>.<ext>`) — stable, greppable, runtime-agnostic
-- In step bodies the agent executes, use the path that resolves at the **invocation site**: repo-relative when the skill runs from a clone of this repo (e.g., `skills/release/poll-pr-reviews.sh`); the consumer's tile-mount path when the skill runs inside a consumer repo (e.g., `.tessl/tiles/jbaruch/coding-policy/skills/install-reviewer/preflight.sh`, or whichever absolute path the consumer's runtime documents — container mounts like `/home/node/.claude/...` are common for hosted runners). The two shipped skills in this tile each exemplify one case: `release/SKILL.md` runs from a clone (repo-relative), `install-reviewer/SKILL.md` runs inside a consumer (mount path)
-- Don't mix conventions inside one SKILL.md — if one step invokes a script via a mount path, every other script-invoking step must too
+- In step bodies the agent executes, use the path that resolves at the invocation site: repo-relative when the skill runs from a clone of this repo (`skills/release/poll-pr-reviews.sh`); the consumer's tile-mount path when the skill runs inside a consumer (`.tessl/tiles/jbaruch/coding-policy/skills/install-reviewer/preflight.sh`)
+- Don't mix conventions inside one SKILL.md — if one step invokes via a mount path, every other script-invoking step must too
 - Include the expected input/output contract in the step description
 
 ## tile.json Manifest Reference
@@ -67,7 +65,7 @@ Required fields:
 
 Optional fields:
 - `private` — `true` to prevent publishing to the public registry
-- `docs` — path to extended documentation (avoid — keep docs in the entrypoint to prevent duplicate tables that drift)
+- `docs` — path to extended documentation (avoid; keep docs in the entrypoint)
 - `keywords` — array of discovery tags
 - `skills` — map of skill names to `{ "path": "skills/<name>/SKILL.md" }`
 - `steering` — map of rule names to `{ "rules": "rules/<name>.md", "alwaysApply": true }`

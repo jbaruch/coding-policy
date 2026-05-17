@@ -43,7 +43,7 @@ If no issues found in a scenario, proceed silently to the next one. Proceed imme
 
 Edit `criteria.json` and `task.md` to remove bleeding, remove leaking, improve failure messages, and align criteria with task. See `skills/eval-authoring/REVIEW_CHECKLIST.md` for definitions.
 
-When a criterion is misaligned, leaking, or otherwise unsalvageable, **remove it** and reweight the remaining criteria so the checklist still sums to 100 — do NOT keep a bad criterion just to preserve the existing weights. Bumping a misaligned criterion's `max_score` to keep the math tidy makes the scenario worse, not better. If a fix removes the only criterion that gave the scenario tile-specific signal, the scenario itself is unsalvageable — delete it per Step 6.
+When a criterion is misaligned, leaking, or unsalvageable, remove it and reweight the remaining criteria so the checklist sums to 100 — do not keep a bad criterion to preserve existing weights. If removing the bad criterion leaves no tile-specific signal, the scenario itself is unsalvageable — delete it per Step 6.
 
 ## Step 6 — Delete Unsalvageable Scenarios
 
