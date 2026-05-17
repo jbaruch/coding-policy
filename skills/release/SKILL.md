@@ -101,6 +101,12 @@ Only proceed when:
 
 A `COMMENTED` review with zero inline comments is fully non-blocking; a `COMMENTED` review with inline comments is non-blocking once every thread has a reply.
 
+Before merging, capture the registry baseline so the post-merge check has something to compare against:
+
+```bash
+PRE=$(tessl tile info <workspace>/<tile> | grep "Latest Version" | awk '{print $NF}')
+```
+
 Pick the right cleanup path based on where you ran the skill from.
 
 **(A) From the base checkout (no additional worktree):**
@@ -145,7 +151,7 @@ After merge — per `rules/ci-safety.md`'s Always Watch CI duty extended through
 
 - Verify the merge landed on main (`git pull --ff-only` succeeds; `git log -1 --oneline` shows the merge commit)
 - Watch the publish workflow to a terminal state. Bind to the merge commit SHA, never to "latest on main": `merge_sha=$(git log -1 --format=%H)`, then resolve the run with `gh run list --branch main --workflow "<publish-workflow-name>" --json databaseId,headSha --jq '.[] | select(.headSha == "'"$merge_sha"'") | .databaseId' | head -n 1`, then `gh run watch <run-id>`. `--limit 1` alone is race-prone — a parallel merge may land between your merge and the watch. The watch is a timing precondition for the registry check below, not the authoritative gate
-- Confirm the registry advanced. Capture `PRE=$(tessl tile info <workspace>/<tile> | grep "Latest Version" | awk '{print $NF}')` BEFORE the merge; after the watch returns, query again and confirm the new value is greater than `PRE`. Registry-advanced is the authoritative signal. Do not compare against a specific expected version — interleaved merges may advance past yours. See `rules/ci-safety.md` for the full registry semantics and failed-publish recovery
+- Confirm the registry advanced. After the watch returns, query `tessl tile info <workspace>/<tile>` again and confirm the new `Latest Version` is greater than `PRE` (captured before the merge above). Registry-advanced is the authoritative signal. Do not compare against a specific expected version — interleaved merges may advance past yours. See `rules/ci-safety.md` for the full registry semantics and failed-publish recovery
 - Report the outcome: merged PR URL, version published, registry confirmation
 
 When this step is wrapped in a reusable script (e.g., `merge-and-cleanup.sh` that other devs run unattended), see `skills/release/SCRIPTING.md` for the gates the script must enforce.

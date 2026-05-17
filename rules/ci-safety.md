@@ -41,7 +41,7 @@ alwaysApply: true
 - Do not compare against a specific expected version — interleaved merges may advance the registry past yours
 - The Tessl registry never rejects a published version. `moderationPassed: false` affects `tessl search` visibility only; a security finding requires an override flag for `tessl install`. Neither is rejection
 - If the registry didn't advance, the publish failed — do not invent moderation states as a hedge explanation
-- Naively re-running a failed publish creates an extra release when the workflow includes a version-bump step (e.g., `tesslio/patch-version-publish`). Safer recovery: a follow-up commit fires a fresh publish on merge
+- Naively re-running a failed publish can create an extra release when the workflow includes a version-bump step (e.g., `tesslio/patch-version-publish`) and the run got past it. Safer recovery: a follow-up commit fires a fresh publish on merge
 
 ## Protected Branches
 

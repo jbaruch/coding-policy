@@ -4,10 +4,16 @@ alwaysApply: true
 
 # Context Writing Style
 
+## Scope
+
+- Applies to artifacts that load into agent context: rules (always-on per `tile.json` steering), skills (loaded on invocation), READMEs (loaded on tile fetch)
+- CHANGELOG entries are the archive — they carry the motivation and incident references stripped from rules, and follow looser discipline because they load only on demand
+- Line-count and section-count budgets target single-concept rules; rules that cover one coherent policy area with several sub-aspects (e.g., `plugin-evals` covering coverage, lift, persistence, naming, hygiene) may run larger
+
 ## What to Cut
 
-- Logical connectives: therefore, however, because, since, thus, consequently, moreover, although, despite, as a result, in order to
-- Intensifiers: very, extremely, quite, really, fully, exactly, precisely, narrowly, completely
+- Logical connectives used as prose connectors: therefore, however, because, since, thus, consequently, moreover, although, despite, as a result, in order to — bullet order or punctuation carries the relation. Keep when stating a real causal constraint inside a directive (e.g., "the teardown precedes branch delete — `git branch -d` refuses..." stays; "we did X because of Y" goes)
+- Intensifiers used as noise modifiers: very, extremely, quite, really, fully, exactly, precisely, narrowly, completely. Keep when carrying a real constraint (`sum to exactly 100`, `fully enumerable`, `narrowly scoped`)
 - Reinforcement and hedging restatements of conclusions the preconditions already entail
 - Meta-justification prose explaining why the rule exists — belongs in CHANGELOG
 - Reference incidents, dated outages, worked examples tracing a case through the rule — belongs in CHANGELOG

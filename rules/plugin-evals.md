@@ -30,7 +30,7 @@ alwaysApply: true
 ## No Bleeding
 
 - Primary form: a criterion value appears verbatim in the task description. Grep each criterion's expected literal against the task text — if found there, the criterion tests reading, not application
-- Fix bleeding at the task, not the criterion. Strip the leaked literal from the task; keep the criterion. If stripping makes the task unsolvable for a baseline, the scenario is too narrow — reframe it
+- Fix bleeding at the task, not the criterion. Strip the leaked technique/format/literal from the task; keep the criterion. If stripping makes the task unsolvable for a baseline, the scenario is too narrow — reframe it
 - Second form: fixtures matching examples inside the skill prompt — the agent passes by recognition, not application. Keep fixtures in a namespace separate from skill examples
 
 ## No Leaking
