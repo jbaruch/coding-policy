@@ -82,7 +82,7 @@ The script returns:
 
 Loop until `ci.status` is `success` (or `none` if no checks are configured) and no bot has `CHANGES_REQUESTED`. `COMMENTED` does NOT block the polling loop — exit and proceed to Step 6. Step 7's merge gate separately requires every inline comment thread to have a reply. If the gh-aw review check ran but no review was posted, inspect logs with `gh run view --log-failed`. Do not retry via GraphQL — gh-aw is event-triggered.
 
-If `ci.status` stays `none` with `checks: []` across multiple pushes (Copilot may still run because it uses a separate event path), check `merge_state` — `status: DIRTY` / `mergeable: CONFLICTING` means GitHub couldn't create `refs/pull/<N>/merge` and silently skipped `pull_request:` workflows. Rebase onto current `main`, resolve conflicts, and force-push to unblock; the next push will fire the missed workflows.
+If `ci.status` stays `none` with `checks: []` across multiple pushes, check `merge_state`. `status: DIRTY` / `mergeable: CONFLICTING` indicates GitHub couldn't build `refs/pull/<N>/merge` and silently skipped `pull_request:` workflows. Rebase onto current `main`, resolve conflicts, and force-push.
 
 ## Step 6 — Address Feedback; No Re-request Needed
 
