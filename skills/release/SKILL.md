@@ -23,7 +23,7 @@ Structured workflow for shipping code: PR creation, automated policy review, mer
 - Grep the diff for the literal markers each rule names:
   - banned connectives `because`, `therefore`, `since`, etc. per `rules/context-writing-style.md`
   - the `outer-boundary-process-contract` token per `rules/error-handling.md`
-  - `max_score` weight sums per `rules/plugin-evals.md`
+  - `max_score` weight sums (must sum to 100) per `skills/eval-authoring/SKILL.md`
 - Run any local check the rule prescribes:
   - `jq '[.checklist[].max_score] | add' <criteria.json>` must print `100`
   - `bash -n <script>` must exit 0 on shell scripts
