@@ -80,7 +80,7 @@ The script returns:
 - `inline_comments.gh_aw` and `inline_comments.copilot` — top-level inline comment counts
 - `merge_state.status` and `merge_state.mergeable` — GitHub's merge-readiness state (e.g., `CLEAN`/`MERGEABLE`, `DIRTY`/`CONFLICTING`)
 
-Loop until `ci.status` is `success` (or `none` if no checks are configured) AND `merge_state.mergeable` is not `CONFLICTING` AND no bot has `CHANGES_REQUESTED`. `COMMENTED` does NOT block the polling loop — exit and proceed to Step 6. Step 7's merge gate separately requires every inline comment thread to have a reply. If the gh-aw review check ran but no review was posted, inspect logs with `gh run view --log-failed`. Do not retry via GraphQL — gh-aw is event-triggered.
+Loop until `ci.status` is `success` (or `none` if no checks are configured) AND `merge_state.mergeable` is not `CONFLICTING` AND `merge_state.status` is not `DIRTY` AND no bot has `CHANGES_REQUESTED`. `COMMENTED` does NOT block the polling loop — exit and proceed to Step 6. Step 7's merge gate separately requires every inline comment thread to have a reply. If the gh-aw review check ran but no review was posted, inspect logs with `gh run view --log-failed`. Do not retry via GraphQL — gh-aw is event-triggered.
 
 `merge_state.mergeable: CONFLICTING` (or `status: DIRTY`) is a blocking failure. Exit the loop, rebase onto current `main`, resolve conflicts, and force-push; the next push fires the missed `pull_request:` workflows.
 
@@ -98,7 +98,7 @@ Loop until `ci.status` is `success` (or `none` if no checks are configured) AND 
 ## Step 7 — Merge + Cleanup
 
 Only proceed when:
-- Step 5's poll returns `ci.status` as `success` (or `none` if no checks are configured) AND `merge_state.mergeable` is not `CONFLICTING` AND no bot has `CHANGES_REQUESTED`, AND
+- Step 5's poll returns `ci.status` as `success` (or `none` if no checks are configured) AND `merge_state.mergeable` is not `CONFLICTING` AND `merge_state.status` is not `DIRTY` AND no bot has `CHANGES_REQUESTED`, AND
 - Both `reviews.gh_aw.state` and `reviews.copilot.state` are NOT `none` — i.e., each gating reviewer has actually posted a review. A reviewer that hasn't run yet leaves `state: none` and `inline_comments: 0`, which would otherwise satisfy the no-CHANGES_REQUESTED check vacuously, AND
 - Every inline comment from Step 5's `inline_comments` count has a `Fixed in <sha>` or `Declining — <reason>` reply per Step 6 (verify by listing the PR's review comments — the poll script tracks counts, not reply state, so the operator confirms thread closure).
 
