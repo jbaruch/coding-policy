@@ -6,7 +6,7 @@ alwaysApply: true
 
 ## Scope
 
-- Applies to artifacts that load into agent context: rules (always-on per `tile.json` steering), skills (loaded on invocation), READMEs (loaded on tile fetch)
+- Applies to auto-loaded artifacts: rules from `tile.json` steering, skills on invocation, READMEs on tile fetch
 - CHANGELOG entries load only on demand, not always-on
 - CHANGELOG entries are the archive — they carry the motivation and incident references stripped from rules, and follow looser discipline
 - Line-count and section-count budgets target single-concept rules; rules that cover one coherent policy area with several sub-aspects (e.g., `plugin-evals` covering coverage/lift/persistence/naming/hygiene; `context-artifacts` covering structure/review/sync/audit; `skill-authoring` covering frontmatter/preamble/steps/calls) may run larger
@@ -35,5 +35,5 @@ alwaysApply: true
 - Carve-outs: lead with "Narrow exception for X.", then numbered preconditions, then a one-line reset stating every other case follows the rule
 - Never comma-splice preconditions with "; AND ...; AND ..."
 - 3–6 H2 sections per rule, ~25–40 lines total
-- At most one parenthetical per sentence — break out a second clause into its own bullet
+- At most one parenthetical clause per sentence — break out a second clause into its own bullet. Function-call notation (`Skill()`, `print()`, etc.), label tags inside lists, and other literal-syntax parens do not count as parenthetical clauses
 - Active voice, present tense; drop articles where the referent is unambiguous

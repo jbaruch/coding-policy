@@ -24,5 +24,5 @@ alwaysApply: true
 
 ## Reconciliation With `commit-conventions`
 
-- `rules/commit-conventions.md`'s "Keep PRs focused" and this rule appear to conflict. They don't. Focus governs the SHAPE of the bundle (one logical change per commit / PR); boy-scout governs whether you walk away from problems you noticed (no, you don't)
+- `rules/commit-conventions.md`'s "Keep PRs focused" and this rule appear to conflict. They don't. Focus governs the SHAPE of the bundle: one logical change per commit / PR. Boy-scout governs whether you walk away from problems you noticed: you don't
 - A focused PR can include adjacent cleanup commits when the scope reads as one cohesive change. A focused PR cannot include unrelated rewrites — but it CAN include a follow-up reference to where those are tracked

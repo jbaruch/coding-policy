@@ -7,7 +7,7 @@ alwaysApply: true
 ## How to Declare
 
 - Explicit (preferred): add an `**Author-Model:**` line near the top of the PR body — `**Author-Model:** claude-opus-4-7`
-- Implicit (fallback): a `Co-authored-by:` git trailer on any commit in the PR (Claude Code emits this by default)
+- Implicit fallback: a `Co-authored-by:` git trailer on any commit in the PR. Claude Code emits the trailer by default
 - Human-authored PRs: `**Author-Model:** human`
 - Mixed authorship: list every model that contributed, space-separated — `**Author-Model:** human claude-opus-4-7`
 

@@ -64,7 +64,7 @@ Healthy positive-case bands and negative cases whose near-zero lift is acceptabl
 
 If no scenarios sit in the actionable bands (no weak / no-lift positive cases, no tile-specific negative case that fails the lift expectation), the suite is clean. Produce a one-line `curation-summary.md` stating "no curation needed" and finish here — do not fabricate diagnoses for scenarios that don't need them.
 
-Otherwise proceed immediately to Step 4 with: the weak / no-lift positive cases (each routed to the three-cause diagnosis), AND any tile-specific negative case whose lift fell below the acceptable band (also routed to the three-cause diagnosis).
+Otherwise proceed immediately to Step 4 with two inputs to the three-cause diagnosis: the weak / no-lift positive cases, AND any tile-specific negative case whose lift fell below the acceptable band.
 
 ## Step 4 — Diagnose Every Actionable Scenario
 

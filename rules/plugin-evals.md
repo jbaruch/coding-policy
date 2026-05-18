@@ -7,7 +7,7 @@ alwaysApply: true
 ## Coverage
 
 - Every skill with decisional logic ships eval cases, subject only to the closed-loop carve-out below
-- Include both positive cases (correct behavior) and negative cases (refuse bad input, produce silence when nothing actionable)
+- Include positive cases that show correct behavior, and negative cases that refuse bad input or produce silence when nothing actionable
 - Write negative cases by hand using existing scenarios as a structural template (`tessl scenario generate` skews toward happy-path)
 
 ## Closed-Loop Carve-Out
@@ -43,7 +43,7 @@ alwaysApply: true
 
 ## Lift, Not Attainment
 
-- Lift = `with-context` score (tile loaded) minus `baseline` score (tile not loaded). Near-zero lift on a positive case has three causes:
+- Lift = `with-context` score minus `baseline` score, where `with-context` is with the tile loaded and `baseline` is without. Near-zero lift on a positive case has three causes:
   1. Coincidence with universal competence — tile's prescribed manner matches what baseline agents already produce. Retire the scenario
   2. Task leaked the technique — fix the task per No Bleeding; keep the criterion
   3. Criteria grade universal competence — criteria test things baseline always does (basic git safety, obvious judgement) instead of tile-specific choices. Rewrite the criteria or retire the scenario
