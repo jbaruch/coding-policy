@@ -6,7 +6,7 @@ alwaysApply: true
 
 ## Hands Off CI Config
 
-- **Never smuggle CI configuration changes** (workflow files, pipeline configs) into a PR whose stated scope is something else — CI changes affect every contributor and every branch
+- **Never smuggle CI configuration changes** (workflow files, pipeline configs) into a PR whose stated scope is something else
 - A PR whose title and body explicitly scope the work as a CI change **is** the approval artifact; this rule forbids unannounced edits, not CI-scope PRs
 - For unplanned CI edits discovered mid-task, stop and ask before touching the workflow files
 
@@ -14,7 +14,7 @@ alwaysApply: true
 
 - Never add `[skip ci]` to commit messages
 - Never disable or skip failing tests to unblock a merge
-- If tests fail, fix the tests or fix the code — skipping is not a valid option
+- If tests fail, fix the tests or fix the code
 
 ## Install, Don't Skip
 
@@ -37,8 +37,8 @@ alwaysApply: true
   1. Before merge: capture the registry's `Latest Version` as baseline (`tessl tile info <workspace>/<tile>` for Tessl tiles)
   2. After merge: wait for the publish workflow to reach a terminal state (`gh run watch <publish-run-id>`)
   3. Confirm the registry's `Latest Version` advanced past the baseline
-- Do not derive an expected version from the merge SHA's manifest — the bump runs inside the publish workflow after that SHA is read
-- Do not compare against a specific expected version — interleaved merges may advance the registry past yours
+- Do not derive an expected version from the merge SHA's manifest
+- Do not compare against a specific expected version
 - The Tessl registry never rejects a published version. `moderationPassed: false` affects `tessl search` visibility only; a security finding requires an override flag for `tessl install`. Neither is rejection
 - If the registry didn't advance, the publish failed — do not invent moderation states as a hedge explanation
 - Naively re-running a failed publish can create an extra release when the workflow includes a version-bump step (e.g., `tesslio/patch-version-publish`) and the run got past it. Safer recovery: a follow-up commit fires a fresh publish on merge

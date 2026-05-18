@@ -7,7 +7,7 @@ alwaysApply: true
 ## Specific Exceptions
 
 - Catch specific exception types, never bare catch-all handlers
-- Let unexpected exceptions propagate — they indicate bugs that need fixing, not hiding
+- Let unexpected exceptions propagate
 
 ## Outer-Boundary Carve-Out
 

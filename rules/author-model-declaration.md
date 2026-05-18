@@ -13,7 +13,7 @@ alwaysApply: true
 
 ## Precedence
 
-- Every PR must carry a signal — the declaration is required
+- Every PR must carry a signal
 - PR body `Author-Model:` wins when both exist (explicit beats implicit)
 - Trailer-only: known display names normalize to canonical IDs (e.g., `Claude Opus 4.7` → `claude-opus-4-7`); unknown display names are accepted as ad-hoc model IDs
 - Neither present blocks the PR — the reviewer exits with `REQUEST_CHANGES` before reading the diff
@@ -23,7 +23,7 @@ alwaysApply: true
 - `claude-*` → anthropic
 - `gpt-*`, `codex-*` → openai
 - `gemini-*` → google
-- Unknown strings default to their own ad-hoc family — unknown never matches a known family
+- Unknown strings default to their own ad-hoc family
 
 ## Mixed Authorship
 

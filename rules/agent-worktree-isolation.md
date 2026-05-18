@@ -8,7 +8,7 @@ alwaysApply: true
 
 - Any task that writes to the repo AND may run concurrently with another agent — branch work, file edits, scripted refactors, dependency upgrades, releases
 - Read-only inspection on the shared checkout (`Grep`, `Read`, `Glob`, non-mutating `Bash` like `git status`) is permitted; isolation becomes mandatory the moment the task crosses into mutating tools (`Edit`, `Write`, side-effecting `Bash`, branch creation)
-- Single-machine single-agent workflows benefit from worktrees but are not required to use them — the rule requires isolation only when concurrency is possible
+- Single-machine single-agent workflows may use worktrees but are not required to
 
 ## How to Isolate
 
@@ -19,8 +19,8 @@ alwaysApply: true
 ## Cleanup
 
 - A worktree's lifecycle ends when its branch merges or is abandoned — remove it at that point; do not leave orphans in `git worktree list`
-- Use `git worktree remove <path>` — never `rm -rf` the directory, which strands metadata under `.git/worktrees/`
-- When the worktree's branch lands via `skills/release/SKILL.md` Step 7, the post-merge order is mandatory: `cd` back to the base checkout → fast-forward base `main` → `git worktree remove <worktree-path>` → `git branch -d <branch>`. Teardown precedes branch delete — `git branch -d` refuses to delete a branch checked out in any worktree
+- Use `git worktree remove <path>`; never `rm -rf` the directory
+- When the worktree's branch lands via `skills/release/SKILL.md` Step 7, the post-merge order is mandatory: `cd` back to the base checkout → fast-forward base `main` → `git worktree remove <worktree-path>` → `git branch -d <branch>`. Teardown precedes branch delete
 
 ## Exception — Single-Reader Inspection
 

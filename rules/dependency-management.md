@@ -27,7 +27,7 @@ alwaysApply: true
   1. The project documents an authority-of-record rule in its own tile naming the carve-out and listing every covered manifest
   2. A deploy-time check fails the deployment if any disallowed specifier appears (literal pin, range, tag, or anything other than the permitted floating specifier)
   3. Each covered manifest is named explicitly in the authority-of-record rule
-- Multiple covered manifests permitted iff each independently meets all three preconditions — the carve-out does not widen to "any manifest" or apply transitively
+- Multiple covered manifests permitted iff each independently meets all three preconditions
 - Every other manifest in the repo still pins
 
 ## No Vendoring
@@ -35,7 +35,7 @@ alwaysApply: true
 - Don't copy library source code into the repo
 - Use the language's package manager to install dependencies
 - Tessl tiles count as dependencies — never vendor them. Install via `tessl install` at runtime; don't commit tile content (e.g., `.tessl/tiles/<workspace>/<tile>/...`) into the consumer repo
-- A workspace-local `.tessl/` is wiped by `actions/checkout`'s default `clean: true` — install to a non-workspace path for CI agents
+- Install Tessl tiles to a non-workspace path for CI agents
 
 ## Dependency Groups
 
@@ -45,4 +45,4 @@ alwaysApply: true
 ## CI Compatibility
 
 - Every dependency must be installable in CI
-- If something exists as a package, install it properly — don't skip tests because a dependency is "hard to install"
+- If something exists as a package, install it properly

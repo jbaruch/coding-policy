@@ -8,7 +8,7 @@ alwaysApply: true
 
 - Every skill with decisional logic ships eval cases, subject only to the closed-loop carve-out below
 - Include both positive cases (correct behavior) and negative cases (refuse bad input, produce silence when nothing actionable)
-- `tessl scenario generate` skews toward happy-path scenarios — write negative cases by hand using existing scenarios as a structural template
+- Write negative cases by hand using existing scenarios as a structural template (`tessl scenario generate` skews toward happy-path)
 
 ## Closed-Loop Carve-Out
 
@@ -18,20 +18,20 @@ alwaysApply: true
   2. No gating use — eval results do not gate any downstream automated action: release blocks, deploy blocks, publish-tile gates, rollback triggers, alert routing, dashboard surfaces, paging, summary stats consumed by another workflow
   3. Affirmative owner declaration — tile's CHANGELOG records the exception under a `### Rules` entry naming this rule + date
 - "We plan to look at results" does NOT qualify
-- "We have a gate that fails on regressions but nobody checks the failures" does NOT qualify — precondition 2 violated by the gate itself
+- "We have a gate that fails on regressions but nobody checks the failures" does NOT qualify (precondition 2)
 - Re-introducing any consumption later (human review or automated gating) requires re-introducing evals first under the standard requirement
 - Every other tile follows the rule in full
 
 ## Task and Criteria: the load-bearing shape
 
 - **Task** describes the SITUATION — what the user needs done. It does NOT prescribe the technique, format, sequence, or specific manner of solving it. "Ship a hotfix" is a task; "Ship a hotfix using a feature branch named `fix/*`" is a task with the answer smuggled in
-- **Criteria** grade whether the output matches the specific manner this tile prescribes. That conformance IS the tile's contribution — without the tile, agents pick some manner; with the tile, they pick the manner the tile teaches. Checking for tile-prescribed specifics (flag choices, format literals, sequences, conventions) is measuring tile value, not testing reading
+- **Criteria** grade whether the output matches the specific manner this tile prescribes. Checking for tile-prescribed specifics (flag choices, format literals, sequences, conventions) is measuring tile value, not testing reading
 
 ## No Bleeding
 
 - Primary form: a criterion value appears verbatim in the task description. Grep each criterion's expected literal against the task text — if found there, the criterion tests reading, not application
 - Fix bleeding at the task, not the criterion. Strip the leaked technique/format/literal from the task; keep the criterion. If stripping makes the task unsolvable for a baseline, the scenario is too narrow — reframe it
-- Second form: fixtures matching examples inside the skill prompt — the agent passes by recognition, not application. Keep fixtures in a namespace separate from skill examples
+- Second form: fixtures matching examples inside the skill prompt. Keep fixtures in a namespace separate from skill examples
 
 ## No Leaking
 
@@ -44,10 +44,10 @@ alwaysApply: true
 ## Lift, Not Attainment
 
 - Lift = `with-context` score (tile loaded) minus `baseline` score (tile not loaded). Near-zero lift on a positive case has three causes:
-  1. Coincidence with universal competence — tile's prescribed manner matches what baseline agents already produce. Retire the scenario; the rule prose documents the prescription
-  2. Task leaked the technique — the task mentioned the technique and baseline pattern-matched the criterion. Fix the task per No Bleeding; keep the criterion
+  1. Coincidence with universal competence — tile's prescribed manner matches what baseline agents already produce. Retire the scenario
+  2. Task leaked the technique — fix the task per No Bleeding; keep the criterion
   3. Criteria grade universal competence — criteria test things baseline always does (basic git safety, obvious judgement) instead of tile-specific choices. Rewrite the criteria or retire the scenario
-- Aggregate attainment alone is vanity — always report per-scenario lift alongside the average
+- Always report per-scenario lift alongside the average
 - High-lift scenarios test tile-prescribed choices where baseline picks something different (bot-ID discovery, reply format, CLI sequence). Keep them — do not rewrite toward "testing reasoning" if baseline already reasons to the same outcome
 - Pruning is mandatory upkeep, not optional cleanup. Run the curation pass (see `skills/eval-curation/SKILL.md`) every few publishes; retire any scenario showing near-zero lift after the three-cause diagnosis and fix attempt
 - Measure by per-scenario lift contribution, not raw scenario count — a 10-scenario suite where every scenario pulls weight beats a 35-scenario suite where half score baseline-equivalent

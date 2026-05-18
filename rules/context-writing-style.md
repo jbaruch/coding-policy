@@ -14,7 +14,7 @@ alwaysApply: true
 
 ## What to Cut
 
-- Logical connectives used as prose connectors: therefore, however, because, since, thus, consequently, moreover, although, despite, as a result, in order to — bullet order or punctuation carries the relation. Keep when stating a real causal constraint inside a directive (e.g., "the teardown precedes branch delete — `git branch -d` refuses..." stays; "we did X because of Y" goes)
+- Logical connectives are why-content detectors: therefore, however, because, since, thus, consequently, moreover, although, despite, as a result, in order to. When you write one, the clause it introduces is motivation, justification, or rationale — strip the whole clause and move the explanation to CHANGELOG. Em-dash, colon, semicolon are not loopholes; they smuggle the same why-content
 - Intensifiers used as noise modifiers: very, extremely, quite, really, fully, exactly, precisely, narrowly, completely. Keep when carrying a real constraint (`sum to exactly 100`, `fully enumerable`, `narrowly scoped`)
 - Reinforcement and hedging restatements of conclusions the preconditions already entail
 - Meta-justification prose explaining why the rule exists — belongs in CHANGELOG
@@ -27,7 +27,7 @@ alwaysApply: true
 
 - File paths, command names, flag literals, version numbers, dates, function names, env vars, error codes
 - Constraint-bearing words: required, optional, mandatory, forbidden, deprecated
-- Carve-out preconditions in full — those preconditions are the rule for edge cases
+- Carve-out preconditions in full (preconditions are the rule for edge cases)
 
 ## Structure
 
