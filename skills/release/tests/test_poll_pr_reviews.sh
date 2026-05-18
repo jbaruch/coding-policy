@@ -53,9 +53,23 @@ run() {
 gh() {
   case "$1" in
     pr)
-      case "$2" in
+      local subcmd="$2"
+      shift 2
+      case "$subcmd" in
         view)
-          # gh pr view <N> --repo <o/r> --json mergeStateStatus,mergeable
+          # Contract: `gh pr view <N> --repo <o/r> --json mergeStateStatus,mergeable`.
+          # Validate the --json args explicitly so a regression that drops --json
+          # or asks for the wrong fields surfaces as a loud mock failure rather
+          # than passing silently against a permissive stub.
+          local saw_json=0 json_args=""
+          while [[ $# -gt 0 ]]; do
+            case "$1" in
+              --json) saw_json=1; json_args="${2:-}"; shift 2 ;;
+              *)      shift ;;
+            esac
+          done
+          [[ $saw_json -eq 1 ]] || { echo "mock gh pr view: missing --json flag (contract: --json mergeStateStatus,mergeable)" >&2; return 99; }
+          [[ "$json_args" == "mergeStateStatus,mergeable" ]] || { echo "mock gh pr view: wrong --json args: '${json_args}' (expected 'mergeStateStatus,mergeable')" >&2; return 99; }
           case "${MOCK_MERGE_STATE:-}" in
             clean)        echo '{"mergeStateStatus":"CLEAN","mergeable":"MERGEABLE"}' ;;
             dirty)        echo '{"mergeStateStatus":"DIRTY","mergeable":"CONFLICTING"}' ;;
@@ -67,7 +81,7 @@ gh() {
           # gh pr checks <N> --repo <o/r> --json name,bucket
           echo '[]'
           ;;
-        *) echo "mock gh pr: unsupported subcommand: $2" >&2; return 2 ;;
+        *) echo "mock gh pr: unsupported subcommand: $subcmd" >&2; return 2 ;;
       esac
       ;;
     api)
