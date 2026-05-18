@@ -22,7 +22,13 @@ Scaffold the gh-aw PR policy reviewer pair (OpenAI + Anthropic) into a consumer 
 The skill runs in one of two modes determined by the user's request:
 
 - **install** (default) — the consumer hasn't run the skill before, no scaffolded reviewer files exist. The current behavior of every step.
-- **upgrade** (`--override`) — refresh a previously-installed reviewer to the current tile version. Triggered by user phrases like "upgrade", "update", "refresh", "pull latest reviewer templates", "override". Pass `--override` to all five scripts (preflight, branch, scaffold, commit, push). Branch becomes `feat/upgrade-coding-policy-review`; commit message becomes `ci(review): upgrade ...`. Preflight skips branch-clear checks and instead refuses if any existing rewritable target (the four reviewer source/lock files plus `.github/aw/actions-lock.json` and `.gitattributes`) has uncommitted local edits. Scaffold snapshots and restores all four reviewer files on compile failure.
+- **upgrade** (`--override`) — refresh a previously-installed reviewer to the current tile version
+  - Trigger phrases: "upgrade", "update", "refresh", "pull latest reviewer templates", "override"
+  - Pass `--override` to all five scripts: preflight, branch, scaffold, commit, push
+  - Branch: `feat/upgrade-coding-policy-review`
+  - Commit message: `ci(review): upgrade ...`
+  - Preflight skips branch-clear checks; instead refuses if any existing rewritable target has uncommitted local edits
+  - Scaffold snapshots and restores all four reviewer files on compile failure
 
 ## Step 1 — Run Preflight Checks
 

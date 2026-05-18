@@ -34,9 +34,11 @@ alwaysApply: true
 - A task is not done until CI is green
 - For plugin/tile/package releases, the duty extends past merge — the authoritative signal is the registry's state, not the workflow's exit code (workflows can succeed without publishing, or fail after publishing)
 - Release contract:
-  1. Before merge: capture the registry's `Latest Version` as baseline (`tessl tile info <workspace>/<tile>` for Tessl tiles)
-  2. After merge: resolve the publish run whose `headSha` matches the merge commit (from `gh pr view <N> --json mergeCommit`, not `git log -1` on main) AND whose `event` is `push` (excluding manual `workflow_dispatch` runs sharing the SHA), then `gh run watch <publish-run-id>` on that exact run
-  3. Confirm the registry's `Latest Version` advanced past the baseline
+  1. Before merge: capture the registry's `Latest Version` as baseline
+  2. After merge: resolve the publish run by merge-commit `headSha` + `push` event filter
+  3. Watch the resolved run to terminal state
+  4. Confirm the registry's `Latest Version` advanced past the baseline
+- See `skills/release/SKILL.md` Step 7 for the agent-executable form of the release contract
 - Do not derive an expected version from the merge SHA's manifest
 - Do not compare against a specific expected version
 - The Tessl registry never rejects a published version. `moderationPassed: false` affects `tessl search` visibility only; a security finding requires an override flag for `tessl install`. Neither is rejection
