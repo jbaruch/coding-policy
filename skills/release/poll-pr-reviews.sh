@@ -42,6 +42,12 @@ toplevel_comments_by() {
     --jq "[.[] | select(.user.login == \"${login}\") | select(.in_reply_to_id == null)] | length"
 }
 
+fetch_merge_state() {
+  local owner="$1" repo="$2" pr="$3"
+  gh pr view "$pr" --repo "${owner}/${repo}" --json mergeStateStatus,mergeable \
+    | jq -c '{status: .mergeStateStatus, mergeable: .mergeable}'
+}
+
 main() {
   if [[ $# -ne 3 ]]; then
     echo "usage: $0 <owner> <repo> <pr-number>" >&2
@@ -70,8 +76,7 @@ main() {
   ')
 
   local merge_state
-  merge_state=$(gh pr view "$pr_number" --repo "${owner}/${repo}" --json mergeStateStatus,mergeable \
-    --jq '{status: .mergeStateStatus, mergeable: .mergeable}') \
+  merge_state=$(fetch_merge_state "$owner" "$repo" "$pr_number") \
     || { echo "error: failed to fetch merge state for ${owner}/${repo}#${pr_number} — run 'gh auth status' to verify auth, then retry 'gh pr view ${pr_number} --repo ${owner}/${repo} --json mergeStateStatus,mergeable' to inspect the failing call directly" >&2; exit 1; }
 
   local gh_aw_review copilot_review gh_aw_comments copilot_comments
