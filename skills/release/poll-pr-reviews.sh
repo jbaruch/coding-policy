@@ -16,8 +16,15 @@
 #       "copilot": {"state": "APPROVED|CHANGES_REQUESTED|COMMENTED|none",
 #                   "submitted_at": "ISO-8601|null"}
 #     },
-#     "inline_comments": {"gh_aw": N, "copilot": N}
+#     "inline_comments": {"gh_aw": N, "copilot": N},
+#     "merge_state": {"status": "CLEAN|DIRTY|BLOCKED|BEHIND|UNSTABLE|...",
+#                     "mergeable": "MERGEABLE|CONFLICTING|UNKNOWN"}
 #   }
+#
+# `merge_state.status == "DIRTY"` / `mergeable == "CONFLICTING"` means GitHub
+# couldn't create `refs/pull/N/merge` and silently skipped `pull_request:`
+# workflows — agent should surface a rebase recommendation rather than keep
+# polling `ci.status: none`.
 
 set -euo pipefail
 
@@ -33,6 +40,12 @@ toplevel_comments_by() {
   local owner="$1" repo="$2" pr="$3" login="$4"
   gh api "repos/${owner}/${repo}/pulls/${pr}/comments" \
     --jq "[.[] | select(.user.login == \"${login}\") | select(.in_reply_to_id == null)] | length"
+}
+
+fetch_merge_state() {
+  local owner="$1" repo="$2" pr="$3"
+  gh pr view "$pr" --repo "${owner}/${repo}" --json mergeStateStatus,mergeable \
+    | jq -c '{status: .mergeStateStatus, mergeable: .mergeable}'
 }
 
 main() {
@@ -62,6 +75,10 @@ main() {
     else "success" end
   ')
 
+  local merge_state
+  merge_state=$(fetch_merge_state "$owner" "$repo" "$pr_number") \
+    || { echo "error: failed to fetch merge state for ${owner}/${repo}#${pr_number} — run 'gh auth status' to verify auth, then retry 'gh pr view ${pr_number} --repo ${owner}/${repo} --json mergeStateStatus,mergeable' to inspect the failing call directly" >&2; exit 1; }
+
   local gh_aw_review copilot_review gh_aw_comments copilot_comments
   gh_aw_review=$(latest_review_by   "$owner" "$repo" "$pr_number" "github-actions[bot]") \
     || { echo "error: failed to fetch gh-aw review state" >&2; exit 1; }
@@ -80,11 +97,13 @@ main() {
     --argjson copilot "$copilot_review" \
     --argjson gh_aw_comments "$gh_aw_comments" \
     --argjson copilot_comments "$copilot_comments" \
+    --argjson merge_state "$merge_state" \
     '{
       pr_number: $pr_number,
       ci: {status: $ci_status, checks: $checks},
       reviews: {gh_aw: $gh_aw, copilot: $copilot},
-      inline_comments: {gh_aw: $gh_aw_comments, copilot: $copilot_comments}
+      inline_comments: {gh_aw: $gh_aw_comments, copilot: $copilot_comments},
+      merge_state: $merge_state
     }'
 }
 
