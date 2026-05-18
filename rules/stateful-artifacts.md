@@ -21,13 +21,13 @@ alwaysApply: true
 
 - Artifacts are last-seen snapshots, not ground truth — before acting on a recalled value, verify against the live source (API, DB, filesystem)
 - Stale state is the default; assume it until proven fresh
-- A skill that recalls a value from an artifact and mutates the world without verifying is the textbook cause of "worked yesterday, wrong today" bugs
 
 ## Migration Policy
 
 - Bump `schema_version` for any shape change — don't repurpose a field silently
 - Only the owner skill migrates: on its own read, detect old `schema_version`, upgrade the record, rewrite
-- Reader skills (non-owners) must not migrate — on encountering an old version, treat it as "no usable prior state" (read-only) and let the next owner-skill run perform the upgrade
+- Non-owner reader skills must not migrate
+- On encountering an old version, the reader treats it as read-only "no usable prior state" and lets the next owner-skill run perform the upgrade
 
 ## Rename / Removal
 

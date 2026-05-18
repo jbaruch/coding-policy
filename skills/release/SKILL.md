@@ -79,15 +79,15 @@ The script returns:
 - `reviews.gh_aw.state` and `reviews.copilot.state` — latest review per bot (`APPROVED | CHANGES_REQUESTED | COMMENTED | none`)
 - `inline_comments.gh_aw` and `inline_comments.copilot` — top-level inline comment counts
 
-Loop until `ci.status` is `success` (or `none` if no checks are configured) and no bot has `CHANGES_REQUESTED`. `COMMENTED` does NOT block the polling loop — exit it and proceed to Step 6. (`COMMENTED` with inline comments still requires reply-per-thread before the Step 7 merge gate, but that's a separate condition the operator confirms at merge time, not a poll-loop exit criterion.) If the gh-aw review check ran but no review was posted, inspect logs with `gh run view --log-failed`. Do not retry via GraphQL — gh-aw is event-triggered, not request-triggered.
+Loop until `ci.status` is `success` (or `none` if no checks are configured) and no bot has `CHANGES_REQUESTED`. `COMMENTED` does NOT block the polling loop — exit and proceed to Step 6. Step 7's merge gate separately requires every inline comment thread to have a reply. If the gh-aw review check ran but no review was posted, inspect logs with `gh run view --log-failed`. Do not retry via GraphQL — gh-aw is event-triggered.
 
 ## Step 6 — Address Feedback; No Re-request Needed
 
-- **CI failures**: Fix every one, no exceptions
-- **Review suggestions**: Apply what's right and reasonable. Push back on anything that misreads scope or over-engineers — but cite concrete evidence (file:line, log line, spec quote) when declining; never hand-wave
-- **Reply on EVERY thread** — nothing left dangling. Use these exact opening literals so threads scan consistently:
-  - Accepted: `Fixed in <sha>` (literal phrase; semantically-equivalent variants like `Done` or `Accepted and fixed` do not satisfy)
-  - Declined: `Declining — <reason with cited evidence>` (em dash `—`, not a hyphen or period)
+- **CI failures**: Fix every one
+- **Review suggestions**: Apply what's right. Push back on anything that misreads scope — cite concrete evidence (file:line, log line, spec quote) when declining
+- **Reply on EVERY thread.** Use these exact opening literals:
+  - Accepted: `Fixed in <sha>` (literal phrase; `Done` / `Accepted and fixed` do not satisfy)
+  - Declined: `Declining — <reason with cited evidence>` (em dash `—`, not hyphen or period)
 - Push fixes to the same branch
 - **gh-aw re-runs automatically on every push** (`pull_request: synchronize`); Copilot needs a manual re-request each push via `skills/release/request-copilot-review.sh` (same args as Step 4).
 - Repeat Step 5 until every active bot review is `APPROVED` or `COMMENTED` with no blocking items, and every thread has a reply.
@@ -100,6 +100,12 @@ Only proceed when:
 - Every inline comment from Step 5's `inline_comments` count has a `Fixed in <sha>` or `Declining — <reason>` reply per Step 6 (verify by listing the PR's review comments — the poll script tracks counts, not reply state, so the operator confirms thread closure).
 
 A `COMMENTED` review with zero inline comments is fully non-blocking; a `COMMENTED` review with inline comments is non-blocking once every thread has a reply.
+
+Before merging, capture the registry baseline so the post-merge check has something to compare against:
+
+```bash
+PRE=$(tessl tile info <workspace>/<tile> | grep "Latest Version" | awk '{print $NF}')
+```
 
 Pick the right cleanup path based on where you ran the skill from.
 
@@ -144,8 +150,8 @@ Order in (B) is mandatory: `git branch -d` refuses to delete a branch that is ch
 After merge — per `rules/ci-safety.md`'s Always Watch CI duty extended through release:
 
 - Verify the merge landed on main (`git pull --ff-only` succeeds; `git log -1 --oneline` shows the merge commit)
-- **Watch the publish workflow to a terminal state** — not just "check it triggered". Bind the run to the **merge commit SHA**, never to "latest on main": after the fast-forward pull, capture `merge_sha=$(git log -1 --format=%H)`, then resolve the run for that exact commit with `gh run list --branch main --workflow "<publish-workflow-name>" --json databaseId,headSha --jq '.[] | select(.headSha == "'"$merge_sha"'") | .databaseId' | head -n 1`, then `gh run watch <run-id>`. `--limit 1` alone is race-prone: if another merge lands on main between your merge and the watch, it picks the wrong run. The watch is a **timing precondition** for the next bullet's registry check (so we don't query mid-flight), not an authoritative gate — workflow exit code is approximate (workflows can succeed without running the publish step under some conditions, or fail in post-publish cleanup); the actual gate is registry-advanced
-- **Confirm the registry advanced** — capture `PRE=$(tessl tile info <workspace>/<tile> | grep "Latest Version" | awk '{print $NF}')` BEFORE the merge, then after the watch returns, run the same query again and confirm the new value is greater than `PRE`. Registry-advanced is the **authoritative signal** the publish landed (registry-not-advanced = it didn't, regardless of the workflow's exit code). Do not compare against a specific expected version (interleaved merges in busy repos may advance past yours anyway). See `rules/ci-safety.md`'s "Always Watch CI" extension for the full framing — Tessl registry never rejects, `moderationPassed: false` means won't-surface-in-search, security finding means install-flag-required, neither is rejection. Naively re-running a failed publish can create an extra release when the workflow includes a version-bump step (as this tile's `publish.yml` does via `tesslio/patch-version-publish`); the safer recovery is a follow-up commit that fires a fresh publish on merge.
+- Watch the publish workflow to a terminal state. Bind to the merge commit SHA + the `push` event, never to "latest on main": `merge_sha=$(gh pr view <N> --json mergeCommit --jq '.mergeCommit.oid')`, then resolve the run with `gh run list --branch main --workflow "<publish-workflow-name>" --json databaseId,headSha,event --jq '.[] | select(.headSha == "'"$merge_sha"'") | select(.event == "push") | .databaseId' | head -n 1`, then `gh run watch <run-id>`. `gh pr view` returns the specific merge commit for this PR, unaffected by parallel merges. Filtering by event excludes manual `workflow_dispatch` runs that may share the same SHA. The watch is a timing precondition for the registry check below, not the authoritative gate
+- Confirm the registry advanced. After the watch returns, query `tessl tile info <workspace>/<tile>` again and confirm the new `Latest Version` is greater than `PRE` (captured before the merge above). Registry-advanced is the authoritative signal. Do not compare against a specific expected version — interleaved merges may advance past yours. See `rules/ci-safety.md` for the full registry semantics and failed-publish recovery
 - Report the outcome: merged PR URL, version published, registry confirmation
 
 When this step is wrapped in a reusable script (e.g., `merge-and-cleanup.sh` that other devs run unattended), see `skills/release/SCRIPTING.md` for the gates the script must enforce.

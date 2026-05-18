@@ -62,6 +62,10 @@
       "rules": "rules/context-artifacts.md",
       "alwaysApply": true
     },
+    "context-writing-style": {
+      "rules": "rules/context-writing-style.md",
+      "alwaysApply": true
+    },
     "skill-authoring": {
       "rules": "rules/skill-authoring.md",
       "alwaysApply": true

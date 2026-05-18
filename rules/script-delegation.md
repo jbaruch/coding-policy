@@ -24,7 +24,7 @@ alwaysApply: true
 
 ## The Regex Trap
 
-- LLMs are over-eager declaring things deterministic because they think they can regex it
+- Resist the over-eager urge to declare things deterministic on a regex hunch
 - If the input has too many edge cases for a reasonable regex, it's reasoning — not scripting
 - Parsing natural language dates, extracting meaning from unstructured text, classifying ambiguous input — these are **not** scripting tasks
 - A script should only handle patterns that are fully enumerable
@@ -46,5 +46,5 @@ Scripts follow the baseline in `rules/file-hygiene.md` (exit codes, stderr, idem
 ## Precheck Gating
 
 - For scheduled or recurring tasks where most runs are no-ops, have the script produce a last-line JSON payload such as `{"wake_agent": false, "data": {}}`; `wake_agent` is a boolean and `data` is an object
-- The scheduler runs the script first and only wakes the agent when `wake_agent` is `true` — no-op runs cost zero model tokens because the LLM is never invoked
-- `data` carries the inputs the agent will need if it does wake, so a single precheck run gates activation *and* supplies the payload — no second fetch
+- The scheduler runs the script first and only wakes the agent when `wake_agent` is `true`
+- `data` carries the inputs the agent will need if it does wake; a single precheck run gates activation *and* supplies the payload

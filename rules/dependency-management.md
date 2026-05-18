@@ -18,15 +18,25 @@ alwaysApply: true
 
 - Pin versions or use a lock file to ensure reproducible builds
 - Lock files are committed to the repo
-- **Narrow exception for runtime-managed manifests**: if a tool the deployment relies on rewrites a manifest in-place at runtime AND the resolved-version state is gitignored, pin-or-lock produces silent drift where git and the running deployment disagree across every restart. In that case the manifest may use a floating-but-explicit specifier (e.g. `"version": "latest"`) and skip the lock file. Each covered manifest must independently satisfy three preconditions: (1) the project documents an authority-of-record rule in its own tile naming the carve-out (filename, scope, why the rewrite-in-place violates pin/lock semantics) and listing every manifest the carve-out covers; (2) a deploy-time check fails the deployment if any disallowed specifier appears in that manifest — literal pin, range, tag, or anything other than the permitted floating specifier (rejecting only literal pins lets a non-literal pinned/ranged value slip through while still violating the carve-out's intent); (3) each covered manifest is named explicitly in the authority-of-record rule. Multiple named manifests in the same project are permitted iff each independently meets (1)–(3); the carve-out doesn't widen to "any manifest" and doesn't apply transitively to manifests the runtime rewriter doesn't touch. Every other manifest in the repo still pins. Reference incidents: NanoClaw's `tessl-workspace/tessl.json` accumulated a 22-day silent drift on 2026-04-27 because `tessl update` rewrites the manifest in-place; the same `tessl update` invocation also rewrites the project-root `tessl.json` (a separate manifest `tessl install` consumes to populate gitignored `.tessl/tiles/` for `@.tessl/RULES.md` resolution at agent runtime), which accumulated silent `vendored`-mode + pin drift on 2026-05-03 — both manifests are now covered by the same authority-of-record rule (`nanoclaw-host: tessl-version-floating`) with one combined `scripts/deploy.sh` walk-and-verify check.
+
+## Runtime-Managed Manifest Carve-Out
+
+- Narrow exception for runtime-managed manifests
+- Applies when a tool rewrites a manifest in-place at runtime AND the resolved-version state is gitignored
+- The manifest may use a floating-but-explicit specifier (e.g., `"version": "latest"`) and skip the lock file
+- Preconditions (each covered manifest, all required):
+  1. The project documents an authority-of-record rule in its own tile naming the carve-out and listing every covered manifest
+  2. A deploy-time check fails the deployment if any disallowed specifier appears (literal pin, range, tag, or anything other than the permitted floating specifier)
+  3. Each covered manifest is named explicitly in the authority-of-record rule
+- Multiple covered manifests permitted iff each independently meets all three preconditions
+- Every other manifest in the repo still pins
 
 ## No Vendoring
 
 - Don't copy library source code into the repo
 - Use the language's package manager to install dependencies
 - Tessl tiles count as dependencies — never vendor them. Install via `tessl install` at runtime; don't commit tile content (e.g., `.tessl/tiles/<workspace>/<tile>/...`) into the consumer repo
-- A vendored copy silently drifts from the registry version, so consumers run stale rules without noticing
-- A workspace-local `.tessl/` is also wiped by `actions/checkout`'s default `clean: true` before CI agents read it — see `install-reviewer` 0.2.x changelog entries for the incident that drove the runtime install path off the workspace
+- Install Tessl tiles to a non-workspace path for CI agents
 
 ## Dependency Groups
 
@@ -36,4 +46,4 @@ alwaysApply: true
 ## CI Compatibility
 
 - Every dependency must be installable in CI
-- If something exists as a package, install it properly — don't skip tests because a dependency is "hard to install"
+- If something exists as a package, install it properly

@@ -6,52 +6,43 @@ alwaysApply: true
 
 ## Plugin Structure
 
-- Every tile has a `tile.json` manifest with `name`, `version`, `summary`, and `entrypoint` (→ `README.md`). Don't add a separate `docs` field — keep all documentation in the entrypoint to avoid duplicate tables that drift out of sync
-- The tile's entrypoint `README.md` **is** the project's `README.md` — they are the same file. Do not create a separate README for the tile. If the project already has a README, extend it with tile content (rules table, skills table, installation instructions)
+- Every tile has a `tile.json` manifest with `name`, `version`, `summary`, and `entrypoint` (→ `README.md`)
+- Don't add a separate `docs` field — keep documentation in the entrypoint
+- The tile's entrypoint `README.md` is the project's `README.md` — same file. Extend the existing README with rules table, skills table, and installation instructions
 - Include a Tessl registry badge at the top of README: `[![tessl](https://img.shields.io/endpoint?url=https%3A%2F%2Fapi.tessl.io%2Fv1%2Fbadges%2F<workspace>%2F<tile>)](https://tessl.io/registry/<workspace>/<tile>)`
 - Skills live in `skills/<name>/SKILL.md`, rules live in `rules/<name>.md`
 - Standard directories: `rules/`, `skills/<name>/`, `evals/` — `evals/` is omitted in tiles claiming the closed-loop carve-out in `rules/plugin-evals.md`
 - Use `.tileignore` to exclude build artifacts and CI files from the published tile
 - Validate structure with `tessl tile lint` before every publish
-- Standard repo files like `CHANGELOG.md` will show as orphaned in lint — this is expected; lint only tracks manifest-declared paths
-
-## Context Artifacts Are First-Class
-
-- Skills, rules, and scripts are first-class deliverables packaged as a tile
-- They share the same lifecycle guarantees as code: versioned, reviewed, tested
-- Not ad-hoc files — they ship with the plugin and follow its release process
+- `CHANGELOG.md` and similar repo files show as orphaned in `tessl tile lint` — lint only tracks manifest-declared paths
 
 ## Rules Are Prose
 
 - One concept per rule file — don't combine unrelated concerns
-- Include both **why** and **how** — the "why" prevents workarounds
 - Compose by reference (`see rules/foo.md`), don't duplicate content across rules — if you want to state the same point in two rules, one states it and the other references it
 
 ## Rule Format
 
 - Frontmatter: `alwaysApply: true` (no other fields needed for rules)
 - H1 title matching the filename concept (e.g., `# Commit Conventions` for `commit-conventions.md`)
-- H2 sections grouping related bullets — aim for 3–6 sections per rule
-- Concise bullets, ~25–40 lines total — if a rule exceeds this, it's covering more than one concept
-- No code blocks unless demonstrating a specific command — rules are prose, not scripts
+- No code blocks unless demonstrating a specific command
+- Section count, line budget, prose discipline (what to cut, what to keep, carve-out format) — see `rules/context-writing-style.md`
 
 ## Mandatory Review
 
-- Every skill change must pass `tessl skill review --threshold 85` before the publish that ships that change
-- Below-threshold scores block the pipeline — no exceptions
-- Wire `tessl skill review` into CI as a **changed-skills loop**, not as static per-skill steps. One workflow step iterates over the skills whose files changed since the previous push — `git diff --name-only <prev-sha>..HEAD -- 'skills/'` (directory pathspec, matching `action.yml`) drives the loop; only those skills get reviewed. Adding a skill requires no CI YAML edit. Reference implementation: `.github/actions/skill-review/action.yml` (consumers `uses: jbaruch/coding-policy/.github/actions/skill-review@<ref>`)
-- The why: `tessl skill review` is LLM-backed and credit-consuming. Re-running it against unchanged content reproduces the prior rubric output, so per-skill static steps are both costlier and lower-signal than the diff-driven loop
-- Fallback: the loop reviews every skill only when the diff base is absent (manual `workflow_dispatch`, initial push, the all-zeros sentinel SHA). When the base is set but unreachable in the local clone the loop hard-fails — silently degrading to "review all" or "no changes" would mask a missing review under the changed-only contract
-- The review rubric verifies frontmatter validity, an execution-mode preamble appropriate to the skill's shape (sequential-workflow preamble for in-order skills, action-router preamble for skills where the agent picks one of several alternatives by user intent — both forms specified in `rules/skill-authoring.md`), flat step numbering, typed `Skill()` calls (no prose invocations), silence-rule compliance, and channel-appropriate formatting (e.g., no Markdown in HTML-only channels)
-- Read the reviewer's suggestions — the review tool is a development aid, not just a gate. Act on concrete feedback (improve trigger terms, extract reference material, tighten descriptions) and re-review until you've addressed the actionable suggestions
+- Every skill change must pass `tessl skill review --threshold 85` before publish
+- Below-threshold scores block the pipeline
+- Wire into CI as a changed-skills loop, not static per-skill steps. The loop iterates over `git diff --name-only <prev-sha>..HEAD -- 'skills/'`. Reference: `.github/actions/skill-review/action.yml` (consumers `uses: jbaruch/coding-policy/.github/actions/skill-review@<ref>`)
+- Fallback: review every skill when the diff base is absent (manual `workflow_dispatch`, initial push, all-zeros sentinel SHA); hard-fail when the base is set but unreachable
+- Rubric verifies: frontmatter validity, execution-mode preamble matching the skill's shape (sequential workflow or action router per `rules/skill-authoring.md`), flat step numbering, typed `Skill()` calls, silence-rule compliance, channel-appropriate formatting
+- Act on concrete feedback (tighter triggers, extracted reference material, tightened descriptions); re-review until the gate passes
 
 ## Disagreeing With the Reviewer
 
-- Never lower `--threshold 85` to make a failing skill pass — that shifts the burden from "fix the skill" to "hide the failure" and rots the gate. Bypassing CI by other means (local publish, `[skip ci]`, disabling the review step) is forbidden under `rules/ci-safety.md`'s "Never Skip Tests" already; this section adds the threshold-specific prohibition on top
-- When you disagree with the reviewer's conclusions, the response is `tessl skill review --optimize <skill>` run **locally** — not arguing with the CI gate. Back up `SKILL.md` (and any reference files `--optimize` may rewrite) before invoking, so you can diff against the pre-optimization state
-- `--optimize` is a learning tool, not a take-it-or-leave-it patch. The reviewer's judge is not a subject-matter expert and routinely strips load-bearing context, examples, and edge-case handling that the local agent (with project context) knows are necessary. Diff the optimized output against the backup, keep the genuinely-improving moves (tighter triggers, less prose, better `Skill()` typing, removed redundancy), reject the over-aggressive cuts, then re-run `tessl skill review --threshold 85 <skill>` against the curated result and iterate until the gate passes
-- The point is to learn the reviewer's optimization patterns and re-apply them with subject-matter expertise the judge lacks — not to mechanically accept whatever `--optimize` produces. A skill that scores 92 with critical context preserved beats a skill that scores 98 because the reviewer cut the load-bearing bits
-- **Shipping `--optimize` output verbatim is forbidden even when the score went up.** The "I'll run `--optimize` and ship because the score improved" pattern has the same gate-rotting effect as dropping the threshold, just disguised as a fix. The score reflects what the rubric measures; it does not reflect the content the optimizer stripped that the rubric does not penalize but the skill's author or local agent knows is load-bearing. The optimizer is a diagnostic signal that surfaces *what kinds of issues exist* (actionability deductions, progressive-disclosure deductions, redundancy); the actual fix is applying that signal with judgment. Repeated experience: the optimizer is too aggressive on applied output and strips content authors value, so use it as a signal and curate manually — never accept the full output
+- Never lower `--threshold 85` to make a failing skill pass. Bypassing CI by other means (local publish, `[skip ci]`, disabling the review step) is forbidden under `rules/ci-safety.md`
+- When you disagree with the reviewer's conclusions, run `tessl skill review --optimize <skill>` locally. Back up `SKILL.md` and any reference files before invoking
+- `--optimize` is a diagnostic signal, not a patch. The reviewer's judge strips load-bearing context. Diff against the backup, keep the genuinely-improving moves (tighter triggers, less prose, better `Skill()` typing), reject over-aggressive cuts, then re-run the review and iterate
+- Shipping `--optimize` output verbatim is forbidden even when the score improved. The optimizer surfaces what kinds of issues exist (actionability, progressive disclosure, redundancy); apply the signal with judgment, curate manually
 
 ## Mandatory Evals
 
@@ -68,14 +59,23 @@ When you add, remove, or rename a rule or skill, update **all** of these:
 - `README.md` — update the rules table and/or skills table
 - `CHANGELOG.md` — add an entry describing the change
 
+## CHANGELOG Hygiene
+
+- On version release, consolidate Unreleased entries into the new version section: group related entries, collapse redundant detail, retain load-bearing facts (what changed, references)
+- CHANGELOG is archive but bounded — a PR's full motivation lives in the PR body and commit messages; the Unreleased entry can be one or two sentences when the broader context lives elsewhere
+- During consolidation, audit Unreleased for duplication — multiple PRs reworking the same rule become one entry with the final outcome
+
 ## Consistency Check
 
 After modifying rules, audit for cross-rule alignment:
 
 - No duplicated bullets across rules — if two rules say the same thing, one should reference the other
+- Don't duplicate long command literals or contract statements between rules and skills
+- Rules state the contract
+- Skills (or their scripts) carry the executable form per `rules/script-delegation.md`
 - New rules don't contradict existing ones
 - Skills follow the conventions their own rules prescribe
-- Documentation tables match `tile.json` entries exactly
+- Documentation tables match `tile.json` entries
 
 ## Post-Edit Rule Audit
 
@@ -83,4 +83,4 @@ After editing a rule, audit the repo itself against the new rule text and fix an
 
 - Grep for every instance of the pattern the rule governs (`.env.example` files, `SKILL.md` step headings, secret names, etc.) and update them to satisfy the new wording
 - A rule that doesn't describe what's already committed in the repo erodes trust in every rule
-- If drift can't be fixed in the same PR (e.g., because it touches a frozen branch), file a follow-up issue that references the rule-edit commit
+- If drift can't be fixed in the same PR (e.g., it touches a frozen branch), file a follow-up issue that references the rule-edit commit

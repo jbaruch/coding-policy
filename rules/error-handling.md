@@ -7,8 +7,24 @@ alwaysApply: true
 ## Specific Exceptions
 
 - Catch specific exception types, never bare catch-all handlers
-- Let unexpected exceptions propagate — they indicate bugs that need fixing, not hiding
-- **Narrow exception for outer-boundary process contracts**: when a process boundary's caller treats non-zero exit OR invalid stdout as a silent-failure signal (e.g. agent-runner subprocess prechecks, network-protocol stdout contracts, IPC handlers where the wrapping framework reads malformed output as "skip the task"), letting an unexpected exception propagate from a programming bug silently disables the contract — the exact failure mode the "let unexpected propagate" clause above cannot accept here. The outer-boundary handler may use the language's narrowest "everything except interrupts" form — Python `except Exception:` (never `except BaseException:` — `KeyboardInterrupt` and `SystemExit` must be allowed to propagate past this handler so processes stay killable via Ctrl-C / `sys.exit()`), or the analogous form in other languages — **only when** all three preconditions hold: the catch line or the comment immediately above it contains the literal grep token `outer-boundary-process-contract` (mandatory in every language so one tile-wide grep catches every sanctioned instance); AND, where a linter requires a native catch-all suppressor, that suppressor sits on the catch line itself (Python/Ruff: `# noqa: BLE001` must be inline with `except Exception:` — placing it on the comment above does not suppress BLE001); AND a comment immediately above names (a) the caller's silent-failure shape, (b) what the catch emits to satisfy the contract (e.g. stderr traceback + safe-shape JSON on stdout), and (c) why propagation would break the contract; AND the handler sits at the outermost process boundary, never an inner function. Every other catch in the file still uses specific exception types. Reference incident: 2026-04-16 → 2026-04-18 silent outage where an unhandled `TypeError` in a precheck script caused agent-runner to read the non-zero exit as `wake_agent=false` (the precheck JSON contract documented in `rules/script-delegation.md`) and the scheduled task never woke; the carve-out exists so the defensible outer-boundary catch is also defensible to literal-rule reviewers.
+- Let unexpected exceptions propagate
+
+## Outer-Boundary Carve-Out
+
+- Narrow exception for outer-boundary process contracts
+- Applies when a process boundary's caller reads non-zero exit OR invalid stdout as a silent-failure signal (agent-runner prechecks, network-protocol stdout contracts, IPC handlers)
+- A propagating unexpected exception silently disables the contract
+- Use the language's narrowest "everything except interrupts" form — Python `except Exception:`, or the analogous form in other languages
+- Never `except BaseException:` (or its equivalent that traps interrupts); `KeyboardInterrupt` and `SystemExit` must propagate so processes stay killable
+- Preconditions (all required):
+  1. Catch line or its preceding comment contains literal grep token `outer-boundary-process-contract`
+  2. Where a linter requires a catch-all suppressor, it sits inline with the catch (Python/Ruff: `# noqa: BLE001` on the `except Exception:` line, not above)
+  3. Comment above names three things:
+     - caller's silent-failure shape
+     - what catch emits
+     - why propagation breaks contract
+  4. Handler at outermost process boundary — never inner function
+- Every other catch in the file still uses specific exception types
 
 ## Actionable Messages
 

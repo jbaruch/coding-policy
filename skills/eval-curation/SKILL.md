@@ -64,21 +64,21 @@ Healthy positive-case bands and negative cases whose near-zero lift is acceptabl
 
 If no scenarios sit in the actionable bands (no weak / no-lift positive cases, no tile-specific negative case that fails the lift expectation), the suite is clean. Produce a one-line `curation-summary.md` stating "no curation needed" and finish here — do not fabricate diagnoses for scenarios that don't need them.
 
-Otherwise proceed immediately to Step 4 with: the weak / no-lift positive cases (each routed to the three-cause diagnosis), AND any tile-specific negative case whose lift fell below the acceptable band (also routed to the three-cause diagnosis — the rule's framework applies because the underspecification lives in the same three places).
+Otherwise proceed immediately to Step 4 with two inputs to the three-cause diagnosis: the weak / no-lift positive cases, AND any tile-specific negative case whose lift fell below the acceptable band.
 
 ## Step 4 — Diagnose Every Actionable Scenario
 
 Apply the three-cause diagnosis from `rules/plugin-evals.md` "Lift, Not Attainment" to each scenario routed in from Step 3:
 
-1. **Coincidence with universal competence** — the tile's prescribed manner matches what baseline agents already produce by default (positive case), or for a tile-specific negative case routed in from Step 3: baseline refuses for tile-independent reasons so the tile's refusal isn't adding signal. Decision: retire. (Universal-knowledge negative cases at acceptable lift do NOT reach this step — they're filtered in Step 3 per LIFT_ANALYSIS.md's Negative Cases carve-out, which preserves them as documented refusal checks of a kind the rule prose doesn't carry on its own.)
-2. **Task leaked the technique** — baseline pattern-matched its way to the criterion because the task mentioned it. Decision: fix the task per `skills/eval-authoring/REVIEW_CHECKLIST.md`'s No Bleeding rules; keep the criterion. Do NOT drop the criterion.
+1. **Coincidence with universal competence** — tile's prescribed manner matches what baseline agents produce by default (positive case), or for a tile-specific negative case: baseline refuses for tile-independent reasons so the tile's refusal adds no signal. Decision: retire
+2. **Task leaked the technique** — fix the task per `skills/eval-authoring/REVIEW_CHECKLIST.md`'s No Bleeding rules; keep the criterion. Do NOT drop the criterion.
 3. **Criteria grade universal competence** — the criteria test things baseline always does (basic git safety, obvious engineering judgement), not tile-specific choices. Decision: rewrite the criteria to test the specific manner the tile prescribes, or retire the scenario.
 
 Record the decision per scenario: `retire`, `fix-task`, or `rewrite-criteria`. Proceed immediately to Step 5.
 
 ## Step 5 — Apply Decisions
 
-For each `retire`: `git rm -r evals/<scenario-dir>` (stages the deletion in the same step so the curation pass can't ship with the disk delete unstaged) and note the removal in the tile's `CHANGELOG.md` under Unreleased.
+For each `retire`: `git rm -r evals/<scenario-dir>` and note the removal in the tile's `CHANGELOG.md` under Unreleased.
 
 For each `fix-task`: edit `task.md` per the No Bleeding rules — strip the technique / format / literal that leaked; keep the situation the user actually needs done.
 

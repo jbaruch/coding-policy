@@ -6,7 +6,7 @@ Coding policy tile for Baruch's AI agents. Language-agnostic code quality rules 
 
 ## What's New
 
-- 16 always-on steering rules: 8 covering code quality, 5 covering plugin authoring, 1 covering author-model declaration, 1 covering concurrency, 1 covering review discipline
+- 17 always-on steering rules: 8 covering code quality, 6 covering plugin authoring, 1 covering author-model declaration, 1 covering concurrency, 1 covering review discipline
 - `release` skill — structured PR + merge workflow with Copilot review and paired-reviewer cross-family enforcement
 - `eval-authoring` skill — generate, review, and curate eval scenarios with score-driven iteration
 - `install-reviewer` skill — scaffold the paired gh-aw PR review workflows (OpenAI + Anthropic) into a consumer repo
@@ -35,6 +35,7 @@ tessl install jbaruch/coding-policy
 | Secrets | [no-secrets](rules/no-secrets.md) | No credentials in code, env vars or secrets manager |
 | Style | [code-formatting](rules/code-formatting.md) | Use project's formatter, don't mix style with logic |
 | Authoring | [context-artifacts](rules/context-artifacts.md) | Plugin structure, rule format, review iteration, surface sync, consistency checks |
+| Authoring | [context-writing-style](rules/context-writing-style.md) | Prose discipline for rules, skills, and READMEs — what to cut, what to keep, structural format. CHANGELOG entries follow looser archive discipline |
 | Authoring | [skill-authoring](rules/skill-authoring.md) | SKILL.md structure, step numbering, typed calls, tile.json reference |
 | Authoring | [script-delegation](rules/script-delegation.md) | Deterministic → script, reasoning → LLM, the regex trap |
 | Authoring | [plugin-evals](rules/plugin-evals.md) | No bleeding, no leaking, persistent eval coverage |
