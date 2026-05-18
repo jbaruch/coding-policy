@@ -12,7 +12,8 @@ alwaysApply: true
 
 ## Closed-Loop Carve-Out
 
-- Narrow exception for closed-loop automated systems with no human eval-result consumption — tile exempt from the Coverage clause above and the entire Persistence section
+- Narrow exception for closed-loop automated systems with no human eval-result consumption
+- Tile exempt from the Coverage clause above and the entire Persistence section
 - Preconditions (all required):
   1. No human review — no human reads eval output in any form: scores, lift deltas, scenario diffs, regression alerts, failure traces, dashboards, periodic reports
   2. No gating use — eval results do not gate any downstream automated action: release blocks, deploy blocks, publish-tile gates, rollback triggers, alert routing, dashboard surfaces, paging, summary stats consumed by another workflow
@@ -38,7 +39,7 @@ alwaysApply: true
 - Use sanitized or synthetic fixtures — never live user data. Real emails, calendar events, production PRs, or internal logs must never appear in an eval fixture; use stable synthetic IDs and scrubbed examples
 - Criteria must not reference tile-internal implementation details that mean nothing outside the tile — internal skill action names, `.tessl/tiles/...` paths, tile-only identifiers
 - Criteria **may** reference public tool/API surfaces that exist independent of the tile — `gh pr create`, REST endpoints, conventional-commits format, semver
-- Criteria may reference tile-prescribed conventions and specific values — reply templates (`Fixed in <sha>`), chosen flags (`--ff-only`), invented format literals. Checking for them measures application, not leaking
+- Criteria may reference tile-prescribed conventions and specific values such as reply templates like `Fixed in <sha>`, chosen flags like `--ff-only`, invented format literals. Checking for them measures application, not leaking
 - Test: would someone outside the tile recognize the term? `gh pr merge` is public; `createJwtToken` internal action is tile-internal
 
 ## Lift, Not Attainment
@@ -61,7 +62,7 @@ alwaysApply: true
 ## Persistence
 
 - Tessl's publish pipeline runs the eval suite automatically when `tessl tile publish` (or `tesslio/patch-version-publish`) executes — that is the persistence point
-- Do not add a `tessl eval run` step to tile-repo CI; do not add a scheduled or recurring workflow
+- Do not add a `tessl eval run` step to tile-repo CI; do not add a scheduled or recurring workflow that re-runs the eval suite
 - Out of scope: local invocations during authoring/debugging, and ad-hoc invocations by separate measurement rigs (e.g., `jbaruch/coding-policy-evals`)
 - Regressions block the publish — fix the regression (or the scenario if it's fixture drift per `Fixture Hygiene`); do not add a parallel CI step that could mask the publish-layer failure
 

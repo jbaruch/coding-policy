@@ -11,9 +11,11 @@ alwaysApply: true
 
 ## Outer-Boundary Carve-Out
 
-- Narrow exception for outer-boundary process contracts: a process boundary's caller reads non-zero exit OR invalid stdout as a silent-failure signal (agent-runner prechecks, network-protocol stdout contracts, IPC handlers)
+- Narrow exception for outer-boundary process contracts
+- Applies when a process boundary's caller reads non-zero exit OR invalid stdout as a silent-failure signal (agent-runner prechecks, network-protocol stdout contracts, IPC handlers)
 - A propagating unexpected exception silently disables the contract
-- Use the language's narrowest "everything except interrupts" form — Python `except Exception:`, or the analogous form in other languages. Never `except BaseException:` (or its equivalent that traps interrupts): `KeyboardInterrupt` and `SystemExit` must propagate so processes stay killable
+- Use the language's narrowest "everything except interrupts" form — Python `except Exception:`, or the analogous form in other languages
+- Never `except BaseException:` (or its equivalent that traps interrupts); `KeyboardInterrupt` and `SystemExit` must propagate so processes stay killable
 - Preconditions (all required):
   1. Catch line or its preceding comment contains literal grep token `outer-boundary-process-contract`
   2. Linter catch-all suppressor inline with catch (Python/Ruff: `# noqa: BLE001` on the `except Exception:` line, not above)

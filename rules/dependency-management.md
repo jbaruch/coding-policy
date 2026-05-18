@@ -21,7 +21,8 @@ alwaysApply: true
 
 ## Runtime-Managed Manifest Carve-Out
 
-- Narrow exception for runtime-managed manifests: when a tool rewrites a manifest in-place at runtime AND the resolved-version state is gitignored, pin-or-lock produces silent drift between git and the running deployment
+- Narrow exception for runtime-managed manifests
+- Applies when a tool rewrites a manifest in-place at runtime AND the resolved-version state is gitignored
 - The manifest may use a floating-but-explicit specifier (e.g., `"version": "latest"`) and skip the lock file
 - Preconditions (each covered manifest, all required):
   1. The project documents an authority-of-record rule in its own tile naming the carve-out and listing every covered manifest
