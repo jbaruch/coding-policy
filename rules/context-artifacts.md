@@ -59,11 +59,18 @@ When you add, remove, or rename a rule or skill, update **all** of these:
 - `README.md` — update the rules table and/or skills table
 - `CHANGELOG.md` — add an entry describing the change
 
+## CHANGELOG Hygiene
+
+- On version release, consolidate Unreleased entries into the new version section: group related entries, collapse redundant detail, retain load-bearing facts (what changed, references)
+- CHANGELOG is archive but bounded — a PR's full motivation lives in the PR body and commit messages; the Unreleased entry can be one or two sentences when the broader context lives elsewhere
+- During consolidation, audit Unreleased for duplication — multiple PRs reworking the same rule become one entry with the final outcome
+
 ## Consistency Check
 
 After modifying rules, audit for cross-rule alignment:
 
 - No duplicated bullets across rules — if two rules say the same thing, one should reference the other
+- The same rule applies between rules and skills — don't duplicate long command literals or contract statements; the rule states the contract, the skill or its script carries the executable form per `rules/script-delegation.md`
 - New rules don't contradict existing ones
 - Skills follow the conventions their own rules prescribe
 - Documentation tables match `tile.json` entries
