@@ -19,6 +19,16 @@ Structured workflow for shipping code: PR creation, automated policy review, mer
 - Confirm you're on a feature branch (not `main`/`master`)
 - Run the test suite — all tests must pass
 - Run the linter — no warnings or errors
+- Self-audit the diff against every governing rule or skill whose domain covers the touched paths (e.g., `evals/` → `rules/plugin-evals.md` and `skills/eval-authoring/SKILL.md`; auto-loaded prose in `rules/` or `skills/` → `rules/context-writing-style.md`; new scripts → `rules/script-delegation.md` and `rules/testing-standards.md`)
+- Grep the diff for the literal markers each governing rule or skill names:
+  - banned connectives `because`, `therefore`, `since`, etc. per `rules/context-writing-style.md`
+  - the `outer-boundary-process-contract` token per `rules/error-handling.md`
+  - `max_score` weight sums (must sum to 100) per `skills/eval-authoring/SKILL.md`
+- Run any local check the rule or skill prescribes:
+  - `jq '[.checklist[].max_score] | add' <criteria.json>` must print `100`, and the weights must not be uniformly distributed (per `skills/eval-authoring/SKILL.md`)
+  - `bash -n <script>` must exit 0 on shell scripts
+  - the script's own fixture test must pass
+- The paired cross-family reviewer is a backstop, not the first read
 - If anything fails, fix it before proceeding
 
 ## Step 2 — Create PR
