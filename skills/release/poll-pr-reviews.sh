@@ -72,7 +72,7 @@ main() {
   local merge_state
   merge_state=$(gh pr view "$pr_number" --repo "${owner}/${repo}" --json mergeStateStatus,mergeable \
     --jq '{status: .mergeStateStatus, mergeable: .mergeable}') \
-    || { echo "error: failed to fetch merge state" >&2; exit 1; }
+    || { echo "error: failed to fetch merge state for ${owner}/${repo}#${pr_number} — run 'gh auth status' to verify auth, then retry 'gh pr view ${pr_number} --repo ${owner}/${repo} --json mergeStateStatus,mergeable' to inspect the failing call directly" >&2; exit 1; }
 
   local gh_aw_review copilot_review gh_aw_comments copilot_comments
   gh_aw_review=$(latest_review_by   "$owner" "$repo" "$pr_number" "github-actions[bot]") \

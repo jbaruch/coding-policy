@@ -4,22 +4,22 @@
   "checklist": [
     {
       "name": "Uses `gh pr checks` with structured output",
-      "max_score": 15,
+      "max_score": 13,
       "description": "The script retrieves CI state by invoking `gh pr checks <N>` with `--json` (the prescribed mechanism returns structured `name`/`bucket` fields the caller can parse into a terminal state). `gh run list`, ad-hoc greps of `gh pr view` text output, or UI polling score zero — those are different approaches that do not give the caller a structured terminal-state signal"
     },
     {
       "name": "Uses `gh api .../pulls/<N>/reviews` for review state",
-      "max_score": 15,
+      "max_score": 13,
       "description": "The script hits the pull-request reviews endpoint (`gh api repos/<owner>/<repo>/pulls/<N>/reviews`) to retrieve per-reviewer state. Other endpoints (`gh pr view`, `gh api` on a different path) score zero — the tile prescribes this endpoint specifically because it returns the per-review structure needed for multi-bot setups"
     },
     {
       "name": "Uses `gh api .../pulls/<N>/comments` for inline comments",
-      "max_score": 15,
+      "max_score": 13,
       "description": "The script retrieves inline review comments via the pull-request review-comments endpoint (`gh api repos/<owner>/<repo>/pulls/<N>/comments`). This is a tile-prescribed endpoint choice that avoids the issue-comments trap"
     },
     {
       "name": "Does NOT use `/issues/<N>/comments`",
-      "max_score": 10,
+      "max_score": 8,
       "description": "The script must NOT use the issue-comments endpoint (`gh api repos/<o>/<r>/issues/<N>/comments`) for inline review comments. That endpoint returns a different object shape (PR-level comments, not inline review comments) and surfaces wrong data. A script that conflates the two scores zero here — this is a known GitHub-API gotcha the tile exists to prevent"
     },
     {

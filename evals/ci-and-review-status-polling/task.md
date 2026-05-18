@@ -15,4 +15,4 @@ Produce a shell script named `monitor_pr.sh` that:
 3. Retrieves the review state(s) from the automated reviewer(s)
 4. Retrieves any inline comments left on the PR
 5. Prints a summary of what was found so the developer knows what to address
-6. Surfaces enough state for the developer to diagnose why CI may never have started (e.g., because GitHub could not build the test-merge ref), not just "still pending"
+6. Surfaces enough state for the developer to diagnose why CI may never have started, not just "still pending"
