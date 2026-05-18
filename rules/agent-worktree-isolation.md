@@ -7,7 +7,8 @@ alwaysApply: true
 ## When to Isolate
 
 - Any task that writes to the repo AND may run concurrently with another agent — branch work, file edits, scripted refactors, dependency upgrades, releases
-- Read-only inspection on the shared checkout (`Grep`, `Read`, `Glob`, non-mutating `Bash` like `git status`) is permitted; isolation becomes mandatory the moment the task crosses into mutating tools (`Edit`, `Write`, side-effecting `Bash`, branch creation)
+- Read-only inspection on the shared checkout is permitted: `Grep`, `Read`, `Glob`, non-mutating `Bash` like `git status`
+- Isolation becomes mandatory the moment the task crosses into mutating tools: `Edit`, `Write`, side-effecting `Bash`, branch creation
 - Single-machine single-agent workflows may use worktrees but are not required to
 
 ## How to Isolate
