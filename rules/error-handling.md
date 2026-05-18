@@ -19,7 +19,10 @@ alwaysApply: true
 - Preconditions (all required):
   1. Catch line or its preceding comment contains literal grep token `outer-boundary-process-contract`
   2. Where a linter requires a catch-all suppressor, it sits inline with the catch (Python/Ruff: `# noqa: BLE001` on the `except Exception:` line, not above)
-  3. Comment above names three things: caller's silent-failure shape; what catch emits; why propagation breaks contract
+  3. Comment above names three things:
+     - caller's silent-failure shape
+     - what catch emits
+     - why propagation breaks contract
   4. Handler at outermost process boundary — never inner function
 - Every other catch in the file still uses specific exception types
 

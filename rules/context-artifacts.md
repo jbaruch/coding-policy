@@ -70,7 +70,9 @@ When you add, remove, or rename a rule or skill, update **all** of these:
 After modifying rules, audit for cross-rule alignment:
 
 - No duplicated bullets across rules — if two rules say the same thing, one should reference the other
-- The same rule applies between rules and skills — don't duplicate long command literals or contract statements; the rule states the contract, the skill or its script carries the executable form per `rules/script-delegation.md`
+- Don't duplicate long command literals or contract statements between rules and skills
+- Rules state the contract
+- Skills (or their scripts) carry the executable form per `rules/script-delegation.md`
 - New rules don't contradict existing ones
 - Skills follow the conventions their own rules prescribe
 - Documentation tables match `tile.json` entries

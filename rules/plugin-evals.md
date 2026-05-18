@@ -50,7 +50,9 @@ alwaysApply: true
   3. Criteria grade universal competence — criteria test things baseline always does (basic git safety, obvious judgement) instead of tile-specific choices. Rewrite the criteria or retire the scenario
 - Always report per-scenario lift alongside the average
 - High-lift scenarios test tile-prescribed choices where baseline picks something different (bot-ID discovery, reply format, CLI sequence). Keep them — do not rewrite toward "testing reasoning" if baseline already reasons to the same outcome
-- Pruning is mandatory upkeep, not optional cleanup. Run the curation pass (see `skills/eval-curation/SKILL.md`) every few publishes; retire any scenario showing near-zero lift after the three-cause diagnosis and fix attempt
+- Pruning is mandatory upkeep, not optional cleanup
+- Run the curation pass (see `skills/eval-curation/SKILL.md`) every few publishes
+- Retire any scenario showing near-zero lift after the three-cause diagnosis and fix attempt
 - Measure by per-scenario lift contribution, not raw scenario count — a 10-scenario suite where every scenario pulls weight beats a 35-scenario suite where half score baseline-equivalent
 
 ## Quality
@@ -64,7 +66,9 @@ alwaysApply: true
 - Tessl's publish pipeline runs the eval suite automatically when `tessl tile publish` (or `tesslio/patch-version-publish`) executes — that is the persistence point
 - Do not add a `tessl eval run` step to tile-repo CI; do not add a scheduled or recurring workflow that re-runs the eval suite
 - Out of scope: local invocations during authoring/debugging, and ad-hoc invocations by separate measurement rigs (e.g., `jbaruch/coding-policy-evals`)
-- Regressions block the publish — fix the regression (or the scenario if it's fixture drift per `Fixture Hygiene`); do not add a parallel CI step that could mask the publish-layer failure
+- Regressions block the publish
+- Fix the regression, or fix the scenario when the cause is fixture drift per `Fixture Hygiene`
+- Do not add a parallel CI step that could mask the publish-layer failure
 
 ## Naming
 
