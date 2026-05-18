@@ -22,7 +22,7 @@ Scaffold the gh-aw PR policy reviewer pair (OpenAI + Anthropic) into a consumer 
 The skill runs in one of two modes determined by the user's request:
 
 - **install** (default) — the consumer hasn't run the skill before, no scaffolded reviewer files exist. The current behavior of every step.
-- **upgrade** (`--override`) — refresh a previously-installed reviewer to the current tile version. Triggered by user phrases like "upgrade", "update", "refresh", "pull latest reviewer templates", "override". Pass `--override` to all five scripts (preflight, branch, scaffold, commit, push). Branch becomes `feat/upgrade-coding-policy-review`; commit message becomes `ci(review): upgrade ...`. Preflight skips branch-clear checks and instead refuses if any of the six rewritable paths (the four reviewer source/lock files plus `.github/aw/actions-lock.json` and `.gitattributes`) has uncommitted local edits or is untracked. Scaffold snapshots and restores all four reviewer files on compile failure.
+- **upgrade** (`--override`) — refresh a previously-installed reviewer to the current tile version. Triggered by user phrases like "upgrade", "update", "refresh", "pull latest reviewer templates", "override". Pass `--override` to all five scripts (preflight, branch, scaffold, commit, push). Branch becomes `feat/upgrade-coding-policy-review`; commit message becomes `ci(review): upgrade ...`. Preflight skips branch-clear checks and instead refuses if any existing rewritable target (the four reviewer source/lock files plus `.github/aw/actions-lock.json` and `.gitattributes`) has uncommitted local edits. Scaffold snapshots and restores all four reviewer files on compile failure.
 
 ## Step 1 — Run Preflight Checks
 
@@ -44,7 +44,7 @@ Runs every precondition (git worktree, GitHub CLI install + auth, gh-aw extensio
 
 In **install mode**: if any of `.github/workflows/review-openai.md`, `.github/workflows/review-openai.lock.yml`, `.github/workflows/review-anthropic.md`, or `.github/workflows/review-anthropic.lock.yml` exists, stop and report that prior review setup is present. Do not overwrite — a lock alone or a source alone indicates deliberate in-progress configuration. If none exist, proceed to Step 3.
 
-In **upgrade mode**: skip this step. Preflight has verified working tree cleanliness on those paths; scaffold.sh snapshots and restores them on compile failure.
+In **upgrade mode**: skip this step. Preflight has verified that existing target files have no uncommitted edits; scaffold.sh snapshots and restores them on compile failure.
 
 ## Step 3 — Establish Feature Branch
 

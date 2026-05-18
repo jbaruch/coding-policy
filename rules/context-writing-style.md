@@ -14,7 +14,9 @@ alwaysApply: true
 
 ## What to Cut
 
-- Logical connectives are why-content detectors: therefore, however, because, since, thus, consequently, moreover, although, despite, as a result, in order to. When you write one, the clause it introduces is motivation, justification, or rationale — strip the whole clause and move the explanation to CHANGELOG. Em-dash, colon, semicolon are not loopholes; they smuggle the same why-content
+- Logical connectives are why-content detectors: therefore, however, because, since, thus, consequently, moreover, although, despite, as a result, in order to
+- When you write one of these, strip the entire clause it introduces and move the explanation to CHANGELOG
+- Em-dash, colon, semicolon are not loopholes; they smuggle the same why-content
 - Intensifiers used as noise modifiers: very, extremely, quite, really, fully, exactly, precisely, narrowly, completely. Keep when carrying a real constraint (`sum to exactly 100`, `fully enumerable`, `narrowly scoped`)
 - Reinforcement and hedging restatements of conclusions the preconditions already entail
 - Meta-justification prose explaining why the rule exists — belongs in CHANGELOG
