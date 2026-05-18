@@ -19,6 +19,7 @@ Structured workflow for shipping code: PR creation, automated policy review, mer
 - Confirm you're on a feature branch (not `main`/`master`)
 - Run the test suite — all tests must pass
 - Run the linter — no warnings or errors
+- Self-audit the diff against every rule whose domain it touches: `git diff main...HEAD` enumerates what to check; the touched paths point at which rules govern them. Grep for the patterns each rule names (banned connectives, weight sums, named tokens, positive-vs-negative checks, fixture-validates-contract guarantees) and run any local check the rule prescribes (`jq '[.checklist[].max_score] | add'`, `bash -n`, the script's own test file). Treating the paired cross-family reviewer as the first read of the rule is the same bypass shape `boy-scout.md` forbids.
 - If anything fails, fix it before proceeding
 
 ## Step 2 — Create PR
