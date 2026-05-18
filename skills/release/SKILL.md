@@ -25,7 +25,7 @@ Structured workflow for shipping code: PR creation, automated policy review, mer
   - the `outer-boundary-process-contract` token per `rules/error-handling.md`
   - `max_score` weight sums (must sum to 100) per `skills/eval-authoring/SKILL.md`
 - Run any local check the rule or skill prescribes:
-  - `jq '[.checklist[].max_score] | add' <criteria.json>` must print `100`
+  - `jq '[.checklist[].max_score] | add' <criteria.json>` must print `100`, and the weights must not be uniformly distributed (per `skills/eval-authoring/SKILL.md`)
   - `bash -n <script>` must exit 0 on shell scripts
   - the script's own fixture test must pass
 - The paired cross-family reviewer is a backstop, not the first read
