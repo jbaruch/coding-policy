@@ -20,7 +20,7 @@ Structured workflow for shipping code: PR creation, automated policy review, mer
 - Run the test suite — all tests must pass
 - Run the linter — no warnings or errors
 - Self-audit the diff against every rule whose domain governs the touched paths (e.g., `evals/` → `rules/plugin-evals.md`; auto-loaded prose in `rules/` or `skills/` → `rules/context-writing-style.md`; new scripts → `rules/script-delegation.md` and `rules/testing-standards.md`)
-- Grep the diff for the literal markers each rule names:
+- Grep the diff for the literal markers each governing rule or skill names:
   - banned connectives `because`, `therefore`, `since`, etc. per `rules/context-writing-style.md`
   - the `outer-boundary-process-contract` token per `rules/error-handling.md`
   - `max_score` weight sums (must sum to 100) per `skills/eval-authoring/SKILL.md`
