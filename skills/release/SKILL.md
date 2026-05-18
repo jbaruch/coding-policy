@@ -80,9 +80,12 @@ The script returns:
 - `inline_comments.gh_aw` and `inline_comments.copilot` — top-level inline comment counts
 - `merge_state.status` and `merge_state.mergeable` — GitHub's merge-readiness state (e.g., `CLEAN`/`MERGEABLE`, `DIRTY`/`CONFLICTING`)
 
-Loop until `ci.status` is `success` (or `none` if no checks are configured) AND `merge_state.mergeable` is not `CONFLICTING` AND `merge_state.status` is not `DIRTY` AND no bot has `CHANGES_REQUESTED`. `COMMENTED` does NOT block the polling loop — exit and proceed to Step 6. Step 7's merge gate separately requires every inline comment thread to have a reply. If the gh-aw review check ran but no review was posted, inspect logs with `gh run view --log-failed`. Do not retry via GraphQL — gh-aw is event-triggered.
+Each poll, check `merge_state` first:
 
-`merge_state.mergeable: CONFLICTING` (or `status: DIRTY`) is a blocking failure. Exit the loop, rebase onto current `main`, resolve conflicts, and force-push; the next push fires the missed `pull_request:` workflows.
+- If `merge_state.mergeable` is `CONFLICTING` or `merge_state.status` is `DIRTY`, exit the loop immediately, rebase onto current `main`, resolve conflicts, and force-push; resume polling once the next push fires the missed `pull_request:` workflows.
+- Otherwise, continue polling. Exit when `ci.status` is `success` (or `none` if no checks are configured) AND no bot has `CHANGES_REQUESTED`, then proceed to Step 6. `COMMENTED` does NOT block the polling-loop exit; Step 7's merge gate separately requires every inline comment thread to have a reply.
+
+If the gh-aw review check ran but no review was posted, inspect logs with `gh run view --log-failed`. Do not retry via GraphQL — gh-aw is event-triggered.
 
 ## Step 6 — Address Feedback; No Re-request Needed
 
