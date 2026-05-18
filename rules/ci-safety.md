@@ -35,7 +35,7 @@ alwaysApply: true
 - For plugin/tile/package releases, the duty extends past merge — the authoritative signal is the registry's state, not the workflow's exit code (workflows can succeed without publishing, or fail after publishing)
 - Release contract:
   1. Before merge: capture the registry's `Latest Version` as baseline (`tessl tile info <workspace>/<tile>` for Tessl tiles)
-  2. After merge: wait for the publish workflow to reach a terminal state (`gh run watch <publish-run-id>`)
+  2. After merge: resolve the publish run whose `headSha` matches the merge commit (from `gh pr view <N> --json mergeCommit`, not `git log -1` on main) AND whose `event` is `push` (excluding manual `workflow_dispatch` runs sharing the SHA), then `gh run watch <publish-run-id>` on that exact run
   3. Confirm the registry's `Latest Version` advanced past the baseline
 - Do not derive an expected version from the merge SHA's manifest
 - Do not compare against a specific expected version

@@ -26,7 +26,8 @@ alwaysApply: true
 
 - Bump `schema_version` for any shape change — don't repurpose a field silently
 - Only the owner skill migrates: on its own read, detect old `schema_version`, upgrade the record, rewrite
-- Reader skills (non-owners) must not migrate — on encountering an old version, treat it as "no usable prior state" (read-only) and let the next owner-skill run perform the upgrade
+- Non-owner reader skills must not migrate
+- On encountering an old version, the reader treats it as read-only "no usable prior state" and lets the next owner-skill run perform the upgrade
 
 ## Rename / Removal
 
