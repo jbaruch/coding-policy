@@ -10,12 +10,6 @@ alwaysApply: true
 - "Pre-existing" is not a valid concept. The state you observed is the state you own, regardless of who or what put it there
 - Applies to anything you'd flag if a colleague had just written it: failing tests, broken docs, dead code, stale comments, lying type signatures, leaked secrets, missing newlines, unbumped versions
 
-## Why "Pre-existing" Is Cope
-
-- Most bypass attempts and gate-evasion patterns ("not my regression", "pre-existing", "out of scope for this PR") share this framing. Patching the bypass paths individually plays whack-a-mole; ruling out the framing closes the source. The bypass paths themselves are forbidden separately by `rules/ci-safety.md`'s "Never Skip Tests" and `rules/context-artifacts.md`'s "Disagreeing With the Reviewer"
-- "I didn't break it" is true and irrelevant — the question is whether you'll leave it broken when you walk away. The repo doesn't care who broke it; it cares whether it's broken when the next person reads it
-- Quality gates measure the merged state, not the delta. Treating gates as "your delta only" rots them on the same timescale as bypassing them outright
-
 ## How to Apply
 
 - **In-scope cleanups** (typo, missing newline, broken doc link, small drift): roll into the current PR. The bundle is fine when the PR's stated scope still reads coherently

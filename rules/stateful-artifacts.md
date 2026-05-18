@@ -21,7 +21,6 @@ alwaysApply: true
 
 - Artifacts are last-seen snapshots, not ground truth — before acting on a recalled value, verify against the live source (API, DB, filesystem)
 - Stale state is the default; assume it until proven fresh
-- A skill that recalls a value from an artifact and mutates the world without verifying is the textbook cause of "worked yesterday, wrong today" bugs
 
 ## Migration Policy
 
