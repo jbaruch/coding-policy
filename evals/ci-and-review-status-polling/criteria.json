@@ -51,6 +51,11 @@
       "name": "Surfaces inline comment content or count",
       "max_score": 9,
       "description": "The final summary includes inline comment bodies (for low counts) or a count with a pointer to read them, so the developer can tell whether there is unaddressed feedback"
+    },
+    {
+      "name": "Surfaces merge-readiness state for conflict diagnosis",
+      "max_score": 8,
+      "description": "The script surfaces the PR's merge-readiness state — specifically `mergeStateStatus` and `mergeable` via `gh pr view --json mergeStateStatus,mergeable` — so a developer can tell whether `ci.status: none` means 'no checks configured' versus 'GitHub could not build the test-merge ref because of conflicts and silently skipped `pull_request:` workflows'. A script that polls CI without surfacing merge-readiness state cannot distinguish the two and scores zero on this check"
     }
   ]
 }
