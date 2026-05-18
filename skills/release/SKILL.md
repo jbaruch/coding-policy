@@ -19,10 +19,10 @@ Structured workflow for shipping code: PR creation, automated policy review, mer
 - Confirm you're on a feature branch (not `main`/`master`)
 - Run the test suite — all tests must pass
 - Run the linter — no warnings or errors
-- Self-audit the diff (`git diff main...HEAD`) against every rule whose domain the touched paths govern
-- Grep the diff for the patterns each rule names: banned connectives, weight sums, named tokens, positive-vs-negative checks, fixture-validates-contract guarantees
-- Run any local check the rule prescribes (`jq '[.checklist[].max_score] | add'`, `bash -n`, the script's own test file)
-- Treating the paired cross-family reviewer as the first read of the rule is the same bypass shape `rules/boy-scout.md` forbids
+- Self-audit the diff against every rule whose domain the touched paths govern (e.g., `evals/` → `rules/plugin-evals.md`; auto-loaded prose in `rules/` or `skills/` → `rules/context-writing-style.md`; new scripts → `rules/script-delegation.md` and `rules/testing-standards.md`)
+- Grep the diff for the specific markers each rule names — connectives like `because` / `therefore` (per `rules/context-writing-style.md`), the `outer-boundary-process-contract` token (per `rules/error-handling.md`), `max_score` sums in eval criteria (per `rules/plugin-evals.md`)
+- Run any local check the rule prescribes (`jq '[.checklist[].max_score] | add'` against eval criteria, `bash -n` on shell scripts, the script's own fixture test file)
+- The paired cross-family reviewer is a backstop, not a first read — finishing the rule-compliance pass before push is the author's responsibility
 - If anything fails, fix it before proceeding
 
 ## Step 2 — Create PR
