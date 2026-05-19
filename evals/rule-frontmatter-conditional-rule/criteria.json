@@ -15,7 +15,7 @@
     {
       "name": "applyTo value combines globs with a natural-language clause",
       "max_score": 14,
-      "description": "The applyTo value includes both a glob list and a natural-language clause separated by an em dash (— or --), e.g., 'package.json, pyproject.toml — when editing dependency manifests'. The clause expresses the action-level scope in prose alongside the file-level glob scope. Scores zero if the value is glob-only with no prose, or prose-only with no globs"
+      "description": "The applyTo value includes both a glob list and a natural-language clause separated by a literal em dash (—, U+2014), e.g., 'package.json, pyproject.toml — when editing dependency manifests'. The clause expresses the action-level scope in prose alongside the file-level glob scope. Scores zero if the value is glob-only with no prose, prose-only with no globs, or uses a different separator (hyphen, double hyphen, en dash) where the rule prescribes an em dash"
     },
     {
       "name": "tile.json steering entry added with alwaysApply: false",

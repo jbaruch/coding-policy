@@ -30,10 +30,13 @@ description: Frontmatter conventions for rule files — what to set for always-o
 
 - Path-scope when **every** prescription in the rule is bound to a specific file set or context (tile-authoring rules whose content only fires inside `rules/`, `skills/`, `evals/` are good candidates)
 - Stay universal when the rule mixes file-bound and broad guidance — `applyTo:` is exclusionary at the model layer, so a too-narrow scope drops the broad bits
-- Example: `dependency-management` covers "stdlib first" (fires when writing code) and "pin versions" (fires when editing manifests); scoping to manifests would silently drop the code-level guidance
+- Example — `dependency-management` covers two practices:
+  - "stdlib first" fires when writing code
+  - "pin versions" fires when editing manifests
+- Scoping `dependency-management` to manifests would silently drop the code-level guidance, so the rule stays universal
 
 ## tile.json and Rule File in Agreement
 
 - Set the same `alwaysApply` value in both `tile.json`'s steering entry and the rule file frontmatter — split values are inconsistent and may produce surprising behavior across consuming agents
 - `applyTo:` lives only in the rule file (not in `tile.json`)
-- Install-time write map per agent — see `docs/tessl-rule-frontmatter.md` (draft for `docs.tessl.io`)
+- Install-time write map per agent — `docs/tessl-rule-frontmatter.md` is the repo-internal draft of additions for `docs.tessl.io`. The `docs/` directory is `.tileignore`d and does not ship with the published tile, so consumers read the integrated content on `docs.tessl.io` once it lands; until then, read the source on GitHub

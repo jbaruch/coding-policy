@@ -15,7 +15,7 @@
     {
       "name": "applyTo value combines globs with a natural-language clause",
       "max_score": 12,
-      "description": "The applyTo value includes both a glob list and a natural-language clause separated by an em dash (— or --), e.g., '.github/PULL_REQUEST_TEMPLATE*, CONTRIBUTING.md — when authoring or editing PR artifacts'. The clause expresses the action-level scope in prose. Scores zero if the value is glob-only or prose-only"
+      "description": "The applyTo value includes both a glob list and a natural-language clause separated by a literal em dash (—, U+2014), e.g., '.github/PULL_REQUEST_TEMPLATE*, CONTRIBUTING.md — when authoring or editing PR artifacts'. The clause expresses the action-level scope in prose. Scores zero if the value is glob-only, prose-only, or uses a different separator (hyphen, double hyphen, en dash) where the rule prescribes an em dash"
     },
     {
       "name": "tile.json steering entry flipped to alwaysApply: false",
