@@ -22,7 +22,8 @@ description: Frontmatter conventions for rule files — what to set for always-o
 ## Conditional Rules
 
 - For rules whose prescriptions only fire in specific files or contexts: set `alwaysApply: false` in both `tile.json` steering and the rule file frontmatter, and add `applyTo:`
-- `applyTo:` syntax: glob patterns plus an optional natural-language clause — `applyTo: "skills/**/SKILL.md — when authoring or modifying skills"`
+- `applyTo:` syntax is `"<glob list> — <natural-language clause>"` — both halves required. Example: `applyTo: "skills/**/SKILL.md — when authoring or modifying skills"`
+- The em dash separates the file-level scope (globs) from the action-level scope (prose); the model reads both halves and narrows on whichever signal is clearer
 - Field aliases the model also reads: `globs:`, `paths:`, scope-prose in `description:` — pick one form per file, do not mix
 
 ## When to Path-Scope
