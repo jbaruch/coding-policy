@@ -40,7 +40,7 @@ If any of the above doesn't match what you observe, push back before writing —
    - Tessl preserves rule file frontmatter byte-identical at install — no per-agent translation, no field filtering.
    - The agent's model reads frontmatter as natural-language instruction and applies the rule according to its declared scope.
    - The two patterns: **always-on rules** (`alwaysApply: true` in both `tile.json` and the rule file; no `applyTo:`) and **conditional rules** (`alwaysApply: false` in both; `applyTo:` with the required em-dash glob+prose pattern — `"<globs> — <natural-language clause>"`).
-   - That `applyTo:` aliases the model also accepts include `globs:`, `paths:`, and scope-prose inside `description:` — author should pick one form per file.
+   - That `applyTo:` accepts field-name aliases (`globs:`, `paths:`) with the same em-dash glob+prose value, and that `description:` is a rule summary, never a substitute for `applyTo:` as a scoping mechanism.
    - Keep `alwaysApply` in agreement between `tile.json` and the rule file; split values are inconsistent.
 3. Give one example each of an always-on rule and a conditional rule. Pick examples that are universally meaningful — e.g., commit conventions for the always-on case, manifest hygiene scoped to `**/package.json,**/pyproject.toml,**/go.mod,**/Cargo.toml` for the conditional case.
 

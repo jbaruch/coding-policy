@@ -24,7 +24,8 @@ description: Frontmatter conventions for rule files — what to set for always-o
 - For rules whose prescriptions only fire in specific files or contexts: set `alwaysApply: false` in both `tile.json` steering and the rule file frontmatter, and add `applyTo:`
 - `applyTo:` syntax is `"<glob list> — <natural-language clause>"` — both halves required. Example: `applyTo: "skills/**/SKILL.md — when authoring or modifying skills"`
 - The em dash separates the file-level scope (globs) from the action-level scope (prose); the model reads both halves and narrows on whichever signal is clearer
-- Field aliases the model also reads: `globs:`, `paths:`, scope-prose in `description:` — pick one form per file, do not mix
+- `globs:` and `paths:` are accepted **field-name aliases** for `applyTo:` — the value still follows the em-dash glob+prose form; pick one field name per file
+- `description:` is a rule summary, not a scoping mechanism — never put scope prose only in `description:` as a substitute for `applyTo:` on a conditional rule
 
 ## When to Path-Scope
 
