@@ -1,0 +1,41 @@
+{
+  "context": "Tests whether the agent applies this tile's frontmatter convention for a conditional rule whose prescriptions only fire in specific files. The tile prescribes: alwaysApply: false in BOTH the rule file frontmatter AND the tile.json steering entry, plus an applyTo: field combining glob patterns (matching common dependency manifests like package.json, pyproject.toml, Cargo.toml, go.mod) with a natural-language clause introduced by an em dash. Baseline agents without the tile typically default to alwaysApply: true on every rule (matching the only convention they've seen) and do not know about the applyTo glob+prose pattern. Even a baseline agent that does scope the rule typically omits the natural-language clause or splits the scope across multiple fields.",
+  "type": "weighted_checklist",
+  "checklist": [
+    {
+      "name": "Rule file frontmatter declares alwaysApply: false",
+      "max_score": 16,
+      "description": "The rules/pin-dependencies.md file has a YAML frontmatter block at the top with alwaysApply: false. Scores zero if frontmatter is missing, if alwaysApply is true, or if alwaysApply is omitted from the block. Baseline agents commonly default to alwaysApply: true"
+    },
+    {
+      "name": "Rule file frontmatter declares applyTo with glob patterns",
+      "max_score": 18,
+      "description": "The rules/pin-dependencies.md frontmatter contains an applyTo field (or accepted alias: globs, paths) whose value includes glob patterns matching at least two common dependency manifest filenames (e.g., package.json, pyproject.toml, Cargo.toml, go.mod, Gemfile, composer.json). Scores partial credit (10) if applyTo is present but only matches one manifest type; scores zero if the field is missing or contains no glob patterns"
+    },
+    {
+      "name": "applyTo value combines globs with a natural-language clause",
+      "max_score": 14,
+      "description": "The applyTo value includes both a glob list and a natural-language clause separated by an em dash (— or --), e.g., 'package.json, pyproject.toml — when editing dependency manifests'. The clause expresses the action-level scope in prose alongside the file-level glob scope. Scores zero if the value is glob-only with no prose, or prose-only with no globs"
+    },
+    {
+      "name": "tile.json steering entry added with alwaysApply: false",
+      "max_score": 16,
+      "description": "The updated tile.json includes a steering entry for the new rule (e.g., 'pin-dependencies') pointing at rules/pin-dependencies.md with alwaysApply: false. Scores zero if the steering entry is missing, points at the wrong path, or sets alwaysApply: true"
+    },
+    {
+      "name": "alwaysApply values agree between rule file and tile.json",
+      "max_score": 14,
+      "description": "The alwaysApply value declared in the rule file frontmatter matches the value declared in the tile.json steering entry. Both must be false. A common baseline failure is flipping one surface and leaving the other at true — the tile prescribes the two surfaces stay in lockstep"
+    },
+    {
+      "name": "Rule body has H1 title matching the filename concept",
+      "max_score": 10,
+      "description": "The rule body starts with an H1 heading like # Pin Dependencies (or close equivalent) matching the filename. Scores zero if there is no H1 or it is unrelated to the file's concept"
+    },
+    {
+      "name": "Existing rules and entries are preserved unchanged",
+      "max_score": 12,
+      "description": "The two pre-existing steering entries (commit-conventions, spaces-not-tabs) remain in the updated tile.json with their original paths and alwaysApply values. The inputs/rules/spaces-not-tabs.md file is not modified. Scores zero if any pre-existing entry is dropped, renamed, or has its alwaysApply value flipped"
+    }
+  ]
+}

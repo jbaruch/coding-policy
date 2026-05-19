@@ -1,5 +1,7 @@
 ---
-alwaysApply: true
+alwaysApply: false
+applyTo: "skills/**, scripts/**, skills/**/*.sh, skills/**/*.py, skills/**/SKILL.md — when authoring deterministic scripts that skills invoke"
+description: Deterministic operations → script, reasoning → LLM, the regex trap, script structure conventions, precheck gating
 ---
 
 # Script Delegation

@@ -60,23 +60,27 @@
     },
     "context-artifacts": {
       "rules": "rules/context-artifacts.md",
-      "alwaysApply": true
+      "alwaysApply": false
     },
     "context-writing-style": {
       "rules": "rules/context-writing-style.md",
-      "alwaysApply": true
+      "alwaysApply": false
+    },
+    "rule-frontmatter": {
+      "rules": "rules/rule-frontmatter.md",
+      "alwaysApply": false
     },
     "skill-authoring": {
       "rules": "rules/skill-authoring.md",
-      "alwaysApply": true
+      "alwaysApply": false
     },
     "script-delegation": {
       "rules": "rules/script-delegation.md",
-      "alwaysApply": true
+      "alwaysApply": false
     },
     "plugin-evals": {
       "rules": "rules/plugin-evals.md",
-      "alwaysApply": true
+      "alwaysApply": false
     },
     "author-model-declaration": {
       "rules": "rules/author-model-declaration.md",

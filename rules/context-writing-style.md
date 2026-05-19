@@ -1,5 +1,7 @@
 ---
-alwaysApply: true
+alwaysApply: false
+applyTo: "rules/**/*.md, skills/**/*.md, README.md, CHANGELOG.md — when writing prose in tile context artifacts"
+description: Prose discipline for rules, skills, and READMEs — what to cut, what to keep, structural format
 ---
 
 # Context Writing Style

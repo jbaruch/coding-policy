@@ -1,5 +1,7 @@
 ---
-alwaysApply: true
+alwaysApply: false
+applyTo: "tile.json, rules/**, skills/**, evals/**, .tileignore, .tesslignore, CHANGELOG.md, README.md — when authoring or modifying tile artifacts"
+description: Tile structure, rule/skill format, review pipeline, surface sync, consistency audits — the authoring contract for Tessl plugins
 ---
 
 # Context Artifacts
@@ -23,9 +25,9 @@ alwaysApply: true
 
 ## Rule Format
 
-- Frontmatter: `alwaysApply: true` (no other fields needed for rules)
 - H1 title matching the filename concept (e.g., `# Commit Conventions` for `commit-conventions.md`)
 - No code blocks unless demonstrating a specific command
+- Frontmatter fields, passthrough behavior, and scoping with `applyTo:` — see `rules/rule-frontmatter.md`
 - Section count, line budget, prose discipline (what to cut, what to keep, carve-out format) — see `rules/context-writing-style.md`
 
 ## Mandatory Review

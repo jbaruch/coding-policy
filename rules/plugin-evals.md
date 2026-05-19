@@ -1,5 +1,7 @@
 ---
-alwaysApply: true
+alwaysApply: false
+applyTo: "evals/**, skills/**/SKILL.md — when authoring or maintaining eval scenarios"
+description: Eval coverage, lift-not-attainment scoring, no bleeding, no leaking, fixture hygiene, closed-loop carve-out
 ---
 
 # Plugin Evals

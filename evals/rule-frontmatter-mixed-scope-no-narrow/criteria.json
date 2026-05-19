@@ -1,0 +1,41 @@
+{
+  "context": "Tests whether the agent correctly resists path-scoping a rule whose prescriptions span multiple contexts. The rule has two halves: (a) 'prefer stdlib over third-party' fires when writing code, (b) 'pin if you add it' fires when editing dependency manifests. Path-scoping the rule to manifests only (a tempting move because pin-dependencies in the same tile is already scoped that way) would silently drop half (a) — the stdlib-first guidance would no longer fire when the agent is writing code. The tile prescribes keeping mixed-scope rules universal (alwaysApply: true, no applyTo) so every prescription continues to fire in its native context. Baseline agents may either (1) default everything to alwaysApply: true and miss the deliberate decision, or (2) copy the pin-dependencies pattern and over-scope to manifests, which is the failure mode this rule guards against.",
+  "type": "weighted_checklist",
+  "checklist": [
+    {
+      "name": "Rule file frontmatter declares alwaysApply: true",
+      "max_score": 20,
+      "description": "The rules/stdlib-first.md file has a YAML frontmatter block with alwaysApply: true. The rule must stay universal because part (a) fires when writing code, not when editing manifests. Setting alwaysApply: false here (matching the pin-dependencies pattern) is the failure this scenario tests for — it would scope the rule to manifests only and silently drop the stdlib-first guidance when the agent is writing code"
+    },
+    {
+      "name": "Rule file frontmatter declares no scoping fields",
+      "max_score": 18,
+      "description": "The rules/stdlib-first.md frontmatter does NOT contain applyTo, globs, or paths fields. Any scoping field narrows the rule's activation; with mixed-scope content, scoping to one context drops the other. The tile prescribes omitting scoping fields when the rule's prescriptions span multiple contexts"
+    },
+    {
+      "name": "tile.json steering entry added with alwaysApply: true",
+      "max_score": 18,
+      "description": "The updated tile.json includes a steering entry for the new rule (e.g., 'stdlib-first') pointing at rules/stdlib-first.md with alwaysApply: true. Setting alwaysApply: false here is the failure mode this scenario tests for"
+    },
+    {
+      "name": "alwaysApply values agree between rule file and tile.json",
+      "max_score": 12,
+      "description": "The alwaysApply value declared in the rule file frontmatter matches the value declared in the tile.json steering entry. Both must be true. A common baseline failure is flipping one surface and leaving the other inconsistent"
+    },
+    {
+      "name": "Rule body covers the stdlib-first practice",
+      "max_score": 10,
+      "description": "The rule body has at least one bullet covering the 'prefer stdlib over third-party' practice — this is the half that fires when writing code. Scores zero if the body only covers pinning and omits the stdlib-first guidance"
+    },
+    {
+      "name": "Rule body covers the dependency-pinning practice",
+      "max_score": 10,
+      "description": "The rule body has at least one bullet covering the 'pin if you add it' practice — the manifest-level half. Scores zero if the body only covers stdlib-first and omits the pinning guidance"
+    },
+    {
+      "name": "Existing rules and entries are preserved unchanged",
+      "max_score": 12,
+      "description": "The three pre-existing steering entries (commit-conventions, spaces-not-tabs, pin-dependencies) remain in the updated tile.json with their original paths and alwaysApply values. The pre-existing alwaysApply: false on pin-dependencies must not be flipped. Scores zero if any pre-existing entry is dropped, renamed, or has its alwaysApply value changed"
+    }
+  ]
+}
