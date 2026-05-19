@@ -17,7 +17,7 @@ description: Frontmatter conventions for rule files — what to set for always-o
 
 - For rules that apply regardless of file or task context (commits, secrets, code formatting, error handling): set `alwaysApply: true` in both `tile.json` steering and the rule file frontmatter
 - Omit `applyTo:` — the rule has no narrowed scope
-- Include `description:` for the agent UI and human readers
+- `description:` is optional for always-on rules; add it when the README rules-table row needs a complement, otherwise the rule body's H1 + sections speak for themselves
 
 ## Conditional Rules
 
