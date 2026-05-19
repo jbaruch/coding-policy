@@ -57,7 +57,7 @@ tessl install jbaruch/coding-policy
 ## Philosophy
 
 - **Language-agnostic code rules.** The code quality rules (commits through formatting) apply to Python, TypeScript, Go, Rust, Java — any language. No framework-specific assumptions.
-- **Tessl-specific authoring rules.** The authoring rules (context-artifacts through plugin-evals) are specific to the Tessl plugin workflow. They codify how to build, test, and ship tiles.
+- **Tessl-specific authoring rules.** The Authoring-category rules in the table above are specific to the Tessl plugin workflow. They codify how to build, test, and ship tiles.
 - **One concern per rule.** Each file covers one topic. Easy to read, easy to reference, easy to override if a project needs an exception.
 - **Opinionated but practical.** These rules reflect real patterns found across 17+ repositories and the Tessl plugin authoring workflow. They solve problems that actually come up when agents write and ship code.
 - **Loaded by default; scoped by intent.** Universal rules are `alwaysApply: true`. Rules whose prescriptions only fire in specific files are `alwaysApply: false` with `applyTo:` declaring the scope — the agent's model reads the frontmatter and narrows when to act. See `rules/rule-frontmatter.md`.
