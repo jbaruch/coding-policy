@@ -78,10 +78,19 @@ description: Eval coverage, lift-not-attainment scoring, no bleeding, no leaking
 - Skill-specific scenarios: prefix with the skill name — `<skill>-<descriptor>` (e.g., `install-reviewer-refuses-overwrite`, `eval-curation-task-leak-fix`)
 - Cross-cutting scenarios: name the behavior directly without a skill prefix (e.g., `pr-merge-and-post-merge-cleanup`)
 - Descriptors name the behavior under test, not the implementation: `refuses-overwrite` ✓, `checks-existing-file-via-stat` ✗
-- Hard cap at 40 characters for the directory name — some tooling in the tessl-eval pipeline silently truncates longer names
-- Cap applies prospectively; scenarios already run through `tessl eval run` that exceed the cap are grandfathered by the rename-stability clause (which wins over the cap)
+- Default cap at 40 characters for the directory name — driven by tessl's interactive tooling (`tessl eval view`, `tessl scenario generate`) silently truncating longer names
+- Cap applies prospectively; scenarios already run through `tessl eval run` that exceed it are grandfathered by the rename-stability clause (which wins over the cap)
 - Once committed and run through `tessl eval run`, the name is stable — do not rename. `tessl eval view` identifies scenarios by directory name; renaming resets the lift history the Persistence section relies on
-- Rig conventions (programmatic shapes like `<rule>-<fixture_type>-<cell>-run-<n>`) may diverge when documented in the tile's `evals/instructions.json`. The 40-char cap and rename-stability still apply
+- Rig conventions (programmatic shapes like `<rule>-<fixture_type>-<cell>-run-<n>`) may diverge from kebab-case-with-descriptor when documented in the tile's `evals/instructions.json`
+- Narrow exception for rig-shaped scenarios that exceed the 40-char default cap
+- Preconditions (all required):
+  1. Rig's programmatic shape provably cannot fit 40 chars without losing reconstructability of its components (e.g., 4-tuple `rule`/`fixture_type`/`cell`/`run` needed by the rig's scorer for lift bucketing)
+  2. `evals/instructions.json` declares the rig's actual safe length AND names every tessl-eval tool the rig touches end-to-end
+  3. Rig bypasses the interactive tools that drive the default cap — scenario names built by custom script, runs invoked via `tessl eval run <path>`, scoring via custom scorer
+  4. Rig owns naming-collision and truncation-driven scoring drift in its own scorer, not in tessl's tooling
+  5. Rig's CHANGELOG records the carve-out under a `### Rules` (or equivalent) entry citing this clause
+- Rename-stability applies regardless of cap — `tessl eval view` identifies scenarios by directory name irrespective of how the name was generated
+- Every scenario outside an active rig carve-out still respects the 40-char default
 
 ## Fixture Hygiene
 
