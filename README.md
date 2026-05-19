@@ -6,7 +6,7 @@ Coding policy tile for Baruch's AI agents. Language-agnostic code quality rules 
 
 ## What's New
 
-- 17 always-on steering rules: 8 covering code quality, 6 covering plugin authoring, 1 covering author-model declaration, 1 covering concurrency, 1 covering review discipline
+- 18 steering rules — 12 always-on (universal coverage), 6 conditional (scoped via `applyTo:` to the files where the rule's prescriptions actually fire). Breakdown: 8 covering code quality, 7 covering plugin authoring, 1 covering author-model declaration, 1 covering concurrency, 1 covering review discipline
 - `release` skill — structured PR + merge workflow with Copilot review and paired-reviewer cross-family enforcement
 - `eval-authoring` skill — generate, review, and curate eval scenarios with score-driven iteration
 - `install-reviewer` skill — scaffold the paired gh-aw PR review workflows (OpenAI + Anthropic) into a consumer repo
@@ -36,6 +36,7 @@ tessl install jbaruch/coding-policy
 | Style | [code-formatting](rules/code-formatting.md) | Use project's formatter, don't mix style with logic |
 | Authoring | [context-artifacts](rules/context-artifacts.md) | Plugin structure, rule format, review iteration, surface sync, consistency checks |
 | Authoring | [context-writing-style](rules/context-writing-style.md) | Prose discipline for rules, skills, and READMEs — what to cut, what to keep, structural format. CHANGELOG entries follow looser archive discipline |
+| Authoring | [rule-frontmatter](rules/rule-frontmatter.md) | Frontmatter conventions for rule files — passthrough model, per-agent field map, when to path-scope |
 | Authoring | [skill-authoring](rules/skill-authoring.md) | SKILL.md structure, step numbering, typed calls, tile.json reference |
 | Authoring | [script-delegation](rules/script-delegation.md) | Deterministic → script, reasoning → LLM, the regex trap |
 | Authoring | [plugin-evals](rules/plugin-evals.md) | No bleeding, no leaking, persistent eval coverage |
@@ -56,7 +57,7 @@ tessl install jbaruch/coding-policy
 ## Philosophy
 
 - **Language-agnostic code rules.** The code quality rules (commits through formatting) apply to Python, TypeScript, Go, Rust, Java — any language. No framework-specific assumptions.
-- **Tessl-specific authoring rules.** The authoring rules (context-artifacts through plugin-evals) are specific to the Tessl plugin workflow. They codify how to build, test, and ship tiles.
+- **Tessl-specific authoring rules.** The Authoring-category rules in the table above are specific to the Tessl plugin workflow. They codify how to build, test, and ship tiles.
 - **One concern per rule.** Each file covers one topic. Easy to read, easy to reference, easy to override if a project needs an exception.
 - **Opinionated but practical.** These rules reflect real patterns found across 17+ repositories and the Tessl plugin authoring workflow. They solve problems that actually come up when agents write and ship code.
-- **Always on.** Every rule is `alwaysApply: true`. Agents follow these conventions without being reminded.
+- **Loaded by default; scoped by intent.** Universal rules are `alwaysApply: true`. Rules whose prescriptions only fire in specific files are `alwaysApply: false` with `applyTo:` declaring the scope — the agent's model reads the frontmatter and narrows when to act. See `rules/rule-frontmatter.md`.

@@ -1,0 +1,41 @@
+{
+  "context": "Tests whether the agent flips alwaysApply in BOTH the rule file frontmatter AND the tile.json steering entry when converting a universal rule to a conditional one. The tile prescribes that the two surfaces stay in agreement — flipping only one leaves the rule loaded universally in some consumer agents and scoped in others. Baseline agents typically flip only the rule file frontmatter (because that is where they read the rule) and forget about the tile.json side, OR flip only the tile.json side (because the question mentions converting the entry). The tile teaches that both must move together, with applyTo added to the rule file to declare the new scope.",
+  "type": "weighted_checklist",
+  "checklist": [
+    {
+      "name": "Rule file frontmatter flipped to alwaysApply: false",
+      "max_score": 16,
+      "description": "The rules/pr-template-checklist.md frontmatter's alwaysApply value is changed from true to false. Scores zero if the value remains true, or if the field is removed entirely"
+    },
+    {
+      "name": "Rule file frontmatter gains applyTo with glob patterns",
+      "max_score": 16,
+      "description": "The rules/pr-template-checklist.md frontmatter contains a new applyTo field (or accepted alias: globs, paths) whose value includes glob patterns matching PR-related artifacts. The patterns must include at least one match for `.github/PULL_REQUEST_TEMPLATE` (with or without the `.md` extension, with or without the directory variant). Scores zero if the field is missing or contains no glob patterns at all; partial credit (10) if globs are present but do not match PR templates specifically"
+    },
+    {
+      "name": "applyTo value combines globs with a natural-language clause",
+      "max_score": 12,
+      "description": "The applyTo value includes both a glob list and a natural-language clause separated by a literal em dash (—, U+2014), e.g., '.github/PULL_REQUEST_TEMPLATE*, CONTRIBUTING.md — when authoring or editing PR artifacts'. The clause expresses the action-level scope in prose. Scores zero if the value is glob-only, prose-only, or uses a different separator (hyphen, double hyphen, en dash) where the rule prescribes an em dash"
+    },
+    {
+      "name": "tile.json steering entry flipped to alwaysApply: false",
+      "max_score": 16,
+      "description": "The updated tile.json's pr-template-checklist steering entry's alwaysApply value is changed from true to false. Scores zero if the value remains true, or if the entry is dropped entirely"
+    },
+    {
+      "name": "Both alwaysApply values flipped together (no orphaned surface)",
+      "max_score": 16,
+      "description": "Both the rule file frontmatter and the tile.json steering entry have alwaysApply: false. This is the lockstep agreement the tile prescribes. Scores zero if only one surface was flipped, leaving them inconsistent (the most common baseline failure on this scenario)"
+    },
+    {
+      "name": "Rule body content is preserved unchanged",
+      "max_score": 12,
+      "description": "The body of rules/pr-template-checklist.md (everything after the frontmatter block) is byte-identical to the input. The scenario is a frontmatter-only edit; modifying the body bullets is out of scope and counts against the agent"
+    },
+    {
+      "name": "Existing rule (commit-conventions) is preserved unchanged",
+      "max_score": 12,
+      "description": "The commit-conventions steering entry in tile.json remains with its original path and alwaysApply: true value. Scores zero if it is dropped, renamed, or has its alwaysApply flipped"
+    }
+  ]
+}

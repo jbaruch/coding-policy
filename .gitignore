@@ -6,6 +6,8 @@
 .DS_Store
 Thumbs.db
 .codex/
+.gemini/
+tessl.json
 .github/aw/logs/
 *.bak
 *.tmp

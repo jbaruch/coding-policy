@@ -1,0 +1,41 @@
+{
+  "context": "Tests whether the agent applies this tile's frontmatter convention for an always-on rule: alwaysApply: true in both the rule file frontmatter AND the tile.json steering entry, with no scoping fields (applyTo, globs, paths). Baseline agents without the tile typically write rules with no frontmatter beyond a single alwaysApply: true (matching the only example most agents have seen), but they also frequently forget to keep the tile.json entry in agreement, or invent unnecessary scoping fields. This tile prescribes that an always-on rule omits scope and that both surfaces declare alwaysApply: true.",
+  "type": "weighted_checklist",
+  "checklist": [
+    {
+      "name": "Rule file frontmatter declares alwaysApply: true",
+      "max_score": 18,
+      "description": "The rules/spaces-not-tabs.md file has a YAML frontmatter block at the top with alwaysApply: true. Scores zero if frontmatter is missing entirely, if alwaysApply is false, or if alwaysApply is omitted from the block"
+    },
+    {
+      "name": "Rule file frontmatter declares no scoping fields",
+      "max_score": 16,
+      "description": "The rules/spaces-not-tabs.md frontmatter does NOT contain applyTo, globs, or paths fields. The rule applies universally; including any of those fields signals a scoped intent that contradicts the rule's universal nature. Baseline agents may invent scoping fields spuriously; the tile prescribes omitting them for universal rules"
+    },
+    {
+      "name": "tile.json steering entry added with alwaysApply: true",
+      "max_score": 18,
+      "description": "The updated tile.json includes a steering entry for the new rule (e.g., 'spaces-not-tabs') pointing at rules/spaces-not-tabs.md with alwaysApply: true. Scores zero if the steering entry is missing, points at the wrong path, or sets alwaysApply: false"
+    },
+    {
+      "name": "alwaysApply values agree between rule file and tile.json",
+      "max_score": 16,
+      "description": "The alwaysApply value declared in the rule file frontmatter matches the value declared in the tile.json steering entry. Both must be true. Baseline agents may set one surface and forget the other; the tile prescribes the two surfaces stay in lockstep"
+    },
+    {
+      "name": "Rule body has H1 title matching the filename concept",
+      "max_score": 10,
+      "description": "The rule body starts with an H1 heading like # Spaces Not Tabs (or close equivalent) that matches the filename. Scores zero if there is no H1 or the H1 is unrelated to the file's concept"
+    },
+    {
+      "name": "Rule body has at least one substantive bullet",
+      "max_score": 10,
+      "description": "The rule body contains at least one actionable bullet stating the prescription (e.g., 'Use spaces for indentation, not tabs'). Scores zero if the body is empty, contains only the H1, or fills the body with non-prescriptive prose"
+    },
+    {
+      "name": "Existing rules and entries are preserved unchanged",
+      "max_score": 12,
+      "description": "The two pre-existing steering entries (manifest-pin, test-fixture-hygiene) remain in the updated tile.json with their original paths and alwaysApply: false values. The inputs/rules/manifest-pin.md and inputs/rules/test-fixture-hygiene.md files are not modified. Scores zero if any pre-existing entry is dropped, renamed, or has its alwaysApply value flipped"
+    }
+  ]
+}

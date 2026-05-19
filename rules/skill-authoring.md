@@ -1,5 +1,7 @@
 ---
-alwaysApply: true
+alwaysApply: false
+applyTo: "skills/**/SKILL.md, skills/**/*.md, tile.json — when authoring or modifying skills"
+description: SKILL.md structure, frontmatter, execution-mode preamble, flat step numbering, typed Skill() calls, tile.json reference
 ---
 
 # Skill Authoring
