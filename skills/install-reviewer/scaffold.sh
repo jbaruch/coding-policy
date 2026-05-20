@@ -37,12 +37,21 @@ set -euo pipefail
 
 # Append the lock-generated-rule marker to $1 if it isn't already
 # present, then normalize EOF whitespace to exactly one newline.
-# Idempotent — running twice is a no-op. The post-append sanitation
-# uses \s*\z (not \s+\z) so it ALSO adds the newline when the file
-# ends with a non-whitespace byte; the printf '%s\n' above should
-# leave the newline in place, but in practice some consumer scaffolds
-# land .gitattributes without one (mechanism unidentified), and
-# \s+\z would no-op on that exact failure mode.
+# Running twice is a no-op once the file is in the canonical state.
+#
+# EOF normalization runs whenever the file exists, NOT only on the
+# marker-absent branch: the bug this function exists to address is
+# .gitattributes landing without a trailing newline, and rerunning
+# the scaffold on a previously-affected consumer (marker present but
+# trailing newline missing) must repair that state. Skipping the
+# perl pass on marker-present would trap such consumers in the broken
+# state until they hand-edit.
+#
+# The perl regex uses \s*\z (zero-or-more) instead of \s+\z
+# (one-or-more) so EOF is normalized even when the last byte is
+# non-whitespace — exactly the reported failure mode where the
+# append step inside this function should leave a trailing \n but
+# in practice doesn't (mechanism unidentified; \s+\z would no-op).
 ensure_gitattributes_marker() {
   local target="$1" rule="$2"
   if [[ ! -f "$target" ]] || ! grep -qxF "$rule" "$target"; then
@@ -50,6 +59,8 @@ ensure_gitattributes_marker() {
       printf '\n' >> "$target"
     fi
     printf '%s\n' "$rule" >> "$target"
+  fi
+  if [[ -f "$target" ]]; then
     perl -i -0pe 's/\s*\z/\n/' "$target" 2>/dev/null || true
   fi
 }
