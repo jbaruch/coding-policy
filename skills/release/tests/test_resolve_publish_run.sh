@@ -1,22 +1,25 @@
 #!/usr/bin/env bash
 # Outcome-based tests for resolve-publish-run.sh.
 #
-# Covers the three behaviors the script promises:
+# Covers behaviors the script promises:
 #   1. Immediate hit — `gh run list` returns the run on the first call,
-#      script prints the ID and exits 0 without sleeping.
+#      script emits {"database_id": N} and exits 0 without sleeping.
 #   2. Deferred hit — first N calls return empty, then a later call
-#      returns the run; script polls, eventually finds it, prints the
-#      ID, exits 0.
+#      returns the run; script polls, eventually finds it, emits JSON,
+#      exits 0.
 #   3. Budget exhausted — every call returns empty; script exits non-zero
 #      with a diagnostic on stderr that mentions the SHA and workflow.
+#   4. Arg-count validation — missing args produce exit 2 with usage.
+#   5. Env-var validation — non-positive-integer INTERVAL/BUDGET/LIMIT
+#      values produce exit 2 with a clear diagnostic naming the bad var.
 #
 # Approach: source the script (the main() guard prevents auto-run when
 # sourced) and override `gh` + `sleep` as shell functions. Because
-# `main` runs the gh call inside a subshell pipeline (`gh ... | head`),
-# state like "which call is this" can't live in shell variables —
-# subshells get a copy and writes don't propagate back. State lives
-# in tempfiles instead: a call-index file the mock reads-and-bumps,
-# and a queue-file the mock indexes into for the response.
+# `main` runs the gh call inside a subshell pipeline, state like
+# "which call is this" can't live in shell variables — subshells get
+# a copy and writes don't propagate back. State lives in tempfiles
+# instead: a calls log the mock appends to, and a queue file the
+# mock indexes into for each call's response.
 #
 # Run: bash skills/release/tests/test_resolve_publish_run.sh
 # Exit 0 on all-pass; non-zero with a per-test diagnostic on failure.
@@ -26,9 +29,10 @@ set -uo pipefail
 SCRIPT="$(cd "$(dirname "$0")/.." && pwd)/resolve-publish-run.sh"
 [[ -x "$SCRIPT" ]] || { echo "fatal: resolve-publish-run.sh not executable at $SCRIPT" >&2; exit 2; }
 
-# Keep the test fast — 1s intervals, 3s budget. The script defaults
-# (2s / 30s) are still asserted indirectly by the immediate-hit and
-# deferred-hit tests, which observe call counts rather than wall time.
+# Override to 1s/3s so the budget-exhausted test stays fast. The script
+# defaults (2s interval, 30s budget) are not directly observable in
+# these tests — call counts and exit codes are what's asserted, not
+# wall-clock timing. A separate test would be needed to cover defaults.
 export RESOLVE_PUBLISH_RUN_INTERVAL_SEC=1
 export RESOLVE_PUBLISH_RUN_BUDGET_SEC=3
 
@@ -66,10 +70,11 @@ run() {
   fi
 }
 
-# Mock `gh` — supports only `gh run list`. Reads the next response from
-# MOCK_GH_QUEUE_FILE (one entry per line); literal `EMPTY` maps to empty
-# stdout, anything else is echoed verbatim. Records the invocation in
-# MOCK_GH_CALLS_FILE so the test can count calls after main() returns.
+# Mock `gh` — stands in for `gh run list ... --jq '...'`. The real gh
+# with --jq returns the filtered output as text, so the mock returns
+# the next queued response verbatim (EMPTY → empty stdout, otherwise
+# echoed). Records each invocation in MOCK_GH_CALLS_FILE so the test
+# can count calls after main() returns.
 gh() {
   [[ "$1" == "run" && "$2" == "list" ]] || { echo "mock gh: unexpected invocation: $*" >&2; return 99; }
   echo "call" >> "$MOCK_GH_CALLS_FILE"
@@ -90,6 +95,15 @@ reset_mocks() {
   : > "$MOCK_GH_CALLS_FILE"
   : > "$MOCK_SLEEP_CALLS_FILE"
   : > "$MOCK_GH_QUEUE_FILE"
+  # Reset env-driven knobs to known-good values. Tests that exercise
+  # invalid values override these immediately before invoking main()
+  # below. Without this, an INTERVAL_SEC=0 override from one test
+  # leaks into the next test's main() call (env-prefix on a `var=$(...)`
+  # assignment is a plain variable assignment in bash, not a command-
+  # scoped env override).
+  INTERVAL_SEC=1
+  BUDGET_SEC=3
+  RUN_LIST_LIMIT=100
 }
 
 queue_responses() {
@@ -101,6 +115,9 @@ queue_responses() {
 gh_calls() { wc -l < "$MOCK_GH_CALLS_FILE" | tr -d ' '; }
 sleep_calls() { wc -l < "$MOCK_SLEEP_CALLS_FILE" | tr -d ' '; }
 
+# Extract .database_id from a JSON envelope; prints empty if absent.
+database_id_of() { echo "$1" | jq -r '.database_id // empty'; }
+
 # --- Test 1: immediate hit ----------------------------------------------------
 test_immediate_hit() {
   reset_mocks
@@ -108,11 +125,11 @@ test_immediate_hit() {
   local output rc=0
   output=$(main jbaruch coding-policy abc123 publish.yml 2>&1) || rc=$?
   assert_eq "exit code" "0" "$rc" || return 1
-  assert_eq "output" "123456" "$output" || return 1
+  assert_eq "database_id" "123456" "$(database_id_of "$output")" || return 1
   assert_eq "gh call count" "1" "$(gh_calls)" || return 1
   assert_eq "sleep call count" "0" "$(sleep_calls)" || return 1
 }
-run "immediate hit returns run ID without sleeping" test_immediate_hit
+run "immediate hit emits {\"database_id\": N} without sleeping" test_immediate_hit
 
 # --- Test 2: deferred hit (poll succeeds on third try) ------------------------
 test_deferred_hit() {
@@ -121,7 +138,7 @@ test_deferred_hit() {
   local output rc=0
   output=$(main jbaruch coding-policy def456 publish.yml 2>&1) || rc=$?
   assert_eq "exit code" "0" "$rc" || return 1
-  assert_eq "output" "789012" "$output" || return 1
+  assert_eq "database_id" "789012" "$(database_id_of "$output")" || return 1
   assert_eq "gh call count" "3" "$(gh_calls)" || return 1
   assert_eq "sleep call count" "2" "$(sleep_calls)" || return 1
 }
@@ -148,6 +165,38 @@ test_arg_validation() {
   echo "$stderr" | grep -q "usage:" || { echo "    FAIL: stderr missing usage line, got: ${stderr}" >&2; return 1; }
 }
 run "missing arg exits 2 with usage" test_arg_validation
+
+# --- Test 5: env-var validation (positive integer requirement) ----------------
+test_interval_zero_rejected() {
+  reset_mocks
+  INTERVAL_SEC=0
+  local stderr rc=0
+  stderr=$(main jbaruch coding-policy abc publish.yml 2>&1 >/dev/null) || rc=$?
+  assert_eq "exit code" "2" "$rc" || return 1
+  echo "$stderr" | grep -q "INTERVAL_SEC" || { echo "    FAIL: stderr should name INTERVAL_SEC var, got: ${stderr}" >&2; return 1; }
+}
+run "INTERVAL_SEC=0 rejected with named diagnostic" test_interval_zero_rejected
+
+test_budget_negative_rejected() {
+  reset_mocks
+  BUDGET_SEC=-5
+  local stderr rc=0
+  stderr=$(main jbaruch coding-policy abc publish.yml 2>&1 >/dev/null) || rc=$?
+  assert_eq "exit code" "2" "$rc" || return 1
+  echo "$stderr" | grep -q "BUDGET_SEC" || { echo "    FAIL: stderr should name BUDGET_SEC var, got: ${stderr}" >&2; return 1; }
+}
+run "BUDGET_SEC=-5 rejected with named diagnostic" test_budget_negative_rejected
+
+test_interval_gt_budget_rejected() {
+  reset_mocks
+  INTERVAL_SEC=10
+  BUDGET_SEC=5
+  local stderr rc=0
+  stderr=$(main jbaruch coding-policy abc publish.yml 2>&1 >/dev/null) || rc=$?
+  assert_eq "exit code" "2" "$rc" || return 1
+  echo "$stderr" | grep -q "cannot exceed" || { echo "    FAIL: stderr should explain interval-vs-budget, got: ${stderr}" >&2; return 1; }
+}
+run "INTERVAL_SEC > BUDGET_SEC rejected" test_interval_gt_budget_rejected
 
 echo
 echo "results: ${PASS_COUNT} pass, ${FAIL_COUNT} fail"
