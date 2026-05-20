@@ -35,6 +35,25 @@
 
 set -euo pipefail
 
+# Append the lock-generated-rule marker to $1 if it isn't already
+# present, then normalize EOF whitespace to exactly one newline.
+# Idempotent — running twice is a no-op. The post-append sanitation
+# uses \s*\z (not \s+\z) so it ALSO adds the newline when the file
+# ends with a non-whitespace byte; the printf '%s\n' above should
+# leave the newline in place, but in practice some consumer scaffolds
+# land .gitattributes without one (mechanism unidentified), and
+# \s+\z would no-op on that exact failure mode.
+ensure_gitattributes_marker() {
+  local target="$1" rule="$2"
+  if [[ ! -f "$target" ]] || ! grep -qxF "$rule" "$target"; then
+    if [[ -f "$target" && -s "$target" && -n "$(tail -c 1 "$target")" ]]; then
+      printf '\n' >> "$target"
+    fi
+    printf '%s\n' "$rule" >> "$target"
+    perl -i -0pe 's/\s*\z/\n/' "$target" 2>/dev/null || true
+  fi
+}
+
 OVERRIDE_MODE=0
 for arg in "$@"; do
   case "$arg" in
@@ -248,18 +267,7 @@ main() {
   # rules/file-hygiene.md. Idempotent — appends only if the exact line
   # is not already present, so existing consumer-managed .gitattributes
   # entries are not clobbered. The wildcard pattern covers both lock files.
-  if [[ ! -f "$GITATTRIBUTES" ]] || ! grep -qxF "$LOCK_GENERATED_RULE" "$GITATTRIBUTES"; then
-    # If the file exists and doesn't end in a newline, add one first so the
-    # appended line lands on its own row.
-    if [[ -f "$GITATTRIBUTES" && -s "$GITATTRIBUTES" && -n "$(tail -c 1 "$GITATTRIBUTES")" ]]; then
-      printf '\n' >> "$GITATTRIBUTES"
-    fi
-    printf '%s\n' "$LOCK_GENERATED_RULE" >> "$GITATTRIBUTES"
-    # Defensive: the printf above should leave a trailing \n, but in practice
-    # the file lands without one (mechanism unidentified). Mirror the lock
-    # sanitation to guarantee rules/code-formatting.md's single-newline basic.
-    perl -i -0pe 's/\s+\z/\n/' "$GITATTRIBUTES" 2>/dev/null || true
-  fi
+  ensure_gitattributes_marker "$GITATTRIBUTES" "$LOCK_GENERATED_RULE"
 
   local override_json="false"
   (( OVERRIDE_MODE == 1 )) && override_json="true"
