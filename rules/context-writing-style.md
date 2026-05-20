@@ -36,11 +36,12 @@ description: Prose discipline for rules, skills, and READMEs — what to cut, wh
 ## Reader-Side — Consult the CHANGELOGs
 
 - The relevant tile's `CHANGELOG.md` is the archive for motivation, incidents, and worked examples cut from rule bodies
-- Read each tile's archive when a rule spans tiles; one tile's CHANGELOG won't carry another tile's cut content
+- Read each tile's archive when a rule spans tiles
+- Do not stop after one tile's CHANGELOG
 - Pull a CHANGELOG when judging an edge case
 - Pull a CHANGELOG when debugging an unexpected directive
 - Pull a CHANGELOG when auditing whether a rule still describes current reality
-- Silence on rationale in rule bodies is by design — never infer the rule is incomplete
+- Never infer that missing rationale in a rule body means the rule is incomplete
 
 ## Structure
 
