@@ -255,6 +255,10 @@ main() {
       printf '\n' >> "$GITATTRIBUTES"
     fi
     printf '%s\n' "$LOCK_GENERATED_RULE" >> "$GITATTRIBUTES"
+    # Defensive: the printf above should leave a trailing \n, but in practice
+    # the file lands without one (mechanism unidentified). Mirror the lock
+    # sanitation to guarantee rules/code-formatting.md's single-newline basic.
+    perl -i -0pe 's/\s+\z/\n/' "$GITATTRIBUTES" 2>/dev/null || true
   fi
 
   local override_json="false"
