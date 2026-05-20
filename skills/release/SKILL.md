@@ -172,8 +172,10 @@ After merge — per `rules/ci-safety.md`'s Always Watch CI duty extended through
   ```bash
   merge_sha=$(gh pr view <N> --json mergeCommit --jq '.mergeCommit.oid')
   run_id=$(skills/release/resolve-publish-run.sh <owner> <repo> "$merge_sha" "<publish-workflow-name>" | jq -r '.database_id')
-  gh run watch "$run_id" --exit-status
+  gh run watch "$run_id"
   ```
+
+  No `--exit-status` on the watch: per `rules/ci-safety.md`, the registry-advanced check below is the authoritative gate, not the publish workflow's exit code. Letting `--exit-status` propagate a non-zero exit would short-circuit the script (under `set -e`) before the registry check runs, turning the approximate workflow conclusion into the gate.
 
   `gh pr view` returns the specific merge commit for this PR, unaffected by parallel merges. The resolver filters on `headSha == $merge_sha` AND `event == push` so manual `workflow_dispatch` runs sharing the SHA are excluded; it also retries on enqueue latency so the immediate post-merge `gh run list` doesn't race the publish workflow's enqueue and surface as "no run found". Output is `{"database_id": N}` per `rules/script-delegation.md` — extract with `jq -r '.database_id'`. The watch is a timing precondition for the registry check below, not the authoritative gate
 - Confirm the registry advanced. After the watch returns, query `tessl tile info <workspace>/<tile>` again and confirm the new `Latest Version` is greater than `PRE` (captured before the merge above). Registry-advanced is the authoritative signal. Do not compare against a specific expected version — interleaved merges may advance past yours. See `rules/ci-safety.md` for the full registry semantics and failed-publish recovery

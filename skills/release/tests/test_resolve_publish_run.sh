@@ -10,8 +10,13 @@
 #   3. Budget exhausted — every call returns empty; script exits non-zero
 #      with a diagnostic on stderr that mentions the SHA and workflow.
 #   4. Arg-count validation — missing args produce exit 2 with usage.
-#   5. Env-var validation — non-positive-integer INTERVAL/BUDGET/LIMIT
-#      values produce exit 2 with a clear diagnostic naming the bad var.
+#   5. Env-var validation — non-positive-integer INTERVAL/BUDGET values
+#      produce exit 2 with a clear diagnostic naming the bad var.
+#   6. INTERVAL > BUDGET rejected.
+#   7. Budget cap — total sleep never exceeds BUDGET_SEC even when
+#      INTERVAL doesn't divide BUDGET evenly.
+#   8. Numeric run-id validation — gh returning non-numeric output
+#      produces exit 1 with an actionable diagnostic.
 #
 # Approach: source the script (the main() guard prevents auto-run when
 # sourced) and override `gh` + `sleep` as shell functions. Because
@@ -191,6 +196,7 @@ test_budget_negative_rejected() {
 }
 run "BUDGET_SEC=-5 rejected with named diagnostic" test_budget_negative_rejected
 
+# --- Test 6: INTERVAL > BUDGET rejected --------------------------------------
 test_interval_gt_budget_rejected() {
   reset_mocks
   INTERVAL_SEC=10
@@ -202,7 +208,7 @@ test_interval_gt_budget_rejected() {
 }
 run "INTERVAL_SEC > BUDGET_SEC rejected" test_interval_gt_budget_rejected
 
-# --- Test 8: budget cap — loop wall-clock cannot exceed BUDGET_SEC -----------
+# --- Test 7: budget cap — total sleep cannot exceed BUDGET_SEC ---------------
 # With INTERVAL=2 and BUDGET=3, a naive `sleep $INTERVAL` after each
 # poll would sleep twice (4s total). The script caps the final sleep
 # at remaining-budget so total sleep <= BUDGET_SEC.
@@ -222,7 +228,7 @@ test_budget_cap_on_non_divisible_interval() {
 }
 run "budget cap: total sleep never exceeds BUDGET_SEC (non-divisible interval)" test_budget_cap_on_non_divisible_interval
 
-# --- Test 9: numeric run-id validation ---------------------------------------
+# --- Test 8: numeric run-id validation ---------------------------------------
 test_non_numeric_run_id_rejected() {
   reset_mocks
   queue_responses "not-a-number"

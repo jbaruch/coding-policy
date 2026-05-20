@@ -52,7 +52,10 @@ main() {
   local owner="$1" repo="$2" merge_sha="$3" workflow="$4"
   local elapsed=0 run_id
 
-  while (( elapsed < BUDGET_SEC )); do
+  # Loop bound is `<= BUDGET_SEC` (not strictly less) so a run that
+  # becomes visible exactly at the budget boundary is still caught.
+  # A strict `<` bound would skip the final poll at t == BUDGET_SEC.
+  while (( elapsed <= BUDGET_SEC )); do
     # --jq wraps the filter in `[...] | .[0] // empty` so the output is
     # a single scalar (or empty when no match). No `| head -n 1` pipe —
     # gh's full output is fully consumed by gh's internal jq, so there's
@@ -74,9 +77,15 @@ main() {
       printf '{"database_id": %s}\n' "$run_id"
       return 0
     fi
-    # Cap the sleep at the remaining budget so the loop's wall-clock
-    # cost never exceeds BUDGET_SEC (otherwise a non-divisible interval
-    # would oversleep — e.g., interval=2 + budget=3 → sleep twice = 4s).
+    # Skip the trailing sleep on the boundary iteration so the loop
+    # exits immediately after polling at t == BUDGET_SEC. Otherwise
+    # cap sleep at (BUDGET - elapsed) so the total sleep accounting
+    # tracks BUDGET_SEC for non-divisible intervals (e.g., interval=2
+    # + budget=3 → sleeps 2, 1 instead of 2, 2). Note: this bounds
+    # total SLEEP time, not real wall-clock — `gh run list` API calls
+    # also take time, so the loop's true wall-clock can exceed
+    # BUDGET_SEC by a few seconds of network latency.
+    (( elapsed == BUDGET_SEC )) && break
     local remaining=$(( BUDGET_SEC - elapsed ))
     local sleep_for=$INTERVAL_SEC
     (( sleep_for > remaining )) && sleep_for=$remaining
