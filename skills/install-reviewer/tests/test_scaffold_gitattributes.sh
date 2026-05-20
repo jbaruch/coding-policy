@@ -11,9 +11,12 @@
 # and inspects the resulting file with byte-level assertions so a
 # silent off-by-one or wrong-newline-count regression surfaces loudly.
 #
-# Portability: avoids `shasum` and `xxd` (not POSIX, not universally
-# installed in minimal environments) — uses `cksum` and `od` instead
-# so the suite runs on bare alpine, BSD, and stripped CI images.
+# Portability: byte-level assertions use POSIX `cksum` and `od` (not
+# `shasum`/`xxd`, which aren't universally installed). The trailing-
+# newline-count helper does use `perl` — same dependency the
+# scaffold.sh sanitation step uses, and present on every macOS and
+# standard Linux CI image. Alpine images need `apk add perl` to run
+# this test suite.
 #
 # Run: bash skills/install-reviewer/tests/test_scaffold_gitattributes.sh
 # Exit 0 on all-pass; non-zero with a per-test diagnostic on failure.
@@ -72,8 +75,10 @@ content_fingerprint() {
 }
 
 # Counts occurrences of the marker line (verifies no duplicate appended).
+# `grep -c` always prints the count (including 0); the non-zero exit on
+# no-match is suppressed without adding a second line of output.
 marker_count() {
-  grep -cxF "$RULE" "$1" 2>/dev/null || echo 0
+  grep -cxF "$RULE" "$1" 2>/dev/null || true
 }
 
 # --- Test 1: fresh consumer (file doesn't exist) -----------------------------
