@@ -15,7 +15,8 @@ description: |
   from `main`. Fork PRs are skipped by gh-aw's fork-guard. Posts up to 10
   inline comments plus one consolidated review verdict.
 
-  Required repository secrets:
+  Required repository secrets (set at
+  https://github.com/<owner>/<repo>/settings/secrets/actions):
     - ANTHROPIC_API_KEY — Claude Code engine authentication
     - TESSL_TOKEN       — tessl install authentication
 

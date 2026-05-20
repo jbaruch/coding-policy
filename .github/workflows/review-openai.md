@@ -14,6 +14,11 @@ description: |
   skipped by gh-aw's fork-guard. Posts up to 10 inline comments plus one
   consolidated review verdict.
 
+  Required repository secrets (set at
+  https://github.com/jbaruch/coding-policy/settings/secrets/actions):
+    - OPENAI_API_KEY or CODEX_API_KEY — Codex engine authentication
+      (either name is accepted; the workflow coalesces them at runtime)
+
 on:
   pull_request:
     types: [opened, synchronize, reopened, edited]

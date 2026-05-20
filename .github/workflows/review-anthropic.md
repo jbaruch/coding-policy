@@ -14,6 +14,10 @@ description: |
   skipped by gh-aw's fork-guard. Posts up to 10 inline comments plus one
   consolidated review verdict.
 
+  Required repository secrets (set at
+  https://github.com/jbaruch/coding-policy/settings/secrets/actions):
+    - ANTHROPIC_API_KEY — Claude Code engine authentication
+
 on:
   pull_request:
     types: [opened, synchronize, reopened, edited]

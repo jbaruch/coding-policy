@@ -15,7 +15,8 @@ description: |
   from `main`. Fork PRs are skipped by gh-aw's fork-guard. Posts up to 10
   inline comments plus one consolidated review verdict.
 
-  Required repository secrets:
+  Required repository secrets (set at
+  https://github.com/<owner>/<repo>/settings/secrets/actions):
     - OPENAI_API_KEY or CODEX_API_KEY — Codex engine authentication
       (either name is accepted; the workflow coalesces them at runtime)
     - TESSL_TOKEN — tessl install authentication
