@@ -15,11 +15,12 @@
 #
 # Approach: source the script (the main() guard prevents auto-run when
 # sourced) and override `gh` + `sleep` as shell functions. Because
-# `main` runs the gh call inside a subshell pipeline, state like
-# "which call is this" can't live in shell variables — subshells get
-# a copy and writes don't propagate back. State lives in tempfiles
-# instead: a calls log the mock appends to, and a queue file the
-# mock indexes into for each call's response.
+# `main` runs the gh call inside a command substitution (`run_id=$(...)`),
+# state like "which call is this" can't live in shell variables — the
+# substitution spawns a subshell that gets its own copy and writes
+# don't propagate back. State lives in tempfiles instead: a calls log
+# the mock appends to, and a queue file the mock indexes into for each
+# call's response.
 #
 # Run: bash skills/release/tests/test_resolve_publish_run.sh
 # Exit 0 on all-pass; non-zero with a per-test diagnostic on failure.
@@ -86,9 +87,11 @@ gh() {
   echo "$response"
 }
 
-# Mock `sleep` — record the call but don't actually wait.
+# Mock `sleep` — record the requested duration (one per line) without
+# actually waiting. Tests sum these to verify the loop respects the
+# wall-clock budget.
 sleep() {
-  echo "call" >> "$MOCK_SLEEP_CALLS_FILE"
+  echo "$1" >> "$MOCK_SLEEP_CALLS_FILE"
 }
 
 reset_mocks() {
@@ -114,6 +117,7 @@ queue_responses() {
 
 gh_calls() { wc -l < "$MOCK_GH_CALLS_FILE" | tr -d ' '; }
 sleep_calls() { wc -l < "$MOCK_SLEEP_CALLS_FILE" | tr -d ' '; }
+total_sleep_seconds() { awk '{ sum += $1 } END { print sum + 0 }' "$MOCK_SLEEP_CALLS_FILE"; }
 
 # Extract .database_id from a JSON envelope; prints empty if absent.
 database_id_of() { echo "$1" | jq -r '.database_id // empty'; }
@@ -197,6 +201,37 @@ test_interval_gt_budget_rejected() {
   echo "$stderr" | grep -q "cannot exceed" || { echo "    FAIL: stderr should explain interval-vs-budget, got: ${stderr}" >&2; return 1; }
 }
 run "INTERVAL_SEC > BUDGET_SEC rejected" test_interval_gt_budget_rejected
+
+# --- Test 8: budget cap — loop wall-clock cannot exceed BUDGET_SEC -----------
+# With INTERVAL=2 and BUDGET=3, a naive `sleep $INTERVAL` after each
+# poll would sleep twice (4s total). The script caps the final sleep
+# at remaining-budget so total sleep <= BUDGET_SEC.
+test_budget_cap_on_non_divisible_interval() {
+  reset_mocks
+  INTERVAL_SEC=2
+  BUDGET_SEC=3
+  queue_responses "EMPTY" "EMPTY" "EMPTY" "EMPTY"
+  local rc=0
+  # Wrap main in a subshell so its `exit 1` on budget exhaustion
+  # doesn't kill the test runner.
+  ( main jbaruch coding-policy abc publish.yml >/dev/null 2>&1 ) || rc=$?
+  [[ $rc -ne 0 ]] || { echo "    FAIL: expected budget-exhausted non-zero exit" >&2; return 1; }
+  local total
+  total=$(total_sleep_seconds)
+  [[ "$total" -le "$BUDGET_SEC" ]] || { echo "    FAIL: total sleep ${total}s exceeds budget ${BUDGET_SEC}s" >&2; return 1; }
+}
+run "budget cap: total sleep never exceeds BUDGET_SEC (non-divisible interval)" test_budget_cap_on_non_divisible_interval
+
+# --- Test 9: numeric run-id validation ---------------------------------------
+test_non_numeric_run_id_rejected() {
+  reset_mocks
+  queue_responses "not-a-number"
+  local stderr rc=0
+  stderr=$(main jbaruch coding-policy abc publish.yml 2>&1 >/dev/null) || rc=$?
+  assert_eq "exit code" "1" "$rc" || return 1
+  echo "$stderr" | grep -q "expected numeric run id" || { echo "    FAIL: stderr should explain numeric validation, got: ${stderr}" >&2; return 1; }
+}
+run "non-numeric run id rejected with diagnostic" test_non_numeric_run_id_rejected
 
 echo
 echo "results: ${PASS_COUNT} pass, ${FAIL_COUNT} fail"

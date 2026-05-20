@@ -55,8 +55,10 @@ main() {
   while (( elapsed < BUDGET_SEC )); do
     # --jq wraps the filter in `[...] | .[0] // empty` so the output is
     # a single scalar (or empty when no match). No `| head -n 1` pipe —
-    # gh's full output is fully consumed by jq, so there's no SIGPIPE
-    # window that `pipefail` could mis-attribute as a script failure.
+    # gh's full output is fully consumed by gh's internal jq, so there's
+    # no SIGPIPE window that `pipefail` could mis-attribute as failure.
+    # gh's `--jq` is internal to gh; this script does NOT depend on the
+    # system `jq` binary being installed.
     run_id=$(gh run list \
       --repo "${owner}/${repo}" \
       --branch main \
@@ -65,11 +67,21 @@ main() {
       --json databaseId,headSha,event \
       --jq '[.[] | select(.headSha == "'"$merge_sha"'") | select(.event == "push") | .databaseId] | .[0] // empty')
     if [[ -n "$run_id" ]]; then
-      jq -n --argjson id "$run_id" '{database_id: $id}'
+      if ! [[ "$run_id" =~ ^[0-9]+$ ]]; then
+        echo "error: expected numeric run id from gh, got: '${run_id}' — inspect 'gh run list ... --json databaseId,headSha,event' to diagnose" >&2
+        exit 1
+      fi
+      printf '{"database_id": %s}\n' "$run_id"
       return 0
     fi
-    sleep "$INTERVAL_SEC"
-    elapsed=$(( elapsed + INTERVAL_SEC ))
+    # Cap the sleep at the remaining budget so the loop's wall-clock
+    # cost never exceeds BUDGET_SEC (otherwise a non-divisible interval
+    # would oversleep — e.g., interval=2 + budget=3 → sleep twice = 4s).
+    local remaining=$(( BUDGET_SEC - elapsed ))
+    local sleep_for=$INTERVAL_SEC
+    (( sleep_for > remaining )) && sleep_for=$remaining
+    sleep "$sleep_for"
+    elapsed=$(( elapsed + sleep_for ))
   done
 
   echo "error: no '${workflow}' push-event run found for merge SHA ${merge_sha} on ${owner}/${repo} after ${BUDGET_SEC}s — inspect 'gh run list --repo ${owner}/${repo} --branch main --workflow \"${workflow}\" --limit ${RUN_LIST_LIMIT}' to diagnose (workflow may have failed to enqueue, or the SHA may not have triggered it)" >&2
