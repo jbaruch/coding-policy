@@ -35,6 +35,42 @@
 
 set -euo pipefail
 
+# Append the lock-generated-rule marker to $1 if it isn't already
+# present, then ensure the file ends with exactly one trailing newline.
+# Running twice is a no-op once the file is in canonical state.
+#
+# EOF normalization runs whenever the file exists, NOT only on the
+# marker-absent branch: the bug this function exists to address is
+# .gitattributes landing without a trailing newline, and rerunning
+# the scaffold on a previously-affected consumer (marker present but
+# trailing newline missing) must repair that state. Skipping the
+# normalization on marker-present would trap such consumers in the
+# broken state until they hand-edit.
+#
+# Two-stage normalization. The bash-only stage is the AUTHORITATIVE
+# fix for the reported missing-newline failure mode and never fails
+# silently: if the last byte isn't a newline, append one with printf.
+# The perl stage is a follow-up that ALSO collapses multiple trailing
+# newlines to one (\s*\z → \n, where \s*\z matches even a non-whitespace
+# EOF; \s+\z would no-op on the exact reported failure mode). Perl is
+# best-effort so a missing perl binary doesn't fail the scaffold —
+# the missing-newline fix landed via the bash stage in that case.
+ensure_gitattributes_marker() {
+  local target="$1" rule="$2"
+  if [[ ! -f "$target" ]] || ! grep -qxF "$rule" "$target"; then
+    if [[ -f "$target" && -s "$target" && -n "$(tail -c 1 "$target")" ]]; then
+      printf '\n' >> "$target"
+    fi
+    printf '%s\n' "$rule" >> "$target"
+  fi
+  if [[ -f "$target" && -s "$target" && -n "$(tail -c 1 "$target")" ]]; then
+    printf '\n' >> "$target"
+  fi
+  if [[ -f "$target" ]]; then
+    perl -i -0pe 's/\s*\z/\n/' "$target" 2>/dev/null || true
+  fi
+}
+
 OVERRIDE_MODE=0
 for arg in "$@"; do
   case "$arg" in
@@ -248,14 +284,7 @@ main() {
   # rules/file-hygiene.md. Idempotent — appends only if the exact line
   # is not already present, so existing consumer-managed .gitattributes
   # entries are not clobbered. The wildcard pattern covers both lock files.
-  if [[ ! -f "$GITATTRIBUTES" ]] || ! grep -qxF "$LOCK_GENERATED_RULE" "$GITATTRIBUTES"; then
-    # If the file exists and doesn't end in a newline, add one first so the
-    # appended line lands on its own row.
-    if [[ -f "$GITATTRIBUTES" && -s "$GITATTRIBUTES" && -n "$(tail -c 1 "$GITATTRIBUTES")" ]]; then
-      printf '\n' >> "$GITATTRIBUTES"
-    fi
-    printf '%s\n' "$LOCK_GENERATED_RULE" >> "$GITATTRIBUTES"
-  fi
+  ensure_gitattributes_marker "$GITATTRIBUTES" "$LOCK_GENERATED_RULE"
 
   local override_json="false"
   (( OVERRIDE_MODE == 1 )) && override_json="true"
