@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Rules
+
+- **context-writing-style** — Adds reader-side complement to "What to Cut → move to CHANGELOG". Writer-side directives strip motivation, incidents, and worked examples from rule bodies; the reader-side `## Reader-Side — Consult the CHANGELOGs` section now tells agents where to find that content when they need it. Four bullets: (1) the relevant tile's `CHANGELOG.md` is the archive for cut motivation/incident/worked-example content; (2) cross-tile rules have motivation spread across multiple CHANGELOGs — read each, don't stop at one; (3) CHANGELOGs are read-on-demand, not auto-loaded — consult when judging an edge case, debugging a directive, or auditing rule-vs-reality drift; (4) silence on rationale in rule bodies is by design, not omission — don't infer incompleteness, consult the archive. Closes the writer/reader asymmetry where rule bodies were being aggressively pruned without a complementary signal telling agents where the cut content went.
+
 ### Skills
 
 - **release** — Step 1 (Verify Readiness) gains a pre-push self-audit bullet alongside the existing tests + linter gates: audit the diff against every governing rule or skill whose domain covers the touched paths, grep the diff for the markers each one names, run any local check it prescribes, and recognize the paired cross-family reviewer as a backstop rather than the first read.
