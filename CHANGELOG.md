@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Rules
+
+- **context-writing-style** — Adds `## Reader-Side — Consult the CHANGELOGs` section telling agents where to find motivation cut from rule bodies. Closes the writer/reader asymmetry created by "What to Cut → move to CHANGELOG".
+
 ### Skills
 
 - **release** — Step 1 (Verify Readiness) gains a pre-push self-audit bullet alongside the existing tests + linter gates: audit the diff against every governing rule or skill whose domain covers the touched paths, grep the diff for the markers each one names, run any local check it prescribes, and recognize the paired cross-family reviewer as a backstop rather than the first read.
