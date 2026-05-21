@@ -6,7 +6,7 @@ Coding policy tile for Baruch's AI agents. Language-agnostic code quality rules 
 
 ## What's New
 
-- 18 steering rules — 12 always-on (universal coverage), 6 conditional (scoped via `applyTo:` to the files where the rule's prescriptions actually fire). Breakdown: 8 covering code quality, 7 covering plugin authoring, 1 covering author-model declaration, 1 covering concurrency, 1 covering review discipline
+- 19 steering rules — 12 always-on (universal coverage), 7 conditional (scoped via `applyTo:` to the files where the rule's prescriptions actually fire). Breakdown: 8 covering code quality, 8 covering plugin authoring, 1 covering author-model declaration, 1 covering concurrency, 1 covering review discipline
 - `release` skill — structured PR + merge workflow with Copilot review and paired-reviewer cross-family enforcement
 - `eval-authoring` skill — generate, review, and curate eval scenarios with score-driven iteration
 - `install-reviewer` skill — scaffold the paired gh-aw PR review workflows (OpenAI + Anthropic) into a consumer repo
@@ -39,6 +39,7 @@ tessl install jbaruch/coding-policy
 | Authoring | [rule-frontmatter](rules/rule-frontmatter.md) | Frontmatter conventions for rule files — passthrough model, per-agent field map, when to path-scope |
 | Authoring | [skill-authoring](rules/skill-authoring.md) | SKILL.md structure, step numbering, typed calls, tile.json reference |
 | Authoring | [script-delegation](rules/script-delegation.md) | Deterministic → script, reasoning → LLM, the regex trap |
+| Authoring | [script-as-black-box](rules/script-as-black-box.md) | Skills reference the script's contract (inputs/outputs/exit codes), not its internal logic — thresholds and predicates live in the script |
 | Authoring | [plugin-evals](rules/plugin-evals.md) | No bleeding, no leaking, persistent eval coverage |
 | Authoring | [stateful-artifacts](rules/stateful-artifacts.md) | Cross-invocation state: schema, owner skill, schema_version, hints-not-authority, migration |
 | Review | [author-model-declaration](rules/author-model-declaration.md) | PRs declare author model; paired reviewers pick the cross-family one |
