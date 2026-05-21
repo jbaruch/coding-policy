@@ -2,9 +2,9 @@
 
 ## Problem/Feature Description
 
-A platform team manages a monorepo where several developers merge PRs throughout the day. After a merge, developers frequently forget to sync their local main branch, leave stale local branches around, and don't verify whether the post-merge publish pipeline actually fired. This leads to subtle issues: developers push new work on top of outdated local main, accidentally re-create deleted branches, and only notice the publish pipeline failed hours later when a release is expected.
+A platform team manages a monorepo where several developers merge PRs throughout the day. After a merge, developers frequently forget to sync their local main branch, leave stale local branches around, and walk away without confirming the release actually published. This leads to subtle issues: developers push new work on top of outdated local main, accidentally re-create deleted branches, and only notice the release never went out hours later when a downstream consumer reports it missing.
 
-The team wants a `merge-and-cleanup.sh` bash script that a developer can run once a PR is ready to land. The script should handle the merge itself, clean up the local and remote state, and confirm the release is on track — giving the developer a clear final status rather than leaving them to check manually.
+The team wants a `merge-and-cleanup.sh` bash script that a developer can run once a PR is ready to land. The script should handle the merge itself, clean up the local and remote state, and confirm the release actually published — giving the developer a clear final status rather than leaving them to check manually.
 
 ## Output Specification
 
