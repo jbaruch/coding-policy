@@ -51,3 +51,14 @@ alwaysApply: true
 
 - Don't push directly to `main` or `master`
 - All changes go through pull requests
+
+## Content-Only Direct-Push Carve-Out
+
+- Narrow exception for content-only edits to a fully-enumerable path set
+- Applies when the edited paths are prose / data artifacts a human audience reads directly — not code, not context artifacts an agent loads (rules, skills, scripts, manifests, workflow files, configuration)
+- The push may go directly to `main` / `master` without a PR review cycle
+- Preconditions (each consuming repo, all required):
+  1. Repo documents an authority-of-record rule in its own tile naming the carve-out — the exact path globs, why those paths qualify as content not code/context, and what policy review the direct-push does NOT carry
+  2. Carve-out scopes to one or more named path globs — never a broad wildcard like `**/*.md`. Globs that would match `rules/**/*.md`, `skills/**/*.md`, `*.yml` workflow files, `tile.json`, `package.json`, or any executable/loaded artifact are mis-scoped
+  3. Automated check fails the push when a commit on a carved-out path also touches a non-carved-out path (CI lint, GitHub branch-protection path restriction, or pre-receive hook), so the carve-out can't be used as a smuggling vector for code or context changes
+- Every other branch / path in the repo still goes through pull requests
