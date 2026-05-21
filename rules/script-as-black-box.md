@@ -24,10 +24,10 @@ description: Skills reference the script's contract (inputs, outputs, exit codes
 
 ## What Skills Do Carry
 
-- Required inputs and output shape — agent needs this to invoke the script and parse its result
-- Exit codes and error conditions — agent needs this to branch on failure
-- Suppression conditions that affect skill flow (e.g., `prior snapshot absent ⇒ no fire`) — they shape the agent's decision tree even though the script enforces them
-- Verbatim-posted text shapes the script emits — surfaced as templates the agent recognizes, not as logic the agent reconstructs
+- Required inputs and output shape
+- Exit codes and error conditions
+- Suppression conditions that affect skill flow (e.g., `prior snapshot absent ⇒ no fire`)
+- Verbatim-posted text shapes the script emits, surfaced as templates
 
 ## How to Reference
 
