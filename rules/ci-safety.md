@@ -49,8 +49,8 @@ alwaysApply: true
 
 ## Protected Branches
 
-- Don't push directly to `main` or `master`
-- All changes go through pull requests
+- Don't push directly to `main` or `master` (except under the Content-Only Direct-Push Carve-Out below)
+- All changes go through pull requests (same exception applies)
 
 ## Content-Only Direct-Push Carve-Out
 
