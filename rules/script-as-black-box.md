@@ -10,8 +10,9 @@ description: Skills reference the script's contract (inputs, outputs, exit codes
 
 - Skill prose names the script's contract — required inputs, output shape, exit codes, side effects, comment-text shapes the script emits verbatim
 - Skill prose does not restate the script's internal logic — thresholds, predicates, formulas, allowlists, source lists, filter rules
-- The script is the source of truth; skill prose points at it (`see scripts/<name>` — named constants at the top of the file, docstring, or named frozenset)
-- Composes with `rules/script-delegation.md` (extraction) and `rules/skill-authoring.md` (Script References)
+- The script is the source of truth; skill prose points at it (`see <script-path> — named constants at the top of the file, docstring, or named frozenset`)
+- Script paths in skill prose follow `rules/skill-authoring.md` Script References — repo-relative `skills/<name>/<file>.<ext>` in this tile, tile-mount paths when running inside a consumer
+- Composes with `rules/script-delegation.md` for when to extract a script in the first place
 
 ## What Skills Do Not Restate
 
@@ -31,5 +32,7 @@ description: Skills reference the script's contract (inputs, outputs, exit codes
 ## How to Reference
 
 - Name the file and an anchor inside it — top-of-file constants, named frozenset, docstring, function name
-- Example: `see scripts/compute-drift.py — CADENCE_CAP_SKILLS frozenset and named constants at the top of the file`
-- One reference per concept — do not fan the same rule across multiple skill files (`SKILL.md`, `references/*.md`); pick the file closest to where the agent reads it and reference from the others
+- Example: `see skills/release/resolve-publish-run.sh — argument contract and filter logic in the top-of-file docstring`
+- One reference per concept across all of a skill's files
+- Do not fan the same reference across `SKILL.md` and `references/*.md`
+- Pick the file closest to where the agent reads the contract and reference from the others
