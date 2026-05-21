@@ -16,7 +16,7 @@ Produce a `merge-and-cleanup.sh` bash script that:
 - Removes the local feature branch
 - Cleans up stale remote-tracking references
 - Verifies the merge landed on main
-- Confirms the publish/release CI workflow was triggered
+- Confirms the release was actually published successfully before exiting
 - Prints a final summary including the merged PR URL
 
 The script does not need to run successfully (no GitHub credentials available) — focus on correctness of the approach and commands used.
