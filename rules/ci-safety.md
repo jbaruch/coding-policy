@@ -59,6 +59,6 @@ alwaysApply: true
 - The push may go directly to `main` / `master` without a PR review cycle
 - Preconditions (each consuming repo, all required):
   1. Repo documents an authority-of-record rule in its own tile naming the carve-out — the exact path globs, why those paths qualify as content not code/context, and what policy review the direct-push does NOT carry
-  2. Carve-out scopes to one or more named path globs — never a broad wildcard like `**/*.md`. Globs that would match `rules/**/*.md`, `skills/**/*.md`, `*.yml` workflow files, `tile.json`, `package.json`, or any executable/loaded artifact are mis-scoped
+  2. Carve-out scopes to one or more named path globs — never a broad wildcard like `**/*.md`. Globs that would match `rules/**/*.md`, `skills/**/*.md`, workflow files (`*.yml` or `*.yaml`), `tile.json`, `package.json`, or any executable/loaded artifact are mis-scoped
   3. Push-time enforcement rejects the entire ref update when any path changed by the push lies outside the carve-out globs (GitHub push ruleset with path restriction, pre-receive hook, or equivalent server-side gate that blocks the ref update). Post-push CI checks do NOT qualify
 - Every other branch / path in the repo still goes through pull requests
