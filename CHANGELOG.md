@@ -4,6 +4,8 @@
 
 ### Rules
 
+- **external-repo-contributions** (new) — Always-on rule defaulting to deny on issues, pull requests, comments, reactions, and discussions in repositories the operator does not own. Explicit permission required per target (operator names the target repo and action type in the conversation, or a standing instruction in CLAUDE.md / memory authorizes the action). Bullets enumerate common bypass patterns that do NOT qualify (e.g., permission to fix a bug locally is not permission to file it upstream; "this should be reported" instinct is not consent; permission for one external repo does not extend to others). Surface sync: `tile.json` steering, README rules table + What's-New count 19 → 20 and new "Scope" category row.
+
 - **script-as-black-box** (new) — Conditional rule (`applyTo: skills/**/SKILL.md, skills/**/*.md`) requiring skill prose to name the script's contract (inputs, outputs, exit codes, verbatim-emitted text shapes) and not restate the script's internal logic (thresholds, predicates, formulas, allowlists, source lists, per-tier rules). Surface sync: `tile.json` steering, README rules table + What's-New count 18 → 19. Triggered by `jbaruch/nanoclaw-admin#288`; PR body carries the full incident trail.
 
 - **context-writing-style** — Adds `## Reader-Side — Consult the CHANGELOGs` section telling agents where to find motivation cut from rule bodies. Closes the writer/reader asymmetry created by "What to Cut → move to CHANGELOG".

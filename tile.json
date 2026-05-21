@@ -101,6 +101,10 @@
     "boy-scout": {
       "rules": "rules/boy-scout.md",
       "alwaysApply": true
+    },
+    "external-repo-contributions": {
+      "rules": "rules/external-repo-contributions.md",
+      "alwaysApply": true
     }
   }
 }
