@@ -4,6 +4,8 @@
 
 ### Rules
 
+- **script-as-black-box** (new) — Conditional rule (`applyTo: skills/**/SKILL.md, skills/**/*.md`) requiring skill prose to name the script's contract (inputs, outputs, exit codes, verbatim-emitted text shapes) and not restate the script's internal logic (thresholds, predicates, formulas, allowlists, source lists, per-tier rules). Surface sync: `tile.json` steering, README rules table + What's-New count 18 → 19. Triggered by `jbaruch/nanoclaw-admin#288`; PR body carries the full incident trail.
+
 - **context-writing-style** — Adds `## Reader-Side — Consult the CHANGELOGs` section telling agents where to find motivation cut from rule bodies. Closes the writer/reader asymmetry created by "What to Cut → move to CHANGELOG".
 
 ### Skills

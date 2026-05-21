@@ -78,6 +78,10 @@
       "rules": "rules/script-delegation.md",
       "alwaysApply": false
     },
+    "script-as-black-box": {
+      "rules": "rules/script-as-black-box.md",
+      "alwaysApply": false
+    },
     "plugin-evals": {
       "rules": "rules/plugin-evals.md",
       "alwaysApply": false
