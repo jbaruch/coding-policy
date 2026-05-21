@@ -11,9 +11,13 @@
 #                 safety gate). Skips the branch-not-local /
 #                 branch-not-remote checks (the upgrade branch can
 #                 legitimately already exist from a prior in-flight
-#                 attempt) and adds a no-uncommitted-target-edits check
-#                 so the consumer commits or stashes their dirty
-#                 working tree before the upgrade overwrites it.
+#                 attempt) and adds a no-dirty-target-edits check
+#                 covering four clobber-states the upgrade refuses to
+#                 overwrite — uncommitted edits, untracked content,
+#                 symlinks, and tracked deletions (HEAD-present,
+#                 working-tree-removed) — so the consumer commits,
+#                 stashes, restores, or removes the local content
+#                 before the scaffold replaces their files.
 # Out:   one JSON object on stdout:
 #          {"ok": bool,
 #           "override": bool,

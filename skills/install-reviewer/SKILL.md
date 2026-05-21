@@ -17,7 +17,7 @@ description: >
 
 # Install Reviewer Skill
 
-Scaffold the gh-aw PR policy reviewer pair (OpenAI + Anthropic) into a consumer repository. Steps are sequential — complete each before moving to the next.
+Scaffold the gh-aw PR policy reviewer pair (OpenAI + Anthropic) into a consumer repository. Process steps in order. Do not skip ahead.
 
 The skill runs in one of two modes determined by the user's request:
 
