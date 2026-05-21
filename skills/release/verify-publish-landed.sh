@@ -47,9 +47,13 @@ set -euo pipefail
 # call with no JSON on stdout, breaking wrappers that parse the
 # documented output. Hand-roll the missing-jq diagnostic so the failure
 # satisfies the JSON contract even when jq itself is absent (same
-# pattern as skills/install-reviewer/preflight.sh).
+# pattern as skills/install-reviewer/preflight.sh). Also emit to stderr
+# per `rules/script-delegation.md` "Self-error-handling: exit non-zero
+# on failure, write a diagnostic message to stderr" — log-watchers and
+# stderr-only wrappers need the failure as well.
 if ! command -v jq >/dev/null 2>&1; then
   printf '{"ok":false,"reason":"jq is not installed; install with '"'"'brew install jq'"'"' (macOS) or '"'"'apt install jq'"'"' (Debian/Ubuntu) and re-run","run_conclusion":"","pre":"","current":""}\n'
+  echo "error: jq is not installed; install with 'brew install jq' (macOS) or 'apt install jq' (Debian/Ubuntu) and re-run" >&2
   exit 2
 fi
 

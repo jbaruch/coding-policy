@@ -331,6 +331,41 @@ t_main_runs_under_errexit_pipefail() {
   [[ "$stderr" == *"Latest Version"* ]] || { echo "    FAIL: expected 'Latest Version' in stderr; got: $stderr" >&2; return 1; }
 }
 
+# Find a PATH that excludes jq. macOS ships `/usr/bin/jq` and Linux
+# distros usually drop jq in `/usr/bin/jq` too, so a pure-/bin PATH is
+# the most portable jq-free environment. Echo the path; caller checks
+# the exit code (1 = skip, 0 = path captured).
+no_jq_path() {
+  local path="/bin"
+  if PATH="$path" command -v jq >/dev/null 2>&1; then
+    echo "    SKIP: cannot construct a jq-free PATH on this system" >&2
+    return 1
+  fi
+  echo "$path"
+}
+
+# Missing-jq must (a) emit a parseable JSON envelope on stdout so
+# callers parsing stdout still see the failure AND (b) emit an
+# actionable diagnostic to stderr per rules/script-delegation.md's
+# Self-error-handling requirement. Runs as a subprocess in a jq-free
+# PATH — sourcing the script when jq is available would skip the guard.
+t_missing_jq_emits_json_AND_stderr() {
+  local path
+  path=$(no_jq_path) || return 0  # SKIP returns 0 to avoid noisy fail
+  local out err_file rc=0 err
+  err_file=$(mktemp)
+  out=$(env -i PATH="$path" HOME="$HOME" "$SCRIPT" jbaruch coding-policy "0.3.31" "12345" 2>"$err_file") || rc=$?
+  err=$(cat "$err_file"); rm -f "$err_file"
+  assert_eq "exit code" "2" "$rc" || return 1
+  # JSON envelope on stdout (caller-parses-stdout contract still holds).
+  echo "$out" | env -i PATH="$PATH" jq -e . >/dev/null || { echo "    FAIL: stdout is not valid JSON: $out" >&2; return 1; }
+  assert_eq "ok" "false" "$(echo "$out" | env -i PATH="$PATH" jq -r .ok)" || return 1
+  [[ "$(echo "$out" | env -i PATH="$PATH" jq -r .reason)" == *"jq is not installed"* ]] || { echo "    FAIL: missing 'jq is not installed' in JSON reason" >&2; return 1; }
+  # Stderr diagnostic per script-delegation.md.
+  [[ -n "$err" ]] || { echo "    FAIL: stderr is empty (script-delegation.md requires a diagnostic on stderr)" >&2; return 1; }
+  [[ "$err" == *"jq is not installed"* ]] || { echo "    FAIL: stderr missing 'jq is not installed': $err" >&2; return 1; }
+}
+
 # JSON shape — every reported case must be parseable JSON with the
 # documented fields. Guards against future formatting drift.
 t_output_is_valid_json_with_documented_shape() {
@@ -361,6 +396,7 @@ run "in-flight (null) conclusion exits 2"                          t_null_conclu
 run "empty conclusion exits 2"                                     t_empty_conclusion_exits_two
 run "tessl tile info parse miss exits 2 with offending output"     t_tessl_parse_miss_exits_two
 run "main runs safely under set -euo pipefail"                     t_main_runs_under_errexit_pipefail
+run "missing jq emits JSON on stdout AND diagnostic on stderr"     t_missing_jq_emits_json_AND_stderr
 run "output is valid JSON with documented shape"                   t_output_is_valid_json_with_documented_shape
 
 echo "== summary: ${PASS_COUNT} passed, ${FAIL_COUNT} failed =="
