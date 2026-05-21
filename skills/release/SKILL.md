@@ -178,17 +178,13 @@ After merge — per `rules/ci-safety.md`'s Always Watch CI duty extended through
   No `--exit-status` on the watch: the publish-landed conjunction below reads the run conclusion explicitly, so letting `--exit-status` propagate a non-zero exit would short-circuit `set -e` wrappers before the conjunction runs.
 
   `gh pr view` returns the specific merge commit for this PR, unaffected by parallel merges. The resolver filters on `headSha == $merge_sha` AND `event == push` so manual `workflow_dispatch` runs sharing the SHA are excluded; it also retries on enqueue latency so the immediate post-merge `gh run list` doesn't race the publish workflow's enqueue and surface as "no run found". Output is `{"database_id": N}` per `rules/script-delegation.md` — extract with `jq -r '.database_id'`. The watch is a timing precondition for the conjunction below, not the gate
-- Confirm the publish landed via the conjunction check. Both conjuncts must hold; either alone is insufficient (registry-advance alone is race-prone per issue #80 — an interleaved earlier publish can advance the registry while ours fails; success-alone misses workflow exits that skipped the publish step):
+- Confirm the publish landed via the conjunction check. Both conjuncts must hold (resolved run's `conclusion == success` AND registry's `Latest Version > PRE`):
 
   ```bash
   skills/release/verify-publish-landed.sh <workspace> <tile> "$PRE" "$run_id"
   ```
 
-  Output is `{"ok": bool, "reason": "...", "run_conclusion": "...", "pre": "...", "current": "..."}` per `rules/script-delegation.md`. Exit 0 means both conjuncts hold (publish landed); exit 1 means one or both failed (`reason` names which one). Conjuncts:
-  1. The resolved run's `conclusion` is `success` — a failed conclusion disqualifies any subsequent registry advance as attributable to OUR run (an interleaved earlier publish may have advanced the registry while ours failed)
-  2. The registry's `Latest Version` is strictly greater than `PRE` — a non-advance after `success` means the workflow exited cleanly without publishing (conditional skip, no-op publish step)
-
-  Do not compare against a specific expected version. See `rules/ci-safety.md` for the full registry semantics and failed-publish recovery
+  Output: `{"ok": bool, "reason": "...", "run_conclusion": "...", "pre": "...", "current": "..."}`. Exit 0 means both conjuncts hold; exit 1 means one or both failed (`reason` names which one); exit 2 means a tool-state error (run still in flight, jq missing, tessl unreachable). Do not compare against a specific expected version. See `rules/ci-safety.md` for full release-contract semantics and failed-publish recovery
 - Report the outcome: merged PR URL, version published, registry confirmation
 
 When this step is wrapped in a reusable script (e.g., `merge-and-cleanup.sh` that other devs run unattended), see `skills/release/SCRIPTING.md` for the gates the script must enforce.
