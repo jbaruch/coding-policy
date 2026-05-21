@@ -6,13 +6,13 @@ alwaysApply: true
 
 ## Default Deny
 
-- Never open issues, pull requests, comments, reactions, or discussions in repositories the operator does not own unless the operator has explicitly granted permission for that specific target
+- Never open issues, pull requests, or discussions, post comments, or apply reactions in repositories the operator does not own unless the operator has explicitly granted permission for that specific target
 - "Own" means the operator is the namespace owner of the repo (user account or org they administer) — not collaborator, not contributor, not employee of the org
 - Covered actions: filing issues, sending PRs, posting comments on existing issues / PRs / discussions, opening discussions, applying reactions
 
 ## What Counts as Permission
 
-- Operator explicitly names the target repo and the action in the current conversation (e.g., "open an issue at `<owner>/<repo>` about <topic>", "send a PR upstream to `<owner>/<repo>` fixing <X>")
+- Operator explicitly names the target repo and the action in the current conversation (e.g., "open an issue at `<owner>/<repo>` about `<topic>`", "send a PR upstream to `<owner>/<repo>` fixing `<X>`")
 - A standing instruction in the conversation, the project's CLAUDE.md, or memory naming the target repo and the authorized action types
 - Asking the operator and getting an affirmative answer that names the target repo, the action type, and the content preview
 
