@@ -85,22 +85,28 @@ gh() {
       esac
       ;;
     api)
-      # gh api repos/<o>/<r>/pulls/<N>/reviews --jq <filter>
-      # gh api repos/<o>/<r>/pulls/<N>/comments --jq <filter>
-      local path="$2" filter=""
-      shift 2
+      # gh api --paginate repos/<o>/<r>/pulls/<N>/reviews?per_page=100
+      # gh api --paginate repos/<o>/<r>/pulls/<N>/comments?per_page=100
+      # The script pipes the raw paginated output through `jq -s` itself,
+      # so this mock no longer forwards `--jq`. It echoes a fixture body
+      # keyed off the path; tests can simulate multiple pages by setting
+      # MOCK_REVIEWS_BODY / MOCK_COMMENTS_BODY to several concatenated
+      # JSON arrays (what `gh api --paginate` actually emits across pages).
+      shift  # consume "api"
+      local path="" saw_paginate=0
       while [[ $# -gt 0 ]]; do
         case "$1" in
-          --jq) filter="$2"; shift 2 ;;
-          *)    shift ;;
+          --paginate) saw_paginate=1; shift ;;
+          --jq)       echo "mock gh api: --jq is incompatible with --paginate here; the script should jq -s externally" >&2; return 99 ;;
+          *)          [[ -z "$path" ]] && path="$1"; shift ;;
         esac
       done
-      local fixture='[]'
-      if [[ -n "$filter" ]]; then
-        echo "$fixture" | jq "$filter"
-      else
-        echo "$fixture"
-      fi
+      [[ $saw_paginate -eq 1 ]] || { echo "mock gh api: missing --paginate (required so the script never silently misses page 2+)" >&2; return 99; }
+      case "$path" in
+        *reviews*)  echo "${MOCK_REVIEWS_BODY:-[]}" ;;
+        *comments*) echo "${MOCK_COMMENTS_BODY:-[]}" ;;
+        *) echo "mock gh api: unsupported path: $path" >&2; return 2 ;;
+      esac
       ;;
     *) echo "mock gh: unsupported invocation: $*" >&2; return 2 ;;
   esac
@@ -154,6 +160,65 @@ t_main_propagates_dirty_state() {
   assert_eq "merge_state in main output" "DIRTY|CONFLICTING" "$keys"
 }
 
+# Issue #83: on PRs with > 1 page of reviews, gh api without --paginate
+# returns only page 1. The pre-fix `| last` filter then picked the last
+# entry on page 1 — not the actual newest review on the last page — and
+# the gate could approve a merge against stale data.
+#
+# Build a fixture that mimics what `gh api --paginate` actually emits:
+# two concatenated JSON arrays. Page 1's last entry is a COMMENTED review
+# at 17:00; page 2's last entry is a CHANGES_REQUESTED review at 18:04.
+# A correct implementation must report CHANGES_REQUESTED@18:04.
+t_latest_review_by_picks_from_last_page() {
+  MOCK_REVIEWS_BODY='[{"user":{"login":"github-actions[bot]"},"state":"APPROVED","submitted_at":"2026-05-18T16:00:00Z"},{"user":{"login":"github-actions[bot]"},"state":"COMMENTED","submitted_at":"2026-05-18T17:00:00Z"}][{"user":{"login":"github-actions[bot]"},"state":"CHANGES_REQUESTED","submitted_at":"2026-05-18T18:04:00Z"}]'
+  local out state submitted_at
+  out=$(latest_review_by "owner" "repo" "1" "github-actions[bot]")
+  state=$(echo "$out" | jq -r '.state')
+  submitted_at=$(echo "$out" | jq -r '.submitted_at')
+  assert_eq "state from last page"        "CHANGES_REQUESTED"     "$state"        || return 1
+  assert_eq "submitted_at from last page" "2026-05-18T18:04:00Z"  "$submitted_at"
+}
+
+t_latest_review_by_returns_none_when_no_reviews() {
+  MOCK_REVIEWS_BODY='[]'
+  local out state submitted_at
+  out=$(latest_review_by "owner" "repo" "1" "github-actions[bot]")
+  state=$(echo "$out" | jq -r '.state')
+  submitted_at=$(echo "$out" | jq -r '.submitted_at')
+  assert_eq "state for empty"        "none" "$state"        || return 1
+  assert_eq "submitted_at for empty" "null" "$submitted_at"
+}
+
+t_latest_review_by_filters_other_logins_across_pages() {
+  # Page 1: two human reviews + one bot review. Page 2: one human review
+  # that's newer than the bot review. The bot's latest is still the page-1
+  # bot review, even though the page-2 human is newer.
+  MOCK_REVIEWS_BODY='[{"user":{"login":"alice"},"state":"COMMENTED","submitted_at":"2026-05-18T15:00:00Z"},{"user":{"login":"github-actions[bot]"},"state":"APPROVED","submitted_at":"2026-05-18T16:00:00Z"},{"user":{"login":"bob"},"state":"COMMENTED","submitted_at":"2026-05-18T16:30:00Z"}][{"user":{"login":"alice"},"state":"COMMENTED","submitted_at":"2026-05-18T17:00:00Z"}]'
+  local out state submitted_at
+  out=$(latest_review_by "owner" "repo" "1" "github-actions[bot]")
+  state=$(echo "$out" | jq -r '.state')
+  submitted_at=$(echo "$out" | jq -r '.submitted_at')
+  assert_eq "bot state"        "APPROVED"             "$state"        || return 1
+  assert_eq "bot submitted_at" "2026-05-18T16:00:00Z" "$submitted_at"
+}
+
+# Same shape for comments: counts must sum across pages, not pick page 1
+# alone. Mix in a non-target login and an in_reply_to_id to confirm the
+# filter still discards both.
+t_toplevel_comments_by_sums_across_pages() {
+  MOCK_COMMENTS_BODY='[{"user":{"login":"github-actions[bot]"},"in_reply_to_id":null},{"user":{"login":"github-actions[bot]"},"in_reply_to_id":null},{"user":{"login":"alice"},"in_reply_to_id":null}][{"user":{"login":"github-actions[bot]"},"in_reply_to_id":null},{"user":{"login":"github-actions[bot]"},"in_reply_to_id":12345}]'
+  local count
+  count=$(toplevel_comments_by "owner" "repo" "1" "github-actions[bot]")
+  assert_eq "top-level bot comments across both pages" "3" "$count"
+}
+
+t_toplevel_comments_by_returns_zero_for_no_comments() {
+  MOCK_COMMENTS_BODY='[]'
+  local count
+  count=$(toplevel_comments_by "owner" "repo" "1" "github-actions[bot]")
+  assert_eq "comments count for empty" "0" "$count"
+}
+
 # --- driver ---
 
 echo "== poll-pr-reviews.sh tests =="
@@ -162,6 +227,11 @@ run "fetch_merge_state returns {DIRTY, CONFLICTING} on conflict"      t_fetch_me
 run "fetch_merge_state propagates UNKNOWN/UNKNOWN while computing"    t_fetch_merge_state_unknown_returns_unknown_envelope
 run "main surfaces merge_state as a top-level field"                  t_main_surfaces_merge_state_as_top_level_field
 run "main propagates DIRTY merge_state end-to-end"                    t_main_propagates_dirty_state
+run "latest_review_by picks newest review on page 2 (issue #83)"      t_latest_review_by_picks_from_last_page
+run "latest_review_by returns 'none' for empty reviews"               t_latest_review_by_returns_none_when_no_reviews
+run "latest_review_by ignores other logins across pages"              t_latest_review_by_filters_other_logins_across_pages
+run "toplevel_comments_by sums counts across pages (issue #83)"       t_toplevel_comments_by_sums_across_pages
+run "toplevel_comments_by returns 0 for empty comments"               t_toplevel_comments_by_returns_zero_for_no_comments
 
 echo "== summary: ${PASS_COUNT} passed, ${FAIL_COUNT} failed =="
 [[ "$FAIL_COUNT" -eq 0 ]]

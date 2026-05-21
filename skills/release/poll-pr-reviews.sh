@@ -28,18 +28,33 @@
 
 set -euo pipefail
 
+# `--paginate` is mandatory: GitHub's default per-page is 30, and a PR
+# with more than that many reviews/comments would otherwise return only
+# the first page. The script's `last` filter would then pick the last
+# entry on page 1 — not the actual latest review — and the gate could
+# approve a merge against stale data. `--jq` is incompatible with
+# `--paginate` here (it applies per page, not across the stream), so
+# pipe the raw paginated output through `jq -s 'add | ...'` to slurp
+# every page into one array before filtering. `per_page=100` is the API
+# maximum and keeps request volume bounded.
 latest_review_by() {
   local owner="$1" repo="$2" pr="$3" login="$4"
-  gh api "repos/${owner}/${repo}/pulls/${pr}/reviews" \
-    --jq "[.[] | select(.user.login == \"${login}\")] | last
-          | if . == null then {state: \"none\", submitted_at: null}
-            else {state, submitted_at} end"
+  gh api --paginate "repos/${owner}/${repo}/pulls/${pr}/reviews?per_page=100" \
+    | jq -s --arg login "$login" '
+        (add // [])
+        | [.[] | select(.user.login == $login)]
+        | last
+        | if . == null then {state: "none", submitted_at: null}
+          else {state, submitted_at} end'
 }
 
 toplevel_comments_by() {
   local owner="$1" repo="$2" pr="$3" login="$4"
-  gh api "repos/${owner}/${repo}/pulls/${pr}/comments" \
-    --jq "[.[] | select(.user.login == \"${login}\") | select(.in_reply_to_id == null)] | length"
+  gh api --paginate "repos/${owner}/${repo}/pulls/${pr}/comments?per_page=100" \
+    | jq -s --arg login "$login" '
+        (add // [])
+        | [.[] | select(.user.login == $login) | select(.in_reply_to_id == null)]
+        | length'
 }
 
 fetch_merge_state() {
