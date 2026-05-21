@@ -49,5 +49,16 @@ alwaysApply: true
 
 ## Protected Branches
 
-- Don't push directly to `main` or `master`
-- All changes go through pull requests
+- Don't push directly to `main` or `master` (except under the Content-Only Direct-Push Carve-Out below)
+- All changes go through pull requests (same exception applies)
+
+## Content-Only Direct-Push Carve-Out
+
+- Narrow exception for content-only edits within an explicit, narrowly scoped path-glob set
+- Applies when the edited paths are prose / data artifacts a human audience reads directly — not code, not context artifacts an agent loads (rules, skills, scripts, manifests, workflow files, configuration)
+- The push may go directly to `main` or `master` without a PR review cycle
+- Preconditions (each consuming repo, all required):
+  1. Repo documents an authority-of-record rule in its own tile naming the carve-out — the exact path globs, why those paths qualify as content not code/context, and what policy review the direct-push does NOT carry
+  2. Carve-out scopes to one or more named path globs — never a broad wildcard like `**/*.md`. Globs that would match `rules/**`, `skills/**`, workflow files (`*.yml` or `*.yaml`), `tile.json`, `package.json`, or any executable/loaded artifact (regardless of extension) are mis-scoped
+  3. Push-time enforcement rejects the entire ref update when any path changed by the push lies outside the carve-out globs (GitHub push ruleset with path restriction, pre-receive hook, or equivalent server-side gate that blocks the ref update). Post-push CI checks do NOT qualify
+- Every other branch / path in the repo still goes through pull requests
