@@ -27,6 +27,6 @@ alwaysApply: true
 
 ## Asking Before Acting
 
-- When tempted to contribute externally, surface the proposed action to the operator before any API call: name the target repo, the action type (issue / PR / comment / reaction), and a preview of the content
+- When tempted to contribute externally, surface the proposed action to the operator before any API call: name the target repo, the action type (issue / PR / comment / reaction / discussion), and a preview of the content
 - Wait for an affirmative response; silence or ambiguity is not consent
 - Permission granted for one specific action does NOT extend to follow-up actions on the same target (a granted issue-filing is not also permission to reply on the resulting thread without a second confirmation)

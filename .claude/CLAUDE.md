@@ -20,3 +20,4 @@ This repo IS `jbaruch/coding-policy`. The rule files below are the source-of-tru
 @../rules/stateful-artifacts.md
 @../rules/agent-worktree-isolation.md
 @../rules/boy-scout.md
+@../rules/external-repo-contributions.md
