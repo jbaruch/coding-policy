@@ -11,9 +11,13 @@
 #                 safety gate). Skips the branch-not-local /
 #                 branch-not-remote checks (the upgrade branch can
 #                 legitimately already exist from a prior in-flight
-#                 attempt) and adds a no-uncommitted-target-edits check
-#                 so the consumer commits or stashes their dirty
-#                 working tree before the upgrade overwrites it.
+#                 attempt) and adds a no-dirty-target-edits check
+#                 covering four clobber-states the upgrade refuses to
+#                 overwrite — uncommitted edits, untracked content,
+#                 symlinks, and tracked deletions (HEAD-present,
+#                 working-tree-removed) — so the consumer commits,
+#                 stashes, restores, or removes the local content
+#                 before the scaffold replaces their files.
 # Out:   one JSON object on stdout:
 #          {"ok": bool,
 #           "override": bool,
@@ -169,13 +173,16 @@ check_branch_not_remote() {
 # may be appended). Mirrors how `git pull` refuses to overwrite uncommitted
 # changes — forces the consumer to commit, stash, or remove the local
 # content before the scaffold replaces their files. "Dirty" here covers
-# three states the override could clobber:
+# four states the override could clobber:
 #   - symlink at the target path (working or broken); refuse outright so
 #     `cp`/compile/append never follows or replaces an unexpected link
 #   - tracked file with staged or unstaged edits relative to HEAD
 #   - untracked regular file at the target path (consumer hand-rolled a
 #     reviewer that was never staged); without this case the override
-#     would silently clobber an intentional local file.
+#     would silently clobber an intentional local file
+#   - tracked file deleted from the working tree (`rm` or `git rm`) but
+#     still present at HEAD; without this case scaffold.sh re-creates
+#     the file and silently clobbers the consumer's intentional removal.
 check_no_dirty_target_edits() {
   local dirty=()
   for t in "${TARGETS[@]}"; do
@@ -183,7 +190,21 @@ check_no_dirty_target_edits() {
     # returns false; `-L` is true for any symlink, broken or not. The
     # OR catches every form of "something is at this path" the override
     # could clobber.
-    [[ -e "$t" || -L "$t" ]] || continue
+    if [[ ! -e "$t" && ! -L "$t" ]]; then
+      # Nothing at this path in the working tree. If HEAD still tracks
+      # one there the consumer either `rm`'d it (missing from working
+      # tree, present in index + HEAD) or `git rm`'d it (missing from
+      # working tree AND index, still in HEAD). `git diff --diff-filter=D
+      # HEAD` catches both because it compares HEAD against the working
+      # tree (NOT including the index, but that doesn't matter here —
+      # both forms leave the working tree without the file while HEAD
+      # still has it). `--quiet` exits 0 when there's no diff and 1 when
+      # there is, so negation reads as "is this path deleted vs HEAD?".
+      if ! git diff --quiet --diff-filter=D HEAD -- "$t" 2>/dev/null; then
+        dirty+=("$t (tracked deletion)")
+      fi
+      continue
+    fi
     if [[ -L "$t" ]]; then
       # Symlinks (working or broken) get their own diagnostic so the
       # consumer sees what the actual problem is — falling through to
@@ -203,7 +224,7 @@ check_no_dirty_target_edits() {
     fi
   done
   if [[ ${#dirty[@]} -gt 0 ]]; then
-    push_failure "no-dirty-target-edits" "--override refuses to overwrite local changes in: ${dirty[*]} — commit, stash, or remove these first, then re-run"
+    push_failure "no-dirty-target-edits" "--override refuses to overwrite local changes in: ${dirty[*]} — commit, stash, restore, or remove these first, then re-run"
   fi
 }
 

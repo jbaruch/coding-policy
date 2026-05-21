@@ -17,7 +17,7 @@ description: >
 
 # Install Reviewer Skill
 
-Scaffold the gh-aw PR policy reviewer pair (OpenAI + Anthropic) into a consumer repository. Steps are sequential — complete each before moving to the next.
+Scaffold the gh-aw PR policy reviewer pair (OpenAI + Anthropic) into a consumer repository. Process steps in order. Do not skip ahead.
 
 The skill runs in one of two modes determined by the user's request:
 
@@ -27,7 +27,7 @@ The skill runs in one of two modes determined by the user's request:
   - Pass `--override` to all five scripts: preflight, branch, scaffold, commit, push
   - Branch: `feat/upgrade-coding-policy-review`
   - Commit message: `ci(review): upgrade ...`
-  - Preflight skips branch-clear checks; instead refuses if any existing rewritable target has uncommitted local edits
+  - Preflight skips branch-clear checks; instead refuses if any rewritable target is in a state the upgrade could clobber — uncommitted edits, untracked content, symlinks, or tracked deletions (HEAD-present, working-tree-removed)
   - Scaffold snapshots and restores all four reviewer files on compile failure
 
 ## Step 1 — Run Preflight Checks
@@ -50,7 +50,7 @@ Runs every precondition (git worktree, GitHub CLI install + auth, gh-aw extensio
 
 In **install mode**: if any of `.github/workflows/review-openai.md`, `.github/workflows/review-openai.lock.yml`, `.github/workflows/review-anthropic.md`, or `.github/workflows/review-anthropic.lock.yml` exists, stop and report that prior review setup is present. Do not overwrite — a lock alone or a source alone indicates deliberate in-progress configuration. If none exist, proceed to Step 3.
 
-In **upgrade mode**: skip this step. Preflight has verified that existing target files have no uncommitted edits; scaffold.sh snapshots and restores them on compile failure.
+In **upgrade mode**: skip this step. Preflight has verified rewritable targets carry no state the upgrade could clobber (no uncommitted edits, untracked content, symlinks, or tracked deletions); scaffold.sh snapshots and restores them on compile failure.
 
 ## Step 3 — Establish Feature Branch
 

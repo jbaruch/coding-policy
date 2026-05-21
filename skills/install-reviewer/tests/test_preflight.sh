@@ -117,11 +117,100 @@ t_missing_jq_emits_structured_failure_override_mode() {
   assert_eq "override" "true" "$(echo "$out" | jq -r .override)" || return 1
 }
 
+# Helper: build a fresh git repo with all six TARGETS committed to HEAD,
+# then source preflight.sh in --override mode so check_no_dirty_target_edits
+# and the TARGETS/failures globals are exercisable as a unit. The script's
+# BASH_SOURCE guard prevents main() from running on source; we relax only
+# errexit afterwards (matching test_poll_pr_reviews.sh) so the test driver
+# can assert exit codes without aborting on the first failed assertion —
+# nounset and pipefail stay on so the tests still catch the same shell
+# bugs the rest of the suite catches.
+with_sourced_sandbox() {
+  local fn="$1"
+  local sandbox; sandbox=$(mktemp -d "/tmp/test_preflight.${fn}.XXXXXX") || return 1
+  (
+    set -e
+    cd "$sandbox"
+    git -c init.defaultBranch=main init -q
+    git -c user.email=t@t -c user.name=t commit --allow-empty -q -m init
+    mkdir -p .github/workflows .github/aw
+    touch .github/workflows/review-openai.md \
+          .github/workflows/review-openai.lock.yml \
+          .github/workflows/review-anthropic.md \
+          .github/workflows/review-anthropic.lock.yml \
+          .github/aw/actions-lock.json \
+          .gitattributes
+    git add -A
+    git -c user.email=t@t -c user.name=t commit -q -m targets
+  ) || { local s=$?; rm -rf "$sandbox"; return $s; }
+
+  (
+    cd "$sandbox"
+    # shellcheck disable=SC1090
+    source "$SCRIPT" --override 2>/dev/null || true
+    set +e
+    "$fn"
+  )
+  local rc=$?
+  rm -rf "$sandbox"
+  return $rc
+}
+
+# Issue #79: a TARGET file deleted from the working tree (`rm <file>`)
+# but still tracked at HEAD must surface as a dirty-target failure so
+# scaffold.sh can't silently re-create it and clobber the consumer's
+# intentional removal.
+t_tracked_deletion_via_rm_flagged() {
+  rm .gitattributes
+  failures=()
+  check_no_dirty_target_edits
+  [[ ${#failures[@]} -eq 1 ]] || { echo "    FAIL: expected 1 failure, got ${#failures[@]}: ${failures[*]}" >&2; return 1; }
+  echo "${failures[0]}" | grep -q "tracked deletion" || { echo "    FAIL: expected 'tracked deletion' marker; got: ${failures[0]}" >&2; return 1; }
+  echo "${failures[0]}" | grep -q "\.gitattributes" || { echo "    FAIL: expected .gitattributes path; got: ${failures[0]}" >&2; return 1; }
+}
+
+# `git rm` form removes the path from index AND working tree while it
+# stays in HEAD until the deletion is committed. The diff-filter=D
+# check must catch this case too.
+t_tracked_deletion_via_git_rm_flagged() {
+  git rm -q .github/aw/actions-lock.json
+  failures=()
+  check_no_dirty_target_edits
+  [[ ${#failures[@]} -eq 1 ]] || { echo "    FAIL: expected 1 failure, got ${#failures[@]}: ${failures[*]}" >&2; return 1; }
+  echo "${failures[0]}" | grep -q "tracked deletion" || { echo "    FAIL: expected 'tracked deletion' marker; got: ${failures[0]}" >&2; return 1; }
+  echo "${failures[0]}" | grep -q "actions-lock\.json" || { echo "    FAIL: expected actions-lock.json path; got: ${failures[0]}" >&2; return 1; }
+}
+
+# Multi-target deletion: every deleted target must surface, not just
+# the first one found.
+t_multiple_tracked_deletions_all_flagged() {
+  rm .gitattributes
+  git rm -q .github/workflows/review-openai.md
+  failures=()
+  check_no_dirty_target_edits
+  [[ ${#failures[@]} -eq 1 ]] || { echo "    FAIL: expected 1 aggregated failure, got ${#failures[@]}: ${failures[*]}" >&2; return 1; }
+  echo "${failures[0]}" | grep -q "\.gitattributes (tracked deletion)" || { echo "    FAIL: missing .gitattributes in: ${failures[0]}" >&2; return 1; }
+  echo "${failures[0]}" | grep -q "review-openai\.md (tracked deletion)" || { echo "    FAIL: missing review-openai.md in: ${failures[0]}" >&2; return 1; }
+}
+
+# Sanity: with all targets present and unmodified, the check must not
+# flag anything. Guards against a regression where the new branch
+# misfires on the happy path.
+t_unmodified_targets_not_flagged() {
+  failures=()
+  check_no_dirty_target_edits
+  [[ ${#failures[@]} -eq 0 ]] || { echo "    FAIL: expected 0 failures, got ${#failures[@]}: ${failures[*]}" >&2; return 1; }
+}
+
 # --- driver ---
 
 echo "== preflight.sh tests =="
 run "missing jq emits structured failure (install mode)"   with_repo missing_jq_install   t_missing_jq_emits_structured_failure_install_mode
 run "missing jq emits structured failure (override mode)"  with_repo missing_jq_override  t_missing_jq_emits_structured_failure_override_mode
+run "tracked deletion via rm flagged (issue #79)"          with_sourced_sandbox t_tracked_deletion_via_rm_flagged
+run "tracked deletion via git rm flagged (issue #79)"      with_sourced_sandbox t_tracked_deletion_via_git_rm_flagged
+run "multiple tracked deletions all flagged"               with_sourced_sandbox t_multiple_tracked_deletions_all_flagged
+run "unmodified targets not flagged (sanity)"              with_sourced_sandbox t_unmodified_targets_not_flagged
 
 echo "== summary: ${PASS_COUNT} passed, ${FAIL_COUNT} failed =="
 [[ "$FAIL_COUNT" -eq 0 ]]
