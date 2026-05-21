@@ -11,8 +11,8 @@ description: Skills reference the script's contract (inputs, outputs, exit codes
 - Skill prose names the script's contract — required inputs, output shape, exit codes, side effects, comment-text shapes the script emits verbatim
 - Skill prose does not restate the script's internal logic — thresholds, predicates, formulas, allowlists, source lists, filter rules
 - The script is the source of truth; skill prose points at it (`see <script-path> — named constants at the top of the file, docstring, or named frozenset`)
-- Script paths in skill prose follow `rules/skill-authoring.md` Script References — repo-relative `skills/<name>/<file>.<ext>` in this tile, tile-mount paths when running inside a consumer
-- Composes with `rules/script-delegation.md` for when to extract a script in the first place
+- Script paths follow `rules/skill-authoring.md` Script References
+- See `rules/script-delegation.md`
 
 ## What Skills Do Not Restate
 
