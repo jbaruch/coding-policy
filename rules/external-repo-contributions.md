@@ -6,7 +6,7 @@ alwaysApply: true
 
 ## Default Deny
 
-- Never open issues, pull requests, or discussions, post comments, or apply reactions in repositories the operator does not own unless the operator has explicitly granted permission for that specific target
+- Never open issues, pull requests, or discussions, post comments, or apply reactions in repositories the operator does not own unless the operator has explicitly granted permission for that specific repo AND action type
 - "Own" means the operator is the namespace owner of the repo (user account or org they administer) — not collaborator, not contributor, not employee of the org
 - Covered actions: filing issues, sending PRs, posting comments on existing issues / PRs / discussions, opening discussions, applying reactions
 
