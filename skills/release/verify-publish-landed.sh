@@ -26,14 +26,19 @@
 # the workflow design layer — keep publish as the last step.
 #
 # Usage: verify-publish-landed.sh <workspace> <tile> <pre-baseline> <run-id>
-# Out:   one JSON object on stdout, per rules/script-delegation.md "JSON-producing":
-#          {"ok": bool,
-#           "reason": "<human text>",
-#           "run_conclusion": "<gh-run-conclusion>",
-#           "pre": "<pre-baseline>",
-#           "current": "<current-latest-version>"}
-# Exit:  0 if ok is true; 1 if ok is false (publish did not land); 2 on
-#        argument or external-tool errors
+# Out:   JSON contract differs by exit code (per rules/script-delegation.md
+#        "JSON-producing"):
+#          - rc 0/1 (publish-landed finding): one JSON object on stdout
+#              {"ok": bool, "reason": "<human text>",
+#               "run_conclusion": "<gh-run-conclusion>",
+#               "pre": "<pre-baseline>", "current": "<current-latest-version>"}
+#          - rc 2 (tool-state error): stderr-only diagnostic, stdout is
+#            empty (or, for the missing-jq guard, a minimal JSON envelope
+#            with the same five fields and "ok": false). Wrappers MUST
+#            parse stdout only when exit code is 0 or 1.
+# Exit:  0 if both conjuncts hold; 1 if either conjunct fails (publish did
+#        not land); 2 on argument-validation or external-tool failures
+#        (run still in flight, jq missing, gh/tessl unreachable)
 
 set -euo pipefail
 
@@ -107,9 +112,17 @@ main() {
   # that hasn't actually finished. Callers should `gh run watch <id>`
   # before invoking this script; this guard catches the case where
   # they skipped that step.
-  local conclusion
-  conclusion=$(gh run view "$run_id" --json conclusion --jq '.conclusion' 2>&1) \
-    || { echo "error: 'gh run view ${run_id}' failed: ${conclusion} — verify (1) the run ID is correct (cross-check 'gh run list --workflow <publish-workflow-name> --branch main --limit 10'), (2) 'gh auth status' shows you're authenticated against the right host, then re-run; if the run failed at the GitHub side, inspect with 'gh run view ${run_id} --log-failed'" >&2; exit 2; }
+  #
+  # Capture stdout for the value and stderr to a separate tempfile so a
+  # gh warning emitted on stderr can't get mixed into the conclusion
+  # string and break the "conclusion == success" comparison. Combined
+  # `2>&1` capture would otherwise let a single warning misclassify the
+  # run on the happy path.
+  local conclusion err_file
+  err_file=$(mktemp) || { echo "error: mktemp failed — cannot run verify-publish-landed.sh without writable TMPDIR" >&2; exit 2; }
+  trap 'rm -f "$err_file"' EXIT
+  conclusion=$(gh run view "$run_id" --json conclusion --jq '.conclusion' 2>"$err_file") \
+    || { local err; err=$(cat "$err_file"); echo "error: 'gh run view ${run_id}' failed: ${err} — verify (1) the run ID is correct (cross-check 'gh run list --workflow <publish-workflow-name> --branch main --limit 10'), (2) 'gh auth status' shows you're authenticated against the right host, then re-run; if the run failed at the GitHub side, inspect with 'gh run view ${run_id} --log-failed'" >&2; exit 2; }
   if [[ -z "$conclusion" || "$conclusion" == "null" ]]; then
     echo "error: 'gh run view ${run_id}' reports no terminal conclusion (got: '${conclusion}') — run is still in flight; run 'gh run watch ${run_id}' first, then re-run this script" >&2
     exit 2
@@ -118,11 +131,13 @@ main() {
   # `tessl tile info | grep | awk` under `set -o pipefail` lets a parse
   # miss (grep exits 1 when "Latest Version" doesn't appear) trigger
   # the `||` "tessl failed" branch and swallow the actual output. To
-  # distinguish tool failure from parse miss, capture first (preserving
-  # stderr) then parse in a separate step.
+  # distinguish tool failure from parse miss, capture first (separating
+  # stdout from stderr the same way as the gh capture above) then parse
+  # stdout in a separate step. Mixed `2>&1` capture would let a tessl
+  # warning on stderr poison the parsed-output and misread the version.
   local tessl_output
-  tessl_output=$(tessl tile info "${workspace}/${tile}" 2>&1) \
-    || { echo "error: 'tessl tile info ${workspace}/${tile}' failed: ${tessl_output} — verify (1) tessl CLI is installed and on PATH ('command -v tessl'), (2) the workspace/tile slug is correct, (3) you have network access to the registry, then re-run 'tessl tile info ${workspace}/${tile}' directly to inspect the failure before retrying the publish verification" >&2; exit 2; }
+  tessl_output=$(tessl tile info "${workspace}/${tile}" 2>"$err_file") \
+    || { local err; err=$(cat "$err_file"); echo "error: 'tessl tile info ${workspace}/${tile}' failed: ${err} — verify (1) tessl CLI is installed and on PATH ('command -v tessl'), (2) the workspace/tile slug is correct, (3) you have network access to the registry, then re-run 'tessl tile info ${workspace}/${tile}' directly to inspect the failure before retrying the publish verification" >&2; exit 2; }
   # `|| true` lets the parse-miss case fall through to the explicit
   # `-z` diagnostic below rather than triggering `set -e` + `pipefail`
   # exit. Without it, grep's exit-1 on no-match (compounded by pipefail)

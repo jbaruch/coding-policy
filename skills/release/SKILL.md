@@ -184,7 +184,7 @@ After merge — per `rules/ci-safety.md`'s Always Watch CI duty extended through
   skills/release/verify-publish-landed.sh <workspace> <tile> "$PRE" "$run_id"
   ```
 
-  Output: `{"ok": bool, "reason": "...", "run_conclusion": "...", "pre": "...", "current": "..."}`. Exit 0 means both conjuncts hold; exit 1 means one or both failed (`reason` names which one); exit 2 means a tool-state error (run still in flight, jq missing, tessl unreachable). Do not compare against a specific expected version. See `rules/ci-safety.md` for full release-contract semantics and failed-publish recovery
+  Output is exit-code-dependent: rc 0/1 emits the JSON envelope `{"ok": bool, "reason": "...", "run_conclusion": "...", "pre": "...", "current": "..."}` on stdout (parse it for the finding); rc 2 emits only the stderr diagnostic (tool-state error: run still in flight, jq missing, gh/tessl unreachable) — parse stdout only when rc is 0 or 1. Do not compare against a specific expected version. See `rules/ci-safety.md` for full release-contract semantics and failed-publish recovery
 - Report the outcome: merged PR URL, version published, registry confirmation
 
 When this step is wrapped in a reusable script (e.g., `merge-and-cleanup.sh` that other devs run unattended), see `skills/release/SCRIPTING.md` for the gates the script must enforce.
