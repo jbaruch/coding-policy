@@ -56,7 +56,7 @@ alwaysApply: true
 
 - Narrow exception for content-only edits within an explicit, narrowly scoped path-glob set
 - Applies when the edited paths are prose / data artifacts a human audience reads directly — not code, not context artifacts an agent loads (rules, skills, scripts, manifests, workflow files, configuration)
-- The push may go directly to `main` / `master` without a PR review cycle
+- The push may go directly to `main` or `master` without a PR review cycle
 - Preconditions (each consuming repo, all required):
   1. Repo documents an authority-of-record rule in its own tile naming the carve-out — the exact path globs, why those paths qualify as content not code/context, and what policy review the direct-push does NOT carry
   2. Carve-out scopes to one or more named path globs — never a broad wildcard like `**/*.md`. Globs that would match `rules/**`, `skills/**`, workflow files (`*.yml` or `*.yaml`), `tile.json`, `package.json`, or any executable/loaded artifact (regardless of extension) are mis-scoped
