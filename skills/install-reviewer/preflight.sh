@@ -195,10 +195,12 @@ check_no_dirty_target_edits() {
       # one there the consumer either `rm`'d it (missing from working
       # tree, present in index + HEAD) or `git rm`'d it (missing from
       # working tree AND index, still in HEAD). `git diff --diff-filter=D
-      # HEAD` catches both — it diffs HEAD against the working tree
-      # (including the index) and `D` flags any path in HEAD but no
-      # longer in the working tree.
-      if [[ -n "$(git diff --name-only --diff-filter=D HEAD -- "$t" 2>/dev/null)" ]]; then
+      # HEAD` catches both because it compares HEAD against the working
+      # tree (NOT including the index, but that doesn't matter here —
+      # both forms leave the working tree without the file while HEAD
+      # still has it). `--quiet` exits 0 when there's no diff and 1 when
+      # there is, so negation reads as "is this path deleted vs HEAD?".
+      if ! git diff --quiet --diff-filter=D HEAD -- "$t" 2>/dev/null; then
         dirty+=("$t (tracked deletion)")
       fi
       continue

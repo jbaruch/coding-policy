@@ -120,9 +120,11 @@ t_missing_jq_emits_structured_failure_override_mode() {
 # Helper: build a fresh git repo with all six TARGETS committed to HEAD,
 # then source preflight.sh in --override mode so check_no_dirty_target_edits
 # and the TARGETS/failures globals are exercisable as a unit. The script's
-# BASH_SOURCE guard prevents main() from running on source; the strict
-# shell options it enables are relaxed afterwards for test ergonomics
-# (same pattern as test_poll_pr_reviews.sh).
+# BASH_SOURCE guard prevents main() from running on source; we relax only
+# errexit afterwards (matching test_poll_pr_reviews.sh) so the test driver
+# can assert exit codes without aborting on the first failed assertion —
+# nounset and pipefail stay on so the tests still catch the same shell
+# bugs the rest of the suite catches.
 with_sourced_sandbox() {
   local fn="$1"
   local sandbox; sandbox=$(mktemp -d "/tmp/test_preflight.${fn}.XXXXXX") || return 1
@@ -146,7 +148,7 @@ with_sourced_sandbox() {
     cd "$sandbox"
     # shellcheck disable=SC1090
     source "$SCRIPT" --override 2>/dev/null || true
-    set +euo pipefail
+    set +e
     "$fn"
   )
   local rc=$?
