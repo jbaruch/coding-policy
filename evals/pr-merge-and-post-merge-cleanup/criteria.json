@@ -50,7 +50,7 @@
     {
       "name": "SHA-bound publish-run resolution",
       "max_score": 10,
-      "description": "Resolves THE publish run for this merge by merge-commit SHA AND `push` event filter — derives the SHA from `gh pr view <N> --json mergeCommit --jq '.mergeCommit.oid'`, then selects the run whose `headSha == merge_sha` and `event == push`. Scripts using 'latest on main', `gh run list --limit 1`, branch-name-only filters, or selecting by workflow name alone score zero — those are race-prone selectors that may pick a parallel-merge run or a manual `workflow_dispatch` and are exactly the heuristics the tile forbids"
+      "description": "Resolves THE publish run for this merge by merge-commit SHA AND `push` event filter — derives the SHA from `gh pr view <N> --json mergeCommit --jq '.mergeCommit.oid'`, then selects the run whose `.headSha == \"<merge-sha>\"` and `.event == \"push\"` (jq string literals — bare `push` would be an undefined variable). Scripts using 'latest on main', `gh run list --limit 1`, branch-name-only filters, or selecting by workflow name alone score zero — those are race-prone selectors that may pick a parallel-merge run or a manual `workflow_dispatch` and are exactly the heuristics the tile forbids"
     },
     {
       "name": "Watch publish run to terminal state",
