@@ -166,6 +166,27 @@ test_env_link_in_header_on_merge() {
 }
 run "ensure_env_example: deep link prepended into header on merge" test_env_link_in_header_on_merge
 
+# --- ensure_env_example: link present BELOW vars → re-prepended to header ----
+# A link counts only when it sits in the header. A consumer file with the
+# link below a variable line is non-compliant, so a header link must be
+# prepended (the function must not treat the below-body link as "done").
+test_env_link_below_body_reprepended() {
+  local f="$TMPDIR_TEST/link-below.env"
+  {
+    printf 'DATABASE_URL=postgres://localhost/app\n'
+    printf '#   https://github.com/%s/settings/secrets/actions\n' "$SLUG"
+    printf 'CODEX_API_KEY=\nOPENAI_API_KEY=\nANTHROPIC_API_KEY=\nTESSL_TOKEN=\n'
+  } > "$f"
+  ensure_env_example "$f" "$SLUG" || return 1
+  local link_line var_line
+  link_line=$(grep -nF 'settings/secrets/actions' "$f" | head -1 | cut -d: -f1)
+  var_line=$(grep -nE '^DATABASE_URL=' "$f" | head -1 | cut -d: -f1)
+  [[ "$link_line" -lt "$var_line" ]] || { echo "    FAIL: header link (line $link_line) not before first var (line $var_line)" >&2; return 1; }
+  grep -qxF 'DATABASE_URL=postgres://localhost/app' "$f" || { echo "    FAIL: consumer var clobbered" >&2; return 1; }
+  assert_eq "trailing newline count" "1" "$(trailing_newline_count "$f")" || return 1
+}
+run "ensure_env_example: link below body re-prepended to header" test_env_link_below_body_reprepended
+
 # --- ensure_env_example: existing file WITHOUT trailing newline --------------
 test_env_merge_no_newline() {
   local f="$TMPDIR_TEST/no-nl.env"

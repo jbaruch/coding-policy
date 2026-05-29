@@ -114,14 +114,15 @@ derive_repo_slug() {
 # secret is "present" when the file already has a line beginning `KEY=`;
 # existing consumer content is preserved verbatim. The GH Actions
 # secrets-settings deep link ($2 = "owner/repo" slug) must sit "in the
-# file header" per no-secrets.md, so when the file lacks the link the
-# whole reviewer block (header comment + any missing KEY= lines) is
-# PREPENDED above the consumer's existing entries — not appended below
-# them. When the link is already present (our prior run, or a consumer's
-# own link) only the missing KEY= lines are appended, since the header
-# requirement is already satisfied. Idempotent: every secret present AND
-# the link already there is a no-op. EOF is normalized to a single
-# trailing newline per rules/code-formatting.md.
+# file header" per no-secrets.md. A link counts as in-header only when it
+# precedes the first `KEY=` assignment; when the file lacks a header link
+# (no link at all, or one sitting below the body) the whole reviewer
+# block (header comment + any missing KEY= lines) is PREPENDED above the
+# consumer's existing entries — not appended below them. When a header
+# link is already present only the missing KEY= lines are appended.
+# Idempotent: every secret present AND a header link already there is a
+# no-op. EOF is normalized to a single trailing newline per
+# rules/code-formatting.md.
 ensure_env_example() {
   local target="$1" slug="$2"
   local secrets=(CODEX_API_KEY OPENAI_API_KEY ANTHROPIC_API_KEY TESSL_TOKEN)
@@ -131,17 +132,26 @@ ensure_env_example() {
       missing+=("$k")
     fi
   done
-  local link_present=0
-  if [[ -f "$target" ]] && grep -qF 'settings/secrets/actions' "$target"; then
-    link_present=1
+  # The link counts as "in the header" only when it precedes the first
+  # variable assignment (`KEY=`). A link sitting below the body does not
+  # satisfy no-secrets.md, so it is treated the same as a missing link —
+  # the block is prepended to put a header link at the top.
+  local link_in_header=0
+  if [[ -f "$target" ]]; then
+    local link_ln var_ln
+    link_ln=$( { grep -nF 'settings/secrets/actions' "$target" || true; } | head -1 | cut -d: -f1 )
+    var_ln=$( { grep -nE '^[A-Za-z_][A-Za-z0-9_]*=' "$target" || true; } | head -1 | cut -d: -f1 )
+    if [[ -n "$link_ln" ]] && { [[ -z "$var_ln" ]] || [[ "$link_ln" -lt "$var_ln" ]]; }; then
+      link_in_header=1
+    fi
   fi
-  if [[ ${#missing[@]} -eq 0 && $link_present -eq 1 ]]; then
+  if [[ ${#missing[@]} -eq 0 && $link_in_header -eq 1 ]]; then
     return 0
   fi
 
-  if [[ $link_present -eq 0 ]]; then
-    # No link yet — prepend the reviewer block so the deep link lands in
-    # the file header. Build the block in a tempfile, append the
+  if [[ $link_in_header -eq 0 ]]; then
+    # No header link yet — prepend the reviewer block so the deep link
+    # lands in the file header. Build the block in a tempfile, append the
     # consumer's existing content beneath it, then rewrite target in
     # place (cat > target preserves the original file's permissions).
     local tmp
