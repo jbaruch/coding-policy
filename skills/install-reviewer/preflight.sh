@@ -69,7 +69,10 @@ if (( OVERRIDE_MODE == 1 )); then
 else
   BRANCH="feat/add-coding-policy-review"
 fi
-TEMPLATE_DIR=".tessl/tiles/jbaruch/coding-policy/skills/install-reviewer"
+# tessl >=0.81 installs under .tessl/plugins/ (renamed from .tessl/tiles/).
+# Prefer the new layout, fall back to the legacy one for older CLIs.
+TEMPLATE_DIR=".tessl/plugins/jbaruch/coding-policy/skills/install-reviewer"
+[ -d "$TEMPLATE_DIR" ] || TEMPLATE_DIR=".tessl/tiles/jbaruch/coding-policy/skills/install-reviewer"
 TEMPLATES=(
   "${TEMPLATE_DIR}/review-openai.md"
   "${TEMPLATE_DIR}/review-anthropic.md"

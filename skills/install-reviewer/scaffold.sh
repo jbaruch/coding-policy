@@ -87,7 +87,10 @@ repo_root=$(git rev-parse --show-toplevel 2>/dev/null) || {
 }
 cd "$repo_root"
 
-TEMPLATE_DIR=".tessl/tiles/jbaruch/coding-policy/skills/install-reviewer"
+# tessl >=0.81 installs under .tessl/plugins/ (renamed from .tessl/tiles/).
+# Prefer the new layout, fall back to the legacy one for older CLIs.
+TEMPLATE_DIR=".tessl/plugins/jbaruch/coding-policy/skills/install-reviewer"
+[ -d "$TEMPLATE_DIR" ] || TEMPLATE_DIR=".tessl/tiles/jbaruch/coding-policy/skills/install-reviewer"
 WORKFLOW_DIR=".github/workflows"
 ACTIONS_LOCK=".github/aw/actions-lock.json"
 GITATTRIBUTES=".gitattributes"
