@@ -12,13 +12,15 @@ Explain that the two workflows install `jbaruch/coding-policy` at run time and r
 
 ### 2. Required secrets, before merge
 
-List the three repository secrets the consumer must set BEFORE merging:
+List the repository secrets the consumer must set BEFORE merging:
 
-- `OPENAI_API_KEY` — OpenAI billing account for the Codex reviewer
+- `CODEX_API_KEY` **or** `OPENAI_API_KEY` — OpenAI-family billing account for the Codex reviewer. The workflow reads `CODEX_API_KEY || OPENAI_API_KEY`, so either one satisfies it (`CODEX_API_KEY` wins when both are set)
 - `ANTHROPIC_API_KEY` — Anthropic billing account for the Claude Code reviewer
 - `TESSL_TOKEN` — generated at https://tessl.io/account/api-keys, used by the workflow's `tessl install` setup step
 
-Add a one-line note that merging without all three secrets set will cause the workflows to fail on their first run.
+Note that this PR also commits a `.env.example` documenting these same secrets with a deep link to the repo's Actions secrets-settings page (`https://github.com/<owner>/<repo>/settings/secrets/actions`) per `jbaruch/coding-policy: no-secrets` — that file is the committed inventory; the secrets themselves are set as GitHub Actions secrets, not committed.
+
+Add a one-line note that merging without an OpenAI-family key, `ANTHROPIC_API_KEY`, and `TESSL_TOKEN` set will cause the workflows to fail on their first run.
 
 ### 3. Load indicator (so the consumer can confirm policy actually loaded)
 
