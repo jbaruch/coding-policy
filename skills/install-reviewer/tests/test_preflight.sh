@@ -215,6 +215,26 @@ t_env_example_uncommitted_edits_flagged() {
   echo "${failures[0]}" | grep -q "\.env\.example (uncommitted edits)" || { echo "    FAIL: expected '.env.example (uncommitted edits)'; got: ${failures[0]}" >&2; return 1; }
 }
 
+# Install mode stages .env.example too but does NOT run the full
+# override dirty-check. check_env_example_clean must flag a dirty
+# .env.example so unrelated local content (possibly real secrets) isn't
+# swept into the reviewer-install commit.
+t_env_example_clean_check_flags_dirty() {
+  printf 'SECRET_TOKEN=real-value-not-a-placeholder\n' >> .env.example
+  failures=()
+  check_env_example_clean
+  [[ ${#failures[@]} -eq 1 ]] || { echo "    FAIL: expected 1 failure, got ${#failures[@]}: ${failures[*]}" >&2; return 1; }
+  echo "${failures[0]}" | grep -q "env-example-not-clean" || { echo "    FAIL: expected 'env-example-not-clean' check; got: ${failures[0]}" >&2; return 1; }
+}
+
+# Sanity: a clean tracked .env.example must NOT be flagged by the
+# install-mode guard (scaffold merges into it; commit stages only the diff).
+t_env_example_clean_check_passes_when_clean() {
+  failures=()
+  check_env_example_clean
+  [[ ${#failures[@]} -eq 0 ]] || { echo "    FAIL: expected 0 failures, got ${#failures[@]}: ${failures[*]}" >&2; return 1; }
+}
+
 # --- driver ---
 
 echo "== preflight.sh tests =="
@@ -225,6 +245,8 @@ run "tracked deletion via git rm flagged (issue #79)"      with_sourced_sandbox 
 run "multiple tracked deletions all flagged"               with_sourced_sandbox t_multiple_tracked_deletions_all_flagged
 run "unmodified targets not flagged (sanity)"              with_sourced_sandbox t_unmodified_targets_not_flagged
 run "env.example uncommitted edits flagged (#103)"         with_sourced_sandbox t_env_example_uncommitted_edits_flagged
+run "install-mode env.example dirty flagged (#103)"        with_sourced_sandbox t_env_example_clean_check_flags_dirty
+run "install-mode env.example clean passes (#103)"         with_sourced_sandbox t_env_example_clean_check_passes_when_clean
 
 echo "== summary: ${PASS_COUNT} passed, ${FAIL_COUNT} failed =="
 [[ "$FAIL_COUNT" -eq 0 ]]

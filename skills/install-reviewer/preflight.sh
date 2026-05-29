@@ -3,7 +3,9 @@
 # result. The skill invokes this before any mutation so every preflight
 # failure is surfaced together, not one-at-a-time. Checks cover: git
 # worktree, GitHub CLI installation + auth, gh-aw extension, tile
-# template presence, origin remote, and (mode-dependent) branch state.
+# template presence, origin remote, (mode-dependent) branch state, and a
+# clean-`.env.example` guard (install mode guards `.env.example` alone;
+# override mode guards it among all rewritable targets).
 #
 # Usage: preflight.sh [--override]
 #   --override    Upgrade existing scaffolded reviewers in place (instead
@@ -190,48 +192,68 @@ check_branch_not_remote() {
 #   - tracked file deleted from the working tree (`rm` or `git rm`) but
 #     still present at HEAD; without this case scaffold.sh re-creates
 #     the file and silently clobbers the consumer's intentional removal.
+# Classify a single target's working-tree state, echoing a short reason
+# when it is one the scaffold/commit flow could clobber or wrongly stage,
+# and nothing for a clean tracked file or a path that neither exists nor
+# is tracked at HEAD. Pure inspection — no mutation, always exits 0.
+classify_target_dirty() {
+  local t="$1"
+  # `-e` follows symlinks, so a broken symlink (target nonexistent)
+  # returns false; `-L` is true for any symlink, broken or not. The OR
+  # catches every form of "something is at this path".
+  if [[ ! -e "$t" && ! -L "$t" ]]; then
+    # Nothing at this path in the working tree. If HEAD still tracks one
+    # there the consumer either `rm`'d it (missing from working tree,
+    # present in index + HEAD) or `git rm`'d it (missing from working tree
+    # AND index, still in HEAD). `git diff --diff-filter=D HEAD` catches
+    # both because it compares HEAD against the working tree. `--quiet`
+    # exits 0 when there's no diff and 1 when there is, so negation reads
+    # as "is this path deleted vs HEAD?".
+    if ! git diff --quiet --diff-filter=D HEAD -- "$t" 2>/dev/null; then
+      echo "tracked deletion"
+    fi
+    return 0
+  fi
+  if [[ -L "$t" ]]; then
+    # Symlinks (working or broken) get their own diagnostic — falling
+    # through to "untracked" would mislabel a broken symlink. scaffold.sh
+    # refuses symlinks too; this just surfaces it earlier.
+    echo "symlink target"
+  elif git ls-files --error-unmatch -- "$t" >/dev/null 2>&1; then
+    # Tracked: flag if uncommitted edits exist relative to HEAD.
+    if ! git diff --quiet HEAD -- "$t" 2>/dev/null; then
+      echo "uncommitted edits"
+    fi
+  else
+    # Untracked regular file at the target path.
+    echo "untracked"
+  fi
+}
+
 check_no_dirty_target_edits() {
-  local dirty=()
+  local dirty=() t reason
   for t in "${TARGETS[@]}"; do
-    # `-e` follows symlinks, so a broken symlink (target nonexistent)
-    # returns false; `-L` is true for any symlink, broken or not. The
-    # OR catches every form of "something is at this path" the override
-    # could clobber.
-    if [[ ! -e "$t" && ! -L "$t" ]]; then
-      # Nothing at this path in the working tree. If HEAD still tracks
-      # one there the consumer either `rm`'d it (missing from working
-      # tree, present in index + HEAD) or `git rm`'d it (missing from
-      # working tree AND index, still in HEAD). `git diff --diff-filter=D
-      # HEAD` catches both because it compares HEAD against the working
-      # tree (NOT including the index, but that doesn't matter here —
-      # both forms leave the working tree without the file while HEAD
-      # still has it). `--quiet` exits 0 when there's no diff and 1 when
-      # there is, so negation reads as "is this path deleted vs HEAD?".
-      if ! git diff --quiet --diff-filter=D HEAD -- "$t" 2>/dev/null; then
-        dirty+=("$t (tracked deletion)")
-      fi
-      continue
-    fi
-    if [[ -L "$t" ]]; then
-      # Symlinks (working or broken) get their own diagnostic so the
-      # consumer sees what the actual problem is — falling through to
-      # the "(untracked)" branch below would mislabel a broken symlink
-      # as merely untracked content. scaffold.sh refuses symlinks too;
-      # this just surfaces it earlier with a clearer reason.
-      dirty+=("$t (symlink target)")
-    elif git ls-files --error-unmatch -- "$t" >/dev/null 2>&1; then
-      # Tracked: flag if uncommitted edits exist relative to HEAD
-      if ! git diff --quiet HEAD -- "$t" 2>/dev/null; then
-        dirty+=("$t (uncommitted edits)")
-      fi
-    else
-      # Untracked regular file at the target path — override would
-      # silently clobber it without this case.
-      dirty+=("$t (untracked)")
-    fi
+    reason=$(classify_target_dirty "$t")
+    [[ -n "$reason" ]] && dirty+=("$t ($reason)")
   done
   if [[ ${#dirty[@]} -gt 0 ]]; then
     push_failure "no-dirty-target-edits" "--override refuses to overwrite local changes in: ${dirty[*]} — commit, stash, restore, or remove these first, then re-run"
+  fi
+}
+
+# Install-mode guard for `.env.example`. The six reviewer targets are
+# guarded in install mode by the skill's Step 2 existence-refusal, but
+# `.env.example` legitimately pre-exists in many repos and commit.sh
+# stages it wholesale — so a dirty, untracked, symlinked, or tracked-
+# deleted `.env.example` would otherwise sweep unrelated local content
+# (possibly real secret values) into the reviewer-install commit. A
+# clean tracked file or an absent one is fine — scaffold merges into the
+# former and creates the latter, and commit.sh stages only the diff.
+check_env_example_clean() {
+  local reason
+  reason=$(classify_target_dirty ".env.example")
+  if [[ -n "$reason" ]]; then
+    push_failure "env-example-not-clean" ".env.example is in a state install cannot safely stage (${reason}) — install stages it into the reviewer PR, which could commit unrelated local content (possibly real secret values). Commit, stash, restore, or remove it first, then re-run"
   fi
 }
 
@@ -262,11 +284,14 @@ main() {
     else
       # Install mode: the install branch must NOT already exist locally
       # or remotely — Step 2's overwrite refusal in the skill assumes a
-      # fresh branch.
+      # fresh branch. The reviewer targets are guarded by that refusal,
+      # but `.env.example` can pre-exist, so guard it against dirty/
+      # untracked state commit.sh would otherwise stage wholesale.
       check_branch_not_local
       if git remote get-url origin >/dev/null 2>&1; then
         check_branch_not_remote
       fi
+      check_env_example_clean
     fi
   fi
 
