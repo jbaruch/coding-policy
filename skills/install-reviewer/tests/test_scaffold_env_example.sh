@@ -146,6 +146,26 @@ test_env_merge_preserves() {
 }
 run "ensure_env_example: merges missing keys, preserves existing content" test_env_merge_preserves
 
+# --- ensure_env_example: deep link lands in the header (above vars) ----------
+# rules/no-secrets.md requires the deep link "in the file header". When
+# merging into a consumer file that has variables but no link, the block
+# must be PREPENDED so the link sits above the first variable line.
+test_env_link_in_header_on_merge() {
+  local f="$TMPDIR_TEST/header-placement.env"
+  printf 'DATABASE_URL=postgres://localhost/app\nREDIS_URL=redis://localhost\n' > "$f"
+  ensure_env_example "$f" "$SLUG" || return 1
+  local link_line var_line
+  link_line=$(grep -nF 'settings/secrets/actions' "$f" | head -1 | cut -d: -f1)
+  var_line=$(grep -nE '^DATABASE_URL=' "$f" | head -1 | cut -d: -f1)
+  [[ -n "$link_line" && -n "$var_line" ]] || { echo "    FAIL: missing link ($link_line) or var ($var_line) line" >&2; return 1; }
+  [[ "$link_line" -lt "$var_line" ]] || { echo "    FAIL: deep link (line $link_line) not before first var (line $var_line)" >&2; return 1; }
+  grep -qxF 'DATABASE_URL=postgres://localhost/app' "$f" || { echo "    FAIL: consumer var clobbered" >&2; return 1; }
+  grep -qxF 'REDIS_URL=redis://localhost' "$f" || { echo "    FAIL: consumer var clobbered" >&2; return 1; }
+  assert_complete_and_linked "$f" || return 1
+  assert_eq "trailing newline count" "1" "$(trailing_newline_count "$f")" || return 1
+}
+run "ensure_env_example: deep link prepended into header on merge" test_env_link_in_header_on_merge
+
 # --- ensure_env_example: existing file WITHOUT trailing newline --------------
 test_env_merge_no_newline() {
   local f="$TMPDIR_TEST/no-nl.env"

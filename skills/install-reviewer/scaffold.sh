@@ -111,15 +111,16 @@ derive_repo_slug() {
 
 # Ensure $1 documents the reviewer CI secrets per rules/no-secrets.md. A
 # secret is "present" when the file already has a line beginning `KEY=`;
-# only missing secrets are appended, so an existing consumer .env.example
-# is never rewritten. The GH Actions secrets-settings deep link header
-# ($2 = "owner/repo" slug) is its own compliance concern: it lands
-# whenever the file lacks the link, even if every secret line is already
-# present (no-secrets.md requires the deep link "in the file header").
-# Idempotent: when every secret is present AND the link is already there
-# the file is left byte-for-byte unchanged. A fresh file and a partial
-# merge run the same path — what differs is whether the header and/or how
-# many KEY= lines land.
+# existing consumer content is preserved verbatim. The GH Actions
+# secrets-settings deep link ($2 = "owner/repo" slug) must sit "in the
+# file header" per no-secrets.md, so when the file lacks the link the
+# whole reviewer block (header comment + any missing KEY= lines) is
+# PREPENDED above the consumer's existing entries — not appended below
+# them. When the link is already present (our prior run, or a consumer's
+# own link) only the missing KEY= lines are appended, since the header
+# requirement is already satisfied. Idempotent: every secret present AND
+# the link already there is a no-op. EOF is normalized to a single
+# trailing newline per rules/code-formatting.md.
 ensure_env_example() {
   local target="$1" slug="$2"
   local secrets=(CODEX_API_KEY OPENAI_API_KEY ANTHROPIC_API_KEY TESSL_TOKEN)
@@ -129,37 +130,57 @@ ensure_env_example() {
       missing+=("$k")
     fi
   done
-  local need_header=1
+  local link_present=0
   if [[ -f "$target" ]] && grep -qF 'settings/secrets/actions' "$target"; then
-    need_header=0
+    link_present=1
   fi
-  if [[ ${#missing[@]} -eq 0 && $need_header -eq 0 ]]; then
+  if [[ ${#missing[@]} -eq 0 && $link_present -eq 1 ]]; then
     return 0
   fi
-  # Terminate the consumer's last line if it lacks a trailing newline so
-  # our block doesn't fuse onto their content, then add one blank-line
-  # separator when the file already has content.
-  if [[ -f "$target" && -s "$target" && -n "$(tail -c 1 "$target")" ]]; then
-    printf '\n' >> "$target"
-  fi
-  if [[ -f "$target" && -s "$target" ]]; then
-    printf '\n' >> "$target"
-  fi
-  {
-    if [[ $need_header -eq 1 ]]; then
+
+  if [[ $link_present -eq 0 ]]; then
+    # No link yet — prepend the reviewer block so the deep link lands in
+    # the file header. Build the block in a tempfile, append the
+    # consumer's existing content beneath it, then rewrite target in
+    # place (cat > target preserves the original file's permissions).
+    local tmp
+    tmp=$(mktemp -t aw-env-example.XXXXXX)
+    {
       printf '# CI reviewer secrets for the jbaruch/coding-policy gh-aw PR review workflows.\n'
       printf '# Set as GitHub Actions repository secrets:\n'
       printf '#   https://github.com/%s/settings/secrets/actions\n' "$slug"
       printf '# The Codex (OpenAI-family) reviewer reads CODEX_API_KEY or OPENAI_API_KEY\n'
       printf '# (CODEX_API_KEY wins when both are set). ANTHROPIC_API_KEY drives the Claude\n'
       printf '# reviewer; TESSL_TOKEN authenticates the `tessl install` step for both.\n'
+      if [[ ${#missing[@]} -gt 0 ]]; then
+        for k in "${missing[@]}"; do
+          printf '%s=\n' "$k"
+        done
+      fi
+    } > "$tmp"
+    if [[ -f "$target" && -s "$target" ]]; then
+      printf '\n' >> "$tmp"
+      cat "$target" >> "$tmp"
     fi
-    if [[ ${#missing[@]} -gt 0 ]]; then
-      for k in "${missing[@]}"; do
-        printf '%s=\n' "$k"
-      done
+    cat "$tmp" > "$target"
+    rm -f "$tmp"
+  else
+    # Link already in the header — only the KEY= lines are missing.
+    # Append them; the header requirement is already satisfied.
+    if [[ -f "$target" && -s "$target" && -n "$(tail -c 1 "$target")" ]]; then
+      printf '\n' >> "$target"
     fi
-  } >> "$target"
+    for k in "${missing[@]}"; do
+      printf '%s=\n' "$k" >> "$target"
+    done
+  fi
+
+  # Normalize EOF to a single trailing newline — the prepended consumer
+  # content may have lacked one. Two-stage, same as ensure_gitattributes_marker.
+  if [[ -f "$target" && -s "$target" && -n "$(tail -c 1 "$target")" ]]; then
+    printf '\n' >> "$target"
+  fi
+  perl -i -0pe 's/\s*\z/\n/' "$target" 2>/dev/null || true
 }
 
 OVERRIDE_MODE=0
