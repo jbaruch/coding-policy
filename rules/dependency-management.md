@@ -35,7 +35,7 @@ alwaysApply: true
 
 - Don't copy library source code into the repo
 - Use the language's package manager to install dependencies
-- Tessl tiles count as dependencies — never vendor them. Install via `tessl install` at runtime; don't commit tile content (e.g., `.tessl/tiles/<workspace>/<tile>/...`) into the consumer repo
+- Tessl tiles count as dependencies — never vendor them. Install via `tessl install` at runtime; don't commit tile content (e.g., `.tessl/plugins/<workspace>/<tile>/...`) into the consumer repo
 - Install Tessl tiles to a non-workspace path for CI agents
 
 ## Dependency Groups

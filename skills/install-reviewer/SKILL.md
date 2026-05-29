@@ -34,10 +34,10 @@ The skill runs in one of two modes determined by the user's request:
 
 ```bash
 # install mode
-.tessl/tiles/jbaruch/coding-policy/skills/install-reviewer/preflight.sh
+.tessl/plugins/jbaruch/coding-policy/skills/install-reviewer/preflight.sh
 
 # upgrade mode
-.tessl/tiles/jbaruch/coding-policy/skills/install-reviewer/preflight.sh --override
+.tessl/plugins/jbaruch/coding-policy/skills/install-reviewer/preflight.sh --override
 ```
 
 Runs every precondition (git worktree, GitHub CLI install + auth, gh-aw extension at minimum version, tile template, origin remote, plus mode-dependent branch state) and returns one JSON object: `{"ok": bool, "override": bool, "failures": [...], "warnings": [...]}`.
@@ -56,10 +56,10 @@ In **upgrade mode**: skip this step. Preflight has verified rewritable targets c
 
 ```bash
 # install mode
-.tessl/tiles/jbaruch/coding-policy/skills/install-reviewer/branch.sh
+.tessl/plugins/jbaruch/coding-policy/skills/install-reviewer/branch.sh
 
 # upgrade mode
-.tessl/tiles/jbaruch/coding-policy/skills/install-reviewer/branch.sh --override
+.tessl/plugins/jbaruch/coding-policy/skills/install-reviewer/branch.sh --override
 ```
 
 Establishes the feature branch the rest of the steps commit on. Install mode creates `feat/add-coding-policy-review` from origin's default branch. Upgrade mode targets `feat/upgrade-coding-policy-review` and probes both remote (`git ls-remote --exit-code --heads`) and local state to handle the fresh-clone-while-upgrade-PR-open case: if the local branch exists it's checked out (state `checked-out`); else if the remote branch exists it's checked out with upstream tracking so the upcoming push fast-forwards (state `checked-out-tracking`); else it's created from the default branch (state `created`). Idempotent: emits `{"state": "already-on-branch", ...}` on re-run when HEAD already matches the target. Real `ls-remote`/`fetch` errors (network, auth) propagate verbatim with non-zero exit. Proceed immediately to Step 4.
@@ -68,10 +68,10 @@ Establishes the feature branch the rest of the steps commit on. Install mode cre
 
 ```bash
 # install mode
-.tessl/tiles/jbaruch/coding-policy/skills/install-reviewer/scaffold.sh
+.tessl/plugins/jbaruch/coding-policy/skills/install-reviewer/scaffold.sh
 
 # upgrade mode
-.tessl/tiles/jbaruch/coding-policy/skills/install-reviewer/scaffold.sh --override
+.tessl/plugins/jbaruch/coding-policy/skills/install-reviewer/scaffold.sh --override
 ```
 
 Creates `.github/workflows/` if missing, copies both packaged templates into `review-openai.md` and `review-anthropic.md`, compiles them via `gh aw compile review-openai review-anthropic` to produce the matching `.lock.yml` files, and ensures `.gitattributes` marks the lock files as generated (`linguist-generated=true`, `merge=ours`) per `rules/file-hygiene.md`. Emits a JSON summary on success; exits non-zero with a stderr diagnostic and rolls back every artifact it touched on compile failure (in upgrade mode the rollback restores the prior contents of all four target files from snapshots in addition to restoring `actions-lock.json`). The two templates scaffold atomically: either both land or neither does. Proceed immediately to Step 5.
@@ -80,10 +80,10 @@ Creates `.github/workflows/` if missing, copies both packaged templates into `re
 
 ```bash
 # install mode
-.tessl/tiles/jbaruch/coding-policy/skills/install-reviewer/commit.sh
+.tessl/plugins/jbaruch/coding-policy/skills/install-reviewer/commit.sh
 
 # upgrade mode
-.tessl/tiles/jbaruch/coding-policy/skills/install-reviewer/commit.sh --override
+.tessl/plugins/jbaruch/coding-policy/skills/install-reviewer/commit.sh --override
 ```
 
 Stages the six scaffolded files (`review-openai.md`, `review-openai.lock.yml`, `review-anthropic.md`, `review-anthropic.lock.yml`, `actions-lock.json`, `.gitattributes`) and commits with the canonical message — `ci(review): add jbaruch/coding-policy PR review workflows` in install mode, `ci(review): upgrade jbaruch/coding-policy PR review workflows` in upgrade mode. Idempotent: emits `{"state": "no-op", …}` on re-run when the working tree already matches a prior successful run. If a pre-commit hook rejects the commit, the script exits non-zero — fix the hook's finding and re-run; do not `--no-verify`. Proceed immediately to Step 6.
@@ -92,10 +92,10 @@ Stages the six scaffolded files (`review-openai.md`, `review-openai.lock.yml`, `
 
 ```bash
 # install mode
-.tessl/tiles/jbaruch/coding-policy/skills/install-reviewer/push.sh
+.tessl/plugins/jbaruch/coding-policy/skills/install-reviewer/push.sh
 
 # upgrade mode
-.tessl/tiles/jbaruch/coding-policy/skills/install-reviewer/push.sh --override
+.tessl/plugins/jbaruch/coding-policy/skills/install-reviewer/push.sh --override
 ```
 
 Pushes the appropriate branch (`feat/add-coding-policy-review` in install mode, `feat/upgrade-coding-policy-review` in upgrade mode) to origin with upstream tracking. Idempotent: emits `{"state": "up-to-date", …}` if origin already matches local HEAD. Proceed immediately to Step 7.

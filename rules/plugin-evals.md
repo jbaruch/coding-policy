@@ -39,7 +39,7 @@ description: Eval coverage, lift-not-attainment scoring, no bleeding, no leaking
 ## No Leaking
 
 - Use sanitized or synthetic fixtures — never live user data. Real emails, calendar events, production PRs, or internal logs must never appear in an eval fixture; use stable synthetic IDs and scrubbed examples
-- Criteria must not reference tile-internal implementation details that mean nothing outside the tile — internal skill action names, `.tessl/tiles/...` paths, tile-only identifiers
+- Criteria must not reference tile-internal implementation details that mean nothing outside the tile — internal skill action names, `.tessl/plugins/...` paths, tile-only identifiers
 - Criteria **may** reference public tool/API surfaces that exist independent of the tile — `gh pr create`, REST endpoints, conventional-commits format, semver
 - Criteria may reference tile-prescribed conventions and specific values such as reply templates like `Fixed in <sha>`, chosen flags like `--ff-only`, invented format literals. Checking for them measures application, not leaking
 - Test: would someone outside the tile recognize the term? `gh pr merge` is public; `createJwtToken` internal action is tile-internal

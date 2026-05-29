@@ -87,7 +87,7 @@ repo_root=$(git rev-parse --show-toplevel 2>/dev/null) || {
 }
 cd "$repo_root"
 
-TEMPLATE_DIR=".tessl/tiles/jbaruch/coding-policy/skills/install-reviewer"
+TEMPLATE_DIR=".tessl/plugins/jbaruch/coding-policy/skills/install-reviewer"
 WORKFLOW_DIR=".github/workflows"
 ACTIONS_LOCK=".github/aw/actions-lock.json"
 GITATTRIBUTES=".gitattributes"

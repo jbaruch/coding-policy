@@ -69,7 +69,7 @@ if (( OVERRIDE_MODE == 1 )); then
 else
   BRANCH="feat/add-coding-policy-review"
 fi
-TEMPLATE_DIR=".tessl/tiles/jbaruch/coding-policy/skills/install-reviewer"
+TEMPLATE_DIR=".tessl/plugins/jbaruch/coding-policy/skills/install-reviewer"
 TEMPLATES=(
   "${TEMPLATE_DIR}/review-openai.md"
   "${TEMPLATE_DIR}/review-anthropic.md"
