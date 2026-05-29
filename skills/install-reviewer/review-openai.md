@@ -94,14 +94,6 @@ steps:
       mkdir -p /tmp/gh-aw/coding-policy
       cd /tmp/gh-aw/coding-policy
       tessl install jbaruch/coding-policy --yes
-      # tessl >=0.81 installs under .tessl/plugins/ (renamed from the
-      # pre-0.81 .tessl/tiles/). The reviewer prompt reads the plugins
-      # path; back-fill it from tiles when an older CLI wrote there, so
-      # the prompt resolves on both layouts.
-      if [ ! -d .tessl/plugins/jbaruch/coding-policy ] && [ -d .tessl/tiles/jbaruch/coding-policy ]; then
-        mkdir -p .tessl/plugins/jbaruch
-        cp -r .tessl/tiles/jbaruch/coding-policy .tessl/plugins/jbaruch/coding-policy
-      fi
 
 tools:
   bash:
