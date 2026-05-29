@@ -30,7 +30,7 @@
     {
       "name": "New criteria don't leak tile internals",
       "max_score": 10,
-      "description": "Criteria describe observable behaviour, not tile-internal file paths, action names, or invented string conventions. Referencing public tool/API surfaces is fine; referencing `.tessl/tiles/...` paths, internal routing, or prescribed reply templates is leaking"
+      "description": "Criteria describe observable behaviour, not tile-internal file paths, action names, or invented string conventions. Referencing public tool/API surfaces is fine; referencing `.tessl/plugins/...` paths, internal routing, or prescribed reply templates is leaking"
     },
     {
       "name": "Failure descriptions are specific",

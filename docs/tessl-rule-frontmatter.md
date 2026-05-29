@@ -6,7 +6,7 @@
 
 ## Why This Request Exists
 
-Tessl rule files are markdown with YAML frontmatter. The CLI preserves that frontmatter byte-identical at install time (no per-agent translation, no field filtering), and the agent's model reads it as part of the rule content — including any scope declared via `alwaysApply` and `applyTo:`. This is verified behavior, both empirically (`diff` between published source and installed `.tessl/tiles/<workspace>/<tile>/rules/<rule>.md`) and via a Tessl-engineering test where a rule scoped to TypeScript fired on a TS fizzbuzz and skipped a Python one.
+Tessl rule files are markdown with YAML frontmatter. The CLI preserves that frontmatter byte-identical at install time (no per-agent translation, no field filtering), and the agent's model reads it as part of the rule content — including any scope declared via `alwaysApply` and `applyTo:`. This is verified behavior, both empirically (`diff` between published source and installed `.tessl/plugins/<workspace>/<tile>/rules/<rule>.md`) and via a Tessl-engineering test where a rule scoped to TypeScript fired on a TS fizzbuzz and skipped a Python one.
 
 None of this is documented on `docs.tessl.io` today. Authors land on `reference/configuration.md` or `create/developing-tiles-locally.md`, see the directory layout and the `steering` map, but find nothing about:
 
@@ -21,7 +21,7 @@ Without that, authors default to `alwaysApply: true` on every rule (because it's
 
 Before writing, please confirm each claim against:
 
-1. **Live install behavior.** `tessl install <some-tile>` and inspect what's written: `.tessl/tiles/<workspace>/<tile>/rules/<rule>.md` for source preservation, `.tessl/RULES.md` for the `@import` index, and `.cursor/rules/tessl__rule__*.mdc` (when `--agent cursor`) for the Cursor wrapper structure.
+1. **Live install behavior.** `tessl install <some-tile>` and inspect what's written: `.tessl/plugins/<workspace>/<tile>/rules/<rule>.md` for source preservation, `.tessl/RULES.md` for the `@import` index, and `.cursor/rules/tessl__rule__*.mdc` (when `--agent cursor`) for the Cursor wrapper structure.
 2. **Engineering's TypeScript-scoping test.** Replicate or reference it as the canonical "the model honors frontmatter scope" example.
 3. **Existing tile.json schema.** The `steering.<rule>.alwaysApply` field exists today — every published tile sets it. The docs currently don't describe it. The right framing: it should match the corresponding `alwaysApply` value in the rule file's frontmatter; setting both to the same value is the convention.
 
@@ -67,10 +67,10 @@ Keep this short — this page is for the development workflow, not the reference
 
 **What to change:** Add a new H2 section, `What tessl install writes per agent`, between "Configuring your agent" and "Validating configuration". Two tables:
 
-1. **Always written (every install):** the path → purpose map for `.tessl/tiles/<workspace>/<tile>/...`, `.tessl/RULES.md`, `tessl.json`, `.mcp.json`, `AGENTS.md`.
+1. **Always written (every install):** the path → purpose map for `.tessl/plugins/<workspace>/<tile>/...`, `.tessl/RULES.md`, `tessl.json`, `.mcp.json`, `AGENTS.md`.
 2. **Per-agent additions:** for each supported `--agent` value (`claude-code`, `cursor`, `gemini`, `codex`, `copilot`, `copilot-vscode`), the additional files written and the path by which rules reach the agent.
 
-Note that the source rule file in `.tessl/tiles/.../rules/<rule>.md` is byte-identical to the published source, regardless of agent.
+Note that the source rule file in `.tessl/plugins/.../rules/<rule>.md` is byte-identical to the published source, regardless of agent.
 
 **Why this page:** This is the agent setup reference. Per-agent install output is the missing operational detail authors need when something doesn't work as expected.
 

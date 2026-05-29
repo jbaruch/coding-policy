@@ -17,7 +17,7 @@ Two forms:
 ## Leaking
 
 - **Privacy**: use sanitized or synthetic fixtures. Never live user data (real emails, calendar events, production PRs, internal logs). Use stable synthetic IDs and scrubbed examples — live-data fixtures drift silently and risk accidental exposure.
-- **Tile internals (leaking)**: criteria must not reference internal skill action names, `.tessl/tiles/...` paths, or tile-only identifiers that mean nothing outside the tile.
+- **Tile internals (leaking)**: criteria must not reference internal skill action names, `.tessl/plugins/...` paths, or tile-only identifiers that mean nothing outside the tile.
 - **Public surfaces (allowed)**: `gh pr create`, REST endpoints, conventional-commits format, semver — these exist independent of the tile.
 - **Tile-prescribed conventions (allowed)**: specific reply templates (`Fixed in <sha>`), chosen flags (`--ff-only`), invented format literals, specific sequences. A competent engineer without the tile would not produce these specific choices — checking for them measures tile value, not internal wiring.
 

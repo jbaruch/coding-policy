@@ -1,6 +1,6 @@
 # Project Instructions — coding-policy maintainer context
 
-This repo IS `jbaruch/coding-policy`. The rule files below are the source-of-truth tile content — directly imported so the maintainer always reads (and edits) the live versions, not a vendored `.tessl/tiles/` copy.
+This repo IS `jbaruch/coding-policy`. The rule files below are the source-of-truth tile content — directly imported so the maintainer always reads (and edits) the live versions, not a vendored `.tessl/plugins/` copy.
 
 @../rules/commit-conventions.md
 @../rules/testing-standards.md
