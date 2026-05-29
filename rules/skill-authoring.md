@@ -55,7 +55,7 @@ description: SKILL.md structure, frontmatter, execution-mode preamble, flat step
 - In rule prose, documentation, and skill cross-references, use repo-relative paths (`skills/<name>/<file>.<ext>`)
 - In step bodies, use the path that resolves at the invocation site
 - Repo-relative when the skill runs from a clone of this repo: `skills/release/poll-pr-reviews.sh`
-- Tile-mount path when the skill runs inside a consumer: `.tessl/tiles/jbaruch/coding-policy/skills/install-reviewer/preflight.sh`
+- Tile-mount path when the skill runs inside a consumer: `.tessl/plugins/jbaruch/coding-policy/skills/install-reviewer/preflight.sh` (tessl ≥0.81; the pre-0.81 layout was `.tessl/tiles/…`)
 - Don't mix conventions inside one SKILL.md — if one step invokes via a mount path, every other script-invoking step must too
 - Include the expected input/output contract in the step description
 
