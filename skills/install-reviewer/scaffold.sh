@@ -10,7 +10,8 @@
 # no-ops if the dir exists, `cp` rewrites the sources from the templates,
 # `gh aw compile` rewrites the locks, the .gitattributes append only
 # happens when the exact rule line is missing, and the .env.example
-# append only adds the secrets not already documented. The overwrite-
+# update adds the deep-link header and any missing secrets while
+# preserving existing consumer entries. The overwrite-
 # safety guard for pre-existing user content lives in the
 # install-reviewer skill, which halts before this script runs if the
 # repo already has its own review workflow files (install mode); in
