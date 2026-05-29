@@ -103,8 +103,11 @@ run "parse_repo_slug_from_url: ssh:// URL form" test_parse_ssh_url
 
 test_parse_trailing_slash() {
   assert_eq "trailing slash" "acme/widgets" "$(parse_repo_slug_from_url 'https://github.com/acme/widgets/')" || return 1
+  # `.git/` — a remote URL copied with a trailing slash after .git.
+  assert_eq "https .git/" "acme/widgets" "$(parse_repo_slug_from_url 'https://github.com/acme/widgets.git/')" || return 1
+  assert_eq "scp .git/" "acme/widgets" "$(parse_repo_slug_from_url 'git@github.com:acme/widgets.git/')" || return 1
 }
-run "parse_repo_slug_from_url: trailing slash stripped" test_parse_trailing_slash
+run "parse_repo_slug_from_url: trailing slash and .git/ stripped" test_parse_trailing_slash
 
 test_parse_rejects_empty_and_bare() {
   parse_repo_slug_from_url "" && { echo "    FAIL: empty URL accepted" >&2; return 1; }
@@ -155,10 +158,11 @@ test_env_merge_no_newline() {
 }
 run "ensure_env_example: existing file without newline merges cleanly" test_env_merge_no_newline
 
-# --- ensure_env_example: all keys present → file untouched (no-op) -----------
+# --- ensure_env_example: all keys present AND link present → untouched -------
 test_env_idempotent_noop() {
   local f="$TMPDIR_TEST/complete.env"
   {
+    printf '#   https://github.com/%s/settings/secrets/actions\n' "$SLUG"
     printf 'CODEX_API_KEY=\nOPENAI_API_KEY=\nANTHROPIC_API_KEY=\nTESSL_TOKEN=\n'
   } > "$f"
   local fp_before
@@ -167,10 +171,29 @@ test_env_idempotent_noop() {
   local fp_after
   fp_after=$(content_fingerprint "$f")
   assert_eq "content fingerprint unchanged" "$fp_before" "$fp_after" || return 1
-  # No spurious header appended when nothing was missing.
-  assert_eq "deep-link header count" "0" "$(grep -cF 'settings/secrets/actions' "$f")" || return 1
+  # No duplicate header appended.
+  assert_eq "deep-link header count" "1" "$(grep -cF 'settings/secrets/actions' "$f")" || return 1
 }
-run "ensure_env_example: all keys present → file untouched" test_env_idempotent_noop
+run "ensure_env_example: all keys + link present → file untouched" test_env_idempotent_noop
+
+# --- ensure_env_example: all keys present, link MISSING → header backfilled --
+# rules/no-secrets.md requires the deep link "in the file header". A
+# consumer file that documents every reviewer secret but lacks the link
+# must still get the link appended — not left non-compliant.
+test_env_backfills_missing_header() {
+  local f="$TMPDIR_TEST/keys-no-link.env"
+  printf 'CODEX_API_KEY=\nOPENAI_API_KEY=\nANTHROPIC_API_KEY=\nTESSL_TOKEN=\n' > "$f"
+  assert_eq "precondition: no link" "0" "$(grep -cF 'settings/secrets/actions' "$f")" || return 1
+  ensure_env_example "$f" "$SLUG" || return 1
+  assert_eq "deep-link header appended" "1" "$(grep -cF 'settings/secrets/actions' "$f")" || return 1
+  grep -qxF "$DEEP_LINK" "$f" || { echo "    FAIL: deep link line missing" >&2; return 1; }
+  # No secret key duplicated — they were all already present.
+  for k in "${SECRETS[@]}"; do
+    assert_eq "key ${k} count (no duplicate)" "1" "$(key_count "$f" "$k")" || return 1
+  done
+  assert_eq "trailing newline count" "1" "$(trailing_newline_count "$f")" || return 1
+}
+run "ensure_env_example: backfills missing deep-link header" test_env_backfills_missing_header
 
 # --- ensure_env_example: idempotent across two invocations on fresh file -----
 test_env_idempotency() {

@@ -76,15 +76,20 @@ ensure_gitattributes_marker() {
 # Parse the "owner/repo" slug from a git remote URL. Handles the three
 # forms git emits — SCP-style SSH (git@github.com:owner/repo.git), ssh://
 # URLs (ssh://git@github.com/owner/repo.git), and HTTPS
-# (https://github.com/owner/repo.git) — by stripping any trailing
-# .git/slash and taking the last two path segments. The owner segment is
-# bounded by the last `/` OR `:` so the SCP host:path separator is
-# handled without a regex. Echoes the slug on success; non-zero (no
-# echo) on an empty or unparseable URL. Pure function — no git calls — so
-# the enumerable parsing is unit-testable in isolation.
+# (https://github.com/owner/repo.git), each with an optional trailing
+# slash — by stripping any trailing slash/.git suffix and taking the last
+# two path segments. The owner segment is bounded by the last `/` OR `:`
+# so the SCP host:path separator is handled without a regex. Echoes the
+# slug on success; non-zero (no echo) on an empty or unparseable URL.
+# Pure function — no git calls — so the enumerable parsing is
+# unit-testable in isolation.
 parse_repo_slug_from_url() {
   local url="$1"
   [[ -n "$url" ]] || return 1
+  # Strip a trailing slash BEFORE the .git suffix so the `.git/` form
+  # (a remote URL copied with a trailing slash) still loses both — the
+  # reverse order leaves `.git` attached because the string ends in `/`.
+  url="${url%/}"
   url="${url%.git}"
   url="${url%/}"
   local repo="${url##*/}"
@@ -107,11 +112,14 @@ derive_repo_slug() {
 # Ensure $1 documents the reviewer CI secrets per rules/no-secrets.md. A
 # secret is "present" when the file already has a line beginning `KEY=`;
 # only missing secrets are appended, so an existing consumer .env.example
-# is never rewritten. The appended block carries the GH Actions
-# secrets-settings deep link header ($2 = "owner/repo" slug). Idempotent:
-# when every secret is already present the file is left byte-for-byte
-# unchanged (no header re-appended). A fresh file and a partial merge run
-# the same path — the only difference is how many KEY= lines land.
+# is never rewritten. The GH Actions secrets-settings deep link header
+# ($2 = "owner/repo" slug) is its own compliance concern: it lands
+# whenever the file lacks the link, even if every secret line is already
+# present (no-secrets.md requires the deep link "in the file header").
+# Idempotent: when every secret is present AND the link is already there
+# the file is left byte-for-byte unchanged. A fresh file and a partial
+# merge run the same path — what differs is whether the header and/or how
+# many KEY= lines land.
 ensure_env_example() {
   local target="$1" slug="$2"
   local secrets=(CODEX_API_KEY OPENAI_API_KEY ANTHROPIC_API_KEY TESSL_TOKEN)
@@ -121,7 +129,11 @@ ensure_env_example() {
       missing+=("$k")
     fi
   done
-  if [[ ${#missing[@]} -eq 0 ]]; then
+  local need_header=1
+  if [[ -f "$target" ]] && grep -qF 'settings/secrets/actions' "$target"; then
+    need_header=0
+  fi
+  if [[ ${#missing[@]} -eq 0 && $need_header -eq 0 ]]; then
     return 0
   fi
   # Terminate the consumer's last line if it lacks a trailing newline so
@@ -134,15 +146,19 @@ ensure_env_example() {
     printf '\n' >> "$target"
   fi
   {
-    printf '# CI reviewer secrets for the jbaruch/coding-policy gh-aw PR review workflows.\n'
-    printf '# Set as GitHub Actions repository secrets:\n'
-    printf '#   https://github.com/%s/settings/secrets/actions\n' "$slug"
-    printf '# The Codex (OpenAI-family) reviewer reads CODEX_API_KEY or OPENAI_API_KEY\n'
-    printf '# (CODEX_API_KEY wins when both are set). ANTHROPIC_API_KEY drives the Claude\n'
-    printf '# reviewer; TESSL_TOKEN authenticates the `tessl install` step for both.\n'
-    for k in "${missing[@]}"; do
-      printf '%s=\n' "$k"
-    done
+    if [[ $need_header -eq 1 ]]; then
+      printf '# CI reviewer secrets for the jbaruch/coding-policy gh-aw PR review workflows.\n'
+      printf '# Set as GitHub Actions repository secrets:\n'
+      printf '#   https://github.com/%s/settings/secrets/actions\n' "$slug"
+      printf '# The Codex (OpenAI-family) reviewer reads CODEX_API_KEY or OPENAI_API_KEY\n'
+      printf '# (CODEX_API_KEY wins when both are set). ANTHROPIC_API_KEY drives the Claude\n'
+      printf '# reviewer; TESSL_TOKEN authenticates the `tessl install` step for both.\n'
+    fi
+    if [[ ${#missing[@]} -gt 0 ]]; then
+      for k in "${missing[@]}"; do
+        printf '%s=\n' "$k"
+      done
+    fi
   } >> "$target"
 }
 
