@@ -81,6 +81,7 @@ TARGETS=(
   ".github/workflows/review-anthropic.lock.yml"
   ".github/aw/actions-lock.json"
   ".gitattributes"
+  ".env.example"
 )
 
 declare -a failures=()
@@ -167,13 +168,19 @@ check_branch_not_remote() {
 }
 
 # Override-mode safety check: refuse to upgrade if the consumer has dirty
-# working-tree state on any path the upgrade flow can rewrite — the four
-# reviewer source/lock files plus `.github/aw/actions-lock.json` (rewritten
-# by `gh aw compile`) and `.gitattributes` (the LOCK_GENERATED_RULE marker
-# may be appended). Mirrors how `git pull` refuses to overwrite uncommitted
-# changes — forces the consumer to commit, stash, or remove the local
-# content before the scaffold replaces their files. "Dirty" here covers
-# four states the override could clobber:
+# working-tree state on any path the upgrade flow can rewrite OR stage —
+# the four reviewer source/lock files, `.github/aw/actions-lock.json`
+# (rewritten by `gh aw compile`), `.gitattributes` (the LOCK_GENERATED_RULE
+# marker may be appended), and `.env.example` (the reviewer secrets block
+# may be appended). `.env.example` is merge-not-overwrite, so scaffold
+# itself preserves consumer content — but commit.sh stages the whole file,
+# so a consumer's unrelated pending `.env.example` edits would otherwise be
+# swept into the reviewer-upgrade commit. A never-tracked, not-yet-created
+# `.env.example` (fresh install/upgrade) has nothing to clobber and is not
+# flagged. Mirrors how `git pull` refuses to overwrite uncommitted changes
+# — forces the consumer to commit, stash, or remove the local content
+# before the scaffold replaces their files. "Dirty" here covers four
+# states the override could clobber:
 #   - symlink at the target path (working or broken); refuse outright so
 #     `cp`/compile/append never follows or replaces an unexpected link
 #   - tracked file with staged or unstaged edits relative to HEAD
