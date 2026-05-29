@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Stage the six files the install-reviewer skill produces and commit
+# Stage the seven files the install-reviewer skill produces and commit
 # them with the canonical message. Call after scaffold.sh has succeeded
 # and before push.sh.
 #
@@ -15,6 +15,7 @@
 #   .github/workflows/review-anthropic.lock.yml
 #   .github/aw/actions-lock.json
 #   .gitattributes
+#   .env.example
 #
 # Usage: commit.sh [--override]
 #   --override    Upgrade-mode commit. Uses the upgrade branch name and
@@ -55,6 +56,7 @@ FILES=(
   .github/workflows/review-anthropic.lock.yml
   .github/aw/actions-lock.json
   .gitattributes
+  .env.example
 )
 
 main() {

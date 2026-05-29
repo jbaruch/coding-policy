@@ -2,13 +2,15 @@
 # Scaffold the jbaruch/coding-policy PR review workflow pair into a
 # consumer repo: ensure the workflows dir exists, copy both packaged
 # templates (OpenAI + Anthropic reviewers), compile them with gh-aw,
-# and mark the lock files as generated via .gitattributes. Call after
+# mark the lock files as generated via .gitattributes, and document the
+# reviewer CI secrets in .env.example per rules/no-secrets.md. Call after
 # creating the feature branch and before committing.
 #
 # Idempotent per rules/file-hygiene.md: re-running is safe — `mkdir -p`
 # no-ops if the dir exists, `cp` rewrites the sources from the templates,
-# `gh aw compile` rewrites the locks, and the .gitattributes append
-# only happens when the exact rule line is missing. The overwrite-
+# `gh aw compile` rewrites the locks, the .gitattributes append only
+# happens when the exact rule line is missing, and the .env.example
+# append only adds the secrets not already documented. The overwrite-
 # safety guard for pre-existing user content lives in the
 # install-reviewer skill, which halts before this script runs if the
 # repo already has its own review workflow files (install mode); in
@@ -30,7 +32,7 @@
 #                 flag, this script assumes Step 2's overwrite refusal
 #                 in the skill has already verified no targets exist.
 # Out:   one JSON object on stdout:
-#          {"sources":[...], "locks":[...], "gitattributes":"...", "compiled":true, "override":bool}
+#          {"sources":[...], "locks":[...], "gitattributes":"...", "env_example":"...", "compiled":true, "override":bool}
 # Exit:  0 on success; non-zero with stderr diagnostic on failure
 
 set -euo pipefail
@@ -71,6 +73,79 @@ ensure_gitattributes_marker() {
   fi
 }
 
+# Parse the "owner/repo" slug from a git remote URL. Handles the three
+# forms git emits — SCP-style SSH (git@github.com:owner/repo.git), ssh://
+# URLs (ssh://git@github.com/owner/repo.git), and HTTPS
+# (https://github.com/owner/repo.git) — by stripping any trailing
+# .git/slash and taking the last two path segments. The owner segment is
+# bounded by the last `/` OR `:` so the SCP host:path separator is
+# handled without a regex. Echoes the slug on success; non-zero (no
+# echo) on an empty or unparseable URL. Pure function — no git calls — so
+# the enumerable parsing is unit-testable in isolation.
+parse_repo_slug_from_url() {
+  local url="$1"
+  [[ -n "$url" ]] || return 1
+  url="${url%.git}"
+  url="${url%/}"
+  local repo="${url##*/}"
+  local rest="${url%/*}"
+  local owner="${rest##*[/:]}"
+  [[ -n "$owner" && -n "$repo" && "$owner" != "$rest" ]] || return 1
+  printf '%s/%s' "$owner" "$repo"
+}
+
+# Resolve the origin remote's owner/repo slug for the .env.example
+# secrets-settings deep link. Non-zero (no echo) when origin is unset —
+# the caller falls back to a literal placeholder so the file still
+# scaffolds.
+derive_repo_slug() {
+  local url
+  url=$(git remote get-url origin 2>/dev/null) || return 1
+  parse_repo_slug_from_url "$url"
+}
+
+# Ensure $1 documents the reviewer CI secrets per rules/no-secrets.md. A
+# secret is "present" when the file already has a line beginning `KEY=`;
+# only missing secrets are appended, so an existing consumer .env.example
+# is never rewritten. The appended block carries the GH Actions
+# secrets-settings deep link header ($2 = "owner/repo" slug). Idempotent:
+# when every secret is already present the file is left byte-for-byte
+# unchanged (no header re-appended). A fresh file and a partial merge run
+# the same path — the only difference is how many KEY= lines land.
+ensure_env_example() {
+  local target="$1" slug="$2"
+  local secrets=(CODEX_API_KEY OPENAI_API_KEY ANTHROPIC_API_KEY TESSL_TOKEN)
+  local missing=() k
+  for k in "${secrets[@]}"; do
+    if [[ ! -f "$target" ]] || ! grep -qE "^${k}=" "$target"; then
+      missing+=("$k")
+    fi
+  done
+  if [[ ${#missing[@]} -eq 0 ]]; then
+    return 0
+  fi
+  # Terminate the consumer's last line if it lacks a trailing newline so
+  # our block doesn't fuse onto their content, then add one blank-line
+  # separator when the file already has content.
+  if [[ -f "$target" && -s "$target" && -n "$(tail -c 1 "$target")" ]]; then
+    printf '\n' >> "$target"
+  fi
+  if [[ -f "$target" && -s "$target" ]]; then
+    printf '\n' >> "$target"
+  fi
+  {
+    printf '# CI reviewer secrets for the jbaruch/coding-policy gh-aw PR review workflows.\n'
+    printf '# Set as GitHub Actions repository secrets:\n'
+    printf '#   https://github.com/%s/settings/secrets/actions\n' "$slug"
+    printf '# The Codex (OpenAI-family) reviewer reads CODEX_API_KEY or OPENAI_API_KEY\n'
+    printf '# (CODEX_API_KEY wins when both are set). ANTHROPIC_API_KEY drives the Claude\n'
+    printf '# reviewer; TESSL_TOKEN authenticates the `tessl install` step for both.\n'
+    for k in "${missing[@]}"; do
+      printf '%s=\n' "$k"
+    done
+  } >> "$target"
+}
+
 OVERRIDE_MODE=0
 for arg in "$@"; do
   case "$arg" in
@@ -91,6 +166,7 @@ TEMPLATE_DIR=".tessl/plugins/jbaruch/coding-policy/skills/install-reviewer"
 WORKFLOW_DIR=".github/workflows"
 ACTIONS_LOCK=".github/aw/actions-lock.json"
 GITATTRIBUTES=".gitattributes"
+ENV_EXAMPLE=".env.example"
 LOCK_GENERATED_RULE='.github/workflows/*.lock.yml linguist-generated=true merge=ours'
 
 # Paired reviewer workflows — both scaffold together.
@@ -140,8 +216,9 @@ main() {
 
   # Refuse symlinks at any path this script can write to, in BOTH modes.
   # Coverage extends beyond the four reviewer source/lock files to also
-  # include `.github/aw/actions-lock.json` (rewritten by `gh aw compile`)
-  # and `.gitattributes` (the LOCK_GENERATED_RULE marker may be appended).
+  # include `.github/aw/actions-lock.json` (rewritten by `gh aw compile`),
+  # `.gitattributes` (the LOCK_GENERATED_RULE marker may be appended), and
+  # `.env.example` (reviewer secrets block may be appended).
   # A symlink at any of these (e.g., review-openai.md → some file outside
   # the repo, or .gitattributes → a shared global config) is an
   # unexpected manual configuration this skill doesn't manage: the
@@ -149,7 +226,7 @@ main() {
   # the target rather than replace the link itself, which can clobber an
   # arbitrary file. Forces the consumer to remove the symlink explicitly
   # before running the skill.
-  local writable_paths=("${sources[@]}" "${locks[@]}" "$ACTIONS_LOCK" "$GITATTRIBUTES")
+  local writable_paths=("${sources[@]}" "${locks[@]}" "$ACTIONS_LOCK" "$GITATTRIBUTES" "$ENV_EXAMPLE")
   local symlinks=()
   for f in "${writable_paths[@]}"; do
     [[ -L "$f" ]] && symlinks+=("$f")
@@ -286,6 +363,16 @@ main() {
   # entries are not clobbered. The wildcard pattern covers both lock files.
   ensure_gitattributes_marker "$GITATTRIBUTES" "$LOCK_GENERATED_RULE"
 
+  # Document the reviewer CI secrets in .env.example per rules/no-secrets.md.
+  # Idempotent merge — appends only the secrets missing from an existing
+  # consumer file, never rewrites their content. The deep-link header is
+  # built from the origin remote; if origin is unset (preflight normally
+  # guarantees it) fall back to a literal placeholder so the file still
+  # scaffolds with a fill-in-the-blank link.
+  local repo_slug
+  repo_slug=$(derive_repo_slug) || repo_slug="<owner>/<repo>"
+  ensure_env_example "$ENV_EXAMPLE" "$repo_slug"
+
   local override_json="false"
   (( OVERRIDE_MODE == 1 )) && override_json="true"
 
@@ -295,8 +382,9 @@ main() {
     --argjson sources "$(printf '%s\n' "${sources[@]}" | jq -R . | jq -s .)" \
     --argjson locks "$(printf '%s\n' "${locks[@]}" | jq -R . | jq -s .)" \
     --arg gitattributes "$GITATTRIBUTES" \
+    --arg env_example "$ENV_EXAMPLE" \
     --argjson override "$override_json" \
-    '{sources: $sources, locks: $locks, gitattributes: $gitattributes, compiled: true, override: $override}'
+    '{sources: $sources, locks: $locks, gitattributes: $gitattributes, env_example: $env_example, compiled: true, override: $override}'
 }
 
 [[ "${BASH_SOURCE[0]}" == "${0}" ]] && main "$@"

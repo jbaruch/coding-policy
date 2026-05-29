@@ -54,7 +54,7 @@ tessl install jbaruch/coding-policy
 | [release](skills/release/SKILL.md) | PR creation, Copilot review, merge + cleanup workflow |
 | [eval-authoring](skills/eval-authoring/SKILL.md) | Generate, review, iterate on eval scenarios with score-driven feedback |
 | [eval-curation](skills/eval-curation/SKILL.md) | Prune an existing eval suite — run, compute per-scenario lift, diagnose weak scenarios, retire / fix / rewrite, verify the curated suite still pulls weight |
-| [install-reviewer](skills/install-reviewer/SKILL.md) | Scaffold the paired gh-aw PR review workflows (OpenAI + Anthropic) into a consumer repo — reviews every PR against the latest published `jbaruch/coding-policy` with cross-family enforcement. Supports `--override` for in-place upgrades. |
+| [install-reviewer](skills/install-reviewer/SKILL.md) | Scaffold the paired gh-aw PR review workflows (OpenAI + Anthropic) into a consumer repo — reviews every PR against the latest published `jbaruch/coding-policy` with cross-family enforcement. Documents the reviewer CI secrets in a merged `.env.example`. Supports `--override` for in-place upgrades. |
 
 ## Philosophy
 
