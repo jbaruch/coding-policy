@@ -187,6 +187,26 @@ test_env_link_below_body_reprepended() {
 }
 run "ensure_env_example: link below body re-prepended to header" test_env_link_below_body_reprepended
 
+# --- ensure_env_example: a DIFFERENT repo's header link is not accepted ------
+# The link must point at THIS repo. A header link for another repo must
+# not satisfy the check — the current repo's link is prepended.
+test_env_wrong_repo_link_replaced() {
+  local f="$TMPDIR_TEST/wrong-repo.env"
+  {
+    printf '#   https://github.com/other/project/settings/secrets/actions\n'
+    printf 'CODEX_API_KEY=\nOPENAI_API_KEY=\nANTHROPIC_API_KEY=\nTESSL_TOKEN=\n'
+  } > "$f"
+  ensure_env_example "$f" "$SLUG" || return 1
+  grep -qxF "$DEEP_LINK" "$f" || { echo "    FAIL: current-repo link not added" >&2; return 1; }
+  local link_line var_line
+  link_line=$(grep -nF "github.com/${SLUG}/settings/secrets/actions" "$f" | head -1 | cut -d: -f1)
+  var_line=$(grep -nE '^CODEX_API_KEY=' "$f" | head -1 | cut -d: -f1)
+  [[ "$link_line" -lt "$var_line" ]] || { echo "    FAIL: current-repo link (line $link_line) not before first var (line $var_line)" >&2; return 1; }
+  # The other repo's link is consumer content — left in place, not deleted.
+  grep -qF 'github.com/other/project/settings/secrets/actions' "$f" || { echo "    FAIL: consumer's other-repo link deleted" >&2; return 1; }
+}
+run "ensure_env_example: different repo's header link not accepted" test_env_wrong_repo_link_replaced
+
 # --- ensure_env_example: existing file WITHOUT trailing newline --------------
 test_env_merge_no_newline() {
   local f="$TMPDIR_TEST/no-nl.env"

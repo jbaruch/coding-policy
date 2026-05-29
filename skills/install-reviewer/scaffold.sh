@@ -114,14 +114,15 @@ derive_repo_slug() {
 # secret is "present" when the file already has a line beginning `KEY=`;
 # existing consumer content is preserved verbatim. The GH Actions
 # secrets-settings deep link ($2 = "owner/repo" slug) must sit "in the
-# file header" per no-secrets.md. A link counts as in-header only when it
-# precedes the first `KEY=` assignment; when the file lacks a header link
-# (no link at all, or one sitting below the body) the whole reviewer
-# block (header comment + any missing KEY= lines) is PREPENDED above the
-# consumer's existing entries — not appended below them. When a header
+# file header" per no-secrets.md. A link counts as in-header only when
+# THIS repo's slug-specific link precedes the first `KEY=` assignment;
+# when the file lacks such a header link (no link, a different repo's
+# link, or one sitting below the body) the whole reviewer block (header
+# comment + any missing KEY= lines) is PREPENDED above the consumer's
+# existing entries — not appended below them. When the correct header
 # link is already present only the missing KEY= lines are appended.
-# Idempotent: every secret present AND a header link already there is a
-# no-op. EOF is normalized to a single trailing newline per
+# Idempotent: every secret present AND the correct header link already
+# there is a no-op. EOF is normalized to a single trailing newline per
 # rules/code-formatting.md.
 ensure_env_example() {
   local target="$1" slug="$2"
@@ -132,14 +133,17 @@ ensure_env_example() {
       missing+=("$k")
     fi
   done
-  # The link counts as "in the header" only when it precedes the first
-  # variable assignment (`KEY=`). A link sitting below the body does not
-  # satisfy no-secrets.md, so it is treated the same as a missing link —
-  # the block is prepended to put a header link at the top.
+  # The link counts as "in the header" only when THIS repo's link
+  # (slug-specific, not just any settings/secrets/actions URL) precedes
+  # the first variable assignment (`KEY=`). A link for a different repo,
+  # or one sitting below the body, does not satisfy no-secrets.md — both
+  # are treated as a missing header link, so the block is prepended to put
+  # the correct link at the top.
+  local expected_link="https://github.com/${slug}/settings/secrets/actions"
   local link_in_header=0
   if [[ -f "$target" ]]; then
     local link_ln var_ln
-    link_ln=$( { grep -nF 'settings/secrets/actions' "$target" || true; } | head -1 | cut -d: -f1 )
+    link_ln=$( { grep -nF "$expected_link" "$target" || true; } | head -1 | cut -d: -f1 )
     var_ln=$( { grep -nE '^[A-Za-z_][A-Za-z0-9_]*=' "$target" || true; } | head -1 | cut -d: -f1 )
     if [[ -n "$link_ln" ]] && { [[ -z "$var_ln" ]] || [[ "$link_ln" -lt "$var_ln" ]]; }; then
       link_in_header=1
