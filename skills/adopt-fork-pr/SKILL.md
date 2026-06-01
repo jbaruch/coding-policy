@@ -18,7 +18,7 @@ Classify a referenced pull request and, when it comes from a fork, adopt its bra
 
 ## Step 1 — Classify the PR
 
-Run `gh pr view <N> --json number,isCrossRepository,headRefName,headRepositoryOwner,author,title,url,state`.
+Run `gh pr view <N> --json number,isCrossRepository,headRefName,headRepositoryOwner,headRepository,author,title,url,state`.
 
 - `isCrossRepository: false` — same-repo PR. Proceed to Step 2.
 - `isCrossRepository: true` — fork PR. Proceed to Step 3.
@@ -27,16 +27,20 @@ Run `gh pr view <N> --json number,isCrossRepository,headRefName,headRepositoryOw
 
 The policy reviewer already covers same-repo PRs. Report the PR's review and check status from `gh pr view <N> --json reviewDecision,statusCheckRollup` and finish here. Do not create branches, push, or open duplicate PRs.
 
-## Step 3 — Surface the Fork and Confirm
+## Step 3 — Surface the Fork
 
-Tell the user PR #N comes from fork `<headRepositoryOwner>/<repo>` and that the policy reviewer's fork-guard skips it. Ask with `AskUserQuestion`:
+Tell the user PR #N comes from fork `<headRepositoryOwner>/<headRepository>` and that the policy reviewer's fork-guard skips it. Proceed immediately to Step 4.
+
+## Step 4 — Confirm Adoption
+
+Ask with `AskUserQuestion`:
 
 - **Adopt for review** — push the contributor's branch into the base repo as a reviewable same-repo PR.
 - **Just inspect** — read-only; no adoption.
 
-On **Just inspect**, report the diff and status, then finish here. On **Adopt for review**, proceed to Step 4.
+On **Just inspect**, report the diff and status, then finish here. On **Adopt for review**, proceed to Step 5.
 
-## Step 4 — Adopt the Branch
+## Step 5 — Adopt the Branch
 
 ```bash
 .tessl/plugins/jbaruch/coding-policy/skills/adopt-fork-pr/adopt.sh <N>
