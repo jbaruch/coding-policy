@@ -18,9 +18,16 @@ Lift is the number that matters. Aggregate attainment on its own is a vanity met
 
 ### Three causes for weak / no lift
 
-1. **Coincidence with universal competence** — the tile prescribes what baseline already does. The rule prose itself documents the prescription; a perpetually-passing eval scenario adds no documentation value beyond the rule and only pays Tessl run-cost. Retire the scenario as a null test.
+1. **Coincidence with universal competence** — the tile's prescription *itself* is what baseline already produces; no more-specific tile behaviour is being missed, so no replacement criterion can be salvaged. Retire the scenario as a null test.
 2. **Task leaked the technique** — baseline pattern-matched the answer from the task text. Fix the task (strip the leaked literal); keep the criterion.
-3. **Criteria grade universal competence** — the criteria test things baseline always does (basic git safety, obvious engineering judgement, general engineering-101) rather than the specific manner the tile prescribes. Rewrite the criteria to check the tile's specific prescription (e.g., the exact reply template, the chosen flag, the named CLI sequence), or retire the scenario if nothing tile-specific can be salvaged from it. The default action is `rewrite-criteria` (the task itself is fine; the bleed lives in the criteria); `retire` is the fallback when no tile-specific replacement criteria exist.
+3. **Criteria grade universal competence** — the criteria test things baseline always does (basic git safety, obvious engineering judgement, general engineering-101) while the tile prescribes a *more specific* behaviour the criteria failed to check. Rewrite the criteria to check that specific prescription (the exact reply template, the chosen flag, the named CLI sequence).
+
+**Cause #1 vs #3 discriminator** — both present as "baseline already does it," and conflating them sends the action the wrong way. Ask: does the tile prescribe a more specific behaviour than the criteria currently grade, one baseline would not produce by default?
+
+- No salvageable tile-specific replacement (the tile's prescription *is* the universal behaviour — e.g., imperative-mood commit subjects) → cause #1 → `retire`
+- A more-specific prescription exists and the criteria merely glossed it (e.g., a canary 10% / 15-min-bake sequence the criteria phrased as "mention deployment") → cause #3 → `rewrite-criteria`
+
+The salvageable-replacement test decides — there is no default action.
 
 ## Negative Cases (Refusal-Based Scenarios)
 
