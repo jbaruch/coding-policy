@@ -29,7 +29,7 @@ The policy reviewer already covers same-repo PRs. Report the PR's review and che
 
 ## Step 3 — Surface the Fork
 
-Tell the user PR #N comes from fork `<headRepositoryOwner>/<headRepository>` and that the policy reviewer's fork-guard skips it. Proceed immediately to Step 4.
+Tell the user PR #N comes from fork `<headRepositoryOwner.login>/<headRepository.name>` and that the policy reviewer's fork-guard skips it. Proceed immediately to Step 4.
 
 ## Step 4 — Confirm Adoption
 
