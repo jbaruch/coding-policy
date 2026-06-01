@@ -8,19 +8,19 @@
       "description": "Uses `git checkout -b <branch>` (or equivalent) to create a new branch before making changes — does NOT commit directly to main/master"
     },
     {
-      "name": "Populates .github/workflows with both source + lock pairs",
+      "name": "Plan populates .github/workflows with both source + lock pairs",
       "max_score": 30,
-      "description": "Ends with all four files present in the working tree: `.github/workflows/review-openai.md`, `.github/workflows/review-openai.lock.yml`, `.github/workflows/review-anthropic.md`, `.github/workflows/review-anthropic.lock.yml`. Each source declares a `pull_request` trigger and a pre-step that runs `tessl install jbaruch/coding-policy`; each lock is the compiled form of its source (produced by `gh aw compile`, which is a public gh CLI extension, not typed out by hand or fetched from a URL). Only the final observable state is graded — not the specific command sequence the agent chose to reach it"
+      "description": "The plan's command sequence produces all four files at `.github/workflows/`: `review-openai.md`, `review-openai.lock.yml`, `review-anthropic.md`, `review-anthropic.lock.yml`. Each source declares a `pull_request` trigger and a pre-step that runs `tessl install jbaruch/coding-policy`; each lock is the compiled form of its source (produced by `gh aw compile`, which is a public gh CLI extension, not typed out by hand or fetched from a URL). Graded on the end state the plan's commands describe — not on files actually present in the working tree, and not on the specific command sequence chosen to reach it"
     },
     {
       "name": "Commits both sources and both locks",
       "max_score": 10,
-      "description": "Stages and commits all four workflow files — both source files AND both lock files, not a partial set"
+      "description": "The plan stages and commits all four workflow files — both source files AND both lock files, not a partial set"
     },
     {
       "name": "Pushes and opens a PR",
       "max_score": 7,
-      "description": "Pushes the branch and creates a pull request with `gh pr create`"
+      "description": "The plan pushes the branch and creates a pull request with `gh pr create`"
     },
     {
       "name": "PR body lists OPENAI_API_KEY",
