@@ -7,7 +7,7 @@
 # Repo:    operates on the current git repository (origin).
 #
 # What it does (all deterministic):
-#   1. Reads PR metadata via `gh pr view`.
+#   1. Reads PR metadata via `gh pr view` (including the PR body).
 #   2. Refuses anything that is not an OPEN cross-repo (fork) PR.
 #   3. Computes the adopted branch name:
 #        adopt/pr-<N>-<slug(headRefName)>
@@ -22,6 +22,11 @@
 #      under the adopted branch name (commits unchanged, so authorship + any
 #      `Co-authored-by:` Author-Model trailer survive), then opens a same-repo
 #      PR and comments on the original fork PR. The original is left OPEN.
+#   6. Author-Model continuity: if the original PR body carried an
+#      `**Author-Model:**` line (a body-only declaration the preserved commits
+#      would NOT reproduce), that exact line is prepended to the adopted PR
+#      body so the reviewer's declaration gate passes immediately. Trailer-based
+#      declarations need no copy — they ride along on the commits.
 #
 # Output: a single JSON object on stdout:
 #   {"state": "...", "adopted_branch": "...", "new_pr_url": "...",
@@ -32,7 +37,10 @@
 #   to format the normal envelope, so the failure is hand-rolled. Every other
 #   failure is a stderr diagnostic with the exit code below (no stdout JSON).
 #
-# New-PR body template (verbatim):
+# New-PR body template (verbatim; the Author-Model line is present only when the
+# original PR body carried one):
+#   [**Author-Model:** <copied from original body>]
+#
 #   Adopted from #<N> by @<author> (fork <owner>/<repo>).
 #
 #   Carries the contributor's original commits unchanged — authorship and any
@@ -48,7 +56,7 @@
 #
 # Exit codes:
 #   0  success (adopted, recovered, or already-adopted no-op)
-#   1  operational failure (dirty tree, push/gh failure, PR not OPEN)
+#   1  operational failure (dirty tree, gh/git failure, PR not OPEN)
 #   2  usage / invalid argument
 #   3  PR is not a fork PR (adoption does not apply)
 #
@@ -68,23 +76,37 @@ slugify() {
   printf '%s' "${s:0:50}"
 }
 
+extract_author_model_line() {
+  # echoes the first `**Author-Model:**` / `Author-Model:` line in $1 (trimmed),
+  # or empty. grep no-match (exit 1) is swallowed; the line is data, not status.
+  printf '%s\n' "$1" \
+    | grep -m1 -E '^[[:space:]]*\*{0,2}Author-Model:' \
+    | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//' \
+    || true
+}
+
 open_pr_url_for() {
-  # echoes the URL of the open PR whose head is $1, or empty
-  gh pr list --head "$1" --state open --json url --jq '.[0].url // empty' 2>/dev/null || true
+  # echoes the URL of the open PR whose head is $1, or empty if none.
+  # Exits non-zero (with gh's stderr intact) if the query itself fails, so the
+  # caller can distinguish "no PR" from "couldn't ask".
+  gh pr list --head "$1" --state open --json url --jq '.[0].url // empty'
 }
 
 create_adopted_pr() {
-  # args: base branch title pr_n author fork_owner fork_repo orig_url
+  # args: base branch title pr_n author fork_owner fork_repo orig_url am_line
   # opens the same-repo PR, comments on the original, echoes the new PR URL
-  local base="$1" branch="$2" title="$3" pr_n="$4" author="$5" fork_owner="$6" fork_repo="$7" orig_url="$8"
-  local body comment new_url
-  body=$(printf 'Adopted from #%s by @%s (fork %s/%s).\n\nCarries the contributor'\''s original commits unchanged — authorship and any Author-Model trailer are preserved. As a same-repo PR, it gets the policy review.\n\nOriginal PR: %s\n' \
-    "$pr_n" "$author" "$fork_owner" "$fork_repo" "$orig_url")
-  new_url=$(gh pr create --base "$base" --head "$branch" --title "$title" --body "$body" 2>/dev/null) \
-    || die "gh pr create for branch $branch failed." 1
+  local base="$1" branch="$2" title="$3" pr_n="$4" author="$5" fork_owner="$6" fork_repo="$7" orig_url="$8" am_line="${9:-}"
+  local header="" body comment new_url
+  if [ -n "$am_line" ]; then
+    header="${am_line}"$'\n\n'
+  fi
+  body=$(printf '%sAdopted from #%s by @%s (fork %s/%s).\n\nCarries the contributor'\''s original commits unchanged — authorship and any Author-Model trailer are preserved. As a same-repo PR, it gets the policy review.\n\nOriginal PR: %s\n' \
+    "$header" "$pr_n" "$author" "$fork_owner" "$fork_repo" "$orig_url")
+  new_url=$(gh pr create --base "$base" --head "$branch" --title "$title" --body "$body") \
+    || die "gh pr create for branch $branch failed — see the gh error above (permissions, an existing PR for the branch, or validation)." 1
   comment=$(printf 'Adopted into the base repo as %s so the policy reviewer can run — fork PRs are skipped by the reviewer'\''s fork-guard. Leaving this PR open; close it whenever you like, it'\''s your call.\n' "$new_url")
-  gh pr comment "$pr_n" --body "$comment" >/dev/null 2>&1 \
-    || printf 'adopt.sh: warning — adopted PR created (%s) but commenting on original #%s failed.\n' "$new_url" "$pr_n" >&2
+  gh pr comment "$pr_n" --body "$comment" >/dev/null \
+    || printf 'adopt.sh: warning — adopted PR created (%s) but commenting on original #%s failed (see gh error above).\n' "$new_url" "$pr_n" >&2
   printf '%s' "$new_url"
 }
 
@@ -106,10 +128,10 @@ main() {
   git rev-parse --is-inside-work-tree >/dev/null 2>&1 || die "not inside a git work tree." 1
 
   local meta
-  meta=$(gh pr view "$n" --json number,isCrossRepository,headRefName,headRepositoryOwner,headRepository,author,title,url,state,baseRefName 2>/dev/null) \
-    || die "could not read PR #$n — check the number and that 'gh auth status' is healthy." 1
+  meta=$(gh pr view "$n" --json number,isCrossRepository,headRefName,headRepositoryOwner,headRepository,author,title,url,state,baseRefName,body) \
+    || die "could not read PR #$n — see the gh error above; check the number and that 'gh auth status' is healthy." 1
 
-  local is_fork state head_ref base_ref fork_owner fork_repo author title url
+  local is_fork state head_ref base_ref fork_owner fork_repo author title url orig_body am_line
   is_fork=$(jq -r '.isCrossRepository' <<<"$meta")
   state=$(jq -r '.state' <<<"$meta")
   head_ref=$(jq -r '.headRefName' <<<"$meta")
@@ -119,6 +141,8 @@ main() {
   author=$(jq -r '.author.login // empty' <<<"$meta")
   title=$(jq -r '.title' <<<"$meta")
   url=$(jq -r '.url' <<<"$meta")
+  orig_body=$(jq -r '.body // empty' <<<"$meta")
+  am_line=$(extract_author_model_line "$orig_body")
 
   [ "$is_fork" = "true" ] || die "PR #$n is a same-repo PR — adoption only applies to fork PRs; the reviewer already covers it." 3
   [ "$state" = "OPEN" ] || die "PR #$n is $state — only OPEN fork PRs can be adopted." 1
@@ -132,13 +156,14 @@ main() {
     || die "git ls-remote origin failed — check network/auth to the base repo." 1
   if [ -n "$remote_heads" ]; then
     local existing
-    existing=$(open_pr_url_for "$branch")
+    existing=$(open_pr_url_for "$branch") \
+      || die "gh pr list failed while checking for an existing adopted PR — see the gh error above; do not assume none exists." 1
     if [ -n "$existing" ]; then
       emit "already-adopted" "$branch" "$existing" "$n" "$author"
       exit 0
     fi
     # Branch was pushed but no PR exists — recover by opening it now.
-    new_url=$(create_adopted_pr "$base_ref" "$branch" "$title" "$n" "$author" "$fork_owner" "$fork_repo" "$url")
+    new_url=$(create_adopted_pr "$base_ref" "$branch" "$title" "$n" "$author" "$fork_owner" "$fork_repo" "$url" "$am_line")
     emit "adopted" "$branch" "$new_url" "$n" "$author"
     exit 0
   fi
@@ -156,7 +181,7 @@ main() {
     || die "push to origin/$branch failed — you need write access to the base repo." 1
   git checkout --quiet "$orig_ref" 2>/dev/null || true
 
-  new_url=$(create_adopted_pr "$base_ref" "$branch" "$title" "$n" "$author" "$fork_owner" "$fork_repo" "$url")
+  new_url=$(create_adopted_pr "$base_ref" "$branch" "$title" "$n" "$author" "$fork_owner" "$fork_repo" "$url" "$am_line")
   emit "adopted" "$branch" "$new_url" "$n" "$author"
 }
 

@@ -22,6 +22,8 @@ rc_is() { if [ "$1" -eq "$2" ]; then ok "$3"; else bad "$3 (rc=$1)"; fi; }
 : "${FIXTURE_BRANCH_EXISTS:=0}"
 : "${FIXTURE_OPEN_PR:=0}"        # 1 = an open PR already exists for the adopted branch
 : "${FIXTURE_LSREMOTE_FAIL:=0}"  # 1 = git ls-remote fails (network/auth)
+: "${FIXTURE_PRLIST_FAIL:=0}"    # 1 = gh pr list fails (auth/API)
+: "${FIXTURE_BODY:=}"            # original PR body text
 
 gh() {
   case "$1 $2" in
@@ -30,13 +32,24 @@ gh() {
 {"number":${3},"isCrossRepository":${FIXTURE_IS_FORK},"headRefName":"feat/cool-thing",
  "headRepositoryOwner":{"login":"contributor"},"headRepository":{"name":"blog-writer"},
  "author":{"login":"contributor"},"title":"feat: a cool thing","url":"https://github.com/owner/blog-writer/pull/${3}",
- "state":"${FIXTURE_STATE}","baseRefName":"main"}
+ "state":"${FIXTURE_STATE}","baseRefName":"main","body":"${FIXTURE_BODY}"}
 JSON
       ;;
     "pr checkout") return 0 ;;
-    "pr create")  printf 'https://github.com/owner/blog-writer/pull/99\n' ;;
+    "pr create")
+      if [ -n "${BODY_CAPTURE:-}" ]; then
+        local prev="" b=""
+        for a in "$@"; do
+          if [ "$prev" = "--body" ]; then b="$a"; fi
+          prev="$a"
+        done
+        printf '%s' "$b" > "$BODY_CAPTURE"
+      fi
+      printf 'https://github.com/owner/blog-writer/pull/99\n' ;;
     "pr comment") return 0 ;;
-    "pr list")    if [ "$FIXTURE_OPEN_PR" = "1" ]; then printf 'https://github.com/owner/blog-writer/pull/42\n'; else printf '\n'; fi ;;
+    "pr list")
+      if [ "$FIXTURE_PRLIST_FAIL" = "1" ]; then return 4; fi
+      if [ "$FIXTURE_OPEN_PR" = "1" ]; then printf 'https://github.com/owner/blog-writer/pull/42\n'; else printf '\n'; fi ;;
     *) return 0 ;;
   esac
 }
@@ -64,6 +77,10 @@ eq "$(slugify 'feat/framework-md-persona-override')" "feat-framework-md-persona-
 eq "$(slugify 'Foo_Bar Baz!!')" "foo-bar-baz" "slugify lowercases and squeezes"
 eq "$(slugify '---weird///')" "weird" "slugify trims leading/trailing dashes"
 
+# ---- extract_author_model_line (pure) ------------------------------------
+eq "$(extract_author_model_line $'intro\n**Author-Model:** gpt-5.4\nmore')" "**Author-Model:** gpt-5.4" "extracts bold Author-Model line"
+eq "$(extract_author_model_line $'no declaration here')" "" "no Author-Model line → empty"
+
 # ---- argument validation -------------------------------------------------
 run_main >/dev/null 2>&1;     rc_is "$?" 2 "no arg → exit 2"
 run_main abc >/dev/null 2>&1; rc_is "$?" 2 "non-numeric → exit 2"
@@ -78,6 +95,9 @@ FIXTURE_STATE=MERGED run_main 6 >/dev/null 2>&1; rc_is "$?" 1 "non-OPEN fork PR 
 # ---- ls-remote failure (network/auth) → exit 1, not silent fresh-adoption -
 FIXTURE_LSREMOTE_FAIL=1 run_main 6 >/dev/null 2>&1; rc_is "$?" 1 "ls-remote failure → exit 1"
 
+# ---- gh pr list failure on existing branch → exit 1, not false recovery --
+FIXTURE_BRANCH_EXISTS=1 FIXTURE_PRLIST_FAIL=1 run_main 6 >/dev/null 2>&1; rc_is "$?" 1 "gh pr list failure → exit 1"
+
 # ---- happy path ----------------------------------------------------------
 out=$(run_main 6 2>/dev/null); rc=$?
 if [ "$rc" -eq 0 ] \
@@ -90,6 +110,16 @@ if [ "$rc" -eq 0 ] \
 else
   bad "happy path → adopted JSON with expected fields (got: $out rc=$rc)"
 fi
+
+# ---- Author-Model carry-over from a body-only declaration ----------------
+BODY_CAP=$(mktemp)
+FIXTURE_BODY='**Author-Model:** gpt-5.4' BODY_CAPTURE="$BODY_CAP" run_main 6 >/dev/null 2>&1
+if head -1 "$BODY_CAP" | grep -q '^\*\*Author-Model:\*\* gpt-5.4$'; then
+  ok "carries Author-Model line from original PR body into adopted PR body"
+else
+  bad "carries Author-Model line from original PR body (captured: $(cat "$BODY_CAP"))"
+fi
+rm -f "$BODY_CAP"
 
 # ---- idempotency: branch on origin AND an open PR exists → no-op ----------
 out=$(FIXTURE_BRANCH_EXISTS=1 FIXTURE_OPEN_PR=1 run_main 6 2>/dev/null); rc=$?
