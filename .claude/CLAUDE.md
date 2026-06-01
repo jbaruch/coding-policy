@@ -15,6 +15,7 @@ This repo IS `jbaruch/coding-policy`. The rule files below are the source-of-tru
 @../rules/rule-frontmatter.md
 @../rules/skill-authoring.md
 @../rules/script-delegation.md
+@../rules/script-as-black-box.md
 @../rules/plugin-evals.md
 @../rules/author-model-declaration.md
 @../rules/stateful-artifacts.md
