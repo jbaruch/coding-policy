@@ -55,7 +55,8 @@
 #
 #   Original PR: <url>
 #
-# Original-PR pointer-comment template (verbatim):
+# Original-PR pointer-comment template (emitted as a single line; wrapped here
+# only for readability):
 #   Adopted into the base repo as <new_pr_url> so the policy reviewer can run —
 #   fork PRs are skipped by the reviewer's fork-guard. Leaving this PR open;
 #   close it whenever you like, it's your call.
