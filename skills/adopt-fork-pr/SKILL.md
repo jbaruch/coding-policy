@@ -12,7 +12,9 @@ description: >
 
 # Adopt Fork PR Skill
 
-Classify a referenced pull request and, when it comes from a fork, adopt its branch into the base repo as a same-repo PR the policy reviewer can run on. Process steps in order. Do not skip ahead.
+Process steps in order. Do not skip ahead.
+
+Classify a referenced pull request and, when it comes from a fork, adopt its branch into the base repo as a same-repo PR the policy reviewer can run on.
 
 ## Step 1 — Classify the PR
 
