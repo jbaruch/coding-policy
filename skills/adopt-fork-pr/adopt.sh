@@ -38,10 +38,11 @@
 #   {"state": "...", "adopted_branch": "...", "new_pr_url": "...",
 #    "original_pr": N, "author": "..."}
 #   state ∈ {"adopted", "already-adopted"}
-#   Error path: when jq itself is missing, stdout instead carries
-#   {"state": "error", "reason": "..."} and the script exits 1 — jq is required
-#   to format the normal envelope, so the failure is hand-rolled. Every other
-#   failure is a stderr diagnostic with the exit code below (no stdout JSON).
+#   Error path: when jq itself is missing, the script emits
+#   {"state": "error", "reason": "..."} on stdout (so stdout-parsing wrappers
+#   still get a payload) AND a diagnostic on stderr, then exits 1 — jq is
+#   required to format the normal envelope, so the failure is hand-rolled. Every
+#   other failure is a stderr diagnostic with the exit code below (no stdout JSON).
 #
 # New-PR body template (verbatim; the Author-Model line is present only when the
 # original PR body carried one):
@@ -73,7 +74,12 @@ set -euo pipefail
 orig_ref=""   # caller's branch; restored by the EXIT trap once fresh adoption starts
 
 emit_jq_missing() {
-  printf '{"state":"error","reason":"jq is required but not installed — install it (macOS: brew install jq; Debian/Ubuntu: apt install jq) and re-run."}\n'
+  # jq is needed to format the normal envelope, so hand-roll the failure: a JSON
+  # payload on stdout for stdout-parsing wrappers AND a diagnostic on stderr for
+  # stderr-only watchers.
+  local msg="jq is required but not installed — install it (macOS: brew install jq; Debian/Ubuntu: apt install jq) and re-run."
+  printf '{"state":"error","reason":"%s"}\n' "$msg"
+  printf 'adopt.sh: %s\n' "$msg" >&2
 }
 
 die() { printf 'adopt.sh: %s\n' "$1" >&2; exit "${2:-1}"; }
