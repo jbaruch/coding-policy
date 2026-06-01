@@ -109,10 +109,14 @@ open_pr_url_for() {
 
 ensure_pointer_comment() {
   # args: original_pr adopted_url
-  # Idempotent: skip when the original already links the adopted URL. A posting
-  # failure is an operational error, not a warning.
-  local original_pr="$1" adopted_url="$2" comment
-  if gh pr view "$original_pr" --json comments 2>/dev/null | grep -qF "$adopted_url"; then
+  # Idempotent: skip when the original already links the adopted URL. Both the
+  # read probe and the post are operational errors on failure, not warnings —
+  # capture the read first and die rather than letting a failed probe look like
+  # "no comment" (which would duplicate the pointer on rerun).
+  local original_pr="$1" adopted_url="$2" comment existing_comments
+  existing_comments=$(gh pr view "$original_pr" --json comments) \
+    || die "could not read comments on original #$original_pr to check for an existing pointer — see the gh error above." 1
+  if grep -qF "$adopted_url" <<<"$existing_comments"; then
     return 0
   fi
   comment=$(printf 'Adopted into the base repo as %s so the policy reviewer can run — fork PRs are skipped by the reviewer'\''s fork-guard. Leaving this PR open; close it whenever you like, it'\''s your call.\n' "$adopted_url")

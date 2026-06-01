@@ -24,13 +24,15 @@ rc_is() { if [ "$1" -eq "$2" ]; then ok "$3"; else bad "$3 (rc=$1)"; fi; }
 : "${FIXTURE_LSREMOTE_FAIL:=0}"  # 1 = git ls-remote fails (network/auth)
 : "${FIXTURE_PRLIST_FAIL:=0}"    # 1 = gh pr list fails (auth/API)
 : "${FIXTURE_BODY:=}"            # original PR body text
-: "${FIXTURE_COMMENT_FAIL:=0}"   # 1 = gh pr comment fails
-: "${FIXTURE_COMMENT_EXISTS:=0}" # 1 = original PR already links the adopted URL
+: "${FIXTURE_COMMENT_FAIL:=0}"        # 1 = gh pr comment fails
+: "${FIXTURE_COMMENT_EXISTS:=0}"      # 1 = original PR already links the adopted URL
+: "${FIXTURE_COMMENTSREAD_FAIL:=0}"   # 1 = gh pr view --json comments fails
 
 gh() {
   case "$1 $2" in
     "pr view")
       if [[ "$*" == *"--json comments"* ]]; then
+        if [ "$FIXTURE_COMMENTSREAD_FAIL" = "1" ]; then return 6; fi
         if [ "$FIXTURE_COMMENT_EXISTS" = "1" ]; then
           printf '{"comments":[{"body":"Adopted into the base repo as https://github.com/owner/blog-writer/pull/99"}]}\n'
         else
@@ -110,6 +112,9 @@ FIXTURE_BRANCH_EXISTS=1 FIXTURE_PRLIST_FAIL=1 run_main 6 >/dev/null 2>&1; rc_is 
 
 # ---- pointer-comment failure is fatal (not a warning) --------------------
 FIXTURE_COMMENT_FAIL=1 run_main 6 >/dev/null 2>&1; rc_is "$?" 1 "pointer-comment failure → exit 1"
+
+# ---- comments-read probe failure is fatal (not "no comment") -------------
+FIXTURE_COMMENTSREAD_FAIL=1 run_main 6 >/dev/null 2>&1; rc_is "$?" 1 "comments-read failure → exit 1"
 
 # ---- pointer comment is idempotent (already linked → no re-post) ----------
 out=$(FIXTURE_COMMENT_EXISTS=1 FIXTURE_COMMENT_FAIL=1 run_main 6 2>/dev/null); rc=$?
