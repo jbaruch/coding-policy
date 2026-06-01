@@ -27,6 +27,10 @@
 #   {"state": "...", "adopted_branch": "...", "new_pr_url": "...",
 #    "original_pr": N, "author": "..."}
 #   state ∈ {"adopted", "already-adopted"}
+#   Error path: when jq itself is missing, stdout instead carries
+#   {"state": "error", "reason": "..."} and the script exits 1 — jq is required
+#   to format the normal envelope, so the failure is hand-rolled. Every other
+#   failure is a stderr diagnostic with the exit code below (no stdout JSON).
 #
 # New-PR body template (verbatim):
 #   Adopted from #<N> by @<author> (fork <owner>/<repo>).
@@ -123,7 +127,10 @@ main() {
   branch="adopt/pr-${n}-$(slugify "$head_ref")"
 
   # Branch already on origin: distinguish a complete prior run from a partial one.
-  if [ -n "$(git ls-remote --heads origin "refs/heads/$branch" 2>/dev/null)" ]; then
+  local remote_heads
+  remote_heads=$(git ls-remote --heads origin "refs/heads/$branch") \
+    || die "git ls-remote origin failed — check network/auth to the base repo." 1
+  if [ -n "$remote_heads" ]; then
     local existing
     existing=$(open_pr_url_for "$branch")
     if [ -n "$existing" ]; then

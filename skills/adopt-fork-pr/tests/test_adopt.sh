@@ -20,7 +20,8 @@ rc_is() { if [ "$1" -eq "$2" ]; then ok "$3"; else bad "$3 (rc=$1)"; fi; }
 : "${FIXTURE_IS_FORK:=true}"
 : "${FIXTURE_STATE:=OPEN}"
 : "${FIXTURE_BRANCH_EXISTS:=0}"
-: "${FIXTURE_OPEN_PR:=0}"   # 1 = an open PR already exists for the adopted branch
+: "${FIXTURE_OPEN_PR:=0}"        # 1 = an open PR already exists for the adopted branch
+: "${FIXTURE_LSREMOTE_FAIL:=0}"  # 1 = git ls-remote fails (network/auth)
 
 gh() {
   case "$1 $2" in
@@ -47,7 +48,9 @@ git() {
     "diff --quiet"|"diff --cached --quiet") return 0 ;;
     "symbolic-ref --quiet --short HEAD") printf 'main\n' ;;
     "ls-remote --heads origin refs/heads/"*)
-      [ "$FIXTURE_BRANCH_EXISTS" = "1" ] && printf 'deadbeef\trefs/heads/adopted\n'; return 0 ;;
+      if [ "$FIXTURE_LSREMOTE_FAIL" = "1" ]; then return 2; fi
+      if [ "$FIXTURE_BRANCH_EXISTS" = "1" ]; then printf 'deadbeef\trefs/heads/adopted\n'; fi
+      return 0 ;;
     "push origin HEAD:refs/heads/"*) return 0 ;;
     "checkout --quiet "*) return 0 ;;
     *) return 0 ;;
@@ -71,6 +74,9 @@ FIXTURE_IS_FORK=false run_main 6 >/dev/null 2>&1; rc_is "$?" 3 "same-repo PR →
 
 # ---- non-OPEN refusal ----------------------------------------------------
 FIXTURE_STATE=MERGED run_main 6 >/dev/null 2>&1; rc_is "$?" 1 "non-OPEN fork PR → exit 1"
+
+# ---- ls-remote failure (network/auth) → exit 1, not silent fresh-adoption -
+FIXTURE_LSREMOTE_FAIL=1 run_main 6 >/dev/null 2>&1; rc_is "$?" 1 "ls-remote failure → exit 1"
 
 # ---- happy path ----------------------------------------------------------
 out=$(run_main 6 2>/dev/null); rc=$?
