@@ -1,6 +1,6 @@
 ---
 alwaysApply: false
-applyTo: "tile.json, rules/**, skills/**, evals/**, .tesslignore, CHANGELOG.md, README.md — when authoring or modifying tile artifacts"
+applyTo: "tile.json, .tessl-plugin/plugin.json, rules/**, skills/**, evals/**, .tesslignore, CHANGELOG.md, README.md — when authoring or modifying tile artifacts"
 description: Tile structure, rule/skill format, review pipeline, surface sync, consistency audits — the authoring contract for Tessl plugins
 ---
 
