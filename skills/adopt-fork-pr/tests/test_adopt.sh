@@ -90,13 +90,14 @@ eq "$(slugify 'Foo_Bar Baz!!')" "foo-bar-baz" "slugify lowercases and squeezes"
 eq "$(slugify '---weird///')" "weird" "slugify trims leading/trailing dashes"
 
 # ---- emit_jq_missing: stdout JSON envelope + stderr diagnostic -----------
-jqm_out=$(emit_jq_missing 2>/tmp/adopt_jqm_err)
-if [ "$(jq -r '.state' <<<"$jqm_out" 2>/dev/null)" = "error" ] && grep -q 'jq is required' /tmp/adopt_jqm_err; then
+jqm_err=$(mktemp)
+jqm_out=$(emit_jq_missing 2>"$jqm_err")
+if [ "$(jq -r '.state' <<<"$jqm_out" 2>/dev/null)" = "error" ] && grep -q 'jq is required' "$jqm_err"; then
   ok "jq-missing emits stdout JSON and stderr diagnostic"
 else
-  bad "jq-missing emits stdout JSON and stderr diagnostic (out=$jqm_out err=$(cat /tmp/adopt_jqm_err 2>/dev/null))"
+  bad "jq-missing emits stdout JSON and stderr diagnostic (out=$jqm_out err=$(cat "$jqm_err" 2>/dev/null))"
 fi
-rm -f /tmp/adopt_jqm_err
+rm -f "$jqm_err"
 
 # ---- extract_author_model_line (pure) ------------------------------------
 eq "$(extract_author_model_line $'intro\n**Author-Model:** gpt-5.4\nmore')" "**Author-Model:** gpt-5.4" "extracts bold Author-Model line"
