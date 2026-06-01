@@ -175,10 +175,10 @@ main() {
   local orig_ref
   orig_ref=$(git symbolic-ref --quiet --short HEAD 2>/dev/null || git rev-parse HEAD)
 
-  gh pr checkout "$n" >/dev/null 2>&1 \
-    || die "gh pr checkout #$n failed — the fork branch may be unavailable or your tree is not clean." 1
-  git push origin "HEAD:refs/heads/$branch" >/dev/null 2>&1 \
-    || die "push to origin/$branch failed — you need write access to the base repo." 1
+  gh pr checkout "$n" >/dev/null \
+    || die "gh pr checkout #$n failed — see the gh error above; the fork branch may be unavailable or your tree is not clean." 1
+  git push origin "HEAD:refs/heads/$branch" >/dev/null \
+    || die "push to origin/$branch failed — see the git error above; you need write access to the base repo." 1
   git checkout --quiet "$orig_ref" 2>/dev/null || true
 
   new_url=$(create_adopted_pr "$base_ref" "$branch" "$title" "$n" "$author" "$fork_owner" "$fork_repo" "$url" "$am_line")
