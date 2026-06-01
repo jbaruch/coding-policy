@@ -24,16 +24,26 @@ rc_is() { if [ "$1" -eq "$2" ]; then ok "$3"; else bad "$3 (rc=$1)"; fi; }
 : "${FIXTURE_LSREMOTE_FAIL:=0}"  # 1 = git ls-remote fails (network/auth)
 : "${FIXTURE_PRLIST_FAIL:=0}"    # 1 = gh pr list fails (auth/API)
 : "${FIXTURE_BODY:=}"            # original PR body text
+: "${FIXTURE_COMMENT_FAIL:=0}"   # 1 = gh pr comment fails
+: "${FIXTURE_COMMENT_EXISTS:=0}" # 1 = original PR already links the adopted URL
 
 gh() {
   case "$1 $2" in
     "pr view")
-      cat <<JSON
+      if [[ "$*" == *"--json comments"* ]]; then
+        if [ "$FIXTURE_COMMENT_EXISTS" = "1" ]; then
+          printf '{"comments":[{"body":"Adopted into the base repo as https://github.com/owner/blog-writer/pull/99"}]}\n'
+        else
+          printf '{"comments":[]}\n'
+        fi
+      else
+        cat <<JSON
 {"number":${3},"isCrossRepository":${FIXTURE_IS_FORK},"headRefName":"feat/cool-thing",
  "headRepositoryOwner":{"login":"contributor"},"headRepository":{"name":"blog-writer"},
  "author":{"login":"contributor"},"title":"feat: a cool thing","url":"https://github.com/owner/blog-writer/pull/${3}",
  "state":"${FIXTURE_STATE}","baseRefName":"main","body":"${FIXTURE_BODY}"}
 JSON
+      fi
       ;;
     "pr checkout") return 0 ;;
     "pr create")
@@ -46,7 +56,7 @@ JSON
         printf '%s' "$b" > "$BODY_CAPTURE"
       fi
       printf 'https://github.com/owner/blog-writer/pull/99\n' ;;
-    "pr comment") return 0 ;;
+    "pr comment") if [ "$FIXTURE_COMMENT_FAIL" = "1" ]; then return 5; fi; return 0 ;;
     "pr list")
       if [ "$FIXTURE_PRLIST_FAIL" = "1" ]; then return 4; fi
       if [ "$FIXTURE_OPEN_PR" = "1" ]; then printf 'https://github.com/owner/blog-writer/pull/42\n'; else printf '\n'; fi ;;
@@ -97,6 +107,17 @@ FIXTURE_LSREMOTE_FAIL=1 run_main 6 >/dev/null 2>&1; rc_is "$?" 1 "ls-remote fail
 
 # ---- gh pr list failure on existing branch → exit 1, not false recovery --
 FIXTURE_BRANCH_EXISTS=1 FIXTURE_PRLIST_FAIL=1 run_main 6 >/dev/null 2>&1; rc_is "$?" 1 "gh pr list failure → exit 1"
+
+# ---- pointer-comment failure is fatal (not a warning) --------------------
+FIXTURE_COMMENT_FAIL=1 run_main 6 >/dev/null 2>&1; rc_is "$?" 1 "pointer-comment failure → exit 1"
+
+# ---- pointer comment is idempotent (already linked → no re-post) ----------
+out=$(FIXTURE_COMMENT_EXISTS=1 FIXTURE_COMMENT_FAIL=1 run_main 6 2>/dev/null); rc=$?
+if [ "$rc" -eq 0 ] && [ "$(jq -r '.state' <<<"$out")" = "adopted" ]; then
+  ok "existing pointer link → idempotent skip, adoption succeeds"
+else
+  bad "existing pointer link → idempotent skip (got: $out rc=$rc)"
+fi
 
 # ---- happy path ----------------------------------------------------------
 out=$(run_main 6 2>/dev/null); rc=$?

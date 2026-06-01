@@ -14,19 +14,25 @@
 #      slug = headRefName lowercased, every run of non-[a-z0-9] folded to a
 #      single '-', leading/trailing '-' trimmed, truncated to 50 chars.
 #   4. Idempotency / partial-run recovery, keyed on the adopted branch:
-#        - branch on origin AND an open PR for it  -> "already-adopted" no-op
+#        - branch on origin AND an open PR for it  -> "already-adopted" (still
+#          ensures the original carries the pointer comment, repairing a prior
+#          run that died before commenting)
 #        - branch on origin but NO open PR (a prior run pushed then died before
 #          `gh pr create`) -> recover: open the PR + comment, emit "adopted"
 #        - branch not on origin -> fresh adoption (checkout, push, PR, comment)
 #   5. Fresh adoption `gh pr checkout`s the fork head and pushes it to origin
 #      under the adopted branch name (commits unchanged, so authorship + any
 #      `Co-authored-by:` Author-Model trailer survive), then opens a same-repo
-#      PR and comments on the original fork PR. The original is left OPEN.
-#   6. Author-Model continuity: if the original PR body carried an
+#      PR and comments on the original fork PR. The original is left OPEN. An
+#      EXIT trap restores the caller's original branch even if a later step
+#      fails after `gh pr checkout`.
+#   6. The pointer comment on the original PR is part of the contract: it is
+#      idempotent (skipped when the original already links the adopted URL) and
+#      a posting failure is an operational error (exit 1), not a warning.
+#   7. Author-Model continuity: if the original PR body carried an
 #      `**Author-Model:**` line (a body-only declaration the preserved commits
 #      would NOT reproduce), that exact line is prepended to the adopted PR
-#      body so the reviewer's declaration gate passes immediately. Trailer-based
-#      declarations need no copy — they ride along on the commits.
+#      body so the reviewer's declaration gate passes immediately.
 #
 # Output: a single JSON object on stdout:
 #   {"state": "...", "adopted_branch": "...", "new_pr_url": "...",
@@ -49,24 +55,33 @@
 #
 #   Original PR: <url>
 #
-# Original-PR comment template (verbatim):
+# Original-PR pointer-comment template (verbatim):
 #   Adopted into the base repo as <new_pr_url> so the policy reviewer can run —
 #   fork PRs are skipped by the reviewer's fork-guard. Leaving this PR open;
 #   close it whenever you like, it's your call.
 #
 # Exit codes:
 #   0  success (adopted, recovered, or already-adopted no-op)
-#   1  operational failure (dirty tree, gh/git failure, PR not OPEN)
+#   1  operational failure (dirty tree, gh/git failure, pointer-comment failure,
+#      PR not OPEN)
 #   2  usage / invalid argument
 #   3  PR is not a fork PR (adoption does not apply)
 #
 set -euo pipefail
+
+orig_ref=""   # caller's branch; restored by the EXIT trap once fresh adoption starts
 
 emit_jq_missing() {
   printf '{"state":"error","reason":"jq is required but not installed — install it (macOS: brew install jq; Debian/Ubuntu: apt install jq) and re-run."}\n'
 }
 
 die() { printf 'adopt.sh: %s\n' "$1" >&2; exit "${2:-1}"; }
+
+restore_orig_ref() {
+  if [ -n "$orig_ref" ]; then
+    git checkout --quiet "$orig_ref" >/dev/null 2>&1 || true
+  fi
+}
 
 slugify() {
   # lowercase → fold non-alnum runs to '-' → trim → cap at 50 chars
@@ -92,11 +107,24 @@ open_pr_url_for() {
   gh pr list --head "$1" --state open --json url --jq '.[0].url // empty'
 }
 
+ensure_pointer_comment() {
+  # args: original_pr adopted_url
+  # Idempotent: skip when the original already links the adopted URL. A posting
+  # failure is an operational error, not a warning.
+  local original_pr="$1" adopted_url="$2" comment
+  if gh pr view "$original_pr" --json comments 2>/dev/null | grep -qF "$adopted_url"; then
+    return 0
+  fi
+  comment=$(printf 'Adopted into the base repo as %s so the policy reviewer can run — fork PRs are skipped by the reviewer'\''s fork-guard. Leaving this PR open; close it whenever you like, it'\''s your call.\n' "$adopted_url")
+  gh pr comment "$original_pr" --body "$comment" >/dev/null \
+    || die "adopted PR ($adopted_url) exists but posting the pointer comment on original #$original_pr failed — see the gh error above; rerun to retry." 1
+}
+
 create_adopted_pr() {
   # args: base branch title pr_n author fork_owner fork_repo orig_url am_line
-  # opens the same-repo PR, comments on the original, echoes the new PR URL
+  # opens the same-repo PR, links the original, echoes the new PR URL
   local base="$1" branch="$2" title="$3" pr_n="$4" author="$5" fork_owner="$6" fork_repo="$7" orig_url="$8" am_line="${9:-}"
-  local header="" body comment new_url
+  local header="" body new_url
   if [ -n "$am_line" ]; then
     header="${am_line}"$'\n\n'
   fi
@@ -104,9 +132,7 @@ create_adopted_pr() {
     "$header" "$pr_n" "$author" "$fork_owner" "$fork_repo" "$orig_url")
   new_url=$(gh pr create --base "$base" --head "$branch" --title "$title" --body "$body") \
     || die "gh pr create for branch $branch failed — see the gh error above (permissions, an existing PR for the branch, or validation)." 1
-  comment=$(printf 'Adopted into the base repo as %s so the policy reviewer can run — fork PRs are skipped by the reviewer'\''s fork-guard. Leaving this PR open; close it whenever you like, it'\''s your call.\n' "$new_url")
-  gh pr comment "$pr_n" --body "$comment" >/dev/null \
-    || printf 'adopt.sh: warning — adopted PR created (%s) but commenting on original #%s failed (see gh error above).\n' "$new_url" "$pr_n" >&2
+  ensure_pointer_comment "$pr_n" "$new_url"
   printf '%s' "$new_url"
 }
 
@@ -159,6 +185,7 @@ main() {
     existing=$(open_pr_url_for "$branch") \
       || die "gh pr list failed while checking for an existing adopted PR — see the gh error above; do not assume none exists." 1
     if [ -n "$existing" ]; then
+      ensure_pointer_comment "$n" "$existing"   # repair a missing link from a prior partial run
       emit "already-adopted" "$branch" "$existing" "$n" "$author"
       exit 0
     fi
@@ -172,14 +199,13 @@ main() {
   if ! git diff --quiet || ! git diff --cached --quiet; then
     die "working tree has uncommitted changes — commit or stash before adopting (gh pr checkout needs a clean tree)." 1
   fi
-  local orig_ref
   orig_ref=$(git symbolic-ref --quiet --short HEAD 2>/dev/null || git rev-parse HEAD)
+  trap restore_orig_ref EXIT   # restore the caller's branch even if a later step fails
 
   gh pr checkout "$n" >/dev/null \
     || die "gh pr checkout #$n failed — see the gh error above; the fork branch may be unavailable or your tree is not clean." 1
   git push origin "HEAD:refs/heads/$branch" >/dev/null \
     || die "push to origin/$branch failed — see the git error above; you need write access to the base repo." 1
-  git checkout --quiet "$orig_ref" 2>/dev/null || true
 
   new_url=$(create_adopted_pr "$base_ref" "$branch" "$title" "$n" "$author" "$fork_owner" "$fork_repo" "$url" "$am_line")
   emit "adopted" "$branch" "$new_url" "$n" "$author"
