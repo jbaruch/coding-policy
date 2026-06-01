@@ -40,4 +40,4 @@ description: Frontmatter conventions for rule files — what to set for always-o
 
 - Set the same `alwaysApply` value in both `tile.json`'s steering entry and the rule file frontmatter — split values are inconsistent and may produce surprising behavior across consuming agents
 - `applyTo:` lives only in the rule file (not in `tile.json`)
-- Install-time write map per agent — `docs/tessl-rule-frontmatter.md` is the repo-internal draft of additions for `docs.tessl.io`. The `docs/` directory is `.tileignore`d and does not ship with the published tile, so consumers read the integrated content on `docs.tessl.io` once it lands; until then, read the source on GitHub
+- Install-time write map per agent — `docs/tessl-rule-frontmatter.md` is the repo-internal draft of additions for `docs.tessl.io`. The `docs/` directory is `.tesslignore`d and does not ship with the published tile, so consumers read the integrated content on `docs.tessl.io` once it lands; until then, read the source on GitHub

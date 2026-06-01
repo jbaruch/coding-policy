@@ -27,8 +27,8 @@ jobs:
         with:
           token: ${{ secrets.TESSL_TOKEN }}
 
-      - name: Lint tile
-        run: tessl tile lint
+      - name: Lint plugin
+        run: tessl plugin lint
 
       # Reviews only the skills whose files changed since the previous
       # push. Action is dogfooded from this repo via the local path
