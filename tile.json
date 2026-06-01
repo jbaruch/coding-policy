@@ -23,6 +23,9 @@
     },
     "install-reviewer": {
       "path": "skills/install-reviewer/SKILL.md"
+    },
+    "adopt-fork-pr": {
+      "path": "skills/adopt-fork-pr/SKILL.md"
     }
   },
   "steering": {

@@ -10,6 +10,7 @@ Coding policy tile for Baruch's AI agents. Language-agnostic code quality rules 
 - `release` skill — structured PR + merge workflow with Copilot review and paired-reviewer cross-family enforcement
 - `eval-authoring` skill — generate, review, and curate eval scenarios with score-driven iteration
 - `install-reviewer` skill — scaffold the paired gh-aw PR review workflows (OpenAI + Anthropic) into a consumer repo
+- `adopt-fork-pr` skill — bring a fork PR's branch into the base repo as a same-repo PR the fork-guarded reviewer can run on
 - 0.3.0 added `install-reviewer` upgrade mode (`--override`) — refreshes scaffolded reviewer files in place instead of requiring a manual `git rm`-and-rerun
 - 0.2.0 lifted with-context attainment from 93 to 98 (3× avg, lift +17 → +22) by tuning skill prose against eval log analysis
 - Language-agnostic: works with any stack, no Python/JS assumptions
@@ -55,6 +56,7 @@ tessl install jbaruch/coding-policy
 | [eval-authoring](skills/eval-authoring/SKILL.md) | Generate, review, iterate on eval scenarios with score-driven feedback |
 | [eval-curation](skills/eval-curation/SKILL.md) | Prune an existing eval suite — run, compute per-scenario lift, diagnose weak scenarios, retire / fix / rewrite, verify the curated suite still pulls weight |
 | [install-reviewer](skills/install-reviewer/SKILL.md) | Scaffold the paired gh-aw PR review workflows (OpenAI + Anthropic) into a consumer repo — reviews every PR against the latest published `jbaruch/coding-policy` with cross-family enforcement. Documents the reviewer CI secrets in a merged `.env.example`. Supports `--override` for in-place upgrades. |
+| [adopt-fork-pr](skills/adopt-fork-pr/SKILL.md) | Classify a PR by number. Same-repo PRs pass through to the reviewer; fork PRs (skipped by the reviewer's fork-guard) get adopted into the base repo as a same-repo PR, preserving the contributor's commits. |
 
 ## Philosophy
 
