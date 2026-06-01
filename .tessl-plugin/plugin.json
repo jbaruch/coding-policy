@@ -1,0 +1,35 @@
+{
+  "name": "jbaruch/coding-policy",
+  "version": "0.3.43",
+  "description": "General-purpose coding policy for Baruch's AI agents",
+  "private": false,
+  "skills": [
+    "skills/release",
+    "skills/eval-authoring",
+    "skills/eval-curation",
+    "skills/install-reviewer",
+    "skills/adopt-fork-pr"
+  ],
+  "rules": [
+    "rules/commit-conventions.md",
+    "rules/testing-standards.md",
+    "rules/error-handling.md",
+    "rules/dependency-management.md",
+    "rules/file-hygiene.md",
+    "rules/ci-safety.md",
+    "rules/no-secrets.md",
+    "rules/code-formatting.md",
+    "rules/context-artifacts.md",
+    "rules/context-writing-style.md",
+    "rules/rule-frontmatter.md",
+    "rules/skill-authoring.md",
+    "rules/script-delegation.md",
+    "rules/script-as-black-box.md",
+    "rules/plugin-evals.md",
+    "rules/author-model-declaration.md",
+    "rules/stateful-artifacts.md",
+    "rules/agent-worktree-isolation.md",
+    "rules/boy-scout.md",
+    "rules/external-repo-contributions.md"
+  ]
+}

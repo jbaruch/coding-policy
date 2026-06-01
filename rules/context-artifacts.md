@@ -1,6 +1,6 @@
 ---
 alwaysApply: false
-applyTo: "tile.json, rules/**, skills/**, evals/**, .tileignore, .tesslignore, CHANGELOG.md, README.md — when authoring or modifying tile artifacts"
+applyTo: "tile.json, .tessl-plugin/plugin.json, rules/**, skills/**, evals/**, .tesslignore, CHANGELOG.md, README.md — when authoring or modifying tile artifacts"
 description: Tile structure, rule/skill format, review pipeline, surface sync, consistency audits — the authoring contract for Tessl plugins
 ---
 
@@ -14,9 +14,9 @@ description: Tile structure, rule/skill format, review pipeline, surface sync, c
 - Include a Tessl registry badge at the top of README: `[![tessl](https://img.shields.io/endpoint?url=https%3A%2F%2Fapi.tessl.io%2Fv1%2Fbadges%2F<workspace>%2F<tile>)](https://tessl.io/registry/<workspace>/<tile>)`
 - Skills live in `skills/<name>/SKILL.md`, rules live in `rules/<name>.md`
 - Standard directories: `rules/`, `skills/<name>/`, `evals/` — `evals/` is omitted in tiles claiming the closed-loop carve-out in `rules/plugin-evals.md`
-- Use `.tileignore` to exclude build artifacts and CI files from the published tile
-- Validate structure with `tessl tile lint` before every publish
-- `CHANGELOG.md` and similar repo files show as orphaned in `tessl tile lint` — lint only tracks manifest-declared paths
+- Use `.tesslignore` to exclude build artifacts and CI files from the published tile
+- Validate structure with `tessl plugin lint` before every publish
+- `CHANGELOG.md` and similar repo files show as orphaned in `tessl plugin lint` — lint only tracks manifest-declared paths
 
 ## Rules Are Prose
 
