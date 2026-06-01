@@ -20,6 +20,7 @@ rc_is() { if [ "$1" -eq "$2" ]; then ok "$3"; else bad "$3 (rc=$1)"; fi; }
 : "${FIXTURE_IS_FORK:=true}"
 : "${FIXTURE_STATE:=OPEN}"
 : "${FIXTURE_BRANCH_EXISTS:=0}"
+: "${FIXTURE_OPEN_PR:=0}"   # 1 = an open PR already exists for the adopted branch
 
 gh() {
   case "$1 $2" in
@@ -34,7 +35,7 @@ JSON
     "pr checkout") return 0 ;;
     "pr create")  printf 'https://github.com/owner/blog-writer/pull/99\n' ;;
     "pr comment") return 0 ;;
-    "pr list")    printf '\n' ;;
+    "pr list")    if [ "$FIXTURE_OPEN_PR" = "1" ]; then printf 'https://github.com/owner/blog-writer/pull/42\n'; else printf '\n'; fi ;;
     *) return 0 ;;
   esac
 }
@@ -84,12 +85,24 @@ else
   bad "happy path → adopted JSON with expected fields (got: $out rc=$rc)"
 fi
 
-# ---- idempotency: adopted branch already on origin -----------------------
-out=$(FIXTURE_BRANCH_EXISTS=1 run_main 6 2>/dev/null); rc=$?
-if [ "$rc" -eq 0 ] && [ "$(jq -r '.state' <<<"$out")" = "already-adopted" ]; then
-  ok "existing adopted branch → already-adopted no-op"
+# ---- idempotency: branch on origin AND an open PR exists → no-op ----------
+out=$(FIXTURE_BRANCH_EXISTS=1 FIXTURE_OPEN_PR=1 run_main 6 2>/dev/null); rc=$?
+if [ "$rc" -eq 0 ] \
+   && [ "$(jq -r '.state' <<<"$out")" = "already-adopted" ] \
+   && [ "$(jq -r '.new_pr_url' <<<"$out")" = "https://github.com/owner/blog-writer/pull/42" ]; then
+  ok "branch + open PR → already-adopted no-op with existing URL"
 else
-  bad "existing adopted branch → already-adopted no-op (got: $out rc=$rc)"
+  bad "branch + open PR → already-adopted no-op with existing URL (got: $out rc=$rc)"
+fi
+
+# ---- partial-run recovery: branch on origin but NO open PR → adopt --------
+out=$(FIXTURE_BRANCH_EXISTS=1 FIXTURE_OPEN_PR=0 run_main 6 2>/dev/null); rc=$?
+if [ "$rc" -eq 0 ] \
+   && [ "$(jq -r '.state' <<<"$out")" = "adopted" ] \
+   && [ "$(jq -r '.new_pr_url' <<<"$out")" = "https://github.com/owner/blog-writer/pull/99" ]; then
+  ok "branch but no PR → recovers by opening the PR"
+else
+  bad "branch but no PR → recovers by opening the PR (got: $out rc=$rc)"
 fi
 
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
