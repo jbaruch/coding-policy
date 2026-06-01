@@ -108,4 +108,4 @@ Note that the source rule file in `.tessl/plugins/.../rules/<rule>.md` is byte-i
 
 - The Tessl MCP server's runtime rule-serving semantics (how `tessl mcp start` decides what to surface on which call). If relevant to authors, that's a separate addition to `reference/mcp-tools.md`.
 - Any change to the install pipeline itself. This request is purely documentation — describing existing behavior accurately.
-- Any new lint rules or warnings. If `tessl tile lint` should flag `tile.json`/rule-file `alwaysApply` mismatches, that's a separate request to the CLI team.
+- Any new lint rules or warnings. If `tessl plugin lint` should flag `tile.json`/rule-file `alwaysApply` mismatches, that's a separate request to the CLI team.
