@@ -1,0 +1,46 @@
+{
+  "context": "Tests whether the agent applies this tile's prescribed release sequencing and version-bump policy. The tile prescribes: patch bumps are delegated to the CI pipeline (`tesslio/patch-version-publish` auto-bumps the patch segment on every merge) so manual manifest edits for patch changes are wrong; minor and major bumps require manual manifest updates to specific target numbers; breaking changes need explicit impact surfacing in the runbook; PRs should be sequenced patch → minor → major for risk management. Baseline agents typically bump all three manually and do not sequence the releases.",
+  "type": "weighted_checklist",
+  "checklist": [
+    {
+      "name": "Patch: no manual manifest update",
+      "max_score": 12,
+      "description": "For the bug-fix change (null-pointer guard, backward-compat, no API change), the runbook does NOT prescribe a manual manifest version bump. Baseline agents will typically bump it manually; the tile prescribes delegating to CI"
+    },
+    {
+      "name": "Patch: explains CI auto-bump",
+      "max_score": 10,
+      "description": "The runbook explains WHY the patch case skips a manual bump — because the CI pipeline (`tesslio/patch-version-publish` or equivalent) auto-bumps the patch segment on every merge. Mentioning the specific automation or its role is tile-prescribed knowledge; a baseline agent without the tile would not know this wiring exists"
+    },
+    {
+      "name": "Minor: manifest bumped to `1.5.0`",
+      "max_score": 12,
+      "description": "For the CSV-export change (additive new route, backward-compat), the runbook updates the manifest version to `1.5.0` (not `1.4.3`, not `2.0.0`). Scores correct classification (minor) AND correct arithmetic"
+    },
+    {
+      "name": "Major: manifest bumped to `2.0.0`",
+      "max_score": 12,
+      "description": "For the v1-routes removal (breaking change), the runbook updates the manifest version to `2.0.0` (not `1.4.3`, not `1.5.0`). Scores correct classification (major) AND correct arithmetic"
+    },
+    {
+      "name": "Major: flags breaking-change impact for downstream",
+      "max_score": 12,
+      "description": "The runbook calls out that the v1-routes removal will break existing clients AND surfaces migration guidance in a place a downstream consumer would see (release notes, migration guide, or a deployment checklist). An agent who treats the major bump the same way as the minor bump — no impact statement, no migration — scores zero"
+    },
+    {
+      "name": "Release sequencing: patch first, major last",
+      "max_score": 12,
+      "description": "The runbook orders the three PRs patch → minor → major with explicit rationale (patch is low-risk and gets CI's auto-bump first; major gives downstream the longest notice and comes last). Any coherent risk-based sequencing with stated reasoning passes; no sequencing, or reversing without justification, scores zero. Baseline agents typically do not sequence"
+    },
+    {
+      "name": "Readiness gate: tests + linter",
+      "max_score": 10,
+      "description": "The runbook requires tests AND linter to pass before creating any of the three PRs. Scored once as a cross-cutting gate, not duplicated per change"
+    },
+    {
+      "name": "Runbook covers all three changes separately",
+      "max_score": 20,
+      "description": "The `RELEASE_RUNBOOK.md` has a distinct section for each of the three pending changes, each answering the readiness / versioning / sequencing questions in the task's output spec. A single conflated section scores zero. Only two of three sections present scores two-thirds"
+    }
+  ]
+}

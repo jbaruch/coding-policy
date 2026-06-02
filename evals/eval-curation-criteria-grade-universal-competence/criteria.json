@@ -1,0 +1,26 @@
+{
+  "context": "Tests whether the agent applies the three-cause diagnosis to a near-zero-lift scenario where the criteria grade universal competence (any reasonable engineer would 'mention deployment' / 'consider rollback' / 'address production' without the tile loaded) rather than tile-prescribed specifics (the canary 10% → 15min bake → full sequence and the 0.5%-in-5min rollback trigger). The correct cause is 'Criteria grade universal competence'. Because the task explicitly supplies the tile-prescribed values that could replace the universal-competence criteria, this scenario forces the `rewrite-criteria` branch — `retire` is the cause-#3 fallback only when nothing tile-specific can be salvaged, which is not the case here. The tile's contribution being measured is two discriminating judgments: (a) between rewrite-criteria (correct) and fix-task (wrong — the task isn't the problem), and (b) between rewrite-criteria (correct, given the task supplies replacements) and retire (wrong, given salvageable specifics exist).",
+  "type": "weighted_checklist",
+  "checklist": [
+    {
+      "name": "names canonical cause",
+      "max_score": 30,
+      "description": "The diagnosis identifies the cause as 'Criteria grade universal competence' (or an unmistakable paraphrase naming the criteria-test-baseline-behavior mechanism). Generic 'the criteria are vague' or 'the test is weak' without naming the canonical cause does not satisfy this criterion"
+    },
+    {
+      "name": "prescribes rewrite-criteria",
+      "max_score": 30,
+      "description": "The recommended action is `rewrite-criteria`. The task explicitly supplies the tile-prescribed specifics (canary 10% / 15min bake / 0.5%-in-5min trigger) that should replace the universal-competence criteria, so the cause-#3 fallback to `retire` does not apply here (the rule's words: '`retire` if nothing tile-specific can be salvaged' — salvageable specifics exist). `fix-task` and `retire` are both wrong for this scenario; a bare `retire` claim does not satisfy this criterion"
+    },
+    {
+      "name": "rejects fix-task and retire",
+      "max_score": 20,
+      "description": "The diagnosis explicitly does not propose editing the task (the task is fine; the bleed lives in the criteria) and does not propose retiring the scenario (tile-specific replacements exist). Both are wrong-intervention choices the cause-#3 diagnosis is designed to discriminate against on this specific input"
+    },
+    {
+      "name": "replacement criteria are tile-specific",
+      "max_score": 20,
+      "description": "The proposed replacement criteria reference the tile's specific prescribed values (the canary 10% / 15min bake / 0.5%-in-5min trigger, or close paraphrases of those specifics), not further generic platitudes. Replacement criteria sum to exactly 100"
+    }
+  ]
+}
