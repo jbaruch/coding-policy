@@ -1,6 +1,6 @@
 ---
 alwaysApply: false
-applyTo: "rules/**/*.md, skills/**/*.md, README.md, CHANGELOG.md — when writing prose in tile context artifacts"
+applyTo: "rules/**/*.md, skills/**/*.md, README.md, CHANGELOG.md — when writing prose in plugin context artifacts"
 description: Prose discipline for rules, skills, and READMEs — what to cut, what to keep, structural format
 ---
 
