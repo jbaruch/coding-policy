@@ -8,6 +8,13 @@ Reference material for Step 9 of the `eval-authoring` skill. Pulled out of the S
 
 Lift is the number that matters. Aggregate attainment on its own is a vanity metric — a tile scoring 99% with-context and 73% baseline is contributing 26 points of real value, not 99. A 100/100 scenario with the tile loaded but 100/100 baseline is delivering zero tile value, no matter how good the score looks.
 
+## Measure on the Floor Model
+
+- Lift is model-dependent and often diverges — sometimes inverts — across solver strength: a scenario near-zero on a strong solver can deliver large lift on a weak one
+- Measure lift on the **floor model** (the weakest agent in the consumer spectrum), not the strongest — a strong solver's baseline competence masks context the floor model actually needs
+- coding-policy's floor is `glm-5.1` (the CI publish-run solver); a curation decision reached on a stronger solver such as `claude-opus-4-7` must be re-checked against the floor before any retire
+- Retire only when lift is near-zero on the floor model too
+
 ## Thresholds (Positive Cases)
 
 | Lift band | Verdict | Action |
