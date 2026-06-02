@@ -38,7 +38,7 @@ tessl install jbaruch/coding-policy
 | Authoring | [context-artifacts](rules/context-artifacts.md) | Plugin structure, rule format, review iteration, surface sync, consistency checks |
 | Authoring | [context-writing-style](rules/context-writing-style.md) | Prose discipline for rules, skills, and READMEs — what to cut, what to keep, structural format. CHANGELOG entries follow looser archive discipline |
 | Authoring | [rule-frontmatter](rules/rule-frontmatter.md) | Frontmatter conventions for rule files — passthrough model, per-agent field map, when to path-scope |
-| Authoring | [skill-authoring](rules/skill-authoring.md) | SKILL.md structure, step numbering, typed calls, tile.json reference |
+| Authoring | [skill-authoring](rules/skill-authoring.md) | SKILL.md structure, step numbering, typed calls, plugin.json reference |
 | Authoring | [script-delegation](rules/script-delegation.md) | Deterministic → script, reasoning → LLM, the regex trap |
 | Authoring | [script-as-black-box](rules/script-as-black-box.md) | Skills reference the script's contract (inputs/outputs/exit codes), not its internal logic — thresholds and predicates live in the script |
 | Authoring | [plugin-evals](rules/plugin-evals.md) | No bleeding, no leaking, persistent eval coverage |

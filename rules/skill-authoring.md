@@ -1,7 +1,7 @@
 ---
 alwaysApply: false
-applyTo: "skills/**/SKILL.md, skills/**/*.md, tile.json — when authoring or modifying skills"
-description: SKILL.md structure, frontmatter, execution-mode preamble, flat step numbering, typed Skill() calls, tile.json reference
+applyTo: "skills/**/SKILL.md, skills/**/*.md, .tessl-plugin/plugin.json — when authoring or modifying skills"
+description: SKILL.md structure, frontmatter, execution-mode preamble, flat step numbering, typed Skill() calls, plugin.json reference
 ---
 
 # Skill Authoring
@@ -59,17 +59,20 @@ description: SKILL.md structure, frontmatter, execution-mode preamble, flat step
 - Don't mix conventions inside one SKILL.md — if one step invokes via a mount path, every other script-invoking step must too
 - Include the expected input/output contract in the step description
 
-## tile.json Manifest Reference
+## plugin.json Manifest Reference
+
+The manifest lives at `.tessl-plugin/plugin.json`.
 
 Required fields:
-- `name` — `<workspace>/<tile-name>` format
+- `name` — `<workspace>/<plugin-name>` format
 - `version` — semver string
-- `summary` — one-line description of the tile
-- `entrypoint` — path to the tile's README (typically `README.md`)
+- `description` — one-sentence overview of the plugin
 
 Optional fields:
-- `private` — `true` to prevent publishing to the public registry
-- `docs` — path to extended documentation (avoid; keep docs in the entrypoint)
-- `keywords` — array of discovery tags
-- `skills` — map of skill names to `{ "path": "skills/<name>/SKILL.md" }`
-- `steering` — map of rule names to `{ "rules": "rules/<name>.md", "alwaysApply": true }`
+- `private` — `true` to prevent publishing to the public registry (defaults to `true`; set `false` to publish)
+- `skills` — directory path (`"skills/"`) or array of skill directory paths (`"skills/<name>"`)
+- `rules` — directory path (`"rules/"`) or array of rule-file paths (`"rules/<name>.md"`); every `.md` file in a declared directory is included
+- `repository`, `homepage`, `license` — provenance and discovery metadata
+- `author` — object with `name`, `email`, `url`
+
+`alwaysApply` and `applyTo:` are not manifest fields — rule scope lives in the rule file frontmatter per `rules/rule-frontmatter.md`.

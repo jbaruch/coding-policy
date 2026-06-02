@@ -1,20 +1,19 @@
 ---
 alwaysApply: false
-applyTo: "tile.json, .tessl-plugin/plugin.json, rules/**, skills/**, evals/**, .tesslignore, CHANGELOG.md, README.md — when authoring or modifying tile artifacts"
-description: Tile structure, rule/skill format, review pipeline, surface sync, consistency audits — the authoring contract for Tessl plugins
+applyTo: ".tessl-plugin/plugin.json, rules/**, skills/**, evals/**, .tesslignore, CHANGELOG.md, README.md — when authoring or modifying plugin artifacts"
+description: Plugin structure, rule/skill format, review pipeline, surface sync, consistency audits — the authoring contract for Tessl plugins
 ---
 
 # Context Artifacts
 
 ## Plugin Structure
 
-- Every tile has a `tile.json` manifest with `name`, `version`, `summary`, and `entrypoint` (→ `README.md`)
-- Don't add a separate `docs` field — keep documentation in the entrypoint
-- The tile's entrypoint `README.md` is the project's `README.md` — same file. Extend the existing README with rules table, skills table, and installation instructions
-- Include a Tessl registry badge at the top of README: `[![tessl](https://img.shields.io/endpoint?url=https%3A%2F%2Fapi.tessl.io%2Fv1%2Fbadges%2F<workspace>%2F<tile>)](https://tessl.io/registry/<workspace>/<tile>)`
+- Every plugin has a `.tessl-plugin/plugin.json` manifest with `name`, `version`, and `description` — full schema in `rules/skill-authoring.md`
+- The plugin's `README.md` is the project's `README.md` — same file. Extend the existing README with rules table, skills table, and installation instructions
+- Include a Tessl registry badge at the top of README: `[![tessl](https://img.shields.io/endpoint?url=https%3A%2F%2Fapi.tessl.io%2Fv1%2Fbadges%2F<workspace>%2F<plugin>)](https://tessl.io/registry/<workspace>/<plugin>)`
 - Skills live in `skills/<name>/SKILL.md`, rules live in `rules/<name>.md`
-- Standard directories: `rules/`, `skills/<name>/`, `evals/` — `evals/` is omitted in tiles claiming the closed-loop carve-out in `rules/plugin-evals.md`
-- Use `.tesslignore` to exclude build artifacts and CI files from the published tile
+- Standard directories: `rules/`, `skills/<name>/`, `evals/` — `evals/` is omitted in plugins claiming the closed-loop carve-out in `rules/plugin-evals.md`
+- Use `.tesslignore` to exclude build artifacts and CI files from the published plugin
 - Validate structure with `tessl plugin lint` before every publish
 - `CHANGELOG.md` and similar repo files show as orphaned in `tessl plugin lint` — lint only tracks manifest-declared paths
 
@@ -56,7 +55,7 @@ description: Tile structure, rule/skill format, review pipeline, surface sync, c
 
 When you add, remove, or rename a rule or skill, update **all** of these:
 
-- `tile.json` — add/remove the steering or skill entry
+- `.tessl-plugin/plugin.json` — add/remove the rule path in `rules` or the skill path in `skills`
 - CI workflow — no edit needed when the canonical changed-skills loop is in use (it picks new/removed paths up automatically via `git diff`); for bespoke workflows, confirm the path glob covers the added skill or excludes the removed one
 - `README.md` — update the rules table and/or skills table
 - `CHANGELOG.md` — add an entry describing the change
@@ -77,7 +76,7 @@ After modifying rules, audit for cross-rule alignment:
 - Skills (or their scripts) carry the executable form per `rules/script-delegation.md`
 - New rules don't contradict existing ones
 - Skills follow the conventions their own rules prescribe
-- Documentation tables match `tile.json` entries
+- Documentation tables match `.tessl-plugin/plugin.json` entries
 
 ## Post-Edit Rule Audit
 

@@ -1,35 +1,29 @@
-# Add a Code-Style Rule to a Tessl Tile
+# Add a Code-Style Rule to a Tessl Plugin
 
 ## Problem/Feature Description
 
-A small team maintains a Tessl tile that ships coding rules to their AI agents. They want to add a new rule that requires every code file in any project to use spaces (never tabs) for indentation. The practice applies regardless of language, framework, or file type — it's a baseline conformance the team wants enforced everywhere. Add the rule to the existing tile.
+A small team maintains a Tessl plugin that ships coding rules to their AI agents. They want to add a new rule that requires every code file in any project to use spaces (never tabs) for indentation. The practice applies regardless of language, framework, or file type — it's a baseline conformance the team wants enforced everywhere. Add the rule to the existing plugin.
 
 ## Output Specification
 
 Produce:
 - A new `rules/spaces-not-tabs.md` rule file with the rule body
-- An updated `tile.json` reflecting the new rule's presence in the steering map
+- An updated `.tessl-plugin/plugin.json` that ships the new rule
 
 ## Input Files
 
-The following files are the current state of the tile. Extract them before beginning.
+The following files are the current state of the plugin. Extract them before beginning.
 
-=============== FILE: inputs/tile.json ===============
+=============== FILE: inputs/.tessl-plugin/plugin.json ===============
 {
   "name": "acme/coding-rules",
   "version": "0.2.0",
-  "summary": "Acme's coding rules for AI agents",
-  "entrypoint": "README.md",
-  "steering": {
-    "manifest-pin": {
-      "rules": "rules/manifest-pin.md",
-      "alwaysApply": false
-    },
-    "test-fixture-hygiene": {
-      "rules": "rules/test-fixture-hygiene.md",
-      "alwaysApply": false
-    }
-  }
+  "description": "Acme's coding rules for AI agents",
+  "private": false,
+  "rules": [
+    "rules/manifest-pin.md",
+    "rules/test-fixture-hygiene.md"
+  ]
 }
 
 =============== FILE: inputs/rules/manifest-pin.md ===============
