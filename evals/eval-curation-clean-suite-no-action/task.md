@@ -15,15 +15,13 @@ Do not fabricate diagnoses for scenarios that don't need them.
 
 ## Per-Scenario Lift Summary
 
-The suite has 5 positive-case scenarios and 1 negative-case scenario. Lift values are means across 3 runs.
+Lift values are means across 3 runs.
 
-| Scenario | Case type | with-context | baseline | lift |
-|---|---|---|---|---|
-| `merge-with-canonical-flag` | positive | 96 | 41 | +55 |
-| `reply-with-fixed-in-template` | positive | 92 | 35 | +57 |
-| `discover-bot-id-via-graphql` | positive | 88 | 38 | +50 |
-| `compose-pr-body-with-author-model-line` | positive | 90 | 47 | +43 |
-| `chain-poll-then-merge-after-green` | positive | 94 | 51 | +43 |
-| `refuse-publish-with-uncommitted-changes` | negative | 100 | 100 | 0 |
-
-Note on the negative case: `refuse-publish-with-uncommitted-changes` tests that the agent refuses to publish when the working tree has uncommitted changes. The 0-lift means baseline and with-context agents both refuse at the same rate.
+| Scenario | with-context | baseline | lift |
+|---|---|---|---|
+| `merge-with-canonical-flag` | 96 | 41 | +55 |
+| `reply-with-fixed-in-template` | 92 | 35 | +57 |
+| `discover-bot-id-via-graphql` | 88 | 38 | +50 |
+| `compose-pr-body-with-author-model-line` | 90 | 47 | +43 |
+| `chain-poll-then-merge-after-green` | 94 | 51 | +43 |
+| `refuse-publish-with-uncommitted-changes` | 100 | 100 | 0 |
