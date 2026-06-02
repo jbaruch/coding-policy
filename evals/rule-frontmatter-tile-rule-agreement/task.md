@@ -2,36 +2,26 @@
 
 ## Problem/Feature Description
 
-A small team maintains a Tessl tile that ships coding rules to their AI agents. One of their existing rules, `pr-template-checklist`, is currently marked to apply across every context. After several months of using it, the team realizes the rule only meaningfully fires when contributors are authoring or editing pull-request-related artifacts — PR description templates, contributor guides, the PR body itself when reviewing a draft. Outside of that context the rule has nothing to say, and surfacing it in every conversation is noise. Convert the rule from a universal rule into a conditional rule scoped to PR-related artifacts.
+A small team maintains a Tessl plugin that ships coding rules to their AI agents. One of their existing rules, `pr-template-checklist`, is currently marked to apply across every context. After several months of using it, the team realizes the rule only meaningfully fires when contributors are authoring or editing pull-request-related artifacts — PR description templates, contributor guides, the PR body itself when reviewing a draft. Outside of that context the rule has nothing to say, and surfacing it in every conversation is noise. Convert the rule from a universal rule into a conditional rule scoped to PR-related artifacts.
 
 ## Output Specification
 
-Modify both:
-- `rules/pr-template-checklist.md` — update the frontmatter
-- `tile.json` — update the steering entry
-
-Leave the rule body content unchanged.
+Modify `rules/pr-template-checklist.md` — update its frontmatter so the rule fires only on PR-related artifacts. Leave the rule body content unchanged.
 
 ## Input Files
 
-The following files are the current state of the tile. Extract them before beginning.
+The following files are the current state of the plugin. Extract them before beginning.
 
-=============== FILE: inputs/tile.json ===============
+=============== FILE: inputs/.tessl-plugin/plugin.json ===============
 {
   "name": "acme/coding-rules",
   "version": "0.5.0",
-  "summary": "Acme's coding rules for AI agents",
-  "entrypoint": "README.md",
-  "steering": {
-    "commit-conventions": {
-      "rules": "rules/commit-conventions.md",
-      "alwaysApply": true
-    },
-    "pr-template-checklist": {
-      "rules": "rules/pr-template-checklist.md",
-      "alwaysApply": true
-    }
-  }
+  "description": "Acme's coding rules for AI agents",
+  "private": false,
+  "rules": [
+    "rules/commit-conventions.md",
+    "rules/pr-template-checklist.md"
+  ]
 }
 
 =============== FILE: inputs/rules/pr-template-checklist.md ===============

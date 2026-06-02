@@ -8,7 +8,7 @@ description: Prose discipline for rules, skills, and READMEs — what to cut, wh
 
 ## Scope
 
-- Applies to auto-loaded artifacts: rules from `tile.json` steering, skills on invocation, READMEs on tile fetch
+- Applies to auto-loaded artifacts: rules declared in `.tessl-plugin/plugin.json`, skills on invocation, READMEs on plugin fetch
 - CHANGELOG entries load only on demand, not always-on
 - CHANGELOG entries are the archive — they carry the motivation and incident references stripped from rules, and follow looser discipline
 - Line-count and section-count budgets target single-concept rules; rules that cover one coherent policy area with several sub-aspects (e.g., `plugin-evals` covering coverage/lift/persistence/naming/hygiene; `context-artifacts` covering structure/review/sync/audit; `skill-authoring` covering frontmatter/preamble/steps/calls) may run larger
