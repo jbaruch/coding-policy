@@ -62,9 +62,13 @@ When you add, remove, or rename a rule or skill, update **all** of these:
 
 ## CHANGELOG Hygiene
 
-- On version release, consolidate Unreleased entries into the new version section: group related entries, collapse redundant detail, retain load-bearing facts (what changed, references)
-- CHANGELOG is archive but bounded — a PR's full motivation lives in the PR body and commit messages; the Unreleased entry can be one or two sentences when the broader context lives elsewhere
-- During consolidation, audit Unreleased for duplication — multiple PRs reworking the same rule become one entry with the final outcome
+- Match the CHANGELOG's top-of-file convention to the project's release model
+- **Publish-on-merge** (every merge auto-publishes, e.g. via `tesslio/patch-version-publish`): no `Unreleased` section. Authors add un-headed `### ` entry blocks at the top of `CHANGELOG.md`; the publish pipeline stamps a `## <version> — <date>` heading above them before publish
+- On a publish-on-merge project an `Unreleased` heading is forbidden — merged work is already published
+- **Manual release** (versions cut deliberately): keep an `## Unreleased` section; consolidate its entries into the new version heading on release
+- Consolidation groups related entries, collapses redundant detail, retains load-bearing facts (what changed, references)
+- CHANGELOG is archive but bounded — a PR's full motivation lives in the PR body and commit messages; an entry can be one or two sentences when the broader context lives elsewhere
+- Audit the top section for duplication — multiple PRs reworking the same rule become one entry with the final outcome
 
 ## Consistency Check
 

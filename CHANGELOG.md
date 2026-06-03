@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+### Rules
+
+- **CHANGELOG Hygiene rewritten for publish-on-merge vs manual release** — `rules/context-artifacts.md` now matches the CHANGELOG's top-of-file convention to the release model. Publish-on-merge projects (every merge auto-publishes) drop the `Unreleased` bucket: authors add un-headed `### ` entries at the top and the publish pipeline stamps a `## <version> — <date>` heading before publish; an `Unreleased` heading is forbidden because merged work is already published. Manual-release projects keep `Unreleased` and consolidate on release. Prompted by the Tessl registry "what's new" surfacing already-published entries as unreleased. This entry itself follows the new convention (un-headed, above the stamped `## 0.3.49` section). Follow-ups: this repo's publish pipeline must adopt the stamp step (port `scripts/stamp-changelog.py` + the workflow step from `jbaruch/speaker-toolkit#60`) so un-headed entries get versioned; `skills/eval-curation/SKILL.md`'s "under Unreleased" wording needs a model-agnostic tweak.
+
+## 0.3.49 — 2026-06-03
 
 ### Rules
 
