@@ -47,7 +47,7 @@ description: Plugin structure, rule/skill format, review pipeline, surface sync,
 
 ## Mandatory Evals
 
-- Every skill with decisional logic ships eval cases, subject to the closed-loop carve-out in `rules/plugin-evals.md`
+- Eval scenarios are lift-gated and capped per skill — not every skill ships one; absence is correct when nothing clears the lift bar. See `rules/plugin-evals.md` Coverage (and the closed-loop carve-out)
 - No bleeding, no leaking — full guardrails in `rules/plugin-evals.md`
 - Process details live in the `eval-authoring` skill — invoke it to generate and curate scenarios
 
