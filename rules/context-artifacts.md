@@ -63,8 +63,10 @@ When you add, remove, or rename a rule or skill, update **all** of these:
 ## CHANGELOG Hygiene
 
 - Match the CHANGELOG's top-of-file convention to the project's release model
-- **Publish-on-merge** (every merge auto-publishes, e.g. via `tesslio/patch-version-publish`): no `Unreleased` section. Authors add un-headed `### ` entry blocks at the top of `CHANGELOG.md`; the publish pipeline stamps a `## <version> — <date>` heading above them before publish
-- On a publish-on-merge project an `Unreleased` heading is forbidden — merged work is already published
+- **Publish-on-merge** (every merge auto-publishes, e.g. via `tesslio/patch-version-publish`):
+  - No `Unreleased` section; the heading is forbidden
+  - Authors add un-headed `### ` entry blocks at the top of `CHANGELOG.md`
+  - The publish pipeline stamps a `## <version> — <date>` heading above them before publish
 - **Manual release** (versions cut deliberately): keep an `## Unreleased` section; consolidate its entries into the new version heading on release
 - Consolidation groups related entries, collapses redundant detail, retains load-bearing facts (what changed, references)
 - CHANGELOG is archive but bounded — a PR's full motivation lives in the PR body and commit messages; an entry can be one or two sentences when the broader context lives elsewhere
