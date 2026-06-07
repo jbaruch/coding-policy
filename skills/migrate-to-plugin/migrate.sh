@@ -18,10 +18,9 @@
 #
 # Usage: migrate.sh [path]
 #   path   plugin directory (defaults to the current directory)
-# Out:   STATUS outcomes emit one JSON object on stdout; pure tool/
-#        precondition errors emit only a stderr diagnostic (the missing-jq
-#        guard is the lone exception — it emits a minimal JSON envelope so
-#        stdout parsers still see it). Parse stdout only on exit 0 or 1.
+# Out:   STATUS outcomes (exit 0/1) emit one JSON object on stdout; tool/
+#        precondition errors (exit 2) emit only a stderr diagnostic and no
+#        stdout. Parse stdout only when the exit code is 0 or 1.
 #          {"status": "migrated"|"already-migrated"|"not-a-plugin",
 #           "migrated": bool,            # ran `tessl plugin migrate` now
 #           "plugin_json": bool,         # .tessl-plugin/plugin.json exists
@@ -83,7 +82,6 @@ main() {
   local path_arg="${1:-.}"
 
   if ! command -v jq >/dev/null 2>&1; then
-    printf '{"status":"not-a-plugin","migrated":false,"plugin_json":false,"tileignore_renamed":false,"tile_json_removed":false,"lint_ok":null,"residual_tile_refs":0,"residual_files":[]}\n'
     echo "error: jq is not installed; install with 'brew install jq' (macOS) or 'apt install jq' (Debian/Ubuntu) and re-run" >&2
     exit 2
   fi
