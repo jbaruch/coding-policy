@@ -8,7 +8,8 @@
     "skills/eval-authoring",
     "skills/eval-curation",
     "skills/install-reviewer",
-    "skills/adopt-fork-pr"
+    "skills/adopt-fork-pr",
+    "skills/migrate-to-plugin"
   ],
   "rules": [
     "rules/commit-conventions.md",
