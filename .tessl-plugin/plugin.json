@@ -1,6 +1,6 @@
 {
   "name": "jbaruch/coding-policy",
-  "version": "0.3.54",
+  "version": "0.3.55",
   "description": "General-purpose coding policy for Baruch's AI agents",
   "private": false,
   "skills": [
@@ -8,7 +8,8 @@
     "skills/eval-authoring",
     "skills/eval-curation",
     "skills/install-reviewer",
-    "skills/adopt-fork-pr"
+    "skills/adopt-fork-pr",
+    "skills/migrate-to-plugin"
   ],
   "rules": [
     "rules/commit-conventions.md",
