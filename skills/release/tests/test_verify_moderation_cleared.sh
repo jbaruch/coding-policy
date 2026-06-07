@@ -41,7 +41,7 @@ export VERIFY_MODERATION_MAX_DELAY_SEC=2
 export VERIFY_MODERATION_BUDGET_SEC=4
 
 # shellcheck disable=SC1090
-source "$SCRIPT" || true
+source "$SCRIPT"
 set +e
 
 FAIL_COUNT=0
@@ -154,6 +154,19 @@ if [[ $rc -eq 1 ]] && echo "$out" | jq -e '.ok == false' >/dev/null 2>&1 && [[ "
   pass "blocked by non-null moderationError: exit 1 immediately"
 else
   fail "blocked by error (rc=$rc out=$out calls=$(count_calls))"
+fi
+
+# --- 5b. Blocked by moderationError ALONE (no status, no passed) ---
+# Regression guard: the parse guard must treat moderationError as a
+# parsed field, so an error-only body is the rc 1 blocked finding, not
+# an rc 2 "could not parse" tool error.
+reset_mocks
+queue 1 '{"data":{"attributes":{"moderationError":"policy violation"}}}'
+out=$(main acme widget 1.2.3); rc=$?
+if [[ $rc -eq 1 ]] && echo "$out" | jq -e '.ok == false' >/dev/null 2>&1; then
+  pass "blocked by moderationError alone: exit 1 (not exit 2 parse error)"
+else
+  fail "error-only body (rc=$rc out=$out)"
 fi
 
 # --- 6. Budget exhausted ---

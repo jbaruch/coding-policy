@@ -181,7 +181,11 @@ After merge — per `rules/ci-safety.md`'s Always Watch CI duty extended through
 - Confirm the publish landed via the conjunction check — conjuncts 1 and 2 (resolved run's `conclusion == success` AND registry's `Latest Version > PRE`). Capture the emitted `current` version for the moderation check that follows:
 
   ```bash
-  landed=$(skills/release/verify-publish-landed.sh <workspace> <tile> "$PRE" "$run_id")
+  # Gate on the exit code — only a clean conjunction (rc 0) may proceed to
+  # the moderation step. A non-zero rc (publish did not land, or a tool
+  # error) stops the release here; do not fall through to moderation.
+  landed=$(skills/release/verify-publish-landed.sh <workspace> <tile> "$PRE" "$run_id") \
+    || { echo "Publish not confirmed — $(jq -r '.reason // "see stderr"' <<<"$landed")" >&2; exit 1; }
   CURRENT=$(jq -r '.current' <<<"$landed")
   ```
 

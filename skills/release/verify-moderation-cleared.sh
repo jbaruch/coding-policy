@@ -125,7 +125,11 @@ main() {
     passed=$(printf '%s' "$body" | jq -r '.data.attributes.moderationPassed // empty' 2>/dev/null || true)
     mod_error=$(printf '%s' "$body" | jq -r '.data.attributes.moderationError // empty' 2>/dev/null || true)
 
-    if [[ -z "$status" && -z "$passed" ]]; then
+    # A moderationError alone is a valid (blocked) response, so it counts
+    # as a parsed field — without it in the guard, a block-by-error result
+    # with no status/passed would wrongly exit 2 instead of the rc 1
+    # blocked finding below.
+    if [[ -z "$status" && -z "$passed" && -z "$mod_error" ]]; then
       echo "error: could not parse moderation fields from 'tessl api ${endpoint}' (body was: ${body}) — the registry response shape may have changed; inspect it directly and update verify-moderation-cleared.sh's jq paths" >&2
       exit 2
     fi
@@ -159,4 +163,6 @@ main() {
   done
 }
 
-[[ "${BASH_SOURCE[0]}" == "${0}" ]] && main "$@"
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  main "$@"
+fi
