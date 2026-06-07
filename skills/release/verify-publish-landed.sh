@@ -141,7 +141,7 @@ main() {
   # warning on stderr poison the parsed-output and misread the version.
   local tessl_output
   tessl_output=$(tessl plugin info "${workspace}/${tile}" 2>"$err_file") \
-    || { local err; err=$(cat "$err_file"); echo "error: 'tessl plugin info ${workspace}/${tile}' failed: ${err} — verify (1) tessl CLI is installed and on PATH ('command -v tessl'), (2) the workspace/tile slug is correct, (3) you have network access to the registry, then re-run 'tessl plugin info ${workspace}/${tile}' directly to inspect the failure before retrying the publish verification" >&2; exit 2; }
+    || { local err; err=$(cat "$err_file"); echo "error: 'tessl plugin info ${workspace}/${tile}' failed: ${err} — verify (1) tessl CLI is installed and on PATH ('command -v tessl'), (2) the workspace/plugin slug is correct, (3) you have network access to the registry, then re-run 'tessl plugin info ${workspace}/${tile}' directly to inspect the failure before retrying the publish verification" >&2; exit 2; }
   # `|| true` lets the parse-miss case fall through to the explicit
   # `-z` diagnostic below rather than triggering `set -e` + `pipefail`
   # exit. Without it, grep's exit-1 on no-match (compounded by pipefail)

@@ -38,7 +38,7 @@ The salvageable-replacement test decides — there is no default action.
 
 ## Negative Cases (Refusal-Based Scenarios)
 
-Near-zero lift on a negative case is acceptable **only** when the baseline refusal is driven by universal knowledge (obvious error cases — e.g., "do not push secrets," "do not merge red CI"). Plugin-specific refusal reasoning (e.g., "refuses to overwrite an existing reviewer workflow because the plugin's overwrite-guard says so") must still show lift; if it doesn't, apply the three-cause diagnosis above.
+Near-zero lift on a negative case is acceptable **only** when the baseline refusal is driven by universal knowledge (obvious error cases — e.g., "do not push secrets," "do not merge red CI"). Plugin-specific refusal reasoning (e.g., "refuses to overwrite an existing reviewer workflow per the plugin's overwrite-guard") must still show lift; if it doesn't, apply the three-cause diagnosis above.
 
 ## Diagnosing Where to Fix
 
