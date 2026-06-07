@@ -11,7 +11,9 @@ description: >
 
 # Eval Authoring Skill
 
-Generate, review, and iterate on eval scenarios for a Tessl skill. The 10-step workflow: generate (1) and download (2–3) scenarios, audit each (4) for bleeding/leaking, fix (5) or delete (6) unsalvageable ones, add lift-bearing scenarios (7), run evals (8), interpret results via lift analysis (9), iterate until stable (10). Steps are sequential — complete each before moving to the next.
+Process steps in order. Do not skip ahead.
+
+Generate, review, and iterate on eval scenarios for a Tessl skill. The 10-step workflow: generate (1) and download (2–3) scenarios, audit each (4) for bleeding/leaking, fix (5) or delete (6) unsalvageable ones, add lift-bearing scenarios (7), run evals (8), interpret results via lift analysis (9), iterate until stable (10).
 
 ## Step 1 — Generate Scenarios
 
@@ -51,7 +53,7 @@ Remove scenario directories that can't be fixed: task tests an internal detail, 
 
 ## Step 7 — Add Lift-Bearing Scenarios
 
-Admission is governed by `rules/plugin-evals.md` Coverage: a scenario earns its place only by demonstrated lift, capped per skill, negatives only where a refusal/silence contract exists, and a skill whose decisional core is a unit-tested script has little to no LLM-side surface to eval. So the Step 1 batch is a starting point, not a coverage target — do NOT enumerate a skill's behaviors and write a scenario for each. Add a scenario only where the tile prescribes a decision a baseline agent would plausibly get different; Steps 8–9 confirm its lift, and a flat one is dropped (Step 6 / Step 10), not "improved." Absence is correct when nothing clears the bar.
+Admission is governed by `rules/plugin-evals.md` Coverage: a scenario earns its place only by demonstrated lift, capped per skill, negatives only where a refusal/silence contract exists, and a skill whose decisional core is a unit-tested script has little to no LLM-side surface to eval. So the Step 1 batch is a starting point, not a coverage target — do NOT enumerate a skill's behaviors and write a scenario for each. Add a scenario only where the tile prescribes a decision a baseline agent would plausibly handle differently; Steps 8–9 confirm its lift, and a flat one is dropped (Step 6 / Step 10), not "improved." Absence is correct when nothing clears the bar.
 
 Write new scenarios directly rather than re-generating — you have full plugin context, the cloud generator doesn't. Each scenario is a directory in `evals/<name>/` with two files: `task.md` and `criteria.json`.
 
