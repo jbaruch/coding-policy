@@ -53,7 +53,7 @@ Remove scenario directories that can't be fixed: task tests an internal detail, 
 
 ## Step 7 — Add Lift-Bearing Scenarios
 
-Admission is governed by `rules/plugin-evals.md` Coverage: a scenario earns its place only by demonstrated lift, capped per skill, negatives only where a refusal/silence contract exists, and a skill whose decisional core is a unit-tested script has little to no LLM-side surface to eval. So the Step 1 batch is a starting point, not a coverage target — do NOT enumerate a skill's behaviors and write a scenario for each. Add a scenario only where the tile prescribes a decision a baseline agent would plausibly handle differently; Steps 8–9 confirm its lift, and a flat one is dropped (Step 6 / Step 10), not "improved." Absence is correct when nothing clears the bar.
+Read `rules/plugin-evals.md` Coverage for the admission criteria before adding anything. Procedurally: the Step 1 batch is a starting point, not a coverage target — do NOT enumerate a skill's behaviors and write a scenario for each. Add a scenario only where the tile prescribes a decision a baseline agent would plausibly handle differently; Steps 8–9 confirm its lift, and a flat one is dropped (Step 6 / Step 10), not "improved."
 
 Write new scenarios directly rather than re-generating — you have full plugin context, the cloud generator doesn't. Each scenario is a directory in `evals/<name>/` with two files: `task.md` and `criteria.json`.
 
