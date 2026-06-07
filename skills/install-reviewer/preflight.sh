@@ -2,7 +2,7 @@
 # Run all install-reviewer preconditions and report them as one JSON
 # result. The skill invokes this before any mutation so every preflight
 # failure is surfaced together, not one-at-a-time. Checks cover: git
-# worktree, GitHub CLI installation + auth, gh-aw extension, tile
+# worktree, GitHub CLI installation + auth, gh-aw extension, plugin
 # template presence, origin remote, (mode-dependent) branch state, and a
 # clean-`.env.example` guard (install mode guards `.env.example` alone;
 # override mode guards it among all rewritable targets).

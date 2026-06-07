@@ -1,4 +1,4 @@
-name: Review & Publish Tile
+name: Review & Publish Plugin
 
 on:
   push:
@@ -10,7 +10,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: publish-tile
+  group: publish-plugin
   cancel-in-progress: false
 
 jobs:

@@ -32,7 +32,7 @@ alwaysApply: true
 - Use `gh run watch` or equivalent to monitor the run in real time
 - If CI fails, inspect the logs immediately, fix the issue, and push again
 - A task is not done until CI is green
-- For plugin/tile/package releases, the duty extends past merge — confirm the resolved run's conclusion, the registry advance, and the moderation clear; no single signal is authoritative
+- For plugin/package releases, the duty extends past merge — confirm the resolved run's conclusion, the registry advance, and the moderation clear; no single signal is authoritative
 - Release contract:
   1. Before merge: capture the registry's `Latest Version` as baseline
   2. After merge: resolve the publish run by merge-commit `headSha` + `push` event filter
@@ -62,7 +62,7 @@ alwaysApply: true
 - Applies when the edited paths are prose / data artifacts a human audience reads directly — not code, not context artifacts an agent loads (rules, skills, scripts, manifests, workflow files, configuration)
 - The push may go directly to `main` or `master` without a PR review cycle
 - Preconditions (each consuming repo, all required):
-  1. Repo documents an authority-of-record rule in its own tile naming the carve-out — the exact path globs, why those paths qualify as content not code/context, and what policy review the direct-push does NOT carry
+  1. Repo documents an authority-of-record rule in its own plugin naming the carve-out — the exact path globs, why those paths qualify as content not code/context, and what policy review the direct-push does NOT carry
   2. Carve-out scopes to one or more named path globs — never a broad wildcard like `**/*.md`. Globs that would match `rules/**`, `skills/**`, workflow files (`*.yml` or `*.yaml`), `.tessl-plugin/plugin.json`, `package.json`, or any executable/loaded artifact (regardless of extension) are mis-scoped
   3. Push-time enforcement keeps any out-of-glob change from landing on the protected branch via direct push (allowlist semantics), satisfied by form A or form B. Post-push CI checks satisfy neither
      - Form A — server-side gate: a GitHub push ruleset with path restriction, a pre-receive hook, or an equivalent server-side gate rejects the ref update

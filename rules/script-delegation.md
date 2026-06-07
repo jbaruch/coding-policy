@@ -33,7 +33,7 @@ description: Deterministic operations → script, reasoning → LLM, the regex t
 
 ## Scripts Are Real Files
 
-- Scripts are executable files that live in the tile (e.g., `scripts/request-review.sh`) — not code blocks in SKILL.md for the agent to copy-paste
+- Scripts are executable files that live in the plugin (e.g., `scripts/request-review.sh`) — not code blocks in SKILL.md for the agent to copy-paste
 - The skill references the script and runs it; the script does the work
 - Code blocks in SKILL.md are for showing the agent what command to run, not for embedding logic the agent should reproduce character-by-character
 

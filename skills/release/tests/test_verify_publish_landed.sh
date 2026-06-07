@@ -50,7 +50,7 @@ run() {
 
 # Mocks. MOCK_RUN_CONCLUSION feeds `gh run view --jq .conclusion`;
 # MOCK_REGISTRY_VERSION feeds the parsed `Latest Version` line from
-# `tessl tile info`. Tests set these per-scenario.
+# `tessl plugin info`. Tests set these per-scenario.
 gh() {
   case "$1" in
     run)
@@ -87,12 +87,12 @@ gh() {
 
 tessl() {
   case "$1" in
-    tile)
-      [[ "$2" == "info" ]] || { echo "mock tessl tile: unsupported subcommand: $2" >&2; return 2; }
-      # `tessl tile info <workspace>/<tile>` emits multiline output; the
+    plugin)
+      [[ "$2" == "info" ]] || { echo "mock tessl plugin: unsupported subcommand: $2" >&2; return 2; }
+      # `tessl plugin info <workspace>/<tile>` emits multiline output; the
       # script greps for "Latest Version" and awks the last field. Mimic
       # the relevant line so the parsing pipeline is exercised end-to-end.
-      printf 'Tile: %s\n' "$3"
+      printf 'Plugin: %s\n' "$3"
       printf 'Latest Version: %s\n' "${MOCK_REGISTRY_VERSION:-0.3.31}"
       printf 'Some other line\n'
       ;;
@@ -253,7 +253,7 @@ t_empty_conclusion_exits_two() {
   assert_eq "exit code for empty conclusion" "2" "$rc"
 }
 
-# tessl tile info parse miss — output without "Latest Version" must
+# tessl plugin info parse miss — output without "Latest Version" must
 # surface as a tool-state error (exit 2), not pass through to the
 # conjunction with empty `current`. Pre-fix, `set -o pipefail` made
 # grep's exit-1 trigger the `||` "tessl failed" branch and swallow
@@ -264,9 +264,9 @@ t_tessl_parse_miss_exits_two() {
   # Override tessl mock for this test: emit output WITHOUT "Latest Version" line.
   tessl() {
     case "$1" in
-      tile)
-        [[ "$2" == "info" ]] || { echo "mock tessl tile: unsupported subcommand: $2" >&2; return 2; }
-        printf 'Tile: %s\n' "$3"
+      plugin)
+        [[ "$2" == "info" ]] || { echo "mock tessl plugin: unsupported subcommand: $2" >&2; return 2; }
+        printf 'Plugin: %s\n' "$3"
         printf 'No version line here\n'
         ;;
       *) echo "mock tessl: unsupported invocation: $*" >&2; return 2 ;;
@@ -280,9 +280,9 @@ t_tessl_parse_miss_exits_two() {
   unset -f tessl
   tessl() {
     case "$1" in
-      tile)
-        [[ "$2" == "info" ]] || { echo "mock tessl tile: unsupported subcommand: $2" >&2; return 2; }
-        printf 'Tile: %s\n' "$3"
+      plugin)
+        [[ "$2" == "info" ]] || { echo "mock tessl plugin: unsupported subcommand: $2" >&2; return 2; }
+        printf 'Plugin: %s\n' "$3"
         printf 'Latest Version: %s\n' "${MOCK_REGISTRY_VERSION:-0.3.31}"
         printf 'Some other line\n'
         ;;
@@ -304,9 +304,9 @@ t_main_runs_under_errexit_pipefail() {
   MOCK_RUN_CONCLUSION="success"
   tessl() {
     case "$1" in
-      tile)
-        [[ "$2" == "info" ]] || { echo "mock tessl tile: unsupported subcommand: $2" >&2; return 2; }
-        printf 'Tile: %s\n' "$3"
+      plugin)
+        [[ "$2" == "info" ]] || { echo "mock tessl plugin: unsupported subcommand: $2" >&2; return 2; }
+        printf 'Plugin: %s\n' "$3"
         printf 'No version line here\n'
         ;;
       *) echo "mock tessl: unsupported invocation: $*" >&2; return 2 ;;
@@ -318,9 +318,9 @@ t_main_runs_under_errexit_pipefail() {
   unset -f tessl
   tessl() {
     case "$1" in
-      tile)
-        [[ "$2" == "info" ]] || { echo "mock tessl tile: unsupported subcommand: $2" >&2; return 2; }
-        printf 'Tile: %s\n' "$3"
+      plugin)
+        [[ "$2" == "info" ]] || { echo "mock tessl plugin: unsupported subcommand: $2" >&2; return 2; }
+        printf 'Plugin: %s\n' "$3"
         printf 'Latest Version: %s\n' "${MOCK_REGISTRY_VERSION:-0.3.31}"
         printf 'Some other line\n'
         ;;
@@ -394,7 +394,7 @@ run "wrong arg count exits 2"                                      t_wrong_arg_c
 run "run-id == 0 exits 2 (matches positive-integer contract)"      t_zero_run_id_exits_two
 run "in-flight (null) conclusion exits 2"                          t_null_conclusion_in_flight_exits_two
 run "empty conclusion exits 2"                                     t_empty_conclusion_exits_two
-run "tessl tile info parse miss exits 2 with offending output"     t_tessl_parse_miss_exits_two
+run "tessl plugin info parse miss exits 2 with offending output"     t_tessl_parse_miss_exits_two
 run "main runs safely under set -euo pipefail"                     t_main_runs_under_errexit_pipefail
 run "missing jq emits JSON on stdout AND diagnostic on stderr"     t_missing_jq_emits_json_AND_stderr
 run "output is valid JSON with documented shape"                   t_output_is_valid_json_with_documented_shape

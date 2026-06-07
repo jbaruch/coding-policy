@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Wait for a published tile version's moderation to clear, polling the
+# Wait for a published plugin version's moderation to clear, polling the
 # registry with exponential backoff. Moderation is a post-publish install
 # gate: a freshly published version can be blocked from `tessl install`
 # until its moderation state reaches "pass". This is the release
 # contract's third conjunct (rules/ci-safety.md) — a green publish run
 # plus a registry advance does NOT confirm a release on its own.
 #
-# Signal (machine-readable JSON, not the `tessl tile info` human text):
+# Signal (machine-readable JSON, not the `tessl plugin info` human text):
 #   tessl api v1/tiles/<workspace>/<tile>/versions/<version>
 #     .data.attributes.moderationStatus   ("pass" => cleared)
 #     .data.attributes.moderationPassed    (bool; true => cleared)

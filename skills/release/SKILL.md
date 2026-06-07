@@ -121,7 +121,7 @@ A `COMMENTED` review with zero inline comments is fully non-blocking; a `COMMENT
 Before merging, capture the registry baseline so the post-merge check has something to compare against:
 
 ```bash
-PRE=$(tessl tile info <workspace>/<tile> | grep "Latest Version" | awk '{print $NF}')
+PRE=$(tessl plugin info <workspace>/<tile> | grep "Latest Version" | awk '{print $NF}')
 ```
 
 Pick the right cleanup path based on where you ran the skill from.
