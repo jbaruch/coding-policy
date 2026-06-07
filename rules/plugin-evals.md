@@ -8,9 +8,14 @@ description: Eval coverage, lift-not-attainment scoring, no bleeding, no leaking
 
 ## Coverage
 
-- Every skill with decisional logic ships eval cases, subject only to the closed-loop carve-out below
-- Include positive cases that show correct behavior, and negative cases that refuse bad input or produce silence when nothing actionable
-- Write negative cases by hand using existing scenarios as a structural template (`tessl scenario generate` skews toward happy-path)
+- A scenario earns its place only by demonstrated lift on the floor model (see `Lift, Not Attainment`). Proving tile value is the goal, not coverage
+- Do NOT write one scenario per prescribed behavior, pad a suite to "cover" a skill, or add a scenario you have not lift-checked. Absence is correct when nothing clears the bar
+- Admission gate, not a curation afterthought: run a candidate once (baseline + with-context) before committing it; a flat result keeps it out of the suite
+- Default cap of 3 scenarios per skill. Exceeding it requires justifying that each added scenario clears the lift bar AND tests a distinct tile-prescribed behavior
+- The cap is a prospective admission gate on newly added scenarios; existing suites already over 3 stay governed by `Lift, Not Attainment` curation, not forced truncation
+- Scope to genuine LLM-side judgment: a skill whose decisional core is a unit-tested script has no LLM-side surface to eval. Eval only the judgment the tile prescribes that the script does not make
+- Negative cases only where the skill has a refusal or silence contract; write them by hand (`tessl scenario generate` skews toward happy-path)
+- Subject to the closed-loop carve-out below
 
 ## Closed-Loop Carve-Out
 
@@ -55,7 +60,7 @@ description: Eval coverage, lift-not-attainment scoring, no bleeding, no leaking
 - Pruning is mandatory upkeep, not optional cleanup
 - Run the curation pass (see `skills/eval-curation/SKILL.md`) every few publishes
 - Retire any scenario showing near-zero lift after the three-cause diagnosis and fix attempt
-- Measure by per-scenario lift contribution, not raw scenario count — a 10-scenario suite where every scenario pulls weight beats a 35-scenario suite where half score baseline-equivalent
+- Measure by per-scenario lift contribution, not raw scenario count. Most skills need 1–3 lift-bearing scenarios; many prescribed behaviors need zero, where baseline already produces the tile's manner. A small suite where every scenario pulls weight beats a large one padded with baseline-equivalents
 
 ## Quality
 
