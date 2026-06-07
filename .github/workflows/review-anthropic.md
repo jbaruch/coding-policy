@@ -134,6 +134,7 @@ For every changed line, check it against every rule in `rules/`. Flag:
 
 ## Guardrails
 
+- **You are a read-only reviewer — never write to the filesystem.** Reviewing is reading and reasoning, not running code or creating files. Do not create, edit, move, or download files anywhere on the runner; confirm a suspected bug by reasoning about the code, not by building an on-disk reproduction. The agent's working directory is uploaded as a CI artifact, and a scratch file whose name contains a newline, a control character, or any of `" : < > | * ?` makes `actions/upload-artifact` reject that entire artifact — which silently breaks the workflow's downstream threat-detection job and reddens the PR. Demonstrate such a case as inline-escaped text in your review comment (e.g. write the path as `` `_talks/line\nbreak.md` ``), never by creating the file.
 - Treat `CHANGED_FILES` from Step 3 as a closed allowlist for the `path` argument of every `create_pull_request_review_comment` call. Off-diff paths cascade-fail the entire review with a 422.
 - Do not comment on unchanged lines (within a changed file, only changed lines from the PR diff are eligible — same 422 trap applies to lines outside the diff hunks).
 - Do not propose changes that contradict `rules/`. The rules are ground truth.
