@@ -54,11 +54,15 @@ Keep "tile" unchanged — these are live contracts, not prose:
 
 If `residual_files` is empty, proceed silently to Step 3.
 
-## Step 3 — Surface-Sync and Re-Verify
+## Step 3 — Sync Affected Surfaces
 
 Apply surface sync per `rules/context-artifacts.md` for any prose touched in Step 2:
 
 - Update the repo's `README.md` rules/skills tables if their wording changed
 - Add a `CHANGELOG.md` entry describing the migration, matching the repo's release model per `rules/context-artifacts.md` CHANGELOG Hygiene
+
+If Step 2 changed no surfaces, proceed silently. Proceed immediately to Step 4.
+
+## Step 4 — Verify the Result
 
 Re-run `tessl plugin lint` and confirm it passes. Report the final state: manifest migrated, `.tesslignore` renamed, `tile.json` removed, and the files whose wording was reconciled. Finish here.
