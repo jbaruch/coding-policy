@@ -12,7 +12,7 @@ description: Plugin structure, rule/skill format, review pipeline, surface sync,
 - The plugin's `README.md` is the project's `README.md` — same file. Extend the existing README with rules table, skills table, and installation instructions
 - Include a Tessl registry badge at the top of README: `[![tessl](https://img.shields.io/endpoint?url=https%3A%2F%2Fapi.tessl.io%2Fv1%2Fbadges%2F<workspace>%2F<plugin>)](https://tessl.io/registry/<workspace>/<plugin>)`
 - Skills live in `skills/<name>/SKILL.md`, rules live in `rules/<name>.md`
-- Standard directories: `rules/`, `skills/<name>/`, `evals/` — `evals/` is omitted in plugins claiming the closed-loop carve-out in `rules/plugin-evals.md`
+- Standard directories: `rules/`, `skills/<name>/`, `evals/`
 - Use `.tesslignore` to exclude build artifacts and CI files from the published plugin
 - Validate structure with `tessl plugin lint` before every publish
 - `CHANGELOG.md` and similar repo files show as orphaned in `tessl plugin lint` — lint only tracks manifest-declared paths
@@ -47,7 +47,7 @@ description: Plugin structure, rule/skill format, review pipeline, surface sync,
 
 ## Mandatory Evals
 
-- Eval scenario requirements live in `rules/plugin-evals.md` Coverage (and the closed-loop carve-out)
+- Eval scenario requirements live in `rules/plugin-evals.md` Coverage
 - No bleeding, no leaking — full guardrails in `rules/plugin-evals.md`
 - Process details live in the `eval-authoring` skill — invoke it to generate and curate scenarios
 

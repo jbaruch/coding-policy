@@ -1,7 +1,7 @@
 ---
 alwaysApply: false
 applyTo: "evals/**, skills/**/SKILL.md — when authoring or maintaining eval scenarios"
-description: Eval coverage, lift-not-attainment scoring, no bleeding, no leaking, fixture hygiene, closed-loop carve-out
+description: Eval coverage, lift-not-attainment scoring, no bleeding, no leaking, fixture hygiene
 ---
 
 # Plugin Evals
@@ -15,20 +15,6 @@ description: Eval coverage, lift-not-attainment scoring, no bleeding, no leaking
 - The cap is a prospective admission gate on newly added scenarios; existing suites already over 3 stay governed by `Lift, Not Attainment` curation, not forced truncation
 - Scope to genuine LLM-side judgment: a skill whose decisional core is a unit-tested script has no LLM-side surface to eval. Eval only the judgment the tile prescribes that the script does not make
 - Negative cases only where the skill has a refusal or silence contract; write them by hand (`tessl scenario generate` skews toward happy-path)
-- Subject to the closed-loop carve-out below
-
-## Closed-Loop Carve-Out
-
-- Narrow exception for closed-loop automated systems with no human eval-result consumption
-- Tile exempt from the Coverage clause above and the entire Persistence section
-- Preconditions (all required):
-  1. No human review — no human reads eval output in any form: scores, lift deltas, scenario diffs, regression alerts, failure traces, dashboards, periodic reports
-  2. No gating use — eval results do not gate any downstream automated action: release blocks, deploy blocks, publish-tile gates, rollback triggers, alert routing, dashboard surfaces, paging, summary stats consumed by another workflow
-  3. Affirmative owner declaration — tile's CHANGELOG records the exception under a `### Rules` entry naming this rule + date
-- "We plan to look at results" does NOT qualify
-- "We have a gate that fails on regressions but nobody checks the failures" does NOT qualify (precondition 2)
-- Re-introducing any consumption later (human review or automated gating) requires re-introducing evals first under the standard requirement
-- Every other tile follows the rule in full
 
 ## Task and Criteria: the load-bearing shape
 
