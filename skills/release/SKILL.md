@@ -178,14 +178,26 @@ After merge — per `rules/ci-safety.md`'s Always Watch CI duty extended through
   No `--exit-status` on the watch: the publish-landed conjunction below reads the run conclusion explicitly, so letting `--exit-status` propagate a non-zero exit would short-circuit `set -e` wrappers before the conjunction runs.
 
   `gh pr view` returns the specific merge commit for this PR, unaffected by parallel merges. The resolver filters on `headSha == $merge_sha` AND `event == push` so manual `workflow_dispatch` runs sharing the SHA are excluded; it also retries on enqueue latency so the immediate post-merge `gh run list` doesn't race the publish workflow's enqueue and surface as "no run found". Output is `{"database_id": N}` per `rules/script-delegation.md` — extract with `jq -r '.database_id'`. The watch is a timing precondition for the conjunction below, not the gate
-- Confirm the publish landed via the conjunction check. Both conjuncts must hold (resolved run's `conclusion == success` AND registry's `Latest Version > PRE`):
+- Confirm the publish landed via the conjunction check — conjuncts 1 and 2 (resolved run's `conclusion == success` AND registry's `Latest Version > PRE`). Capture the emitted `current` version for the moderation check that follows:
 
   ```bash
-  skills/release/verify-publish-landed.sh <workspace> <tile> "$PRE" "$run_id"
+  # Gate on the exit code — only a clean conjunction (rc 0) may proceed to
+  # the moderation step. A non-zero rc (publish did not land, or a tool
+  # error) stops the release here; do not fall through to moderation.
+  landed=$(skills/release/verify-publish-landed.sh <workspace> <tile> "$PRE" "$run_id") \
+    || { echo "Publish not confirmed — $(jq -r '.reason // "see stderr"' <<<"$landed")" >&2; exit 1; }
+  CURRENT=$(jq -r '.current' <<<"$landed")
   ```
 
   Output is exit-code-dependent: rc 0/1 emits the JSON envelope `{"ok": bool, "reason": "...", "run_conclusion": "...", "pre": "...", "current": "..."}` on stdout (parse it for the finding); rc 2 emits the stderr diagnostic (tool-state errors: run still in flight, gh/tessl unreachable). Exception: the missing-jq guard at rc 2 emits a minimal JSON envelope on stdout (the script can't use jq to format JSON when jq itself is absent) so wrappers that always parse stdout still see a parseable failure. Do not compare against a specific expected version. See `rules/ci-safety.md` for full release-contract semantics and failed-publish recovery
-- Report the outcome: merged PR URL, version published, registry confirmation
+- Once conjuncts 1 and 2 hold, confirm moderation cleared — conjunct 3. A freshly published version can be install-blocked until its moderation state reaches `pass`; poll with exponential backoff (the script owns the backoff constants and the cleared/blocked decision):
+
+  ```bash
+  skills/release/verify-moderation-cleared.sh <workspace> <tile> "$CURRENT"
+  ```
+
+  Exit 0 = moderation cleared. Exit 1 = blocked or still-pending at budget exhaustion — an unconfirmed release; surface it and do not report success. Exit 2 = tool-state error (tessl unreachable, jq missing). Never report the release confirmed until this clears. See `rules/ci-safety.md` for the full three-conjunct contract
+- Report the outcome: merged PR URL, version published, registry + moderation confirmation
 
 When this step is wrapped in a reusable script (e.g., `merge-and-cleanup.sh` that other devs run unattended), see `skills/release/SCRIPTING.md` for the gates the script must enforce.
 

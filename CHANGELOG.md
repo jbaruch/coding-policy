@@ -1,6 +1,20 @@
 # Changelog
 
-## Unreleased
+### Rules
+
+- **ci-safety — moderation is now a post-publish install gate (reverses the earlier "registry never rejects" framing)** — Tessl changed: a freshly published version can be blocked from `tessl install` until its moderation state reaches `pass`. The release contract gains a third conjunct — run-success AND registry-advance AND moderation-clear — plus a wait step: poll the published version's moderation state with exponential backoff and fail loud at budget. This reverses the prior 0.3.x framing (`The Tessl registry never rejects a published version`; `moderationPassed: false affects tessl search visibility only`) that earlier entries planted to kill a hedge-hallucination — the anti-hallucination intent survives as "query the real moderation state, never invent one to hedge a failed publish." The advisory-vs-blocking security-finding distinction is retained. Signal: `tessl api v1/tiles/<ws>/<tile>/versions/<v>` → `.data.attributes.moderationStatus` / `moderationPassed` / `moderationError`.
+
+- **CHANGELOG Hygiene rewritten for publish-on-merge vs manual release** — `rules/context-artifacts.md` now matches the CHANGELOG's top-of-file convention to the release model. Publish-on-merge projects (every merge auto-publishes) drop the `Unreleased` bucket: authors add un-headed `### ` entries at the top and the publish pipeline stamps a `## <version> — <date>` heading before publish; an `Unreleased` heading is forbidden because merged work is already published. Manual-release projects keep `Unreleased` and consolidate on release. Prompted by the Tessl registry "what's new" surfacing already-published entries as unreleased. This entry itself follows the new convention (un-headed, above the stamped `## 0.3.49` section). Follow-ups: this repo's publish pipeline must adopt the stamp step (port `scripts/stamp-changelog.py` + the workflow step from `jbaruch/speaker-toolkit#60`) so un-headed entries get versioned; `skills/eval-curation/SKILL.md`'s "under Unreleased" wording needs a model-agnostic tweak.
+
+### Skills
+
+- **release — moderation-clear gate wired into Step 7 (conjunct 3)** — New `skills/release/verify-moderation-cleared.sh <workspace> <tile> <version>` polls the registry moderation signal with exponential backoff (BASE 5s → MAX 120s, BUDGET 600s; env-overridable for tests) and emits `{"ok",...,"moderation_status","version","attempts","elapsed_seconds"}`. Exit 0 cleared (`moderationStatus == pass` or `moderationPassed == true`); exit 1 blocked (non-null `moderationError` or a terminal block state — fast fail) or still-pending at budget exhaustion (fail loud); exit 2 arg/tool error. Backoff constants and the block-state set live at the top of the script per `rules/script-as-black-box.md`. `SKILL.md` Step 7 and `SCRIPTING.md`'s Wrapping-Step-7 gates call it after `verify-publish-landed.sh`; `SCRIPTING.md`'s former "No moderation states" prohibition is inverted into a required moderation-clear gate. `tests/test_verify_moderation_cleared.sh` covers 13 paths (immediate/boolean/deferred clear, block-by-status, block-by-error, budget exhaustion, arg + env validation, tessl failure, unparseable body); mocks `tessl`/`sleep` as functions over a tempfile response queue.
+
+### Evals
+
+- **pr-merge-and-post-merge-cleanup — conjunction criterion realigned to the 3-conjunct contract** — The "Conjunction check" criterion (max_score 15) previously zero-scored any moderation-state handling as a hallucination on the now-false "registry never rejects" premise. Rewritten to require all three conjuncts (run-success AND registry-advance AND moderation-clear) and to zero-score treating a published-but-unmoderated version as confirmed; context line updated to match. Weights unchanged (sum 100, non-uniform); no moderation literal leaks into `task.md`.
+
+## 0.3.49 — 2026-06-03
 
 ### Rules
 
