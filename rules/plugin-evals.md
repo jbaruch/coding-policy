@@ -12,6 +12,7 @@ description: Eval coverage, lift-not-attainment scoring, no bleeding, no leaking
 - Do NOT write one scenario per prescribed behavior, pad a suite to "cover" a skill, or add a scenario you have not lift-checked. Absence is correct when nothing clears the bar
 - Admission gate, not a curation afterthought: run a candidate once (baseline + with-context) before committing it; a flat result keeps it out of the suite
 - Default cap of 3 scenarios per skill. Exceeding it requires justifying that each added scenario clears the lift bar AND tests a distinct tile-prescribed behavior
+- The cap is a prospective admission gate on newly added scenarios; existing suites already over 3 stay governed by `Lift, Not Attainment` curation, not forced truncation
 - Scope to genuine LLM-side judgment: a skill whose decisional core is a unit-tested script has no LLM-side surface to eval. Eval only the judgment the tile prescribes that the script does not make
 - Negative cases only where the skill has a refusal or silence contract; write them by hand (`tessl scenario generate` skews toward happy-path)
 - Subject to the closed-loop carve-out below
