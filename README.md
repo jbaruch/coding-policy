@@ -57,6 +57,7 @@ tessl install jbaruch/coding-policy
 | [eval-curation](skills/eval-curation/SKILL.md) | Prune an existing eval suite — run, compute per-scenario lift, diagnose weak scenarios, retire / fix / rewrite, verify the curated suite still pulls weight |
 | [install-reviewer](skills/install-reviewer/SKILL.md) | Scaffold the paired gh-aw PR review workflows (OpenAI + Anthropic) into a consumer repo — reviews every PR against the latest published `jbaruch/coding-policy` with cross-family enforcement. Documents the reviewer CI secrets in a merged `.env.example`. Supports `--override` for in-place upgrades. |
 | [adopt-fork-pr](skills/adopt-fork-pr/SKILL.md) | Classify a PR by number. Same-repo PRs pass through to the reviewer; fork PRs (skipped by the reviewer's fork-guard) get adopted into the base repo as a same-repo PR, preserving the contributor's commits. |
+| [migrate-to-plugin](skills/migrate-to-plugin/SKILL.md) | Migrate a legacy `tile.json` plugin to the `.tessl-plugin/plugin.json` form: runs `tessl plugin migrate`, renames `.tileignore`, removes the obsolete `tile.json`, re-lints, then reconciles residual "tile" wording to "plugin" while preserving contract surfaces. |
 
 ## Philosophy
 
