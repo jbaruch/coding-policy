@@ -25,7 +25,7 @@
 # checks the registry, sees the publish landed) and the root fix is at
 # the workflow design layer — keep publish as the last step.
 #
-# Usage: verify-publish-landed.sh <workspace> <tile> <pre-baseline> <run-id>
+# Usage: verify-publish-landed.sh <workspace> <plugin> <pre-baseline> <run-id>
 # Out:   JSON contract differs by exit code (per rules/script-delegation.md
 #        "JSON-producing"):
 #          - rc 0/1 (publish-landed finding): one JSON object on stdout
@@ -91,7 +91,7 @@ version_gt() {
 
 main() {
   if [[ $# -ne 4 ]]; then
-    echo "usage: $0 <workspace> <tile> <pre-baseline> <run-id>" >&2
+    echo "usage: $0 <workspace> <plugin> <pre-baseline> <run-id>" >&2
     exit 2
   fi
   local workspace="$1" tile="$2" pre="$3" run_id="$4"

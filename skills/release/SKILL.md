@@ -121,7 +121,7 @@ A `COMMENTED` review with zero inline comments is fully non-blocking; a `COMMENT
 Before merging, capture the registry baseline so the post-merge check has something to compare against:
 
 ```bash
-PRE=$(tessl plugin info <workspace>/<tile> | grep "Latest Version" | awk '{print $NF}')
+PRE=$(tessl plugin info <workspace>/<plugin> | grep "Latest Version" | awk '{print $NF}')
 ```
 
 Pick the right cleanup path based on where you ran the skill from.
@@ -184,7 +184,7 @@ After merge — per `rules/ci-safety.md`'s Always Watch CI duty extended through
   # Gate on the exit code — only a clean conjunction (rc 0) may proceed to
   # the moderation step. A non-zero rc (publish did not land, or a tool
   # error) stops the release here; do not fall through to moderation.
-  landed=$(skills/release/verify-publish-landed.sh <workspace> <tile> "$PRE" "$run_id") \
+  landed=$(skills/release/verify-publish-landed.sh <workspace> <plugin> "$PRE" "$run_id") \
     || { echo "Publish not confirmed — $(jq -r '.reason // "see stderr"' <<<"$landed")" >&2; exit 1; }
   CURRENT=$(jq -r '.current' <<<"$landed")
   ```
@@ -193,7 +193,7 @@ After merge — per `rules/ci-safety.md`'s Always Watch CI duty extended through
 - Once conjuncts 1 and 2 hold, confirm moderation cleared — conjunct 3. A freshly published version can be install-blocked until its moderation state reaches `pass`; poll with exponential backoff (the script owns the backoff constants and the cleared/blocked decision):
 
   ```bash
-  skills/release/verify-moderation-cleared.sh <workspace> <tile> "$CURRENT"
+  skills/release/verify-moderation-cleared.sh <workspace> <plugin> "$CURRENT"
   ```
 
   Exit 0 = moderation cleared. Exit 1 = blocked or still-pending at budget exhaustion — an unconfirmed release; surface it and do not report success. Exit 2 = tool-state error (tessl unreachable, jq missing). Never report the release confirmed until this clears. See `rules/ci-safety.md` for the full three-conjunct contract

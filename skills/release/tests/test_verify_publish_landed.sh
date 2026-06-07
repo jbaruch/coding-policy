@@ -89,7 +89,7 @@ tessl() {
   case "$1" in
     plugin)
       [[ "$2" == "info" ]] || { echo "mock tessl plugin: unsupported subcommand: $2" >&2; return 2; }
-      # `tessl plugin info <workspace>/<tile>` emits multiline output; the
+      # `tessl plugin info <workspace>/<plugin>` emits multiline output; the
       # script greps for "Latest Version" and awks the last field. Mimic
       # the relevant line so the parsing pipeline is exercised end-to-end.
       printf 'Plugin: %s\n' "$3"
