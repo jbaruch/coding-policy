@@ -64,5 +64,11 @@ alwaysApply: true
 - Preconditions (each consuming repo, all required):
   1. Repo documents an authority-of-record rule in its own tile naming the carve-out — the exact path globs, why those paths qualify as content not code/context, and what policy review the direct-push does NOT carry
   2. Carve-out scopes to one or more named path globs — never a broad wildcard like `**/*.md`. Globs that would match `rules/**`, `skills/**`, workflow files (`*.yml` or `*.yaml`), `.tessl-plugin/plugin.json`, `package.json`, or any executable/loaded artifact (regardless of extension) are mis-scoped
-  3. Push-time enforcement rejects the entire ref update when any path changed by the push lies outside the carve-out globs (GitHub push ruleset with path restriction, pre-receive hook, or equivalent server-side gate that blocks the ref update). Post-push CI checks do NOT qualify
+  3. Push-time enforcement rejects the push when any changed path lies outside the carve-out globs (allowlist semantics), satisfied by form A or form B. Post-push CI checks satisfy neither
+     - Form A — server-side gate: a GitHub push ruleset with path restriction, a pre-receive hook, or an equivalent server-side gate blocks the ref update
+     - Form B — client-side content-only diff gate: permitted only where the platform cannot express server-side allowlist enforcement (e.g., github.com personal repos)
+       - The publishing tool runs the gate as a deterministic script (per `rules/script-delegation.md`), not agent judgment
+       - The gate computes changed paths with `git diff --name-only` against the push target ref and direct-pushes only when every changed path matches a declared content glob
+       - Any out-of-glob path forces an automatic branch + PR fallback — never an operator-say-so override
+       - The authority-of-record rule (precondition 1) names the gate script
 - Every other branch / path in the repo still goes through pull requests
