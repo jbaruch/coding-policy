@@ -18,31 +18,37 @@
 #
 # Usage: migrate.sh [path]
 #   path   plugin directory (defaults to the current directory)
-# Out:   one JSON object on stdout:
+# Out:   STATUS outcomes emit one JSON object on stdout; pure tool/
+#        precondition errors emit only a stderr diagnostic (the missing-jq
+#        guard is the lone exception — it emits a minimal JSON envelope so
+#        stdout parsers still see it). Parse stdout only on exit 0 or 1.
 #          {"status": "migrated"|"already-migrated"|"not-a-plugin",
 #           "migrated": bool,            # ran `tessl plugin migrate` now
 #           "plugin_json": bool,         # .tessl-plugin/plugin.json exists
 #           "tileignore_renamed": bool,  # .tileignore -> .tesslignore
 #           "tile_json_removed": bool,   # legacy tile.json deleted
 #           "lint_ok": bool|null,        # `tessl plugin lint` passed (null if not run)
-#           "residual_tile_refs": N,     # files containing /\btile(s)?\b/i
+#           "residual_tile_refs": N,     # files matching whole-word tile/tiles, case-insensitive
 #           "residual_files": [path,...]}
-# Exit:  0 migrated cleanly or already-migrated (no-op);
+# Exit:  0 not-a-plugin (nothing to migrate), already-migrated, or migrated
+#          with lint passing;
 #        1 migrated but `tessl plugin lint` failed (agent must address);
-#        2 not a plugin directory, or a tool/precondition error
-#          (jq/tessl missing, path invalid, migrate produced no manifest)
+#        2 tool/precondition error — jq/tessl missing, path not a directory,
+#          or `tessl plugin migrate` produced no manifest (stderr only)
 
 set -euo pipefail
 
-# Scan tracked-and-untracked text files for /\btile(s)?\b/i, excluding the
-# VCS dir, installed plugins, dependency dirs, and the CHANGELOG (its
-# archive legitimately references the legacy term). Emits a JSON array of
-# matching file paths (relative, sorted) on stdout. Always exits 0.
+# Scan tracked-and-untracked text files for the whole word "tile"/"tiles",
+# case-insensitive, excluding the VCS dir, installed plugins, dependency
+# dirs, and the CHANGELOG (its archive legitimately references the legacy
+# term). Uses `grep -w` for word boundaries (POSIX-portable, unlike the
+# `\b` GNU extension) and `-i` so capitalized "Tile" is not missed. Emits a
+# JSON array of matching file paths (relative, sorted) on stdout. Always 0.
 scan_residual_files() {
   local files
   # `|| true`: grep exits 1 on no matches, which would trip `set -o
   # pipefail` and abort the migration after it already succeeded.
-  files=$(grep -rIlE '\btile\b|\btiles\b' . \
+  files=$(grep -rIliwE 'tiles?' . \
     --exclude-dir=.git \
     --exclude-dir=.tessl \
     --exclude-dir=node_modules \
@@ -102,11 +108,12 @@ main() {
     exit 0
   fi
 
-  # Neither manifest: not a tessl plugin directory — nothing to migrate.
+  # Neither manifest: not a tessl plugin directory — nothing to migrate. A
+  # clean assessment, not a tool error, so emit the status and exit 0; the
+  # only exit-2 cases are genuine tool/precondition failures.
   if [[ "$has_tile" == false ]]; then
     emit "not-a-plugin" false false false false null "[]"
-    echo "error: no tile.json or .tessl-plugin/plugin.json under '${path_arg}' — not a tessl plugin directory" >&2
-    exit 2
+    exit 0
   fi
 
   # Legacy: tile.json present, no plugin.json. Run the conversion.

@@ -60,7 +60,10 @@ make_legacy_repo() {
     printf '{"name":"acme/widget","version":"0.1.0"}\n' > tile.json
     printf 'dist/\n' > .tileignore
     mkdir -p rules
-    printf 'Install a tile to get started.\n' > rules/intro.md
+    # Capital "Tile" on purpose: locks the case-insensitive residual scan
+    # (a case-sensitive grep would miss it and the happy-path assertion below
+    # would fail).
+    printf 'Install a Tile to get started.\n' > rules/intro.md
     git add -A; git commit -qm init )
   echo "$d"
 }
@@ -78,12 +81,14 @@ t_already_migrated_is_noop() {
   assert_eq "migrated" "false" "$(jq -r .migrated <<<"$out")" || return 1
 }
 
-t_not_a_plugin_exits_two() {
+t_not_a_plugin_is_noop() {
   local d; d=$(mktemp -d)
   local out rc=0
-  out=$(main "$d" 2>/dev/null) || rc=$?
+  out=$(main "$d") || rc=$?
   rm -rf "$d"
-  assert_eq "exit" "2" "$rc" || return 1
+  # Not a plugin dir is a clean assessment (nothing to migrate), not a tool
+  # error — exit 0 with the status on stdout so the skill can branch on it.
+  assert_eq "exit" "0" "$rc" || return 1
   assert_eq "status" "not-a-plugin" "$(jq -r .status <<<"$out")"
 }
 
@@ -160,7 +165,7 @@ t_output_is_valid_json_with_documented_shape() {
 
 echo "== migrate.sh tests =="
 run "already-migrated is a no-op (exit 0)"                t_already_migrated_is_noop
-run "not-a-plugin exits 2"                                t_not_a_plugin_exits_two
+run "not-a-plugin is a no-op (exit 0)"                    t_not_a_plugin_is_noop
 run "legacy happy path migrates + sanitizes + scans"      t_legacy_happy_path
 run "lint failure after migrate exits 1"                  t_legacy_lint_failure_exits_one
 run "migrate without manifest exits 2"                    t_migrate_without_manifest_exits_two
