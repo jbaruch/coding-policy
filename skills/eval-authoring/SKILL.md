@@ -37,7 +37,7 @@ tessl scenario download --output evals <id>
 
 ## Step 4 — Review Each Scenario
 
-For every scenario in `evals/`, read `task.md` and `criteria.json`. Check against `skills/eval-authoring/REVIEW_CHECKLIST.md`: does the task describe a situation without prescribing the technique? Do the criteria grade the specific manner the tile prescribes (good) rather than restating literals from the task (bleeding)? Any tile-internal leaks in the criteria? Are criteria values public surfaces, tile-prescribed conventions (allowed — they measure tile value), or tile internals (leaking)? Any quality or consistency issues?
+For every scenario in `evals/`, read `task.md` and `criteria.json`. Check against `skills/eval-authoring/REVIEW_CHECKLIST.md`: does the task describe a situation without prescribing the technique? Do the criteria grade the specific manner the plugin prescribes (good) rather than restating literals from the task (bleeding)? Any plugin-internal leaks in the criteria? Are criteria values public surfaces, plugin-prescribed conventions (allowed — they measure plugin value), or plugin internals (leaking)? Any quality or consistency issues?
 
 If no issues found in a scenario, proceed silently to the next one. Proceed immediately to Step 5.
 
@@ -45,7 +45,7 @@ If no issues found in a scenario, proceed silently to the next one. Proceed imme
 
 Edit `criteria.json` and `task.md` to remove bleeding, remove leaking, improve failure messages, and align criteria with task. See `skills/eval-authoring/REVIEW_CHECKLIST.md` for definitions.
 
-When a criterion is misaligned, leaking, or unsalvageable, remove it and reweight the remaining criteria so the checklist sums to 100 — do not keep a bad criterion to preserve existing weights. If removing the bad criterion leaves no tile-specific signal, the scenario itself is unsalvageable — delete it per Step 6.
+When a criterion is misaligned, leaking, or unsalvageable, remove it and reweight the remaining criteria so the checklist sums to 100 — do not keep a bad criterion to preserve existing weights. If removing the bad criterion leaves no plugin-specific signal, the scenario itself is unsalvageable — delete it per Step 6.
 
 ## Step 6 — Delete Unsalvageable Scenarios
 
@@ -53,7 +53,7 @@ Remove scenario directories that can't be fixed: task tests an internal detail, 
 
 ## Step 7 — Add Lift-Bearing Scenarios
 
-Read `rules/plugin-evals.md` Coverage for the admission criteria before adding anything. Procedurally: the Step 1 batch is a starting point, not a coverage target — do NOT enumerate a skill's behaviors and write a scenario for each. Add a scenario only where the tile prescribes a decision a baseline agent would plausibly handle differently; Steps 8–9 confirm its lift, and a flat one is dropped (Step 6 / Step 10), not "improved."
+Read `rules/plugin-evals.md` Coverage for the admission criteria before adding anything. Procedurally: the Step 1 batch is a starting point, not a coverage target — do NOT enumerate a skill's behaviors and write a scenario for each. Add a scenario only where the plugin prescribes a decision a baseline agent would plausibly handle differently; Steps 8–9 confirm its lift, and a flat one is dropped (Step 6 / Step 10), not "improved."
 
 Write new scenarios directly rather than re-generating — you have full plugin context, the cloud generator doesn't. Each scenario is a directory in `evals/<name>/` with two files: `task.md` and `criteria.json`.
 
@@ -61,7 +61,7 @@ Write new scenarios directly rather than re-generating — you have full plugin 
 
 ```json
 {
-  "context": "<one-paragraph rationale: what this scenario tests and why it measures tile value (not baseline reasoning)>",
+  "context": "<one-paragraph rationale: what this scenario tests and why it measures plugin value (not baseline reasoning)>",
   "type": "weighted_checklist",
   "checklist": [
     { "name": "<short-criterion-name>", "max_score": <int>, "description": "<what passes and what failure looks like>" }
@@ -69,7 +69,7 @@ Write new scenarios directly rather than re-generating — you have full plugin 
 }
 ```
 
-Weights in `checklist[].max_score` MUST sum to exactly 100. Do not distribute evenly — weight the criteria that most specifically grade tile-prescribed behaviour. Look at a sibling `evals/*/criteria.json` in this tile to anchor on the exact shape; ignore any pre-existing plain-array files in the test repo under evaluation — those are seed data, not the format to emit.
+Weights in `checklist[].max_score` MUST sum to exactly 100. Do not distribute evenly — weight the criteria that most specifically grade plugin-prescribed behaviour. Look at a sibling `evals/*/criteria.json` in this plugin to anchor on the exact shape; ignore any pre-existing plain-array files in the test repo under evaluation — those are seed data, not the format to emit.
 
 After writing each new scenario, run the Step 4 review against it and apply Step 5 fixes before moving on — new scenarios need the same no-bleeding / no-leaking audit as generated ones, and the failure mode on this step is to skip review on content you authored yourself.
 
@@ -95,4 +95,4 @@ Bring the results back here, then proceed immediately to Step 10.
 
 ## Step 10 — Iterate
 
-Fix the identified issues — including retiring null-test scenarios — then re-run from Step 8. Repeat until every positive-case scenario shows meaningful lift and every criterion grades behaviour the tile actually contributes. Finish here when the lift distribution is stable and no null tests remain.
+Fix the identified issues — including retiring null-test scenarios — then re-run from Step 8. Repeat until every positive-case scenario shows meaningful lift and every criterion grades behaviour the plugin actually contributes. Finish here when the lift distribution is stable and no null tests remain.

@@ -26,8 +26,8 @@ Output (stdout, JSON, per the script-delegation "JSON-producing" requirement):
     }
 
 Variant pairing — `with-context` paired against `baseline`; tessl-eval also
-emits `usage-spec` (older "with tile loaded") and `without-context` (older
-"without tile loaded"), so the script accepts those as aliases. The first
+emits `usage-spec` (older "with plugin loaded") and `without-context` (older
+"without plugin loaded"), so the script accepts those as aliases. The first
 preferred variant present wins per side.
 
 Exit codes: 0 on success (even when scenarios are skipped — skips are data,

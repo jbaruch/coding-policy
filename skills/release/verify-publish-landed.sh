@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Verify a tile publish actually landed on the registry by checking BOTH
+# Verify a plugin publish actually landed on the registry by checking BOTH
 # (a) the resolved publish run's conclusion and (b) the registry's
 # `Latest Version` against a pre-merge baseline. Both signals together
 # close the queued/in-flight publish race (issue #80): an interleaved
@@ -25,7 +25,7 @@
 # checks the registry, sees the publish landed) and the root fix is at
 # the workflow design layer — keep publish as the last step.
 #
-# Usage: verify-publish-landed.sh <workspace> <tile> <pre-baseline> <run-id>
+# Usage: verify-publish-landed.sh <workspace> <plugin> <pre-baseline> <run-id>
 # Out:   JSON contract differs by exit code (per rules/script-delegation.md
 #        "JSON-producing"):
 #          - rc 0/1 (publish-landed finding): one JSON object on stdout
@@ -91,7 +91,7 @@ version_gt() {
 
 main() {
   if [[ $# -ne 4 ]]; then
-    echo "usage: $0 <workspace> <tile> <pre-baseline> <run-id>" >&2
+    echo "usage: $0 <workspace> <plugin> <pre-baseline> <run-id>" >&2
     exit 2
   fi
   local workspace="$1" tile="$2" pre="$3" run_id="$4"
@@ -104,7 +104,7 @@ main() {
     exit 2
   fi
   if [[ -z "$pre" ]]; then
-    echo "error: <pre-baseline> is empty — capture with 'tessl tile info ${workspace}/${tile} | grep \"Latest Version\" | awk \"{print \\\$NF}\"' before merge" >&2
+    echo "error: <pre-baseline> is empty — capture with 'tessl plugin info ${workspace}/${tile} | grep \"Latest Version\" | awk \"{print \\\$NF}\"' before merge" >&2
     exit 2
   fi
 
@@ -132,7 +132,7 @@ main() {
     exit 2
   fi
 
-  # `tessl tile info | grep | awk` under `set -o pipefail` lets a parse
+  # `tessl plugin info | grep | awk` under `set -o pipefail` lets a parse
   # miss (grep exits 1 when "Latest Version" doesn't appear) trigger
   # the `||` "tessl failed" branch and swallow the actual output. To
   # distinguish tool failure from parse miss, capture first (separating
@@ -140,8 +140,8 @@ main() {
   # stdout in a separate step. Mixed `2>&1` capture would let a tessl
   # warning on stderr poison the parsed-output and misread the version.
   local tessl_output
-  tessl_output=$(tessl tile info "${workspace}/${tile}" 2>"$err_file") \
-    || { local err; err=$(cat "$err_file"); echo "error: 'tessl tile info ${workspace}/${tile}' failed: ${err} — verify (1) tessl CLI is installed and on PATH ('command -v tessl'), (2) the workspace/tile slug is correct, (3) you have network access to the registry, then re-run 'tessl tile info ${workspace}/${tile}' directly to inspect the failure before retrying the publish verification" >&2; exit 2; }
+  tessl_output=$(tessl plugin info "${workspace}/${tile}" 2>"$err_file") \
+    || { local err; err=$(cat "$err_file"); echo "error: 'tessl plugin info ${workspace}/${tile}' failed: ${err} — verify (1) tessl CLI is installed and on PATH ('command -v tessl'), (2) the workspace/plugin slug is correct, (3) you have network access to the registry, then re-run 'tessl plugin info ${workspace}/${tile}' directly to inspect the failure before retrying the publish verification" >&2; exit 2; }
   # `|| true` lets the parse-miss case fall through to the explicit
   # `-z` diagnostic below rather than triggering `set -e` + `pipefail`
   # exit. Without it, grep's exit-1 on no-match (compounded by pipefail)
@@ -150,7 +150,7 @@ main() {
   local current
   current=$(printf '%s\n' "$tessl_output" | grep "Latest Version" | awk '{print $NF}' || true)
   if [[ -z "$current" ]]; then
-    echo "error: could not parse 'Latest Version' from 'tessl tile info ${workspace}/${tile}' output (output was: ${tessl_output})" >&2
+    echo "error: could not parse 'Latest Version' from 'tessl plugin info ${workspace}/${tile}' output (output was: ${tessl_output})" >&2
     exit 2
   fi
 

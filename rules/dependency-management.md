@@ -25,7 +25,7 @@ alwaysApply: true
 - Applies when a tool rewrites a manifest in-place at runtime AND the resolved-version state is gitignored
 - The manifest may use a floating-but-explicit specifier (e.g., `"version": "latest"`) and skip the lock file
 - Preconditions (each covered manifest, all required):
-  1. The project documents an authority-of-record rule in its own tile naming the carve-out and listing every covered manifest
+  1. The project documents an authority-of-record rule in its own plugin naming the carve-out and listing every covered manifest
   2. A deploy-time check fails the deployment if any disallowed specifier appears (literal pin, range, tag, or anything other than the permitted floating specifier)
   3. Each covered manifest is named explicitly in the authority-of-record rule
 - Multiple covered manifests permitted iff each independently meets all three preconditions
@@ -35,8 +35,8 @@ alwaysApply: true
 
 - Don't copy library source code into the repo
 - Use the language's package manager to install dependencies
-- Tessl tiles count as dependencies — never vendor them. Install via `tessl install` at runtime; don't commit tile content (e.g., `.tessl/plugins/<workspace>/<tile>/...`) into the consumer repo
-- Install Tessl tiles to a non-workspace path for CI agents
+- Tessl plugins count as dependencies — never vendor them. Install via `tessl install` at runtime; don't commit plugin content (e.g., `.tessl/plugins/<workspace>/<plugin>/...`) into the consumer repo
+- Install Tessl plugins to a non-workspace path for CI agents
 
 ## Dependency Groups
 

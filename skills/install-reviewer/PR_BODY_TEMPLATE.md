@@ -27,7 +27,7 @@ Add a one-line note that merging without an OpenAI-family key, `ANTHROPIC_API_KE
 Note that each reviewer's verdict begins with a one-line load indicator:
 
 ```
-Policy loaded: N rule files from /tmp/gh-aw/coding-policy/.tessl/plugins/jbaruch/coding-policy/rules/ (installed tile).
+Policy loaded: N rule files from /tmp/gh-aw/coding-policy/.tessl/plugins/jbaruch/coding-policy/rules/ (installed plugin).
 ```
 
 Tells the consumer at a glance whether the workflow setup `tessl install` ran cleanly or whether the policy never reached the runtime.

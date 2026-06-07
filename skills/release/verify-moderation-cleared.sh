@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Wait for a published tile version's moderation to clear, polling the
+# Wait for a published plugin version's moderation to clear, polling the
 # registry with exponential backoff. Moderation is a post-publish install
 # gate: a freshly published version can be blocked from `tessl install`
 # until its moderation state reaches "pass". This is the release
 # contract's third conjunct (rules/ci-safety.md) — a green publish run
 # plus a registry advance does NOT confirm a release on its own.
 #
-# Signal (machine-readable JSON, not the `tessl tile info` human text):
+# Signal (machine-readable JSON, not the `tessl plugin info` human text):
 #   tessl api v1/tiles/<workspace>/<tile>/versions/<version>
 #     .data.attributes.moderationStatus   ("pass" => cleared)
 #     .data.attributes.moderationPassed    (bool; true => cleared)
@@ -20,7 +20,7 @@
 # Fail-loud-at-budget: a still-pending OR blocked state when the budget is
 # exhausted exits 1 — an unconfirmed release is never reported as success.
 #
-# Usage: verify-moderation-cleared.sh <workspace> <tile> <version>
+# Usage: verify-moderation-cleared.sh <workspace> <plugin> <version>
 # Out:   JSON contract differs by exit code (per rules/script-delegation.md
 #        "JSON-producing"):
 #          - rc 0/1 (moderation finding): one JSON object on stdout
@@ -84,12 +84,12 @@ is_block_state() {
 
 main() {
   if [[ $# -ne 3 ]]; then
-    echo "usage: $0 <workspace> <tile> <version>" >&2
+    echo "usage: $0 <workspace> <plugin> <version>" >&2
     exit 2
   fi
   local workspace="$1" tile="$2" version="$3"
   if [[ -z "$workspace" || -z "$tile" || -z "$version" ]]; then
-    echo "error: <workspace>, <tile>, and <version> are all required and must be non-empty — capture the published version from the registry advance confirmed by verify-publish-landed.sh" >&2
+    echo "error: <workspace>, <plugin>, and <version> are all required and must be non-empty — capture the published version from the registry advance confirmed by verify-publish-landed.sh" >&2
     exit 2
   fi
 
@@ -118,7 +118,7 @@ main() {
     # verify-publish-landed.sh.
     local body
     body=$(tessl api "$endpoint" 2>"$err_file") \
-      || { local err; err=$(cat "$err_file"); echo "error: 'tessl api ${endpoint}' failed: ${err} — verify (1) tessl CLI is installed and on PATH ('command -v tessl'), (2) the workspace/tile/version slug is correct, (3) you have network access to the registry, then re-run; the version was already confirmed on the registry by verify-publish-landed.sh, so a persistent failure here is a tool/auth/network problem, not a missing version" >&2; exit 2; }
+      || { local err; err=$(cat "$err_file"); echo "error: 'tessl api ${endpoint}' failed: ${err} — verify (1) tessl CLI is installed and on PATH ('command -v tessl'), (2) the workspace/plugin/version slug is correct, (3) you have network access to the registry, then re-run; the version was already confirmed on the registry by verify-publish-landed.sh, so a persistent failure here is a tool/auth/network problem, not a missing version" >&2; exit 2; }
 
     local status passed mod_error
     status=$(printf '%s' "$body" | jq -r '.data.attributes.moderationStatus // empty' 2>/dev/null || true)

@@ -383,7 +383,7 @@ main() {
 
   # Sanitize the generated lock files. `gh aw compile` emits two formatting
   # drifts that violate rules/code-formatting.md "Basics" in any consumer
-  # repo that runs this tile's reviewers against itself:
+  # repo that runs this plugin's reviewers against itself:
   #   1. Trailing whitespace on every line of the leading ASCII-art banner
   #      (and a few blank lines elsewhere).
   #   2. Files end with two trailing newlines (\n\n) instead of a single \n.

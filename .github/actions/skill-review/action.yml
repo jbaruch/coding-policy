@@ -1,7 +1,7 @@
 name: 'Skill review (changed only)'
 description: |
   Runs `tessl skill review --threshold N` on every skill whose files
-  changed since the previous push, instead of every skill in the tile.
+  changed since the previous push, instead of every skill in the plugin.
   Per `jbaruch/coding-policy: context-artifacts` "Mandatory Review":
   every skill change must pass review, but unchanged skills do not
   need to be re-reviewed on every publish — that just burns runner

@@ -62,27 +62,27 @@ skills/eval-authoring/LIFT_ANALYSIS.md
 
 Healthy positive-case bands and negative cases whose near-zero lift is acceptable per that file's Negative Cases section stay as-is.
 
-If no scenarios sit in the actionable bands (no weak / no-lift positive cases, no tile-specific negative case that fails the lift expectation), the suite is clean. Produce a one-line `curation-summary.md` stating "no curation needed" and finish here — do not fabricate diagnoses for scenarios that don't need them.
+If no scenarios sit in the actionable bands (no weak / no-lift positive cases, no plugin-specific negative case that fails the lift expectation), the suite is clean. Produce a one-line `curation-summary.md` stating "no curation needed" and finish here — do not fabricate diagnoses for scenarios that don't need them.
 
-Otherwise proceed immediately to Step 4 with two inputs to the three-cause diagnosis: the weak / no-lift positive cases, AND any tile-specific negative case whose lift fell below the acceptable band.
+Otherwise proceed immediately to Step 4 with two inputs to the three-cause diagnosis: the weak / no-lift positive cases, AND any plugin-specific negative case whose lift fell below the acceptable band.
 
 ## Step 4 — Diagnose Every Actionable Scenario
 
 Apply the three-cause diagnosis from `rules/plugin-evals.md` "Lift, Not Attainment" to each scenario routed in from Step 3:
 
-1. **Coincidence with universal competence** — tile's prescribed manner matches what baseline agents produce by default (positive case), or for a tile-specific negative case: baseline refuses for tile-independent reasons so the tile's refusal adds no signal. Decision: retire
+1. **Coincidence with universal competence** — plugin's prescribed manner matches what baseline agents produce by default (positive case), or for a plugin-specific negative case: baseline refuses for plugin-independent reasons so the plugin's refusal adds no signal. Decision: retire
 2. **Task leaked the technique** — fix the task per `skills/eval-authoring/REVIEW_CHECKLIST.md`'s No Bleeding rules; keep the criterion. Do NOT drop the criterion.
-3. **Criteria grade universal competence** — the criteria test things baseline always does (basic git safety, obvious engineering judgement), not tile-specific choices. Decision: rewrite the criteria to test the specific manner the tile prescribes, or retire the scenario.
+3. **Criteria grade universal competence** — the criteria test things baseline always does (basic git safety, obvious engineering judgement), not plugin-specific choices. Decision: rewrite the criteria to test the specific manner the plugin prescribes, or retire the scenario.
 
 Record the decision per scenario: `retire`, `fix-task`, or `rewrite-criteria`. Proceed immediately to Step 5.
 
 ## Step 5 — Apply Decisions
 
-For each `retire`: `git rm -r evals/<scenario-dir>` and note the removal in the tile's `CHANGELOG.md` under Unreleased.
+For each `retire`: `git rm -r evals/<scenario-dir>` and note the removal in the plugin's `CHANGELOG.md` under Unreleased.
 
 For each `fix-task`: edit `task.md` per the No Bleeding rules — strip the technique / format / literal that leaked; keep the situation the user actually needs done.
 
-For each `rewrite-criteria`: edit `criteria.json` so the checklist grades the specific manner the tile prescribes (flag choices, format literals, sequences, conventions), not universal competence. Re-weight so `max_score` values still sum to exactly 100; if removing a criterion leaves nothing tile-specific, retire the scenario instead.
+For each `rewrite-criteria`: edit `criteria.json` so the checklist grades the specific manner the plugin prescribes (flag choices, format literals, sequences, conventions), not universal competence. Re-weight so `max_score` values still sum to exactly 100; if removing a criterion leaves nothing plugin-specific, retire the scenario instead.
 
 Proceed immediately to Step 6.
 
