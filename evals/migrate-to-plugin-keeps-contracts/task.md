@@ -40,4 +40,4 @@ export function fetchTile(name: string) { return tileRegistry.get(name); }
 
 ## Output Specification
 
-Produce a migration plan in a file named `migration-plan.md`. Walk through, in order, the concrete commands you would run to convert the manifest and sanitize the layout, then list every wording edit you would make to the files above — for each, give the before and after, or state explicitly that the occurrence stays unchanged and why.
+Capture your migration plan in a file named `migration-plan.md`: the commands you would run and the edits you would make to the files above to complete the migration.

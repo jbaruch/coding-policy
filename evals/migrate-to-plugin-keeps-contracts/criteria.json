@@ -1,11 +1,11 @@
 {
-  "context": "Tests the migrate-to-plugin skill's judgment core: after the deterministic manifest migration, the agent must keep live contract surfaces untouched rather than blanket find-and-replacing tile->plugin. A baseline agent told to 'migrate to plugin form' tends to sweep every 'tile', which breaks the v1/tiles REST route and code identifiers; the skill teaches the keep boundary. Weight concentrates on those keep criteria plus the distinguish-prose-from-contract judgment — that is where the skill beats baseline.",
+  "context": "Tests the migrate-to-plugin skill's judgment core: after the deterministic manifest migration, the agent must keep live contract surfaces untouched rather than blindly replacing every `tile` with `plugin`. A baseline agent told to 'migrate to plugin form' tends to sweep every 'tile', which breaks the v1/tiles REST route and code identifiers; the skill teaches the keep boundary. Weight concentrates on those keep criteria plus the distinguish-prose-from-contract judgment — that is where the skill beats baseline.",
   "type": "weighted_checklist",
   "checklist": [
     {
       "name": "Runs the migration mechanics",
       "max_score": 14,
-      "description": "The plan converts the manifest with `tessl plugin migrate` (or the skill's migrate script), renames `.tileignore` to `.tesslignore`, and removes the now-obsolete root `tile.json`. Fails if it skips the conversion, hand-writes plugin.json, or leaves tile.json in place as the live manifest"
+      "description": "The plan converts the manifest with `tessl plugin migrate` (or the skill's migrate script), renames `.tileignore` to `.tesslignore`, and removes the now-obsolete root `tile.json`. Fails if it skips the conversion, hand-writes `.tessl-plugin/plugin.json`, or leaves tile.json in place as the live manifest"
     },
     {
       "name": "Renames the tessl tile CLI alias",
