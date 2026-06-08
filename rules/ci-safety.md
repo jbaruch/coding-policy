@@ -16,6 +16,16 @@ alwaysApply: true
 - Never disable or skip failing tests to unblock a merge
 - If tests fail, fix the tests or fix the code
 
+## Publish-Pipeline Loop-Prevention Carve-Out
+
+- Narrow exception for `[skip ci]` on a commit the publish workflow pushes to the protected branch
+- Applies when that commit would otherwise re-trigger the same publish workflow (infinite publish loop)
+- Preconditions (all required):
+  1. Commit is authored by the CI bot inside the publish workflow — never a human- or agent-authored PR commit
+  2. Sole purpose is the workflow's own release bookkeeping — manifest version bump, CHANGELOG version stamp — carrying no source or test changes that need CI validation
+  3. `[skip ci]` rides only on the commit pushed back to the protected branch, solely to stop self-retrigger
+- Every other commit still follows the rule: no `[skip ci]`, never to skip failing tests or unblock a merge
+
 ## Install, Don't Skip
 
 - If a test needs an external tool or dependency, install it in CI
