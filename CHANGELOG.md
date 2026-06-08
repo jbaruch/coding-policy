@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.59 — 2026-06-08
+
 ### Rules
 
 - **ci-safety — `[skip ci]` carve-out for publish-pipeline loop-prevention (#131)** — `## Never Skip Tests` flatly forbade `[skip ci]`, but every `tesslio/patch-version-publish` bump commit on `main` already carries it: the commit the publish workflow pushes back would otherwise re-trigger the workflow (infinite loop). The auto-stamp step below adds a second such commit. Added a narrow carve-out — `[skip ci]` is permitted only on a CI-bot commit the publish workflow pushes to the protected branch for release bookkeeping (version bump, CHANGELOG stamp) carrying no source/test changes; every other commit still never uses it. Reconciles the rule with the pipeline the repo already runs.
