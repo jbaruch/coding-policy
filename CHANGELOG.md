@@ -1,5 +1,9 @@
 # Changelog
 
+### Build
+
+- **Publish pipeline — CHANGELOG auto-stamp step (implements the #124 follow-up)** — Wires the automation #124/#125 only documented: `skills/release/stamp-changelog.py` computes the version the publish step will assign (registry-latest patch-bump, or the manifest when it is already ahead — mirrors `tesslio/patch-version-publish`) and inserts a `## <version> — <date>` heading above the topmost un-headed `### ` blocks; idempotent no-op when the top is already headed. A new `publish.yml` step runs it before `patch-version-publish` and commits the result (no push — the publish step's commit carries it, `[skip ci]` guards the re-trigger). Ported from `jbaruch/speaker-toolkit#60` (`ci/auto-stamp-changelog`), adapted to coding-policy: lives under `skills/release/` (not top-level `scripts/`), queries `tessl plugin info`, primary manifest `.tessl-plugin/plugin.json`. `skills/release/tests/test_stamp_changelog.py` covers 10 paths (version math incl. malformed + manual-ahead, insert/no-op/idempotent/trailing-newline). This moves the repo from the rule's "without a stamp step" branch (hand-stamp every entry, the source of #125's rebase churn) to the "with a wired stamp step" branch — PR authors now add un-headed `### ` blocks and the pipeline versions them. This very entry is left un-headed and stamped by the new step on its own merge.
+
 ## 0.3.57 — 2026-06-07
 
 ### Rules
