@@ -1,0 +1,36 @@
+{
+  "context": "Tests the migrate-to-plugin skill's judgment core: after the deterministic manifest migration, the agent must keep live contract surfaces untouched rather than blanket find-and-replacing tile->plugin. A baseline agent told to 'migrate to plugin form' tends to sweep every 'tile', which breaks the v1/tiles REST route and code identifiers; the skill teaches the keep boundary. Weight concentrates on those keep criteria plus the distinguish-prose-from-contract judgment — that is where the skill beats baseline.",
+  "type": "weighted_checklist",
+  "checklist": [
+    {
+      "name": "Runs the migration mechanics",
+      "max_score": 14,
+      "description": "The plan converts the manifest with `tessl plugin migrate` (or the skill's migrate script), renames `.tileignore` to `.tesslignore`, and removes the now-obsolete root `tile.json`. Fails if it skips the conversion, hand-writes plugin.json, or leaves tile.json in place as the live manifest"
+    },
+    {
+      "name": "Renames the tessl tile CLI alias",
+      "max_score": 12,
+      "description": "`tessl tile info` in check-publish.sh becomes `tessl plugin info` (the canonical command alias). Fails if the CLI invocation is left as `tessl tile`"
+    },
+    {
+      "name": "Keeps the v1/tiles API route",
+      "max_score": 24,
+      "description": "The `tessl api v1/tiles/<workspace>/<name>/versions/<version>` route is left unchanged — it is a live REST endpoint, not prose. Fails if the plan rewrites it to `v1/plugins/...` or otherwise alters the `v1/tiles` path"
+    },
+    {
+      "name": "Keeps code identifiers",
+      "max_score": 20,
+      "description": "The `tileRegistry` variable and `fetchTile` function in registry.ts stay as-is — renaming identifiers is out of scope and risks breaking call sites. Fails if the plan renames either identifier to a 'plugin' form"
+    },
+    {
+      "name": "Keeps the legacy tile.json reference",
+      "max_score": 14,
+      "description": "The CHANGELOG line 'Migrated the build from a hand-written tile.json' keeps the literal `tile.json` — it is a factual historical reference to the old manifest filename. Fails if the plan rewrites it to plugin.json, which would make the entry false"
+    },
+    {
+      "name": "Distinguishes prose from contract rather than blanket-replacing",
+      "max_score": 16,
+      "description": "The plan treats the edits per-occurrence (renaming package-sense prose, preserving contracts) rather than proposing a global s/tile/plugin/ across the repo. Fails if it describes or implies an undifferentiated find-and-replace"
+    }
+  ]
+}
