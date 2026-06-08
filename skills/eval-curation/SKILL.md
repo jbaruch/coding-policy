@@ -78,7 +78,7 @@ Record the decision per scenario: `retire`, `fix-task`, or `rewrite-criteria`. P
 
 ## Step 5 — Apply Decisions
 
-For each `retire`: `git rm -r evals/<scenario-dir>` and note the removal in the plugin's `CHANGELOG.md` under Unreleased.
+For each `retire`: `git rm -r evals/<scenario-dir>` and note the removal at the top of the plugin's `CHANGELOG.md`, following the project's CHANGELOG Hygiene convention (`rules/context-artifacts.md`).
 
 For each `fix-task`: edit `task.md` per the No Bleeding rules — strip the technique / format / literal that leaked; keep the situation the user actually needs done.
 
