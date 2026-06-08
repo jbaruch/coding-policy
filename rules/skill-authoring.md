@@ -9,7 +9,9 @@ description: SKILL.md structure, frontmatter, execution-mode preamble, flat step
 ## SKILL.md Frontmatter
 
 - Required fields: `name`, `description` (include trigger phrases so the agent knows when to activate)
-- Optional fields: `allowed-tools`, `disable-model-invocation`, `user-invocable` (set to `false` for background-knowledge skills the runtime loads as context but the user should never invoke directly)
+- Optional fields include `allowed-tools`, `disable-model-invocation`, `user-invocable` (set to `false` for background-knowledge skills the runtime loads as context but the user should never invoke directly), and `argument-hint`
+- `argument-hint` is a Claude Code slash-command UI hint — a string naming the expected arguments, e.g. `[init|status|use|uninit|help] [feature]`
+- This list is not a closed allow-list — agents preserve unrecognized skill frontmatter and ignore fields they don't use (see `rules/rule-frontmatter.md`)
 - The `description` field is your discovery surface — write it for the agent, not a human audience
 
 ## Title and Preamble
