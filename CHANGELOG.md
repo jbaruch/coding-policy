@@ -1,5 +1,9 @@
 # Changelog
 
+### Rules
+
+- **skill-authoring — `argument-hint` is an allowed optional SKILL.md frontmatter field (#117)** — The `## SKILL.md Frontmatter` "Optional fields" line read as a closed allow-list, so the OpenAI policy reviewer on `intent-integrity-chain/kit` [PR #89](https://github.com/intent-integrity-chain/kit/pull/89) blocked adding `argument-hint:` to five skills ("the loaded policy only permits `allowed-tools`, `disable-model-invocation`, and `user-invocable`"). `argument-hint` is real Claude Code slash-command frontmatter — the UI surfaces the expected argument shape inline next to the command; it carries no runtime semantics, and other agents (Codex, Gemini, OpenCode) ignore unknown fields. Added it to the list (with an example value) and added a second bullet stating the list is illustrative, not a closed allow-list: agents preserve unrecognized skill frontmatter and ignore fields they don't use, mirroring `rules/rule-frontmatter.md` passthrough. The "Optional fields:" lead-in also softened to "Optional fields include" to kill the closed-list reading at the source. Unblocks kit #89 and any future PR adding `argument-hint:` to a skill.
+
 ## 0.3.59 — 2026-06-08
 
 ### Rules
