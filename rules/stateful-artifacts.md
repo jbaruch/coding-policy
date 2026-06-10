@@ -25,9 +25,10 @@ alwaysApply: true
 ## Migration Policy
 
 - Bump `schema_version` for any shape change — don't repurpose a field silently
-- Only the owner skill migrates: on its own read, detect old `schema_version`, upgrade the record, rewrite
+- Only the owner skill migrates: on reading an older record, detect the old `schema_version`, upgrade the record, rewrite
 - Non-owner reader skills must not migrate
-- On encountering any non-matching version (older or newer), the reader treats it as read-only "no usable prior state" and lets the next owner-skill run perform the upgrade
+- On an older record, a reader treats it as read-only "no usable prior state" — the next owner-skill run upgrades it
+- On a record newer than it accepts, a reader is lagging, not awaiting migration — treat it as "no usable prior state" and update the reader to accept the new version (see Cross-Pipeline Schema Bumps when writer and readers deploy through separate pipelines)
 
 ## Rename / Removal
 
@@ -43,7 +44,8 @@ alwaysApply: true
 - A zero-skew rollout requires readers that parse both old and new shapes for the window: deploy those dual-accept readers (read-only, never migrating) first → flip the writer → drop the old version from the readers' accepted set
 - Additive (backward-compatible) bumps always allow dual-accept — the new reader reads old records via field defaults
 - Breaking bumps allow dual-accept only when one reader can be written to parse both shapes, at higher cost
-- Narrow exception for breaking bumps where no single reader can parse both shapes — take the writer offline for an atomic cutover, skipping the dual-accept sequence. Preconditions (all required):
+- Narrow exception for breaking bumps where no single reader can parse both shapes — take the writer offline for an atomic cutover, skipping the dual-accept sequence
+- Preconditions (all required):
   1. The bump is breaking — no reader written for one shape can read the other
   2. A single dual-accept reader spanning both shapes is infeasible for the rollout window
 - Every other bump — additive, or breaking with a feasible dual-parse reader — uses the zero-skew dual-accept rollout above
