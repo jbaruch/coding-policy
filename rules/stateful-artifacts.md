@@ -27,9 +27,20 @@ alwaysApply: true
 - Bump `schema_version` for any shape change — don't repurpose a field silently
 - Only the owner skill migrates: on its own read, detect old `schema_version`, upgrade the record, rewrite
 - Non-owner reader skills must not migrate
-- On encountering an old version, the reader treats it as read-only "no usable prior state" and lets the next owner-skill run perform the upgrade
+- On encountering any non-matching version (older or newer), the reader treats it as read-only "no usable prior state" and lets the next owner-skill run perform the upgrade
 
 ## Rename / Removal
 
 - Renaming or removing an artifact follows surface sync (see `rules/context-artifacts.md`): update the owner skill's schema doc, update every reader skill, add a CHANGELOG entry
 - Keep reader skills tolerant of missing artifacts — an artifact that was never written (first run) is indistinguishable from one that was removed; both mean "no prior state"
+
+## Cross-Pipeline Schema Bumps
+
+- Applies when the writer and its readers deploy through separate pipelines: different repos, registries, or release cadences
+- Treat the bump as non-atomic — production runs mixed versions for the rollout window
+- A single-exact-version reader gate rejects every mismatched record and takes its no-prior-state path (see Migration Policy) on every record during the skew
+- The no-prior-state fallback MUST be safe and non-disruptive — never a path that escalates work (wake-always, full recompute, alert storm)
+- Additive (backward-compatible) bump: readers MUST accept a version set spanning the transition — old plus new, read-only, never migrating — before the writer flips
+- Additive rollout order: deploy the dual-accept readers first, bump the writer, then drop the old version from the readers' accepted set
+- Breaking bump: no zero-skew rollout exists across separate pipelines
+- Breaking options: sequence dual-accept-reader release → writer flip → old-version drop, OR take the writer offline for the cutover
