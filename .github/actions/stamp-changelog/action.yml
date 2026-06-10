@@ -1,0 +1,100 @@
+name: 'Stamp CHANGELOG with the published version'
+description: |
+  Stamps the CHANGELOG's newest (un-headed) entries with the version the
+  publish step is about to assign, then commits the result with `[skip ci]`
+  (no push — the publish step's own commit carries it along).
+
+  For publish-on-merge repos per `jbaruch/coding-policy: context-artifacts`
+  "CHANGELOG Hygiene": PR authors add un-headed `### ` entry blocks at the
+  top of `CHANGELOG.md`; this step inserts the `## <version> — <date>`
+  heading above them before publish, so the published artifact and the
+  registry "what's new" show them under their real version instead of
+  "Unreleased". Wire it immediately before `tesslio/patch-version-publish`.
+
+  Idempotent: if the top section already carries a `## ` heading there is
+  nothing un-headed to stamp and the step is a no-op (no commit).
+
+  Requirements (consumer must arrange):
+    - `python3` on PATH (stdlib only — the script needs no packages).
+    - `tessl` CLI on PATH (typically via `tesslio/setup-tessl@v2`) so the
+      script can read the registry's latest version. Skip this by passing
+      `latest:` explicitly.
+    - The consumer repo checked out (`actions/checkout@v4`) with a writable
+      working tree; the step runs against `$GITHUB_WORKSPACE`.
+
+inputs:
+  changelog:
+    description: 'Path to the CHANGELOG, relative to the workspace root'
+    required: false
+    default: 'CHANGELOG.md'
+  manifest:
+    description: |
+      Path to the plugin manifest the version is read from. When empty the
+      script auto-detects `.tessl-plugin/plugin.json`, then `tile.json`.
+    required: false
+    default: ''
+  latest:
+    description: |
+      Latest published version (X.Y.Z) to compute against. When empty the
+      script queries the registry via `tessl plugin info`. Set it to skip
+      the registry query (testing / offline runs).
+    required: false
+    default: ''
+  date:
+    description: 'Heading date (YYYY-MM-DD). When empty, today in UTC.'
+    required: false
+    default: ''
+  commit:
+    description: |
+      When 'true' (default), commit the stamped CHANGELOG with `[skip ci]`
+      and no push. Set 'false' to leave it staged for the caller to commit.
+    required: false
+    default: 'true'
+  commit-message:
+    description: 'Commit message for the stamp commit'
+    required: false
+    default: 'Stamp CHANGELOG for the published version [skip ci]'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Stamp CHANGELOG and commit
+      shell: bash
+      env:
+        CHANGELOG: ${{ inputs.changelog }}
+        MANIFEST: ${{ inputs.manifest }}
+        LATEST: ${{ inputs.latest }}
+        DATE: ${{ inputs.date }}
+        DO_COMMIT: ${{ inputs.commit }}
+        COMMIT_MESSAGE: ${{ inputs.commit-message }}
+      run: |
+        set -eo pipefail
+
+        # The script is the single source of truth; it lives in the plugin
+        # tree, not this action dir. `uses: <owner>/coding-policy/.github/
+        # actions/stamp-changelog@<ref>` checks out the whole repo, so it
+        # resolves three levels up from the action path.
+        script="$GITHUB_ACTION_PATH/../../../skills/release/stamp-changelog.py"
+        if [ ! -f "$script" ]; then
+          echo "::error::stamp-changelog.py not found at $script — the coding-policy action repo did not check out fully."
+          exit 1
+        fi
+
+        # Build args without `&&` chaining: under `set -e` a false `[ -n ]`
+        # test would abort the step before the script ever runs.
+        args=(--changelog "$CHANGELOG")
+        if [ -n "$MANIFEST" ]; then args+=(--manifest "$MANIFEST"); fi
+        if [ -n "$LATEST" ]; then args+=(--latest "$LATEST"); fi
+        if [ -n "$DATE" ]; then args+=(--date "$DATE"); fi
+
+        python3 "$script" "${args[@]}"
+
+        if [ "$DO_COMMIT" != "true" ]; then
+          echo "commit=false — leaving the stamped CHANGELOG uncommitted."
+          exit 0
+        fi
+
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        git add "$CHANGELOG"
+        git diff --cached --quiet || git commit -m "$COMMIT_MESSAGE"
