@@ -44,8 +44,9 @@ alwaysApply: true
 - A zero-skew rollout requires readers that parse both old and new shapes for the window: deploy those dual-accept readers (read-only, never migrating) first → flip the writer → drop the old version from the readers' accepted set
 - Additive (backward-compatible) bumps always allow dual-accept — the new reader reads old records via field defaults
 - Breaking bumps allow dual-accept only when one reader can be written to parse both shapes, at higher cost
-- Narrow exception for breaking bumps where no single reader can parse both shapes — take the writer offline for an atomic cutover, skipping the dual-accept sequence
+- Narrow exception for breaking bumps with no dual-parse reader
+- Take the writer offline for an atomic cutover — the dual-accept sequence does not apply
 - Preconditions (all required):
-  1. The bump is breaking — no reader written for one shape can read the other
-  2. A single dual-accept reader spanning both shapes is infeasible for the rollout window
+  1. The new shape is not readable by a reader written for the old shape (the bump is breaking)
+  2. No single reader can be written to parse both shapes for the rollout window
 - Every other bump — additive, or breaking with a feasible dual-parse reader — uses the zero-skew dual-accept rollout above
