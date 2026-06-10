@@ -38,9 +38,9 @@ alwaysApply: true
 
 - Applies when the writer and its readers deploy through separate pipelines: different repos, registries, or release cadences
 - Treat the bump as non-atomic — production runs mixed versions for the rollout window
-- A single-exact-version reader gate rejects every mismatched record and takes its no-prior-state path (see Migration Policy) on every record during the skew
-- The no-prior-state fallback MUST be safe and non-disruptive — never a path that escalates work (wake-always, full recompute, alert storm)
-- Additive (backward-compatible) bump: readers MUST accept a version set spanning the transition — old plus new, read-only, never migrating — before the writer flips
-- Additive rollout order: deploy the dual-accept readers first, bump the writer, then drop the old version from the readers' accepted set
-- Breaking bump: no zero-skew rollout exists across separate pipelines
-- Breaking options: sequence dual-accept-reader release → writer flip → old-version drop, OR take the writer offline for the cutover
+- A single-exact-version reader gate takes its no-prior-state path (see Migration Policy) only for records stamped with a version it doesn't accept — matching-version records still read normally
+- That no-prior-state fallback MUST be safe and non-disruptive — never a path that escalates work (wake-always, full recompute, alert storm)
+- Zero-skew rollout, every bump: deploy dual-accept readers (accept old plus new, read-only, never migrating) first → flip the writer → drop the old version from the readers' accepted set
+- Additive (backward-compatible) bump: dual-accept is cheap — the new reader reads old records via field defaults
+- Breaking bump: dual-accept costs more — the reader must parse both shapes for the rollout window
+- Breaking bump where the two shapes can't be parsed by one reader: take the writer offline for an atomic cutover instead
