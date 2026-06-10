@@ -67,6 +67,7 @@ When you add, remove, or rename a rule or skill, update **all** of these:
   - No `Unreleased` section; the heading is forbidden
   - `tesslio/patch-version-publish` does NOT stamp `CHANGELOG.md` (it only bumps the manifest version and publishes)
   - Stamping a `## <version> — <date>` heading is a separate step the repo wires itself
+  - Reusable stamp step: `.github/actions/stamp-changelog` (consumers `uses: jbaruch/coding-policy/.github/actions/stamp-changelog@<ref>`, wired before `tesslio/patch-version-publish`)
   - **With a wired stamp step:** authors add un-headed `### ` entry blocks at the top of `CHANGELOG.md`
   - The stamp step writes the `## <version> — <date>` heading above those blocks before publish
   - **Without a stamp step:** authors write the `## <version> — <date>` heading manually above their entries
