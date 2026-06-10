@@ -40,7 +40,7 @@ alwaysApply: true
 - Treat the bump as non-atomic — production runs mixed versions for the rollout window
 - A single-exact-version reader gate takes its no-prior-state path (see Migration Policy) only for records stamped with a version it doesn't accept — matching-version records still read normally
 - That no-prior-state fallback MUST be safe and non-disruptive — never a path that escalates work (wake-always, full recompute, alert storm)
-- Zero-skew rollout, every bump: deploy dual-accept readers (accept old plus new, read-only, never migrating) first → flip the writer → drop the old version from the readers' accepted set
-- Additive (backward-compatible) bump: dual-accept is cheap — the new reader reads old records via field defaults
-- Breaking bump: dual-accept costs more — the reader must parse both shapes for the rollout window
-- Breaking bump where the two shapes can't be parsed by one reader: take the writer offline for an atomic cutover instead
+- A zero-skew rollout requires readers that parse both old and new shapes for the window: deploy those dual-accept readers (read-only, never migrating) first → flip the writer → drop the old version from the readers' accepted set
+- Additive (backward-compatible) bumps always allow dual-accept — the new reader reads old records via field defaults
+- Breaking bumps allow it only when one reader can be written to parse both shapes, at higher cost
+- Narrow exception for breaking bumps where no single reader can parse both shapes: take the writer offline for an atomic cutover — the dual-accept sequence does not apply
