@@ -1,5 +1,13 @@
 # Changelog
 
+### Rules
+
+- **context-artifacts — CHANGELOG Hygiene points at the reusable stamp action (#134)** — The "Publish-on-merge" sub-list now names the concrete step consumers wire — `.github/actions/stamp-changelog`, called as `uses: jbaruch/coding-policy/.github/actions/stamp-changelog@<ref>` before `tesslio/patch-version-publish` — instead of leaving "a separate step the repo wires itself" abstract. Closes the #124 follow-up asking the rule to point at the shipped automation rather than assert the bump action stamps.
+
+### Build
+
+- **Reusable `stamp-changelog` composite action (closes #134)** — Packages the CHANGELOG auto-stamp as `.github/actions/stamp-changelog/action.yml`, the consumer-facing form of the logic 0.3.59 wired only into this repo's own `publish.yml`. A publish-on-merge consumer adds one step before `tesslio/patch-version-publish` (`uses: jbaruch/coding-policy/.github/actions/stamp-changelog@<ref>`) and its un-headed `### ` entries get a `## <version> — <date>` heading at publish instead of rendering as "Unreleased" in the registry "what's new" — the exact failure `jbaruch/speaker-toolkit` had to hand-backfill for 0.18.20–0.18.26. The action wraps the existing `skills/release/stamp-changelog.py` (single source of truth — already general: auto-detects `.tessl-plugin/plugin.json` then `tile.json`, exposes `--changelog`/`--manifest`/`--latest`/`--date`) and resolves it three levels up from the action path, so no script is copied into the action dir. Inputs cover changelog/manifest/latest/date plus `commit` (default `true`) and `commit-message`; it commits with `[skip ci]` and no push per the `ci-safety` Publish-Pipeline Loop-Prevention Carve-Out, letting the publish step's own commit carry it. This repo's `publish.yml` now dogfoods it via `uses: ./.github/actions/stamp-changelog`, replacing the inline python+commit block. `.github/` is `.tesslignore`d, so the action ships from GitHub via `uses:`, not the published plugin — no `plugin.json` change.
+
 ## 0.3.62 — 2026-06-08
 
 ### Rules
