@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.63 — 2026-06-10
+
 ### Rules
 
 - **context-artifacts — CHANGELOG Hygiene points at the reusable stamp action (#134)** — The "Publish-on-merge" sub-list now names the concrete step consumers wire — `.github/actions/stamp-changelog`, called as `uses: jbaruch/coding-policy/.github/actions/stamp-changelog@<ref>` before `tesslio/patch-version-publish` — instead of leaving "a separate step the repo wires itself" abstract. Closes the #124 follow-up asking the rule to point at the shipped automation rather than assert the bump action stamps.
