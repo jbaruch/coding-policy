@@ -51,7 +51,9 @@ inputs:
     required: false
     default: 'true'
   commit-message:
-    description: 'Commit message for the stamp commit'
+    description: |
+      Commit message for the stamp commit. `[skip ci]` is appended if absent
+      — loop-prevention requires it, so it cannot be overridden away.
     required: false
     default: 'Stamp CHANGELOG for the published version [skip ci]'
 
@@ -80,8 +82,8 @@ runs:
           exit 1
         fi
 
-        # Build args without `&&` chaining: under `set -e` a false `[ -n ]`
-        # test would abort the step before the script ever runs.
+        # Append optional flags with explicit `if` blocks — clearer than
+        # `&&` one-liners and unambiguous to read.
         args=(--changelog "$CHANGELOG")
         if [ -n "$MANIFEST" ]; then args+=(--manifest "$MANIFEST"); fi
         if [ -n "$LATEST" ]; then args+=(--latest "$LATEST"); fi
@@ -94,7 +96,16 @@ runs:
           exit 0
         fi
 
+        # Loop-prevention is non-negotiable: the stamp commit MUST carry
+        # `[skip ci]` or it re-triggers the publish workflow. Enforce it even
+        # when a caller overrode `commit-message` without it.
+        msg="$COMMIT_MESSAGE"
+        case "$msg" in
+          *"[skip ci]"*) ;;
+          *) msg="$msg [skip ci]" ;;
+        esac
+
         git config user.name "github-actions[bot]"
         git config user.email "github-actions[bot]@users.noreply.github.com"
         git add "$CHANGELOG"
-        git diff --cached --quiet || git commit -m "$COMMIT_MESSAGE"
+        git diff --cached --quiet || git commit -m "$msg"
