@@ -1,5 +1,9 @@
 # Changelog
 
+### Rules
+
+- **ci-safety — Checks Not Starting diagnostic for merge-conflict stalls (#139)** — Agents repeatedly misdiagnosed a stuck-`queued` PR as a GitHub Actions outage and either waited indefinitely or gave up, when the real cause was a `CONFLICTING` / `mergeStateStatus=DIRTY` PR. `pull_request` workflows run against the PR's merge commit (`refs/pull/N/merge`); a conflict means GitHub can't compute that ref, so it never creates the `github-actions` check-suite — while third-party apps (Copilot, SonarQube, reviewers) subscribe to the head SHA and *do* register suites that then sit `queued`. That split (third-party suites `queued`, no `github-actions` suite at all) is the tell, and it's easy to misread because the repo's Actions are enabled and `main` runs fine. Added a `## Checks Not Starting` section under Always Watch CI: check merge state first (`gh pr view <N> --json mergeable,mergeStateStatus`), inspect suites via `gh api .../check-suites`, and fix by merging/rebasing the base into the branch so the merge ref recomputes and the suite runs. Pure rule addition; the mechanism prose lives here in the archive, the rule body carries only the diagnostic and fix.
+
 ## 0.3.65 — 2026-06-11
 
 ### Rules
