@@ -61,6 +61,14 @@ alwaysApply: true
 - If any conjunct fails, the publish is not confirmed — query the real moderation state, never invent one to hedge a failed publish
 - Naively re-running a failed publish can create an extra release when the workflow includes a version-bump step (e.g., `tesslio/patch-version-publish`) and the run got past it. Safer recovery: a follow-up commit fires a fresh publish on merge
 
+## Checks Not Starting
+
+- When pushed checks sit in `queued` and no `github-actions` run is created, check the PR's merge state before assuming an Actions outage
+- Diagnose with `gh pr view <N> --json mergeable,mergeStateStatus` — `CONFLICTING` / `DIRTY` is the cause
+- The tell: third-party check suites (Copilot, SonarQube, reviewers) sit `queued` while no `github-actions` suite is created
+- Inspect suites with `gh api repos/<owner>/<repo>/commits/<sha>/check-suites -q '.check_suites[] | "\(.app.slug) \(.status) \(.conclusion)"'`
+- Fix: merge the base into the PR branch (or rebase the branch onto the base), resolve conflicts, push — the `github-actions` suite runs and `mergeStateStatus` flips to `UNSTABLE` / `CLEAN`
+
 ## Protected Branches
 
 - Don't push directly to `main` or `master` (except under the Content-Only Direct-Push Carve-Out below)
