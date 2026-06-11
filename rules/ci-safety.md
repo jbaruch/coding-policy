@@ -67,7 +67,7 @@ alwaysApply: true
 - Diagnose with `gh pr view <N> --json mergeable,mergeStateStatus` — `CONFLICTING` / `DIRTY` is the cause
 - The tell: third-party check suites (Copilot, SonarQube, reviewers) sit `queued` while no `github-actions` suite is created
 - Inspect suites with `gh api repos/<owner>/<repo>/commits/<sha>/check-suites -q '.check_suites[] | "\(.app.slug) \(.status) \(.conclusion)"'`
-- Fix: merge or rebase the base into the PR branch, resolve conflicts, push — the `github-actions` suite runs and `mergeStateStatus` flips to `UNSTABLE` / `CLEAN`
+- Fix: merge the base into the PR branch (or rebase the branch onto the base), resolve conflicts, push — the `github-actions` suite runs and `mergeStateStatus` flips to `UNSTABLE` / `CLEAN`
 
 ## Protected Branches
 
