@@ -62,7 +62,7 @@ When you add, remove, or rename a rule or skill, update **all** of these:
 
 ## CHANGELOG Hygiene
 
-- Every merge publishes a version (publish-on-merge, e.g. via `tesslio/patch-version-publish`); merged work is always released
+- Every merge publishes a version (publish-on-merge, e.g. via `tesslio/patch-version-publish`)
 - No `Unreleased` section — the heading is forbidden
 - `tesslio/patch-version-publish` does NOT stamp `CHANGELOG.md` (it only bumps the manifest version and publishes)
 - Stamping a `## <version> — <date>` heading is a separate step the repo wires itself
