@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.65 — 2026-06-11
+
 ### Rules
 
 - **context-artifacts — CHANGELOG Hygiene drops the `Unreleased` / manual-release model** — Every merge publishes a version, so there is no "unreleased" state and the rule no longer presents two release models. Removed the "Manual release … keep an `## Unreleased` section" branch and the "match the convention to the release model" framing, leaving publish-on-merge as the single model: the `Unreleased` heading is forbidden, authors add un-headed `### ` entry blocks that the wired `stamp-changelog` step versions at publish (or write the `## <version> — <date>` heading manually where no stamp step is wired). Per the Post-Edit Rule Audit, dropped the same multi-model framing from the two supporting docs — `skills/release/stamp-changelog.py` and `.github/actions/stamp-changelog/action.yml` docstrings now read "every merge is published" rather than "in a publish-on-merge model" and describe the registry failure mode as "unversioned entries" rather than "Unreleased". Historical CHANGELOG entries naming the old model are archive and left intact.
