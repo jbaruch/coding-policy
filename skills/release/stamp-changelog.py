@@ -2,7 +2,7 @@
 """Stamp the CHANGELOG's newest (un-headed) entries with the version being published.
 
 Run by the publish pipeline (`.github/workflows/publish.yml`) immediately before
-`tesslio/patch-version-publish`. In a publish-on-merge model there is no
+`tesslio/patch-version-publish`. Every merge is published, so there is no
 "Unreleased" bucket: PR authors add `### ...` entry blocks at the TOP of
 `CHANGELOG.md` (below the `# Changelog` H1) with NO version heading. This script
 computes the version the publish step will assign and inserts a

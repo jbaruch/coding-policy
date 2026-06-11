@@ -62,17 +62,15 @@ When you add, remove, or rename a rule or skill, update **all** of these:
 
 ## CHANGELOG Hygiene
 
-- Match the CHANGELOG's top-of-file convention to the project's release model
-- **Publish-on-merge** (every merge auto-publishes, e.g. via `tesslio/patch-version-publish`):
-  - No `Unreleased` section; the heading is forbidden
-  - `tesslio/patch-version-publish` does NOT stamp `CHANGELOG.md` (it only bumps the manifest version and publishes)
-  - Stamping a `## <version> — <date>` heading is a separate step the repo wires itself
-  - Reusable stamp step: `.github/actions/stamp-changelog` (consumers `uses: jbaruch/coding-policy/.github/actions/stamp-changelog@<ref>`, wired before `tesslio/patch-version-publish`)
-  - **With a wired stamp step:** authors add un-headed `### ` entry blocks at the top of `CHANGELOG.md`
-  - The stamp step writes the `## <version> — <date>` heading above those blocks before publish
-  - **Without a stamp step:** authors write the `## <version> — <date>` heading manually above their entries
-  - Never leave un-headed `### ` blocks expecting auto-stamping when no stamp step is wired
-- **Manual release** (versions cut deliberately): keep an `## Unreleased` section; consolidate its entries into the new version heading on release
+- Every merge publishes a version (publish-on-merge, e.g. via `tesslio/patch-version-publish`); merged work is always released
+- No `Unreleased` section — the heading is forbidden
+- `tesslio/patch-version-publish` does NOT stamp `CHANGELOG.md` (it only bumps the manifest version and publishes)
+- Stamping a `## <version> — <date>` heading is a separate step the repo wires itself
+- Reusable stamp step: `.github/actions/stamp-changelog` (consumers `uses: jbaruch/coding-policy/.github/actions/stamp-changelog@<ref>`, wired before `tesslio/patch-version-publish`)
+- **With a wired stamp step:** authors add un-headed `### ` entry blocks at the top of `CHANGELOG.md`
+- The stamp step writes the `## <version> — <date>` heading above those blocks before publish
+- **Without a stamp step:** authors write the `## <version> — <date>` heading manually above their entries
+- Never leave un-headed `### ` blocks expecting auto-stamping when no stamp step is wired
 - Consolidation groups related entries, collapses redundant detail, retains load-bearing facts (what changed, references)
 - CHANGELOG is archive but bounded — a PR's full motivation lives in the PR body and commit messages; an entry can be one or two sentences when the broader context lives elsewhere
 - Audit the top section for duplication — multiple PRs reworking the same rule become one entry with the final outcome
