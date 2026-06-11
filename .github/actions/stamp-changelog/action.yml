@@ -4,12 +4,12 @@ description: |
   publish step is about to assign, then commits the result with `[skip ci]`
   (no push — the publish step's own commit carries it along).
 
-  For publish-on-merge repos per `jbaruch/coding-policy: context-artifacts`
-  "CHANGELOG Hygiene": PR authors add un-headed `### ` entry blocks at the
-  top of `CHANGELOG.md`; this step inserts the `## <version> — <date>`
+  Per `jbaruch/coding-policy: context-artifacts` "CHANGELOG Hygiene"
+  (every merge publishes): PR authors add un-headed `### ` entry blocks at
+  the top of `CHANGELOG.md`; this step inserts the `## <version> — <date>`
   heading above them before publish, so the published artifact and the
-  registry "what's new" show them under their real version instead of
-  "Unreleased". Wire it immediately before `tesslio/patch-version-publish`.
+  registry "what's new" show them under their real version rather than as
+  unversioned entries. Wire it immediately before `tesslio/patch-version-publish`.
 
   Idempotent: if the top section already carries a `## ` heading there is
   nothing un-headed to stamp and the step is a no-op (no commit).
