@@ -1,5 +1,9 @@
 # Changelog
 
+### Rules
+
+- **sync-before-work — fetch and sync the local checkout before the first read (#141)** — New always-on rule. An agent was asked to fix two issues that referenced skills by name (`vault-ingress`, `vault-clarification`) and step number. It read the local tree, found a *monolithic* `rhetoric-knowledge-vault/SKILL.md`, mapped the issues onto it, implemented the fix, wrote tests, committed, pushed, and opened a PR — which came back `CONFLICTING`. Local `main` was ~410 commits behind `origin/main` (0.10.1 vs 0.18.x); upstream had long since refactored that one skill into six (`vault-ingress`/`vault-clarification`/`vault-profile`/…), so the file the agent edited had been *deleted upstream* and the issues' names/step-numbers matched the current structure exactly. The whole first implementation landed on a tombstone — thrown away, rebased onto real `origin/main`, redone against the actual files. Cost: a wasted implementation pass, a force-push, a rewritten PR, all avoidable by a `git fetch` at minute zero. The agent even had the clue (issues naming files absent locally) and still didn't check freshness first. The rule encodes: fetch before the first read, fast-forward/rebase/reset the default onto `origin/<default>`, branch from the fresh tip, treat "this file looks like X" as suspect when the local default is behind, and honor an explicitly-pinned older ref as the only exception. Rule body carries the directives; this entry holds the incident.
+
 ## 0.3.66 — 2026-06-11
 
 ### Rules
