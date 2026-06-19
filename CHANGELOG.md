@@ -1,5 +1,9 @@
 # Changelog
 
+### Skills
+
+- **install-reviewer — document the reviewer data-flow / trust boundary** — Both reviewer templates (`review-anthropic.md`, `review-openai.md`) now state, in the workflow `description`, exactly what the reviewer sends to the review model (the pull-request diff and the published policy files — never repository secrets, tokens, or credentials) and what the `tessl install jbaruch/coding-policy` pre-step fetches (a public, version-pinned plugin from the official Tessl registry, not arbitrary remote code). Operator-facing transparency for the reviewer's cross-provider behavior, which a registry moderation scan otherwise had no stated trust model to weigh.
+
 ## 0.3.68 — 2026-06-19
 
 ### Skills
