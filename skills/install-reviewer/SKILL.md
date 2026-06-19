@@ -43,7 +43,7 @@ The skill runs in one of two modes determined by the user's request:
 Runs every precondition (git worktree, GitHub CLI install + auth, gh-aw extension at minimum version, plugin template, origin remote, plus mode-dependent branch state) and returns one JSON object: `{"ok": bool, "override": bool, "failures": [...], "warnings": [...]}`.
 
 - **Exit 0, empty `failures`** — every precondition passed; proceed to Step 2.
-- **Exit 1, populated `failures`** — report each failure's `reason` verbatim and stop. Every failure carries a concrete recovery command. The gh-aw extension is `github/gh-aw` (lives under the `github` org, not the plugin owner) and must be v0.71.0+. Install with `gh extension install github/gh-aw --pin v0.71.0` — the unpinned form would land on the latest *stable* release (currently below v0.71.0; everything from v0.69.0 onward is marked prerelease) and fail the version check.
+- **Exit 1, populated `failures`** — report each failure's `reason` verbatim and stop. Every failure carries a concrete recovery command. The gh-aw extension is `github/gh-aw` (lives under the `github` org, not the plugin owner) and must be v0.71.0+. Install with `gh extension install github/gh-aw --pin v0.79.8` — pinning the current latest *stable* keeps installs reproducible. (The unpinned form tracks whatever stable is current; stable now sits above the v0.71.0 floor and passes the version check — that wasn't always true, which is why the pin exists.)
 - **Non-empty `warnings`** — informational only; never affects `ok` or the exit code. Report each `reason` verbatim alongside the Step 1 outcome and remember them for Step 7's PR body. Do not stop; proceed to Step 2.
 
 ## Step 2 — Refuse Overwrite (install mode only)
