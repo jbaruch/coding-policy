@@ -24,6 +24,8 @@ description: Sync the local checkout with the remote default branch before readi
 
 ## Working Against a Pinned Ref
 
-- Narrow exception when the user explicitly wants a specific older ref or commit
-- Honor that ref, and state you are starting from it rather than the fresh default
+- Narrow exception for starting work from a specific older ref instead of the fresh default
+- Preconditions (all required):
+  1. The user explicitly names the older ref or commit to work against
+  2. You state you are starting from that pinned ref rather than `origin/<default>`
 - Every other task starts from the synced remote default
