@@ -6,7 +6,7 @@ Coding policy plugin for Baruch's AI agents. Language-agnostic code quality rule
 
 ## What's New
 
-- 20 rules — 13 always-on, 7 conditional (scoped via `applyTo:` to the files where the rule's prescriptions actually fire). Breakdown: 8 covering code quality, 8 covering plugin authoring, 1 covering author-model declaration, 1 covering concurrency, 1 covering review discipline, 1 covering external-repo action scope
+- 21 rules — 14 always-on, 7 conditional (scoped via `applyTo:` to the files where the rule's prescriptions actually fire). Breakdown: 9 covering code quality, 8 covering plugin authoring, 1 covering author-model declaration, 1 covering concurrency, 1 covering review discipline, 1 covering external-repo action scope
 - `release` skill — structured PR + merge workflow with Copilot review and paired-reviewer cross-family enforcement
 - `eval-authoring` skill — generate, review, and curate eval scenarios with score-driven iteration
 - `install-reviewer` skill — scaffold the paired gh-aw PR review workflows (OpenAI + Anthropic) into a consumer repo
@@ -28,6 +28,7 @@ tessl install jbaruch/coding-policy
 | Category | Rule | Summary |
 |----------|------|---------|
 | Git | [commit-conventions](rules/commit-conventions.md) | Imperative mood, one change per commit, PR hygiene |
+| Git | [sync-before-work](rules/sync-before-work.md) | Fetch and sync the local checkout to the remote default before reading, planning, or editing; branch from the fresh default |
 | Testing | [testing-standards](rules/testing-standards.md) | Outcome-based, deterministic, no binary fixtures |
 | Errors | [error-handling](rules/error-handling.md) | Specific exceptions (with outer-boundary process-contract carve-out), actionable messages, structured logging |
 | Deps | [dependency-management](rules/dependency-management.md) | Stdlib-first, pinned versions, lock files |

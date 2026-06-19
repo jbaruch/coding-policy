@@ -13,6 +13,7 @@
   ],
   "rules": [
     "rules/commit-conventions.md",
+    "rules/sync-before-work.md",
     "rules/testing-standards.md",
     "rules/error-handling.md",
     "rules/dependency-management.md",
