@@ -33,6 +33,17 @@
 
 set -euo pipefail
 
+# gh-aw version policy (enforced in check_gh_aw_min_version):
+#   GH_AW_MIN — hard floor. `acceptEdits` (replaced bypassPermissions) and
+#               `engine.args` both require >= 0.71.0; older compiles produce
+#               lock files current Claude SDK versions reject.
+#   GH_AW_PIN — version the install/recovery commands pin to, for
+#               reproducibility. Tracks the latest gh-aw stable release,
+#               which now sits above the floor (stable used to lag below it,
+#               which is why a prerelease pin was once required).
+GH_AW_MIN="0.71.0"
+GH_AW_PIN="0.79.8"
+
 OVERRIDE_MODE=0
 for arg in "$@"; do
   case "$arg" in
@@ -119,31 +130,28 @@ check_gh_authenticated() {
 
 check_gh_aw_installed() {
   gh aw --version >/dev/null 2>&1 || \
-    push_failure "gh-aw-installed" "gh-aw extension missing — run 'gh extension install github/gh-aw'"
+    push_failure "gh-aw-installed" "gh-aw extension missing — run 'gh extension install github/gh-aw --pin v${GH_AW_PIN}'"
 }
 
-# v0.71.0 replaced the deprecated `bypassPermissions` Claude SDK flag with
-# `acceptEdits`. Older gh-aw compiles lock files that current Claude SDK
-# versions reject, so refuse to scaffold against < v0.71.0. github/gh-aw
-# marks releases >= v0.69.0 as prerelease, so `gh extension install
-# github/gh-aw` installs the latest stable (v0.68.3) by default — the
-# recovery command pins explicitly to a known-good prerelease.
+# Floor and pin are defined at the top of the script (GH_AW_MIN / GH_AW_PIN).
+# We enforce a >= GH_AW_MIN floor but tell users to install GH_AW_PIN (the
+# latest stable), which clears the floor and keeps installs reproducible.
 check_gh_aw_min_version() {
   local raw min major minor patch min_major min_minor min_patch
   # `gh aw --version` writes to stderr (typical gh-extension idiom), so merge
   # streams before parsing rather than discarding stderr.
   raw=$(gh aw --version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n1) || true
   if [[ -z "$raw" ]]; then
-    push_failure "gh-aw-min-version" "Could not parse 'gh aw --version' output — re-install with 'gh extension remove gh-aw && gh extension install github/gh-aw --pin v0.71.0'"
+    push_failure "gh-aw-min-version" "Could not parse 'gh aw --version' output — re-install with 'gh extension remove gh-aw && gh extension install github/gh-aw --pin v${GH_AW_PIN}'"
     return
   fi
   IFS='.' read -r major minor patch <<<"$raw"
-  min="0.71.0"
+  min="$GH_AW_MIN"
   IFS='.' read -r min_major min_minor min_patch <<<"$min"
   if (( major < min_major )) \
      || (( major == min_major && minor < min_minor )) \
      || (( major == min_major && minor == min_minor && patch < min_patch )); then
-    push_failure "gh-aw-min-version" "gh-aw v${raw} is too old (need >= v${min} for the Claude SDK 'acceptEdits' flag) — run 'gh extension remove gh-aw && gh extension install github/gh-aw --pin v${min}'"
+    push_failure "gh-aw-min-version" "gh-aw v${raw} is too old (need >= v${min} for the Claude SDK 'acceptEdits' flag) — run 'gh extension remove gh-aw && gh extension install github/gh-aw --pin v${GH_AW_PIN}'"
   fi
 }
 

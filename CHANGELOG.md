@@ -1,5 +1,9 @@
 # Changelog
 
+### Skills
+
+- **install-reviewer — pin gh-aw install to the latest stable (v0.79.8)** — The preflight's install and recovery commands pinned `v0.71.0`, which is the technical *floor* (where `acceptEdits` and `engine.args` landed), not a version anyone should freshly install — so every fresh setup landed on a months-old gh-aw. The install/recovery commands now pin the latest stable, and the floor (`GH_AW_MIN`) and pin (`GH_AW_PIN`) are named constants in `preflight.sh` so they can't drift apart or silently go stale again. The enforced floor is unchanged at `v0.71.0`. Also corrected now-false prose: when the skill was written, latest stable (`v0.68.3`) sat below the floor so a prerelease pin was mandatory; stable has since caught up (`v0.79.8` > `v0.71.0`), so the "unpinned install fails the version check" warning no longer holds.
+
 ## 0.3.67 — 2026-06-19
 
 ### Rules
