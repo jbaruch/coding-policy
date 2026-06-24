@@ -1,0 +1,22 @@
+name: Tests
+
+# Executes every module's bash unit-test suite via scripts/run-tests.sh.
+# rules/testing-standards.md mandates tests for every module; this gates
+# PRs on them so a red suite blocks the merge (publish.yml runs the same
+# runner again before release as defense-in-depth).
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run unit test suites
+        run: bash scripts/run-tests.sh

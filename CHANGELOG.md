@@ -1,5 +1,9 @@
 # Changelog
 
+### Build
+
+- **Run the bash unit-test suites in CI — cobbler's-shoes gap** — `rules/testing-standards.md` mandates a test for every module, and the repo had 12 suites (~136 assertions across `install-reviewer`, `release`, `migrate-to-plugin`, `adopt-fork-pr`), but nothing ran them: `publish.yml` did lint → skill-review → publish only, no git hook, no Makefile target. A suite could go red on `main` and a regression could publish green. Added `scripts/run-tests.sh` (discovers `<base>/**/tests/test_*.sh`, runs each in its own subshell, exits non-zero on any failure; base-dir arg so it can be pointed at a fixture tree) plus its own test `scripts/tests/test_run_tests.sh`. New `tests.yml` runs it on every PR and push to `main` (gates merge); `publish.yml` runs the same runner after lint as defense-in-depth so a direct push to `main` can't ship on red. `scripts/` is `.tesslignore`d — the dev runner doesn't ship in the published plugin.
+
 ## 0.3.69 — 2026-06-19
 
 ### Skills
