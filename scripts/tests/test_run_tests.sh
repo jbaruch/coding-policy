@@ -72,6 +72,20 @@ invoke "$base"
   || fail "stream split: out=$OUT err=$ERR"
 rm -rf "$base"
 
+# --- path with space + newline still yields valid JSON (finding #145/#146) ---
+base="$(make_base)"
+weird="$base/skills/we ird"$'\n'"name/tests"
+mkdir -p "$weird"
+printf '#!/usr/bin/env bash\nexit 1\n' > "$weird/test_weird.sh"
+invoke "$base"
+{ [[ "$CODE" == 1 ]] \
+  && jq -e . <<<"$OUT" >/dev/null \
+  && [[ "$(jq -r .failed <<<"$OUT")" == 1 ]] \
+  && jq -e '.failures | any(test("test_weird.sh$"))' <<<"$OUT" >/dev/null; } \
+  && pass "control-char path -> still valid JSON" \
+  || fail "control-char path: code=$CODE out=$OUT"
+rm -rf "$base"
+
 # --- no suites found -> exit 2, JSON error, suites=0 ---
 base="$(make_base)"
 invoke "$base"

@@ -26,8 +26,31 @@
 
 set -euo pipefail
 
-# JSON string escaper (backslash + double-quote; paths carry no controls).
-json_str() { local s="$1"; s="${s//\\/\\\\}"; s="${s//\"/\\\"}"; printf '"%s"' "$s"; }
+# JSON string escaper. A Unix path may contain any byte except NUL and
+# '/', so escape the JSON-mandatory characters AND the C0 control set
+# (newline/tab/CR/etc.) rather than assuming paths are control-free.
+json_str() {
+  local s="$1" out="" i ch ord
+  s="${s//\\/\\\\}"
+  s="${s//\"/\\\"}"
+  for (( i = 0; i < ${#s}; i++ )); do
+    ch="${s:i:1}"
+    printf -v ord '%d' "'$ch"
+    if (( ord >= 0 && ord < 32 )); then
+      case "$ch" in
+        $'\n') out+='\n' ;;
+        $'\t') out+='\t' ;;
+        $'\r') out+='\r' ;;
+        $'\b') out+='\b' ;;
+        $'\f') out+='\f' ;;
+        *) out+="$(printf '\\u%04x' "$ord")" ;;
+      esac
+    else
+      out+="$ch"
+    fi
+  done
+  printf '"%s"' "$out"
+}
 
 main() {
   local base="${1:-}"
@@ -41,11 +64,28 @@ main() {
     return 2
   fi
 
+  # NUL-delimited discovery via a temp file. NUL is the only byte a Unix
+  # path can't contain, so `-print0`/`sort -z`/`read -d ''` survives paths
+  # with spaces or newlines (a newline-delimited pipe would split them).
+  # A temp file (not process substitution) keeps `find`'s exit observable:
+  # `set -o pipefail` propagates a `find` failure through `| sort -z` to
+  # the redirection, and the `if !` catches it — a command substitution
+  # can't be used because bash strips NUL bytes from its output.
+  local tmplist; tmplist="$(mktemp)"
+  if ! find "$base" -type f -path '*/tests/test_*.sh' -print0 | sort -z > "$tmplist"; then
+    rm -f "$tmplist"
+    echo "run-tests: suite discovery (find) failed under $base" >&2
+    printf '{"suites":0,"passed":0,"failed":0,"failures":[],"error":%s}\n' \
+      "$(json_str "suite discovery failed under $base")"
+    return 2
+  fi
+
   local suites=()
   local s
-  while IFS= read -r s; do
-    suites+=("$s")
-  done < <(find "$base" -type f -path '*/tests/test_*.sh' | sort)
+  while IFS= read -r -d '' s; do
+    [[ -n "$s" ]] && suites+=("$s")
+  done < "$tmplist"
+  rm -f "$tmplist"
 
   if [[ ${#suites[@]} -eq 0 ]]; then
     echo "run-tests: no test suites found under ${base}/**/tests/test_*.sh" >&2
