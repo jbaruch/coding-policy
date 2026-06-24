@@ -59,6 +59,7 @@ tools:
     - "git show *"
     - "gh pr diff *"
     - "gh pr view *"
+    - "bash skills/install-reviewer/resolve-author-family.sh *"
   github:
     toolsets: [pull_requests]
 
@@ -87,18 +88,24 @@ Your reviewer family is **anthropic** (engine is Claude Code / claude-opus-4-6).
 
 ## Step 1 — Author-Model gate (declaration + self-review skip)
 
-Your reviewer family is **anthropic**; your paired reviewer's family is **openai**. Per `rules/author-model-declaration.md`, every PR must declare its author model via a `**Author-Model:**` line in the PR body (preferred) or a model-identifying `Co-authored-by:` git trailer (fallback).
+Your reviewer family is **anthropic**; your paired reviewer's family is **openai**. Per `rules/author-model-declaration.md`, every PR must declare its author model via a `**Author-Model:**` line in the PR body (preferred) or a model-identifying `Co-authored-by:` git trailer (fallback). Extract the declared token(s), then delegate the gate decision to the resolver script. Do NOT map families or decide skip-vs-review yourself — a reviewer LLM once mis-mapped a model id newer than its own model set (`claude-opus-4-8`) to its own family and falsely self-skipped, leaving an AI-authored PR with zero policy review (issue #145). The script owns family-mapping, the skip predicate, and the verbatim body text.
 
 1. Run `gh pr view ${{ github.event.pull_request.number }} --json body,commits` to fetch the PR body and commit list.
-2. Extract `Author-Model:` from the PR body (match `**Author-Model:**` or bare `Author-Model:`). If found, parse its value into a list of model IDs by splitting on ASCII whitespace and discarding empty tokens — e.g., `human claude-opus-4-7` → `["human", "claude-opus-4-7"]`.
-3. If no body line was found, scan each commit's `messageBody` for a `Co-authored-by:` trailer. Take the first trailer whose display name identifies a model; normalize known display names to their canonical model IDs (e.g., `Claude Opus 4.7` → `claude-opus-4-7`, `GPT-5.4` → `gpt-5.4`). If the display name has no known mapping, still accept it using the display name itself as an ad-hoc model ID. This contributes a single-element list.
-4. If neither a body line nor a model-identifying trailer was found, this PR violates `rules/author-model-declaration.md`. Stop. Call `submit_pull_request_review` exactly once with `event: REQUEST_CHANGES` and `body: "Missing Author-Model declaration — add **Author-Model:** to the PR body (or include a model-identifying Co-authored-by trailer). See rules/author-model-declaration.md."` Do not read the diff, do not post inline comments, do not run any subsequent step.
-5. Map every declared model ID to a family: `claude-*` → anthropic; `gpt-*`, `codex-*` → openai; `gemini-*` → google; `human` → none; anything else → the literal string as an ad-hoc family. Build the set F of non-`none` families present in the declaration.
-
-Decide whether to proceed:
-
-- If **anthropic** ∈ F AND **openai** ∉ F → the paired OpenAI-family reviewer is cross-family and will cover this PR. Stop. Call `submit_pull_request_review` exactly once with `event: COMMENT` and `body: "Skipping: self-review-bias — author-family anthropic; see rules/author-model-declaration.md."` Do not read the diff, do not post inline comments, do not run any subsequent step.
-- Otherwise (anthropic ∉ F, **or** both openai and anthropic are in F so the paired reviewer also can't be cross-family) → proceed to Step 2. The both-families-present case is a degraded fallback per `rules/author-model-declaration.md`: both reviewers run, neither is truly cross-family.
+2. Extract the declared model-id token(s):
+   - From the PR body — match `**Author-Model:**` or bare `Author-Model:`, split its value on ASCII whitespace, discard empty tokens (e.g. `human claude-opus-4-7` → `human` `claude-opus-4-7`).
+   - If no body line is present — scan each commit's `messageBody` for a `Co-authored-by:` trailer; take the first whose display name identifies a model and normalize it to a canonical id (e.g. `Claude Opus 4.8 (1M context)` → `claude-opus-4-8`, `GPT-5.4` → `gpt-5.4`). An unrecognized display name is still accepted as an ad-hoc id. This yields one token.
+   - If neither is present — you have zero tokens; pass none.
+3. Run the resolver, passing every extracted token after `--` (zero tokens means the missing-declaration case — pass none):
+   ```
+   bash skills/install-reviewer/resolve-author-family.sh \
+     --reviewer anthropic \
+     --policy-ref "rules/author-model-declaration.md" \
+     -- <token> [<token> ...]
+   ```
+   It prints one JSON object: `{"decision": "review"|"skip"|"request_changes", "review_event": ..., "review_body": ...}`. Family-mapping, the skip predicate, and the verbatim body text live in the script — see `skills/install-reviewer/resolve-author-family.sh` (header docstring). Do not second-guess its output.
+4. Act on `decision`:
+   - `skip` or `request_changes` → call `submit_pull_request_review` exactly once with `event` set to the script's `review_event` and `body` set to the script's `review_body` verbatim. Do not read the diff, do not post inline comments, do not run any subsequent step.
+   - `review` → proceed to Step 2. This is the substantive path: this reviewer is cross-family, or the declaration spans both paired families / neither paired family (the degraded both-run and human-only fallbacks per `rules/author-model-declaration.md`).
 
 ## Step 2 — Load the policy (from PR head, NOT main)
 
