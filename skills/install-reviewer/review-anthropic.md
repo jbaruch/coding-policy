@@ -115,6 +115,7 @@ tools:
     - "git show *"
     - "gh pr diff *"
     - "gh pr view *"
+    - "bash /tmp/gh-aw/coding-policy/.tessl/plugins/jbaruch/coding-policy/skills/install-reviewer/resolve-author-family.sh *"
   github:
     toolsets: [pull_requests]
 
@@ -143,21 +144,24 @@ Your reviewer family is **anthropic** (engine is Claude Code / claude-opus-4-x).
 
 ## Step 1 — Self-Review Gate
 
-Your reviewer family is **anthropic**; your paired reviewer's family is **openai**. Read the PR body and commit trailers to determine the author-model signal, per `jbaruch/coding-policy: author-model-declaration` (loaded in Step 2 below):
+Your reviewer family is **anthropic**; your paired reviewer's family is **openai**. Extract the author-model token(s) from the PR, then delegate the gate decision to the resolver script. Do NOT map families or decide skip-vs-review yourself — a reviewer LLM once mis-mapped a model id newer than its own model set (`claude-opus-4-8`) to its own family and falsely self-skipped, leaving an AI-authored PR with zero policy review (issue #145). The script owns family-mapping, the skip predicate, and the verbatim body text.
 
 1. Run `gh pr view ${{ github.event.pull_request.number }} --json body,commits` to fetch the PR body and commit list.
-2. Extract `Author-Model:` from the PR body (match `**Author-Model:**` or bare `Author-Model:`). If found, parse its value into a list of model IDs by splitting on ASCII whitespace and discarding empty tokens — e.g., `human claude-opus-4-7` → `["human", "claude-opus-4-7"]`.
-3. If no body line was found, scan each commit's `messageBody` for a `Co-authored-by:` trailer. Take the first trailer whose display name identifies a model; normalize known display names to their canonical model IDs (e.g., `Claude Opus 4.7` → `claude-opus-4-7`, `GPT-5.4` → `gpt-5.4`). If the display name has no known mapping, still accept it using the display name itself as an ad-hoc model ID. This contributes a single-element list.
-4. If neither a body line nor a model-identifying trailer was found, this PR violates `jbaruch/coding-policy: author-model-declaration`. Stop. Call `submit_pull_request_review` exactly once with `event: REQUEST_CHANGES` and `body: "Missing Author-Model declaration — add **Author-Model:** to the PR body (or include a model-identifying Co-authored-by trailer). See jbaruch/coding-policy: author-model-declaration."` Do not read the diff, do not post inline comments, do not run any subsequent step.
-5. Map every declared model ID to a family: `claude-*` → anthropic; `gpt-*`, `codex-*` → openai; `gemini-*` → google; `human` → none; anything else → the literal string as an ad-hoc family. Build the set F of non-`none` families present in the declaration.
-
-Decide whether to proceed:
-
-- If **anthropic** ∈ F AND **openai** ∉ F → the paired OpenAI-family reviewer is cross-family and will cover this PR. Stop. Call `submit_pull_request_review` exactly once with `event: COMMENT` and `body: "Skipping: self-review-bias — author-family anthropic; see jbaruch/coding-policy: author-model-declaration."` Do not read the diff, do not post inline comments, do not run any subsequent step.
-- Otherwise → proceed to Step 2. Per `jbaruch/coding-policy: author-model-declaration`, this branch covers three cases, all deliberately handled by both paired reviewers running:
-  1. **Both paired families present** (e.g., `gpt-5.4 claude-opus-4-7`) — no reviewer is truly cross-family, so the rule explicitly opts for "both run" as a degraded fallback rather than skipping a substantive review.
-  2. **Neither paired family present** (e.g., `gemini-2.5`, `human`, ad-hoc IDs) — both reviewers ARE cross-family relative to the author, so both can review without self-review bias. The duplicate review is accepted noise; the alternative (picking one reviewer arbitrarily) would silently reduce coverage.
-  3. **Only the OTHER paired family present** (e.g., `gpt-5.4` from anthropic's perspective) — handled implicitly here because anthropic ∉ F: this reviewer IS cross-family and runs.
+2. Extract the declared model-id token(s) per `jbaruch/coding-policy: author-model-declaration` (loaded in Step 2):
+   - From the PR body — match `**Author-Model:**` or bare `Author-Model:`, split its value on ASCII whitespace, discard empty tokens (e.g. `human claude-opus-4-7` → `human` `claude-opus-4-7`).
+   - If no body line is present — scan each commit's `messageBody` for a `Co-authored-by:` trailer; take the first whose display name identifies a model and normalize it to a canonical id (e.g. `Claude Opus 4.8 (1M context)` → `claude-opus-4-8`, `GPT-5.4` → `gpt-5.4`). An unrecognized display name is still accepted as an ad-hoc id. This yields one token.
+   - If neither is present — you have zero tokens; pass none.
+3. Run the resolver, passing every extracted token after `--` (zero tokens means the missing-declaration case — pass none):
+   ```
+   bash /tmp/gh-aw/coding-policy/.tessl/plugins/jbaruch/coding-policy/skills/install-reviewer/resolve-author-family.sh \
+     --reviewer anthropic \
+     --policy-ref "jbaruch/coding-policy: author-model-declaration" \
+     -- <token> [<token> ...]
+   ```
+   It prints one JSON object: `{"decision": "review"|"skip"|"request_changes", "review_event": ..., "review_body": ...}`. Family-mapping, the skip predicate, and the verbatim body text live in the script — see `/tmp/gh-aw/coding-policy/.tessl/plugins/jbaruch/coding-policy/skills/install-reviewer/resolve-author-family.sh` (header docstring). Do not second-guess its output.
+4. Act on `decision`:
+   - `skip` or `request_changes` → call `submit_pull_request_review` exactly once with `event` set to the script's `review_event` and `body` set to the script's `review_body` verbatim. Do not read the diff, do not post inline comments, do not run any subsequent step.
+   - `review` → proceed to Step 2. This is the substantive path: this reviewer is cross-family, or the declaration spans both paired families / neither paired family (the degraded both-run and human-only fallbacks documented in `jbaruch/coding-policy: author-model-declaration`).
 
 ## Step 2 — Load the policy
 
