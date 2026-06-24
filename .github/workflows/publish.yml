@@ -30,6 +30,12 @@ jobs:
       - name: Lint plugin
         run: tessl plugin lint
 
+      # Defense-in-depth: tests.yml already gates PRs on these suites, but
+      # a direct push to main (content-only carve-out, admin) skips that
+      # gate — so block the publish on a red suite too.
+      - name: Run unit tests
+        run: bash scripts/run-tests.sh
+
       # Reviews only the skills whose files changed since the previous
       # push. Action is dogfooded from this repo via the local path
       # `./.github/actions/skill-review`; consumer repos call it as
