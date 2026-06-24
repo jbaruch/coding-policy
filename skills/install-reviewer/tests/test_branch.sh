@@ -32,6 +32,11 @@ with_repo() {
     set -e
     git -c init.defaultBranch=main init -q "$repo"
     cd "$repo"
+    # Self-contained identity: a clean CI runner has no global git
+    # user.name/user.email, so an inherited-identity commit fails there
+    # (it only worked locally because dev machines carry a global one).
+    git config user.email test@example.com
+    git config user.name "Test"
     git commit --allow-empty -m init -q
     git init --bare -q "$origin"
     git remote add origin "$origin"
