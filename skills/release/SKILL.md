@@ -78,7 +78,7 @@ Proceed immediately to Step 5.
 
 ## Step 5 — Poll PR State
 
-Capture a single JSON snapshot of CI status, bot review states, and inline comment counts:
+Capture a single JSON snapshot of CI status, bot review states and bodies, and inline comment counts:
 
 ```bash
 skills/release/poll-pr-reviews.sh <owner> <repo> <pr-number>
