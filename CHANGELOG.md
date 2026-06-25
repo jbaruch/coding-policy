@@ -1,5 +1,9 @@
 # Changelog
 
+### Rules
+
+- **New `rules/language-diagnostics.md` — enable the project's language server and treat its findings as non-dismissible without cause** — Surfaced by `jbaruch/nanoclaw-travel#80`/`#81`: a manual `pyright` run on a repo that had never been type-checked produced ~200 findings, decomposing into 9 real source bugs (a `tuple.__name__` validation crash, a could-be-None `raise __cause__`, Optional-flow bugs — all fixed in #80) hiding behind ~100 import false-positives and 110 low-severity test-strictness errors. A fleet survey showed the gap is systemic but language-split: not one of the 16 Python repos gates diagnostics (the nanoclaw family runs `ruff` format/lint only, the other nine run nothing), while the real-TypeScript nanoclaw repos (`nanoclaw`, `-public`, `-telegram`) already gate `tsc` in CI — the existence proof the contract works. Two TS repos (`tessl-demo`, `robocoders-jfokus-2026`) are `strict` with a `typecheck` script that CI never runs. The trigger was the maintainer telling the agent to "stop ignoring pyright warnings" — a deterministic check enforced by memory, the `rules/script-delegation.md` anti-pattern. The rule generalized past type-checking to any language's diagnostics engine (pyright, tsc, clippy, `go vet`): enable the language server in-editor; findings are fixed or suppressed inline with a stated cause (no blanket `# type: ignore` / `# pyright: basic` / `// @ts-nocheck`); CI gates the engine's headless form at zero findings, before tests, alongside format/lint per `rules/code-formatting.md`; resolve modules first so real bugs don't drown in resolution noise; adopt on a dirty tree via config PR → fix PRs by finding shape → CI-gate PR. It does not mandate an immediate clean-tree migration across the fleet — that's per-repo work, tracked in each repo. Surface-synced: `plugin.json`, README rules table, project `.claude/CLAUDE.md` import list.
+
 ## 0.3.71 — 2026-06-24
 
 ### Skills

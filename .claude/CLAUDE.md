@@ -10,6 +10,7 @@ This repo IS `jbaruch/coding-policy`. The rule files below are the source-of-tru
 @../rules/ci-safety.md
 @../rules/no-secrets.md
 @../rules/code-formatting.md
+@../rules/language-diagnostics.md
 @../rules/context-artifacts.md
 @../rules/context-writing-style.md
 @../rules/rule-frontmatter.md
