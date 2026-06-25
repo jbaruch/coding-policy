@@ -33,5 +33,5 @@ alwaysApply: true
 ## Adopting on a Dirty Tree
 
 - Turning the gate on for a tree never checked is its own focused change — land the config plus the fixes in a PR separate from feature work
-- The tree goes green first; wire the gate into CI only once it reports zero findings, so the debt can't silently regrow
+- The tree goes green first; wire the gate into CI only once it reports zero findings
 - Sequence large adoptions: a config PR, then fix PRs grouped by finding shape, then the CI-gate PR
