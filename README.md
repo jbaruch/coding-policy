@@ -6,7 +6,7 @@ Coding policy plugin for Baruch's AI agents. Language-agnostic code quality rule
 
 ## What's New
 
-- 21 rules — 14 always-on, 7 conditional (scoped via `applyTo:` to the files where the rule's prescriptions actually fire). Breakdown: 9 covering code quality, 8 covering plugin authoring, 1 covering author-model declaration, 1 covering concurrency, 1 covering review discipline, 1 covering external-repo action scope
+- 22 rules — 15 always-on, 7 conditional (scoped via `applyTo:` to the files where the rule's prescriptions actually fire). Breakdown: 10 covering code quality, 8 covering plugin authoring, 1 covering author-model declaration, 1 covering concurrency, 1 covering review discipline, 1 covering external-repo action scope
 - `release` skill — structured PR + merge workflow with Copilot review and paired-reviewer cross-family enforcement
 - `eval-authoring` skill — generate, review, and curate eval scenarios with score-driven iteration
 - `install-reviewer` skill — scaffold the paired gh-aw PR review workflows (OpenAI + Anthropic) into a consumer repo
