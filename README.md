@@ -36,6 +36,7 @@ tessl install jbaruch/coding-policy
 | CI | [ci-safety](rules/ci-safety.md) | Never skip tests, never modify CI without asking |
 | Secrets | [no-secrets](rules/no-secrets.md) | No credentials in code, env vars or secrets manager |
 | Style | [code-formatting](rules/code-formatting.md) | Use project's formatter, don't mix style with logic |
+| Types | [language-diagnostics](rules/language-diagnostics.md) | Enable the project's language server; its findings are non-dismissible without cause; gate the headless checker in CI at zero findings |
 | Authoring | [context-artifacts](rules/context-artifacts.md) | Plugin structure, rule format, review iteration, surface sync, consistency checks |
 | Authoring | [context-writing-style](rules/context-writing-style.md) | Prose discipline for rules, skills, and READMEs — what to cut, what to keep, structural format. CHANGELOG entries follow looser archive discipline |
 | Authoring | [rule-frontmatter](rules/rule-frontmatter.md) | Frontmatter conventions for rule files — passthrough model, per-agent field map, when to path-scope |
