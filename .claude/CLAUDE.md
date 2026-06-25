@@ -3,6 +3,7 @@
 This repo IS `jbaruch/coding-policy`. The rule files below are the source-of-truth tile content — directly imported so the maintainer always reads (and edits) the live versions, not a vendored `.tessl/plugins/` copy.
 
 @../rules/commit-conventions.md
+@../rules/sync-before-work.md
 @../rules/testing-standards.md
 @../rules/error-handling.md
 @../rules/dependency-management.md
@@ -23,3 +24,4 @@ This repo IS `jbaruch/coding-policy`. The rule files below are the source-of-tru
 @../rules/agent-worktree-isolation.md
 @../rules/boy-scout.md
 @../rules/external-repo-contributions.md
+@../rules/reviewer-feedback-reading.md

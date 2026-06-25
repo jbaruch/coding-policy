@@ -181,12 +181,27 @@ t_latest_review_by_picks_from_last_page() {
 
 t_latest_review_by_returns_none_when_no_reviews() {
   MOCK_REVIEWS_BODY='[]'
-  local out state submitted_at
+  local out state submitted_at body
   out=$(latest_review_by "owner" "repo" "1" "github-actions[bot]")
   state=$(echo "$out" | jq -r '.state')
   submitted_at=$(echo "$out" | jq -r '.submitted_at')
+  body=$(echo "$out" | jq -r '.body')
   assert_eq "state for empty"        "none" "$state"        || return 1
-  assert_eq "submitted_at for empty" "null" "$submitted_at"
+  assert_eq "submitted_at for empty" "null" "$submitted_at" || return 1
+  assert_eq "body for empty"         "null" "$body"
+}
+
+# A review's state classifies merge-gating, not whether its body must be read.
+# A COMMENTED review with zero inline comments still carries a body the gate
+# must surface so the agent reads it (rules/reviewer-feedback-reading.md).
+t_latest_review_by_surfaces_body_text() {
+  MOCK_REVIEWS_BODY='[{"user":{"login":"github-actions[bot]"},"state":"COMMENTED","submitted_at":"2026-05-18T16:00:00Z","body":"Non-blocking, but the rename in foo.py:42 drops the retry guard."}]'
+  local out state body
+  out=$(latest_review_by "owner" "repo" "1" "github-actions[bot]")
+  state=$(echo "$out" | jq -r '.state')
+  body=$(echo "$out" | jq -r '.body')
+  assert_eq "state surfaced"  "COMMENTED" "$state" || return 1
+  assert_eq "body surfaced verbatim" "Non-blocking, but the rename in foo.py:42 drops the retry guard." "$body"
 }
 
 t_latest_review_by_filters_other_logins_across_pages() {
@@ -229,6 +244,7 @@ run "main surfaces merge_state as a top-level field"                  t_main_sur
 run "main propagates DIRTY merge_state end-to-end"                    t_main_propagates_dirty_state
 run "latest_review_by picks newest review on page 2 (issue #83)"      t_latest_review_by_picks_from_last_page
 run "latest_review_by returns 'none' for empty reviews"               t_latest_review_by_returns_none_when_no_reviews
+run "latest_review_by surfaces the review body text"                  t_latest_review_by_surfaces_body_text
 run "latest_review_by ignores other logins across pages"              t_latest_review_by_filters_other_logins_across_pages
 run "toplevel_comments_by sums counts across pages (issue #83)"       t_toplevel_comments_by_sums_across_pages
 run "toplevel_comments_by returns 0 for empty comments"               t_toplevel_comments_by_returns_zero_for_no_comments
