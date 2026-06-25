@@ -33,6 +33,7 @@
     "rules/stateful-artifacts.md",
     "rules/agent-worktree-isolation.md",
     "rules/boy-scout.md",
-    "rules/external-repo-contributions.md"
+    "rules/external-repo-contributions.md",
+    "rules/reviewer-feedback-reading.md"
   ]
 }

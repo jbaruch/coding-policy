@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
-# Snapshot CI status, bot review states, and inline comment counts for a PR.
+# Snapshot CI status, bot review states + bodies, and inline comment counts for a PR.
 # Non-blocking — call repeatedly to observe transitions.
 #
 # Usage: poll-pr-reviews.sh <owner> <repo> <pr-number>
 # Out:   one JSON object on stdout with the schema below.
 # Exit:  0 on successful query; non-zero with stderr diagnostic on failure
+#
+# `reviews.*.body` carries the full review body text — a review's state classifies
+# whether it gates the merge, not whether its body must be read. A COMMENTED review
+# with zero inline comments still carries a body (see rules/reviewer-feedback-reading.md).
 #
 # Schema:
 #   {
@@ -12,9 +16,9 @@
 #     "ci":   {"status": "pending|success|failure|none", "checks": [...]},
 #     "reviews": {
 #       "gh_aw":   {"state": "APPROVED|CHANGES_REQUESTED|COMMENTED|none",
-#                   "submitted_at": "ISO-8601|null"},
+#                   "submitted_at": "ISO-8601|null", "body": "text|null"},
 #       "copilot": {"state": "APPROVED|CHANGES_REQUESTED|COMMENTED|none",
-#                   "submitted_at": "ISO-8601|null"}
+#                   "submitted_at": "ISO-8601|null", "body": "text|null"}
 #     },
 #     "inline_comments": {"gh_aw": N, "copilot": N},
 #     "merge_state": {"status": "CLEAN|DIRTY|BLOCKED|BEHIND|UNSTABLE|...",
@@ -44,8 +48,8 @@ latest_review_by() {
         (add // [])
         | [.[] | select(.user.login == $login)]
         | last
-        | if . == null then {state: "none", submitted_at: null}
-          else {state, submitted_at} end'
+        | if . == null then {state: "none", submitted_at: null, body: null}
+          else {state, submitted_at, body} end'
 }
 
 toplevel_comments_by() {

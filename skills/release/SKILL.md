@@ -78,7 +78,7 @@ Proceed immediately to Step 5.
 
 ## Step 5 — Poll PR State
 
-Capture a single JSON snapshot of CI status, bot review states, and inline comment counts:
+Capture a single JSON snapshot of CI status, bot review states and bodies, and inline comment counts:
 
 ```bash
 skills/release/poll-pr-reviews.sh <owner> <repo> <pr-number>
@@ -87,6 +87,7 @@ skills/release/poll-pr-reviews.sh <owner> <repo> <pr-number>
 The script returns:
 - `ci.status` — `pending | success | failure | none` (the gh-aw workflow appears here as a check once it has run)
 - `reviews.gh_aw.state` and `reviews.copilot.state` — latest review per bot (`APPROVED | CHANGES_REQUESTED | COMMENTED | none`)
+- `reviews.gh_aw.body` and `reviews.copilot.body` — the full review body text per bot (`null` when the bot hasn't reviewed) — read it; the state label is not a summary of it, per `rules/reviewer-feedback-reading.md`
 - `inline_comments.gh_aw` and `inline_comments.copilot` — top-level inline comment counts
 - `merge_state.status` and `merge_state.mergeable` — GitHub's merge-readiness state (e.g., `CLEAN`/`MERGEABLE`, `DIRTY`/`CONFLICTING`)
 
@@ -100,6 +101,7 @@ If the gh-aw review check ran but no review was posted, inspect logs with `gh ru
 
 ## Step 6 — Address Feedback; No Re-request Needed
 
+- **Read every review in full first.** Read each reviewer's `reviews.*.body` and every inline comment body before judging any item — a `COMMENTED` state or zero inline comments is not a license to skip the body (see `rules/reviewer-feedback-reading.md`)
 - **CI failures**: Fix every one
 - **Review suggestions**: Apply what's right. Push back on anything that misreads scope — cite concrete evidence (file:line, log line, spec quote) when declining
 - **Reply on EVERY thread.** Use these exact opening literals:
@@ -107,16 +109,17 @@ If the gh-aw review check ran but no review was posted, inspect logs with `gh ru
   - Declined: `Declining — <reason with cited evidence>` (em dash `—`, not hyphen or period)
 - Push fixes to the same branch
 - **gh-aw re-runs automatically on every push** (`pull_request: synchronize`); Copilot needs a manual re-request each push via `skills/release/request-copilot-review.sh` (same args as Step 4).
-- Repeat Step 5 until every active bot review is `APPROVED` or `COMMENTED` with no blocking items, and every thread has a reply.
+- Repeat Step 5 until every active bot review is `APPROVED`, or `COMMENTED` with its body read and no blocking items, and every thread has a reply.
 
 ## Step 7 — Merge + Cleanup
 
 Only proceed when:
 - Step 5's poll returns `ci.status` as `success` (or `none` if no checks are configured) AND `merge_state.mergeable` is `MERGEABLE` (`UNKNOWN` is not acceptable — GitHub hasn't finished computing mergeability) AND `merge_state.status` is not `DIRTY` AND no bot has `CHANGES_REQUESTED`, AND
 - Both `reviews.gh_aw.state` and `reviews.copilot.state` are NOT `none` — i.e., each gating reviewer has actually posted a review. A reviewer that hasn't run yet leaves `state: none` and `inline_comments: 0`, which would otherwise satisfy the no-CHANGES_REQUESTED check vacuously, AND
+- Every non-empty `reviews.*.body` has been read in full — a `COMMENTED` state with zero inline comments is not a license to skip the body (see `rules/reviewer-feedback-reading.md`), AND
 - Every inline comment from Step 5's `inline_comments` count has a `Fixed in <sha>` or `Declining — <reason>` reply per Step 6 (verify by listing the PR's review comments — the poll script tracks counts, not reply state, so the operator confirms thread closure).
 
-A `COMMENTED` review with zero inline comments is fully non-blocking; a `COMMENTED` review with inline comments is non-blocking once every thread has a reply.
+A `COMMENTED` review never gates the merge on its state alone — but its body must be read before merge, zero inline comments included. With inline comments, it is mergeable once every thread also has a reply.
 
 Before merging, capture the registry baseline so the post-merge check has something to compare against:
 
