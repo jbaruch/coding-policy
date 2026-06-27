@@ -2,7 +2,7 @@
 
 ### Build
 
-- **Republish 0.3.73's content as 0.3.74 after a Tessl moderation infrastructure failure** — `0.3.73`'s registry moderation errored (*"Moderation could not be completed"*), not a content finding; `0.3.74` ships the identical rules/skills through a fresh publish-and-moderation run per `rules/ci-safety.md`'s safer-recovery guidance, with no functional, source, or test changes relative to `0.3.73`. Full incident in PR #151.
+- **Republish 0.3.73's content as 0.3.74 after a Tessl moderation infrastructure failure** — `0.3.73`'s registry moderation errored (*"Moderation could not be completed"*), not a content finding; `0.3.74` ships the identical rules/skills through a fresh publish-and-moderation run per `rules/ci-safety.md`'s safer-recovery guidance. The only change from `0.3.73` is this CHANGELOG entry. Full incident in PR #151.
 
 ## 0.3.73 — 2026-06-25
 
