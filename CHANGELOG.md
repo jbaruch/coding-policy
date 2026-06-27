@@ -2,7 +2,7 @@
 
 ### Build
 
-- **Republish 0.3.73's content as 0.3.74 after a Tessl moderation infrastructure failure** — `0.3.73`'s registry moderation errored (*"Moderation could not be completed"*), not a content finding; `0.3.74` ships the identical rules/skills through a fresh publish-and-moderation run per `rules/ci-safety.md`'s safer-recovery guidance. The only change from `0.3.73` is this CHANGELOG entry. Full incident in PR #151.
+- **Publish 0.3.74 after 0.3.73's moderation failed and reserved its version** — `0.3.73`'s registry moderation errored (*"Moderation could not be completed"*), so it never became `Latest` (stuck at `0.3.72`) yet still reserved the `0.3.73` version number; a plain republish collided (`0.3.73 already exists`, since `tesslio/patch-version-publish` auto-bumps only from registry `Latest`, which the ghost defeats). `0.3.74` ships the identical rules/skills via an explicit manifest bump and a fresh publish-and-moderation run per `rules/ci-safety.md`. Full incident in PR #151.
 
 ## 0.3.73 — 2026-06-25
 
