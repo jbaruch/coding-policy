@@ -2,7 +2,7 @@
 
 ### Build
 
-- **Republish 0.3.73's content after a Tessl moderation infrastructure failure** — `0.3.73` (PR #150) published with a green run and a clean version bump, but its registry moderation sat `pending` for ~5.5 hours and then flipped to `error`: *"Moderation could not be completed for this version. Please contact support@tessl.io."* This was not a content finding — the `0.3.72 → 0.3.73` delta was nine benign text files (the `reviewer-feedback-reading` rule plus the release-skill body-surfacing changes), no binaries, no secrets — but a moderation-pipeline failure on the registry side, leaving `0.3.73` published-but-not-install-confirmed (`Latest Version` stuck at `0.3.72`, `publishedAt: null`). Per `rules/ci-safety.md`'s safer-recovery guidance — a follow-up commit fires a fresh publish on merge rather than re-running a failed publish — this version ships the identical plugin content through a fresh moderation run, sidestepping the dead `0.3.73` moderation job. No source or test changes relative to `0.3.73`.
+- **Republish 0.3.73's content as 0.3.74 after a Tessl moderation infrastructure failure** — `0.3.73`'s registry moderation errored (*"Moderation could not be completed"*), not a content finding; `0.3.74` ships the identical rules/skills through a fresh publish-and-moderation run per `rules/ci-safety.md`'s safer-recovery guidance, with no functional, source, or test changes relative to `0.3.73`. Full incident in PR #151.
 
 ## 0.3.73 — 2026-06-25
 
