@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.75 — 2026-06-28
+
+### Rules
+
+- **`rules/testing-standards.md` Determinism — ban tests that depend on the current date or wall-clock time** — Surfaced by `fifty-tabs-of-fares`, which had many tests hardcoding "today" or a future date into assertions and fixtures; they passed when written and started failing as the wall clock crossed the baked-in date. This is the temporal sibling of the existing no-self-generated-random-data ban — both leak non-determinism into tests. New bullets: no `today`/runtime `now()`/hardcoded future dates; control the clock by injecting or freezing "now" (passed-in reference date, mocked time source, freezegun); compute relative dates from a fixed injected reference; fixed past dates as fixtures remain fine since they don't rot. Post-edit audit found this repo's own tests already compliant — `test_poll_pr_reviews.sh` uses fixed past dates as fixtures, `test_stamp_changelog.py` injects the date as a parameter rather than reading the clock.
+
+## 0.3.74 — 2026-06-27
+
 ### Build
 
 - **Publish 0.3.74 after 0.3.73's moderation failed and reserved its version** — `0.3.73`'s registry moderation errored (*"Moderation could not be completed"*), so it never became `Latest` (stuck at `0.3.72`) yet still reserved the `0.3.73` version number; a plain republish collided (`0.3.73 already exists`, since `tesslio/patch-version-publish` auto-bumps only from registry `Latest`, which the ghost defeats). `0.3.74` ships the identical rules/skills via an explicit manifest bump and a fresh publish-and-moderation run per `rules/ci-safety.md`. Full incident in PR #151.

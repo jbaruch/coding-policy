@@ -30,6 +30,10 @@ alwaysApply: true
 
 - Tests must be deterministic — no self-generated random test data
 - Provide fixed test data; never have the test generate its own inputs randomly
+- No dependence on the current date or wall-clock time — no `today`, runtime `now()`, or hardcoded future dates in assertions or fixtures
+- Control the clock: inject or freeze "now" (a passed-in reference date, a mocked time source, freezegun) so a test green today is green every day
+- Compute relative dates from a fixed injected reference, never from the real clock at run time
+- Fixed past dates as fixtures are fine — the ban is on time-relative values that rot as the run date advances
 - Flaky tests are bugs — diagnose the root cause, don't retry and hope
 
 ## Fixtures
