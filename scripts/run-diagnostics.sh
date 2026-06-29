@@ -1,0 +1,101 @@
+#!/usr/bin/env bash
+# Language-diagnostics gate (rules/language-diagnostics.md): run the
+# headless engines over the first-party trees and fail on any finding so
+# CI gates at zero. shellcheck is the engine behind bash-language-server;
+# pyright is the Python engine (scope: pyrightconfig.json). Mirrors
+# scripts/run-tests.sh — CI calls it on every PR (tests.yml) before the
+# unit suites.
+#
+# Both engines always run (explicit rc capture, not error suppression per
+# rules/error-handling.md) so one invocation surfaces every finding.
+#
+# Output:
+#   stderr: each engine's native findings plus per-engine progress.
+# Usage: scripts/run-diagnostics.sh [base-dir]
+#   base-dir  Tree whose skills/ and scripts/ are scanned for shell
+#             scripts. Defaults to the repo root. The optional arg exists
+#             so the runner's own test can point it at a fixture tree.
+#             pyright always runs against pyrightconfig.json at the cwd,
+#             independent of base-dir.
+# Exit: 0 if both engines report zero findings, 1 on any finding, 2 on
+#       setup error (base dir missing, no scripts found, engine absent).
+
+set -uo pipefail
+
+main() {
+  local base="${1:-}"
+  if [[ -z "$base" ]]; then
+    base="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+  fi
+  if [[ ! -d "$base" ]]; then
+    echo "run-diagnostics: base dir not found: $base" >&2
+    return 2
+  fi
+
+  local engine
+  for engine in shellcheck pyright; do
+    if ! command -v "$engine" >/dev/null 2>&1; then
+      echo "run-diagnostics: $engine not installed — install it in CI (see .github/workflows/tests.yml)" >&2
+      return 2
+    fi
+  done
+
+  local roots=()
+  [[ -d "$base/skills" ]] && roots+=("$base/skills")
+  [[ -d "$base/scripts" ]] && roots+=("$base/scripts")
+  if [[ ${#roots[@]} -eq 0 ]]; then
+    echo "run-diagnostics: neither skills/ nor scripts/ found under $base" >&2
+    return 2
+  fi
+
+  # NUL-safe discovery (a Unix path may contain spaces or newlines). A temp
+  # file keeps find's exit observable through the pipe (see run-tests.sh).
+  local tmplist; tmplist="$(mktemp)"
+  if ! find "${roots[@]}" -type f -name '*.sh' -print0 | sort -z > "$tmplist"; then
+    rm -f "$tmplist"
+    echo "run-diagnostics: shell-script discovery (find) failed under $base" >&2
+    return 2
+  fi
+  local scripts=()
+  local f
+  while IFS= read -r -d '' f; do
+    [[ -n "$f" ]] && scripts+=("$f")
+  done < "$tmplist"
+  rm -f "$tmplist"
+
+  if [[ ${#scripts[@]} -eq 0 ]]; then
+    echo "run-diagnostics: no shell scripts found under ${base}/{skills,scripts}" >&2
+    return 2
+  fi
+
+  local rc=0
+
+  echo "▶ shellcheck (${#scripts[@]} script(s))" >&2
+  if shellcheck "${scripts[@]}"; then
+    echo "  ✓ shellcheck clean" >&2
+  else
+    echo "  ✗ shellcheck findings" >&2
+    rc=1
+  fi
+  echo "" >&2
+
+  echo "▶ pyright" >&2
+  if pyright; then
+    echo "  ✓ pyright clean" >&2
+  else
+    echo "  ✗ pyright findings" >&2
+    rc=1
+  fi
+  echo "" >&2
+
+  echo "─────────────────────────────────────────────" >&2
+  if [[ $rc -eq 0 ]]; then
+    echo "PASSED: diagnostics clean." >&2
+  else
+    echo "FAILED: diagnostics findings above." >&2
+  fi
+
+  return $rc
+}
+
+[[ "${BASH_SOURCE[0]}" == "${0}" ]] && main "$@"

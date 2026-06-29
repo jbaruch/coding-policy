@@ -30,9 +30,13 @@ jobs:
       - name: Lint plugin
         run: tessl plugin lint
 
-      # Defense-in-depth: tests.yml already gates PRs on these suites, but
-      # a direct push to main (content-only carve-out, admin) skips that
-      # gate — so block the publish on a red suite too.
+      # Defense-in-depth: tests.yml already gates PRs on diagnostics + the
+      # suites, but publish.yml runs independently on push to main — so
+      # block the publish on either failing here too. Static checks first.
+      - uses: ./.github/actions/setup-diagnostics
+      - name: Run language diagnostics
+        run: bash scripts/run-diagnostics.sh
+
       - name: Run unit tests
         run: bash scripts/run-tests.sh
 
