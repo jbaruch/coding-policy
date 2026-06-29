@@ -42,34 +42,40 @@ echo "run-tests.sh tests"
 # --- all suites pass -> exit 0, JSON summary ---
 base="$(make_base)"; add_suite "$base" alpha 0; add_suite "$base" beta 0
 invoke "$base"
-{ [[ "$CODE" == 0 ]] \
+if [[ "$CODE" == 0 ]] \
   && [[ "$(jq -r .suites <<<"$OUT")" == 2 ]] \
   && [[ "$(jq -r .passed <<<"$OUT")" == 2 ]] \
   && [[ "$(jq -r .failed <<<"$OUT")" == 0 ]] \
-  && [[ "$(jq -r '.failures | length' <<<"$OUT")" == 0 ]]; } \
-  && pass "all pass -> exit 0, passed=2 failed=0" \
-  || fail "all pass: code=$CODE out=$OUT"
+  && [[ "$(jq -r '.failures | length' <<<"$OUT")" == 0 ]]; then
+  pass "all pass -> exit 0, passed=2 failed=0"
+else
+  fail "all pass: code=$CODE out=$OUT"
+fi
 rm -rf "$base"
 
 # --- one suite fails -> exit 1, JSON names it in failures ---
 base="$(make_base)"; add_suite "$base" alpha 0; add_suite "$base" doomed 1
 invoke "$base"
-{ [[ "$CODE" == 1 ]] \
+if [[ "$CODE" == 1 ]] \
   && [[ "$(jq -r .failed <<<"$OUT")" == 1 ]] \
   && [[ "$(jq -r .passed <<<"$OUT")" == 1 ]] \
-  && jq -e '.failures | any(test("test_doomed.sh$"))' <<<"$OUT" >/dev/null; } \
-  && pass "one fail -> exit 1, failures lists the suite" \
-  || fail "one fail: code=$CODE out=$OUT"
+  && jq -e '.failures | any(test("test_doomed.sh$"))' <<<"$OUT" >/dev/null; then
+  pass "one fail -> exit 1, failures lists the suite"
+else
+  fail "one fail: code=$CODE out=$OUT"
+fi
 rm -rf "$base"
 
 # --- stdout is pure JSON; progress lives on stderr ---
 base="$(make_base)"; add_suite "$base" alpha 0
 invoke "$base"
-{ jq -e . <<<"$OUT" >/dev/null \
+if jq -e . <<<"$OUT" >/dev/null \
   && ! grep -q "▶" <<<"$OUT" \
-  && grep -q "▶" <<<"$ERR"; } \
-  && pass "stdout is JSON, progress on stderr" \
-  || fail "stream split: out=$OUT err=$ERR"
+  && grep -q "▶" <<<"$ERR"; then
+  pass "stdout is JSON, progress on stderr"
+else
+  fail "stream split: out=$OUT err=$ERR"
+fi
 rm -rf "$base"
 
 # --- path with space + newline still yields valid JSON (finding #145/#146) ---
@@ -78,36 +84,44 @@ weird="$base/skills/we ird"$'\n'"name/tests"
 mkdir -p "$weird"
 printf '#!/usr/bin/env bash\nexit 1\n' > "$weird/test_weird.sh"
 invoke "$base"
-{ [[ "$CODE" == 1 ]] \
+if [[ "$CODE" == 1 ]] \
   && jq -e . <<<"$OUT" >/dev/null \
   && [[ "$(jq -r .failed <<<"$OUT")" == 1 ]] \
-  && jq -e '.failures | any(test("test_weird.sh$"))' <<<"$OUT" >/dev/null; } \
-  && pass "control-char path -> still valid JSON" \
-  || fail "control-char path: code=$CODE out=$OUT"
+  && jq -e '.failures | any(test("test_weird.sh$"))' <<<"$OUT" >/dev/null; then
+  pass "control-char path -> still valid JSON"
+else
+  fail "control-char path: code=$CODE out=$OUT"
+fi
 rm -rf "$base"
 
 # --- no suites found -> exit 2, JSON error, suites=0 ---
 base="$(make_base)"
 invoke "$base"
-{ [[ "$CODE" == 2 ]] \
+if [[ "$CODE" == 2 ]] \
   && [[ "$(jq -r .suites <<<"$OUT")" == 0 ]] \
-  && jq -e 'has("error")' <<<"$OUT" >/dev/null; } \
-  && pass "no suites -> exit 2, JSON error" \
-  || fail "no suites: code=$CODE out=$OUT"
+  && jq -e 'has("error")' <<<"$OUT" >/dev/null; then
+  pass "no suites -> exit 2, JSON error"
+else
+  fail "no suites: code=$CODE out=$OUT"
+fi
 rm -rf "$base"
 
 # --- missing base dir -> exit 2, JSON error ---
 invoke "/nonexistent/path/$$"
-{ [[ "$CODE" == 2 ]] && jq -e 'has("error")' <<<"$OUT" >/dev/null; } \
-  && pass "missing base dir -> exit 2, JSON error" \
-  || fail "missing base: code=$CODE out=$OUT"
+if [[ "$CODE" == 2 ]] && jq -e 'has("error")' <<<"$OUT" >/dev/null; then
+  pass "missing base dir -> exit 2, JSON error"
+else
+  fail "missing base: code=$CODE out=$OUT"
+fi
 
 # --- a later suite failing still fails the run (no early-exit masking) ---
 base="$(make_base)"; add_suite "$base" aaa 0; add_suite "$base" zzz 1
 invoke "$base"
-{ [[ "$CODE" == 1 ]] && [[ "$(jq -r .failed <<<"$OUT")" == 1 ]]; } \
-  && pass "later-suite failure not masked -> exit 1" \
-  || fail "later fail: code=$CODE out=$OUT"
+if [[ "$CODE" == 1 ]] && [[ "$(jq -r .failed <<<"$OUT")" == 1 ]]; then
+  pass "later-suite failure not masked -> exit 1"
+else
+  fail "later fail: code=$CODE out=$OUT"
+fi
 rm -rf "$base"
 
 echo ""

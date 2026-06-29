@@ -166,6 +166,7 @@ ensure_env_example() {
       printf '#   https://github.com/%s/settings/secrets/actions\n' "$slug"
       printf '# The Codex (OpenAI-family) reviewer reads CODEX_API_KEY or OPENAI_API_KEY\n'
       printf '# (CODEX_API_KEY wins when both are set). ANTHROPIC_API_KEY drives the Claude\n'
+      # shellcheck disable=SC2016  # backticks are literal markdown in the generated comment; no shell expansion intended
       printf '# reviewer; TESSL_TOKEN authenticates the `tessl install` step for both.\n'
       if [[ ${#missing[@]} -gt 0 ]]; then
         for k in "${missing[@]}"; do

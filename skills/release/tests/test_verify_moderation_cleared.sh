@@ -65,9 +65,15 @@ tessl() {
   if [[ -f "$MOCK_QUEUE_DIR/$n" ]]; then
     resp="$MOCK_QUEUE_DIR/$n"
   else
-    # Sticky last: highest-numbered fixture file.
-    resp=$(ls "$MOCK_QUEUE_DIR" 2>/dev/null | sort -n | tail -1)
-    [[ -n "$resp" ]] && resp="$MOCK_QUEUE_DIR/$resp"
+    # Sticky last: highest-numbered fixture file. queue() names files by
+    # integer call number, so a numeric max over the basenames (glob, no
+    # `ls` parsing) picks the latest queued response.
+    local highest=0 f
+    resp=""
+    for f in "$MOCK_QUEUE_DIR"/*; do
+      [[ -f "$f" ]] || continue
+      if (( ${f##*/} > highest )); then highest=${f##*/}; resp="$f"; fi
+    done
   fi
   [[ -z "$resp" || ! -f "$resp" ]] && { echo "mock: no queued response for call $n" >&2; return 1; }
   if [[ "$(head -1 "$resp")" == "__FAIL__" ]]; then
@@ -184,30 +190,36 @@ fi
 # when not run inside a command substitution.
 reset_mocks
 ( main acme widget ) >/dev/null 2>&1; rc=$?
-[[ $rc -eq 2 ]] && pass "missing arg: exit 2" || fail "missing arg (rc=$rc)"
+if [[ $rc -eq 2 ]]; then pass "missing arg: exit 2"; else fail "missing arg (rc=$rc)"; fi
 ( main acme widget "" ) >/dev/null 2>&1; rc=$?
-[[ $rc -eq 2 ]] && pass "empty version arg: exit 2" || fail "empty version (rc=$rc)"
+if [[ $rc -eq 2 ]]; then pass "empty version arg: exit 2"; else fail "empty version (rc=$rc)"; fi
 
 # --- 8. Env-var validation ---
+# main() reads the resolved globals (BASE_DELAY_SEC, MAX_DELAY_SEC,
+# BUDGET_SEC) set once at source time — it does NOT re-read the
+# VERIFY_MODERATION_* env vars per call. So the override must set those
+# globals, command-scoped to the main() call (a bash env-prefix on a
+# function makes the var visible inside it and restores it after). The
+# subshell only isolates main's `exit`.
 reset_mocks
-( export VERIFY_MODERATION_BASE_DELAY_SEC=0; main acme widget 1.2.3 ) >/dev/null 2>&1; rc=$?
-[[ $rc -eq 2 ]] && pass "base delay 0: exit 2" || fail "base delay 0 (rc=$rc)"
-( export VERIFY_MODERATION_BASE_DELAY_SEC=10 VERIFY_MODERATION_MAX_DELAY_SEC=5; main acme widget 1.2.3 ) >/dev/null 2>&1; rc=$?
-[[ $rc -eq 2 ]] && pass "base > max: exit 2" || fail "base > max (rc=$rc)"
-( export VERIFY_MODERATION_BASE_DELAY_SEC=100 VERIFY_MODERATION_MAX_DELAY_SEC=100 VERIFY_MODERATION_BUDGET_SEC=10; main acme widget 1.2.3 ) >/dev/null 2>&1; rc=$?
-[[ $rc -eq 2 ]] && pass "base > budget: exit 2" || fail "base > budget (rc=$rc)"
+( BASE_DELAY_SEC=0 main acme widget 1.2.3 ) >/dev/null 2>&1; rc=$?
+if [[ $rc -eq 2 ]]; then pass "base delay 0: exit 2"; else fail "base delay 0 (rc=$rc)"; fi
+( BASE_DELAY_SEC=10 MAX_DELAY_SEC=5 main acme widget 1.2.3 ) >/dev/null 2>&1; rc=$?
+if [[ $rc -eq 2 ]]; then pass "base > max: exit 2"; else fail "base > max (rc=$rc)"; fi
+( BASE_DELAY_SEC=100 MAX_DELAY_SEC=100 BUDGET_SEC=10 main acme widget 1.2.3 ) >/dev/null 2>&1; rc=$?
+if [[ $rc -eq 2 ]]; then pass "base > budget: exit 2"; else fail "base > budget (rc=$rc)"; fi
 
 # --- 9. tessl failure ---
 reset_mocks
 queue 1 "$(printf '__FAIL__\n500 Internal Server Error')"
 out=$(main acme widget 1.2.3 2>/dev/null); rc=$?
-[[ $rc -eq 2 ]] && pass "tessl api failure: exit 2" || fail "tessl failure (rc=$rc out=$out)"
+if [[ $rc -eq 2 ]]; then pass "tessl api failure: exit 2"; else fail "tessl failure (rc=$rc out=$out)"; fi
 
 # --- 10. Unparseable body ---
 reset_mocks
 queue 1 '{"data":{"attributes":{}}}'
 out=$(main acme widget 1.2.3 2>/dev/null); rc=$?
-[[ $rc -eq 2 ]] && pass "no moderation fields: exit 2" || fail "unparseable (rc=$rc out=$out)"
+if [[ $rc -eq 2 ]]; then pass "no moderation fields: exit 2"; else fail "unparseable (rc=$rc out=$out)"; fi
 
 echo
 echo "verify-moderation-cleared: ${PASS_COUNT} passed, ${FAIL_COUNT} failed"

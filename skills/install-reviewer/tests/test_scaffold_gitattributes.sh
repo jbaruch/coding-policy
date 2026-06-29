@@ -21,6 +21,7 @@
 # Run: bash skills/install-reviewer/tests/test_scaffold_gitattributes.sh
 # Exit 0 on all-pass; non-zero with a per-test diagnostic on failure.
 
+# shellcheck disable=SC2329  # test cases run indirectly via run() ("$@" dispatch); shellcheck cannot trace dynamic invocation
 set -uo pipefail
 
 SCRIPT="$(cd "$(dirname "$0")/.." && pwd)/scaffold.sh"
