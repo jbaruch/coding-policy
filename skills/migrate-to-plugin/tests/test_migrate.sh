@@ -55,7 +55,11 @@ tessl() {
 # .tileignore, and a prose file carrying a residual "tile" reference.
 make_legacy_repo() {
   local d; d=$(mktemp -d)
-  ( cd "$d" || { echo "fatal: cd into temp repo $d failed" >&2; exit 1; }
+  # Build inside a subshell so the cd is scoped. Propagate any failure to
+  # the caller — without this the function would echo "$d" even on a failed
+  # build, handing back an uninitialized path the test would then misread.
+  if ! (
+    cd "$d" || exit 1
     git init -q
     git config user.email t@t.t; git config user.name t
     printf '{"name":"acme/widget","version":"0.1.0"}\n' > tile.json
@@ -65,7 +69,12 @@ make_legacy_repo() {
     # (a case-sensitive grep would miss it and the happy-path assertion below
     # would fail).
     printf 'Install a Tile to get started.\n' > rules/intro.md
-    git add -A; git commit -qm init )
+    git add -A; git commit -qm init
+  ); then
+    echo "fatal: failed to build legacy fixture repo under $d" >&2
+    rm -rf "$d"
+    return 1
+  fi
   echo "$d"
 }
 
