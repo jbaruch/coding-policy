@@ -8,6 +8,7 @@ from pathlib import Path
 SCRIPT = Path(__file__).resolve().parent.parent / "stamp-changelog.py"
 
 spec = importlib.util.spec_from_file_location("stamp_changelog", SCRIPT)
+assert spec and spec.loader, f"cannot load stamp-changelog.py at {SCRIPT}"
 stamp_changelog = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(stamp_changelog)
 

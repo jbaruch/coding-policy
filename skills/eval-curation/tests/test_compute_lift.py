@@ -12,6 +12,7 @@ from pathlib import Path
 SCRIPT = Path(__file__).resolve().parent.parent / "compute-lift.py"
 
 spec = importlib.util.spec_from_file_location("compute_lift", SCRIPT)
+assert spec and spec.loader, f"cannot load compute-lift.py at {SCRIPT}"
 compute_lift = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(compute_lift)
 

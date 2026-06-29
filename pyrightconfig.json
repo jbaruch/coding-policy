@@ -1,0 +1,11 @@
+{
+  "include": [
+    "skills/eval-curation/compute-lift.py",
+    "skills/eval-curation/tests/test_compute_lift.py",
+    "skills/release/stamp-changelog.py",
+    "skills/release/tests/test_stamp_changelog.py"
+  ],
+  "pythonVersion": "3.11",
+  "typeCheckingMode": "standard",
+  "reportMissingModuleSource": "none"
+}
