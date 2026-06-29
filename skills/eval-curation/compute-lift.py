@@ -131,7 +131,7 @@ def compute_lifts(payload: Dict) -> Dict:
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(
-        description=__doc__.split("\n\n")[0],
+        description=(__doc__ or "").split("\n\n")[0],
     )
     parser.add_argument(
         "payload",

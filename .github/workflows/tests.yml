@@ -1,9 +1,14 @@
 name: Tests
 
-# Executes every module's bash unit-test suite via scripts/run-tests.sh.
-# rules/testing-standards.md mandates tests for every module; this gates
-# PRs on them so a red suite blocks the merge (publish.yml runs the same
-# runner again before release as defense-in-depth).
+# Two gates on every PR (and on direct pushes to main):
+#   1. diagnostics — shellcheck over every first-party shell script and
+#      pyright over the first-party Python, at zero findings
+#      (rules/language-diagnostics.md). Runs first: static checks are fast
+#      and cheap, so style/type regressions block before the suites run
+#      (rules/code-formatting.md CI Integration).
+#   2. unit-tests — every module's bash unit suite via scripts/run-tests.sh
+#      (rules/testing-standards.md). Gated on diagnostics passing.
+# publish.yml reruns both before release as defense-in-depth.
 on:
   pull_request:
   push:
@@ -14,7 +19,16 @@ permissions:
   contents: read
 
 jobs:
+  diagnostics:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-diagnostics
+      - name: Run language-diagnostics gate
+        run: bash scripts/run-diagnostics.sh
+
   unit-tests:
+    needs: diagnostics
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

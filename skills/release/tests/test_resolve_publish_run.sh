@@ -30,6 +30,7 @@
 # Run: bash skills/release/tests/test_resolve_publish_run.sh
 # Exit 0 on all-pass; non-zero with a per-test diagnostic on failure.
 
+# shellcheck disable=SC2329  # test cases run indirectly via run() ("$@" dispatch); shellcheck cannot trace dynamic invocation
 set -uo pipefail
 
 SCRIPT="$(cd "$(dirname "$0")/.." && pwd)/resolve-publish-run.sh"
@@ -111,6 +112,7 @@ reset_mocks() {
   # scoped env override).
   INTERVAL_SEC=1
   BUDGET_SEC=3
+  # shellcheck disable=SC2034  # read by the sourced resolve-publish-run.sh (--limit); shellcheck can't trace the source boundary
   RUN_LIST_LIMIT=100
 }
 
@@ -214,6 +216,7 @@ run "INTERVAL_SEC > BUDGET_SEC rejected" test_interval_gt_budget_rejected
 # at remaining-budget so total sleep <= BUDGET_SEC.
 test_budget_cap_on_non_divisible_interval() {
   reset_mocks
+  # shellcheck disable=SC2034  # read by the sourced resolve-publish-run.sh; shellcheck can't trace the source boundary
   INTERVAL_SEC=2
   BUDGET_SEC=3
   queue_responses "EMPTY" "EMPTY" "EMPTY" "EMPTY"
