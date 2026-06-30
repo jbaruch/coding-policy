@@ -22,7 +22,7 @@ jobs:
   diagnostics:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-diagnostics
       - name: Run language-diagnostics gate
         run: bash scripts/run-diagnostics.sh
@@ -31,6 +31,6 @@ jobs:
     needs: diagnostics
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Run unit test suites
         run: bash scripts/run-tests.sh
