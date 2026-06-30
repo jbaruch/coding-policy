@@ -1,0 +1,15 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "ignorePaths": [".github/workflows/*.lock.yml"],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "managerFilePatterns": [".github/actions/setup-diagnostics/action.yml"],
+      "matchStrings": [
+        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)( versioning=(?<versioning>\\S+))?\\s+version=(?<currentValue>\\S+)",
+        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)( versioning=(?<versioning>\\S+))?\\s+npm install -g pyright@(?<currentValue>\\S+)"
+      ]
+    }
+  ]
+}
