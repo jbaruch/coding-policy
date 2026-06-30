@@ -1,5 +1,9 @@
 # Changelog
 
+### Build
+
+- **Bump gh-aw to latest (v0.81.6) and recompile reviewer locks** — The in-repo reviewer locks had sat on gh-aw v0.71.5 since #70 while `GH_AW_PIN` advanced to v0.79.8 in a commit (33cf76e) that never recompiled them, and no CI check enforced lock freshness. Recompiled both `.github/workflows/review-{anthropic,openai}.lock.yml` on the latest stable (v0.81.6) and bumped `GH_AW_PIN` in `skills/install-reviewer/preflight.sh` to match, so the install/recovery commands, the committed locks, and the framework setup-action pin (`github/gh-aw-actions/setup`) all track one version. Pure regeneration — no workflow source change.
+
 ## 0.3.78 — 2026-06-30
 
 ### Build
