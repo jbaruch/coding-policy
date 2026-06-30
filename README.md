@@ -31,7 +31,7 @@ tessl install jbaruch/coding-policy
 | Git | [sync-before-work](rules/sync-before-work.md) | Fetch and sync the local checkout to the remote default before reading, planning, or editing; branch from the fresh default |
 | Testing | [testing-standards](rules/testing-standards.md) | Outcome-based, deterministic, no binary fixtures |
 | Errors | [error-handling](rules/error-handling.md) | Specific exceptions (with outer-boundary process-contract carve-out), actionable messages, structured logging |
-| Deps | [dependency-management](rules/dependency-management.md) | Stdlib-first, pinned versions, lock files |
+| Deps | [dependency-management](rules/dependency-management.md) | Stdlib-first, pinned versions kept fresh via a renewal mechanism, lock files |
 | Files | [file-hygiene](rules/file-hygiene.md) | Proper .gitignore, no generated files committed |
 | CI | [ci-safety](rules/ci-safety.md) | Never skip tests, never modify CI without asking |
 | Secrets | [no-secrets](rules/no-secrets.md) | No credentials in code, env vars or secrets manager |

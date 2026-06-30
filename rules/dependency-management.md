@@ -19,6 +19,15 @@ alwaysApply: true
 - Pin versions or use a lock file to ensure reproducible builds
 - Lock files are committed to the repo
 
+## Freshness
+
+- Every pinned dependency needs a stated renewal mechanism
+- Automate it where a scanner supports the ecosystem: a committed Dependabot or Renovate config
+- Where no scanner tracks the pin — a version baked into a script or action step — document the renewal cadence beside the pin
+- A version bump is its own focused change, never bundled with feature work
+- Formatter and linter bumps especially (see `rules/code-formatting.md` Separation of Concerns)
+- Match a stale pin locally to ship the current task; bump it in a separate change
+
 ## Runtime-Managed Manifest Carve-Out
 
 - Narrow exception for runtime-managed manifests
