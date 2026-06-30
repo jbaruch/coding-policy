@@ -50,9 +50,66 @@ on:
     - "dependabot[bot]"
     - "renovate[bot]"
 
+# Runner-level self-review-bias gate (jbaruch/coding-policy#161). The
+# `gate` job below resolves the PR's author-family from its
+# `**Author-Model:**` body line before the agent activates; this `if:`
+# short-circuits activation (and the whole agent cascade) when the
+# author-family is anthropic — this reviewer's own family — so the
+# same-family skip costs ~0 review tokens instead of ~400K. The in-agent
+# Step 1 stays as the fallback for the cases the gate deliberately does
+# not skip (trailer-only declarations). The gate runs its own
+# `tessl install` because it is a separate job from the agent, so the
+# published `author-family-gate.sh` / `resolve-author-family.sh` are not
+# yet on disk when it runs.
+if: needs.gate.outputs.should_skip != 'true'
+
 permissions:
   contents: read
   pull-requests: read
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      should_skip: ${{ steps.decide.outputs.should_skip }}
+    steps:
+      - name: Install Tessl CLI
+        uses: tesslio/setup-tessl@v2
+        with:
+          token: ${{ secrets.TESSL_TOKEN }}
+      - name: Install jbaruch/coding-policy (latest published)
+        run: |
+          mkdir -p /tmp/gh-aw/coding-policy
+          cd /tmp/gh-aw/coding-policy
+          tessl install jbaruch/coding-policy --yes
+      - id: decide
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          GH_TOKEN: ${{ github.token }}
+        # Fails OPEN: a failed gate job would cascade-skip the agent and
+        # silently drop the review, so any trouble here defaults
+        # should_skip=false and lets the agent run. Explicit `if` checks
+        # (never silent suppression) keep the step's own exit at 0.
+        run: |
+          set -uo pipefail
+          GATE=/tmp/gh-aw/coding-policy/.tessl/plugins/jbaruch/coding-policy/skills/install-reviewer/author-family-gate.sh
+          commits="$(mktemp)"
+          if ! gh pr view "$PR_NUMBER" --json commits -q '.commits[].messageBody' > "$commits"; then
+            echo "author-family gate: 'gh pr view' failed; proceeding body-only" >&2
+            : > "$commits"
+          fi
+          skip=false
+          if out="$(printf '%s' "$PR_BODY" | bash "$GATE" --reviewer anthropic --policy-ref 'jbaruch/coding-policy: author-model-declaration' --commits-file "$commits")"; then
+            echo "author-family gate: $out" >&2
+            case "$(printf '%s' "$out" | jq -r .should_skip)" in true) skip=true ;; esac
+          else
+            echo "author-family gate: script errored; defaulting should_skip=false (agent will run)" >&2
+          fi
+          echo "should_skip=$skip" >> "$GITHUB_OUTPUT"
 
 engine:
   id: claude

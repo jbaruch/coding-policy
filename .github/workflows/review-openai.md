@@ -23,9 +23,54 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, edited]
 
+# Runner-level self-review-bias gate (issue #161). The `gate` job below
+# resolves the PR's author-family from its `**Author-Model:**` body line
+# before the agent activates; this `if:` short-circuits activation (and
+# the whole agent cascade) when the author-family is openai — this
+# reviewer's own family — so the same-family skip costs ~0 tokens instead
+# of ~400K. gh-aw composes this onto activation/agent and wires `gate`
+# into their needs. The in-agent Step 1 stays as the fallback for the
+# cases the gate deliberately does not skip (trailer-only declarations).
+if: needs.gate.outputs.should_skip != 'true'
+
 permissions:
   contents: read
   pull-requests: read
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      should_skip: ${{ steps.decide.outputs.should_skip }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: decide
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          GH_TOKEN: ${{ github.token }}
+        # Fails OPEN: a failed gate job would cascade-skip the agent and
+        # silently drop the review, so any trouble here defaults
+        # should_skip=false and lets the agent run. Explicit `if` checks
+        # (never silent suppression) keep the step's own exit at 0.
+        run: |
+          set -uo pipefail
+          commits="$(mktemp)"
+          if ! gh pr view "$PR_NUMBER" --json commits -q '.commits[].messageBody' > "$commits"; then
+            echo "author-family gate: 'gh pr view' failed; proceeding body-only" >&2
+            : > "$commits"
+          fi
+          skip=false
+          if out="$(printf '%s' "$PR_BODY" | bash skills/install-reviewer/author-family-gate.sh --reviewer openai --commits-file "$commits")"; then
+            echo "author-family gate: $out" >&2
+            case "$(printf '%s' "$out" | jq -r .should_skip)" in true) skip=true ;; esac
+          else
+            echo "author-family gate: script errored; defaulting should_skip=false (agent will run)" >&2
+          fi
+          echo "should_skip=$skip" >> "$GITHUB_OUTPUT"
 
 engine:
   id: codex
