@@ -1,5 +1,9 @@
 # Changelog
 
+### Rules
+
+- **`rules/dependency-management.md` — add a Freshness section: pins need a renewal mechanism** — Surfaced by a `nanoclaw` agent hitting phantom reformats: its system `ruff` (0.15.18) disagreed with CI's pinned `ruff` (0.7.4), so the formatter wanted to rewrite files it never touched. The agent correctly diagnosed version skew and matched CI via a pinned venv — but the deeper gap was that CI sat frozen on a 2024 ruff with no bump path. The Pinning rule demanded reproducibility and said nothing about freshness, so pins rot by design. The failure mode is dual: unpinned → local/CI skew (the agent's phantom diffs), pinned-and-never-bumped → frozen on stale (the 0.7.4 trap); the rule only encoded the first half. New section: every pinned dependency needs a stated renewal mechanism — automated via Dependabot/Renovate where a scanner supports the ecosystem, or a documented cadence beside pins no scanner tracks (a version baked into a script or action step); a version bump is its own focused change, formatter/linter bumps especially per `rules/code-formatting.md` Separation of Concerns. Surface-synced: README rules table. Post-edit audit found this repo itself non-compliant — no renewal mechanism for its own pins (the `shellcheck`/`pyright` tool pins in `setup-diagnostics`, the workflow `uses:` tags, around the gh-aw generated lock files); establishing one needs design, tracked in #155.
+
 ## 0.3.76 — 2026-06-29
 
 ### Build
