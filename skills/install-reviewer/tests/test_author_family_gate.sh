@@ -160,6 +160,16 @@ run_trailer "trailer as unterminated final line, anthropic reviewer -> SKIP" \
 run_trailer "body wins over trailer, openai reviewer skips on body" \
   openai true skip "$CLAUDE_TRAILER" '**Author-Model:** gpt-5.4'
 
+# Empty/whitespace body Author-Model line is a PRESENT (malformed) body
+# declaration: it wins over the trailer, resolves to request_changes, and
+# must NOT self-skip via a same-family trailer.
+run_trailer "empty body line + same-family trailer -> NO skip (request_changes, body wins)" \
+  anthropic false request_changes "$CLAUDE_TRAILER" '**Author-Model:**   '
+run_body "empty body line, no trailer -> NO skip (request_changes)" \
+  anthropic false request_changes '**Author-Model:**'
+run_body "bare empty Author-Model line -> NO skip (request_changes)" \
+  openai false request_changes 'Author-Model: '
+
 echo ""
 echo "author-family-gate.sh: ${PASS_COUNT} passed, ${FAIL_COUNT} failed"
 [[ $FAIL_COUNT -eq 0 ]] || exit 1

@@ -177,8 +177,15 @@ if [[ $found_body -eq 1 ]]; then
   # read -ra splits on IFS (whitespace) without glob expansion.
   declare -a body_tokens=()
   read -ra body_tokens <<< "$value"
+  # A present body line wins over the trailer even when it is empty
+  # (rules/author-model-declaration.md Precedence: body beats trailer). A
+  # blank `**Author-Model:**` is a malformed/missing declaration — hand the
+  # resolver its zero tokens (→ request_changes, should_skip false) and do
+  # NOT fall through to trailer parsing, matching the agent's Step 1.
   if [[ ${#body_tokens[@]} -gt 0 ]]; then
     resolve_and_emit body "${body_tokens[@]}"
+  else
+    resolve_and_emit body
   fi
 fi
 
