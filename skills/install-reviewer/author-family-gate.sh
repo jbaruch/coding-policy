@@ -8,10 +8,13 @@
 # for zero review value. Because this repo's PRs are predominantly
 # Claude-authored, the anthropic reviewer self-skipped on nearly every PR.
 #
-# This script moves the skip decision BEFORE the agent activates. A cheap
-# gate job runs it and short-circuits activation when the author-family
-# matches the reviewer's own family, so the agent never spins up. The
-# policy outcome is identical — a pure efficiency move (issue #161).
+# This script moves the skip decision out of the agent. A cheap gate job
+# runs it and skips the `agent` job — where the ~400K-token spend lives —
+# when the author-family matches the reviewer's own family, so the agent
+# never spins up. (gh-aw composes the gate onto `agent`, so the cheap
+# pre_activation/activation framework setup still runs; the token spend,
+# not the seconds of slim-runner setup, is what #161 measures.) The policy
+# outcome is identical — a pure efficiency move (issue #161).
 #
 # Two deterministic author-family signals, in declaration-precedence order
 # (rules/author-model-declaration.md → Precedence: body line wins):
@@ -83,44 +86,10 @@ die() { echo "author-family-gate: $1" >&2; exit 2; }
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RESOLVER="${SCRIPT_DIR}/resolve-author-family.sh"
 
+# Set by main() from the CLI, read by the emit helpers below. Kept as
+# globals (not main()-locals) so emit()/resolve_and_emit() see them.
 reviewer=""
 policy_ref="rules/author-model-declaration.md"
-body_file=""
-commits_file=""
-
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-    --reviewer)
-      [[ $# -ge 2 ]] || die "--reviewer requires a value"
-      reviewer="$2"; shift 2 ;;
-    --policy-ref)
-      [[ $# -ge 2 ]] || die "--policy-ref requires a value"
-      policy_ref="$2"; shift 2 ;;
-    --body-file)
-      [[ $# -ge 2 ]] || die "--body-file requires a value"
-      body_file="$2"; shift 2 ;;
-    --commits-file)
-      [[ $# -ge 2 ]] || die "--commits-file requires a value"
-      commits_file="$2"; shift 2 ;;
-    *)
-      die "unknown argument: $1" ;;
-  esac
-done
-
-case "$reviewer" in
-  openai|anthropic) ;;
-  "") die "--reviewer is required (openai|anthropic)" ;;
-  *) die "--reviewer must be 'openai' or 'anthropic', got '$reviewer'" ;;
-esac
-[[ -x "$RESOLVER" ]] || die "resolver not found/executable at ${RESOLVER}"
-
-# Read the PR body (stdin by default).
-if [[ -n "$body_file" ]]; then
-  [[ -f "$body_file" ]] || die "--body-file not found: ${body_file}"
-  body="$(cat "$body_file")"
-else
-  body="$(cat)"
-fi
 
 json_str() { local s="$1"; s="${s//\\/\\\\}"; s="${s//\"/\\\"}"; printf '"%s"' "$s"; }
 
@@ -158,74 +127,122 @@ resolve_and_emit() {
   fi
 }
 
-# --- Signal 1: PR body `**Author-Model:**` line (preferred, wins) ---------
-# Extract the FIRST `**Author-Model:**` (or bare `Author-Model:`) line's
-# value, then split it on ASCII whitespace into canonical-id tokens.
-value=""
-found_body=0
-while IFS= read -r line; do
-  line="${line%$'\r'}"
-  if [[ "$line" =~ ^[[:space:]]*\*\*Author-Model:\*\*[[:space:]]*(.*)$ ]]; then
-    value="${BASH_REMATCH[1]}"; found_body=1; break
-  fi
-  if [[ "$line" =~ ^[[:space:]]*Author-Model:[[:space:]]*(.*)$ ]]; then
-    value="${BASH_REMATCH[1]}"; found_body=1; break
-  fi
-done <<< "$body"
+main() {
+  local body_file="" commits_file=""
 
-if [[ $found_body -eq 1 ]]; then
-  # read -ra splits on IFS (whitespace) without glob expansion.
-  declare -a body_tokens=()
-  read -ra body_tokens <<< "$value"
-  # A present body line wins over the trailer even when it is empty
-  # (rules/author-model-declaration.md Precedence: body beats trailer). A
-  # blank `**Author-Model:**` is a malformed/missing declaration — hand the
-  # resolver its zero tokens (→ request_changes, should_skip false) and do
-  # NOT fall through to trailer parsing, matching the agent's Step 1.
-  if [[ ${#body_tokens[@]} -gt 0 ]]; then
-    resolve_and_emit body "${body_tokens[@]}"
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --reviewer)
+        [[ $# -ge 2 ]] || die "--reviewer requires a value"
+        reviewer="$2"; shift 2 ;;
+      --policy-ref)
+        [[ $# -ge 2 ]] || die "--policy-ref requires a value"
+        policy_ref="$2"; shift 2 ;;
+      --body-file)
+        [[ $# -ge 2 ]] || die "--body-file requires a value"
+        body_file="$2"; shift 2 ;;
+      --commits-file)
+        [[ $# -ge 2 ]] || die "--commits-file requires a value"
+        commits_file="$2"; shift 2 ;;
+      *)
+        die "unknown argument: $1" ;;
+    esac
+  done
+
+  case "$reviewer" in
+    openai|anthropic) ;;
+    "") die "--reviewer is required (openai|anthropic)" ;;
+    *) die "--reviewer must be 'openai' or 'anthropic', got '$reviewer'" ;;
+  esac
+  [[ -x "$RESOLVER" ]] || die "resolver not found/executable at ${RESOLVER}"
+
+  # Read the PR body (stdin by default).
+  local body
+  if [[ -n "$body_file" ]]; then
+    [[ -f "$body_file" ]] || die "--body-file not found: ${body_file}"
+    body="$(cat "$body_file")"
   else
-    resolve_and_emit body
+    body="$(cat)"
   fi
-fi
 
-# --- Signal 2: Co-authored-by trailer email on the PR's commits -----------
-# Only consulted when the body carried no Author-Model declaration. Maps the
-# trailer email DOMAIN to a family token; unknown domains (human committers,
-# customized commit_attribution) contribute nothing and fall through to the
-# agent. Dedupe so a multi-commit PR yields each family at most once.
-if [[ -n "$commits_file" ]]; then
-  [[ -f "$commits_file" ]] || die "--commits-file not found: ${commits_file}"
-  declare -a fam_tokens=()
-  has_family() { local n="$1" e; for e in "${fam_tokens[@]:-}"; do [[ "$e" == "$n" ]] && return 0; done; return 1; }
-  # Match a Co-authored-by trailer (either capitalization) carrying an
-  # <email>; capture the email between <...>. The pattern lives in a
-  # variable: angle brackets are literal in ERE but bash's `[[ =~ ]]`
-  # parser chokes on an inline `<`/`>`, and glibc reads `\<`/`\>` as word
-  # boundaries — a variable sidesteps both traps.
-  coauthor_re='[Cc]o-[Aa]uthored-[Bb]y:.*<([^>]+)>'
-  # `|| [[ -n "$line" ]]` processes a final line with no trailing newline —
-  # gh/jq output usually terminates it, but a message body may not.
-  while IFS= read -r line || [[ -n "$line" ]]; do
+  # --- Signal 1: PR body `**Author-Model:**` line (preferred, wins) -------
+  # Extract the FIRST `**Author-Model:**` (or bare `Author-Model:`) line's
+  # value, then split it on ASCII whitespace into canonical-id tokens.
+  local value="" line
+  local found_body=0
+  while IFS= read -r line; do
     line="${line%$'\r'}"
-    if [[ "$line" =~ $coauthor_re ]]; then
-      email="${BASH_REMATCH[1]}"
-      email="${email,,}"   # domains are case-insensitive
-      fam=""
-      case "$email" in
-        *@anthropic.com) fam="anthropic" ;;
-        *@openai.com)    fam="openai" ;;
-      esac
-      if [[ -n "$fam" ]] && ! has_family "$fam"; then
-        fam_tokens+=("$fam")
-      fi
+    if [[ "$line" =~ ^[[:space:]]*\*\*Author-Model:\*\*[[:space:]]*(.*)$ ]]; then
+      value="${BASH_REMATCH[1]}"; found_body=1; break
     fi
-  done < "$commits_file"
+    if [[ "$line" =~ ^[[:space:]]*Author-Model:[[:space:]]*(.*)$ ]]; then
+      value="${BASH_REMATCH[1]}"; found_body=1; break
+    fi
+  done <<< "$body"
 
-  if [[ ${#fam_tokens[@]} -gt 0 ]]; then
-    resolve_and_emit trailer "${fam_tokens[@]}"
+  if [[ $found_body -eq 1 ]]; then
+    # read -ra splits on IFS (whitespace) without glob expansion.
+    local -a body_tokens=()
+    read -ra body_tokens <<< "$value"
+    # A present body line wins over the trailer even when it is empty
+    # (rules/author-model-declaration.md Precedence: body beats trailer). A
+    # blank `**Author-Model:**` is a malformed/missing declaration — hand
+    # the resolver its zero tokens (→ request_changes, should_skip false)
+    # and do NOT fall through to trailer parsing, matching the agent's
+    # Step 1.
+    if [[ ${#body_tokens[@]} -gt 0 ]]; then
+      resolve_and_emit body "${body_tokens[@]}"
+    else
+      resolve_and_emit body
+    fi
   fi
-fi
 
-# --- No deterministic signal → defer to the agent -------------------------
-emit false "no-declaration" "none"
+  # --- Signal 2: Co-authored-by trailer email on the PR's commits ---------
+  # Only consulted when the body carried no Author-Model declaration. Maps
+  # the trailer email DOMAIN to a family token; unknown domains (human
+  # committers, customized commit_attribution) contribute nothing and fall
+  # through to the agent. Dedupe so a multi-commit PR yields each family at
+  # most once.
+  if [[ -n "$commits_file" ]]; then
+    [[ -f "$commits_file" ]] || die "--commits-file not found: ${commits_file}"
+    local -a fam_tokens=()
+    has_family() { local n="$1" e; for e in "${fam_tokens[@]:-}"; do [[ "$e" == "$n" ]] && return 0; done; return 1; }
+    # Match a Co-authored-by trailer (either capitalization) carrying an
+    # <email>; capture the email between <...>. The pattern lives in a
+    # variable: angle brackets are literal in ERE but bash's `[[ =~ ]]`
+    # parser chokes on an inline `<`/`>`, and glibc reads `\<`/`\>` as word
+    # boundaries — a variable sidesteps both traps.
+    local coauthor_re='[Cc]o-[Aa]uthored-[Bb]y:.*<([^>]+)>'
+    local email fam
+    # `|| [[ -n "$line" ]]` processes a final line with no trailing newline
+    # — gh/jq output usually terminates it, but a message body may not.
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      line="${line%$'\r'}"
+      if [[ "$line" =~ $coauthor_re ]]; then
+        email="${BASH_REMATCH[1]}"
+        email="${email,,}"   # domains are case-insensitive
+        fam=""
+        case "$email" in
+          *@anthropic.com) fam="anthropic" ;;
+          *@openai.com)    fam="openai" ;;
+        esac
+        if [[ -n "$fam" ]] && ! has_family "$fam"; then
+          fam_tokens+=("$fam")
+        fi
+      fi
+    done < "$commits_file"
+
+    if [[ ${#fam_tokens[@]} -gt 0 ]]; then
+      resolve_and_emit trailer "${fam_tokens[@]}"
+    fi
+  fi
+
+  # --- No deterministic signal → defer to the agent -----------------------
+  emit false "no-declaration" "none"
+}
+
+# Entry-point guard (rules/file-hygiene.md): run main() only when executed
+# directly, so the script stays sourceable for testing.
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  main "$@"
+fi
