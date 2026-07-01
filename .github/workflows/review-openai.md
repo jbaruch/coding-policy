@@ -24,13 +24,15 @@ on:
     types: [opened, synchronize, reopened, edited]
 
 # Runner-level self-review-bias gate (issue #161). The `gate` job below
-# resolves the PR's author-family from its `**Author-Model:**` body line
-# before the agent activates; this `if:` short-circuits activation (and
-# the whole agent cascade) when the author-family is openai — this
-# reviewer's own family — so the same-family skip costs ~0 tokens instead
-# of ~400K. gh-aw composes this onto activation/agent and wires `gate`
-# into their needs. The in-agent Step 1 stays as the fallback for the
-# cases the gate deliberately does not skip (trailer-only declarations).
+# resolves the PR's author-family before the agent runs; this `if:` skips
+# the `agent` job — where the ~400K-token review spend lives — when the
+# author-family is openai (this reviewer's own family), dropping the
+# token cost #161 targets to ~0. gh-aw v0.81.6 composes the gate onto
+# `agent`, so the cheap pre_activation/activation framework setup still
+# runs; the token spend, not the seconds of slim-runner setup, is what
+# #161 measures. The in-agent Step 1 stays as the fallback for cases the
+# gate deliberately does not skip (a customized commit-attribution email
+# or a display-name-only trailer).
 if: needs.gate.outputs.should_skip != 'true'
 
 permissions:

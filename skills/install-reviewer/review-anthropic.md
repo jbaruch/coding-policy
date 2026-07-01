@@ -51,16 +51,18 @@ on:
     - "renovate[bot]"
 
 # Runner-level self-review-bias gate (jbaruch/coding-policy#161). The
-# `gate` job below resolves the PR's author-family from its
-# `**Author-Model:**` body line before the agent activates; this `if:`
-# short-circuits activation (and the whole agent cascade) when the
-# author-family is anthropic — this reviewer's own family — so the
-# same-family skip costs ~0 review tokens instead of ~400K. The in-agent
-# Step 1 stays as the fallback for the cases the gate deliberately does
-# not skip (trailer-only declarations). The gate runs its own
-# `tessl install` because it is a separate job from the agent, so the
-# published `author-family-gate.sh` / `resolve-author-family.sh` are not
-# yet on disk when it runs.
+# `gate` job below resolves the PR's author-family before the agent runs;
+# this `if:` skips the `agent` job — where the ~400K-token review spend
+# lives — when the author-family is anthropic (this reviewer's own
+# family), dropping the token cost to ~0. gh-aw composes the gate onto
+# `agent`, so the cheap pre_activation/activation framework setup still
+# runs; the token spend, not the seconds of slim-runner setup, is the
+# target. The in-agent Step 1 stays as the fallback for cases the gate
+# deliberately does not skip (a customized commit-attribution email or a
+# display-name-only trailer). The gate runs its own `tessl install`
+# because it is a separate job from the agent, so the published
+# `author-family-gate.sh` / `resolve-author-family.sh` are not yet on
+# disk when it runs.
 if: needs.gate.outputs.should_skip != 'true'
 
 permissions:
