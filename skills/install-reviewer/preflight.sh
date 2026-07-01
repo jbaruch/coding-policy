@@ -42,7 +42,7 @@ set -euo pipefail
 #               which now sits above the floor (stable used to lag below it,
 #               which is why a prerelease pin was once required).
 GH_AW_MIN="0.71.0"
-GH_AW_PIN="0.79.8"
+GH_AW_PIN="0.81.6"
 
 OVERRIDE_MODE=0
 for arg in "$@"; do
