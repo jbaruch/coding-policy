@@ -6,7 +6,7 @@ description: |
   Pairs with `review-anthropic.md`; each workflow self-gates to skip PRs
   authored by its own family so the active reviewer is cross-family
   whenever the declaration permits — when the declaration spans both
-  paired families (e.g., `gpt-5.4 claude-opus-4-7`), or neither paired
+  paired families (e.g., `gpt-5.5 claude-opus-4-8`), or neither paired
   family (e.g., `gemini-2.5`, `human`-only), both reviewers run as the
   documented fallback (see `rules/author-model-declaration.md`).
   This repo IS the policy —
@@ -76,7 +76,15 @@ jobs:
 
 engine:
   id: codex
-  model: gpt-5.4
+  # Model pin renewal (rules/dependency-management.md, Freshness): no scanner
+  # tracks gh-aw `engine.model` pins. Check OpenAI's current Codex model and
+  # bump this pin — together with the consumer-facing template
+  # (skills/install-reviewer/review-openai.md) — at every reviewer-template
+  # change, at least quarterly. Verify the Codex CLI version pinned in the
+  # compiled lock file recognizes the new ID before shipping — the CLI
+  # silently remaps unknown model IDs to an older model (codex 0.118.0 ran
+  # `gpt-5.4` as `gpt-5.3-codex` with no error).
+  model: gpt-5.5
   env:
     # Mirrors the consumer-facing install-reviewer template: gh-aw's
     # compiled validation step accepts CODEX_API_KEY or OPENAI_API_KEY,
