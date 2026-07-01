@@ -274,6 +274,47 @@ test_env_idempotency() {
 }
 run "ensure_env_example: idempotent across invocations" test_env_idempotency
 
+# --- ensure_env_example: header present, a secret MISSING → contextual group -
+# Regression for issue #163: when THIS repo's header link already exists
+# but a reviewer secret is missing, the missing key must be appended as a
+# labeled, contextual group — not a bare KEY= at EOF with no CI context.
+test_env_header_present_missing_secret_grouped() {
+  local f="$TMPDIR_TEST/header-missing-secret.env"
+  {
+    printf '#   https://github.com/%s/settings/secrets/actions\n' "$SLUG"
+    printf 'ANTHROPIC_API_KEY=\nOPENAI_API_KEY=\nTESSL_TOKEN=\n'
+    printf 'DATABASE_URL=postgres://localhost/app\n'
+  } > "$f"
+  assert_eq "precondition: CODEX_API_KEY absent" "0" "$(key_count "$f" CODEX_API_KEY)" || return 1
+  assert_eq "precondition: this-repo header link present" "1" \
+    "$(grep -cF "github.com/${SLUG}/settings/secrets/actions" "$f")" || return 1
+  ensure_env_example "$f" "$SLUG" || return 1
+  # The missing key is appended exactly once.
+  assert_eq "CODEX_API_KEY appended once" "1" "$(key_count "$f" CODEX_API_KEY)" || return 1
+  # ... preceded by a CI-reviewer context comment (grouped, not bare at EOF).
+  local ctx_line codex_line
+  ctx_line=$(grep -nF 'CI reviewer secret' "$f" | tail -1 | cut -d: -f1)
+  codex_line=$(grep -nE '^CODEX_API_KEY=' "$f" | tail -1 | cut -d: -f1)
+  [[ -n "$ctx_line" ]] || { echo "    FAIL: appended CODEX_API_KEY has no CI-reviewer context comment" >&2; return 1; }
+  [[ "$ctx_line" -lt "$codex_line" ]] || { echo "    FAIL: context comment (line $ctx_line) not above appended key (line $codex_line)" >&2; return 1; }
+  # Consumer content and the other secrets are untouched (each present once).
+  grep -qxF 'DATABASE_URL=postgres://localhost/app' "$f" || { echo "    FAIL: consumer var clobbered" >&2; return 1; }
+  local k
+  for k in ANTHROPIC_API_KEY OPENAI_API_KEY TESSL_TOKEN; do
+    assert_eq "key ${k} count (unchanged)" "1" "$(key_count "$f" "$k")" || return 1
+  done
+  # The header link is not duplicated by the appended group.
+  assert_eq "deep-link header count" "1" "$(grep -cF 'settings/secrets/actions' "$f")" || return 1
+  assert_eq "trailing newline count" "1" "$(trailing_newline_count "$f")" || return 1
+  # Idempotent: a second run is a no-op (key now present → early return).
+  local fp_before fp_after
+  fp_before=$(content_fingerprint "$f")
+  ensure_env_example "$f" "$SLUG" || return 1
+  fp_after=$(content_fingerprint "$f")
+  assert_eq "second run no-op" "$fp_before" "$fp_after" || return 1
+}
+run "ensure_env_example: header present, missing secret appended as contextual group" test_env_header_present_missing_secret_grouped
+
 echo
 echo "results: ${PASS_COUNT} pass, ${FAIL_COUNT} fail"
 exit "$FAIL_COUNT"
