@@ -1,5 +1,9 @@
 # Changelog
 
+### Build
+
+- **Bump reviewer model pins to current flagships + document their renewal cadence** — A consumer was seen reviewing with `claude-opus-4-7`: not drift on their side but exactly what the consumer template shipped, and this repo's own anthropic workflow was a version further behind on `claude-opus-4-6`. Bumped all four `engine.model` pins — consumer templates (`skills/install-reviewer/review-{anthropic,openai}.md`) and in-repo workflows (`.github/workflows/review-{anthropic,openai}.md`) — to `claude-opus-4-8` and `gpt-5.5`, and recompiled both lock files. The OpenAI bump was verified against the actual Codex CLI the lock pins (`@openai/codex@0.142.1` binary contains `gpt-5.5`; gh-aw v0.81.6's api-proxy model table lists it too) because the Codex CLI silently remaps unknown model IDs to an older model — codex 0.118.0 ran `gpt-5.4` as `gpt-5.3-codex` with no error. Freshness compliance (`rules/dependency-management.md`): the #157 Renovate config renews action/tool pins but no scanner tracks gh-aw `engine.model` pins, so each pin now carries a renewal-cadence comment (re-check the provider's current flagship at every reviewer-template change, at least quarterly; verify a new OpenAI ID against the pinned Codex CLI before shipping). Consumers pick the new pins up via the install-reviewer **upgrade** action. Also replaced the hardcoded `claude-opus-4-6` in the in-repo anthropic workflow's prose with the template's version-agnostic `claude-opus-4-x`, and refreshed the paired-families declaration example (`gpt-5.5 claude-opus-4-8`) in all four files.
+
 ## 0.3.82 — 2026-07-01
 
 ### Build

@@ -6,7 +6,7 @@ description: |
   Pairs with `review-openai.md`; each workflow self-gates to skip PRs
   authored by its own family so the active reviewer is cross-family
   whenever the declaration permits — when the declaration spans both
-  paired families (e.g., `gpt-5.4 claude-opus-4-7`), or neither paired
+  paired families (e.g., `gpt-5.5 claude-opus-4-8`), or neither paired
   family (e.g., `gemini-2.5`, `human`-only), both reviewers run as the
   documented fallback (see `rules/author-model-declaration.md`).
   This repo IS the policy —
@@ -75,7 +75,12 @@ jobs:
 
 engine:
   id: claude
-  model: claude-opus-4-6
+  # Model pin renewal (rules/dependency-management.md, Freshness): no scanner
+  # tracks gh-aw `engine.model` pins. Check Anthropic's current model lineup
+  # and bump this pin — together with the consumer-facing template
+  # (skills/install-reviewer/review-anthropic.md) — at every
+  # reviewer-template change, at least quarterly.
+  model: claude-opus-4-8
   # `--strict-mcp-config` tells Claude Code to use ONLY the MCP servers
   # gh-aw injects via `--mcp-config`, ignoring any project-local
   # `.mcp.json`. Mirrors the same fix applied to the consumer-facing
@@ -125,7 +130,7 @@ safe-outputs:
 
 You review pull requests against this repository's own in-tree rules. This repo IS the policy: rules proposed in a PR must be enforced consistently against themselves.
 
-Your reviewer family is **anthropic** (engine is Claude Code / claude-opus-4-6). The paired workflow `review-openai.md` (compiled as `review-openai.lock.yml`) handles the openai family. On any given PR the cross-family reviewer does the substantive work while the same-family reviewer short-circuits with a `COMMENT`; when the declaration spans both paired families — a degraded fallback — both workflows run and neither is truly cross-family.
+Your reviewer family is **anthropic** (engine is Claude Code / claude-opus-4-x). The paired workflow `review-openai.md` (compiled as `review-openai.lock.yml`) handles the openai family. On any given PR the cross-family reviewer does the substantive work while the same-family reviewer short-circuits with a `COMMENT`; when the declaration spans both paired families — a degraded fallback — both workflows run and neither is truly cross-family.
 
 ## Context
 
