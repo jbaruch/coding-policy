@@ -181,14 +181,23 @@ ensure_env_example() {
     cat "$tmp" > "$target"
     rm -f "$tmp"
   else
-    # Link already in the header — only the KEY= lines are missing.
-    # Append them; the header requirement is already satisfied.
+    # Link already in the header — the header block (with its context) is
+    # at the top, but one or more KEY= lines are missing. Append them as a
+    # labeled, contextual group rather than bare KEY= lines at EOF, so the
+    # reviewer secrets stay grouped-with-context whether or not the header
+    # block pre-existed (issue #163). Idempotent: once appended the keys
+    # are present, so the early-return guard skips this block on re-runs.
     if [[ -f "$target" && -s "$target" && -n "$(tail -c 1 "$target")" ]]; then
       printf '\n' >> "$target"
     fi
-    for k in "${missing[@]}"; do
-      printf '%s=\n' "$k" >> "$target"
-    done
+    {
+      printf '\n# CI reviewer secret(s) for the jbaruch/coding-policy gh-aw PR review\n'
+      printf '# workflows — set as GitHub Actions repository secrets (see the secrets\n'
+      printf '# link in the header above).\n'
+      for k in "${missing[@]}"; do
+        printf '%s=\n' "$k"
+      done
+    } >> "$target"
   fi
 
   # Normalize EOF to a single trailing newline — the prepended consumer
