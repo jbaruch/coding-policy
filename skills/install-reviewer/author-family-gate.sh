@@ -156,7 +156,7 @@ main() {
     "") die "--reviewer is required (openai|anthropic)" ;;
     *) die "--reviewer must be 'openai' or 'anthropic', got '$reviewer'" ;;
   esac
-  [[ -r "$RESOLVER" ]] || die "resolver not found/readable at ${RESOLVER}"
+  [[ -f "$RESOLVER" && -r "$RESOLVER" ]] || die "resolver not a readable file at ${RESOLVER}"
 
   # Read the PR body (stdin by default).
   local body
