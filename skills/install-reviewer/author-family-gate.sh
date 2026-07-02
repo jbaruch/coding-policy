@@ -113,7 +113,9 @@ emit() {
 resolve_and_emit() {
   local source="$1"; shift
   local resolver_out decision
-  resolver_out="$("$RESOLVER" --reviewer "$reviewer" --policy-ref "$policy_ref" -- "$@")" \
+  # Invoke via `bash` — tessl publish/install ships plugin files mode
+  # 0644, so the installed resolver has no exec bit (issue #166).
+  resolver_out="$(bash "$RESOLVER" --reviewer "$reviewer" --policy-ref "$policy_ref" -- "$@")" \
     || die "resolver exited non-zero for tokens: $*"
   if [[ "$resolver_out" =~ \"decision\":\"([a-z_]+)\" ]]; then
     decision="${BASH_REMATCH[1]}"
@@ -154,7 +156,7 @@ main() {
     "") die "--reviewer is required (openai|anthropic)" ;;
     *) die "--reviewer must be 'openai' or 'anthropic', got '$reviewer'" ;;
   esac
-  [[ -x "$RESOLVER" ]] || die "resolver not found/executable at ${RESOLVER}"
+  [[ -f "$RESOLVER" && -r "$RESOLVER" ]] || die "resolver not a readable file at ${RESOLVER}"
 
   # Read the PR body (stdin by default).
   local body

@@ -170,6 +170,27 @@ run_body "empty body line, no trailer -> NO skip (request_changes)" \
 run_body "bare empty Author-Model line -> NO skip (request_changes)" \
   openai false request_changes 'Author-Model: '
 
+# ============ File mode independence (issue #166) ========================
+
+# tessl publish/install ships plugin files mode 0644 — no exec bit. The
+# gate must still consult the resolver in that state instead of dying on
+# an -x guard and fail-opening. Reproduce the installed layout: copies of
+# both scripts with the exec bit stripped, gate invoked via `bash` (as the
+# compiled workflow does). A "skip" decision proves the resolver ran —
+# only the resolver produces it; the fail-open path yields no output at all.
+MODE_DIR="$TMPDIR_TEST/mode644"
+mkdir -p "$MODE_DIR"
+cp "$SCRIPT" "$(dirname "$SCRIPT")/resolve-author-family.sh" "$MODE_DIR/"
+chmod 644 "$MODE_DIR/author-family-gate.sh" "$MODE_DIR/resolve-author-family.sh"
+if out="$(printf '%s' '**Author-Model:** claude-opus-4-8' \
+    | bash "$MODE_DIR/author-family-gate.sh" --reviewer anthropic)"; then
+  check "non-executable (0644) gate+resolver still resolve -> SKIP" \
+    "$out" true skip
+else
+  echo "  FAIL: non-executable (0644) gate+resolver: gate exited non-zero" >&2
+  FAIL_COUNT=$((FAIL_COUNT + 1))
+fi
+
 echo ""
 echo "author-family-gate.sh: ${PASS_COUNT} passed, ${FAIL_COUNT} failed"
 [[ $FAIL_COUNT -eq 0 ]] || exit 1
