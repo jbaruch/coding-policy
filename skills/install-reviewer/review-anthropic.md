@@ -15,10 +15,10 @@ description: |
   from `main`. Fork PRs are skipped by gh-aw's fork-guard. Posts up to 10
   inline comments plus one consolidated review verdict.
 
-  Data flow / trust boundary: the review model — the engine the
-  repository owner configured for this workflow (Anthropic here; OpenAI
-  in the paired workflow) — reads the pull-request content it is asked
-  to evaluate as its ordinary inference input: the diff, the PR title,
+  Data flow / trust boundary: this workflow's review engine is
+  Anthropic; the paired workflow's is OpenAI. The engine the repository
+  owner configured reads the pull-request content it is asked to
+  evaluate as its ordinary inference input: the diff, the PR title,
   body, and commit messages (for the author-model gate and the
   changed-file allowlist), and the published policy rules it reviews
   against. PR content reaches no model provider other than that one
