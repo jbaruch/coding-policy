@@ -19,11 +19,13 @@ description: |
   OpenAI; the paired workflow's is Anthropic. The engine the repository
   owner configured reads the pull-request content it is asked to
   evaluate as its ordinary inference input: the diff, the PR title,
-  body, and commit messages (for the author-model gate and the
-  changed-file allowlist), and the published policy rules it reviews
-  against. PR content reaches no model provider other than that one
-  owner-configured engine; repository secrets, tokens, and credentials
-  are never part of the model input.
+  body, and commit messages (the commit messages feed the author-model
+  gate), and the published policy rules it reviews against. Within this
+  workflow's run, PR content reaches no model provider other than its
+  configured engine; when the paired workflow also runs under the
+  documented fallback, it reads the same content with its own engine.
+  Repository secrets, tokens, and credentials are never part of the
+  model input.
 
   The `tessl install jbaruch/coding-policy` pre-step fetches this
   plugin's own published content from the official Tessl registry:
