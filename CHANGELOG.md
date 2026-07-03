@@ -1,5 +1,9 @@
 # Changelog
 
+### Build
+
+- **Consumer gate's trailer fallback was dead: `gh pr view` had no repo context** — The consumer templates' `gate` job (`skills/install-reviewer/review-{anthropic,openai}.md`) runs without `actions/checkout` (it installs the plugin instead), so its `gh pr view "$PR_NUMBER" --json commits` call had no git remote to infer the repo from and failed on **every** run — observed as a consistent `author-family gate: 'gh pr view' failed; proceeding body-only` in all `jbaruch/fifty-tabs-of-fares` gate logs (e.g. runs 28662293652, 28679850281). Fail-open meant nothing was silently unreviewed, but the #161 gate's signal 2 (the `Co-authored-by:` trailer email domain — Claude Code's default attribution) never fired in consumers: a same-family PR declaring authorship only via trailer fell through to the agent and burned the ~400K tokens the gate exists to save. Body-declared PRs were unaffected (the body arrives via the event payload, not `gh`). Fixed by adding `GH_REPO: ${{ github.repository }}` to the `decide` step's env — `gh` reads it natively, no checkout needed. The in-repo workflows (`.github/workflows/review-{anthropic,openai}.md`) were never affected: their gate job checks out the repo. Consumers pick the fix up via the install-reviewer **upgrade** action.
+
 ## 0.3.84 — 2026-07-02
 
 ### Build
