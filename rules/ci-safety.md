@@ -26,6 +26,18 @@ alwaysApply: true
   3. `[skip ci]` rides only on the commit pushed back to the protected branch, solely to stop self-retrigger
 - Every other commit still follows the rule: no `[skip ci]`, never to skip failing tests or unblock a merge
 
+## Bootstrap-Red Carve-Out
+
+- Narrow exception for merging a PR with a failing required check whose failure is an explicit cache-binding or bootstrap guard, not a test assertion
+- Applies when the PR changes a key the CI cache is bound to (an interaction hash, a schema fingerprint) AND the rebuilt cache can only be seeded from the default branch after merge
+- Preconditions (all required):
+  1. The failing check's output names the guard explicitly (e.g., `InteractionMismatchError`) and shows zero test assertions executed
+  2. The consuming repo documents the merge-then-reseed procedure in its own plugin or contributor docs
+  3. The repo owner approves the merge explicitly — review approval or a recorded dismissal of the blocking review
+  4. The post-merge re-seed runs immediately after merge; its green result is verified and recorded on the PR or its tracking issue
+- Reviewers treat a PR meeting all four preconditions as mergeable — do not request changes on the red check alone
+- Every other failing check still blocks the merge: fix the tests or fix the code
+
 ## Install, Don't Skip
 
 - If a test needs an external tool or dependency, install it in CI
@@ -34,7 +46,9 @@ alwaysApply: true
 ## Branch Naming
 
 - Use the convention: `<type>/<description>` (e.g., `feat/add-auth`, `fix/null-pointer`, `chore/update-deps`)
+- `<type>-<issue-number>` is an accepted alternative where the repo's existing branches already use it (e.g., `fix-111`)
 - Keep branch names lowercase with hyphens
+- Naming is enforceable only before a PR exists — GitHub cannot rename an open PR's head branch; merged branches are precedent, not violations
 
 ## Always Watch CI
 

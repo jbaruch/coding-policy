@@ -1,5 +1,11 @@
 # Changelog
 
+### Rules
+
+- **Three carve-outs aligning rule text with lived consumer practice (#170)** — All three surfaced as review friction in `jbaruch/fifty-tabs-of-fares`, each resolved there by operator override; the rules now encode what the overrides established. (1) `testing-standards` gains the Live-Upstream Future-Date Carve-Out: suites exercising a live external service that rejects past-dated inputs may pin explicit future dates in versioned fixtures with a documented refresh cadence (fifty-tabs #55/#90 — flight searches need future travel dates; past dates return no flights). (2) `ci-safety` gains the Bootstrap-Red Carve-Out: a PR whose only red check is an explicit cache-binding guard (`InteractionMismatchError`, zero assertions run) may merge with owner approval and a verified post-merge re-seed, since the rebuilt cache can only be seeded from the default branch after merge (fifty-tabs #72/#117/#120 — the policy reviewer blocked two such merges in one day); `commit-conventions`' "no exceptions" now points at it. (3) Branch Naming blesses `<type>-<issue-number>` as an alternative where repo precedent uses it, and scopes enforcement to pre-PR — GitHub cannot rename an open PR's head branch, so flagging merged precedent is noise (fifty-tabs `fix-111`/`fix-113` merged unflagged before `fix-116` drew an objection).
+
+## 0.3.86 — 2026-07-03
+
 ### Build
 
 - **Recover from 0.3.85's moderation block: reframe reviewer-template trust-boundary prose + explicit bump to 0.3.86** — The registry scan scored `install-reviewer` CRITICAL (E006) on 0.3.85, reading the templates' trust-boundary disclosure — its transmission-verb phrasing aimed at a model provider, plus its unqualified plugin-install clause — as exfiltration and supply-chain patterns, install-gating the version fleet-wide; identical scripts scored MEDIUM on 0.3.84, so the flag is phrasing, not behavior. Both templates now describe the same data flow in engine-reads-input terms (each workflow run's PR content goes only to its own configured engine, and the paired workflow reads the same content when the documented fallback runs both), and the manifest bumps explicitly to 0.3.86 past the blocked ghost version that `patch-version-publish`'s registry-Latest auto-bump would collide with — full motivation in PR #169.
