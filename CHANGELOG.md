@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.87 — 2026-07-03
+
 ### Rules
 
 - **Three carve-outs aligning rule text with lived consumer practice (#170)** — `testing-standards` gains the Live-Upstream Future-Date Carve-Out, `ci-safety` gains the Bootstrap-Red Carve-Out plus a `<type>-<issue-number>` branch-naming alternative, and `commit-conventions` points its CI-pass exception at the new carve-out. Full history: #170 and PR #172.
