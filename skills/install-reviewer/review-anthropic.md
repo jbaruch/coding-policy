@@ -21,11 +21,11 @@ description: |
   to evaluate as its ordinary inference input: the diff, the PR title,
   body, and commit messages (for the author-model gate and the
   changed-file allowlist), and the published policy rules it reviews
-  against. Repository content reaches only that one owner-configured
-  engine; repository secrets, tokens, and credentials are never part of
-  the model input. The `tessl install jbaruch/coding-policy` pre-step
+  against. PR content reaches no model provider other than that one
+  owner-configured engine; repository secrets, tokens, and credentials
+  are never part of the model input. The `tessl install jbaruch/coding-policy` pre-step
   fetches this plugin's own published rule set — prose policy documents
-  from the same `jbaruch/coding-policy` plugin that ships this very
+  from the same `jbaruch/coding-policy` plugin that ships this
   workflow — from the official Tessl registry, so the review runs
   against the registry-reviewed version rather than unpublished
   working-tree content.
