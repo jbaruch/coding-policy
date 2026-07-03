@@ -48,7 +48,7 @@ alwaysApply: true
 - Use the convention: `<type>/<description>` (e.g., `feat/add-auth`, `fix/null-pointer`, `chore/update-deps`)
 - `<type>-<issue-number>` is an accepted alternative where the repo's existing branches already use it (e.g., `fix-111`)
 - Keep branch names lowercase with hyphens
-- Naming is enforceable only before a PR exists — GitHub cannot rename an open PR's head branch; merged branches are precedent, not violations
+- Flag naming before a PR exists — merged branches are precedent, not violations
 
 ## Always Watch CI
 

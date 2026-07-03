@@ -42,7 +42,7 @@ alwaysApply: true
 - Fixtures and prompts may pin explicit future dates
 - Preconditions (all required):
   1. Each pinned date is a literal in a versioned fixture — never computed from the run-time clock
-  2. Fixtures follow `rules/plugin-evals.md` Fixture Hygiene — dated filenames or a documented fixture version
+  2. Fixtures follow `rules/plugin-evals.md` Fixture Hygiene — dates in filenames
   3. The owning repo documents the refresh cadence and refresh procedure beside the fixtures
 - A pinned date aging into the past is a fixture refresh under the documented cadence — never an inline patch during unrelated work
 - Every other suite still bans future dates and time-relative values
