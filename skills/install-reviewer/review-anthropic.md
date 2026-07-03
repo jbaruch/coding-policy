@@ -23,9 +23,11 @@ description: |
   changed-file allowlist), and the published policy rules it reviews
   against. PR content reaches no model provider other than that one
   owner-configured engine; repository secrets, tokens, and credentials
-  are never part of the model input. The `tessl install jbaruch/coding-policy` pre-step
-  fetches this plugin's own published content from the official Tessl
-  registry: the policy rule set the reviewer evaluates against, plus
+  are never part of the model input.
+
+  The `tessl install jbaruch/coding-policy` pre-step fetches this
+  plugin's own published content from the official Tessl registry:
+  the policy rule set the reviewer evaluates against, plus
   the helper scripts the gate job invokes (e.g., the author-family
   resolver). It is the same `jbaruch/coding-policy` plugin that ships
   this workflow, at its registry-published version rather than
