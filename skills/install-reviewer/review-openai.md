@@ -93,6 +93,11 @@ jobs:
           PR_BODY: ${{ github.event.pull_request.body }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           GH_TOKEN: ${{ github.token }}
+          # No actions/checkout in this job — without a git context `gh pr
+          # view` cannot infer the repo and fails on every run, silently
+          # reducing the gate to body-only (trailer-only PRs never skip).
+          # GH_REPO supplies the repo context explicitly.
+          GH_REPO: ${{ github.repository }}
         # Fails OPEN: a failed gate job would cascade-skip the agent and
         # silently drop the review, so any trouble here defaults
         # should_skip=false and lets the agent run. The setup/install steps
