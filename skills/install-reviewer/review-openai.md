@@ -15,15 +15,20 @@ description: |
   from `main`. Fork PRs are skipped by gh-aw's fork-guard. Posts up to 10
   inline comments plus one consolidated review verdict.
 
-  Data flow / trust boundary: the reviewer sends the pull-request content
-  it evaluates — the diff, the PR title, body, and commit messages (read
-  for the author-model gate and the changed-file allowlist), and the
-  published policy files — to the review model (OpenAI here; Anthropic in
-  the paired workflow), the same provider whose model renders the verdict.
-  Repository secrets, tokens, and credentials are never included in that
-  payload. The `tessl install jbaruch/coding-policy` pre-step fetches the
-  latest published plugin from the official Tessl registry — a known
-  published ruleset, not arbitrary remote code.
+  Data flow / trust boundary: the review model — the engine the
+  repository owner configured for this workflow (OpenAI here; Anthropic
+  in the paired workflow) — reads the pull-request content it is asked
+  to evaluate as its ordinary inference input: the diff, the PR title,
+  body, and commit messages (for the author-model gate and the
+  changed-file allowlist), and the published policy rules it reviews
+  against. Repository content reaches only that one owner-configured
+  engine; repository secrets, tokens, and credentials are never part of
+  the model input. The `tessl install jbaruch/coding-policy` pre-step
+  fetches this plugin's own published rule set — prose policy documents
+  from the same `jbaruch/coding-policy` plugin that ships this very
+  workflow — from the official Tessl registry, so the review runs
+  against the registry-reviewed version rather than unpublished
+  working-tree content.
 
   Required repository secrets (set at
   https://github.com/<owner>/<repo>/settings/secrets/actions):
