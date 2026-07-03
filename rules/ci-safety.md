@@ -32,11 +32,11 @@ alwaysApply: true
 - Applies when the PR changes a key the CI cache is bound to (an interaction hash, a schema fingerprint) AND the rebuilt cache can only be seeded from the default branch after merge
 - Pre-merge gates (all required):
   1. The failing check's output names the guard explicitly (e.g., `InteractionMismatchError`) and shows zero test assertions executed
-  2. The consuming repo documents the merge-then-reseed procedure in its own plugin or contributor docs
+  2. The consuming repo documents the merge-then-re-seed procedure in its own plugin or contributor docs
   3. The repo owner approves the merge explicitly — review approval or a recorded dismissal of the blocking review — with a recorded commitment to the post-merge obligations
 - Post-merge obligations (both required):
   4. The re-seed runs immediately after merge
-  5. The re-seed's green result is verified and recorded on the PR or its tracking issue
+  5. The green re-seed result is verified and recorded on the PR or its tracking issue
 - Reviewers treat a PR as mergeable when it matches both Applies-when criteria and meets all three pre-merge gates — do not request changes on the red check alone
 - Open post-merge obligations block the next use of this carve-out — complete and record them first
 - Every other failing check still blocks the merge: fix the tests or fix the code

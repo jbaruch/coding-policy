@@ -51,7 +51,7 @@ alwaysApply: true
 ## Fixtures
 
 - No binary fixtures checked into the repo
-- Build test data programmatically in test setup/fixtures
+- Build test data programmatically in test setup/fixtures (narrow exception: pinned future-date fixture files under the Live-Upstream Future-Date Carve-Out above)
 - For binary files that can't be built programmatically, download them from a URL during test setup
 
 ## Independence
