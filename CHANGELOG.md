@@ -2,7 +2,7 @@
 
 ### Rules
 
-- **Three carve-outs aligning rule text with lived consumer practice (#170)** — `testing-standards` gains the Live-Upstream Future-Date Carve-Out (versioned future-date fixtures for suites hitting live services that reject past dates), `ci-safety` gains the Bootstrap-Red Carve-Out (a cache-binding-guard failure like `InteractionMismatchError` may merge with owner approval and a verified post-merge re-seed, with `commit-conventions` pointing at it), and Branch Naming blesses `<type>-<issue-number>` where repo precedent uses it while scoping enforcement to pre-PR. Full history and the fifty-tabs-of-fares incidents that drove each: issue #170 and PR #172.
+- **Three carve-outs aligning rule text with lived consumer practice (#170)** — `testing-standards` gains the Live-Upstream Future-Date Carve-Out, `ci-safety` gains the Bootstrap-Red Carve-Out plus a `<type>-<issue-number>` branch-naming alternative, and `commit-conventions` points its CI-pass exception at the new carve-out. Full history: #170 and PR #172.
 
 ## 0.3.86 — 2026-07-03
 

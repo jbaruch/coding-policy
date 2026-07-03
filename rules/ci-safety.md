@@ -34,8 +34,9 @@ alwaysApply: true
   1. The failing check's output names the guard explicitly (e.g., `InteractionMismatchError`) and shows zero test assertions executed
   2. The consuming repo documents the merge-then-reseed procedure in its own plugin or contributor docs
   3. The repo owner approves the merge explicitly — review approval or a recorded dismissal of the blocking review
-  4. The post-merge re-seed runs immediately after merge; its green result is verified and recorded on the PR or its tracking issue
-- Reviewers treat a PR meeting all four preconditions as mergeable — do not request changes on the red check alone
+  4. The post-merge re-seed runs immediately after merge
+  5. The re-seed's green result is verified and recorded on the PR or its tracking issue
+- Reviewers treat a PR meeting all five preconditions as mergeable — do not request changes on the red check alone
 - Every other failing check still blocks the merge: fix the tests or fix the code
 
 ## Install, Don't Skip

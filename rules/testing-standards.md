@@ -39,7 +39,8 @@ alwaysApply: true
 ## Live-Upstream Future-Date Carve-Out
 
 - Narrow exception for suites exercising a live external service that rejects past-dated inputs (flight search, hotel booking, event scheduling)
-- Fixtures and prompts may pin explicit future dates
+- Versioned fixture files, prompt fixtures included, may pin explicit future dates
+- Assertions compare against the pinned fixture dates — never against fresh future-date literals
 - Preconditions (all required):
   1. Each pinned date is a literal in a versioned fixture — never computed from the run-time clock
   2. Fixtures follow `rules/plugin-evals.md` Fixture Hygiene — dates in filenames
