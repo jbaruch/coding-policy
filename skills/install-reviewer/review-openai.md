@@ -24,11 +24,12 @@ description: |
   against. PR content reaches no model provider other than that one
   owner-configured engine; repository secrets, tokens, and credentials
   are never part of the model input. The `tessl install jbaruch/coding-policy` pre-step
-  fetches this plugin's own published rule set — prose policy documents
-  from the same `jbaruch/coding-policy` plugin that ships this
-  workflow — from the official Tessl registry, so the review runs
-  against the registry-reviewed version rather than unpublished
-  working-tree content.
+  fetches this plugin's own published content from the official Tessl
+  registry: the policy rule set the reviewer evaluates against, plus
+  the helper scripts the gate job invokes (e.g., the author-family
+  resolver). It is the same `jbaruch/coding-policy` plugin that ships
+  this workflow, at its registry-published version rather than
+  unpublished working-tree content.
 
   Required repository secrets (set at
   https://github.com/<owner>/<repo>/settings/secrets/actions):
