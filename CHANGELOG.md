@@ -1,5 +1,11 @@
 # Changelog
 
+### Rules
+
+- **Three carve-outs aligning rule text with lived consumer practice (#170)** — `testing-standards` gains the Live-Upstream Future-Date Carve-Out, `ci-safety` gains the Bootstrap-Red Carve-Out plus a `<type>-<issue-number>` branch-naming alternative, and `commit-conventions` points its CI-pass exception at the new carve-out. Full history: #170 and PR #172.
+
+## 0.3.86 — 2026-07-03
+
 ### Build
 
 - **Recover from 0.3.85's moderation block: reframe reviewer-template trust-boundary prose + explicit bump to 0.3.86** — The registry scan scored `install-reviewer` CRITICAL (E006) on 0.3.85, reading the templates' trust-boundary disclosure — its transmission-verb phrasing aimed at a model provider, plus its unqualified plugin-install clause — as exfiltration and supply-chain patterns, install-gating the version fleet-wide; identical scripts scored MEDIUM on 0.3.84, so the flag is phrasing, not behavior. Both templates now describe the same data flow in engine-reads-input terms (each workflow run's PR content goes only to its own configured engine, and the paired workflow reads the same content when the documented fallback runs both), and the manifest bumps explicitly to 0.3.86 past the blocked ghost version that `patch-version-publish`'s registry-Latest auto-bump would collide with — full motivation in PR #169.

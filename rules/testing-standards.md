@@ -30,16 +30,28 @@ alwaysApply: true
 
 - Tests must be deterministic — no self-generated random test data
 - Provide fixed test data; never have the test generate its own inputs randomly
-- No dependence on the current date or wall-clock time — no `today`, runtime `now()`, or hardcoded future dates in assertions or fixtures
+- No dependence on the current date or wall-clock time — no `today`, runtime `now()`, or hardcoded future dates in assertions or fixtures (narrow exception: Live-Upstream Future-Date Carve-Out below)
 - Control the clock: inject or freeze "now" (a passed-in reference date, a mocked time source, freezegun) so a test green today is green every day
 - Compute relative dates from a fixed injected reference, never from the real clock at run time
 - Fixed past dates as fixtures are fine — the ban is on time-relative values that rot as the run date advances
 - Flaky tests are bugs — diagnose the root cause, don't retry and hope
 
+## Live-Upstream Future-Date Carve-Out
+
+- Narrow exception for suites exercising a live external service that rejects past-dated inputs (flight search, hotel booking, event scheduling)
+- Versioned fixture files, prompt fixtures included, may pin explicit future dates
+- Assertions compare against the pinned fixture dates — never against fresh future-date literals
+- Preconditions (all required):
+  1. Each pinned date is a literal in a versioned fixture — never computed from the run-time clock
+  2. Fixtures follow `rules/plugin-evals.md` Fixture Hygiene — dates in filenames
+  3. The owning repo documents the refresh cadence and refresh procedure beside the fixtures
+- A pinned date aging into the past is a fixture refresh under the documented cadence — never an inline patch during unrelated work
+- Every other suite still bans future dates and time-relative values
+
 ## Fixtures
 
 - No binary fixtures checked into the repo
-- Build test data programmatically in test setup/fixtures
+- Build test data programmatically in test setup/fixtures (narrow exception: pinned future-date fixture files under the Live-Upstream Future-Date Carve-Out above)
 - For binary files that can't be built programmatically, download them from a URL during test setup
 
 ## Independence
