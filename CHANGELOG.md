@@ -1,5 +1,10 @@
 # Changelog
 
+### Skills
+
+- **`release` skill: dismiss superseded review gates automatically** — New `skills/release/dismiss-stale-reviews.sh` clears a policy bot's `CHANGES_REQUESTED` that a later all-clear from the same bot superseded. A `github-actions[bot]` reviewer cannot `APPROVE` (HTTP 422), so a clean re-review lands as a `COMMENT` that never supersedes the earlier `CHANGES_REQUESTED` in GitHub's merge gate — the stale request kept `merge_state.status` at `BLOCKED` and had to be dismissed by hand every cycle. The script dismisses only superseded requests (leaves a bot whose latest verdict is still `CHANGES_REQUESTED` untouched) and is idempotent; Step 7 runs it before merging. Covered by `skills/release/tests/test_dismiss_stale_reviews.sh`.
+- **`release` skill: auto-open PR and auto-merge on green gates** — Steps 2 and 7 now state explicitly that PR creation and merge proceed automatically once their objective gates are green — the readiness checks and the merge conjunction are the approval; the operator no longer pauses for a human ack.
+
 ## 0.3.87 — 2026-07-03
 
 ### Rules

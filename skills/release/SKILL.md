@@ -33,6 +33,7 @@ Structured workflow for shipping code: PR creation, automated policy review, mer
 
 ## Step 2 — Create PR
 
+- Once Step 1's readiness checks pass, create the PR automatically — the green readiness checks are the gate. Do not pause to ask a human whether to open it.
 - Push the branch: `git push -u origin <branch>`
 - Create the PR with `gh pr create`:
   - **Title**: `<type>(<scope>): <imperative summary>`
@@ -120,6 +121,16 @@ Only proceed when:
 - Every inline comment from Step 5's `inline_comments` count has a `Fixed in <sha>` or `Declining — <reason>` reply per Step 6 (verify by listing the PR's review comments — the poll script tracks counts, not reply state, so the operator confirms thread closure).
 
 A `COMMENTED` review never gates the merge on its state alone — but its body must be read before merge, zero inline comments included. With inline comments, it is mergeable once every thread also has a reply.
+
+Once these conditions hold, merge automatically — the green gates are the approval. Do not pause to ask a human whether to merge.
+
+**Clear superseded review gates first.** A policy bot cannot `APPROVE` (`github-actions[bot]` gets HTTP 422), so a clean re-review lands as a `COMMENT` that does NOT supersede the bot's earlier `CHANGES_REQUESTED` in GitHub's merge gate — the stale request keeps `merge_state.status` at `BLOCKED`. Dismiss every such superseded review before merging:
+
+```bash
+skills/release/dismiss-stale-reviews.sh <owner> <repo> <pr-number>
+```
+
+Run it once Step 5's poll shows every bot's latest verdict clean. It emits a JSON summary of what it dismissed and what it left active, exits non-zero on API failure, and is idempotent on re-run. Which reviews it dismisses and which it leaves is the script's decision contract — see `skills/release/dismiss-stale-reviews.sh` header, not restated here (`rules/script-as-black-box.md`).
 
 Before merging, capture the registry baseline so the post-merge check has something to compare against:
 
