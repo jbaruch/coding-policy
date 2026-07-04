@@ -184,6 +184,28 @@ t_multiple_stale_crs_all_dismissed() {
   assert_eq "two dismissals"       "2"     "$(dismiss_count)"
 }
 
+# The bot logins contain `[bot]`, a glob bracket. If the loop iterated them
+# unquoted, a file in the working directory matching the pattern (e.g.
+# `github-actionsb`) would rewrite the login token via pathname expansion
+# and the review would never be found. Run from a directory seeded with
+# such a decoy file and assert the dismissal still happens.
+t_login_is_glob_safe_against_cwd_files() {
+  MOCK_REVIEWS_BODY='[
+    {"id":71,"state":"CHANGES_REQUESTED","commit_id":"aaa","submitted_at":"2026-01-01T00:00:00Z","user":{"login":"github-actions[bot]"}},
+    {"id":72,"state":"COMMENTED","commit_id":"bbb","submitted_at":"2026-01-02T00:00:00Z","user":{"login":"github-actions[bot]"}}
+  ]'
+  local decoy_dir out ids
+  decoy_dir=$(mktemp -d)
+  # Files that `github-actions[bot]` and `copilot-...[bot]` would glob to.
+  : > "${decoy_dir}/github-actionsb"
+  : > "${decoy_dir}/copilot-pull-request-reviewero"
+  out=$(cd "$decoy_dir" && main "owner" "repo" "1") || { rm -rf "$decoy_dir"; return 1; }
+  rm -rf "$decoy_dir"
+  ids=$(jq -r '.dismissed | map(.review_id) | join(",")' <<<"$out")
+  assert_eq "dismissed despite cwd decoy files" "71" "$ids" || return 1
+  assert_eq "one dismissal" "1" "$(dismiss_count)"
+}
+
 # --- runner ---
 
 echo "test_dismiss_stale_reviews.sh"
@@ -194,6 +216,7 @@ run "per-bot independence"                      t_per_bot_independence
 run "no reviews is a no-op"                     t_no_reviews_is_noop
 run "latest DISMISSED leaves earlier active CR" t_latest_dismissed_leaves_earlier_active_cr
 run "multiple stale CRs all dismissed"          t_multiple_stale_crs_all_dismissed
+run "login is glob-safe against cwd files"      t_login_is_glob_safe_against_cwd_files
 
 echo
 echo "passed: ${PASS_COUNT}, failed: ${FAIL_COUNT}"

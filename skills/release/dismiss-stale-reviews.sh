@@ -37,8 +37,12 @@
 set -euo pipefail
 
 # The bot logins whose CHANGES_REQUESTED reviews gate the merge — the same
-# two the release skill polls (skills/release/poll-pr-reviews.sh).
-GATING_BOTS="github-actions[bot] copilot-pull-request-reviewer[bot]"
+# two the release skill polls (skills/release/poll-pr-reviews.sh). An array
+# iterated with quoted expansion, NOT a space-string: the `[bot]` suffix is
+# a glob bracket, so an unquoted `for login in $GATING_BOTS` would rewrite
+# the token against a matching filename in the release checkout (e.g.
+# `github-actionsb`) and silently miss the review.
+GATING_BOTS=("github-actions[bot]" "copilot-pull-request-reviewer[bot]")
 
 # Fixed dismissal message — a dismissal records who/why on the PR timeline.
 DISMISS_MESSAGE="Superseded by a later all-clear review from the same bot — dismissed by the release skill so the stale request stops gating the merge."
@@ -81,7 +85,7 @@ main() {
   local dismissed="[]" left_active="[]"
   local login reviews latest_state stale
 
-  for login in $GATING_BOTS; do
+  for login in "${GATING_BOTS[@]}"; do
     reviews=$(reviews_by "$owner" "$repo" "$pr" "$login") \
       || { echo "error: failed to fetch reviews for ${login} on ${owner}/${repo}#${pr} — run 'gh auth status' to verify auth, then retry" >&2; exit 1; }
 
