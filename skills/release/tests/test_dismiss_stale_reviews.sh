@@ -154,6 +154,22 @@ t_no_reviews_is_noop() {
   assert_eq "no dismissals"     "0" "$(dismiss_count)"
 }
 
+# Latest review is DISMISSED (not an all-clear) with an EARLIER active
+# CHANGES_REQUESTED the bot never cleared -> dismiss nothing. A dismissed
+# latest verdict is not a COMMENTED/APPROVED all-clear, so the earlier
+# active request must stay put.
+t_latest_dismissed_leaves_earlier_active_cr() {
+  MOCK_REVIEWS_BODY='[
+    {"id":61,"state":"CHANGES_REQUESTED","commit_id":"aaa","submitted_at":"2026-01-01T00:00:00Z","user":{"login":"github-actions[bot]"}},
+    {"id":62,"state":"DISMISSED","commit_id":"bbb","submitted_at":"2026-01-02T00:00:00Z","user":{"login":"github-actions[bot]"}}
+  ]'
+  local out n
+  out=$(main "owner" "repo" "1") || return 1
+  n=$(dismiss_count)
+  assert_eq "no dismissals"   "0" "$n"                                   || return 1
+  assert_eq "dismissed empty" "0" "$(jq '.dismissed | length' <<<"$out")"
+}
+
 # Two stale CRs before a clean COMMENT -> both dismissed.
 t_multiple_stale_crs_all_dismissed() {
   MOCK_REVIEWS_BODY='[
@@ -176,6 +192,7 @@ run "latest CR is left active"                  t_latest_cr_is_left_active
 run "already-dismissed is skipped"              t_already_dismissed_is_skipped
 run "per-bot independence"                      t_per_bot_independence
 run "no reviews is a no-op"                     t_no_reviews_is_noop
+run "latest DISMISSED leaves earlier active CR" t_latest_dismissed_leaves_earlier_active_cr
 run "multiple stale CRs all dismissed"          t_multiple_stale_crs_all_dismissed
 
 echo

@@ -14,10 +14,13 @@
 # judgment (rules/script-delegation.md).
 #
 # Decision, per gating bot (see GATING_BOTS below):
-#   - latest review state == CHANGES_REQUESTED  => leave it; the bot is
+#   - latest review state == CHANGES_REQUESTED => leave it; the bot is
 #     currently requesting changes, nothing to dismiss.
-#   - latest review state is anything else (COMMENTED/APPROVED) => dismiss
-#     every EARLIER review from that bot still in CHANGES_REQUESTED.
+#   - latest review state == COMMENTED or APPROVED (a fresh all-clear) =>
+#     dismiss every EARLIER review from that bot still in CHANGES_REQUESTED.
+#   - any other latest state (DISMISSED, PENDING) => no-op; a dismissed or
+#     pending latest review is NOT an all-clear, so an earlier active
+#     CHANGES_REQUESTED that no all-clear superseded must stay put.
 # Reviews already in DISMISSED state are skipped, so re-running is a no-op
 # (idempotent per rules/file-hygiene.md).
 #
@@ -94,7 +97,15 @@ main() {
       continue
     fi
 
-    # Latest is COMMENTED/APPROVED — dismiss every EARLIER review still in
+    # Dismissal requires a fresh all-clear from the same bot. Only COMMENTED
+    # (a bot cannot APPROVE — HTTP 422) or APPROVED counts. A latest state
+    # of DISMISSED or PENDING is NOT an all-clear, so an earlier active
+    # CHANGES_REQUESTED that no all-clear superseded must stay put.
+    if [[ "$latest_state" != "COMMENTED" && "$latest_state" != "APPROVED" ]]; then
+      continue
+    fi
+
+    # Latest is an all-clear — dismiss every EARLIER review still in
     # CHANGES_REQUESTED (already-DISMISSED ones are excluded, so re-runs
     # are no-ops).
     stale=$(jq -c '.[:-1][] | select(.state == "CHANGES_REQUESTED")' <<<"$reviews")

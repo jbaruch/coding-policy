@@ -130,7 +130,7 @@ Once these conditions hold, merge automatically — the green gates are the appr
 skills/release/dismiss-stale-reviews.sh <owner> <repo> <pr-number>
 ```
 
-The script dismisses only a bot's `CHANGES_REQUESTED` that a later non-`CHANGES_REQUESTED` verdict from the same bot has superseded; it leaves a bot whose latest verdict is still `CHANGES_REQUESTED` untouched, and re-running is a no-op (see the script's header for the decision contract and output shape). Run it after Step 5's poll shows every bot's latest verdict clean.
+The script dismisses only a bot's `CHANGES_REQUESTED` that a later all-clear (`COMMENTED` or `APPROVED`) from the same bot has superseded; it leaves a bot whose latest verdict is still `CHANGES_REQUESTED` — or whose latest review is merely `DISMISSED`/`PENDING` — untouched, and re-running is a no-op (see the script's header for the decision contract and output shape). Run it after Step 5's poll shows every bot's latest verdict clean.
 
 Before merging, capture the registry baseline so the post-merge check has something to compare against:
 
