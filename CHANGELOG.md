@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.89 — 2026-07-08
+
 ### Rules
 
 - **`ci-safety`: Superseded-Bot-Review Dismissal Carve-Out** — Dismissing a gating bot's `CHANGES_REQUESTED` that the same bot later superseded with an all-clear re-review is now explicitly sanctioned as gate cleanup, not a bypass, so an agent loading the rules as steering context stops false-positiving a legitimate dismissal as gate-gaming. Scoped to the `dismiss-stale-reviews.sh` `GATING_BOTS` allowlist (bots that cannot `APPROVE`); human change requests still gate. Full motivation: PR #174.
