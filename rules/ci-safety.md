@@ -16,6 +16,17 @@ alwaysApply: true
 - Never disable or skip failing tests to unblock a merge
 - If tests fail, fix the tests or fix the code
 
+## Superseded-Bot-Review Dismissal Carve-Out
+
+- Narrow exception for dismissing a review gate — not a bypass when the gate is a bot's `CHANGES_REQUESTED` that the same bot later superseded with an all-clear re-review
+- Applies when a reviewer that cannot `APPROVE` (`github-actions[bot]` — GitHub returns HTTP 422) posts its clean re-review as a `COMMENTED` or `APPROVED` verdict, which GitHub's merge gate never treats as superseding the earlier `CHANGES_REQUESTED` — the stale request keeps the merge `BLOCKED` until dismissed
+- Preconditions (all required):
+  1. The dismissed review is a `CHANGES_REQUESTED` from a bot login, never a human reviewer — a human can `APPROVE`, so a human's supersession goes through re-request-and-approve, never dismissal
+  2. The same bot posted a later `COMMENTED` or `APPROVED` verdict on the PR — a fresh all-clear, not a `DISMISSED` or `PENDING` latest state
+- Deterministic form is `skills/release/dismiss-stale-reviews.sh` — it enforces both preconditions and is the recommended path; decision predicate and gating bot logins live in the script header, not restated here (`rules/script-as-black-box.md`)
+- A hand dismissal meeting both preconditions is equally sanctioned — merging after it is not a `Never Skip Tests` violation; the gate was satisfied and cleaned up, not skipped
+- Every other dismissal still gates: a bot `CHANGES_REQUESTED` no all-clear superseded, or any human reviewer's change request, blocks the merge until resolved through review
+
 ## Publish-Pipeline Loop-Prevention Carve-Out
 
 - Narrow exception for `[skip ci]` on a commit the publish workflow pushes to the protected branch
