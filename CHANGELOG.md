@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.90 — 2026-07-09
+
 ### Skills
 
 - **`release` skill: deterministic pre-merge review watch** — New `skills/release/watch-pr-reviews.sh` owns the poll loop that used to be hand-rolled per agent. It wraps the `poll-pr-reviews.sh` snapshot, polling at a script-owned interval (`WATCH_PR_REVIEWS_INTERVAL_SEC`, default 15s) up to a script-owned budget (`WATCH_PR_REVIEWS_BUDGET_SEC`, default 900s), and watches exactly the fields the Step 7 merge gate reads — each gating bot's latest review *state* (by login), CI status, and merge state — emitting the snapshot plus a `.watch.result` verdict (`ready` / `changes_requested` / `ci_failure` / `dirty` / `pending_at_budget`). Step 5 is rewired from a prose poll loop to a single blocking call; `SCRIPTING.md`'s Step-7 wrapper points at it too. Motivation: agents were inventing wall-clock timeouts (one added a 10-minute cap citing a policy minute-count that does not exist), watching the wrong signals (inline-comment appearance, hand-picked run/comment ids) and waiting on verdicts that were already complete. Covered by `skills/release/tests/test_watch_pr_reviews.sh`.
