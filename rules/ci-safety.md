@@ -70,6 +70,12 @@ alwaysApply: true
 - Use `gh run watch` or equivalent to monitor the run in real time
 - If CI fails, inspect the logs immediately, fix the issue, and push again
 - A task is not done until CI is green
+- Watch the event, not a stopwatch: bind the watch to the terminal signal it awaits — a run's `conclusion`, a review verdict posted, a moderation `pass` — never to an agent-chosen elapsed time
+- Poll interval and give-up budget are script-owned constants (the `*_INTERVAL_SEC` / `*_BUDGET_SEC` env vars in the release watch scripts), never numbers an agent picks per run
+- Never wrap a watch in an invented wall-clock `timeout` — no blanket minute count exists in this policy to cite; a watcher gives up only at its own documented budget
+- Watch only the fields the gate reads. For PR reviews that is each gating bot's latest review state resolved by bot login, CI status, and merge state — not the appearance of inline comments, and not a hand-picked run / comment / check id
+- A bot review is complete when its verdict posts (state leaves `none`), zero inline comments included — never wait for comments to appear
+- The pre-merge review watch has an agent-executable form — `skills/release/watch-pr-reviews.sh` (see `skills/release/SKILL.md` Step 5); it owns the interval and budget and watches exactly the gate fields above
 - For plugin/package releases, the duty extends past merge — confirm the resolved run's conclusion, the registry advance, and the moderation clear; no single signal is authoritative
 - Release contract:
   1. Before merge: capture the registry's `Latest Version` as baseline
