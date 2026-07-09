@@ -77,28 +77,21 @@ skills/release/request-copilot-review.sh <owner> <repo> <pr-number>
 
 Proceed immediately to Step 5.
 
-## Step 5 — Poll PR State
+## Step 5 — Watch PR State to a Terminal Verdict
 
-Capture a single JSON snapshot of CI status, bot review states and bodies, and inline comment counts:
+Block until the PR reaches a merge-gate-relevant terminal state. The watcher polls `poll-pr-reviews.sh` at a script-owned interval up to a script-owned budget and watches exactly the fields the Step 7 merge gate reads — each gating bot's latest review state (resolved by bot login), CI status, and merge state. Do not hand-roll a poll loop, and do not wrap the watch in an invented wall-clock `timeout` (see `rules/ci-safety.md` "Always Watch CI"):
 
 ```bash
-skills/release/poll-pr-reviews.sh <owner> <repo> <pr-number>
+skills/release/watch-pr-reviews.sh <owner> <repo> <pr-number>
 ```
 
-The script returns:
-- `ci.status` — `pending | success | failure | none` (the gh-aw workflow appears here as a check once it has run)
-- `reviews.gh_aw.state` and `reviews.copilot.state` — latest review per bot (`APPROVED | CHANGES_REQUESTED | COMMENTED | none`)
-- `reviews.gh_aw.body` and `reviews.copilot.body` — the full review body text per bot (`null` when the bot hasn't reviewed) — read it; the state label is not a summary of it, per `rules/reviewer-feedback-reading.md`
-- `inline_comments.gh_aw` and `inline_comments.copilot` — top-level inline comment counts
-- `merge_state.status` and `merge_state.mergeable` — GitHub's merge-readiness state (e.g., `CLEAN`/`MERGEABLE`, `DIRTY`/`CONFLICTING`)
+It returns the full `poll-pr-reviews.sh` snapshot plus a `watch` object — `{"result": ..., "attempts": N, "elapsed_seconds": N}`. The interval/budget constants and the result contract are the script's, not restated here (`rules/script-as-black-box.md` — see the header's result matrix). Branch on `.watch.result`:
 
-Each poll, check `merge_state` first:
-
-- If `merge_state.mergeable` is `CONFLICTING` or `merge_state.status` is `DIRTY`, exit the loop immediately, rebase onto current `main`, resolve conflicts, and force-push; resume polling once the next push fires the missed `pull_request:` workflows.
-- If `merge_state.mergeable` is `UNKNOWN`, keep polling — GitHub is still computing mergeability after the most recent push.
-- Once `merge_state.mergeable` is `MERGEABLE`, continue polling and exit when `ci.status` is `success` (or `none` if no checks are configured) AND no bot has `CHANGES_REQUESTED`, then proceed to Step 6. `COMMENTED` does NOT block the polling-loop exit; Step 7's merge gate separately requires every inline comment thread to have a reply.
-
-If the gh-aw review check ran but no review was posted, inspect logs with `gh run view --log-failed`. Do not retry via GraphQL — gh-aw is event-triggered.
+- `ready` (exit 0) — mergeable, CI `success`/`none`, both gating bots posted, none requested changes. Read every non-empty `reviews.*.body` (a `COMMENTED` verdict with zero inline comments still carries a body per `rules/reviewer-feedback-reading.md`), then proceed to Step 6.
+- `changes_requested` (exit 0) — a gating bot requested changes. Go to Step 6, address it, push; the next push re-fires the review, so re-run the watcher.
+- `ci_failure` (exit 0) — a check failed. Fix it (Step 6), push, re-run the watcher.
+- `dirty` (exit 0) — the branch conflicts with `main` and GitHub skipped the `pull_request:` workflows. Rebase onto current `main`, resolve, force-push, then re-run the watcher — the push re-fires the missed workflows.
+- `pending_at_budget` (exit 1) — a signal never arrived within the budget (a reviewer that never posted, CI stuck pending). Inspect which field is still `none`/`pending` in the returned snapshot. If the gh-aw review check ran but posted nothing, `gh run view --log-failed`; do not retry via GraphQL — gh-aw is event-triggered. Re-run the watcher to keep waiting once the cause is understood.
 
 ## Step 6 — Address Feedback; No Re-request Needed
 
@@ -115,9 +108,8 @@ If the gh-aw review check ran but no review was posted, inspect logs with `gh ru
 ## Step 7 — Merge + Cleanup
 
 Only proceed when:
-- Step 5's poll returns `ci.status` as `success` (or `none` if no checks are configured) AND `merge_state.mergeable` is `MERGEABLE` (`UNKNOWN` is not acceptable — GitHub hasn't finished computing mergeability) AND `merge_state.status` is not `DIRTY` AND no bot has `CHANGES_REQUESTED`, AND
-- Both `reviews.gh_aw.state` and `reviews.copilot.state` are NOT `none` — i.e., each gating reviewer has actually posted a review. A reviewer that hasn't run yet leaves `state: none` and `inline_comments: 0`, which would otherwise satisfy the no-CHANGES_REQUESTED check vacuously, AND
-- Every non-empty `reviews.*.body` has been read in full — a `COMMENTED` state with zero inline comments is not a license to skip the body (see `rules/reviewer-feedback-reading.md`), AND
+- Step 5's watcher returned `.watch.result` as `ready` — its exit-0 readiness conjunction (mergeable, CI `success`/`none`, both gating bots posted, no `CHANGES_REQUESTED`); the field predicate is the watcher's, not restated here (`rules/script-as-black-box.md` — see `skills/release/watch-pr-reviews.sh` header). `ready` already requires each gating bot's `state` to have left `none`, so a reviewer that never ran cannot satisfy the gate vacuously, AND
+- Every non-empty `reviews.*.body` in the returned snapshot has been read in full — a `COMMENTED` state with zero inline comments is not a license to skip the body (see `rules/reviewer-feedback-reading.md`), AND
 - Every inline comment from Step 5's `inline_comments` count has a `Fixed in <sha>` or `Declining — <reason>` reply per Step 6 (verify by listing the PR's review comments — the poll script tracks counts, not reply state, so the operator confirms thread closure).
 
 A `COMMENTED` review never gates the merge on its state alone — but its body must be read before merge, zero inline comments included. With inline comments, it is mergeable once every thread also has a reply.
