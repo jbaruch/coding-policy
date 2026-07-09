@@ -259,7 +259,9 @@ run "INTERVAL_SEC=0 rejected with named diagnostic" test_interval_zero_rejected
 
 test_interval_gt_budget_rejected() {
   reset_mocks
+  # shellcheck disable=SC2034  # read by the sourced watch-pr-reviews.sh; shellcheck can't trace the source boundary
   INTERVAL_SEC=10
+  # shellcheck disable=SC2034  # read by the sourced watch-pr-reviews.sh; shellcheck can't trace the source boundary
   BUDGET_SEC=5
   local err rc=0
   err=$(main jbaruch coding-policy 42 2>&1 >/dev/null) || rc=$?
