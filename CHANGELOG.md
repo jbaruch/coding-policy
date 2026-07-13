@@ -1,5 +1,9 @@
 # Changelog
 
+### Rules
+
+- **`error-handling` Outer-Boundary Carve-Out precondition 2: formatter-aware suppressor placement** — The precondition read "inline with the catch … not above," worded for Python/Ruff where `# noqa` trails the `except` line. In TypeScript/ESLint under Prettier that placement is unreachable: Prettier relocates any trailing comment off a `} catch (err) {` line onto the next line, where an `eslint-disable-line` no longer covers the catch and reports as an unused directive — so `eslint-disable-next-line` on the immediately-preceding line is the only working attached form. The gh-aw policy reviewer (correctly, per the old literal text) rejected that form, deadlocking legitimate outer-boundary catches (must-not-die loops, a proxy's guaranteed-502 handler) against the toolchain during the nanoclaw `no-catch-all` burn-down (`jbaruch/nanoclaw#735`). Precondition 2 now accepts either placement by whichever the formatter permits — trailing on the catch line where kept there, or the immediately-preceding line where the formatter relocates it — while still rejecting a suppressor detached by any intervening line. Promise `.catch` boundaries carry no linter suppressor (not a `CatchClause`), so precondition 2 is vacuous for them; they still satisfy preconditions 1/3/4 via the `outer-boundary-process-contract` token and rationale.
+
 ## 0.3.90 — 2026-07-09
 
 ### Skills
