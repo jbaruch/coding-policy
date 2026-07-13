@@ -17,9 +17,9 @@ alwaysApply: true
 - Use the language's narrowest "everything except interrupts" form — Python `except Exception:`, or the analogous form in other languages
 - Never `except BaseException:` (or its equivalent that traps interrupts); `KeyboardInterrupt` and `SystemExit` must propagate so processes stay killable
 - Preconditions (all required):
-  1. Catch line or its preceding comment contains literal grep token `outer-boundary-process-contract`
+  1. The catch line, the suppressor line, or a comment directly above either carries the literal grep token `outer-boundary-process-contract`
   2. Where a linter requires a catch-all suppressor, it sits attached to the catch — on the catch line where the formatter keeps a trailing comment there (Python/Ruff: `# noqa: BLE001` on the `except Exception:` line), or on the immediately-preceding line where the formatter relocates a same-line trailing comment off the catch's opening brace (TypeScript/ESLint under Prettier: `// eslint-disable-next-line` directly above the `catch`). A suppressor separated from the catch by any other line does not qualify
-  3. Comment above names three things:
+  3. A comment directly above the catch — or directly above the suppressor, when precondition 2 places the suppressor immediately above the catch — names three things:
      - caller's silent-failure shape
      - what catch emits
      - why propagation breaks contract
