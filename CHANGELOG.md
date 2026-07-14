@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.91 — 2026-07-14
+
 ### Rules
 
 - **`error-handling` Outer-Boundary Carve-Out preconditions 1–3: formatter-aware suppressor placement** — Precondition 2 now accepts the catch-all suppressor either trailing the catch line (Python/Ruff) or on the immediately-preceding line (TypeScript/ESLint under Prettier, which relocates a trailing comment off the `catch` brace and breaks `eslint-disable-line`); a suppressor detached by an intervening line still fails. Preconditions 1 and 3 clarify where the token and 3-part rationale sit when the suppressor stacks directly above the catch. Surfaced by `jbaruch/nanoclaw#735`; full motivation in PR #177.
