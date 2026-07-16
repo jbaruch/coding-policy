@@ -19,6 +19,7 @@
     "rules/dependency-management.md",
     "rules/file-hygiene.md",
     "rules/ci-safety.md",
+    "rules/autonomous-shipping.md",
     "rules/no-secrets.md",
     "rules/code-formatting.md",
     "rules/language-diagnostics.md",

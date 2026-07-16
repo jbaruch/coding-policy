@@ -1,5 +1,11 @@
 # Changelog
 
+### Rules
+
+- **`autonomous-shipping` (new, always-on)** — States that opening a PR, dismissing superseded bot reviews, merging, and watching through publish are the autonomous next step once their gate reads green, and that asking on a green gate is a defect rather than a courtesy. The autonomy statements already existed in `skills/release/SKILL.md` (Step 2 "create the PR automatically", Step 7 "merge automatically") but a skill loads only on invocation — an agent that has just finished implementing a task has never invoked the release skill, so its always-on context carried the PR mandate with no word on who authorizes opening one. Agents filled the gap by asking, and the ask itself is what made the merge classifier demand approval for actions the policy had already granted. Rule names the four gating cases that survive (red/absent/ambiguous gate, no-undo actions, human `CHANGES_REQUESTED`, unowned repos) so the autonomy stays bounded. Consumers: an always-on instruction in your own `CLAUDE.md` outranks plugin rules — an "ask before pushing" line there will defeat this rule.
+- **`ci-safety`: Superseded-Bot-Review Dismissal Carve-Out → Dismissing Superseded Bot Reviews** — Retitled and reopened; preconditions and the `GATING_BOTS` scoping are unchanged. PR #174 added the carve-out precisely so agents would stop false-positiving a legitimate dismissal as gate-gaming, but titling it "Carve-Out" and opening with "Narrow exception" read as a danger signal, and agents kept asking for a go-ahead on a dismissal `dismiss-stale-reviews.sh` already validates deterministically. The section now leads with the affirmative permission and points at `autonomous-shipping`; the reset line still gates every dismissal the two preconditions miss.
+- **`release` skill Steps 2 and 7** — Reference `rules/autonomous-shipping.md` so the skill and the always-on context agree on one contract; Step 7 also names dismissal explicitly as no-ask.
+
 ## 0.3.93 — 2026-07-17
 
 ### Skills

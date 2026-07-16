@@ -6,7 +6,7 @@ Coding policy plugin for Baruch's AI agents. Language-agnostic code quality rule
 
 ## What's New
 
-- 23 rules — 16 always-on, 7 conditional (scoped via `applyTo:` to the files where the rule's prescriptions actually fire). Breakdown: 10 covering code quality, 8 covering plugin authoring, 1 covering author-model declaration, 1 covering concurrency, 1 covering review discipline, 1 covering reviewer-feedback reading, 1 covering external-repo action scope
+- 24 rules — 17 always-on, 7 conditional (scoped via `applyTo:` to the files where the rule's prescriptions actually fire). Breakdown: 10 covering code quality, 8 covering plugin authoring, 1 covering author-model declaration, 1 covering concurrency, 1 covering review discipline, 1 covering reviewer-feedback reading, 1 covering external-repo action scope, 1 covering shipping autonomy
 - `release` skill — structured PR + merge workflow with Copilot review and paired-reviewer cross-family enforcement
 - `eval-authoring` skill — generate, review, and curate eval scenarios with score-driven iteration
 - `install-reviewer` skill — scaffold the paired gh-aw PR review workflows (OpenAI + Anthropic) into a consumer repo
@@ -34,6 +34,7 @@ tessl install jbaruch/coding-policy
 | Deps | [dependency-management](rules/dependency-management.md) | Stdlib-first, pinned versions kept fresh via a renewal mechanism, lock files |
 | Files | [file-hygiene](rules/file-hygiene.md) | Proper .gitignore, no generated files committed |
 | CI | [ci-safety](rules/ci-safety.md) | Never skip tests, never modify CI without asking |
+| Shipping | [autonomous-shipping](rules/autonomous-shipping.md) | A green gate is the go-ahead — open the PR, dismiss superseded bot reviews, merge and watch through publish without asking; asking on a green gate is the violation |
 | Secrets | [no-secrets](rules/no-secrets.md) | No credentials in code, env vars or secrets manager |
 | Style | [code-formatting](rules/code-formatting.md) | Use project's formatter, don't mix style with logic |
 | Types | [language-diagnostics](rules/language-diagnostics.md) | Enable the project's language server; its findings are non-dismissible without cause; gate the headless checker in CI at zero findings |

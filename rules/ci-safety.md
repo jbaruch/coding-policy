@@ -16,9 +16,10 @@ alwaysApply: true
 - Never disable or skip failing tests to unblock a merge
 - If tests fail, fix the tests or fix the code
 
-## Superseded-Bot-Review Dismissal Carve-Out
+## Dismissing Superseded Bot Reviews
 
-- Narrow exception for dismissing a review gate — not a bypass when the gate is a bot's `CHANGES_REQUESTED` that the same bot later superseded with an all-clear re-review
+- Dismiss autonomously once both preconditions below hold — sanctioned gate cleanup, never a bypass, and never an operator ack (see `rules/autonomous-shipping.md`)
+- The gate is a bot's `CHANGES_REQUESTED` that the same bot later superseded with an all-clear re-review
 - Applies when a gating bot that cannot `APPROVE` (`github-actions[bot]` — GitHub returns HTTP 422) re-reviews clean but cannot post the `APPROVED` verdict that would supersede its earlier `CHANGES_REQUESTED` — the stale request keeps the merge `BLOCKED` until dismissed
 - Preconditions (all required):
   1. The dismissed review is a `CHANGES_REQUESTED` from a gating bot on the allowlist (`GATING_BOTS` in `skills/release/dismiss-stale-reviews.sh`), never a human reviewer — a human can `APPROVE`, so a human's supersession goes through re-request-and-approve, never dismissal
