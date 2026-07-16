@@ -234,6 +234,46 @@ t_toplevel_comments_by_returns_zero_for_no_comments() {
   assert_eq "comments count for empty" "0" "$count"
 }
 
+# Copilot authors its REVIEW as `copilot-pull-request-reviewer[bot]` but its
+# INLINE COMMENTS as `Copilot`. Counting comments against the review login
+# matched nothing, so `inline_comments.copilot` read 0 on every PR — vacuously
+# satisfying the release skill's Step 7 "every inline comment has a reply" gate
+# and letting a real Copilot finding merge unanswered.
+t_toplevel_comments_by_counts_copilot_login() {
+  MOCK_COMMENTS_BODY='[{"user":{"login":"Copilot"},"in_reply_to_id":null,"path":"a/b.md","body":"Real finding."}]'
+  local count
+  count=$(toplevel_comments_by "owner" "repo" "1" "${COPILOT_COMMENT_LOGINS[@]}")
+  assert_eq "Copilot-authored comment is counted" "1" "$count"
+}
+
+# The review login must stay in the comment set: a regression that swapped one
+# login for the other instead of matching both would pass the test above and
+# still lose comments on any PR where Copilot posts under the review login.
+t_toplevel_comments_by_matches_either_copilot_login() {
+  MOCK_COMMENTS_BODY='[{"user":{"login":"Copilot"},"in_reply_to_id":null},{"user":{"login":"copilot-pull-request-reviewer[bot]"},"in_reply_to_id":null}]'
+  local count
+  count=$(toplevel_comments_by "owner" "repo" "1" "${COPILOT_COMMENT_LOGINS[@]}")
+  assert_eq "both Copilot logins counted" "2" "$count"
+}
+
+t_toplevel_comments_by_excludes_replies_and_other_logins() {
+  MOCK_COMMENTS_BODY='[{"user":{"login":"Copilot"},"in_reply_to_id":null},{"user":{"login":"Copilot"},"in_reply_to_id":991},{"user":{"login":"some-human"},"in_reply_to_id":null}]'
+  local count
+  count=$(toplevel_comments_by "owner" "repo" "1" "${COPILOT_COMMENT_LOGINS[@]}")
+  assert_eq "replies and foreign logins excluded" "1" "$count"
+}
+
+# End-to-end through main() — the path the Step 7 merge gate actually reads.
+# gh-aw and Copilot counts must not bleed into each other.
+t_main_counts_copilot_comments_in_snapshot() {
+  MOCK_MERGE_STATE=clean
+  MOCK_COMMENTS_BODY='[{"user":{"login":"Copilot"},"in_reply_to_id":null},{"user":{"login":"github-actions[bot]"},"in_reply_to_id":null},{"user":{"login":"github-actions[bot]"},"in_reply_to_id":null}]'
+  local out counts
+  out=$(main "owner" "repo" "1")
+  counts=$(echo "$out" | jq -r '.inline_comments | "\(.gh_aw)|\(.copilot)"')
+  assert_eq "inline_comments {gh_aw|copilot}" "2|1" "$counts"
+}
+
 # --- driver ---
 
 echo "== poll-pr-reviews.sh tests =="
@@ -248,6 +288,10 @@ run "latest_review_by surfaces the review body text"                  t_latest_r
 run "latest_review_by ignores other logins across pages"              t_latest_review_by_filters_other_logins_across_pages
 run "toplevel_comments_by sums counts across pages (issue #83)"       t_toplevel_comments_by_sums_across_pages
 run "toplevel_comments_by returns 0 for empty comments"               t_toplevel_comments_by_returns_zero_for_no_comments
+run "toplevel_comments_by counts the 'Copilot' comment login"         t_toplevel_comments_by_counts_copilot_login
+run "toplevel_comments_by matches either Copilot login"               t_toplevel_comments_by_matches_either_copilot_login
+run "toplevel_comments_by excludes replies and foreign logins"        t_toplevel_comments_by_excludes_replies_and_other_logins
+run "main counts Copilot comments in the snapshot"                    t_main_counts_copilot_comments_in_snapshot
 
 echo "== summary: ${PASS_COUNT} passed, ${FAIL_COUNT} failed =="
 [[ "$FAIL_COUNT" -eq 0 ]]

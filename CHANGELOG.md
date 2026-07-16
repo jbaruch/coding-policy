@@ -1,5 +1,9 @@
 # Changelog
 
+### Skills
+
+- **`release`: `poll-pr-reviews.sh` counted zero Copilot inline comments on every PR** — Copilot authors its review as `copilot-pull-request-reviewer[bot]` but its inline comments as `Copilot`; `toplevel_comments_by` matched comments against the review login, so `inline_comments.copilot` was a constant `0`. Step 7's merge gate reads that count for its "every inline comment has a `Fixed in <sha>` or `Declining — <reason>` reply" condition, which a zero count satisfies vacuously — every Copilot inline finding since the counter was written was invisible to the release workflow and mergeable unanswered. Comment counting now matches a set of logins per reviewer (`GH_AW_COMMENT_LOGINS`, `COPILOT_COMMENT_LOGINS` at the top of the script) rather than the single review login; a comment carries one author, so listing both cannot double-count. gh-aw was unaffected (`github-actions[bot]` authors both its reviews and comments), as was `dismiss-stale-reviews.sh` (it matches reviews, where the review login is correct). Found while shipping PR #178: Copilot's body said "generated 1 comment", the watcher reported 0, and the real comment turned out to be a correct finding about the PR's own diff. Regression covered end-to-end through `main()` — the path the gate reads — plus unit coverage for either-login matching and reply/foreign-login exclusion.
+
 ## 0.3.92 — 2026-07-17
 
 ### Rules
