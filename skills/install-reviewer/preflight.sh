@@ -72,7 +72,18 @@ fi
 # NOT in a worktree, the check_in_git_worktree step below will fail
 # cleanly; don't exit here — we want to surface all preflight failures
 # as structured JSON, not die early.
-repo_root=$(git rev-parse --show-toplevel 2>/dev/null || true)
+# `2>/dev/null` hides git's own "not a git repository" text because that
+# case is handled below and reported as structured JSON — the failure is
+# handled, not suppressed. Branch on the code rather than blanket-`|| true`:
+# 128 is the expected not-a-repo answer, anything else is a real git fault
+# that `|| true` would have read as "not in a repo" and silently skipped.
+repo_root=""
+git_rc=0
+repo_root=$(git rev-parse --show-toplevel 2>/dev/null) || git_rc=$?
+if [[ $git_rc -ne 0 && $git_rc -ne 128 ]]; then
+  echo "preflight.sh: 'git rev-parse --show-toplevel' failed (rc=${git_rc}) — not the ordinary not-a-repo case; verify git is installed and the repository is readable, then re-run" >&2
+  exit 2
+fi
 if [[ -n "$repo_root" ]]; then
   cd "$repo_root"
 fi
@@ -140,7 +151,17 @@ check_gh_aw_min_version() {
   local raw min major minor patch min_major min_minor min_patch
   # `gh aw --version` writes to stderr (typical gh-extension idiom), so merge
   # streams before parsing rather than discarding stderr.
-  raw=$(gh aw --version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n1) || true
+  # Branch on the pipeline's code instead of `|| true`. The unparseable
+  # case is a real preflight finding reported below, but `|| true` also
+  # swallowed `gh` being absent entirely and grep's own failures — every
+  # cause collapsed into one "could not parse" message pointing at a
+  # re-install that may not be the problem.
+  local raw_rc=0
+  raw=$(gh aw --version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n1) || raw_rc=$?
+  if [[ $raw_rc -gt 1 ]]; then
+    push_failure "gh-aw-min-version" "Could not run 'gh aw --version' (rc=${raw_rc}) — verify the gh CLI is installed and on PATH ('command -v gh'), then re-run"
+    return
+  fi
   if [[ -z "$raw" ]]; then
     push_failure "gh-aw-min-version" "Could not parse 'gh aw --version' output — re-install with 'gh extension remove gh-aw && gh extension install github/gh-aw --pin v${GH_AW_PIN}'"
     return

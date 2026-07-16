@@ -44,14 +44,21 @@ set -euo pipefail
 # `\b` GNU extension) and `-i` so capitalized "Tile" is not missed. Emits a
 # JSON array of matching file paths (relative, sorted) on stdout. Always 0.
 scan_residual_files() {
-  local files
-  # `|| true`: grep exits 1 on no matches, which would trip `set -o
-  # pipefail` and abort the migration after it already succeeded.
+  local files grep_rc=0
+  # grep exits 1 on no matches — a real, expected result (a clean tree has
+  # no residual 'tile' references), not a failure. Branch on the code rather
+  # than `|| true`, which also swallowed grep's exit 2: an unreadable
+  # directory would report "no residual files" and the migration would
+  # declare clean a tree it never managed to scan.
   files=$(grep -rIliwE 'tiles?' . \
     --exclude-dir=.git \
     --exclude-dir=.tessl \
     --exclude-dir=node_modules \
-    --exclude='CHANGELOG.md' 2>/dev/null || true)
+    --exclude='CHANGELOG.md' 2>/dev/null) || grep_rc=$?
+  if [[ $grep_rc -gt 1 ]]; then
+    echo "migrate.sh: residual-file scan failed (grep rc=${grep_rc}) — the tree could not be fully read, so a 'no residual files' result cannot be trusted; check directory permissions, then re-run" >&2
+    return 2
+  fi
   if [[ -z "$files" ]]; then
     echo '[]'
     return 0

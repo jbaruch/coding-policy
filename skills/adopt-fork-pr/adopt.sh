@@ -86,8 +86,16 @@ die() { printf 'adopt.sh: %s\n' "$1" >&2; exit "${2:-1}"; }
 
 restore_orig_ref() {
   if [ -n "$orig_ref" ]; then
-    git checkout --quiet "$orig_ref" >/dev/null 2>&1 || true
+    # Best-effort: this runs on the error path, where the caller is already
+    # reporting a failure — a checkout failure here must not replace that
+    # message or the exit code with its own. Best-effort is not silent
+    # though: `|| true` left the operator on an unexpected branch with no
+    # hint, which is the worst version of this outcome.
+    if ! git checkout --quiet "$orig_ref" >/dev/null 2>&1; then
+      echo "adopt.sh: warning: could not restore the original ref '${orig_ref}' — you are left on the branch adopt.sh was using; run 'git checkout ${orig_ref}' to get back" >&2
+    fi
   fi
+  return 0
 }
 
 slugify() {
@@ -99,12 +107,25 @@ slugify() {
 }
 
 extract_author_model_line() {
-  # echoes the first `**Author-Model:**` / `Author-Model:` line in $1 (trimmed),
-  # or empty. grep no-match (exit 1) is swallowed; the line is data, not status.
-  printf '%s\n' "$1" \
-    | grep -m1 -E '^[[:space:]]*\*{0,2}Author-Model:' \
-    | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//' \
-    || true
+  # Echoes the first `**Author-Model:**` / `Author-Model:` line in $1
+  # (trimmed), or empty. A missing line is data, not status — an absent
+  # declaration is a valid input the caller handles.
+  #
+  # Branch on grep's code rather than `|| true`, which read exit 2 (a
+  # broken pattern, a read fault) as "no Author-Model line". That matters
+  # here specifically: rules/author-model-declaration.md makes an absent
+  # declaration block the PR, so a grep fault would silently manufacture
+  # the blocking verdict instead of reporting itself.
+  local line rc=0
+  line=$(printf '%s\n' "$1" | grep -m1 -E '^[[:space:]]*\*{0,2}Author-Model:') || rc=$?
+  case "$rc" in
+    0) printf '%s\n' "$line" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//' ;;
+    1) ;;  # no declaration present: echo nothing
+    *)
+      echo "adopt.sh: grep failed (rc=${rc}) scanning the PR body for an Author-Model declaration — cannot distinguish 'absent' from 'unreadable'; report this with the PR body that triggered it" >&2
+      return 2
+      ;;
+  esac
 }
 
 open_pr_url_for() {

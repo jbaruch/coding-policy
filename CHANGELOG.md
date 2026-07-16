@@ -1,5 +1,13 @@
 # Changelog
 
+### Rules
+
+- **`error-handling`: new Shell Error Handling section** — the rule was entirely silent on shell (no `set -euo pipefail`, no suppression ban), so consumers installing the plugin inherited none of the discipline the repo itself practises in all 18 of its non-test scripts. Encodes: mandatory `set -euo pipefail`; no `|| true` / `|| :` / bare `2>/dev/null`; explicit `if`/`case` on exit codes for commands that can legitimately fail; the distinction between an expected non-result and a tool failure (`grep` exits 1 on no-match, 2 on error — `|| true` collapses both); that silencing a *diagnostic* while explicitly handling the *failure* is not suppression; and that "fail visibly" permits a stderr warning rather than requiring exit non-zero. Full motivation: PR #184.
+
+### Skills
+
+- **All 16 production `|| true` sites converted to explicit exit-code handling** — landed with the rule above so it ships describing a repo that already obeys it (`rules/context-artifacts.md` Post-Edit Rule Audit). Three patterns: `grep`-no-match (`verify-publish-landed`, `scaffold`, `preflight`, `migrate`, `adopt`) now branch on rc so exit 2 is no longer read as "nothing found"; `jq` extraction (`verify-moderation-cleared`) validates the body once so a non-JSON response stops blaming the registry's shape; best-effort cleanup (`scaffold`, `adopt`) keeps its lenient behaviour but warns to stderr instead of skipping in silence. Full motivation: PR #184.
+
 ## 0.3.93 — 2026-07-17
 
 ### Skills

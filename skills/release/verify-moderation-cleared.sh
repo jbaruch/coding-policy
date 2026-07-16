@@ -120,10 +120,28 @@ main() {
     body=$(tessl api "$endpoint" 2>"$err_file") \
       || { local err; err=$(cat "$err_file"); echo "error: 'tessl api ${endpoint}' failed: ${err} — verify (1) tessl CLI is installed and on PATH ('command -v tessl'), (2) the workspace/plugin/version slug is correct, (3) you have network access to the registry, then re-run; the version was already confirmed on the registry by verify-publish-landed.sh, so a persistent failure here is a tool/auth/network problem, not a missing version" >&2; exit 2; }
 
+    # Validate the payload ONCE, explicitly, before extracting fields.
+    # Each extraction previously carried `2>/dev/null || true`, collapsing
+    # two different states into the same empty string: a field legitimately
+    # absent (what `// empty` is for), and a body that is not JSON at all
+    # (a proxy error page, an HTML 502). Both then reached the same
+    # "response shape may have changed — update this script's jq paths"
+    # diagnostic below. That exit code was right and the message was wrong:
+    # it sends the operator to rewrite a parse that works, against a
+    # registry that is returning 502s (rules/error-handling.md Actionable
+    # Messages).
+    if ! printf '%s' "$body" | jq -e . >/dev/null 2>&1; then
+      echo "error: 'tessl api ${endpoint}' returned a body that is not valid JSON — the registry may be returning an error page or the endpoint shape changed; inspect it directly with 'tessl api ${endpoint}' before retrying (body was: ${body})" >&2
+      exit 2
+    fi
+
+    # `// empty` covers an absent field; the body is known-valid JSON by
+    # now, so a jq failure here is a real fault and propagates under
+    # `set -e` rather than being read as an empty field.
     local status passed mod_error
-    status=$(printf '%s' "$body" | jq -r '.data.attributes.moderationStatus // empty' 2>/dev/null || true)
-    passed=$(printf '%s' "$body" | jq -r '.data.attributes.moderationPassed // empty' 2>/dev/null || true)
-    mod_error=$(printf '%s' "$body" | jq -r '.data.attributes.moderationError // empty' 2>/dev/null || true)
+    status=$(printf '%s' "$body" | jq -r '.data.attributes.moderationStatus // empty')
+    passed=$(printf '%s' "$body" | jq -r '.data.attributes.moderationPassed // empty')
+    mod_error=$(printf '%s' "$body" | jq -r '.data.attributes.moderationError // empty')
 
     # A moderationError alone is a valid (blocked) response, so it counts
     # as a parsed field — without it in the guard, a block-by-error result

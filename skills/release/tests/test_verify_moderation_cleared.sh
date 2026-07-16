@@ -221,6 +221,38 @@ queue 1 '{"data":{"attributes":{}}}'
 out=$(main acme widget 1.2.3 2>/dev/null); rc=$?
 if [[ $rc -eq 2 ]]; then pass "no moderation fields: exit 2"; else fail "unparseable (rc=$rc out=$out)"; fi
 
+# --- 11. Body that is not JSON at all ---
+# The field extractions used to carry `2>/dev/null || true`, which read a
+# non-JSON body (a proxy error page, an HTML 502) as "no moderation fields
+# present". The script still exited 2 — this was never a vacuous pass — but
+# it reported the wrong cause: "the registry response shape may have
+# changed; update verify-moderation-cleared.sh's jq paths", sending the
+# operator to edit a parse that is working fine against a registry that is
+# returning 502s. Per rules/error-handling.md Actionable Messages, the
+# message must name what to do; naming the wrong thing is worse than
+# terse, because it is confidently wrong.
+reset_mocks
+queue 1 '<html><head><title>502 Bad Gateway</title></head></html>'
+err=$( { main acme widget 1.2.3 >/dev/null; } 2>&1 ); rc=$?
+if [[ $rc -eq 2 ]] && [[ "$err" == *"not valid JSON"* ]]; then
+  pass "non-JSON body: exit 2 naming the real fault"
+else
+  fail "non-JSON body (rc=$rc err=$err)"
+fi
+
+# --- 12. Truncated JSON body ---
+# jq fails outright here rather than returning empty; the old suppression
+# turned that failure into the same misdirected "update the jq paths"
+# message as case 11.
+reset_mocks
+queue 1 '{"data":{"attributes":{"moderationStatus":'
+err=$( { main acme widget 1.2.3 >/dev/null; } 2>&1 ); rc=$?
+if [[ $rc -eq 2 ]] && [[ "$err" == *"not valid JSON"* ]]; then
+  pass "truncated JSON body: exit 2 naming the real fault"
+else
+  fail "truncated JSON (rc=$rc err=$err)"
+fi
+
 echo
 echo "verify-moderation-cleared: ${PASS_COUNT} passed, ${FAIL_COUNT} failed"
 [[ $FAIL_COUNT -eq 0 ]]

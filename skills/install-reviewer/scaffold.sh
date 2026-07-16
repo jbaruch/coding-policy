@@ -58,6 +58,52 @@ set -euo pipefail
 # EOF; \s+\z would no-op on the exact reported failure mode). Perl is
 # best-effort so a missing perl binary doesn't fail the scaffold —
 # the missing-newline fix landed via the bash stage in that case.
+# Echo the 1-based line number of the first line in <file> matching
+# <pattern>, or nothing when nothing matches. <mode> is grep's pattern
+# flag: -F fixed-string, -E extended-regex.
+#
+# The explicit rc branch is the point. `grep ... || true` collapses grep's
+# exit 1 (no match — a real, expected state) with its exit 2 (unreadable
+# file, bad pattern — a fault), so a failed READ reports as "not present"
+# and the caller rewrites a file it never actually inspected.
+first_match_line() {
+  local mode="$1" pattern="$2" file="$3"
+  local out rc=0
+  out=$(grep -n "$mode" -e "$pattern" -- "$file") || rc=$?
+  case "$rc" in
+    0) printf '%s\n' "$out" | head -1 | cut -d: -f1 ;;
+    1) ;;  # no match: echo nothing, caller treats empty as absent
+    *)
+      echo "scaffold.sh: grep failed (rc=${rc}) reading ${file} — cannot determine the file's layout; verify it is readable, then re-run" >&2
+      return 2
+      ;;
+  esac
+}
+
+# Strip trailing whitespace and collapse EOF whitespace in one compiled
+# lock file. Best-effort by design — see the caller for why hard-failing
+# after a successful compile is the worse outcome.
+#
+# Best-effort means "does not exit non-zero"; it does NOT mean silent. The
+# previous `|| true` hid which tool was missing, so a consumer whose runner
+# lacked perl saw the reviewer flag upstream gh-aw drift on their first PR
+# with nothing connecting it to a cleanup that never ran here.
+sanitize_lock() {
+  local l="$1"
+  if sed -i.bak -E 's/[[:space:]]+$//' "$l" 2>/dev/null; then
+    rm -f "${l}.bak"
+  else
+    echo "scaffold.sh: warning: sed failed on ${l} — skipped trailing-whitespace strip; the reviewer may flag gh-aw drift on the first PR" >&2
+  fi
+  # perl -0 reads the whole file as one record; \s+\z matches any run of
+  # whitespace at the absolute end. Deliberately \s+\z, not the \s*\z used
+  # by collapse_trailing_newlines — see that function's caller.
+  if ! perl -i -0pe 's/\s+\z/\n/' "$l" 2>/dev/null; then
+    echo "scaffold.sh: warning: perl failed on ${l} — skipped EOF-whitespace collapse; the reviewer may flag gh-aw drift on the first PR" >&2
+  fi
+  return 0
+}
+
 ensure_gitattributes_marker() {
   local target="$1" rule="$2"
   if [[ ! -f "$target" ]] || ! grep -qxF "$rule" "$target"; then
@@ -70,8 +116,30 @@ ensure_gitattributes_marker() {
     printf '\n' >> "$target"
   fi
   if [[ -f "$target" ]]; then
-    perl -i -0pe 's/\s*\z/\n/' "$target" 2>/dev/null || true
+    collapse_trailing_newlines "$target"
   fi
+}
+
+# Collapse trailing whitespace at EOF to a single newline. Best-effort by
+# design: the bash stage above already guaranteed the file ENDS with a
+# newline, so a missing perl costs cosmetic tidiness, not correctness, and
+# hard-failing here would abandon a scaffold that otherwise succeeded.
+#
+# Best-effort means "does not exit non-zero" — it does NOT mean silent.
+# The previous `|| true` swallowed the reason entirely, so a runner without
+# perl produced a subtly different file than a runner with one and nothing
+# said why. A warning keeps the lenient behaviour and makes the divergence
+# explainable.
+collapse_trailing_newlines() {
+  local file="$1"
+  if ! command -v perl >/dev/null; then
+    echo "scaffold.sh: warning: perl not found — skipped trailing-newline cleanup on ${file} (file still ends with a newline; cosmetic only)" >&2
+    return 0
+  fi
+  if ! perl -i -0pe 's/\s*\z/\n/' "$file" 2>/dev/null; then
+    echo "scaffold.sh: warning: perl failed on ${file} — skipped trailing-newline cleanup (file still ends with a newline; cosmetic only)" >&2
+  fi
+  return 0
 }
 
 # Parse the "owner/repo" slug from a git remote URL. Handles the three
@@ -143,8 +211,8 @@ ensure_env_example() {
   local link_in_header=0
   if [[ -f "$target" ]]; then
     local link_ln var_ln
-    link_ln=$( { grep -nF "$expected_link" "$target" || true; } | head -1 | cut -d: -f1 )
-    var_ln=$( { grep -nE '^[A-Za-z_][A-Za-z0-9_]*=' "$target" || true; } | head -1 | cut -d: -f1 )
+    link_ln=$(first_match_line -F "$expected_link" "$target")
+    var_ln=$(first_match_line -E '^[A-Za-z_][A-Za-z0-9_]*=' "$target")
     if [[ -n "$link_ln" ]] && { [[ -z "$var_ln" ]] || [[ "$link_ln" -lt "$var_ln" ]]; }; then
       link_in_header=1
     fi
@@ -205,7 +273,7 @@ ensure_env_example() {
   if [[ -f "$target" && -s "$target" && -n "$(tail -c 1 "$target")" ]]; then
     printf '\n' >> "$target"
   fi
-  perl -i -0pe 's/\s*\z/\n/' "$target" 2>/dev/null || true
+  collapse_trailing_newlines "$target"
 }
 
 OVERRIDE_MODE=0
@@ -378,7 +446,15 @@ main() {
       # If the directory itself didn't exist before and is now empty, remove
       # it too so the rollback leaves no trace.
       if [[ $aw_dir_existed_before -eq 0 ]]; then
-        rmdir "$(dirname "$ACTIONS_LOCK")" 2>/dev/null || true
+        # rmdir exits non-zero when the directory is non-empty — expected
+        # whenever the consumer has other content there, and the right
+        # outcome: a rollback must not delete files it did not create.
+        # Ask whether the directory is empty instead of suppressing the
+        # refusal, so a genuine rmdir failure (permissions) still surfaces.
+        local aw_dir; aw_dir="$(dirname "$ACTIONS_LOCK")"
+        if [[ -d "$aw_dir" ]] && [[ -z "$(ls -A "$aw_dir")" ]]; then
+          rmdir "$aw_dir"
+        fi
       fi
     fi
     echo "error: 'gh aw compile ${WORKFLOWS[*]}' failed — rolled back ${sources[*]}, ${locks[*]}, and restored prior state of ${ACTIONS_LOCK}" >&2
@@ -404,19 +480,13 @@ main() {
   # Sanitization runs AFTER the compile-success rollback boundary above, so
   # any tool failure here is best-effort cleanup, not grounds for hard-failing
   # and leaving the consumer with half-sanitized locks. perl is standard on
-  # Linux/macOS runners but the contract shouldn't rely on that — the
-  # `|| true` opts out of `set -e` so a missing perl/sed (or any cleanup
-  # error) still lets the scaffold complete. If sanitization is skipped,
-  # the upstream gh-aw drift remains in the lock file and the reviewer
-  # flags it on the consumer's first PR; that's a worse experience than
-  # the sanitization landing, but a strictly better experience than rolling
-  # back the whole scaffold after compile succeeded.
+  # Linux/macOS runners but the contract shouldn't rely on that. If
+  # sanitization is skipped, the upstream gh-aw drift remains in the lock
+  # file and the reviewer flags it on the consumer's first PR; that's a worse
+  # experience than the sanitization landing, but a strictly better experience
+  # than rolling back the whole scaffold after compile succeeded.
   for l in "${locks[@]}"; do
-    sed -i.bak -E 's/[[:space:]]+$//' "$l" 2>/dev/null && rm -f "${l}.bak" || true
-    # Collapse trailing whitespace at EOF (including blank trailing lines)
-    # to a single newline. perl -0 reads the whole file as one record;
-    # \s+\z matches any run of whitespace at the absolute end.
-    perl -i -0pe 's/\s+\z/\n/' "$l" 2>/dev/null || true
+    sanitize_lock "$l"
   done
 
   # Ensure the lock files are marked as generated artifacts per

@@ -142,15 +142,31 @@ main() {
   local tessl_output
   tessl_output=$(tessl plugin info "${workspace}/${tile}" 2>"$err_file") \
     || { local err; err=$(cat "$err_file"); echo "error: 'tessl plugin info ${workspace}/${tile}' failed: ${err} — verify (1) tessl CLI is installed and on PATH ('command -v tessl'), (2) the workspace/plugin slug is correct, (3) you have network access to the registry, then re-run 'tessl plugin info ${workspace}/${tile}' directly to inspect the failure before retrying the publish verification" >&2; exit 2; }
-  # `|| true` lets the parse-miss case fall through to the explicit
-  # `-z` diagnostic below rather than triggering `set -e` + `pipefail`
-  # exit. Without it, grep's exit-1 on no-match (compounded by pipefail)
-  # would propagate through the command substitution and terminate the
-  # script before the actionable parse-miss diagnostic fires.
+  # Branch on grep's exit code explicitly. A bare `|| true` would let the
+  # parse-miss reach the `-z` diagnostic below, but it collapses grep's two
+  # non-zero codes into one: 1 is "no match" (a real, expected state — the
+  # registry didn't print the line) and 2 is "grep itself failed" (bad
+  # regex, unreadable input). Suppressing both reports a broken tool as a
+  # missing line, sending the operator to debug the registry over a fault
+  # in this script.
+  local version_line rc=0
+  version_line=$(printf '%s\n' "$tessl_output" | grep "Latest Version") || rc=$?
+  case "$rc" in
+    0) ;;
+    1)
+      echo "error: could not parse 'Latest Version' from 'tessl plugin info ${workspace}/${tile}' output — the registry output shape may have changed; inspect it directly and update this parse (output was: ${tessl_output})" >&2
+      exit 2
+      ;;
+    *)
+      echo "error: grep failed (rc=${rc}) while parsing 'tessl plugin info ${workspace}/${tile}' output — this is a fault in verify-publish-landed.sh's parse, not a registry problem; report it with the output that triggered it (output was: ${tessl_output})" >&2
+      exit 2
+      ;;
+  esac
+
   local current
-  current=$(printf '%s\n' "$tessl_output" | grep "Latest Version" | awk '{print $NF}' || true)
+  current=$(printf '%s\n' "$version_line" | awk '{print $NF}')
   if [[ -z "$current" ]]; then
-    echo "error: could not parse 'Latest Version' from 'tessl plugin info ${workspace}/${tile}' output (output was: ${tessl_output})" >&2
+    echo "error: 'Latest Version' line present but carried no version token in 'tessl plugin info ${workspace}/${tile}' output (line was: ${version_line})" >&2
     exit 2
   fi
 
