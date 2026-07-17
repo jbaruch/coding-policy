@@ -16,7 +16,7 @@ description: A green gate is the go-ahead; pausing to ask for approval the gate 
 ## What Counts as Approval
 
 - Review is the paired bot fleet, not a human sign-off — a merge needs no human approval, except where another always-on rule names an owner-approval precondition (see What Still Gates)
-- Merge approval is exactly `skills/release/SKILL.md` Step 7's preconditions — load Step 7 before merging; this rule never restates them and never adds an approval field
+- The merge gate has two halves, both required: `skills/release/SKILL.md` Step 7's executable preconditions (watcher-checked) AND every What Still Gates condition (agent-checked). Load Step 7 and confirm What Still Gates before merging; this rule restates neither
 - A gating bot that cannot `APPROVE` posts its all-clear as `COMMENTED` — `github-actions[bot]` gets HTTP 422 (see `rules/ci-safety.md` Superseded-Bot-Review Dismissal Carve-Out)
 
 ## The Autonomous Actions
