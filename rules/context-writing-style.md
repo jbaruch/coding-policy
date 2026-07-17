@@ -15,7 +15,8 @@ description: Prose discipline for rules, skills, and READMEs — what to cut, wh
 - CHANGELOG entries load only on demand, not always-on
 - CHANGELOG entries are the archive — they carry the motivation and incident references stripped from rules, and follow looser discipline
 - `What to Cut` and `Structure` do not govern CHANGELOG. `What to Cut` names CHANGELOG as where the stripped explanation goes; a connective ban there would leave it nowhere to live. The rule reaches CHANGELOG only to say what belongs in it
-- Line-count and section-count budgets target single-concept rules; rules that cover one coherent policy area with several sub-aspects (e.g., `plugin-evals` covering coverage/lift/persistence/naming/hygiene; `context-artifacts` covering structure/review/sync/audit; `skill-authoring` covering frontmatter/preamble/steps/calls) may run larger
+- The ~25–40 line and 3–6 section budgets bind single-concept rules only. A rule with 4 or more named H2 sub-aspect sections is multi-aspect and exempt from both numeric budgets (e.g. `plugin-evals` covering coverage/lift/persistence/naming/hygiene; `context-artifacts` covering structure/review/sync/audit; `autonomous-shipping` covering green-gate/approval/actions/asking/gating)
+- A multi-aspect rule still owes every non-numeric discipline in full — atomic bullets, the connective and intensifier bans, carve-out format. Exempt from the counts, never from the prose quality
 - Lists and quoted literals naming the forbidden terms themselves (e.g., this rule's own bullets enumerating the connectives and intensifiers) are not violations — the directive is the list, not prose use of the listed words
 
 ## What to Cut
