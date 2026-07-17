@@ -84,8 +84,17 @@ fi
 repo_root=""
 git_rc=0
 git_err=""
-repo_root=$(git rev-parse --show-toplevel 2>/tmp/preflight_git_err.$$) || git_rc=$?
-git_err=$(cat /tmp/preflight_git_err.$$ 2>/dev/null); rm -f /tmp/preflight_git_err.$$
+git_err_file=$(mktemp) || { echo "preflight.sh: mktemp failed — cannot capture git stderr; check TMPDIR is writable" >&2; exit 2; }
+repo_root=$(git rev-parse --show-toplevel 2>"$git_err_file") || git_rc=$?
+# Read only if readable (explicit branch, not `2>/dev/null` suppression), then
+# clean up with a checked rm so a failed cleanup warns rather than aborting
+# under this script's `set -e`.
+if [[ -r "$git_err_file" ]]; then
+  git_err=$(cat "$git_err_file")
+fi
+if ! rm -f "$git_err_file"; then
+  echo "preflight.sh: warning: could not remove temp file ${git_err_file} — remove it by hand" >&2
+fi
 # rc 128 whose stderr carries the not-a-repo sentinel is the expected case:
 # fall through, and check_in_git_worktree below reports it as structured
 # JSON. Every other non-zero rc — and a 128 WITHOUT that sentinel — is a

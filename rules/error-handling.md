@@ -42,7 +42,7 @@ alwaysApply: true
   1. Each check is independent — a later one's result never depends on an earlier one having passed
   2. The script captures each check's exit code explicitly and exits non-zero when any check failed
   3. It keeps `set -uo pipefail` — only `-e` is dropped
-  4. Setup steps the checks depend on (temp dirs, fixtures, tool presence) carry their own explicit failure check
+  4. A setup step whose failure would silently corrupt the run rather than loudly abort it — a temp dir spliced onto `PATH`, a value that defaults to something dangerous — carries its own explicit failure check. A temp dir used only as a path for later file operations already fails loudly on first use and needs none
 - Every other shell script still opens with `set -euo pipefail`
 - Narrow exception for `|| true` on a `source` of the script under test — sourcing runs that script's own `set -euo pipefail` in the harness's shell, and its entry-point guard then returns non-zero under the `-e` it just enabled
 - Preconditions (all required):
