@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.92 — 2026-07-17
+
 ### Rules
 
 - **`context-writing-style` Scope: resolve the frontmatter/body contradiction over `skills/**` reference files** — The rule's body scoped it to auto-loaded artifacts ("skills on invocation") while its own `applyTo:` glob said `skills/**/*.md`, which matches every on-demand reference file under `skills/<name>/references/**`. The two halves disagreed and the rule fired inconsistently: on `jbaruch/speaker-toolkit#117` the gh-aw reviewer returned a `context-writing-style` violation, then "All rules pass — no violations found", then a violation again — three verdicts on prose unchanged between runs, with nothing in the rule to say which half wins. Frontmatter now reads `skills/**/SKILL.md`, and Scope states the operative test: load-time, not directory. A file the agent receives without choosing it is in scope; a file it opens after reading a pointer is not.
