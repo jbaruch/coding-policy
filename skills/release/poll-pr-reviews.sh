@@ -104,7 +104,12 @@ main() {
   checks_raw=$(gh pr checks "$pr_number" --repo "${owner}/${repo}" --json name,bucket 2>&1) || rc=$?
   if [[ $rc -eq 0 ]]; then
     checks_json="$checks_raw"
-  elif [[ $rc -eq 8 ]] || echo "$checks_raw" | grep -qi "no check"; then
+  # Here-string, not `echo | grep -qi`: `-q` makes grep exit at the first
+  # match and close the pipe on a still-writing echo, so under `pipefail` the
+  # pipeline can carry echo's SIGPIPE (141) while grep matched — turning this
+  # no-checks branch false and routing a valid state into the error exit
+  # below (rules/error-handling.md Shell Error Handling).
+  elif [[ $rc -eq 8 ]] || grep -qi "no check" <<<"$checks_raw"; then
     checks_json='[]'
   else
     echo "error: gh pr checks failed (rc=${rc}): ${checks_raw}" >&2

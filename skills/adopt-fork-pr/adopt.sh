@@ -116,10 +116,15 @@ extract_author_model_line() {
   # here specifically: rules/author-model-declaration.md makes an absent
   # declaration block the PR, so a grep fault would silently manufacture
   # the blocking verdict instead of reporting itself.
+  # Here-strings, no pipelines: under `pipefail` a pipeline reports the
+  # rightmost NON-ZERO status, so `printf | grep -m1` lets a SIGPIPE'd printf
+  # (grep -m1 exits at the first match and closes the pipe on it) carry 141
+  # while grep exits 0 — firing the tool-fault branch on a successful parse.
+  # With no second process, grep's own rc is the only status the `case` reads.
   local line rc=0
-  line=$(printf '%s\n' "$1" | grep -m1 -E '^[[:space:]]*\*{0,2}Author-Model:') || rc=$?
+  line=$(grep -m1 -E '^[[:space:]]*\*{0,2}Author-Model:' <<<"$1") || rc=$?
   case "$rc" in
-    0) printf '%s\n' "$line" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//' ;;
+    0) sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//' <<<"$line" ;;
     1) ;;  # no declaration present: echo nothing
     *)
       echo "adopt.sh: grep failed (rc=${rc}) scanning the PR body for an Author-Model declaration — cannot distinguish 'absent' from 'unreadable'; report this with the PR body that triggered it" >&2

@@ -170,16 +170,19 @@ check_gh_aw_min_version() {
   # Parse the captured output. grep's exit 1 here means the command ran and
   # printed no version — a real preflight finding, reported below.
   #
-  # `grep -m1`, never `grep | head -n1`: under `pipefail` the pipeline
-  # reports the rightmost non-zero status, and `head` closing the pipe after
-  # one line can kill a still-writing grep with SIGPIPE (rc 141). 141 is
-  # `> 1`, so the tool-fault branch below would fire on a SUCCESSFUL parse
-  # with a valid version already in `raw`. Reproduced at 200k matches.
-  # `-m1` stops grep after the first match, so nothing closes the pipe early
-  # and grep's own rc is the only status. Same footgun
-  # skills/release/resolve-publish-run.sh documents and avoids.
+  # No pipeline at all — a here-string. Under `pipefail` a pipeline reports
+  # the rightmost NON-ZERO status, so any pipe here lets a process other than
+  # grep speak for the parse:
+  #   `grep | head -n1` — head closes the pipe on a still-writing grep, grep
+  #     dies with SIGPIPE (141), and 141 > 1 fires the tool-fault branch on a
+  #     SUCCESSFUL parse.
+  #   `printf | grep -m1` — the same race one process upstream: grep -m1 exits
+  #     at the first match and closes the pipe on a still-writing printf, so
+  #     printf carries the 141 while grep exits 0.
+  # Both reproduced at 200k matches. A here-string has no second process, so
+  # grep's own rc is the only status the `case` can read.
   local grep_rc=0
-  raw=$(printf '%s\n' "$gh_out" | grep -m1 -oE '[0-9]+\.[0-9]+\.[0-9]+') || grep_rc=$?
+  raw=$(grep -m1 -oE '[0-9]+\.[0-9]+\.[0-9]+' <<<"$gh_out") || grep_rc=$?
   if [[ $grep_rc -gt 1 ]]; then
     push_failure "gh-aw-min-version" "Version parse failed (grep rc=${grep_rc}) while reading 'gh aw --version' output — this is a fault in preflight.sh's parse, not a gh-aw problem; report it with the output that triggered it: ${gh_out}"
     return
