@@ -26,7 +26,7 @@ Run the deterministic migration from the repo root:
 
 The script detects the manifest state, runs `tessl plugin migrate`, renames `.tileignore` → `.tesslignore`, removes the obsolete `tile.json`, runs `tessl plugin lint`, and emits a JSON report with a `residual_files` list. Contract — inputs, output shape, exit codes — is in the script's top-of-file docstring.
 
-A non-zero exit with no JSON on stdout (exit 2) is a tool or precondition failure — jq/tessl missing, the path is not a directory, or `tessl plugin migrate` produced no manifest. Surface the script's stderr diagnostic and stop; do not proceed.
+A non-zero exit with no JSON on stdout (exit 2) is a tool or precondition failure — jq/tessl missing, the path is not a directory, `tessl plugin migrate` produced no manifest, or the residual-file scan could not read the tree. Surface the script's stderr diagnostic and stop; do not proceed.
 
 Otherwise parse stdout and branch on the emitted `status`:
 

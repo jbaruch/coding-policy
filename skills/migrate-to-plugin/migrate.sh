@@ -33,7 +33,8 @@
 #          with lint passing;
 #        1 migrated but `tessl plugin lint` failed (agent must address);
 #        2 tool/precondition error — jq/tessl missing, path not a directory,
-#          or `tessl plugin migrate` produced no manifest (stderr only)
+#          `tessl plugin migrate` produced no manifest, or the residual-file
+#          scan could not read the tree (grep rc >1) (stderr only)
 
 set -euo pipefail
 
@@ -42,7 +43,10 @@ set -euo pipefail
 # dirs, and the CHANGELOG (its archive legitimately references the legacy
 # term). Uses `grep -w` for word boundaries (POSIX-portable, unlike the
 # `\b` GNU extension) and `-i` so capitalized "Tile" is not missed. Emits a
-# JSON array of matching file paths (relative, sorted) on stdout. Always 0.
+# JSON array of matching file paths (relative, sorted) on stdout. Exits 0
+# on a completed scan (matches or none); exits 2 if the scan itself failed
+# (grep rc >1 — an unreadable tree), so "no residual files" is never
+# reported for a tree that could not be read.
 scan_residual_files() {
   local files grep_rc=0
   # grep exits 1 on no matches — a real, expected result (a clean tree has

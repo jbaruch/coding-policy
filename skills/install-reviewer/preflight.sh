@@ -111,7 +111,10 @@ if [[ $git_rc -ne 0 ]] && ! { [[ $git_rc -eq 128 ]] && [[ "$git_err" == *"not a 
   jq -nc --argjson override "$override_bool" --arg reason "$reason" \
     '{ok: false, override: $override, failures: [{check: "git-usable", reason: $reason}], warnings: []}'
   echo "preflight.sh: ${reason}" >&2
-  exit 2
+  # exit 1, not 2: this is a populated `failures` result like every other
+  # preflight check, so it stays inside the documented "0 if ok, 1 if any
+  # check fails" contract — no new exit code for callers to learn.
+  exit 1
 fi
 if [[ -n "$repo_root" ]]; then
   cd "$repo_root"
@@ -299,12 +302,15 @@ classify_target_dirty() {
     # `if ! ...` would collapse both and mislabel the fault "tracked
     # deletion" (rules/error-handling.md — distinguish an expected
     # non-result from a tool failure).
-    local d_rc=0
-    git diff --quiet --diff-filter=D HEAD -- "$t" 2>/dev/null || d_rc=$?
+    local d_rc=0 d_err
+    d_err=$(git diff --quiet --diff-filter=D HEAD -- "$t" 2>&1) || d_rc=$?
     case "$d_rc" in
       0) ;;                       # no diff: not deleted
       1) echo "tracked deletion" ;;
-      *) echo "git-error (git diff rc=${d_rc} on ${t})" ;;
+      # rc >1: capture and surface git's own message; the reason disclaims
+      # the dirty-target framing the caller's recovery text assumes, since a
+      # git fault is not something you commit or stash away
+      *) echo "git fault (not a local edit) — 'git diff' failed rc=${d_rc} on ${t}: ${d_err}; inspect the repo (git status, safe.directory/ownership)" ;;
     esac
     return 0
   fi
@@ -317,12 +323,12 @@ classify_target_dirty() {
     # Tracked: flag uncommitted edits vs HEAD. Same rc branch as the
     # deletion probe above — 1 is dirty (the finding), >1 is a git fault
     # that `if ! ...` would mislabel "uncommitted edits".
-    local e_rc=0
-    git diff --quiet HEAD -- "$t" 2>/dev/null || e_rc=$?
+    local e_rc=0 e_err
+    e_err=$(git diff --quiet HEAD -- "$t" 2>&1) || e_rc=$?
     case "$e_rc" in
       0) ;;                       # clean
       1) echo "uncommitted edits" ;;
-      *) echo "git-error (git diff rc=${e_rc} on ${t})" ;;
+      *) echo "git fault (not a local edit) — 'git diff' failed rc=${e_rc} on ${t}: ${e_err}; inspect the repo (git status, safe.directory/ownership)" ;;
     esac
   else
     # Untracked regular file at the target path.
