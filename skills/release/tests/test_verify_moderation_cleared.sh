@@ -95,7 +95,13 @@ tessl() {
   cat "$resp"
 }
 sleep() { echo "$*" >> "$MOCK_SLEEP_FILE"; }
-export -f tessl sleep 2>/dev/null || true
+# The suite sources the script rather than spawning it, so the export is
+# belt-and-braces. Warn rather than suppress: silently losing it would
+# surface as a mock that never fires, which reads as a script bug
+# (rules/error-handling.md Shell Error Handling).
+if ! export -f tessl sleep 2>/dev/null; then
+  echo "warning: 'export -f' unavailable — mocks apply to this shell only" >&2
+fi
 
 reset_mocks() {
   rm -rf "$MOCK_QUEUE_DIR"; mkdir -p "$MOCK_QUEUE_DIR"

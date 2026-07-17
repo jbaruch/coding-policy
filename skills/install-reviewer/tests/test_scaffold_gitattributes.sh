@@ -88,10 +88,17 @@ content_fingerprint() {
 }
 
 # Counts occurrences of the marker line (verifies no duplicate appended).
-# `grep -c` always prints the count (including 0); the non-zero exit on
-# no-match is suppressed without adding a second line of output.
+# `grep -c` prints the count (including 0) and exits 1 on no-match — an
+# expected result here, not a failure. Branch on the code so grep's exit 2
+# (unreadable file, bad pattern) stays a fault rather than reading as
+# "marker absent" (rules/error-handling.md Shell Error Handling).
 marker_count() {
-  grep -cxF "$RULE" "$1" 2>/dev/null || true
+  local n rc=0
+  n=$(grep -cxF "$RULE" "$1" 2>/dev/null) || rc=$?
+  case "$rc" in
+    0|1) printf '%s\n' "${n:-0}" ;;
+    *) echo "fatal: grep failed (rc=${rc}) reading $1" >&2; return 2 ;;
+  esac
 }
 
 # --- Test 1: fresh consumer (file doesn't exist) -----------------------------

@@ -109,7 +109,13 @@ main() {
   # Already migrated: plugin.json is authoritative. Idempotent no-op so the
   # skill can re-run safely; the agent skips straight to reconciliation.
   if [[ "$has_plugin" == true ]]; then
-    emit "already-migrated" false true false false null "$(scan_residual_files)"
+    # Capture, then emit. `emit ... "$(scan_residual_files)"` swallows the
+    # scan's exit status inside the substitution, so its exit-2 tool fault
+    # would surface later as a `jq --argjson residual_files ""` failure
+    # instead of the documented diagnostic.
+    local residual
+    residual=$(scan_residual_files) || exit 2
+    emit "already-migrated" false true false false null "$residual"
     exit 0
   fi
 
@@ -151,7 +157,10 @@ main() {
     rc=1
   fi
 
-  emit "migrated" true true "$tileignore_renamed" "$tile_json_removed" "$lint_ok" "$(scan_residual_files)"
+  # Capture, then emit — see the already-migrated path above.
+  local residual
+  residual=$(scan_residual_files) || exit 2
+  emit "migrated" true true "$tileignore_renamed" "$tile_json_removed" "$lint_ok" "$residual"
 
   if [[ $rc -ne 0 ]]; then
     echo "migrate: 'tessl plugin lint' failed after migration — inspect the lint output and fix before publishing" >&2

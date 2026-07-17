@@ -81,7 +81,17 @@ repo_root=""
 git_rc=0
 repo_root=$(git rev-parse --show-toplevel 2>/dev/null) || git_rc=$?
 if [[ $git_rc -ne 0 && $git_rc -ne 128 ]]; then
-  echo "preflight.sh: 'git rev-parse --show-toplevel' failed (rc=${git_rc}) — not the ordinary not-a-repo case; verify git is installed and the repository is readable, then re-run" >&2
+  # Hand-rolled JSON, same shape as the missing-jq guard above: this runs
+  # before push_failure exists, and the documented contract is one JSON
+  # object on stdout. A stderr-only exit leaves every caller that parses
+  # the contract with no payload (rules/script-delegation.md).
+  override_json="false"
+  (( OVERRIDE_MODE == 1 )) && override_json="true"
+  reason="git rev-parse --show-toplevel failed (rc=${git_rc}) — not the ordinary not-a-repo case; verify git is installed and the repository is readable, then re-run"
+  cat <<EOF
+{"ok": false, "override": ${override_json}, "failures": [{"check": "git-usable", "reason": "${reason}"}], "warnings": []}
+EOF
+  echo "preflight.sh: ${reason}" >&2
   exit 2
 fi
 if [[ -n "$repo_root" ]]; then

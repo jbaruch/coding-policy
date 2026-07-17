@@ -164,10 +164,20 @@ t_resolve_default_branch_falls_back_to_master() {
   # Repo whose default is `master` and origin/HEAD symref isn't set
   local out
   git checkout -b master -q
-  git branch -d main -q 2>/dev/null || true
+  # Ask whether each ref exists rather than suppressing the delete's failure.
+  # Absence is the expected state on some fixture paths; a delete failing for
+  # any OTHER reason must still surface (rules/error-handling.md Shell Error
+  # Handling — distinguish an expected non-result from a tool failure).
+  if git show-ref --verify --quiet refs/heads/main; then
+    git branch -d main -q
+  fi
   git push -q origin master
-  git push -q origin --delete main 2>/dev/null || true
-  git symbolic-ref --delete refs/remotes/origin/HEAD 2>/dev/null || true
+  if git ls-remote --exit-code --heads origin main >/dev/null 2>&1; then
+    git push -q origin --delete main
+  fi
+  if git symbolic-ref --quiet refs/remotes/origin/HEAD >/dev/null 2>&1; then
+    git symbolic-ref --delete refs/remotes/origin/HEAD
+  fi
   out=$("$SCRIPT" 2>/dev/null) || return 1
   assert_eq "state" "created" "$(jq -r .state <<<"$out")"
 }

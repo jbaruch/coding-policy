@@ -82,8 +82,17 @@ content_fingerprint() {
   cksum < "$1"
 }
 
+# `grep -c` prints the count (including 0) and exits 1 on no-match — an
+# expected result, not a failure. Branch on the code so grep's exit 2
+# (unreadable file, bad pattern) stays a fault rather than reading as
+# "key absent" (rules/error-handling.md Shell Error Handling).
 key_count() {
-  grep -cE "^$2=" "$1" 2>/dev/null || true
+  local n rc=0
+  n=$(grep -cE "^$2=" "$1" 2>/dev/null) || rc=$?
+  case "$rc" in
+    0|1) printf '%s\n' "${n:-0}" ;;
+    *) echo "fatal: grep failed (rc=${rc}) reading $1" >&2; return 2 ;;
+  esac
 }
 
 # Asserts every reviewer secret has exactly one KEY= line and the deep
