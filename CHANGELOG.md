@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.93 — 2026-07-17
+
 ### Skills
 
 - **`release`: `poll-pr-reviews.sh` counted zero Copilot inline comments on every PR** — Copilot authors its review as `copilot-pull-request-reviewer[bot]` but its inline comments as `Copilot`, and the counter matched comments against the review login, so `inline_comments.copilot` was a constant `0` — vacuously satisfying Step 7's "every inline comment has a reply" merge gate and letting real Copilot findings merge unanswered. Comment counting now matches a set of logins per reviewer (`GH_AW_COMMENT_LOGINS` / `COPILOT_COMMENT_LOGINS` at the top of the script); gh-aw and `dismiss-stale-reviews.sh` were unaffected. Full motivation: PR #180.
