@@ -9,14 +9,16 @@ description: A green gate is the go-ahead; pausing to ask for approval the gate 
 
 - A shipping action is the autonomous next step once its gate reads green
 - Read the gate to resolve doubt; never ask the operator what reading it answers
-- Authorization to ship is standing — it lives in this policy and the operator's durable config, in no conversational turn. A challenging question, an ambiguous remark, an earlier "ship it when green", or silence is never the grant
+- Authorization to ship is standing — it lives in this policy and the operator's durable config, in no conversational turn
+- A challenging question, an ambiguous remark, an earlier "ship it when green", or silence is never the grant
 - No standing grant covers the action ⇒ the gate is absent, not green (see What Still Gates)
 - A harness gate this policy does not govern (safety classifier, permission prompt) is a red gate — surface what it blocked; never re-attempt through another tool
 
 ## What Counts as Approval
 
 - Review is the paired bot fleet, not a human sign-off — a merge needs no human approval, except where another always-on rule names an owner-approval precondition (see What Still Gates)
-- The merge gate has two halves, both required: `skills/release/SKILL.md` Step 7's executable preconditions hold (watcher-checked) AND no What Still Gates condition applies (agent-checked). Load Step 7 and confirm What Still Gates before merging; this rule restates neither
+- The merge gate has two halves, both required: `skills/release/SKILL.md` Step 7's executable preconditions hold (watcher-checked) AND no What Still Gates condition applies (agent-checked)
+- Load Step 7 and confirm What Still Gates before merging; this rule restates neither
 - A gating bot that cannot `APPROVE` posts its all-clear as `COMMENTED` — `github-actions[bot]` gets HTTP 422 (see `rules/ci-safety.md` Superseded-Bot-Review Dismissal Carve-Out)
 
 ## The Autonomous Actions
@@ -28,8 +30,13 @@ description: A green gate is the go-ahead; pausing to ask for approval the gate 
 
 ## Asking vs Surfacing
 
-- An ask on a green gate is a defect — the ask manufactures an approval gate the policy already opened. Report the action taken, never propose it; never re-ask what the policy grants standing
-- Surface every decision the gate does NOT answer — scope, base branch, a human's prose hold, whether an out-of-scope discovery belongs in the task. These are absent grants, not green ones; re-reading this policy never resolves one. Uncertainty that the rule covers an action means it does not — report and stop
+- An ask on a green gate is a defect
+- Report the action taken, never propose it
+- Never re-ask what the policy grants standing
+- Surface every decision the gate does not answer: scope, base branch, a human's prose hold, whether an out-of-scope discovery belongs in the task
+- A question the gate does not answer is an absent grant, not a green one
+- Re-reading this policy never resolves an absent grant
+- Uncertainty that the rule covers an action means it does not — report and stop
 
 ## What Still Gates
 
