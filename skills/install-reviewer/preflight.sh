@@ -72,7 +72,60 @@ fi
 # NOT in a worktree, the check_in_git_worktree step below will fail
 # cleanly; don't exit here — we want to surface all preflight failures
 # as structured JSON, not die early.
-repo_root=$(git rev-parse --show-toplevel 2>/dev/null || true)
+# Capture stderr, not `2>/dev/null`: git returns 128 for BOTH the ordinary
+# not-a-repo case AND real faults (corrupt/unreadable repo, an unsafe-
+# ownership refusal), so the exit code alone cannot tell them apart — the
+# distinguisher is git's own message. `rev-parse --show-toplevel` on no repo
+# emits the stable, decades-old sentinel "not a git repository"; any other
+# 128 is a fault this preflight must surface, not treat as "just not in a
+# repo". Matching that one fixed token is not the regex-trap
+# (rules/script-delegation.md) — it is a documented tool sentinel, not
+# free-form text.
+repo_root=""
+git_rc=0
+git_err=""
+git_err_file=$(mktemp) || {
+  # Emit the JSON envelope + exit 1, not a stderr-only exit 2: a bare exit
+  # here breaks the documented "single JSON object on stdout" contract for
+  # wrappers that parse it (jq is guaranteed by the early guard).
+  reason="mktemp failed — cannot capture git stderr; check TMPDIR is writable"
+  override_bool="false"; (( OVERRIDE_MODE == 1 )) && override_bool="true"
+  jq -nc --argjson override "$override_bool" --arg reason "$reason" \
+    '{ok: false, override: $override, failures: [{check: "tmpdir-writable", reason: $reason}], warnings: []}'
+  echo "preflight.sh: ${reason}" >&2
+  exit 1
+}
+repo_root=$(git rev-parse --show-toplevel 2>"$git_err_file") || git_rc=$?
+# Read only if readable (explicit branch, not `2>/dev/null` suppression), then
+# clean up with a checked rm so a failed cleanup warns rather than aborting
+# under this script's `set -e`.
+if [[ -r "$git_err_file" ]]; then
+  git_err=$(cat "$git_err_file")
+fi
+if ! rm -f "$git_err_file"; then
+  echo "preflight.sh: warning: could not remove temp file ${git_err_file} — remove it by hand" >&2
+fi
+# rc 128 whose stderr carries the not-a-repo sentinel is the expected case:
+# fall through, and check_in_git_worktree below reports it as structured
+# JSON. Every other non-zero rc — and a 128 WITHOUT that sentinel — is a
+# git fault surfaced here.
+if [[ $git_rc -ne 0 ]] && ! { [[ $git_rc -eq 128 ]] && [[ "$git_err" == *"not a git repository"* ]]; }; then
+  # Build the JSON with jq, never interpolation: `reason` embeds raw git
+  # stderr, which can carry quotes/newlines that would break the parse (the
+  # push_failure injection class). jq is guaranteed here — the missing-jq
+  # guard near the top of this file exits before we reach this line — so the
+  # documented single-JSON-object contract holds (rules/script-delegation.md).
+  override_bool="false"
+  (( OVERRIDE_MODE == 1 )) && override_bool="true"
+  reason="git rev-parse --show-toplevel failed (rc=${git_rc}): ${git_err} — not the ordinary not-a-repo case; verify git is installed and the repository is readable (e.g. 'git status', check ownership/safe.directory), then re-run"
+  jq -nc --argjson override "$override_bool" --arg reason "$reason" \
+    '{ok: false, override: $override, failures: [{check: "git-usable", reason: $reason}], warnings: []}'
+  echo "preflight.sh: ${reason}" >&2
+  # exit 1, not 2: this is a populated `failures` result like every other
+  # preflight check, so it stays inside the documented "0 if ok, 1 if any
+  # check fails" contract — no new exit code for callers to learn.
+  exit 1
+fi
 if [[ -n "$repo_root" ]]; then
   cd "$repo_root"
 fi
@@ -100,12 +153,16 @@ TARGETS=(
 declare -a failures=()
 declare -a warnings=()
 
+# Build the JSON object with jq, never string interpolation: a reason can
+# carry raw command output (a version string, a git error), and a quote,
+# backslash, or newline in it would break the `jq --argjson failures` parse
+# at emit time and drop the whole documented JSON contract. jq escapes it.
 push_failure() {
-  failures+=("{\"check\":\"$1\",\"reason\":\"$2\"}")
+  failures+=("$(jq -nc --arg check "$1" --arg reason "$2" '{check: $check, reason: $reason}')")
 }
 
 push_warning() {
-  warnings+=("{\"check\":\"$1\",\"reason\":\"$2\"}")
+  warnings+=("$(jq -nc --arg check "$1" --arg reason "$2" '{check: $check, reason: $reason}')")
 }
 
 check_in_git_worktree() {
@@ -138,9 +195,44 @@ check_gh_aw_installed() {
 # latest stable), which clears the floor and keeps installs reproducible.
 check_gh_aw_min_version() {
   local raw min major minor patch min_major min_minor min_patch
-  # `gh aw --version` writes to stderr (typical gh-extension idiom), so merge
-  # streams before parsing rather than discarding stderr.
-  raw=$(gh aw --version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n1) || true
+  # Run the command, THEN parse its captured output — never one pipeline.
+  # `pipefail` reports the RIGHTMOST non-zero status, so piping straight
+  # into grep hides the command's own failure behind grep's exit 1: a
+  # missing `gh` (127) plus a no-match grep (1) yields 1, indistinguishable
+  # from "gh ran and printed no version", and the user gets told to
+  # re-install the gh-aw extension when the real problem is that `gh` is
+  # not on PATH at all (rules/error-handling.md — distinguish an expected
+  # non-result from a tool failure; Actionable Messages).
+  #
+  # `gh aw --version` writes to stderr (typical gh-extension idiom), so
+  # merge streams into the capture rather than discarding stderr.
+  local gh_out gh_rc=0
+  gh_out=$(gh aw --version 2>&1) || gh_rc=$?
+  if [[ $gh_rc -ne 0 ]]; then
+    push_failure "gh-aw-min-version" "Could not run 'gh aw --version' (rc=${gh_rc}): ${gh_out} — verify the gh CLI is installed and on PATH ('command -v gh') and the gh-aw extension is installed ('gh extension list'), then re-run"
+    return
+  fi
+
+  # Parse the captured output. grep's exit 1 here means the command ran and
+  # printed no version — a real preflight finding, reported below.
+  #
+  # No pipeline at all — a here-string. Under `pipefail` a pipeline reports
+  # the rightmost NON-ZERO status, so any pipe here lets a process other than
+  # grep speak for the parse:
+  #   `grep | head -n1` — head closes the pipe on a still-writing grep, grep
+  #     dies with SIGPIPE (141), and 141 > 1 fires the tool-fault branch on a
+  #     SUCCESSFUL parse.
+  #   `printf | grep -m1` — the same race one process upstream: grep -m1 exits
+  #     at the first match and closes the pipe on a still-writing printf, so
+  #     printf carries the 141 while grep exits 0.
+  # Both reproduced at 200k matches. A here-string has no second process, so
+  # grep's own rc is the only status the `case` can read.
+  local grep_rc=0
+  raw=$(grep -m1 -oE '[0-9]+\.[0-9]+\.[0-9]+' <<<"$gh_out") || grep_rc=$?
+  if [[ $grep_rc -gt 1 ]]; then
+    push_failure "gh-aw-min-version" "Version parse failed (grep rc=${grep_rc}) while reading 'gh aw --version' output — this is a fault in preflight.sh's parse, not a gh-aw problem; report it with the output that triggered it: ${gh_out}"
+    return
+  fi
   if [[ -z "$raw" ]]; then
     push_failure "gh-aw-min-version" "Could not parse 'gh aw --version' output — re-install with 'gh extension remove gh-aw && gh extension install github/gh-aw --pin v${GH_AW_PIN}'"
     return
@@ -166,15 +258,28 @@ check_templates_present() {
 }
 
 check_branch_not_local() {
-  if git show-ref --verify --quiet "refs/heads/${BRANCH}"; then
-    push_failure "branch-not-local" "Local branch '${BRANCH}' already exists — delete with: git branch -d '${BRANCH}' (refuses if unmerged); or rename with: git branch -m '${BRANCH}' '${BRANCH}.bak' before re-running"
-  fi
+  # show-ref: 0 present, 1 absent (both expected), >1 a git fault surfaced
+  # as its own failure rather than read as "absent, all clear"
+  # (rules/error-handling.md — expected non-result vs tool failure).
+  local rc=0
+  git show-ref --verify --quiet "refs/heads/${BRANCH}" || rc=$?
+  case "$rc" in
+    0) push_failure "branch-not-local" "Local branch '${BRANCH}' already exists — delete with: git branch -d '${BRANCH}' (refuses if unmerged); or rename with: git branch -m '${BRANCH}' '${BRANCH}.bak' before re-running" ;;
+    1) ;;  # absent: clean
+    *) push_failure "branch-not-local" "'git show-ref refs/heads/${BRANCH}' failed (rc=${rc}) — cannot verify branch state; the repository may be unreadable, check 'git status' and re-run" ;;
+  esac
 }
 
 check_branch_not_remote() {
-  if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
-    push_failure "branch-not-remote" "Remote branch 'origin/${BRANCH}' already exists — delete with 'git push origin --delete ${BRANCH}' or rename before re-running"
-  fi
+  # ls-remote --exit-code: 0 present, 2 absent (both expected), other a
+  # network/auth/tool fault surfaced rather than read as "absent".
+  local rc=0
+  git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1 || rc=$?
+  case "$rc" in
+    0) push_failure "branch-not-remote" "Remote branch 'origin/${BRANCH}' already exists — delete with 'git push origin --delete ${BRANCH}' or rename before re-running" ;;
+    2) ;;  # absent on remote: clean
+    *) push_failure "branch-not-remote" "'git ls-remote origin ${BRANCH}' failed (rc=${rc}) — cannot verify remote branch state; likely a network or auth issue, resolve and re-run" ;;
+  esac
 }
 
 # Override-mode safety check: refuse to upgrade if the consumer has dirty
@@ -215,11 +320,21 @@ classify_target_dirty() {
     # present in index + HEAD) or `git rm`'d it (missing from working tree
     # AND index, still in HEAD). `git diff --diff-filter=D HEAD` catches
     # both because it compares HEAD against the working tree. `--quiet`
-    # exits 0 when there's no diff and 1 when there is, so negation reads
-    # as "is this path deleted vs HEAD?".
-    if ! git diff --quiet --diff-filter=D HEAD -- "$t" 2>/dev/null; then
-      echo "tracked deletion"
-    fi
+    # exits 0 when there's no diff and 1 when there is. Branch on the code:
+    # 1 is "deleted vs HEAD" (the finding), but >1 is a real git fault, and
+    # `if ! ...` would collapse both and mislabel the fault "tracked
+    # deletion" (rules/error-handling.md — distinguish an expected
+    # non-result from a tool failure).
+    local d_rc=0 d_err
+    d_err=$(git diff --quiet --diff-filter=D HEAD -- "$t" 2>&1) || d_rc=$?
+    case "$d_rc" in
+      0) ;;                       # no diff: not deleted
+      1) echo "tracked deletion" ;;
+      # rc >1: capture and surface git's own message; the reason disclaims
+      # the dirty-target framing the caller's recovery text assumes, since a
+      # git fault is not something you commit or stash away
+      *) echo "git fault (not a local edit) — 'git diff' failed rc=${d_rc} on ${t}: ${d_err}; inspect the repo (git status, safe.directory/ownership)" ;;
+    esac
     return 0
   fi
   if [[ -L "$t" ]]; then
@@ -228,10 +343,16 @@ classify_target_dirty() {
     # refuses symlinks too; this just surfaces it earlier.
     echo "symlink target"
   elif git ls-files --error-unmatch -- "$t" >/dev/null 2>&1; then
-    # Tracked: flag if uncommitted edits exist relative to HEAD.
-    if ! git diff --quiet HEAD -- "$t" 2>/dev/null; then
-      echo "uncommitted edits"
-    fi
+    # Tracked: flag uncommitted edits vs HEAD. Same rc branch as the
+    # deletion probe above — 1 is dirty (the finding), >1 is a git fault
+    # that `if ! ...` would mislabel "uncommitted edits".
+    local e_rc=0 e_err
+    e_err=$(git diff --quiet HEAD -- "$t" 2>&1) || e_rc=$?
+    case "$e_rc" in
+      0) ;;                       # clean
+      1) echo "uncommitted edits" ;;
+      *) echo "git fault (not a local edit) — 'git diff' failed rc=${e_rc} on ${t}: ${e_err}; inspect the repo (git status, safe.directory/ownership)" ;;
+    esac
   else
     # Untracked regular file at the target path.
     echo "untracked"

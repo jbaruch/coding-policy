@@ -68,6 +68,29 @@ emit_and_exit() {
   exit "$rc"
 }
 
+# `err_file` is script-global, never `local` in main: the EXIT trap fires
+# after main returns, when a main-local would be out of scope and this
+# handler would silently skip cleanup (verified: the normal-return path
+# leaks the tempfile every run; only the exit-from-inside-main paths clean up).
+err_file=""
+
+# EXIT-trap cleanup. `return 0` is load-bearing: the trap's final command
+# status becomes the script's exit status, so a failing `rm` would rewrite
+# this script's verdict (rules/error-handling.md Shell Error Handling).
+#
+# `if ! rm` rather than a bare `rm`: under `set -e` a failing rm aborts the
+# handler before `return 0` runs — reintroducing the exact rewrite the
+# handler exists to prevent. An `if` condition suspends `set -e`, so the
+# failure is reported instead of escaping.
+cleanup_err_file() {
+  if [[ -n "${err_file:-}" ]]; then
+    if ! rm -f "$err_file"; then
+      echo "verify-publish-landed.sh: warning: could not remove temp file ${err_file} — remove it by hand" >&2
+    fi
+  fi
+  return 0
+}
+
 # Returns 0 iff $1 > $2 under semver ordering. Parses major.minor.patch
 # as integers in pure bash so the comparison stays portable across GNU
 # coreutils (Linux CI) and BSD userland (macOS) — `sort -V` is a GNU
@@ -122,9 +145,14 @@ main() {
   # string and break the "conclusion == success" comparison. Combined
   # `2>&1` capture would otherwise let a single warning misclassify the
   # run on the happy path.
-  local conclusion err_file
+  local conclusion
   err_file=$(mktemp) || { echo "error: mktemp failed — cannot run verify-publish-landed.sh without writable TMPDIR" >&2; exit 2; }
-  trap 'rm -f "$err_file"' EXIT
+  # Named handler ending `return 0`, not an inline `rm -f`: the EXIT trap's
+  # final command status becomes the script's exit status, so an `rm` that
+  # fails (unwritable TMPDIR) would rewrite this script's verdict into a
+  # bare 1 — a publish-landed conjunction silently reported as a generic
+  # failure. Cleanup reports on cleanup, never on the outcome.
+  trap cleanup_err_file EXIT
   conclusion=$(gh run view "$run_id" --json conclusion --jq '.conclusion' 2>"$err_file") \
     || { local err; err=$(cat "$err_file"); echo "error: 'gh run view ${run_id}' failed: ${err} — verify (1) the run ID is correct (cross-check 'gh run list --workflow <publish-workflow-name> --branch main --limit 10'), (2) 'gh auth status' shows you're authenticated against the right host, then re-run; if the run failed at the GitHub side, inspect with 'gh run view ${run_id} --log-failed'" >&2; exit 2; }
   if [[ -z "$conclusion" || "$conclusion" == "null" ]]; then
@@ -142,15 +170,35 @@ main() {
   local tessl_output
   tessl_output=$(tessl plugin info "${workspace}/${tile}" 2>"$err_file") \
     || { local err; err=$(cat "$err_file"); echo "error: 'tessl plugin info ${workspace}/${tile}' failed: ${err} — verify (1) tessl CLI is installed and on PATH ('command -v tessl'), (2) the workspace/plugin slug is correct, (3) you have network access to the registry, then re-run 'tessl plugin info ${workspace}/${tile}' directly to inspect the failure before retrying the publish verification" >&2; exit 2; }
-  # `|| true` lets the parse-miss case fall through to the explicit
-  # `-z` diagnostic below rather than triggering `set -e` + `pipefail`
-  # exit. Without it, grep's exit-1 on no-match (compounded by pipefail)
-  # would propagate through the command substitution and terminate the
-  # script before the actionable parse-miss diagnostic fires.
+  # Branch on grep's exit code explicitly. A bare `|| true` would let the
+  # parse-miss reach the `-z` diagnostic below, but it collapses grep's two
+  # non-zero codes into one: 1 is "no match" (a real, expected state — the
+  # registry didn't print the line) and 2 is "grep itself failed" (bad
+  # regex, unreadable input). Suppressing both reports a broken tool as a
+  # missing line, sending the operator to debug the registry over a fault
+  # in this script.
+  # here-string + `grep -m1`, not a pipeline: `-m1` stops at the first match
+  # so a second "Latest Version" line can't make version_line multi-line and
+  # break the awk/semver step, and the here-string avoids the pipeline that
+  # under pipefail could carry a SIGPIPE'd producer's status instead of grep's.
+  local version_line rc=0
+  version_line=$(grep -m1 "Latest Version" <<<"$tessl_output") || rc=$?
+  case "$rc" in
+    0) ;;
+    1)
+      echo "error: could not parse 'Latest Version' from 'tessl plugin info ${workspace}/${tile}' output — the registry output shape may have changed; inspect it directly and update this parse (output was: ${tessl_output})" >&2
+      exit 2
+      ;;
+    *)
+      echo "error: grep failed (rc=${rc}) while parsing 'tessl plugin info ${workspace}/${tile}' output — this is a fault in verify-publish-landed.sh's parse, not a registry problem; report it with the output that triggered it (output was: ${tessl_output})" >&2
+      exit 2
+      ;;
+  esac
+
   local current
-  current=$(printf '%s\n' "$tessl_output" | grep "Latest Version" | awk '{print $NF}' || true)
+  current=$(printf '%s\n' "$version_line" | awk '{print $NF}')
   if [[ -z "$current" ]]; then
-    echo "error: could not parse 'Latest Version' from 'tessl plugin info ${workspace}/${tile}' output (output was: ${tessl_output})" >&2
+    echo "error: 'Latest Version' line present but carried no version token in 'tessl plugin info ${workspace}/${tile}' output (line was: ${version_line})" >&2
     exit 2
   fi
 

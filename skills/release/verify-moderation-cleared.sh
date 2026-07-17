@@ -54,6 +54,29 @@ if ! command -v jq >/dev/null 2>&1; then
   exit 2
 fi
 
+# `err_file` is script-global, never `local` in main: the EXIT trap fires
+# after main returns, when a main-local would be out of scope and this
+# handler would silently skip cleanup (verified: the normal-return path
+# leaks the tempfile every run; only the exit-from-inside-main paths clean up).
+err_file=""
+
+# EXIT-trap cleanup. `return 0` is load-bearing: the trap's final command
+# status becomes the script's exit status, so a failing `rm` would rewrite
+# this script's verdict (rules/error-handling.md Shell Error Handling).
+#
+# `if ! rm` rather than a bare `rm`: under `set -e` a failing rm aborts the
+# handler before `return 0` runs — reintroducing the exact rewrite the
+# handler exists to prevent. An `if` condition suspends `set -e`, so the
+# failure is reported instead of escaping.
+cleanup_err_file() {
+  if [[ -n "${err_file:-}" ]]; then
+    if ! rm -f "$err_file"; then
+      echo "verify-moderation-cleared.sh: warning: could not remove temp file ${err_file} — remove it by hand" >&2
+    fi
+  fi
+  return 0
+}
+
 emit_and_exit() {
   local ok="$1" reason="$2" status="$3" version="$4" attempts="$5" elapsed="$6" rc="$7"
   printf '{"ok":%s,"reason":%s,"moderation_status":%s,"version":%s,"attempts":%s,"elapsed_seconds":%s}\n' \
@@ -107,8 +130,11 @@ main() {
 
   local endpoint="v1/tiles/${workspace}/${tile}/versions/${version}"
   local delay="$BASE_DELAY_SEC" elapsed=0 attempts=0
-  local err_file; err_file=$(mktemp) || { echo "error: mktemp failed — cannot run verify-moderation-cleared.sh without writable TMPDIR" >&2; exit 2; }
-  trap 'rm -f "$err_file"' EXIT
+  err_file=$(mktemp) || { echo "error: mktemp failed — cannot run verify-moderation-cleared.sh without writable TMPDIR" >&2; exit 2; }
+  # Named handler ending `return 0` — the EXIT trap's final command status
+  # becomes the script's exit status, so a failing `rm` would rewrite the
+  # moderation verdict into a bare 1 (rules/error-handling.md).
+  trap cleanup_err_file EXIT
 
   while :; do
     attempts=$(( attempts + 1 ))
@@ -120,10 +146,40 @@ main() {
     body=$(tessl api "$endpoint" 2>"$err_file") \
       || { local err; err=$(cat "$err_file"); echo "error: 'tessl api ${endpoint}' failed: ${err} — verify (1) tessl CLI is installed and on PATH ('command -v tessl'), (2) the workspace/plugin/version slug is correct, (3) you have network access to the registry, then re-run; the version was already confirmed on the registry by verify-publish-landed.sh, so a persistent failure here is a tool/auth/network problem, not a missing version" >&2; exit 2; }
 
+    # Validate the payload ONCE, explicitly, before extracting fields.
+    # Each extraction previously carried `2>/dev/null || true`, collapsing
+    # two different states into the same empty string: a field legitimately
+    # absent (what `// empty` is for), and a body that is not JSON at all
+    # (a proxy error page, an HTML 502). Both then reached the same
+    # "response shape may have changed — update this script's jq paths"
+    # diagnostic below. That exit code was right and the message was wrong:
+    # it sends the operator to rewrite a parse that works, against a
+    # registry that is returning 502s (rules/error-handling.md Actionable
+    # Messages).
+    # `jq empty`, not `jq -e .`: `-e` sets the exit code from the last
+    # OUTPUT's truthiness, so a body that is valid JSON but evaluates to
+    # `false` or `null` would exit 1 and be misreported "not valid JSON".
+    # `jq empty` parses and produces no output — exit reflects parse
+    # validity alone.
+    if ! printf '%s' "$body" | jq empty >/dev/null 2>&1; then
+      echo "error: 'tessl api ${endpoint}' returned a body that is not valid JSON — the registry may be returning an error page or the endpoint shape changed; inspect it directly with 'tessl api ${endpoint}' before retrying (body was: ${body})" >&2
+      exit 2
+    fi
+
+    # `(.data.attributes.FIELD)?` parenthesizes the WHOLE path before `?`, so
+    # an index error at ANY step is suppressed — `.data` a string, or `.data`
+    # an object whose `.attributes` is a string/array (a proxy error page that
+    # parsed). A one-level `.attributes?` only guards that step and still
+    # crashes when `.attributes` itself is the wrong type. Without the guard
+    # the call hard-fails under `set -e` and the script exits on jq's raw
+    # error, skipping the shape-changed diagnostic below; with it, a wrong
+    # shape yields empty for all three and falls through to that diagnostic.
+    # Three separate calls, not a `@tsv` read — tab is IFS-whitespace, so a
+    # leading empty field would shift the values.
     local status passed mod_error
-    status=$(printf '%s' "$body" | jq -r '.data.attributes.moderationStatus // empty' 2>/dev/null || true)
-    passed=$(printf '%s' "$body" | jq -r '.data.attributes.moderationPassed // empty' 2>/dev/null || true)
-    mod_error=$(printf '%s' "$body" | jq -r '.data.attributes.moderationError // empty' 2>/dev/null || true)
+    status=$(printf '%s' "$body" | jq -r '(.data.attributes.moderationStatus)? // empty')
+    passed=$(printf '%s' "$body" | jq -r '(.data.attributes.moderationPassed)? // empty')
+    mod_error=$(printf '%s' "$body" | jq -r '(.data.attributes.moderationError)? // empty')
 
     # A moderationError alone is a valid (blocked) response, so it counts
     # as a parsed field — without it in the guard, a block-by-error result

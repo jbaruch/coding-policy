@@ -52,6 +52,16 @@ json_str() {
   printf '"%s"' "$out"
 }
 
+# Best-effort temp cleanup. Under `set -e` a failing bare `rm` on the error
+# branch would abort before the diagnostic below is emitted; warn and
+# continue instead, never silence (rules/error-handling.md Shell Error Handling).
+discard() {
+  local f="$1"
+  if [[ -n "$f" ]] && ! rm -f "$f"; then
+    echo "run-tests: warning: could not remove temp file ${f} — remove it by hand" >&2
+  fi
+}
+
 main() {
   local base="${1:-}"
   if [[ -z "$base" ]]; then
@@ -73,7 +83,7 @@ main() {
   # can't be used because bash strips NUL bytes from its output.
   local tmplist; tmplist="$(mktemp)"
   if ! find "$base" -type f -path '*/tests/test_*.sh' -print0 | sort -z > "$tmplist"; then
-    rm -f "$tmplist"
+    discard "$tmplist"
     echo "run-tests: suite discovery (find) failed under $base" >&2
     printf '{"suites":0,"passed":0,"failed":0,"failures":[],"error":%s}\n' \
       "$(json_str "suite discovery failed under $base")"
@@ -85,7 +95,7 @@ main() {
   while IFS= read -r -d '' s; do
     [[ -n "$s" ]] && suites+=("$s")
   done < "$tmplist"
-  rm -f "$tmplist"
+  discard "$tmplist"
 
   if [[ ${#suites[@]} -eq 0 ]]; then
     echo "run-tests: no test suites found under ${base}/**/tests/test_*.sh" >&2

@@ -48,7 +48,19 @@ FAIL_COUNT=0
 PASS_COUNT=0
 
 TMPDIR_TEST=$(mktemp -d -t verify-mod-test.XXXXXX)
-trap 'rm -rf "$TMPDIR_TEST"' EXIT
+# Named handler ending `return 0`, not a bare `trap 'rm -rf ...'`: the
+# EXIT trap's final command status becomes the process's exit status, so
+# a failed cleanup would turn an all-green run non-zero and flake CI
+# (rules/error-handling.md Shell Error Handling).
+cleanup_tmp() {
+  if [[ -n "${TMPDIR_TEST:-}" ]]; then
+    if ! rm -rf "$TMPDIR_TEST"; then
+      echo "warning: could not remove temp dir ${TMPDIR_TEST} — remove it by hand" >&2
+    fi
+  fi
+  return 0
+}
+trap cleanup_tmp EXIT
 export MOCK_COUNT_FILE="$TMPDIR_TEST/count"
 export MOCK_CALLS_FILE="$TMPDIR_TEST/calls"
 export MOCK_SLEEP_FILE="$TMPDIR_TEST/sleeps"
@@ -58,7 +70,14 @@ export MOCK_QUEUE_DIR="$TMPDIR_TEST/queue"
 # rest to stderr and return non-zero (simulates a registry/tool failure).
 tessl() {
   local n resp
-  n=$(cat "$MOCK_COUNT_FILE" 2>/dev/null || echo 0)
+  # Absent count file is the expected first-call state (=> 0); a present but
+  # unreadable file is a harness fault that must not read as 0
+  # (rules/error-handling.md — expected non-result vs tool failure).
+  if [[ -f "$MOCK_COUNT_FILE" ]]; then
+    n=$(cat "$MOCK_COUNT_FILE") || { echo "test harness: cannot read $MOCK_COUNT_FILE" >&2; exit 2; }
+  else
+    n=0
+  fi
   n=$(( n + 1 ))
   echo "$n" > "$MOCK_COUNT_FILE"
   echo "tessl $*" >> "$MOCK_CALLS_FILE"
@@ -83,7 +102,13 @@ tessl() {
   cat "$resp"
 }
 sleep() { echo "$*" >> "$MOCK_SLEEP_FILE"; }
-export -f tessl sleep 2>/dev/null || true
+# The suite sources the script rather than spawning it, so the export is
+# belt-and-braces. Warn rather than suppress: silently losing it would
+# surface as a mock that never fires, which reads as a script bug
+# (rules/error-handling.md Shell Error Handling).
+if ! export -f tessl sleep 2>/dev/null; then
+  echo "warning: 'export -f' unavailable — mocks apply to this shell only" >&2
+fi
 
 reset_mocks() {
   rm -rf "$MOCK_QUEUE_DIR"; mkdir -p "$MOCK_QUEUE_DIR"
@@ -104,7 +129,7 @@ body_json() {
 queue() { printf '%s' "$2" > "$MOCK_QUEUE_DIR/$1"; }
 
 count_calls() { wc -l < "$MOCK_CALLS_FILE" | tr -d ' '; }
-count_sleeps() { [[ -s "$MOCK_SLEEP_FILE" ]] && wc -l < "$MOCK_SLEEP_FILE" | tr -d ' ' || echo 0; }
+count_sleeps() { [[ -s "$MOCK_SLEEP_FILE" ]] || { echo 0; return; }; wc -l < "$MOCK_SLEEP_FILE" | tr -d ' '; }
 
 pass() { PASS_COUNT=$(( PASS_COUNT + 1 )); echo "  PASS: $1"; }
 fail() { FAIL_COUNT=$(( FAIL_COUNT + 1 )); echo "  FAIL: $1" >&2; }
@@ -220,6 +245,60 @@ reset_mocks
 queue 1 '{"data":{"attributes":{}}}'
 out=$(main acme widget 1.2.3 2>/dev/null); rc=$?
 if [[ $rc -eq 2 ]]; then pass "no moderation fields: exit 2"; else fail "unparseable (rc=$rc out=$out)"; fi
+
+# --- 11. Body that is not JSON at all ---
+# The field extractions used to carry `2>/dev/null || true`, which read a
+# non-JSON body (a proxy error page, an HTML 502) as "no moderation fields
+# present". The script still exited 2 — this was never a vacuous pass — but
+# it reported the wrong cause: "the registry response shape may have
+# changed; update verify-moderation-cleared.sh's jq paths", sending the
+# operator to edit a parse that is working fine against a registry that is
+# returning 502s. Per rules/error-handling.md Actionable Messages, the
+# message must name what to do; naming the wrong thing is worse than
+# terse, because it is confidently wrong.
+reset_mocks
+queue 1 '<html><head><title>502 Bad Gateway</title></head></html>'
+err=$( { main acme widget 1.2.3 >/dev/null; } 2>&1 ); rc=$?
+if [[ $rc -eq 2 ]] && [[ "$err" == *"not valid JSON"* ]]; then
+  pass "non-JSON body: exit 2 naming the real fault"
+else
+  fail "non-JSON body (rc=$rc err=$err)"
+fi
+
+# --- 12. Truncated JSON body ---
+# jq fails outright here rather than returning empty; the old suppression
+# turned that failure into the same misdirected "update the jq paths"
+# message as case 11.
+reset_mocks
+queue 1 '{"data":{"attributes":{"moderationStatus":'
+err=$( { main acme widget 1.2.3 >/dev/null; } 2>&1 ); rc=$?
+if [[ $rc -eq 2 ]] && [[ "$err" == *"not valid JSON"* ]]; then
+  pass "truncated JSON body: exit 2 naming the real fault"
+else
+  fail "truncated JSON (rc=$rc err=$err)"
+fi
+
+# --- 13/14. Valid JSON, WRONG SHAPE — must reach the shape-changed
+# diagnostic, not crash on jq's raw index error. `.data` a string, and
+# `.data.attributes` a string (nested), are the two levels a one-step
+# `.attributes?` guard misses; only `(.data.attributes.FIELD)?` catches both.
+reset_mocks
+queue 1 '{"data":"a-string-not-an-object"}'
+err=$( { main acme widget 1.2.3 >/dev/null; } 2>&1 ); rc=$?
+if [[ $rc -eq 2 ]] && [[ "$err" == *"response shape may have changed"* ]]; then
+  pass "wrong shape (.data string): shape-changed diagnostic, not a jq crash"
+else
+  fail "wrong shape .data string (rc=$rc err=$err)"
+fi
+
+reset_mocks
+queue 1 '{"data":{"attributes":"not-an-object"}}'
+err=$( { main acme widget 1.2.3 >/dev/null; } 2>&1 ); rc=$?
+if [[ $rc -eq 2 ]] && [[ "$err" == *"response shape may have changed"* ]]; then
+  pass "wrong shape (.data.attributes string): shape-changed diagnostic"
+else
+  fail "wrong shape .attributes string (rc=$rc err=$err)"
+fi
 
 echo
 echo "verify-moderation-cleared: ${PASS_COUNT} passed, ${FAIL_COUNT} failed"

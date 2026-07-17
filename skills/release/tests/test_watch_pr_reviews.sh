@@ -52,7 +52,19 @@ FAIL_COUNT=0
 PASS_COUNT=0
 
 TMPDIR_TEST=$(mktemp -d -t watch-pr-test.XXXXXX)
-trap 'rm -rf "$TMPDIR_TEST"' EXIT
+# Named handler ending `return 0`, not a bare `trap 'rm -rf ...'`: the
+# EXIT trap's final command status becomes the process's exit status, so
+# a failed cleanup would turn an all-green run non-zero and flake CI
+# (rules/error-handling.md Shell Error Handling).
+cleanup_tmp() {
+  if [[ -n "${TMPDIR_TEST:-}" ]]; then
+    if ! rm -rf "$TMPDIR_TEST"; then
+      echo "warning: could not remove temp dir ${TMPDIR_TEST} — remove it by hand" >&2
+    fi
+  fi
+  return 0
+}
+trap cleanup_tmp EXIT
 export MOCK_CALLS_FILE="$TMPDIR_TEST/calls"
 export MOCK_QUEUE_FILE="$TMPDIR_TEST/queue"
 
@@ -100,7 +112,7 @@ reset_mocks() {
 
 queue() { for s in "$@"; do echo "$s" >> "$MOCK_QUEUE_FILE"; done; }
 calls() { wc -l < "$MOCK_CALLS_FILE" | tr -d ' '; }
-sleeps() { [[ -f "$TMPDIR_TEST/sleeps" ]] && wc -l < "$TMPDIR_TEST/sleeps" | tr -d ' ' || echo 0; }
+sleeps() { [[ -f "$TMPDIR_TEST/sleeps" ]] || { echo 0; return; }; wc -l < "$TMPDIR_TEST/sleeps" | tr -d ' '; }
 
 # Build a compact snapshot JSON. Args: mergeable mstatus ci gh_aw copilot [gh_comments copilot_comments]
 snap() {

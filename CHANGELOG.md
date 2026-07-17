@@ -1,5 +1,14 @@
 # Changelog
 
+### Rules
+
+- **`error-handling`: new Shell Error Handling section** — the rule was entirely silent on shell (no `set -euo pipefail`, no suppression ban), so consumers installing the plugin inherited none of the discipline the repo itself practises in all 18 of its non-test scripts. Encodes: mandatory `set -euo pipefail`; no `|| true` / `|| :` / bare `2>/dev/null`; explicit `if`/`case` on exit codes for commands that can legitimately fail; the distinction between an expected non-result and a tool failure (`grep` exits 1 on no-match, 2 on error — `|| true` collapses both); that silencing a *diagnostic* while explicitly handling the *failure* is not suppression; and that "fail visibly" permits a stderr warning rather than requiring exit non-zero. Full motivation: PR #184.
+
+### Skills
+
+- **All 16 production `|| true` sites converted to explicit exit-code handling** — landed with the rule above so it ships describing a repo that already obeys it (`rules/context-artifacts.md` Post-Edit Rule Audit). Three patterns: `grep`-no-match (`verify-publish-landed`, `scaffold`, `preflight`, `migrate`, `adopt`) now branch on rc so exit 2 is no longer read as "nothing found"; `jq` extraction (`verify-moderation-cleared`) validates the body once so a non-JSON response stops blaming the registry's shape; best-effort cleanup (`scaffold`, `adopt`) keeps its lenient behaviour but warns to stderr instead of skipping in silence. Full motivation: PR #184.
+- **Post-audit follow-through: remaining bare cleanup `rm` swept, and an EXIT-trap tempfile leak fixed** — the bare cleanup `rm` sites the `|| true` sweep left untouched (`scaffold` rollback + success paths, `run-diagnostics`, `run-tests`) now route through a `discard` helper that warns on a failed remove instead of aborting the operation (`set -e`) or silently continuing (`set +e`), so the committed repo satisfies the new "best-effort warns, never nothing" clause everywhere the reviewer flagged. Separately, `verify-publish-landed` and `verify-moderation-cleared` declared their EXIT-trap `err_file` as a `main`-local, but the trap fires after `main` returns — on the normal success path the handler saw an empty variable and leaked the tempfile every run; only the `exit`-from-inside-`main` error paths cleaned up. `err_file` is now script-global. Full motivation: PR #184.
+
 ## 0.3.93 — 2026-07-17
 
 ### Skills

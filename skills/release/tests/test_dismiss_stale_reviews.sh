@@ -77,7 +77,7 @@ gh() {
 }
 
 # Convenience: how many dismissals were issued this test.
-dismiss_count() { [[ -s "$DISMISS_LOG" ]] && wc -l < "$DISMISS_LOG" | tr -d ' ' || echo 0; }
+dismiss_count() { [[ -s "$DISMISS_LOG" ]] || { echo 0; return; }; wc -l < "$DISMISS_LOG" | tr -d ' '; }
 
 # --- test bodies ---
 

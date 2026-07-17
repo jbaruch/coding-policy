@@ -9,6 +9,16 @@
 # Both engines always run (explicit rc capture, not error suppression per
 # rules/error-handling.md) so one invocation surfaces every finding.
 #
+# `set -uo pipefail`, not `set -euo pipefail`: this script takes
+# rules/error-handling.md Shell Error Handling's carve-out for a script
+# running independent checks and reporting an aggregate. All four
+# preconditions hold — shellcheck and pyright are independent; each rc is
+# captured explicitly and aggregated into a non-zero exit; only `-e` is
+# dropped; and the two setup steps that gate the checks — base-dir presence
+# and engine presence — carry their own explicit checks below (per the
+# carve-out's silent-corruption clause; the engines' own runs need no such
+# guard, since their exit codes are exactly what this script captures).
+#
 # Output:
 #   stderr: each engine's native findings plus per-engine progress.
 # Usage: scripts/run-diagnostics.sh [base-dir]
@@ -21,6 +31,16 @@
 #       setup error (base dir missing, no scripts found, engine absent).
 
 set -uo pipefail
+
+# Best-effort temp cleanup. Without `set -e` a failing bare `rm` here would
+# leave the tmpfile with no signal at all; warn, never silence
+# (rules/error-handling.md Shell Error Handling).
+discard() {
+  local f="$1"
+  if [[ -n "$f" ]] && ! rm -f "$f"; then
+    echo "run-diagnostics: warning: could not remove temp file ${f} — remove it by hand" >&2
+  fi
+}
 
 main() {
   local base="${1:-}"
@@ -52,7 +72,7 @@ main() {
   # file keeps find's exit observable through the pipe (see run-tests.sh).
   local tmplist; tmplist="$(mktemp)"
   if ! find "${roots[@]}" -type f -name '*.sh' -print0 | sort -z > "$tmplist"; then
-    rm -f "$tmplist"
+    discard "$tmplist"
     echo "run-diagnostics: shell-script discovery (find) failed under $base" >&2
     return 2
   fi
@@ -61,7 +81,7 @@ main() {
   while IFS= read -r -d '' f; do
     [[ -n "$f" ]] && scripts+=("$f")
   done < "$tmplist"
-  rm -f "$tmplist"
+  discard "$tmplist"
 
   if [[ ${#scripts[@]} -eq 0 ]]; then
     echo "run-diagnostics: no shell scripts found under ${base}/{skills,scripts}" >&2

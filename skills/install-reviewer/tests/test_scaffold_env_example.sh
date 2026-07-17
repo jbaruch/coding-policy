@@ -36,7 +36,19 @@ FAIL_COUNT=0
 PASS_COUNT=0
 
 TMPDIR_TEST=$(mktemp -d -t scaffold-env-test.XXXXXX)
-trap 'rm -rf "$TMPDIR_TEST"' EXIT
+# Named handler ending `return 0`, not a bare `trap 'rm -rf ...'`: the
+# EXIT trap's final command status becomes the process's exit status, so
+# a failed cleanup would turn an all-green run non-zero and flake CI
+# (rules/error-handling.md Shell Error Handling).
+cleanup_tmp() {
+  if [[ -n "${TMPDIR_TEST:-}" ]]; then
+    if ! rm -rf "$TMPDIR_TEST"; then
+      echo "warning: could not remove temp dir ${TMPDIR_TEST} — remove it by hand" >&2
+    fi
+  fi
+  return 0
+}
+trap cleanup_tmp EXIT
 
 assert_eq() {
   local label="$1" expected="$2" actual="$3"
@@ -70,8 +82,17 @@ content_fingerprint() {
   cksum < "$1"
 }
 
+# `grep -c` prints the count (including 0) and exits 1 on no-match — an
+# expected result, not a failure. Branch on the code so grep's exit 2
+# (unreadable file, bad pattern) stays a fault rather than reading as
+# "key absent" (rules/error-handling.md Shell Error Handling).
 key_count() {
-  grep -cE "^$2=" "$1" 2>/dev/null || true
+  local n rc=0
+  n=$(grep -cE "^$2=" "$1" 2>/dev/null) || rc=$?
+  case "$rc" in
+    0|1) printf '%s\n' "${n:-0}" ;;
+    *) echo "fatal: grep failed (rc=${rc}) reading $1" >&2; return 2 ;;
+  esac
 }
 
 # Asserts every reviewer secret has exactly one KEY= line and the deep

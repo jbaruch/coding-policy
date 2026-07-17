@@ -28,6 +28,31 @@ alwaysApply: true
   4. Handler at outermost process boundary — never inner function
 - Every other catch in the file still uses specific exception types
 
+## Shell Error Handling
+
+- Every shell script opens with `set -euo pipefail` (except under the carve-out below)
+- Never suppress a failure — no `|| true`, no `|| :`, no `2>/dev/null` standing in for a handler
+- A command that can legitimately fail gets an explicit `if` or `case` on its exit code, never blanket suppression
+- Distinguish an expected non-result from a tool failure — `grep` exits 1 on no-match and 2 on error, and `|| true` collapses both, so an unreadable file or a bad regex reads as "nothing found"
+- Silencing a tool's diagnostic while explicitly handling its failure is not suppression: `cmd 2>/dev/null || { echo "<actionable message>" >&2; exit 1; }` replaces a worse message with a better one
+- Fail visibly does not require exit non-zero — best-effort work that legitimately continues past a failure emits a warning to stderr, never nothing
+- An `EXIT` trap's final command status becomes the script's exit status — end cleanup handlers with `return 0` so cleanup never rewrites the outcome
+- Narrow exception for aggregate-reporting scripts that drop `set -e`
+- Applies when a script runs independent checks and reports an aggregate (test harnesses, multi-engine diagnostics gates)
+- Preconditions (all required):
+  1. Each check is independent — a later one's result never depends on an earlier one having passed
+  2. The script captures each check's exit code explicitly and exits non-zero when any check failed
+  3. It keeps `set -uo pipefail` — only `-e` is dropped
+  4. A setup step whose failure would silently corrupt the run rather than loudly abort it — a temp dir spliced onto `PATH`, a value that defaults to something dangerous — carries its own explicit failure check. A temp dir used only as a path for later file operations already fails loudly on first use and needs none
+- Every other shell script still opens with `set -euo pipefail`
+- Narrow exception for `|| true` on a `source` of the script under test
+- Applies when sourcing runs that script's own `set -euo pipefail` in the harness's shell, and its entry-point guard then returns non-zero under the `-e` it just enabled
+- Preconditions (all required):
+  1. The suppressed command is the `source` itself, never an assertion or a command under test
+  2. `set +e` follows on the next line, restoring the harness's own discipline
+  3. The harness takes the `set -e` carve-out above
+- Every other `|| true` in a harness still converts to an explicit exit-code check
+
 ## Actionable Messages
 
 - Error messages must tell the user **what to do**, not just what went wrong

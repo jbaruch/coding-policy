@@ -33,7 +33,8 @@
 #          with lint passing;
 #        1 migrated but `tessl plugin lint` failed (agent must address);
 #        2 tool/precondition error — jq/tessl missing, path not a directory,
-#          or `tessl plugin migrate` produced no manifest (stderr only)
+#          `tessl plugin migrate` produced no manifest, or the residual-file
+#          scan could not read the tree (grep rc >1) (stderr only)
 
 set -euo pipefail
 
@@ -42,16 +43,26 @@ set -euo pipefail
 # dirs, and the CHANGELOG (its archive legitimately references the legacy
 # term). Uses `grep -w` for word boundaries (POSIX-portable, unlike the
 # `\b` GNU extension) and `-i` so capitalized "Tile" is not missed. Emits a
-# JSON array of matching file paths (relative, sorted) on stdout. Always 0.
+# JSON array of matching file paths (relative, sorted) on stdout. Exits 0
+# on a completed scan (matches or none); exits 2 if the scan itself failed
+# (grep rc >1 — an unreadable tree), so "no residual files" is never
+# reported for a tree that could not be read.
 scan_residual_files() {
-  local files
-  # `|| true`: grep exits 1 on no matches, which would trip `set -o
-  # pipefail` and abort the migration after it already succeeded.
+  local files grep_rc=0
+  # grep exits 1 on no matches — a real, expected result (a clean tree has
+  # no residual 'tile' references), not a failure. Branch on the code rather
+  # than `|| true`, which also swallowed grep's exit 2: an unreadable
+  # directory would report "no residual files" and the migration would
+  # declare clean a tree it never managed to scan.
   files=$(grep -rIliwE 'tiles?' . \
     --exclude-dir=.git \
     --exclude-dir=.tessl \
     --exclude-dir=node_modules \
-    --exclude='CHANGELOG.md' 2>/dev/null || true)
+    --exclude='CHANGELOG.md' 2>/dev/null) || grep_rc=$?
+  if [[ $grep_rc -gt 1 ]]; then
+    echo "migrate.sh: residual-file scan failed (grep rc=${grep_rc}) — the tree could not be fully read, so a 'no residual files' result cannot be trusted; check directory permissions, then re-run" >&2
+    return 2
+  fi
   if [[ -z "$files" ]]; then
     echo '[]'
     return 0
@@ -102,7 +113,13 @@ main() {
   # Already migrated: plugin.json is authoritative. Idempotent no-op so the
   # skill can re-run safely; the agent skips straight to reconciliation.
   if [[ "$has_plugin" == true ]]; then
-    emit "already-migrated" false true false false null "$(scan_residual_files)"
+    # Capture, then emit. `emit ... "$(scan_residual_files)"` swallows the
+    # scan's exit status inside the substitution, so its exit-2 tool fault
+    # would surface later as a `jq --argjson residual_files ""` failure
+    # instead of the documented diagnostic.
+    local residual
+    residual=$(scan_residual_files) || exit 2
+    emit "already-migrated" false true false false null "$residual"
     exit 0
   fi
 
@@ -144,7 +161,10 @@ main() {
     rc=1
   fi
 
-  emit "migrated" true true "$tileignore_renamed" "$tile_json_removed" "$lint_ok" "$(scan_residual_files)"
+  # Capture, then emit — see the already-migrated path above.
+  local residual
+  residual=$(scan_residual_files) || exit 2
+  emit "migrated" true true "$tileignore_renamed" "$tile_json_removed" "$lint_ok" "$residual"
 
   if [[ $rc -ne 0 ]]; then
     echo "migrate: 'tessl plugin lint' failed after migration — inspect the lint output and fix before publishing" >&2
