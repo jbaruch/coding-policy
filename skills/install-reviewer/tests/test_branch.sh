@@ -163,34 +163,32 @@ t_outside_git_worktree_refused() {
 t_resolve_default_branch_falls_back_to_master() {
   # Repo whose default is `master` and origin/HEAD symref isn't set
   local out
-  git checkout -b master -q
-  # Branch on each probe's exit code, distinguishing absence (the expected
-  # fixture state) from a real git fault (rules/error-handling.md — expected
-  # non-result vs tool failure). show-ref: 0 present / 1 absent / >1 fault.
-  # ls-remote --exit-code: 0 present / 2 absent / other fault. symbolic-ref
-  # --quiet: 0 present / 1 absent / >1 fault.
-  # `|| rc=$?`, not `; rc=$?`: if a prior test left `set -e` on, a bare
-  # `git show-ref` at exit 1 (absent) would abort before `rc=$?` and the
-  # case never runs. The `||` both captures the code and suspends `-e`.
+  # resolve_default_branch reads the LOCAL remote-tracking refs
+  # (refs/remotes/origin/*), so shape those directly rather than pushing to
+  # and deleting from the bare repo — deleting the bare repo's current
+  # branch is prohibited, and the local refs are what the code under test
+  # actually probes. Target state: origin/HEAD symref absent, origin/main
+  # absent, origin/master present => falls back to master.
+  #
+  # Each probe branches on its own exit code, distinguishing the expected
+  # absent state from a real git fault (rules/error-handling.md). `|| rc=$?`
+  # not `; rc=$?`: if a prior test left `set -e` on, a bare probe at its
+  # expected-nonzero code would abort before `rc=$?`; `||` captures and
+  # suspends `-e` together.
   local rc=0
-  git show-ref --verify --quiet refs/heads/main || rc=$?
-  case "$rc" in
-    0) git branch -d main -q ;;
-    1) ;;                        # absent: nothing to delete
-    *) fail "setup: git show-ref failed (rc=$rc)"; return 1 ;;
-  esac
-  git push -q origin master
-  rc=0; git ls-remote --exit-code --heads origin main >/dev/null 2>&1 || rc=$?
-  case "$rc" in
-    0) git push -q origin --delete main ;;
-    2) ;;                        # absent on remote: nothing to delete
-    *) fail "setup: git ls-remote failed (rc=$rc)"; return 1 ;;
-  esac
+  git checkout -b master -q
+  git push -q origin master                 # creates local refs/remotes/origin/master
   rc=0; git symbolic-ref --quiet refs/remotes/origin/HEAD >/dev/null 2>&1 || rc=$?
   case "$rc" in
     0) git symbolic-ref --delete refs/remotes/origin/HEAD ;;
-    1) ;;                        # not a symref / absent: nothing to delete
+    1) ;;                                    # no symref: already the target state
     *) fail "setup: git symbolic-ref failed (rc=$rc)"; return 1 ;;
+  esac
+  rc=0; git show-ref --verify --quiet refs/remotes/origin/main || rc=$?
+  case "$rc" in
+    0) git update-ref -d refs/remotes/origin/main ;;  # drop the local tracking ref
+    1) ;;                                    # absent: already the target state
+    *) fail "setup: git show-ref failed (rc=$rc)"; return 1 ;;
   esac
   out=$("$SCRIPT" 2>/dev/null) || return 1
   assert_eq "state" "created" "$(jq -r .state <<<"$out")"

@@ -45,19 +45,41 @@ emit() {
     '{state: $state, branch: $branch, override: $override}'
 }
 
-# Determine the repo's default branch from origin/HEAD. The symref is
-# set by `git clone` and `git remote set-head`; if it's missing we fall
-# back to probing `origin/main` then `origin/master` (covers the two
-# overwhelmingly common conventions). A repo with neither is an unusual
-# configuration the consumer needs to fix manually.
+# Does <ref> exist? 0 present, 1 absent — both expected. A `git show-ref`
+# exit >1 is a real fault (unreadable/corrupt repo), which this returns as
+# 2 so callers surface it instead of reading it as "absent"
+# (rules/error-handling.md — distinguish an expected non-result from a tool
+# failure). No `--quiet` needed: stdout is redirected by the caller.
+ref_exists() {
+  local rc=0
+  git show-ref --verify --quiet "$1" || rc=$?
+  case "$rc" in
+    0) return 0 ;;
+    1) return 1 ;;
+    *) echo "error: 'git show-ref $1' failed (rc=${rc}) — the repository may be unreadable or corrupt; check 'git status' and repository ownership, then re-run" >&2; exit 2 ;;
+  esac
+}
+
+# Determine the repo's default branch from origin/HEAD. The symref is set
+# by `git clone` and `git remote set-head`; if it's missing we fall back to
+# probing `origin/main` then `origin/master` (the two common conventions).
+# A repo with neither is an unusual configuration the consumer fixes by hand.
 resolve_default_branch() {
-  local ref
-  if ref=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null); then
-    echo "${ref#refs/remotes/origin/}"
-    return 0
-  fi
+  local ref rc=0
+  # `--quiet` is what makes the codes distinguishable: WITHOUT it, git
+  # returns 128 for BOTH "HEAD symref not set" (expected) AND a real fault,
+  # so they can't be told apart. WITH it, an unset/non-symref HEAD is rc 1
+  # (expected, probe candidates) and only a genuine fault stays 128 —
+  # surfaced rather than silently falling through to the main/master guess
+  # (rules/error-handling.md — expected non-result vs tool failure).
+  ref=$(git symbolic-ref --quiet refs/remotes/origin/HEAD 2>/dev/null) || rc=$?
+  case "$rc" in
+    0) echo "${ref#refs/remotes/origin/}"; return 0 ;;
+    1) ;;  # HEAD symref not set: fall through to candidate probing
+    *) echo "error: 'git symbolic-ref refs/remotes/origin/HEAD' failed (rc=${rc}) — the repository may be unreadable; check 'git status', then re-run" >&2; exit 2 ;;
+  esac
   for candidate in main master; do
-    if git show-ref --verify --quiet "refs/remotes/origin/${candidate}"; then
+    if ref_exists "refs/remotes/origin/${candidate}"; then
       echo "$candidate"
       return 0
     fi
@@ -79,7 +101,7 @@ main() {
     # Install mode: create from default branch. If the local branch
     # already exists (consumer ran the skill before, branch lingering)
     # we'd produce a divergent state — refuse with a clear diagnostic.
-    if git show-ref --verify --quiet "refs/heads/${BRANCH}"; then
+    if ref_exists "refs/heads/${BRANCH}"; then
       echo "error: local branch '${BRANCH}' already exists — install mode expects a clean slate; remove the branch or run with --override to use the upgrade flow" >&2
       exit 1
     fi
@@ -118,7 +140,7 @@ main() {
   fi
 
   local local_exists=0
-  if git show-ref --verify --quiet "refs/heads/${BRANCH}"; then
+  if ref_exists "refs/heads/${BRANCH}"; then
     local_exists=1
   fi
 

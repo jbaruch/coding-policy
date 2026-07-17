@@ -258,15 +258,28 @@ check_templates_present() {
 }
 
 check_branch_not_local() {
-  if git show-ref --verify --quiet "refs/heads/${BRANCH}"; then
-    push_failure "branch-not-local" "Local branch '${BRANCH}' already exists — delete with: git branch -d '${BRANCH}' (refuses if unmerged); or rename with: git branch -m '${BRANCH}' '${BRANCH}.bak' before re-running"
-  fi
+  # show-ref: 0 present, 1 absent (both expected), >1 a git fault surfaced
+  # as its own failure rather than read as "absent, all clear"
+  # (rules/error-handling.md — expected non-result vs tool failure).
+  local rc=0
+  git show-ref --verify --quiet "refs/heads/${BRANCH}" || rc=$?
+  case "$rc" in
+    0) push_failure "branch-not-local" "Local branch '${BRANCH}' already exists — delete with: git branch -d '${BRANCH}' (refuses if unmerged); or rename with: git branch -m '${BRANCH}' '${BRANCH}.bak' before re-running" ;;
+    1) ;;  # absent: clean
+    *) push_failure "branch-not-local" "'git show-ref refs/heads/${BRANCH}' failed (rc=${rc}) — cannot verify branch state; the repository may be unreadable, check 'git status' and re-run" ;;
+  esac
 }
 
 check_branch_not_remote() {
-  if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
-    push_failure "branch-not-remote" "Remote branch 'origin/${BRANCH}' already exists — delete with 'git push origin --delete ${BRANCH}' or rename before re-running"
-  fi
+  # ls-remote --exit-code: 0 present, 2 absent (both expected), other a
+  # network/auth/tool fault surfaced rather than read as "absent".
+  local rc=0
+  git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1 || rc=$?
+  case "$rc" in
+    0) push_failure "branch-not-remote" "Remote branch 'origin/${BRANCH}' already exists — delete with 'git push origin --delete ${BRANCH}' or rename before re-running" ;;
+    2) ;;  # absent on remote: clean
+    *) push_failure "branch-not-remote" "'git ls-remote origin ${BRANCH}' failed (rc=${rc}) — cannot verify remote branch state; likely a network or auth issue, resolve and re-run" ;;
+  esac
 }
 
 # Override-mode safety check: refuse to upgrade if the consumer has dirty
