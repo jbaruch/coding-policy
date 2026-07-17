@@ -233,8 +233,11 @@ main() {
   fi
 
   # Fresh adoption: needs a clean tree because gh pr checkout mutates it.
+  # This is a GUARD, not a classifier — unlike preflight's classify_target_dirty,
+  # it needn't distinguish diff's exit 1 (dirty) from >1 (git fault): both mean
+  # "not safe to mutate the tree", and refusing on either is the safe outcome.
   if ! git diff --quiet || ! git diff --cached --quiet; then
-    die "working tree has uncommitted changes — commit or stash before adopting (gh pr checkout needs a clean tree)." 1
+    die "working tree has uncommitted changes (or git could not verify it) — commit or stash before adopting (gh pr checkout needs a clean tree)." 1
   fi
   orig_ref=$(git symbolic-ref --quiet --short HEAD 2>/dev/null || git rev-parse HEAD)
   trap restore_orig_ref EXIT   # restore the caller's branch even if a later step fails

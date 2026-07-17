@@ -275,11 +275,18 @@ classify_target_dirty() {
     # present in index + HEAD) or `git rm`'d it (missing from working tree
     # AND index, still in HEAD). `git diff --diff-filter=D HEAD` catches
     # both because it compares HEAD against the working tree. `--quiet`
-    # exits 0 when there's no diff and 1 when there is, so negation reads
-    # as "is this path deleted vs HEAD?".
-    if ! git diff --quiet --diff-filter=D HEAD -- "$t" 2>/dev/null; then
-      echo "tracked deletion"
-    fi
+    # exits 0 when there's no diff and 1 when there is. Branch on the code:
+    # 1 is "deleted vs HEAD" (the finding), but >1 is a real git fault, and
+    # `if ! ...` would collapse both and mislabel the fault "tracked
+    # deletion" (rules/error-handling.md — distinguish an expected
+    # non-result from a tool failure).
+    local d_rc=0
+    git diff --quiet --diff-filter=D HEAD -- "$t" 2>/dev/null || d_rc=$?
+    case "$d_rc" in
+      0) ;;                       # no diff: not deleted
+      1) echo "tracked deletion" ;;
+      *) echo "git-error (git diff rc=${d_rc} on ${t})" ;;
+    esac
     return 0
   fi
   if [[ -L "$t" ]]; then
@@ -288,10 +295,16 @@ classify_target_dirty() {
     # refuses symlinks too; this just surfaces it earlier.
     echo "symlink target"
   elif git ls-files --error-unmatch -- "$t" >/dev/null 2>&1; then
-    # Tracked: flag if uncommitted edits exist relative to HEAD.
-    if ! git diff --quiet HEAD -- "$t" 2>/dev/null; then
-      echo "uncommitted edits"
-    fi
+    # Tracked: flag uncommitted edits vs HEAD. Same rc branch as the
+    # deletion probe above — 1 is dirty (the finding), >1 is a git fault
+    # that `if ! ...` would mislabel "uncommitted edits".
+    local e_rc=0
+    git diff --quiet HEAD -- "$t" 2>/dev/null || e_rc=$?
+    case "$e_rc" in
+      0) ;;                       # clean
+      1) echo "uncommitted edits" ;;
+      *) echo "git-error (git diff rc=${e_rc} on ${t})" ;;
+    esac
   else
     # Untracked regular file at the target path.
     echo "untracked"
