@@ -46,13 +46,21 @@ main() {
   (( OVERRIDE_MODE == 1 )) && override_json="true"
 
   # If the remote branch already matches local HEAD, skip the push.
-  # ls-remote can fail on network/auth issues — treat that as "unknown remote
-  # state" and proceed with the push so git push can report the real error.
-  # set -o pipefail means a failure in ls-remote would kill us here without
-  # the explicit `|| true` guard.
-  local local_sha remote_sha
+  # ls-remote failing (network/auth) is deliberately tolerated — fall through
+  # and let `git push` report the real error. But branch on its exit code
+  # instead of `... | awk | echo ""`, which collapsed two states into empty:
+  # the branch legitimately absent (rc 0, no output) and ls-remote failing.
+  # Both then read as "not on remote"; a real failure now warns rather than
+  # passing silently (rules/error-handling.md Shell Error Handling).
+  local local_sha remote_sha ls_out ls_rc=0
   local_sha=$(git rev-parse HEAD)
-  remote_sha=$(git ls-remote --heads origin "$BRANCH" 2>/dev/null | awk '{print $1}' || echo "")
+  ls_out=$(git ls-remote --heads origin "$BRANCH" 2>/dev/null) || ls_rc=$?
+  if [[ $ls_rc -ne 0 ]]; then
+    echo "push.sh: warning: 'git ls-remote origin ${BRANCH}' failed (rc=${ls_rc}) — remote state unknown; proceeding with the push, which will report the real error if any" >&2
+    remote_sha=""
+  else
+    remote_sha=$(awk 'NR==1{print $1}' <<<"$ls_out")
+  fi
   if [[ -n "$remote_sha" && "$remote_sha" == "$local_sha" ]]; then
     jq -n --arg branch "$BRANCH" --argjson override "$override_json" \
       '{state: "up-to-date", remote_ref: ("origin/" + $branch), override: $override}'

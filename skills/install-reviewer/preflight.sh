@@ -121,12 +121,16 @@ TARGETS=(
 declare -a failures=()
 declare -a warnings=()
 
+# Build the JSON object with jq, never string interpolation: a reason can
+# carry raw command output (a version string, a git error), and a quote,
+# backslash, or newline in it would break the `jq --argjson failures` parse
+# at emit time and drop the whole documented JSON contract. jq escapes it.
 push_failure() {
-  failures+=("{\"check\":\"$1\",\"reason\":\"$2\"}")
+  failures+=("$(jq -nc --arg check "$1" --arg reason "$2" '{check: $check, reason: $reason}')")
 }
 
 push_warning() {
-  warnings+=("{\"check\":\"$1\",\"reason\":\"$2\"}")
+  warnings+=("$(jq -nc --arg check "$1" --arg reason "$2" '{check: $check, reason: $reason}')")
 }
 
 check_in_git_worktree() {
