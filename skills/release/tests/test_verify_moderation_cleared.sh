@@ -70,7 +70,14 @@ export MOCK_QUEUE_DIR="$TMPDIR_TEST/queue"
 # rest to stderr and return non-zero (simulates a registry/tool failure).
 tessl() {
   local n resp
-  n=$(cat "$MOCK_COUNT_FILE" 2>/dev/null || echo 0)
+  # Absent count file is the expected first-call state (=> 0); a present but
+  # unreadable file is a harness fault that must not read as 0
+  # (rules/error-handling.md — expected non-result vs tool failure).
+  if [[ -f "$MOCK_COUNT_FILE" ]]; then
+    n=$(cat "$MOCK_COUNT_FILE") || { echo "test harness: cannot read $MOCK_COUNT_FILE" >&2; exit 2; }
+  else
+    n=0
+  fi
   n=$(( n + 1 ))
   echo "$n" > "$MOCK_COUNT_FILE"
   echo "tessl $*" >> "$MOCK_CALLS_FILE"
@@ -122,7 +129,7 @@ body_json() {
 queue() { printf '%s' "$2" > "$MOCK_QUEUE_DIR/$1"; }
 
 count_calls() { wc -l < "$MOCK_CALLS_FILE" | tr -d ' '; }
-count_sleeps() { [[ -s "$MOCK_SLEEP_FILE" ]] && wc -l < "$MOCK_SLEEP_FILE" | tr -d ' ' || echo 0; }
+count_sleeps() { [[ -s "$MOCK_SLEEP_FILE" ]] || { echo 0; return; }; wc -l < "$MOCK_SLEEP_FILE" | tr -d ' '; }
 
 pass() { PASS_COUNT=$(( PASS_COUNT + 1 )); echo "  PASS: $1"; }
 fail() { FAIL_COUNT=$(( FAIL_COUNT + 1 )); echo "  FAIL: $1" >&2; }

@@ -112,7 +112,7 @@ reset_mocks() {
 
 queue() { for s in "$@"; do echo "$s" >> "$MOCK_QUEUE_FILE"; done; }
 calls() { wc -l < "$MOCK_CALLS_FILE" | tr -d ' '; }
-sleeps() { [[ -f "$TMPDIR_TEST/sleeps" ]] && wc -l < "$TMPDIR_TEST/sleeps" | tr -d ' ' || echo 0; }
+sleeps() { [[ -f "$TMPDIR_TEST/sleeps" ]] || { echo 0; return; }; wc -l < "$TMPDIR_TEST/sleeps" | tr -d ' '; }
 
 # Build a compact snapshot JSON. Args: mergeable mstatus ci gh_aw copilot [gh_comments copilot_comments]
 snap() {
