@@ -271,6 +271,28 @@ else
   fail "truncated JSON (rc=$rc err=$err)"
 fi
 
+# --- 13/14. Valid JSON, WRONG SHAPE — must reach the shape-changed
+# diagnostic, not crash on jq's raw index error. `.data` a string, and
+# `.data.attributes` a string (nested), are the two levels a one-step
+# `.attributes?` guard misses; only `(.data.attributes.FIELD)?` catches both.
+reset_mocks
+queue 1 '{"data":"a-string-not-an-object"}'
+err=$( { main acme widget 1.2.3 >/dev/null; } 2>&1 ); rc=$?
+if [[ $rc -eq 2 ]] && [[ "$err" == *"response shape may have changed"* ]]; then
+  pass "wrong shape (.data string): shape-changed diagnostic, not a jq crash"
+else
+  fail "wrong shape .data string (rc=$rc err=$err)"
+fi
+
+reset_mocks
+queue 1 '{"data":{"attributes":"not-an-object"}}'
+err=$( { main acme widget 1.2.3 >/dev/null; } 2>&1 ); rc=$?
+if [[ $rc -eq 2 ]] && [[ "$err" == *"response shape may have changed"* ]]; then
+  pass "wrong shape (.data.attributes string): shape-changed diagnostic"
+else
+  fail "wrong shape .attributes string (rc=$rc err=$err)"
+fi
+
 echo
 echo "verify-moderation-cleared: ${PASS_COUNT} passed, ${FAIL_COUNT} failed"
 [[ $FAIL_COUNT -eq 0 ]]

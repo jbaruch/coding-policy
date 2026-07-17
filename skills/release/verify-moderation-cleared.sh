@@ -160,17 +160,20 @@ main() {
       exit 2
     fi
 
-    # `.attributes?` suppresses the index error jq raises when `.data` is
-    # valid JSON of the wrong TYPE (a string/array, e.g. a proxy error page
-    # that parsed) — without it, the call hard-fails under `set -e` and the
-    # script exits on jq's raw error, skipping the shape-changed diagnostic
-    # below. With `?`, a wrong shape yields empty for all three and falls
-    # through to that diagnostic. Three separate calls, not a `@tsv` read —
-    # tab is IFS-whitespace, so a leading empty field would shift the values.
+    # `(.data.attributes.FIELD)?` parenthesizes the WHOLE path before `?`, so
+    # an index error at ANY step is suppressed — `.data` a string, or `.data`
+    # an object whose `.attributes` is a string/array (a proxy error page that
+    # parsed). A one-level `.attributes?` only guards that step and still
+    # crashes when `.attributes` itself is the wrong type. Without the guard
+    # the call hard-fails under `set -e` and the script exits on jq's raw
+    # error, skipping the shape-changed diagnostic below; with it, a wrong
+    # shape yields empty for all three and falls through to that diagnostic.
+    # Three separate calls, not a `@tsv` read — tab is IFS-whitespace, so a
+    # leading empty field would shift the values.
     local status passed mod_error
-    status=$(printf '%s' "$body" | jq -r '.data.attributes?.moderationStatus // empty')
-    passed=$(printf '%s' "$body" | jq -r '.data.attributes?.moderationPassed // empty')
-    mod_error=$(printf '%s' "$body" | jq -r '.data.attributes?.moderationError // empty')
+    status=$(printf '%s' "$body" | jq -r '(.data.attributes.moderationStatus)? // empty')
+    passed=$(printf '%s' "$body" | jq -r '(.data.attributes.moderationPassed)? // empty')
+    mod_error=$(printf '%s' "$body" | jq -r '(.data.attributes.moderationError)? // empty')
 
     # A moderationError alone is a valid (blocked) response, so it counts
     # as a parsed field — without it in the guard, a block-by-error result
