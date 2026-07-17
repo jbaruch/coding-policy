@@ -84,7 +84,17 @@ fi
 repo_root=""
 git_rc=0
 git_err=""
-git_err_file=$(mktemp) || { echo "preflight.sh: mktemp failed — cannot capture git stderr; check TMPDIR is writable" >&2; exit 2; }
+git_err_file=$(mktemp) || {
+  # Emit the JSON envelope + exit 1, not a stderr-only exit 2: a bare exit
+  # here breaks the documented "single JSON object on stdout" contract for
+  # wrappers that parse it (jq is guaranteed by the early guard).
+  reason="mktemp failed — cannot capture git stderr; check TMPDIR is writable"
+  override_bool="false"; (( OVERRIDE_MODE == 1 )) && override_bool="true"
+  jq -nc --argjson override "$override_bool" --arg reason "$reason" \
+    '{ok: false, override: $override, failures: [{check: "tmpdir-writable", reason: $reason}], warnings: []}'
+  echo "preflight.sh: ${reason}" >&2
+  exit 1
+}
 repo_root=$(git rev-parse --show-toplevel 2>"$git_err_file") || git_rc=$?
 # Read only if readable (explicit branch, not `2>/dev/null` suppression), then
 # clean up with a checked rm so a failed cleanup warns rather than aborting

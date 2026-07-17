@@ -171,8 +171,12 @@ main() {
   # regex, unreadable input). Suppressing both reports a broken tool as a
   # missing line, sending the operator to debug the registry over a fault
   # in this script.
+  # here-string + `grep -m1`, not a pipeline: `-m1` stops at the first match
+  # so a second "Latest Version" line can't make version_line multi-line and
+  # break the awk/semver step, and the here-string avoids the pipeline that
+  # under pipefail could carry a SIGPIPE'd producer's status instead of grep's.
   local version_line rc=0
-  version_line=$(printf '%s\n' "$tessl_output" | grep "Latest Version") || rc=$?
+  version_line=$(grep -m1 "Latest Version" <<<"$tessl_output") || rc=$?
   case "$rc" in
     0) ;;
     1)

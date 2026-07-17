@@ -169,8 +169,11 @@ t_resolve_default_branch_falls_back_to_master() {
   # non-result vs tool failure). show-ref: 0 present / 1 absent / >1 fault.
   # ls-remote --exit-code: 0 present / 2 absent / other fault. symbolic-ref
   # --quiet: 0 present / 1 absent / >1 fault.
+  # `|| rc=$?`, not `; rc=$?`: if a prior test left `set -e` on, a bare
+  # `git show-ref` at exit 1 (absent) would abort before `rc=$?` and the
+  # case never runs. The `||` both captures the code and suspends `-e`.
   local rc=0
-  git show-ref --verify --quiet refs/heads/main; rc=$?
+  git show-ref --verify --quiet refs/heads/main || rc=$?
   case "$rc" in
     0) git branch -d main -q ;;
     1) ;;                        # absent: nothing to delete

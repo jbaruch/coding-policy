@@ -150,7 +150,12 @@ main() {
     # it sends the operator to rewrite a parse that works, against a
     # registry that is returning 502s (rules/error-handling.md Actionable
     # Messages).
-    if ! printf '%s' "$body" | jq -e . >/dev/null 2>&1; then
+    # `jq empty`, not `jq -e .`: `-e` sets the exit code from the last
+    # OUTPUT's truthiness, so a body that is valid JSON but evaluates to
+    # `false` or `null` would exit 1 and be misreported "not valid JSON".
+    # `jq empty` parses and produces no output — exit reflects parse
+    # validity alone.
+    if ! printf '%s' "$body" | jq empty >/dev/null 2>&1; then
       echo "error: 'tessl api ${endpoint}' returned a body that is not valid JSON — the registry may be returning an error page or the endpoint shape changed; inspect it directly with 'tessl api ${endpoint}' before retrying (body was: ${body})" >&2
       exit 2
     fi

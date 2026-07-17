@@ -14,8 +14,10 @@
 # running independent checks and reporting an aggregate. All four
 # preconditions hold — shellcheck and pyright are independent; each rc is
 # captured explicitly and aggregated into a non-zero exit; only `-e` is
-# dropped; and the setup steps `-e` would otherwise have caught (base-dir
-# presence, engine presence) carry their own explicit checks below.
+# dropped; and the two setup steps that gate the checks — base-dir presence
+# and engine presence — carry their own explicit checks below (per the
+# carve-out's silent-corruption clause; the engines' own runs need no such
+# guard, since their exit codes are exactly what this script captures).
 #
 # Output:
 #   stderr: each engine's native findings plus per-engine progress.
