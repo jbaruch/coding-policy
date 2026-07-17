@@ -48,7 +48,19 @@ FAIL_COUNT=0
 PASS_COUNT=0
 
 TMPDIR_TEST=$(mktemp -d -t verify-mod-test.XXXXXX)
-trap 'rm -rf "$TMPDIR_TEST"' EXIT
+# Named handler ending `return 0`, not a bare `trap 'rm -rf ...'`: the
+# EXIT trap's final command status becomes the process's exit status, so
+# a failed cleanup would turn an all-green run non-zero and flake CI
+# (rules/error-handling.md Shell Error Handling).
+cleanup_tmp() {
+  if [[ -n "${TMPDIR_TEST:-}" ]]; then
+    if ! rm -rf "$TMPDIR_TEST"; then
+      echo "warning: could not remove temp dir ${TMPDIR_TEST} — remove it by hand" >&2
+    fi
+  fi
+  return 0
+}
+trap cleanup_tmp EXIT
 export MOCK_COUNT_FILE="$TMPDIR_TEST/count"
 export MOCK_CALLS_FILE="$TMPDIR_TEST/calls"
 export MOCK_SLEEP_FILE="$TMPDIR_TEST/sleeps"
