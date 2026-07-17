@@ -54,6 +54,12 @@ if ! command -v jq >/dev/null 2>&1; then
   exit 2
 fi
 
+# `err_file` is script-global, never `local` in main: the EXIT trap fires
+# after main returns, when a main-local would be out of scope and this
+# handler would silently skip cleanup (verified: the normal-return path
+# leaks the tempfile every run; only the exit-from-inside-main paths clean up).
+err_file=""
+
 # EXIT-trap cleanup. `return 0` is load-bearing: the trap's final command
 # status becomes the script's exit status, so a failing `rm` would rewrite
 # this script's verdict (rules/error-handling.md Shell Error Handling).
@@ -124,7 +130,7 @@ main() {
 
   local endpoint="v1/tiles/${workspace}/${tile}/versions/${version}"
   local delay="$BASE_DELAY_SEC" elapsed=0 attempts=0
-  local err_file; err_file=$(mktemp) || { echo "error: mktemp failed — cannot run verify-moderation-cleared.sh without writable TMPDIR" >&2; exit 2; }
+  err_file=$(mktemp) || { echo "error: mktemp failed — cannot run verify-moderation-cleared.sh without writable TMPDIR" >&2; exit 2; }
   # Named handler ending `return 0` — the EXIT trap's final command status
   # becomes the script's exit status, so a failing `rm` would rewrite the
   # moderation verdict into a bare 1 (rules/error-handling.md).

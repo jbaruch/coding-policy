@@ -68,6 +68,12 @@ emit_and_exit() {
   exit "$rc"
 }
 
+# `err_file` is script-global, never `local` in main: the EXIT trap fires
+# after main returns, when a main-local would be out of scope and this
+# handler would silently skip cleanup (verified: the normal-return path
+# leaks the tempfile every run; only the exit-from-inside-main paths clean up).
+err_file=""
+
 # EXIT-trap cleanup. `return 0` is load-bearing: the trap's final command
 # status becomes the script's exit status, so a failing `rm` would rewrite
 # this script's verdict (rules/error-handling.md Shell Error Handling).
@@ -139,7 +145,7 @@ main() {
   # string and break the "conclusion == success" comparison. Combined
   # `2>&1` capture would otherwise let a single warning misclassify the
   # run on the happy path.
-  local conclusion err_file
+  local conclusion
   err_file=$(mktemp) || { echo "error: mktemp failed — cannot run verify-publish-landed.sh without writable TMPDIR" >&2; exit 2; }
   # Named handler ending `return 0`, not an inline `rm -f`: the EXIT trap's
   # final command status becomes the script's exit status, so an `rm` that
