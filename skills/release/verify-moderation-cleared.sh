@@ -54,12 +54,19 @@ if ! command -v jq >/dev/null 2>&1; then
   exit 2
 fi
 
-# EXIT-trap cleanup. `return 0` is load-bearing: the trap's final status
-# becomes the script's exit status, so a failing `rm` would rewrite this
-# script's verdict (rules/error-handling.md Shell Error Handling).
+# EXIT-trap cleanup. `return 0` is load-bearing: the trap's final command
+# status becomes the script's exit status, so a failing `rm` would rewrite
+# this script's verdict (rules/error-handling.md Shell Error Handling).
+#
+# `if ! rm` rather than a bare `rm`: under `set -e` a failing rm aborts the
+# handler before `return 0` runs — reintroducing the exact rewrite the
+# handler exists to prevent. An `if` condition suspends `set -e`, so the
+# failure is reported instead of escaping.
 cleanup_err_file() {
   if [[ -n "${err_file:-}" ]]; then
-    rm -f "$err_file"
+    if ! rm -f "$err_file"; then
+      echo "verify-moderation-cleared.sh: warning: could not remove temp file ${err_file} — remove it by hand" >&2
+    fi
   fi
   return 0
 }

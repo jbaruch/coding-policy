@@ -68,22 +68,29 @@ emit_and_exit() {
   exit "$rc"
 }
 
+# EXIT-trap cleanup. `return 0` is load-bearing: the trap's final command
+# status becomes the script's exit status, so a failing `rm` would rewrite
+# this script's verdict (rules/error-handling.md Shell Error Handling).
+#
+# `if ! rm` rather than a bare `rm`: under `set -e` a failing rm aborts the
+# handler before `return 0` runs — reintroducing the exact rewrite the
+# handler exists to prevent. An `if` condition suspends `set -e`, so the
+# failure is reported instead of escaping.
+cleanup_err_file() {
+  if [[ -n "${err_file:-}" ]]; then
+    if ! rm -f "$err_file"; then
+      echo "verify-publish-landed.sh: warning: could not remove temp file ${err_file} — remove it by hand" >&2
+    fi
+  fi
+  return 0
+}
+
 # Returns 0 iff $1 > $2 under semver ordering. Parses major.minor.patch
 # as integers in pure bash so the comparison stays portable across GNU
 # coreutils (Linux CI) and BSD userland (macOS) — `sort -V` is a GNU
 # extension and isn't guaranteed on BSD sort. Equality returns non-zero
 # so the caller can distinguish strict advance from no-op. Missing parts
 # default to 0 via parameter expansion.
-# EXIT-trap cleanup. `return 0` is load-bearing: the trap's final status
-# becomes the script's exit status, so a failing `rm` would rewrite this
-# script's verdict (rules/error-handling.md Shell Error Handling).
-cleanup_err_file() {
-  if [[ -n "${err_file:-}" ]]; then
-    rm -f "$err_file"
-  fi
-  return 0
-}
-
 version_gt() {
   [[ "$1" != "$2" ]] || return 1
   local a1 a2 a3 b1 b2 b3
