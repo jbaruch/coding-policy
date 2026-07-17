@@ -164,20 +164,31 @@ t_resolve_default_branch_falls_back_to_master() {
   # Repo whose default is `master` and origin/HEAD symref isn't set
   local out
   git checkout -b master -q
-  # Ask whether each ref exists rather than suppressing the delete's failure.
-  # Absence is the expected state on some fixture paths; a delete failing for
-  # any OTHER reason must still surface (rules/error-handling.md Shell Error
-  # Handling — distinguish an expected non-result from a tool failure).
-  if git show-ref --verify --quiet refs/heads/main; then
-    git branch -d main -q
-  fi
+  # Branch on each probe's exit code, distinguishing absence (the expected
+  # fixture state) from a real git fault (rules/error-handling.md — expected
+  # non-result vs tool failure). show-ref: 0 present / 1 absent / >1 fault.
+  # ls-remote --exit-code: 0 present / 2 absent / other fault. symbolic-ref
+  # --quiet: 0 present / 1 absent / >1 fault.
+  local rc=0
+  git show-ref --verify --quiet refs/heads/main; rc=$?
+  case "$rc" in
+    0) git branch -d main -q ;;
+    1) ;;                        # absent: nothing to delete
+    *) fail "setup: git show-ref failed (rc=$rc)"; return 1 ;;
+  esac
   git push -q origin master
-  if git ls-remote --exit-code --heads origin main >/dev/null 2>&1; then
-    git push -q origin --delete main
-  fi
-  if git symbolic-ref --quiet refs/remotes/origin/HEAD >/dev/null 2>&1; then
-    git symbolic-ref --delete refs/remotes/origin/HEAD
-  fi
+  rc=0; git ls-remote --exit-code --heads origin main >/dev/null 2>&1 || rc=$?
+  case "$rc" in
+    0) git push -q origin --delete main ;;
+    2) ;;                        # absent on remote: nothing to delete
+    *) fail "setup: git ls-remote failed (rc=$rc)"; return 1 ;;
+  esac
+  rc=0; git symbolic-ref --quiet refs/remotes/origin/HEAD >/dev/null 2>&1 || rc=$?
+  case "$rc" in
+    0) git symbolic-ref --delete refs/remotes/origin/HEAD ;;
+    1) ;;                        # not a symref / absent: nothing to delete
+    *) fail "setup: git symbolic-ref failed (rc=$rc)"; return 1 ;;
+  esac
   out=$("$SCRIPT" 2>/dev/null) || return 1
   assert_eq "state" "created" "$(jq -r .state <<<"$out")"
 }

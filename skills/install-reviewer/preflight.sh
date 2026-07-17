@@ -72,25 +72,35 @@ fi
 # NOT in a worktree, the check_in_git_worktree step below will fail
 # cleanly; don't exit here — we want to surface all preflight failures
 # as structured JSON, not die early.
-# `2>/dev/null` hides git's own "not a git repository" text because that
-# case is handled below and reported as structured JSON — the failure is
-# handled, not suppressed. Branch on the code rather than blanket-`|| true`:
-# 128 is the expected not-a-repo answer, anything else is a real git fault
-# that `|| true` would have read as "not in a repo" and silently skipped.
+# Capture stderr, not `2>/dev/null`: git returns 128 for BOTH the ordinary
+# not-a-repo case AND real faults (corrupt/unreadable repo, an unsafe-
+# ownership refusal), so the exit code alone cannot tell them apart — the
+# distinguisher is git's own message. `rev-parse --show-toplevel` on no repo
+# emits the stable, decades-old sentinel "not a git repository"; any other
+# 128 is a fault this preflight must surface, not treat as "just not in a
+# repo". Matching that one fixed token is not the regex-trap
+# (rules/script-delegation.md) — it is a documented tool sentinel, not
+# free-form text.
 repo_root=""
 git_rc=0
-repo_root=$(git rev-parse --show-toplevel 2>/dev/null) || git_rc=$?
-if [[ $git_rc -ne 0 && $git_rc -ne 128 ]]; then
-  # Hand-rolled JSON, same shape as the missing-jq guard above: this runs
-  # before push_failure exists, and the documented contract is one JSON
-  # object on stdout. A stderr-only exit leaves every caller that parses
-  # the contract with no payload (rules/script-delegation.md).
-  override_json="false"
-  (( OVERRIDE_MODE == 1 )) && override_json="true"
-  reason="git rev-parse --show-toplevel failed (rc=${git_rc}) — not the ordinary not-a-repo case; verify git is installed and the repository is readable, then re-run"
-  cat <<EOF
-{"ok": false, "override": ${override_json}, "failures": [{"check": "git-usable", "reason": "${reason}"}], "warnings": []}
-EOF
+git_err=""
+repo_root=$(git rev-parse --show-toplevel 2>/tmp/preflight_git_err.$$) || git_rc=$?
+git_err=$(cat /tmp/preflight_git_err.$$ 2>/dev/null); rm -f /tmp/preflight_git_err.$$
+# rc 128 whose stderr carries the not-a-repo sentinel is the expected case:
+# fall through, and check_in_git_worktree below reports it as structured
+# JSON. Every other non-zero rc — and a 128 WITHOUT that sentinel — is a
+# git fault surfaced here.
+if [[ $git_rc -ne 0 ]] && ! { [[ $git_rc -eq 128 ]] && [[ "$git_err" == *"not a git repository"* ]]; }; then
+  # Build the JSON with jq, never interpolation: `reason` embeds raw git
+  # stderr, which can carry quotes/newlines that would break the parse (the
+  # push_failure injection class). jq is guaranteed here — the missing-jq
+  # guard near the top of this file exits before we reach this line — so the
+  # documented single-JSON-object contract holds (rules/script-delegation.md).
+  override_bool="false"
+  (( OVERRIDE_MODE == 1 )) && override_bool="true"
+  reason="git rev-parse --show-toplevel failed (rc=${git_rc}): ${git_err} — not the ordinary not-a-repo case; verify git is installed and the repository is readable (e.g. 'git status', check ownership/safe.directory), then re-run"
+  jq -nc --argjson override "$override_bool" --arg reason "$reason" \
+    '{ok: false, override: $override, failures: [{check: "git-usable", reason: $reason}], warnings: []}'
   echo "preflight.sh: ${reason}" >&2
   exit 2
 fi
