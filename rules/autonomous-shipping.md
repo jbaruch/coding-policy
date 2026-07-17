@@ -44,7 +44,7 @@ description: A green gate is the go-ahead; pausing to ask for approval the gate 
 - A platform-rejected merge — never `--admin`, never a ruleset or branch-protection bypass; surface the blocking rule
 - An owner-approval precondition named by another always-on rule (`rules/ci-safety.md` Bootstrap-Red Carve-Out); no bullet here retires it
 - An unplanned CI-config edit, even to turn a red gate green (`rules/ci-safety.md` Hands Off CI Config)
-- Force-push, history rewrite, tag or release deletion — any action with no undo
+- Force-push over shared or protected history, tag or release deletion — any action with no undo. Force-pushing your own feature branch to land a rebase is routine, not gated
 - Direct push to a protected branch outside `rules/ci-safety.md` Content-Only Direct-Push Carve-Out
 - A human reviewer's `CHANGES_REQUESTED`, a prose hold ("wait", "I'll approve after X"), or a `PENDING` human review — autonomous dismissal covers bot reviews only
 - A PR marked not-ready — draft status, a `do-not-merge` or WIP label, a title marker
