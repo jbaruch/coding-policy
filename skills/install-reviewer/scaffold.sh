@@ -119,6 +119,21 @@ sanitize_lock() {
   return 0
 }
 
+# Best-effort snapshot/temp cleanup. Removing a snapshot or temp file must
+# never abort the operation: on the rollback path a bare `rm` failing under
+# `set -e` would swallow the compile-failure diagnostic below; on the success
+# path it would fail a scaffold that already succeeded. Warn, never silence
+# (rules/error-handling.md Shell Error Handling). Skips empty args so callers
+# can pass an unset optional snapshot without a guard.
+discard() {
+  local f
+  for f in "$@"; do
+    if [[ -n "$f" ]] && ! rm -f "$f"; then
+      echo "scaffold.sh: warning: could not remove ${f} — remove it by hand" >&2
+    fi
+  done
+}
+
 ensure_gitattributes_marker() {
   local target="$1" rule="$2"
   if [[ ! -f "$target" ]] || ! grep -qxF "$rule" "$target"; then
@@ -262,7 +277,7 @@ ensure_env_example() {
       cat "$target" >> "$tmp"
     fi
     cat "$tmp" > "$target"
-    rm -f "$tmp"
+    discard "$tmp"
   else
     # Link already in the header — the header block (with its context) is
     # at the top, but one or more KEY= lines are missing. Append them as a
@@ -447,17 +462,17 @@ main() {
       done
       if [[ -n "$snap" ]]; then
         cp "$snap" "$f"
-        rm -f "$snap"
+        discard "$snap"
       else
-        rm -f "$f"
+        discard "$f"
       fi
     done
     if [[ -n "$lock_snapshot" ]]; then
       cp "$lock_snapshot" "$ACTIONS_LOCK"
-      rm -f "$lock_snapshot"
+      discard "$lock_snapshot"
     else
       # actions-lock.json didn't exist before; if compile created it, remove it.
-      rm -f "$ACTIONS_LOCK"
+      discard "$ACTIONS_LOCK"
       # If the directory itself didn't exist before and is now empty, remove
       # it too so the rollback leaves no trace.
       if [[ $aw_dir_existed_before -eq 0 ]]; then
@@ -488,9 +503,9 @@ main() {
   fi
 
   # Compile succeeded — discard every snapshot.
-  [[ -n "$lock_snapshot" ]] && rm -f "$lock_snapshot"
+  discard "$lock_snapshot"
   for snap in "${target_snapshots[@]}"; do
-    rm -f "$snap"
+    discard "$snap"
   done
 
   # Sanitize the generated lock files. `gh aw compile` emits two formatting

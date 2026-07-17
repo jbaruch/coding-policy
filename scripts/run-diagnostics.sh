@@ -32,6 +32,16 @@
 
 set -uo pipefail
 
+# Best-effort temp cleanup. Without `set -e` a failing bare `rm` here would
+# leave the tmpfile with no signal at all; warn, never silence
+# (rules/error-handling.md Shell Error Handling).
+discard() {
+  local f="$1"
+  if [[ -n "$f" ]] && ! rm -f "$f"; then
+    echo "run-diagnostics: warning: could not remove temp file ${f} — remove it by hand" >&2
+  fi
+}
+
 main() {
   local base="${1:-}"
   if [[ -z "$base" ]]; then
@@ -62,7 +72,7 @@ main() {
   # file keeps find's exit observable through the pipe (see run-tests.sh).
   local tmplist; tmplist="$(mktemp)"
   if ! find "${roots[@]}" -type f -name '*.sh' -print0 | sort -z > "$tmplist"; then
-    rm -f "$tmplist"
+    discard "$tmplist"
     echo "run-diagnostics: shell-script discovery (find) failed under $base" >&2
     return 2
   fi
@@ -71,7 +81,7 @@ main() {
   while IFS= read -r -d '' f; do
     [[ -n "$f" ]] && scripts+=("$f")
   done < "$tmplist"
-  rm -f "$tmplist"
+  discard "$tmplist"
 
   if [[ ${#scripts[@]} -eq 0 ]]; then
     echo "run-diagnostics: no shell scripts found under ${base}/{skills,scripts}" >&2
