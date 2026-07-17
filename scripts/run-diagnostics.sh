@@ -9,6 +9,14 @@
 # Both engines always run (explicit rc capture, not error suppression per
 # rules/error-handling.md) so one invocation surfaces every finding.
 #
+# `set -uo pipefail`, not `set -euo pipefail`: this script takes
+# rules/error-handling.md Shell Error Handling's carve-out for a script
+# running independent checks and reporting an aggregate. All four
+# preconditions hold — shellcheck and pyright are independent; each rc is
+# captured explicitly and aggregated into a non-zero exit; only `-e` is
+# dropped; and the setup steps `-e` would otherwise have caught (base-dir
+# presence, engine presence) carry their own explicit checks below.
+#
 # Output:
 #   stderr: each engine's native findings plus per-engine progress.
 # Usage: scripts/run-diagnostics.sh [base-dir]

@@ -74,6 +74,16 @@ emit_and_exit() {
 # extension and isn't guaranteed on BSD sort. Equality returns non-zero
 # so the caller can distinguish strict advance from no-op. Missing parts
 # default to 0 via parameter expansion.
+# EXIT-trap cleanup. `return 0` is load-bearing: the trap's final status
+# becomes the script's exit status, so a failing `rm` would rewrite this
+# script's verdict (rules/error-handling.md Shell Error Handling).
+cleanup_err_file() {
+  if [[ -n "${err_file:-}" ]]; then
+    rm -f "$err_file"
+  fi
+  return 0
+}
+
 version_gt() {
   [[ "$1" != "$2" ]] || return 1
   local a1 a2 a3 b1 b2 b3
@@ -124,7 +134,12 @@ main() {
   # run on the happy path.
   local conclusion err_file
   err_file=$(mktemp) || { echo "error: mktemp failed — cannot run verify-publish-landed.sh without writable TMPDIR" >&2; exit 2; }
-  trap 'rm -f "$err_file"' EXIT
+  # Named handler ending `return 0`, not an inline `rm -f`: the EXIT trap's
+  # final command status becomes the script's exit status, so an `rm` that
+  # fails (unwritable TMPDIR) would rewrite this script's verdict into a
+  # bare 1 — a publish-landed conjunction silently reported as a generic
+  # failure. Cleanup reports on cleanup, never on the outcome.
+  trap cleanup_err_file EXIT
   conclusion=$(gh run view "$run_id" --json conclusion --jq '.conclusion' 2>"$err_file") \
     || { local err; err=$(cat "$err_file"); echo "error: 'gh run view ${run_id}' failed: ${err} — verify (1) the run ID is correct (cross-check 'gh run list --workflow <publish-workflow-name> --branch main --limit 10'), (2) 'gh auth status' shows you're authenticated against the right host, then re-run; if the run failed at the GitHub side, inspect with 'gh run view ${run_id} --log-failed'" >&2; exit 2; }
   if [[ -z "$conclusion" || "$conclusion" == "null" ]]; then

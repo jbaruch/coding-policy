@@ -54,6 +54,16 @@ if ! command -v jq >/dev/null 2>&1; then
   exit 2
 fi
 
+# EXIT-trap cleanup. `return 0` is load-bearing: the trap's final status
+# becomes the script's exit status, so a failing `rm` would rewrite this
+# script's verdict (rules/error-handling.md Shell Error Handling).
+cleanup_err_file() {
+  if [[ -n "${err_file:-}" ]]; then
+    rm -f "$err_file"
+  fi
+  return 0
+}
+
 emit_and_exit() {
   local ok="$1" reason="$2" status="$3" version="$4" attempts="$5" elapsed="$6" rc="$7"
   printf '{"ok":%s,"reason":%s,"moderation_status":%s,"version":%s,"attempts":%s,"elapsed_seconds":%s}\n' \
@@ -108,7 +118,10 @@ main() {
   local endpoint="v1/tiles/${workspace}/${tile}/versions/${version}"
   local delay="$BASE_DELAY_SEC" elapsed=0 attempts=0
   local err_file; err_file=$(mktemp) || { echo "error: mktemp failed — cannot run verify-moderation-cleared.sh without writable TMPDIR" >&2; exit 2; }
-  trap 'rm -f "$err_file"' EXIT
+  # Named handler ending `return 0` — the EXIT trap's final command status
+  # becomes the script's exit status, so a failing `rm` would rewrite the
+  # moderation verdict into a bare 1 (rules/error-handling.md).
+  trap cleanup_err_file EXIT
 
   while :; do
     attempts=$(( attempts + 1 ))

@@ -37,12 +37,12 @@ alwaysApply: true
 - Silencing a tool's diagnostic while explicitly handling its failure is not suppression: `cmd 2>/dev/null || { echo "<actionable message>" >&2; exit 1; }` replaces a worse message with a better one
 - Fail visibly does not require exit non-zero — best-effort work that legitimately continues past a failure emits a warning to stderr, never nothing
 - An `EXIT` trap's final command status becomes the script's exit status — end cleanup handlers with `return 0` so cleanup never rewrites the outcome
-- Narrow exception for dropping `set -e` in a failure-counting test harness — a harness that aborts on its first red assertion cannot report the rest
+- Narrow exception for dropping `set -e` in a script whose job is running independent checks and reporting an aggregate — aborting on the first failure hides every later finding, the opposite of what the script exists to do (test harnesses, multi-engine diagnostics gates)
 - Preconditions (all required):
-  1. The script's job is running assertions and reporting a pass/fail count
-  2. It tracks failures and exits non-zero when any assertion failed
+  1. Each check is independent — a later one's result never depends on an earlier one having passed
+  2. The script captures each check's exit code explicitly and exits non-zero when any check failed
   3. It keeps `set -uo pipefail` — only `-e` is dropped
-  4. Setup steps the assertions depend on (temp dirs, fixtures) carry their own explicit failure check, since `set -e` is no longer catching them
+  4. Setup steps the checks depend on (temp dirs, fixtures, tool presence) carry their own explicit failure check, since `set -e` is no longer catching them
 - Every other shell script still opens with `set -euo pipefail`
 
 ## Actionable Messages
