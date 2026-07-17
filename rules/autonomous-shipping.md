@@ -28,7 +28,7 @@ description: A green gate is the go-ahead; pausing to ask for approval the gate 
 
 ## Asking vs Surfacing
 
-- An ask on a green gate is a defect — the ask manufactures the very gate the policy already opened. Report the action taken, never propose it; never re-ask what the policy grants standing
+- An ask on a green gate is a defect — the ask manufactures an approval gate the policy already opened. Report the action taken, never propose it; never re-ask what the policy grants standing
 - Surface every decision the gate does NOT answer — scope, base branch, a human's prose hold, whether an out-of-scope discovery belongs in the task. These are absent grants, not green ones; re-reading this policy never resolves one. Uncertainty that the rule covers an action means it does not — report and stop
 
 ## What Still Gates
