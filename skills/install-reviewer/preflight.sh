@@ -149,17 +149,30 @@ check_gh_aw_installed() {
 # latest stable), which clears the floor and keeps installs reproducible.
 check_gh_aw_min_version() {
   local raw min major minor patch min_major min_minor min_patch
-  # `gh aw --version` writes to stderr (typical gh-extension idiom), so merge
-  # streams before parsing rather than discarding stderr.
-  # Branch on the pipeline's code instead of `|| true`. The unparseable
-  # case is a real preflight finding reported below, but `|| true` also
-  # swallowed `gh` being absent entirely and grep's own failures — every
-  # cause collapsed into one "could not parse" message pointing at a
-  # re-install that may not be the problem.
-  local raw_rc=0
-  raw=$(gh aw --version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n1) || raw_rc=$?
-  if [[ $raw_rc -gt 1 ]]; then
-    push_failure "gh-aw-min-version" "Could not run 'gh aw --version' (rc=${raw_rc}) — verify the gh CLI is installed and on PATH ('command -v gh'), then re-run"
+  # Run the command, THEN parse its captured output — never one pipeline.
+  # `pipefail` reports the RIGHTMOST non-zero status, so piping straight
+  # into grep hides the command's own failure behind grep's exit 1: a
+  # missing `gh` (127) plus a no-match grep (1) yields 1, indistinguishable
+  # from "gh ran and printed no version", and the user gets told to
+  # re-install the gh-aw extension when the real problem is that `gh` is
+  # not on PATH at all (rules/error-handling.md — distinguish an expected
+  # non-result from a tool failure; Actionable Messages).
+  #
+  # `gh aw --version` writes to stderr (typical gh-extension idiom), so
+  # merge streams into the capture rather than discarding stderr.
+  local gh_out gh_rc=0
+  gh_out=$(gh aw --version 2>&1) || gh_rc=$?
+  if [[ $gh_rc -ne 0 ]]; then
+    push_failure "gh-aw-min-version" "Could not run 'gh aw --version' (rc=${gh_rc}): ${gh_out} — verify the gh CLI is installed and on PATH ('command -v gh') and the gh-aw extension is installed ('gh extension list'), then re-run"
+    return
+  fi
+
+  # Parse the captured output. grep's exit 1 here means the command ran and
+  # printed no version — a real preflight finding, reported below.
+  local grep_rc=0
+  raw=$(printf '%s\n' "$gh_out" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n1) || grep_rc=$?
+  if [[ $grep_rc -gt 1 ]]; then
+    push_failure "gh-aw-min-version" "Version parse failed (grep rc=${grep_rc}) while reading 'gh aw --version' output — this is a fault in preflight.sh's parse, not a gh-aw problem; report it with the output that triggered it: ${gh_out}"
     return
   fi
   if [[ -z "$raw" ]]; then

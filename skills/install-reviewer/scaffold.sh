@@ -449,11 +449,22 @@ main() {
         # rmdir exits non-zero when the directory is non-empty — expected
         # whenever the consumer has other content there, and the right
         # outcome: a rollback must not delete files it did not create.
-        # Ask whether the directory is empty instead of suppressing the
-        # refusal, so a genuine rmdir failure (permissions) still surfaces.
+        #
+        # Probe emptiness with `find`, not `$(ls -A)`: this runs on the
+        # error path under `set -e`, where a failing command substitution
+        # (an unreadable directory) would abort the rollback before it
+        # emits the compile-failure diagnostic below — losing the message
+        # the operator actually needs to a cleanup detail. An unreadable
+        # directory warns and leaves the directory alone.
         local aw_dir; aw_dir="$(dirname "$ACTIONS_LOCK")"
-        if [[ -d "$aw_dir" ]] && [[ -z "$(ls -A "$aw_dir")" ]]; then
-          rmdir "$aw_dir"
+        if [[ -d "$aw_dir" ]]; then
+          local entries find_rc=0
+          entries=$(find "$aw_dir" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null) || find_rc=$?
+          if [[ $find_rc -ne 0 ]]; then
+            echo "scaffold.sh: warning: could not inspect ${aw_dir} (find rc=${find_rc}) — leaving it in place; remove it by hand if the scaffold created it" >&2
+          elif [[ -z "$entries" ]]; then
+            rmdir "$aw_dir" || echo "scaffold.sh: warning: could not remove empty ${aw_dir} — remove it by hand" >&2
+          fi
         fi
       fi
     fi
