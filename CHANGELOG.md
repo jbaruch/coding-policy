@@ -1,5 +1,20 @@
 # Changelog
 
+### Rules
+
+- **`context-writing-style` Scope: resolve the frontmatter/body contradiction over `skills/**` reference files** — The rule's body scoped it to auto-loaded artifacts ("skills on invocation") while its own `applyTo:` glob said `skills/**/*.md`, which matches every on-demand reference file under `skills/<name>/references/**`. The two halves disagreed and the rule fired inconsistently: on `jbaruch/speaker-toolkit#117` the gh-aw reviewer returned a `context-writing-style` violation, then "All rules pass — no violations found", then a violation again — three verdicts on prose unchanged between runs, with nothing in the rule to say which half wins. Frontmatter now reads `skills/**/SKILL.md`, and Scope states the operative test: load-time, not directory. A file the agent receives without choosing it is in scope; a file it opens after reading a pointer is not.
+
+  The body's reading is the one preserved, on three grounds. `rules/skill-authoring.md` Keep Skills Compact designates reference files as the destination for detail moved off the loaded surface — applying the prose budget to both surfaces leaves that detail nowhere to live and makes progressive disclosure pointless. The convention is already established in practice: 31 of the 104 pattern files in speaker-toolkit's taxonomy carried the banned connectives before #117 (47 occurrences), including files from earlier ingests that shipped through this same reviewer. And the remedy the glob implied — strip mechanism prose from a reference file, move it to CHANGELOG — relocates selection-time information to a surface nobody reads at selection time.
+
+  The same glob/body split covers `CHANGELOG.md`, which the frontmatter lists while the body exempts it as
+  the archive that follows "looser discipline". Scope now states that `What to Cut` and `Structure` do not
+  govern CHANGELOG — `What to Cut` names CHANGELOG as where the stripped explanation goes, so a connective
+  ban there would leave it nowhere to live. Surfaced on `jbaruch/speaker-toolkit#121`, where the reviewer
+  flagged `because` in a CHANGELOG entry that was doing the archival job the rule assigns it. The rule
+  reaches CHANGELOG only to say what belongs in it.
+
+  Scope-only change; the prose directives are untouched. `script-as-black-box` and `skill-authoring` keep `skills/**/*.md` deliberately — the former governs reference files by design (it names `references/*.md` in its own text), and the latter carries no prose budget that would gut them.
+
 ## 0.3.91 — 2026-07-14
 
 ### Rules
