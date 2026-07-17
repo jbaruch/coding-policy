@@ -21,10 +21,8 @@ description: A green gate is the go-ahead; pausing to ask for approval the gate 
 ## What Counts as Approval
 
 - Review in these repos is the paired bot fleet, not a human sign-off — a merge needs no human approval, except where another always-on rule names an owner-approval precondition (see What Still Gates)
-- Merge approval is exactly `skills/release/SKILL.md` Step 7's preconditions — this section does not restate a shorter one, and a summary of them is never the gate
-- Every gate field, all required: both gating bots' latest verdicts posted and non-`CHANGES_REQUESTED`, CI `success` or `none`, `mergeable` MERGEABLE, `mergeStateStatus` not `BLOCKED` / `DIRTY` / `BEHIND`, every review body read in full, every inline comment answered with Step 7's literals — `Fixed in <sha>` or `Declining — <reason with cited evidence>`
-- "Latest verdict" resolves by bot login across every commit — the poll does not bind a verdict to the head SHA, so a verdict on a superseded commit reads as current. Confirm each gating bot's latest verdict names the PR's head SHA before merging
-- Re-read the gate immediately before merging — `ready` is a snapshot, and a push or review landing between the check and the merge makes it stale
+- Merge approval is exactly `skills/release/SKILL.md` Step 7's preconditions — this rule adds no field to them and subtracts none
+- Load Step 7 before merging — it holds the gate, and this rule never restates it
 - A gating bot that cannot `APPROVE` posts its all-clear as `COMMENTED` — `github-actions[bot]` gets HTTP 422 from GitHub (see `rules/ci-safety.md` Superseded-Bot-Review Dismissal Carve-Out)
 - A human reviewer's `CHANGES_REQUESTED` overrides every bot verdict (see What Still Gates)
 
@@ -47,7 +45,7 @@ description: A green gate is the go-ahead; pausing to ask for approval the gate 
 ## Surfacing Is Required
 
 - Surface every decision the gate does not answer — this is the complement of the section above, never an exception to it
-- A question outside What Counts as Approval is an absent grant, never a green one: scope, base branch, a human's prose hold, whether boy-scout work is in the task
+- A question outside What Counts as Approval is an absent grant, never a green one: scope, base branch, a human's prose hold, whether an out-of-scope discovery belongs in this task
 - Re-reading this policy never resolves an absent grant — the answer is not in it
 - Uncertainty about whether the rule covers an action means it does not — report and stop
 
@@ -64,4 +62,4 @@ description: A green gate is the go-ahead; pausing to ask for approval the gate 
 - A PR marked not-ready — draft status, a `do-not-merge` or WIP label, a title marker
 - A base branch the task never named — merging a stacked or mis-based PR is not the agreed task
 - Action in a repo the operator does not own (see `rules/external-repo-contributions.md`)
-- Scope the operator never granted — this rule governs how to ship the agreed task, never which task to take on. Boy-scout cleanup and drive-by dependency work are new tasks, never standing ship authorization
+- Scope the operator never granted — this rule governs how to ship the agreed task, never which task to take on. An out-of-scope boy-scout discovery and drive-by dependency work are new tasks, never standing ship authorization (in-scope cleanup rolls into the current PR per `rules/boy-scout.md` How to Apply)
