@@ -32,6 +32,25 @@
 
 set -euo pipefail
 
+# Bot logins, by surface. A reviewer does NOT necessarily author its reviews
+# and its inline comments under the same login:
+#
+#   surface          gh-aw                  Copilot
+#   ---------------  ---------------------  --------------------------------
+#   review           github-actions[bot]    copilot-pull-request-reviewer[bot]
+#   inline comment   github-actions[bot]    Copilot
+#
+# Counting Copilot's comments against its REVIEW login matches nothing, so
+# `inline_comments.copilot` reads 0 on every PR — which vacuously satisfies the
+# release skill's Step 7 "every inline comment has a reply" merge gate and lets
+# a real Copilot finding merge unanswered. Comment counting therefore matches a
+# SET of logins per reviewer. A comment carries exactly one author, so listing
+# both logins cannot double-count.
+GH_AW_REVIEW_LOGIN="github-actions[bot]"
+COPILOT_REVIEW_LOGIN="copilot-pull-request-reviewer[bot]"
+GH_AW_COMMENT_LOGINS=("github-actions[bot]")
+COPILOT_COMMENT_LOGINS=("Copilot" "copilot-pull-request-reviewer[bot]")
+
 # `--paginate` is mandatory: GitHub's default per-page is 30, and a PR
 # with more than that many reviews/comments would otherwise return only
 # the first page. The script's `last` filter would then pick the last
@@ -52,12 +71,18 @@ latest_review_by() {
           else {state, submitted_at, body} end'
 }
 
+# Count top-level (non-reply) inline comments authored by ANY of <login...>.
+# Variadic on login so one reviewer's multiple author identities collapse to a
+# single count — see the login table at the top of this file.
 toplevel_comments_by() {
-  local owner="$1" repo="$2" pr="$3" login="$4"
+  local owner="$1" repo="$2" pr="$3"; shift 3
+  local logins_json
+  logins_json=$(jq -n '$ARGS.positional' --args "$@") \
+    || { echo "error: failed to encode login list for comment count" >&2; return 1; }
   gh api --paginate "repos/${owner}/${repo}/pulls/${pr}/comments?per_page=100" \
-    | jq -s --arg login "$login" '
+    | jq -s --argjson logins "$logins_json" '
         (add // [])
-        | [.[] | select(.user.login == $login) | select(.in_reply_to_id == null)]
+        | [.[] | select(.in_reply_to_id == null) | select(.user.login | IN($logins[]))]
         | length'
 }
 
@@ -99,13 +124,13 @@ main() {
     || { echo "error: failed to fetch merge state for ${owner}/${repo}#${pr_number} — run 'gh auth status' to verify auth, then retry 'gh pr view ${pr_number} --repo ${owner}/${repo} --json mergeStateStatus,mergeable' to inspect the failing call directly" >&2; exit 1; }
 
   local gh_aw_review copilot_review gh_aw_comments copilot_comments
-  gh_aw_review=$(latest_review_by   "$owner" "$repo" "$pr_number" "github-actions[bot]") \
+  gh_aw_review=$(latest_review_by   "$owner" "$repo" "$pr_number" "$GH_AW_REVIEW_LOGIN") \
     || { echo "error: failed to fetch gh-aw review state" >&2; exit 1; }
-  copilot_review=$(latest_review_by "$owner" "$repo" "$pr_number" "copilot-pull-request-reviewer[bot]") \
+  copilot_review=$(latest_review_by "$owner" "$repo" "$pr_number" "$COPILOT_REVIEW_LOGIN") \
     || { echo "error: failed to fetch Copilot review state" >&2; exit 1; }
-  gh_aw_comments=$(toplevel_comments_by   "$owner" "$repo" "$pr_number" "github-actions[bot]") \
+  gh_aw_comments=$(toplevel_comments_by   "$owner" "$repo" "$pr_number" "${GH_AW_COMMENT_LOGINS[@]}") \
     || { echo "error: failed to count gh-aw inline comments" >&2; exit 1; }
-  copilot_comments=$(toplevel_comments_by "$owner" "$repo" "$pr_number" "copilot-pull-request-reviewer[bot]") \
+  copilot_comments=$(toplevel_comments_by "$owner" "$repo" "$pr_number" "${COPILOT_COMMENT_LOGINS[@]}") \
     || { echo "error: failed to count Copilot inline comments" >&2; exit 1; }
 
   jq -n \
