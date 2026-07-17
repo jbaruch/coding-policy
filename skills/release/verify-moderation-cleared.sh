@@ -160,13 +160,17 @@ main() {
       exit 2
     fi
 
-    # `// empty` covers an absent field; the body is known-valid JSON by
-    # now, so a jq failure here is a real fault and propagates under
-    # `set -e` rather than being read as an empty field.
+    # `.attributes?` suppresses the index error jq raises when `.data` is
+    # valid JSON of the wrong TYPE (a string/array, e.g. a proxy error page
+    # that parsed) — without it, the call hard-fails under `set -e` and the
+    # script exits on jq's raw error, skipping the shape-changed diagnostic
+    # below. With `?`, a wrong shape yields empty for all three and falls
+    # through to that diagnostic. Three separate calls, not a `@tsv` read —
+    # tab is IFS-whitespace, so a leading empty field would shift the values.
     local status passed mod_error
-    status=$(printf '%s' "$body" | jq -r '.data.attributes.moderationStatus // empty')
-    passed=$(printf '%s' "$body" | jq -r '.data.attributes.moderationPassed // empty')
-    mod_error=$(printf '%s' "$body" | jq -r '.data.attributes.moderationError // empty')
+    status=$(printf '%s' "$body" | jq -r '.data.attributes?.moderationStatus // empty')
+    passed=$(printf '%s' "$body" | jq -r '.data.attributes?.moderationPassed // empty')
+    mod_error=$(printf '%s' "$body" | jq -r '.data.attributes?.moderationError // empty')
 
     # A moderationError alone is a valid (blocked) response, so it counts
     # as a parsed field — without it in the guard, a block-by-error result
