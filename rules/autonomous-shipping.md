@@ -8,7 +8,7 @@ description: A green gate is the go-ahead; pausing to ask for approval the gate 
 ## Green Gate Is the Approval
 
 - A shipping action is the autonomous next step once its gate reads green
-- A gate is a named conjunction of fields, never an impression — What Counts as Approval names every field of the merge gate
+- A gate is a named conjunction of fields, never an impression — the merge gate's fields live in `skills/release/SKILL.md` Step 7 (see What Counts as Approval)
 - Read the gate to resolve doubt about whether it is green
 - Never ask the operator to resolve what reading the gate answers
 - Authorization to ship is standing — it lives in this policy and in the operator's own durable config, and in no conversational turn
