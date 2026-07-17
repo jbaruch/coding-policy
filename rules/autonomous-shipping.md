@@ -29,7 +29,7 @@ description: A green gate is the go-ahead; pausing to ask for approval the gate 
 ## The Autonomous Actions
 
 - **Open the PR** — Step 1 readiness checks pass (`skills/release/SKILL.md`) ⇒ push the branch and open the PR
-- **Dismiss superseded bot reviews** — a gating bot's `CHANGES_REQUESTED` that the same bot's later all-clear superseded ⇒ run `skills/release/dismiss-stale-reviews.sh` (see `rules/ci-safety.md` Superseded-Bot-Review Dismissal Carve-Out)
+- **Dismiss superseded bot reviews** — a gating bot's `CHANGES_REQUESTED` that the same bot's later all-clear superseded ⇒ dismiss it. `skills/release/dismiss-stale-reviews.sh` is the recommended path; a hand dismissal meeting both preconditions is equally sanctioned (see `rules/ci-safety.md` Superseded-Bot-Review Dismissal Carve-Out)
 - **Merge** — `skills/release/SKILL.md` Step 7's preconditions hold ⇒ merge and clean up. What Counts as Approval is that same conjunction, never a subset
 - **Watch through publish** — the merge lands ⇒ watch the run, the registry advance, and the moderation clear per `rules/ci-safety.md` Always Watch CI. The watch is part of the merge, not a separate decision
 
