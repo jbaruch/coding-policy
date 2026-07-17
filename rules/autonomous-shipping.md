@@ -21,8 +21,8 @@ description: A green gate is the go-ahead; pausing to ask for approval the gate 
 ## What Counts as Approval
 
 - Review in these repos is the paired bot fleet, not a human sign-off — a merge needs no human approval, except where another always-on rule names an owner-approval precondition (see What Still Gates)
-- Merge approval is exactly `skills/release/SKILL.md` Step 7's preconditions — this rule adds no field to them and subtracts none
-- Load Step 7 before merging — it holds the gate, and this rule never restates it
+- Merge approval is `skills/release/SKILL.md` Step 7's preconditions — load Step 7 before merging; this rule never restates them and never adds an approval field
+- Approval is not the whole test — What Still Gates lists conditions that block a merge even when Step 7's gate reads green, and no green gate retires them
 - A gating bot that cannot `APPROVE` posts its all-clear as `COMMENTED` — `github-actions[bot]` gets HTTP 422 from GitHub (see `rules/ci-safety.md` Superseded-Bot-Review Dismissal Carve-Out)
 - A human reviewer's `CHANGES_REQUESTED` overrides every bot verdict (see What Still Gates)
 
@@ -51,6 +51,7 @@ description: A green gate is the go-ahead; pausing to ask for approval the gate 
 
 ## What Still Gates
 
+- These block a merge even when Step 7's gate reads green. The watcher does not check them — the agent does, before merging
 - Red, absent, or ambiguous gate — fix it, or surface the specific field that is not green
 - A platform-rejected merge is a red gate, never an obstacle to route around — never `--admin`, never a ruleset or branch-protection bypass, never "merge despite failing requirements". Surface the blocking rule
 - An owner-approval precondition named by another always-on rule — `rules/ci-safety.md` Bootstrap-Red Carve-Out requires the repo owner's explicit approval, and no bullet in this rule retires it
