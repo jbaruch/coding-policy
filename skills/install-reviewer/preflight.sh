@@ -169,8 +169,17 @@ check_gh_aw_min_version() {
 
   # Parse the captured output. grep's exit 1 here means the command ran and
   # printed no version — a real preflight finding, reported below.
+  #
+  # `grep -m1`, never `grep | head -n1`: under `pipefail` the pipeline
+  # reports the rightmost non-zero status, and `head` closing the pipe after
+  # one line can kill a still-writing grep with SIGPIPE (rc 141). 141 is
+  # `> 1`, so the tool-fault branch below would fire on a SUCCESSFUL parse
+  # with a valid version already in `raw`. Reproduced at 200k matches.
+  # `-m1` stops grep after the first match, so nothing closes the pipe early
+  # and grep's own rc is the only status. Same footgun
+  # skills/release/resolve-publish-run.sh documents and avoids.
   local grep_rc=0
-  raw=$(printf '%s\n' "$gh_out" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n1) || grep_rc=$?
+  raw=$(printf '%s\n' "$gh_out" | grep -m1 -oE '[0-9]+\.[0-9]+\.[0-9]+') || grep_rc=$?
   if [[ $grep_rc -gt 1 ]]; then
     push_failure "gh-aw-min-version" "Version parse failed (grep rc=${grep_rc}) while reading 'gh aw --version' output — this is a fault in preflight.sh's parse, not a gh-aw problem; report it with the output that triggered it: ${gh_out}"
     return

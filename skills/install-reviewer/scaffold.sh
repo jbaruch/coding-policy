@@ -69,9 +69,18 @@ set -euo pipefail
 first_match_line() {
   local mode="$1" pattern="$2" file="$3"
   local out rc=0
-  out=$(grep -n "$mode" -e "$pattern" -- "$file") || rc=$?
+  # `grep -m1` stops at the first match, so nothing downstream closes a pipe
+  # on a still-writing grep. Extract with parameter expansion rather than
+  # `| head -1 | cut`: under `pipefail` that pipeline reports the rightmost
+  # non-zero status, and a SIGPIPE'd printf (rc 141) would become this
+  # function's rc — which the caller assigns under `set -e`, aborting the
+  # scaffold on a successful lookup.
+  out=$(grep -n -m1 "$mode" -e "$pattern" -- "$file") || rc=$?
   case "$rc" in
-    0) printf '%s\n' "$out" | head -1 | cut -d: -f1 ;;
+    0)
+      out="${out%%$'\n'*}"   # first line
+      printf '%s\n' "${out%%:*}"   # line number, before grep -n's ':'
+      ;;
     1) ;;  # no match: echo nothing, caller treats empty as absent
     *)
       echo "scaffold.sh: grep failed (rc=${rc}) reading ${file} — cannot determine the file's layout; verify it is readable, then re-run" >&2
@@ -91,7 +100,13 @@ first_match_line() {
 sanitize_lock() {
   local l="$1"
   if sed -i.bak -E 's/[[:space:]]+$//' "$l" 2>/dev/null; then
-    rm -f "${l}.bak"
+    # `if ! rm` rather than a bare `rm`: this function is best-effort by
+    # design — it runs after the compile-success rollback boundary — and a
+    # bare `rm` under `set -e` hard-fails the scaffold on a failed backup
+    # cleanup, the exact outcome the leniency exists to prevent.
+    if ! rm -f "${l}.bak"; then
+      echo "scaffold.sh: warning: could not remove backup ${l}.bak — remove it by hand" >&2
+    fi
   else
     echo "scaffold.sh: warning: sed failed on ${l} — skipped trailing-whitespace strip; the reviewer may flag gh-aw drift on the first PR" >&2
   fi
