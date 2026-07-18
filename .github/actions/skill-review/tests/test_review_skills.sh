@@ -235,9 +235,9 @@ assert_contains "$DRIVE_OUT" "invalid credit-outage" "invalid credit-outage: nam
 # --- identify_skills: changed-skill detection, review-all fallback, base failure ---
 
 # Run identify_skills with the given event context, echoing its output. The
-# config are `local`, so dynamic scoping makes them visible to identify_skills
-# while keeping them out of the global namespace (no SC2034/SC2030); the `cd`
-# is isolated because callers invoke this inside a `$()` capture.
+# config are `export`ed (the env contract review-skills.sh reads; also
+# shellcheck-clean as used-externally). Callers invoke this inside a `$()`
+# capture, so both the exports and the `cd` stay confined to that subshell.
 capture_identify() {
   local dir="$1"
   export SKILLS_DIR="$2" BASE_OVERRIDE="$3" EVENT_NAME="$4" EVENT_BEFORE="$5"
@@ -283,9 +283,10 @@ assert_eq "$rc" "2" "identify_skills: unreachable base hard-fails with exit 2"
 
 # --- main: emits the unreviewed-skills output ---
 
-# Run main with the given context, its GITHUB_OUTPUT write being the artifact
-# under test. Config are `local`, dynamically visible to main (same rationale
-# as capture_identify).
+# Run main with the given context; its GITHUB_OUTPUT write is the artifact
+# under test. Config are `export`ed like capture_identify's, but this runs in
+# the current shell (not a `$()`), so the exports persist afterward — harmless
+# here: these are the final cases and each overwrites the values it needs.
 capture_main() {
   export SKILLS_DIR="$1" EVENT_NAME="$2" EVENT_BEFORE="$3" CREDIT_OUTAGE="$4" \
          GITHUB_OUTPUT="$5" GITHUB_STEP_SUMMARY="$6" BASE_OVERRIDE="" THRESHOLD="85"
