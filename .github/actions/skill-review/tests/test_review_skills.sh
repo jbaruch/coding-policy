@@ -31,6 +31,9 @@ SCRIPT="$(cd "$(dirname "$0")/.." && pwd)/review-skills.sh"
 
 # Sourcing runs the script's own `set -euo pipefail`; `|| true` then `set +e`
 # restores the harness's discipline (rules/error-handling.md source carve-out).
+# The config vars below are `export`ed, mirroring how the action passes them to
+# review-skills.sh (via `env:`) — which also tells shellcheck they're used
+# externally by the sourced functions, not dead (SC2034).
 # shellcheck disable=SC1090
 source "$SCRIPT" || true
 set +e
@@ -116,15 +119,8 @@ tessl() {
 drive() {
   local mode="$1"; shift          # CREDIT_OUTAGE value
   : > "$MOCK_CALLS_FILE"
-  # These three are read by run_reviews/credit_skip in the sourced
-  # review-skills.sh; shellcheck cannot trace the cross-source use.
-  # shellcheck disable=SC2034
-  SKILLS_DIR="$FIXTURE"
-  # shellcheck disable=SC2034
-  THRESHOLD="85"
-  # shellcheck disable=SC2034
-  CREDIT_OUTAGE="$mode"
-  GITHUB_STEP_SUMMARY="$FIXTURE/summary.txt"; : > "$GITHUB_STEP_SUMMARY"
+  export SKILLS_DIR="$FIXTURE" THRESHOLD="85" CREDIT_OUTAGE="$mode"
+  export GITHUB_STEP_SUMMARY="$FIXTURE/summary.txt"; : > "$GITHUB_STEP_SUMMARY"
   UNREVIEWED=()
   run_reviews "$@" > "$FIXTURE/run.out" 2>&1
   DRIVE_RC=$?
@@ -231,6 +227,80 @@ assert_unreviewed "" "deleted skill: nothing unreviewed"
 MOCK_MODE="success"; drive bogus alpha
 assert_rc 2 "invalid credit-outage: rejected with exit 2"
 assert_contains "$DRIVE_OUT" "invalid credit-outage" "invalid credit-outage: names the bad value"
+
+# --- identify_skills: changed-skill detection, review-all fallback, base failure ---
+
+# Run identify_skills with the given event context, echoing its output. The
+# config are `local`, so dynamic scoping makes them visible to identify_skills
+# while keeping them out of the global namespace (no SC2034/SC2030); the `cd`
+# is isolated because callers invoke this inside a `$()` capture.
+capture_identify() {
+  local dir="$1"
+  export SKILLS_DIR="$2" BASE_OVERRIDE="$3" EVENT_NAME="$4" EVENT_BEFORE="$5"
+  cd "$dir" || return 9
+  identify_skills
+}
+
+# Review-all fallback (workflow_dispatch / no base) returns every immediate
+# skill-dir basename, sorted. FIXTURE holds alpha, beta, deleted, needs-credits.
+got=$(capture_identify "$FIXTURE" "$FIXTURE" "" "workflow_dispatch" "")
+assert_eq "$got" "$(printf 'alpha\nbeta\ndeleted\nneeds-credits')" "identify_skills: review-all lists every skill dir, sorted"
+
+# A throwaway git tree with a base commit and a HEAD that modifies alpha and
+# adds beta — the diff base is HEAD~1, so both count as changed.
+GITREPO="$FIXTURE/gitrepo"
+make_git_fixture() {
+  rm -rf "$GITREPO"
+  mkdir -p "$GITREPO" || return 1
+  (
+    set -e
+    cd "$GITREPO"
+    git init -q
+    git config user.email t@e.test
+    git config user.name tester
+    mkdir -p skills/alpha; echo a > skills/alpha/SKILL.md
+    git add -A; git commit -q -m base
+    mkdir -p skills/beta; echo b > skills/beta/SKILL.md
+    echo more >> skills/alpha/SKILL.md
+    git add -A; git commit -q -m head
+  )
+}
+make_git_fixture || { echo "fatal: could not build git fixture" >&2; exit 2; }
+base_sha=$( cd "$GITREPO" && git rev-parse HEAD~1 )
+
+got=$(capture_identify "$GITREPO" "skills" "" "push" "$base_sha")
+assert_eq "$got" "$(printf 'alpha\nbeta')" "identify_skills: git-diff detects the modified and added skills"
+
+# An unreachable (non-sentinel) base with no remote to fetch from must
+# hard-fail, never collapse to "no changes".
+rc=0
+capture_identify "$GITREPO" "skills" "" "push" "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef" >/dev/null 2>&1 || rc=$?
+assert_eq "$rc" "2" "identify_skills: unreachable base hard-fails with exit 2"
+
+# --- main: emits the unreviewed-skills output ---
+
+# Run main with the given context, its GITHUB_OUTPUT write being the artifact
+# under test. Config are `local`, dynamically visible to main (same rationale
+# as capture_identify).
+capture_main() {
+  export SKILLS_DIR="$1" EVENT_NAME="$2" EVENT_BEFORE="$3" CREDIT_OUTAGE="$4" \
+         GITHUB_OUTPUT="$5" GITHUB_STEP_SUMMARY="$6" BASE_OVERRIDE="" THRESHOLD="85"
+  main
+}
+
+# Review-all over the fixture with a per-path mock: needs-credits hits the
+# credit outage (skip), alpha/beta pass, deleted has no SKILL.md. main must
+# write the outage skill to $GITHUB_OUTPUT.
+GH_OUT="$FIXTURE/gh_output"; : > "$GH_OUT"
+MOCK_MODE="by-path"
+capture_main "$FIXTURE" "workflow_dispatch" "" "skip" "$GH_OUT" "$FIXTURE/sum2" >/dev/null 2>&1
+assert_eq "$(cat "$GH_OUT")" "unreviewed-skills=needs-credits" "main: writes the credit-skipped skill to GITHUB_OUTPUT"
+
+# A fully-clean review-all writes an empty output value.
+GH_OUT2="$FIXTURE/gh_output2"; : > "$GH_OUT2"
+MOCK_MODE="success"
+capture_main "$FIXTURE" "workflow_dispatch" "" "skip" "$GH_OUT2" "$FIXTURE/sum3" >/dev/null 2>&1
+assert_eq "$(cat "$GH_OUT2")" "unreviewed-skills=" "main: clean review-all writes an empty unreviewed-skills value"
 
 echo "─────────────────────────────────────────────"
 if [[ "$FAIL_COUNT" -gt 0 ]]; then
