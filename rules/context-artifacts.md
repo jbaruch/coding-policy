@@ -47,7 +47,7 @@ description: Plugin structure, rule/skill format, review pipeline, surface sync,
 - Preconditions (all required):
   1. Opt-in explicit — the consumer sets `credit-outage: skip`; default `fail` preserves the gate. Classification is the action's decision contract — see `.github/actions/skill-review/review-skills.sh` `run_reviews`
   2. Fail-safe — only the out-of-credits signature skips; every other non-zero exit still hard-fails the publish (below-threshold score, auth error, tooling bug)
-  3. Each unreviewed publish is flagged — a `::warning::` plus a `$GITHUB_STEP_SUMMARY` note name every skipped skill, surfaced on the `unreviewed-skills` action output
+  3. Each unreviewed publish is flagged — a `::warning::` plus a `$GITHUB_STEP_SUMMARY` note names every skipped skill, surfaced on the `unreviewed-skills` action output
   4. The gate self-heals — every publish re-attempts review, so a credit top-up restores it immediately and the monthly reset restores it regardless
 - Distinct from the forbidden review-step bypass in Disagreeing With the Reviewer — that dodges a verdict; this tolerates an outage that produced no verdict, opt-in and flagged
 - Every skill reviewed clean, and every non-credit failure, still blocks or passes exactly as Mandatory Review prescribes
