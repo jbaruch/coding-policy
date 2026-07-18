@@ -7,13 +7,15 @@
 # tolerates anything.
 #
 # Approach: source review-skills.sh (its main() guard prevents auto-run when
-# sourced) and drive run_reviews directly with a mocked `tessl` shell
+# sourced) and drive its functions directly with a mocked `tessl` shell
 # function — a command substitution inherits the caller's functions, so the
-# mock intercepts the real call without touching PATH. Skill discovery
-# (git diff / find) is not exercised here; it is a straight move of the
-# prior action.yml logic and depends on GNU find + a git tree — run_reviews
-# takes the already-identified skill list, which is where the new logic
-# lives.
+# mock intercepts the real call without touching PATH. Coverage:
+#   - run_reviews: the credit-outage classification (fail vs skip, the
+#     credit-phrase-plus-403 signature, non-credit hard-fail, mixed runs,
+#     deleted skills, input validation);
+#   - identify_skills: review-all fallback, git-diff changed-skill detection
+#     against a throwaway git tree, and unreachable-base hard-fail;
+#   - main: the unreviewed-skills output emission.
 #
 # Determinism (rules/testing-standards.md): assertions never check the
 # credit-reset date credit_skip() computes from the wall clock — only that a
@@ -23,7 +25,6 @@
 # Run: bash .github/actions/skill-review/tests/test_review_skills.sh
 # Exit 0 on all-pass; non-zero with a per-test diagnostic on failure.
 
-# shellcheck disable=SC2329  # test cases run indirectly via run() ("$@" dispatch); shellcheck cannot trace dynamic invocation
 set -uo pipefail
 
 SCRIPT="$(cd "$(dirname "$0")/.." && pwd)/review-skills.sh"
@@ -72,6 +73,9 @@ mkdir -p "$FIXTURE/deleted" || { echo "fatal: could not create fixture deleted" 
 # variable writes never reach the parent.
 MOCK_MODE="success"
 MOCK_CALLS_FILE="$FIXTURE/tessl-calls.log"
+# Invoked only from run_reviews inside the sourced review-skills.sh (via a
+# command substitution shellcheck cannot trace), never directly here.
+# shellcheck disable=SC2329
 tessl() {
   echo x >> "$MOCK_CALLS_FILE"
   local path="${!#}"
