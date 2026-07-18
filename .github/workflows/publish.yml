@@ -48,6 +48,13 @@ jobs:
         uses: ./.github/actions/skill-review
         with:
           threshold: '85'
+          # Opt into the fail-safe out-of-credits tolerance (issue #188):
+          # a tessl billing 403 skips the affected skill (flagged in the run
+          # summary and unreviewed-skills output) instead of blocking every
+          # skill-changing merge until credits reset. Every other review
+          # failure still hard-fails. Sanctioned by the context-artifacts
+          # Credit-Outage Review Carve-Out.
+          credit-outage: 'skip'
 
       # Dogfoods the reusable action consumers call as
       # `uses: jbaruch/coding-policy/.github/actions/stamp-changelog@<ref>`.
