@@ -22,9 +22,10 @@
 # Output:
 #   stderr: each engine's native findings plus per-engine progress.
 # Usage: scripts/run-diagnostics.sh [base-dir]
-#   base-dir  Tree whose skills/ and scripts/ are scanned for shell
-#             scripts. Defaults to the repo root. The optional arg exists
-#             so the runner's own test can point it at a fixture tree.
+#   base-dir  Tree whose skills/, scripts/, and .github/actions/ are
+#             scanned for shell scripts. Defaults to the repo root. The
+#             optional arg exists so the runner's own test can point it at
+#             a fixture tree.
 #             pyright always runs against pyrightconfig.json at the cwd,
 #             independent of base-dir.
 # Exit: 0 if both engines report zero findings, 1 on any finding, 2 on
@@ -63,8 +64,12 @@ main() {
   local roots=()
   [[ -d "$base/skills" ]] && roots+=("$base/skills")
   [[ -d "$base/scripts" ]] && roots+=("$base/scripts")
+  # Composite-action bodies extracted to real scripts per
+  # rules/script-delegation.md (e.g. skill-review/review-skills.sh) — gate
+  # them too so an action script is held to the same zero-findings bar.
+  [[ -d "$base/.github/actions" ]] && roots+=("$base/.github/actions")
   if [[ ${#roots[@]} -eq 0 ]]; then
-    echo "run-diagnostics: neither skills/ nor scripts/ found under $base" >&2
+    echo "run-diagnostics: none of skills/, scripts/, .github/actions/ found under $base" >&2
     return 2
   fi
 
@@ -84,7 +89,7 @@ main() {
   discard "$tmplist"
 
   if [[ ${#scripts[@]} -eq 0 ]]; then
-    echo "run-diagnostics: no shell scripts found under ${base}/{skills,scripts}" >&2
+    echo "run-diagnostics: no shell scripts found under ${base}/{skills,scripts,.github/actions}" >&2
     return 2
   fi
 
