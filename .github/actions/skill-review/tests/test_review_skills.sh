@@ -235,9 +235,10 @@ assert_contains "$DRIVE_OUT" "invalid credit-outage" "invalid credit-outage: nam
 # --- identify_skills: changed-skill detection, review-all fallback, base failure ---
 
 # Run identify_skills with the given event context, echoing its output. The
-# config are `export`ed (the env contract review-skills.sh reads; also
-# shellcheck-clean as used-externally). Callers invoke this inside a `$()`
-# capture, so both the exports and the `cd` stay confined to that subshell.
+# config are `export`ed — the env contract review-skills.sh reads, and read
+# as used-externally so the linter does not flag them dead. Callers invoke
+# this inside a `$()` capture, so both the exports and the `cd` stay confined
+# to that subshell.
 capture_identify() {
   local dir="$1"
   export SKILLS_DIR="$2" BASE_OVERRIDE="$3" EVENT_NAME="$4" EVENT_BEFORE="$5"
