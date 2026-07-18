@@ -42,14 +42,14 @@ description: Plugin structure, rule/skill format, review pipeline, surface sync,
 ## Credit-Outage Review Carve-Out
 
 - Narrow exception for skipping review during a tessl out-of-credits (403) billing outage
-- Applies when `tessl skill review` fails with the out-of-credits signature — a billing state the skill author cannot fix — never a below-threshold score
+- Applies when `tessl skill review` fails with the out-of-credits signature; never a below-threshold score
 - The `skill-review` action's `credit-outage: skip` input publishes the affected skill unreviewed rather than blocking every skill-changing merge until credits return
 - Preconditions (all required):
   1. Opt-in explicit — the consumer sets `credit-outage: skip`; default `fail` preserves the gate. Classification is the action's decision contract — see `.github/actions/skill-review/review-skills.sh` `run_reviews`
   2. Fail-safe — only the out-of-credits signature skips; every other non-zero exit still hard-fails the publish (below-threshold score, auth error, tooling bug)
   3. Each unreviewed publish is flagged — a `::warning::` plus a `$GITHUB_STEP_SUMMARY` note names every skipped skill, surfaced on the `unreviewed-skills` action output
-  4. The gate self-heals — every publish re-attempts review, so a credit top-up restores it immediately and the monthly reset restores it regardless
-- Distinct from the forbidden review-step bypass in Disagreeing With the Reviewer — that dodges a verdict; this tolerates an outage that produced no verdict, opt-in and flagged
+  4. The gate self-heals — every publish re-attempts review; a credit top-up or the monthly reset restores it
+- The forbidden review-step bypass in Disagreeing With the Reviewer remains forbidden
 - Every skill reviewed clean, and every non-credit failure, still blocks or passes exactly as Mandatory Review prescribes
 
 ## Disagreeing With the Reviewer
