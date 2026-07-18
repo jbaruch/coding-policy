@@ -134,7 +134,7 @@ identify_skills() {
     # Immediate subdir basenames, sorted. `sed 's|.*/||'` instead of GNU
     # `find -printf '%f'` keeps discovery portable (BSD find on macOS has no
     # -printf) so this path is testable off the CI runner. Skill dir names
-    # are kebab-case with no newlines (rules/plugin-evals.md Naming).
+    # are kebab-case with no newlines.
     find "$SKILLS_DIR" -mindepth 1 -maxdepth 1 -type d | sed 's|.*/||' | sort
     return 0
   fi

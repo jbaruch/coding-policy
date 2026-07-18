@@ -29,7 +29,7 @@ description: Frontmatter conventions for rule files — what to set for always-o
 
 ## When to Path-Scope
 
-- Path-scope when **every** prescription in the rule is bound to a specific file set or context (plugin-authoring rules whose content only fires inside `rules/`, `skills/`, `evals/` are good candidates)
+- Path-scope when **every** prescription in the rule is bound to a specific file set or context (plugin-authoring rules whose content only fires inside `rules/`, `skills/` are good candidates)
 - Stay universal when the rule mixes file-bound and broad guidance — `applyTo:` is exclusionary at the model layer, so a too-narrow scope drops the broad bits
 - Example — `dependency-management` covers two practices:
   - "stdlib first" fires when writing code

@@ -49,7 +49,6 @@ Keep "tile" unchanged — these are live contracts, not prose:
 - The `tile.json` filename in historical or legacy-format references
 - `v1/tiles/...` REST API routes and any argument bound to that route
 - Code identifiers — variable, function, type, and class names
-- Frozen `evals/*` scenario directory names — renaming resets lift history (see `rules/plugin-evals.md` Naming)
 - Real external documentation page paths and analytics property names
 
 If `residual_files` is empty, proceed silently to Step 3.
