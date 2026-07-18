@@ -33,11 +33,37 @@ inputs:
       (workflow_dispatch / initial push).
     required: false
     default: ''
+  credit-outage:
+    description: |
+      How a tessl "out of credits" (403) billing outage during review is
+      handled. `fail` (default) preserves the Mandatory Review gate — any
+      review failure, credit outage included, blocks the publish. `skip`
+      is fail-safe and narrow: ONLY a review call failing with the
+      out-of-credits signature is tolerated (that skill publishes
+      unreviewed, named in the run summary and the `unreviewed-skills`
+      output); every other non-zero exit — a below-threshold score, an
+      auth error, a tooling bug — still hard-fails. Opting in requires the
+      `context-artifacts` Mandatory Review Credit-Outage carve-out.
+    required: false
+    default: 'fail'
+
+outputs:
+  unreviewed-skills:
+    description: |
+      Comma-separated skills that were NOT reviewed because the tessl org
+      was out of credits (empty when every changed skill was reviewed).
+      Only ever non-empty under `credit-outage: skip`. Gate follow-up
+      steps on it to flag or track an unreviewed publish.
+    value: ${{ steps.review.outputs.unreviewed-skills }}
 
 runs:
   using: 'composite'
   steps:
+    # Body lives in review-skills.sh (a real, unit-tested file per
+    # rules/script-delegation.md), invoked via bash so no exec-bit is
+    # required — tessl packaging normalizes plugin file modes.
     - name: Identify changed skills and review them
+      id: review
       shell: bash
       env:
         EVENT_BEFORE: ${{ github.event.before }}
@@ -45,59 +71,5 @@ runs:
         BASE_OVERRIDE: ${{ inputs.base-ref }}
         THRESHOLD: ${{ inputs.threshold }}
         SKILLS_DIR: ${{ inputs.skills-dir }}
-      run: |
-        # Pipefail so a failing `git diff` propagates instead of silently
-        # producing an empty changed-skills set (which would skip the
-        # mandatory review per `rules/context-artifacts.md`).
-        set -eo pipefail
-
-        if [ -n "$BASE_OVERRIDE" ]; then
-          base="$BASE_OVERRIDE"
-        elif [ "$EVENT_NAME" = "workflow_dispatch" ] \
-             || [ -z "$EVENT_BEFORE" ] \
-             || [ "$EVENT_BEFORE" = "0000000000000000000000000000000000000000" ]; then
-          base=""
-        else
-          base="$EVENT_BEFORE"
-        fi
-        if [ -z "$base" ]; then
-          mapfile -t skills < <(find "$SKILLS_DIR" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort)
-          echo "Reviewing all ${#skills[@]} skill(s) (manual trigger or initial push)."
-        else
-          # Validate the base is a real commit before relying on it for
-          # the diff. If not reachable in the local clone, try a shallow
-          # fetch; if that fails too, hard-fail rather than silently
-          # converting an unreachable base into "no changes".
-          if ! git rev-parse --verify "${base}^{commit}" >/dev/null 2>&1; then
-            echo "Base $base not reachable in clone; fetching..."
-            git fetch --no-tags --depth=50 origin "$base" 2>/dev/null \
-              || git fetch --unshallow origin 2>/dev/null \
-              || true
-          fi
-          if ! git rev-parse --verify "${base}^{commit}" >/dev/null 2>&1; then
-            echo "::error::Base $base is not a reachable commit; refusing to silently skip skill review."
-            echo "::error::Set actions/checkout fetch-depth: 0 in the calling workflow, or pass an explicit base-ref."
-            exit 1
-          fi
-          # Strip the SKILLS_DIR prefix from each diff path and pull
-          # out the first path component beneath it — works for any
-          # depth (single-component `skills` or nested `pkg/skills`).
-          mapfile -t skills < <(git diff --name-only "$base..HEAD" -- "$SKILLS_DIR/" \
-            | awk -v prefix="$SKILLS_DIR/" '
-                index($0, prefix) == 1 {
-                  rest = substr($0, length(prefix) + 1)
-                  slash = index(rest, "/")
-                  if (slash > 0) print substr(rest, 1, slash - 1)
-                }' | sort -u)
-          echo "Detected ${#skills[@]} changed skill(s) since ${base:0:7}."
-        fi
-        if [ "${#skills[@]}" -eq 0 ]; then
-          echo "No skill changes — review skipped."
-          exit 0
-        fi
-        for skill in "${skills[@]}"; do
-          [ -f "$SKILLS_DIR/$skill/SKILL.md" ] || { echo "  - $skill: deleted, skipping"; continue; }
-          echo "::group::Reviewing $skill"
-          tessl skill review --threshold "$THRESHOLD" "$SKILLS_DIR/$skill/SKILL.md"
-          echo "::endgroup::"
-        done
+        CREDIT_OUTAGE: ${{ inputs.credit-outage }}
+      run: bash "$GITHUB_ACTION_PATH/review-skills.sh"
