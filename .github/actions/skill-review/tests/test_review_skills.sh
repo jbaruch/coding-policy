@@ -38,7 +38,11 @@ set +e
 FAIL_COUNT=0
 PASS_COUNT=0
 
-FIXTURE=$(mktemp -d -t skill-review-test.XXXXXX)
+# Explicit setup checks under `set +e`: a failed mktemp/mkdir would otherwise
+# leave a bad fixture path and the assertions below would no longer mean what
+# they report (rules/error-handling.md setup-failure clause).
+FIXTURE=$(mktemp -d -t skill-review-test.XXXXXX) \
+  || { echo "fatal: could not create fixture dir" >&2; exit 2; }
 cleanup_tmp() {
   if [[ -n "${FIXTURE:-}" ]]; then
     if ! rm -rf "$FIXTURE"; then
@@ -52,12 +56,12 @@ trap cleanup_tmp EXIT
 # Fixture skills. `needs-credits` is named so the by-path mock can single it
 # out for a mixed run; the rest are plain.
 for s in alpha beta needs-credits; do
-  mkdir -p "$FIXTURE/$s"
-  : > "$FIXTURE/$s/SKILL.md"
+  mkdir -p "$FIXTURE/$s" || { echo "fatal: could not create fixture $s" >&2; exit 2; }
+  : > "$FIXTURE/$s/SKILL.md" || { echo "fatal: could not write fixture $s/SKILL.md" >&2; exit 2; }
 done
 # A skill dir whose SKILL.md is absent (a deleted skill) — run_reviews must
 # skip it, never call tessl on it.
-mkdir -p "$FIXTURE/deleted"
+mkdir -p "$FIXTURE/deleted" || { echo "fatal: could not create fixture deleted" >&2; exit 2; }
 
 # Global mock. MOCK_MODE selects behaviour; the last arg is the SKILL.md
 # path. tessl runs inside run_reviews' command substitution (a subshell), so
@@ -80,8 +84,11 @@ tessl() {
       return 1
       ;;
     phrase-only)
-      # The credit phrase but no 403 — must NOT be classed as an outage.
-      echo "The example said the org ran out of credits; assertion failed."
+      # The EXACT production-matched phrase ("run out of credits") but no
+      # 403 — must NOT be classed as an outage. Using the exact phrase is
+      # the point: if is_credit_outage ever stopped requiring 403 and matched
+      # the phrase alone, this case would flip to a wrongful skip and fail.
+      echo "Your organization has run out of credits."
       return 1
       ;;
     code-only)
