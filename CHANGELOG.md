@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.94 — 2026-07-18
+
 ### Rules
 
 - **`context-artifacts`: Credit-Outage Review Carve-Out** — a tessl out-of-credits (403) billing outage can now satisfy the Mandatory Review gate under an opt-in, fail-safe skip: only the credit-phrase-plus-403 signature skips the affected skill (flagged in the run summary and the `unreviewed-skills` output), every other review failure still hard-fails, and the gate self-heals when credits return. Mirrors the `ci-safety` Publish-Pipeline carve-out shape. Distinct from the forbidden review-step bypass — that dodges a verdict, this tolerates an outage that produced none. Motivation: issue #188.
