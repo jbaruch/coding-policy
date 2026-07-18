@@ -1,6 +1,6 @@
 ---
 alwaysApply: false
-applyTo: ".tessl-plugin/plugin.json, rules/**, skills/**, evals/**, .tesslignore, CHANGELOG.md, README.md — when authoring or modifying plugin artifacts"
+applyTo: ".tessl-plugin/plugin.json, rules/**, skills/**, .tesslignore, CHANGELOG.md, README.md — when authoring or modifying plugin artifacts"
 description: Plugin structure, rule/skill format, review pipeline, surface sync, consistency audits — the authoring contract for Tessl plugins
 ---
 
@@ -12,7 +12,7 @@ description: Plugin structure, rule/skill format, review pipeline, surface sync,
 - The plugin's `README.md` is the project's `README.md` — same file. Extend the existing README with rules table, skills table, and installation instructions
 - Include a Tessl registry badge at the top of README: `[![tessl](https://img.shields.io/endpoint?url=https%3A%2F%2Fapi.tessl.io%2Fv1%2Fbadges%2F<workspace>%2F<plugin>)](https://tessl.io/registry/<workspace>/<plugin>)`
 - Skills live in `skills/<name>/SKILL.md`, rules live in `rules/<name>.md`
-- Standard directories: `rules/`, `skills/<name>/`, `evals/`
+- Standard directories: `rules/`, `skills/<name>/`
 - Use `.tesslignore` to exclude build artifacts and CI files from the published plugin
 - Validate structure with `tessl plugin lint` before every publish
 - `CHANGELOG.md` and similar repo files show as orphaned in `tessl plugin lint` — lint only tracks manifest-declared paths
@@ -58,12 +58,6 @@ description: Plugin structure, rule/skill format, review pipeline, surface sync,
 - When you disagree with the reviewer's conclusions, run `tessl skill review --optimize <skill>` locally. Back up `SKILL.md` and any reference files before invoking
 - `--optimize` is a diagnostic signal, not a patch. The reviewer's judge strips load-bearing context. Diff against the backup, keep the genuinely-improving moves (tighter triggers, less prose, better `Skill()` typing), reject over-aggressive cuts, then re-run the review and iterate
 - Shipping `--optimize` output verbatim is forbidden even when the score improved. The optimizer surfaces what kinds of issues exist (actionability, progressive disclosure, redundancy); apply the signal with judgment, curate manually
-
-## Mandatory Evals
-
-- Eval scenario requirements live in `rules/plugin-evals.md` Coverage
-- No bleeding, no leaking — full guardrails in `rules/plugin-evals.md`
-- Process details live in the `eval-authoring` skill — invoke it to generate and curate scenarios
 
 ## Surface Sync
 
