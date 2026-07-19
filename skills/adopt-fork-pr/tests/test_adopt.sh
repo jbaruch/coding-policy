@@ -23,7 +23,6 @@ rc_is() { if [ "$1" -eq "$2" ]; then ok "$3"; else bad "$3 (rc=$1)"; fi; }
 : "${FIXTURE_OPEN_PR:=0}"        # 1 = an open PR already exists for the adopted branch
 : "${FIXTURE_LSREMOTE_FAIL:=0}"  # 1 = git ls-remote fails (network/auth)
 : "${FIXTURE_PRLIST_FAIL:=0}"    # 1 = gh pr list fails (auth/API)
-: "${FIXTURE_BODY:=}"            # original PR body text
 : "${FIXTURE_COMMENT_FAIL:=0}"        # 1 = gh pr comment fails
 : "${FIXTURE_COMMENT_EXISTS:=0}"      # 1 = original PR already links the adopted URL
 : "${FIXTURE_COMMENTSREAD_FAIL:=0}"   # 1 = gh pr view --json comments fails
@@ -43,20 +42,12 @@ gh() {
 {"number":${3},"isCrossRepository":${FIXTURE_IS_FORK},"headRefName":"feat/cool-thing",
  "headRepositoryOwner":{"login":"contributor"},"headRepository":{"name":"blog-writer"},
  "author":{"login":"contributor"},"title":"feat: a cool thing","url":"https://github.com/owner/blog-writer/pull/${3}",
- "state":"${FIXTURE_STATE}","baseRefName":"main","body":"${FIXTURE_BODY}"}
+ "state":"${FIXTURE_STATE}","baseRefName":"main"}
 JSON
       fi
       ;;
     "pr checkout") return 0 ;;
     "pr create")
-      if [ -n "${BODY_CAPTURE:-}" ]; then
-        local prev="" b=""
-        for a in "$@"; do
-          if [ "$prev" = "--body" ]; then b="$a"; fi
-          prev="$a"
-        done
-        printf '%s' "$b" > "$BODY_CAPTURE"
-      fi
       printf 'https://github.com/owner/blog-writer/pull/99\n' ;;
     "pr comment") if [ "$FIXTURE_COMMENT_FAIL" = "1" ]; then return 5; fi; return 0 ;;
     "pr list")
@@ -98,10 +89,6 @@ else
   bad "jq-missing emits stdout JSON and stderr diagnostic (out=$jqm_out err=$(cat "$jqm_err" 2>/dev/null))"
 fi
 rm -f "$jqm_err"
-
-# ---- extract_author_model_line (pure) ------------------------------------
-eq "$(extract_author_model_line $'intro\n**Author-Model:** gpt-5.4\nmore')" "**Author-Model:** gpt-5.4" "extracts bold Author-Model line"
-eq "$(extract_author_model_line $'no declaration here')" "" "no Author-Model line → empty"
 
 # ---- argument validation -------------------------------------------------
 run_main >/dev/null 2>&1;     rc_is "$?" 2 "no arg → exit 2"
@@ -146,16 +133,6 @@ if [ "$rc" -eq 0 ] \
 else
   bad "happy path → adopted JSON with expected fields (got: $out rc=$rc)"
 fi
-
-# ---- Author-Model carry-over from a body-only declaration ----------------
-BODY_CAP=$(mktemp)
-FIXTURE_BODY='**Author-Model:** gpt-5.4' BODY_CAPTURE="$BODY_CAP" run_main 6 >/dev/null 2>&1
-if head -1 "$BODY_CAP" | grep -q '^\*\*Author-Model:\*\* gpt-5.4$'; then
-  ok "carries Author-Model line from original PR body into adopted PR body"
-else
-  bad "carries Author-Model line from original PR body (captured: $(cat "$BODY_CAP"))"
-fi
-rm -f "$BODY_CAP"
 
 # ---- idempotency: branch on origin AND an open PR exists → no-op ----------
 out=$(FIXTURE_BRANCH_EXISTS=1 FIXTURE_OPEN_PR=1 run_main 6 2>/dev/null); rc=$?

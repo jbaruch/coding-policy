@@ -26,7 +26,6 @@
     "rules/skill-authoring.md",
     "rules/script-delegation.md",
     "rules/script-as-black-box.md",
-    "rules/author-model-declaration.md",
     "rules/stateful-artifacts.md",
     "rules/agent-worktree-isolation.md",
     "rules/boy-scout.md",

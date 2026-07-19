@@ -1,5 +1,18 @@
 # Changelog
 
+### Rules
+
+- **PR review moved to the native Codex app; author-model / cross-family apparatus removed** — the paid-per-token gh-aw OpenAI + Anthropic reviewers are replaced by the OpenAI Codex code-review app on a ChatGPT subscription (no API key), steered by `AGENTS.md ## Review guidelines`, with Copilot as the code-quality lane. A single reviewer that reviews every PR has no author-family to match against, so `rules/author-model-declaration.md` and the whole declaration + family-resolution + self-review-skip machinery are deleted (22→21 rules). The `ci-safety` Superseded-Bot-Review carve-out now names `chatgpt-codex-connector[bot]`, which posts only `CHANGES_REQUESTED` or `COMMENT` — never `APPROVE` — so the same stale-review dismissal the old gh-aw bot needed still applies. Motivation and the `projectkorero/korero` precedent that proved this feasible (beans `Korero-cxrv` experiment / `Korero-swrv` retirement): the API bill drove the move; the subscription flat-rate removes the token-cost rationale (#161) the family gate existed to serve.
+
+### Skills
+
+- **`release`: merge gate retargeted to the Codex connector** — `poll-pr-reviews.sh` / `watch-pr-reviews.sh` / `dismiss-stale-reviews.sh` resolve the policy reviewer by the `chatgpt-codex-connector[bot]` login (was `github-actions[bot]`), the internal `reviews` key was renamed `gh_aw`→`codex` (no gh-aw left to name), `GH_AW_DETAILS.md` became `REVIEW_DETAILS.md`, and the mandatory `**Author-Model:**` PR-body line was dropped. The dismissal logic is unchanged — only the gating-bot login moved.
+- **`install-reviewer`: rewritten for the native-app setup** — commits an `AGENTS.md` `## Review guidelines` block plus `.github/copilot-instructions.md` (replacing the gh-aw workflow scaffold, `gh aw compile`, lock files, `.gitattributes`, and the `.env.example` secrets inventory), then opens a PR and hands the operator the Codex-UI checklist (install the app, connect the ChatGPT subscription, turn on Code review + Automatic reviews, configure the `tessl install` environment). `scaffold.sh` now creates / appends / replaces a marker-delimited block idempotently; `preflight.sh` dropped the gh-aw-version gate.
+
+### CI
+
+- **This repo's own reviewers migrated** — deleted `.github/workflows/review-openai.*` and `review-anthropic.*` plus the gh-aw framework files (`.github/aw/actions-lock.json`, `.gitattributes`), and added a root `AGENTS.md ## Review guidelines` (reviewing against the in-tree `rules/`) and `.github/copilot-instructions.md`. Enabling the Codex app and connecting the subscription are operator steps in the Codex UI, not committed here.
+
 ## 0.3.94 — 2026-07-18
 
 ### Rules
