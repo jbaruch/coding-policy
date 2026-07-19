@@ -6,7 +6,8 @@ and edit the live rule files directly (see `.claude/CLAUDE.md`).
 
 ## Review guidelines
 
-These guide the Codex code-review app. This repo is the policy, so review every pull request
+These guide the Codex reviewer (`.github/workflows/review-codex.yml`, Codex CLI on a ChatGPT
+subscription). This repo is the policy, so review every pull request
 against its **own in-tree `rules/*.md` on the PR head branch** — read them fully, they are the
 authoritative policy for the review.
 

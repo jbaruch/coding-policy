@@ -2,14 +2,14 @@
 # Dismiss a gating bot's CHANGES_REQUESTED review once the SAME bot has
 # posted a later non-CHANGES_REQUESTED verdict on the PR.
 #
-# Why this exists: the policy reviewer is the native Codex code-review app
-# (`chatgpt-codex-connector[bot]`), which posts only CHANGES_REQUESTED or
-# COMMENT — never APPROVE. A clean re-review is therefore a COMMENT, and a
-# later COMMENT never supersedes an earlier CHANGES_REQUESTED in GitHub's
-# merge-gating model — the stale CHANGES_REQUESTED keeps blocking the merge
-# until it is dismissed. The operator running the release skill dismisses it
-# here. The decision is fully deterministic, so it is a script, not agent
-# judgment (rules/script-delegation.md).
+# Why this exists: the policy reviewer runs as `github-actions[bot]` (the
+# Codex CLI review workflow, review-codex.yml, submits with the workflow
+# token), which GitHub rejects APPROVE from with HTTP 422. A clean re-review is
+# therefore a COMMENT, and a later COMMENT never supersedes an earlier
+# CHANGES_REQUESTED in GitHub's merge-gating model — the stale
+# CHANGES_REQUESTED keeps blocking the merge until it is dismissed. The
+# operator running the release skill dismisses it here. The decision is fully
+# deterministic, so it is a script, not agent judgment (rules/script-delegation.md).
 #
 # Decision, per gating bot (see GATING_BOTS below):
 #   - latest review state == CHANGES_REQUESTED => leave it; the bot is
@@ -40,7 +40,7 @@ set -euo pipefail
 # a glob bracket, so an unquoted `for login in $GATING_BOTS` would rewrite
 # the token against a matching filename in the release checkout (e.g.
 # `github-actionsb`) and silently miss the review.
-GATING_BOTS=("chatgpt-codex-connector[bot]" "copilot-pull-request-reviewer[bot]")
+GATING_BOTS=("github-actions[bot]" "copilot-pull-request-reviewer[bot]")
 
 # Fixed dismissal message — a dismissal records who/why on the PR timeline.
 DISMISS_MESSAGE="Superseded by a later all-clear review from the same bot — dismissed by the release skill so the stale request stops gating the merge."

@@ -1,0 +1,101 @@
+name: PR Policy Review (Codex, subscription)
+
+# Reviews every same-repo pull request against this repo's in-tree rules/*.md
+# using the Codex CLI authenticated by a ChatGPT subscription (no API key).
+# The subscription token lives in the CODEX_AUTH_JSON secret; it is seeded onto
+# the runner only when the actions/cache miss leaves no fresher token in place,
+# so Codex's own token refresh (written back to the cache) is never discarded.
+#
+# One-time operator setup (cannot be automated — it needs a browser login):
+#   1. On a trusted machine, set file-based credential storage and run
+#      `codex login` (Sign in with ChatGPT). Confirm ~/.codex/auth.json has
+#      "auth_mode": "chatgpt" and "has_refresh_token": true.
+#   2. Store the FULL contents of ~/.codex/auth.json as the repo secret
+#      CODEX_AUTH_JSON:
+#      https://github.com/jbaruch/coding-policy/settings/secrets/actions
+# See https://learn.chatgpt.com/docs/auth/ci-cd-auth
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+# Fork PRs cannot read secrets, so the review only runs for same-repo PRs.
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: codex-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    # Skip fork PRs (no secret access) — they are adopted via the adopt-fork-pr skill.
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      # Version pin: no scanner tracks this npm global. Check the current Codex
+      # CLI and bump at every reviewer-template change, at least quarterly
+      # (rules/dependency-management.md Freshness).
+      - name: Install Codex CLI
+        run: npm install -g @openai/codex@0.142.5
+
+      - name: Restore Codex auth (latest refreshed token)
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.codex/auth.json
+          key: codex-auth-${{ github.run_id }}
+          restore-keys: codex-auth-
+
+      - name: Seed auth.json from the secret only if the cache had none
+        env:
+          CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
+        run: |
+          set -euo pipefail
+          export CODEX_HOME="$HOME/.codex"
+          mkdir -p "$CODEX_HOME"; chmod 700 "$CODEX_HOME"
+          if [ ! -f "$CODEX_HOME/auth.json" ]; then
+            if [ -z "${CODEX_AUTH_JSON:-}" ]; then
+              echo "error: no cached auth and CODEX_AUTH_JSON secret is empty — run 'codex login' on a trusted machine and store ~/.codex/auth.json as the CODEX_AUTH_JSON secret (see this workflow's header)" >&2
+              exit 1
+            fi
+            printf '%s' "$CODEX_AUTH_JSON" > "$CODEX_HOME/auth.json"
+            chmod 600 "$CODEX_HOME/auth.json"
+          fi
+
+      - name: Run Codex policy review
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=1 origin "${{ github.event.pull_request.base.ref }}"
+          codex exec \
+            --json \
+            --skip-git-repo-check \
+            --dangerously-bypass-approvals-and-sandbox \
+            --output-schema .github/codex-review/schema.json \
+            --output-last-message /tmp/codex-final.json \
+            - < .github/codex-review/prompt.md
+
+      - name: Post the review
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          bash .github/codex-review/post-review.sh \
+            "${{ github.repository_owner }}" \
+            "${{ github.event.repository.name }}" \
+            "${{ github.event.pull_request.number }}" \
+            /tmp/codex-final.json
+
+      - name: Persist the refreshed auth token
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.codex/auth.json
+          key: codex-auth-${{ github.run_id }}

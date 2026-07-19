@@ -35,10 +35,15 @@ set -euo pipefail
 # Bot logins, by surface. A reviewer does NOT necessarily author its reviews
 # and its inline comments under the same login:
 #
-#   surface          Codex policy reviewer         Copilot
-#   ---------------  ----------------------------  --------------------------------
-#   review           chatgpt-codex-connector[bot]  copilot-pull-request-reviewer[bot]
-#   inline comment   chatgpt-codex-connector[bot]  Copilot
+#   surface          Codex policy reviewer   Copilot
+#   ---------------  ----------------------  --------------------------------
+#   review           github-actions[bot]     copilot-pull-request-reviewer[bot]
+#   inline comment   github-actions[bot]     Copilot
+#
+# The Codex policy reviewer runs as a GitHub Actions workflow
+# (review-codex.yml, Codex CLI on a ChatGPT subscription) and submits its
+# review with the workflow's GITHUB_TOKEN, so its author is
+# `github-actions[bot]`.
 #
 # Counting Copilot's comments against its REVIEW login matches nothing, so
 # `inline_comments.copilot` reads 0 on every PR — which vacuously satisfies the
@@ -46,9 +51,9 @@ set -euo pipefail
 # a real Copilot finding merge unanswered. Comment counting therefore matches a
 # SET of logins per reviewer. A comment carries exactly one author, so listing
 # both logins cannot double-count.
-CODEX_REVIEW_LOGIN="chatgpt-codex-connector[bot]"
+CODEX_REVIEW_LOGIN="github-actions[bot]"
 COPILOT_REVIEW_LOGIN="copilot-pull-request-reviewer[bot]"
-CODEX_COMMENT_LOGINS=("chatgpt-codex-connector[bot]")
+CODEX_COMMENT_LOGINS=("github-actions[bot]")
 COPILOT_COMMENT_LOGINS=("Copilot" "copilot-pull-request-reviewer[bot]")
 
 # `--paginate` is mandatory: GitHub's default per-page is 30, and a PR

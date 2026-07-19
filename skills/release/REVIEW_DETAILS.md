@@ -2,17 +2,17 @@
 
 Reference for Step 4 of the `release` skill — how the two PR reviewers are wired. Pulled out of SKILL.md so the main flow stays focused on what the operator does.
 
-## Codex policy reviewer (native Codex code-review app)
+## Codex policy reviewer (Codex CLI on a ChatGPT subscription)
 
-The policy reviewer is the OpenAI Codex code-review GitHub App, running on a ChatGPT subscription (no API key). It is steered by the repo's `AGENTS.md ## Review guidelines`, which point it at the in-tree `rules/*.md`.
+The policy reviewer is the `.github/workflows/review-codex.yml` GitHub Actions workflow. It runs the OpenAI Codex CLI authenticated by a **ChatGPT subscription** (the `CODEX_AUTH_JSON` secret — no API key), reviewing the PR diff against the in-tree `rules/*.md` via `codex exec` with `.github/codex-review/prompt.md` and `schema.json`; `.github/codex-review/post-review.sh` submits the verdict as a PR review.
 
-- **Trigger:** in Codex settings, turn on **Code review** and set the review trigger to run **on every push** — it reviews when the PR opens and re-reviews each pushed commit, which the release merge gate depends on (Step 6 re-polls after every push). Without an automatic trigger, an `@codex review` PR comment triggers a one-off review. A plain `git push` to a non-PR branch never triggers it.
-- **Thoroughness:** enable **Exhaustive code review** in Codex settings so Codex keeps looking for findings until it stops surfacing new ones — a policy reviewer runs to a clean bill rather than stopping at diminishing returns.
-- **Authorship:** reviews are submitted by `chatgpt-codex-connector[bot]`; inline comments carry the same login.
-- **Verdicts:** the app posts only `CHANGES_REQUESTED` (violations found) or `COMMENT` (clean / observations) — never `APPROVE`. A clean re-review after an earlier `CHANGES_REQUESTED` lands as a `COMMENT` that does not supersede the stale request in GitHub's merge gate, so Step 7 dismisses it via `skills/release/dismiss-stale-reviews.sh`.
+- **Trigger:** the workflow fires on `pull_request` `opened` / `synchronize` / `reopened`, so it reviews when the PR opens and re-reviews each pushed commit (Step 6 re-polls after every push). Fork PRs are skipped (no secret access) — adopt them via `adopt-fork-pr`.
+- **Authorship:** the review is submitted with the workflow's `GITHUB_TOKEN`, so its author is `github-actions[bot]`.
+- **Verdicts:** `github-actions[bot]` cannot `APPROVE` (GitHub returns HTTP 422), so a clean pass is a `COMMENT` and a violation is `REQUEST_CHANGES`. A clean re-review after an earlier `CHANGES_REQUESTED` lands as a `COMMENT` that does not supersede the stale request in GitHub's merge gate, so Step 7 dismisses it via `skills/release/dismiss-stale-reviews.sh`.
+- **Auth / cost:** the subscription token is persisted in the actions cache and refreshed by Codex; `keep-codex-auth-fresh.yml` (weekly) keeps it from aging out. No per-token API billing. One-time operator setup — `codex login` plus storing the `CODEX_AUTH_JSON` secret — is documented in the `review-codex.yml` header.
 
 ## Copilot — second reviewer with a different lens
 
-The skill keeps Copilot as a deliberate second reviewer alongside the Codex app, not as a temporary trial. They have complementary lenses: the Codex app enforces `rules/*.md` compliance (per `AGENTS.md ## Review guidelines`), while Copilot reads for correctness, bugs, security, and test-coverage gaps that no rule file specifically targets (scoped via `.github/copilot-instructions.md`). PRs through this skill regularly see each catch issues the other misses.
+The skill keeps Copilot as a deliberate second reviewer alongside the Codex reviewer, not as a temporary trial. They have complementary lenses: the Codex reviewer enforces `rules/*.md` compliance (per `.github/codex-review/prompt.md` and `AGENTS.md ## Review guidelines`), while Copilot reads for correctness, bugs, security, and test-coverage gaps that no rule file specifically targets (scoped via `.github/copilot-instructions.md`). PRs through this skill regularly see each catch issues the other misses.
 
 The operator requests Copilot via `skills/release/request-copilot-review.sh`. The script uses the GraphQL `requestReviews` mutation (REST drops bot reviewers silently — that's the failure mode the script exists to avoid), keeps a pinned bot ID `BOT_kgDOCnlnWA` for the hot path, and falls back to discovering the bot ID from recent reviews when the pin goes stale. It verifies Copilot landed in `requested_reviewers` before exiting. Exits non-zero on failure; emits a JSON summary on success. Both Copilot and the Codex reviewer gate the merge per Step 7.

@@ -170,9 +170,9 @@ t_main_propagates_dirty_state() {
 # at 17:00; page 2's last entry is a CHANGES_REQUESTED review at 18:04.
 # A correct implementation must report CHANGES_REQUESTED@18:04.
 t_latest_review_by_picks_from_last_page() {
-  MOCK_REVIEWS_BODY='[{"user":{"login":"chatgpt-codex-connector[bot]"},"state":"APPROVED","submitted_at":"2026-05-18T16:00:00Z"},{"user":{"login":"chatgpt-codex-connector[bot]"},"state":"COMMENTED","submitted_at":"2026-05-18T17:00:00Z"}][{"user":{"login":"chatgpt-codex-connector[bot]"},"state":"CHANGES_REQUESTED","submitted_at":"2026-05-18T18:04:00Z"}]'
+  MOCK_REVIEWS_BODY='[{"user":{"login":"github-actions[bot]"},"state":"APPROVED","submitted_at":"2026-05-18T16:00:00Z"},{"user":{"login":"github-actions[bot]"},"state":"COMMENTED","submitted_at":"2026-05-18T17:00:00Z"}][{"user":{"login":"github-actions[bot]"},"state":"CHANGES_REQUESTED","submitted_at":"2026-05-18T18:04:00Z"}]'
   local out state submitted_at
-  out=$(latest_review_by "owner" "repo" "1" "chatgpt-codex-connector[bot]")
+  out=$(latest_review_by "owner" "repo" "1" "github-actions[bot]")
   state=$(echo "$out" | jq -r '.state')
   submitted_at=$(echo "$out" | jq -r '.submitted_at')
   assert_eq "state from last page"        "CHANGES_REQUESTED"     "$state"        || return 1
@@ -182,7 +182,7 @@ t_latest_review_by_picks_from_last_page() {
 t_latest_review_by_returns_none_when_no_reviews() {
   MOCK_REVIEWS_BODY='[]'
   local out state submitted_at body
-  out=$(latest_review_by "owner" "repo" "1" "chatgpt-codex-connector[bot]")
+  out=$(latest_review_by "owner" "repo" "1" "github-actions[bot]")
   state=$(echo "$out" | jq -r '.state')
   submitted_at=$(echo "$out" | jq -r '.submitted_at')
   body=$(echo "$out" | jq -r '.body')
@@ -195,9 +195,9 @@ t_latest_review_by_returns_none_when_no_reviews() {
 # A COMMENTED review with zero inline comments still carries a body the gate
 # must surface so the agent reads it (rules/reviewer-feedback-reading.md).
 t_latest_review_by_surfaces_body_text() {
-  MOCK_REVIEWS_BODY='[{"user":{"login":"chatgpt-codex-connector[bot]"},"state":"COMMENTED","submitted_at":"2026-05-18T16:00:00Z","body":"Non-blocking, but the rename in foo.py:42 drops the retry guard."}]'
+  MOCK_REVIEWS_BODY='[{"user":{"login":"github-actions[bot]"},"state":"COMMENTED","submitted_at":"2026-05-18T16:00:00Z","body":"Non-blocking, but the rename in foo.py:42 drops the retry guard."}]'
   local out state body
-  out=$(latest_review_by "owner" "repo" "1" "chatgpt-codex-connector[bot]")
+  out=$(latest_review_by "owner" "repo" "1" "github-actions[bot]")
   state=$(echo "$out" | jq -r '.state')
   body=$(echo "$out" | jq -r '.body')
   assert_eq "state surfaced"  "COMMENTED" "$state" || return 1
@@ -208,9 +208,9 @@ t_latest_review_by_filters_other_logins_across_pages() {
   # Page 1: two human reviews + one bot review. Page 2: one human review
   # that's newer than the bot review. The bot's latest is still the page-1
   # bot review, even though the page-2 human is newer.
-  MOCK_REVIEWS_BODY='[{"user":{"login":"alice"},"state":"COMMENTED","submitted_at":"2026-05-18T15:00:00Z"},{"user":{"login":"chatgpt-codex-connector[bot]"},"state":"APPROVED","submitted_at":"2026-05-18T16:00:00Z"},{"user":{"login":"bob"},"state":"COMMENTED","submitted_at":"2026-05-18T16:30:00Z"}][{"user":{"login":"alice"},"state":"COMMENTED","submitted_at":"2026-05-18T17:00:00Z"}]'
+  MOCK_REVIEWS_BODY='[{"user":{"login":"alice"},"state":"COMMENTED","submitted_at":"2026-05-18T15:00:00Z"},{"user":{"login":"github-actions[bot]"},"state":"APPROVED","submitted_at":"2026-05-18T16:00:00Z"},{"user":{"login":"bob"},"state":"COMMENTED","submitted_at":"2026-05-18T16:30:00Z"}][{"user":{"login":"alice"},"state":"COMMENTED","submitted_at":"2026-05-18T17:00:00Z"}]'
   local out state submitted_at
-  out=$(latest_review_by "owner" "repo" "1" "chatgpt-codex-connector[bot]")
+  out=$(latest_review_by "owner" "repo" "1" "github-actions[bot]")
   state=$(echo "$out" | jq -r '.state')
   submitted_at=$(echo "$out" | jq -r '.submitted_at')
   assert_eq "bot state"        "APPROVED"             "$state"        || return 1
@@ -221,16 +221,16 @@ t_latest_review_by_filters_other_logins_across_pages() {
 # alone. Mix in a non-target login and an in_reply_to_id to confirm the
 # filter still discards both.
 t_toplevel_comments_by_sums_across_pages() {
-  MOCK_COMMENTS_BODY='[{"user":{"login":"chatgpt-codex-connector[bot]"},"in_reply_to_id":null},{"user":{"login":"chatgpt-codex-connector[bot]"},"in_reply_to_id":null},{"user":{"login":"alice"},"in_reply_to_id":null}][{"user":{"login":"chatgpt-codex-connector[bot]"},"in_reply_to_id":null},{"user":{"login":"chatgpt-codex-connector[bot]"},"in_reply_to_id":12345}]'
+  MOCK_COMMENTS_BODY='[{"user":{"login":"github-actions[bot]"},"in_reply_to_id":null},{"user":{"login":"github-actions[bot]"},"in_reply_to_id":null},{"user":{"login":"alice"},"in_reply_to_id":null}][{"user":{"login":"github-actions[bot]"},"in_reply_to_id":null},{"user":{"login":"github-actions[bot]"},"in_reply_to_id":12345}]'
   local count
-  count=$(toplevel_comments_by "owner" "repo" "1" "chatgpt-codex-connector[bot]")
+  count=$(toplevel_comments_by "owner" "repo" "1" "github-actions[bot]")
   assert_eq "top-level bot comments across both pages" "3" "$count"
 }
 
 t_toplevel_comments_by_returns_zero_for_no_comments() {
   MOCK_COMMENTS_BODY='[]'
   local count
-  count=$(toplevel_comments_by "owner" "repo" "1" "chatgpt-codex-connector[bot]")
+  count=$(toplevel_comments_by "owner" "repo" "1" "github-actions[bot]")
   assert_eq "comments count for empty" "0" "$count"
 }
 
@@ -267,7 +267,7 @@ t_toplevel_comments_by_excludes_replies_and_other_logins() {
 # Codex and Copilot counts must not bleed into each other.
 t_main_counts_copilot_comments_in_snapshot() {
   MOCK_MERGE_STATE=clean
-  MOCK_COMMENTS_BODY='[{"user":{"login":"Copilot"},"in_reply_to_id":null},{"user":{"login":"chatgpt-codex-connector[bot]"},"in_reply_to_id":null},{"user":{"login":"chatgpt-codex-connector[bot]"},"in_reply_to_id":null}]'
+  MOCK_COMMENTS_BODY='[{"user":{"login":"Copilot"},"in_reply_to_id":null},{"user":{"login":"github-actions[bot]"},"in_reply_to_id":null},{"user":{"login":"github-actions[bot]"},"in_reply_to_id":null}]'
   local out counts
   out=$(main "owner" "repo" "1")
   counts=$(echo "$out" | jq -r '.inline_comments | "\(.codex)|\(.copilot)"')

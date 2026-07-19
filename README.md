@@ -6,7 +6,7 @@ Coding policy plugin for Baruch's AI agents. Language-agnostic code quality rule
 
 ## What's New
 
-- Policy review runs on the native OpenAI Codex code-review app (ChatGPT subscription, no API key), steered by `AGENTS.md ## Review guidelines`; Copilot stays as the complementary code-quality lane
+- Policy review runs on the OpenAI Codex CLI authenticated by a ChatGPT subscription (no API key) via `.github/workflows/review-codex.yml`, reviewing every PR against the in-tree `rules/*.md`; Copilot stays as the complementary code-quality lane
 - 21 rules — 15 always-on, 6 conditional (scoped via `applyTo:` to the files where the rule's prescriptions actually fire). Breakdown: 10 covering code quality, 7 covering plugin authoring, 1 covering concurrency, 1 covering review discipline, 1 covering reviewer-feedback reading, 1 covering external-repo action scope
 - `release` skill — structured PR + merge workflow gated on the Codex policy review and Copilot code-quality review
 - `install-reviewer` skill — set up the native Codex PR reviewer (plus the Copilot lane) in a consumer repo
@@ -52,7 +52,7 @@ tessl install jbaruch/coding-policy
 
 | Skill | Description |
 |-------|-------------|
-| [release](skills/release/SKILL.md) | PR creation, Codex policy review + Copilot code-quality review, merge + cleanup workflow |
+| [release](skills/release/SKILL.md) | PR creation, Codex (subscription-CLI) policy review + Copilot code-quality review, merge + cleanup workflow |
 | [install-reviewer](skills/install-reviewer/SKILL.md) | Set up the native OpenAI Codex PR reviewer (plus the Copilot lane) in a consumer repo — commits an `AGENTS.md` `## Review guidelines` block that steers Codex to review every PR against the installed `jbaruch/coding-policy` rules, plus `.github/copilot-instructions.md`, then opens a PR and hands the operator the Codex-UI setup checklist. Supports `--override` for in-place upgrades. |
 | [adopt-fork-pr](skills/adopt-fork-pr/SKILL.md) | Classify a PR by number. Same-repo PRs pass through to the reviewer; fork PRs get adopted into the base repo as a same-repo PR, preserving the contributor's commits. |
 | [migrate-to-plugin](skills/migrate-to-plugin/SKILL.md) | Migrate a legacy `tile.json` plugin to the `.tessl-plugin/plugin.json` form: runs `tessl plugin migrate`, renames `.tileignore`, removes the obsolete `tile.json`, re-lints, then reconciles residual "tile" wording to "plugin" while preserving contract surfaces. |
