@@ -37,7 +37,7 @@ jobs:
     if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -45,9 +45,7 @@ jobs:
         with:
           node-version: "22"
 
-      # Version pin: no scanner tracks this npm global. Check the current Codex
-      # CLI and bump at every reviewer-template change, at least quarterly
-      # (rules/dependency-management.md Freshness).
+      # renovate: datasource=npm depName=@openai/codex
       - name: Install Codex CLI
         run: npm install -g @openai/codex@0.142.5
 

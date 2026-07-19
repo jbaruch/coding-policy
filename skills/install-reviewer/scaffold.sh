@@ -105,7 +105,7 @@ main() {
     set +e
     restore
     echo "error: scaffold failed (rc=${rc}) — targets restored to their prior contents" >&2
-    rm -rf "$SNAP_DIR"
+    rm -rf "$SNAP_DIR" || echo "scaffold.sh: warning: could not remove temp dir ${SNAP_DIR} — remove it by hand" >&2
     exit "$rc"
   }
   # Armed only AFTER the snapshot so a pre-snapshot failure can't restore from

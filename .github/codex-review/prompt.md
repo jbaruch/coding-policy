@@ -17,6 +17,9 @@ Do this:
      `rules/no-secrets.md`, and the rest.
 5. Minor style preferences that no rule covers are NOT grounds for a finding.
 
+Repo facts (do not raise these as violations):
+- Dependency renewal here is via `.github/renovate.json`. Renovate `config:recommended` tracks GitHub Action version tags, and the `# renovate:`-annotated CLI pins are tracked by its custom manager — this is the scanner path `rules/dependency-management.md` Freshness explicitly accepts, so major-version action tags and those annotated pins are compliant, not "unpinned".
+
 Return ONLY the JSON object required by the output schema:
 - `summary`: begin with `Policy loaded: N rule files from rules/.` then one short paragraph
   on what applied and which rules.
