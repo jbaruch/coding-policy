@@ -12,7 +12,9 @@ description: >
 
 # Release Skill
 
-Structured workflow for shipping code: PR creation, automated policy review, merge, and cleanup. Process each step in order — do not skip ahead, and do not stop between steps; the skill runs end-to-end from `git push` through merge + cleanup verification in a single agent session.
+Process steps in order. Do not skip ahead.
+
+Structured workflow for shipping code: PR creation, automated policy review, merge, and cleanup. Do not stop between steps; the skill runs end-to-end from `git push` through merge + cleanup verification in a single agent session.
 
 ## Step 1 — Verify Readiness
 
