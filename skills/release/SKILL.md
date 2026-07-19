@@ -2,8 +2,8 @@
 name: release
 description: >
   Structured workflow for shipping code via GitHub pull requests: PR creation,
-  dual-lens automated review (gh-aw for `rules/*.md` compliance + Copilot for
-  doc accuracy and cross-step consistency), merge, and branch cleanup. Covers
+  dual-lens automated review (the Codex code-review app for `rules/*.md`
+  compliance + Copilot for correctness and risk), merge, and branch cleanup. Covers
   readiness checks, version
   reasoning, review polling, feedback handling, and post-merge verification.
   Use when the user wants to open a pull request, ship code, merge a branch,
@@ -58,13 +58,13 @@ Decide the bump per semver. Patch is the default and is handled automatically by
 
 ## Step 4 — Policy Review Fires Automatically
 
-Opening the PR, or pushing further commits to an existing PR, automatically triggers the paired gh-aw policy reviewers (OpenAI + Anthropic, cross-family by author-model). The workflows are bound to the `pull_request` event (`opened` / `synchronize` / `reopened` / `edited`); a plain `git push` to a non-PR branch does NOT fire them. See the trigger / self-gating / authorship mechanics at:
+Opening the PR, or pushing further commits to an existing PR, automatically triggers the native Codex policy reviewer when **Automatic reviews** is enabled in Codex settings; otherwise post an `@codex review` PR comment to trigger it. It reviews the diff against the repo's in-tree `rules/*.md` per `AGENTS.md ## Review guidelines`. A plain `git push` to a non-PR branch does NOT trigger it. See the trigger / authorship / dismissal mechanics at:
 
 ```text
-skills/release/GH_AW_DETAILS.md
+skills/release/REVIEW_DETAILS.md
 ```
 
-**Also request Copilot.** Copilot is a deliberate second reviewer with a different lens — gh-aw enforces `rules/*.md` compliance, Copilot reads for doc accuracy, cross-step consistency, and ambiguity. Both reviewers gate the merge:
+**Also request Copilot.** Copilot is a deliberate second reviewer with a different lens — the Codex app enforces `rules/*.md` compliance, Copilot reads for correctness, bugs, security, and test gaps. Both reviewers gate the merge:
 
 ```bash
 skills/release/request-copilot-review.sh <owner> <repo> <pr-number>
@@ -86,7 +86,7 @@ It returns the full `poll-pr-reviews.sh` snapshot plus a `watch` object — `{"r
 - `changes_requested` (exit 0) — a gating bot requested changes. Go to Step 6, address it, push; the next push re-fires the review, so re-run the watcher.
 - `ci_failure` (exit 0) — a check failed. Fix it (Step 6), push, re-run the watcher.
 - `dirty` (exit 0) — the branch conflicts with `main` and GitHub skipped the `pull_request:` workflows. Rebase onto current `main`, resolve, force-push, then re-run the watcher — the push re-fires the missed workflows.
-- `pending_at_budget` (exit 1) — a signal never arrived within the budget (a reviewer that never posted, CI stuck pending). Inspect which field is still `none`/`pending` in the returned snapshot. If the gh-aw review check ran but posted nothing, `gh run view --log-failed`; do not retry via GraphQL — gh-aw is event-triggered. Re-run the watcher to keep waiting once the cause is understood.
+- `pending_at_budget` (exit 1) — a signal never arrived within the budget (a reviewer that never posted, CI stuck pending). Inspect which field is still `none`/`pending` in the returned snapshot. If the Codex reviewer never posted, confirm **Automatic reviews** is enabled in Codex settings, or post an `@codex review` comment to trigger it. Re-run the watcher to keep waiting once the cause is understood.
 
 ## Step 6 — Address Feedback; No Re-request Needed
 
@@ -97,7 +97,7 @@ It returns the full `poll-pr-reviews.sh` snapshot plus a `watch` object — `{"r
   - Accepted: `Fixed in <sha>` (literal phrase; `Done` / `Accepted and fixed` do not satisfy)
   - Declined: `Declining — <reason with cited evidence>` (em dash `—`, not hyphen or period)
 - Push fixes to the same branch
-- **gh-aw re-runs automatically on every push** (`pull_request: synchronize`); Copilot needs a manual re-request each push via `skills/release/request-copilot-review.sh` (same args as Step 4).
+- **The Codex reviewer re-reviews automatically on every push** (with **Automatic reviews** enabled); Copilot needs a manual re-request each push via `skills/release/request-copilot-review.sh` (same args as Step 4).
 - Repeat Step 5 until every active bot review is `APPROVED`, or `COMMENTED` with its body read and no blocking items, and every thread has a reply.
 
 ## Step 7 — Merge + Cleanup
@@ -111,7 +111,7 @@ A `COMMENTED` review never gates the merge on its state alone — but its body m
 
 Once these conditions hold, merge automatically — the green gates are the approval. Do not pause to ask a human whether to merge.
 
-**Clear superseded review gates first.** A policy bot cannot `APPROVE` (`github-actions[bot]` gets HTTP 422), so a clean re-review lands as a `COMMENT` that does NOT supersede the bot's earlier `CHANGES_REQUESTED` in GitHub's merge gate — the stale request keeps `merge_state.status` at `BLOCKED`. Dismiss every such superseded review before merging:
+**Clear superseded review gates first.** The Codex policy bot cannot `APPROVE` (`chatgpt-codex-connector[bot]` posts only `CHANGES_REQUESTED` or `COMMENT`), so a clean re-review lands as a `COMMENT` that does NOT supersede the bot's earlier `CHANGES_REQUESTED` in GitHub's merge gate — the stale request keeps `merge_state.status` at `BLOCKED`. Dismiss every such superseded review before merging:
 
 ```bash
 skills/release/dismiss-stale-reviews.sh <owner> <repo> <pr-number>

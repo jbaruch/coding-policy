@@ -86,8 +86,8 @@ dismiss_count() { [[ -s "$DISMISS_LOG" ]] || { echo 0; return; }; wc -l < "$DISM
 # fixes, bot re-reviews clean with a COMMENT (it cannot APPROVE — 422).
 t_stale_cr_then_comment_is_dismissed() {
   MOCK_REVIEWS_BODY='[
-    {"id":11,"state":"CHANGES_REQUESTED","commit_id":"aaa","submitted_at":"2026-01-01T00:00:00Z","user":{"login":"github-actions[bot]"}},
-    {"id":12,"state":"COMMENTED","commit_id":"bbb","submitted_at":"2026-01-02T00:00:00Z","user":{"login":"github-actions[bot]"}}
+    {"id":11,"state":"CHANGES_REQUESTED","commit_id":"aaa","submitted_at":"2026-01-01T00:00:00Z","user":{"login":"chatgpt-codex-connector[bot]"}},
+    {"id":12,"state":"COMMENTED","commit_id":"bbb","submitted_at":"2026-01-02T00:00:00Z","user":{"login":"chatgpt-codex-connector[bot]"}}
   ]'
   local out ids n
   out=$(main "owner" "repo" "1") || { echo "    main exited non-zero" >&2; return 1; }
@@ -101,15 +101,15 @@ t_stale_cr_then_comment_is_dismissed() {
 # Latest review is still CHANGES_REQUESTED -> leave it gating, dismiss nothing.
 t_latest_cr_is_left_active() {
   MOCK_REVIEWS_BODY='[
-    {"id":21,"state":"CHANGES_REQUESTED","commit_id":"aaa","submitted_at":"2026-01-01T00:00:00Z","user":{"login":"github-actions[bot]"}},
-    {"id":22,"state":"COMMENTED","commit_id":"bbb","submitted_at":"2026-01-02T00:00:00Z","user":{"login":"github-actions[bot]"}},
-    {"id":23,"state":"CHANGES_REQUESTED","commit_id":"ccc","submitted_at":"2026-01-03T00:00:00Z","user":{"login":"github-actions[bot]"}}
+    {"id":21,"state":"CHANGES_REQUESTED","commit_id":"aaa","submitted_at":"2026-01-01T00:00:00Z","user":{"login":"chatgpt-codex-connector[bot]"}},
+    {"id":22,"state":"COMMENTED","commit_id":"bbb","submitted_at":"2026-01-02T00:00:00Z","user":{"login":"chatgpt-codex-connector[bot]"}},
+    {"id":23,"state":"CHANGES_REQUESTED","commit_id":"ccc","submitted_at":"2026-01-03T00:00:00Z","user":{"login":"chatgpt-codex-connector[bot]"}}
   ]'
   local out active n
   out=$(main "owner" "repo" "1") || return 1
   active=$(jq -r '.left_active | map("\(.login):\(.review_id)") | join(",")' <<<"$out")
   n=$(dismiss_count)
-  assert_eq "left_active entry" "github-actions[bot]:23" "$active" || return 1
+  assert_eq "left_active entry" "chatgpt-codex-connector[bot]:23" "$active" || return 1
   assert_eq "no dismissals"     "0"                      "$n"      || return 1
   assert_eq "dismissed empty"   "0" "$(jq '.dismissed | length' <<<"$out")"
 }
@@ -117,8 +117,8 @@ t_latest_cr_is_left_active() {
 # An already-DISMISSED stale review is not re-dismissed (idempotent re-run).
 t_already_dismissed_is_skipped() {
   MOCK_REVIEWS_BODY='[
-    {"id":31,"state":"DISMISSED","commit_id":"aaa","submitted_at":"2026-01-01T00:00:00Z","user":{"login":"github-actions[bot]"}},
-    {"id":32,"state":"COMMENTED","commit_id":"bbb","submitted_at":"2026-01-02T00:00:00Z","user":{"login":"github-actions[bot]"}}
+    {"id":31,"state":"DISMISSED","commit_id":"aaa","submitted_at":"2026-01-01T00:00:00Z","user":{"login":"chatgpt-codex-connector[bot]"}},
+    {"id":32,"state":"COMMENTED","commit_id":"bbb","submitted_at":"2026-01-02T00:00:00Z","user":{"login":"chatgpt-codex-connector[bot]"}}
   ]'
   local out n
   out=$(main "owner" "repo" "1") || return 1
@@ -131,15 +131,15 @@ t_already_dismissed_is_skipped() {
 # still requesting changes (leave active).
 t_per_bot_independence() {
   MOCK_REVIEWS_BODY='[
-    {"id":41,"state":"CHANGES_REQUESTED","commit_id":"aaa","submitted_at":"2026-01-01T00:00:00Z","user":{"login":"github-actions[bot]"}},
-    {"id":42,"state":"COMMENTED","commit_id":"bbb","submitted_at":"2026-01-02T00:00:00Z","user":{"login":"github-actions[bot]"}},
+    {"id":41,"state":"CHANGES_REQUESTED","commit_id":"aaa","submitted_at":"2026-01-01T00:00:00Z","user":{"login":"chatgpt-codex-connector[bot]"}},
+    {"id":42,"state":"COMMENTED","commit_id":"bbb","submitted_at":"2026-01-02T00:00:00Z","user":{"login":"chatgpt-codex-connector[bot]"}},
     {"id":43,"state":"CHANGES_REQUESTED","commit_id":"ccc","submitted_at":"2026-01-02T06:00:00Z","user":{"login":"copilot-pull-request-reviewer[bot]"}}
   ]'
   local out dismissed active
   out=$(main "owner" "repo" "1") || return 1
   dismissed=$(jq -r '.dismissed | map("\(.login):\(.review_id)") | join(",")' <<<"$out")
   active=$(jq -r '.left_active | map("\(.login):\(.review_id)") | join(",")' <<<"$out")
-  assert_eq "dismissed gh-aw stale"       "github-actions[bot]:41"                 "$dismissed" || return 1
+  assert_eq "dismissed codex stale"       "chatgpt-codex-connector[bot]:41"                 "$dismissed" || return 1
   assert_eq "copilot left active"         "copilot-pull-request-reviewer[bot]:43"  "$active"    || return 1
   assert_eq "exactly one dismissal"       "1"                                      "$(dismiss_count)"
 }
@@ -160,8 +160,8 @@ t_no_reviews_is_noop() {
 # active request must stay put.
 t_latest_dismissed_leaves_earlier_active_cr() {
   MOCK_REVIEWS_BODY='[
-    {"id":61,"state":"CHANGES_REQUESTED","commit_id":"aaa","submitted_at":"2026-01-01T00:00:00Z","user":{"login":"github-actions[bot]"}},
-    {"id":62,"state":"DISMISSED","commit_id":"bbb","submitted_at":"2026-01-02T00:00:00Z","user":{"login":"github-actions[bot]"}}
+    {"id":61,"state":"CHANGES_REQUESTED","commit_id":"aaa","submitted_at":"2026-01-01T00:00:00Z","user":{"login":"chatgpt-codex-connector[bot]"}},
+    {"id":62,"state":"DISMISSED","commit_id":"bbb","submitted_at":"2026-01-02T00:00:00Z","user":{"login":"chatgpt-codex-connector[bot]"}}
   ]'
   local out n
   out=$(main "owner" "repo" "1") || return 1
@@ -173,9 +173,9 @@ t_latest_dismissed_leaves_earlier_active_cr() {
 # Two stale CRs before a clean COMMENT -> both dismissed.
 t_multiple_stale_crs_all_dismissed() {
   MOCK_REVIEWS_BODY='[
-    {"id":51,"state":"CHANGES_REQUESTED","commit_id":"aaa","submitted_at":"2026-01-01T00:00:00Z","user":{"login":"github-actions[bot]"}},
-    {"id":52,"state":"CHANGES_REQUESTED","commit_id":"bbb","submitted_at":"2026-01-02T00:00:00Z","user":{"login":"github-actions[bot]"}},
-    {"id":53,"state":"COMMENTED","commit_id":"ccc","submitted_at":"2026-01-03T00:00:00Z","user":{"login":"github-actions[bot]"}}
+    {"id":51,"state":"CHANGES_REQUESTED","commit_id":"aaa","submitted_at":"2026-01-01T00:00:00Z","user":{"login":"chatgpt-codex-connector[bot]"}},
+    {"id":52,"state":"CHANGES_REQUESTED","commit_id":"bbb","submitted_at":"2026-01-02T00:00:00Z","user":{"login":"chatgpt-codex-connector[bot]"}},
+    {"id":53,"state":"COMMENTED","commit_id":"ccc","submitted_at":"2026-01-03T00:00:00Z","user":{"login":"chatgpt-codex-connector[bot]"}}
   ]'
   local out ids
   out=$(main "owner" "repo" "1") || return 1
@@ -186,18 +186,18 @@ t_multiple_stale_crs_all_dismissed() {
 
 # The bot logins contain `[bot]`, a glob bracket. If the loop iterated them
 # unquoted, a file in the working directory matching the pattern (e.g.
-# `github-actionsb`) would rewrite the login token via pathname expansion
+# `chatgpt-codex-connectorb`) would rewrite the login token via pathname expansion
 # and the review would never be found. Run from a directory seeded with
 # such a decoy file and assert the dismissal still happens.
 t_login_is_glob_safe_against_cwd_files() {
   MOCK_REVIEWS_BODY='[
-    {"id":71,"state":"CHANGES_REQUESTED","commit_id":"aaa","submitted_at":"2026-01-01T00:00:00Z","user":{"login":"github-actions[bot]"}},
-    {"id":72,"state":"COMMENTED","commit_id":"bbb","submitted_at":"2026-01-02T00:00:00Z","user":{"login":"github-actions[bot]"}}
+    {"id":71,"state":"CHANGES_REQUESTED","commit_id":"aaa","submitted_at":"2026-01-01T00:00:00Z","user":{"login":"chatgpt-codex-connector[bot]"}},
+    {"id":72,"state":"COMMENTED","commit_id":"bbb","submitted_at":"2026-01-02T00:00:00Z","user":{"login":"chatgpt-codex-connector[bot]"}}
   ]'
   local decoy_dir out ids
   decoy_dir=$(mktemp -d)
-  # Files that `github-actions[bot]` and `copilot-...[bot]` would glob to.
-  : > "${decoy_dir}/github-actionsb"
+  # Files that `chatgpt-codex-connector[bot]` and `copilot-...[bot]` would glob to.
+  : > "${decoy_dir}/chatgpt-codex-connectorb"
   : > "${decoy_dir}/copilot-pull-request-reviewero"
   out=$(cd "$decoy_dir" && main "owner" "repo" "1") || { rm -rf "$decoy_dir"; return 1; }
   rm -rf "$decoy_dir"

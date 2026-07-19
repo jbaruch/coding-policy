@@ -15,12 +15,12 @@
 #     "pr_number": N,
 #     "ci":   {"status": "pending|success|failure|none", "checks": [...]},
 #     "reviews": {
-#       "gh_aw":   {"state": "APPROVED|CHANGES_REQUESTED|COMMENTED|none",
+#       "codex":   {"state": "APPROVED|CHANGES_REQUESTED|COMMENTED|none",
 #                   "submitted_at": "ISO-8601|null", "body": "text|null"},
 #       "copilot": {"state": "APPROVED|CHANGES_REQUESTED|COMMENTED|none",
 #                   "submitted_at": "ISO-8601|null", "body": "text|null"}
 #     },
-#     "inline_comments": {"gh_aw": N, "copilot": N},
+#     "inline_comments": {"codex": N, "copilot": N},
 #     "merge_state": {"status": "CLEAN|DIRTY|BLOCKED|BEHIND|UNSTABLE|...",
 #                     "mergeable": "MERGEABLE|CONFLICTING|UNKNOWN"}
 #   }
@@ -35,10 +35,10 @@ set -euo pipefail
 # Bot logins, by surface. A reviewer does NOT necessarily author its reviews
 # and its inline comments under the same login:
 #
-#   surface          gh-aw                  Copilot
-#   ---------------  ---------------------  --------------------------------
-#   review           github-actions[bot]    copilot-pull-request-reviewer[bot]
-#   inline comment   github-actions[bot]    Copilot
+#   surface          Codex policy reviewer         Copilot
+#   ---------------  ----------------------------  --------------------------------
+#   review           chatgpt-codex-connector[bot]  copilot-pull-request-reviewer[bot]
+#   inline comment   chatgpt-codex-connector[bot]  Copilot
 #
 # Counting Copilot's comments against its REVIEW login matches nothing, so
 # `inline_comments.copilot` reads 0 on every PR — which vacuously satisfies the
@@ -46,9 +46,9 @@ set -euo pipefail
 # a real Copilot finding merge unanswered. Comment counting therefore matches a
 # SET of logins per reviewer. A comment carries exactly one author, so listing
 # both logins cannot double-count.
-GH_AW_REVIEW_LOGIN="github-actions[bot]"
+CODEX_REVIEW_LOGIN="chatgpt-codex-connector[bot]"
 COPILOT_REVIEW_LOGIN="copilot-pull-request-reviewer[bot]"
-GH_AW_COMMENT_LOGINS=("github-actions[bot]")
+CODEX_COMMENT_LOGINS=("chatgpt-codex-connector[bot]")
 COPILOT_COMMENT_LOGINS=("Copilot" "copilot-pull-request-reviewer[bot]")
 
 # `--paginate` is mandatory: GitHub's default per-page is 30, and a PR
@@ -128,13 +128,13 @@ main() {
   merge_state=$(fetch_merge_state "$owner" "$repo" "$pr_number") \
     || { echo "error: failed to fetch merge state for ${owner}/${repo}#${pr_number} — run 'gh auth status' to verify auth, then retry 'gh pr view ${pr_number} --repo ${owner}/${repo} --json mergeStateStatus,mergeable' to inspect the failing call directly" >&2; exit 1; }
 
-  local gh_aw_review copilot_review gh_aw_comments copilot_comments
-  gh_aw_review=$(latest_review_by   "$owner" "$repo" "$pr_number" "$GH_AW_REVIEW_LOGIN") \
-    || { echo "error: failed to fetch gh-aw review state" >&2; exit 1; }
+  local codex_review copilot_review codex_comments copilot_comments
+  codex_review=$(latest_review_by   "$owner" "$repo" "$pr_number" "$CODEX_REVIEW_LOGIN") \
+    || { echo "error: failed to fetch Codex review state" >&2; exit 1; }
   copilot_review=$(latest_review_by "$owner" "$repo" "$pr_number" "$COPILOT_REVIEW_LOGIN") \
     || { echo "error: failed to fetch Copilot review state" >&2; exit 1; }
-  gh_aw_comments=$(toplevel_comments_by   "$owner" "$repo" "$pr_number" "${GH_AW_COMMENT_LOGINS[@]}") \
-    || { echo "error: failed to count gh-aw inline comments" >&2; exit 1; }
+  codex_comments=$(toplevel_comments_by   "$owner" "$repo" "$pr_number" "${CODEX_COMMENT_LOGINS[@]}") \
+    || { echo "error: failed to count Codex inline comments" >&2; exit 1; }
   copilot_comments=$(toplevel_comments_by "$owner" "$repo" "$pr_number" "${COPILOT_COMMENT_LOGINS[@]}") \
     || { echo "error: failed to count Copilot inline comments" >&2; exit 1; }
 
@@ -142,16 +142,16 @@ main() {
     --argjson pr_number "$pr_number" \
     --arg ci_status "$ci_status" \
     --argjson checks "$checks_json" \
-    --argjson gh_aw "$gh_aw_review" \
+    --argjson codex "$codex_review" \
     --argjson copilot "$copilot_review" \
-    --argjson gh_aw_comments "$gh_aw_comments" \
+    --argjson codex_comments "$codex_comments" \
     --argjson copilot_comments "$copilot_comments" \
     --argjson merge_state "$merge_state" \
     '{
       pr_number: $pr_number,
       ci: {status: $ci_status, checks: $checks},
-      reviews: {gh_aw: $gh_aw, copilot: $copilot},
-      inline_comments: {gh_aw: $gh_aw_comments, copilot: $copilot_comments},
+      reviews: {codex: $codex, copilot: $copilot},
+      inline_comments: {codex: $codex_comments, copilot: $copilot_comments},
       merge_state: $merge_state
     }'
 }

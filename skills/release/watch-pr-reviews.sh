@@ -106,11 +106,11 @@ main() {
       exit 2
     fi
 
-    local mergeable mstatus ci gh_aw copilot
+    local mergeable mstatus ci codex copilot
     mergeable=$(printf '%s' "$snapshot" | jq -r '.merge_state.mergeable')
     mstatus=$(printf '%s'   "$snapshot" | jq -r '.merge_state.status')
     ci=$(printf '%s'        "$snapshot" | jq -r '.ci.status')
-    gh_aw=$(printf '%s'     "$snapshot" | jq -r '.reviews.gh_aw.state')
+    codex=$(printf '%s'     "$snapshot" | jq -r '.reviews.codex.state')
     copilot=$(printf '%s'   "$snapshot" | jq -r '.reviews.copilot.state')
 
     # Order matters: a conflicting branch or a failed check or a
@@ -122,7 +122,7 @@ main() {
     if [[ "$ci" == "failure" ]]; then
       emit_and_exit "ci_failure" "$attempts" "$elapsed" "$snapshot" 0
     fi
-    if [[ "$gh_aw" == "CHANGES_REQUESTED" || "$copilot" == "CHANGES_REQUESTED" ]]; then
+    if [[ "$codex" == "CHANGES_REQUESTED" || "$copilot" == "CHANGES_REQUESTED" ]]; then
       emit_and_exit "changes_requested" "$attempts" "$elapsed" "$snapshot" 0
     fi
 
@@ -131,7 +131,7 @@ main() {
     # "none"). Neither is CHANGES_REQUESTED here — the guard above returned.
     if [[ "$mergeable" == "MERGEABLE" \
        && ( "$ci" == "success" || "$ci" == "none" ) \
-       && "$gh_aw" != "none" \
+       && "$codex" != "none" \
        && "$copilot" != "none" ]]; then
       emit_and_exit "ready" "$attempts" "$elapsed" "$snapshot" 0
     fi
