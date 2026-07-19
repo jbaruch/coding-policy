@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.96 — 2026-07-19
+
 ### Rules
 
 - **PR review moved to the Codex CLI on a ChatGPT subscription; author-model / cross-family apparatus removed** — the paid-per-token gh-aw OpenAI + Anthropic reviewers (~400K API tokens/PR) are replaced by a GitHub Actions workflow that runs the OpenAI Codex CLI authenticated by a **ChatGPT subscription** (no API key), reviewing every PR against the in-tree `rules/*.md`, with Copilot as the code-quality lane. A single reviewer that reviews every PR has no author-family to match against, so `rules/author-model-declaration.md` and the whole declaration + family-resolution + self-review-skip machinery are deleted (22→21 rules); the subscription flat-rate removes the token-cost rationale (#161) the family gate existed to serve. The native Codex code-review GitHub App was the first target (proven feasible by `projectkorero/korero` beans `Korero-cxrv` / `Korero-swrv`) but is blocked on this account by an OpenAI server-side workspace-binding desync, so this repo uses the Codex CLI in CI — OpenAI's documented CI/CD subscription-auth path.
