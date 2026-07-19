@@ -9,7 +9,7 @@ The policy reviewer is the `.github/workflows/review-codex.yml` GitHub Actions w
 - **Trigger:** the workflow fires on `pull_request` `opened` / `synchronize` / `reopened`, so it reviews when the PR opens and re-reviews each pushed commit (Step 6 re-polls after every push). Fork PRs are skipped (no secret access) — adopt them via `adopt-fork-pr`.
 - **Authorship:** the review is submitted with the workflow's `GITHUB_TOKEN`, so its author is `github-actions[bot]`.
 - **Verdicts:** `github-actions[bot]` cannot `APPROVE` (GitHub returns HTTP 422), so a clean pass is a `COMMENT` and a violation is `REQUEST_CHANGES`. A clean re-review after an earlier `CHANGES_REQUESTED` lands as a `COMMENT` that does not supersede the stale request in GitHub's merge gate, so Step 7 dismisses it via `skills/release/dismiss-stale-reviews.sh`.
-- **Auth / cost:** the subscription token is persisted in the actions cache and refreshed by Codex; `keep-codex-auth-fresh.yml` (weekly) keeps it from aging out. No per-token API billing. One-time operator setup — `codex login` plus storing the `CODEX_AUTH_JSON` secret — is documented in the `review-codex.yml` header.
+- **Auth / cost:** the subscription token is read only from the `CODEX_AUTH_JSON` secret at runtime and never persisted to the runner (rules/no-secrets.md); Codex refreshes the access token in-memory for the run. No per-token API billing. If the refresh token expires, the review fails loudly and the operator re-seeds the secret. One-time operator setup — `codex login` plus `gh secret set CODEX_AUTH_JSON < ~/.codex/auth.json` — is documented in the `review-codex.yml` header.
 
 ## Copilot — second reviewer with a different lens
 

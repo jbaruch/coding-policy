@@ -11,7 +11,7 @@
 
 ### CI
 
-- **This repo self-reviews via the Codex CLI subscription workflow** — deleted `.github/workflows/review-openai.*` and `review-anthropic.*` plus the gh-aw framework files (`.github/aw/actions-lock.json`, `.gitattributes`); added `.github/workflows/review-codex.yml` (runs `codex exec` with `.github/codex-review/{prompt.md,schema.json}`, posts the verdict via `post-review.sh`), `keep-codex-auth-fresh.yml` (weekly token refresh), `.github/copilot-instructions.md`, and a root `AGENTS.md ## Review guidelines`. One-time operator step: `codex login` locally, then store `~/.codex/auth.json` as the `CODEX_AUTH_JSON` repo secret.
+- **This repo self-reviews via the Codex CLI subscription workflow** — deleted `.github/workflows/review-openai.*` and `review-anthropic.*` plus the gh-aw framework files (`.github/aw/actions-lock.json`, `.gitattributes`); added `.github/workflows/review-codex.yml` (runs `codex exec` with `.github/codex-review/{prompt.md,schema.json}`, posts the verdict via `post-review.sh`), `.github/copilot-instructions.md`, and a root `AGENTS.md ## Review guidelines`. The subscription token is read only from the `CODEX_AUTH_JSON` secret at runtime, never persisted to the runner (rules/no-secrets.md). One-time operator step: `codex login` locally, then `gh secret set CODEX_AUTH_JSON < ~/.codex/auth.json`.
 
 ## 0.3.94 — 2026-07-18
 

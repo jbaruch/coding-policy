@@ -81,9 +81,20 @@ main() {
   [[ -f "$AGENTS_TARGET"  ]] && { cp "$AGENTS_TARGET"  "${SNAP_DIR}/agents";  agents_existed=1; }
   [[ -f "$COPILOT_TARGET" ]] && { cp "$COPILOT_TARGET" "${SNAP_DIR}/copilot"; copilot_existed=1; }
 
+  # Best-effort rollback: it runs from on_err under `set +e`, so a failing
+  # cp/rm must warn rather than pass silently (rules/error-handling.md — best-
+  # effort work that continues past a failure emits a warning to stderr).
   restore() {
-    if (( agents_existed == 1 )); then cp "${SNAP_DIR}/agents" "$AGENTS_TARGET"; else rm -f "$AGENTS_TARGET"; fi
-    if (( copilot_existed == 1 )); then cp "${SNAP_DIR}/copilot" "$COPILOT_TARGET"; else rm -f "$COPILOT_TARGET"; fi
+    if (( agents_existed == 1 )); then
+      cp "${SNAP_DIR}/agents" "$AGENTS_TARGET" || echo "scaffold.sh: warning: could not restore ${AGENTS_TARGET} from ${SNAP_DIR}/agents — restore it by hand" >&2
+    else
+      rm -f "$AGENTS_TARGET" || echo "scaffold.sh: warning: could not remove ${AGENTS_TARGET} during rollback — remove it by hand" >&2
+    fi
+    if (( copilot_existed == 1 )); then
+      cp "${SNAP_DIR}/copilot" "$COPILOT_TARGET" || echo "scaffold.sh: warning: could not restore ${COPILOT_TARGET} from ${SNAP_DIR}/copilot — restore it by hand" >&2
+    else
+      rm -f "$COPILOT_TARGET" || echo "scaffold.sh: warning: could not remove ${COPILOT_TARGET} during rollback — remove it by hand" >&2
+    fi
   }
   on_err() {
     local rc=$?
