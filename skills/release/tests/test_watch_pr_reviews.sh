@@ -6,7 +6,7 @@
 #      none requested changes → result "ready", exit 0, no sleep.
 #   2. Deferred ready — first snapshot pending (one bot not yet posted), a
 #      later snapshot ready → polls, reaches "ready", exit 0.
-#   3. Both-bots-required — a lone gh_aw verdict with copilot still "none"
+#   3. Both-bots-required — a lone codex verdict with copilot still "none"
 #      is NOT ready (proves the watcher waits for the full merge-gate set,
 #      not the first verdict to land).
 #   4. Zero inline comments is still ready — a clean verdict with no inline
@@ -114,22 +114,22 @@ queue() { for s in "$@"; do echo "$s" >> "$MOCK_QUEUE_FILE"; done; }
 calls() { wc -l < "$MOCK_CALLS_FILE" | tr -d ' '; }
 sleeps() { [[ -f "$TMPDIR_TEST/sleeps" ]] || { echo 0; return; }; wc -l < "$TMPDIR_TEST/sleeps" | tr -d ' '; }
 
-# Build a compact snapshot JSON. Args: mergeable mstatus ci gh_aw copilot [gh_comments copilot_comments]
+# Build a compact snapshot JSON. Args: mergeable mstatus ci codex copilot [gh_comments copilot_comments]
 snap() {
-  local mergeable="$1" mstatus="$2" ci="$3" gh_aw="$4" copilot="$5"
+  local mergeable="$1" mstatus="$2" ci="$3" codex="$4" copilot="$5"
   local ghc="${6:-0}" cpc="${7:-0}"
   jq -cn \
     --arg mergeable "$mergeable" --arg mstatus "$mstatus" --arg ci "$ci" \
-    --arg gh_aw "$gh_aw" --arg copilot "$copilot" \
+    --arg codex "$codex" --arg copilot "$copilot" \
     --argjson ghc "$ghc" --argjson cpc "$cpc" \
     '{
       pr_number: 42,
       ci: {status: $ci, checks: []},
       reviews: {
-        gh_aw:   {state: $gh_aw,   submitted_at: null, body: null},
+        codex:   {state: $codex,   submitted_at: null, body: null},
         copilot: {state: $copilot, submitted_at: null, body: null}
       },
-      inline_comments: {gh_aw: $ghc, copilot: $cpc},
+      inline_comments: {codex: $ghc, copilot: $cpc},
       merge_state: {status: $mstatus, mergeable: $mergeable}
     }'
 }
@@ -167,14 +167,14 @@ run "deferred ready polls until both bots post" test_deferred_ready
 # --- Test 3: both bots required (a lone verdict is not ready) -----------------
 test_both_bots_required() {
   reset_mocks
-  # Copilot never posts — mergeable + gh_aw approved is NOT enough.
+  # Copilot never posts — mergeable + codex approved is NOT enough.
   queue "$(snap MERGEABLE CLEAN success APPROVED none)"
   local out rc=0
   out=$(main jbaruch coding-policy 42 2>&1) || rc=$?
   assert_eq "exit code (budget)" "1" "$rc" || return 1
   assert_eq "result" "pending_at_budget" "$(result_of "$out")" || return 1
 }
-run "lone gh_aw verdict is not ready — waits for both bots" test_both_bots_required
+run "lone codex verdict is not ready — waits for both bots" test_both_bots_required
 
 # --- Test 4: zero inline comments is still ready ------------------------------
 test_zero_comments_ready() {
@@ -243,7 +243,7 @@ test_pending_at_budget() {
   assert_eq "exit code" "1" "$rc" || return 1
   assert_eq "result" "pending_at_budget" "$(result_of "$out")" || return 1
   # The final snapshot is preserved so the agent can see which field is stuck.
-  assert_eq "snapshot preserved (gh_aw)" "none" "$(echo "$out" | jq -r '.reviews.gh_aw.state')" || return 1
+  assert_eq "snapshot preserved (codex)" "none" "$(echo "$out" | jq -r '.reviews.codex.state')" || return 1
   assert_eq "snapshot preserved (ci)" "pending" "$(echo "$out" | jq -r '.ci.status')" || return 1
 }
 run "pending forever exits 1 with the snapshot intact" test_pending_at_budget

@@ -264,14 +264,14 @@ t_toplevel_comments_by_excludes_replies_and_other_logins() {
 }
 
 # End-to-end through main() — the path the Step 7 merge gate actually reads.
-# gh-aw and Copilot counts must not bleed into each other.
+# Codex and Copilot counts must not bleed into each other.
 t_main_counts_copilot_comments_in_snapshot() {
   MOCK_MERGE_STATE=clean
   MOCK_COMMENTS_BODY='[{"user":{"login":"Copilot"},"in_reply_to_id":null},{"user":{"login":"github-actions[bot]"},"in_reply_to_id":null},{"user":{"login":"github-actions[bot]"},"in_reply_to_id":null}]'
   local out counts
   out=$(main "owner" "repo" "1")
-  counts=$(echo "$out" | jq -r '.inline_comments | "\(.gh_aw)|\(.copilot)"')
-  assert_eq "inline_comments {gh_aw|copilot}" "2|1" "$counts"
+  counts=$(echo "$out" | jq -r '.inline_comments | "\(.codex)|\(.copilot)"')
+  assert_eq "inline_comments {codex|copilot}" "2|1" "$counts"
 }
 
 # --- driver ---

@@ -2,16 +2,14 @@
 # Dismiss a gating bot's CHANGES_REQUESTED review once the SAME bot has
 # posted a later non-CHANGES_REQUESTED verdict on the PR.
 #
-# Why this exists: the policy reviewers run as `github-actions[bot]`, which
-# GitHub rejects `APPROVE` from with HTTP 422 (see
-# .github/workflows/review-anthropic.md Step 5). A clean re-review is
-# therefore a COMMENT ("All rules pass"), and a later COMMENT never
-# supersedes an earlier CHANGES_REQUESTED in GitHub's merge-gating model —
-# the stale CHANGES_REQUESTED keeps blocking the merge until it is
-# dismissed. The bot cannot dismiss its own review (it holds only
-# `pull-requests: read`), so the operator running the release skill does it
-# here. The decision is fully deterministic, so it is a script, not agent
-# judgment (rules/script-delegation.md).
+# Why this exists: the policy reviewer runs as `github-actions[bot]` (the
+# Codex CLI review workflow, review-codex.yml, submits with the workflow
+# token), which GitHub rejects APPROVE from with HTTP 422. A clean re-review is
+# therefore a COMMENT, and a later COMMENT never supersedes an earlier
+# CHANGES_REQUESTED in GitHub's merge-gating model — the stale
+# CHANGES_REQUESTED keeps blocking the merge until it is dismissed. The
+# operator running the release skill dismisses it here. The decision is fully
+# deterministic, so it is a script, not agent judgment (rules/script-delegation.md).
 #
 # Decision, per gating bot (see GATING_BOTS below):
 #   - latest review state == CHANGES_REQUESTED => leave it; the bot is

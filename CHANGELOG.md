@@ -1,5 +1,18 @@
 # Changelog
 
+### Rules
+
+- **PR review moved to the Codex CLI on a ChatGPT subscription; author-model / cross-family apparatus removed** — the paid-per-token gh-aw OpenAI + Anthropic reviewers (~400K API tokens/PR) are replaced by a GitHub Actions workflow that runs the OpenAI Codex CLI authenticated by a **ChatGPT subscription** (no API key), reviewing every PR against the in-tree `rules/*.md`, with Copilot as the code-quality lane. A single reviewer that reviews every PR has no author-family to match against, so `rules/author-model-declaration.md` and the whole declaration + family-resolution + self-review-skip machinery are deleted (22→21 rules); the subscription flat-rate removes the token-cost rationale (#161) the family gate existed to serve. The native Codex code-review GitHub App was the first target (proven feasible by `projectkorero/korero` beans `Korero-cxrv` / `Korero-swrv`) but is blocked on this account by an OpenAI server-side workspace-binding desync, so this repo uses the Codex CLI in CI — OpenAI's documented CI/CD subscription-auth path.
+
+### Skills
+
+- **`release`: merge gate points at the self-hosted Codex reviewer** — the reviewer runs as a workflow and submits with `GITHUB_TOKEN`, so `poll-pr-reviews.sh` / `dismiss-stale-reviews.sh` resolve it by `github-actions[bot]`; the internal `reviews` key was renamed `gh_aw`→`codex`, `GH_AW_DETAILS.md` became `REVIEW_DETAILS.md`, and the mandatory `**Author-Model:**` PR-body line was dropped. `github-actions[bot]` still cannot `APPROVE` (HTTP 422), so the stale-review dismissal is unchanged.
+- **`install-reviewer`: rewritten off the gh-aw scaffold** — now commits an `AGENTS.md` `## Review guidelines` block plus `.github/copilot-instructions.md` and hands the operator the reviewer-setup checklist, replacing the `gh aw compile` / lock-file / `.env.example` machinery. (This repo self-reviews with the Codex CLI workflow below; a CLI-workflow consumer scaffold is a tracked follow-up.)
+
+### CI
+
+- **This repo self-reviews via the Codex CLI subscription workflow** — deleted `.github/workflows/review-openai.*` and `review-anthropic.*` plus the gh-aw framework files (`.github/aw/actions-lock.json`, `.gitattributes`); added `.github/workflows/review-codex.yml` (runs `codex exec` with `.github/codex-review/{prompt.md,schema.json}`, posts the verdict via `post-review.sh`), `.github/copilot-instructions.md`, and a root `AGENTS.md ## Review guidelines`. The subscription token is read only from the `CODEX_AUTH_JSON` secret at runtime, never persisted to the runner (rules/no-secrets.md); against prompt-injection exfil, `mask-secrets.sh` registers each token with `::add-mask::` so it is redacted from the public CI logs, and `assert-no-secret-leak.sh` refuses to post + drops the token if the review output ever echoes credential material. One-time operator step: `codex login` locally, then `gh secret set CODEX_AUTH_JSON < ~/.codex/auth.json`.
+
 ## 0.3.94 — 2026-07-18
 
 ### Rules

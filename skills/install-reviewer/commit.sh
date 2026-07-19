@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Stage the seven files the install-reviewer skill produces and commit
+# Stage the two files the install-reviewer skill produces and commit
 # them with the canonical message. Call after scaffold.sh has succeeded
 # and before push.sh.
 #
@@ -9,13 +9,8 @@
 # `git commit` would.
 #
 # Staged paths:
-#   .github/workflows/review-openai.md
-#   .github/workflows/review-openai.lock.yml
-#   .github/workflows/review-anthropic.md
-#   .github/workflows/review-anthropic.lock.yml
-#   .github/aw/actions-lock.json
-#   .gitattributes
-#   .env.example
+#   AGENTS.md
+#   .github/copilot-instructions.md
 #
 # Usage: commit.sh [--override]
 #   --override    Upgrade-mode commit. Uses the upgrade branch name and
@@ -43,20 +38,15 @@ cd "$repo_root"
 
 if (( OVERRIDE_MODE == 1 )); then
   BRANCH="feat/upgrade-coding-policy-review"
-  COMMIT_MSG="ci(review): upgrade jbaruch/coding-policy PR review workflows"
+  COMMIT_MSG="ci(review): upgrade jbaruch/coding-policy PR review setup"
 else
   BRANCH="feat/add-coding-policy-review"
-  COMMIT_MSG="ci(review): add jbaruch/coding-policy PR review workflows"
+  COMMIT_MSG="ci(review): add jbaruch/coding-policy PR review setup"
 fi
 
 FILES=(
-  .github/workflows/review-openai.md
-  .github/workflows/review-openai.lock.yml
-  .github/workflows/review-anthropic.md
-  .github/workflows/review-anthropic.lock.yml
-  .github/aw/actions-lock.json
-  .gitattributes
-  .env.example
+  AGENTS.md
+  .github/copilot-instructions.md
 )
 
 main() {
@@ -67,16 +57,16 @@ main() {
     exit 1
   fi
 
-  # The paired reviewers must land atomically — refuse to commit a partial
-  # scaffold (e.g., one workflow pair missing because the user deleted a file
-  # between scaffold and commit). If any expected artifact is missing, list
-  # every missing path and fail; do not stage what's present.
+  # Both artifacts must land together — refuse to commit a partial scaffold
+  # (e.g., a file deleted between scaffold and commit). If any expected
+  # artifact is missing, list every missing path and fail; do not stage
+  # what's present.
   local missing=()
   for f in "${FILES[@]}"; do
     [[ -e "$f" ]] || missing+=("$f")
   done
   if [[ ${#missing[@]} -gt 0 ]]; then
-    echo "error: partial scaffold — expected files missing: ${missing[*]} — run scaffold.sh first (or restore the missing files) so both reviewer pairs land together" >&2
+    echo "error: partial scaffold — expected files missing: ${missing[*]} — run scaffold.sh first (or restore the missing files) so both artifacts land together" >&2
     exit 1
   fi
 

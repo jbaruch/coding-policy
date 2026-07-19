@@ -122,7 +122,7 @@ t_missing_jq_emits_structured_failure_override_mode() {
   assert_eq "override" "true" "$(echo "$out" | jq -r .override)" || return 1
 }
 
-# Helper: build a fresh git repo with all six TARGETS committed to HEAD,
+# Helper: build a fresh git repo with both TARGETS committed to HEAD,
 # then source preflight.sh in --override mode so check_no_dirty_target_edits
 # and the TARGETS/failures globals are exercisable as a unit. The script's
 # BASH_SOURCE guard prevents main() from running on source; we relax only
@@ -138,14 +138,9 @@ with_sourced_sandbox() {
     cd "$sandbox"
     git -c init.defaultBranch=main init -q
     git -c user.email=t@t -c user.name=t commit --allow-empty -q -m init
-    mkdir -p .github/workflows .github/aw
-    touch .github/workflows/review-openai.md \
-          .github/workflows/review-openai.lock.yml \
-          .github/workflows/review-anthropic.md \
-          .github/workflows/review-anthropic.lock.yml \
-          .github/aw/actions-lock.json \
-          .gitattributes \
-          .env.example
+    mkdir -p .github
+    printf '# Agents\n\n<!-- BEGIN jbaruch/coding-policy review guidelines -->\n## Review guidelines\n<!-- END jbaruch/coding-policy review guidelines -->\n' > AGENTS.md
+    printf '# Copilot\n' > .github/copilot-instructions.md
     git add -A
     git -c user.email=t@t -c user.name=t commit -q -m targets
   ) || { local s=$?; rm -rf "$sandbox"; return $s; }
@@ -167,36 +162,36 @@ with_sourced_sandbox() {
 # scaffold.sh can't silently re-create it and clobber the consumer's
 # intentional removal.
 t_tracked_deletion_via_rm_flagged() {
-  rm .gitattributes
+  rm AGENTS.md
   failures=()
   check_no_dirty_target_edits
   [[ ${#failures[@]} -eq 1 ]] || { echo "    FAIL: expected 1 failure, got ${#failures[@]}: ${failures[*]}" >&2; return 1; }
   echo "${failures[0]}" | grep -q "tracked deletion" || { echo "    FAIL: expected 'tracked deletion' marker; got: ${failures[0]}" >&2; return 1; }
-  echo "${failures[0]}" | grep -q "\.gitattributes" || { echo "    FAIL: expected .gitattributes path; got: ${failures[0]}" >&2; return 1; }
+  echo "${failures[0]}" | grep -q "AGENTS\.md" || { echo "    FAIL: expected AGENTS.md path; got: ${failures[0]}" >&2; return 1; }
 }
 
 # `git rm` form removes the path from index AND working tree while it
 # stays in HEAD until the deletion is committed. The diff-filter=D
 # check must catch this case too.
 t_tracked_deletion_via_git_rm_flagged() {
-  git rm -q .github/aw/actions-lock.json
+  git rm -q .github/copilot-instructions.md
   failures=()
   check_no_dirty_target_edits
   [[ ${#failures[@]} -eq 1 ]] || { echo "    FAIL: expected 1 failure, got ${#failures[@]}: ${failures[*]}" >&2; return 1; }
   echo "${failures[0]}" | grep -q "tracked deletion" || { echo "    FAIL: expected 'tracked deletion' marker; got: ${failures[0]}" >&2; return 1; }
-  echo "${failures[0]}" | grep -q "actions-lock\.json" || { echo "    FAIL: expected actions-lock.json path; got: ${failures[0]}" >&2; return 1; }
+  echo "${failures[0]}" | grep -q "copilot-instructions\.md" || { echo "    FAIL: expected copilot-instructions.md path; got: ${failures[0]}" >&2; return 1; }
 }
 
 # Multi-target deletion: every deleted target must surface, not just
 # the first one found.
 t_multiple_tracked_deletions_all_flagged() {
-  rm .gitattributes
-  git rm -q .github/workflows/review-openai.md
+  rm AGENTS.md
+  git rm -q .github/copilot-instructions.md
   failures=()
   check_no_dirty_target_edits
   [[ ${#failures[@]} -eq 1 ]] || { echo "    FAIL: expected 1 aggregated failure, got ${#failures[@]}: ${failures[*]}" >&2; return 1; }
-  echo "${failures[0]}" | grep -q "\.gitattributes (tracked deletion)" || { echo "    FAIL: missing .gitattributes in: ${failures[0]}" >&2; return 1; }
-  echo "${failures[0]}" | grep -q "review-openai\.md (tracked deletion)" || { echo "    FAIL: missing review-openai.md in: ${failures[0]}" >&2; return 1; }
+  echo "${failures[0]}" | grep -q "AGENTS\.md (tracked deletion)" || { echo "    FAIL: missing AGENTS.md in: ${failures[0]}" >&2; return 1; }
+  echo "${failures[0]}" | grep -q "copilot-instructions\.md (tracked deletion)" || { echo "    FAIL: missing copilot-instructions.md in: ${failures[0]}" >&2; return 1; }
 }
 
 # Sanity: with all targets present and unmodified, the check must not
@@ -208,35 +203,34 @@ t_unmodified_targets_not_flagged() {
   [[ ${#failures[@]} -eq 0 ]] || { echo "    FAIL: expected 0 failures, got ${#failures[@]}: ${failures[*]}" >&2; return 1; }
 }
 
-# .env.example is staged by commit.sh, so the override dirty-check must
-# guard it too — otherwise a consumer's unrelated pending .env.example
+# AGENTS.md is staged by commit.sh, so the override dirty-check must
+# guard it too — otherwise a consumer's unrelated pending AGENTS.md
 # edits get swept into the reviewer-upgrade commit. Uncommitted edits on
-# the tracked .env.example must surface as a dirty-target failure.
-t_env_example_uncommitted_edits_flagged() {
-  printf 'CONSUMER_VAR=pending\n' >> .env.example
+# the tracked AGENTS.md must surface as a dirty-target failure.
+t_agents_uncommitted_edits_flagged() {
+  printf 'consumer note\n' >> AGENTS.md
   failures=()
   check_no_dirty_target_edits
   [[ ${#failures[@]} -eq 1 ]] || { echo "    FAIL: expected 1 failure, got ${#failures[@]}: ${failures[*]}" >&2; return 1; }
-  echo "${failures[0]}" | grep -q "\.env\.example (uncommitted edits)" || { echo "    FAIL: expected '.env.example (uncommitted edits)'; got: ${failures[0]}" >&2; return 1; }
+  echo "${failures[0]}" | grep -q "AGENTS\.md (uncommitted edits)" || { echo "    FAIL: expected 'AGENTS.md (uncommitted edits)'; got: ${failures[0]}" >&2; return 1; }
 }
 
-# Install mode stages .env.example too but does NOT run the full
-# override dirty-check. check_env_example_clean must flag a dirty
-# .env.example so unrelated local content (possibly real secrets) isn't
-# swept into the reviewer-install commit.
-t_env_example_clean_check_flags_dirty() {
-  printf 'SECRET_TOKEN=real-value-not-a-placeholder\n' >> .env.example
+# Install mode stages AGENTS.md too but does NOT run the full override
+# dirty-check. check_agents_clean must flag a dirty AGENTS.md so unrelated
+# local content isn't swept into the reviewer-install commit.
+t_agents_clean_check_flags_dirty() {
+  printf 'unrelated pending change\n' >> AGENTS.md
   failures=()
-  check_env_example_clean
+  check_agents_clean
   [[ ${#failures[@]} -eq 1 ]] || { echo "    FAIL: expected 1 failure, got ${#failures[@]}: ${failures[*]}" >&2; return 1; }
-  echo "${failures[0]}" | grep -q "env-example-not-clean" || { echo "    FAIL: expected 'env-example-not-clean' check; got: ${failures[0]}" >&2; return 1; }
+  echo "${failures[0]}" | grep -q "agents-not-clean" || { echo "    FAIL: expected 'agents-not-clean' check; got: ${failures[0]}" >&2; return 1; }
 }
 
-# Sanity: a clean tracked .env.example must NOT be flagged by the
-# install-mode guard (scaffold merges into it; commit stages only the diff).
-t_env_example_clean_check_passes_when_clean() {
+# Sanity: a clean tracked AGENTS.md must NOT be flagged by the install-mode
+# guard (scaffold appends the block; commit stages only the diff).
+t_agents_clean_check_passes_when_clean() {
   failures=()
-  check_env_example_clean
+  check_agents_clean
   [[ ${#failures[@]} -eq 0 ]] || { echo "    FAIL: expected 0 failures, got ${#failures[@]}: ${failures[*]}" >&2; return 1; }
 }
 
@@ -249,9 +243,9 @@ run "tracked deletion via rm flagged (issue #79)"          with_sourced_sandbox 
 run "tracked deletion via git rm flagged (issue #79)"      with_sourced_sandbox t_tracked_deletion_via_git_rm_flagged
 run "multiple tracked deletions all flagged"               with_sourced_sandbox t_multiple_tracked_deletions_all_flagged
 run "unmodified targets not flagged (sanity)"              with_sourced_sandbox t_unmodified_targets_not_flagged
-run "env.example uncommitted edits flagged (#103)"         with_sourced_sandbox t_env_example_uncommitted_edits_flagged
-run "install-mode env.example dirty flagged (#103)"        with_sourced_sandbox t_env_example_clean_check_flags_dirty
-run "install-mode env.example clean passes (#103)"         with_sourced_sandbox t_env_example_clean_check_passes_when_clean
+run "AGENTS.md uncommitted edits flagged (#103)"           with_sourced_sandbox t_agents_uncommitted_edits_flagged
+run "install-mode AGENTS.md dirty flagged (#103)"          with_sourced_sandbox t_agents_clean_check_flags_dirty
+run "install-mode AGENTS.md clean passes (#103)"           with_sourced_sandbox t_agents_clean_check_passes_when_clean
 
 echo "== summary: ${PASS_COUNT} passed, ${FAIL_COUNT} failed =="
 [[ "$FAIL_COUNT" -eq 0 ]]

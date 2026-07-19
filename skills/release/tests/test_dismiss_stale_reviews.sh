@@ -139,7 +139,7 @@ t_per_bot_independence() {
   out=$(main "owner" "repo" "1") || return 1
   dismissed=$(jq -r '.dismissed | map("\(.login):\(.review_id)") | join(",")' <<<"$out")
   active=$(jq -r '.left_active | map("\(.login):\(.review_id)") | join(",")' <<<"$out")
-  assert_eq "dismissed gh-aw stale"       "github-actions[bot]:41"                 "$dismissed" || return 1
+  assert_eq "dismissed codex stale"       "github-actions[bot]:41"                 "$dismissed" || return 1
   assert_eq "copilot left active"         "copilot-pull-request-reviewer[bot]:43"  "$active"    || return 1
   assert_eq "exactly one dismissal"       "1"                                      "$(dismiss_count)"
 }

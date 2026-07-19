@@ -6,11 +6,12 @@ Coding policy plugin for Baruch's AI agents. Language-agnostic code quality rule
 
 ## What's New
 
-- 22 rules — 16 always-on, 6 conditional (scoped via `applyTo:` to the files where the rule's prescriptions actually fire). Breakdown: 10 covering code quality, 7 covering plugin authoring, 1 covering author-model declaration, 1 covering concurrency, 1 covering review discipline, 1 covering reviewer-feedback reading, 1 covering external-repo action scope
-- `release` skill — structured PR + merge workflow with Copilot review and paired-reviewer cross-family enforcement
-- `install-reviewer` skill — scaffold the paired gh-aw PR review workflows (OpenAI + Anthropic) into a consumer repo
-- `adopt-fork-pr` skill — bring a fork PR's branch into the base repo as a same-repo PR the fork-guarded reviewer can run on
-- 0.3.0 added `install-reviewer` upgrade mode (`--override`) — refreshes scaffolded reviewer files in place instead of requiring a manual `git rm`-and-rerun
+- Policy review runs on the OpenAI Codex CLI authenticated by a ChatGPT subscription (no API key) via `.github/workflows/review-codex.yml`, reviewing every PR against the in-tree `rules/*.md`; Copilot stays as the complementary code-quality lane
+- 21 rules — 15 always-on, 6 conditional (scoped via `applyTo:` to the files where the rule's prescriptions actually fire). Breakdown: 10 covering code quality, 7 covering plugin authoring, 1 covering concurrency, 1 covering review discipline, 1 covering reviewer-feedback reading, 1 covering external-repo action scope
+- `release` skill — structured PR + merge workflow gated on the Codex policy review and Copilot code-quality review
+- `install-reviewer` skill — set up the native Codex PR reviewer (plus the Copilot lane) in a consumer repo
+- `adopt-fork-pr` skill — bring a fork PR's branch into the base repo as a same-repo PR the reviewer can run on
+- 0.3.0 added `install-reviewer` upgrade mode (`--override`) — refreshes the reviewer artifacts in place instead of requiring a manual `git rm`-and-rerun
 - Language-agnostic: works with any stack, no Python/JS assumptions
 
 See [CHANGELOG.md](CHANGELOG.md) for full version history.
@@ -42,7 +43,6 @@ tessl install jbaruch/coding-policy
 | Authoring | [script-delegation](rules/script-delegation.md) | Deterministic → script, reasoning → LLM, the regex trap |
 | Authoring | [script-as-black-box](rules/script-as-black-box.md) | Skills reference the script's contract (inputs/outputs/exit codes), not its internal logic — thresholds and predicates live in the script |
 | Authoring | [stateful-artifacts](rules/stateful-artifacts.md) | Cross-invocation state: schema, owner skill, schema_version, hints-not-authority, migration |
-| Review | [author-model-declaration](rules/author-model-declaration.md) | PRs declare author model; paired reviewers pick the cross-family one |
 | Review | [reviewer-feedback-reading](rules/reviewer-feedback-reading.md) | A review's state classifies merge-gating, not whether its body must be read; read every reviewer's body before declaring merge-ready, COMMENTED-with-zero-inline included |
 | Concurrency | [agent-worktree-isolation](rules/agent-worktree-isolation.md) | Mandatory git worktrees for concurrent agent work; cleanup; read-only exception |
 | Discipline | [boy-scout](rules/boy-scout.md) | Leave it better than you found it; "pre-existing" is not a valid concept; in-scope cleanups bundle, out-of-scope ones get filed |
@@ -52,9 +52,9 @@ tessl install jbaruch/coding-policy
 
 | Skill | Description |
 |-------|-------------|
-| [release](skills/release/SKILL.md) | PR creation, Copilot review, merge + cleanup workflow |
-| [install-reviewer](skills/install-reviewer/SKILL.md) | Scaffold the paired gh-aw PR review workflows (OpenAI + Anthropic) into a consumer repo — reviews every PR against the latest published `jbaruch/coding-policy` with cross-family enforcement. Documents the reviewer CI secrets in a merged `.env.example`. Supports `--override` for in-place upgrades. |
-| [adopt-fork-pr](skills/adopt-fork-pr/SKILL.md) | Classify a PR by number. Same-repo PRs pass through to the reviewer; fork PRs (skipped by the reviewer's fork-guard) get adopted into the base repo as a same-repo PR, preserving the contributor's commits. |
+| [release](skills/release/SKILL.md) | PR creation, Codex (subscription-CLI) policy review + Copilot code-quality review, merge + cleanup workflow |
+| [install-reviewer](skills/install-reviewer/SKILL.md) | Set up the native OpenAI Codex PR reviewer (plus the Copilot lane) in a consumer repo — commits an `AGENTS.md` `## Review guidelines` block that steers Codex to review every PR against the installed `jbaruch/coding-policy` rules, plus `.github/copilot-instructions.md`, then opens a PR and hands the operator the Codex-UI setup checklist. Supports `--override` for in-place upgrades. |
+| [adopt-fork-pr](skills/adopt-fork-pr/SKILL.md) | Classify a PR by number. Same-repo PRs pass through to the reviewer; fork PRs get adopted into the base repo as a same-repo PR, preserving the contributor's commits. |
 | [migrate-to-plugin](skills/migrate-to-plugin/SKILL.md) | Migrate a legacy `tile.json` plugin to the `.tessl-plugin/plugin.json` form: runs `tessl plugin migrate`, renames `.tileignore`, removes the obsolete `tile.json`, re-lints, then reconciles residual "tile" wording to "plugin" while preserving contract surfaces. |
 
 ## Philosophy
