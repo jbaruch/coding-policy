@@ -12,7 +12,7 @@
 set -euo pipefail
 
 if ! command -v jq >/dev/null 2>&1; then
-  echo "error: jq is not installed" >&2
+  echo "error: jq is not installed; install with 'brew install jq' (macOS) or 'apt install jq' (Debian/Ubuntu) and re-run" >&2
   exit 2
 fi
 
