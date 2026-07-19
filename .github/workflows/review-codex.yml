@@ -65,6 +65,12 @@ jobs:
           printf '%s' "$CODEX_AUTH_JSON" > "$CODEX_HOME/auth.json"
           chmod 600 "$CODEX_HOME/auth.json"
 
+      # Register each token with ::add-mask:: BEFORE any PR-controlled agent
+      # code runs, so a prompt-injected attempt to print the credential is
+      # redacted as *** in the (public) CI logs (rules/no-secrets.md Logging).
+      - name: Redact the credential from CI logs
+        run: bash .github/codex-review/mask-secrets.sh "$HOME/.codex/auth.json"
+
       - name: Run Codex policy review
         run: |
           set -euo pipefail

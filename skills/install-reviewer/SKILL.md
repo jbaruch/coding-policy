@@ -15,9 +15,9 @@ description: >
 
 # Install Reviewer Skill
 
-Set up the `jbaruch/coding-policy` PR reviewer (Codex policy app + Copilot lane) in a consumer repository. Process steps in order. Do not skip ahead.
+Process steps in order. Do not skip ahead.
 
-The reviewer itself is the OpenAI Codex code-review GitHub App on a ChatGPT subscription, enabled by the operator in the Codex UI. This skill commits the two repo artifacts that steer it and opens a PR; Step 7 hands the operator the UI checklist.
+Set up the `jbaruch/coding-policy` PR reviewer (Codex policy reviewer + Copilot lane) in a consumer repository. The reviewer itself is the OpenAI Codex code-review GitHub App on a ChatGPT subscription, enabled by the operator in the Codex UI. This skill commits the two repo artifacts that steer it and opens a PR; Step 7 hands the operator the UI checklist.
 
 The skill runs in one of two modes determined by the user's request:
 
