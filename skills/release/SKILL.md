@@ -26,7 +26,7 @@ Structured workflow for shipping code: PR creation, automated policy review, mer
 - Run any local check the rule or skill prescribes:
   - `bash -n <script>` must exit 0 on shell scripts
   - the script's own fixture test must pass
-- The paired cross-family reviewer is a backstop, not the first read
+- The Codex policy reviewer is a backstop, not the first read
 - If anything fails, fix it before proceeding
 
 ## Step 2 — Create PR
@@ -37,15 +37,12 @@ Structured workflow for shipping code: PR creation, automated policy review, mer
   - **Title**: `<type>(<scope>): <imperative summary>`
   - **Body**:
     ```
-    **Author-Model:** <model-id(s) space-separated, or `human`>
-
     ## Summary
     <what changed and why — 1-3 bullet points>
 
     ## Test plan
     - [ ] <verification steps>
     ```
-- **Author-Model is mandatory** per `rules/author-model-declaration.md`. Use the exact model ID you're running under (e.g., `claude-opus-4-7`, `gpt-5.4`), `human` for a hand-authored PR, or every contributing model space-separated for mixed authorship.
 
 When this step is wrapped in a reusable script (e.g., `release.sh` that other devs run unattended), see the script-wrapping gates at:
 
