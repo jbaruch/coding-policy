@@ -2,10 +2,10 @@
 # Run all install-reviewer preconditions and report them as one JSON
 # result. The skill invokes this before any mutation so every preflight
 # failure is surfaced together, not one-at-a-time. Checks cover: git
-# worktree, GitHub CLI installation + auth, gh-aw extension, plugin
-# template presence, origin remote, (mode-dependent) branch state, and a
-# clean-`.env.example` guard (install mode guards `.env.example` alone;
-# override mode guards it among all rewritable targets).
+# worktree, GitHub CLI installation + auth, packaged template presence,
+# origin remote, (mode-dependent) branch state, and a clean-target guard
+# (install mode guards AGENTS.md alone; override mode guards both
+# rewritable targets).
 #
 # Usage: preflight.sh [--override]
 #   --override    Upgrade existing scaffolded reviewers in place (instead
@@ -32,17 +32,6 @@
 # Exit:  0 if ok is true; 1 if any check fails
 
 set -euo pipefail
-
-# gh-aw version policy (enforced in check_gh_aw_min_version):
-#   GH_AW_MIN — hard floor. `acceptEdits` (replaced bypassPermissions) and
-#               `engine.args` both require >= 0.71.0; older compiles produce
-#               lock files current Claude SDK versions reject.
-#   GH_AW_PIN — version the install/recovery commands pin to, for
-#               reproducibility. Tracks the latest gh-aw stable release,
-#               which now sits above the floor (stable used to lag below it,
-#               which is why a prerelease pin was once required).
-GH_AW_MIN="0.71.0"
-GH_AW_PIN="0.81.6"
 
 OVERRIDE_MODE=0
 for arg in "$@"; do
@@ -137,17 +126,12 @@ else
 fi
 TEMPLATE_DIR=".tessl/plugins/jbaruch/coding-policy/skills/install-reviewer"
 TEMPLATES=(
-  "${TEMPLATE_DIR}/review-openai.md"
-  "${TEMPLATE_DIR}/review-anthropic.md"
+  "${TEMPLATE_DIR}/AGENTS_REVIEW_GUIDELINES.md"
+  "${TEMPLATE_DIR}/copilot-instructions.md"
 )
 TARGETS=(
-  ".github/workflows/review-openai.md"
-  ".github/workflows/review-openai.lock.yml"
-  ".github/workflows/review-anthropic.md"
-  ".github/workflows/review-anthropic.lock.yml"
-  ".github/aw/actions-lock.json"
-  ".gitattributes"
-  ".env.example"
+  "AGENTS.md"
+  ".github/copilot-instructions.md"
 )
 
 declare -a failures=()
@@ -183,68 +167,6 @@ check_gh_installed() {
 check_gh_authenticated() {
   gh auth status >/dev/null 2>&1 || \
     push_failure "gh-authenticated" "GitHub CLI not authenticated — run 'gh auth login'"
-}
-
-check_gh_aw_installed() {
-  gh aw --version >/dev/null 2>&1 || \
-    push_failure "gh-aw-installed" "gh-aw extension missing — run 'gh extension install github/gh-aw --pin v${GH_AW_PIN}'"
-}
-
-# Floor and pin are defined at the top of the script (GH_AW_MIN / GH_AW_PIN).
-# We enforce a >= GH_AW_MIN floor but tell users to install GH_AW_PIN (the
-# latest stable), which clears the floor and keeps installs reproducible.
-check_gh_aw_min_version() {
-  local raw min major minor patch min_major min_minor min_patch
-  # Run the command, THEN parse its captured output — never one pipeline.
-  # `pipefail` reports the RIGHTMOST non-zero status, so piping straight
-  # into grep hides the command's own failure behind grep's exit 1: a
-  # missing `gh` (127) plus a no-match grep (1) yields 1, indistinguishable
-  # from "gh ran and printed no version", and the user gets told to
-  # re-install the gh-aw extension when the real problem is that `gh` is
-  # not on PATH at all (rules/error-handling.md — distinguish an expected
-  # non-result from a tool failure; Actionable Messages).
-  #
-  # `gh aw --version` writes to stderr (typical gh-extension idiom), so
-  # merge streams into the capture rather than discarding stderr.
-  local gh_out gh_rc=0
-  gh_out=$(gh aw --version 2>&1) || gh_rc=$?
-  if [[ $gh_rc -ne 0 ]]; then
-    push_failure "gh-aw-min-version" "Could not run 'gh aw --version' (rc=${gh_rc}): ${gh_out} — verify the gh CLI is installed and on PATH ('command -v gh') and the gh-aw extension is installed ('gh extension list'), then re-run"
-    return
-  fi
-
-  # Parse the captured output. grep's exit 1 here means the command ran and
-  # printed no version — a real preflight finding, reported below.
-  #
-  # No pipeline at all — a here-string. Under `pipefail` a pipeline reports
-  # the rightmost NON-ZERO status, so any pipe here lets a process other than
-  # grep speak for the parse:
-  #   `grep | head -n1` — head closes the pipe on a still-writing grep, grep
-  #     dies with SIGPIPE (141), and 141 > 1 fires the tool-fault branch on a
-  #     SUCCESSFUL parse.
-  #   `printf | grep -m1` — the same race one process upstream: grep -m1 exits
-  #     at the first match and closes the pipe on a still-writing printf, so
-  #     printf carries the 141 while grep exits 0.
-  # Both reproduced at 200k matches. A here-string has no second process, so
-  # grep's own rc is the only status the `case` can read.
-  local grep_rc=0
-  raw=$(grep -m1 -oE '[0-9]+\.[0-9]+\.[0-9]+' <<<"$gh_out") || grep_rc=$?
-  if [[ $grep_rc -gt 1 ]]; then
-    push_failure "gh-aw-min-version" "Version parse failed (grep rc=${grep_rc}) while reading 'gh aw --version' output — this is a fault in preflight.sh's parse, not a gh-aw problem; report it with the output that triggered it: ${gh_out}"
-    return
-  fi
-  if [[ -z "$raw" ]]; then
-    push_failure "gh-aw-min-version" "Could not parse 'gh aw --version' output — re-install with 'gh extension remove gh-aw && gh extension install github/gh-aw --pin v${GH_AW_PIN}'"
-    return
-  fi
-  IFS='.' read -r major minor patch <<<"$raw"
-  min="$GH_AW_MIN"
-  IFS='.' read -r min_major min_minor min_patch <<<"$min"
-  if (( major < min_major )) \
-     || (( major == min_major && minor < min_minor )) \
-     || (( major == min_major && minor == min_minor && patch < min_patch )); then
-    push_failure "gh-aw-min-version" "gh-aw v${raw} is too old (need >= v${min} for the Claude SDK 'acceptEdits' flag) — run 'gh extension remove gh-aw && gh extension install github/gh-aw --pin v${GH_AW_PIN}'"
-  fi
 }
 
 check_templates_present() {
@@ -283,18 +205,16 @@ check_branch_not_remote() {
 }
 
 # Override-mode safety check: refuse to upgrade if the consumer has dirty
-# working-tree state on any path the upgrade flow can rewrite OR stage —
-# the four reviewer source/lock files, `.github/aw/actions-lock.json`
-# (rewritten by `gh aw compile`), `.gitattributes` (the LOCK_GENERATED_RULE
-# marker may be appended), and `.env.example` (the reviewer secrets block
-# may be appended). `.env.example` is merge-not-overwrite, so scaffold
-# itself preserves consumer content — but commit.sh stages the whole file,
-# so a consumer's unrelated pending `.env.example` edits would otherwise be
-# swept into the reviewer-upgrade commit. A never-tracked, not-yet-created
-# `.env.example` (fresh install/upgrade) has nothing to clobber and is not
-# flagged. Mirrors how `git pull` refuses to overwrite uncommitted changes
-# — forces the consumer to commit, stash, or remove the local content
-# before the scaffold replaces their files. "Dirty" here covers four
+# working-tree state on either path the upgrade flow rewrites AND stages —
+# AGENTS.md (its managed review-guidelines block is replaced in place) and
+# .github/copilot-instructions.md (overwritten wholesale). scaffold.sh
+# preserves the rest of AGENTS.md, but commit.sh stages the whole file, so
+# a consumer's unrelated pending AGENTS.md edits would otherwise be swept
+# into the reviewer-upgrade commit. A never-tracked, not-yet-created target
+# (fresh install/upgrade) has nothing to clobber and is not flagged.
+# Mirrors how `git pull` refuses to overwrite uncommitted changes — forces
+# the consumer to commit, stash, or remove the local content before the
+# scaffold replaces their files. "Dirty" here covers four
 # states the override could clobber:
 #   - symlink at the target path (working or broken); refuse outright so
 #     `cp`/compile/append never follows or replaces an unexpected link
@@ -370,19 +290,19 @@ check_no_dirty_target_edits() {
   fi
 }
 
-# Install-mode guard for `.env.example`. The six reviewer targets are
+# Install-mode guard for AGENTS.md. .github/copilot-instructions.md is
 # guarded in install mode by the skill's Step 2 existence-refusal, but
-# `.env.example` legitimately pre-exists in many repos and commit.sh
-# stages it wholesale — so a dirty, untracked, symlinked, or tracked-
-# deleted `.env.example` would otherwise sweep unrelated local content
-# (possibly real secret values) into the reviewer-install commit. A
-# clean tracked file or an absent one is fine — scaffold merges into the
-# former and creates the latter, and commit.sh stages only the diff.
-check_env_example_clean() {
+# AGENTS.md legitimately pre-exists in many repos and commit.sh stages it
+# wholesale — so a dirty, untracked, symlinked, or tracked-deleted AGENTS.md
+# would otherwise sweep unrelated local content into the reviewer-install
+# commit. A clean tracked file or an absent one is fine — scaffold appends
+# the block to the former and creates the latter, and commit.sh stages only
+# the diff.
+check_agents_clean() {
   local reason
-  reason=$(classify_target_dirty ".env.example")
+  reason=$(classify_target_dirty "AGENTS.md")
   if [[ -n "$reason" ]]; then
-    push_failure "env-example-not-clean" ".env.example is in a state install cannot safely stage (${reason}) — install stages it into the reviewer PR, which could commit unrelated local content (possibly real secret values). Commit, stash, restore, or remove it first, then re-run"
+    push_failure "agents-not-clean" "AGENTS.md is in a state install cannot safely stage (${reason}) — install stages it into the reviewer PR, which could commit unrelated local content. Commit, stash, restore, or remove it first, then re-run"
   fi
 }
 
@@ -393,10 +313,6 @@ main() {
   # emit follow-on failures that can't succeed until gh is installed first.
   if command -v gh >/dev/null 2>&1; then
     check_gh_authenticated
-    check_gh_aw_installed
-    if gh aw --version >/dev/null 2>&1; then
-      check_gh_aw_min_version
-    fi
   fi
   check_templates_present
   # Remaining checks depend on a git worktree with origin; skip if either is missing
@@ -413,14 +329,14 @@ main() {
     else
       # Install mode: the install branch must NOT already exist locally
       # or remotely — Step 2's overwrite refusal in the skill assumes a
-      # fresh branch. The reviewer targets are guarded by that refusal,
-      # but `.env.example` can pre-exist, so guard it against dirty/
+      # fresh branch. .github/copilot-instructions.md is guarded by that
+      # refusal, but AGENTS.md can pre-exist, so guard it against dirty/
       # untracked state commit.sh would otherwise stage wholesale.
       check_branch_not_local
       if git remote get-url origin >/dev/null 2>&1; then
         check_branch_not_remote
       fi
-      check_env_example_clean
+      check_agents_clean
     fi
   fi
 
