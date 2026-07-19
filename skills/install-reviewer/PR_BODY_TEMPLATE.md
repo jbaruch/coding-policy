@@ -20,7 +20,7 @@ The Codex app is the policy reviewer; Copilot is the code-quality reviewer. Both
 The reviewer is a GitHub App on a ChatGPT subscription — it is enabled in the Codex UI, not by committing this PR. List the operator steps the consumer must complete (these cannot be automated):
 
 1. Install the **OpenAI Codex** GitHub App on this repository and authenticate it to a ChatGPT plan that includes Codex code review.
-2. In **Codex settings**, turn on **Code review** for this repository and turn on **Automatic reviews** (otherwise every PR needs a manual `@codex review` comment).
+2. In **Codex settings**, turn on **Code review** for this repository, turn on **Automatic reviews** (otherwise every PR needs a manual `@codex review` comment), and turn on **Exhaustive code review** so Codex keeps looking for findings until it stops finding new ones — a policy reviewer should run to a clean bill, not stop early.
 3. Configure the Codex **environment** for this repository to run `tessl install jbaruch/coding-policy` in its setup, and set any secret that step needs (e.g. a Tessl API key if your registry requires auth).
 
 Add a one-line note that until steps 1–2 are done, the Codex reviewer will not post and the merge gate will wait on a reviewer that never runs.

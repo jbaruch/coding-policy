@@ -7,6 +7,7 @@ Reference for Step 4 of the `release` skill — how the two PR reviewers are wir
 The policy reviewer is the OpenAI Codex code-review GitHub App, running on a ChatGPT subscription (no API key). It is steered by the repo's `AGENTS.md ## Review guidelines`, which point it at the in-tree `rules/*.md`.
 
 - **Trigger:** with **Automatic reviews** enabled in Codex settings, it posts a review whenever a PR is opened and re-reviews on each pushed commit. Without it, an `@codex review` PR comment triggers a review. A plain `git push` to a non-PR branch never triggers it.
+- **Thoroughness:** enable **Exhaustive code review** in Codex settings so Codex keeps looking for findings until it stops surfacing new ones — a policy reviewer runs to a clean bill rather than stopping at diminishing returns.
 - **Authorship:** reviews are submitted by `chatgpt-codex-connector[bot]`; inline comments carry the same login.
 - **Verdicts:** the app posts only `CHANGES_REQUESTED` (violations found) or `COMMENT` (clean / observations) — never `APPROVE`. A clean re-review after an earlier `CHANGES_REQUESTED` lands as a `COMMENT` that does not supersede the stale request in GitHub's merge gate, so Step 7 dismisses it via `skills/release/dismiss-stale-reviews.sh`.
 
