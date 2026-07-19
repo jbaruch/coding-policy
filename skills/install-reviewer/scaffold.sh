@@ -35,8 +35,6 @@ COPILOT_TEMPLATE="${TEMPLATE_DIR}/copilot-instructions.md"
 AGENTS_TARGET="AGENTS.md"
 COPILOT_TARGET=".github/copilot-instructions.md"
 
-hash_of() { if [[ -f "$1" ]]; then shasum "$1" | awk '{print $1}'; else echo "absent"; fi; }
-
 main() {
   local OVERRIDE_MODE=0 arg
   for arg in "$@"; do
@@ -89,6 +87,11 @@ main() {
   }
   on_err() {
     local rc=$?
+    # Disarm the ERR trap and errexit first so a failing cp/rm inside restore
+    # can't re-enter this handler or abort before the original error is
+    # reported — rollback is best-effort.
+    trap - ERR
+    set +e
     restore
     echo "error: scaffold failed (rc=${rc}) — targets restored to their prior contents" >&2
     rm -rf "$SNAP_DIR"
@@ -98,16 +101,19 @@ main() {
   # an empty dir.
   trap on_err ERR
 
-  local agents_before copilot_before
-  agents_before=$(hash_of "$AGENTS_TARGET")
-  copilot_before=$(hash_of "$COPILOT_TARGET")
-
   # --- AGENTS.md: create / append / replace the marked block -------------
   local agents_action tmp
   if [[ ! -f "$AGENTS_TARGET" ]]; then
     cp "$AGENTS_TEMPLATE" "$AGENTS_TARGET"
     agents_action="created"
   elif grep -qF "$BEGIN_MARKER" "$AGENTS_TARGET"; then
+    # A BEGIN marker with no matching END would make the awk rewrite below drop
+    # everything after BEGIN — refuse rather than destroy consumer content.
+    if ! grep -qF "$END_MARKER" "$AGENTS_TARGET"; then
+      echo "error: ${AGENTS_TARGET} has the BEGIN marker but no END marker — refusing to rewrite (that would drop everything after BEGIN); repair the file by hand and re-run" >&2
+      rm -rf "$SNAP_DIR"
+      exit 1
+    fi
     # Replace the BEGIN..END range with the fresh template block, preserving
     # everything before BEGIN and after END. Read the block from the template
     # (first file) so multi-line content needs no shell-quoting gymnastics.
@@ -135,11 +141,15 @@ main() {
   cp "$COPILOT_TEMPLATE" "$COPILOT_TARGET"
 
   # --- report ------------------------------------------------------------
-  local agents_after copilot_after
-  agents_after=$(hash_of "$AGENTS_TARGET")
-  copilot_after=$(hash_of "$COPILOT_TARGET")
-  [[ "$agents_after"  == "$agents_before"  ]] && agents_action="unchanged"
-  [[ "$copilot_after" == "$copilot_before" ]] && copilot_action="unchanged"
+  # Detect a no-op by comparing each target against its pre-write snapshot
+  # (POSIX cmp, no external hash tool). A file that did not exist before is a
+  # genuine create/overwrite, never "unchanged".
+  if (( agents_existed == 1 )) && cmp -s "$AGENTS_TARGET" "${SNAP_DIR}/agents"; then
+    agents_action="unchanged"
+  fi
+  if (( copilot_existed == 1 )) && cmp -s "$COPILOT_TARGET" "${SNAP_DIR}/copilot"; then
+    copilot_action="unchanged"
+  fi
 
   local state="scaffolded"
   [[ "$agents_action" == "unchanged" && "$copilot_action" == "unchanged" ]] && state="no-op"

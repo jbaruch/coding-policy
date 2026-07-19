@@ -112,6 +112,16 @@ t_missing_template_fails() {
   [[ "$rc" -ne 0 ]] || { echo "    FAIL: expected non-zero exit when a template is missing" >&2; return 1; }
 }
 
+# A corrupted AGENTS.md with a BEGIN marker but no END marker must be refused,
+# not rewritten — the awk range-replace would otherwise drop everything after
+# BEGIN (data loss).
+t_begin_without_end_refused() {
+  printf '# Agents\n\n%s\n## Review guidelines\n(no end marker here)\nTAIL-CONTENT\n' "$BEGIN_MARKER" > AGENTS.md
+  local rc=0; bash "$SCRIPT" >/dev/null 2>&1 || rc=$?
+  [[ "$rc" -ne 0 ]]              || { echo "    FAIL: expected non-zero exit on BEGIN-without-END" >&2; return 1; }
+  grep -qF "TAIL-CONTENT" AGENTS.md || { echo "    FAIL: tail content dropped instead of preserved" >&2; return 1; }
+}
+
 echo "== scaffold.sh tests =="
 run "create writes both artifacts"              with_repo t_create
 run "re-run is a no-op"                         with_repo t_idempotent
@@ -120,6 +130,7 @@ run "replace removes stale, keeps content"      with_repo t_replace_removes_stal
 run "pre-existing copilot file overwritten"     with_repo t_copilot_overwritten
 run "symlink target refused"                    with_repo t_symlink_refused
 run "missing template fails loudly"             with_repo t_missing_template_fails
+run "BEGIN without END is refused (no data loss)" with_repo t_begin_without_end_refused
 
 echo "== summary: ${PASS_COUNT} passed, ${FAIL_COUNT} failed =="
 [[ "$FAIL_COUNT" -eq 0 ]]
