@@ -9,6 +9,19 @@ name: PR Policy Review (Codex, subscription)
 # itself ever expires, the review fails loudly and the operator re-seeds the
 # secret (step 2 below).
 #
+# Security posture (maintainer-accepted, PR #192):
+#   This pull_request workflow exposes the subscription credential to same-repo
+#   PRs. Same-repo PRs require write access, which GitHub's trust model already
+#   treats as trusted (forks are excluded and get no secret). Accidental and
+#   content-injection leaks are mitigated: every token is registered with
+#   ::add-mask:: (log redaction) before Codex runs, the review output is scanned
+#   for credential material (assert-no-secret-leak.sh), and the token is deleted
+#   before the post step. A malicious write-access collaborator editing this
+#   workflow to exfiltrate the secret is out of scope — that residual is
+#   universal to every CI secret and is accepted here rather than abandoning
+#   subscription-based review (the reviewer's standing objection to this is a
+#   recorded maintainer override, not an unaddressed finding).
+#
 # One-time operator setup (cannot be automated — it needs a browser login):
 #   1. On a trusted machine, set file-based credential storage and run
 #      `codex login` (Sign in with ChatGPT). Confirm ~/.codex/auth.json has
