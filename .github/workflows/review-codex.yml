@@ -77,6 +77,19 @@ jobs:
             --output-last-message /tmp/codex-final.json \
             - < .github/codex-review/prompt.md
 
+      # Defense against prompt-injection exfil: a PR can edit the reviewed
+      # rules/ or prompt to try to make Codex echo the subscription token into
+      # its review. Refuse to post if any token string from auth.json appears
+      # in the review output, then delete the credential before the (also
+      # PR-controlled) post step runs so it is never in scope for later code.
+      # (A collaborator editing this workflow itself is out of scope — same-repo
+      # PRs require write access, which GitHub already treats as trusted.)
+      - name: Guard against credential leakage, then drop the token
+        run: |
+          set -euo pipefail
+          bash .github/codex-review/assert-no-secret-leak.sh "$HOME/.codex/auth.json" /tmp/codex-final.json
+          rm -f "$HOME/.codex/auth.json"
+
       - name: Post the review
         env:
           GH_TOKEN: ${{ github.token }}
