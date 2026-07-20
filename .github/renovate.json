@@ -7,7 +7,8 @@
       "customType": "regex",
       "managerFilePatterns": [
         ".github/actions/setup-diagnostics/action.yml",
-        ".github/workflows/review-codex.yml"
+        ".github/workflows/review-codex.yml",
+        ".github/workflows/fleet-review.yml"
       ],
       "matchStrings": [
         "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)( versioning=(?<versioning>\\S+))?\\s+version=(?<currentValue>\\S+)",
