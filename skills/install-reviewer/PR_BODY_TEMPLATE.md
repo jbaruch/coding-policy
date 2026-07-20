@@ -10,7 +10,7 @@ The PR body the skill opens must include the following content blocks. Order the
 
 Explain that this PR adds a GitHub Actions reviewer and nothing else:
 
-- `.github/workflows/review-codex.yml` — on every PR, installs the `jbaruch/coding-policy` rules via `tessl install` and reviews the diff against them with the OpenAI Codex CLI authenticated by a **ChatGPT subscription** (no API key). The verdict posts as a `github-actions[bot]` review.
+- `.github/workflows/review-codex.yml` — on every same-repo PR (fork PRs are skipped, since they cannot read the secrets; adopt them via the `adopt-fork-pr` skill), installs the `jbaruch/coding-policy` rules via `tessl install` and reviews the diff against them with the OpenAI Codex CLI authenticated by a **ChatGPT subscription** (no API key). The verdict posts as a `github-actions[bot]` review.
 - `.github/codex-review/` — the review driver (`post-review.sh`) plus the credential guards (`mask-secrets.sh`, `assert-no-secret-leak.sh`) and the review `prompt.md` + `schema.json`.
 - `.github/copilot-instructions.md` — scopes Copilot to the complementary lane (correctness, bugs, security, test gaps) and off policy.
 
@@ -27,7 +27,7 @@ Note the accepted security posture: this `pull_request` workflow exposes `CODEX_
 
 ### 3. Load indicator (so the consumer can confirm policy actually loaded)
 
-Note that the Codex review cites findings as `coding-policy: <rule>` and its summary begins `Policy loaded: N rule files from jbaruch/coding-policy.` — seeing that confirms the workflow's `tessl install` loaded the policy. A review that never references a `coding-policy:` rule is a signal the install step did not run.
+Note that the Codex review's summary begins `Policy loaded: N rule files from jbaruch/coding-policy.` and each finding names the violated rule in bold (e.g. `**ci-safety**`) — seeing the `Policy loaded:` line confirms the workflow's `tessl install` loaded the policy. A summary that never reports `Policy loaded: N rule files` is a signal the install step did not run.
 
 ### 4. (Conditional) "Action required before merge" — only if Step 1 preflight emitted warnings
 
