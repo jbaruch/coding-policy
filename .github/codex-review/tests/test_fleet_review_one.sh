@@ -21,13 +21,16 @@ rmwarn() { rm -rf "$@" || echo "test_fleet_review_one: warning: could not remove
 
 # Build a fake toolchain (git/tessl/codex) + stubbed CENTRAL_DIR driver scripts.
 # Echoes: BIN CENTRAL CODEXH (space-separated) for the caller to consume.
-make_env() {
+# The function body is a `set -e` subshell so ANY failed mktemp/cat/chmod/mkdir
+# during fixture setup aborts non-zero — the caller propagates it via
+# `env_line=$(make_env) || exit 2` (rules/error-handling.md aggregate carve-out:
+# a setup step that could corrupt the run carries its own failure check).
+make_env() (
+  set -e
   local bin central codexh
-  # Guard each mktemp — bin is spliced onto PATH, so a silent failure would
-  # corrupt the run (rules/error-handling.md aggregate-reporting carve-out).
-  bin=$(mktemp -d)     || { echo "fatal: mktemp -d failed (bin)" >&2; exit 2; }
-  central=$(mktemp -d) || { echo "fatal: mktemp -d failed (central)" >&2; exit 2; }
-  codexh=$(mktemp -d)  || { echo "fatal: mktemp -d failed (codexh)" >&2; exit 2; }
+  bin=$(mktemp -d)
+  central=$(mktemp -d)
+  codexh=$(mktemp -d)
 
   cat > "$bin/git" <<'EOF'
 #!/usr/bin/env bash
@@ -58,7 +61,7 @@ EOF
 
   echo '{"tokens":{"access_token":"x"}}' > "$codexh/auth.json"
   printf '%s %s %s' "$bin" "$central" "$codexh"
-}
+)
 
 # --- happy path: routes to the poster with the right owner/repo/pr ---
 t_happy() {

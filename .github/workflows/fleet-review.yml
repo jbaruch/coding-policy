@@ -91,13 +91,16 @@ jobs:
           CENTRAL_DIR: ${{ github.workspace }}
         run: |
           set -uo pipefail
-          # Explicitly guard the worklist parse: a malformed worklist.json must
-          # abort loudly, never pass silently with zero reviews (rules/error-handling.md
-          # aggregate-reporting carve-out — the setup step carries its own check).
-          if ! items=$(jq -c '.[]' worklist.json); then
-            echo "error: worklist.json is not a valid JSON array — fleet-poll.sh produced malformed output; inspect the poll step" >&2
+          # Explicitly validate the worklist shape: a malformed worklist.json must
+          # abort loudly, never pass silently with zero (or null-field) reviews
+          # (rules/error-handling.md aggregate-reporting carve-out — the setup step
+          # carries its own check). Require a top-level array whose every item has
+          # all fields fleet-review-one.sh consumes.
+          if ! jq -e 'type=="array" and all(.[]; has("owner") and has("repo") and has("number") and has("base_ref") and has("head_sha"))' worklist.json >/dev/null 2>&1; then
+            echo "error: worklist.json is not an array of well-formed work items {owner,repo,number,base_ref,head_sha} — inspect the poll step output" >&2
             exit 1
           fi
+          items=$(jq -c '.[]' worklist.json)
           count=$(jq 'length' worklist.json)  # worklist.json validated as an array above
           echo "PRs needing review: ${count}"
           fail=0
