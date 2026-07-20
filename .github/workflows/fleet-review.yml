@@ -100,9 +100,8 @@ jobs:
             r=$(jq -r .repo      <<<"$item")
             n=$(jq -r .number    <<<"$item")
             b=$(jq -r .base_ref  <<<"$item")
-            h=$(jq -r .head_sha  <<<"$item")
-            echo "::group::review ${o}/${r}#${n}"
-            if bash .github/codex-review/fleet-review-one.sh "$o" "$r" "$n" "$b" "$h"; then
+            echo "::group::review ${o}/${r}#${n} (head $(jq -r .head_sha <<<"$item"))"
+            if bash .github/codex-review/fleet-review-one.sh "$o" "$r" "$n" "$b"; then
               echo "reviewed ${o}/${r}#${n}"
             else
               echo "::warning::fleet review failed for ${o}/${r}#${n}"

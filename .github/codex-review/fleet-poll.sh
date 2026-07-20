@@ -28,7 +28,7 @@ main() {
     [[ -n "$full" ]] || continue
     owner=${full%%/*}; repo=${full#*/}
 
-    if ! prs_json=$(gh api "/repos/${full}/pulls?state=open&per_page=100"); then
+    if ! prs_json=$(gh api --paginate "/repos/${full}/pulls?state=open&per_page=100"); then
       echo "warn: could not list open PRs for ${full} — skipping this repo" >&2
       continue
     fi
@@ -44,7 +44,7 @@ main() {
       # fork; those are adopted via the adopt-fork-pr flow, same as before.
       [[ "$headrepo" == "$full" ]] || continue
 
-      if ! reviews_json=$(gh api "/repos/${full}/pulls/${number}/reviews"); then
+      if ! reviews_json=$(gh api --paginate "/repos/${full}/pulls/${number}/reviews"); then
         echo "warn: could not read reviews for ${full}#${number} — treating as needs-review" >&2
         reviews_json="[]"
       fi

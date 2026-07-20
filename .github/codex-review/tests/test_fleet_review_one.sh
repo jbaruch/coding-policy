@@ -57,7 +57,7 @@ t_happy() {
   read -r BIN CENTRAL CODEXH < <(make_env)
   local out rc
   out=$(PATH="$BIN:$PATH" GH_TOKEN=tok CENTRAL_DIR="$CENTRAL" CODEX_HOME="$CODEXH" \
-        bash "$SCRIPT" jbaruch repo-a 7 main aaa111 2>/dev/null); rc=$?
+        bash "$SCRIPT" jbaruch repo-a 7 main 2>/dev/null); rc=$?
   rm -rf "$BIN" "$CENTRAL" "$CODEXH"
   [[ $rc -eq 0 ]]                                        || { bad "happy: exit 0 (rc=$rc, out=$out)"; return; }
   [[ "$(jq -r .state <<<"$out")" == "posted" ]]         || { bad "happy: state posted ($out)"; return; }
@@ -79,7 +79,7 @@ t_missing_driver() {
   rm -f "$CENTRAL/.github/codex-review/schema.json"
   local rc=0
   PATH="$BIN:$PATH" GH_TOKEN=tok CENTRAL_DIR="$CENTRAL" CODEX_HOME="$CODEXH" \
-    bash "$SCRIPT" jbaruch repo-a 7 main aaa111 >/dev/null 2>&1 || rc=$?
+    bash "$SCRIPT" jbaruch repo-a 7 main >/dev/null 2>&1 || rc=$?
   rm -rf "$BIN" "$CENTRAL" "$CODEXH"
   if [[ $rc -eq 1 ]]; then ok "missing driver file -> exit 1"; else bad "missing_driver: expected exit 1 (rc=$rc)"; fi
 }
@@ -89,7 +89,7 @@ t_missing_token() {
   read -r BIN CENTRAL CODEXH < <(make_env)
   local rc=0
   PATH="$BIN:$PATH" CENTRAL_DIR="$CENTRAL" CODEX_HOME="$CODEXH" \
-    bash "$SCRIPT" jbaruch repo-a 7 main aaa111 >/dev/null 2>&1 || rc=$?
+    bash "$SCRIPT" jbaruch repo-a 7 main >/dev/null 2>&1 || rc=$?
   rm -rf "$BIN" "$CENTRAL" "$CODEXH"
   if [[ $rc -ne 0 ]]; then ok "missing GH_TOKEN -> non-zero"; else bad "missing_token: expected non-zero"; fi
 }

@@ -31,8 +31,8 @@ cleanup() {
 }
 
 main() {
-  [[ $# -eq 5 ]] || { echo "usage: $0 <owner> <repo> <pr-number> <base-ref> <head-sha>" >&2; exit 2; }
-  local owner="$1" repo="$2" pr="$3" base="$4" head="$5"
+  [[ $# -eq 4 ]] || { echo "usage: $0 <owner> <repo> <pr-number> <base-ref>" >&2; exit 2; }
+  local owner="$1" repo="$2" pr="$3" base="$4"
   local full="${owner}/${repo}"
   : "${GH_TOKEN:?GH_TOKEN (App installation token) required}"
   : "${CENTRAL_DIR:?CENTRAL_DIR (coding-policy checkout path) required}"
@@ -61,10 +61,10 @@ main() {
     git fetch --quiet --no-tags origin "pull/${pr}/head:pr-head" || { echo "error: could not fetch pull/${pr}/head in ${full}" >&2; exit 1; }
     git checkout --quiet pr-head
     git remote set-url origin "https://github.com/${full}.git"  # drop the embedded token
-    # The poller enumerated ${head}; note if the head advanced since, so the log
-    # records exactly which SHA was reviewed (the review posts against the live head).
-    actual=$(git rev-parse HEAD)
-    [[ "$actual" == "$head" ]] || echo "note: ${full}#${pr} advanced past polled ${head}; reviewing ${actual}" >&2
+    # Review the live PR head — GitHub records the posted review's commit_id as the
+    # PR head at post time, so reviewing the live head keeps review and dedup key
+    # consistent. Log exactly which SHA was reviewed.
+    echo "reviewing ${full}#${pr} at $(git rev-parse HEAD)" >&2
   ) || exit 1
 
   # Install the policy into the checkout so the prompt's rule paths resolve.
