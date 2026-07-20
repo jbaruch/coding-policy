@@ -21,14 +21,19 @@
 # Exit: 0 on a posted review; non-zero with a stderr diagnostic.
 set -euo pipefail
 
-# `WORK` is script-global (not a main() local) so the EXIT trap can still see it
-# after main returns; guarded with :- so a trap firing before it is set is safe.
+# `WORK` (throwaway PR checkout) and `POLICY` (non-workspace tessl install) are
+# script-global (not main() locals) so the EXIT trap can still see them after
+# main returns; guarded with :- so a trap firing before they are set is safe.
 # Ends with `return 0` so a failed removal never rewrites the exit status
 # (rules/error-handling.md Shell Error Handling).
 WORK=""
+POLICY=""
 cleanup() {
-  [[ -n "${WORK:-}" ]] || return 0
-  rm -rf "$WORK" || echo "fleet-review-one.sh: warning: could not remove temp dir ${WORK} — remove it by hand" >&2
+  local d
+  for d in "${WORK:-}" "${POLICY:-}"; do
+    [[ -n "$d" ]] || continue
+    rm -rf "$d" || echo "fleet-review-one.sh: warning: could not remove temp dir ${d} — remove it by hand" >&2
+  done
   return 0
 }
 
@@ -74,9 +79,15 @@ main() {
     echo "reviewing ${full}#${pr} at $(git rev-parse HEAD)" >&2
   ) || exit 1
 
-  # Install the policy into the checkout so the prompt's rule paths resolve.
-  ( cd "$work" && tessl install jbaruch/coding-policy >/dev/null ) \
+  # Install the policy to a NON-workspace path (rules/dependency-management.md — CI
+  # agents install Tessl plugins outside the workspace, never vendored into it),
+  # then expose it at the relative .tessl path the shared prompt expects via a
+  # symlink, so the plugin content itself never lands in the reviewed checkout.
+  POLICY=$(mktemp -d) || { echo "error: mktemp -d failed (policy)" >&2; exit 1; }
+  ( cd "$POLICY" && tessl install jbaruch/coding-policy >/dev/null ) \
     || { echo "error: tessl install jbaruch/coding-policy failed for ${full}#${pr}" >&2; exit 1; }
+  ln -s "${POLICY}/.tessl" "${work}/.tessl" \
+    || { echo "error: could not link the installed policy into the workspace for ${full}#${pr}" >&2; exit 1; }
 
   # Run Codex against the diff with the App token REMOVED from the environment.
   local out="${work}/.codex-final.json"

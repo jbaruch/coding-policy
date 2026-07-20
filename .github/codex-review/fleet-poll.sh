@@ -33,6 +33,14 @@ main() {
       continue
     fi
 
+    # Guard the PR-list parse explicitly: a jq shape/parse failure must skip the
+    # repo loudly, never yield a silent empty worklist (rules/error-handling.md).
+    local pr_lines
+    if ! pr_lines=$(jq -c '.[] | {number, base: .base.ref, head: .head.sha, headrepo: .head.repo.full_name}' <<<"$prs_json"); then
+      echo "warn: could not parse the open-PR list for ${full} — skipping this repo" >&2
+      continue
+    fi
+
     while IFS= read -r pr; do
       [[ -n "$pr" ]] || continue
       number=$(jq -r '.number'  <<<"$pr")
@@ -55,7 +63,7 @@ main() {
       worklist=$(jq -c \
         --arg o "$owner" --arg r "$repo" --argjson n "$number" --arg b "$base" --arg h "$head" \
         '. + [{owner:$o, repo:$r, number:$n, base_ref:$b, head_sha:$h}]' <<<"$worklist")
-    done < <(jq -c '.[] | {number, base: .base.ref, head: .head.sha, headrepo: .head.repo.full_name}' <<<"$prs_json")
+    done <<<"$pr_lines"
   done <<<"$repos"
 
   printf '%s\n' "$worklist"
