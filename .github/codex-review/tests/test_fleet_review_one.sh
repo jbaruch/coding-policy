@@ -15,6 +15,10 @@ pass=0; fail=0
 ok()  { printf 'ok   - %s\n' "$1"; pass=$((pass+1)); }
 bad() { printf 'FAIL - %s\n' "$1"; fail=$((fail+1)); }
 
+# Best-effort cleanup that warns on failure rather than swallowing it
+# (rules/error-handling.md — warn to stderr, never nothing).
+rmwarn() { rm -rf "$@" || echo "test_fleet_review_one: warning: could not remove ${*}" >&2; }
+
 # Build a fake toolchain (git/tessl/codex) + stubbed CENTRAL_DIR driver scripts.
 # Echoes: BIN CENTRAL CODEXH (space-separated) for the caller to consume.
 make_env() {
@@ -58,11 +62,12 @@ EOF
 
 # --- happy path: routes to the poster with the right owner/repo/pr ---
 t_happy() {
-  read -r BIN CENTRAL CODEXH < <(make_env)
+  local env_line; env_line=$(make_env) || exit 2   # propagate make_env setup failure (aggregate carve-out)
+  read -r BIN CENTRAL CODEXH <<< "$env_line"
   local out rc
   out=$(PATH="$BIN:$PATH" GH_TOKEN=tok CENTRAL_DIR="$CENTRAL" CODEX_HOME="$CODEXH" \
         bash "$SCRIPT" jbaruch repo-a 7 main 2>/dev/null); rc=$?
-  rm -rf "$BIN" "$CENTRAL" "$CODEXH"
+  rmwarn "$BIN" "$CENTRAL" "$CODEXH"
   [[ $rc -eq 0 ]]                                        || { bad "happy: exit 0 (rc=$rc, out=$out)"; return; }
   [[ "$(jq -r .state <<<"$out")" == "posted" ]]         || { bad "happy: state posted ($out)"; return; }
   [[ "$(jq -r .owner <<<"$out")" == "jbaruch" ]]        || { bad "happy: owner routed ($out)"; return; }
@@ -79,22 +84,24 @@ t_bad_args() {
 
 # --- a missing CENTRAL_DIR driver file -> exit 1 ---
 t_missing_driver() {
-  read -r BIN CENTRAL CODEXH < <(make_env)
+  local env_line; env_line=$(make_env) || exit 2   # propagate make_env setup failure (aggregate carve-out)
+  read -r BIN CENTRAL CODEXH <<< "$env_line"
   rm -f "$CENTRAL/.github/codex-review/schema.json"
   local rc=0
   PATH="$BIN:$PATH" GH_TOKEN=tok CENTRAL_DIR="$CENTRAL" CODEX_HOME="$CODEXH" \
     bash "$SCRIPT" jbaruch repo-a 7 main >/dev/null 2>&1 || rc=$?
-  rm -rf "$BIN" "$CENTRAL" "$CODEXH"
+  rmwarn "$BIN" "$CENTRAL" "$CODEXH"
   if [[ $rc -eq 1 ]]; then ok "missing driver file -> exit 1"; else bad "missing_driver: expected exit 1 (rc=$rc)"; fi
 }
 
 # --- missing GH_TOKEN -> non-zero (unset :? guard) ---
 t_missing_token() {
-  read -r BIN CENTRAL CODEXH < <(make_env)
+  local env_line; env_line=$(make_env) || exit 2   # propagate make_env setup failure (aggregate carve-out)
+  read -r BIN CENTRAL CODEXH <<< "$env_line"
   local rc=0
   PATH="$BIN:$PATH" CENTRAL_DIR="$CENTRAL" CODEX_HOME="$CODEXH" \
     bash "$SCRIPT" jbaruch repo-a 7 main >/dev/null 2>&1 || rc=$?
-  rm -rf "$BIN" "$CENTRAL" "$CODEXH"
+  rmwarn "$BIN" "$CENTRAL" "$CODEXH"
   if [[ $rc -ne 0 ]]; then ok "missing GH_TOKEN -> non-zero"; else bad "missing_token: expected non-zero"; fi
 }
 

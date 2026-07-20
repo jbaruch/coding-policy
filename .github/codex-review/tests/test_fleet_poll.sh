@@ -47,8 +47,8 @@ gh() {
 
 run_main() { ( set -euo pipefail; REVIEWER_LOGIN="app[bot]" main ); }
 
-setup() { MOCK_DIR=$(mktemp -d); MOCK_REPOS=(); }
-teardown() { rm -rf "$MOCK_DIR"; }
+setup() { MOCK_DIR=$(mktemp -d) || { echo "fatal: mktemp -d failed" >&2; exit 2; }; MOCK_REPOS=(); }
+teardown() { rm -rf "$MOCK_DIR" || echo "test_fleet_poll: warning: could not remove ${MOCK_DIR}" >&2; }
 
 # --- an un-reviewed same-repo PR is included ---
 t_needs_review() {
