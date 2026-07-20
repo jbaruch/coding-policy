@@ -1,0 +1,134 @@
+name: Fleet Policy Review (Codex, central)
+
+# Central cron poller: reviews every open same-repo PR across the reviewer App's
+# installation against the jbaruch/coding-policy rules, using ONE ChatGPT-
+# subscription credential held only in this repo. Replaces the per-repo
+# review-codex.yml fleet (blast radius for CODEX_AUTH_JSON drops from 22 to 1).
+#
+# Secrets required in THIS repo only:
+#   CODEX_AUTH_JSON       — the ChatGPT-subscription token (see review-codex.yml header)
+#   FLEET_APP_ID          — the coding-policy-fleet-reviewer GitHub App's App ID
+#   FLEET_APP_PRIVATE_KEY — that App's private key (PEM)
+#   TESSL_TOKEN           — to `tessl install jbaruch/coding-policy` in CI
+#
+# The App (Pull requests: RW, Contents: RO, Metadata: RO) must be installed on
+# every reviewed repo. It posts reviews as `<app-slug>[bot]`; a pass posts as a
+# COMMENT and a violation as REQUEST_CHANGES (post-review.sh). Posting APPROVE on
+# a pass — which the App identity permits, unlike github-actions[bot] — is a
+# tracked follow-up, not current behavior.
+#
+# Token isolation: fleet-review-one.sh scrubs the App token from the workdir and
+# the environment before the sandbox-bypassed Codex step runs; the Codex auth.json
+# is guarded by assert-no-secret-leak.sh. See that script's header.
+
+on:
+  schedule:
+    # Every 15 min: steady-state polls are near-instant no-ops (the stateless
+    # dedup reviews only new/updated heads), and a 15-min interval comfortably
+    # exceeds a typical full-batch run, so runs do not pile up under the
+    # cancel-in-progress:false concurrency guard below.
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fleet-review
+  cancel-in-progress: false
+
+jobs:
+  review:
+    # Dormant until activated: set repo variable FLEET_REVIEWER_ENABLED=true once
+    # the GitHub App is installed and FLEET_APP_ID / FLEET_APP_PRIVATE_KEY /
+    # CODEX_AUTH_JSON / TESSL_TOKEN secrets are set. Until then scheduled runs
+    # are skipped (neutral, no failure noise) and workflow_dispatch is a no-op.
+    if: vars.FLEET_REVIEWER_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    # Backstop so a stuck run cannot hold the concurrency slot and block the queue.
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - uses: tesslio/setup-tessl@v2
+        with:
+          token: ${{ secrets.TESSL_TOKEN }}
+
+      # renovate: datasource=npm depName=@openai/codex
+      - name: Install Codex CLI
+        run: npm install -g @openai/codex@0.142.5
+
+      - name: Mint the reviewer App installation token
+        id: apptoken
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.FLEET_APP_ID }}
+          private-key: ${{ secrets.FLEET_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      - name: Write auth.json from the secret (runtime-only, never persisted)
+        env:
+          CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
+        run: |
+          set -euo pipefail
+          if [ -z "${CODEX_AUTH_JSON:-}" ]; then
+            echo "error: CODEX_AUTH_JSON secret is empty — re-seed it (see review-codex.yml header)" >&2
+            exit 1
+          fi
+          export CODEX_HOME="$HOME/.codex"
+          mkdir -p "$CODEX_HOME"; chmod 700 "$CODEX_HOME"
+          printf '%s' "$CODEX_AUTH_JSON" > "$CODEX_HOME/auth.json"
+          chmod 600 "$CODEX_HOME/auth.json"
+
+      - name: Redact the credential from CI logs
+        run: bash .github/codex-review/mask-secrets.sh "$HOME/.codex/auth.json"
+
+      - name: Poll for PRs that still need review
+        env:
+          GH_TOKEN: ${{ steps.apptoken.outputs.token }}
+          REVIEWER_LOGIN: ${{ steps.apptoken.outputs.app-slug }}[bot]
+        run: bash .github/codex-review/fleet-poll.sh > worklist.json
+
+      - name: Review each PR that needs it
+        env:
+          GH_TOKEN: ${{ steps.apptoken.outputs.token }}
+          CENTRAL_DIR: ${{ github.workspace }}
+        run: |
+          set -uo pipefail
+          # Explicitly validate the worklist shape: a malformed worklist.json must
+          # abort loudly, never pass silently with zero (or null-field) reviews
+          # (rules/error-handling.md aggregate-reporting carve-out — the setup step
+          # carries its own check). Require a top-level array whose every item has
+          # all fields fleet-review-one.sh consumes.
+          if ! jq -e 'type=="array" and all(.[]; has("owner") and has("repo") and has("number") and has("base_ref") and has("head_sha"))' worklist.json >/dev/null 2>&1; then
+            echo "error: worklist.json is not an array of well-formed work items {owner,repo,number,base_ref,head_sha} — inspect the poll step output" >&2
+            exit 1
+          fi
+          items=$(jq -c '.[]' worklist.json)
+          count=$(jq 'length' worklist.json)  # worklist.json validated as an array above
+          echo "PRs needing review: ${count}"
+          fail=0
+          while IFS= read -r item; do
+            [ -n "$item" ] || continue
+            o=$(jq -r .owner     <<<"$item")
+            r=$(jq -r .repo      <<<"$item")
+            n=$(jq -r .number    <<<"$item")
+            b=$(jq -r .base_ref  <<<"$item")
+            echo "::group::review ${o}/${r}#${n} (head $(jq -r .head_sha <<<"$item"))"
+            if bash .github/codex-review/fleet-review-one.sh "$o" "$r" "$n" "$b"; then
+              echo "reviewed ${o}/${r}#${n}"
+            else
+              echo "::warning::fleet review failed for ${o}/${r}#${n}"
+              fail=1
+            fi
+            echo "::endgroup::"
+          done <<< "$items"
+          exit "$fail"
+
+      - name: Drop the Codex credential
+        if: always()
+        run: rm -f "$HOME/.codex/auth.json"
