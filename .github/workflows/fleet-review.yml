@@ -91,7 +91,14 @@ jobs:
           CENTRAL_DIR: ${{ github.workspace }}
         run: |
           set -uo pipefail
-          count=$(jq 'length' worklist.json)
+          # Explicitly guard the worklist parse: a malformed worklist.json must
+          # abort loudly, never pass silently with zero reviews (rules/error-handling.md
+          # aggregate-reporting carve-out — the setup step carries its own check).
+          if ! items=$(jq -c '.[]' worklist.json); then
+            echo "error: worklist.json is not a valid JSON array — fleet-poll.sh produced malformed output; inspect the poll step" >&2
+            exit 1
+          fi
+          count=$(jq 'length' worklist.json)  # worklist.json validated as an array above
           echo "PRs needing review: ${count}"
           fail=0
           while IFS= read -r item; do
@@ -108,7 +115,7 @@ jobs:
               fail=1
             fi
             echo "::endgroup::"
-          done < <(jq -c '.[]' worklist.json)
+          done <<< "$items"
           exit "$fail"
 
       - name: Drop the Codex credential
