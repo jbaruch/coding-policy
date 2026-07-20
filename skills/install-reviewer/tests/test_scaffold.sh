@@ -1,10 +1,8 @@
 #!/usr/bin/env bash
-# Outcome-based tests for scaffold.sh — the create/append/replace/idempotent
-# behavior of the AGENTS.md `## Review guidelines` block and the wholesale
-# write of .github/copilot-instructions.md, plus symlink refusal and the
-# missing-template guard. Each test runs in its own throwaway git repo with
-# the packaged templates copied to the plugin-mount path, so there is no
-# shared mutable state (rules/testing-standards.md).
+# Outcome-based tests for scaffold.sh — copies the Codex-CLI reviewer template
+# tree into a consumer repo. Each test runs in a throwaway git repo with the
+# packaged templates copied to the plugin-mount path (no network, no shared
+# state per rules/testing-standards.md).
 #
 # Run: bash skills/install-reviewer/tests/test_scaffold.sh
 # Exit 0 on all-pass; non-zero with a per-test diagnostic on failure.
@@ -15,23 +13,14 @@ SKILL_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 SCRIPT="${SKILL_DIR}/scaffold.sh"
 [[ -f "$SCRIPT" && -r "$SCRIPT" ]] || { echo "fatal: scaffold.sh not readable at $SCRIPT" >&2; exit 2; }
 
-BEGIN_MARKER="<!-- BEGIN jbaruch/coding-policy review guidelines -->"
-TEMPLATE_MOUNT=".tessl/plugins/jbaruch/coding-policy/skills/install-reviewer"
+TEMPLATE_MOUNT=".tessl/plugins/jbaruch/coding-policy/skills/install-reviewer/templates"
+TARGETS=(.github/workflows/review-codex.yml .github/codex-review/schema.json .github/codex-review/prompt.md .github/codex-review/post-review.sh .github/codex-review/assert-no-secret-leak.sh .github/codex-review/mask-secrets.sh .github/copilot-instructions.md)
 
-FAIL_COUNT=0
-PASS_COUNT=0
+pass=0; fail=0
+ok()  { printf 'ok   - %s\n' "$1"; pass=$((pass+1)); }
+bad() { printf 'FAIL - %s\n' "$1"; fail=$((fail+1)); }
+run() { local n="$1"; shift; if "$@"; then ok "$n"; else bad "$n"; fi; }
 
-run() {
-  local name="$1"; shift
-  if "$@"; then
-    PASS_COUNT=$((PASS_COUNT + 1)); echo "  pass: $name"
-  else
-    FAIL_COUNT=$((FAIL_COUNT + 1)); echo "  FAIL: $name" >&2
-  fi
-}
-
-# Build a throwaway consumer repo with the two templates installed at the
-# plugin-mount path, then run the test body inside it.
 with_repo() {
   local fn="$1"
   local sandbox; sandbox=$(mktemp -d "/tmp/test_scaffold.${fn}.XXXXXX") || return 1
@@ -40,9 +29,10 @@ with_repo() {
     cd "$sandbox"
     git -c init.defaultBranch=main init -q
     git -c user.email=t@t -c user.name=t commit --allow-empty -q -m init
-    mkdir -p "$TEMPLATE_MOUNT"
-    cp "${SKILL_DIR}/AGENTS_REVIEW_GUIDELINES.md" "${TEMPLATE_MOUNT}/"
-    cp "${SKILL_DIR}/copilot-instructions.md" "${TEMPLATE_MOUNT}/"
+    mkdir -p "$TEMPLATE_MOUNT/codex-review"
+    cp "${SKILL_DIR}/templates/review-codex.yml"        "$TEMPLATE_MOUNT/"
+    cp "${SKILL_DIR}/templates/codex-review/"*          "$TEMPLATE_MOUNT/codex-review/"
+    cp "${SKILL_DIR}/templates/copilot-instructions.md" "$TEMPLATE_MOUNT/"
   ) || { local s=$?; rm -rf "$sandbox"; return $s; }
   ( cd "$sandbox" && "$fn" )
   local rc=$?
@@ -50,87 +40,54 @@ with_repo() {
   return $rc
 }
 
-count_markers() { grep -cF "$BEGIN_MARKER" AGENTS.md; }
+all_targets_present() { local t; for t in "${TARGETS[@]}"; do [[ -f "$t" ]] || return 1; done; return 0; }
 
-# --- test bodies (run with cwd inside the sandbox) ---
-
-t_create() {
+t_install_creates_all() {
   local out; out=$(bash "$SCRIPT") || { echo "    FAIL: scaffold exited non-zero" >&2; return 1; }
-  [[ "$(jq -r .agents_action <<<"$out")" == "created" ]]  || { echo "    FAIL: agents_action != created: $out" >&2; return 1; }
-  [[ "$(jq -r .copilot_action <<<"$out")" == "created" ]] || { echo "    FAIL: copilot_action != created: $out" >&2; return 1; }
-  [[ "$(jq -r .state <<<"$out")" == "scaffolded" ]]       || { echo "    FAIL: state != scaffolded: $out" >&2; return 1; }
-  [[ "$(count_markers)" == "1" ]]                         || { echo "    FAIL: expected exactly one block, got $(count_markers)" >&2; return 1; }
-  [[ -f .github/copilot-instructions.md ]]                || { echo "    FAIL: copilot-instructions.md not written" >&2; return 1; }
+  [[ "$(jq -r .state <<<"$out")" == "scaffolded" ]] || { echo "    FAIL: state != scaffolded: $out" >&2; return 1; }
+  [[ "$(jq '[.files[] | select(.action=="created")] | length' <<<"$out")" == "7" ]] || { echo "    FAIL: expected 7 created: $out" >&2; return 1; }
+  all_targets_present || { echo "    FAIL: not all 7 targets written" >&2; return 1; }
 }
 
-t_idempotent() {
+t_install_refuses_existing() {
   bash "$SCRIPT" >/dev/null || return 1
-  local out; out=$(bash "$SCRIPT") || { echo "    FAIL: second run exited non-zero" >&2; return 1; }
-  [[ "$(jq -r .state <<<"$out")" == "no-op" ]]                  || { echo "    FAIL: re-run not no-op: $out" >&2; return 1; }
-  [[ "$(jq -r .agents_action <<<"$out")" == "unchanged" ]]     || { echo "    FAIL: agents_action != unchanged: $out" >&2; return 1; }
-  [[ "$(jq -r .copilot_action <<<"$out")" == "unchanged" ]]    || { echo "    FAIL: copilot_action != unchanged: $out" >&2; return 1; }
-}
-
-t_append_preserves_content() {
-  printf '# My Agents\n\nConsumer content here.\n' > AGENTS.md
-  local out; out=$(bash "$SCRIPT") || return 1
-  [[ "$(jq -r .agents_action <<<"$out")" == "appended" ]] || { echo "    FAIL: agents_action != appended: $out" >&2; return 1; }
-  grep -qF "Consumer content here." AGENTS.md || { echo "    FAIL: prior content not preserved" >&2; return 1; }
-  [[ "$(count_markers)" == "1" ]]             || { echo "    FAIL: expected one block, got $(count_markers)" >&2; return 1; }
-}
-
-t_replace_removes_stale_keeps_content() {
-  bash "$SCRIPT" >/dev/null || return 1
-  printf '# Prefix content\n\n' | cat - AGENTS.md > AGENTS.md.new && mv AGENTS.md.new AGENTS.md
-  # Corrupt the block interior with a STALE line.
-  perl -0pi -e 's/(BEGIN jbaruch.*?-->\n)/$1STALE-LINE\n/s' AGENTS.md
-  local out; out=$(bash "$SCRIPT") || return 1
-  [[ "$(jq -r .agents_action <<<"$out")" == "replaced" ]] || { echo "    FAIL: agents_action != replaced: $out" >&2; return 1; }
-  grep -qF "Prefix content" AGENTS.md || { echo "    FAIL: prefix content lost" >&2; return 1; }
-  ! grep -qF "STALE-LINE" AGENTS.md   || { echo "    FAIL: STALE-LINE survived replace" >&2; return 1; }
-  [[ "$(count_markers)" == "1" ]]     || { echo "    FAIL: expected one block after replace, got $(count_markers)" >&2; return 1; }
-}
-
-t_copilot_overwritten() {
-  mkdir -p .github
-  printf 'consumer copilot notes\n' > .github/copilot-instructions.md
-  local out; out=$(bash "$SCRIPT") || return 1
-  [[ "$(jq -r .copilot_action <<<"$out")" == "overwritten" ]] || { echo "    FAIL: copilot_action != overwritten: $out" >&2; return 1; }
-  grep -qF "Copilot code review" .github/copilot-instructions.md || { echo "    FAIL: copilot template not written over" >&2; return 1; }
-}
-
-t_symlink_refused() {
-  ln -s /etc/hostname AGENTS.md
   local rc=0; bash "$SCRIPT" >/dev/null 2>&1 || rc=$?
-  [[ "$rc" -ne 0 ]] || { echo "    FAIL: expected non-zero exit on symlink target" >&2; return 1; }
-  [[ -L AGENTS.md ]] || { echo "    FAIL: symlink was replaced instead of refused" >&2; return 1; }
+  [[ $rc -eq 1 ]] || { echo "    FAIL: install did not refuse a pre-existing target (rc=$rc)" >&2; return 1; }
+}
+
+t_upgrade_overwrites() {
+  bash "$SCRIPT" >/dev/null || return 1
+  printf 'tampered\n' > .github/codex-review/prompt.md
+  local out; out=$(bash "$SCRIPT" --override) || return 1
+  [[ "$(jq -r .override <<<"$out")" == "true" ]] || { echo "    FAIL: override flag not true" >&2; return 1; }
+  grep -q "policy reviewer" .github/codex-review/prompt.md || { echo "    FAIL: prompt not restored from template" >&2; return 1; }
+}
+
+t_upgrade_noop_when_identical() {
+  bash "$SCRIPT" >/dev/null || return 1
+  local out; out=$(bash "$SCRIPT" --override) || return 1
+  [[ "$(jq -r .state <<<"$out")" == "no-op" ]] || { echo "    FAIL: identical upgrade not no-op: $out" >&2; return 1; }
+}
+
+t_symlink_target_refused() {
+  mkdir -p .github/workflows
+  ln -s /etc/hostname .github/workflows/review-codex.yml
+  local rc=0; bash "$SCRIPT" --override >/dev/null 2>&1 || rc=$?
+  [[ $rc -ne 0 && -L .github/workflows/review-codex.yml ]] || { echo "    FAIL: symlink target not refused (rc=$rc)" >&2; return 1; }
 }
 
 t_missing_template_fails() {
-  rm -f "${TEMPLATE_MOUNT}/AGENTS_REVIEW_GUIDELINES.md"
+  rm -f "$TEMPLATE_MOUNT/review-codex.yml"
   local rc=0; bash "$SCRIPT" >/dev/null 2>&1 || rc=$?
-  [[ "$rc" -ne 0 ]] || { echo "    FAIL: expected non-zero exit when a template is missing" >&2; return 1; }
-}
-
-# A corrupted AGENTS.md with a BEGIN marker but no END marker must be refused,
-# not rewritten — the awk range-replace would otherwise drop everything after
-# BEGIN (data loss).
-t_begin_without_end_refused() {
-  printf '# Agents\n\n%s\n## Review guidelines\n(no end marker here)\nTAIL-CONTENT\n' "$BEGIN_MARKER" > AGENTS.md
-  local rc=0; bash "$SCRIPT" >/dev/null 2>&1 || rc=$?
-  [[ "$rc" -ne 0 ]]              || { echo "    FAIL: expected non-zero exit on BEGIN-without-END" >&2; return 1; }
-  grep -qF "TAIL-CONTENT" AGENTS.md || { echo "    FAIL: tail content dropped instead of preserved" >&2; return 1; }
+  [[ $rc -ne 0 ]] || { echo "    FAIL: missing template did not fail" >&2; return 1; }
 }
 
 echo "== scaffold.sh tests =="
-run "create writes both artifacts"              with_repo t_create
-run "re-run is a no-op"                         with_repo t_idempotent
-run "append preserves consumer content"         with_repo t_append_preserves_content
-run "replace removes stale, keeps content"      with_repo t_replace_removes_stale_keeps_content
-run "pre-existing copilot file overwritten"     with_repo t_copilot_overwritten
-run "symlink target refused"                    with_repo t_symlink_refused
-run "missing template fails loudly"             with_repo t_missing_template_fails
-run "BEGIN without END is refused (no data loss)" with_repo t_begin_without_end_refused
-
-echo "== summary: ${PASS_COUNT} passed, ${FAIL_COUNT} failed =="
-[[ "$FAIL_COUNT" -eq 0 ]]
+run "install creates all 7 artifacts"        with_repo t_install_creates_all
+run "install refuses a pre-existing target"  with_repo t_install_refuses_existing
+run "upgrade overwrites a tampered file"      with_repo t_upgrade_overwrites
+run "upgrade is a no-op when identical"       with_repo t_upgrade_noop_when_identical
+run "symlink target is refused"               with_repo t_symlink_target_refused
+run "missing template fails loudly"           with_repo t_missing_template_fails
+echo "== summary: ${pass} passed, ${fail} failed =="
+[[ "$fail" -eq 0 ]]

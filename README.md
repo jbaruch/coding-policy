@@ -9,7 +9,7 @@ Coding policy plugin for Baruch's AI agents. Language-agnostic code quality rule
 - Policy review runs on the OpenAI Codex CLI authenticated by a ChatGPT subscription (no API key) via `.github/workflows/review-codex.yml`, reviewing every PR against the in-tree `rules/*.md`; Copilot stays as the complementary code-quality lane
 - 21 rules — 15 always-on, 6 conditional (scoped via `applyTo:` to the files where the rule's prescriptions actually fire). Breakdown: 10 covering code quality, 7 covering plugin authoring, 1 covering concurrency, 1 covering review discipline, 1 covering reviewer-feedback reading, 1 covering external-repo action scope
 - `release` skill — structured PR + merge workflow gated on the Codex policy review and Copilot code-quality review
-- `install-reviewer` skill — set up the native Codex PR reviewer (plus the Copilot lane) in a consumer repo
+- `install-reviewer` skill — scaffold the subscription-CLI Codex PR reviewer (plus the Copilot lane) into a consumer repo
 - `adopt-fork-pr` skill — bring a fork PR's branch into the base repo as a same-repo PR the reviewer can run on
 - 0.3.0 added `install-reviewer` upgrade mode (`--override`) — refreshes the reviewer artifacts in place instead of requiring a manual `git rm`-and-rerun
 - Language-agnostic: works with any stack, no Python/JS assumptions
@@ -53,7 +53,7 @@ tessl install jbaruch/coding-policy
 | Skill | Description |
 |-------|-------------|
 | [release](skills/release/SKILL.md) | PR creation, Codex (subscription-CLI) policy review + Copilot code-quality review, merge + cleanup workflow |
-| [install-reviewer](skills/install-reviewer/SKILL.md) | Set up the native OpenAI Codex PR reviewer (plus the Copilot lane) in a consumer repo — commits an `AGENTS.md` `## Review guidelines` block that steers Codex to review every PR against the installed `jbaruch/coding-policy` rules, plus `.github/copilot-instructions.md`, then opens a PR and hands the operator the Codex-UI setup checklist. Supports `--override` for in-place upgrades. |
+| [install-reviewer](skills/install-reviewer/SKILL.md) | Scaffold the subscription-CLI Codex PR reviewer into a consumer repo — a `.github/workflows/review-codex.yml` that `tessl install`s the `jbaruch/coding-policy` rules and reviews every PR against them with the Codex CLI on a ChatGPT subscription (no API key), plus the `.github/codex-review/` scripts and `.github/copilot-instructions.md`, then opens a PR and hands the operator the `CODEX_AUTH_JSON` + `TESSL_TOKEN` secrets checklist. Supports `--override` for in-place upgrades. |
 | [adopt-fork-pr](skills/adopt-fork-pr/SKILL.md) | Classify a PR by number. Same-repo PRs pass through to the reviewer; fork PRs get adopted into the base repo as a same-repo PR, preserving the contributor's commits. |
 | [migrate-to-plugin](skills/migrate-to-plugin/SKILL.md) | Migrate a legacy `tile.json` plugin to the `.tessl-plugin/plugin.json` form: runs `tessl plugin migrate`, renames `.tileignore`, removes the obsolete `tile.json`, re-lints, then reconciles residual "tile" wording to "plugin" while preserving contract surfaces. |
 
