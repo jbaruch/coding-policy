@@ -21,7 +21,11 @@ name: Fleet Policy Review (Codex, central)
 
 on:
   schedule:
-    - cron: "*/5 * * * *"
+    # Every 15 min: steady-state polls are near-instant no-ops (the stateless
+    # dedup reviews only new/updated heads), and a 15-min interval comfortably
+    # exceeds a typical full-batch run, so runs do not pile up under the
+    # cancel-in-progress:false concurrency guard below.
+    - cron: "*/15 * * * *"
   workflow_dispatch:
 
 permissions:
@@ -39,6 +43,8 @@ jobs:
     # are skipped (neutral, no failure noise) and workflow_dispatch is a no-op.
     if: vars.FLEET_REVIEWER_ENABLED == 'true'
     runs-on: ubuntu-latest
+    # Backstop so a stuck run cannot hold the concurrency slot and block the queue.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
 
