@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.97 — 2026-07-20
+
 ### Skills
 
 - **`install-reviewer` scaffolds the subscription-CLI reviewer** — the skill now copies a `.github/workflows/review-codex.yml` (Codex CLI on a ChatGPT subscription; `tessl install`s the `jbaruch/coding-policy` rules and reviews each PR against them), the `.github/codex-review/*` driver + credential guards, and `.github/copilot-instructions.md` into the consumer — replacing the native-app `AGENTS.md`-block scaffold, which was blocked by an OpenAI account-binding bug. `scaffold.sh` copies a fixed template tree (refuse-existing in install mode, overwrite in upgrade, snapshot + restore on failure, refuse any target that exists as a non-regular file); `preflight.sh` / `commit.sh` / the tests retarget to the seven files. The template `schema.json` load indicator reads `from jbaruch/coding-policy.`, matching `prompt.md` and `PR_BODY_TEMPLATE.md`. Proven by the fleet migration of every `jbaruch/*` consumer off the paid gh-aw reviewers.
