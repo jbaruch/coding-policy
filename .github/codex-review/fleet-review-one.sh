@@ -3,13 +3,15 @@
 # head via the App token, install the policy, run Codex against the diff, guard
 # the Codex credential, and post the verdict back as the App.
 #
-# Token isolation (rules/no-secrets.md): the App token fetches the code, then is
-# scrubbed from the workdir git config AND unset from the environment before the
-# sandbox-bypassed `codex exec` runs, so a prompt-injected PR cannot exfiltrate
-# the fleet-wide App token through the review. The Codex auth.json stays on disk
-# (Codex needs it) and is guarded by assert-no-secret-leak.sh as before.
+# Token isolation (rules/no-secrets.md): the App token is passed to git only via
+# a transient `-c http.extraheader` auth header (never in the clone URL, so a
+# clone/fetch failure that echoes the URL cannot leak it, and `git -c` is not
+# persisted to the checkout's config), and it is unset from the environment
+# before the sandbox-bypassed `codex exec` runs — so a prompt-injected PR cannot
+# exfiltrate the fleet-wide App token through the review. The Codex auth.json
+# stays on disk (Codex needs it) and is guarded by assert-no-secret-leak.sh.
 #
-# Args: <owner> <repo> <pr-number> <base-ref> <head-sha>
+# Args: <owner> <repo> <pr-number> <base-ref>
 # Env:
 #   GH_TOKEN     App installation token (used to fetch + to post)
 #   CENTRAL_DIR  path to this coding-policy checkout (holds .github/codex-review/*)
@@ -51,16 +53,21 @@ main() {
   trap cleanup EXIT
   local work="$WORK"
 
-  # Fetch the PR head with the token, then scrub the token from git config so it
-  # is gone before the untrusted review step runs.
-  git clone --quiet --no-tags "https://x-access-token:${GH_TOKEN}@github.com/${full}.git" "$work" \
+  # Auth to GitHub via a transient HTTP header (git-level `-c`, applied per command
+  # and NOT written to the checkout's config), with a tokenless clone URL. A
+  # clone/fetch failure that echoes the URL therefore cannot leak the token, and
+  # the untrusted review step later finds no token in the workdir (rules/no-secrets.md).
+  local authhdr
+  authhdr="Authorization: Basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 | tr -d '\n')"
+  git -c "http.https://github.com/.extraheader=${authhdr}" clone --quiet --no-tags "https://github.com/${full}.git" "$work" \
     || { echo "error: clone failed for ${full}" >&2; exit 1; }
   (
     cd "$work"
-    git fetch --quiet --no-tags origin "${base}" || { echo "error: could not fetch base ${base} in ${full}" >&2; exit 1; }
-    git fetch --quiet --no-tags origin "pull/${pr}/head:pr-head" || { echo "error: could not fetch pull/${pr}/head in ${full}" >&2; exit 1; }
+    git -c "http.https://github.com/.extraheader=${authhdr}" fetch --quiet --no-tags origin "${base}" \
+      || { echo "error: could not fetch base ${base} in ${full}" >&2; exit 1; }
+    git -c "http.https://github.com/.extraheader=${authhdr}" fetch --quiet --no-tags origin "pull/${pr}/head:pr-head" \
+      || { echo "error: could not fetch pull/${pr}/head in ${full}" >&2; exit 1; }
     git checkout --quiet pr-head
-    git remote set-url origin "https://github.com/${full}.git"  # drop the embedded token
     # Review the live PR head — GitHub records the posted review's commit_id as the
     # PR head at post time, so reviewing the live head keeps review and dedup key
     # consistent. Log exactly which SHA was reviewed.

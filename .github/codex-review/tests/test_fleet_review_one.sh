@@ -19,7 +19,11 @@ bad() { printf 'FAIL - %s\n' "$1"; fail=$((fail+1)); }
 # Echoes: BIN CENTRAL CODEXH (space-separated) for the caller to consume.
 make_env() {
   local bin central codexh
-  bin=$(mktemp -d); central=$(mktemp -d); codexh=$(mktemp -d)
+  # Guard each mktemp — bin is spliced onto PATH, so a silent failure would
+  # corrupt the run (rules/error-handling.md aggregate-reporting carve-out).
+  bin=$(mktemp -d)     || { echo "fatal: mktemp -d failed (bin)" >&2; exit 2; }
+  central=$(mktemp -d) || { echo "fatal: mktemp -d failed (central)" >&2; exit 2; }
+  codexh=$(mktemp -d)  || { echo "fatal: mktemp -d failed (codexh)" >&2; exit 2; }
 
   cat > "$bin/git" <<'EOF'
 #!/usr/bin/env bash
