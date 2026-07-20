@@ -49,9 +49,10 @@ exit 0
 EOF
   chmod +x "$bin"/*
 
-  mkdir -p "$central/.github/codex-review"
-  echo '{}'     > "$central/.github/codex-review/schema.json"
-  echo 'prompt' > "$central/.github/codex-review/prompt.md"
+  # Prompt + schema live under the consumer template; drivers under .github.
+  mkdir -p "$central/skills/install-reviewer/templates/codex-review" "$central/.github/codex-review"
+  echo '{}'     > "$central/skills/install-reviewer/templates/codex-review/schema.json"
+  echo 'prompt' > "$central/skills/install-reviewer/templates/codex-review/prompt.md"
   printf '#!/usr/bin/env bash\nexit 0\n' > "$central/.github/codex-review/assert-no-secret-leak.sh"
   cat > "$central/.github/codex-review/post-review.sh" <<'EOF'
 #!/usr/bin/env bash
@@ -89,7 +90,7 @@ t_bad_args() {
 t_missing_driver() {
   local env_line; env_line=$(make_env) || exit 2   # propagate make_env setup failure (aggregate carve-out)
   read -r BIN CENTRAL CODEXH <<< "$env_line"
-  rm -f "$CENTRAL/.github/codex-review/schema.json"
+  rm -f "$CENTRAL/skills/install-reviewer/templates/codex-review/schema.json"
   local rc=0
   PATH="$BIN:$PATH" GH_TOKEN=tok CENTRAL_DIR="$CENTRAL" CODEX_HOME="$CODEXH" \
     bash "$SCRIPT" jbaruch repo-a 7 main >/dev/null 2>&1 || rc=$?

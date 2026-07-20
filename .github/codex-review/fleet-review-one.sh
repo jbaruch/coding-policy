@@ -45,8 +45,13 @@ main() {
   : "${CENTRAL_DIR:?CENTRAL_DIR (coding-policy checkout path) required}"
   local codex_home="${CODEX_HOME:-$HOME/.codex}"
 
-  local schema="${CENTRAL_DIR}/.github/codex-review/schema.json"
-  local prompt="${CENTRAL_DIR}/.github/codex-review/prompt.md"
+  # Prompt + schema come from the CONSUMER template: they instruct Codex to read
+  # the tessl-installed policy at .tessl/plugins/jbaruch/coding-policy/rules/, which
+  # is what a reviewed consumer checkout has. This repo's own .github/codex-review/
+  # prompt is a SELF-review that reads in-tree rules/ — wrong for fleet reviews.
+  local schema="${CENTRAL_DIR}/skills/install-reviewer/templates/codex-review/schema.json"
+  local prompt="${CENTRAL_DIR}/skills/install-reviewer/templates/codex-review/prompt.md"
+  # Mechanical drivers (policy-path-agnostic) come from this repo's own copies.
   local assert="${CENTRAL_DIR}/.github/codex-review/assert-no-secret-leak.sh"
   local poster="${CENTRAL_DIR}/.github/codex-review/post-review.sh"
   local f

@@ -12,8 +12,10 @@ name: Fleet Policy Review (Codex, central)
 #   TESSL_TOKEN           — to `tessl install jbaruch/coding-policy` in CI
 #
 # The App (Pull requests: RW, Contents: RO, Metadata: RO) must be installed on
-# every reviewed repo. It posts reviews as `<app-slug>[bot]` and CAN APPROVE
-# (unlike github-actions[bot]), so no stale-review dismissal is needed.
+# every reviewed repo. It posts reviews as `<app-slug>[bot]`; a pass posts as a
+# COMMENT and a violation as REQUEST_CHANGES (post-review.sh). Posting APPROVE on
+# a pass — which the App identity permits, unlike github-actions[bot] — is a
+# tracked follow-up, not current behavior.
 #
 # Token isolation: fleet-review-one.sh scrubs the App token from the workdir and
 # the environment before the sandbox-bypassed Codex step runs; the Codex auth.json
