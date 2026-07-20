@@ -8,26 +8,26 @@ The PR body the skill opens must include the following content blocks. Order the
 
 ### 1. What this PR commits, and who reviews
 
-Explain that this PR commits two repo artifacts and nothing else:
+Explain that this PR adds a GitHub Actions reviewer and nothing else:
 
-- `AGENTS.md` — a `## Review guidelines` section steering the OpenAI Codex code-review app to review every PR against the `jbaruch/coding-policy` rules (loaded by the Codex environment's `tessl install jbaruch/coding-policy` step).
-- `.github/copilot-instructions.md` — scopes Copilot to the complementary lane (correctness, bugs, security, test gaps) and off policy, so the two reviewers do not overlap.
+- `.github/workflows/review-codex.yml` — on every same-repo PR (fork PRs are skipped, since they cannot read the secrets; adopt them via the `adopt-fork-pr` skill), installs the `jbaruch/coding-policy` rules via `tessl install` and reviews the diff against them with the OpenAI Codex CLI authenticated by a **ChatGPT subscription** (no API key). The verdict posts as a `github-actions[bot]` review.
+- `.github/codex-review/` — the review driver (`post-review.sh`) plus the credential guards (`mask-secrets.sh`, `assert-no-secret-leak.sh`) and the review `prompt.md` + `schema.json`.
+- `.github/copilot-instructions.md` — scopes Copilot to the complementary lane (correctness, bugs, security, test gaps) and off policy.
 
-The Codex app is the policy reviewer; Copilot is the code-quality reviewer. Both gate the merge.
+The Codex reviewer is the policy reviewer; Copilot is the code-quality reviewer. Both gate the merge.
 
-### 2. Operator setup, before the reviewer runs
+### 2. Operator secrets, before the reviewer runs
 
-The reviewer is a GitHub App on a ChatGPT subscription — it is enabled in the Codex UI, not by committing this PR. List the operator steps the consumer must complete (these cannot be automated):
+List the two repo secrets the consumer must set (Settings → Secrets and variables → Actions) BEFORE merging — the reviewer fails its first run without them:
 
-1. Install the **OpenAI Codex** GitHub App on this repository and authenticate it to a ChatGPT plan that includes Codex code review.
-2. In **Codex settings**, turn on **Code review** for this repository, set the **review trigger to run on every push** (so each pushed commit is re-reviewed, not just PR-open — otherwise the release merge gate waits on a re-review that never comes; without any automatic trigger a manual `@codex review` comment is needed per push), and turn on **Exhaustive code review** so Codex keeps looking for findings until it stops finding new ones — a policy reviewer should run to a clean bill, not stop early.
-3. Configure the Codex **environment** for this repository to run `tessl install jbaruch/coding-policy` in its setup, and set any secret that step needs (e.g. a Tessl API key if your registry requires auth).
+- `CODEX_AUTH_JSON` — the ChatGPT-subscription token. On a trusted machine run `codex login` (Sign in with ChatGPT), confirm `~/.codex/auth.json` has `"auth_mode":"chatgpt"` and `"has_refresh_token":true`, then `gh secret set CODEX_AUTH_JSON < ~/.codex/auth.json`. Re-run that whenever the review fails on expired auth. See https://learn.chatgpt.com/docs/auth/ci-cd-auth
+- `TESSL_TOKEN` — from https://tessl.io/account/api-keys, used by the workflow's `tessl install jbaruch/coding-policy` step.
 
-Add a one-line note that until steps 1–2 are done, the Codex reviewer will not post and the merge gate will wait on a reviewer that never runs.
+Note the accepted security posture: this `pull_request` workflow exposes `CODEX_AUTH_JSON` to same-repo PRs (write-access collaborators, trusted per GitHub's model; forks are excluded). Leak vectors are mitigated — the token is `::add-mask::`-redacted from logs, the review output is scanned for it, and the token is deleted before the post step.
 
 ### 3. Load indicator (so the consumer can confirm policy actually loaded)
 
-Note that the Codex review cites findings as `coding-policy: <rule>` — seeing a citation to an installed rule (not just a universal code smell) confirms the environment's `tessl install` loaded the policy. A review that never references a `coding-policy:` rule is a signal the environment setup did not run.
+Note that the Codex review's summary begins `Policy loaded: N rule files from jbaruch/coding-policy.` and each finding names the violated rule in bold (e.g. `**ci-safety**`) — seeing the `Policy loaded:` line confirms the workflow's `tessl install` loaded the policy. A summary that never reports `Policy loaded: N rule files` is a signal the install step did not run.
 
 ### 4. (Conditional) "Action required before merge" — only if Step 1 preflight emitted warnings
 

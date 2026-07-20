@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Stage the two files the install-reviewer skill produces and commit
+# Stage the reviewer files the install-reviewer skill produces and commit
 # them with the canonical message. Call after scaffold.sh has succeeded
 # and before push.sh.
 #
@@ -9,7 +9,9 @@
 # `git commit` would.
 #
 # Staged paths:
-#   AGENTS.md
+#   .github/workflows/review-codex.yml
+#   .github/codex-review/{schema.json,prompt.md,post-review.sh,
+#                         assert-no-secret-leak.sh,mask-secrets.sh}
 #   .github/copilot-instructions.md
 #
 # Usage: commit.sh [--override]
@@ -45,7 +47,12 @@ else
 fi
 
 FILES=(
-  AGENTS.md
+  .github/workflows/review-codex.yml
+  .github/codex-review/schema.json
+  .github/codex-review/prompt.md
+  .github/codex-review/post-review.sh
+  .github/codex-review/assert-no-secret-leak.sh
+  .github/codex-review/mask-secrets.sh
   .github/copilot-instructions.md
 )
 
@@ -57,7 +64,7 @@ main() {
     exit 1
   fi
 
-  # Both artifacts must land together — refuse to commit a partial scaffold
+  # All reviewer files must land together — refuse to commit a partial scaffold
   # (e.g., a file deleted between scaffold and commit). If any expected
   # artifact is missing, list every missing path and fail; do not stage
   # what's present.
@@ -66,7 +73,7 @@ main() {
     [[ -e "$f" ]] || missing+=("$f")
   done
   if [[ ${#missing[@]} -gt 0 ]]; then
-    echo "error: partial scaffold — expected files missing: ${missing[*]} — run scaffold.sh first (or restore the missing files) so both artifacts land together" >&2
+    echo "error: partial scaffold — expected files missing: ${missing[*]} — run scaffold.sh first (or restore the missing files) so all reviewer files land together" >&2
     exit 1
   fi
 

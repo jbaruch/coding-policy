@@ -3,9 +3,8 @@
 # result. The skill invokes this before any mutation so every preflight
 # failure is surfaced together, not one-at-a-time. Checks cover: git
 # worktree, GitHub CLI installation + auth, packaged template presence,
-# origin remote, (mode-dependent) branch state, and a clean-target guard
-# (install mode guards AGENTS.md alone; override mode guards both
-# rewritable targets).
+# origin remote, and (mode-dependent) branch state. In override mode it also
+# refuses to overwrite uncommitted local changes to any reviewer target.
 #
 # Usage: preflight.sh [--override]
 #   --override    Upgrade existing scaffolded reviewers in place (instead
@@ -124,13 +123,23 @@ if (( OVERRIDE_MODE == 1 )); then
 else
   BRANCH="feat/add-coding-policy-review"
 fi
-TEMPLATE_DIR=".tessl/plugins/jbaruch/coding-policy/skills/install-reviewer"
+TEMPLATE_DIR=".tessl/plugins/jbaruch/coding-policy/skills/install-reviewer/templates"
 TEMPLATES=(
-  "${TEMPLATE_DIR}/AGENTS_REVIEW_GUIDELINES.md"
+  "${TEMPLATE_DIR}/review-codex.yml"
+  "${TEMPLATE_DIR}/codex-review/schema.json"
+  "${TEMPLATE_DIR}/codex-review/prompt.md"
+  "${TEMPLATE_DIR}/codex-review/post-review.sh"
+  "${TEMPLATE_DIR}/codex-review/assert-no-secret-leak.sh"
+  "${TEMPLATE_DIR}/codex-review/mask-secrets.sh"
   "${TEMPLATE_DIR}/copilot-instructions.md"
 )
 TARGETS=(
-  "AGENTS.md"
+  ".github/workflows/review-codex.yml"
+  ".github/codex-review/schema.json"
+  ".github/codex-review/prompt.md"
+  ".github/codex-review/post-review.sh"
+  ".github/codex-review/assert-no-secret-leak.sh"
+  ".github/codex-review/mask-secrets.sh"
   ".github/copilot-instructions.md"
 )
 
@@ -205,17 +214,15 @@ check_branch_not_remote() {
 }
 
 # Override-mode safety check: refuse to upgrade if the consumer has dirty
-# working-tree state on either path the upgrade flow rewrites AND stages —
-# AGENTS.md (its managed review-guidelines block is replaced in place) and
-# .github/copilot-instructions.md (overwritten wholesale). scaffold.sh
-# preserves the rest of AGENTS.md, but commit.sh stages the whole file, so
-# a consumer's unrelated pending AGENTS.md edits would otherwise be swept
-# into the reviewer-upgrade commit. A never-tracked, not-yet-created target
-# (fresh install/upgrade) has nothing to clobber and is not flagged.
-# Mirrors how `git pull` refuses to overwrite uncommitted changes — forces
-# the consumer to commit, stash, or remove the local content before the
-# scaffold replaces their files. "Dirty" here covers four
-# states the override could clobber:
+# working-tree state on any reviewer target the upgrade overwrites and stages
+# (the review-codex.yml workflow, the .github/codex-review/* scripts, and
+# .github/copilot-instructions.md). Each is overwritten wholesale, so a
+# consumer's unrelated pending edits would be swept into the reviewer-upgrade
+# commit. A never-tracked, not-yet-created target (fresh install/upgrade) has
+# nothing to clobber and is not flagged. Mirrors how `git pull` refuses to
+# overwrite uncommitted changes — forces the consumer to commit, stash, or
+# remove the local content before the scaffold replaces their files. "Dirty"
+# here covers four states the override could clobber:
 #   - symlink at the target path (working or broken); refuse outright so
 #     `cp`/compile/append never follows or replaces an unexpected link
 #   - tracked file with staged or unstaged edits relative to HEAD
@@ -290,22 +297,6 @@ check_no_dirty_target_edits() {
   fi
 }
 
-# Install-mode guard for AGENTS.md. .github/copilot-instructions.md is
-# guarded in install mode by the skill's Step 2 existence-refusal, but
-# AGENTS.md legitimately pre-exists in many repos and commit.sh stages it
-# wholesale — so a dirty, untracked, symlinked, or tracked-deleted AGENTS.md
-# would otherwise sweep unrelated local content into the reviewer-install
-# commit. A clean tracked file or an absent one is fine — scaffold appends
-# the block to the former and creates the latter, and commit.sh stages only
-# the diff.
-check_agents_clean() {
-  local reason
-  reason=$(classify_target_dirty "AGENTS.md")
-  if [[ -n "$reason" ]]; then
-    push_failure "agents-not-clean" "AGENTS.md is in a state install cannot safely stage (${reason}) — install stages it into the reviewer PR, which could commit unrelated local content. Commit, stash, restore, or remove it first, then re-run"
-  fi
-}
-
 main() {
   check_in_git_worktree
   check_gh_installed
@@ -327,16 +318,13 @@ main() {
       # target files we're about to replace.
       check_no_dirty_target_edits
     else
-      # Install mode: the install branch must NOT already exist locally
-      # or remotely — Step 2's overwrite refusal in the skill assumes a
-      # fresh branch. .github/copilot-instructions.md is guarded by that
-      # refusal, but AGENTS.md can pre-exist, so guard it against dirty/
-      # untracked state commit.sh would otherwise stage wholesale.
+      # Install mode: the install branch must NOT already exist locally or
+      # remotely — Step 2's overwrite refusal in the skill assumes a fresh
+      # branch, and scaffold.sh refuses any pre-existing reviewer target.
       check_branch_not_local
       if git remote get-url origin >/dev/null 2>&1; then
         check_branch_not_remote
       fi
-      check_agents_clean
     fi
   fi
 
