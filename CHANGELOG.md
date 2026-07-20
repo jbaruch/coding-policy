@@ -1,5 +1,9 @@
 # Changelog
 
+### CI
+
+- **Central fleet policy reviewer — one Codex credential for the whole fleet** — new `.github/workflows/fleet-review.yml` cron-polls (`*/5`) every open same-repo PR across a GitHub App's installation and reviews each against the `jbaruch/coding-policy` rules, so `CODEX_AUTH_JSON` lives in this repo only (blast radius drops from 22 to 1). `fleet-poll.sh` enumerates PRs needing review statelessly (skips any whose current head SHA the App already reviewed via each review's `commit_id`); `fleet-review-one.sh` fetches one PR's head with the App token, then scrubs that token from the workdir and the environment before the sandbox-bypassed `codex exec` runs, so a prompt-injected PR cannot exfiltrate the fleet-wide token (the Codex `auth.json` stays guarded by `assert-no-secret-leak.sh`). The App posts as `<app-slug>[bot]` and can `APPROVE`, retiring the `github-actions[bot]` stale-review dismissal. Dormant until repo variable `FLEET_REVIEWER_ENABLED=true` and the `FLEET_APP_ID` / `FLEET_APP_PRIVATE_KEY` secrets are set.
+
 ## 0.3.97 — 2026-07-20
 
 ### Skills
