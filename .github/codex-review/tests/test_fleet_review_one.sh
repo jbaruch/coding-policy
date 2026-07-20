@@ -70,7 +70,7 @@ t_happy() {
 # --- wrong arg count -> exit 2 ---
 t_bad_args() {
   local rc=0; bash "$SCRIPT" only three args >/dev/null 2>&1 || rc=$?
-  [[ $rc -eq 2 ]] && ok "wrong arg count -> exit 2" || bad "bad_args: expected exit 2 (rc=$rc)"
+  if [[ $rc -eq 2 ]]; then ok "wrong arg count -> exit 2"; else bad "bad_args: expected exit 2 (rc=$rc)"; fi
 }
 
 # --- a missing CENTRAL_DIR driver file -> exit 1 ---
@@ -81,7 +81,7 @@ t_missing_driver() {
   PATH="$BIN:$PATH" GH_TOKEN=tok CENTRAL_DIR="$CENTRAL" CODEX_HOME="$CODEXH" \
     bash "$SCRIPT" jbaruch repo-a 7 main aaa111 >/dev/null 2>&1 || rc=$?
   rm -rf "$BIN" "$CENTRAL" "$CODEXH"
-  [[ $rc -eq 1 ]] && ok "missing driver file -> exit 1" || bad "missing_driver: expected exit 1 (rc=$rc)"
+  if [[ $rc -eq 1 ]]; then ok "missing driver file -> exit 1"; else bad "missing_driver: expected exit 1 (rc=$rc)"; fi
 }
 
 # --- missing GH_TOKEN -> non-zero (unset :? guard) ---
@@ -91,7 +91,7 @@ t_missing_token() {
   PATH="$BIN:$PATH" CENTRAL_DIR="$CENTRAL" CODEX_HOME="$CODEXH" \
     bash "$SCRIPT" jbaruch repo-a 7 main aaa111 >/dev/null 2>&1 || rc=$?
   rm -rf "$BIN" "$CENTRAL" "$CODEXH"
-  [[ $rc -ne 0 ]] && ok "missing GH_TOKEN -> non-zero" || bad "missing_token: expected non-zero"
+  if [[ $rc -ne 0 ]]; then ok "missing GH_TOKEN -> non-zero"; else bad "missing_token: expected non-zero"; fi
 }
 
 echo "== fleet-review-one.sh tests =="

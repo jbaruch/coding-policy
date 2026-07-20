@@ -74,7 +74,7 @@ JSON
 [{"user":{"login":"app[bot]"},"commit_id":"aaa111","state":"COMMENTED"}]
 JSON
   local out; out=$(run_main)
-  [[ "$(jq 'length' <<<"$out")" == "0" ]] && ok "PR reviewed at current head is skipped" || bad "already_reviewed: expected empty ($out)"
+  if [[ "$(jq 'length' <<<"$out")" == "0" ]]; then ok "PR reviewed at current head is skipped"; else bad "already_reviewed: expected empty ($out)"; fi
   teardown
 }
 
@@ -88,7 +88,7 @@ JSON
 [{"user":{"login":"app[bot]"},"commit_id":"aaa111","state":"COMMENTED"}]
 JSON
   local out; out=$(run_main)
-  [[ "$(jq 'length' <<<"$out")" == "1" ]] && ok "PR whose head advanced past the last review is included" || bad "head_advanced: expected one ($out)"
+  if [[ "$(jq 'length' <<<"$out")" == "1" ]]; then ok "PR whose head advanced past the last review is included"; else bad "head_advanced: expected one ($out)"; fi
   teardown
 }
 
@@ -99,7 +99,7 @@ t_fork_skipped() {
 [{"number":7,"base":{"ref":"main"},"head":{"sha":"aaa111","repo":{"full_name":"someone/repo-a-fork"}}}]
 JSON
   local out; out=$(run_main)
-  [[ "$(jq 'length' <<<"$out")" == "0" ]] && ok "fork PR is skipped" || bad "fork_skipped: expected empty ($out)"
+  if [[ "$(jq 'length' <<<"$out")" == "0" ]]; then ok "fork PR is skipped"; else bad "fork_skipped: expected empty ($out)"; fi
   teardown
 }
 
@@ -113,7 +113,7 @@ JSON
 [{"user":{"login":"copilot[bot]"},"commit_id":"aaa111","state":"COMMENTED"}]
 JSON
   local out; out=$(run_main)
-  [[ "$(jq 'length' <<<"$out")" == "1" ]] && ok "another reviewer's verdict does not mark it reviewed" || bad "other_reviewer: expected one ($out)"
+  if [[ "$(jq 'length' <<<"$out")" == "1" ]]; then ok "another reviewer's verdict does not mark it reviewed"; else bad "other_reviewer: expected one ($out)"; fi
   teardown
 }
 

@@ -19,6 +19,17 @@
 # Exit: 0 on a posted review; non-zero with a stderr diagnostic.
 set -euo pipefail
 
+# `WORK` is script-global (not a main() local) so the EXIT trap can still see it
+# after main returns; guarded with :- so a trap firing before it is set is safe.
+# Ends with `return 0` so a failed removal never rewrites the exit status
+# (rules/error-handling.md Shell Error Handling).
+WORK=""
+cleanup() {
+  [[ -n "${WORK:-}" ]] || return 0
+  rm -rf "$WORK" || echo "fleet-review-one.sh: warning: could not remove temp dir ${WORK} — remove it by hand" >&2
+  return 0
+}
+
 main() {
   [[ $# -eq 5 ]] || { echo "usage: $0 <owner> <repo> <pr-number> <base-ref> <head-sha>" >&2; exit 2; }
   local owner="$1" repo="$2" pr="$3" base="$4" head="$5"
@@ -36,10 +47,9 @@ main() {
     [[ -f "$f" ]] || { echo "error: central driver file missing: $f" >&2; exit 1; }
   done
 
-  local work
-  work=$(mktemp -d) || { echo "error: mktemp -d failed" >&2; exit 1; }
-  # shellcheck disable=SC2064
-  trap "rm -rf '$work'" EXIT
+  WORK=$(mktemp -d) || { echo "error: mktemp -d failed" >&2; exit 1; }
+  trap cleanup EXIT
+  local work="$WORK"
 
   # Fetch the PR head with the token, then scrub the token from git config so it
   # is gone before the untrusted review step runs.
@@ -51,6 +61,10 @@ main() {
     git fetch --quiet --no-tags origin "pull/${pr}/head:pr-head" || { echo "error: could not fetch pull/${pr}/head in ${full}" >&2; exit 1; }
     git checkout --quiet pr-head
     git remote set-url origin "https://github.com/${full}.git"  # drop the embedded token
+    # The poller enumerated ${head}; note if the head advanced since, so the log
+    # records exactly which SHA was reviewed (the review posts against the live head).
+    actual=$(git rev-parse HEAD)
+    [[ "$actual" == "$head" ]] || echo "note: ${full}#${pr} advanced past polled ${head}; reviewing ${actual}" >&2
   ) || exit 1
 
   # Install the policy into the checkout so the prompt's rule paths resolve.
@@ -61,6 +75,10 @@ main() {
   local out="${work}/.codex-final.json"
   (
     cd "$work"
+    # Single quotes are required: the backticks are literal markdown and the only
+    # substitutions are printf's own %s — double quotes would make bash treat the
+    # backticks as command substitution. Nothing here is meant to shell-expand.
+    # shellcheck disable=SC2016
     { printf 'This PR targets base branch `%s`; review the diff `git diff origin/%s...HEAD`.\n\n' "$base" "$base"; cat "$prompt"; } \
       | env -u GH_TOKEN CODEX_HOME="$codex_home" codex exec \
           --json \
