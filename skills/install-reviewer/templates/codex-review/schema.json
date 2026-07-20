@@ -4,7 +4,7 @@
   "properties": {
     "summary": {
       "type": "string",
-      "description": "One short paragraph. MUST begin with the load indicator 'Policy loaded: N rule files from rules/.' where N is the count of rules/*.md files read."
+      "description": "One short paragraph. MUST begin with the load indicator 'Policy loaded: N rule files from jbaruch/coding-policy.' where N is the count of rules/*.md files read."
     },
     "verdict": {
       "type": "string",

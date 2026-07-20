@@ -61,6 +61,10 @@ main() {
   for pair in "${MANIFEST[@]}"; do
     tgt="${pair#*:}"
     [[ -L "$tgt" ]] && { echo "error: ${tgt} is a symlink — refusing to write through it; replace it with a regular file (or remove it) and re-run" >&2; exit 1; }
+    if [[ -e "$tgt" && ! -f "$tgt" ]]; then
+      echo "error: ${tgt} exists but is not a regular file (directory, FIFO, or device) — refusing to write; remove it and re-run" >&2
+      exit 1
+    fi
     if (( OVERRIDE_MODE == 0 )) && [[ -e "$tgt" ]]; then
       echo "error: ${tgt} already exists — refusing to overwrite in install mode; re-run in upgrade mode (--override) to refresh" >&2
       exit 1

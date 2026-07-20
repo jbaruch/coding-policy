@@ -76,6 +76,12 @@ t_symlink_target_refused() {
   [[ $rc -ne 0 && -L .github/workflows/review-codex.yml ]] || { echo "    FAIL: symlink target not refused (rc=$rc)" >&2; return 1; }
 }
 
+t_nonregular_target_refused() {
+  mkdir -p .github/workflows/review-codex.yml
+  local rc=0; bash "$SCRIPT" --override >/dev/null 2>&1 || rc=$?
+  [[ $rc -ne 0 && -d .github/workflows/review-codex.yml ]] || { echo "    FAIL: directory target not refused (rc=$rc)" >&2; return 1; }
+}
+
 t_missing_template_fails() {
   rm -f "$TEMPLATE_MOUNT/review-codex.yml"
   local rc=0; bash "$SCRIPT" >/dev/null 2>&1 || rc=$?
@@ -88,6 +94,7 @@ run "install refuses a pre-existing target"  with_repo t_install_refuses_existin
 run "upgrade overwrites a tampered file"      with_repo t_upgrade_overwrites
 run "upgrade is a no-op when identical"       with_repo t_upgrade_noop_when_identical
 run "symlink target is refused"               with_repo t_symlink_target_refused
+run "non-regular-file target is refused"      with_repo t_nonregular_target_refused
 run "missing template fails loudly"           with_repo t_missing_template_fails
 echo "== summary: ${pass} passed, ${fail} failed =="
 [[ "$fail" -eq 0 ]]
