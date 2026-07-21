@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.102 — 2026-07-21
+
 ### CI
 
 - **Opt-in marker guard for the fleet reviewer** — `fleet-poll.sh` now reviews a repo only if it carries a `.github/fleet-review-enabled` marker file, so the App can be installed on **all repositories** while only opted-in repos are reviewed (404 on the marker = opt-out, skipped silently; any other error warns and skips so a transient failure never mass-skips). The fleet reviewer's prompt/schema moved to `.github/codex-review/fleet-prompt.md` + `fleet-schema.json` (fleet-owned, decoupled from the install-reviewer templates).
