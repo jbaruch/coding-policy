@@ -47,7 +47,7 @@ description: SKILL.md structure, frontmatter, execution-mode preamble, flat step
 - Invoke other skills with typed `Skill(skill: "name")` calls, never prose references
 - Never call `Skill()` on a rule (rules are auto-loaded, not invoked via Skill)
 - Narrow exception for mid-session-install recovery
-- Applies when the authored flow's typed `Skill()` call targets a skill whose plugin was installed earlier in the same session and the harness throws "Unknown skill" — the skill registry loads at session start and does not see mid-session installs
+- Applies when the authored flow's typed `Skill()` call targets a skill whose plugin was installed earlier in the same session and the harness throws "Unknown skill"
 - Preconditions (all required):
   1. The typed `Skill()` call stays the sole invocation path in authored flow; the recovery never replaces it
   2. The recovery reads the target skill's mounted `SKILL.md` at its plugin mount path (`.tessl/plugins/<workspace>/<plugin>/skills/<name>/SKILL.md`) and executes its steps
