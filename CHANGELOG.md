@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.100 — 2026-07-21
+
 ### CI
 
 - **`post-review.sh` posts `APPROVE` on a pass** — a pass verdict now submits an `APPROVE` review instead of a `COMMENT`, so a clean re-review supersedes an earlier `REQUEST_CHANGES` in GitHub's merge gate without a manual dismissal — which matters for fleet-reviewed consumer repos, where no release skill runs to dismiss stale reviews. A token that cannot approve (`github-actions[bot]`, HTTP 422) falls back to `COMMENT`, so this repo's own self-review still works during the transition. The submit logic is factored into a `submit_review()` helper that distinguishes a non-retryable 422 from a transient 5xx. Implements #200.
