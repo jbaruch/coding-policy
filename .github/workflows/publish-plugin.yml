@@ -1,0 +1,149 @@
+name: Publish plugin (reusable)
+
+# Canonical fleet publish pipeline, called by each consumer's thin
+# `publish.yml`. Unifies the drifted per-repo publish workflows
+# (publish-tile.yml / publish-plugin.yml / publish.yml) onto one definition
+# (jbaruch/coding-policy#206) — consumers carry only triggers + a caller
+# block, this owns the steps and the third-party action versions.
+#
+# Consumer caller (thin):
+#   jobs:
+#     publish:
+#       uses: jbaruch/coding-policy/.github/workflows/publish-plugin.yml@<sha>
+#       secrets: inherit
+#       with:
+#         stamp-changelog: true          # optional
+#         python-version: '3.11'         # optional — only if the gate needs it
+#         pre-publish-script: .github/pre-publish.sh   # optional repo-specific gate
+#         publish-mode: as-is            # optional — default auto-bump
+#
+# Sibling composite actions are referenced by full path at `@main`, not a
+# local `./` path: in a called reusable workflow a `./` path resolves
+# against the CALLER's checkout (which has no coding-policy actions). `@main`
+# keeps the review rubric + CHANGELOG stamp tracking current policy, the
+# same always-latest contract as the consumer's runtime `tessl install
+# jbaruch/coding-policy`. Consumers pin THIS workflow (`@<sha>`) for
+# reproducible caller logic.
+
+on:
+  workflow_call:
+    inputs:
+      python-version:
+        description: 'If set, sets up this Python before the pre-publish gate (for gates needing a pinned interpreter). Empty = no Python setup.'
+        type: string
+        default: ''
+      pre-publish-script:
+        description: 'Path (in the caller repo) to a bash gate script run after checkout, before publish. Empty = no repo-specific gate.'
+        type: string
+        default: ''
+      skills-dir:
+        description: 'Directory holding skill subdirectories, passed to the skill-review action.'
+        type: string
+        default: 'skills'
+      skill-review-threshold:
+        description: 'Minimum skill-review score.'
+        type: string
+        default: '85'
+      stamp-changelog:
+        description: 'Stamp the CHANGELOG version heading before publish.'
+        type: boolean
+        default: false
+      publish-mode:
+        description: "'auto-bump' = tesslio/patch-version-publish (bump + commit + publish); 'as-is' = tessl plugin publish (manifest version verbatim, no bump)."
+        type: string
+        default: 'auto-bump'
+    secrets:
+      TESSL_TOKEN:
+        required: true
+
+permissions:
+  id-token: write
+  contents: write
+  pull-requests: write # patch-version-publish falls back to a PR when a direct push is blocked
+
+concurrency:
+  # One in-flight publish per consumer repo; never cancel a running publish.
+  group: publish-plugin-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # Full history so the changed-skills review can diff
+          # github.event.before..HEAD.
+          fetch-depth: 0
+
+      - name: Set up Python
+        if: inputs.python-version != ''
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ inputs.python-version }}
+
+      # Repo-specific gate (pyright, unit tests, custom lints, carve-out
+      # checks). Deterministic gate logic lives in the caller's script per
+      # rules/script-delegation.md; this just invokes it. Runs before the
+      # tessl steps — the gates are self-contained (no tessl needed).
+      - name: Repo-specific pre-publish gate
+        if: inputs.pre-publish-script != ''
+        run: bash "${{ inputs.pre-publish-script }}"
+
+      - uses: tesslio/setup-tessl@v2
+        with:
+          token: ${{ secrets.TESSL_TOKEN }}
+
+      # Fail loudly on an unrecognized publish-mode: otherwise both publish
+      # steps below would be skipped and the run would pass green having
+      # published nothing (rules/error-handling.md — no silent success).
+      - name: Validate publish-mode
+        env:
+          MODE: ${{ inputs.publish-mode }}
+        run: |
+          set -euo pipefail
+          case "$MODE" in
+            auto-bump|as-is) ;;
+            *) echo "::error::publish-mode must be 'auto-bump' or 'as-is', got '$MODE'" >&2; exit 1 ;;
+          esac
+
+      - name: Lint plugin
+        run: tessl plugin lint
+
+      # Reviews only the skills whose files changed in this push, against the
+      # latest published jbaruch/coding-policy. `credit-outage: skip` is the
+      # fleet-wide setting sanctioned by the context-artifacts Credit-Outage
+      # Review Carve-Out: only a tessl out-of-credits (403) skips the affected
+      # skill (flagged in the run summary + unreviewed-skills output); every
+      # other review failure still hard-fails.
+      - name: Skill review (changed only)
+        uses: jbaruch/coding-policy/.github/actions/skill-review@main
+        with:
+          threshold: ${{ inputs.skill-review-threshold }}
+          skills-dir: ${{ inputs.skills-dir }}
+          credit-outage: 'skip'
+
+      # Stamps the top un-headed `### ` CHANGELOG blocks with the
+      # `## <version> — <date>` heading the publish step is about to assign,
+      # per context-artifacts "CHANGELOG Hygiene". Must run immediately before
+      # publish. No-op when the top section is already headed.
+      - name: Stamp CHANGELOG with the version being published
+        if: inputs.stamp-changelog
+        uses: jbaruch/coding-policy/.github/actions/stamp-changelog@main
+
+      # Default: patch-version-publish auto-bumps the manifest patch when it
+      # matches the registry, commits `Bump … [skip ci]` (publish-pipeline
+      # loop-prevention carve-out), and publishes.
+      - name: Publish (auto-bump)
+        if: inputs.publish-mode == 'auto-bump'
+        uses: tesslio/patch-version-publish@v1
+        with:
+          token: ${{ secrets.TESSL_TOKEN }}
+
+      # Alternative: publish the manifest version verbatim (no auto-bump, no
+      # commit-back). A missing human bump surfaces as a red `version already
+      # exists` run — the correct signal, not a silent auto-bump. Requires the
+      # release PR to carry the manifest + CHANGELOG version bump.
+      - name: Publish (manifest version as-is)
+        if: inputs.publish-mode == 'as-is'
+        run: tessl plugin publish .
