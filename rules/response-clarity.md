@@ -13,8 +13,10 @@ description: How agents shape their responses to the user — action-first, numb
 ## Lead With the Action
 
 - Open with the command, edit, or answer — never context, preamble, or restated question
-- Number multi-step work; one bounded action per item, no compound "and then" clause
-- Cap an unranked list at 5 items; split a longer one into "do now" and "later" tiers
+- Number multi-step work
+- Keep each numbered item to one bounded action, no compound "and then" clause
+- Cap an unranked list at 5 items
+- Split a longer list into "do now" and "later" tiers
 - Defer secondary issues — finish the primary problem, then offer the rest as separate follow-ups
 
 ## Show State and Progress
@@ -31,7 +33,8 @@ description: How agents shape their responses to the user — action-first, numb
 ## Close With One Next Step
 
 - End with one concrete action the user can take in two minutes or less
-- No recap, no pleasantries, no closer — end when the answer is done
+- No recap, no pleasantries, no closer
+- End when the answer is done
 
 ## Exceptions
 

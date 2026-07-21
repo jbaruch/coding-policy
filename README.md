@@ -7,7 +7,7 @@ Coding policy plugin for Baruch's AI agents. Language-agnostic code quality rule
 ## What's New
 
 - Policy review runs on the OpenAI Codex CLI authenticated by a ChatGPT subscription (no API key) via `.github/workflows/review-codex.yml`, reviewing every PR against the in-tree `rules/*.md`; Copilot stays as the complementary code-quality lane
-- 21 rules — 15 always-on, 6 conditional (scoped via `applyTo:` to the files where the rule's prescriptions actually fire). Breakdown: 10 covering code quality, 7 covering plugin authoring, 1 covering concurrency, 1 covering review discipline, 1 covering reviewer-feedback reading, 1 covering external-repo action scope
+- 22 rules — 16 always-on, 6 conditional (scoped via `applyTo:` to the files where the rule's prescriptions actually fire). Breakdown: 10 covering code quality, 7 covering plugin authoring, 1 covering concurrency, 1 covering review discipline, 1 covering reviewer-feedback reading, 1 covering external-repo action scope, 1 covering response communication
 - `release` skill — structured PR + merge workflow gated on the Codex policy review and Copilot code-quality review
 - `install-reviewer` skill — enroll a consumer repo in the central fleet policy reviewer (the `.github/fleet-review-enabled` marker + the Copilot lane); no per-repo workflow or secrets
 - `adopt-fork-pr` skill — bring a fork PR's branch into the base repo as a same-repo PR the reviewer can run on
