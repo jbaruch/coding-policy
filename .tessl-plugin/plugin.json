@@ -30,6 +30,7 @@
     "rules/agent-worktree-isolation.md",
     "rules/boy-scout.md",
     "rules/external-repo-contributions.md",
-    "rules/reviewer-feedback-reading.md"
+    "rules/reviewer-feedback-reading.md",
+    "rules/response-clarity.md"
   ]
 }
