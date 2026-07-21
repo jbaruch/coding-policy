@@ -138,8 +138,9 @@ with_sourced_sandbox() {
     cd "$sandbox"
     git -c init.defaultBranch=main init -q
     git -c user.email=t@t -c user.name=t commit --allow-empty -q -m init
-    mkdir -p .github
+    mkdir -p .github/workflows
     printf '# fleet-review marker\n' > .github/fleet-review-enabled
+    printf 'name: trigger\n' > .github/workflows/review-trigger.yml
     printf '# Copilot\n' > .github/copilot-instructions.md
     git add -A
     git -c user.email=t@t -c user.name=t commit -q -m targets

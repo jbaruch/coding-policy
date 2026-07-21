@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
 # Copy the fleet-reviewer opt-in files into the consumer repo:
-#   .github/fleet-review-enabled         — opt-in marker; the central
-#                                          coding-policy-fleet-reviewer App polls
-#                                          and reviews every repo carrying it
-#   .github/copilot-instructions.md      — the Copilot complementary lane
+#   .github/fleet-review-enabled            — opt-in marker; the central
+#                                             coding-policy-fleet-reviewer App polls
+#                                             and reviews every repo carrying it
+#   .github/workflows/review-trigger.yml    — PR-time trigger; fires an immediate
+#                                             single-PR review so the verdict lands
+#                                             before merge (the poll is a backstop)
+#   .github/copilot-instructions.md         — the Copilot complementary lane
 #
-# No per-repo workflow or secrets — the credential lives only in coding-policy,
-# and the marker is what enrolls this repo in the central fleet review.
+# The Codex credential lives only in coding-policy. The consumer holds the marker,
+# the thin trigger workflow, and one stable FLEET_DISPATCH_TOKEN (a narrow PAT).
 #
 # Every target is snapshotted before any write and restored if a later copy
 # fails, so a partial run never leaves a half-written reviewer.
@@ -26,6 +29,7 @@ TEMPLATE_DIR=".tessl/plugins/jbaruch/coding-policy/skills/install-reviewer/templ
 # "<source relative to TEMPLATE_DIR>:<target in the consumer repo>"
 MANIFEST=(
   "fleet-review-enabled:.github/fleet-review-enabled"
+  "review-trigger.yml:.github/workflows/review-trigger.yml"
   "copilot-instructions.md:.github/copilot-instructions.md"
 )
 

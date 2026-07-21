@@ -126,10 +126,12 @@ fi
 TEMPLATE_DIR=".tessl/plugins/jbaruch/coding-policy/skills/install-reviewer/templates"
 TEMPLATES=(
   "${TEMPLATE_DIR}/fleet-review-enabled"
+  "${TEMPLATE_DIR}/review-trigger.yml"
   "${TEMPLATE_DIR}/copilot-instructions.md"
 )
 TARGETS=(
   ".github/fleet-review-enabled"
+  ".github/workflows/review-trigger.yml"
   ".github/copilot-instructions.md"
 )
 

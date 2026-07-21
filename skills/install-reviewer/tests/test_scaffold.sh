@@ -15,7 +15,7 @@ SCRIPT="${SKILL_DIR}/scaffold.sh"
 [[ -f "$SCRIPT" && -r "$SCRIPT" ]] || { echo "fatal: scaffold.sh not readable at $SCRIPT" >&2; exit 2; }
 
 TEMPLATE_MOUNT=".tessl/plugins/jbaruch/coding-policy/skills/install-reviewer/templates"
-TARGETS=(.github/fleet-review-enabled .github/copilot-instructions.md)
+TARGETS=(.github/fleet-review-enabled .github/workflows/review-trigger.yml .github/copilot-instructions.md)
 
 pass=0; fail=0
 ok()  { printf 'ok   - %s\n' "$1"; pass=$((pass+1)); }
@@ -32,6 +32,7 @@ with_repo() {
     git -c user.email=t@t -c user.name=t commit --allow-empty -q -m init
     mkdir -p "$TEMPLATE_MOUNT"
     cp "${SKILL_DIR}/templates/fleet-review-enabled"    "$TEMPLATE_MOUNT/"
+    cp "${SKILL_DIR}/templates/review-trigger.yml"       "$TEMPLATE_MOUNT/"
     cp "${SKILL_DIR}/templates/copilot-instructions.md" "$TEMPLATE_MOUNT/"
   ) || { local s=$?; rm -rf "$sandbox"; return $s; }
   ( cd "$sandbox" && "$fn" )
@@ -45,8 +46,8 @@ all_targets_present() { local t; for t in "${TARGETS[@]}"; do [[ -f "$t" ]] || r
 t_install_creates_all() {
   local out; out=$(bash "$SCRIPT") || { echo "    FAIL: scaffold exited non-zero" >&2; return 1; }
   [[ "$(jq -r .state <<<"$out")" == "scaffolded" ]] || { echo "    FAIL: state != scaffolded: $out" >&2; return 1; }
-  [[ "$(jq '[.files[] | select(.action=="created")] | length' <<<"$out")" == "2" ]] || { echo "    FAIL: expected 2 created: $out" >&2; return 1; }
-  all_targets_present || { echo "    FAIL: not all 2 targets written" >&2; return 1; }
+  [[ "$(jq '[.files[] | select(.action=="created")] | length' <<<"$out")" == "3" ]] || { echo "    FAIL: expected 3 created: $out" >&2; return 1; }
+  all_targets_present || { echo "    FAIL: not all 3 targets written" >&2; return 1; }
 }
 
 t_install_refuses_existing() {
@@ -89,7 +90,7 @@ t_missing_template_fails() {
 }
 
 echo "== scaffold.sh tests =="
-run "install creates both artifacts"          with_repo t_install_creates_all
+run "install creates all three artifacts"          with_repo t_install_creates_all
 run "install refuses a pre-existing target"   with_repo t_install_refuses_existing
 run "upgrade overwrites a tampered file"      with_repo t_upgrade_overwrites
 run "upgrade is a no-op when identical"       with_repo t_upgrade_noop_when_identical
