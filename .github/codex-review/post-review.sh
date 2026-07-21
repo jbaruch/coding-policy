@@ -33,7 +33,8 @@ submit_review() {
   payload=$(jq -n --arg event "$event" --arg body "$body" '{event: $event, body: $body}')
   while :; do
     attempt=$((attempt + 1))
-    # Capture stderr (stdout discarded) so a 422 can be told from a transient 5xx.
+    # Capture stderr (stdout discarded) so a non-retryable 422 can be told apart
+    # from any other failure (which is retried).
     if err=$(printf '%s' "$payload" | gh api "repos/${owner}/${repo}/pulls/${pr}/reviews" --method POST --input - 2>&1 1>/dev/null); then
       return 0
     fi
