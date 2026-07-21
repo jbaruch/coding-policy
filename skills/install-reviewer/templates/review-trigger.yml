@@ -5,7 +5,8 @@ name: Trigger fleet policy review
 # so the policy verdict is available before merge (the coding-policy cron poll is
 # only a backstop). Fork PRs are skipped — they cannot read the dispatch secret.
 #
-# Requires one repo secret:
+# Requires one repo secret (set it at
+# https://github.com/<owner>/<repo>/settings/secrets/actions for this repo):
 #   FLEET_DISPATCH_TOKEN — a fine-grained PAT scoped to ONLY jbaruch/coding-policy
 #     with `Actions: write` (nothing else). It can trigger the review workflow and
 #     nothing more. The Codex credential itself lives only in coding-policy.
