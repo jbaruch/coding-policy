@@ -33,27 +33,35 @@
 set -euo pipefail
 
 # Bot logins, by surface. A reviewer does NOT necessarily author its reviews
-# and its inline comments under the same login:
+# and its inline comments under the same login, and the policy reviewer's login
+# depends on WHICH repo the PR is in:
 #
-#   surface          Codex policy reviewer   Copilot
-#   ---------------  ----------------------  --------------------------------
-#   review           github-actions[bot]     copilot-pull-request-reviewer[bot]
-#   inline comment   github-actions[bot]     Copilot
+#   surface          Policy reviewer                       Copilot
+#   ---------------  ------------------------------------  ----------------------------------
+#   review           github-actions[bot] (coding-policy's  copilot-pull-request-reviewer[bot]
+#                    own PRs) OR
+#                    coding-policy-fleet-reviewer[bot]
+#                    (consumer repos)
+#   inline comment   same login as its review              Copilot
 #
-# The Codex policy reviewer runs as a GitHub Actions workflow
-# (review-codex.yml, Codex CLI on a ChatGPT subscription) and submits its
-# review with the workflow's GITHUB_TOKEN, so its author is
-# `github-actions[bot]`.
+# The policy reviewer runs two ways: in coding-policy itself as a GitHub Actions
+# workflow (review-codex.yml, Codex CLI) submitting with the workflow's
+# GITHUB_TOKEN, so its author is `github-actions[bot]`; in every consumer repo as
+# the central fleet App (coding-policy#202), submitting as
+# `coding-policy-fleet-reviewer[bot]`. A given PR is reviewed by exactly one of
+# them, so resolving the policy reviewer across BOTH logins (latest review among
+# them) is unambiguous — and a watcher that only knew `github-actions[bot]` sat
+# blind at `none` on every consumer PR the fleet App reviewed.
 #
 # Counting Copilot's comments against its REVIEW login matches nothing, so
 # `inline_comments.copilot` reads 0 on every PR — which vacuously satisfies the
 # release skill's Step 7 "every inline comment has a reply" merge gate and lets
 # a real Copilot finding merge unanswered. Comment counting therefore matches a
 # SET of logins per reviewer. A comment carries exactly one author, so listing
-# both logins cannot double-count.
-CODEX_REVIEW_LOGIN="github-actions[bot]"
+# multiple logins cannot double-count.
+CODEX_REVIEW_LOGINS=("github-actions[bot]" "coding-policy-fleet-reviewer[bot]")
 COPILOT_REVIEW_LOGIN="copilot-pull-request-reviewer[bot]"
-CODEX_COMMENT_LOGINS=("github-actions[bot]")
+CODEX_COMMENT_LOGINS=("github-actions[bot]" "coding-policy-fleet-reviewer[bot]")
 COPILOT_COMMENT_LOGINS=("Copilot" "copilot-pull-request-reviewer[bot]")
 
 # `--paginate` is mandatory: GitHub's default per-page is 30, and a PR
@@ -65,12 +73,20 @@ COPILOT_COMMENT_LOGINS=("Copilot" "copilot-pull-request-reviewer[bot]")
 # pipe the raw paginated output through `jq -s 'add | ...'` to slurp
 # every page into one array before filtering. `per_page=100` is the API
 # maximum and keeps request volume bounded.
+# Variadic on login so one reviewer's multiple identities collapse to a single
+# latest review — the policy reviewer is `github-actions[bot]` on coding-policy's
+# own PRs and `coding-policy-fleet-reviewer[bot]` on consumer repos (see the
+# login table above). A given PR carries reviews from only one of them, so `last`
+# after filtering to the set is that reviewer's newest verdict.
 latest_review_by() {
-  local owner="$1" repo="$2" pr="$3" login="$4"
+  local owner="$1" repo="$2" pr="$3"; shift 3
+  local logins_json
+  logins_json=$(jq -n '$ARGS.positional' --args "$@") \
+    || { echo "error: failed to encode login list for review lookup" >&2; return 1; }
   gh api --paginate "repos/${owner}/${repo}/pulls/${pr}/reviews?per_page=100" \
-    | jq -s --arg login "$login" '
+    | jq -s --argjson logins "$logins_json" '
         (add // [])
-        | [.[] | select(.user.login == $login)]
+        | [.[] | select(.user.login | IN($logins[]))]
         | last
         | if . == null then {state: "none", submitted_at: null, body: null}
           else {state, submitted_at, body} end'
@@ -134,7 +150,7 @@ main() {
     || { echo "error: failed to fetch merge state for ${owner}/${repo}#${pr_number} — run 'gh auth status' to verify auth, then retry 'gh pr view ${pr_number} --repo ${owner}/${repo} --json mergeStateStatus,mergeable' to inspect the failing call directly" >&2; exit 1; }
 
   local codex_review copilot_review codex_comments copilot_comments
-  codex_review=$(latest_review_by   "$owner" "$repo" "$pr_number" "$CODEX_REVIEW_LOGIN") \
+  codex_review=$(latest_review_by   "$owner" "$repo" "$pr_number" "${CODEX_REVIEW_LOGINS[@]}") \
     || { echo "error: failed to fetch Codex review state" >&2; exit 1; }
   copilot_review=$(latest_review_by "$owner" "$repo" "$pr_number" "$COPILOT_REVIEW_LOGIN") \
     || { echo "error: failed to fetch Copilot review state" >&2; exit 1; }

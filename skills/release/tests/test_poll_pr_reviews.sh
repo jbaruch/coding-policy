@@ -274,6 +274,44 @@ t_main_counts_copilot_comments_in_snapshot() {
   assert_eq "inline_comments {codex|copilot}" "2|1" "$counts"
 }
 
+# coding-policy#202: consumer PRs are reviewed by the central fleet App
+# `coding-policy-fleet-reviewer[bot]`, not `github-actions[bot]`. A watcher that
+# only knew the latter sat blind at `none` on every consumer PR. The policy
+# reviewer must resolve across BOTH logins.
+t_latest_review_by_resolves_fleet_app_login() {
+  MOCK_REVIEWS_BODY='[{"user":{"login":"coding-policy-fleet-reviewer[bot]"},"state":"APPROVED","submitted_at":"2026-07-21T05:15:00Z"}]'
+  local out state
+  out=$(latest_review_by "owner" "repo" "1" "${CODEX_REVIEW_LOGINS[@]}")
+  state=$(echo "$out" | jq -r '.state')
+  assert_eq "fleet-App review resolves to policy state" "APPROVED" "$state"
+}
+
+# Only one policy reviewer posts per PR, but resolving across both logins must
+# still return the newest verdict when (hypothetically) both appear.
+t_latest_review_by_policy_reviewer_picks_newest_across_logins() {
+  MOCK_REVIEWS_BODY='[{"user":{"login":"github-actions[bot]"},"state":"COMMENTED","submitted_at":"2026-07-21T05:00:00Z"},{"user":{"login":"coding-policy-fleet-reviewer[bot]"},"state":"CHANGES_REQUESTED","submitted_at":"2026-07-21T05:10:00Z"}]'
+  local out state
+  out=$(latest_review_by "owner" "repo" "1" "${CODEX_REVIEW_LOGINS[@]}")
+  state=$(echo "$out" | jq -r '.state')
+  assert_eq "newest policy verdict across both logins" "CHANGES_REQUESTED" "$state"
+}
+
+t_main_surfaces_fleet_app_review_as_codex() {
+  MOCK_MERGE_STATE=clean
+  MOCK_REVIEWS_BODY='[{"user":{"login":"coding-policy-fleet-reviewer[bot]"},"state":"APPROVED","submitted_at":"2026-07-21T05:15:00Z"}]'
+  local out state
+  out=$(main "owner" "repo" "1")
+  state=$(echo "$out" | jq -r '.reviews.codex.state')
+  assert_eq "fleet-App review surfaced as .reviews.codex.state" "APPROVED" "$state"
+}
+
+t_toplevel_comments_by_counts_fleet_app_login() {
+  MOCK_COMMENTS_BODY='[{"user":{"login":"coding-policy-fleet-reviewer[bot]"},"in_reply_to_id":null}]'
+  local count
+  count=$(toplevel_comments_by "owner" "repo" "1" "${CODEX_COMMENT_LOGINS[@]}")
+  assert_eq "fleet-App inline comment counted for policy reviewer" "1" "$count"
+}
+
 # --- driver ---
 
 echo "== poll-pr-reviews.sh tests =="
@@ -292,6 +330,10 @@ run "toplevel_comments_by counts the 'Copilot' comment login"         t_toplevel
 run "toplevel_comments_by matches either Copilot login"               t_toplevel_comments_by_matches_either_copilot_login
 run "toplevel_comments_by excludes replies and foreign logins"        t_toplevel_comments_by_excludes_replies_and_other_logins
 run "main counts Copilot comments in the snapshot"                    t_main_counts_copilot_comments_in_snapshot
+run "latest_review_by resolves the fleet App login (#202)"            t_latest_review_by_resolves_fleet_app_login
+run "latest_review_by picks newest policy verdict across logins"      t_latest_review_by_policy_reviewer_picks_newest_across_logins
+run "main surfaces the fleet App review as .reviews.codex"            t_main_surfaces_fleet_app_review_as_codex
+run "toplevel_comments_by counts the fleet App comment login"         t_toplevel_comments_by_counts_fleet_app_login
 
 echo "== summary: ${PASS_COUNT} passed, ${FAIL_COUNT} failed =="
 [[ "$FAIL_COUNT" -eq 0 ]]

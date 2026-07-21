@@ -1,5 +1,9 @@
 # Changelog
 
+### Skills
+
+- **Release watcher recognizes the fleet reviewer on consumer repos** — `poll-pr-reviews.sh` resolved the policy reviewer only as `github-actions[bot]` (correct for coding-policy's own PRs), so on a consumer repo — where the central fleet App reviews as `coding-policy-fleet-reviewer[bot]` (#202) — `watch-pr-reviews.sh` saw `.reviews.codex.state` as `none` forever and sat at `pending_at_budget`. `latest_review_by` is now variadic and resolves the policy reviewer across both logins (a PR carries reviews from only one, so `last` in the set is unambiguous); the codex comment-login set gains the App login too. `SKILL.md` Step 5 and `dismiss-stale-reviews.sh` now note the consumer case: the fleet App CAN `APPROVE`, so its re-review supersedes its own `CHANGES_REQUESTED` directly and no dismissal is needed there. New tests cover the fleet-App review state, cross-login newest-verdict resolution, and the App comment count.
+
 ## 0.3.105 — 2026-07-21
 
 ### Rules
