@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.104 — 2026-07-21
+
 ### CI
 
 - **PR-time trigger for the fleet reviewer — restores before-merge policy review on consumers** — the cron poller (`*/15`) can't review a PR that merges within the interval, so a fast/urgent merge on a swept consumer skipped policy review entirely. `fleet-review.yml` gains a `workflow_dispatch` single-PR path (inputs `repo`/`pr`/`base`, its own per-PR concurrency group so it never queues behind a running poll) that reviews exactly the dispatched PR; the cron stays as the backstop. Consumers fire it at PR time via a thin trigger workflow (below).
