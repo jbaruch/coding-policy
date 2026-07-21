@@ -29,6 +29,7 @@ import argparse
 import json
 import re
 import subprocess
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -83,18 +84,34 @@ def stamp_changelog(text: str, version: str, date: str) -> tuple[str, bool]:
 
 
 def query_latest_version(plugin_name: str) -> str | None:
-    """Return the registry's latest published version, or None on first publish.
+    """Return the registry's latest published version, or None if it can't be read.
 
-    Mirrors patch-version-publish's handling: a 404 means the plugin has never
-    been published; any other failure is surfaced so auth/network issues are not
-    masked.
+    Mirrors patch-version-publish's handling. Returns None in two cases so the
+    caller falls back to the manifest version: a 404 (the plugin has never been
+    published) and a Tessl auth failure (the stamp step ran without login — see
+    the caller). Any other failure (network, etc.) is surfaced so it is not masked.
     """
     proc = subprocess.run(
         ["tessl", "plugin", "info", plugin_name],
         capture_output=True, text=True,
     )
     if proc.returncode != 0:
-        if "404" in (proc.stdout + proc.stderr):
+        combined = proc.stdout + proc.stderr
+        if "404" in combined:
+            return None
+        # No Tessl auth reached this step — e.g. a consumer publish workflow that
+        # stamps without running setup-tessl / `tessl login` first. Fall back to
+        # the manifest version rather than wedging the publish: the manifest is the
+        # version being published when kept ahead of the registry (the standard
+        # convention), and patch-version-publish still does its own authoritative
+        # bump downstream. Genuine (non-auth) failures still raise.
+        if re.search(r"authenticat|log ?in|sign (?:in|up)", combined, re.IGNORECASE):
+            print(
+                f"warning: `tessl plugin info {plugin_name}` requires Tessl auth in "
+                "this step — falling back to the manifest version. Run setup-tessl "
+                "before the stamp step for an authoritative registry check.",
+                file=sys.stderr,
+            )
             return None
         raise RuntimeError(
             f"`tessl plugin info {plugin_name}` failed (exit {proc.returncode}): "

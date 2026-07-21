@@ -1,5 +1,9 @@
 # Changelog
 
+### CI
+
+- **`stamp-changelog` falls back to the manifest version on a Tessl auth failure** — the action's `query_latest_version` hard-raised when `tessl plugin info` failed for any non-404 reason, so a consumer's publish-on-merge wedged at the stamp step with "requires you to be logged in" when that step ran without `setup-tessl` / `tessl login`. An auth failure is now non-fatal — it warns and returns `None`, so the manifest version (the one being published when kept ahead of the registry) is used; `patch-version-publish` still does its own authoritative bump. Genuine non-auth failures still raise. Fixes #207.
+
 ## 0.3.102 — 2026-07-21
 
 ### CI

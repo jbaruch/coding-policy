@@ -2,7 +2,9 @@
 """Tests for skills/release/stamp-changelog.py — version computation and stamping."""
 
 import importlib.util
+import subprocess
 import unittest
+from unittest import mock
 from pathlib import Path
 
 SCRIPT = Path(__file__).resolve().parent.parent / "stamp-changelog.py"
@@ -50,6 +52,30 @@ class ComputeVersion(unittest.TestCase):
             stamp_changelog.compute_version("0.18", "0.18.7")
         with self.assertRaises(ValueError):
             stamp_changelog.compute_version("0.18.7", "vNext")
+
+
+class QueryLatestVersion(unittest.TestCase):
+    """query_latest_version degrades gracefully when the stamp step has no auth."""
+
+    def _run(self, returncode, stdout="", stderr=""):
+        cp = subprocess.CompletedProcess(args=[], returncode=returncode, stdout=stdout, stderr=stderr)
+        with mock.patch.object(stamp_changelog.subprocess, "run", return_value=cp):
+            return stamp_changelog.query_latest_version("jbaruch/x")
+
+    def test_success_parses_latest(self):
+        self.assertEqual(self._run(0, stdout="Name  x\nLatest Version  0.2.64\n"), "0.2.64")
+
+    def test_404_returns_none(self):
+        self.assertIsNone(self._run(1, stderr="request failed: HTTP 404"))
+
+    def test_auth_failure_returns_none(self):
+        # The regression: no auth in the stamp step must fall back, not raise (#207).
+        msg = "✘ Please authenticate with Tessl to continue. Run `tessl login` to sign up or log in."
+        self.assertIsNone(self._run(1, stderr=msg))
+
+    def test_non_auth_failure_still_raises(self):
+        with self.assertRaises(RuntimeError):
+            self._run(1, stderr="connection reset by peer")
 
 
 class StampChangelog(unittest.TestCase):
