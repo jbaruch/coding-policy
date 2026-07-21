@@ -111,7 +111,7 @@ jobs:
           DISPATCH_PR: ${{ github.event.inputs.pr }}
           DISPATCH_BASE: ${{ github.event.inputs.base }}
         run: |
-          set -uo pipefail
+          set -euo pipefail
           if [ -n "${DISPATCH_REPO:-}" ]; then
             # PR-time single-PR path: review exactly the dispatched PR. No dedup —
             # the trigger fires on each push, and fleet-review-one reviews the live head.
