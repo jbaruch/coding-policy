@@ -20,10 +20,19 @@ ok()  { printf 'ok   - %s\n' "$1"; pass=$((pass+1)); }
 bad() { printf 'FAIL - %s\n' "$1"; fail=$((fail+1)); }
 
 # Mock gh: capture the /reviews POST payload (arrives on stdin via --input -).
+# With MOCK_422_ON_APPROVE=1, an APPROVE submit fails HTTP 422 (as github-actions[bot]
+# would), so the fallback-to-COMMENT path can be exercised.
 GH_CAPTURE=""
+MOCK_422_ON_APPROVE=0
 gh() {
   if [[ "${1:-}" == "api" && "$*" == */reviews* ]]; then
-    cat > "$GH_CAPTURE"
+    local payload; payload=$(cat)
+    printf '%s' "$payload" > "$GH_CAPTURE"
+    local ev; ev=$(jq -r '.event' <<<"$payload")
+    if [[ "$MOCK_422_ON_APPROVE" == "1" && "$ev" == "APPROVE" ]]; then
+      echo "gh: Unprocessable Entity (HTTP 422)" >&2
+      return 1
+    fi
     return 0
   fi
   return 0
@@ -31,19 +40,34 @@ gh() {
 
 run_main() { ( set -euo pipefail; main "$@" ); }
 
-# --- pass, no findings -> COMMENT, body is the summary ---
+# --- pass, no findings -> APPROVE (token can approve), body is the summary ---
 t_pass() {
-  local dir; dir=$(mktemp -d)
-  GH_CAPTURE="$dir/payload.json"
-  printf '{"summary":"Policy loaded: 21 rule files from rules/. All rules pass.","verdict":"pass","findings":[]}' > "$dir/final.json"
+  local dir; dir=$(mktemp -d) || { bad "pass: mktemp -d failed"; return; }
+  GH_CAPTURE="$dir/payload.json"; MOCK_422_ON_APPROVE=0
+  printf '{"summary":"Policy loaded: 21 rule files from jbaruch/coding-policy. All rules pass.","verdict":"pass","findings":[]}' > "$dir/final.json"
   local out; out=$(run_main owner repo 5 "$dir/final.json")
   local rc=$?
   [[ $rc -eq 0 ]]                                              || { bad "pass: exit 0 (rc=$rc)"; rm -rf "$dir"; return; }
-  [[ "$(jq -r .event <<<"$out")" == "COMMENT" ]]              || { bad "pass: event COMMENT (got $out)"; rm -rf "$dir"; return; }
+  [[ "$(jq -r .event <<<"$out")" == "APPROVE" ]]             || { bad "pass: event APPROVE (got $out)"; rm -rf "$dir"; return; }
   [[ "$(jq -r .findings <<<"$out")" == "0" ]]                 || { bad "pass: findings 0 (got $out)"; rm -rf "$dir"; return; }
-  [[ "$(jq -r .event "$GH_CAPTURE")" == "COMMENT" ]]          || { bad "pass: payload event COMMENT"; rm -rf "$dir"; return; }
+  [[ "$(jq -r .event "$GH_CAPTURE")" == "APPROVE" ]]         || { bad "pass: payload event APPROVE"; rm -rf "$dir"; return; }
   jq -r .body "$GH_CAPTURE" | grep -q "Policy loaded: 21"     || { bad "pass: body carries the load indicator"; rm -rf "$dir"; return; }
-  ok "pass verdict -> COMMENT, summary body, 0 findings"
+  ok "pass verdict -> APPROVE, summary body, 0 findings"
+  rm -rf "$dir"
+}
+
+# --- pass but token can't approve (HTTP 422) -> falls back to COMMENT ---
+t_pass_422_fallback() {
+  local dir; dir=$(mktemp -d) || { bad "fallback: mktemp -d failed"; return; }
+  GH_CAPTURE="$dir/payload.json"; MOCK_422_ON_APPROVE=1
+  printf '{"summary":"Policy loaded: 21 rule files from jbaruch/coding-policy. Clean.","verdict":"pass","findings":[]}' > "$dir/final.json"
+  local out; out=$(run_main owner repo 5 "$dir/final.json" 2>/dev/null)
+  local rc=$?
+  MOCK_422_ON_APPROVE=0
+  [[ $rc -eq 0 ]]                                              || { bad "fallback: exit 0 (rc=$rc)"; rm -rf "$dir"; return; }
+  [[ "$(jq -r .event <<<"$out")" == "COMMENT" ]]             || { bad "fallback: output event COMMENT (got $out)"; rm -rf "$dir"; return; }
+  [[ "$(jq -r .event "$GH_CAPTURE")" == "COMMENT" ]]         || { bad "fallback: last payload event COMMENT"; rm -rf "$dir"; return; }
+  ok "pass + APPROVE 422 -> falls back to COMMENT"
   rm -rf "$dir"
 }
 
@@ -69,20 +93,21 @@ JSON
 # --- missing result file -> exit 1 ---
 t_missing_file() {
   local rc=0; run_main owner repo 1 "/nonexistent/final.json" >/dev/null 2>&1 || rc=$?
-  [[ $rc -eq 1 ]] && ok "missing result file -> exit 1" || bad "missing result file -> exit 1 (rc=$rc)"
+  if [[ $rc -eq 1 ]]; then ok "missing result file -> exit 1"; else bad "missing result file -> exit 1 (rc=$rc)"; fi
 }
 
 # --- invalid JSON -> exit 1 ---
 t_invalid_json() {
-  local dir; dir=$(mktemp -d)
+  local dir; dir=$(mktemp -d) || { bad "invalid_json: mktemp -d failed"; return; }
   printf 'not json at all' > "$dir/final.json"
   local rc=0; run_main owner repo 1 "$dir/final.json" >/dev/null 2>&1 || rc=$?
-  [[ $rc -eq 1 ]] && ok "invalid JSON -> exit 1" || bad "invalid JSON -> exit 1 (rc=$rc)"
+  if [[ $rc -eq 1 ]]; then ok "invalid JSON -> exit 1"; else bad "invalid JSON -> exit 1 (rc=$rc)"; fi
   rm -rf "$dir"
 }
 
 echo "== post-review.sh tests =="
 t_pass
+t_pass_422_fallback
 t_changes
 t_missing_file
 t_invalid_json

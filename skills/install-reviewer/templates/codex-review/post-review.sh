@@ -7,9 +7,10 @@
 # the review body rather than as inline comments so an off-diff line can never
 # trigger the HTTP 422 that would cascade-fail the whole review.
 #
-# The review is authored by whoever GH_TOKEN belongs to — in CI that is
-# `github-actions[bot]`, which GitHub forbids from posting APPROVE (HTTP 422).
-# So a clean pass is a COMMENT; a violation is REQUEST_CHANGES.
+# The review is authored by whoever GH_TOKEN belongs to. A clean pass posts
+# APPROVE and a violation posts REQUEST_CHANGES. A token GitHub forbids from
+# approving (`github-actions[bot]` — HTTP 422) falls back to COMMENT on a pass,
+# so the verdict is never lost.
 #
 # Usage: post-review.sh <owner> <repo> <pr-number> <result-json-file>
 # Out:   one JSON object on stdout: {"state":"posted","event":"...","findings":N}
@@ -21,6 +22,36 @@ if ! command -v jq >/dev/null 2>&1; then
   echo "error: jq is not installed; install with 'brew install jq' (macOS) or 'apt install jq' (Debian/Ubuntu) and re-run" >&2
   exit 2
 fi
+
+# Submit ONE review event to the PR, retrying transient failures with backoff.
+# Args: <owner> <repo> <pr> <event> <body>
+# Return: 0 posted; 22 the event was rejected as unprocessable (HTTP 422 — e.g.
+#   an APPROVE from a token that cannot approve); 1 other failure after retries.
+submit_review() {
+  local owner="$1" repo="$2" pr="$3" event="$4" body="$5"
+  local payload attempt=0 max=3 err
+  payload=$(jq -n --arg event "$event" --arg body "$body" '{event: $event, body: $body}')
+  while :; do
+    attempt=$((attempt + 1))
+    # Capture stderr (stdout discarded) so a non-retryable 422 can be told apart
+    # from any other failure (which is retried).
+    if err=$(printf '%s' "$payload" | gh api "repos/${owner}/${repo}/pulls/${pr}/reviews" --method POST --input - 2>&1 1>/dev/null); then
+      return 0
+    fi
+    # HTTP 422 (unprocessable) is not transient — do not retry; let the caller fall back.
+    if grep -q "HTTP 422" <<<"$err"; then
+      printf '%s\n' "$err" >&2
+      return 22
+    fi
+    if (( attempt >= max )); then
+      printf '%s\n' "$err" >&2
+      echo "error: failed to submit the review on ${owner}/${repo}#${pr} after ${max} attempts — see the gh error above (token scope, PR state, or a GitHub API outage)" >&2
+      return 1
+    fi
+    echo "post-review: submit attempt ${attempt} failed — retrying in $(( attempt * 5 ))s" >&2
+    sleep $(( attempt * 5 ))
+  done
+}
 
 main() {
   if [[ $# -ne 4 ]]; then
@@ -46,7 +77,7 @@ main() {
   local event
   case "$verdict" in
     changes_requested) event="REQUEST_CHANGES" ;;
-    pass)              event="COMMENT" ;;
+    pass)              event="APPROVE" ;;
     *) echo "error: unexpected verdict '${verdict}' in ${result} (want pass|changes_requested)" >&2; exit 1 ;;
   esac
 
@@ -58,26 +89,20 @@ main() {
     body="${body}"$'\n\n'"## Findings"$'\n'"${findings_md}"
   fi
 
-  local payload attempt=0 max=3
-  payload=$(jq -n --arg event "$event" --arg body "$body" '{event: $event, body: $body}')
+  # A pass is APPROVE when the token can approve (a GitHub App); a token that
+  # cannot approve (github-actions[bot] — HTTP 422) falls back to COMMENT so the
+  # verdict is never lost. The output reports the event actually posted.
+  local posted="$event" rc=0
+  submit_review "$owner" "$repo" "$pr" "$event" "$body" || rc=$?
+  if (( rc == 22 )) && [[ "$event" == "APPROVE" ]]; then
+    echo "post-review: APPROVE rejected as unprocessable (HTTP 422) — this token cannot approve; posting COMMENT instead" >&2
+    posted="COMMENT"
+    submit_review "$owner" "$repo" "$pr" "COMMENT" "$body" || exit 1
+  elif (( rc != 0 )); then
+    exit 1
+  fi
 
-  # Retry on a transient GitHub API failure (5xx / network) — a policy verdict
-  # must not be lost to a blip. gh exits non-zero on HTTP errors; back off and
-  # retry before giving up.
-  while :; do
-    attempt=$((attempt + 1))
-    if printf '%s' "$payload" | gh api "repos/${owner}/${repo}/pulls/${pr}/reviews" --method POST --input - >&2; then
-      break
-    fi
-    if (( attempt >= max )); then
-      echo "error: failed to submit the review on ${owner}/${repo}#${pr} after ${max} attempts — see the gh error above (token scope, PR state, or a GitHub API outage)" >&2
-      exit 1
-    fi
-    echo "post-review: submit attempt ${attempt} failed — retrying in $(( attempt * 5 ))s" >&2
-    sleep $(( attempt * 5 ))
-  done
-
-  jq -n --arg event "$event" --argjson findings "$findings_count" \
+  jq -n --arg event "$posted" --argjson findings "$findings_count" \
     '{state: "posted", event: $event, findings: $findings}'
 }
 
