@@ -1,5 +1,13 @@
 # Changelog
 
+### Rules
+
+- **`dependency-management` — Same-Repo Reusable-Workflow Action Carve-Out** — a reusable workflow that invokes a composite action in its own repo can't use a `./` local path (it resolves against the external caller's checkout) and no scanner renews a same-repo `owner/repo/...@ref` self-reference, so a SHA pin is both circular and un-renewable. The carve-out sanctions tracking the hosting repo's default branch (`@main`) for that narrow case; every external action reference still pins with scanner-tracked renewal. Surfaced implementing the reusable publish workflow (below).
+
+### CI
+
+- **Canonical reusable publish workflow — unifies the fleet's drifted publish CI** — the `jbaruch/*` consumers had drifted onto three filenames for the same job (`publish-tile.yml` / `publish-plugin.yml` / `publish.yml`) with per-repo copies of the checkout → setup-tessl → skill-review → lint → publish boilerplate and their own third-party action pins. New reusable `.github/workflows/publish-plugin.yml` (`on: workflow_call`) owns that pipeline; consumers carry a thin `publish.yml` caller (triggers + `uses:` + `secrets: inherit`). Inputs fold in the per-repo variation: `python-version`, `pre-publish-script` (repo-specific gate), `stamp-changelog`, `skills-dir`, `skill-review-credit-outage` (default `fail`; consumers opt into `skip`), and `publish-mode` (`auto-bump` via `patch-version-publish`, or `as-is` via `tessl plugin publish` for repos that require human-authored version bumps). The skill-review threshold is fixed at 85 (context-artifacts forbids lowering it), not a caller input. Sibling composite actions are referenced at `@main` (a `./` path in a called reusable workflow resolves against the caller, which has no coding-policy actions). jbaruch/coding-policy#206.
+
 ## 0.3.104 — 2026-07-21
 
 ### CI

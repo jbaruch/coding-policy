@@ -40,6 +40,17 @@ alwaysApply: true
 - Multiple covered manifests permitted iff each independently meets all three preconditions
 - Every other manifest in the repo still pins
 
+## Same-Repo Reusable-Workflow Action Carve-Out
+
+- Narrow exception for a reusable workflow (`on: workflow_call`) referencing a composite action in its OWN repository
+- Applies when one repo hosts both the reusable workflow and the action it invokes, and external repos call that workflow — a `./` local path resolves against the caller's checkout (which lacks the action), forcing a full `owner/repo/.../action@ref` self-reference
+- The self-reference MAY track the hosting repo's default branch (`@main`) instead of a pin
+- Preconditions (all required):
+  1. The referenced action lives in the same repository as the reusable workflow
+  2. No dependency scanner updates the reference — Dependabot and Renovate skip same-repo self-references, so a pin has no renewal path and a SHA pin of one's own repo is circular
+  3. Workflow and action move together on the default branch; the external caller pins the WORKFLOW ref (`@<sha>`) for reproducible caller logic
+- Every external action reference still pins with a scanner-tracked renewal per Freshness
+
 ## No Vendoring
 
 - Don't copy library source code into the repo
