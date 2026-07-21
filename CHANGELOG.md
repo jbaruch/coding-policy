@@ -1,5 +1,9 @@
 # Changelog
 
+### Skills
+
+- **`install-reviewer` — fleet-review trigger skips Dependabot PRs** — the scaffolded `review-trigger.yml` guarded only fork PRs (`head.repo.full_name == github.repository`). Dependabot PRs are same-repo, so they passed that guard, but the `dependabot[bot]` actor receives no secrets — `FLEET_DISPATCH_TOKEN` came through empty and the workflow's own empty-token guard exited 1, leaving a permanent red check on every Dependabot PR. The job `if:` now also requires `github.actor != 'dependabot[bot]'`; the coding-policy cron poll reviews Dependabot PRs as the backstop. PR body template and the workflow header note the new skip.
+
 ## 0.3.107 — 2026-07-21
 
 ### Rules
