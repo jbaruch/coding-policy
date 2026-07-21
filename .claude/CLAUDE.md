@@ -23,3 +23,4 @@ This repo IS `jbaruch/coding-policy`. The rule files below are the source-of-tru
 @../rules/boy-scout.md
 @../rules/external-repo-contributions.md
 @../rules/reviewer-feedback-reading.md
+@../rules/response-clarity.md

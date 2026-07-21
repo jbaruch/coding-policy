@@ -1,5 +1,9 @@
 # Changelog
 
+### Rules
+
+- **New `response-clarity` rule — action-first agent responses** — adapts the ten output principles from [`ayghri/i-have-adhd`](https://github.com/ayghri/i-have-adhd) into an always-on steering rule for how agents shape their live responses to the user (distinct from `context-writing-style`, which governs written context artifacts). Lead with the command or answer, number multi-step work, one bounded action per item, cap unranked lists at 5, restate progress across turns, make wins concrete and verifiable, give concrete time ballparks, report errors matter-of-fact, close with one two-minute next step, no preamble or closers. Exceptions loosen the rules for requested explanations, destructive actions (add confirmation), debug spirals (ask one diagnostic question), and genuine ambiguity (ask one clarifying question).
+
 ## 0.3.106 — 2026-07-21
 
 ### Skills
