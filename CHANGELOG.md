@@ -1,5 +1,13 @@
 # Changelog
 
+### CI
+
+- **PR-time trigger for the fleet reviewer — restores before-merge policy review on consumers** — the cron poller (`*/15`) can't review a PR that merges within the interval, so a fast/urgent merge on a swept consumer skipped policy review entirely. `fleet-review.yml` gains a `workflow_dispatch` single-PR path (inputs `repo`/`pr`/`base`, its own per-PR concurrency group so it never queues behind a running poll) that reviews exactly the dispatched PR; the cron stays as the backstop. Consumers fire it at PR time via a thin trigger workflow (below).
+
+### Skills
+
+- **`install-reviewer` scaffolds a PR-time trigger + one narrow dispatch secret** — onboarding now also commits `.github/workflows/review-trigger.yml`, a thin `on: pull_request` workflow that `gh workflow run`s the central review for the PR immediately (so the verdict lands before merge). The consumer sets one stable `FLEET_DISPATCH_TOKEN` — a fine-grained PAT scoped to only `jbaruch/coding-policy` with `Actions: write` — which can trigger the review workflow and nothing else; the Codex credential still lives only in `coding-policy`. `scaffold.sh`/`preflight.sh`/`commit.sh`/tests retarget to the three files; `SKILL.md` + `PR_BODY_TEMPLATE.md` document the secret.
+
 ## 0.3.103 — 2026-07-21
 
 ### CI

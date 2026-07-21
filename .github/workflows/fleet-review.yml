@@ -29,14 +29,29 @@ on:
     # exceeds a typical full-batch run, so runs do not pile up under the
     # cancel-in-progress:false concurrency guard below.
     - cron: "*/15 * * * *"
+  # PR-time path: a consumer's thin review-trigger.yml calls this with the PR
+  # coords for an immediate single-PR review; the cron above is the backstop.
   workflow_dispatch:
+    inputs:
+      repo:
+        description: "Consumer repo name (under jbaruch/) to review a single PR of"
+        required: false
+      pr:
+        description: "PR number to review"
+        required: false
+      base:
+        description: "Base branch of the PR"
+        required: false
 
 permissions:
   contents: read
 
 concurrency:
-  group: fleet-review
-  cancel-in-progress: false
+  # Single-PR dispatches get a per-PR group so they run immediately instead of
+  # queuing behind a running cron poll; a new push to that PR cancels its prior
+  # review. The cron poll keeps its own group and never cancels in-progress.
+  group: fleet-review-${{ github.event.inputs.repo || 'poll' }}-${{ github.event.inputs.pr || 'all' }}
+  cancel-in-progress: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.pr != '' }}
 
 jobs:
   review:
@@ -88,11 +103,28 @@ jobs:
       - name: Redact the credential from CI logs
         run: bash .github/codex-review/mask-secrets.sh "$HOME/.codex/auth.json"
 
-      - name: Poll for PRs that still need review
+      - name: Build the review worklist
         env:
           GH_TOKEN: ${{ steps.apptoken.outputs.token }}
           REVIEWER_LOGIN: ${{ steps.apptoken.outputs.app-slug }}[bot]
-        run: bash .github/codex-review/fleet-poll.sh > worklist.json
+          DISPATCH_REPO: ${{ github.event.inputs.repo }}
+          DISPATCH_PR: ${{ github.event.inputs.pr }}
+          DISPATCH_BASE: ${{ github.event.inputs.base }}
+        run: |
+          set -uo pipefail
+          if [ -n "${DISPATCH_REPO:-}" ]; then
+            # PR-time single-PR path: review exactly the dispatched PR. No dedup —
+            # the trigger fires on each push, and fleet-review-one reviews the live head.
+            if ! [[ "${DISPATCH_PR:-}" =~ ^[0-9]+$ ]]; then
+              echo "error: dispatch input 'pr' must be a number, got '${DISPATCH_PR:-}'" >&2
+              exit 1
+            fi
+            jq -nc --arg r "$DISPATCH_REPO" --argjson n "$DISPATCH_PR" --arg b "$DISPATCH_BASE" \
+              '[{owner:"jbaruch", repo:$r, number:$n, base_ref:$b, head_sha:"(dispatch)"}]' > worklist.json
+          else
+            # Cron backstop: poll all marked repos for PRs needing review.
+            bash .github/codex-review/fleet-poll.sh > worklist.json
+          fi
 
       - name: Review each PR that needs it
         env:
