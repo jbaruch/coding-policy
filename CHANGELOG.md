@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.105 — 2026-07-21
+
 ### Rules
 
 - **`dependency-management` — Same-Repo Reusable-Workflow Action Carve-Out** — a reusable workflow that invokes a composite action in its own repo can't use a `./` local path (it resolves against the external caller's checkout) and no scanner renews a same-repo `owner/repo/...@ref` self-reference, so a SHA pin is both circular and un-renewable. The carve-out sanctions tracking the hosting repo's default branch (`@main`) for that narrow case; every external action reference still pins with scanner-tracked renewal. Surfaced implementing the reusable publish workflow (below).
