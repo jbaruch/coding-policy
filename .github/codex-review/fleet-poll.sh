@@ -38,7 +38,7 @@ main() {
     elif grep -q "HTTP 404" <<<"$merr"; then
       continue
     else
-      echo "warn: could not check the fleet-review marker for ${full} — skipping this cycle" >&2
+      echo "warn: could not check the fleet-review marker for ${full} (${merr}) — skipping this cycle" >&2
       continue
     fi
 
