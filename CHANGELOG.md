@@ -1,5 +1,9 @@
 # Changelog
 
+### Rules
+
+- **`skill-authoring` Typed Calls: mid-session-install recovery carve-out** — field feedback from a first-run consumer setup (jbaruch/jbaruch-travel-policy#24): a policy skill's Setup installs its library plugin mid-session, and the harness's skill registry only loads at session start — the documented typed `Skill()` call throws "Unknown skill" for the rest of that session no matter how the skill phrases it. The consumer documented the only working recovery (read the just-installed skill's mounted `SKILL.md` and execute its steps), and the policy reviewer correctly flagged that as a Typed Calls violation with no sanctioned form, naming "update the governing rule with an explicit carve-out" as a remedy. The carve-out sanctions exactly that shape with three preconditions: the typed call stays the sole authored invocation path, the recovery reads the plugin-mount `SKILL.md`, and the skill text scopes the recovery to the installing session.
+
 ## 0.3.100 — 2026-07-21
 
 ### CI
