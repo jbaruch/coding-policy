@@ -125,21 +125,11 @@ else
 fi
 TEMPLATE_DIR=".tessl/plugins/jbaruch/coding-policy/skills/install-reviewer/templates"
 TEMPLATES=(
-  "${TEMPLATE_DIR}/review-codex.yml"
-  "${TEMPLATE_DIR}/codex-review/schema.json"
-  "${TEMPLATE_DIR}/codex-review/prompt.md"
-  "${TEMPLATE_DIR}/codex-review/post-review.sh"
-  "${TEMPLATE_DIR}/codex-review/assert-no-secret-leak.sh"
-  "${TEMPLATE_DIR}/codex-review/mask-secrets.sh"
+  "${TEMPLATE_DIR}/fleet-review-enabled"
   "${TEMPLATE_DIR}/copilot-instructions.md"
 )
 TARGETS=(
-  ".github/workflows/review-codex.yml"
-  ".github/codex-review/schema.json"
-  ".github/codex-review/prompt.md"
-  ".github/codex-review/post-review.sh"
-  ".github/codex-review/assert-no-secret-leak.sh"
-  ".github/codex-review/mask-secrets.sh"
+  ".github/fleet-review-enabled"
   ".github/copilot-instructions.md"
 )
 

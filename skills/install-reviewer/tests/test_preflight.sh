@@ -138,9 +138,8 @@ with_sourced_sandbox() {
     cd "$sandbox"
     git -c init.defaultBranch=main init -q
     git -c user.email=t@t -c user.name=t commit --allow-empty -q -m init
-    mkdir -p .github/workflows .github/codex-review
-    printf 'name: review\n' > .github/workflows/review-codex.yml
-    for f in schema.json prompt.md post-review.sh assert-no-secret-leak.sh mask-secrets.sh; do printf '# %s\n' "$f" > ".github/codex-review/$f"; done
+    mkdir -p .github
+    printf '# fleet-review marker\n' > .github/fleet-review-enabled
     printf '# Copilot\n' > .github/copilot-instructions.md
     git add -A
     git -c user.email=t@t -c user.name=t commit -q -m targets
@@ -163,12 +162,12 @@ with_sourced_sandbox() {
 # scaffold.sh can't silently re-create it and clobber the consumer's
 # intentional removal.
 t_tracked_deletion_via_rm_flagged() {
-  rm .github/workflows/review-codex.yml
+  rm .github/fleet-review-enabled
   failures=()
   check_no_dirty_target_edits
   [[ ${#failures[@]} -eq 1 ]] || { echo "    FAIL: expected 1 failure, got ${#failures[@]}: ${failures[*]}" >&2; return 1; }
   echo "${failures[0]}" | grep -q "tracked deletion" || { echo "    FAIL: expected 'tracked deletion' marker; got: ${failures[0]}" >&2; return 1; }
-  echo "${failures[0]}" | grep -q "review-codex\.yml" || { echo "    FAIL: expected review-codex.yml path; got: ${failures[0]}" >&2; return 1; }
+  echo "${failures[0]}" | grep -q "fleet-review-enabled" || { echo "    FAIL: expected fleet-review-enabled path; got: ${failures[0]}" >&2; return 1; }
 }
 
 # `git rm` form removes the path from index AND working tree while it
@@ -186,12 +185,12 @@ t_tracked_deletion_via_git_rm_flagged() {
 # Multi-target deletion: every deleted target must surface, not just
 # the first one found.
 t_multiple_tracked_deletions_all_flagged() {
-  rm .github/workflows/review-codex.yml
+  rm .github/fleet-review-enabled
   git rm -q .github/copilot-instructions.md
   failures=()
   check_no_dirty_target_edits
   [[ ${#failures[@]} -eq 1 ]] || { echo "    FAIL: expected 1 aggregated failure, got ${#failures[@]}: ${failures[*]}" >&2; return 1; }
-  echo "${failures[0]}" | grep -q "review-codex\.yml (tracked deletion)" || { echo "    FAIL: missing review-codex.yml in: ${failures[0]}" >&2; return 1; }
+  echo "${failures[0]}" | grep -q "fleet-review-enabled (tracked deletion)" || { echo "    FAIL: missing fleet-review-enabled in: ${failures[0]}" >&2; return 1; }
   echo "${failures[0]}" | grep -q "copilot-instructions\.md (tracked deletion)" || { echo "    FAIL: missing copilot-instructions.md in: ${failures[0]}" >&2; return 1; }
 }
 
@@ -207,11 +206,11 @@ t_unmodified_targets_not_flagged() {
 # Uncommitted edits on a tracked reviewer target must surface in override mode,
 # so a consumer's unrelated pending change isn't swept into the upgrade commit.
 t_uncommitted_edits_flagged() {
-  printf '\n# consumer edit\n' >> .github/codex-review/prompt.md
+  printf "\n# consumer edit\n" >> .github/copilot-instructions.md
   failures=()
   check_no_dirty_target_edits
   [[ ${#failures[@]} -eq 1 ]] || { echo "    FAIL: expected 1 failure, got ${#failures[@]}: ${failures[*]}" >&2; return 1; }
-  echo "${failures[0]}" | grep -q "prompt\.md (uncommitted edits)" || { echo "    FAIL: expected 'prompt.md (uncommitted edits)'; got: ${failures[0]}" >&2; return 1; }
+  echo "${failures[0]}" | grep -q "copilot-instructions.md (uncommitted edits)" || { echo "    FAIL: expected copilot-instructions.md (uncommitted edits); got: ${failures[0]}" >&2; return 1; }
 }
 
 # --- driver ---

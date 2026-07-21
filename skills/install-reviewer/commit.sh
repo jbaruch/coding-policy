@@ -9,9 +9,7 @@
 # `git commit` would.
 #
 # Staged paths:
-#   .github/workflows/review-codex.yml
-#   .github/codex-review/{schema.json,prompt.md,post-review.sh,
-#                         assert-no-secret-leak.sh,mask-secrets.sh}
+#   .github/fleet-review-enabled
 #   .github/copilot-instructions.md
 #
 # Usage: commit.sh [--override]
@@ -47,12 +45,7 @@ else
 fi
 
 FILES=(
-  .github/workflows/review-codex.yml
-  .github/codex-review/schema.json
-  .github/codex-review/prompt.md
-  .github/codex-review/post-review.sh
-  .github/codex-review/assert-no-secret-leak.sh
-  .github/codex-review/mask-secrets.sh
+  .github/fleet-review-enabled
   .github/copilot-instructions.md
 )
 

@@ -1,5 +1,13 @@
 # Changelog
 
+### CI
+
+- **Opt-in marker guard for the fleet reviewer** — `fleet-poll.sh` now reviews a repo only if it carries a `.github/fleet-review-enabled` marker file, so the App can be installed on **all repositories** while only opted-in repos are reviewed (404 on the marker = opt-out, skipped silently; any other error warns and skips so a transient failure never mass-skips). The fleet reviewer's prompt/schema moved to `.github/codex-review/fleet-prompt.md` + `fleet-schema.json` (fleet-owned, decoupled from the install-reviewer templates).
+
+### Skills
+
+- **`install-reviewer` enrolls a repo in the central fleet reviewer instead of scaffolding a per-repo workflow** — onboarding now commits a `.github/fleet-review-enabled` marker + `.github/copilot-instructions.md` and opens a PR; the marker enrolls the repo in the `coding-policy-fleet-reviewer` GitHub App. No per-repo `review-codex.yml`, no `.github/codex-review/` driver, and no `CODEX_AUTH_JSON`/`TESSL_TOKEN` repo secrets — the credential lives only in `coding-policy`. `scaffold.sh`/`preflight.sh`/`commit.sh`/the tests retarget from seven files to the two marker files; the secrets checklist is dropped from `SKILL.md` and `PR_BODY_TEMPLATE.md`.
+
 ## 0.3.101 — 2026-07-21
 
 ### Rules
