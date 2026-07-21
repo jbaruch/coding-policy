@@ -84,11 +84,12 @@ def stamp_changelog(text: str, version: str, date: str) -> tuple[str, bool]:
 
 
 def query_latest_version(plugin_name: str) -> str | None:
-    """Return the registry's latest published version, or None on first publish.
+    """Return the registry's latest published version, or None if it can't be read.
 
-    Mirrors patch-version-publish's handling: a 404 means the plugin has never
-    been published; any other failure is surfaced so auth/network issues are not
-    masked.
+    Mirrors patch-version-publish's handling. Returns None in two cases so the
+    caller falls back to the manifest version: a 404 (the plugin has never been
+    published) and a Tessl auth failure (the stamp step ran without login — see
+    the caller). Any other failure (network, etc.) is surfaced so it is not masked.
     """
     proc = subprocess.run(
         ["tessl", "plugin", "info", plugin_name],
