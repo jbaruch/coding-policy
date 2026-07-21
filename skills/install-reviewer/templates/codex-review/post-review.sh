@@ -7,9 +7,10 @@
 # the review body rather than as inline comments so an off-diff line can never
 # trigger the HTTP 422 that would cascade-fail the whole review.
 #
-# The review is authored by whoever GH_TOKEN belongs to — in CI that is
-# `github-actions[bot]`, which GitHub forbids from posting APPROVE (HTTP 422).
-# So a clean pass is a COMMENT; a violation is REQUEST_CHANGES.
+# The review is authored by whoever GH_TOKEN belongs to. A clean pass posts
+# APPROVE and a violation posts REQUEST_CHANGES. A token GitHub forbids from
+# approving (`github-actions[bot]` — HTTP 422) falls back to COMMENT on a pass,
+# so the verdict is never lost.
 #
 # Usage: post-review.sh <owner> <repo> <pr-number> <result-json-file>
 # Out:   one JSON object on stdout: {"state":"posted","event":"...","findings":N}
