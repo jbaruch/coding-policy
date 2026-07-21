@@ -115,8 +115,17 @@ jobs:
           if [ -n "${DISPATCH_REPO:-}" ]; then
             # PR-time single-PR path: review exactly the dispatched PR. No dedup —
             # the trigger fires on each push, and fleet-review-one reviews the live head.
+            # Validate inputs up front so a bad dispatch fails here, not deep in a git fetch.
+            if ! [[ "${DISPATCH_REPO}" =~ ^[A-Za-z0-9._-]+$ ]]; then
+              echo "error: dispatch input 'repo' must be a bare repo name under jbaruch/ (no owner/slash), got '${DISPATCH_REPO}'" >&2
+              exit 1
+            fi
             if ! [[ "${DISPATCH_PR:-}" =~ ^[0-9]+$ ]]; then
               echo "error: dispatch input 'pr' must be a number, got '${DISPATCH_PR:-}'" >&2
+              exit 1
+            fi
+            if [ -z "${DISPATCH_BASE:-}" ]; then
+              echo "error: dispatch input 'base' is required when 'repo' is set" >&2
               exit 1
             fi
             jq -nc --arg r "$DISPATCH_REPO" --argjson n "$DISPATCH_PR" --arg b "$DISPATCH_BASE" \

@@ -5,10 +5,11 @@ description: >
   scaffold a `.github/fleet-review-enabled` opt-in marker, a thin
   `.github/workflows/review-trigger.yml` (fires an immediate PR-time review), and a
   `.github/copilot-instructions.md` scoping Copilot to the complementary code-quality
-  lane, then open a PR. The marker + trigger enroll the repo in the central
-  coding-policy-fleet-reviewer GitHub App, which reviews it against the
-  `jbaruch/coding-policy` rules. The Codex credential lives only in coding-policy; the
-  consumer sets one stable `FLEET_DISPATCH_TOKEN` secret (a narrow PAT).
+  lane, then open a PR. The trigger dispatches an immediate PR-time review to the
+  central coding-policy-fleet-reviewer GitHub App; the marker enrolls the repo in the
+  App's scheduled poll (the backstop). Both review against the `jbaruch/coding-policy`
+  rules. The Codex credential lives only in coding-policy; the consumer sets one stable
+  `FLEET_DISPATCH_TOKEN` secret (a narrow PAT).
   Use when the user wants to add, install, enable, scaffold, set up, wire up, or enroll
   an automated policy review / PR reviewer / coding-policy reviewer in a consumer repo.
   Also use to upgrade, update, or refresh the reviewer files in a repo that already has
