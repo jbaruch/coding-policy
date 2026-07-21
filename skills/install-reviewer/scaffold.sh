@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Copy the packaged Codex-CLI reviewer template tree into the consumer repo:
-#   .github/workflows/review-codex.yml   — the ChatGPT-subscription reviewer
-#   .github/codex-review/schema.json
-#   .github/codex-review/prompt.md
-#   .github/codex-review/post-review.sh
-#   .github/codex-review/assert-no-secret-leak.sh
-#   .github/codex-review/mask-secrets.sh
+# Copy the fleet-reviewer opt-in files into the consumer repo:
+#   .github/fleet-review-enabled         — opt-in marker; the central
+#                                          coding-policy-fleet-reviewer App polls
+#                                          and reviews every repo carrying it
 #   .github/copilot-instructions.md      — the Copilot complementary lane
+#
+# No per-repo workflow or secrets — the credential lives only in coding-policy,
+# and the marker is what enrolls this repo in the central fleet review.
 #
 # Every target is snapshotted before any write and restored if a later copy
 # fails, so a partial run never leaves a half-written reviewer.
@@ -25,12 +25,7 @@ set -euo pipefail
 TEMPLATE_DIR=".tessl/plugins/jbaruch/coding-policy/skills/install-reviewer/templates"
 # "<source relative to TEMPLATE_DIR>:<target in the consumer repo>"
 MANIFEST=(
-  "review-codex.yml:.github/workflows/review-codex.yml"
-  "codex-review/schema.json:.github/codex-review/schema.json"
-  "codex-review/prompt.md:.github/codex-review/prompt.md"
-  "codex-review/post-review.sh:.github/codex-review/post-review.sh"
-  "codex-review/assert-no-secret-leak.sh:.github/codex-review/assert-no-secret-leak.sh"
-  "codex-review/mask-secrets.sh:.github/codex-review/mask-secrets.sh"
+  "fleet-review-enabled:.github/fleet-review-enabled"
   "copilot-instructions.md:.github/copilot-instructions.md"
 )
 

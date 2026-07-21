@@ -31,6 +31,16 @@ gh() {
     /installation/repositories)
       printf '%s\n' "${MOCK_REPOS[@]}"
       ;;
+    */contents/.github/fleet-review-enabled)
+      # Marker present by default; a <repo>.unmarked fixture makes it a 404, so
+      # existing tests need no change and only the opt-out case is set explicitly.
+      local rf="${url#/repos/}"; rf="${rf%%/contents*}"
+      if [[ -f "${MOCK_DIR}/${rf//\//__}.unmarked" ]]; then
+        echo "gh: Not Found (HTTP 404)" >&2
+        return 1
+      fi
+      return 0
+      ;;
     */pulls\?state=open*)
       local rf="${url#/repos/}"; rf="${rf%%/pulls*}"
       cat "${MOCK_DIR}/${rf//\//__}.pulls.json"
@@ -122,6 +132,18 @@ JSON
   teardown
 }
 
+# --- a repo without the opt-in marker is skipped entirely ---
+t_unmarked_repo_skipped() {
+  setup; MOCK_REPOS=(jbaruch/repo-a)
+  : > "$MOCK_DIR/jbaruch__repo-a.unmarked"   # 404 on the marker check
+  writef "$MOCK_DIR/jbaruch__repo-a.pulls.json" <<'JSON'
+[{"number":7,"base":{"ref":"main"},"head":{"sha":"aaa111","repo":{"full_name":"jbaruch/repo-a"}}}]
+JSON
+  local out; out=$(run_main)
+  if [[ "$(jq 'length' <<<"$out")" == "0" ]]; then ok "repo without the fleet-review marker is skipped"; else bad "unmarked: expected empty ($out)"; fi
+  teardown
+}
+
 # --- multiple repos, mixed states ---
 t_multi_repo() {
   setup; MOCK_REPOS=(jbaruch/repo-a jbaruch/repo-b)
@@ -145,6 +167,7 @@ t_needs_review
 t_already_reviewed
 t_head_advanced
 t_fork_skipped
+t_unmarked_repo_skipped
 t_other_reviewer_ignored
 t_multi_repo
 echo "== summary: ${pass} passed, ${fail} failed =="

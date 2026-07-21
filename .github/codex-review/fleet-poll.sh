@@ -28,6 +28,20 @@ main() {
     [[ -n "$full" ]] || continue
     owner=${full%%/*}; repo=${full#*/}
 
+    # Opt-in marker guard: review a repo only if it carries the marker file. This
+    # lets the App be installed on ALL repos while only opted-in repos are
+    # reviewed. 404 = not opted in (skip silently); any other error = uncertain
+    # (warn and skip so a transient failure never mass-skips reviews).
+    local merr
+    if merr=$(gh api "/repos/${full}/contents/.github/fleet-review-enabled" 2>&1 1>/dev/null); then
+      :  # marker present — opted in
+    elif grep -q "HTTP 404" <<<"$merr"; then
+      continue
+    else
+      echo "warn: could not check the fleet-review marker for ${full} (${merr}) — skipping this cycle" >&2
+      continue
+    fi
+
     if ! prs_json=$(gh api --paginate "/repos/${full}/pulls?state=open&per_page=100"); then
       echo "warn: could not list open PRs for ${full} — skipping this repo" >&2
       continue
