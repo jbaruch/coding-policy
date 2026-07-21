@@ -113,7 +113,7 @@ A `COMMENTED` review never gates the merge on its state alone — but its body m
 
 Once these conditions hold, merge automatically — the green gates are the approval. Do not pause to ask a human whether to merge.
 
-**Clear superseded review gates first.** The Codex policy reviewer posts as `github-actions[bot]`, which cannot `APPROVE` (GitHub returns HTTP 422), so a clean re-review lands as a `COMMENT` that does NOT supersede the bot's earlier `CHANGES_REQUESTED` in GitHub's merge gate — the stale request keeps `merge_state.status` at `BLOCKED`. Dismiss every such superseded review before merging:
+**Clear superseded review gates first.** This applies to coding-policy's OWN releases, where the policy reviewer posts as `github-actions[bot]`, which cannot `APPROVE` (GitHub returns HTTP 422), so a clean re-review lands as a `COMMENT` that does NOT supersede the bot's earlier `CHANGES_REQUESTED` — the stale request keeps `merge_state.status` at `BLOCKED`. On consumer repos the reviewer is the central fleet App `coding-policy-fleet-reviewer[bot]` (coding-policy#202), which CAN `APPROVE` and supersedes its own earlier `CHANGES_REQUESTED` directly — no dismissal needed there. Dismiss every superseded `github-actions[bot]` review before merging:
 
 ```bash
 skills/release/dismiss-stale-reviews.sh <owner> <repo> <pr-number>
