@@ -20,7 +20,7 @@ The fleet reviewer is the policy reviewer; Copilot is the code-quality reviewer.
 
 The Codex credential lives only in `jbaruch/coding-policy`. The consumer sets **one** repo secret so the trigger can reach it:
 
-- `FLEET_DISPATCH_TOKEN` — a **fine-grained PAT scoped to only `jbaruch/coding-policy`** with `Actions: write` (nothing else). It can trigger the review workflow and nothing more. Set it (Settings → Secrets and variables → Actions) before the first PR after merge, or the PR-time review won't fire (the poll backstop still would). Fork PRs are skipped — they can't read the secret; adopt them via the `adopt-fork-pr` skill.
+- `FLEET_DISPATCH_TOKEN` — a **fine-grained PAT scoped to only `jbaruch/coding-policy`** with `Actions: write` (nothing else). It can trigger the review workflow and nothing more. Set it (Settings → Secrets and variables → Actions) before the first PR after merge, or the PR-time review won't fire (the poll backstop still would). Fork PRs are skipped — they can't read the secret; adopt them via the `adopt-fork-pr` skill. Dependabot PRs are skipped too — the dependabot actor gets no secrets, so the poll backstop reviews them instead.
 
 ### 3. Load indicator (so the consumer can confirm policy actually loaded)
 

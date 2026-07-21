@@ -4,6 +4,8 @@ name: Trigger fleet policy review
 # same-repo PR event this fires a single-PR review in coding-policy immediately,
 # so the policy verdict is available before merge (the coding-policy cron poll is
 # only a backstop). Fork PRs are skipped — they cannot read the dispatch secret.
+# Dependabot PRs are skipped too — the dependabot actor gets no secrets, so the
+# dispatch could never authenticate (the cron poll backstop still reviews them).
 #
 # Requires one repo secret (set it at
 # https://github.com/<owner>/<repo>/settings/secrets/actions for this repo):
@@ -24,7 +26,11 @@ concurrency:
 jobs:
   trigger:
     # Fork PRs cannot read secrets — skip them (adopt via the adopt-fork-pr skill).
-    if: github.event.pull_request.head.repo.full_name == github.repository
+    # Dependabot's actor also gets no secrets, so its dispatch can't authenticate —
+    # skip it too (the coding-policy cron poll reviews dependabot PRs instead).
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.actor != 'dependabot[bot]'
     runs-on: ubuntu-latest
     steps:
       - name: Dispatch the single-PR review to coding-policy
