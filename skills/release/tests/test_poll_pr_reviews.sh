@@ -296,6 +296,18 @@ t_latest_review_by_policy_reviewer_picks_newest_across_logins() {
   assert_eq "newest policy verdict across both logins" "CHANGES_REQUESTED" "$state"
 }
 
+# Fail-safe: an active CHANGES_REQUESTED from one policy-reviewer identity must
+# NOT be masked by a LATER clean review from the other identity — a gating
+# watcher that surfaced the newest-overall would think the reviewer was clean
+# while GitHub still blocked the merge.
+t_latest_review_by_changes_requested_not_masked_by_later_other_login() {
+  MOCK_REVIEWS_BODY='[{"user":{"login":"github-actions[bot]"},"state":"CHANGES_REQUESTED","submitted_at":"2026-07-21T05:00:00Z"},{"user":{"login":"coding-policy-fleet-reviewer[bot]"},"state":"COMMENTED","submitted_at":"2026-07-21T05:10:00Z"}]'
+  local out state
+  out=$(latest_review_by "owner" "repo" "1" "${CODEX_REVIEW_LOGINS[@]}")
+  state=$(echo "$out" | jq -r '.state')
+  assert_eq "active block not masked by later clean review" "CHANGES_REQUESTED" "$state"
+}
+
 t_main_surfaces_fleet_app_review_as_codex() {
   MOCK_MERGE_STATE=clean
   MOCK_REVIEWS_BODY='[{"user":{"login":"coding-policy-fleet-reviewer[bot]"},"state":"APPROVED","submitted_at":"2026-07-21T05:15:00Z"}]'
@@ -332,6 +344,7 @@ run "toplevel_comments_by excludes replies and foreign logins"        t_toplevel
 run "main counts Copilot comments in the snapshot"                    t_main_counts_copilot_comments_in_snapshot
 run "latest_review_by resolves the fleet App login (#202)"            t_latest_review_by_resolves_fleet_app_login
 run "latest_review_by picks newest policy verdict across logins"      t_latest_review_by_policy_reviewer_picks_newest_across_logins
+run "latest_review_by never masks an active block with a later clean" t_latest_review_by_changes_requested_not_masked_by_later_other_login
 run "main surfaces the fleet App review as .reviews.codex"            t_main_surfaces_fleet_app_review_as_codex
 run "toplevel_comments_by counts the fleet App comment login"         t_toplevel_comments_by_counts_fleet_app_login
 
