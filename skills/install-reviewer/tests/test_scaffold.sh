@@ -31,8 +31,8 @@ with_repo() {
     git -c init.defaultBranch=main init -q
     git -c user.email=t@t -c user.name=t commit --allow-empty -q -m init
     mkdir -p "$TEMPLATE_MOUNT"
-    cp "${SKILL_DIR}/templates/fleet-review-enabled"    "$TEMPLATE_MOUNT/"
-    cp "${SKILL_DIR}/templates/review-trigger.yml"       "$TEMPLATE_MOUNT/"
+    cp "${SKILL_DIR}/templates/fleet-review-enabled.md" "$TEMPLATE_MOUNT/"
+    cp "${SKILL_DIR}/templates/review-trigger.yml.md"    "$TEMPLATE_MOUNT/"
     cp "${SKILL_DIR}/templates/copilot-instructions.md" "$TEMPLATE_MOUNT/"
   ) || { local s=$?; rm -rf "$sandbox"; return $s; }
   ( cd "$sandbox" && "$fn" )
@@ -84,7 +84,7 @@ t_nonregular_target_refused() {
 }
 
 t_missing_template_fails() {
-  rm -f "$TEMPLATE_MOUNT/fleet-review-enabled"
+  rm -f "$TEMPLATE_MOUNT/fleet-review-enabled.md"
   local rc=0; bash "$SCRIPT" >/dev/null 2>&1 || rc=$?
   [[ $rc -ne 0 ]] || { echo "    FAIL: missing template did not fail" >&2; return 1; }
 }

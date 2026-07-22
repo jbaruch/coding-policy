@@ -124,9 +124,12 @@ else
   BRANCH="feat/add-coding-policy-review"
 fi
 TEMPLATE_DIR=".tessl/plugins/jbaruch/coding-policy/skills/install-reviewer/templates"
+# `.md` shim on the marker and trigger source: tessl packaging ships only
+# .md/.sh/.json/.py, so a `.yml` or extensionless template never reaches the
+# installed plugin. scaffold.sh strips the shim when it writes the targets.
 TEMPLATES=(
-  "${TEMPLATE_DIR}/fleet-review-enabled"
-  "${TEMPLATE_DIR}/review-trigger.yml"
+  "${TEMPLATE_DIR}/fleet-review-enabled.md"
+  "${TEMPLATE_DIR}/review-trigger.yml.md"
   "${TEMPLATE_DIR}/copilot-instructions.md"
 )
 TARGETS=(
