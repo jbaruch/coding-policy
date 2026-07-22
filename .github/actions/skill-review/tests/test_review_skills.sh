@@ -92,10 +92,37 @@ tessl() {
       ;;
     phrase-only)
       # The EXACT production-matched phrase ("run out of credits") but no
-      # 403 — must NOT be classed as an outage. Using the exact phrase is
-      # the point: if is_credit_outage ever stopped requiring 403 and matched
-      # the phrase alone, this case would flip to a wrongful skip and fail.
+      # 403 and no full billing sentence — must NOT be classed as an
+      # outage. Using the exact phrase is the point: if is_credit_outage
+      # ever loosened to the phrase alone, this case would flip to a
+      # wrongful skip and fail.
       echo "Your organization has run out of credits."
+      return 1
+      ;;
+    billing-sentence)
+      # The current tessl CLI's billing failure verbatim — no 403 anywhere
+      # in the output (nanoclaw-admin run 29951572295, 2026-07-22). The
+      # whole-line sentence signature must classify this as an outage,
+      # tolerating the leading "✘ " glyph.
+      echo "- Creating review run..."
+      echo "✖ Failed to create review run"
+      echo "✘ Your organization has run out of credits. Upgrade your plan or buy more credits to continue."
+      return 1
+      ;;
+    prose-quote)
+      # A real review failure whose feedback QUOTES the full billing
+      # sentence mid-line — must NOT be classed as an outage: the
+      # signature is line-anchored, and quoted text has surrounding
+      # prose on the same line.
+      echo "Skill scored 60 — below threshold 85."
+      echo "Feedback: the error message 'Your organization has run out of credits. Upgrade your plan or buy more credits to continue.' should not be hardcoded in the skill body."
+      return 1
+      ;;
+    numbered-quote)
+      # The full sentence as a numbered-list line — a digit prefix is
+      # NOT a CLI glyph and must not satisfy the whole-line signature.
+      echo "Skill scored 60 — below threshold 85."
+      echo "1. Your organization has run out of credits. Upgrade your plan or buy more credits to continue."
       return 1
       ;;
     code-only)
@@ -199,15 +226,39 @@ assert_rc 1 "skip+threshold: a real below-threshold failure still hard-fails"
 assert_unreviewed "" "skip+threshold: not recorded as a credit skip"
 assert_contains "$DRIVE_OUT" "not a credits outage" "skip+threshold: diagnostic distinguishes the cause"
 
-# Detection precision (issue #188 follow-up): skip requires the credit phrase
-# AND a 403. Either alone is a real failure and must hard-fail.
+# Detection precision (issue #188 follow-up): skip requires the legacy
+# phrase-plus-403 signature OR the full current-CLI billing sentence.
+# A partial phrase alone, or a 403 alone, is a real failure and must
+# hard-fail.
 MOCK_MODE="phrase-only"; drive skip alpha
-assert_rc 1 "skip+phrase-without-403: credit phrase alone is not an outage — hard-fails"
+assert_rc 1 "skip+phrase-without-403: partial credit phrase alone is not an outage — hard-fails"
 assert_unreviewed "" "skip+phrase-without-403: not recorded as a credit skip"
 
 MOCK_MODE="code-only"; drive skip alpha
 assert_rc 1 "skip+403-without-phrase: a different 403 is not an outage — hard-fails"
 assert_unreviewed "" "skip+403-without-phrase: not recorded as a credit skip"
+
+# Signature drift (the 2026-07-22 fleet-wide publish block): the current
+# tessl CLI emits the billing sentence with no 403. The full sentence must
+# classify as an outage under skip — and still hard-fail under fail mode.
+MOCK_MODE="billing-sentence"; drive skip alpha
+assert_rc 0 "skip+billing-sentence: current-CLI outage (no 403) tolerated"
+assert_unreviewed "alpha" "skip+billing-sentence: skill recorded unreviewed"
+assert_contains "$DRIVE_OUT" "::warning::" "skip+billing-sentence: emits a warning"
+
+MOCK_MODE="billing-sentence"; drive fail alpha
+assert_rc 1 "fail+billing-sentence: outage still hard-fails under fail mode"
+assert_unreviewed "" "fail+billing-sentence: nothing recorded as unreviewed"
+
+# Line anchoring: a real failure quoting the full sentence mid-line must
+# not skip — the signature only matches the sentence as an entire line.
+MOCK_MODE="prose-quote"; drive skip alpha
+assert_rc 1 "skip+prose-quote: quoted billing sentence mid-line is not an outage — hard-fails"
+assert_unreviewed "" "skip+prose-quote: not recorded as a credit skip"
+
+MOCK_MODE="numbered-quote"; drive skip alpha
+assert_rc 1 "skip+numbered-quote: digit-prefixed sentence line is not an outage — hard-fails"
+assert_unreviewed "" "skip+numbered-quote: not recorded as a credit skip"
 
 MOCK_MODE="success"; drive skip alpha beta
 assert_rc 0 "skip+success: all clean passes"

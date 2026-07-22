@@ -4,6 +4,10 @@
 
 - **`install-reviewer` templates now survive tessl packaging** — tessl's plugin packaging ships only `.md`/`.sh`/`.json`/`.py` files; a `.yml` or extensionless file is dropped from the installed plugin (workflow-injection safety). Two of the three scaffold templates — `fleet-review-enabled` (extensionless) and `review-trigger.yml` (`.yml`) — were therefore silently absent from every real `tessl install jbaruch/coding-policy`, so `preflight.sh`/`scaffold.sh` failed with `templates-present`/`template not found` on any fresh consumer onboarding. The skill's tests never caught it — they run against the source tree, where the files exist. Fix: the two templates carry a `.md` shim extension (`fleet-review-enabled.md`, `review-trigger.yml.md`); `scaffold.sh`'s MANIFEST and `preflight.sh`'s TEMPLATES map them back to their real target names (`.github/fleet-review-enabled`, `.github/workflows/review-trigger.yml`). Verified with `tessl plugin pack` — all three templates are now in the package tarball. Comments in both scripts warn against dropping the shim.
 
+### Actions
+
+- **skill-review: recognize the current tessl CLI's out-of-credits signature** — `is_credit_outage()` required the credit phrase AND a literal `403`, but the current CLI emits `✘ Your organization has run out of credits. Upgrade your plan or buy more credits to continue.` with no status code, so a genuine billing outage was classified "not a credits outage" and hard-blocked publishes despite `credit-outage: skip` (first hit: `jbaruch/nanoclaw-admin` run 29951572295, 2026-07-22, blocking the 0.1.481 publish). The classifier now accepts either signature: the legacy phrase-plus-403 form, or the full current-CLI billing sentence matched as a whole line (anchored pattern tolerating a leading glyph/whitespace prefix) — a partial phrase, prose quoting the sentence mid-line, or a future wording change still hard-fails (the safe direction). New test modes lock in the full-sentence skip under `skip`, the hard-fail under `fail`, the partial-sentence hard-fail, and the prose-quote hard-fail.
+
 ## 0.3.109 — 2026-07-22
 
 ### Rules
