@@ -102,10 +102,20 @@ tessl() {
     billing-sentence)
       # The current tessl CLI's billing failure verbatim — no 403 anywhere
       # in the output (nanoclaw-admin run 29951572295, 2026-07-22). The
-      # full-sentence signature must classify this as an outage.
+      # whole-line sentence signature must classify this as an outage,
+      # tolerating the leading "✘ " glyph.
       echo "- Creating review run..."
       echo "✖ Failed to create review run"
       echo "✘ Your organization has run out of credits. Upgrade your plan or buy more credits to continue."
+      return 1
+      ;;
+    prose-quote)
+      # A real review failure whose feedback QUOTES the full billing
+      # sentence mid-line — must NOT be classed as an outage: the
+      # signature is line-anchored, and quoted text has surrounding
+      # prose on the same line.
+      echo "Skill scored 60 — below threshold 85."
+      echo "Feedback: the error message 'Your organization has run out of credits. Upgrade your plan or buy more credits to continue.' should not be hardcoded in the skill body."
       return 1
       ;;
     code-only)
@@ -232,6 +242,12 @@ assert_contains "$DRIVE_OUT" "::warning::" "skip+billing-sentence: emits a warni
 MOCK_MODE="billing-sentence"; drive fail alpha
 assert_rc 1 "fail+billing-sentence: outage still hard-fails under fail mode"
 assert_unreviewed "" "fail+billing-sentence: nothing recorded as unreviewed"
+
+# Line anchoring: a real failure quoting the full sentence mid-line must
+# not skip — the signature only matches the sentence as an entire line.
+MOCK_MODE="prose-quote"; drive skip alpha
+assert_rc 1 "skip+prose-quote: quoted billing sentence mid-line is not an outage — hard-fails"
+assert_unreviewed "" "skip+prose-quote: not recorded as a credit skip"
 
 MOCK_MODE="success"; drive skip alpha beta
 assert_rc 0 "skip+success: all clean passes"

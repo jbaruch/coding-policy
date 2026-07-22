@@ -42,14 +42,16 @@ UNREVIEWED=()
 # True only when review output carries an out-of-credits billing signature.
 # Precision matters: this is the sole failure the skip mode tolerates, so a
 # too-loose match would publish a genuinely-broken skill unreviewed. Two
-# accepted signatures, each built from fixed strings (grep -F, no regex
-# metacharacters):
-#   1. Legacy CLI: the credit phrase AND an explicit 403 status line.
-#   2. Current CLI (emits no status code): the FULL billing sentence,
-#      matched whole so a real failure that merely quotes "run out of
-#      credits" in prose still falls through to hard-fail (the safe
-#      direction). A future wording change also hard-fails until this
-#      list learns the new sentence.
+# accepted signatures:
+#   1. Legacy CLI: the credit phrase AND an explicit 403 status line,
+#      each a fixed string (grep -F).
+#   2. Current CLI (emits no status code): the FULL billing sentence as
+#      an entire output line — anchored `^...$`, tolerating only a
+#      leading non-letter glyph/whitespace prefix (the CLI's `✘ `
+#      marker). A real failure that quotes the sentence mid-line, a
+#      partial phrase, or a future wording change all fall through to
+#      hard-fail (the safe direction). The sentence's dots are escaped;
+#      no other regex metacharacters appear in it.
 # tessl exposes no distinct exit code for the billing failure; if it ever
 # does, prefer that over string matching.
 is_credit_outage() {
@@ -57,7 +59,7 @@ is_credit_outage() {
     && printf '%s' "$1" | grep -qF '403'; then
     return 0
   fi
-  printf '%s' "$1" | grep -qF 'Your organization has run out of credits. Upgrade your plan or buy more credits to continue.'
+  printf '%s' "$1" | grep -qE '^[^[:alpha:]]*Your organization has run out of credits\. Upgrade your plan or buy more credits to continue\.$'
 }
 
 # Emit the operator-facing warning and run-summary note for one skill that
