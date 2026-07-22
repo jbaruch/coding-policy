@@ -31,7 +31,7 @@ description: Plugin structure, rule/skill format, review pipeline, surface sync,
 
 ## Mandatory Review
 
-- Every skill change must pass `tessl skill review --threshold 85` before publish
+- Every skill change must pass `tessl review run --threshold 85` before publish
 - Below-threshold scores block the pipeline
 - Wire into CI as a changed-skills loop, not static per-skill steps. The loop iterates over `git diff --name-only <prev-sha>..HEAD -- 'skills/'`. Reference: `.github/actions/skill-review/action.yml` (consumers `uses: jbaruch/coding-policy/.github/actions/skill-review@<ref>`)
 - Fallback: review every skill when the diff base is absent (manual `workflow_dispatch`, initial push, all-zeros sentinel SHA); hard-fail when the base is set but unreachable
@@ -42,7 +42,7 @@ description: Plugin structure, rule/skill format, review pipeline, surface sync,
 ## Credit-Outage Review Carve-Out
 
 - Narrow exception for skipping review during a tessl out-of-credits (403) billing outage
-- Applies when `tessl skill review` fails with the out-of-credits signature; never a below-threshold score
+- Applies when `tessl review run` fails with the out-of-credits signature; never a below-threshold score
 - The `skill-review` action's `credit-outage: skip` input publishes the affected skill unreviewed rather than blocking every skill-changing merge until credits return
 - Preconditions (all required):
   1. Opt-in explicit — the consumer sets `credit-outage: skip`; default `fail` preserves the gate. Classification is the action's decision contract — see `.github/actions/skill-review/review-skills.sh` `run_reviews`
@@ -55,9 +55,15 @@ description: Plugin structure, rule/skill format, review pipeline, surface sync,
 ## Disagreeing With the Reviewer
 
 - Never lower `--threshold 85` to make a failing skill pass. Bypassing CI by other means (local publish, `[skip ci]`, disabling the review step) is forbidden under `rules/ci-safety.md`
-- When you disagree with the reviewer's conclusions, run `tessl skill review --optimize <skill>` locally. Back up `SKILL.md` and any reference files before invoking
-- `--optimize` is a diagnostic signal, not a patch. The reviewer's judge strips load-bearing context. Diff against the backup, keep the genuinely-improving moves (tighter triggers, less prose, better `Skill()` typing), reject over-aggressive cuts, then re-run the review and iterate
-- Shipping `--optimize` output verbatim is forbidden even when the score improved. The optimizer surfaces what kinds of issues exist (actionability, progressive disclosure, redundancy); apply the signal with judgment, curate manually
+- When you disagree with the reviewer's conclusions, run `tessl review fix <skill>` locally
+- Back up `SKILL.md` and any reference files before invoking the fix loop
+- The fix loop is a diagnostic signal, not a patch
+- Diff the applied changes against the backup
+- Keep the genuinely-improving moves (tighter triggers, less prose, better `Skill()` typing)
+- Reject the over-aggressive cuts
+- Re-run `tessl review run` until the gate passes
+- Shipping the fix loop's output verbatim is forbidden even when the score improved
+- Curate the fixes manually with judgment
 
 ## Surface Sync
 

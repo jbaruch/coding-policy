@@ -1,5 +1,9 @@
 # Changelog
 
+### Rules
+
+- **Migrate the skill-review command to the `tessl review` surface** — `tessl skill review` moves to `tessl review run` for the gating call and `tessl review fix` for the disagree-with-reviewer optimize workflow. The `skill-review` composite action (`review-skills.sh`, `action.yml`) now invokes `tessl review run --threshold N`; the `--threshold` gate and out-of-credits classification are unchanged, so the credit-outage carve-out and the changed-skills loop behave identically. `context-artifacts` Mandatory Review, Credit-Outage Carve-Out, and Disagreeing With the Reviewer updated: the former `--optimize` flag has no `tessl review run` equivalent, so the optimize path is now `tessl review fix` (an automated review-and-fix loop that applies changes in place) — the diagnostic-not-verbatim discipline (back up, diff against the backup, curate, never ship the loop's output verbatim) carries over unchanged. The mock-driven action tests are command-agnostic (they key on the trailing path arg) and stay green. Historical CHANGELOG entries keep the old command name as archive.
+
 ## 0.3.108 — 2026-07-21
 
 ### Skills

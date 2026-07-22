@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Identify the skills whose files changed since the previous push and run
-# `tessl skill review --threshold N` on each, per jbaruch/coding-policy
+# `tessl review run --threshold N` on each, per jbaruch/coding-policy
 # `context-artifacts` "Mandatory Review". Unchanged skills are not
 # re-reviewed — that just burns runner time and Tessl credits.
 #
@@ -96,7 +96,7 @@ run_reviews() {
     # toggling `-e` (which would leak to callers); never blanket-swallow —
     # only the credit signature under skip-mode is tolerated below.
     rc=0
-    review_out="$(tessl skill review --threshold "$THRESHOLD" "$SKILLS_DIR/$skill/SKILL.md" 2>&1)" || rc=$?
+    review_out="$(tessl review run --threshold "$THRESHOLD" "$SKILLS_DIR/$skill/SKILL.md" 2>&1)" || rc=$?
     printf '%s\n' "$review_out"
     echo "::endgroup::"
     [ "$rc" -eq 0 ] && continue
