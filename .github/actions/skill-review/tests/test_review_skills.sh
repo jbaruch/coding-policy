@@ -118,6 +118,13 @@ tessl() {
       echo "Feedback: the error message 'Your organization has run out of credits. Upgrade your plan or buy more credits to continue.' should not be hardcoded in the skill body."
       return 1
       ;;
+    numbered-quote)
+      # The full sentence as a numbered-list line — a digit prefix is
+      # NOT a CLI glyph and must not satisfy the whole-line signature.
+      echo "Skill scored 60 — below threshold 85."
+      echo "1. Your organization has run out of credits. Upgrade your plan or buy more credits to continue."
+      return 1
+      ;;
     code-only)
       # A 403 without the credit phrase — a different auth/forbidden error.
       echo "✘ 403 Forbidden — token lacks scope for this workspace."
@@ -248,6 +255,10 @@ assert_unreviewed "" "fail+billing-sentence: nothing recorded as unreviewed"
 MOCK_MODE="prose-quote"; drive skip alpha
 assert_rc 1 "skip+prose-quote: quoted billing sentence mid-line is not an outage — hard-fails"
 assert_unreviewed "" "skip+prose-quote: not recorded as a credit skip"
+
+MOCK_MODE="numbered-quote"; drive skip alpha
+assert_rc 1 "skip+numbered-quote: digit-prefixed sentence line is not an outage — hard-fails"
+assert_unreviewed "" "skip+numbered-quote: not recorded as a credit skip"
 
 MOCK_MODE="success"; drive skip alpha beta
 assert_rc 0 "skip+success: all clean passes"

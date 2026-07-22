@@ -47,11 +47,12 @@ UNREVIEWED=()
 #      each a fixed string (grep -F).
 #   2. Current CLI (emits no status code): the FULL billing sentence as
 #      an entire output line — anchored `^...$`, tolerating only a
-#      leading non-letter glyph/whitespace prefix (the CLI's `✘ `
-#      marker). A real failure that quotes the sentence mid-line, a
-#      partial phrase, or a future wording change all fall through to
-#      hard-fail (the safe direction). The sentence's dots are escaped;
-#      no other regex metacharacters appear in it.
+#      leading non-alphanumeric glyph/whitespace prefix (the CLI's `✘ `
+#      marker; a digit prefix like a numbered list is NOT tolerated). A
+#      real failure that quotes the sentence mid-line, a partial phrase,
+#      or a future wording change all fall through to hard-fail (the
+#      safe direction). The sentence's dots are escaped; no other regex
+#      metacharacters appear in it.
 # tessl exposes no distinct exit code for the billing failure; if it ever
 # does, prefer that over string matching.
 is_credit_outage() {
@@ -59,7 +60,7 @@ is_credit_outage() {
     && printf '%s' "$1" | grep -qF '403'; then
     return 0
   fi
-  printf '%s' "$1" | grep -qE '^[^[:alpha:]]*Your organization has run out of credits\. Upgrade your plan or buy more credits to continue\.$'
+  printf '%s' "$1" | grep -qE '^[^[:alnum:]]*Your organization has run out of credits\. Upgrade your plan or buy more credits to continue\.$'
 }
 
 # Emit the operator-facing warning and run-summary note for one skill that
@@ -71,11 +72,11 @@ credit_skip() {
   local skill="$1" resume
   resume="$(date -u -d "$(date -u +%Y-%m-01) +1 month" +%Y-%m-01 2>/dev/null)" \
     || resume="the 1st of next month"
-  echo "::warning::tessl org out of credits (403) — skipping review for '${skill}'. Publishing UNREVIEWED; review resumes by ${resume} (monthly credit reset)."
+  echo "::warning::tessl org out of credits — skipping review for '${skill}'. Publishing UNREVIEWED; review resumes by ${resume} (monthly credit reset)."
   {
     echo "### ⚠️ Skill review skipped — tessl credits exhausted"
     echo ""
-    echo "\`${skill}\` was **not** reviewed: the tessl org is out of credits (403)."
+    echo "\`${skill}\` was **not** reviewed: the tessl org is out of credits."
     echo "It is publishing **without** review. The gate self-heals — top up credits to restore it immediately, otherwise it resumes by **${resume}** (monthly reset)."
   } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
 }
