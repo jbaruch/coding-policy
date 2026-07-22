@@ -27,9 +27,13 @@ set -euo pipefail
 
 TEMPLATE_DIR=".tessl/plugins/jbaruch/coding-policy/skills/install-reviewer/templates"
 # "<source relative to TEMPLATE_DIR>:<target in the consumer repo>"
+# The marker and the trigger source carry a `.md` shim extension because tessl
+# packaging ships only .md/.sh/.json/.py — a `.yml` or extensionless template is
+# dropped from the installed plugin, so scaffold would find no source. Keep the
+# `.md` suffix; the target names below are what the consumer actually gets.
 MANIFEST=(
-  "fleet-review-enabled:.github/fleet-review-enabled"
-  "review-trigger.yml:.github/workflows/review-trigger.yml"
+  "fleet-review-enabled.md:.github/fleet-review-enabled"
+  "review-trigger.yml.md:.github/workflows/review-trigger.yml"
   "copilot-instructions.md:.github/copilot-instructions.md"
 )
 
