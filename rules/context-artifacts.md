@@ -55,7 +55,7 @@ description: Plugin structure, rule/skill format, review pipeline, surface sync,
 ## Disagreeing With the Reviewer
 
 - Never lower `--threshold 85` to make a failing skill pass. Bypassing CI by other means (local publish, `[skip ci]`, disabling the review step) is forbidden under `rules/ci-safety.md`
-- When you disagree with the reviewer's conclusions, run `tessl review fix <skill>` locally. Back up `SKILL.md` and any reference files before invoking — the fix loop applies changes in place
+- When you disagree with the reviewer's conclusions, run `tessl review fix <skill>` locally. Back up `SKILL.md` and any reference files before invoking
 - The fix loop is a diagnostic signal, not a patch. The reviewer's judge strips load-bearing context. Diff against the backup, keep the genuinely-improving moves (tighter triggers, less prose, better `Skill()` typing), reject over-aggressive cuts, then re-run `tessl review run` and iterate
 - Shipping the fix loop's output verbatim is forbidden even when the score improved. It surfaces what kinds of issues exist (actionability, progressive disclosure, redundancy); apply the signal with judgment, curate manually
 
