@@ -20,8 +20,8 @@
 #          "watch": {"result": "<result>", "attempts": N, "elapsed_seconds": N}
 #        emitted on stdout when a terminal state is reached (rc 0 or 1).
 # Exit / result matrix (branch on .watch.result):
-#   rc 0, result "ready"             — mergeable, CI success/none, both gating
-#                                      bots posted, none requested changes.
+#   rc 0, result "ready"             — mergeable, CI success/none, both bots
+#                                      posted, none requested changes.
 #   rc 0, result "changes_requested" — the policy reviewer's latest verdict is
 #                                      CHANGES_REQUESTED (a blocking finding is
 #                                      present — advisory-only reviews post

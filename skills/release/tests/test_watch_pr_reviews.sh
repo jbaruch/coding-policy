@@ -2,8 +2,8 @@
 # Outcome-based tests for watch-pr-reviews.sh.
 #
 # Covers the behaviors the watcher promises:
-#   1. Ready on first poll — mergeable, CI success, both gating bots posted,
-#      none requested changes → result "ready", exit 0, no sleep.
+#   1. Ready on first poll — mergeable, CI success, both bots posted (only the
+#      policy reviewer gates), none requested changes → result "ready", exit 0.
 #   2. Deferred ready — first snapshot pending (one bot not yet posted), a
 #      later snapshot ready → polls, reaches "ready", exit 0.
 #   3. Both-bots-required — a lone codex verdict with copilot still "none"
