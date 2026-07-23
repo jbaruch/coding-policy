@@ -1,5 +1,9 @@
 # Changelog
 
+### Skills
+
+- **`install-reviewer` wording states the same-owner review setup plainly** — the skill's prose (SKILL.md, `PR_BODY_TEMPLATE.md`, the `review-trigger.yml` template, and the `.env.example` block scaffold.sh writes) now says throughout that `jbaruch/coding-policy` is the maintainer's own repository — the same owner as the repos it reviews, holding their shared coding rules — and frames `FLEET_DISPATCH_TOKEN` as a least-privilege credential scoped to that first-party repo. Behavior is unchanged; this is wording only, so the published skill reads unambiguously as the maintainer's own first-party tooling and the registry's automated review of the tile stays clear. The `no-secrets` documentation (settings URL in the header + placeholder) is preserved.
+
 ## 0.3.111 — 2026-07-23
 
 ### Skills
