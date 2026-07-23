@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.111 — 2026-07-23
+
 ### Skills
 
 - **`install-reviewer` scaffolds `FLEET_DISPATCH_TOKEN` into `.env.example`** (closes #220) — the skill scaffolds `review-trigger.yml`, which requires the `FLEET_DISPATCH_TOKEN` hosted-CI secret, but never documented it in the consumer's `.env.example`, so every onboarded repo drew a `no-secrets` `CHANGES_REQUESTED` from the fleet reviewer on its enrollment PR (seen on `tg-hubitat-bot#42`, fixed by hand). `scaffold.sh` now manages `.env.example` as a 4th artifact: append-or-create, idempotent (skips when the secret is already present), never overwriting existing variables, with the repo's Actions-secrets settings URL derived from the origin remote (https + ssh forms) and folded into the snapshot/rollback. `commit.sh` stages it; `SKILL.md` Step 4 and `PR_BODY_TEMPLATE.md` name the artifact; the per-file JSON `action` gains `appended`. New tests cover create-with-derived-URL, append-preserves-prior-vars, idempotent-when-present, and symlink refusal.
