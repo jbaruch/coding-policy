@@ -14,7 +14,8 @@
 #                                             idempotent, never overwrites prior vars
 #
 # The Codex credential lives only in coding-policy. The consumer holds the marker,
-# the thin trigger workflow, and one stable FLEET_DISPATCH_TOKEN (a narrow PAT).
+# the thin trigger workflow, and one stable FLEET_DISPATCH_TOKEN (a narrow,
+# least-privilege token for the maintainer's own coding-policy repo).
 #
 # Every target is snapshotted before any write and restored if a later write
 # fails, so a partial run never leaves a half-written reviewer.
@@ -78,9 +79,10 @@ env_block() {
 # GitHub Actions secret — set in repo Settings → Secrets and variables → Actions,
 # NOT copied into .env:
 #   ${url}
-# ${ENV_SECRET} — fine-grained PAT scoped to ONLY jbaruch/coding-policy
-#   (Actions: write); lets .github/workflows/review-trigger.yml dispatch the
-#   central fleet policy review.
+# ${ENV_SECRET} — a fine-grained token the maintainer scopes to ONLY their own
+#   jbaruch/coding-policy with Actions: write and nothing else (least privilege).
+#   It lets .github/workflows/review-trigger.yml ask that same-owner repo to run a
+#   policy review; the review credential itself stays only in coding-policy.
 ${ENV_SECRET}=
 EOF
 }
