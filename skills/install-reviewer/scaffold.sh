@@ -7,19 +7,25 @@
 #                                             single-PR review so the verdict lands
 #                                             before merge (the poll is a backstop)
 #   .github/copilot-instructions.md         — the Copilot complementary lane
+# and document the one operator secret the trigger needs:
+#   .env.example                            — appends a FLEET_DISPATCH_TOKEN entry
+#                                             with the repo's Actions-secrets URL
+#                                             (no-secrets rule); append-or-create,
+#                                             idempotent, never overwrites prior vars
 #
 # The Codex credential lives only in coding-policy. The consumer holds the marker,
 # the thin trigger workflow, and one stable FLEET_DISPATCH_TOKEN (a narrow PAT).
 #
-# Every target is snapshotted before any write and restored if a later copy
+# Every target is snapshotted before any write and restored if a later write
 # fails, so a partial run never leaves a half-written reviewer.
 #
 # Usage: scaffold.sh [--override]
-#   --override   Upgrade mode — overwrite existing targets. Install mode refuses
-#                if any target already exists (the skill's Step 2 gates that).
+#   --override   Upgrade mode — overwrite existing template targets. Install mode
+#                refuses if any template target already exists (the skill's Step 2
+#                gates that). .env.example is always append-or-create in both modes.
 # Out:   one JSON object on stdout:
 #          {"state":"scaffolded|no-op","override":bool,
-#           "files":[{"target":"...","action":"created|overwritten|unchanged"}]}
+#           "files":[{"target":"...","action":"created|overwritten|appended|unchanged"}]}
 # Exit:  0 on success (including no-op); non-zero with a stderr diagnostic on
 #        failure (targets restored to their prior contents first).
 
@@ -36,6 +42,44 @@ MANIFEST=(
   "review-trigger.yml.md:.github/workflows/review-trigger.yml"
   "copilot-instructions.md:.github/copilot-instructions.md"
 )
+
+# .env.example is handled separately from MANIFEST: it is appended-to (not
+# overwritten), so a pre-existing one is never refused, and the entry is only
+# added when absent (idempotent).
+ENV_FILE=".env.example"
+ENV_SECRET="FLEET_DISPATCH_TOKEN"
+
+# Resolve the GitHub Actions secrets-settings URL for this repo from its origin
+# remote (https or ssh form). Preflight already requires an origin remote, so
+# real runs resolve a concrete URL; the placeholder only guards odd setups so
+# scaffold never fails purely on URL derivation.
+derive_settings_url() {
+  local url slug
+  url=$(git remote get-url origin 2>/dev/null) \
+    || { printf '%s' 'https://github.com/<owner>/<repo>/settings/secrets/actions'; return; }
+  slug=$(printf '%s' "$url" | sed -E 's#^git@[^:]+:##; s#^https?://[^/]+/##; s#\.git$##; s#/+$##')
+  if [[ "$slug" == */* ]]; then
+    printf 'https://github.com/%s/settings/secrets/actions' "$slug"
+  else
+    printf '%s' 'https://github.com/<owner>/<repo>/settings/secrets/actions'
+  fi
+}
+
+# The FLEET_DISPATCH_TOKEN documentation block that seeds or is appended to
+# .env.example. Carries the settings deep link inline so it is self-contained
+# regardless of the file's existing header.
+env_block() {
+  local url="$1"
+  cat <<EOF
+# GitHub Actions secret — set in repo Settings → Secrets and variables → Actions,
+# NOT copied into .env:
+#   ${url}
+# ${ENV_SECRET} — fine-grained PAT scoped to ONLY jbaruch/coding-policy
+#   (Actions: write); lets .github/workflows/review-trigger.yml dispatch the
+#   central fleet policy review.
+${ENV_SECRET}=
+EOF
+}
 
 main() {
   local OVERRIDE_MODE=0 arg
@@ -60,7 +104,7 @@ main() {
     [[ -f "$src" ]] || { echo "error: template not found: $src — run 'tessl install jbaruch/coding-policy' first" >&2; exit 1; }
   done
 
-  # Refuse symlink targets; in install mode refuse pre-existing targets.
+  # Refuse symlink targets; in install mode refuse pre-existing template targets.
   for pair in "${MANIFEST[@]}"; do
     tgt="${pair#*:}"
     [[ -L "$tgt" ]] && { echo "error: ${tgt} is a symlink — refusing to write through it; replace it with a regular file (or remove it) and re-run" >&2; exit 1; }
@@ -74,7 +118,16 @@ main() {
     fi
   done
 
-  # Snapshot existing targets for rollback. snap_existed[i] tracks each.
+  # .env.example: refuse only a symlink / non-regular file. A regular pre-existing
+  # one is appended to (never refused), so install mode does not gate on it.
+  [[ -L "$ENV_FILE" ]] && { echo "error: ${ENV_FILE} is a symlink — refusing to write through it; replace it with a regular file (or remove it) and re-run" >&2; exit 1; }
+  if [[ -e "$ENV_FILE" && ! -f "$ENV_FILE" ]]; then
+    echo "error: ${ENV_FILE} exists but is not a regular file (directory, FIFO, or device) — refusing to write; remove it and re-run" >&2
+    exit 1
+  fi
+
+  # Snapshot existing targets for rollback. snap_existed[i] tracks each; env_existed
+  # tracks .env.example. Both are set before the ERR trap is armed.
   local SNAP_DIR i=0
   SNAP_DIR=$(mktemp -d) || { echo "error: mktemp -d failed — check TMPDIR is writable" >&2; exit 1; }
   local -a snap_existed=()
@@ -83,6 +136,8 @@ main() {
     if [[ -f "$tgt" ]]; then cp "$tgt" "${SNAP_DIR}/$i"; snap_existed[i]=1; else snap_existed[i]=0; fi
     i=$((i + 1))
   done
+  local env_existed=0
+  if [[ -f "$ENV_FILE" ]]; then cp "$ENV_FILE" "${SNAP_DIR}/env"; env_existed=1; fi
 
   # Best-effort rollback under `set +e` (rules/error-handling.md — warn, never nothing).
   restore() {
@@ -96,6 +151,11 @@ main() {
       fi
       j=$((j + 1))
     done
+    if (( env_existed == 1 )); then
+      cp "${SNAP_DIR}/env" "$ENV_FILE" || echo "scaffold.sh: warning: could not restore ${ENV_FILE} — restore it by hand" >&2
+    else
+      rm -f "$ENV_FILE" || echo "scaffold.sh: warning: could not remove ${ENV_FILE} during rollback — remove it by hand" >&2
+    fi
   }
   on_err() {
     local rc=$?
@@ -122,6 +182,21 @@ main() {
     results=$(jq -c --arg t "$tgt" --arg a "$action" '. + [{target:$t, action:$a}]' <<<"$results")
     i=$((i + 1))
   done
+
+  # Document FLEET_DISPATCH_TOKEN in .env.example (no-secrets rule). Idempotent:
+  # skip when already present; append a blank-line-separated block to an existing
+  # file; seed a new file with a short header plus the block.
+  local env_action
+  if (( env_existed == 1 )) && grep -q "$ENV_SECRET" "$ENV_FILE"; then
+    env_action="unchanged"
+  elif (( env_existed == 1 )); then
+    { printf '\n'; env_block "$(derive_settings_url)"; } >> "$ENV_FILE"
+    env_action="appended"
+  else
+    { printf '# Copy to .env (gitignored) and fill in real values.\n\n'; env_block "$(derive_settings_url)"; } > "$ENV_FILE"
+    env_action="created"
+  fi
+  results=$(jq -c --arg t "$ENV_FILE" --arg a "$env_action" '. + [{target:$t, action:$a}]' <<<"$results")
 
   local state="scaffolded"
   jq -e 'all(.[]; .action=="unchanged")' <<<"$results" >/dev/null && state="no-op"
