@@ -76,12 +76,24 @@ t_env_appended_preserves_existing() {
   [[ -n "$url_ln" && "$url_ln" -lt "$foo_ln" ]] || { echo "    FAIL: settings URL not in header (line $url_ln not before prior var at $foo_ln)" >&2; return 1; }
 }
 
-t_env_idempotent_when_present() {
+t_env_bare_assignment_documented() {
+  # A bare assignment lacks the purpose/source/deep-link no-secrets requires;
+  # scaffold documents it without duplicating the placeholder.
   printf 'FLEET_DISPATCH_TOKEN=\n' > "$ENV_FILE"
   local out; out=$(bash "$SCRIPT") || return 1
   local a; a=$(jq -r '.files[] | select(.target==".env.example") | .action' <<<"$out")
-  [[ "$a" == "unchanged" ]] || { echo "    FAIL: expected .env.example action=unchanged, got $a" >&2; return 1; }
-  [[ "$(grep -c "FLEET_DISPATCH_TOKEN" "$ENV_FILE")" == "1" ]] || { echo "    FAIL: FLEET_DISPATCH_TOKEN duplicated" >&2; return 1; }
+  [[ "$a" == "appended" ]] || { echo "    FAIL: bare assignment not documented (action=$a)" >&2; return 1; }
+  grep -q "settings/secrets/actions" "$ENV_FILE" || { echo "    FAIL: deep link not added" >&2; return 1; }
+  [[ "$(grep -cE '^[[:space:]]*FLEET_DISPATCH_TOKEN=' "$ENV_FILE")" == "1" ]] || { echo "    FAIL: placeholder duplicated" >&2; return 1; }
+}
+
+t_env_idempotent_after_scaffold() {
+  bash "$SCRIPT" >/dev/null || return 1
+  local before; before=$(cat "$ENV_FILE")
+  local out; out=$(bash "$SCRIPT" --override) || return 1
+  local a; a=$(jq -r '.files[] | select(.target==".env.example") | .action' <<<"$out")
+  [[ "$a" == "unchanged" ]] || { echo "    FAIL: re-scaffold of documented file not unchanged (action=$a)" >&2; return 1; }
+  [[ "$before" == "$(cat "$ENV_FILE")" ]] || { echo "    FAIL: .env.example modified on idempotent re-run" >&2; return 1; }
 }
 
 t_env_comment_mention_still_adds_placeholder() {
@@ -143,7 +155,8 @@ echo "== scaffold.sh tests =="
 run "install creates all four artifacts"        with_repo t_install_creates_all
 run "env.example seeded with derived URL"       with_repo t_env_created_with_derived_url
 run "env.example append preserves prior vars"   with_repo t_env_appended_preserves_existing
-run "env.example idempotent when present"       with_repo t_env_idempotent_when_present
+run "env.example bare assignment documented"    with_repo t_env_bare_assignment_documented
+run "env.example idempotent after scaffold"     with_repo t_env_idempotent_after_scaffold
 run "env.example comment-only adds placeholder" with_repo t_env_comment_mention_still_adds_placeholder
 run "env.example symlink is refused"            with_repo t_env_symlink_refused
 run "install refuses a pre-existing target"     with_repo t_install_refuses_existing

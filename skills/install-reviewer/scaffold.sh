@@ -187,31 +187,36 @@ main() {
     i=$((i + 1))
   done
 
-  # Document FLEET_DISPATCH_TOKEN in .env.example (no-secrets rule): the settings
-  # deep link lands in the file header, so a new file is seeded with the block and
-  # an existing file gets the block prepended (existing variables preserved below).
-  local env_action
-  if (( env_existed == 1 )); then
-    # "Already documented" means an actual assignment placeholder is present, not
-    # a mere prose/comment mention — no-secrets requires the placeholder value.
-    # Distinguish match (grep exit 0) / no-match (1) / read error (>=2) per
-    # rules/error-handling.md — never collapse them.
-    local grep_rc=0
-    grep -qE "^[[:space:]]*${ENV_SECRET}=" "$ENV_FILE" || grep_rc=$?
-    if (( grep_rc == 0 )); then
+  # Document FLEET_DISPATCH_TOKEN in .env.example (no-secrets rule). After scaffold
+  # the file carries the full block: purpose, source, the repo's Actions-secrets
+  # deep link (in the header), and the placeholder assignment. "Already documented"
+  # requires BOTH the assignment placeholder AND the deep link — a bare assignment
+  # or a prose mention alone is not enough. Otherwise (re)build: prepend the block
+  # and drop any pre-existing bare assignment so the placeholder is never duplicated.
+  # grep status is read explicitly (0 match / 1 no-match / >=2 read error) per
+  # rules/error-handling.md — never collapsed.
+  local env_action url
+  url=$(derive_settings_url)
+  if (( env_existed == 0 )); then
+    env_block "$url" > "$ENV_FILE"
+    env_action="created"
+  else
+    local rc_assign=0 rc_link=0
+    grep -qE "^[[:space:]]*${ENV_SECRET}=" "$ENV_FILE" || rc_assign=$?
+    grep -qF 'settings/secrets/actions'    "$ENV_FILE" || rc_link=$?
+    (( rc_assign <= 1 )) || { echo "error: reading ${ENV_FILE} failed (grep exit ${rc_assign}) — check it is a readable text file and re-run" >&2; false; }
+    (( rc_link   <= 1 )) || { echo "error: reading ${ENV_FILE} failed (grep exit ${rc_link}) — check it is a readable text file and re-run" >&2; false; }
+    if (( rc_assign == 0 && rc_link == 0 )); then
       env_action="unchanged"
-    elif (( grep_rc == 1 )); then
+    else
       local env_tmp; env_tmp=$(mktemp) || { echo "error: mktemp failed while updating ${ENV_FILE}" >&2; false; }
-      { env_block "$(derive_settings_url)"; printf '\n'; cat "$ENV_FILE"; } > "$env_tmp"
+      # Prepend the block (deep link in header); keep every existing line except a
+      # bare placeholder, which the block now supplies. grep -v exit 1 (all lines
+      # stripped) is a valid empty remainder; only exit >=2 is a real error.
+      { env_block "$url"; printf '\n'; grep -vE "^[[:space:]]*${ENV_SECRET}=" "$ENV_FILE" || (( $? == 1 )); } > "$env_tmp"
       mv "$env_tmp" "$ENV_FILE"
       env_action="appended"
-    else
-      echo "error: reading ${ENV_FILE} failed (grep exit ${grep_rc}) — check it is a readable text file and re-run" >&2
-      false  # trip the ERR trap so scaffolded targets roll back
     fi
-  else
-    env_block "$(derive_settings_url)" > "$ENV_FILE"
-    env_action="created"
   fi
   results=$(jq -c --arg t "$ENV_FILE" --arg a "$env_action" '. + [{target:$t, action:$a}]' <<<"$results")
 
