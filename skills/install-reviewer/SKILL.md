@@ -1,14 +1,13 @@
 ---
 name: install-reviewer
 description: >
-  Opt one of the maintainer's own repositories into their same-owner `jbaruch/coding-policy`
-  review setup (coding-policy holds their shared coding rules): scaffold a
-  `.github/fleet-review-enabled` marker, a thin `.github/workflows/review-trigger.yml` (asks
-  coding-policy to run a PR-time review), a `.github/copilot-instructions.md` scoping Copilot
-  to the code-quality lane, and a `.env.example` entry, then open a PR. The trigger asks the
-  same-owner reviewer App to review the PR; the marker enrolls the repo in its scheduled-poll
-  backstop; both review against the `jbaruch/coding-policy` rules. The review credential stays
-  only in coding-policy; the consumer sets one least-privilege `FLEET_DISPATCH_TOKEN`.
+  Add the files that run the `jbaruch/coding-policy` coding-rule review on a repo's pull
+  requests: scaffold a `.github/fleet-review-enabled` marker, a
+  `.github/workflows/review-trigger.yml` (on each PR, starts a review of that PR against the
+  coding-policy rules), a `.github/copilot-instructions.md` pointing Copilot at the
+  code-quality lane, and a `.env.example` entry, then open a PR. While the marker is present
+  the same review also runs on a schedule as a backstop; both post as a review. The consumer
+  sets one `FLEET_DISPATCH_TOKEN` secret that `review-trigger.yml` reads.
   Use when the user wants to add, install, enable, scaffold, set up, wire up, or enroll an
   automated policy review / PR reviewer / coding-policy reviewer in a consumer repo. Also use
   to upgrade or refresh the reviewer files in a repo that already has them (override mode).
@@ -18,7 +17,7 @@ description: >
 
 Process steps in order. Do not skip ahead.
 
-Opt one of the maintainer's own repositories into their same-owner `jbaruch/coding-policy` review setup — `jbaruch/coding-policy` is the maintainer's repository holding their shared coding rules. The reviewer is the `coding-policy-fleet-reviewer` GitHub App running in the maintainer's own `jbaruch/coding-policy`, using the Codex CLI on a ChatGPT subscription. A thin `.github/workflows/review-trigger.yml` asks that same-owner repo to run a single-PR review on each PR event (so the verdict lands before merge); the `.github/fleet-review-enabled` marker enrolls the repo in the App's scheduled poll, which is the backstop. The review credential stays only in `coding-policy`; the consumer holds the marker, the trigger workflow, and one stable least-privilege `FLEET_DISPATCH_TOKEN`. This skill commits those files plus the Copilot-lane charter and opens a PR.
+Add the files that run the `jbaruch/coding-policy` coding-rule review on a repo's pull requests — `jbaruch/coding-policy` holds the shared coding rules, reviewed by the `coding-policy-fleet-reviewer` GitHub App with the Codex CLI on a ChatGPT subscription. `.github/workflows/review-trigger.yml`, on each PR event, starts a review of that PR against the coding-policy rules so the result is available before merge; the `.github/fleet-review-enabled` marker makes the same review run on a schedule as a backstop. The consumer holds the marker, the trigger workflow, and one `FLEET_DISPATCH_TOKEN` secret that the workflow reads. This skill commits those files plus the Copilot-lane charter and opens a PR.
 
 Precondition: the App is installed on the account with access to this repo (installed on all repositories).
 
@@ -79,8 +78,8 @@ Establishes the feature branch the rest of the steps commit on. Install mode cre
 
 Copies the opt-in files from the packaged template tree into the consumer, and documents the operator secret:
 
-- `.github/fleet-review-enabled` — the opt-in marker; its presence enrolls the repo in the maintainer's same-owner review setup
-- `.github/workflows/review-trigger.yml` — the thin PR-time trigger; asks the same-owner coding-policy to run an immediate single-PR review
+- `.github/fleet-review-enabled` — the opt-in marker; while present, the coding-policy review also runs on a schedule as a backstop
+- `.github/workflows/review-trigger.yml` — on each PR, starts a review of that PR against the coding-policy rules
 - `.github/copilot-instructions.md` — the Copilot complementary-lane charter
 - `.env.example` — appends a `FLEET_DISPATCH_TOKEN` entry carrying the repo's Actions-secrets settings URL (no-secrets rule); append-or-create, never overwrites prior variables
 
@@ -120,4 +119,4 @@ skills/install-reviewer/PR_BODY_TEMPLATE.md
 
 In upgrade mode, also include a brief diff line in the PR body naming the outgoing and incoming plugin versions so the human reviewer sees what's being refreshed.
 
-Return the PR URL. If Step 1 emitted any warnings, surface them inline in your user-facing summary too (not only in the PR body). **Surface the one operator secret in your summary:** the trigger workflow needs a `FLEET_DISPATCH_TOKEN` repo secret — a fine-grained token the maintainer scopes to only their own `jbaruch/coding-policy` with `Actions: write` and nothing else (least privilege). Set it before the first PR after merge, or the PR-time review will not fire. The scheduled poll still reviews as a backstop. Finish here — the operator sets the secret and merges.
+Return the PR URL. If Step 1 emitted any warnings, surface them inline in your user-facing summary too (not only in the PR body). **Surface the one operator secret in your summary:** `.github/workflows/review-trigger.yml` reads a `FLEET_DISPATCH_TOKEN` repo secret (a fine-grained token with `Actions: write` on `jbaruch/coding-policy`). Set it before the first PR after merge, or the trigger will not run; the scheduled backstop still reviews. Finish here — the operator sets the secret and merges.
