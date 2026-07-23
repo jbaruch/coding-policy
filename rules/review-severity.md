@@ -31,11 +31,14 @@ description: Review findings carry a severity — blocking gates the merge, advi
 - Any blocking finding present → the reviewer posts `CHANGES_REQUESTED` and the merge gates
 - Only advisory findings → the reviewer posts `COMMENTED` and the merge is allowed
 - The policy reviewer's posted state already encodes this — the event is derived from per-finding severity (see `.github/codex-review/post-review.sh` header)
-- The merge watcher gates on the policy reviewer's `CHANGES_REQUESTED` alone; Copilot never gates (see `skills/release/watch-pr-reviews.sh` header)
+- The merge watcher gates on the policy reviewer's `CHANGES_REQUESTED` alone (see `skills/release/watch-pr-reviews.sh` header)
+- Copilot never gates
 
 ## Split Reading From Acting
 
 - Read every finding in full first — severity never licenses skipping a body (see `rules/reviewer-feedback-reading.md`)
 - Blocking → fix before merge
-- Advisory → acknowledge; fold in only when a blocking round is already happening, else defer to a follow-up (see `rules/boy-scout.md`)
+- Advisory → acknowledge
+- Fold an advisory in only when a blocking round is already happening
+- Otherwise defer the advisory to a follow-up (see `rules/boy-scout.md`)
 - Never burn a dedicated re-review round on a lone advisory

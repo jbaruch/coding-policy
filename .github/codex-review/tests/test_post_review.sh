@@ -51,7 +51,7 @@ t_pass() {
   [[ "$(jq -r .event <<<"$out")" == "APPROVE" ]]             || { bad "pass: event APPROVE (got $out)"; rm -rf "$dir"; return; }
   [[ "$(jq -r .findings <<<"$out")" == "0" ]]                 || { bad "pass: findings 0 (got $out)"; rm -rf "$dir"; return; }
   [[ "$(jq -r .event "$GH_CAPTURE")" == "APPROVE" ]]         || { bad "pass: payload event APPROVE"; rm -rf "$dir"; return; }
-  jq -r .body "$GH_CAPTURE" | grep -q "Policy loaded: 23"     || { bad "pass: body carries the load indicator"; rm -rf "$dir"; return; }
+  jq -r .body "$GH_CAPTURE" | grep -qE "Policy loaded: [0-9]+ rule files" || { bad "pass: body carries the load indicator"; rm -rf "$dir"; return; }
   ok "no findings -> APPROVE, summary body, 0 findings"
   rm -rf "$dir"
 }
