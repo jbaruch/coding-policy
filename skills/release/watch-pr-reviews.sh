@@ -8,20 +8,30 @@
 # fabricated "N minutes in the policy" citations) crept in. This script owns
 # that loop so the cadence and give-up budget are one tuned constant, not an
 # agent choice, and it watches EXACTLY the fields the Step 7 merge gate reads:
-# each gating bot's LATEST review state (resolved by bot login inside
-# poll-pr-reviews.sh), CI status, and merge state. It does NOT wait for inline
-# comments to appear (a verdict with zero inline comments is a complete
-# review) and does NOT key off any hand-picked run/comment/check id.
+# both bots' LATEST review state (resolved by bot login inside
+# poll-pr-reviews.sh), CI status, and merge state. Only the policy reviewer
+# gates (rules/review-severity.md — Copilot is always advisory); it waits for
+# Copilot to post so its body can be read, never gates on its verdict. It does
+# NOT wait for inline comments to appear (a verdict with zero inline comments is
+# a complete review) and does NOT key off any hand-picked run/comment/check id.
 #
 # Usage: watch-pr-reviews.sh <owner> <repo> <pr-number>
 # Out:   the full poll-pr-reviews.sh snapshot with an added top-level object:
 #          "watch": {"result": "<result>", "attempts": N, "elapsed_seconds": N}
 #        emitted on stdout when a terminal state is reached (rc 0 or 1).
 # Exit / result matrix (branch on .watch.result):
-#   rc 0, result "ready"             — mergeable, CI success/none, both gating
-#                                      bots posted, none requested changes.
-#   rc 0, result "changes_requested" — a gating bot's latest verdict is
-#                                      CHANGES_REQUESTED. Address and re-push.
+#   rc 0, result "ready"             — mergeable, CI success/none, both bots
+#                                      posted (so their bodies can be read), and
+#                                      the policy reviewer is not
+#                                      CHANGES_REQUESTED. Copilot may be
+#                                      CHANGES_REQUESTED and this still reaches
+#                                      ready (Copilot is always advisory).
+#   rc 0, result "changes_requested" — the policy reviewer's latest verdict is
+#                                      CHANGES_REQUESTED (a blocking finding is
+#                                      present — advisory-only reviews post
+#                                      COMMENT, see rules/review-severity.md).
+#                                      Copilot is always advisory and never
+#                                      produces this result. Address and re-push.
 #   rc 0, result "ci_failure"        — a check failed. Fix and re-push.
 #   rc 0, result "dirty"             — branch conflicts with the base; GitHub
 #                                      skipped the pull_request: workflows.
@@ -113,7 +123,7 @@ main() {
     codex=$(printf '%s'     "$snapshot" | jq -r '.reviews.codex.state')
     copilot=$(printf '%s'   "$snapshot" | jq -r '.reviews.copilot.state')
 
-    # Order matters: a conflicting branch or a failed check or a
+    # Order matters: a conflicting branch or a failed check or a blocking
     # CHANGES_REQUESTED verdict is terminal-for-this-round — the agent must
     # go act (rebase / fix / address) before any further waiting helps.
     if [[ "$mergeable" == "CONFLICTING" || "$mstatus" == "DIRTY" ]]; then
@@ -122,13 +132,19 @@ main() {
     if [[ "$ci" == "failure" ]]; then
       emit_and_exit "ci_failure" "$attempts" "$elapsed" "$snapshot" 0
     fi
-    if [[ "$codex" == "CHANGES_REQUESTED" || "$copilot" == "CHANGES_REQUESTED" ]]; then
+    # Only the policy reviewer gates. Its CHANGES_REQUESTED means a blocking
+    # finding is present (post-review.sh derives the event from per-finding
+    # severity; advisory-only reviews post COMMENT). Copilot is always advisory
+    # (rules/review-severity.md) — its verdict never produces this result; the
+    # agent still reads its body per rules/reviewer-feedback-reading.md.
+    if [[ "$codex" == "CHANGES_REQUESTED" ]]; then
       emit_and_exit "changes_requested" "$attempts" "$elapsed" "$snapshot" 0
     fi
 
     # Ready = the exact Step 7 merge-gate field conjunction: mergeable, CI
-    # green-or-absent, and BOTH gating bots have posted a verdict (state left
-    # "none"). Neither is CHANGES_REQUESTED here — the guard above returned.
+    # green-or-absent, and BOTH bots have posted a verdict (state left "none")
+    # so each body can be read before merge. The policy reviewer is not
+    # CHANGES_REQUESTED here — the guard above returned; Copilot never gates.
     if [[ "$mergeable" == "MERGEABLE" \
        && ( "$ci" == "success" || "$ci" == "none" ) \
        && "$codex" != "none" \

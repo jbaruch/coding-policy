@@ -11,6 +11,7 @@ description: A reviewer's state classifies whether it gates the merge, not wheth
 - `COMMENTED` and "non-blocking" describe the merge gate, never permission to skip the review body
 - Read every reviewer's review body in full and every inline comment body before judging that any item needs no action
 - A `COMMENTED` review with zero inline comments still carries a body that must be read
+- State classifies gating, severity classifies acting, neither classifies reading — read all, then act per `rules/review-severity.md`
 
 ## Read the Text, Not the Tally
 

@@ -15,7 +15,7 @@ List the files this PR adds to run the `jbaruch/coding-policy` coding-rule revie
 - `.github/copilot-instructions.md` — points Copilot at the code-quality lane (correctness, bugs, security, test gaps).
 - `.env.example` — records the `FLEET_DISPATCH_TOKEN` name and where to set it, per the `no-secrets` rule.
 
-The rule review and Copilot are separate lanes; both gate the merge.
+The rule review and Copilot are separate lanes. The rule review gates the merge on blocking findings (correctness, security, policy-contract); Copilot is always advisory — read it, but it never gates.
 
 ### 2. Required secret
 

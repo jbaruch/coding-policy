@@ -15,6 +15,7 @@ alwaysApply: true
 - **In-scope cleanups** (typo, missing newline, broken doc link, small drift): roll into the current PR. The bundle is fine when the PR's stated scope still reads coherently
 - **Out-of-scope discoveries** (untested module, contradicting rules, unrelated security gap): open a follow-up PR — or an issue if the fix needs design — and reference it from the current one. Walking away with no record is the failure mode this rule prevents
 - When unsure whether to bundle or split, prefer **bundle small + cite** or **split large + file**. The wrong answer is "leave it"
+- A review advisory deferred to a follow-up per `rules/review-severity.md` takes the filed-record path — a deferred advisory is not "walking away"
 
 ## Reconciliation With `commit-conventions`
 
