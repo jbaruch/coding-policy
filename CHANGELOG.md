@@ -1,5 +1,9 @@
 # Changelog
 
+### Rules
+
+- **`testing-standards` — Seeded Property-Based Test Carve-Out** (closes #227) — the Determinism clause ("no self-generated random test data", "never have the test generate its own inputs randomly") banned property-based tests (kotest `*PropertyTest`, Hypothesis, fast-check, QuickCheck) outright, since generating inputs is the paradigm — even when a pinned seed makes the run fully reproducible. The clause conflated two senses of "random": runtime entropy (different cases each run, genuinely flaky) versus seeded pseudo-random (same seed produces the same cases on every run and machine, as reproducible as a hand-written fixture, which is the clause's actual goal). The carve-out permits property tests when the seed is a constant in the file, the iteration count is bounded, and no runtime-RNG call shapes the inputs; unseeded or unbounded generation and runtime `random()` inputs stay forbidden. Precondition 3 lists RNG calls only, not the clock — clock nondeterminism is already covered by the Determinism time bullets and by the constant-seed precondition. The Determinism bullets now point to the carve-out, and the second bans runtime randomness specifically rather than all input generation. Surfaced when the fleet reviewer blocked jbaruch/tg-hubitat-bot#47 and jbaruch/tg-hubitat-bot#49 (detekt adoption), whose `PropTestConfig(seed = FIXED_SEED, iterations = 100)` suites are deterministic by construction; two genuinely non-deterministic `modes.random()` calls in that repo were correctly flagged and fixed separately.
+
 ## 0.3.114 — 2026-07-23
 
 ### CI

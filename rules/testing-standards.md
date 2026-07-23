@@ -28,8 +28,8 @@ alwaysApply: true
 
 ## Determinism
 
-- Tests must be deterministic — no self-generated random test data
-- Provide fixed test data; never have the test generate its own inputs randomly
+- Tests must be deterministic — no self-generated random test data (narrow exception: Seeded Property-Based Test Carve-Out below)
+- Provide fixed test data; never let runtime randomness generate or shape the test's inputs
 - No dependence on the current date or wall-clock time — no `today`, runtime `now()`, or hardcoded future dates in assertions or fixtures (narrow exception: Live-Upstream Future-Date Carve-Out below)
 - Control the clock: inject or freeze "now" (a passed-in reference date, a mocked time source, freezegun) so a test green today is green every day
 - Compute relative dates from a fixed injected reference, never from the real clock at run time
@@ -47,6 +47,16 @@ alwaysApply: true
   3. The owning repo documents the refresh cadence and refresh procedure beside the fixtures
 - A pinned date aging into the past is a fixture refresh under the documented cadence — never an inline patch during unrelated work
 - Every other suite still bans future dates and time-relative values
+
+## Seeded Property-Based Test Carve-Out
+
+- Narrow exception for property-based tests whose generated inputs come from a pinned seed
+- Applies when a generative testing library (kotest property tests, Hypothesis, fast-check, QuickCheck) explores many cases per run under a fixed seed
+- Preconditions (all required):
+  1. The generator seed is a constant in the test file (e.g. `PropTestConfig(seed = 1234)`), never drawn from the clock, the environment, or an unset default
+  2. The iteration count is explicitly bounded (e.g. `iterations = 100`), never unbounded or environment-derived
+  3. No runtime-RNG call (`random()`, unseeded `Random()`, `shuffle`) selects or shapes the inputs
+- Every other case still follows Determinism: unseeded or unbounded generation, and any runtime-RNG input, stays forbidden
 
 ## Fixtures
 
