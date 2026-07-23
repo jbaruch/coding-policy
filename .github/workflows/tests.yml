@@ -1,14 +1,19 @@
 name: Tests
 
-# Two gates on every PR (and on direct pushes to main):
+# Three gates on every PR (and on direct pushes to main):
 #   1. diagnostics — shellcheck over every first-party shell script and
 #      pyright over the first-party Python, at zero findings
 #      (rules/language-diagnostics.md). Runs first: static checks are fast
 #      and cheap, so style/type regressions block before the suites run
 #      (rules/code-formatting.md CI Integration).
-#   2. unit-tests — every module's bash unit suite via scripts/run-tests.sh
+#   2. lint — `tessl plugin lint` (manifest + skill-frontmatter + structure
+#      validation). Pre-merge so a bad manifest or frontmatter (e.g. an
+#      over-length skill `description`) is caught here, not only when it
+#      breaks publish.yml's first step after merge.
+#   3. unit-tests — every module's bash unit suite via scripts/run-tests.sh
 #      (rules/testing-standards.md). Gated on diagnostics passing.
-# publish.yml reruns both before release as defense-in-depth.
+# publish.yml reruns lint + diagnostics + the suites before release as
+# defense-in-depth.
 on:
   pull_request:
   push:
@@ -26,6 +31,16 @@ jobs:
       - uses: ./.github/actions/setup-diagnostics
       - name: Run language-diagnostics gate
         run: bash scripts/run-diagnostics.sh
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: tesslio/setup-tessl@v2
+        with:
+          token: ${{ secrets.TESSL_TOKEN }}
+      - name: Lint plugin
+        run: tessl plugin lint
 
   unit-tests:
     needs: diagnostics
