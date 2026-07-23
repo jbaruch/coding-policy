@@ -55,7 +55,7 @@ alwaysApply: true
 - Preconditions (all required):
   1. The generator seed is a constant in the test file (e.g. `PropTestConfig(seed = 1234)`), never drawn from the clock, the environment, or an unset default
   2. The iteration count is explicitly bounded (e.g. `iterations = 100`), never unbounded or environment-derived
-  3. No runtime-RNG call (`random()`, unseeded `Random()`, `shuffle`, `now()`) selects or shapes the inputs
+  3. No runtime-RNG call (`random()`, unseeded `Random()`, `shuffle`) selects or shapes the inputs — the clock is already covered by Determinism above and by precondition 1
 - Every other case still follows Determinism: unseeded or unbounded generation, and any runtime-RNG input, stays forbidden
 
 ## Fixtures
