@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.114 — 2026-07-23
+
 ### CI
 
 - **PR-time `tessl plugin lint` gate** — `tests.yml` gains a `lint` job running `tessl plugin lint` on every PR, alongside `diagnostics` and `unit-tests`. Previously lint ran only in `publish.yml` (post-merge), so a bad manifest or skill frontmatter — e.g. an over-length `description` — passed PR review and merged, then failed the publish pipeline's first step (seen during the 0.3.112 recovery). Now it's caught before merge.
