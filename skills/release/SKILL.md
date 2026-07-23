@@ -84,7 +84,7 @@ skills/release/watch-pr-reviews.sh <owner> <repo> <pr-number>
 
 It returns the full `poll-pr-reviews.sh` snapshot plus a `watch` object — `{"result": ..., "attempts": N, "elapsed_seconds": N}`. The interval/budget constants and the result contract are the script's, not restated here (`rules/script-as-black-box.md` — see the header's result matrix). Branch on `.watch.result`:
 
-- `ready` (exit 0) — mergeable, CI `success`/`none`, both bots posted, none requested changes. Read every non-empty `reviews.*.body` (a `COMMENTED` verdict with zero inline comments still carries a body per `rules/reviewer-feedback-reading.md`), then proceed to Step 6.
+- `ready` (exit 0) — mergeable, CI `success`/`none`, both bots posted, the policy reviewer not `CHANGES_REQUESTED` (Copilot may be, and this still reaches ready — it is always advisory). Read every non-empty `reviews.*.body` (a `COMMENTED` verdict with zero inline comments still carries a body per `rules/reviewer-feedback-reading.md`), then proceed to Step 6.
 - `changes_requested` (exit 0) — the policy reviewer requested changes (a blocking finding). Go to Step 6, address it, push; the next push re-fires the review, so re-run the watcher.
 - `ci_failure` (exit 0) — a check failed. Fix it (Step 6), push, re-run the watcher.
 - `dirty` (exit 0) — the branch conflicts with `main` and GitHub skipped the `pull_request:` workflows. Rebase onto current `main`, resolve, force-push, then re-run the watcher — the push re-fires the missed workflows.
@@ -107,7 +107,7 @@ It returns the full `poll-pr-reviews.sh` snapshot plus a `watch` object — `{"r
 ## Step 7 — Merge + Cleanup
 
 Only proceed when:
-- Step 5's watcher returned `.watch.result` as `ready` — its exit-0 readiness conjunction (mergeable, CI `success`/`none`, both bots posted, no `CHANGES_REQUESTED`); the field predicate is the watcher's, not restated here (`rules/script-as-black-box.md` — see `skills/release/watch-pr-reviews.sh` header). `ready` already requires each bot's `state` to have left `none`, so a reviewer that never ran cannot satisfy the gate vacuously, AND
+- Step 5's watcher returned `.watch.result` as `ready` — its exit-0 readiness conjunction (mergeable, CI `success`/`none`, both bots posted, the policy reviewer not `CHANGES_REQUESTED`); the field predicate is the watcher's, not restated here (`rules/script-as-black-box.md` — see `skills/release/watch-pr-reviews.sh` header). `ready` already requires each bot's `state` to have left `none`, so a reviewer that never ran cannot satisfy the gate vacuously, AND
 - Every non-empty `reviews.*.body` in the returned snapshot has been read in full — a `COMMENTED` state with zero inline comments is not a license to skip the body (see `rules/reviewer-feedback-reading.md`), AND
 - Every inline comment from Step 5's `inline_comments` count has a `Fixed in <sha>` or `Declining — <reason>` reply per Step 6 (verify by listing the PR's review comments — the poll script tracks counts, not reply state, so the operator confirms thread closure).
 

@@ -21,7 +21,11 @@
 #        emitted on stdout when a terminal state is reached (rc 0 or 1).
 # Exit / result matrix (branch on .watch.result):
 #   rc 0, result "ready"             — mergeable, CI success/none, both bots
-#                                      posted, none requested changes.
+#                                      posted (so their bodies can be read), and
+#                                      the policy reviewer is not
+#                                      CHANGES_REQUESTED. Copilot may be
+#                                      CHANGES_REQUESTED and this still reaches
+#                                      ready (Copilot is always advisory).
 #   rc 0, result "changes_requested" — the policy reviewer's latest verdict is
 #                                      CHANGES_REQUESTED (a blocking finding is
 #                                      present — advisory-only reviews post
