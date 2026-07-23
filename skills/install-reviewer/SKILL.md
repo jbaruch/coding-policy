@@ -98,7 +98,7 @@ Install mode refuses if any of the three template targets already exists; upgrad
 .tessl/plugins/jbaruch/coding-policy/skills/install-reviewer/commit.sh --override
 ```
 
-Stages the reviewer files (`.github/fleet-review-enabled`, `.github/workflows/review-trigger.yml`, and `.github/copilot-instructions.md`) and commits with the canonical message — `ci(review): add jbaruch/coding-policy PR review setup` in install mode, `ci(review): upgrade jbaruch/coding-policy PR review setup` in upgrade mode. Idempotent: emits `{"state": "no-op", …}` when the working tree already matches a prior successful run. If a pre-commit hook rejects the commit, the script exits non-zero — fix the hook's finding and re-run; do not `--no-verify`. Proceed immediately to Step 6.
+Stages the reviewer files (`.github/fleet-review-enabled`, `.github/workflows/review-trigger.yml`, `.github/copilot-instructions.md`, and `.env.example`) and commits with the canonical message — `ci(review): add jbaruch/coding-policy PR review setup` in install mode, `ci(review): upgrade jbaruch/coding-policy PR review setup` in upgrade mode. Idempotent: emits `{"state": "no-op", …}` when the working tree already matches a prior successful run. If a pre-commit hook rejects the commit, the script exits non-zero — fix the hook's finding and re-run; do not `--no-verify`. Proceed immediately to Step 6.
 
 ## Step 6 — Push
 

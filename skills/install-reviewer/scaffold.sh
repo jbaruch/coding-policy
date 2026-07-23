@@ -125,6 +125,10 @@ main() {
     echo "error: ${ENV_FILE} exists but is not a regular file (directory, FIFO, or device) — refusing to write; remove it and re-run" >&2
     exit 1
   fi
+  if [[ -f "$ENV_FILE" && ! -r "$ENV_FILE" ]]; then
+    echo "error: ${ENV_FILE} exists but is not readable — fix its permissions and re-run" >&2
+    exit 1
+  fi
 
   # Snapshot existing targets for rollback. snap_existed[i] tracks each; env_existed
   # tracks .env.example. Both are set before the ERR trap is armed.
@@ -183,17 +187,28 @@ main() {
     i=$((i + 1))
   done
 
-  # Document FLEET_DISPATCH_TOKEN in .env.example (no-secrets rule). Idempotent:
-  # skip when already present; append a blank-line-separated block to an existing
-  # file; seed a new file with a short header plus the block.
+  # Document FLEET_DISPATCH_TOKEN in .env.example (no-secrets rule): the settings
+  # deep link lands in the file header, so a new file is seeded with the block and
+  # an existing file gets the block prepended (existing variables preserved below).
   local env_action
-  if (( env_existed == 1 )) && grep -q "$ENV_SECRET" "$ENV_FILE"; then
-    env_action="unchanged"
-  elif (( env_existed == 1 )); then
-    { printf '\n'; env_block "$(derive_settings_url)"; } >> "$ENV_FILE"
-    env_action="appended"
+  if (( env_existed == 1 )); then
+    # Distinguish "already documented" (grep exit 0) from "absent" (exit 1) from a
+    # read error (exit >=2) per rules/error-handling.md — never collapse them.
+    local grep_rc=0
+    grep -q "$ENV_SECRET" "$ENV_FILE" || grep_rc=$?
+    if (( grep_rc == 0 )); then
+      env_action="unchanged"
+    elif (( grep_rc == 1 )); then
+      local env_tmp; env_tmp=$(mktemp) || { echo "error: mktemp failed while updating ${ENV_FILE}" >&2; false; }
+      { env_block "$(derive_settings_url)"; printf '\n'; cat "$ENV_FILE"; } > "$env_tmp"
+      mv "$env_tmp" "$ENV_FILE"
+      env_action="appended"
+    else
+      echo "error: reading ${ENV_FILE} failed (grep exit ${grep_rc}) — check it is a readable text file and re-run" >&2
+      false  # trip the ERR trap so scaffolded targets roll back
+    fi
   else
-    { printf '# Copy to .env (gitignored) and fill in real values.\n\n'; env_block "$(derive_settings_url)"; } > "$ENV_FILE"
+    env_block "$(derive_settings_url)" > "$ENV_FILE"
     env_action="created"
   fi
   results=$(jq -c --arg t "$ENV_FILE" --arg a "$env_action" '. + [{target:$t, action:$a}]' <<<"$results")

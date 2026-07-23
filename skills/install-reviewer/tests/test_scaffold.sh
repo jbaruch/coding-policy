@@ -69,6 +69,11 @@ t_env_appended_preserves_existing() {
   [[ "$a" == "appended" ]] || { echo "    FAIL: expected .env.example action=appended, got $a" >&2; return 1; }
   grep -q "^FOO=bar$" "$ENV_FILE" || { echo "    FAIL: prior var FOO=bar not preserved" >&2; return 1; }
   grep -q "FLEET_DISPATCH_TOKEN=" "$ENV_FILE" || { echo "    FAIL: FLEET_DISPATCH_TOKEN not appended" >&2; return 1; }
+  # no-secrets: the settings deep link must sit in the header, ahead of prior vars.
+  local url_ln foo_ln
+  url_ln=$(grep -n "settings/secrets/actions" "$ENV_FILE" | head -1 | cut -d: -f1)
+  foo_ln=$(grep -n "^FOO=bar$" "$ENV_FILE" | head -1 | cut -d: -f1)
+  [[ -n "$url_ln" && "$url_ln" -lt "$foo_ln" ]] || { echo "    FAIL: settings URL not in header (line $url_ln not before prior var at $foo_ln)" >&2; return 1; }
 }
 
 t_env_idempotent_when_present() {
