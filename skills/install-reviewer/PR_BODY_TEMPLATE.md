@@ -13,6 +13,7 @@ Explain that this PR enrolls the repo in the central reviewer and nothing else:
 - `.github/workflows/review-trigger.yml` — a thin `on: pull_request` workflow that fires an **immediate single-PR review** in `jbaruch/coding-policy` (via `gh workflow run`), so the policy verdict lands before merge. It holds no Codex credential — only a narrow dispatch token.
 - `.github/fleet-review-enabled` — the opt-in marker. It enrolls this repo in the central `coding-policy-fleet-reviewer` App's scheduled poll, which is the backstop for anything the trigger missed. The review runs against the `jbaruch/coding-policy` rules with the OpenAI Codex CLI on a **ChatGPT subscription** (no API key); the verdict posts as a `<app-slug>[bot]` review.
 - `.github/copilot-instructions.md` — scopes Copilot to the complementary lane (correctness, bugs, security, test gaps) and off policy.
+- `.env.example` — a `FLEET_DISPATCH_TOKEN` entry carrying this repo's Actions-secrets settings URL (appended, never overwriting existing variables), documenting the required secret per the `no-secrets` rule.
 
 The fleet reviewer is the policy reviewer; Copilot is the code-quality reviewer. Both gate the merge.
 

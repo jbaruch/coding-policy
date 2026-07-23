@@ -12,6 +12,7 @@
 #   .github/fleet-review-enabled
 #   .github/workflows/review-trigger.yml
 #   .github/copilot-instructions.md
+#   .env.example                          (FLEET_DISPATCH_TOKEN documentation)
 #
 # Usage: commit.sh [--override]
 #   --override    Upgrade-mode commit. Uses the upgrade branch name and
@@ -49,6 +50,7 @@ FILES=(
   .github/fleet-review-enabled
   .github/workflows/review-trigger.yml
   .github/copilot-instructions.md
+  .env.example
 )
 
 main() {
