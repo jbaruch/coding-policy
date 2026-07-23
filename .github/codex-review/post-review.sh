@@ -7,13 +7,20 @@
 # the review body rather than as inline comments so an off-diff line can never
 # trigger the HTTP 422 that would cascade-fail the whole review.
 #
-# The review is authored by whoever GH_TOKEN belongs to. A clean pass posts
-# APPROVE and a violation posts REQUEST_CHANGES. A token GitHub forbids from
-# approving (`github-actions[bot]` — HTTP 422) falls back to COMMENT on a pass,
-# so the verdict is never lost.
+# The review event is DERIVED from per-finding severity, not read from a model
+# verdict (rules/review-severity.md — the gate is a deterministic function of
+# severities, rules/script-delegation.md):
+#   - any finding with severity "blocking"  -> REQUEST_CHANGES (gates the merge)
+#   - findings, all "advisory"              -> COMMENT (visible, never gates)
+#   - no findings                           -> APPROVE (clean pass)
+#
+# The review is authored by whoever GH_TOKEN belongs to. A token GitHub forbids
+# from approving (`github-actions[bot]` — HTTP 422) falls back to COMMENT on a
+# clean pass, so the verdict is never lost.
 #
 # Usage: post-review.sh <owner> <repo> <pr-number> <result-json-file>
-# Out:   one JSON object on stdout: {"state":"posted","event":"...","findings":N}
+# Out:   one JSON object on stdout:
+#          {"state":"posted","event":"...","findings":N,"blocking":N,"advisory":N}
 # Exit:  0 on success; non-zero with a stderr diagnostic on failure.
 
 set -euo pipefail
@@ -69,24 +76,33 @@ main() {
     exit 1
   fi
 
-  local verdict summary findings_count
-  verdict=$(jq -r '.verdict // "pass"' "$result")
+  local summary findings_count blocking_count advisory_count
   summary=$(jq -r '.summary // ""' "$result")
   findings_count=$(jq '(.findings // []) | length' "$result")
+  # A finding with no severity (older reviewer that predates the severity field,
+  # or a malformed entry) is treated as blocking — fail safe: never let an
+  # unclassified finding slip through as non-gating.
+  blocking_count=$(jq '[(.findings // [])[] | select((.severity // "blocking") != "advisory")] | length' "$result")
+  advisory_count=$(( findings_count - blocking_count ))
 
+  # Derive the event from severity (rules/review-severity.md), never a model verdict.
   local event
-  case "$verdict" in
-    changes_requested) event="REQUEST_CHANGES" ;;
-    pass)              event="APPROVE" ;;
-    *) echo "error: unexpected verdict '${verdict}' in ${result} (want pass|changes_requested)" >&2; exit 1 ;;
-  esac
+  if   (( blocking_count > 0 )); then event="REQUEST_CHANGES"
+  elif (( findings_count > 0 )); then event="COMMENT"
+  else                                event="APPROVE"
+  fi
 
-  # Build the review body: summary, then a findings list (omitted when clean).
-  local body findings_md
+  # Build the review body: summary, then blocking and advisory findings in
+  # labeled sections (each omitted when its tier is empty).
+  local body blocking_md advisory_md
   body="$summary"
-  if (( findings_count > 0 )); then
-    findings_md=$(jq -r '.findings[] | "- `\(.path):\(.line)` — **\(.rule)** — \(.message)"' "$result")
-    body="${body}"$'\n\n'"## Findings"$'\n'"${findings_md}"
+  if (( blocking_count > 0 )); then
+    blocking_md=$(jq -r '.findings[] | select((.severity // "blocking") != "advisory") | "- `\(.path):\(.line)` — **\(.rule)** — \(.message)"' "$result")
+    body="${body}"$'\n\n'"## Blocking findings (gate the merge)"$'\n'"${blocking_md}"
+  fi
+  if (( advisory_count > 0 )); then
+    advisory_md=$(jq -r '.findings[] | select((.severity // "blocking") == "advisory") | "- `\(.path):\(.line)` — **\(.rule)** — \(.message)"' "$result")
+    body="${body}"$'\n\n'"## Advisory findings (do not gate)"$'\n'"${advisory_md}"
   fi
 
   # A pass is APPROVE when the token can approve (a GitHub App); a token that
@@ -102,8 +118,11 @@ main() {
     exit 1
   fi
 
-  jq -n --arg event "$posted" --argjson findings "$findings_count" \
-    '{state: "posted", event: $event, findings: $findings}'
+  jq -n --arg event "$posted" \
+    --argjson findings "$findings_count" \
+    --argjson blocking "$blocking_count" \
+    --argjson advisory "$advisory_count" \
+    '{state: "posted", event: $event, findings: $findings, blocking: $blocking, advisory: $advisory}'
 }
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then

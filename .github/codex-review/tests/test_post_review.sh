@@ -44,15 +44,15 @@ run_main() { ( set -euo pipefail; main "$@" ); }
 t_pass() {
   local dir; dir=$(mktemp -d) || { bad "pass: mktemp -d failed"; return; }
   GH_CAPTURE="$dir/payload.json"; MOCK_422_ON_APPROVE=0
-  printf '{"summary":"Policy loaded: 21 rule files from jbaruch/coding-policy. All rules pass.","verdict":"pass","findings":[]}' > "$dir/final.json"
+  printf '{"summary":"Policy loaded: 22 rule files from jbaruch/coding-policy. All rules pass.","findings":[]}' > "$dir/final.json"
   local out; out=$(run_main owner repo 5 "$dir/final.json")
   local rc=$?
   [[ $rc -eq 0 ]]                                              || { bad "pass: exit 0 (rc=$rc)"; rm -rf "$dir"; return; }
   [[ "$(jq -r .event <<<"$out")" == "APPROVE" ]]             || { bad "pass: event APPROVE (got $out)"; rm -rf "$dir"; return; }
   [[ "$(jq -r .findings <<<"$out")" == "0" ]]                 || { bad "pass: findings 0 (got $out)"; rm -rf "$dir"; return; }
   [[ "$(jq -r .event "$GH_CAPTURE")" == "APPROVE" ]]         || { bad "pass: payload event APPROVE"; rm -rf "$dir"; return; }
-  jq -r .body "$GH_CAPTURE" | grep -q "Policy loaded: 21"     || { bad "pass: body carries the load indicator"; rm -rf "$dir"; return; }
-  ok "pass verdict -> APPROVE, summary body, 0 findings"
+  jq -r .body "$GH_CAPTURE" | grep -q "Policy loaded: 22"     || { bad "pass: body carries the load indicator"; rm -rf "$dir"; return; }
+  ok "no findings -> APPROVE, summary body, 0 findings"
   rm -rf "$dir"
 }
 
@@ -60,7 +60,7 @@ t_pass() {
 t_pass_422_fallback() {
   local dir; dir=$(mktemp -d) || { bad "fallback: mktemp -d failed"; return; }
   GH_CAPTURE="$dir/payload.json"; MOCK_422_ON_APPROVE=1
-  printf '{"summary":"Policy loaded: 21 rule files from jbaruch/coding-policy. Clean.","verdict":"pass","findings":[]}' > "$dir/final.json"
+  printf '{"summary":"Policy loaded: 22 rule files from jbaruch/coding-policy. Clean.","findings":[]}' > "$dir/final.json"
   local out; out=$(run_main owner repo 5 "$dir/final.json" 2>/dev/null)
   local rc=$?
   MOCK_422_ON_APPROVE=0
@@ -71,22 +71,85 @@ t_pass_422_fallback() {
   rm -rf "$dir"
 }
 
-# --- changes_requested with findings -> REQUEST_CHANGES, findings in body ---
-t_changes() {
+# --- a blocking finding -> REQUEST_CHANGES, findings in a Blocking section ---
+t_blocking() {
   local dir; dir=$(mktemp -d)
   GH_CAPTURE="$dir/payload.json"
   cat > "$dir/final.json" <<'JSON'
-{"summary":"Policy loaded: 21 rule files from rules/. One violation.","verdict":"changes_requested",
- "findings":[{"path":"skills/x/run.sh","line":3,"rule":"error-handling","message":"missing set -euo pipefail; add it at the top"}]}
+{"summary":"Policy loaded: 22 rule files from rules/. One violation.",
+ "findings":[{"path":"skills/x/run.sh","line":3,"rule":"error-handling","severity":"blocking","message":"missing set -euo pipefail; add it at the top"}]}
 JSON
   local out; out=$(run_main owner repo 9 "$dir/final.json")
   local rc=$?
-  [[ $rc -eq 0 ]]                                                     || { bad "changes: exit 0 (rc=$rc)"; rm -rf "$dir"; return; }
-  [[ "$(jq -r .event <<<"$out")" == "REQUEST_CHANGES" ]]            || { bad "changes: event REQUEST_CHANGES (got $out)"; rm -rf "$dir"; return; }
-  [[ "$(jq -r .findings <<<"$out")" == "1" ]]                       || { bad "changes: findings 1 (got $out)"; rm -rf "$dir"; return; }
-  jq -r .body "$GH_CAPTURE" | grep -q "skills/x/run.sh:3"           || { bad "changes: body cites the finding path:line"; rm -rf "$dir"; return; }
-  jq -r .body "$GH_CAPTURE" | grep -q "error-handling"             || { bad "changes: body names the rule"; rm -rf "$dir"; return; }
-  ok "changes_requested -> REQUEST_CHANGES, findings in body"
+  [[ $rc -eq 0 ]]                                                     || { bad "blocking: exit 0 (rc=$rc)"; rm -rf "$dir"; return; }
+  [[ "$(jq -r .event <<<"$out")" == "REQUEST_CHANGES" ]]            || { bad "blocking: event REQUEST_CHANGES (got $out)"; rm -rf "$dir"; return; }
+  [[ "$(jq -r .findings <<<"$out")" == "1" ]]                       || { bad "blocking: findings 1 (got $out)"; rm -rf "$dir"; return; }
+  [[ "$(jq -r .blocking <<<"$out")" == "1" ]]                       || { bad "blocking: blocking 1 (got $out)"; rm -rf "$dir"; return; }
+  jq -r .body "$GH_CAPTURE" | grep -q "## Blocking findings"        || { bad "blocking: body has a Blocking section"; rm -rf "$dir"; return; }
+  jq -r .body "$GH_CAPTURE" | grep -q "skills/x/run.sh:3"           || { bad "blocking: body cites the finding path:line"; rm -rf "$dir"; return; }
+  jq -r .body "$GH_CAPTURE" | grep -q "error-handling"             || { bad "blocking: body names the rule"; rm -rf "$dir"; return; }
+  ok "blocking finding -> REQUEST_CHANGES, Blocking section in body"
+  rm -rf "$dir"
+}
+
+# --- advisory-only findings -> COMMENT (never gates), Advisory section ---
+t_advisory_only() {
+  local dir; dir=$(mktemp -d)
+  GH_CAPTURE="$dir/payload.json"; MOCK_422_ON_APPROVE=0
+  cat > "$dir/final.json" <<'JSON'
+{"summary":"Policy loaded: 22 rule files from rules/. Style nit only.",
+ "findings":[{"path":"rules/foo.md","line":8,"rule":"context-writing-style","severity":"advisory","message":"em-dash clause attaches a rationale; drop it"}]}
+JSON
+  local out; out=$(run_main owner repo 9 "$dir/final.json")
+  local rc=$?
+  [[ $rc -eq 0 ]]                                                     || { bad "advisory: exit 0 (rc=$rc)"; rm -rf "$dir"; return; }
+  [[ "$(jq -r .event <<<"$out")" == "COMMENT" ]]                    || { bad "advisory: event COMMENT (got $out)"; rm -rf "$dir"; return; }
+  [[ "$(jq -r .findings <<<"$out")" == "1" ]]                       || { bad "advisory: findings 1 (got $out)"; rm -rf "$dir"; return; }
+  [[ "$(jq -r .blocking <<<"$out")" == "0" ]]                       || { bad "advisory: blocking 0 (got $out)"; rm -rf "$dir"; return; }
+  [[ "$(jq -r .advisory <<<"$out")" == "1" ]]                       || { bad "advisory: advisory 1 (got $out)"; rm -rf "$dir"; return; }
+  [[ "$(jq -r .event "$GH_CAPTURE")" == "COMMENT" ]]               || { bad "advisory: payload event COMMENT"; rm -rf "$dir"; return; }
+  jq -r .body "$GH_CAPTURE" | grep -q "## Advisory findings"        || { bad "advisory: body has an Advisory section"; rm -rf "$dir"; return; }
+  if jq -r .body "$GH_CAPTURE" | grep -q "## Blocking findings"; then bad "advisory: body must not have a Blocking section"; rm -rf "$dir"; return; fi
+  ok "advisory-only -> COMMENT (never gates), Advisory section"
+  rm -rf "$dir"
+}
+
+# --- mixed blocking + advisory -> REQUEST_CHANGES, both sections present ---
+t_mixed() {
+  local dir; dir=$(mktemp -d)
+  GH_CAPTURE="$dir/payload.json"
+  cat > "$dir/final.json" <<'JSON'
+{"summary":"Policy loaded: 22 rule files from rules/. Mixed.",
+ "findings":[
+   {"path":"a.sh","line":1,"rule":"no-secrets","severity":"blocking","message":"hardcoded token; move to env"},
+   {"path":"rules/b.md","line":2,"rule":"context-writing-style","severity":"advisory","message":"prefer a synonym"}]}
+JSON
+  local out; out=$(run_main owner repo 9 "$dir/final.json")
+  local rc=$?
+  [[ $rc -eq 0 ]]                                                     || { bad "mixed: exit 0 (rc=$rc)"; rm -rf "$dir"; return; }
+  [[ "$(jq -r .event <<<"$out")" == "REQUEST_CHANGES" ]]            || { bad "mixed: event REQUEST_CHANGES (got $out)"; rm -rf "$dir"; return; }
+  [[ "$(jq -r .blocking <<<"$out")" == "1" ]]                       || { bad "mixed: blocking 1 (got $out)"; rm -rf "$dir"; return; }
+  [[ "$(jq -r .advisory <<<"$out")" == "1" ]]                       || { bad "mixed: advisory 1 (got $out)"; rm -rf "$dir"; return; }
+  jq -r .body "$GH_CAPTURE" | grep -q "## Blocking findings"        || { bad "mixed: body has a Blocking section"; rm -rf "$dir"; return; }
+  jq -r .body "$GH_CAPTURE" | grep -q "## Advisory findings"        || { bad "mixed: body has an Advisory section"; rm -rf "$dir"; return; }
+  ok "mixed blocking+advisory -> REQUEST_CHANGES, both sections"
+  rm -rf "$dir"
+}
+
+# --- missing severity is treated as blocking (fail-safe) ---
+t_missing_severity_blocks() {
+  local dir; dir=$(mktemp -d)
+  GH_CAPTURE="$dir/payload.json"
+  cat > "$dir/final.json" <<'JSON'
+{"summary":"Policy loaded: 22 rule files from rules/. Unclassified finding.",
+ "findings":[{"path":"x.sh","line":1,"rule":"error-handling","message":"no severity field"}]}
+JSON
+  local out; out=$(run_main owner repo 9 "$dir/final.json")
+  local rc=$?
+  [[ $rc -eq 0 ]]                                                     || { bad "missing-severity: exit 0 (rc=$rc)"; rm -rf "$dir"; return; }
+  [[ "$(jq -r .event <<<"$out")" == "REQUEST_CHANGES" ]]            || { bad "missing-severity: event REQUEST_CHANGES (got $out)"; rm -rf "$dir"; return; }
+  [[ "$(jq -r .blocking <<<"$out")" == "1" ]]                       || { bad "missing-severity: blocking 1 (got $out)"; rm -rf "$dir"; return; }
+  ok "missing severity -> treated as blocking (fail-safe)"
   rm -rf "$dir"
 }
 
@@ -108,7 +171,10 @@ t_invalid_json() {
 echo "== post-review.sh tests =="
 t_pass
 t_pass_422_fallback
-t_changes
+t_blocking
+t_advisory_only
+t_mixed
+t_missing_severity_blocks
 t_missing_file
 t_invalid_json
 echo "== summary: ${pass} passed, ${fail} failed =="

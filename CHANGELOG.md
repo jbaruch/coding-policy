@@ -1,5 +1,13 @@
 # Changelog
 
+### Rules
+
+- **`review-severity` — new rule; severity-tiered review findings** (closes #229) — both the fleet policy reviewer and the agent treated every finding as merge-blocking-and-must-fix-in-place, so a lone style nit (a CHANGELOG synonym, an em-dash clause, a non-atomic bullet) cost a full re-review round (Codex tokens) plus a merge delay, same as a real defect. One session (2026-07-23) saw an `install-reviewer` `.env.example` PR run ~6 policy rounds and a seeded-proptest carve-out PR run 3, most of them lone nits. The new rule splits findings into **blocking** (correctness, security, contract violations — a carve-out's preconditions, `no-secrets`, `ci-safety` gate-evasion, surface-sync that breaks publish, a directive whose violation changes behavior, or a style split whose fix changes meaning) and **advisory** (pure prose/style, CHANGELOG wording, naming taste, Copilot findings). The behavioral test: does fixing it change what an agent or the pipeline does? Blocking gates the merge; advisory never does — post as a comment, fix opportunistically or defer to a follow-up. `reviewer-feedback-reading` still requires reading every finding (state classifies gating, severity classifies acting, neither classifies reading); `boy-scout` now records that a deferred advisory is the filed-record path, not walking away.
+
+### CI
+
+- **Policy-reviewer pipeline emits severity per finding; the gate derives from it** — the reviewer schemas (`fleet-schema.json`, `schema.json`) drop the model's `verdict` field and add a required per-finding `severity` (`blocking`|`advisory`); the prompts (`fleet-prompt.md`, `prompt.md`) instruct the reviewer to classify honestly. `post-review.sh` now derives the review event deterministically from severity (`rules/script-delegation.md` — the gate is a pure function of severities, not a model verdict): any blocking → `REQUEST_CHANGES`, advisory-only → `COMMENT` (visible, never gates), none → `APPROVE`; a finding with no severity is treated as blocking (fail-safe). The body renders blocking and advisory findings in labeled sections. `watch-pr-reviews.sh` gates on the policy reviewer's `CHANGES_REQUESTED` alone — Copilot is formalized as always advisory and never produces a `changes_requested` watch result, though the watcher still waits for Copilot to post so its body is read. `release` skill Steps 4/6/7 reflect the split: read all, act by severity, never burn a dedicated round on a lone advisory.
+
 ## 0.3.115 — 2026-07-23
 
 ### Rules

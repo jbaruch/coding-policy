@@ -44,7 +44,7 @@ EOF
 # Write the canned structured result to the --output-last-message path.
 out=""
 while [ $# -gt 0 ]; do [ "$1" = "--output-last-message" ] && out="${2:-}"; shift; done
-[ -n "$out" ] && printf '{"summary":"Policy loaded: 21 rule files from jbaruch/coding-policy.","verdict":"pass","findings":[]}' > "$out"
+[ -n "$out" ] && printf '{"summary":"Policy loaded: 21 rule files from jbaruch/coding-policy.","findings":[]}' > "$out"
 exit 0
 EOF
   chmod +x "$bin"/*

@@ -12,7 +12,9 @@
 #   4. Zero inline comments is still ready — a clean verdict with no inline
 #      comments is complete; the watcher does not wait for comments.
 #   5. ci "none" (no checks configured) is accepted as ready.
-#   6. changes_requested — a gating bot's CHANGES_REQUESTED is terminal.
+#   6. changes_requested — the policy reviewer's CHANGES_REQUESTED is terminal.
+#  6b. Copilot advisory — a Copilot CHANGES_REQUESTED does NOT gate; with codex
+#      approved + mergeable it is "ready" (rules/review-severity.md).
 #   7. ci_failure — a failed check is terminal.
 #   8. dirty — CONFLICTING mergeability is terminal.
 #   9. pending_at_budget — every poll pending → exit 1, snapshot preserved.
@@ -210,6 +212,19 @@ test_changes_requested() {
   assert_eq "poll count" "1" "$(calls)" || return 1
 }
 run "changes_requested is a terminal verdict" test_changes_requested
+
+# --- Test 6b: Copilot is always advisory — its CHANGES_REQUESTED does NOT gate -
+test_copilot_advisory_not_terminal() {
+  reset_mocks
+  # Copilot CHANGES_REQUESTED with codex approved + mergeable is READY, not
+  # changes_requested — only the policy reviewer gates (rules/review-severity.md).
+  queue "$(snap MERGEABLE CLEAN success APPROVED CHANGES_REQUESTED)"
+  local out rc=0
+  out=$(main jbaruch coding-policy 42 2>&1) || rc=$?
+  assert_eq "exit code" "0" "$rc" || return 1
+  assert_eq "result" "ready" "$(result_of "$out")" || return 1
+}
+run "Copilot CHANGES_REQUESTED does not gate — advisory only" test_copilot_advisory_not_terminal
 
 # --- Test 7: ci_failure is terminal ------------------------------------------
 test_ci_failure() {

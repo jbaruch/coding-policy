@@ -27,21 +27,21 @@ with_files() {
 }
 
 t_clean_passes() {
-  local dir; dir=$(with_files '{"summary":"Policy loaded: 21 rule files from rules/. All good.","verdict":"pass","findings":[]}')
+  local dir; dir=$(with_files '{"summary":"Policy loaded: 21 rule files from rules/. All good.","findings":[]}')
   local rc=0; bash "$SCRIPT" "$dir/auth.json" "$dir/out.json" >/dev/null 2>&1 || rc=$?
   [[ $rc -eq 0 ]] && ok "clean output passes" || bad "clean output passes (rc=$rc)"
   rm -rf "$dir"
 }
 
 t_leaked_access_token_fails() {
-  local dir; dir=$(with_files '{"summary":"here is the token sk-tokenABCDEF0123456789verylong oops","verdict":"pass","findings":[]}')
+  local dir; dir=$(with_files '{"summary":"here is the token sk-tokenABCDEF0123456789verylong oops","findings":[]}')
   local rc=0; bash "$SCRIPT" "$dir/auth.json" "$dir/out.json" >/dev/null 2>&1 || rc=$?
   [[ $rc -eq 1 ]] && ok "leaked access token -> exit 1" || bad "leaked access token -> exit 1 (rc=$rc)"
   rm -rf "$dir"
 }
 
 t_leaked_refresh_token_fails() {
-  local dir; dir=$(with_files '{"summary":"rt-9876543210FEDCBAlongtoken","verdict":"pass","findings":[]}')
+  local dir; dir=$(with_files '{"summary":"rt-9876543210FEDCBAlongtoken","findings":[]}')
   local rc=0; bash "$SCRIPT" "$dir/auth.json" "$dir/out.json" >/dev/null 2>&1 || rc=$?
   [[ $rc -eq 1 ]] && ok "leaked refresh token -> exit 1" || bad "leaked refresh token -> exit 1 (rc=$rc)"
   rm -rf "$dir"
@@ -50,7 +50,7 @@ t_leaked_refresh_token_fails() {
 # Short auth fields (e.g. "chatgpt") appearing in ordinary prose must NOT trip
 # the guard — only >= 16-char secret material counts.
 t_short_field_in_prose_passes() {
-  local dir; dir=$(with_files '{"summary":"Reviewed the chatgpt workflow auth_mode handling.","verdict":"pass","findings":[]}')
+  local dir; dir=$(with_files '{"summary":"Reviewed the chatgpt workflow auth_mode handling.","findings":[]}')
   local rc=0; bash "$SCRIPT" "$dir/auth.json" "$dir/out.json" >/dev/null 2>&1 || rc=$?
   [[ $rc -eq 0 ]] && ok "short auth field in prose passes" || bad "short auth field in prose passes (rc=$rc)"
   rm -rf "$dir"

@@ -66,7 +66,7 @@ Opening the PR, or pushing further commits to an existing PR, automatically trig
 skills/release/REVIEW_DETAILS.md
 ```
 
-**Also request Copilot.** Copilot is a deliberate second reviewer with a different lens — the Codex reviewer enforces `rules/*.md` compliance, Copilot reads for correctness, bugs, security, and test gaps. Both reviewers gate the merge:
+**Also request Copilot.** Copilot is a deliberate second reviewer with a different lens — the Codex reviewer enforces `rules/*.md` compliance, Copilot reads for correctness, bugs, security, and test gaps. The policy reviewer gates the merge only on **blocking** findings; advisory-only reviews post `COMMENT` and never gate, and Copilot is always advisory (read it, never gate on it) — see `rules/review-severity.md`:
 
 ```bash
 skills/release/request-copilot-review.sh <owner> <repo> <pr-number>
@@ -93,14 +93,16 @@ It returns the full `poll-pr-reviews.sh` snapshot plus a `watch` object — `{"r
 ## Step 6 — Address Feedback; No Re-request Needed
 
 - **Read every review in full first.** Read each reviewer's `reviews.*.body` and every inline comment body before judging any item — a `COMMENTED` state or zero inline comments is not a license to skip the body (see `rules/reviewer-feedback-reading.md`)
+- **Then act by severity** (see `rules/review-severity.md`): blocking findings — fix now; advisory findings — acknowledge, fold in only when a blocking round is already happening, else defer to a follow-up. Never burn a dedicated re-review round on a lone advisory
 - **CI failures**: Fix every one
 - **Review suggestions**: Apply what's right. Push back on anything that misreads scope — cite concrete evidence (file:line, log line, spec quote) when declining
 - **Reply on EVERY thread.** Use these exact opening literals:
   - Accepted: `Fixed in <sha>` (literal phrase; `Done` / `Accepted and fixed` do not satisfy)
   - Declined: `Declining — <reason with cited evidence>` (em dash `—`, not hyphen or period)
+  - Advisory deferred: `Acknowledged — deferred to <follow-up ref>` (em dash `—`; names where it is tracked)
 - Push fixes to the same branch
 - **The Codex reviewer re-runs automatically on every push** (`pull_request: synchronize`); Copilot needs a manual re-request each push via `skills/release/request-copilot-review.sh` (same args as Step 4).
-- Repeat Step 5 until every active bot review is `APPROVED`, or `COMMENTED` with its body read and no blocking items, and every thread has a reply.
+- Repeat Step 5 until the policy reviewer carries no blocking finding — `APPROVED`, or `COMMENTED` with its body read and only advisories — and every thread has a reply.
 
 ## Step 7 — Merge + Cleanup
 
@@ -109,7 +111,7 @@ Only proceed when:
 - Every non-empty `reviews.*.body` in the returned snapshot has been read in full — a `COMMENTED` state with zero inline comments is not a license to skip the body (see `rules/reviewer-feedback-reading.md`), AND
 - Every inline comment from Step 5's `inline_comments` count has a `Fixed in <sha>` or `Declining — <reason>` reply per Step 6 (verify by listing the PR's review comments — the poll script tracks counts, not reply state, so the operator confirms thread closure).
 
-A `COMMENTED` review never gates the merge on its state alone — but its body must be read before merge, zero inline comments included. With inline comments, it is mergeable once every thread also has a reply.
+A `COMMENTED` review never gates the merge on its state alone — but its body must be read before merge, zero inline comments included. With inline comments, it is mergeable once every thread also has a reply. Advisory findings (the reviewer's `## Advisory findings` section, and every Copilot comment) do not block the merge — acknowledge them and defer per `rules/review-severity.md`; only a blocking finding gates.
 
 Once these conditions hold, merge automatically — the green gates are the approval. Do not pause to ask a human whether to merge.
 

@@ -44,6 +44,7 @@ tessl install jbaruch/coding-policy
 | Authoring | [script-as-black-box](rules/script-as-black-box.md) | Skills reference the script's contract (inputs/outputs/exit codes), not its internal logic — thresholds and predicates live in the script |
 | Authoring | [stateful-artifacts](rules/stateful-artifacts.md) | Cross-invocation state: schema, owner skill, schema_version, hints-not-authority, migration |
 | Review | [reviewer-feedback-reading](rules/reviewer-feedback-reading.md) | A review's state classifies merge-gating, not whether its body must be read; read every reviewer's body before declaring merge-ready, COMMENTED-with-zero-inline included |
+| Review | [review-severity](rules/review-severity.md) | Findings carry a severity — blocking (correctness, security, contract) gates the merge; advisory (prose, style, Copilot) never does; read all, act by severity, never burn a round on a lone advisory |
 | Concurrency | [agent-worktree-isolation](rules/agent-worktree-isolation.md) | Mandatory git worktrees for concurrent agent work; cleanup; read-only exception |
 | Discipline | [boy-scout](rules/boy-scout.md) | Leave it better than you found it; "pre-existing" is not a valid concept; in-scope cleanups bundle, out-of-scope ones get filed |
 | Scope | [external-repo-contributions](rules/external-repo-contributions.md) | Default deny on issues, PRs, comments, reactions, and discussions in repos the operator does not own; explicit permission required per repo and action type |
