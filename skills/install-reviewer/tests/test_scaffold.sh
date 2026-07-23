@@ -106,6 +106,14 @@ t_env_comment_mention_still_adds_placeholder() {
   grep -qE "^FLEET_DISPATCH_TOKEN=" "$ENV_FILE" || { echo "    FAIL: placeholder assignment not added" >&2; return 1; }
 }
 
+t_env_ssh_remote_derives_url() {
+  # The explicit ssh:// remote form must derive the same owner/repo settings URL.
+  git remote set-url origin ssh://git@github.com/sshowner/sshrepo.git
+  bash "$SCRIPT" >/dev/null || return 1
+  grep -q "github.com/sshowner/sshrepo/settings/secrets/actions" "$ENV_FILE" \
+    || { echo "    FAIL: ssh:// remote not parsed to a clean settings URL: $(grep 'secrets/actions' "$ENV_FILE")" >&2; return 1; }
+}
+
 t_env_symlink_refused() {
   ln -s /etc/hostname "$ENV_FILE"
   local rc=0; bash "$SCRIPT" >/dev/null 2>&1 || rc=$?
@@ -158,6 +166,7 @@ run "env.example append preserves prior vars"   with_repo t_env_appended_preserv
 run "env.example bare assignment documented"    with_repo t_env_bare_assignment_documented
 run "env.example idempotent after scaffold"     with_repo t_env_idempotent_after_scaffold
 run "env.example comment-only adds placeholder" with_repo t_env_comment_mention_still_adds_placeholder
+run "env.example ssh:// remote derives URL"     with_repo t_env_ssh_remote_derives_url
 run "env.example symlink is refused"            with_repo t_env_symlink_refused
 run "install refuses a pre-existing target"     with_repo t_install_refuses_existing
 run "upgrade overwrites a tampered file"        with_repo t_upgrade_overwrites

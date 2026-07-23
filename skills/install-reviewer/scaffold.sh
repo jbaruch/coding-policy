@@ -57,7 +57,11 @@ derive_settings_url() {
   local url slug
   url=$(git remote get-url origin 2>/dev/null) \
     || { printf '%s' 'https://github.com/<owner>/<repo>/settings/secrets/actions'; return; }
-  slug=$(printf '%s' "$url" | sed -E 's#^git@[^:]+:##; s#^https?://[^/]+/##; s#\.git$##; s#/+$##')
+  # Reduce every GitHub remote form to owner/repo: strip an optional scheme
+  # (https://, ssh://, git://), an optional user@, the host plus its `:` or `/`
+  # separator (covers scp-like `git@host:owner/repo` and `ssh://host/owner/repo`),
+  # then a trailing `.git` and slashes.
+  slug=$(printf '%s' "$url" | sed -E 's#^[a-zA-Z][a-zA-Z0-9+.-]*://##; s#^[^@/]+@##; s#^[^/:]+[:/]##; s#\.git$##; s#/+$##')
   if [[ "$slug" == */* ]]; then
     printf 'https://github.com/%s/settings/secrets/actions' "$slug"
   else
