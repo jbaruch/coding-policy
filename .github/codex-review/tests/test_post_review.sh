@@ -44,14 +44,14 @@ run_main() { ( set -euo pipefail; main "$@" ); }
 t_pass() {
   local dir; dir=$(mktemp -d) || { bad "pass: mktemp -d failed"; return; }
   GH_CAPTURE="$dir/payload.json"; MOCK_422_ON_APPROVE=0
-  printf '{"summary":"Policy loaded: 22 rule files from jbaruch/coding-policy. All rules pass.","findings":[]}' > "$dir/final.json"
+  printf '{"summary":"Policy loaded: 23 rule files from jbaruch/coding-policy. All rules pass.","findings":[]}' > "$dir/final.json"
   local out; out=$(run_main owner repo 5 "$dir/final.json")
   local rc=$?
   [[ $rc -eq 0 ]]                                              || { bad "pass: exit 0 (rc=$rc)"; rm -rf "$dir"; return; }
   [[ "$(jq -r .event <<<"$out")" == "APPROVE" ]]             || { bad "pass: event APPROVE (got $out)"; rm -rf "$dir"; return; }
   [[ "$(jq -r .findings <<<"$out")" == "0" ]]                 || { bad "pass: findings 0 (got $out)"; rm -rf "$dir"; return; }
   [[ "$(jq -r .event "$GH_CAPTURE")" == "APPROVE" ]]         || { bad "pass: payload event APPROVE"; rm -rf "$dir"; return; }
-  jq -r .body "$GH_CAPTURE" | grep -q "Policy loaded: 22"     || { bad "pass: body carries the load indicator"; rm -rf "$dir"; return; }
+  jq -r .body "$GH_CAPTURE" | grep -q "Policy loaded: 23"     || { bad "pass: body carries the load indicator"; rm -rf "$dir"; return; }
   ok "no findings -> APPROVE, summary body, 0 findings"
   rm -rf "$dir"
 }
@@ -60,7 +60,7 @@ t_pass() {
 t_pass_422_fallback() {
   local dir; dir=$(mktemp -d) || { bad "fallback: mktemp -d failed"; return; }
   GH_CAPTURE="$dir/payload.json"; MOCK_422_ON_APPROVE=1
-  printf '{"summary":"Policy loaded: 22 rule files from jbaruch/coding-policy. Clean.","findings":[]}' > "$dir/final.json"
+  printf '{"summary":"Policy loaded: 23 rule files from jbaruch/coding-policy. Clean.","findings":[]}' > "$dir/final.json"
   local out; out=$(run_main owner repo 5 "$dir/final.json" 2>/dev/null)
   local rc=$?
   MOCK_422_ON_APPROVE=0
@@ -76,7 +76,7 @@ t_blocking() {
   local dir; dir=$(mktemp -d)
   GH_CAPTURE="$dir/payload.json"
   cat > "$dir/final.json" <<'JSON'
-{"summary":"Policy loaded: 22 rule files from rules/. One violation.",
+{"summary":"Policy loaded: 23 rule files from rules/. One violation.",
  "findings":[{"path":"skills/x/run.sh","line":3,"rule":"error-handling","severity":"blocking","message":"missing set -euo pipefail; add it at the top"}]}
 JSON
   local out; out=$(run_main owner repo 9 "$dir/final.json")
@@ -97,7 +97,7 @@ t_advisory_only() {
   local dir; dir=$(mktemp -d)
   GH_CAPTURE="$dir/payload.json"; MOCK_422_ON_APPROVE=0
   cat > "$dir/final.json" <<'JSON'
-{"summary":"Policy loaded: 22 rule files from rules/. Style nit only.",
+{"summary":"Policy loaded: 23 rule files from rules/. Style nit only.",
  "findings":[{"path":"rules/foo.md","line":8,"rule":"context-writing-style","severity":"advisory","message":"em-dash clause attaches a rationale; drop it"}]}
 JSON
   local out; out=$(run_main owner repo 9 "$dir/final.json")
@@ -119,7 +119,7 @@ t_mixed() {
   local dir; dir=$(mktemp -d)
   GH_CAPTURE="$dir/payload.json"
   cat > "$dir/final.json" <<'JSON'
-{"summary":"Policy loaded: 22 rule files from rules/. Mixed.",
+{"summary":"Policy loaded: 23 rule files from rules/. Mixed.",
  "findings":[
    {"path":"a.sh","line":1,"rule":"no-secrets","severity":"blocking","message":"hardcoded token; move to env"},
    {"path":"rules/b.md","line":2,"rule":"context-writing-style","severity":"advisory","message":"prefer a synonym"}]}
@@ -141,7 +141,7 @@ t_missing_severity_blocks() {
   local dir; dir=$(mktemp -d)
   GH_CAPTURE="$dir/payload.json"
   cat > "$dir/final.json" <<'JSON'
-{"summary":"Policy loaded: 22 rule files from rules/. Unclassified finding.",
+{"summary":"Policy loaded: 23 rule files from rules/. Unclassified finding.",
  "findings":[{"path":"x.sh","line":1,"rule":"error-handling","message":"no severity field"}]}
 JSON
   local out; out=$(run_main owner repo 9 "$dir/final.json")
