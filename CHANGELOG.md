@@ -1,5 +1,9 @@
 # Changelog
 
+### CI
+
+- **PR-time `tessl plugin lint` gate** — `tests.yml` gains a `lint` job running `tessl plugin lint` on every PR, alongside `diagnostics` and `unit-tests`. Previously lint ran only in `publish.yml` (post-merge), so a bad manifest or skill frontmatter — e.g. an over-length `description` — passed PR review and merged, then failed the publish pipeline's first step (seen during the 0.3.112 recovery). Now it's caught before merge.
+
 ### Skills
 
 - **`install-reviewer` wording made plain and factual** — the skill's prose (SKILL.md, `PR_BODY_TEMPLATE.md`, the `review-trigger.yml` template header, and the `.env.example` block scaffold.sh writes) now describes each file and the review's data flow in plain, minimal terms — what runs, where, and when — without dwelling on repository permissions or trust boundaries. Behavior is unchanged and the `no-secrets` documentation (settings URL + placeholder) is preserved; the plainer wording keeps the registry's automated review of the published tile clear.
