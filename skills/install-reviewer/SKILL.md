@@ -3,17 +3,15 @@ name: install-reviewer
 description: >
   Opt one of the maintainer's own repositories into their same-owner `jbaruch/coding-policy`
   review setup (coding-policy holds their shared coding rules): scaffold a
-  `.github/fleet-review-enabled` opt-in marker, a thin `.github/workflows/review-trigger.yml`
-  (asks coding-policy to run an immediate PR-time review), and a
-  `.github/copilot-instructions.md` scoping Copilot to the complementary code-quality lane,
-  then open a PR. The trigger asks the same-owner coding-policy-fleet-reviewer GitHub App to
-  review the PR; the marker enrolls the repo in the App's scheduled poll (the backstop). Both
-  review against the maintainer's published `jbaruch/coding-policy` rules. The review credential
-  stays only in coding-policy; the consumer sets one stable least-privilege `FLEET_DISPATCH_TOKEN`.
-  Use when the user wants to add, install, enable, scaffold, set up, wire up, or enroll
-  an automated policy review / PR reviewer / coding-policy reviewer in a consumer repo.
-  Also use to upgrade, update, or refresh the reviewer files in a repo that already has
-  them — the skill switches to override mode in that case.
+  `.github/fleet-review-enabled` marker, a thin `.github/workflows/review-trigger.yml` (asks
+  coding-policy to run a PR-time review), a `.github/copilot-instructions.md` scoping Copilot
+  to the code-quality lane, and a `.env.example` entry, then open a PR. The trigger asks the
+  same-owner reviewer App to review the PR; the marker enrolls the repo in its scheduled-poll
+  backstop; both review against the `jbaruch/coding-policy` rules. The review credential stays
+  only in coding-policy; the consumer sets one least-privilege `FLEET_DISPATCH_TOKEN`.
+  Use when the user wants to add, install, enable, scaffold, set up, wire up, or enroll an
+  automated policy review / PR reviewer / coding-policy reviewer in a consumer repo. Also use
+  to upgrade or refresh the reviewer files in a repo that already has them (override mode).
 ---
 
 # Install Reviewer Skill
