@@ -9,7 +9,7 @@ name: Trigger fleet policy review
 # Requires one repo secret (set it at
 # https://github.com/<owner>/<repo>/settings/secrets/actions for this repo):
 #   FLEET_DISPATCH_TOKEN — the token this workflow reads to start the review run in
-#     jbaruch/coding-policy. Create it with Actions: write on jbaruch/coding-policy.
+#     jbaruch/coding-policy. Create it with Actions: Read and write on jbaruch/coding-policy.
 
 on:
   pull_request:
@@ -40,7 +40,7 @@ jobs:
         run: |
           set -euo pipefail
           if [ -z "${GH_TOKEN:-}" ]; then
-            echo "error: FLEET_DISPATCH_TOKEN secret is empty — set a fine-grained token scoped to Actions: write on jbaruch/coding-policy only; see this workflow's header" >&2
+            echo "error: FLEET_DISPATCH_TOKEN secret is empty — set a fine-grained token scoped to Actions: Read and write on jbaruch/coding-policy only; see this workflow's header" >&2
             exit 1
           fi
           gh workflow run fleet-review.yml \

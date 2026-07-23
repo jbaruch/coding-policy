@@ -79,7 +79,7 @@ env_block() {
 # NOT copied into .env:
 #   ${url}
 # ${ENV_SECRET} — the token .github/workflows/review-trigger.yml reads to start the
-#   review run in jbaruch/coding-policy. Create it with Actions: write on
+#   review run in jbaruch/coding-policy. Create it with Actions: Read and write on
 #   jbaruch/coding-policy.
 ${ENV_SECRET}=
 EOF
