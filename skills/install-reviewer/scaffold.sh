@@ -192,10 +192,12 @@ main() {
   # an existing file gets the block prepended (existing variables preserved below).
   local env_action
   if (( env_existed == 1 )); then
-    # Distinguish "already documented" (grep exit 0) from "absent" (exit 1) from a
-    # read error (exit >=2) per rules/error-handling.md — never collapse them.
+    # "Already documented" means an actual assignment placeholder is present, not
+    # a mere prose/comment mention — no-secrets requires the placeholder value.
+    # Distinguish match (grep exit 0) / no-match (1) / read error (>=2) per
+    # rules/error-handling.md — never collapse them.
     local grep_rc=0
-    grep -q "$ENV_SECRET" "$ENV_FILE" || grep_rc=$?
+    grep -qE "^[[:space:]]*${ENV_SECRET}=" "$ENV_FILE" || grep_rc=$?
     if (( grep_rc == 0 )); then
       env_action="unchanged"
     elif (( grep_rc == 1 )); then

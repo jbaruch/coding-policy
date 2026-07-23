@@ -84,6 +84,16 @@ t_env_idempotent_when_present() {
   [[ "$(grep -c "FLEET_DISPATCH_TOKEN" "$ENV_FILE")" == "1" ]] || { echo "    FAIL: FLEET_DISPATCH_TOKEN duplicated" >&2; return 1; }
 }
 
+t_env_comment_mention_still_adds_placeholder() {
+  # A prose/comment mention without an assignment is NOT "documented" — the
+  # placeholder must still be added (no-secrets requires the value).
+  printf '# note: set FLEET_DISPATCH_TOKEN in repo secrets\n' > "$ENV_FILE"
+  local out; out=$(bash "$SCRIPT") || return 1
+  local a; a=$(jq -r '.files[] | select(.target==".env.example") | .action' <<<"$out")
+  [[ "$a" == "appended" ]] || { echo "    FAIL: comment-only mention treated as $a, not appended" >&2; return 1; }
+  grep -qE "^FLEET_DISPATCH_TOKEN=" "$ENV_FILE" || { echo "    FAIL: placeholder assignment not added" >&2; return 1; }
+}
+
 t_env_symlink_refused() {
   ln -s /etc/hostname "$ENV_FILE"
   local rc=0; bash "$SCRIPT" >/dev/null 2>&1 || rc=$?
@@ -134,6 +144,7 @@ run "install creates all four artifacts"        with_repo t_install_creates_all
 run "env.example seeded with derived URL"       with_repo t_env_created_with_derived_url
 run "env.example append preserves prior vars"   with_repo t_env_appended_preserves_existing
 run "env.example idempotent when present"       with_repo t_env_idempotent_when_present
+run "env.example comment-only adds placeholder" with_repo t_env_comment_mention_still_adds_placeholder
 run "env.example symlink is refused"            with_repo t_env_symlink_refused
 run "install refuses a pre-existing target"     with_repo t_install_refuses_existing
 run "upgrade overwrites a tampered file"        with_repo t_upgrade_overwrites
