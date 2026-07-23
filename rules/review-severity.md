@@ -23,7 +23,7 @@ description: Review findings carry a severity — blocking gates the merge, advi
 
 - Pure prose and style: `context-writing-style` connective or em-dash placement, a presentation-only atomic-bullet split
 - CHANGELOG wording, naming taste, synonym preference
-- Copilot findings are always advisory — Copilot posts `COMMENTED` and never gates the agent's flow
+- Copilot findings are always advisory regardless of Copilot's review state — even a Copilot `CHANGES_REQUESTED` never gates the agent's flow
 - Anything whose fix changes only presentation, not behavior
 
 ## Gating Predicate
