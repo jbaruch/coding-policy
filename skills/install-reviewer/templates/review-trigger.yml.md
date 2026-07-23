@@ -44,7 +44,7 @@ jobs:
         run: |
           set -euo pipefail
           if [ -z "${GH_TOKEN:-}" ]; then
-            echo "error: FLEET_DISPATCH_TOKEN secret is empty — set a fine-grained PAT (Actions: write on jbaruch/coding-policy only); see this workflow's header" >&2
+            echo "error: FLEET_DISPATCH_TOKEN secret is empty — set a fine-grained token scoped to Actions: write on jbaruch/coding-policy only; see this workflow's header" >&2
             exit 1
           fi
           gh workflow run fleet-review.yml \
