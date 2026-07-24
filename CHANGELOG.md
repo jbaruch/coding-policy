@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.117 — 2026-07-24
+
 ### Rules
 
 - **`review-severity` — atomic-bullet cleanup** (closes #231) — folds in the advisory findings deferred from #230: the Gating Predicate's watcher/Copilot bullet and the Split-Reading-From-Acting acknowledge/fold/defer bullet each split into one-directive-per-bullet per `context-writing-style` Structure. Also drops the `test_post_review.sh` load-indicator assertion's hardcoded rule count for a `Policy loaded: [0-9]+ rule files` pattern so it no longer churns when rules are added or removed. Prose and behavior unchanged.
