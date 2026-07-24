@@ -1,5 +1,9 @@
 # Changelog
 
+### Rules
+
+- **`boy-scout` scoped to self-noticed issues; decoupled from reviewer findings** — boy-scout was being read as a lever to fold a reviewer's advisory into the current round ("in-scope cleanup on a line I'm touching"), which fought `review-severity`'s "defer a lone advisory, never burn a dedicated round" — the #232 cleanup ran four review rounds partly on that tension. Boy-scout now states its trigger is the agent's own eyes: a reviewer's stated findings are `review-severity`'s domain — blocking gets fixed, a lone advisory gets deferred, never folded in under a boy-scout in-scope claim. Dropped boy-scout's bridging bullet about deferred review advisories, and dropped `review-severity`'s reverse `see rules/boy-scout.md` pointer on its defer bullet (it now names the follow-up mechanism directly), so neither rule reaches into the other's domain.
+
 ## 0.3.117 — 2026-07-24
 
 ### Rules
