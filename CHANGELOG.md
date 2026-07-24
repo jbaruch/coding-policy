@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.119 — 2026-07-24
+
 ### Rules
 
 - **`boy-scout` reframed around round economics, not reviewer-domain exclusion** — the 0.3.118 framing (below) over-corrected: it scoped reviewer findings out of boy-scout entirely. Boy-scouting a reviewer's finding is fine; the real constraint is the cost of an extra review round, not the finding's source. Boy-scout now carries a "Fold Into a Round Already in Flight" section: the cost unit is the extra round, not the extra line — when a blocking finding forces another push, clean up the adjacent loose ends in that same round (free); when the change is already mergeable, merge and file the loose ends to the next ticket rather than pushing a commit only to fold them in. Points to `rules/review-severity.md` as the review-pipeline form of the same economics. Restores reviewer findings as valid boy-scout targets, dropping the "not boy-scout's domain" bullets.
