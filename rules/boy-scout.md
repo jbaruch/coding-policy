@@ -9,13 +9,14 @@ alwaysApply: true
 - Leave the codebase in better shape than you found it. If you see something wrong while doing something else, fix it
 - "Pre-existing" is not a valid concept. The state you observed is the state you own, regardless of who or what put it there
 - Applies to anything you'd flag if a colleague had just written it: failing tests, broken docs, dead code, stale comments, lying type signatures, leaked secrets, missing newlines, unbumped versions
+- The trigger is your own eyes — issues you spot while working. A reviewer's stated findings are not boy-scout's domain
+- Acting on a reviewer's finding is `rules/review-severity.md`: a blocking finding gets fixed, a lone advisory gets deferred — never folded into the current round under a boy-scout in-scope claim
 
 ## How to Apply
 
 - **In-scope cleanups** (typo, missing newline, broken doc link, small drift): roll into the current PR. The bundle is fine when the PR's stated scope still reads coherently
 - **Out-of-scope discoveries** (untested module, contradicting rules, unrelated security gap): open a follow-up PR — or an issue if the fix needs design — and reference it from the current one. Walking away with no record is the failure mode this rule prevents
 - When unsure whether to bundle or split, prefer **bundle small + cite** or **split large + file**. The wrong answer is "leave it"
-- A review advisory deferred to a follow-up per `rules/review-severity.md` takes the filed-record path — a deferred advisory is not "walking away"
 
 ## Reconciliation With `commit-conventions`
 

@@ -40,5 +40,5 @@ description: Review findings carry a severity — blocking gates the merge, advi
 - Blocking → fix before merge
 - Advisory → acknowledge
 - Fold an advisory in only when a blocking round is already happening
-- Otherwise defer the advisory to a follow-up (see `rules/boy-scout.md`)
+- Otherwise defer the advisory to a follow-up PR or issue and reference it from the current PR
 - Never burn a dedicated re-review round on a lone advisory
