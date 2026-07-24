@@ -51,9 +51,11 @@ t_pass() {
   [[ "$(jq -r .event <<<"$out")" == "APPROVE" ]]             || { bad "pass: event APPROVE (got $out)"; rm -rf "$dir"; return; }
   [[ "$(jq -r .findings <<<"$out")" == "0" ]]                 || { bad "pass: findings 0 (got $out)"; rm -rf "$dir"; return; }
   [[ "$(jq -r .event "$GH_CAPTURE")" == "APPROVE" ]]         || { bad "pass: payload event APPROVE"; rm -rf "$dir"; return; }
-  # Assert the WHOLE body begins with the load indicator (schema contract), not
-  # merely that some line within it does — `grep -E "^..."` anchors per line, so
-  # a preamble before the summary would pass it. `[[ =~ ]]` anchors the whole string.
+  # Assert the body begins with the load indicator (schema contract), not merely
+  # that some line within it does — `grep -E "^..."` anchors per line, so a
+  # preamble line before the summary would pass it. Here `=~` matches against the
+  # whole body string (not line by line), so the pattern's leading `^` anchors to
+  # the body's start.
   local body indicator_re='^Policy loaded: [0-9]+ rule files'
   body=$(jq -r .body "$GH_CAPTURE")
   [[ "$body" =~ $indicator_re ]]                              || { bad "pass: body begins with the load indicator"; rm -rf "$dir"; return; }
