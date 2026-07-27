@@ -20,7 +20,8 @@ alwaysApply: true
 ## Fold Into a Round Already in Flight
 
 - The cost unit is the extra round, not the extra line
-- Fold loose ends into work already happening; never spin up a fresh round just to boy-scout
+- Fold loose ends into work already happening
+- Never spin up a fresh round just to boy-scout
 - A blocking finding is forcing another push: clean up the adjacent loose ends in that same round
 - The change is already mergeable: merge and file the loose ends to the next ticket rather than pushing another commit only to fold them in
 - The review-pipeline form is `rules/review-severity.md`

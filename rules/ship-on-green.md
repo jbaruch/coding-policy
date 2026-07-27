@@ -6,7 +6,7 @@ alwaysApply: true
 
 ## Green Gate Is the Approval
 
-- Required checks green and no exit below holds ⇒ merge. The green gates ARE the approval; do not pause to ask a human whether to merge
+- Required checks green and none of the exits below apply ⇒ merge. The green gates ARE the approval; do not pause to ask a human whether to merge
 - Flag, confirm, "say go and I'll", "worth one confirmation", "want me to?" are asking in a costume — each resolves to asking, and asking IS the decision to not ship
 - Governs every merge, whether or not `skills/release` was invoked — an agent running the flow by hand is bound identically
 
