@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.124 — 2026-07-27
+
 ### Rules
 
 - **`ship-on-green` — new always-on rule; merge-autonomy contract** (closes #187) — the "green gate ⇒ merge, don't ask" contract lived only in `skills/release/SKILL.md`, so an agent that ran the flow by hand (`gh pr create` → watch → `gh pr merge`) without invoking `/release` never loaded it — the exact failure in `jbaruch/nanoclaw-trusted#80`, where a green PR was flagged for permission anyway. Extracted into an always-on rule so every merge decision loads it regardless of skill invocation. It carries: the green gate IS the approval (flag / confirm / "say go and I'll" / "worth one confirmation" are asking in a costume, and asking IS the decision to not ship); stakes raise care, not permission (scary / wide / ships-to-prod / deletes-a-thing ⇒ verify harder, never ask); and the three exhaustive, objective exits, each with a literal test — **Red** (a required check failing/pending, not "I feel uneasy"), **No undo** (`git revert` can't restore it — force-push over protected history, immutable published artifact, deleted data, sent external comms; a supersedable version bump is undoable and shipping to prod is NOT "no undo"), **Murky** (the task's own source states 2+ conflicting options AND names no default; a named default is never murky). `SKILL.md` Step 7 now references the rule instead of restating it.
