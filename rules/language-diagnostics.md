@@ -24,9 +24,11 @@ alwaysApply: true
 - CI runs the engine's headless/CLI form — pyright CLI, `tsc --noEmit`, `clippy`, `go vet` — as a gate at zero findings
 - The language server is the editor surface; the gate runs the same engine in batch mode, before tests, alongside format/lint (see `rules/code-formatting.md` CI Integration)
 - "Don't ignore the warnings" enforced by an agent's or contributor's memory is not a gate — a deterministic check nobody runs does not exist (see `rules/script-delegation.md`)
-- The in-loop expectation resolves to the same deterministic run: before handing work off, the agent runs the headless gate over what it changed and clears every finding. The `LSP` tool surfaces findings live; the pre-handoff run makes "cleared before handoff" a checkable event
-- The pre-handoff run and the CI gate are the same command at two times — CI is the backstop, never the first place a finding surfaces
-- A `Stop` or pre-handoff hook running the gate on the changed set mechanizes the pre-handoff run where the harness supports it
+- Before handoff, the agent runs the same gate command CI runs and clears every finding, scoped to the changed set only where the gate supports it
+- The `LSP` tool is the live editor surface for those findings as the agent works
+- The pre-handoff run makes "cleared before handoff" a checkable event
+- CI runs the same gate as the backstop, never the first place a finding surfaces
+- A `Stop` or pre-handoff hook running the gate mechanizes this where the harness supports it
 
 ## Resolve Modules First
 

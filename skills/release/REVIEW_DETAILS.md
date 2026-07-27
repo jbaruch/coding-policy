@@ -4,7 +4,7 @@ Reference for Step 4 of the `release` skill — how the two PR reviewers are wir
 
 ## Policy reviewer — two deployments
 
-The policy reviewer reviews the PR diff against the in-tree `rules/*.md` and posts the verdict as a PR review. It runs one of two ways depending on the repo; a given PR is reviewed by exactly one of them, and the release scripts resolve the verdict across both logins (`skills/release/poll-pr-reviews.sh` login table).
+The policy reviewer reviews the PR diff against the in-tree `rules/*.md` and posts the verdict as a PR review. It runs one of two ways depending on the repo. Normally exactly one reviews a given PR; a repo mid fleet-migration can transiently carry both, which is why the release scripts resolve the verdict fail-safe across both logins (`skills/release/poll-pr-reviews.sh` login table).
 
 Both derive the review event from per-finding severity (`rules/review-severity.md`; `.github/codex-review/post-review.sh` header) — any blocking finding posts `REQUEST_CHANGES`, advisory-only findings post `COMMENT`, a clean pass posts `APPROVE`.
 
@@ -19,7 +19,7 @@ The `.github/workflows/review-codex.yml` GitHub Actions workflow runs the OpenAI
 
 ### B. Consumer repos — central `coding-policy-fleet-reviewer[bot]` App
 
-Consumer repos carry no per-repo Codex review workflow (`review-codex.yml`) and no `CODEX_AUTH_JSON` — only a thin `.github/workflows/review-trigger.yml`, one lightweight `FLEET_DISPATCH_TOKEN` PAT, and a `.github/fleet-review-enabled` marker that enrolls the repo in the scheduled backstop poll (scaffolded by `install-reviewer`). The central fleet App (coding-policy#202) does the reviewing, running from coding-policy against the consumer's tessl-installed `.tessl/plugins/.../rules/`.
+Consumer repos carry no per-repo Codex review workflow (`review-codex.yml`) and no `CODEX_AUTH_JSON` — only a thin `.github/workflows/review-trigger.yml`, one lightweight `FLEET_DISPATCH_TOKEN` PAT, and a `.github/fleet-review-enabled` marker that enrolls the repo in the scheduled backstop poll (scaffolded by `install-reviewer`). The central fleet App (coding-policy#202) does the reviewing: the fleet-review run `tessl install`s `jbaruch/coding-policy` to a temp path and symlinks its `.tessl/` into the PR workspace, so the review runs against coding-policy's `rules/*.md` (see `.github/codex-review/fleet-review-one.sh`), not a copy the consumer pre-installed.
 
 - **Trigger:** the consumer's in-repo `.github/workflows/review-trigger.yml` fires on the same `pull_request` events and dispatches `fleet-review.yml` (single-PR `workflow_dispatch`) in coding-policy via the `FLEET_DISPATCH_TOKEN` PAT; a scheduled marker-gated cron poll in coding-policy is the backstop for any dispatch that never fired (cadence in the `fleet-review.yml` header).
 - **Authorship:** submitted as `coding-policy-fleet-reviewer[bot]`.

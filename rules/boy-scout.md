@@ -19,10 +19,11 @@ alwaysApply: true
 
 ## Fold Into a Round Already in Flight
 
-- The cost unit is the extra round, not the extra line. Fold loose ends into work that is already happening; do not spin a fresh round up just to boy-scout
-- A blocking finding is forcing another push: clean up the adjacent loose ends in that same round — folding them in there is free
+- The cost unit is the extra round, not the extra line
+- Fold loose ends into work already happening; never spin up a fresh round just to boy-scout
+- A blocking finding is forcing another push: clean up the adjacent loose ends in that same round
 - The change is already mergeable: merge and file the loose ends to the next ticket rather than pushing another commit only to fold them in
-- The review-pipeline form of this economics is `rules/review-severity.md` — fold an advisory in when a blocking round is already happening, else defer
+- The review-pipeline form is `rules/review-severity.md`
 
 ## Reconciliation With `commit-conventions`
 
