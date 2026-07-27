@@ -7,15 +7,22 @@ Do this:
 
 1. List and read every file under `.tessl/plugins/jbaruch/coding-policy/rules/`. Read them
    fully. Remember how many rule files you read — you surface that count in the `summary`.
-2. Also read any `skills/*/SKILL.md` in this repo that governs a changed path, and check it
+2. Several rules carve out exceptions that a repo satisfies by documenting an
+   "authority-of-record rule in its own plugin". Those plugins are installed alongside the
+   policy, so before reporting such a carve-out as undocumented, list
+   `.tessl/plugins/*/*/rules/` and read the authority rule there. Never conclude a rule is
+   absent from a `grep` of the repo's own tree — plugin rules are installed, never
+   committed, so they are never in the tree by design. If the rule is genuinely missing
+   from every installed plugin, say which plugin you expected it in.
+3. Also read any `skills/*/SKILL.md` in this repo that governs a changed path, and check it
    against the installed `skill-authoring` rule.
-3. Review the changes on this pull request — run the `git diff` named above (and
+4. Review the changes on this pull request — run the `git diff` named above (and
    `git log`/`git show` as needed) to see exactly what changed.
-4. For every changed line, check it against every rule. Flag concrete violations only:
+5. For every changed line, check it against every rule. Flag concrete violations only:
    secrets, missing error handling, formatting, dependency hygiene, `ci-safety`, `no-secrets`,
    `testing-standards`, and the rest.
-5. Minor style preferences that no rule covers are NOT grounds for a finding.
-6. Assign each finding a `severity` per the `review-severity` rule:
+6. Minor style preferences that no rule covers are NOT grounds for a finding.
+7. Assign each finding a `severity` per the `review-severity` rule:
    - `blocking` — fixing it changes behavior or closes a contract gap: correctness, security,
      a carve-out's unmet preconditions, `no-secrets`, `ci-safety` gate-evasion, surface-sync
      that breaks publish, a rule directive whose violation changes agent behavior, or a style

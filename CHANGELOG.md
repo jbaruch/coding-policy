@@ -1,5 +1,15 @@
 # Changelog
 
+### Fleet reviewer — resolve the reviewed repo's own plugins (closes #245)
+
+The fleet reviewer installed `jbaruch/coding-policy` into a temp dir and symlinked it in as the reviewed workspace's entire `.tessl`. The consumer's own plugins were never installed — so `.tessl/plugins/` held exactly one plugin, and every carve-out satisfied by an "authority-of-record rule in its own plugin" was unverifiable. That covers `dependency-management`'s Runtime-Managed Manifest and Adversarial-Freshness carve-outs and `ci-safety`'s Content-Only Direct-Push: three carve-outs the reviewer structurally could not confirm, for as long as the fleet reviewer has existed.
+
+The failure mode is worse than a missed check. On `jbaruch/nanoclaw#883` the reviewer recognized the Adversarial-Freshness carve-out, went looking for the authority rule, `rg`'d the repo's own tree, found nothing, and blocked — reporting a fully-documented carve-out as undocumented. The rule was published in `jbaruch/nanoclaw-host` 0.1.53 the whole time. Plugin rules are installed, never committed (No Vendoring), so grepping the tree can only ever come back empty.
+
+`fleet-review-one.sh` now also installs the plugins named in the reviewed repo's manifest. Resolved from the BASE ref, never the PR head: the head is the content under review, so reading it would let a PR name a plugin that authorizes the PR. A plugin that fails to install emits a `::warning::` naming it rather than failing the review — best-effort, but never silent, since an invisibly-missing authority rule is exactly how this bug blocked a compliant PR.
+
+`fleet-prompt.md` gains the matching instruction: read `.tessl/plugins/*/*/rules/` before reporting a carve-out as undocumented, never conclude a rule is absent from a grep of the repo's tree, and name the plugin you expected it in when it genuinely is missing.
+
 ## 0.3.126 — 2026-07-27
 
 ### Rules
