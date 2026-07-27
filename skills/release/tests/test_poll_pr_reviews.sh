@@ -350,6 +350,26 @@ t_latest_review_by_picks_max_by_time_not_array_position() {
   assert_eq "latest submitted_at"                "2026-07-25T18:00:00Z"  "$submitted_at"
 }
 
+# GitHub review states outside the snapshot schema (DISMISSED, PENDING) are
+# not live verdicts, but watch-pr-reviews.sh treats any non-"none" state as
+# "a bot posted" and would let one satisfy the ready gate. They must normalize
+# to "none".
+t_latest_review_by_normalizes_dismissed_to_none() {
+  MOCK_REVIEWS_BODY='[{"user":{"login":"github-actions[bot]"},"state":"DISMISSED","submitted_at":"2026-07-25T16:00:00Z","body":"was dismissed"}]'
+  local out state
+  out=$(latest_review_by "owner" "repo" "1" "github-actions[bot]")
+  state=$(echo "$out" | jq -r '.state')
+  assert_eq "DISMISSED normalizes to none" "none" "$state"
+}
+
+t_latest_review_by_normalizes_pending_to_none() {
+  MOCK_REVIEWS_BODY='[{"user":{"login":"github-actions[bot]"},"state":"PENDING","submitted_at":"2026-07-25T16:00:00Z"}]'
+  local out state
+  out=$(latest_review_by "owner" "repo" "1" "github-actions[bot]")
+  state=$(echo "$out" | jq -r '.state')
+  assert_eq "PENDING normalizes to none" "none" "$state"
+}
+
 # --- #186: review verdicts bound to the PR head SHA ---
 
 # A verdict on the current head passes through unchanged, flagged not-stale.
@@ -496,6 +516,8 @@ run "latest_review_by resolves the fleet App login (#202)"            t_latest_r
 run "latest_review_by picks newest policy verdict across logins"      t_latest_review_by_policy_reviewer_picks_newest_across_logins
 run "latest_review_by never masks an active block with a later clean" t_latest_review_by_changes_requested_not_masked_by_later_other_login
 run "latest_review_by picks latest by time, not array position"       t_latest_review_by_picks_max_by_time_not_array_position
+run "latest_review_by normalizes DISMISSED to none"                   t_latest_review_by_normalizes_dismissed_to_none
+run "latest_review_by normalizes PENDING to none"                     t_latest_review_by_normalizes_pending_to_none
 run "main surfaces the fleet App review as .reviews.codex"            t_main_surfaces_fleet_app_review_as_codex
 run "toplevel_comments_by counts the fleet App comment login"         t_toplevel_comments_by_counts_fleet_app_login
 run "resolve_review_against_head: fresh verdict passes through"       t_resolve_against_head_fresh_passes_through

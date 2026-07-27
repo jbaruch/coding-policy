@@ -117,8 +117,15 @@ latest_review_by() {
         | (group_by(.user.login) | map(max_by(.submitted_at))) as $per_login_latest
         | ( ($per_login_latest | map(select(.state == "CHANGES_REQUESTED")) | first)
             // ($per_login_latest | sort_by(.submitted_at) | last) )
+        # Normalize to the documented schema states. GitHub also emits
+        # DISMISSED and PENDING; neither is a live verdict, but the watcher
+        # treats any non-"none" state as "a bot posted" and would let a
+        # dismissed/pending review satisfy the ready gate. Collapse anything
+        # outside {APPROVED, CHANGES_REQUESTED, COMMENTED} to "none" (absent),
+        # keeping submitted_at/body/commit_id visible for diagnosis.
         | if . == null then {state: "none", submitted_at: null, body: null, commit_id: null}
-          else {state, submitted_at, body, commit_id} end'
+          else {state: (if (.state | IN("APPROVED", "CHANGES_REQUESTED", "COMMENTED")) then .state else "none" end),
+                submitted_at, body, commit_id} end'
 }
 
 # Resolve a latest_review_by result against the PR head SHA. A review's verdict
