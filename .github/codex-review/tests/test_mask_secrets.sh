@@ -36,12 +36,12 @@ t_skips_short_fields() {
 
 t_missing_file_ok() {
   local rc=0 out; out=$(bash "$SCRIPT" /nope/auth.json) || rc=$?
-  [[ $rc -eq 0 && -z "$out" ]] && ok "missing file -> exit 0, no output" || bad "missing file -> exit 0, no output (rc=$rc out='$out')"
+  if [[ $rc -eq 0 && -z "$out" ]]; then ok "missing file -> exit 0, no output"; else bad "missing file -> exit 0, no output (rc=$rc out='$out')"; fi
 }
 
 t_bad_args() {
   local rc=0; bash "$SCRIPT" >/dev/null 2>&1 || rc=$?
-  [[ $rc -eq 2 ]] && ok "no args -> exit 2" || bad "no args -> exit 2 (rc=$rc)"
+  if [[ $rc -eq 2 ]]; then ok "no args -> exit 2"; else bad "no args -> exit 2 (rc=$rc)"; fi
 }
 
 echo "== mask-secrets.sh tests =="
