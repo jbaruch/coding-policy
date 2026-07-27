@@ -1,5 +1,9 @@
 # Changelog
 
+### Rules
+
+- **`language-diagnostics` — the in-loop expectation is a deterministic run, not memory** (closes #175) — the rule told the agent to "read diagnostics on the files it touches and clear them before handing work off" (Enable the Language Server) while also holding that "'don't ignore the warnings' enforced by memory is not a gate — a deterministic check nobody runs does not exist" (Gate It Deterministically). Those two contradicted: the in-loop clause rested on the memory the gate clause disqualified. Resolved by pointing the pre-handoff expectation at the same headless gate CI runs — the `LSP` tool surfaces findings live as the agent works, and clearing before handoff is a deterministic run of the gate over the changed set, with CI as the backstop rather than the first place a finding surfaces. A `Stop`/pre-handoff hook mechanizes it where the harness supports it. Silent-dismissal mechanical detection (a gate that rejects a bare blanket-ignore) and a wired hook are noted as optional follow-ons, not built here.
+
 ## 0.3.125 — 2026-07-27
 
 ### Rules
