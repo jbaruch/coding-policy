@@ -22,8 +22,9 @@
 # Output:
 #   stderr: each engine's native findings plus per-engine progress.
 # Usage: scripts/run-diagnostics.sh [base-dir]
-#   base-dir  Tree whose skills/, scripts/, and .github/actions/ are
-#             scanned for shell scripts. Defaults to the repo root. The
+#   base-dir  Tree whose skills/, scripts/, .github/actions/, and
+#             .github/codex-review/ are scanned for shell scripts.
+#             Defaults to the repo root. The
 #             optional arg exists so the runner's own test can point it at
 #             a fixture tree.
 #             pyright always runs against pyrightconfig.json at the cwd,
@@ -68,8 +69,14 @@ main() {
   # rules/script-delegation.md (e.g. skill-review/review-skills.sh) — gate
   # them too so an action script is held to the same zero-findings bar.
   [[ -d "$base/.github/actions" ]] && roots+=("$base/.github/actions")
+  # The policy-reviewer driver scripts (fleet-poll.sh, fleet-review-one.sh,
+  # post-review.sh, mask-secrets.sh, assert-no-secret-leak.sh + their tests)
+  # are deterministic shell held to the same bar — they were previously
+  # ungated, so the gating reviewer flagged findings this script reported
+  # "clean" (#199).
+  [[ -d "$base/.github/codex-review" ]] && roots+=("$base/.github/codex-review")
   if [[ ${#roots[@]} -eq 0 ]]; then
-    echo "run-diagnostics: none of skills/, scripts/, .github/actions/ found under $base" >&2
+    echo "run-diagnostics: none of skills/, scripts/, .github/actions/, .github/codex-review/ found under $base" >&2
     return 2
   fi
 
@@ -89,7 +96,7 @@ main() {
   discard "$tmplist"
 
   if [[ ${#scripts[@]} -eq 0 ]]; then
-    echo "run-diagnostics: no shell scripts found under ${base}/{skills,scripts,.github/actions}" >&2
+    echo "run-diagnostics: no shell scripts found under ${base}/{skills,scripts,.github/actions,.github/codex-review}" >&2
     return 2
   fi
 
