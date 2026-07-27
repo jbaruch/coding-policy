@@ -107,6 +107,17 @@ main() {
   # tip.
   local base_manifest
   if base_manifest=$(cd "$work" && git show "origin/${base}:tessl.json" 2>/dev/null); then
+    # Capture the dependency list in an explicitly checked assignment, NOT via
+    # process substitution: `while read < <(jq ...)` discards jq's exit status,
+    # so a malformed tessl.json would yield an empty list and the review would
+    # proceed with no authority plugins installed — silently reproducing the
+    # exact wrong-verdict bug this step exists to fix
+    # (rules/error-handling.md Shell Error Handling).
+    local deps
+    if ! deps=$(printf '%s' "$base_manifest" | jq -r '.dependencies // {} | keys[]'); then
+      echo "error: could not parse dependencies from ${full}:${base}/tessl.json — refusing to review with an unknown plugin set" >&2
+      exit 1
+    fi
     local dep
     while IFS= read -r dep; do
       [ -n "$dep" ] || continue
@@ -119,7 +130,7 @@ main() {
         # how a reviewer blocks a compliant PR without saying why.
         echo "::warning::could not install ${dep} for ${full}#${pr} — carve-outs citing its rules cannot be verified this run" >&2
       fi
-    done < <(printf '%s' "$base_manifest" | jq -r '.dependencies // {} | keys[]')
+    done <<< "$deps"
   else
     echo "note: ${full} has no tessl.json on ${base} — reviewing against coding-policy alone" >&2
   fi

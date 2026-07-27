@@ -8,6 +8,8 @@ The failure mode is worse than a missed check. On `jbaruch/nanoclaw#883` the rev
 
 `fleet-review-one.sh` now also installs the plugins named in the reviewed repo's manifest. Resolved from the BASE ref, never the PR head: the head is the content under review, so reading it would let a PR name a plugin that authorizes the PR. A plugin that fails to install emits a `::warning::` naming it rather than failing the review — best-effort, but never silent, since an invisibly-missing authority rule is exactly how this bug blocked a compliant PR.
 
+The dependency list is captured in an explicitly checked assignment rather than read through process substitution: `while read < <(jq ...)` discards jq's exit status, so a malformed `tessl.json` would yield an empty list and the review would proceed with no authority plugins installed — silently reproducing the exact wrong-verdict bug the step exists to fix. A parse failure now aborts the review.
+
 `fleet-prompt.md` gains the matching instruction: read `.tessl/plugins/*/*/rules/` before reporting a carve-out as undocumented, never conclude a rule is absent from a grep of the repo's tree, and name the plugin you expected it in when it genuinely is missing.
 
 ## 0.3.126 — 2026-07-27
