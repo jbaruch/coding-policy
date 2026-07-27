@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.127 — 2026-07-27
+
 ### Fleet reviewer — resolve the reviewed repo's own plugins (closes #245)
 
 The fleet reviewer installed `jbaruch/coding-policy` into a temp dir and symlinked it in as the reviewed workspace's entire `.tessl`. The consumer's own plugins were never installed — so `.tessl/plugins/` held exactly one plugin, and every carve-out satisfied by an "authority-of-record rule in its own plugin" was unverifiable. That covers `dependency-management`'s Runtime-Managed Manifest and Adversarial-Freshness carve-outs and `ci-safety`'s Content-Only Direct-Push: three carve-outs the reviewer structurally could not confirm, for as long as the fleet reviewer has existed.
