@@ -63,9 +63,9 @@ Decide the bump per semver. Patch is the default and is handled automatically by
 Opening the PR, or pushing further commits to an existing PR, automatically triggers the policy reviewer, which reviews the diff against the in-tree `rules/*.md` and posts a verdict. The machinery depends on the repo:
 
 - **coding-policy's own PRs** — the in-repo `review-codex.yml` workflow (Codex CLI on a ChatGPT subscription), posting as `github-actions[bot]`.
-- **Consumer repos** — the central `coding-policy-fleet-reviewer[bot]` GitHub App; the in-repo `review-trigger.yml` dispatches it on each `pull_request` event, with a `*/15` marker-gated poll as backstop (coding-policy#202).
+- **Consumer repos** — the central `coding-policy-fleet-reviewer[bot]` GitHub App; the in-repo `review-trigger.yml` dispatches it on each `pull_request` event, with a scheduled marker-gated poll as backstop (coding-policy#202).
 
-In both, the PR event (`opened` / `synchronize` / `reopened`) is the primary trigger — a plain `git push` to a non-PR branch does NOT fire a review; the consumer path adds the `*/15` poll only as a backstop for a dispatch that never fired. Fork PRs are skipped in both (no secret/token access to a fork head); on coding-policy adopt them via `adopt-fork-pr`. See the trigger / authorship / dismissal mechanics for both at:
+In both, the PR event (`opened` / `synchronize` / `reopened`) is the primary trigger. A plain `git push` to a non-PR branch does NOT fire a review; the consumer path's scheduled poll is only a backstop for a dispatch that never fired. Fork PRs are skipped in both — no secret or token access to a fork head. On coding-policy, adopt a fork PR via `adopt-fork-pr`. See the trigger / authorship / dismissal mechanics for both at:
 
 ```text
 skills/release/REVIEW_DETAILS.md
@@ -93,7 +93,7 @@ It returns the full `poll-pr-reviews.sh` snapshot plus a `watch` object — `{"r
 - `changes_requested` (exit 0) — the policy reviewer requested changes (a blocking finding). Go to Step 6, address it, push; the next push re-fires the review, so re-run the watcher.
 - `ci_failure` (exit 0) — a check failed. Fix it (Step 6), push, re-run the watcher.
 - `dirty` (exit 0) — the branch conflicts with `main` and GitHub skipped the `pull_request:` workflows. Rebase onto current `main`, resolve, force-push, then re-run the watcher — the push re-fires the missed workflows.
-- `pending_at_budget` (exit 1) — a signal never arrived within the budget (a reviewer that never posted, CI stuck pending). Inspect which field is still `none`/`pending` in the returned snapshot. If the policy reviewer never posted: on coding-policy's own PRs check the `review-codex.yml` run (`gh run list --workflow review-codex.yml`) — a missing or expired `CODEX_AUTH_JSON` secret is the usual cause; on a consumer repo confirm `review-trigger.yml` dispatched and the fleet App ran in coding-policy (the `*/15` poll is the backstop). Re-run the watcher to keep waiting once the cause is understood.
+- `pending_at_budget` (exit 1) — a signal never arrived within the budget (a reviewer that never posted, CI stuck pending). Inspect which field is still `none`/`pending` in the returned snapshot. If the policy reviewer never posted on coding-policy's own PRs, check the `review-codex.yml` run (`gh run list --workflow review-codex.yml`) — a missing or expired `CODEX_AUTH_JSON` secret is the usual cause. On a consumer repo, confirm `review-trigger.yml` dispatched and the fleet App ran in coding-policy; its scheduled poll is the backstop. Re-run the watcher to keep waiting once the cause is understood.
 
 ## Step 6 — Address Feedback; No Re-request Needed
 
