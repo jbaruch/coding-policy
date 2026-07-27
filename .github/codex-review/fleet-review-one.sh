@@ -91,6 +91,49 @@ main() {
   POLICY=$(mktemp -d) || { echo "error: mktemp -d failed (policy)" >&2; exit 1; }
   ( cd "$POLICY" && tessl install jbaruch/coding-policy >/dev/null ) \
     || { echo "error: tessl install jbaruch/coding-policy failed for ${full}#${pr}" >&2; exit 1; }
+
+  # Also install the reviewed repo's OWN plugins, because several
+  # coding-policy carve-outs (dependency-management's Runtime-Managed
+  # Manifest and Adversarial-Freshness, ci-safety's Content-Only
+  # Direct-Push) are satisfied by an "authority-of-record rule in its own
+  # plugin" — and with only coding-policy installed, the reviewer cannot
+  # resolve a single one of them. It then reports the rule as absent and
+  # blocks a PR whose carve-out is fully documented, which is what
+  # happened on jbaruch/nanoclaw#883.
+  #
+  # Resolved from the BASE ref's manifest, never the PR head's: the head
+  # is the content under review, so reading it would let a PR name a
+  # plugin that authorizes the PR. The base is the repo's own trusted
+  # tip.
+  local base_manifest
+  if base_manifest=$(cd "$work" && git show "origin/${base}:tessl.json" 2>/dev/null); then
+    # Capture the dependency list in an explicitly checked assignment, NOT via
+    # process substitution: `while read < <(jq ...)` discards jq's exit status,
+    # so a malformed tessl.json would yield an empty list and the review would
+    # proceed with no authority plugins installed — silently reproducing the
+    # exact wrong-verdict bug this step exists to fix
+    # (rules/error-handling.md Shell Error Handling).
+    local deps
+    if ! deps=$(printf '%s' "$base_manifest" | jq -r '.dependencies // {} | keys[]'); then
+      echo "error: could not parse dependencies from ${full}:${base}/tessl.json — refusing to review with an unknown plugin set" >&2
+      exit 1
+    fi
+    local dep
+    while IFS= read -r dep; do
+      [ -n "$dep" ] || continue
+      # coding-policy is already installed above at its own latest.
+      [ "$dep" = "jbaruch/coding-policy" ] && continue
+      if ! ( cd "$POLICY" && tessl install "$dep" >/dev/null 2>&1 ); then
+        # Best-effort per `rules/error-handling.md` Graceful Fallback: a
+        # private or unpublished plugin must not fail the whole review,
+        # but it MUST be visible — a silently missing authority rule is
+        # how a reviewer blocks a compliant PR without saying why.
+        echo "::warning::could not install ${dep} for ${full}#${pr} — carve-outs citing its rules cannot be verified this run" >&2
+      fi
+    done <<< "$deps"
+  else
+    echo "note: ${full} has no tessl.json on ${base} — reviewing against coding-policy alone" >&2
+  fi
   ln -s "${POLICY}/.tessl" "${work}/.tessl" \
     || { echo "error: could not link the installed policy into the workspace for ${full}#${pr}" >&2; exit 1; }
 
