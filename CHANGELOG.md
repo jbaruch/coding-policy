@@ -1,5 +1,9 @@
 # Changelog
 
+### Skills
+
+- **`release` — stale-read gate bugs fixed** (closes #186, #182, #181) — three release-gate scripts were acting on data that no longer described the current code. **#186:** `poll-pr-reviews.sh` resolved review verdicts by login only and dropped `commit_id`, so a stale `APPROVED`/`COMMENTED` from a superseded SHA read as a live clean verdict — a second push whose CI concluded before the reviewers re-posted could reach `ready` and merge unreviewed code. Verdicts now bind to the PR head: a review whose `commit_id` is not `headRefOid` collapses to state `none` (absent, not clean) with a `stale: true` flag that keeps the raw verdict visible for diagnosis; `head_sha` is a new top-level snapshot field and the script refuses to proceed without it. **#182:** the `cancel` bucket was treated as CI failure, so pushing a fix (which auto-cancels the prior SHA's in-flight runs) false-red'd a green PR; cancels are now dropped as no-signal — live buckets decide, a success alongside a cancelled twin still succeeds, and only an all-cancelled set falls to `pending`. **#181:** `verify-publish-landed.sh` derived the current version from the eventually-consistent `tessl plugin info` search listing, which lags the version API by minutes and false-negatived landed publishes with a confidently wrong "no-op publish step" message; it now reads the numeric max from `tessl api v1/tiles/<ws>/<tile>/versions` (the same authoritative API `verify-moderation-cleared.sh` uses). Conjunct 1 (resolved run conclusion) is untouched.
+
 ## 0.3.119 — 2026-07-24
 
 ### Rules
