@@ -75,8 +75,11 @@ alwaysApply: true
 - Never wrap a watch in an invented wall-clock `timeout` — no blanket minute count exists in this policy to cite; a watcher gives up only at its own documented budget
 - Watch only the fields the gate reads. For PR reviews that is each gating bot's latest review state resolved by bot login, CI status, and merge state — not the appearance of inline comments, and not a hand-picked run / comment / check id
 - A bot review is complete when its verdict posts (state leaves `none`), zero inline comments included — never wait for comments to appear
-- A reviewer workflow's run `conclusion` is not evidence a review happened — only the posted verdict is. A gate that fails open (a 503 in a membership check, a suppressed job) reports `success` having reviewed nothing, so a green check answers "did the workflow finish", never "did the review happen"; gate on the verdict, never on the check's color
-- Do not promote a reviewer's check to a required branch-protection gate while a fail-open path exists — required-and-green is satisfied by a run that did nothing, turning a stale green into merge authorization
+- For a reviewer workflow, the run `conclusion` reports only that the workflow finished, never that the review happened
+- A fail-open gate can report `success` having reviewed nothing
+- Gate a reviewer workflow on its posted verdict, not the check's color
+- Build and publish runs still gate on `conclusion`
+- Do not promote a reviewer's check to a required branch-protection gate while a fail-open path exists
 - The pre-merge review watch has an agent-executable form — `skills/release/watch-pr-reviews.sh` (see `skills/release/SKILL.md` Step 5); it owns the interval and budget and watches exactly the gate fields above
 - For plugin/package releases, the duty extends past merge — confirm the resolved run's conclusion, the registry advance, and the moderation clear; no single signal is authoritative
 - Release contract:
