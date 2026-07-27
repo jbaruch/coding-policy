@@ -65,7 +65,7 @@ Opening the PR, or pushing further commits to an existing PR, automatically trig
 - **coding-policy's own PRs** — the in-repo `review-codex.yml` workflow (Codex CLI on a ChatGPT subscription), posting as `github-actions[bot]`.
 - **Consumer repos** — the central `coding-policy-fleet-reviewer[bot]` GitHub App; the in-repo `review-trigger.yml` dispatches it on each `pull_request` event, with a scheduled marker-gated poll as backstop (coding-policy#202).
 
-In both, the PR event (`opened` / `synchronize` / `reopened`) is the primary trigger. A plain `git push` to a non-PR branch does NOT fire a review; the consumer path's scheduled poll is only a backstop for a dispatch that never fired. Fork PRs are skipped in both — no secret or token access to a fork head. On coding-policy, adopt a fork PR via `adopt-fork-pr`. See the trigger / authorship / dismissal mechanics for both at:
+In both, the PR event (`opened` / `synchronize` / `reopened`) is the primary trigger. A plain `git push` to a non-PR branch does NOT fire a review; the consumer path's scheduled poll is only a backstop for a dispatch that never fired. Fork PRs are skipped in both — no secret or token access to a fork head. Adopt a fork PR via `adopt-fork-pr` (works in any repo where the policy review is fork-guarded). See the trigger / authorship / dismissal mechanics for both at:
 
 ```text
 skills/release/REVIEW_DETAILS.md
