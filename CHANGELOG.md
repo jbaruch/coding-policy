@@ -1,5 +1,15 @@
 # Changelog
 
+### Rule — dependency-management: adversarial-freshness carve-out
+
+`dependency-management` had exactly two carve-outs, both structural: a manifest a tool rewrites at runtime, and a same-repo action self-reference. Neither covers a dependency that floats for a *semantic* reason — where tracking the upstream IS the feature.
+
+Surfaced on `jbaruch/nanoclaw` PR #883. Its `fetch_markdown` handler pulls `syabro/snitchmd:latest`, a headless-browser content extractor whose releases carry updated CloakBrowser fingerprints. Pinning it doesn't stabilize anything: the pin ages into blocked fetches as anti-bot detection advances, and the failure is silent — pages come back empty, not broken. The consuming repo wrote an authority-of-record rule plus a deploy gate (`nanoclaw-host: snitchmd-image-floating`), but the reviewer correctly rejected it, because a consumer plugin cannot mint an exception this rule never offered. The carve-out has to exist here or it doesn't exist.
+
+Preconditions are deliberately tighter than the manifest carve-out's. Beyond the authority-of-record rule and the deploy gate, the gate must fail when it can no longer *find* the reference — a rename or refactor that moves the target out of sight is the obvious way this decays into a check that passes vacuously forever. The per-install override is required rather than optional, so reproducibility stays reachable without a code change, and is explicitly out of the gate's scope: environment configuration is not a committed dependency.
+
+Three anti-patterns are bulleted rather than left implied, since this is the carve-out most likely to be reached for in bad faith: "the upstream releases often" (that's Freshness), "pinning is inconvenient", and any dependency whose consumed surface is a versioned API however adversarial its domain.
+
 ## 0.3.121 — 2026-07-27
 
 ### Skills

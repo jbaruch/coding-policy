@@ -40,6 +40,23 @@ alwaysApply: true
 - Multiple covered manifests permitted iff each independently meets all three preconditions
 - Every other manifest in the repo still pins
 
+## Adversarial-Freshness Dependency Carve-Out
+
+- Narrow exception for a dependency whose value is tracking an adversary, not a version
+- Applies when the upstream ships countermeasures against an actively-adapting opponent (browser-fingerprint evasion, malware signatures, threat feeds, blocklists) AND the consumed surface is data or rendered output, not a versioned API contract
+- A pin degrades the capability rather than stabilizing it: the pin's renewal cadence competes with the adversary's release cadence, and staleness surfaces as silent capability loss, never as a build break
+- The covered reference MAY use a floating specifier (e.g., a `:latest` container tag)
+- The exemption reaches that reference alone — never the project's lock file, and never a sibling dependency in the same manifest
+- Preconditions (each covered reference, all required):
+  1. The project documents an authority-of-record rule in its own plugin naming every covered reference, the adversary being tracked, and why a pin degrades rather than stabilizes
+  2. A deploy-time check fails the deployment when the committed reference is anything other than the permitted floating form, and fails when it can no longer locate the reference (a moved or renamed target fails loudly, never passes vacuously)
+  3. The check runs as a deterministic script per `rules/script-delegation.md`, not agent judgment
+  4. A per-install override lets an operator pin for reproducibility, documented in the authority-of-record rule and explicitly outside the deploy check's scope — environment configuration is not a committed dependency
+- "The upstream releases often" does NOT qualify. See Freshness
+- "Pinning is inconvenient" does NOT qualify
+- A dependency whose consumed surface is a versioned API does NOT qualify in an adversarial domain
+- Every other dependency in the repo still pins with a stated renewal mechanism
+
 ## Same-Repo Reusable-Workflow Action Carve-Out
 
 - Narrow exception for a reusable workflow (`on: workflow_call`) referencing a composite action in its OWN repository
