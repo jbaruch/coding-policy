@@ -125,9 +125,15 @@ exit 0
 STUB
   chmod +x "$d/bin/shellcheck" "$d/bin/pyright"
   local log="$d/stub.log"; : > "$log"
-  PATH="$d/bin:$PATH" STUB_LOG="$log" bash "$RUNNER" "$d/base" >/dev/null 2>&1 || true
-  local hit; hit=$(grep -c 'codex-review/driver.sh' "$log")
+  # Capture the exit code explicitly (never `|| true` — rules/error-handling.md
+  # Shell Error Handling): both stub engines exit 0, so a clean run is exit 0.
+  local rc=0
+  PATH="$d/bin:$PATH" STUB_LOG="$log" bash "$RUNNER" "$d/base" >/dev/null 2>&1 || rc=$?
+  # Fixed-string match (`-F`): the '.' in 'driver.sh' is a regex any-char
+  # without it, which would let an unintended filename satisfy the assertion.
+  local hit; hit=$(grep -cF 'codex-review/driver.sh' "$log")
   rm -rf "$d"
+  assert_eq "runner exits clean with only a codex-review script" "0" "$rc" || return 1
   assert_eq "codex-review script passed to shellcheck" "1" "$hit"
 }
 
