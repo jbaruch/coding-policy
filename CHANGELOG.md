@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.128 — 2026-07-27
+
 ### Rules
 
 - **Batched prose cleanup** (closes #236, #240) — one focused pass clearing the advisory prose/accuracy findings deferred across #235/#239/#243/#244/#246 per round-economics. `boy-scout` Fold section: cost-unit bullet split into atomic bullets, the "folding them in there is free" meta-justification dropped, the `review-severity` restatement collapsed to a bare reference, "spin a fresh round up" → "spin up a fresh round". `ship-on-green`: "no exit below holding" → "none of the exits below apply". `ci-safety` reviewer-liveness bullets: incident examples and em-dash rationale trimmed to the invariant + directive, and scoped explicitly to reviewer workflows (build/publish runs still gate on `conclusion`) so it no longer reads as contradicting the "watch a run's `conclusion`" bullet. `language-diagnostics` in-loop bullets: colon/semicolon-packed clauses split atomic, and "over what it changed" corrected to "the same gate command CI runs, scoped to the changed set only where the gate supports it" (the repo's own `run-diagnostics.sh` runs project-level). `REVIEW_DETAILS.md`: "exactly one reviewer" softened to allow the transitional both-reviewers case, and the fleet-review policy-load path corrected — the runner `tessl install`s coding-policy to a temp path and symlinks `.tessl/` into the workspace, it is not consumer-pre-installed.
