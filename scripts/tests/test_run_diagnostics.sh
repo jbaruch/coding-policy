@@ -106,6 +106,31 @@ t_pyright_runs_even_when_shellcheck_fails() {
   assert_eq "pyright invoked despite shellcheck failure" "1" "$py_calls"
 }
 
+# Regression guard for #199: the `.github/codex-review/` root must be
+# discovered and its scripts passed to shellcheck. Builds a base whose ONLY
+# shell script lives under that root and asserts the stub shellcheck received
+# it — proves the new root is gated, not just declared.
+t_gates_codex_review_root() {
+  local d; d=$(mktemp -d)
+  mkdir -p "$d/base/.github/codex-review" "$d/bin"
+  printf '#!/usr/bin/env bash\necho hi\n' > "$d/base/.github/codex-review/driver.sh"
+  cat > "$d/bin/shellcheck" <<'STUB'
+#!/usr/bin/env bash
+echo "shellcheck $*" >> "$STUB_LOG"
+exit 0
+STUB
+  cat > "$d/bin/pyright" <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+  chmod +x "$d/bin/shellcheck" "$d/bin/pyright"
+  local log="$d/stub.log"; : > "$log"
+  PATH="$d/bin:$PATH" STUB_LOG="$log" bash "$RUNNER" "$d/base" >/dev/null 2>&1 || true
+  local hit; hit=$(grep -c 'codex-review/driver.sh' "$log")
+  rm -rf "$d"
+  assert_eq "codex-review script passed to shellcheck" "1" "$hit"
+}
+
 t_missing_base_exits_two() {
   local d; d=$(make_fixture)
   RC=0
@@ -147,6 +172,7 @@ run "both engines clean -> exit 0"                       t_both_clean_exits_zero
 run "shellcheck finding -> exit 1"                       t_shellcheck_finding_exits_one
 run "pyright finding -> exit 1"                          t_pyright_finding_exits_one
 run "both engines find -> exit 1"                        t_both_findings_exit_one
+run "gates the .github/codex-review/ root (#199)"        t_gates_codex_review_root
 run "pyright runs even when shellcheck fails"            t_pyright_runs_even_when_shellcheck_fails
 run "missing base dir -> exit 2"                         t_missing_base_exits_two
 run "no shell scripts found -> exit 2"                   t_no_scripts_exits_two
