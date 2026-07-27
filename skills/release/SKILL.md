@@ -28,7 +28,7 @@ Structured workflow for shipping code: PR creation, automated policy review, mer
 - Run any local check the rule or skill prescribes:
   - `bash -n <script>` must exit 0 on shell scripts
   - the script's own fixture test must pass
-- The Codex policy reviewer is a backstop, not the first read
+- The policy reviewer is a backstop, not the first read
 - If anything fails, fix it before proceeding
 
 ## Step 2 — Create PR
@@ -60,13 +60,18 @@ Decide the bump per semver. Patch is the default and is handled automatically by
 
 ## Step 4 — Policy Review Fires Automatically
 
-Opening the PR, or pushing further commits to an existing PR, automatically triggers the Codex policy reviewer — the `review-codex.yml` workflow, which runs the Codex CLI on a ChatGPT subscription and reviews the diff against the in-tree `rules/*.md`. It is bound to the `pull_request` event (`opened` / `synchronize` / `reopened`); a plain `git push` to a non-PR branch does NOT fire it, and fork PRs are skipped (no secret access). See the trigger / authorship / dismissal mechanics at:
+Opening the PR, or pushing further commits to an existing PR, automatically triggers the policy reviewer, which reviews the diff against the in-tree `rules/*.md` and posts a verdict. The machinery depends on the repo:
+
+- **coding-policy's own PRs** — the in-repo `review-codex.yml` workflow (Codex CLI on a ChatGPT subscription), posting as `github-actions[bot]`.
+- **Consumer repos** — the central `coding-policy-fleet-reviewer[bot]` GitHub App; the in-repo `review-trigger.yml` dispatches it on each `pull_request` event, with a scheduled marker-gated poll as backstop (coding-policy#202).
+
+In both, the PR event (`opened` / `synchronize` / `reopened`) is the primary trigger. A plain `git push` to a non-PR branch does NOT fire a review; the consumer path's scheduled poll is only a backstop for a dispatch that never fired. Fork PRs are skipped in both — no secret or token access to a fork head. Adopt a fork PR via `adopt-fork-pr` (works in any repo where the policy review is fork-guarded). See the trigger / authorship / dismissal mechanics for both at:
 
 ```text
 skills/release/REVIEW_DETAILS.md
 ```
 
-**Also request Copilot.** Copilot is a deliberate second reviewer with a different lens — the Codex reviewer enforces `rules/*.md` compliance, Copilot reads for correctness, bugs, security, and test gaps. The policy reviewer gates the merge only on **blocking** findings; advisory-only reviews post `COMMENT` and never gate, and Copilot is always advisory (read it, never gate on it) — see `rules/review-severity.md`:
+**Also request Copilot.** Copilot is a deliberate second reviewer with a different lens — the policy reviewer enforces `rules/*.md` compliance, Copilot reads for correctness, bugs, security, and test gaps. The policy reviewer gates the merge only on **blocking** findings; advisory-only reviews post `COMMENT` and never gate, and Copilot is always advisory (read it, never gate on it) — see `rules/review-severity.md`:
 
 ```bash
 skills/release/request-copilot-review.sh <owner> <repo> <pr-number>
@@ -88,7 +93,7 @@ It returns the full `poll-pr-reviews.sh` snapshot plus a `watch` object — `{"r
 - `changes_requested` (exit 0) — the policy reviewer requested changes (a blocking finding). Go to Step 6, address it, push; the next push re-fires the review, so re-run the watcher.
 - `ci_failure` (exit 0) — a check failed. Fix it (Step 6), push, re-run the watcher.
 - `dirty` (exit 0) — the branch conflicts with `main` and GitHub skipped the `pull_request:` workflows. Rebase onto current `main`, resolve, force-push, then re-run the watcher — the push re-fires the missed workflows.
-- `pending_at_budget` (exit 1) — a signal never arrived within the budget (a reviewer that never posted, CI stuck pending). Inspect which field is still `none`/`pending` in the returned snapshot. If the Codex reviewer never posted, check the `review-codex.yml` run (`gh run list --workflow review-codex.yml`) — a missing `CODEX_AUTH_JSON` secret or an expired token is the usual cause. Re-run the watcher to keep waiting once the cause is understood.
+- `pending_at_budget` (exit 1) — a signal never arrived within the budget (a reviewer that never posted, CI stuck pending). Inspect which field is still `none`/`pending` in the returned snapshot. If the policy reviewer never posted on coding-policy's own PRs, check the `review-codex.yml` run (`gh run list --workflow review-codex.yml`) — a missing or expired `CODEX_AUTH_JSON` secret is the usual cause. On a consumer repo, confirm `review-trigger.yml` dispatched and the fleet App ran in coding-policy; its scheduled poll is the backstop. Re-run the watcher to keep waiting once the cause is understood.
 
 ## Step 6 — Address Feedback; No Re-request Needed
 
@@ -101,7 +106,7 @@ It returns the full `poll-pr-reviews.sh` snapshot plus a `watch` object — `{"r
   - Declined: `Declining — <reason with cited evidence>` (em dash `—`, not hyphen or period)
   - Advisory deferred: `Acknowledged — deferred to <follow-up ref>` (em dash `—`; names where it is tracked)
 - Push fixes to the same branch
-- **The Codex reviewer re-runs automatically on every push** (`pull_request: synchronize`); Copilot needs a manual re-request each push via `skills/release/request-copilot-review.sh` (same args as Step 4).
+- **The policy reviewer re-runs automatically on every push** (coding-policy via `review-codex.yml` `pull_request: synchronize`; consumers via `review-trigger.yml` re-dispatching the fleet App); Copilot needs a manual re-request each push via `skills/release/request-copilot-review.sh` (same args as Step 4).
 - Repeat Step 5 until the policy reviewer carries no blocking finding — `APPROVED`, or `COMMENTED` with its body read and only advisories — and every thread has a reply.
 
 ## Step 7 — Merge + Cleanup
