@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.122 — 2026-07-27
+
 ### Rule — dependency-management: adversarial-freshness carve-out
 
 `dependency-management` had exactly two carve-outs, both structural: a manifest a tool rewrites at runtime, and a same-repo action self-reference. Neither covers a dependency that floats for a *semantic* reason — where tracking the upstream IS the feature.
