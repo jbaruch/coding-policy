@@ -334,6 +334,22 @@ t_toplevel_comments_by_counts_fleet_app_login() {
   assert_eq "fleet-App inline comment counted for policy reviewer" "1" "$count"
 }
 
+# A login's own latest review must be selected by submitted_at, NOT by the
+# API's array position: jq group_by preserves input order within a group, so
+# if the reviews API returns a login's reviews out of chronological order, a
+# `last`-based pick would gate on a superseded verdict. Here the newest review
+# (CHANGES_REQUESTED @18:00) is NOT last in the input — a correct max_by pick
+# surfaces it; a `last` pick would wrongly return the APPROVED @16:00.
+t_latest_review_by_picks_max_by_time_not_array_position() {
+  MOCK_REVIEWS_BODY='[{"user":{"login":"github-actions[bot]"},"state":"CHANGES_REQUESTED","submitted_at":"2026-07-25T18:00:00Z"},{"user":{"login":"github-actions[bot]"},"state":"COMMENTED","submitted_at":"2026-07-25T17:00:00Z"},{"user":{"login":"github-actions[bot]"},"state":"APPROVED","submitted_at":"2026-07-25T16:00:00Z"}]'
+  local out state submitted_at
+  out=$(latest_review_by "owner" "repo" "1" "github-actions[bot]")
+  state=$(echo "$out" | jq -r '.state')
+  submitted_at=$(echo "$out" | jq -r '.submitted_at')
+  assert_eq "latest by time, not array position" "CHANGES_REQUESTED"     "$state"        || return 1
+  assert_eq "latest submitted_at"                "2026-07-25T18:00:00Z"  "$submitted_at"
+}
+
 # --- #186: review verdicts bound to the PR head SHA ---
 
 # A verdict on the current head passes through unchanged, flagged not-stale.
@@ -479,6 +495,7 @@ run "main counts Copilot comments in the snapshot"                    t_main_cou
 run "latest_review_by resolves the fleet App login (#202)"            t_latest_review_by_resolves_fleet_app_login
 run "latest_review_by picks newest policy verdict across logins"      t_latest_review_by_policy_reviewer_picks_newest_across_logins
 run "latest_review_by never masks an active block with a later clean" t_latest_review_by_changes_requested_not_masked_by_later_other_login
+run "latest_review_by picks latest by time, not array position"       t_latest_review_by_picks_max_by_time_not_array_position
 run "main surfaces the fleet App review as .reviews.codex"            t_main_surfaces_fleet_app_review_as_codex
 run "toplevel_comments_by counts the fleet App comment login"         t_toplevel_comments_by_counts_fleet_app_login
 run "resolve_review_against_head: fresh verdict passes through"       t_resolve_against_head_fresh_passes_through

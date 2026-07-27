@@ -99,6 +99,12 @@ COPILOT_COMMENT_LOGINS=("Copilot" "copilot-pull-request-reviewer[bot]")
 # OWN latest review, then if ANY of those is CHANGES_REQUESTED surface that
 # (an active block from one identity must never be masked by a later clean
 # review from another); otherwise surface the newest among them.
+# `max_by(.submitted_at)` for the per-login latest, NOT `last`: jq `group_by`
+# sorts only by the group key and preserves input order within a group, so
+# `last` returns the newest review only when the API happened to return that
+# login's reviews in chronological order. A merge gate must not rest on that
+# assumption — a login whose re-review came back out of order would gate on a
+# superseded verdict — so select the max by submitted_at explicitly.
 latest_review_by() {
   local owner="$1" repo="$2" pr="$3"; shift 3
   local logins_json
@@ -108,7 +114,7 @@ latest_review_by() {
     | jq -s --argjson logins "$logins_json" '
         (add // [])
         | [.[] | select(.user.login | IN($logins[]))]
-        | (group_by(.user.login) | map(last)) as $per_login_latest
+        | (group_by(.user.login) | map(max_by(.submitted_at))) as $per_login_latest
         | ( ($per_login_latest | map(select(.state == "CHANGES_REQUESTED")) | first)
             // ($per_login_latest | sort_by(.submitted_at) | last) )
         | if . == null then {state: "none", submitted_at: null, body: null, commit_id: null}
