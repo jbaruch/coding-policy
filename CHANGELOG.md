@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.125 — 2026-07-27
+
 ### Rules
 
 - **`ci-safety` — a reviewer's run conclusion is not proof the review happened** (closes #185) — during GitHub's 2026-07-16 REST degradation, a scaffolded reviewer workflow reported `completed success` while skipping the review entirely: a transient 503 in gh-aw's membership check collapsed "can't determine membership" into the same falsy value as "not a member", so every downstream job skipped and the run went green having reviewed nothing. Nothing merged unreviewed only because `watch-pr-reviews.sh` gates on the posted verdict, not the run's color. `ci-safety` now states that invariant explicitly — a run `conclusion` answers "did the workflow finish", never "did the review happen"; gate on the verdict — plus a caution against promoting a reviewer check to a required branch-protection gate while any fail-open path exists (required-and-green is satisfied by a run that did nothing). The upstream fail-open belongs in `githubnext/gh-aw` and consumers have since migrated off the per-repo gh-aw reviewer to the central fleet App, but the invariant is mechanism-agnostic and load-bearing for anyone merging by hand.
