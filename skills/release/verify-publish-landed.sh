@@ -1,11 +1,20 @@
 #!/usr/bin/env bash
 # Verify a plugin publish actually landed on the registry by checking BOTH
-# (a) the resolved publish run's conclusion and (b) the registry's
-# `Latest Version` against a pre-merge baseline. Both signals together
+# (a) the resolved publish run's conclusion and (b) the registry's latest
+# published version against a pre-merge baseline. Both signals together
 # close the queued/in-flight publish race (issue #80): an interleaved
 # earlier publish can advance the registry between PRE capture and our
 # post-merge check, producing a false-positive against OUR failed run if
 # we used registry-advance alone.
+#
+# The current version is read from the authoritative versions API
+# (`tessl api v1/tiles/<ws>/<tile>/versions`), NOT the `tessl plugin info`
+# search listing. The listing is eventually-consistent and lags the version
+# API by minutes, so reading it false-negatived a publish that had actually
+# landed — and, worse, the failure text confidently blamed a nonexistent
+# no-op publish step and sent the operator hunting through green run logs
+# (#181). The version API reflects a publish immediately. verify-moderation-
+# cleared.sh reads the same API family for the same reason.
 #
 # Conjunction (both required):
 #   1. The resolved run's conclusion is `success`. A failed conclusion
@@ -160,45 +169,39 @@ main() {
     exit 2
   fi
 
-  # `tessl plugin info | grep | awk` under `set -o pipefail` lets a parse
-  # miss (grep exits 1 when "Latest Version" doesn't appear) trigger
-  # the `||` "tessl failed" branch and swallow the actual output. To
-  # distinguish tool failure from parse miss, capture first (separating
-  # stdout from stderr the same way as the gh capture above) then parse
-  # stdout in a separate step. Mixed `2>&1` capture would let a tessl
-  # warning on stderr poison the parsed-output and misread the version.
-  local tessl_output
-  tessl_output=$(tessl plugin info "${workspace}/${tile}" 2>"$err_file") \
-    || { local err; err=$(cat "$err_file"); echo "error: 'tessl plugin info ${workspace}/${tile}' failed: ${err} — verify (1) tessl CLI is installed and on PATH ('command -v tessl'), (2) the workspace/plugin slug is correct, (3) you have network access to the registry, then re-run 'tessl plugin info ${workspace}/${tile}' directly to inspect the failure before retrying the publish verification" >&2; exit 2; }
-  # Branch on grep's exit code explicitly. A bare `|| true` would let the
-  # parse-miss reach the `-z` diagnostic below, but it collapses grep's two
-  # non-zero codes into one: 1 is "no match" (a real, expected state — the
-  # registry didn't print the line) and 2 is "grep itself failed" (bad
-  # regex, unreadable input). Suppressing both reports a broken tool as a
-  # missing line, sending the operator to debug the registry over a fault
-  # in this script.
-  # here-string + `grep -m1`, not a pipeline: `-m1` stops at the first match
-  # so a second "Latest Version" line can't make version_line multi-line and
-  # break the awk/semver step, and the here-string avoids the pipeline that
-  # under pipefail could carry a SIGPIPE'd producer's status instead of grep's.
-  local version_line rc=0
-  version_line=$(grep -m1 "Latest Version" <<<"$tessl_output") || rc=$?
-  case "$rc" in
-    0) ;;
-    1)
-      echo "error: could not parse 'Latest Version' from 'tessl plugin info ${workspace}/${tile}' output — the registry output shape may have changed; inspect it directly and update this parse (output was: ${tessl_output})" >&2
-      exit 2
-      ;;
-    *)
-      echo "error: grep failed (rc=${rc}) while parsing 'tessl plugin info ${workspace}/${tile}' output — this is a fault in verify-publish-landed.sh's parse, not a registry problem; report it with the output that triggered it (output was: ${tessl_output})" >&2
-      exit 2
-      ;;
-  esac
+  # Read the current latest version from the versions API. Separate stdout
+  # (the JSON body) from stderr so a tessl warning can't poison the parsed
+  # payload — same capture discipline as the gh call above and as
+  # verify-moderation-cleared.sh. One page suffices: the endpoint returns the
+  # newest versions first, a publish only ever adds a new highest version, so
+  # the maximum is always on page 1 — no --paginate needed.
+  local versions_endpoint="v1/tiles/${workspace}/${tile}/versions"
+  local versions_json
+  versions_json=$(tessl api "$versions_endpoint" 2>"$err_file") \
+    || { local err; err=$(cat "$err_file"); echo "error: 'tessl api ${versions_endpoint}' failed: ${err} — verify (1) tessl CLI is installed and on PATH ('command -v tessl'), (2) the workspace/plugin slug is correct, (3) you have network access to the registry, then re-run 'tessl api ${versions_endpoint}' directly to inspect the failure before retrying the publish verification" >&2; exit 2; }
 
+  # `jq empty`, not `jq -e .`: -e sets the exit from the last output's
+  # truthiness, so a valid body evaluating to false/null would misreport as
+  # "not JSON". `jq empty` parses and produces no output — exit reflects parse
+  # validity alone (same reasoning as verify-moderation-cleared.sh).
+  if ! printf '%s' "$versions_json" | jq empty >/dev/null 2>&1; then
+    echo "error: 'tessl api ${versions_endpoint}' returned a body that is not valid JSON — the registry may be returning an error page or the endpoint shape changed; inspect it directly with 'tessl api ${versions_endpoint}' before retrying (body was: ${versions_json})" >&2
+    exit 2
+  fi
+
+  # Max version across the page, ranked numerically. sort_by a per-element
+  # parsed [major,minor,patch] key (jq compares arrays element-wise, so
+  # [0,3,119] outranks [0,3,20]) and take the last — this depends only on the
+  # `.version` string, not the endpoint's split-out int fields, so a shape
+  # change there can't silently mis-rank. `tonumber? // 0` neutralises a
+  # non-numeric component rather than aborting the whole rank.
   local current
-  current=$(printf '%s\n' "$version_line" | awk '{print $NF}')
+  current=$(printf '%s' "$versions_json" | jq -r '
+    [.data[]?.attributes.version | select(. != null)]
+    | sort_by(split(".") | map(tonumber? // 0))
+    | last // empty')
   if [[ -z "$current" ]]; then
-    echo "error: 'Latest Version' line present but carried no version token in 'tessl plugin info ${workspace}/${tile}' output (line was: ${version_line})" >&2
+    echo "error: 'tessl api ${versions_endpoint}' returned no published version — response carried no .data[].attributes.version entries; the endpoint shape may have changed or the plugin has never published. Inspect it directly with 'tessl api ${versions_endpoint}' (body was: ${versions_json})" >&2
     exit 2
   fi
 

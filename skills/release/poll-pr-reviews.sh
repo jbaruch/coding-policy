@@ -13,17 +13,33 @@
 # Schema:
 #   {
 #     "pr_number": N,
+#     "head_sha": "<PR head commit SHA>",
 #     "ci":   {"status": "pending|success|failure|none", "checks": [...]},
 #     "reviews": {
 #       "codex":   {"state": "APPROVED|CHANGES_REQUESTED|COMMENTED|none",
-#                   "submitted_at": "ISO-8601|null", "body": "text|null"},
+#                   "submitted_at": "ISO-8601|null", "body": "text|null",
+#                   "commit_id": "<SHA the review is bound to>|null",
+#                   "stale": bool},
 #       "copilot": {"state": "APPROVED|CHANGES_REQUESTED|COMMENTED|none",
-#                   "submitted_at": "ISO-8601|null", "body": "text|null"}
+#                   "submitted_at": "ISO-8601|null", "body": "text|null",
+#                   "commit_id": "<SHA the review is bound to>|null",
+#                   "stale": bool}
 #     },
 #     "inline_comments": {"codex": N, "copilot": N},
 #     "merge_state": {"status": "CLEAN|DIRTY|BLOCKED|BEHIND|UNSTABLE|...",
 #                     "mergeable": "MERGEABLE|CONFLICTING|UNKNOWN"}
 #   }
+#
+# A review's `.state` is resolved AGAINST `head_sha`: a review whose
+# `commit_id` is not the current head has not reviewed the current code, so
+# its `.state` collapses to "none" (absent, not clean) and `.stale` is true —
+# the rule in rules/review-severity.md / autonomous-shipping.md that a verdict
+# approves only the commit it reviewed. The pre-resolution verdict stays
+# visible in `submitted_at` / `body` / `commit_id` so a reader can tell "never
+# reviewed" (state none, stale false) from "reviewed an older commit" (state
+# none, stale true). Binding both symptoms to head fixes them together: a
+# stale CHANGES_REQUESTED no longer false-reds a fix no reviewer has seen, and
+# a stale COMMENTED/APPROVED no longer false-readies unreviewed code (#186).
 #
 # `merge_state.status == "DIRTY"` / `mergeable == "CONFLICTING"` means GitHub
 # couldn't create `refs/pull/N/merge` and silently skipped `pull_request:`
@@ -83,6 +99,12 @@ COPILOT_COMMENT_LOGINS=("Copilot" "copilot-pull-request-reviewer[bot]")
 # OWN latest review, then if ANY of those is CHANGES_REQUESTED surface that
 # (an active block from one identity must never be masked by a later clean
 # review from another); otherwise surface the newest among them.
+# `max_by(.submitted_at)` for the per-login latest, NOT `last`: jq `group_by`
+# sorts only by the group key and preserves input order within a group, so
+# `last` returns the newest review only when the API happened to return that
+# login's reviews in chronological order. A merge gate must not rest on that
+# assumption — a login whose re-review came back out of order would gate on a
+# superseded verdict — so select the max by submitted_at explicitly.
 latest_review_by() {
   local owner="$1" repo="$2" pr="$3"; shift 3
   local logins_json
@@ -92,11 +114,40 @@ latest_review_by() {
     | jq -s --argjson logins "$logins_json" '
         (add // [])
         | [.[] | select(.user.login | IN($logins[]))]
-        | (group_by(.user.login) | map(last)) as $per_login_latest
+        | (group_by(.user.login) | map(max_by(.submitted_at))) as $per_login_latest
         | ( ($per_login_latest | map(select(.state == "CHANGES_REQUESTED")) | first)
             // ($per_login_latest | sort_by(.submitted_at) | last) )
-        | if . == null then {state: "none", submitted_at: null, body: null}
-          else {state, submitted_at, body} end'
+        # Normalize to the documented schema states. GitHub also emits
+        # DISMISSED and PENDING; neither is a live verdict, but the watcher
+        # treats any non-"none" state as "a bot posted" and would let a
+        # dismissed/pending review satisfy the ready gate. Collapse anything
+        # outside {APPROVED, CHANGES_REQUESTED, COMMENTED} to "none" (absent),
+        # keeping submitted_at/body/commit_id visible for diagnosis.
+        | if . == null then {state: "none", submitted_at: null, body: null, commit_id: null}
+          else {state: (if (.state | IN("APPROVED", "CHANGES_REQUESTED", "COMMENTED")) then .state else "none" end),
+                submitted_at, body, commit_id} end'
+}
+
+# Resolve a latest_review_by result against the PR head SHA. A review's verdict
+# approves only the commit it reviewed (rules/autonomous-shipping.md), so a
+# review whose `commit_id` is not the head collapses to state "none" — absent,
+# not clean — while its verdict stays visible for diagnosis under a `stale`
+# flag. `head` is always the live headRefOid in production (main asserts it
+# non-empty); an empty head would mark every real review stale, which is why
+# main refuses to proceed without one rather than silently voiding the gate.
+#
+# NOTE on ordering vs the CHANGES_REQUESTED-wins aggregation in
+# latest_review_by: today exactly one policy-reviewer identity posts per PR, so
+# aggregation collapses to that one review and resolving here is equivalent to
+# resolving before aggregation. The hypothetical mixed-freshness-two-logins PR
+# does not occur (see the login table above); if it ever does, fold this
+# binding into the jq above so stale reviews drop before the CR-wins pick.
+resolve_review_against_head() {
+  local review="$1" head="$2"
+  printf '%s' "$review" | jq --arg head "$head" '
+    if .state == "none" then . + {stale: false}
+    elif .commit_id == $head then . + {stale: false}
+    else {state: "none", submitted_at, body, commit_id, stale: true} end'
 }
 
 # Count top-level (non-reply) inline comments authored by ANY of <login...>.
@@ -114,10 +165,15 @@ toplevel_comments_by() {
         | length'
 }
 
+# Also carries the PR head SHA (headRefOid) so review verdicts can be bound to
+# the commit they reviewed — folded into this call rather than a second
+# `gh pr view` so head and merge-state come from one consistent read. main
+# splits head_sha to a top-level field and keeps merge_state as {status,
+# mergeable}.
 fetch_merge_state() {
   local owner="$1" repo="$2" pr="$3"
-  gh pr view "$pr" --repo "${owner}/${repo}" --json mergeStateStatus,mergeable \
-    | jq -c '{status: .mergeStateStatus, mergeable: .mergeable}'
+  gh pr view "$pr" --repo "${owner}/${repo}" --json mergeStateStatus,mergeable,headRefOid \
+    | jq -c '{status: .mergeStateStatus, mergeable: .mergeable, head_sha: .headRefOid}'
 }
 
 main() {
@@ -144,23 +200,50 @@ main() {
     exit 1
   fi
 
+  # `cancel` is NOT failure, and it is NOT a signal at all. Pushing a fix to an
+  # open PR auto-cancels the prior SHA's in-flight runs, and a re-dispatched
+  # workflow cancels its own earlier run on the same head via concurrency — so
+  # a cancelled bucket is a superseded run, and its replacement drives the
+  # state. Treating it as failure false-red'd a green PR the instant a reviewer
+  # was addressed (#182). So drop cancels, then judge the LIVE buckets: a real
+  # `fail` still fails; a `success` alongside a cancelled twin still succeeds
+  # (folding cancel into `pending` would have wedged that case). Only when
+  # cancels are ALL there is — the replacement not yet registered — fall to
+  # pending so the watcher waits for it. `gh pr checks` is head-scoped, so that
+  # replacement always concludes and the pending never wedges. `skipping`
+  # stays success-equivalent (a skipped required check is a pass), unchanged.
   local ci_status
   ci_status=$(echo "$checks_json" | jq -r '
-    if (. | length) == 0 then "none"
-    elif any(.bucket == "fail" or .bucket == "cancel") then "failure"
-    elif any(.bucket == "pending") then "pending"
-    else "success" end
+    (map(select(.bucket != "cancel"))) as $live
+    | if (. | length) == 0 then "none"
+      elif ($live | any(.bucket == "fail")) then "failure"
+      elif ($live | any(.bucket == "pending")) then "pending"
+      elif ($live | length) == 0 then "pending"
+      else "success" end
   ')
 
   local merge_state
   merge_state=$(fetch_merge_state "$owner" "$repo" "$pr_number") \
-    || { echo "error: failed to fetch merge state for ${owner}/${repo}#${pr_number} — run 'gh auth status' to verify auth, then retry 'gh pr view ${pr_number} --repo ${owner}/${repo} --json mergeStateStatus,mergeable' to inspect the failing call directly" >&2; exit 1; }
+    || { echo "error: failed to fetch merge state for ${owner}/${repo}#${pr_number} — run 'gh auth status' to verify auth, then retry 'gh pr view ${pr_number} --repo ${owner}/${repo} --json mergeStateStatus,mergeable,headRefOid' to inspect the failing call directly" >&2; exit 1; }
+
+  # Head SHA binds every review verdict to the commit it reviewed. Refuse to
+  # proceed without it: an empty head would mark every real review stale and
+  # silently void the review gate — the opposite of the fail-safe intent.
+  local head_sha
+  head_sha=$(printf '%s' "$merge_state" | jq -r '.head_sha // empty')
+  if [[ -z "$head_sha" ]]; then
+    echo "error: 'gh pr view ${pr_number} --repo ${owner}/${repo}' returned no headRefOid — cannot bind review verdicts to the PR head; verify the PR number and 'gh auth status', then retry" >&2
+    exit 1
+  fi
 
   local codex_review copilot_review codex_comments copilot_comments
   codex_review=$(latest_review_by   "$owner" "$repo" "$pr_number" "${CODEX_REVIEW_LOGINS[@]}") \
     || { echo "error: failed to fetch Codex review state" >&2; exit 1; }
   copilot_review=$(latest_review_by "$owner" "$repo" "$pr_number" "$COPILOT_REVIEW_LOGIN") \
     || { echo "error: failed to fetch Copilot review state" >&2; exit 1; }
+  # Resolve each verdict against head — stale reviews collapse to "none".
+  codex_review=$(resolve_review_against_head   "$codex_review"   "$head_sha")
+  copilot_review=$(resolve_review_against_head "$copilot_review" "$head_sha")
   codex_comments=$(toplevel_comments_by   "$owner" "$repo" "$pr_number" "${CODEX_COMMENT_LOGINS[@]}") \
     || { echo "error: failed to count Codex inline comments" >&2; exit 1; }
   copilot_comments=$(toplevel_comments_by "$owner" "$repo" "$pr_number" "${COPILOT_COMMENT_LOGINS[@]}") \
@@ -168,6 +251,7 @@ main() {
 
   jq -n \
     --argjson pr_number "$pr_number" \
+    --arg head_sha "$head_sha" \
     --arg ci_status "$ci_status" \
     --argjson checks "$checks_json" \
     --argjson codex "$codex_review" \
@@ -177,10 +261,11 @@ main() {
     --argjson merge_state "$merge_state" \
     '{
       pr_number: $pr_number,
+      head_sha: $head_sha,
       ci: {status: $ci_status, checks: $checks},
       reviews: {codex: $codex, copilot: $copilot},
       inline_comments: {codex: $codex_comments, copilot: $copilot_comments},
-      merge_state: $merge_state
+      merge_state: ($merge_state | {status, mergeable})
     }'
 }
 

@@ -27,6 +27,12 @@ set +e
 FAIL_COUNT=0
 PASS_COUNT=0
 
+# The head SHA the mock's `gh pr view` returns. A review fixture whose
+# commit_id equals this is "fresh" (bound to head); anything else is "stale"
+# and its verdict resolves to state "none" (#186).
+HEAD_SHA="head000000000000000000000000000000000000"
+OLD_SHA="0ld00000000000000000000000000000000000000"
+
 assert_eq() {
   local label="$1" expected="$2" actual="$3"
   if [[ "$expected" == "$actual" ]]; then
@@ -68,18 +74,22 @@ gh() {
               *)      shift ;;
             esac
           done
-          [[ $saw_json -eq 1 ]] || { echo "mock gh pr view: missing --json flag (contract: --json mergeStateStatus,mergeable)" >&2; return 99; }
-          [[ "$json_args" == "mergeStateStatus,mergeable" ]] || { echo "mock gh pr view: wrong --json args: '${json_args}' (expected 'mergeStateStatus,mergeable')" >&2; return 99; }
+          [[ $saw_json -eq 1 ]] || { echo "mock gh pr view: missing --json flag (contract: --json mergeStateStatus,mergeable,headRefOid)" >&2; return 99; }
+          [[ "$json_args" == "mergeStateStatus,mergeable,headRefOid" ]] || { echo "mock gh pr view: wrong --json args: '${json_args}' (expected 'mergeStateStatus,mergeable,headRefOid')" >&2; return 99; }
+          # headRefOid is the head SHA review verdicts are bound to. Tests that
+          # exercise verdict resolution set review fixtures' commit_id to
+          # HEAD_SHA (fresh) or something else (stale) — see HEAD_SHA below.
           case "${MOCK_MERGE_STATE:-}" in
-            clean)        echo '{"mergeStateStatus":"CLEAN","mergeable":"MERGEABLE"}' ;;
-            dirty)        echo '{"mergeStateStatus":"DIRTY","mergeable":"CONFLICTING"}' ;;
-            unknown)      echo '{"mergeStateStatus":"UNKNOWN","mergeable":"UNKNOWN"}' ;;
+            clean)        echo '{"mergeStateStatus":"CLEAN","mergeable":"MERGEABLE","headRefOid":"'"$HEAD_SHA"'"}' ;;
+            dirty)        echo '{"mergeStateStatus":"DIRTY","mergeable":"CONFLICTING","headRefOid":"'"$HEAD_SHA"'"}' ;;
+            unknown)      echo '{"mergeStateStatus":"UNKNOWN","mergeable":"UNKNOWN","headRefOid":"'"$HEAD_SHA"'"}' ;;
+            no-head)      echo '{"mergeStateStatus":"CLEAN","mergeable":"MERGEABLE","headRefOid":""}' ;;
             *) echo "mock gh: unknown MOCK_MERGE_STATE='${MOCK_MERGE_STATE:-}'" >&2; return 2 ;;
           esac
           ;;
         checks)
           # gh pr checks <N> --repo <o/r> --json name,bucket
-          echo '[]'
+          echo "${MOCK_CHECKS_BODY:-[]}"
           ;;
         *) echo "mock gh pr: unsupported subcommand: $subcmd" >&2; return 2 ;;
       esac
@@ -310,7 +320,7 @@ t_latest_review_by_changes_requested_not_masked_by_later_other_login() {
 
 t_main_surfaces_fleet_app_review_as_codex() {
   MOCK_MERGE_STATE=clean
-  MOCK_REVIEWS_BODY='[{"user":{"login":"coding-policy-fleet-reviewer[bot]"},"state":"APPROVED","submitted_at":"2026-07-21T05:15:00Z"}]'
+  MOCK_REVIEWS_BODY='[{"user":{"login":"coding-policy-fleet-reviewer[bot]"},"state":"APPROVED","submitted_at":"2026-07-21T05:15:00Z","commit_id":"'"$HEAD_SHA"'"}]'
   local out state
   out=$(main "owner" "repo" "1")
   state=$(echo "$out" | jq -r '.reviews.codex.state')
@@ -322,6 +332,166 @@ t_toplevel_comments_by_counts_fleet_app_login() {
   local count
   count=$(toplevel_comments_by "owner" "repo" "1" "${CODEX_COMMENT_LOGINS[@]}")
   assert_eq "fleet-App inline comment counted for policy reviewer" "1" "$count"
+}
+
+# A login's own latest review must be selected by submitted_at, NOT by the
+# API's array position: jq group_by preserves input order within a group, so
+# if the reviews API returns a login's reviews out of chronological order, a
+# `last`-based pick would gate on a superseded verdict. Here the newest review
+# (CHANGES_REQUESTED @18:00) is NOT last in the input — a correct max_by pick
+# surfaces it; a `last` pick would wrongly return the APPROVED @16:00.
+t_latest_review_by_picks_max_by_time_not_array_position() {
+  MOCK_REVIEWS_BODY='[{"user":{"login":"github-actions[bot]"},"state":"CHANGES_REQUESTED","submitted_at":"2026-07-25T18:00:00Z"},{"user":{"login":"github-actions[bot]"},"state":"COMMENTED","submitted_at":"2026-07-25T17:00:00Z"},{"user":{"login":"github-actions[bot]"},"state":"APPROVED","submitted_at":"2026-07-25T16:00:00Z"}]'
+  local out state submitted_at
+  out=$(latest_review_by "owner" "repo" "1" "github-actions[bot]")
+  state=$(echo "$out" | jq -r '.state')
+  submitted_at=$(echo "$out" | jq -r '.submitted_at')
+  assert_eq "latest by time, not array position" "CHANGES_REQUESTED"     "$state"        || return 1
+  assert_eq "latest submitted_at"                "2026-07-25T18:00:00Z"  "$submitted_at"
+}
+
+# GitHub review states outside the snapshot schema (DISMISSED, PENDING) are
+# not live verdicts, but watch-pr-reviews.sh treats any non-"none" state as
+# "a bot posted" and would let one satisfy the ready gate. They must normalize
+# to "none".
+t_latest_review_by_normalizes_dismissed_to_none() {
+  MOCK_REVIEWS_BODY='[{"user":{"login":"github-actions[bot]"},"state":"DISMISSED","submitted_at":"2026-07-25T16:00:00Z","body":"was dismissed"}]'
+  local out state
+  out=$(latest_review_by "owner" "repo" "1" "github-actions[bot]")
+  state=$(echo "$out" | jq -r '.state')
+  assert_eq "DISMISSED normalizes to none" "none" "$state"
+}
+
+t_latest_review_by_normalizes_pending_to_none() {
+  MOCK_REVIEWS_BODY='[{"user":{"login":"github-actions[bot]"},"state":"PENDING","submitted_at":"2026-07-25T16:00:00Z"}]'
+  local out state
+  out=$(latest_review_by "owner" "repo" "1" "github-actions[bot]")
+  state=$(echo "$out" | jq -r '.state')
+  assert_eq "PENDING normalizes to none" "none" "$state"
+}
+
+# --- #186: review verdicts bound to the PR head SHA ---
+
+# A verdict on the current head passes through unchanged, flagged not-stale.
+t_resolve_against_head_fresh_passes_through() {
+  local review out state stale
+  review='{"state":"APPROVED","submitted_at":"2026-07-25T10:00:00Z","body":"ok","commit_id":"'"$HEAD_SHA"'"}'
+  out=$(resolve_review_against_head "$review" "$HEAD_SHA")
+  state=$(echo "$out" | jq -r '.state')
+  stale=$(echo "$out" | jq -r '.stale')
+  assert_eq "fresh review keeps its state" "APPROVED" "$state" || return 1
+  assert_eq "fresh review not stale"       "false"    "$stale"
+}
+
+# A verdict on a superseded SHA collapses to "none" (absent, not clean) with
+# stale=true, but keeps its body/commit_id visible for diagnosis. This is the
+# #186 fix: a stale APPROVED/COMMENTED must not read as a live clean verdict.
+t_resolve_against_head_stale_collapses_to_none() {
+  local review out state stale body commit
+  review='{"state":"APPROVED","submitted_at":"2026-07-25T09:00:00Z","body":"reviewed old code","commit_id":"'"$OLD_SHA"'"}'
+  out=$(resolve_review_against_head "$review" "$HEAD_SHA")
+  state=$(echo "$out" | jq -r '.state')
+  stale=$(echo "$out" | jq -r '.stale')
+  body=$(echo "$out" | jq -r '.body')
+  commit=$(echo "$out" | jq -r '.commit_id')
+  assert_eq "stale review resolves to none" "none"                "$state"  || return 1
+  assert_eq "stale review flagged stale"    "true"                "$stale"  || return 1
+  assert_eq "stale verdict body kept"       "reviewed old code"   "$body"   || return 1
+  assert_eq "stale verdict commit kept"     "$OLD_SHA"            "$commit"
+}
+
+# A genuinely-absent review (never posted) stays none, stale=false — an agent
+# can tell "never reviewed" (stale false) from "reviewed older commit" (true).
+t_resolve_against_head_none_stays_none_not_stale() {
+  local review out state stale
+  review='{"state":"none","submitted_at":null,"body":null,"commit_id":null}'
+  out=$(resolve_review_against_head "$review" "$HEAD_SHA")
+  state=$(echo "$out" | jq -r '.state')
+  stale=$(echo "$out" | jq -r '.stale')
+  assert_eq "absent review stays none"        "none"  "$state" || return 1
+  assert_eq "absent review is not stale" "false" "$stale"
+}
+
+# End-to-end #186 symptom 2 (false ready): a stale COMMENTED from an earlier
+# SHA must NOT surface as a live verdict — it collapses to none so the watcher
+# keeps waiting instead of merging unreviewed code.
+t_main_stale_review_collapses_to_none() {
+  MOCK_MERGE_STATE=clean
+  MOCK_REVIEWS_BODY='[{"user":{"login":"github-actions[bot]"},"state":"COMMENTED","submitted_at":"2026-07-25T09:00:00Z","body":"looks fine","commit_id":"'"$OLD_SHA"'"}]'
+  local out state stale
+  out=$(main "owner" "repo" "1")
+  state=$(echo "$out" | jq -r '.reviews.codex.state')
+  stale=$(echo "$out" | jq -r '.reviews.codex.stale')
+  assert_eq "stale codex verdict reads none in snapshot" "none" "$state" || return 1
+  assert_eq "stale codex verdict flagged stale"          "true" "$stale"
+}
+
+# A fresh verdict (commit_id == head) surfaces normally.
+t_main_fresh_review_surfaces_state() {
+  MOCK_MERGE_STATE=clean
+  MOCK_REVIEWS_BODY='[{"user":{"login":"github-actions[bot]"},"state":"APPROVED","submitted_at":"2026-07-25T10:00:00Z","body":"ok","commit_id":"'"$HEAD_SHA"'"}]'
+  local out state stale
+  out=$(main "owner" "repo" "1")
+  state=$(echo "$out" | jq -r '.reviews.codex.state')
+  stale=$(echo "$out" | jq -r '.reviews.codex.stale')
+  assert_eq "fresh codex verdict surfaces" "APPROVED" "$state" || return 1
+  assert_eq "fresh codex verdict not stale" "false"   "$stale"
+}
+
+t_main_surfaces_head_sha_top_level() {
+  MOCK_MERGE_STATE=clean
+  MOCK_REVIEWS_BODY='[]'
+  local out head
+  out=$(main "owner" "repo" "1")
+  head=$(echo "$out" | jq -r '.head_sha')
+  assert_eq "head_sha surfaced top-level" "$HEAD_SHA" "$head"
+}
+
+# Guard: an empty headRefOid must fail loudly, never silently void the review
+# gate by marking every verdict stale.
+t_main_no_head_sha_fails() {
+  MOCK_MERGE_STATE=no-head
+  MOCK_REVIEWS_BODY='[]'
+  # Subshell: main() calls `exit` on the guard, which would otherwise
+  # terminate this sourced test script rather than just the call.
+  local rc=0
+  ( main "owner" "repo" "1" ) >/dev/null 2>&1 || rc=$?
+  [[ "$rc" -ne 0 ]] || { echo "    FAIL: main should exit non-zero on empty headRefOid, got rc=0" >&2; return 1; }
+}
+
+# --- #182: cancelled superseded runs are no-signal, not failure ---
+
+# A cancelled bucket alongside a success is still success (the cancelled twin
+# was superseded; its replacement concluded). Folding cancel into pending would
+# have wedged this.
+t_ci_status_cancel_with_success_is_success() {
+  MOCK_MERGE_STATE=clean
+  MOCK_CHECKS_BODY='[{"name":"CI","bucket":"success"},{"name":"CI","bucket":"cancel"}]'
+  local out ci
+  out=$(main "owner" "repo" "1")
+  ci=$(echo "$out" | jq -r '.ci.status')
+  assert_eq "success alongside a cancelled twin is success" "success" "$ci"
+}
+
+# Only cancels present (replacement not yet registered) → pending, so the
+# watcher waits rather than concluding.
+t_ci_status_only_cancels_is_pending() {
+  MOCK_MERGE_STATE=clean
+  MOCK_CHECKS_BODY='[{"name":"CI","bucket":"cancel"},{"name":"review","bucket":"cancel"}]'
+  local out ci
+  out=$(main "owner" "repo" "1")
+  ci=$(echo "$out" | jq -r '.ci.status')
+  assert_eq "all-cancelled reads pending" "pending" "$ci"
+}
+
+# A real failure on head still fails, even next to a cancelled run.
+t_ci_status_fail_with_cancel_is_failure() {
+  MOCK_MERGE_STATE=clean
+  MOCK_CHECKS_BODY='[{"name":"CI","bucket":"fail"},{"name":"old","bucket":"cancel"}]'
+  local out ci
+  out=$(main "owner" "repo" "1")
+  ci=$(echo "$out" | jq -r '.ci.status')
+  assert_eq "a real fail still fails next to a cancel" "failure" "$ci"
 }
 
 # --- driver ---
@@ -345,8 +515,21 @@ run "main counts Copilot comments in the snapshot"                    t_main_cou
 run "latest_review_by resolves the fleet App login (#202)"            t_latest_review_by_resolves_fleet_app_login
 run "latest_review_by picks newest policy verdict across logins"      t_latest_review_by_policy_reviewer_picks_newest_across_logins
 run "latest_review_by never masks an active block with a later clean" t_latest_review_by_changes_requested_not_masked_by_later_other_login
+run "latest_review_by picks latest by time, not array position"       t_latest_review_by_picks_max_by_time_not_array_position
+run "latest_review_by normalizes DISMISSED to none"                   t_latest_review_by_normalizes_dismissed_to_none
+run "latest_review_by normalizes PENDING to none"                     t_latest_review_by_normalizes_pending_to_none
 run "main surfaces the fleet App review as .reviews.codex"            t_main_surfaces_fleet_app_review_as_codex
 run "toplevel_comments_by counts the fleet App comment login"         t_toplevel_comments_by_counts_fleet_app_login
+run "resolve_review_against_head: fresh verdict passes through"       t_resolve_against_head_fresh_passes_through
+run "resolve_review_against_head: stale verdict collapses to none"    t_resolve_against_head_stale_collapses_to_none
+run "resolve_review_against_head: absent stays none, not stale"       t_resolve_against_head_none_stays_none_not_stale
+run "main collapses a stale review to none (#186 false ready)"        t_main_stale_review_collapses_to_none
+run "main surfaces a fresh (head-bound) review's state"               t_main_fresh_review_surfaces_state
+run "main surfaces head_sha as a top-level field"                     t_main_surfaces_head_sha_top_level
+run "main fails loudly on an empty headRefOid"                        t_main_no_head_sha_fails
+run "ci.status: success next to a cancelled twin is success (#182)"   t_ci_status_cancel_with_success_is_success
+run "ci.status: only-cancels reads pending (#182)"                    t_ci_status_only_cancels_is_pending
+run "ci.status: a real fail next to a cancel still fails (#182)"      t_ci_status_fail_with_cancel_is_failure
 
 echo "== summary: ${PASS_COUNT} passed, ${FAIL_COUNT} failed =="
 [[ "$FAIL_COUNT" -eq 0 ]]

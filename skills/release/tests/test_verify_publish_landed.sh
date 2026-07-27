@@ -50,8 +50,9 @@ run() {
 }
 
 # Mocks. MOCK_RUN_CONCLUSION feeds `gh run view --jq .conclusion`;
-# MOCK_REGISTRY_VERSION feeds the parsed `Latest Version` line from
-# `tessl plugin info`. Tests set these per-scenario.
+# MOCK_REGISTRY_VERSION is the latest published version the versions API
+# (`tessl api v1/tiles/<ws>/<tile>/versions`) reports. Tests set these
+# per-scenario.
 gh() {
   case "$1" in
     run)
@@ -86,16 +87,23 @@ gh() {
   esac
 }
 
+# Emit a versions-API page whose maximum version is $1. Includes a lower
+# entry (and lists them oldest-first) so the script's max-selection jq is
+# genuinely exercised rather than reading a single-element list or relying
+# on the array's order.
+emit_versions_page() {
+  local max="$1"
+  printf '{"data":[{"attributes":{"version":"0.0.1"}},{"attributes":{"version":"%s"}}]}\n' "$max"
+}
+
 tessl() {
   case "$1" in
-    plugin)
-      [[ "$2" == "info" ]] || { echo "mock tessl plugin: unsupported subcommand: $2" >&2; return 2; }
-      # `tessl plugin info <workspace>/<plugin>` emits multiline output; the
-      # script greps for "Latest Version" and awks the last field. Mimic
-      # the relevant line so the parsing pipeline is exercised end-to-end.
-      printf 'Plugin: %s\n' "$3"
-      printf 'Latest Version: %s\n' "${MOCK_REGISTRY_VERSION:-0.3.31}"
-      printf 'Some other line\n'
+    api)
+      # `tessl api v1/tiles/<ws>/<tile>/versions` -> one JSON page. The script
+      # derives the latest published version as the numeric max across
+      # .data[].attributes.version.
+      [[ "$2" == *"/versions" ]] || { echo "mock tessl api: unsupported endpoint: $2" >&2; return 2; }
+      emit_versions_page "${MOCK_REGISTRY_VERSION:-0.3.31}"
       ;;
     *) echo "mock tessl: unsupported invocation: $*" >&2; return 2 ;;
   esac
@@ -254,39 +262,54 @@ t_empty_conclusion_exits_two() {
   assert_eq "exit code for empty conclusion" "2" "$rc"
 }
 
-# tessl plugin info parse miss — output without "Latest Version" must
-# surface as a tool-state error (exit 2), not pass through to the
-# conjunction with empty `current`. Pre-fix, `set -o pipefail` made
-# grep's exit-1 trigger the `||` "tessl failed" branch and swallow
-# the actual output; the new capture-then-parse pipeline must report
-# the parse failure with the offending output included.
-t_tessl_parse_miss_exits_two() {
+# Versions API returns no versions — an empty `.data` (or a shape carrying no
+# .version) must surface as a tool-state error (exit 2) with the offending
+# body included, not pass through to the conjunction with an empty `current`.
+t_tessl_empty_versions_exits_two() {
   MOCK_RUN_CONCLUSION="success"
-  # Override tessl mock for this test: emit output WITHOUT "Latest Version" line.
+  # Override tessl mock for this test: a well-formed page with zero versions.
   tessl() {
     case "$1" in
-      plugin)
-        [[ "$2" == "info" ]] || { echo "mock tessl plugin: unsupported subcommand: $2" >&2; return 2; }
-        printf 'Plugin: %s\n' "$3"
-        printf 'No version line here\n'
-        ;;
+      api) [[ "$2" == *"/versions" ]] || { echo "mock tessl api: unsupported endpoint: $2" >&2; return 2; }
+           printf '{"data":[]}\n' ;;
       *) echo "mock tessl: unsupported invocation: $*" >&2; return 2 ;;
     esac
   }
   local rc=0 stderr
   stderr=$( ( main jbaruch coding-policy "0.3.31" "12345" >/dev/null ) 2>&1 ) || rc=$?
-  assert_eq "exit code for tessl parse miss" "2" "$rc" || return 1
-  [[ "$stderr" == *"Latest Version"* ]] || { echo "    FAIL: expected 'Latest Version' in parse-miss diagnostic; got: $stderr" >&2; return 1; }
-  # Restore the original mock so subsequent tests aren't affected.
+  assert_eq "exit code for empty versions API" "2" "$rc" || return 1
+  [[ "$stderr" == *"no published version"* ]] || { echo "    FAIL: expected 'no published version' in diagnostic; got: $stderr" >&2; return 1; }
+  # Restore the canonical mock so subsequent tests aren't affected.
   unset -f tessl
   tessl() {
     case "$1" in
-      plugin)
-        [[ "$2" == "info" ]] || { echo "mock tessl plugin: unsupported subcommand: $2" >&2; return 2; }
-        printf 'Plugin: %s\n' "$3"
-        printf 'Latest Version: %s\n' "${MOCK_REGISTRY_VERSION:-0.3.31}"
-        printf 'Some other line\n'
-        ;;
+      api) [[ "$2" == *"/versions" ]] || { echo "mock tessl api: unsupported endpoint: $2" >&2; return 2; }
+           emit_versions_page "${MOCK_REGISTRY_VERSION:-0.3.31}" ;;
+      *) echo "mock tessl: unsupported invocation: $*" >&2; return 2 ;;
+    esac
+  }
+}
+
+# Versions API returns a non-JSON body (proxy error page, HTML 502) — must
+# exit 2 with the "not valid JSON" diagnostic, never mis-parse it as a version.
+t_tessl_non_json_exits_two() {
+  MOCK_RUN_CONCLUSION="success"
+  tessl() {
+    case "$1" in
+      api) [[ "$2" == *"/versions" ]] || { echo "mock tessl api: unsupported endpoint: $2" >&2; return 2; }
+           printf '<html>502 Bad Gateway</html>\n' ;;
+      *) echo "mock tessl: unsupported invocation: $*" >&2; return 2 ;;
+    esac
+  }
+  local rc=0 stderr
+  stderr=$( ( main jbaruch coding-policy "0.3.31" "12345" >/dev/null ) 2>&1 ) || rc=$?
+  assert_eq "exit code for non-JSON versions body" "2" "$rc" || return 1
+  [[ "$stderr" == *"not valid JSON"* ]] || { echo "    FAIL: expected 'not valid JSON' in diagnostic; got: $stderr" >&2; return 1; }
+  unset -f tessl
+  tessl() {
+    case "$1" in
+      api) [[ "$2" == *"/versions" ]] || { echo "mock tessl api: unsupported endpoint: $2" >&2; return 2; }
+           emit_versions_page "${MOCK_REGISTRY_VERSION:-0.3.31}" ;;
       *) echo "mock tessl: unsupported invocation: $*" >&2; return 2 ;;
     esac
   }
@@ -294,22 +317,17 @@ t_tessl_parse_miss_exits_two() {
 
 # Tests above source the script and then `set +e` so the test driver
 # can assert exit codes without aborting on each subshell's exit. That
-# weaker mode would mask any errexit-sensitive regression — e.g., the
-# `tessl | grep | awk` parse pipeline pre-fix would die from grep's
-# exit-1 + pipefail BEFORE the explicit empty-`current` diagnostic
-# fired, but the suite's `set +e` would still capture the exit code
-# and pass the t_tessl_parse_miss test. This case explicitly re-enables
-# `set -euo pipefail` inside a subshell before invoking `main`, so
-# any future `set -e` regression in the script surfaces here.
+# weaker mode would mask any errexit-sensitive regression. This case
+# explicitly re-enables `set -euo pipefail` inside a subshell before
+# invoking `main` against an empty versions page, so any future `set -e`
+# regression in the derivation surfaces here rather than being swallowed
+# by the suite's `set +e`.
 t_main_runs_under_errexit_pipefail() {
   MOCK_RUN_CONCLUSION="success"
   tessl() {
     case "$1" in
-      plugin)
-        [[ "$2" == "info" ]] || { echo "mock tessl plugin: unsupported subcommand: $2" >&2; return 2; }
-        printf 'Plugin: %s\n' "$3"
-        printf 'No version line here\n'
-        ;;
+      api) [[ "$2" == *"/versions" ]] || { echo "mock tessl api: unsupported endpoint: $2" >&2; return 2; }
+           printf '{"data":[]}\n' ;;
       *) echo "mock tessl: unsupported invocation: $*" >&2; return 2 ;;
     esac
   }
@@ -319,17 +337,13 @@ t_main_runs_under_errexit_pipefail() {
   unset -f tessl
   tessl() {
     case "$1" in
-      plugin)
-        [[ "$2" == "info" ]] || { echo "mock tessl plugin: unsupported subcommand: $2" >&2; return 2; }
-        printf 'Plugin: %s\n' "$3"
-        printf 'Latest Version: %s\n' "${MOCK_REGISTRY_VERSION:-0.3.31}"
-        printf 'Some other line\n'
-        ;;
+      api) [[ "$2" == *"/versions" ]] || { echo "mock tessl api: unsupported endpoint: $2" >&2; return 2; }
+           emit_versions_page "${MOCK_REGISTRY_VERSION:-0.3.31}" ;;
       *) echo "mock tessl: unsupported invocation: $*" >&2; return 2 ;;
     esac
   }
   assert_eq "exit code under set -euo pipefail" "2" "$rc" || return 1
-  [[ "$stderr" == *"Latest Version"* ]] || { echo "    FAIL: expected 'Latest Version' in stderr; got: $stderr" >&2; return 1; }
+  [[ "$stderr" == *"no published version"* ]] || { echo "    FAIL: expected 'no published version' in stderr; got: $stderr" >&2; return 1; }
 }
 
 # Find a PATH that excludes jq. macOS ships `/usr/bin/jq` and Linux
@@ -395,7 +409,8 @@ run "wrong arg count exits 2"                                      t_wrong_arg_c
 run "run-id == 0 exits 2 (matches positive-integer contract)"      t_zero_run_id_exits_two
 run "in-flight (null) conclusion exits 2"                          t_null_conclusion_in_flight_exits_two
 run "empty conclusion exits 2"                                     t_empty_conclusion_exits_two
-run "tessl plugin info parse miss exits 2 with offending output"     t_tessl_parse_miss_exits_two
+run "empty versions API exits 2 with offending body"               t_tessl_empty_versions_exits_two
+run "non-JSON versions body exits 2 (not valid JSON)"              t_tessl_non_json_exits_two
 run "main runs safely under set -euo pipefail"                     t_main_runs_under_errexit_pipefail
 run "missing jq emits JSON on stdout AND diagnostic on stderr"     t_missing_jq_emits_json_AND_stderr
 run "output is valid JSON with documented shape"                   t_output_is_valid_json_with_documented_shape
