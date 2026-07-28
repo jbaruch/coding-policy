@@ -57,6 +57,23 @@ alwaysApply: true
 - A dependency whose consumed surface is a versioned API does NOT qualify in an adversarial domain
 - Every other dependency in the repo still pins with a stated renewal mechanism
 
+## First-Party Co-Shipped Dependency Carve-Out
+
+- Narrow exception for a dependency the same owner writes, reviews, and deploys in lock-step with its consumer
+- Applies when the dependency has no release train of its own: the consumer rebuilds against the dependency's default branch on every deploy, and no third artifact selects a version between them
+- The covered reference MUST carry no specifier at all — a bare `owner/repo` install. A branch ref, a tag, and a commit SHA are all specifiers and all stay forbidden under this carve-out
+- The exemption reaches that reference alone — never the project's lock file, and never a sibling dependency in the same manifest
+- Preconditions (each covered reference, all required):
+  1. The project documents an authority-of-record rule in its own plugin naming every covered reference, who owns both sides, and what stands in for the version-bump review
+  2. The dependency's own default branch is CI-gated: its test suite runs on every merge
+  3. The consumer's build refetches on every rebuild — any build-cache layer that would freeze the floating reference carries an explicit upstream-change trigger, bound to the covered reference
+  4. A deploy-time check fails the deployment when the committed reference carries any specifier, when the refetch trigger is absent or not bound to that reference, and when it can no longer locate the reference (a moved or renamed target fails loudly, never passes vacuously)
+  5. The check runs as a deterministic script per `rules/script-delegation.md`, not agent judgment
+- "We wrote it" alone does NOT qualify — a dependency with its own release train, or with consumers outside the owner, still pins
+- "The bump PRs are noise" does NOT qualify. See Freshness
+- A consumed surface the owner does not control end-to-end does NOT qualify
+- Every other dependency in the repo still pins with a stated renewal mechanism
+
 ## Same-Repo Reusable-Workflow Action Carve-Out
 
 - Narrow exception for a reusable workflow (`on: workflow_call`) referencing a composite action in its OWN repository
