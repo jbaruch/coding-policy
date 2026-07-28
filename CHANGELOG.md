@@ -1,5 +1,15 @@
 # Changelog
 
+### Rules — First-Party Co-Shipped Dependency Carve-Out
+
+New carve-out in `dependency-management` for a dependency the same owner writes, reviews, and deploys in lock-step with its consumer, where the consumer rebuilds against the dependency's default branch on every deploy and no third artifact selects a version between them.
+
+The case that forced it: `jbaruch/nanoclaw` installs `jbaruch/reclaim-tripit-timezones-sync` into its agent image, pinned to a tag per Pinning. The package gained OneCLI gateway support on 2026-07-10 — the support that repo's own container needs, since the `GOOGLE_*` OAuth trio left it in the native-Google migration — and no tag was ever cut for those commits. Renovate watches the github-tags datasource, so it had nothing to propose; the pin read as current while the deployed CLI silently created zero out-of-office blocks for 19 days. The pin was not protecting the consumer from unreviewed upstream change (same owner reviews both sides); it was holding the consumer on a build that predated a fix written for it.
+
+Three carve-outs now exist, and the distinctions are the load-bearing part. Adversarial-Freshness covers a dependency tracking an opponent, whose consumed surface is data or rendered output — this one's surface is a versioned CLI contract, so it never qualified there. Runtime-Managed Manifest covers a manifest a tool rewrites at runtime. This carve-out covers neither: the reference is committed and the surface is an API, and what makes a pin wrong is the shared review boundary.
+
+Precondition 3 is the one worth reading twice: the consumer's build must refetch on every rebuild. A bare `owner/repo` install behind a Docker layer cache is not floating — it is a pin with no version anyone can read, and it fails in exactly the direction the carve-out is trying to fix. The anti-pattern bullets close the obvious abuse: "we wrote it" alone is not enough (a dependency with its own release train, or consumers outside the owner, still pins), and neither is bump-PR noise.
+
 ## 0.3.128 — 2026-07-27
 
 ### Rules
