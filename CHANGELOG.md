@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.129 — 2026-07-28
+
 ### Rules — First-Party Co-Shipped Dependency Carve-Out
 
 New carve-out in `dependency-management` for a dependency the same owner writes, reviews, and deploys in lock-step with its consumer, where the consumer rebuilds against the dependency's default branch on every deploy and no third artifact selects a version between them.
