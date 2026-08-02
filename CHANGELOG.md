@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.130 — 2026-08-02
+
 ### Rules — noise-word hygiene in response-clarity
 
 `Lead With the Action` in `response-clarity` gains three prose-hygiene directives: cut hedging adverbs that carry no uncertainty, keep a hedge that carries real uncertainty, replace idioms with the literal action.
