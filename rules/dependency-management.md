@@ -74,6 +74,23 @@ alwaysApply: true
 - A consumed surface the owner does not control end-to-end does NOT qualify
 - Every other dependency in the repo still pins with a stated renewal mechanism
 
+## OS-Package Runtime Carve-Out
+
+- Narrow exception for a package installed from the base image's OS package manager inside a container image (`apt-get install`, `apk add`, `dnf install`)
+- Applies when the distro archive serves only the current version of a package, so a literal version pin stops resolving at the next security update — the pin turns a working build into a hard failure rather than a reproducible one
+- The consumed surface is a command-line or shared-library contract, not a versioned API
+- The covered install MAY omit the version specifier
+- The exemption reaches the named packages alone — never a language package manager in the same image (`pip`, `npm`, `gem`), which pins normally
+- Preconditions (each covered image, all required):
+  1. The project documents an authority-of-record rule in its own plugin naming every covered image, the exact package set, and the rebuild cadence that stands in for a pin
+  2. The image's base is pinned to a specific tag or digest and scanner-tracked — the distro release is what bounds these package versions, so a floating base plus floating packages is unbounded
+  3. The image is rebuilt on a stated recurring cadence, so the package tracks the distro's current security state rather than the date someone last edited the manifest
+  4. A deploy-time check fails the deployment when a covered image's base is unpinned, and when an OS package outside the recorded set appears in that image
+  5. The check runs as a deterministic script per `rules/script-delegation.md`, not agent judgment
+- "Pinning apt is annoying" does NOT qualify — the archive-retention failure mode is the test, and a distro that serves historical versions does not meet it
+- A language-ecosystem dependency does NOT qualify, whatever installs it
+- Every other dependency in the repo still pins with a stated renewal mechanism
+
 ## Same-Repo Reusable-Workflow Action Carve-Out
 
 - Narrow exception for a reusable workflow (`on: workflow_call`) referencing a composite action in its OWN repository

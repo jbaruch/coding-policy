@@ -1,5 +1,17 @@
 # Changelog
 
+### Rules — OS-Package Runtime Carve-Out
+
+New carve-out in `dependency-management` for packages installed from a container base image's own package manager — `apt-get install ffmpeg`, `apk add`, `dnf install`.
+
+The distinction that earns it: Debian's archive serves only the current version of a package. `ffmpeg=7.1.1-1+deb13u1` resolves today and stops resolving the day a security update supersedes it, at which point every build of that image fails outright. That is the inverse of what Pinning is for — the pin does not freeze behaviour, it schedules an outage. A distro that serves historical versions does not meet the test, and the carve-out says so.
+
+None of the three existing carve-outs reach this. Adversarial-Freshness wants a dependency tracking an opponent. Runtime-Managed Manifest wants a file a tool rewrites. First-Party Co-Shipped wants shared ownership of both sides. What is specific here is the archive-retention behaviour of the distro, which none of them describe.
+
+Preconditions keep it from becoming "apt is exempt". The base image must be pinned and scanner-tracked (precondition 2) — the distro release is what bounds these package versions, so floating both ends is unbounded, not carved out. The image must be rebuilt on a recurring cadence (3), which is what actually delivers the security updates a pin would have blocked. And the deploy gate (4) fails on an unpinned base or on any OS package outside the recorded set, so the covered surface cannot quietly grow. Language package managers in the same image — pip, npm, gem — pin normally regardless of what installs them.
+
+Raised by the fleet reviewer on `jbaruch/nanoclaw` #896, which documented `ffmpeg` as deliberately unversioned in the audible-backup sidecar and correctly got blocked for claiming an exception the policy did not define.
+
 ## 0.3.129 — 2026-07-28
 
 ### Rules — First-Party Co-Shipped Dependency Carve-Out
