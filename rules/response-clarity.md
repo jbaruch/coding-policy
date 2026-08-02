@@ -36,6 +36,13 @@ description: How agents shape their responses to the user — action-first, numb
 - No recap, no pleasantries, no closer
 - End when the answer is done
 
+## Pre-Send Check
+
+- Cut hedging adverbs that carry no uncertainty ("perhaps", "might", "possibly")
+- Keep a hedge that carries real uncertainty
+- Replace an idiom or figurative phrase ("circle back", "on the same page") with the literal action
+- Before sending, verify the first line names the next action and the last line names what changed
+
 ## Exceptions
 
 - Explanation requested — give full detail, still no preamble

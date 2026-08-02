@@ -1,5 +1,13 @@
 # Changelog
 
+### Rules — Pre-Send Check in response-clarity
+
+New `Pre-Send Check` section in `response-clarity` adding a final self-audit pass: cut noise-hedges, keep real-uncertainty hedges, replace idioms with the literal action, and verify the first line names the next action and the last line names what changed.
+
+The prompt: comparing rules-only behavior against `ayghri/i-have-adhd`'s opt-in skill, which duplicates our ten response-shaping directives, the skill still visibly changed output when invoked. If `response-clarity` is `alwaysApply: true`, why would an invoked skill that says the same things behave differently? Three mechanisms: position (the always-on rule sits buried among ~25 siblings thousands of tokens back, the skill invocation lands fresh right before the turn), salience (an explicit `/i-have-adhd` invocation is a "do this now" spike, an always-on rule is passive background), and richness (the skill kept Bad/Good example pairs and a Pre-send checklist our compression discipline had stripped). `alwaysApply: true` is not the same as reliably-applied.
+
+The active ingredient was the skill's Pre-send checklist — a mechanized audit, not a passive directive. Most of it already lived in our rule (an announcing first sentence is Lead With the Action, an "anything else?" closer is Close With One Next Step, a by-the-way sidebar is Defer secondary), so only the non-duplicative items landed to keep clear of `context-writing-style`'s no-duplication rule: the two new deletions and the verify gate. We did not vendor the skill — it is a separate MIT plugin, and copying it would violate `dependency-management` No Vendoring; anyone wanting the toggle installs it alongside.
+
 ## 0.3.129 — 2026-07-28
 
 ### Rules — First-Party Co-Shipped Dependency Carve-Out
