@@ -18,6 +18,9 @@ description: How agents shape their responses to the user — action-first, numb
 - Cap an unranked list at 5 items
 - Split a longer list into "do now" and "later" tiers
 - Defer secondary issues — finish the primary problem, then offer the rest as separate follow-ups
+- Cut hedging adverbs that carry no uncertainty ("perhaps", "might", "possibly")
+- Keep a hedge that carries real uncertainty
+- Replace an idiom or figurative phrase ("circle back", "on the same page") with the literal action
 
 ## Show State and Progress
 
@@ -35,13 +38,6 @@ description: How agents shape their responses to the user — action-first, numb
 - End with one concrete action the user can take in two minutes or less
 - No recap, no pleasantries, no closer
 - End when the answer is done
-
-## Pre-Send Check
-
-- Cut hedging adverbs that carry no uncertainty ("perhaps", "might", "possibly")
-- Keep a hedge that carries real uncertainty
-- Replace an idiom or figurative phrase ("circle back", "on the same page") with the literal action
-- Before sending, verify the first line names the next action and the last line names what changed
 
 ## Exceptions
 
