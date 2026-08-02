@@ -10,6 +10,10 @@ None of the three existing carve-outs reach this. Adversarial-Freshness wants a 
 
 Preconditions keep it from becoming "apt is exempt". The base image must be pinned and scanner-tracked (precondition 2) — the distro release is what bounds these package versions, so floating both ends is unbounded, not carved out. The image must be rebuilt on a recurring cadence (3), which is what actually delivers the security updates a pin would have blocked. And the deploy gate (4) fails on an unpinned base or on any OS package outside the recorded set, so the covered surface cannot quietly grow. Language package managers in the same image — pip, npm, gem — pin normally regardless of what installs them.
 
+Two review findings sharpened the text. Precondition 4 originally said the gate fails when "an OS package outside the recorded set appears in that image", which is unimplementable as written: every base image already carries hundreds of packages, and the package manager resolves transitive dependencies that shift across security updates. It now scopes to packages the image EXPLICITLY installs — operands of its install command — with base contents and transitive resolution out of scope. And "shared-library contract, not a versioned API" was self-contradictory, since a shared library is precisely an ABI; the applicability test now distinguishes a distro-managed ABI from a semver-governed source API the project compiles against.
+
+Rationale moved here from the rule body per `context-writing-style`: a pin does not freeze behaviour in this shape, it schedules an outage. The base-pinning precondition exists because the distro release is what bounds the package versions, so floating both ends is unbounded rather than carved out. The rebuild cadence is what actually delivers the security updates a pin would have blocked.
+
 Raised by the fleet reviewer on `jbaruch/nanoclaw` #896, which documented `ffmpeg` as deliberately unversioned in the audible-backup sidecar and correctly got blocked for claiming an exception the policy did not define.
 
 ## 0.3.129 — 2026-07-28
