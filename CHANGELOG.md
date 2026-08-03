@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.131 — 2026-08-03
+
 ### Rules — OS-Package Runtime Carve-Out
 
 New carve-out in `dependency-management` for packages installed from a container base image's own package manager — `apt-get install ffmpeg`, `apk add`, `dnf install`.
