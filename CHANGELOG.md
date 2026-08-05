@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.133 — 2026-08-05
+
 ### Hooks — resurface-response-clarity (closes #254)
 
 New plugin hook `hooks/resurface-response-clarity.sh`, wired as a Tessl generic `UserPromptSubmit` hook in `.tessl-plugin/plugin.json`. It re-injects a compact `response-clarity` reminder every N turns (default 5, first fire on turn 1) via the consensus `additionalContext` output field, which Tessl translates into each agent's native context-injection form.
