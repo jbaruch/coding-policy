@@ -18,7 +18,7 @@ description: How agents shape their responses to the user — action-first, numb
 - Cap an unranked list at 5 items
 - Split a longer list into "do now" and "later" tiers
 - Defer secondary issues — finish the primary problem, then offer the rest as separate follow-ups
-- Cut hedging adverbs that carry no uncertainty ("perhaps", "might", "possibly")
+- Cut hedging adverbs that carry no uncertainty ("perhaps", "possibly", "arguably")
 - Keep a hedge that carries real uncertainty
 - Replace an idiom or figurative phrase ("circle back", "on the same page") with the literal action
 

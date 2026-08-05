@@ -1,5 +1,9 @@
 # Changelog
 
+### Rules — fix hedge example in response-clarity (closes #253)
+
+`Lead With the Action`'s noise-hedge example listed "might", a modal verb (the bullet governs hedging adverbs) that often carries real uncertainty (contradicting "carry no uncertainty"). Replaced with "arguably" — a reflexive hedging adverb that matches both the part-of-speech and the no-uncertainty intent.
+
 ## 0.3.131 — 2026-08-03
 
 ### Rules — OS-Package Runtime Carve-Out
