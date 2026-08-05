@@ -97,6 +97,16 @@ check_fires "missing session_id fires" '{"hook_event_name":"UserPromptSubmit","c
 printf 'garbage{not json' > "${STATE_DIR}/s_corrupt.json"
 check_fires "corrupt state fires" "$(payload s_corrupt)"
 
+# 7b: unrecognized schema_version — no usable prior state (count 0) despite a
+#     high turn_count, so the next turn is turn 1 and fires (Migration Policy).
+printf '{"schema_version":999,"session_id":"s_ver","turn_count":42}' > "${STATE_DIR}/s_ver.json"
+check_fires "unknown schema_version ignores turn_count and fires" "$(payload s_ver)"
+
+# 7c: parseable but octal-looking count ("08") — read base-10 (=8), no crash;
+#     next turn is 9, not a fire turn (N=5), so silent (proves no octal abort).
+printf '{"schema_version":1,"session_id":"s_oct","turn_count":"08"}' > "${STATE_DIR}/s_oct.json"
+check_silent "octal-looking count is base-10 and does not crash" "$(payload s_oct)"
+
 # 8: interval override N=2 — fire on 1,3,5; silent on 2,4.
 export RESURFACE_INTERVAL=2
 check_fires  "N=2 turn 1 fires"  "$(payload s_n2)"

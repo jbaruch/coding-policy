@@ -32,32 +32,27 @@ SCHEMA_VERSION=1
 RESURFACE_INTERVAL="${RESURFACE_INTERVAL:-5}"
 STATE_DIR="${RESURFACE_STATE_DIR:-${TMPDIR:-/tmp}/coding-policy-resurface}"
 
-# The reminder injected on a fire turn. Must stay free of " and \ so the
-# jq-absent fallback in emit() can hand-build valid JSON.
+# The reminder injected on a fire turn.
 REMINDER='response-clarity is in effect — lead with the action (command, edit, or answer; no preamble); number multi-step work, one action per step; cap lists at 5; restate progress across turns; report errors plainly (expected vs actual); end with one concrete next step; no recap, no closer.'
 
 warn() { printf 'resurface-response-clarity: %s\n' "$1" >&2; }
 
-# Echo the stored turn_count for a session file, or 0 if absent/unreadable/corrupt.
+# Echo the stored turn_count for a session file, or 0 if absent/unreadable/
+# corrupt/version-mismatched. Only a record stamped with the accepted
+# SCHEMA_VERSION is trusted; any other version is no usable prior state
+# (hooks/state-schema.md Migration; rules/stateful-artifacts.md Migration Policy).
 read_count() {
   local f="$1" c
   [[ -r "$f" ]] || { echo 0; return; }
-  if command -v jq >/dev/null 2>&1; then
-    c="$(jq -r '.turn_count // 0' "$f" 2>/dev/null || echo 0)"
-  else
-    c=0
-  fi
+  c="$(jq -r --argjson v "$SCHEMA_VERSION" \
+    'if (.schema_version == $v) then (.turn_count // 0) else 0 end' \
+    "$f" 2>/dev/null || echo 0)"
   [[ "$c" =~ ^[0-9]+$ ]] || c=0
   echo "$c"
 }
 
 emit() {
-  if command -v jq >/dev/null 2>&1; then
-    jq -n --arg c "$REMINDER" '{additionalContext: $c}'
-  else
-    # jq absent: REMINDER is guaranteed free of " and \, so this is valid JSON.
-    printf '{"additionalContext":"%s"}\n' "$REMINDER"
-  fi
+  jq -n --arg c "$REMINDER" '{additionalContext: $c}'
 }
 
 main() {
@@ -70,13 +65,17 @@ main() {
     RESURFACE_INTERVAL=5
   fi
 
+  # jq maintains the JSON turn counter; without it the hook can't track cadence
+  # and would fire every turn, so degrade to a clean no-op instead.
+  if ! command -v jq >/dev/null 2>&1; then
+    warn "jq not found — response-clarity re-surfacing disabled this session"
+    exit 0
+  fi
+
   input="$(cat)" || input=""
 
-  session="default"
-  if command -v jq >/dev/null 2>&1; then
-    # Explicit fallback on parse failure — not blanket suppression.
-    session="$(printf '%s' "$input" | jq -r '.session_id // "default"' 2>/dev/null || echo default)"
-  fi
+  # Explicit fallback on parse failure — not blanket suppression.
+  session="$(printf '%s' "$input" | jq -r '.session_id // "default"' 2>/dev/null || echo default)"
   [[ -n "$session" ]] || session="default"
   # Sanitize for use as a filename component.
   session="${session//[^A-Za-z0-9_-]/_}"
@@ -88,7 +87,9 @@ main() {
   file="${STATE_DIR}/${session}.json"
 
   count="$(read_count "$file")"
-  count=$((count + 1))
+  # Force base-10: a digit string like "08" would otherwise be read as octal
+  # and abort under set -e.
+  count=$((10#$count + 1))
 
   if ! printf '{"schema_version":%d,"session_id":"%s","turn_count":%d}\n' \
         "$SCHEMA_VERSION" "$session" "$count" > "$file"; then

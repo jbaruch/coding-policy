@@ -18,7 +18,7 @@ Per-session turn counter written and read by `hooks/resurface-response-clarity.s
 
 - The hook is the only writer and the only reader
 - On an absent, unreadable, or corrupt file the hook treats `turn_count` as `0` (no prior state) — the next turn becomes turn 1 and fires
-- Hints-not-authority does not apply — the count is authoritative for this session; it is never cross-checked against an external source
+- Staleness is tolerable per `rules/stateful-artifacts.md` Hints, Not Authority — the counter has no external source to verify against, and a stale or reset count only shifts the reminder cadence (a reminder fires a turn early or late), never a correctness impact
 
 ## Migration
 
