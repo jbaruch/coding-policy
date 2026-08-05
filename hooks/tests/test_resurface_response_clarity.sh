@@ -54,7 +54,12 @@ payload() { printf '{"session_id":"%s","hook_event_name":"UserPromptSubmit","cwd
 # session + seeded state), so no check depends on another having run first
 # (rules/error-handling.md aggregate carve-out precondition 1; testing-standards
 # Independence).
-seed_turn() { printf '{"schema_version":1,"session_id":"%s","turn_count":%d}' "$1" "$(( $2 - 1 ))" > "${STATE_DIR}/$1.json"; }
+seed_turn() {
+  if ! printf '{"schema_version":1,"session_id":"%s","turn_count":%d}' "$1" "$(( $2 - 1 ))" > "${STATE_DIR}/$1.json"; then
+    echo "fatal: seed_turn write failed for session $1" >&2
+    exit 2
+  fi
+}
 
 pass() { PASS_COUNT=$((PASS_COUNT + 1)); }
 fail() { FAIL_COUNT=$((FAIL_COUNT + 1)); echo "  ✗ FAIL: $1" >&2; }
@@ -90,15 +95,16 @@ seed_turn cad6 6; check_fires  "turn 6 fires again"  "$(payload cad6)"
 check_fires "missing session_id fires" '{"hook_event_name":"UserPromptSubmit","cwd":"/x","prompt":"hi"}'
 
 # 6: malformed stdin — no crash, exit 0, fires (treated as default session).
-#    Uses a fresh state dir so the earlier default-session turn doesn't count.
-(
-  bad_dir="$(mktemp -d -t resurface-bad.XXXXXX)" || { echo "  ✗ FAIL: malformed stdin: mktemp failed" >&2; exit 1; }
+#    Own state dir so the earlier default-session turn doesn't count. The
+#    subshell uses local names (sub_out/sub_rc) to stay clear of outer OUT/RC.
+if (
+  bad_dir="$(mktemp -d -t resurface-bad.XXXXXX)" || { echo "  ✗ malformed stdin: mktemp failed" >&2; exit 1; }
   export RESURFACE_STATE_DIR="$bad_dir"
-  OUT="$(printf '%s' 'not json at all' | bash "$SCRIPT")"; RC=$?
+  sub_out="$(printf '%s' 'not json at all' | bash "$SCRIPT")"; sub_rc=$?
   rm -rf "$RESURFACE_STATE_DIR"
-  [[ $RC -eq 0 ]] || { echo "  ✗ FAIL: malformed stdin: expected exit 0, got $RC" >&2; exit 1; }
-  printf '%s' "$OUT" | jq -e '.additionalContext' >/dev/null 2>&1 || { echo "  ✗ FAIL: malformed stdin: expected a fire" >&2; exit 1; }
-) && pass || fail "malformed stdin handling"
+  [[ $sub_rc -eq 0 ]] || { echo "  ✗ malformed stdin: expected exit 0, got $sub_rc" >&2; exit 1; }
+  printf '%s' "$sub_out" | jq -e '.additionalContext' >/dev/null 2>&1 || { echo "  ✗ malformed stdin: expected a fire" >&2; exit 1; }
+); then pass; else fail "malformed stdin handling"; fi
 
 # 7: corrupt state file — treated as count 0, so the next turn is turn 1 and fires.
 printf 'garbage{not json' > "${STATE_DIR}/s_corrupt.json"
@@ -139,12 +145,12 @@ fi
 # 10: determinism — two independent sessions fed the same turn sequence
 #     produce identical fire/silent patterns.
 det() { # emits F/S per turn for a fresh session in a fresh state dir
-  local dir sess out i pat=""
+  local dir sess out pat=""
   dir="$(mktemp -d -t resurface-det.XXXXXX)" || { echo "  ✗ FAIL: det: mktemp failed" >&2; return 1; }
   sess="$1"
-  for i in 1 2 3 4 5 6; do
+  for _ in 1 2 3 4 5 6; do
     out="$(printf '{"session_id":"%s","prompt":"hi"}' "$sess" | RESURFACE_STATE_DIR="$dir" bash "$SCRIPT")"
-    [[ -n "$out" ]] && pat+="F" || pat+="S"
+    if [[ -n "$out" ]]; then pat+="F"; else pat+="S"; fi
   done
   rm -rf "$dir"
   printf '%s' "$pat"
