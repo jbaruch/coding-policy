@@ -27,7 +27,7 @@ SCRIPT="$(cd "$(dirname "$0")/.." && pwd)/resurface-response-clarity.sh"
 [[ -f "$SCRIPT" && -r "$SCRIPT" ]] || { echo "fatal: hook not found/readable at $SCRIPT" >&2; exit 2; }
 command -v jq >/dev/null 2>&1 || { echo "fatal: jq is required to run these tests" >&2; exit 2; }
 
-STATE_DIR="$(mktemp -d -t resurface-test.XXXXXX)"
+STATE_DIR="$(mktemp -d -t resurface-test.XXXXXX)" || { echo "fatal: mktemp failed for state dir" >&2; exit 2; }
 export RESURFACE_STATE_DIR="$STATE_DIR"
 
 cleanup() {
@@ -85,7 +85,8 @@ check_fires "missing session_id fires" '{"hook_event_name":"UserPromptSubmit","c
 # 6: malformed stdin — no crash, exit 0, fires (treated as default session).
 #    Uses a fresh state dir so the earlier default-session turn doesn't count.
 (
-  export RESURFACE_STATE_DIR="$(mktemp -d -t resurface-bad.XXXXXX)"
+  bad_dir="$(mktemp -d -t resurface-bad.XXXXXX)" || { echo "  ✗ FAIL: malformed stdin: mktemp failed" >&2; exit 1; }
+  export RESURFACE_STATE_DIR="$bad_dir"
   OUT="$(printf '%s' 'not json at all' | bash "$SCRIPT")"; RC=$?
   rm -rf "$RESURFACE_STATE_DIR"
   [[ $RC -eq 0 ]] || { echo "  ✗ FAIL: malformed stdin: expected exit 0, got $RC" >&2; exit 1; }
@@ -105,6 +106,11 @@ check_silent "N=2 turn 4 silent" "$(payload s_n2)"
 check_fires  "N=2 turn 5 fires"  "$(payload s_n2)"
 unset RESURFACE_INTERVAL
 
+# 8b: invalid RESURFACE_INTERVAL — never aborts (exit 0), defaults to 5, fires on turn 1.
+export RESURFACE_INTERVAL=not-a-number
+check_fires "invalid interval defaults and fires" "$(payload s_badN)"
+unset RESURFACE_INTERVAL
+
 # 9: emitted output is valid JSON with exactly one key (additionalContext).
 run "$(payload s_shape)"
 if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | jq -e 'keys == ["additionalContext"]' >/dev/null 2>&1; then
@@ -117,7 +123,7 @@ fi
 #     produce identical fire/silent patterns.
 det() { # emits F/S per turn for a fresh session in a fresh state dir
   local dir sess out i pat=""
-  dir="$(mktemp -d -t resurface-det.XXXXXX)"
+  dir="$(mktemp -d -t resurface-det.XXXXXX)" || { echo "  ✗ FAIL: det: mktemp failed" >&2; return 1; }
   sess="$1"
   for i in 1 2 3 4 5 6; do
     out="$(printf '{"session_id":"%s","prompt":"hi"}' "$sess" | RESURFACE_STATE_DIR="$dir" bash "$SCRIPT")"

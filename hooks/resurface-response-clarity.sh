@@ -63,6 +63,13 @@ emit() {
 main() {
   local input session file count
 
+  # Validate the interval before any arithmetic — a non-numeric value would
+  # abort the hook under set -e/set -u and break the never-block contract.
+  if ! [[ "$RESURFACE_INTERVAL" =~ ^[1-9][0-9]*$ ]]; then
+    warn "RESURFACE_INTERVAL='${RESURFACE_INTERVAL}' is not a positive integer — using 5"
+    RESURFACE_INTERVAL=5
+  fi
+
   input="$(cat)" || input=""
 
   session="default"
