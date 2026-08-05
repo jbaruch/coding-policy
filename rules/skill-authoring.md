@@ -85,5 +85,7 @@ Optional fields:
 - `rules` — directory path (`"rules/"`) or array of rule-file paths (`"rules/<name>.md"`); every `.md` file in a declared directory is included
 - `repository`, `homepage`, `license` — provenance and discovery metadata
 - `author` — object with `name`, `email`, `url`
+- `hooks` — cross-agent hook declarations keyed by event (`PreToolUse`, `PostToolUse`, `UserPromptSubmit`, `SessionStart`, `Stop`), each mapping to hook groups (`matcher` optional, `hooks` array of `{type:"command", command, args?}`); Tessl translates the consensus payload to each agent's native form
+- `nativeHooks` — per-agent hook declarations keyed by agent id (`claude-code`), same group shape, written straight to that agent's native config
 
 `alwaysApply` and `applyTo:` are not manifest fields — rule scope lives in the rule file frontmatter per `rules/rule-frontmatter.md`.

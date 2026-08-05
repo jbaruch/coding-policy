@@ -6,6 +6,7 @@ Coding policy plugin for Baruch's AI agents. Language-agnostic code quality rule
 
 ## What's New
 
+- `resurface-response-clarity` hook — a Tessl generic `UserPromptSubmit` hook that periodically re-injects the `response-clarity` directives near the turn, countering the salience decay of an always-on rule buried in context (issue #254). Fires on Claude Code + Codex, only where coding-policy is installed
 - Policy review runs on the OpenAI Codex CLI authenticated by a ChatGPT subscription (no API key) via `.github/workflows/review-codex.yml`, reviewing every PR against the in-tree `rules/*.md`; Copilot stays as the complementary code-quality lane
 - 24 rules — 18 always-on, 6 conditional (scoped via `applyTo:` to the files where the rule's prescriptions actually fire). Breakdown: 10 covering code quality, 7 covering plugin authoring, 1 covering concurrency, 1 covering review discipline, 1 covering reviewer-feedback reading, 1 covering review severity, 1 covering external-repo action scope, 1 covering response communication, 1 covering merge/ship autonomy
 - `release` skill — structured PR + merge workflow gated on the Codex policy review's blocking findings; Copilot is the complementary code-quality lane and is always advisory
@@ -59,6 +60,12 @@ tessl install jbaruch/coding-policy
 | [install-reviewer](skills/install-reviewer/SKILL.md) | Enroll a consumer repo in the central fleet policy reviewer — scaffold the `.github/fleet-review-enabled` marker, a thin `.github/workflows/review-trigger.yml` (fires an immediate PR-time review in `coding-policy`), and `.github/copilot-instructions.md`, then open a PR. The `coding-policy-fleet-reviewer` GitHub App reviews against the `jbaruch/coding-policy` rules with the Codex CLI on a ChatGPT subscription (no API key). The Codex credential lives only in `coding-policy`; the consumer sets one stable `FLEET_DISPATCH_TOKEN` (a narrow PAT). Supports `--override` for in-place upgrades. |
 | [adopt-fork-pr](skills/adopt-fork-pr/SKILL.md) | Classify a PR by number. Same-repo PRs pass through to the reviewer; fork PRs get adopted into the base repo as a same-repo PR, preserving the contributor's commits. |
 | [migrate-to-plugin](skills/migrate-to-plugin/SKILL.md) | Migrate a legacy `tile.json` plugin to the `.tessl-plugin/plugin.json` form: runs `tessl plugin migrate`, renames `.tileignore`, removes the obsolete `tile.json`, re-lints, then reconciles residual "tile" wording to "plugin" while preserving contract surfaces. |
+
+### Hooks
+
+| Hook | Event | Description |
+| ---- | ----- | ----------- |
+| [resurface-response-clarity](hooks/resurface-response-clarity.sh) | UserPromptSubmit | Re-injects a compact `response-clarity` reminder every few turns (Claude Code + Codex) to counter the salience decay of an always-on rule buried in context. State schema: [hooks/state-schema.md](hooks/state-schema.md) |
 
 ## Philosophy
 
