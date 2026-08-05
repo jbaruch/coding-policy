@@ -1,5 +1,49 @@
 # Changelog
 
+## 0.3.133 — 2026-08-05
+
+### Hooks — resurface-response-clarity (closes #254)
+
+New plugin hook `hooks/resurface-response-clarity.sh`, wired as a Tessl generic `UserPromptSubmit` hook in `.tessl-plugin/plugin.json`. It re-injects a compact `response-clarity` reminder every N turns (default 5, first fire on turn 1) via the consensus `additionalContext` output field, which Tessl translates into each agent's native context-injection form.
+
+#254 found that an `alwaysApply: true` rule is not the same as a reliably-applied one: comparing rules-only behavior against `ayghri/i-have-adhd`'s opt-in skill (which duplicates our ten response-shaping directives), the invoked skill still changed output. The delta traced to loading mechanics — position (the rule sits buried among ~25 siblings thousands of tokens back), salience (an explicit invocation is a spike, an always-on rule is passive), and richness — not to rule text. Porting the skill's text into the rule was mostly blocked by `context-writing-style`'s no-duplication rule, so the lever is how the rule loads, not what it says. This hook re-surfaces the directives near the turn to counter the decay.
+
+Chosen the generic `hooks` tier over `nativeHooks.claude-code` deliberately: Tessl's own translation maps the consensus `additionalContext` to Claude Code's `hookSpecificOutput.additionalContext` and to other agents' `systemMessage`, so context injection is portable. The event fires on Claude Code and Codex; agents without a prompt-submit event (Cursor, Gemini) simply don't install it. The hook is scoped to coding-policy installs, never blocks a prompt (always exits 0, never 2), and degrades to a silent no-op if its state dir or `jq` is unavailable. Per-session turn state schema: `hooks/state-schema.md`.
+
+## 0.3.132 — 2026-08-05
+
+### Rules — fix hedge examples in response-clarity (closes #253)
+
+`Lead With the Action`'s Cut/Keep hedge bullets had mismatched examples. The Cut-no-uncertainty bullet listed "might" (a modal verb, not an adverb) alongside "perhaps"/"possibly" — all three express genuine uncertainty, so they belonged on the Keep bullet, not the Cut one. Split them correctly: Cut now lists true no-uncertainty filler adverbs ("basically", "essentially", "practically"); Keep now carries the real-uncertainty hedges ("might", "perhaps", "possibly"), making the distinction concrete on both sides.
+
+## 0.3.131 — 2026-08-03
+
+### Rules — OS-Package Runtime Carve-Out
+
+New carve-out in `dependency-management` for packages installed from a container base image's own package manager — `apt-get install ffmpeg`, `apk add`, `dnf install`.
+
+The distinction that earns it: Debian's archive serves only the current version of a package. `ffmpeg=7.1.1-1+deb13u1` resolves today and stops resolving the day a security update supersedes it, at which point every build of that image fails outright. That is the inverse of what Pinning is for — the pin does not freeze behaviour, it schedules an outage. A distro that serves historical versions does not meet the test, and the carve-out says so.
+
+None of the three existing carve-outs reach this. Adversarial-Freshness wants a dependency tracking an opponent. Runtime-Managed Manifest wants a file a tool rewrites. First-Party Co-Shipped wants shared ownership of both sides. What is specific here is the archive-retention behaviour of the distro, which none of them describe.
+
+Preconditions keep it from becoming "apt is exempt". The base image must be pinned and scanner-tracked (precondition 2) — the distro release is what bounds these package versions, so floating both ends is unbounded, not carved out. The image must be rebuilt on a recurring cadence (3), which is what actually delivers the security updates a pin would have blocked. And the deploy gate (4) fails on an unpinned base or on any OS package outside the recorded set, so the covered surface cannot quietly grow. Language package managers in the same image — pip, npm, gem — pin normally regardless of what installs them.
+
+Two review findings sharpened the text. Precondition 4 originally said the gate fails when "an OS package outside the recorded set appears in that image", which is unimplementable as written: every base image already carries hundreds of packages, and the package manager resolves transitive dependencies that shift across security updates. It now scopes to packages the image EXPLICITLY installs — operands of its install command — with base contents and transitive resolution out of scope. And "shared-library contract, not a versioned API" was self-contradictory, since a shared library is precisely an ABI; the applicability test now distinguishes a distro-managed ABI from a semver-governed source API the project compiles against.
+
+Rationale moved here from the rule body per `context-writing-style`: a pin does not freeze behaviour in this shape, it schedules an outage. The base-pinning precondition exists because the distro release is what bounds the package versions, so floating both ends is unbounded rather than carved out. The rebuild cadence is what actually delivers the security updates a pin would have blocked.
+
+Raised by the fleet reviewer on `jbaruch/nanoclaw` #896, which documented `ffmpeg` as deliberately unversioned in the audible-backup sidecar and correctly got blocked for claiming an exception the policy did not define.
+
+## 0.3.130 — 2026-08-02
+
+### Rules — noise-word hygiene in response-clarity
+
+`Lead With the Action` in `response-clarity` gains three prose-hygiene directives: cut hedging adverbs that carry no uncertainty, keep a hedge that carries real uncertainty, replace idioms with the literal action.
+
+The prompt: comparing rules-only behavior against `ayghri/i-have-adhd`'s opt-in skill, which duplicates our ten response-shaping directives, the skill still visibly changed output when invoked. If `response-clarity` is `alwaysApply: true`, why would an invoked skill that says the same things behave differently? Three mechanisms: position (the always-on rule sits buried among ~25 siblings thousands of tokens back, the skill invocation lands fresh right before the turn), salience (an explicit `/i-have-adhd` invocation is a "do this now" spike, an always-on rule is passive background), and richness (the skill kept Bad/Good example pairs and a Pre-send checklist our compression discipline had stripped). `alwaysApply: true` is not the same as reliably-applied.
+
+The finding narrowed under review. Most of the skill's Pre-send checklist already lived in our rule (an announcing first sentence is Lead With the Action, an "anything else?" closer is Close With One Next Step, a by-the-way sidebar is Defer secondary), so restating it would violate `context-writing-style`'s no-duplication rule. The checklist's first-line/last-line verify gate was worse than duplicative — it contradicted `Close With One Next Step` (last line is the next action, not a recap of what changed), so it was dropped: a verify gate re-checks directives the rule already states and has no non-duplicative form here. The only portable, net-new rule content was the two deletions (noise-hedges, idioms), folded into the existing `Lead With the Action` section rather than a new one to stay within the section budget. We did not vendor the skill — it is a separate MIT plugin, and copying it would violate `dependency-management` No Vendoring; anyone wanting the toggle installs it alongside.
+
 ## 0.3.129 — 2026-07-28
 
 ### Rules — First-Party Co-Shipped Dependency Carve-Out

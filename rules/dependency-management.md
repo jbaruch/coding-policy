@@ -74,6 +74,23 @@ alwaysApply: true
 - A consumed surface the owner does not control end-to-end does NOT qualify
 - Every other dependency in the repo still pins with a stated renewal mechanism
 
+## OS-Package Runtime Carve-Out
+
+- Narrow exception for a package installed from the base image's OS package manager inside a container image (`apt-get install`, `apk add`, `dnf install`)
+- Applies when the distro archive serves only the current version of a package, so a literal version pin stops resolving at the next security update
+- The consumed surface is a command-line invocation or a distro-managed ABI, not a semver-governed source API the project compiles or imports against
+- The covered install MAY omit the version specifier
+- The exemption reaches the named packages alone — never a language package manager in the same image (`pip`, `npm`, `gem`), which pins normally
+- Preconditions (each covered image, all required):
+  1. The project documents an authority-of-record rule in its own plugin naming every covered image, the exact package set, and the rebuild cadence that stands in for a pin
+  2. The image's base is pinned to a specific tag or digest and scanner-tracked
+  3. The image is rebuilt on a stated recurring cadence
+  4. A deploy-time check fails the deployment when a covered image's base is unpinned, and when a package the image EXPLICITLY installs (an operand of its package-manager install command) falls outside the recorded set. Packages already present in the base image, and transitive dependencies the package manager resolves, are out of scope
+  5. The check runs as a deterministic script per `rules/script-delegation.md`, not agent judgment
+- "Pinning apt is annoying" does NOT qualify — the archive-retention failure mode is the test, and a distro that serves historical versions does not meet it
+- A language-ecosystem dependency does NOT qualify, whatever installs it
+- Every other dependency in the repo still pins with a stated renewal mechanism
+
 ## Same-Repo Reusable-Workflow Action Carve-Out
 
 - Narrow exception for a reusable workflow (`on: workflow_call`) referencing a composite action in its OWN repository
