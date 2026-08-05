@@ -60,7 +60,7 @@ jobs:
 
       # renovate: datasource=npm depName=@openai/codex
       - name: Install Codex CLI
-        run: npm install -g @openai/codex@0.142.5
+        run: npm install -g @openai/codex@0.146.1
 
       - name: Write auth.json from the secret (runtime-only, never persisted)
         env:
