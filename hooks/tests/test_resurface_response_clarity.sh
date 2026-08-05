@@ -49,6 +49,13 @@ run() {
 
 payload() { printf '{"session_id":"%s","hook_event_name":"UserPromptSubmit","cwd":"/x","prompt":"hi"}' "$1"; }
 
+# seed_turn <session> <turn> — pre-write state so the next hook call for that
+# session lands on <turn>. Keeps each cadence check independent (its own
+# session + seeded state), so no check depends on another having run first
+# (rules/error-handling.md aggregate carve-out precondition 1; testing-standards
+# Independence).
+seed_turn() { printf '{"schema_version":1,"session_id":"%s","turn_count":%d}' "$1" "$(( $2 - 1 ))" > "${STATE_DIR}/$1.json"; }
+
 pass() { PASS_COUNT=$((PASS_COUNT + 1)); }
 fail() { FAIL_COUNT=$((FAIL_COUNT + 1)); echo "  ✗ FAIL: $1" >&2; }
 
@@ -70,14 +77,14 @@ check_silent() { # $1=label $2=stdin
 
 echo "Testing resurface-response-clarity.sh" >&2
 
-# 1-3: default cadence (N=5) — fire on 1 and 6, silent on 2..5.
+# 1-3: default cadence (N=5) — fire on turn 1 and 6, silent on 2..5. Each check
+# uses its own session with seeded state, so the checks are order-independent.
 unset RESURFACE_INTERVAL
-check_fires  "turn 1 fires"        "$(payload s_cadence)"
-check_silent "turn 2 silent"       "$(payload s_cadence)"
-check_silent "turn 3 silent"       "$(payload s_cadence)"
-check_silent "turn 4 silent"       "$(payload s_cadence)"
-check_silent "turn 5 silent"       "$(payload s_cadence)"
-check_fires  "turn 6 fires again"  "$(payload s_cadence)"
+check_fires  "turn 1 fires"                          "$(payload cad1)"
+seed_turn cad2 2; check_silent "turn 2 silent"       "$(payload cad2)"
+seed_turn cad3 3; check_silent "turn 3 silent"       "$(payload cad3)"
+seed_turn cad5 5; check_silent "turn 5 silent"       "$(payload cad5)"
+seed_turn cad6 6; check_fires  "turn 6 fires again"  "$(payload cad6)"
 
 # 5: missing session_id — still fires on its first turn.
 check_fires "missing session_id fires" '{"hook_event_name":"UserPromptSubmit","cwd":"/x","prompt":"hi"}'
@@ -107,13 +114,13 @@ check_fires "unknown schema_version ignores turn_count and fires" "$(payload s_v
 printf '{"schema_version":1,"session_id":"s_oct","turn_count":"08"}' > "${STATE_DIR}/s_oct.json"
 check_silent "octal-looking count is base-10 and does not crash" "$(payload s_oct)"
 
-# 8: interval override N=2 — fire on 1,3,5; silent on 2,4.
+# 8: interval override N=2 — fires on odd turns. Independent seeded state per check.
 export RESURFACE_INTERVAL=2
-check_fires  "N=2 turn 1 fires"  "$(payload s_n2)"
-check_silent "N=2 turn 2 silent" "$(payload s_n2)"
-check_fires  "N=2 turn 3 fires"  "$(payload s_n2)"
-check_silent "N=2 turn 4 silent" "$(payload s_n2)"
-check_fires  "N=2 turn 5 fires"  "$(payload s_n2)"
+check_fires  "N=2 turn 1 fires"                     "$(payload n2t1)"
+seed_turn n2t2 2; check_silent "N=2 turn 2 silent"  "$(payload n2t2)"
+seed_turn n2t3 3; check_fires  "N=2 turn 3 fires"   "$(payload n2t3)"
+seed_turn n2t4 4; check_silent "N=2 turn 4 silent"  "$(payload n2t4)"
+seed_turn n2t5 5; check_fires  "N=2 turn 5 fires"   "$(payload n2t5)"
 unset RESURFACE_INTERVAL
 
 # 8b: invalid RESURFACE_INTERVAL — never aborts (exit 0), defaults to 5, fires on turn 1.
