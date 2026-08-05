@@ -34,5 +34,18 @@
     "rules/review-severity.md",
     "rules/response-clarity.md",
     "rules/ship-on-green.md"
-  ]
+  ],
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash",
+            "args": ["${TESSL_PLUGIN_DIR}/hooks/resurface-response-clarity.sh"]
+          }
+        ]
+      }
+    ]
+  }
 }

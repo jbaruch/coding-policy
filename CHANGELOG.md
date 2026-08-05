@@ -1,5 +1,13 @@
 # Changelog
 
+### Hooks — resurface-response-clarity (closes #254)
+
+New plugin hook `hooks/resurface-response-clarity.sh`, wired as a Tessl generic `UserPromptSubmit` hook in `.tessl-plugin/plugin.json`. It re-injects a compact `response-clarity` reminder every N turns (default 5, first fire on turn 1) via the consensus `additionalContext` output field, which Tessl translates into each agent's native context-injection form.
+
+#254 found that an `alwaysApply: true` rule is not the same as a reliably-applied one: comparing rules-only behavior against `ayghri/i-have-adhd`'s opt-in skill (which duplicates our ten response-shaping directives), the invoked skill still changed output. The delta traced to loading mechanics — position (the rule sits buried among ~25 siblings thousands of tokens back), salience (an explicit invocation is a spike, an always-on rule is passive), and richness — not to rule text. Porting the skill's text into the rule was mostly blocked by `context-writing-style`'s no-duplication rule, so the lever is how the rule loads, not what it says. This hook re-surfaces the directives near the turn to counter the decay.
+
+Chosen the generic `hooks` tier over `nativeHooks.claude-code` deliberately: Tessl's own translation maps the consensus `additionalContext` to Claude Code's `hookSpecificOutput.additionalContext` and to other agents' `systemMessage`, so context injection is portable. The event fires on Claude Code and Codex; agents without a prompt-submit event (Cursor, Gemini) simply don't install it. The hook is scoped to coding-policy installs, never blocks a prompt (always exits 0, never 2), and degrades to a silent no-op if its state dir or `jq` is unavailable. Per-session turn state schema: `hooks/state-schema.md`.
+
 ## 0.3.132 — 2026-08-05
 
 ### Rules — fix hedge examples in response-clarity (closes #253)
