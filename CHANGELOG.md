@@ -1,8 +1,8 @@
 # Changelog
 
-### Rules — fix hedge example in response-clarity (closes #253)
+### Rules — fix hedge examples in response-clarity (closes #253)
 
-`Lead With the Action`'s noise-hedge example listed "might", a modal verb (the bullet governs hedging adverbs) that often carries real uncertainty (contradicting "carry no uncertainty"). Replaced with "arguably" — a reflexive hedging adverb that matches both the part-of-speech and the no-uncertainty intent.
+`Lead With the Action`'s Cut/Keep hedge bullets had mismatched examples. The Cut-no-uncertainty bullet listed "might" (a modal verb, not an adverb) alongside "perhaps"/"possibly" — all three express genuine uncertainty, so they belonged on the Keep bullet, not the Cut one. Split them correctly: Cut now lists true no-uncertainty filler adverbs ("basically", "essentially", "practically"); Keep now carries the real-uncertainty hedges ("might", "perhaps", "possibly"), making the distinction concrete on both sides.
 
 ## 0.3.131 — 2026-08-03
 
