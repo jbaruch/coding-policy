@@ -1,5 +1,13 @@
 # Changelog
 
+### CI — run Python test suites; guard the release baseline capture (#183)
+
+`scripts/run-tests.sh` discovered only `test_*.sh`, silently orphaning every Python suite in the repo — `skills/release/tests/test_stamp_changelog.py` (10 tests for the shipped stamp-changelog action) looked covered while never executing in CI. Discovery now covers `test_*.{sh,py}` and dispatches by extension (`bash`/`python3`); a missing interpreter is surfaced as a setup error (rc 2), not counted as a failing suite, and a dispatch fault travels by a side channel so every exit code a suite returns stays its own verdict. Discovery also enforces the direct-child-of-`tests/` rule so a nested `test_*` fixture is not run as a suite.
+
+New `skills/release/capture-registry-baseline.sh` replaces the inline `PRE=$(tessl plugin info | grep "Latest Version" | awk ...)` baseline capture in the release skill. That pipeline shared its parse with `verify-publish-landed.sh` but none of its hardening: a parse miss yielded an empty `PRE`, which then compared as "advanced past empty" in the release contract's conjunct 2 — so an unpublished release could report as confirmed. The script emits numeric-only `{"version":...}` and exits non-zero on a parse miss or empty value, so the baseline fails loudly instead of vacuously.
+
+The dead eval-suite scope (evals removed in #191) was dropped.
+
 ## 0.3.151 — 2026-08-09
 
 ### Actions — skill-review diffs from the last successful publish, not event.before
@@ -94,6 +102,8 @@ Measurement contradicted the theory. Mining 33,768 assistant responses across 46
 
 So the hook fought a decay that does not occur on the models in use, at the cost of a per-turn `UserPromptSubmit` fork in every consumer. `skill-authoring.md`'s `hooks`/`nativeHooks` manifest-field documentation is kept — it is accurate reference for the manifest schema regardless of this plugin using it.
 
+## 0.3.133 — 2026-08-05
+||||||| parent of 6fc6441 (fix(ci): run Python test suites; guard registry baseline capture)
 ## 0.3.133 — 2026-08-05
 
 ### Hooks — resurface-response-clarity (closes #254)

@@ -132,8 +132,10 @@ Run it once Step 5's poll shows every bot's latest verdict clean. It emits a JSO
 Before merging, capture the registry baseline so the post-merge check has something to compare against:
 
 ```bash
-PRE=$(tessl plugin info <workspace>/<plugin> | grep "Latest Version" | awk '{print $NF}')
+PRE=$(skills/release/capture-registry-baseline.sh <workspace> <plugin> | jq -r .version)
 ```
+
+It emits one JSON object and exits non-zero on a parse miss or an empty registry value, so an unparseable baseline fails loudly instead of flowing into `verify-publish-landed.sh` as an empty `PRE` (which would pass conjunct 2 vacuously). The parse hardening and numeric-only output contract are the script's — see `skills/release/capture-registry-baseline.sh` header, not restated here (`rules/script-as-black-box.md`).
 
 Pick the right cleanup path based on where you ran the skill from.
 
