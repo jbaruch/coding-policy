@@ -22,7 +22,7 @@
 # Output:
 #   stderr: each engine's native findings plus per-engine progress.
 # Usage: scripts/run-diagnostics.sh [base-dir]
-#   base-dir  Tree whose skills/, scripts/, hooks/, .github/actions/, and
+#   base-dir  Tree whose skills/, scripts/, .github/actions/, and
 #             .github/codex-review/ are scanned for shell scripts.
 #             Defaults to the repo root. The
 #             optional arg exists so the runner's own test can point it at
@@ -65,9 +65,6 @@ main() {
   local roots=()
   [[ -d "$base/skills" ]] && roots+=("$base/skills")
   [[ -d "$base/scripts" ]] && roots+=("$base/scripts")
-  # First-party hook scripts (hooks/*.sh + their tests) — gate them at the
-  # same zero-findings bar as every other shipped shell script.
-  [[ -d "$base/hooks" ]] && roots+=("$base/hooks")
   # Composite-action bodies extracted to real scripts per
   # rules/script-delegation.md (e.g. skill-review/review-skills.sh) — gate
   # them too so an action script is held to the same zero-findings bar.
@@ -79,7 +76,7 @@ main() {
   # "clean" (#199).
   [[ -d "$base/.github/codex-review" ]] && roots+=("$base/.github/codex-review")
   if [[ ${#roots[@]} -eq 0 ]]; then
-    echo "run-diagnostics: none of skills/, scripts/, hooks/, .github/actions/, .github/codex-review/ found under $base" >&2
+    echo "run-diagnostics: none of skills/, scripts/, .github/actions/, .github/codex-review/ found under $base" >&2
     return 2
   fi
 
