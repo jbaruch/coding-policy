@@ -1,5 +1,13 @@
 # Changelog
 
+### Hooks — revert resurface-response-clarity (reverts #254/#256)
+
+Removes the `resurface-response-clarity` hook (`hooks/`, the `plugin.json` hooks block, README, and the `run-diagnostics.sh` hooks-scan root). It shipped in 0.3.133 on #254's theory that an always-on rule loses salience deep in a session, so re-injecting `response-clarity` every N turns would help.
+
+Measurement contradicted the theory. Mining 33,768 assistant responses across 465 real Claude Code transcripts, adherence to the two cleanly-checkable directives (no-preamble, list-cap) does not decay with session depth — it rises and plateaus: no-preamble climbs from 69.5% in turns 1–5 to ~96% past turn 40; list-cap sits at ~98–99% throughout. The worst compliance is at the session opening (conversational habit), which a periodic mid-session re-inject does not address. The one caveat that could have rescued it — weaker models decaying harder — does not apply, since the consuming repos do not run against weak models.
+
+So the hook fought a decay that does not occur on the models in use, at the cost of a per-turn `UserPromptSubmit` fork in every consumer. `skill-authoring.md`'s `hooks`/`nativeHooks` manifest-field documentation is kept — it is accurate reference for the manifest schema regardless of this plugin using it.
+
 ## 0.3.133 — 2026-08-05
 
 ### Hooks — resurface-response-clarity (closes #254)
