@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.139 — 2026-08-08
+
 ### Hooks — revert resurface-response-clarity (reverts #254/#256)
 
 Removes the `resurface-response-clarity` hook (`hooks/`, the `plugin.json` hooks block, README, and the `run-diagnostics.sh` hooks-scan root). It shipped in 0.3.133 on #254's theory that an always-on rule loses salience deep in a session, so re-injecting `response-clarity` every N turns would help.
