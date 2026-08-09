@@ -1,5 +1,13 @@
 # Changelog
 
+### Hooks — stop-handoff-hygiene (Stop pre-handoff gate)
+
+New `hooks/stop-handoff-hygiene.sh`, wired as a Claude Code `Stop` hook via `.tessl-plugin/plugin.json` `nativeHooks.claude-code` (#262). At handoff it runs deterministic, universal git-hygiene checks and blocks the stop once — loop-safe via the stdin `stop_hook_active` guard — when it finds clearly-actionable leftovers: local branches whose upstream is gone (merged then remote-deleted), orphaned linked worktrees whose branch's upstream is gone, or diagnostics findings in the changed set. A dirty working tree is reported to the user but never blocks on its own (often intentional WIP). Fail-open: no jq, not a git repo, or an unparseable payload allows the stop — a hygiene nudge must never wedge a handoff.
+
+Wired under `nativeHooks.claude-code`, not the portable `hooks` tier, deliberately: blocking a stop is an agent-specific contract with no portable consensus form (Tessl translates `additionalContext`, not a stop-block). It mechanizes the pre-handoff cleanup `rules/language-diagnostics.md` endorses and complements the fleet-wide `delete_branch_on_merge` (which auto-cleans remote branches; this covers the local branches and worktrees it never touches). The motivating incident: sessions left stray merged-and-remote-deleted local branches and an abandoned worktree that had to be hand-cleaned.
+
+Diagnostics run on the changed set only — uncommitted `.sh`/`.py` files — via a new `--files` mode added to `scripts/run-diagnostics.sh` (shellcheck the `.sh`, pyright the `.py`; an engine is required only when its file type is present; an empty lintable set exits 0). A clean handoff launches no engine and costs nothing; only genuinely uncommitted lintable changes are checked, so the per-handoff `Stop` event stays cheap.
+
 ## 0.3.141 — 2026-08-09
 
 ### Hooks — check-git-sync (SessionStart sync-before-work warning)
