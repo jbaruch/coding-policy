@@ -18,6 +18,8 @@
 #   5. No origin     -> silent no-op, exit 0.
 #   6. Fetch failure -> silent no-op, exit 0 (offline/broken remote tolerated).
 #   7. Bad clock     -> silent no-op, exit 0 (never aborts SessionStart).
+#   8. Diverged      -> notice names divergence and recommends rebase, not a
+#                       fast-forward (local both ahead and behind origin).
 #
 # Run: bash hooks/tests/test_check_git_sync.sh
 set -uo pipefail
@@ -124,6 +126,17 @@ mk_origin o7
 R7="$TMP/r7"; g clone -q "$BARE" "$R7"
 run "$R7" "$TMP/s7" SYNC_NOW="not-a-number"
 if [[ $RC -eq 0 && -z "$OUT" ]]; then pass; else fail "bad clock: expected silent exit 0, got RC=$RC OUT=$OUT"; fi
+
+# 8. diverged -> divergence notice (rebase, not fast-forward). Clone, add a local
+#    commit (ahead by 1), and push a different commit to origin (behind by 1);
+#    the hook fetches and reports the diverged state.
+mk_origin o8
+R8="$TMP/r8"; g clone -q "$BARE" "$R8"
+printf 'local\n' >> "$R8/f"; g -C "$R8" add f; g -C "$R8" commit -q -m local   # ahead by 1
+commit_push "$SEED" "c2"                                                        # origin moves -> behind by 1
+run "$R8" "$TMP/s8"
+if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | jq -e '.additionalContext | test("diverged") and test("rebase")' >/dev/null 2>&1; then
+  pass; else fail "diverged: expected divergence notice, got RC=$RC OUT=$OUT"; fi
 
 echo "─────────────────────────────────────────────" >&2
 if [[ $FAIL -gt 0 ]]; then echo "FAILED: ${FAIL} failed, ${PASS} passed" >&2; exit 1; fi

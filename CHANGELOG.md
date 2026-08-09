@@ -2,7 +2,7 @@
 
 ### Hooks — check-git-sync (SessionStart sync-before-work warning)
 
-New `hooks/check-git-sync.sh`, wired as a second Tessl `SessionStart` hook (#261). It fetches origin (time-bounded, throttled to once per `SYNC_THROTTLE_HOURS` — default 1h — per repo) and, when the local default branch trails `origin/<default>`, injects a short "sync before working" notice via `additionalContext`. Informative only — never blocks (always exits 0), degrades to a silent no-op outside a git repo, without an `origin` remote, without a local default branch, or when the fetch fails.
+New `hooks/check-git-sync.sh`, wired as a second Tessl `SessionStart` hook (#261). It fetches origin (time-bounded, throttled to once per `SYNC_THROTTLE_HOURS` — default 1h — per repo) and, when the local default branch is behind `origin/<default>`, injects a short "sync before working" notice via `additionalContext`. A diverged branch (both ahead and behind) gets a distinct notice recommending a rebase rather than a fast-forward. Informative only — never blocks (always exits 0), degrades to a silent no-op outside a git repo, without an `origin` remote, without a local default branch, or when the fetch fails.
 
 This mechanizes `rules/sync-before-work.md`, which prescribed fetch-before-work but relied on the agent remembering; stale-checkout ("main is behind") recurred in real work. The remote default is resolved from `origin/HEAD` (falling back to `main`/`master` among the remote-tracking refs), and the behind comparison runs even on throttled sessions against the last-fetched ref, so staleness surfaces without a network call every session.
 

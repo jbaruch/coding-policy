@@ -56,10 +56,22 @@ if ! [[ "$THROTTLE_HOURS" =~ ^[0-9]+$ ]]; then
 fi
 
 # Resolve the remote default branch. Primary path: origin/HEAD's symbolic ref
-# (set at clone time). Fallback: probe the conventional names among the
-# remote-tracking refs we already have.
-db="$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null || true)"
-db="${db#origin/}"
+# (set at clone time). `git symbolic-ref --quiet` exits 0 when resolved and 1
+# for the expected no-symref case (origin/HEAD absent or not symbolic); any
+# other exit is a real git failure and is surfaced, not swallowed as "no
+# default" (rules/error-handling.md — distinguish an expected non-result from a
+# tool failure).
+db=""
+if db="$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null)"; then
+  db="${db#origin/}"
+else
+  rc=$?
+  db=""
+  if (( rc != 1 )); then
+    warn "git symbolic-ref failed (exit ${rc}) resolving origin/HEAD — falling back to name probe"
+  fi
+fi
+# Fallback: probe the conventional names among the remote-tracking refs we have.
 if [[ -z "$db" ]]; then
   for cand in main master; do
     if git show-ref --verify --quiet "refs/remotes/origin/$cand"; then db="$cand"; break; fi
@@ -140,19 +152,28 @@ if (( should_fetch )); then
     warn "git fetch origin failed or timed out — check connectivity; comparing against the last-fetched origin/${db}"
 fi
 
-# Compare the local default branch against its remote-tracking ref. A missing
+# Compare the local default branch against its remote-tracking ref. --left-right
+# --count on a three-dot range yields "<ahead>\t<behind>" — ahead = local-only
+# commits, behind = origin-only commits — so a diverged branch (both > 0) can be
+# distinguished from one that is strictly behind (fast-forwardable). A missing
 # origin ref or a rev-list failure is surfaced, not swallowed as "up to date".
-if ! behind="$(git rev-list --count "refs/heads/${db}..refs/remotes/origin/${db}" 2>/dev/null)"; then
+if ! counts="$(git rev-list --left-right --count "refs/heads/${db}...refs/remotes/origin/${db}" 2>/dev/null)"; then
   warn "could not compare ${db} against origin/${db} — run \`git status\` to inspect; skipping sync check"
   exit 0
 fi
-if ! [[ "$behind" =~ ^[0-9]+$ ]]; then
-  warn "unexpected non-numeric behind-count '${behind}' for ${db} — run \`git status\` to inspect; skipping sync check"
+ahead="${counts%%[[:space:]]*}"
+behind="${counts##*[[:space:]]}"
+if ! [[ "$ahead" =~ ^[0-9]+$ && "$behind" =~ ^[0-9]+$ ]]; then
+  warn "unexpected ahead/behind counts '${counts}' for ${db} — run \`git status\` to inspect; skipping sync check"
   exit 0
 fi
 (( behind > 0 )) || exit 0
 
-notice="Local \`${db}\` is ${behind} commit(s) behind \`origin/${db}\` — sync before working (rules/sync-before-work.md): \`git fetch origin\`, then fast-forward \`${db}\` to \`origin/${db}\`."
+if (( ahead > 0 )); then
+  notice="Local \`${db}\` has diverged from \`origin/${db}\` (${behind} behind, ${ahead} ahead) — reconcile before working (rules/sync-before-work.md): \`git fetch origin\`, then rebase \`${db}\` onto \`origin/${db}\` (a fast-forward won't apply)."
+else
+  notice="Local \`${db}\` is ${behind} commit(s) behind \`origin/${db}\` — sync before working (rules/sync-before-work.md): \`git fetch origin\`, then fast-forward \`${db}\` to \`origin/${db}\`."
+fi
 
 command -v jq >/dev/null 2>&1 || { warn "jq not found — install jq to emit the sync notice; behind by ${behind}"; exit 0; }
 if ! jq -n --arg c "$notice" '{additionalContext: $c}'; then
