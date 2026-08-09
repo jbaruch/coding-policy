@@ -1,6 +1,6 @@
 {
   "name": "jbaruch/coding-policy",
-  "version": "0.3.139",
+  "version": "0.3.140",
   "description": "General-purpose coding policy for Baruch's AI agents",
   "private": false,
   "skills": [
@@ -42,7 +42,9 @@
           {
             "type": "command",
             "command": "bash",
-            "args": ["${TESSL_PLUGIN_DIR}/hooks/check-policy-freshness.sh"]
+            "args": [
+              "${TESSL_PLUGIN_DIR}/hooks/check-policy-freshness.sh"
+            ]
           }
         ]
       }
