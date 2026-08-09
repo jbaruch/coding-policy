@@ -18,7 +18,8 @@
 #   EVENT_BEFORE    github.event.before
 #   CREDIT_OUTAGE   fail | skip                        (default fail)
 #   WORKSPACE       tessl workspace, or empty to derive it from the
-#                   consumer's plugin manifest name (<workspace>/<plugin>)
+#                   consumer's plugin manifest name (<workspace>/<plugin>).
+#                   Deriving needs `jq`; setting this skips the parse.
 #   GITHUB_OUTPUT / GITHUB_STEP_SUMMARY  runner-provided sinks (optional
 #                   off-runner; default to /dev/null)
 #
@@ -61,6 +62,11 @@ resolve_workspace() {
   if [ -n "$WORKSPACE" ]; then
     printf '%s' "$WORKSPACE"
     return 0
+  fi
+
+  if ! command -v jq >/dev/null; then
+    echo "::error::Deriving the tessl workspace from the plugin manifest needs \`jq\`, which is not on PATH. Install it (ubuntu: apt-get install -y jq, macOS: brew install jq), or set the action's \`workspace\` input — that skips the manifest parse entirely." >&2
+    return 2
   fi
 
   local manifest=""

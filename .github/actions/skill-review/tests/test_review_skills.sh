@@ -347,6 +347,21 @@ echo '{"name":"widget"}' > "$WS_FIXTURE/unqualified/.tessl-plugin/plugin.json"
 resolve_in "$WS_FIXTURE/unqualified" > "$FIXTURE/ws.out" 2>&1
 assert_rc_value $? 2 "workspace: a name with no workspace prefix is a setup error"
 
+# jq is only needed to PARSE a manifest. A consumer that sets the workspace
+# explicitly must never be forced to install it — an empty PATH proves the
+# derive path is the only one that touches jq.
+( cd "$WS_FIXTURE/plugin" && PATH="" WORKSPACE="explicitws" resolve_workspace ) \
+  > "$FIXTURE/ws.out" 2>&1
+assert_rc_value $? 0 "workspace: an explicit value needs no jq"
+assert_eq "$(cat "$FIXTURE/ws.out")" "explicitws" "workspace: the explicit value is used verbatim"
+
+( cd "$WS_FIXTURE/plugin" && PATH="" WORKSPACE="" MANIFEST=".tessl-plugin/plugin.json" \
+    LEGACY_MANIFEST="tile.json" resolve_workspace ) > "$FIXTURE/ws.out" 2>&1
+assert_rc_value $? 2 "workspace: deriving without jq is a setup error"
+assert_contains "$(cat "$FIXTURE/ws.out")" "jq" "workspace: the diagnostic names the missing tool"
+assert_contains "$(cat "$FIXTURE/ws.out")" "apt-get install" "workspace: the diagnostic says how to install it"
+assert_contains "$(cat "$FIXTURE/ws.out")" "set the action's" "workspace: the diagnostic offers the no-jq escape hatch"
+
 # An unresolvable workspace must fail BEFORE any review, and as a setup error
 # (2), never as a per-skill review failure.
 DRIVE_WORKSPACE="" MANIFEST="$WS_FIXTURE/none/absent.json" \

@@ -16,6 +16,10 @@ description: |
     - `tessl` CLI on PATH (typically via `tesslio/setup-tessl@v2`).
     - Repository checked out with full history reachable from BASE
       (typically `actions/checkout@v4` with `fetch-depth: 0`).
+    - `jq` on PATH, ONLY when the `workspace` input is empty and the
+      workspace is derived from the plugin manifest. Preinstalled on
+      GitHub-hosted runners; on a self-hosted runner either install it
+      or set `workspace` explicitly, which skips the parse entirely.
 
 inputs:
   threshold:
