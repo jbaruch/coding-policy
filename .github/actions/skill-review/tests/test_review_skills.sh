@@ -47,12 +47,18 @@ PASS_COUNT=0
 # they report (rules/error-handling.md setup-failure clause).
 FIXTURE=$(mktemp -d -t skill-review-test.XXXXXX) \
   || { echo "fatal: could not create fixture dir" >&2; exit 2; }
+# Workspace-resolution fixtures live OUTSIDE $FIXTURE: that dir doubles as
+# SKILLS_DIR, so a subdirectory there is discovered as a skill and would show
+# up in identify_skills' listing.
+WS_FIXTURE=$(mktemp -d -t skill-review-ws.XXXXXX) \
+  || { echo "fatal: could not create workspace fixture dir" >&2; exit 2; }
 cleanup_tmp() {
-  if [[ -n "${FIXTURE:-}" ]]; then
-    if ! rm -rf "$FIXTURE"; then
-      echo "warning: could not remove temp dir $FIXTURE — remove it by hand" >&2
+  local dir
+  for dir in "${FIXTURE:-}" "${WS_FIXTURE:-}"; do
+    if [[ -n "$dir" ]] && ! rm -rf "$dir"; then
+      echo "warning: could not remove temp dir $dir — remove it by hand" >&2
     fi
-  fi
+  done
   return 0
 }
 trap cleanup_tmp EXIT
@@ -77,7 +83,9 @@ MOCK_CALLS_FILE="$FIXTURE/tessl-calls.log"
 # command substitution shellcheck cannot trace), never directly here.
 # shellcheck disable=SC2329
 tessl() {
-  echo x >> "$MOCK_CALLS_FILE"
+  # Full argv, not a tally: `wc -l` still counts calls, and the args are what
+  # the --workspace regression was actually about.
+  echo "$*" >> "$MOCK_CALLS_FILE"
   local path="${!#}"
   case "$MOCK_MODE" in
     success) return 0 ;;
@@ -152,11 +160,17 @@ drive() {
   : > "$MOCK_CALLS_FILE"
   export SKILLS_DIR="$FIXTURE" THRESHOLD="85" CREDIT_OUTAGE="$mode"
   export GITHUB_STEP_SUMMARY="$FIXTURE/summary.txt"; : > "$GITHUB_STEP_SUMMARY"
+  # Pinned, not derived: without this these cases would resolve the workspace
+  # from whatever manifest happens to sit in the CWD — the repo's own, when the
+  # suite runs from the repo root — and would pass for a reason unrelated to
+  # what they assert. Resolution gets its own block below.
+  export WORKSPACE="${DRIVE_WORKSPACE-testws}"
   UNREVIEWED=()
   run_reviews "$@" > "$FIXTURE/run.out" 2>&1
   DRIVE_RC=$?
   DRIVE_OUT="$(cat "$FIXTURE/run.out")"
   MOCK_CALLS=$(wc -l < "$MOCK_CALLS_FILE" | tr -d ' ')
+  MOCK_ARGS="$(cat "$MOCK_CALLS_FILE")"
 }
 
 assert_rc() {
@@ -167,6 +181,18 @@ assert_rc() {
     FAIL_COUNT=$((FAIL_COUNT + 1))
     echo "FAIL: $name — expected rc $want, got $DRIVE_RC" >&2
     echo "  output: $DRIVE_OUT" >&2
+  fi
+}
+
+# Same check for a directly-invoked function, whose rc is passed in rather
+# than left in $DRIVE_RC by drive().
+assert_rc_value() {
+  local got="$1" want="$2" name="$3"
+  if [[ "$got" -eq "$want" ]]; then
+    PASS_COUNT=$((PASS_COUNT + 1))
+  else
+    FAIL_COUNT=$((FAIL_COUNT + 1))
+    echo "FAIL: $name — expected rc $want, got $got" >&2
   fi
 }
 
@@ -276,6 +302,58 @@ MOCK_MODE="success"; drive skip deleted
 assert_rc 0 "deleted skill: skipped, no failure"
 assert_eq "$MOCK_CALLS" "0" "deleted skill: tessl never invoked"
 assert_unreviewed "" "deleted skill: nothing unreviewed"
+
+# --- workspace resolution (the flag that broke every consumer) ---
+#
+# `tessl review run` requires --workspace. Every call here omitted it, and the
+# gap stayed invisible because a publish with no changed skills never reaches
+# the review call — so the action only failed the first time a consumer
+# actually changed a skill (jbaruch/tripit-api run 31297263155).
+
+MOCK_MODE="success"; drive skip alpha
+assert_contains "$MOCK_ARGS" "--workspace testws" "workspace: the flag reaches tessl"
+
+# Resolution from a manifest, with the CWD controlled so nothing leaks in from
+# the repo the suite happens to run in.
+resolve_in() {
+  local dir="$1"
+  ( cd "$dir" && WORKSPACE="" MANIFEST=".tessl-plugin/plugin.json" \
+      LEGACY_MANIFEST="tile.json" resolve_workspace 2>&1 )
+}
+
+mkdir -p "$WS_FIXTURE/plugin/.tessl-plugin"
+echo '{"name":"acme/widget","version":"1.0.0"}' > "$WS_FIXTURE/plugin/.tessl-plugin/plugin.json"
+assert_eq "$(resolve_in "$WS_FIXTURE/plugin")" "acme" "workspace: derived from the plugin manifest name"
+
+mkdir -p "$WS_FIXTURE/legacy"
+echo '{"name":"legacyws/old"}' > "$WS_FIXTURE/legacy/tile.json"
+assert_eq "$(resolve_in "$WS_FIXTURE/legacy")" "legacyws" "workspace: falls back to tile.json"
+
+# The primary manifest wins when both exist — a repo mid-migration must not
+# publish reviews against its stale workspace.
+mkdir -p "$WS_FIXTURE/both/.tessl-plugin"
+echo '{"name":"newws/widget"}' > "$WS_FIXTURE/both/.tessl-plugin/plugin.json"
+echo '{"name":"oldws/widget"}' > "$WS_FIXTURE/both/tile.json"
+assert_eq "$(resolve_in "$WS_FIXTURE/both")" "newws" "workspace: the current manifest wins over the legacy one"
+
+mkdir -p "$WS_FIXTURE/none"
+resolve_in "$WS_FIXTURE/none" > "$FIXTURE/ws.out" 2>&1
+assert_rc_value $? 2 "workspace: no manifest is a setup error"
+assert_contains "$(cat "$FIXTURE/ws.out")" "workspace" "workspace: the diagnostic names what is missing"
+assert_contains "$(cat "$FIXTURE/ws.out")" '`workspace` input' "workspace: the diagnostic names the override"
+
+mkdir -p "$WS_FIXTURE/unqualified/.tessl-plugin"
+echo '{"name":"widget"}' > "$WS_FIXTURE/unqualified/.tessl-plugin/plugin.json"
+resolve_in "$WS_FIXTURE/unqualified" > "$FIXTURE/ws.out" 2>&1
+assert_rc_value $? 2 "workspace: a name with no workspace prefix is a setup error"
+
+# An unresolvable workspace must fail BEFORE any review, and as a setup error
+# (2), never as a per-skill review failure.
+DRIVE_WORKSPACE="" MANIFEST="$WS_FIXTURE/none/absent.json" \
+  LEGACY_MANIFEST="$WS_FIXTURE/none/absent-legacy.json" \
+  MOCK_MODE="success" drive skip alpha
+assert_rc 2 "workspace: unresolvable is exit 2, not a review failure"
+assert_eq "$MOCK_CALLS" "0" "workspace: tessl is never invoked without a workspace"
 
 # --- input validation: an unknown mode is a setup error, not a silent fail ---
 

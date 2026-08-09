@@ -17,6 +17,8 @@
 #   EVENT_NAME      github.event_name
 #   EVENT_BEFORE    github.event.before
 #   CREDIT_OUTAGE   fail | skip                        (default fail)
+#   WORKSPACE       tessl workspace, or empty to derive it from the
+#                   consumer's plugin manifest name (<workspace>/<plugin>)
 #   GITHUB_OUTPUT / GITHUB_STEP_SUMMARY  runner-provided sinks (optional
 #                   off-runner; default to /dev/null)
 #
@@ -34,10 +36,56 @@ BASE_OVERRIDE="${BASE_OVERRIDE:-}"
 EVENT_NAME="${EVENT_NAME:-}"
 EVENT_BEFORE="${EVENT_BEFORE:-}"
 CREDIT_OUTAGE="${CREDIT_OUTAGE:-fail}"
+WORKSPACE="${WORKSPACE:-}"
+MANIFEST="${MANIFEST:-.tessl-plugin/plugin.json}"
+LEGACY_MANIFEST="${LEGACY_MANIFEST:-tile.json}"
 
 # Skills skipped because the tessl org was out of credits. Populated by
 # run_reviews; read by main for the action output.
 UNREVIEWED=()
+
+# The workspace that `tessl review run --workspace` requires.
+#
+# The flag is mandatory in the tessl CLI and every call here omitted it, so the
+# action died with "Missing required flag: --workspace" the first time a
+# consumer actually changed a skill. It stayed latent because a run with no
+# changed skills never reaches the review call, and most publishes change no
+# skill.
+#
+# Derived from the consumer's own manifest rather than configured: a plugin
+# `name` is `<workspace>/<plugin>`, so the workspace is already declared there,
+# and a second place to state it is a second place for it to drift. The
+# WORKSPACE input overrides for a consumer whose review workspace legitimately
+# differs from its publish workspace.
+resolve_workspace() {
+  if [ -n "$WORKSPACE" ]; then
+    printf '%s' "$WORKSPACE"
+    return 0
+  fi
+
+  local manifest=""
+  if [ -f "$MANIFEST" ]; then
+    manifest="$MANIFEST"
+  elif [ -f "$LEGACY_MANIFEST" ]; then
+    manifest="$LEGACY_MANIFEST"
+  else
+    echo "::error::Cannot resolve the tessl workspace: neither ${MANIFEST} nor ${LEGACY_MANIFEST} exists. Set the action's \`workspace\` input." >&2
+    return 2
+  fi
+
+  local name=""
+  if ! name="$(jq -r '.name // empty' "$manifest")"; then
+    echo "::error::Cannot read ${manifest} as JSON. Fix the manifest, or set the action's \`workspace\` input." >&2
+    return 2
+  fi
+  case "$name" in
+    */*) printf '%s' "${name%%/*}" ;;
+    *)
+      echo "::error::${manifest} has name '${name}', expected '<workspace>/<plugin>'. Fix the manifest, or set the action's \`workspace\` input." >&2
+      return 2
+      ;;
+  esac
+}
 
 # True only when review output carries an out-of-credits billing signature.
 # Precision matters: this is the sole failure the skip mode tolerates, so a
@@ -97,6 +145,13 @@ run_reviews() {
   esac
 
   UNREVIEWED=()
+
+  # Resolved once, before any review: a workspace that cannot be resolved is a
+  # setup error, and discovering it per-skill would report it as a review
+  # failure for whichever skill happened to be first.
+  local workspace
+  workspace="$(resolve_workspace)" || return 2
+
   local skill review_out rc
   for skill in "$@"; do
     [ -f "$SKILLS_DIR/$skill/SKILL.md" ] || { echo "  - ${skill}: deleted, skipping"; continue; }
@@ -107,7 +162,7 @@ run_reviews() {
     # toggling `-e` (which would leak to callers); never blanket-swallow —
     # only the credit signature under skip-mode is tolerated below.
     rc=0
-    review_out="$(tessl review run --threshold "$THRESHOLD" "$SKILLS_DIR/$skill/SKILL.md" 2>&1)" || rc=$?
+    review_out="$(tessl review run --workspace "$workspace" --threshold "$THRESHOLD" "$SKILLS_DIR/$skill/SKILL.md" 2>&1)" || rc=$?
     printf '%s\n' "$review_out"
     echo "::endgroup::"
     [ "$rc" -eq 0 ] && continue
