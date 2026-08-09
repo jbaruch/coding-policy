@@ -31,7 +31,9 @@ alwaysApply: true
 ## Runtime-Managed Manifest Carve-Out
 
 - Narrow exception for runtime-managed manifests
-- Applies when a tool rewrites a manifest in-place at runtime AND the resolved-version state is gitignored
+- Applies when a tool produces the resolved-version state at runtime and gitignores it, in either shape:
+  - the tool rewrites the manifest in place
+  - the manifest holds a stable floating specifier and the tool resolves it into a separate gitignored resolved state
 - The manifest may use a floating-but-explicit specifier (e.g., `"version": "latest"`) and skip the lock file
 - Preconditions (each covered manifest, all required):
   1. An authority-of-record rule names the carve-out and lists every covered manifest, in the project's own plugin or in a shared plugin the project installs (whose rules load as the project's policy)
