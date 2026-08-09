@@ -1,5 +1,11 @@
 # Changelog
 
+### Hooks — stop-handoff-hygiene now runs on Codex too
+
+Dual-wire the `stop-handoff-hygiene` Stop hook to Codex via `nativeHooks.codex` in `.tessl-plugin/plugin.json` (#265). Codex's hooks system matches Claude Code's Stop contract — `decision:"block"` continues the turn with `reason` as the next prompt, guarded by a `stop_hook_active` stdin boolean — so the same script runs unchanged on both agents.
+
+The two `nativeHooks` entries differ in shape by necessity: Claude Code's native hook config takes `command` + an `args[]` array, but Codex's takes a single `command` string (its config has no `args` field and shell-parses the string itself). A `command:"bash"` + `args:[...]` entry would run bare `bash` on Codex, so `nativeHooks.codex` uses `bash "${TESSL_PLUGIN_DIR}/hooks/stop-handoff-hygiene.sh"` as one string. Verified by installing into scratch consumers with `--agent claude-code --agent codex` and inspecting the written `.claude/settings.json` and `.codex/config.toml` (Codex entry lands as `[[hooks.Stop]]`, `enabled = true`, trusted).
+
 ## 0.3.142 — 2026-08-09
 
 ### Hooks — stop-handoff-hygiene (Stop pre-handoff gate)

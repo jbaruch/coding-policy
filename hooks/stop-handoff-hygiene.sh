@@ -11,10 +11,17 @@
 # (that auto-cleans REMOTE branches; this covers the LOCAL branches/worktrees it
 # never touches).
 #
-# Why nativeHooks.claude-code (not the portable `hooks` tier): blocking a stop is
-# an agent-specific contract with no portable consensus form — Tessl translates
-# `additionalContext` (informational), not a stop-block. This hook emits Claude
-# Code's native Stop decision, so it ships under nativeHooks.claude-code.
+# Why nativeHooks (not the portable `hooks` tier): blocking a stop is an
+# agent-specific contract with no portable consensus form — the `hooks` tier
+# wraps the script in `tessl hook run`, which translates `additionalContext`
+# (informational), not a stop-block. nativeHooks writes the entry raw to each
+# agent's native config, so the agent reads the script's `{"decision":"block"}`
+# directly. Claude Code and Codex share the same Stop contract (decision/reason/
+# stop_hook_active), so the SAME script is dual-wired. The two entries differ in
+# shape by necessity: Claude Code's config takes command + args[], Codex's takes
+# a single command string (its config has no args field), so nativeHooks.codex
+# uses `bash "<path>"` as one string. Verified by installing into scratch
+# consumers and inspecting .claude/settings.json and .codex/config.toml.
 #
 # Blocking findings (gate the stop, once):
 #   - Leftover local branches whose upstream is gone (merged then remote-deleted).
