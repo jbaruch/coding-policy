@@ -95,7 +95,7 @@ It returns the full `poll-pr-reviews.sh` snapshot plus a `watch` object — `{"r
 - `dirty` (exit 0) — the branch conflicts with `main` and GitHub skipped the `pull_request:` workflows. Rebase onto current `main`, resolve, force-push, then re-run the watcher — the push re-fires the missed workflows.
 - `pending_at_budget` (exit 1) — a signal never arrived within the budget (a reviewer that never posted, CI stuck pending). Inspect which field is still `none`/`pending` in the returned snapshot. If the policy reviewer never posted on coding-policy's own PRs, check the `review-codex.yml` run (`gh run list --workflow review-codex.yml`) — a missing or expired `CODEX_AUTH_JSON` secret is the usual cause. On a consumer repo, confirm `review-trigger.yml` dispatched and the fleet App ran in coding-policy; its scheduled poll is the backstop. Re-run the watcher to keep waiting once the cause is understood.
 
-## Step 6 — Address Feedback; No Re-request Needed
+## Step 6 — Address Feedback
 
 - **Read every review in full first.** Read each reviewer's `reviews.*.body` and every inline comment body before judging any item — a `COMMENTED` state or zero inline comments is not a license to skip the body (see `rules/reviewer-feedback-reading.md`)
 - **Then act by severity** (see `rules/review-severity.md`): blocking findings — fix now; advisory findings — acknowledge, fold in only when a blocking round is already happening, else defer to a follow-up. Never burn a dedicated re-review round on a lone advisory
@@ -106,7 +106,8 @@ It returns the full `poll-pr-reviews.sh` snapshot plus a `watch` object — `{"r
   - Declined: `Declining — <reason with cited evidence>` (em dash `—`, not hyphen or period)
   - Advisory deferred: `Acknowledged — deferred to <follow-up ref>` (em dash `—`; names where it is tracked)
 - Push fixes to the same branch
-- **The policy reviewer re-runs automatically on every push** (coding-policy via `review-codex.yml` `pull_request: synchronize`; consumers via `review-trigger.yml` re-dispatching the fleet App); Copilot needs a manual re-request each push via `skills/release/request-copilot-review.sh` (same args as Step 4).
+- **Re-request Copilot after every push** via `skills/release/request-copilot-review.sh` (same args as Step 4). Copilot does not re-post on its own.
+- The policy reviewer re-runs automatically on every push (coding-policy via `review-codex.yml` `pull_request: synchronize`; consumers via `review-trigger.yml` re-dispatching the fleet App). No manual re-request.
 - Repeat Step 5 until the policy reviewer carries no blocking finding — `APPROVED`, or `COMMENTED` with its body read and only advisories — and every thread has a reply.
 
 ## Step 7 — Merge + Cleanup
