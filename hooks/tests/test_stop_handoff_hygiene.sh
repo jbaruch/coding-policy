@@ -170,7 +170,7 @@ main() {
   printf '#!/usr/bin/env bash\necho hi\n' > "$TMP/r10/new.sh" || die "r10 new.sh failed"
   local engbin="$TMP/engbin"; mkdir -p "$engbin" || die "engbin mkdir failed"
   local u p2
-  for u in bash git jq cat; do
+  for u in bash git jq cat mktemp rm; do
     p2="$(command -v "$u")" || die "no $u on PATH"
     ln -s "$p2" "$engbin/$u" || die "symlink $u failed"
   done

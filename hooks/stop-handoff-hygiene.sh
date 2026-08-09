@@ -72,16 +72,18 @@ main() {
 
   command -v git >/dev/null 2>&1 || { warn "git not found — allowing stop"; return 0; }
 
-  # Outside a work tree there is nothing to check. `--is-inside-work-tree` exits
-  # 128 ("not a git repository") outside a repo — the common non-repo session, an
-  # expected non-result whose diagnostic we silence deliberately. Proceed only on
-  # a literal "true"; a bare repo / gitdir ("false") and the non-repo case both
-  # allow silently. A Stop gate must never wedge or spam a non-repo handoff.
-  inside="$(git rev-parse --is-inside-work-tree 2>/dev/null)" || inside="__notrepo__"
-  case "$inside" in
-    true) : ;;
-    *) return 0 ;;
-  esac
+  # Outside a work tree there is nothing to check. `--is-inside-work-tree` prints
+  # true/false and exits 0 inside any repo; exit 128 is the expected "not a git
+  # repository" non-result (silent allow). Any other exit is a real failure and
+  # is surfaced before failing open (rules/error-handling.md). A bare repo /
+  # gitdir ("false") also allows silently.
+  rc=0
+  inside="$(git rev-parse --is-inside-work-tree 2>/dev/null)" || rc=$?
+  if (( rc != 0 )); then
+    (( rc == 128 )) || warn "git rev-parse --is-inside-work-tree failed (exit ${rc}) — allowing stop"
+    return 0
+  fi
+  [[ "$inside" == "true" ]] || return 0
 
   collect_gone_branches
   collect_worktrees
@@ -111,20 +113,32 @@ main() {
   return 0
 }
 
-# Populate gone_branches with local branches whose upstream is [gone].
+# Populate gone_branches with local branches whose upstream is [gone]. Capture
+# for-each-ref's output and exit status so a failure is surfaced, not silently
+# read as "no leftovers" (rules/error-handling.md).
 collect_gone_branches() {
-  local name track
+  local out rc=0 name track
+  out="$(git for-each-ref --format='%(refname:short)%09%(upstream:track)' refs/heads)" || rc=$?
+  if (( rc != 0 )); then
+    warn "git for-each-ref failed (exit ${rc}) — skipping the leftover-branch check"
+    return 0
+  fi
   while IFS=$'\t' read -r name track; do
     [[ "$track" == "[gone]" ]] && gone_branches+=("$name")
-  done < <(git for-each-ref --format='%(refname:short)%09%(upstream:track)' refs/heads)
-  return 0   # a while-read's EOF status is non-zero; don't let it abort under set -e
+  done <<< "$out"
+  return 0
 }
 
 # Populate wt_paths/wt_branches for LINKED worktrees only (the first porcelain
 # record is the main worktree and is skipped). Detached worktrees have no branch
 # and are skipped.
 collect_worktrees() {
-  local line key val cur_path="" cur_branch="" first=1
+  local out rc=0 line key val cur_path="" cur_branch="" first=1
+  out="$(git worktree list --porcelain)" || rc=$?
+  if (( rc != 0 )); then
+    warn "git worktree list failed (exit ${rc}) — skipping the orphaned-worktree check"
+    return 0
+  fi
   flush() {
     if (( first )); then first=0
     elif [[ -n "$cur_branch" ]]; then wt_paths+=("$cur_path"); wt_branches+=("$cur_branch"); fi
@@ -137,15 +151,19 @@ collect_worktrees() {
       worktree) cur_path="$val" ;;
       branch)   cur_branch="${val#refs/heads/}" ;;
     esac
-  done < <(git worktree list --porcelain)
+  done <<< "$out"
   [[ -n "$cur_path" ]] && flush   # flush a trailing record with no blank line
   return 0
 }
 
 # Turn leftover branches and orphaned worktrees into blocking-finding sections.
 build_branch_findings() {
-  local current b p section
-  current="$(git symbolic-ref --quiet --short HEAD 2>/dev/null)" || current=""
+  local current b p section rc=0
+  # symbolic-ref exits 1 for the expected detached-HEAD non-result (no current
+  # branch); any other exit is a real failure and is surfaced.
+  current="$(git symbolic-ref --quiet --short HEAD 2>/dev/null)" || rc=$?
+  (( rc == 0 )) || current=""
+  (( rc == 0 || rc == 1 )) || warn "git symbolic-ref HEAD failed (exit ${rc})"
   if (( ${#leftover[@]} > 0 )); then
     section="Leftover local branches (merged, upstream deleted) — delete them:"
     for b in "${leftover[@]}"; do
@@ -209,23 +227,38 @@ run_changed_diagnostics() {
 # Populate `changed` with uncommitted .sh/.py files: tracked changes vs HEAD (or
 # the index in an unborn repo) plus untracked files, NUL-safe.
 collect_changed_lintable() {
-  local f
+  # NUL-safe capture via a temp file so the producer's exit status stays
+  # observable (a process substitution would hide it); warn on failure and fall
+  # open to whatever was collected (rules/error-handling.md).
+  local f tmp rc=0
+  tmp="$(mktemp)" || { warn "mktemp failed — skipping changed-set diagnostics"; return 0; }
+
+  rc=0
   if git rev-parse --verify -q HEAD >/dev/null 2>&1; then
-    while IFS= read -r -d '' f; do changed+=("$f"); done \
-      < <(git diff --name-only -z --diff-filter=ACMR HEAD -- '*.sh' '*.py')
+    git diff --name-only -z --diff-filter=ACMR HEAD -- '*.sh' '*.py' > "$tmp" || rc=$?
   else
-    while IFS= read -r -d '' f; do changed+=("$f"); done \
-      < <(git diff --name-only -z --cached --diff-filter=ACMR -- '*.sh' '*.py')
+    git diff --name-only -z --diff-filter=ACMR --cached -- '*.sh' '*.py' > "$tmp" || rc=$?
   fi
-  while IFS= read -r -d '' f; do changed+=("$f"); done \
-    < <(git ls-files -z --others --exclude-standard -- '*.sh' '*.py')
+  (( rc == 0 )) || warn "git diff failed (exit ${rc}) — changed-set diagnostics may be incomplete"
+  while IFS= read -r -d '' f; do changed+=("$f"); done < "$tmp"
+
+  rc=0
+  git ls-files -z --others --exclude-standard -- '*.sh' '*.py' > "$tmp" || rc=$?
+  (( rc == 0 )) || warn "git ls-files failed (exit ${rc}) — untracked changes may be missed"
+  while IFS= read -r -d '' f; do changed+=("$f"); done < "$tmp"
+
+  rm -f "$tmp" || warn "could not remove temp file ${tmp}"
   return 0
 }
 
 # A dirty working tree is report-only — often intentional WIP, never blocks alone.
 check_dirty_tree() {
-  local status
-  status="$(git status --porcelain)" || return 0
+  local status rc=0
+  status="$(git status --porcelain)" || rc=$?
+  if (( rc != 0 )); then
+    warn "git status failed (exit ${rc}) — skipping the dirty-tree report"
+    return 0
+  fi
   [[ -n "$status" ]] && reports+=("Working tree has uncommitted changes — commit, stash, or discard before handoff.")
   return 0
 }
