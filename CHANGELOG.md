@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.147 — 2026-08-09
+
 ### Skills — rename install-reviewer → onboard-repo, add bootstrap hygiene
 
 Renamed the `install-reviewer` skill to `onboard-repo` to reflect its broadened role: it now bootstraps a consumer repo onto coding-policy, not just the reviewer. A new Step 5 (`tessl-hygiene.sh`) pins every `jbaruch/*` dependency in `tessl.json` to `latest` — stopping the auto-update churn that rewrote a pinned version on each coding-policy release; third-party pins (`tessl-labs/*`, `tessl/npm-*`) are left as-is — and ensures `.gitignore` carries the tessl-generated-artifacts block so agents never commit per-developer / per-agent output (`.tessl/`, per-agent skills/hooks/mcp, `.codex/config.toml`, `.gemini/settings.json`, …). `AGENTS.md` / `CLAUDE.md` / `GEMINI.md` are deliberately kept committed — tessl appends to them and they don't churn. The `commit` step now also stages `tessl.json` and `.gitignore` when present so an onboard lands in one commit.
