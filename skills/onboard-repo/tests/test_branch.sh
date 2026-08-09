@@ -5,7 +5,7 @@
 # so test order doesn't matter and there's no shared mutable state per
 # rules/testing-standards.md.
 #
-# Run: bash skills/install-reviewer/tests/test_branch.sh
+# Run: bash skills/onboard-repo/tests/test_branch.sh
 # Exit 0 on all-pass; non-zero with a per-test diagnostic on failure.
 
 set -uo pipefail

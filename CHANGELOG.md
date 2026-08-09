@@ -1,5 +1,13 @@
 # Changelog
 
+### Skills — rename install-reviewer → onboard-repo, add bootstrap hygiene
+
+Renamed the `install-reviewer` skill to `onboard-repo` to reflect its broadened role: it now bootstraps a consumer repo onto coding-policy, not just the reviewer. A new Step 5 (`tessl-hygiene.sh`) pins every `jbaruch/*` dependency in `tessl.json` to `latest` — stopping the auto-update churn that rewrote a pinned version on each coding-policy release; third-party pins (`tessl-labs/*`, `tessl/npm-*`) are left as-is — and ensures `.gitignore` carries the tessl-generated-artifacts block so agents never commit per-developer / per-agent output (`.tessl/`, per-agent skills/hooks/mcp, `.codex/config.toml`, `.gemini/settings.json`, …). `AGENTS.md` / `CLAUDE.md` / `GEMINI.md` are deliberately kept committed — tessl appends to them and they don't churn. The `commit` step now also stages `tessl.json` and `.gitignore` when present so an onboard lands in one commit.
+
+All live references updated (`.tessl-plugin/plugin.json`, README, `rules/skill-authoring.md`, `skills/release/` cross-references, the skill's own scripts/tests/mount paths); historical CHANGELOG entries keep the old name. The `tessl-hygiene` script is idempotent (a dep already at `latest`, and an already-present block, are no-ops) and runs identically in install and upgrade modes. Preflight now refuses pre-existing uncommitted edits to `tessl.json`/`.gitignore` so the onboard commit stays focused.
+
+Pinning `jbaruch/*` to `latest` is sanctioned by the Runtime-Managed Manifest Carve-Out (`rules/dependency-management.md`): tessl rewrites the resolved state into the gitignored `.tessl/`. That carve-out's precondition 2 now accepts a plugin-shipped `SessionStart` hook as the deterministic check (alongside a deploy-time gate), and a new authority-of-record section names consumer `tessl.json` as covered. The enforcement is a new `hooks/check-tessl-latest.sh` `SessionStart` hook that surfaces any `jbaruch/*` dependency not at `latest` — no per-consumer CI workflow needed, since coding-policy ships the hook to every consumer.
+
 ## 0.3.146 — 2026-08-09
 
 ### Actions — skill-review passes the workspace tessl now requires
@@ -13,7 +21,6 @@ The workspace is derived from the consumer's own manifest rather than configured
 `jq` is declared as a prerequisite and validated at the point of use rather than globally: it is needed only to PARSE a manifest, so a consumer that sets the `workspace` input explicitly never touches it and must not be forced to install it. The diagnostic names the install command for both ubuntu and macOS and offers that input as the no-jq escape hatch. Preinstalled on GitHub-hosted runners; the check exists for self-hosted ones.
 
 The test harness had the same latent defect as the code. `drive()` set no workspace, so once resolution existed the existing cases would have resolved it from whatever manifest sat in the CWD — this repo's own, when the suite runs from the repo root — and passed for a reason unrelated to what they assert. `drive()` now pins `WORKSPACE`, the `tessl` mock records full argv instead of a call tally, and resolution gets its own block with the CWD controlled. Verified the way a guard should be: reverting the one-line fix fails exactly the new assertion.
-
 
 ## 0.3.143 — 2026-08-09
 

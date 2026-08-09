@@ -6,7 +6,7 @@
 # plugin-mount path and a fake origin remote (no network, no shared state per
 # rules/testing-standards.md).
 #
-# Run: bash skills/install-reviewer/tests/test_scaffold.sh
+# Run: bash skills/onboard-repo/tests/test_scaffold.sh
 # Exit 0 on all-pass; non-zero with a per-test diagnostic on failure.
 
 set -uo pipefail
@@ -15,7 +15,7 @@ SKILL_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 SCRIPT="${SKILL_DIR}/scaffold.sh"
 [[ -f "$SCRIPT" && -r "$SCRIPT" ]] || { echo "fatal: scaffold.sh not readable at $SCRIPT" >&2; exit 2; }
 
-TEMPLATE_MOUNT=".tessl/plugins/jbaruch/coding-policy/skills/install-reviewer/templates"
+TEMPLATE_MOUNT=".tessl/plugins/jbaruch/coding-policy/skills/onboard-repo/templates"
 TARGETS=(.github/fleet-review-enabled .github/workflows/review-trigger.yml .github/copilot-instructions.md)
 ENV_FILE=".env.example"
 

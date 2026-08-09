@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run all install-reviewer preconditions and report them as one JSON
+# Run all onboard-repo preconditions and report them as one JSON
 # result. The skill invokes this before any mutation so every preflight
 # failure is surfaced together, not one-at-a-time. Checks cover: git
 # worktree, GitHub CLI installation + auth, packaged template presence,
@@ -123,7 +123,7 @@ if (( OVERRIDE_MODE == 1 )); then
 else
   BRANCH="feat/add-coding-policy-review"
 fi
-TEMPLATE_DIR=".tessl/plugins/jbaruch/coding-policy/skills/install-reviewer/templates"
+TEMPLATE_DIR=".tessl/plugins/jbaruch/coding-policy/skills/onboard-repo/templates"
 # `.md` shim on the marker and trigger source: tessl packaging ships only
 # .md/.sh/.json/.py, so a `.yml` or extensionless template never reaches the
 # installed plugin. scaffold.sh strips the shim when it writes the targets.
@@ -292,6 +292,24 @@ check_no_dirty_target_edits() {
   fi
 }
 
+# The tessl-hygiene step (Step 5) rewrites tessl.json and appends to .gitignore,
+# and commit.sh stages them. If either carries uncommitted edits BEFORE onboard
+# runs, the onboard commit would sweep that unrelated work in — refuse so the
+# commit stays focused (rules/commit-conventions.md). Untracked files are fine
+# (nothing committed to sweep in); only tracked, modified ones are refused.
+HYGIENE_PATHS=(tessl.json .gitignore)
+check_no_dirty_hygiene_paths() {
+  local dirty=() t reason
+  for t in "${HYGIENE_PATHS[@]}"; do
+    [[ -e "$t" ]] || continue
+    reason=$(classify_target_dirty "$t")
+    [[ -n "$reason" ]] && dirty+=("$t ($reason)")
+  done
+  if [[ ${#dirty[@]} -gt 0 ]]; then
+    push_failure "no-dirty-hygiene-paths" "onboard would sweep unrelated edits into its commit — these carry uncommitted changes: ${dirty[*]} — commit, stash, or restore them first, then re-run"
+  fi
+}
+
 main() {
   check_in_git_worktree
   check_gh_installed
@@ -305,6 +323,9 @@ main() {
   # so we don't leak confusing git-error diagnostics on top of the real failures.
   if git rev-parse --git-dir >/dev/null 2>&1; then
     check_origin_remote
+    # Both modes run the hygiene step, so both refuse pre-existing dirty
+    # tessl.json / .gitignore.
+    check_no_dirty_hygiene_paths
     if (( OVERRIDE_MODE == 1 )); then
       # Override mode: the upgrade branch may legitimately exist locally
       # (from a prior in-flight upgrade) or remotely (from an open

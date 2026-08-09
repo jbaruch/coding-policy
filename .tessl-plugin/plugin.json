@@ -5,7 +5,7 @@
   "private": false,
   "skills": [
     "skills/release",
-    "skills/install-reviewer",
+    "skills/onboard-repo",
     "skills/adopt-fork-pr",
     "skills/migrate-to-plugin"
   ],
@@ -51,6 +51,13 @@
             "command": "bash",
             "args": [
               "${TESSL_PLUGIN_DIR}/hooks/check-git-sync.sh"
+            ]
+          },
+          {
+            "type": "command",
+            "command": "bash",
+            "args": [
+              "${TESSL_PLUGIN_DIR}/hooks/check-tessl-latest.sh"
             ]
           }
         ]

@@ -7,14 +7,15 @@ Coding policy plugin for Baruch's AI agents. Language-agnostic code quality rule
 ## What's New
 
 - `stop-handoff-hygiene` hook — a `Stop` hook (Claude Code + Codex) that blocks the handoff once (loop-safe via `stop_hook_active`) when it finds leftover local branches (merged, upstream deleted), orphaned worktrees, or diagnostics findings in the changed set; a dirty working tree is reported, not blocked
+- `check-tessl-latest` hook — a Tessl `SessionStart` hook that warns when a consumer's `tessl.json` pins a `jbaruch/*` dependency instead of `latest`; it's the deterministic enforcement for the Runtime-Managed Manifest Carve-Out (`rules/dependency-management.md`). Informative only, never blocks
 - `check-git-sync` hook — a Tessl `SessionStart` hook that fetches origin (throttled) and warns when the local default branch is behind `origin/<default>`, mechanizing `rules/sync-before-work.md`. Informative only, never blocks
 - `check-policy-freshness` hook — a Tessl `SessionStart` hook that runs `tessl outdated` and warns (throttled to once/day) when installed plugins are behind the registry, so repos don't silently drift onto stale policy. Informative only, never blocks
 - Policy review runs on the OpenAI Codex CLI authenticated by a ChatGPT subscription (no API key) via `.github/workflows/review-codex.yml`, reviewing every PR against the in-tree `rules/*.md`; Copilot stays as the complementary code-quality lane
 - 24 rules — 18 always-on, 6 conditional (scoped via `applyTo:` to the files where the rule's prescriptions actually fire). Breakdown: 10 covering code quality, 7 covering plugin authoring, 1 covering concurrency, 1 covering review discipline, 1 covering reviewer-feedback reading, 1 covering review severity, 1 covering external-repo action scope, 1 covering response communication, 1 covering merge/ship autonomy
 - `release` skill — structured PR + merge workflow gated on the Codex policy review's blocking findings; Copilot is the complementary code-quality lane and is always advisory
-- `install-reviewer` skill — enroll a consumer repo in the central fleet policy reviewer (the `.github/fleet-review-enabled` marker + the Copilot lane); no per-repo workflow or secrets
+- `onboard-repo` skill (renamed from `install-reviewer`) — bootstrap a consumer repo onto coding-policy: enroll it in the central fleet policy reviewer, pin its `jbaruch/*` tessl deps to `latest`, and add the tessl-generated-artifacts `.gitignore` block so agents never commit per-developer output
 - `adopt-fork-pr` skill — bring a fork PR's branch into the base repo as a same-repo PR the reviewer can run on
-- 0.3.0 added `install-reviewer` upgrade mode (`--override`) — refreshes the reviewer artifacts in place instead of requiring a manual `git rm`-and-rerun
+- 0.3.0 added `onboard-repo` upgrade mode (`--override`) — refreshes the reviewer artifacts in place instead of requiring a manual `git rm`-and-rerun
 - Language-agnostic: works with any stack, no Python/JS assumptions
 
 See [CHANGELOG.md](CHANGELOG.md) for full version history.
@@ -59,7 +60,7 @@ tessl install jbaruch/coding-policy
 | Skill | Description |
 |-------|-------------|
 | [release](skills/release/SKILL.md) | PR creation, Codex (subscription-CLI) policy review + Copilot code-quality review, merge + cleanup workflow |
-| [install-reviewer](skills/install-reviewer/SKILL.md) | Enroll a consumer repo in the central fleet policy reviewer — scaffold the `.github/fleet-review-enabled` marker, a thin `.github/workflows/review-trigger.yml` (fires an immediate PR-time review in `coding-policy`), and `.github/copilot-instructions.md`, then open a PR. The `coding-policy-fleet-reviewer` GitHub App reviews against the `jbaruch/coding-policy` rules with the Codex CLI on a ChatGPT subscription (no API key). The Codex credential lives only in `coding-policy`; the consumer sets one stable `FLEET_DISPATCH_TOKEN` (a narrow PAT). Supports `--override` for in-place upgrades. |
+| [onboard-repo](skills/onboard-repo/SKILL.md) | Bootstrap a consumer repo onto coding-policy, then open a PR. Scaffolds the fleet reviewer (`.github/fleet-review-enabled` marker, a thin `.github/workflows/review-trigger.yml` that fires an immediate PR-time review in `coding-policy`, `.github/copilot-instructions.md`); pins `jbaruch/*` tessl deps to `latest` (third-party pins left as-is); and adds the tessl-generated-artifacts `.gitignore` block (keeping `AGENTS.md`/`CLAUDE.md`/`GEMINI.md` committed). The `coding-policy-fleet-reviewer` GitHub App reviews against the `jbaruch/coding-policy` rules with the Codex CLI (no API key); the Codex credential lives only in `coding-policy`; the consumer sets one `FLEET_DISPATCH_TOKEN` PAT. Supports `--override` for in-place upgrades. |
 | [adopt-fork-pr](skills/adopt-fork-pr/SKILL.md) | Classify a PR by number. Same-repo PRs pass through to the reviewer; fork PRs get adopted into the base repo as a same-repo PR, preserving the contributor's commits. |
 | [migrate-to-plugin](skills/migrate-to-plugin/SKILL.md) | Migrate a legacy `tile.json` plugin to the `.tessl-plugin/plugin.json` form: runs `tessl plugin migrate`, renames `.tileignore`, removes the obsolete `tile.json`, re-lints, then reconciles residual "tile" wording to "plugin" while preserving contract surfaces. |
 
@@ -69,6 +70,7 @@ tessl install jbaruch/coding-policy
 | ---- | ----- | ----------- |
 | [check-policy-freshness](hooks/check-policy-freshness.sh) | SessionStart | Warns (throttled once/day) when installed Tessl plugins are behind the registry — a `tessl update` reminder at session start. Informative only, never blocks. |
 | [check-git-sync](hooks/check-git-sync.sh) | SessionStart | Fetches origin (throttled once/hour per repo) and warns when the local default branch is behind `origin/<default>` — a `rules/sync-before-work.md` reminder at session start. Informative only, never blocks. |
+| [check-tessl-latest](hooks/check-tessl-latest.sh) | SessionStart | Warns when `tessl.json` pins a `jbaruch/*` dependency instead of `latest` — the deterministic enforcement for the Runtime-Managed Manifest Carve-Out (`rules/dependency-management.md`). Third-party pins are out of scope. Informative only, never blocks. |
 | [stop-handoff-hygiene](hooks/stop-handoff-hygiene.sh) | Stop (Claude Code + Codex) | Blocks the handoff once (loop-safe via `stop_hook_active`) on leftover local branches (merged, upstream gone), orphaned worktrees, or diagnostics findings in the changed set (uncommitted `.sh`/`.py`, linted with shellcheck/pyright). A dirty working tree is reported, not blocked. Fail-open. |
 
 ## Philosophy
