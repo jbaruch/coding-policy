@@ -247,12 +247,16 @@ t_files_only_py_skips_shellcheck() {
   assert_eq "pyright invoked once" "1" "$py"
 }
 
-# A present file type whose engine is missing is a setup error (exit 2).
+# A present file type whose engine is missing is a setup error (exit 2). Isolate
+# PATH to a dir holding only bash so the real shellcheck (installed in /usr/bin
+# on CI) can't satisfy the check — the assertion must not depend on the host's
+# system paths.
 t_files_missing_engine_for_present_type_exits_two() {
   local d; d=$(make_files_fixture)
-  rm -f "$d/bin/shellcheck"
+  local nob="$d/nobin"; mkdir -p "$nob"
+  ln -s "$(command -v bash)" "$nob/bash"
   RC=0
-  PATH="$d/bin:/usr/bin:/bin" bash "$RUNNER" --files "$d/a.sh" >/dev/null 2>&1 || RC=$?
+  PATH="$nob" bash "$RUNNER" --files "$d/a.sh" >/dev/null 2>&1 || RC=$?
   rm -rf "$d"
   assert_eq "exit" "2" "$RC"
 }
