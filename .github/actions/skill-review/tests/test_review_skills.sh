@@ -395,8 +395,11 @@ capture_identify() {
 got=$(capture_identify "$FIXTURE" "$FIXTURE" "" "workflow_dispatch" "")
 assert_eq "$got" "$(printf 'alpha\nbeta\ndeleted\nneeds-credits')" "identify_skills: review-all lists every skill dir, sorted"
 
-# A throwaway git tree with a base commit and a HEAD that modifies alpha and
-# adds beta — the diff base is HEAD~1, so both count as changed.
+# A throwaway git tree with NO publish marker: base commit adds alpha + zeta,
+# HEAD modifies alpha and adds beta. There is no bump commit, so on a normal
+# push identify_skills has no authoritative marker and must review EVERY skill
+# (alpha, beta, zeta) — never narrow to github.event.before, which would drop
+# zeta (unchanged since base) and, in the failed-publish case, unreviewed skills.
 GITREPO="$FIXTURE/gitrepo"
 make_git_fixture() {
   rm -rf "$GITREPO"
@@ -408,6 +411,7 @@ make_git_fixture() {
     git config user.email t@e.test
     git config user.name tester
     mkdir -p skills/alpha; echo a > skills/alpha/SKILL.md
+    mkdir -p skills/zeta; echo z > skills/zeta/SKILL.md
     git add -A; git commit -q -m base
     mkdir -p skills/beta; echo b > skills/beta/SKILL.md
     echo more >> skills/alpha/SKILL.md
@@ -417,14 +421,137 @@ make_git_fixture() {
 make_git_fixture || { echo "fatal: could not build git fixture" >&2; exit 2; }
 base_sha=$( cd "$GITREPO" && git rev-parse HEAD~1 )
 
+# No marker + a real event.before → review ALL (includes zeta, which did NOT
+# change since base). Narrowing to event.before would have yielded only alpha+beta.
 got=$(capture_identify "$GITREPO" "skills" "" "push" "$base_sha")
-assert_eq "$got" "$(printf 'alpha\nbeta')" "identify_skills: git-diff detects the modified and added skills"
+assert_eq "$got" "$(printf 'alpha\nbeta\nzeta')" "identify_skills: no marker reviews ALL skills, never event.before"
 
-# An unreachable (non-sentinel) base with no remote to fetch from must
-# hard-fail, never collapse to "no changes".
+# An unreachable base-ref (BASE_OVERRIDE) with no remote to fetch from must
+# hard-fail, never collapse to "no changes". (event.before is no longer a base,
+# so the base under test is the explicit base-ref input.)
 rc=0
-capture_identify "$GITREPO" "skills" "" "push" "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef" >/dev/null 2>&1 || rc=$?
-assert_eq "$rc" "2" "identify_skills: unreachable base hard-fails with exit 2"
+capture_identify "$GITREPO" "skills" "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef" "push" "$base_sha" >/dev/null 2>&1 || rc=$?
+assert_eq "$rc" "2" "identify_skills: unreachable base-ref hard-fails with exit 2"
+
+# --- #271: the last-publish marker is preferred over github.event.before, so a
+# publish that failed after the review step does not drop its skills. The marker
+# must be an AUTHORITATIVE boundary — a first-parent, CI-bot-authored bump commit
+# — so a look-alike message cannot move the base past unreviewed skills. Fixture:
+#   base → BOT bump (real marker) → gamma (failed publish) → bot bump on a MERGED
+#   FEATURE BRANCH (off first-parent) → delta → NON-BOT bump on mainline.
+# Both look-alikes are newer than the real marker, so an unguarded resolver would
+# pick one and drop gamma/delta.
+BOT_NAME='github-actions[bot]'
+BOT_EMAIL='github-actions[bot]@users.noreply.github.com'
+MARKERREPO="$FIXTURE/markerrepo"
+make_marker_fixture() {
+  rm -rf "$MARKERREPO"
+  mkdir -p "$MARKERREPO" || return 1
+  (
+    set -e
+    cd "$MARKERREPO"
+    git init -q
+    git config user.email t@e.test
+    git config user.name tester
+    mkdir -p skills/alpha; echo a > skills/alpha/SKILL.md
+    git add -A; git commit -q -m base
+    git branch -M main
+    # Last successful publish: the CI bot's bump commit (first-parent, bot-authored).
+    git -c user.name="$BOT_NAME" -c user.email="$BOT_EMAIL" \
+      commit -q --allow-empty -m "Bump acme/x to 1.0.0 [skip ci]"
+    # A push whose publish FAILED after review: gamma changed but never shipped.
+    mkdir -p skills/gamma; echo g > skills/gamma/SKILL.md
+    git add -A; git commit -q -m "add gamma skill"
+    # Look-alike 1 — a bot-authored bump-message commit on a MERGED FEATURE
+    # BRANCH (off first-parent). --first-parent must exclude it.
+    git checkout -q -b feat
+    git -c user.name="$BOT_NAME" -c user.email="$BOT_EMAIL" \
+      commit -q --allow-empty -m "Bump acme/x to 9.9.9 [skip ci]"
+    git checkout -q main
+    git merge -q --no-ff -m "Merge feat" feat
+    # A later push (e.g. an action-pin bump) that re-triggers publish.
+    mkdir -p skills/delta; echo d > skills/delta/SKILL.md
+    git add -A; git commit -q -m "add delta skill"
+    # Look-alike 2 — a hand-authored (non-bot) bump-message commit on mainline.
+    # --author must exclude it.
+    git commit -q --allow-empty -m "Bump acme/x to 2.0.0 [skip ci]"
+    # Look-alike 3 — a bot-authored first-parent commit whose SUBJECT does not
+    # match but whose BODY carries a bump line. Subject-matching must exclude it.
+    # Newest, so a whole-message (`git log --grep`) resolver would pick it.
+    git -c user.name="$BOT_NAME" -c user.email="$BOT_EMAIL" commit -q --allow-empty \
+      -m "chore: routine bot bookkeeping" -m "Bump acme/x to 5.5.5 [skip ci]"
+  )
+}
+make_marker_fixture || { echo "fatal: could not build marker fixture" >&2; exit 2; }
+bot_bump_sha=$( cd "$MARKERREPO" && git log --all -E --grep='to 1\.0\.0 ' --format='%H' | head -1 )
+gamma_sha=$( cd "$MARKERREPO" && git log -E --grep='add gamma' --format='%H' | head -1 )
+delta_sha=$( cd "$MARKERREPO" && git log -E --grep='add delta' --format='%H' | head -1 )
+
+resolve_marker_in() { ( cd "$1" && resolve_publish_marker ); }
+
+# Provenance: the resolver returns the real bot bump, NOT any newer look-alike —
+# the merged-branch commit (first-parent guard), the non-bot commit (author
+# guard), or the body-only match (subject guard).
+assert_eq "$(resolve_marker_in "$MARKERREPO")" "$bot_bump_sha" \
+  "resolve_publish_marker: picks the first-parent bot bump, not a look-alike"
+
+# Isolate the subject guard: the body-only-match commit is HEAD, so a
+# whole-message resolver would return it; subject-matching must not.
+body_match_sha=$( cd "$MARKERREPO" && git rev-parse HEAD )
+if [ "$(resolve_marker_in "$MARKERREPO")" = "$body_match_sha" ]; then
+  FAIL_COUNT=$((FAIL_COUNT + 1)); echo "FAIL: a body-only bump line became the marker" >&2
+else
+  PASS_COUNT=$((PASS_COUNT + 1))
+fi
+
+# event.before = delta, but the marker base wins: BOTH gamma (the failed publish)
+# and delta are re-reviewed. A look-alike base would have dropped them.
+got=$(capture_identify "$MARKERREPO" "skills" "" "push" "$delta_sha")
+assert_eq "$got" "$(printf 'delta\ngamma')" "identify_skills: last-publish marker re-includes a failed publish's skills"
+
+# base-ref override still wins over the marker.
+got=$(capture_identify "$MARKERREPO" "skills" "$gamma_sha" "push" "$delta_sha")
+assert_eq "$got" "delta" "identify_skills: explicit base-ref overrides the marker base"
+
+# Both marker knobs are overridable for a different publish flow. Point the
+# pattern+author at the gamma commit (tester-authored) → gamma becomes the base.
+got=$( cd "$MARKERREPO" && SKILLS_DIR=skills BASE_OVERRIDE="" EVENT_NAME=push \
+         EVENT_BEFORE="$delta_sha" PUBLISH_MARKER_PATTERN="^add gamma" \
+         PUBLISH_MARKER_AUTHOR="tester" identify_skills )
+assert_eq "$got" "delta" "identify_skills: PUBLISH_MARKER_PATTERN/AUTHOR override selects a custom marker"
+
+# Error handling: an invalid marker pattern is a tool failure, not "no marker".
+# resolve_publish_marker returns non-zero with a diagnostic…
+rc=0
+( cd "$MARKERREPO" && PUBLISH_MARKER_PATTERN='[' resolve_publish_marker ) >/dev/null 2>&1 || rc=$?
+assert_eq "$rc" "1" "resolve_publish_marker: an invalid pattern errors, never silent-empty"
+# …and identify_skills surfaces it as a setup error (2), never a silent fallback.
+rc=0
+( cd "$MARKERREPO" && SKILLS_DIR=skills BASE_OVERRIDE="" EVENT_NAME=push \
+    EVENT_BEFORE="$delta_sha" PUBLISH_MARKER_PATTERN='[' identify_skills ) >/dev/null 2>&1 || rc=$?
+assert_eq "$rc" "2" "identify_skills: a marker-resolution error is a setup error (exit 2)"
+
+# Fail-safe: a shallow clone that cannot be deepened must review EVERY skill,
+# never narrow to github.event.before (which could let a failed publish's skills
+# escape review). --depth=1 keeps only HEAD (subject "chore…", no marker), then a
+# broken remote makes --unshallow fail. file:// is required — a local-path clone
+# ignores --depth.
+SHALLOWREPO="$FIXTURE/shallowrepo"
+if git clone --depth=1 -q "file://$MARKERREPO" "$SHALLOWREPO" 2>/dev/null; then
+  ( cd "$SHALLOWREPO" && git remote set-url origin "file:///nonexistent-shallow-remote/repo.git" )
+  rc=0
+  ( cd "$SHALLOWREPO" && resolve_publish_marker >/dev/null 2>&1 ) || rc=$?
+  assert_eq "$rc" "3" "resolve_publish_marker: shallow + undeepenable signals review-all (exit 3)"
+  # identify_skills turns exit 3 into review-all: every skill dir at HEAD, sorted.
+  got=$(capture_identify "$SHALLOWREPO" "skills" "" "push" "$delta_sha")
+  assert_eq "$got" "$(printf 'alpha\ndelta\ngamma')" "identify_skills: shallow+undeepenable reviews ALL skills, not event.before"
+else
+  echo "  skip: could not build shallow-clone fixture (git clone file:// failed)" >&2
+fi
+
+# No marker in history → review ALL (fail-safe), never github.event.before. The
+# GITREPO fixture above (no bump commit) exercises this: its assertion returns
+# every skill dir, including the unchanged zeta.
 
 # --- main: emits the unreviewed-skills output ---
 
