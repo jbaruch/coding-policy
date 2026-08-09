@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.146 — 2026-08-09
+
 ### Actions — skill-review passes the workspace tessl now requires
 
 `review-skills.sh` called `tessl review run --threshold N <path>` with no `--workspace`, which the tessl CLI requires. Every consumer of the `skill-review` action was broken and none of them knew it: the review call is only reached when a push actually changes a skill, and most publishes change none, so the action reported success run after run while never invoking a review.
