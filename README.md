@@ -6,6 +6,7 @@ Coding policy plugin for Baruch's AI agents. Language-agnostic code quality rule
 
 ## What's New
 
+- `check-policy-freshness` hook — a Tessl `SessionStart` hook that runs `tessl outdated` and warns (throttled to once/day) when installed plugins are behind the registry, so repos don't silently drift onto stale policy. Informative only, never blocks
 - Policy review runs on the OpenAI Codex CLI authenticated by a ChatGPT subscription (no API key) via `.github/workflows/review-codex.yml`, reviewing every PR against the in-tree `rules/*.md`; Copilot stays as the complementary code-quality lane
 - 24 rules — 18 always-on, 6 conditional (scoped via `applyTo:` to the files where the rule's prescriptions actually fire). Breakdown: 10 covering code quality, 7 covering plugin authoring, 1 covering concurrency, 1 covering review discipline, 1 covering reviewer-feedback reading, 1 covering review severity, 1 covering external-repo action scope, 1 covering response communication, 1 covering merge/ship autonomy
 - `release` skill — structured PR + merge workflow gated on the Codex policy review's blocking findings; Copilot is the complementary code-quality lane and is always advisory
@@ -59,6 +60,12 @@ tessl install jbaruch/coding-policy
 | [install-reviewer](skills/install-reviewer/SKILL.md) | Enroll a consumer repo in the central fleet policy reviewer — scaffold the `.github/fleet-review-enabled` marker, a thin `.github/workflows/review-trigger.yml` (fires an immediate PR-time review in `coding-policy`), and `.github/copilot-instructions.md`, then open a PR. The `coding-policy-fleet-reviewer` GitHub App reviews against the `jbaruch/coding-policy` rules with the Codex CLI on a ChatGPT subscription (no API key). The Codex credential lives only in `coding-policy`; the consumer sets one stable `FLEET_DISPATCH_TOKEN` (a narrow PAT). Supports `--override` for in-place upgrades. |
 | [adopt-fork-pr](skills/adopt-fork-pr/SKILL.md) | Classify a PR by number. Same-repo PRs pass through to the reviewer; fork PRs get adopted into the base repo as a same-repo PR, preserving the contributor's commits. |
 | [migrate-to-plugin](skills/migrate-to-plugin/SKILL.md) | Migrate a legacy `tile.json` plugin to the `.tessl-plugin/plugin.json` form: runs `tessl plugin migrate`, renames `.tileignore`, removes the obsolete `tile.json`, re-lints, then reconciles residual "tile" wording to "plugin" while preserving contract surfaces. |
+
+### Hooks
+
+| Hook | Event | Description |
+| ---- | ----- | ----------- |
+| [check-policy-freshness](hooks/check-policy-freshness.sh) | SessionStart | Warns (throttled once/day) when installed Tessl plugins are behind the registry — a `tessl update` reminder at session start. Informative only, never blocks. |
 
 ## Philosophy
 
