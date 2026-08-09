@@ -22,8 +22,6 @@ The workspace is derived from the consumer's own manifest rather than configured
 
 The test harness had the same latent defect as the code. `drive()` set no workspace, so once resolution existed the existing cases would have resolved it from whatever manifest sat in the CWD — this repo's own, when the suite runs from the repo root — and passed for a reason unrelated to what they assert. `drive()` now pins `WORKSPACE`, the `tessl` mock records full argv instead of a call tally, and resolution gets its own block with the CWD controlled. Verified the way a guard should be: reverting the one-line fix fails exactly the new assertion.
 
->>>>>>> origin/main
-
 ## 0.3.143 — 2026-08-09
 
 ### Hooks — stop-handoff-hygiene now runs on Codex too
