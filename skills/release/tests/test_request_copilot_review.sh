@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
-# Outcome-based tests for request-copilot-review.sh focused on the two
-# behaviours #42 + #43 fixed: fetch_pr_node_id refuses null PR IDs
-# upfront, and discover_copilot_bot_id matches Copilot's login with or
-# without the [bot] suffix (GraphQL Bot.login is inconsistent across
-# contexts).
+# Outcome-based tests for request-copilot-review.sh covering:
+#   - fetch_pr_node_id refuses null PR IDs upfront (#42);
+#   - discover_copilot_bot_id matches Copilot's login with or without the
+#     [bot] suffix — GraphQL Bot.login is inconsistent across contexts (#43);
+#   - main() verifies the request from the mutation's OWN returned review
+#     requests, not the REST `requested_reviewers` field that omits bot
+#     reviewers (#276) — a bot-only reviewer list must verify clean, the case
+#     the earlier suite never exercised, which let the REST-verify bug ship.
 #
 # Approach: source the script (its main() guard prevents auto-run when
 # sourced) and override `gh` with a shell function that returns
@@ -97,6 +100,47 @@ gh() {
   fi
 }
 
+# A content-aware graphql mock for driving main(): it distinguishes the
+# PR-id query, the requestReviews mutation, and the discover query by their
+# text, and applies the script's own --jq filter so the real filter logic is
+# exercised. Fixtures and behaviour come from env vars the caller sets:
+#   MUT_FIXTURE       requestReviews response JSON
+#   DISCOVER_FIXTURE  review-history response JSON (bot-id discovery)
+#   MUT_FAIL_ONCE + MUT_FAIL_FLAG  fail the FIRST mutation once (stale-ID path)
+# shellcheck disable=SC2329  # invoked indirectly via a per-test gh() override
+_main_gh_mock() {
+  [[ "$1" == api && "$2" == graphql ]] || { echo "mock gh: unsupported: $*" >&2; return 2; }
+  local query="" filter=""
+  shift 2
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -f)   query="${2#query=}"; shift 2 ;;
+      --jq) filter="$2"; shift 2 ;;
+      *)    shift ;;
+    esac
+  done
+  local fixture
+  if [[ "$query" == *requestReviews* ]]; then
+    if [[ -n "${MUT_FAIL_ONCE:-}" && ! -f "${MUT_FAIL_FLAG:-/nonexistent}" ]]; then
+      : > "${MUT_FAIL_FLAG}"
+      echo "mock gh: requestReviews rejected the botId" >&2
+      return 1
+    fi
+    fixture="${MUT_FIXTURE:?MUT_FIXTURE unset}"
+  elif [[ "$query" == *"pullRequest(number"* ]]; then
+    fixture='{"data":{"repository":{"pullRequest":{"id":"PR_kwDOX"}}}}'
+  elif [[ "$query" == *"pullRequests(last"* ]]; then
+    fixture="${DISCOVER_FIXTURE:?DISCOVER_FIXTURE unset}"
+  else
+    echo "mock gh: unrecognized query: $query" >&2; return 2
+  fi
+  if [[ -n "$filter" ]]; then
+    echo "$fixture" | jq -r "$filter"
+  else
+    echo "$fixture"
+  fi
+}
+
 # --- test bodies ---
 
 t_fetch_pr_node_id_returns_empty_and_nonzero_on_null_pr() {
@@ -153,6 +197,55 @@ t_discover_returns_empty_when_no_copilot_review() {
   assert_eq "stdout" "" "$out"
 }
 
+# #276: a request that attaches only a bot reviewer must verify CLEAN. Under
+# the old REST verification this list came back `[]` and main() always exited
+# 1; verifying from the mutation response fixes it.
+t_main_verifies_bot_only_reviewers() {
+  local out rc
+  out=$(
+    gh() { _main_gh_mock "$@"; }
+    MUT_FIXTURE='{"data":{"requestReviews":{"pullRequest":{"reviewRequests":{"nodes":[{"requestedReviewer":{"__typename":"Bot","login":"copilot-pull-request-reviewer"}}]}}}}}' \
+      main owner repo 5 2>/dev/null
+  )
+  rc=$?
+  assert_eq "exit code" "0" "$rc" || return 1
+  echo "$out" | jq -e '.requested_reviewers | any(test("copilot"; "i"))' >/dev/null 2>&1 \
+    || { echo "    FAIL: output envelope missing copilot: $out" >&2; return 1; }
+}
+
+# A mutation whose returned reviewers do NOT include Copilot is a real failure.
+t_main_fails_when_copilot_absent() {
+  local err rc
+  err=$(
+    gh() { _main_gh_mock "$@"; }
+    MUT_FIXTURE='{"data":{"requestReviews":{"pullRequest":{"reviewRequests":{"nodes":[{"requestedReviewer":{"__typename":"Bot","login":"some-other-bot"}}]}}}}}' \
+      main owner repo 5 2>&1 >/dev/null
+  )
+  rc=$?
+  assert_eq "exit code" "1" "$rc" || return 1
+  [[ "$err" == *"not in review requests"* ]] \
+    || { echo "    FAIL: stderr missing 'not in review requests': $err" >&2; return 1; }
+}
+
+# A rejected pinned bot ID falls back to discovery, then verifies from the
+# retried mutation's response.
+t_main_falls_back_on_rejected_pinned_id() {
+  local out rc flag
+  flag=$(mktemp -u)
+  out=$(
+    gh() { _main_gh_mock "$@"; }
+    MUT_FAIL_ONCE=1 MUT_FAIL_FLAG="$flag" \
+    DISCOVER_FIXTURE='{"data":{"repository":{"pullRequests":{"nodes":[{"reviews":{"nodes":[{"author":{"id":"BOT_discovered","login":"copilot-pull-request-reviewer"}}]}}]}}}}' \
+    MUT_FIXTURE='{"data":{"requestReviews":{"pullRequest":{"reviewRequests":{"nodes":[{"requestedReviewer":{"__typename":"Bot","login":"copilot-pull-request-reviewer"}}]}}}}}' \
+      main owner repo 5 2>/dev/null
+  )
+  rc=$?
+  rm -f "$flag"
+  assert_eq "exit code" "0" "$rc" || return 1
+  echo "$out" | jq -e '.bot_id == "BOT_discovered"' >/dev/null 2>&1 \
+    || { echo "    FAIL: expected the discovered bot id in the output: $out" >&2; return 1; }
+}
+
 # --- driver ---
 
 echo "== request-copilot-review.sh tests =="
@@ -162,6 +255,9 @@ run "fetch_pr_node_id returns ID for a real PR"                      t_fetch_pr_
 run "discover_copilot_bot_id matches Bot.login with [bot] suffix"    t_discover_matches_bot_suffix_login
 run "discover_copilot_bot_id matches Bot.login without suffix"       t_discover_matches_bare_login
 run "discover_copilot_bot_id returns empty when no Copilot review"   t_discover_returns_empty_when_no_copilot_review
+run "main verifies a bot-only reviewer list clean (#276)"           t_main_verifies_bot_only_reviewers
+run "main fails when Copilot is absent from the mutation response"   t_main_fails_when_copilot_absent
+run "main falls back to discovery on a rejected pinned bot ID"       t_main_falls_back_on_rejected_pinned_id
 
 echo "== summary: ${PASS_COUNT} passed, ${FAIL_COUNT} failed =="
 [[ "$FAIL_COUNT" -eq 0 ]]

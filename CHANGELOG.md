@@ -1,5 +1,9 @@
 # Changelog
 
+### Release skill — request-copilot-review.sh verifies from the mutation, not REST
+
+`request-copilot-review.sh` sent the Copilot review request over GraphQL (correct) but verified it over the REST `pulls` endpoint's `requested_reviewers` — the exact surface the script's own header says "silently drops bot reviewers." That field returns `[]` for a bot, so the check never matched and the script exited 1 on every successful request, unconditionally, for the only reviewer type it exists to request (observed on `jbaruch/tripit-api#36`; also hit in this repo requesting review on #273). Under a `set -euo pipefail` wrapper the non-zero exit aborts the release flow after the request already landed, and an agent trusting the exit code concludes Copilot was never requested — compounding the #267 fix that made the per-push re-request an explicit step. The mutation now returns its own `reviewRequests` and the script verifies from that authoritative response (dropping a REST round-trip); the `{pr_number, bot_id, requested_reviewers}` output shape is unchanged. Added `main()` coverage the earlier suite lacked — a bot-only reviewer list verifies clean, plus copilot-absent and stale-ID-fallback cases. Closes #276.
+
 ## 0.3.148 — 2026-08-09
 
 ### Release skill — Step 6 heading no longer contradicts its body
