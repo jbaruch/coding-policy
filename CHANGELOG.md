@@ -1,5 +1,9 @@
 # Changelog
 
+### Actions — stamp-changelog pushes its own commit on a first publish
+
+`stamp-changelog` committed the CHANGELOG heading with `[skip ci]` and no push, relying on `patch-version-publish`'s bump commit to carry it to `main`. That coupling breaks on a first publish (and any publish where the manifest is already ahead of the registry): `patch-version-publish` uses the manifest version verbatim, produces no bump commit, and pushes nothing — so the stamp commit was stranded on the runner, leaving the published version live while `CHANGELOG.md` on `main` still showed un-headed `### ` entries. Silent, and it fires exactly once per repo (observed on `jbaruch/tripit-api` 0.6.0). The action now pushes the stamp commit itself precisely when no downstream bump will carry it: `stamp-changelog.py` gained `needs_own_push()` (push iff a stamp was applied and the computed version equals the manifest version) and a `--decision-file`, and the action reads that to `git push` conditionally. The `[skip ci]` on the commit prevents a publish-workflow re-trigger (ci-safety Publish-Pipeline Loop-Prevention Carve-Out). Closes #270.
+
 ## 0.3.148 — 2026-08-09
 
 ### Release skill — Step 6 heading no longer contradicts its body
