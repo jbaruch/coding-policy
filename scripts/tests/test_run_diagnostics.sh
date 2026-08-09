@@ -173,6 +173,90 @@ t_missing_engine_exits_two() {
   assert_eq "exit" "2" "$RC"
 }
 
+# --- changed-set (--files) mode ---------------------------------------------
+
+# Build a fixture for --files mode: a dir with real .sh/.py/.txt files plus a
+# bin/ of stub engines. Echoes the fixture dir.
+make_files_fixture() {
+  local d; d=$(mktemp -d)
+  printf '#!/usr/bin/env bash\necho hi\n' > "$d/a.sh"
+  printf 'x = 1\n' > "$d/b.py"
+  printf 'plain\n' > "$d/c.txt"
+  mkdir -p "$d/bin"
+  cat > "$d/bin/shellcheck" <<'STUB'
+#!/usr/bin/env bash
+echo "shellcheck $*" >> "$STUB_LOG"
+exit "${STUB_SHELLCHECK_RC:-0}"
+STUB
+  cat > "$d/bin/pyright" <<'STUB'
+#!/usr/bin/env bash
+echo "pyright $*" >> "$STUB_LOG"
+exit "${STUB_PYRIGHT_RC:-0}"
+STUB
+  chmod +x "$d/bin/shellcheck" "$d/bin/pyright"
+  echo "$d"
+}
+
+# invoke_files <fixture> <sc-rc> <py-rc> <path>...  -> sets RC, LOG
+invoke_files() {
+  local d="$1" sc_rc="$2" py_rc="$3"; shift 3
+  LOG="$d/stub.log"; : > "$LOG"
+  RC=0
+  PATH="$d/bin:$PATH" STUB_LOG="$LOG" STUB_SHELLCHECK_RC="$sc_rc" STUB_PYRIGHT_RC="$py_rc" \
+    bash "$RUNNER" --files "$@" >/dev/null 2>&1 || RC=$?
+}
+
+t_files_clean_exits_zero() {
+  local d; d=$(make_files_fixture)
+  invoke_files "$d" 0 0 "$d/a.sh" "$d/b.py"
+  local sc py; sc=$(grep -c '^shellcheck ' "$d/stub.log"); py=$(grep -c '^pyright ' "$d/stub.log")
+  rm -rf "$d"
+  assert_eq "exit" "0" "$RC" || return 1
+  assert_eq "shellcheck invoked once" "1" "$sc" || return 1
+  assert_eq "pyright invoked once" "1" "$py"
+}
+
+t_files_shellcheck_finding_exits_one() {
+  local d; d=$(make_files_fixture)
+  invoke_files "$d" 1 0 "$d/a.sh" "$d/b.py"
+  rm -rf "$d"
+  assert_eq "exit" "1" "$RC"
+}
+
+# An empty lintable set (only non-.sh/.py or vanished paths) is a clean no-op,
+# not a setup error — a clean handoff must cost nothing.
+t_files_empty_set_exits_zero() {
+  local d; d=$(make_files_fixture)
+  invoke_files "$d" 0 0 "$d/c.txt" "$d/gone.sh"
+  local sc py; sc=$(grep -c '^shellcheck ' "$d/stub.log"); py=$(grep -c '^pyright ' "$d/stub.log")
+  rm -rf "$d"
+  assert_eq "exit" "0" "$RC" || return 1
+  assert_eq "shellcheck not invoked" "0" "$sc" || return 1
+  assert_eq "pyright not invoked" "0" "$py"
+}
+
+# Only .py changed => shellcheck is neither required nor invoked.
+t_files_only_py_skips_shellcheck() {
+  local d; d=$(make_files_fixture)
+  rm -f "$d/bin/shellcheck"                 # no shellcheck on PATH at all
+  invoke_files "$d" 0 0 "$d/b.py"
+  local sc py; sc=$(grep -c '^shellcheck ' "$d/stub.log"); py=$(grep -c '^pyright ' "$d/stub.log")
+  rm -rf "$d"
+  assert_eq "exit" "0" "$RC" || return 1
+  assert_eq "shellcheck not invoked" "0" "$sc" || return 1
+  assert_eq "pyright invoked once" "1" "$py"
+}
+
+# A present file type whose engine is missing is a setup error (exit 2).
+t_files_missing_engine_for_present_type_exits_two() {
+  local d; d=$(make_files_fixture)
+  rm -f "$d/bin/shellcheck"
+  RC=0
+  PATH="$d/bin:/usr/bin:/bin" bash "$RUNNER" --files "$d/a.sh" >/dev/null 2>&1 || RC=$?
+  rm -rf "$d"
+  assert_eq "exit" "2" "$RC"
+}
+
 echo "== run-diagnostics.sh tests =="
 run "both engines clean -> exit 0"                       t_both_clean_exits_zero
 run "shellcheck finding -> exit 1"                       t_shellcheck_finding_exits_one
@@ -183,6 +267,11 @@ run "pyright runs even when shellcheck fails"            t_pyright_runs_even_whe
 run "missing base dir -> exit 2"                         t_missing_base_exits_two
 run "no shell scripts found -> exit 2"                   t_no_scripts_exits_two
 run "engine not installed -> exit 2"                     t_missing_engine_exits_two
+run "--files both engines clean -> exit 0"               t_files_clean_exits_zero
+run "--files shellcheck finding -> exit 1"               t_files_shellcheck_finding_exits_one
+run "--files empty lintable set -> exit 0, no engines"   t_files_empty_set_exits_zero
+run "--files only .py skips shellcheck"                  t_files_only_py_skips_shellcheck
+run "--files missing engine for present type -> exit 2"  t_files_missing_engine_for_present_type_exits_two
 
 echo "== summary: ${PASS_COUNT} passed, ${FAIL_COUNT} failed =="
 [[ "$FAIL_COUNT" -eq 0 ]]
