@@ -70,15 +70,24 @@ if [[ $RC -eq 0 && -z "$OUT" ]]; then pass; else fail "throttle active: call ins
 run "$d" STUB_JSON="$OUTDATED" FRESHNESS_NOW=1090000            # +25h, past window
 if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | jq -e '.additionalContext' >/dev/null 2>&1; then pass; else fail "throttle expired: call past window should fire, got OUT=$OUT"; fi
 
-# 4. tessl missing -> silent no-op (PATH without the stub, and without real tessl)
+# 4. tessl missing -> silent no-op. Build a minimal PATH with symlinks to the
+#    tools the hook needs (jq present so it passes that check) but NO tessl, so
+#    the test is environment-independent rather than assuming /usr/bin contents.
+minbin="$TMP/minbin"; mkdir -p "$minbin"
+for t in bash jq date mkdir; do ln -s "$(command -v "$t")" "$minbin/$t"; done
 d="$TMP/c4"
-OUT="$(env "PATH=/usr/bin:/bin" FRESHNESS_STATE_DIR="$d" bash "$SCRIPT" </dev/null 2>/dev/null)"; RC=$?
+OUT="$(env "PATH=$minbin" FRESHNESS_STATE_DIR="$d" bash "$SCRIPT" </dev/null 2>/dev/null)"; RC=$?
 if [[ $RC -eq 0 && -z "$OUT" ]]; then pass; else fail "tessl missing: expected silent exit 0, got RC=$RC OUT=$OUT"; fi
 
 # 5. tessl errors -> silent no-op
 d="$TMP/c5"
 run "$d" STUB_JSON="$OUTDATED" STUB_EXIT=1
 if [[ $RC -eq 0 && -z "$OUT" ]]; then pass; else fail "tessl error: expected silent exit 0, got RC=$RC OUT=$OUT"; fi
+
+# 6. malformed injected clock -> no-op, exit 0 (never aborts SessionStart).
+d="$TMP/c6"
+run "$d" STUB_JSON="$OUTDATED" FRESHNESS_NOW="not-a-number"
+if [[ $RC -eq 0 && -z "$OUT" ]]; then pass; else fail "invalid clock: expected silent exit 0, got RC=$RC OUT=$OUT"; fi
 
 echo "─────────────────────────────────────────────" >&2
 if [[ $FAIL -gt 0 ]]; then echo "FAILED: ${FAIL} failed, ${PASS} passed" >&2; exit 1; fi

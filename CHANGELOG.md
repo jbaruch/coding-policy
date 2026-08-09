@@ -2,7 +2,7 @@
 
 ### Hooks — check-policy-freshness (SessionStart staleness warning)
 
-New `hooks/check-policy-freshness.sh`, wired as a Tessl `SessionStart` hook. It runs `tessl outdated --json` and, when installed plugins are behind the registry, injects a one-line `tessl update` reminder via `additionalContext`. Informative only — never blocks (always exits 0), degrades to a silent no-op if `tessl`/`jq` are absent or the registry check fails.
+New `hooks/check-policy-freshness.sh`, wired as a Tessl `SessionStart` hook. It runs `tessl outdated --json` and, when installed plugins are behind the registry, injects a short `tessl update` reminder via `additionalContext` (one line per outdated plugin). Informative only — never blocks (always exits 0), degrades to a silent no-op if `tessl`/`jq` are absent or the registry check fails.
 
 This is the first hook built on the "a hook DOES a deterministic thing at a lifecycle event" principle, after the resurface hook was reverted for re-stating a rule the model already had. It targets a measured problem: fleet repos silently drift onto stale policy versions with nothing flagging it (a consumer was observed running 0.3.138 while 0.3.139 was published). `SessionStart` fires once per session — no per-turn tax — and the registry check is throttled to once per `FRESHNESS_THROTTLE_HOURS` (default 24h) so most session starts skip the network call.
 
