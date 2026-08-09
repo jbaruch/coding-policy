@@ -90,12 +90,19 @@ fi
 
 # Per-repo throttle stamp, keyed by the toplevel path so sibling clones throttle
 # independently. cksum gives a stable filename-safe key for an arbitrary path.
+# A cksum/cut failure would abort the assignment under set -e and break the
+# always-exit-0 contract, so handle it: fall back to an un-throttled run rather
+# than crash the session.
 top="$(git rev-parse --show-toplevel 2>/dev/null || printf '%s' "$PWD")"
-repo_key="$(printf '%s' "$top" | cksum | cut -d' ' -f1)"
+if ! repo_key="$(printf '%s' "$top" | cksum | cut -d' ' -f1)"; then
+  warn "could not derive a throttle key for ${top} — sync check will not throttle this run"
+  repo_key=""
+fi
 stamp="${STATE_DIR}/sync-${repo_key}"
 
+# With no throttle key the fallback fetches unconditionally (never throttles).
 should_fetch=1
-if [[ -r "$stamp" ]]; then
+if [[ -n "$repo_key" && -r "$stamp" ]]; then
   last=""
   read -r last < "$stamp" || last=""
   [[ "$last" =~ ^[0-9]+$ ]] || last=0
@@ -106,12 +113,15 @@ fi
 
 if (( should_fetch )); then
   # Record the fetch up front so a slow/failed fetch still throttles the next
-  # session rather than retrying the network on every start.
-  if mkdir -p "$STATE_DIR"; then
-    printf '%s\n' "$now" > "$stamp" ||
-      warn "cannot write throttle stamp ${stamp} — check permissions on ${STATE_DIR}; will re-fetch next session"
-  else
-    warn "cannot create state dir ${STATE_DIR} — check permissions or set SYNC_STATE_DIR; sync check will not throttle"
+  # session rather than retrying the network on every start. Skipped when no
+  # throttle key was derived.
+  if [[ -n "$repo_key" ]]; then
+    if mkdir -p "$STATE_DIR"; then
+      printf '%s\n' "$now" > "$stamp" ||
+        warn "cannot write throttle stamp ${stamp} — check permissions on ${STATE_DIR}; will re-fetch next session"
+    else
+      warn "cannot create state dir ${STATE_DIR} — check permissions or set SYNC_STATE_DIR; sync check will not throttle"
+    fi
   fi
 
   # Time-bound the fetch so a hung network can't stall session start. timeout is
@@ -136,7 +146,10 @@ if ! behind="$(git rev-list --count "refs/heads/${db}..refs/remotes/origin/${db}
   warn "could not compare ${db} against origin/${db} — run \`git status\` to inspect; skipping sync check"
   exit 0
 fi
-[[ "$behind" =~ ^[0-9]+$ ]] || exit 0
+if ! [[ "$behind" =~ ^[0-9]+$ ]]; then
+  warn "unexpected non-numeric behind-count '${behind}' for ${db} — run \`git status\` to inspect; skipping sync check"
+  exit 0
+fi
 (( behind > 0 )) || exit 0
 
 notice="Local \`${db}\` is ${behind} commit(s) behind \`origin/${db}\` — sync before working (rules/sync-before-work.md): \`git fetch origin\`, then fast-forward \`${db}\` to \`origin/${db}\`."
