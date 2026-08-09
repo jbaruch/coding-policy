@@ -13,7 +13,7 @@ description: >
   to upgrade or refresh the reviewer files in a repo that already has them (override mode).
 ---
 
-# Install Reviewer Skill
+# Onboard Repo Skill
 
 Process steps in order. Do not skip ahead.
 

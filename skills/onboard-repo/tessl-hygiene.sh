@@ -70,8 +70,11 @@ main() {
       tj_state="unchanged"
     else
       local tmp; tmp=$(mktemp) || { echo "error: mktemp failed while updating tessl.json" >&2; exit 1; }
-      jq --indent 2 '.dependencies |= with_entries(if (.key | startswith("jbaruch/")) then .value.version = "latest" else . end)' tessl.json > "$tmp" \
-        || { rm -f "$tmp"; echo "error: failed to rewrite tessl.json" >&2; exit 1; }
+      if ! jq --indent 2 '.dependencies |= with_entries(if (.key | startswith("jbaruch/")) then .value.version = "latest" else . end)' tessl.json > "$tmp"; then
+        rm -f "$tmp" || echo "warning: could not remove temp file ${tmp} — remove it by hand" >&2
+        echo "error: failed to rewrite tessl.json" >&2
+        exit 1
+      fi
       mv "$tmp" tessl.json
       tj_state="pinned-latest"
     fi

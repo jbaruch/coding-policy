@@ -22,7 +22,10 @@ fail() { FAIL=$((FAIL+1)); echo "  ✗ FAIL: $1" >&2; }
 mkrepo() { git init -q "$1"; ( cd "$1" && git config user.email t@t && git config user.name t ); }
 
 TMP="$(mktemp -d)" || { echo "fatal: mktemp" >&2; exit 2; }
-trap 'rm -rf "$TMP"' EXIT
+# Cleanup must end with return 0 so its status never rewrites the test outcome
+# (rules/error-handling.md — EXIT trap final status).
+cleanup() { [[ -n "${TMP:-}" ]] && ! rm -rf "$TMP" && echo "warn: could not remove $TMP" >&2; return 0; }
+trap cleanup EXIT
 
 # 1. pins jbaruch/* to latest, leaves third-party pins untouched.
 d="$TMP/1"; mkrepo "$d"

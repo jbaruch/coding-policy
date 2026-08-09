@@ -35,10 +35,21 @@ alwaysApply: true
 - The manifest may use a floating-but-explicit specifier (e.g., `"version": "latest"`) and skip the lock file
 - Preconditions (each covered manifest, all required):
   1. The project documents an authority-of-record rule in its own plugin naming the carve-out and listing every covered manifest
-  2. A deploy-time check fails the deployment if any disallowed specifier appears (literal pin, range, tag, or anything other than the permitted floating specifier)
+  2. A deterministic check surfaces any disallowed specifier (literal pin, range, tag, or anything other than the permitted floating specifier), in either form:
+     - a deploy-time gate that fails the deployment
+     - a plugin-shipped `SessionStart` hook that reads the manifest and flags a disallowed specifier each session
   3. Each covered manifest is named explicitly in the authority-of-record rule
 - Multiple covered manifests permitted iff each independently meets all three preconditions
 - Every other manifest in the repo still pins
+
+### Authority of Record — consumer `tessl.json`
+
+- Covered manifest: the fleet's consumer `tessl.json`
+- tessl writes its resolved state into the gitignored `.tessl/`
+- `jbaruch/*`-owned dependencies use the `latest` specifier
+- Deterministic check: the plugin-shipped `hooks/check-tessl-latest.sh` `SessionStart` hook, which flags any `jbaruch/*` dependency not at `latest`
+- `skills/onboard-repo` sets `latest` and gitignores `.tessl/` at onboarding
+- Third-party dependencies (`tessl-labs/*`, `tessl/npm-*`) pin normally and stay out of scope
 
 ## Adversarial-Freshness Dependency Carve-Out
 
