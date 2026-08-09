@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # Request a Copilot review on a PR via GraphQL — REST silently drops bot
 # reviewers. Falls back to looking up the bot ID from recent reviews if the
-# pinned ID is stale, then verifies Copilot is in `requested_reviewers`.
+# pinned ID is stale, then verifies Copilot is in the mutation's OWN returned
+# review requests. The REST `requested_reviewers` field omits bot reviewers, so
+# it cannot verify a bot request (issue #276) — the mutation response is the
+# authoritative surface.
 #
 # Usage: request-copilot-review.sh <owner> <repo> <pr-number>
 # Env:   COPILOT_BOT_ID (override default BOT_kgDOCnlnWA)
@@ -46,12 +49,23 @@ fetch_pr_node_id() {
   echo "$pr_id"
 }
 
+# Run the requestReviews mutation and echo the resulting bot-reviewer logins as
+# a JSON array. The mutation's OWN response is the authoritative post-state and
+# the only surface that reports bot reviewers — the REST pulls endpoint's
+# `requested_reviewers` omits them (issue #276), so it cannot verify this. On a
+# GraphQL error (a stale/rejected bot ID) `gh api graphql` exits non-zero and
+# stdout is empty, so a caller can branch on the exit to fall back. stderr is
+# silenced because every caller emits its own actionable message on failure
+# (rules/error-handling.md — silencing a diagnostic while explicitly handling
+# the failure is not suppression).
 request_with_bot_id() {
   gh api graphql -f query="
     mutation { requestReviews(input: {
       pullRequestId: \"$1\", botIds: [\"$2\"]
-    }) { clientMutationId } }
-  " >/dev/null 2>&1
+    }) { pullRequest { reviewRequests(first: 20) { nodes {
+      requestedReviewer { __typename ... on Bot { login } }
+    } } } } }
+  " --jq '[.data.requestReviews.pullRequest.reviewRequests.nodes[]?.requestedReviewer.login // empty]' 2>/dev/null
 }
 
 discover_copilot_bot_id() {
@@ -86,7 +100,11 @@ main() {
   }
 
   local bot_id="${COPILOT_BOT_ID:-$COPILOT_BOT_ID_DEFAULT}"
-  if ! request_with_bot_id "$pr_node_id" "$bot_id"; then
+  local reviewers
+  # The mutation returns the post-request reviewer list; capture it as both the
+  # request AND the verification (issue #276). A non-zero exit means the pinned
+  # ID was rejected — discover the live one from review history and retry.
+  if ! reviewers=$(request_with_bot_id "$pr_node_id" "$bot_id"); then
     echo "warn: pinned bot ID $bot_id rejected; discovering from review history" >&2
     bot_id=$(discover_copilot_bot_id "$owner" "$repo") || {
       echo "error: failed to query review history" >&2; exit 1;
@@ -95,18 +113,13 @@ main() {
       echo "error: no Copilot bot ID found in recent reviews of ${owner}/${repo}" >&2
       exit 1
     fi
-    request_with_bot_id "$pr_node_id" "$bot_id" || {
+    reviewers=$(request_with_bot_id "$pr_node_id" "$bot_id") || {
       echo "error: request failed with discovered bot ID $bot_id" >&2; exit 1;
     }
   fi
 
-  local reviewers
-  reviewers=$(gh api "repos/${owner}/${repo}/pulls/${pr_number}" \
-    --jq '[.requested_reviewers[]?.login // empty]') || {
-    echo "error: verification query failed" >&2; exit 1;
-  }
   if ! echo "$reviewers" | jq -e 'any(test("copilot"; "i"))' >/dev/null 2>&1; then
-    echo "error: Copilot not in requested_reviewers: $reviewers" >&2
+    echo "error: Copilot not in review requests after request: $reviewers" >&2
     exit 1
   fi
 
