@@ -45,6 +45,13 @@
             "args": [
               "${TESSL_PLUGIN_DIR}/hooks/check-policy-freshness.sh"
             ]
+          },
+          {
+            "type": "command",
+            "command": "bash",
+            "args": [
+              "${TESSL_PLUGIN_DIR}/hooks/check-git-sync.sh"
+            ]
           }
         ]
       }

@@ -6,6 +6,7 @@ Coding policy plugin for Baruch's AI agents. Language-agnostic code quality rule
 
 ## What's New
 
+- `check-git-sync` hook — a Tessl `SessionStart` hook that fetches origin (throttled) and warns when the local default branch is behind `origin/<default>`, mechanizing `rules/sync-before-work.md`. Informative only, never blocks
 - `check-policy-freshness` hook — a Tessl `SessionStart` hook that runs `tessl outdated` and warns (throttled to once/day) when installed plugins are behind the registry, so repos don't silently drift onto stale policy. Informative only, never blocks
 - Policy review runs on the OpenAI Codex CLI authenticated by a ChatGPT subscription (no API key) via `.github/workflows/review-codex.yml`, reviewing every PR against the in-tree `rules/*.md`; Copilot stays as the complementary code-quality lane
 - 24 rules — 18 always-on, 6 conditional (scoped via `applyTo:` to the files where the rule's prescriptions actually fire). Breakdown: 10 covering code quality, 7 covering plugin authoring, 1 covering concurrency, 1 covering review discipline, 1 covering reviewer-feedback reading, 1 covering review severity, 1 covering external-repo action scope, 1 covering response communication, 1 covering merge/ship autonomy
@@ -66,6 +67,7 @@ tessl install jbaruch/coding-policy
 | Hook | Event | Description |
 | ---- | ----- | ----------- |
 | [check-policy-freshness](hooks/check-policy-freshness.sh) | SessionStart | Warns (throttled once/day) when installed Tessl plugins are behind the registry — a `tessl update` reminder at session start. Informative only, never blocks. |
+| [check-git-sync](hooks/check-git-sync.sh) | SessionStart | Fetches origin (throttled once/hour per repo) and warns when the local default branch is behind `origin/<default>` — a `rules/sync-before-work.md` reminder at session start. Informative only, never blocks. |
 
 ## Philosophy
 
