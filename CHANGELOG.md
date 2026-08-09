@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.142 — 2026-08-09
+
 ### Hooks — stop-handoff-hygiene (Stop pre-handoff gate)
 
 New `hooks/stop-handoff-hygiene.sh`, wired as a Claude Code `Stop` hook via `.tessl-plugin/plugin.json` `nativeHooks.claude-code` (#262). At handoff it runs deterministic, universal git-hygiene checks and blocks the stop once — loop-safe via the stdin `stop_hook_active` guard — when it finds clearly-actionable leftovers: local branches whose upstream is gone (merged then remote-deleted), orphaned linked worktrees whose branch's upstream is gone, or diagnostics findings in the changed set. A dirty working tree is reported to the user but never blocks on its own (often intentional WIP). Fail-open: no jq, not a git repo, or an unparseable payload allows the stop — a hygiene nudge must never wedge a handoff.
