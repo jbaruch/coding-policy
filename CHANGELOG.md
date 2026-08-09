@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.140 — 2026-08-09
+
 ### Hooks — check-policy-freshness (SessionStart staleness warning)
 
 New `hooks/check-policy-freshness.sh`, wired as a Tessl `SessionStart` hook. It runs `tessl outdated --json` and, when installed plugins are behind the registry, injects a short `tessl update` reminder via `additionalContext` (one line per outdated plugin). Informative only — never blocks (always exits 0), degrades to a silent no-op if `tessl`/`jq` are absent or the registry check fails.
