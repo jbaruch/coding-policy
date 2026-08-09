@@ -16,6 +16,10 @@ description: |
     - `tessl` CLI on PATH (typically via `tesslio/setup-tessl@v2`).
     - Repository checked out with full history reachable from BASE
       (typically `actions/checkout@v4` with `fetch-depth: 0`).
+    - `jq` on PATH, ONLY when the `workspace` input is empty and the
+      workspace is derived from the plugin manifest. Preinstalled on
+      GitHub-hosted runners; on a self-hosted runner either install it
+      or set `workspace` explicitly, which skips the parse entirely.
 
 inputs:
   threshold:
@@ -31,6 +35,16 @@ inputs:
       Override the base ref/SHA for the diff. When empty, the action falls
       back to `github.event.before` (push events) or "review all"
       (workflow_dispatch / initial push).
+    required: false
+    default: ''
+  workspace:
+    description: |
+      Tessl workspace passed to `tessl review run --workspace` (the flag is
+      mandatory in the CLI). When empty, it is derived from the consumer's
+      plugin manifest name (`<workspace>/<plugin>` in
+      `.tessl-plugin/plugin.json`, falling back to `tile.json`) — the
+      workspace is already declared there, so most consumers set nothing.
+      Set it only when the review workspace differs from the publish one.
     required: false
     default: ''
   credit-outage:
@@ -72,4 +86,5 @@ runs:
         THRESHOLD: ${{ inputs.threshold }}
         SKILLS_DIR: ${{ inputs.skills-dir }}
         CREDIT_OUTAGE: ${{ inputs.credit-outage }}
+        WORKSPACE: ${{ inputs.workspace }}
       run: bash "$GITHUB_ACTION_PATH/review-skills.sh"

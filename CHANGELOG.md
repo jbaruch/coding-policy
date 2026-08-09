@@ -8,6 +8,22 @@ All live references updated (`.tessl-plugin/plugin.json`, README, `rules/skill-a
 
 Pinning `jbaruch/*` to `latest` is sanctioned by the Runtime-Managed Manifest Carve-Out (`rules/dependency-management.md`): tessl rewrites the resolved state into the gitignored `.tessl/`. That carve-out's precondition 2 now accepts a plugin-shipped `SessionStart` hook as the deterministic check (alongside a deploy-time gate), and a new authority-of-record section names consumer `tessl.json` as covered. The enforcement is a new `hooks/check-tessl-latest.sh` `SessionStart` hook that surfaces any `jbaruch/*` dependency not at `latest` — no per-consumer CI workflow needed, since coding-policy ships the hook to every consumer.
 
+## 0.3.146 — 2026-08-09
+
+### Actions — skill-review passes the workspace tessl now requires
+
+`review-skills.sh` called `tessl review run --threshold N <path>` with no `--workspace`, which the tessl CLI requires. Every consumer of the `skill-review` action was broken and none of them knew it: the review call is only reached when a push actually changes a skill, and most publishes change none, so the action reported success run after run while never invoking a review.
+
+It surfaced in `jbaruch/tripit-api` run 31297263155 — the first push in a while to change a `SKILL.md` — as `✘ Missing required flag: --workspace`, blocking that repo's first plugin publish. The credit-outage classifier behaved correctly throughout: it declined to treat the flag error as a billing outage and hard-failed the publish, which is the fail-safe direction.
+
+The workspace is derived from the consumer's own manifest rather than configured. A plugin `name` is `<workspace>/<plugin>`, so the workspace is already declared in `.tessl-plugin/plugin.json` (falling back to `tile.json`); a second place to state it would be a second place for it to drift. The new `workspace` action input overrides for a consumer whose review workspace differs from its publish one. An unresolvable workspace is a setup error (exit 2) raised once before any review, never a per-skill review failure attributed to whichever skill sorted first.
+
+`jq` is declared as a prerequisite and validated at the point of use rather than globally: it is needed only to PARSE a manifest, so a consumer that sets the `workspace` input explicitly never touches it and must not be forced to install it. The diagnostic names the install command for both ubuntu and macOS and offers that input as the no-jq escape hatch. Preinstalled on GitHub-hosted runners; the check exists for self-hosted ones.
+
+The test harness had the same latent defect as the code. `drive()` set no workspace, so once resolution existed the existing cases would have resolved it from whatever manifest sat in the CWD — this repo's own, when the suite runs from the repo root — and passed for a reason unrelated to what they assert. `drive()` now pins `WORKSPACE`, the `tessl` mock records full argv instead of a call tally, and resolution gets its own block with the CWD controlled. Verified the way a guard should be: reverting the one-line fix fails exactly the new assertion.
+
+>>>>>>> origin/main
+
 ## 0.3.143 — 2026-08-09
 
 ### Hooks — stop-handoff-hygiene now runs on Codex too
