@@ -4,7 +4,7 @@
 # guard (#40): preflight must emit a parseable JSON envelope even when
 # jq itself isn't on PATH, since the agent parses our stdout.
 #
-# Run: bash skills/install-reviewer/tests/test_preflight.sh
+# Run: bash skills/onboard-repo/tests/test_preflight.sh
 # Exit 0 on all-pass; non-zero with a per-test diagnostic on failure.
 
 set -uo pipefail

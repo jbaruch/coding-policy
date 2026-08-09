@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Push the install-reviewer feature branch to origin. Call AFTER
+# Push the onboard-repo feature branch to origin. Call AFTER
 # commit.sh has produced the commit.
 #
 # Idempotent per rules/file-hygiene.md: if origin/<branch> already

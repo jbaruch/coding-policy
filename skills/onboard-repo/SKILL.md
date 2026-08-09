@@ -1,5 +1,5 @@
 ---
-name: install-reviewer
+name: onboard-repo
 description: >
   Add the files that run the `jbaruch/coding-policy` coding-rule review on a repo's pull
   requests: scaffold a `.github/fleet-review-enabled` marker, a
@@ -36,10 +36,10 @@ The skill runs in one of two modes determined by the user's request:
 
 ```bash
 # install mode
-.tessl/plugins/jbaruch/coding-policy/skills/install-reviewer/preflight.sh
+.tessl/plugins/jbaruch/coding-policy/skills/onboard-repo/preflight.sh
 
 # upgrade mode
-.tessl/plugins/jbaruch/coding-policy/skills/install-reviewer/preflight.sh --override
+.tessl/plugins/jbaruch/coding-policy/skills/onboard-repo/preflight.sh --override
 ```
 
 Runs every precondition (git worktree, GitHub CLI install + auth, packaged templates present, origin remote, plus mode-dependent branch/target state) and returns one JSON object: `{"ok": bool, "override": bool, "failures": [...], "warnings": [...]}`.
@@ -58,10 +58,10 @@ In **upgrade mode**: skip this step. Preflight has verified the rewritable targe
 
 ```bash
 # install mode
-.tessl/plugins/jbaruch/coding-policy/skills/install-reviewer/branch.sh
+.tessl/plugins/jbaruch/coding-policy/skills/onboard-repo/branch.sh
 
 # upgrade mode
-.tessl/plugins/jbaruch/coding-policy/skills/install-reviewer/branch.sh --override
+.tessl/plugins/jbaruch/coding-policy/skills/onboard-repo/branch.sh --override
 ```
 
 Establishes the feature branch the rest of the steps commit on. Install mode creates `feat/add-coding-policy-review` from origin's default branch. Upgrade mode targets `feat/upgrade-coding-policy-review`, probing remote and local state to handle the fresh-clone-while-upgrade-PR-open case. Idempotent: emits `{"state": "already-on-branch", ...}` when HEAD already matches the target. Real `ls-remote`/`fetch` errors propagate verbatim with non-zero exit. Proceed immediately to Step 4.
@@ -70,10 +70,10 @@ Establishes the feature branch the rest of the steps commit on. Install mode cre
 
 ```bash
 # install mode
-.tessl/plugins/jbaruch/coding-policy/skills/install-reviewer/scaffold.sh
+.tessl/plugins/jbaruch/coding-policy/skills/onboard-repo/scaffold.sh
 
 # upgrade mode
-.tessl/plugins/jbaruch/coding-policy/skills/install-reviewer/scaffold.sh --override
+.tessl/plugins/jbaruch/coding-policy/skills/onboard-repo/scaffold.sh --override
 ```
 
 Copies the opt-in files from the packaged template tree into the consumer, and documents the operator secret:
@@ -85,36 +85,44 @@ Copies the opt-in files from the packaged template tree into the consumer, and d
 
 Install mode refuses if any of the three template targets already exists; upgrade mode overwrites them. `.env.example` is always append-or-create in both modes and is skipped when the secret is already documented. Emits a JSON summary on success (per-file `action` is `created|overwritten|appended|unchanged`); on failure it exits non-zero with a stderr diagnostic and restores every target to its prior contents. Idempotent: a re-run that changes nothing is a no-op. Proceed immediately to Step 5.
 
-## Step 5 — Commit
+## Step 5 — Apply tessl-artifact hygiene
+
+```bash
+.tessl/plugins/jbaruch/coding-policy/skills/onboard-repo/tessl-hygiene.sh
+```
+
+Pins every `jbaruch/*` dependency in `tessl.json` to `latest` — stopping the auto-update churn that rewrites a pinned version on each coding-policy release; third-party pins (`tessl-labs/*`, `tessl/npm-*`) are left as-is — and ensures `.gitignore` carries the tessl-generated-artifacts block so agents never commit per-developer / per-agent output. `AGENTS.md` / `CLAUDE.md` / `GEMINI.md` stay committed: tessl appends to them and they don't churn. Emits `{"tessl_json":"pinned-latest|unchanged|absent","gitignore":"created|appended|unchanged"}`. Idempotent: a dep already at `latest`, and an already-present block, are left untouched. Runs the same in install and upgrade modes (no `--override` flag). Proceed immediately to Step 6.
+
+## Step 6 — Commit
 
 ```bash
 # install mode
-.tessl/plugins/jbaruch/coding-policy/skills/install-reviewer/commit.sh
+.tessl/plugins/jbaruch/coding-policy/skills/onboard-repo/commit.sh
 
 # upgrade mode
-.tessl/plugins/jbaruch/coding-policy/skills/install-reviewer/commit.sh --override
+.tessl/plugins/jbaruch/coding-policy/skills/onboard-repo/commit.sh --override
 ```
 
-Stages the reviewer files (`.github/fleet-review-enabled`, `.github/workflows/review-trigger.yml`, `.github/copilot-instructions.md`, and `.env.example`) and commits with the canonical message — `ci(review): add jbaruch/coding-policy PR review setup` in install mode, `ci(review): upgrade jbaruch/coding-policy PR review setup` in upgrade mode. Idempotent: emits `{"state": "no-op", …}` when the working tree already matches a prior successful run. If a pre-commit hook rejects the commit, the script exits non-zero — fix the hook's finding and re-run; do not `--no-verify`. Proceed immediately to Step 6.
+Stages the reviewer files (`.github/fleet-review-enabled`, `.github/workflows/review-trigger.yml`, `.github/copilot-instructions.md`, and `.env.example`) plus the Step 5 hygiene changes (`tessl.json`, `.gitignore`) when present, and commits with the canonical message — `ci(review): add jbaruch/coding-policy PR review setup` in install mode, `ci(review): upgrade jbaruch/coding-policy PR review setup` in upgrade mode. Idempotent: emits `{"state": "no-op", …}` when the working tree already matches a prior successful run. If a pre-commit hook rejects the commit, the script exits non-zero — fix the hook's finding and re-run; do not `--no-verify`. Proceed immediately to Step 7.
 
-## Step 6 — Push
+## Step 7 — Push
 
 ```bash
 # install mode
-.tessl/plugins/jbaruch/coding-policy/skills/install-reviewer/push.sh
+.tessl/plugins/jbaruch/coding-policy/skills/onboard-repo/push.sh
 
 # upgrade mode
-.tessl/plugins/jbaruch/coding-policy/skills/install-reviewer/push.sh --override
+.tessl/plugins/jbaruch/coding-policy/skills/onboard-repo/push.sh --override
 ```
 
-Pushes the appropriate branch (`feat/add-coding-policy-review` in install mode, `feat/upgrade-coding-policy-review` in upgrade mode) to origin with upstream tracking. Idempotent: emits `{"state": "up-to-date", …}` if origin already matches local HEAD. Proceed immediately to Step 7.
+Pushes the appropriate branch (`feat/add-coding-policy-review` in install mode, `feat/upgrade-coding-policy-review` in upgrade mode) to origin with upstream tracking. Idempotent: emits `{"state": "up-to-date", …}` if origin already matches local HEAD. Proceed immediately to Step 8.
 
-## Step 7 — Open PR
+## Step 8 — Open PR
 
 `gh pr create` with title `ci(review): add jbaruch/coding-policy PR review setup` (install mode) or `ci(review): upgrade jbaruch/coding-policy PR review setup` (upgrade mode), and a body that follows the required content blocks (what this PR commits, how the review runs, the load indicator, conditional warnings section) defined at:
 
 ```text
-skills/install-reviewer/PR_BODY_TEMPLATE.md
+skills/onboard-repo/PR_BODY_TEMPLATE.md
 ```
 
 In upgrade mode, also include a brief diff line in the PR body naming the outgoing and incoming plugin versions so the human reviewer sees what's being refreshed.

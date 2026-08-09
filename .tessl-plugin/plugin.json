@@ -5,7 +5,7 @@
   "private": false,
   "skills": [
     "skills/release",
-    "skills/install-reviewer",
+    "skills/onboard-repo",
     "skills/adopt-fork-pr",
     "skills/migrate-to-plugin"
   ],

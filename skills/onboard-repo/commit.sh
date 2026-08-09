@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Stage the reviewer files the install-reviewer skill produces and commit
+# Stage the reviewer files the onboard-repo skill produces and commit
 # them with the canonical message. Call after scaffold.sh has succeeded
 # and before push.sh.
 #
@@ -75,6 +75,16 @@ main() {
   fi
 
   git add "${FILES[@]}"
+
+  # Also stage the tessl-hygiene changes (tessl.json pinned to latest, the
+  # .gitignore block) when present, so the onboard lands in one commit. These are
+  # optional — a repo without tessl.json still commits the reviewer files.
+  local -a hygiene=()
+  local f
+  for f in tessl.json .gitignore; do
+    [[ -e "$f" ]] && hygiene+=("$f")
+  done
+  (( ${#hygiene[@]} > 0 )) && git add -- "${hygiene[@]}"
 
   # Idempotent re-run: nothing staged means a prior run already committed
   # this state. Emit no-op success instead of letting `git commit` fail.

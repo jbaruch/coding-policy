@@ -31,7 +31,7 @@
 
 set -euo pipefail
 
-TEMPLATE_DIR=".tessl/plugins/jbaruch/coding-policy/skills/install-reviewer/templates"
+TEMPLATE_DIR=".tessl/plugins/jbaruch/coding-policy/skills/onboard-repo/templates"
 # "<source relative to TEMPLATE_DIR>:<target in the consumer repo>"
 # The marker and the trigger source carry a `.md` shim extension because tessl
 # packaging ships only .md/.sh/.json/.py — a `.yml` or extensionless template is

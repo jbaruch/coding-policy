@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Establish the install-reviewer feature branch. Call AFTER preflight.sh
+# Establish the onboard-repo feature branch. Call AFTER preflight.sh
 # (and AFTER the install-mode overwrite refusal in Step 2 of the skill)
 # but BEFORE scaffold.sh — the scaffold's writes need to land on the
 # feature branch, not on the consumer's default branch.

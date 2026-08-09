@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run all install-reviewer preconditions and report them as one JSON
+# Run all onboard-repo preconditions and report them as one JSON
 # result. The skill invokes this before any mutation so every preflight
 # failure is surfaced together, not one-at-a-time. Checks cover: git
 # worktree, GitHub CLI installation + auth, packaged template presence,
@@ -123,7 +123,7 @@ if (( OVERRIDE_MODE == 1 )); then
 else
   BRANCH="feat/add-coding-policy-review"
 fi
-TEMPLATE_DIR=".tessl/plugins/jbaruch/coding-policy/skills/install-reviewer/templates"
+TEMPLATE_DIR=".tessl/plugins/jbaruch/coding-policy/skills/onboard-repo/templates"
 # `.md` shim on the marker and trigger source: tessl packaging ships only
 # .md/.sh/.json/.py, so a `.yml` or extensionless template never reaches the
 # installed plugin. scaffold.sh strips the shim when it writes the targets.

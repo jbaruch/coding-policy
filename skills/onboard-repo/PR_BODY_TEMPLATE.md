@@ -1,6 +1,6 @@
 # Install-Reviewer PR Body Template
 
-Reference for Step 7 of the `install-reviewer` skill. Pulled out of SKILL.md so the main flow stays scannable.
+Reference for Step 7 of the `onboard-repo` skill. Pulled out of SKILL.md so the main flow stays scannable.
 
 ## Required content
 
@@ -27,6 +27,6 @@ Note that the fleet review's summary begins `Policy loaded: N rule files from jb
 
 ### 4. (Conditional) "Action required before merge" — only if Step 1 preflight emitted warnings
 
-If Step 1's preflight `warnings` array is non-empty, add an `## Action required before merge` section that reproduces each warning's `reason` verbatim. These are advisory findings the install-reviewer skill deliberately does NOT auto-fix — the section exists so the consumer sees and acts on the finding instead of discovering it later.
+If Step 1's preflight `warnings` array is non-empty, add an `## Action required before merge` section that reproduces each warning's `reason` verbatim. These are advisory findings the onboard-repo skill deliberately does NOT auto-fix — the section exists so the consumer sees and acts on the finding instead of discovering it later.
 
 If Step 1 emitted no warnings, omit the section entirely.

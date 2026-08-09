@@ -56,7 +56,7 @@ set -euo pipefail
 # call with no JSON on stdout, breaking wrappers that parse the
 # documented output. Hand-roll the missing-jq diagnostic so the failure
 # satisfies the JSON contract even when jq itself is absent (same
-# pattern as skills/install-reviewer/preflight.sh). Also emit to stderr
+# pattern as skills/onboard-repo/preflight.sh). Also emit to stderr
 # per `rules/script-delegation.md` "Self-error-handling: exit non-zero
 # on failure, write a diagnostic message to stderr" — log-watchers and
 # stderr-only wrappers need the failure as well.
