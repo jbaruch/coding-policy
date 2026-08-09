@@ -7,7 +7,8 @@
 # Covers:
 #   1. Outdated present  -> emits additionalContext naming the plugin + new version.
 #   2. Nothing outdated  -> silent (empty stdout), exit 0.
-#   3. Throttle          -> a second call within the window is silent even if outdated.
+#   3. Throttle          -> with an injected fixed clock (FRESHNESS_NOW): a call
+#                           inside the window is silent, a call past it fires again.
 #   4. tessl missing     -> silent no-op, exit 0 (no crash).
 #   5. tessl errors      -> silent no-op, exit 0 (network/registry failure tolerated).
 #
@@ -58,12 +59,16 @@ d="$TMP/c2"
 run "$d" STUB_JSON="$EMPTY"
 if [[ $RC -eq 0 && -z "$OUT" ]]; then pass; else fail "empty outdated: expected silence, got RC=$RC OUT=$OUT"; fi
 
-# 3. throttle -> second call within window is silent
+# 3. throttle -> deterministic via an injected clock (FRESHNESS_NOW), not the
+#    real wall clock. First call stamps t; a call 1h later is throttled; a call
+#    25h later (past the 24h window) fires again.
 d="$TMP/c3"
-run "$d" STUB_JSON="$OUTDATED"   # first call fires + writes stamp
+run "$d" STUB_JSON="$OUTDATED" FRESHNESS_NOW=1000000            # fires, stamps 1000000
 [[ -n "$OUT" ]] || fail "throttle setup: first call should have fired"
-run "$d" STUB_JSON="$OUTDATED"   # second call within window
-if [[ $RC -eq 0 && -z "$OUT" ]]; then pass; else fail "throttle: second call should be silent, got OUT=$OUT"; fi
+run "$d" STUB_JSON="$OUTDATED" FRESHNESS_NOW=1003600            # +1h, inside 24h window
+if [[ $RC -eq 0 && -z "$OUT" ]]; then pass; else fail "throttle active: call inside window should be silent, got OUT=$OUT"; fi
+run "$d" STUB_JSON="$OUTDATED" FRESHNESS_NOW=1090000            # +25h, past window
+if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | jq -e '.additionalContext' >/dev/null 2>&1; then pass; else fail "throttle expired: call past window should fire, got OUT=$OUT"; fi
 
 # 4. tessl missing -> silent no-op (PATH without the stub, and without real tessl)
 d="$TMP/c4"

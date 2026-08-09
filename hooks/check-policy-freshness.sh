@@ -15,13 +15,14 @@
 #   - Informative only. Never blocks (always exits 0), never exits 2.
 #
 # Contract:
-#   stdin : consensus SessionStart JSON (unused beyond being drained).
+#   stdin : consensus SessionStart JSON — not read (the script needs none of it).
 #   stdout: on a fire, one JSON object {"additionalContext": "<notice>"}; else nothing.
-#   exit  : always 0. Degrades to a silent no-op if tessl/jq are missing, the
-#           check errors, or the state dir is unwritable.
+#   exit  : always 0. Every best-effort failure emits an actionable stderr warning
+#           and continues/no-ops (rules/error-handling.md Shell Error Handling).
 #   state : $FRESHNESS_STATE_DIR/last-check (default ${TMPDIR:-/tmp}/coding-policy-freshness),
 #           a single epoch-seconds throttle stamp.
-#   env   : FRESHNESS_THROTTLE_HOURS (default 24), FRESHNESS_STATE_DIR (tests).
+#   env   : FRESHNESS_THROTTLE_HOURS (default 24), FRESHNESS_STATE_DIR (tests),
+#           FRESHNESS_NOW (test-only injected clock; defaults to `date +%s`).
 set -euo pipefail
 
 THROTTLE_HOURS="${FRESHNESS_THROTTLE_HOURS:-24}"
@@ -29,24 +30,23 @@ STATE_DIR="${FRESHNESS_STATE_DIR:-${TMPDIR:-/tmp}/coding-policy-freshness}"
 
 warn() { printf 'check-policy-freshness: %s\n' "$1" >&2; }
 
-cat >/dev/null 2>&1 || true   # drain stdin; we don't need its fields
-
-# jq and tessl are both required to produce a signal; without either, no-op.
-command -v jq >/dev/null 2>&1 || exit 0
-command -v tessl >/dev/null 2>&1 || exit 0
+# jq and tessl are both required to produce a signal; a missing optional tool is
+# an expected environment condition, not a failure — warn and no-op.
+command -v jq >/dev/null 2>&1 || { warn "jq not found — skipping freshness check"; exit 0; }
+command -v tessl >/dev/null 2>&1 || { warn "tessl not found — skipping freshness check"; exit 0; }
 
 if ! [[ "$THROTTLE_HOURS" =~ ^[0-9]+$ ]]; then
   warn "FRESHNESS_THROTTLE_HOURS='${THROTTLE_HOURS}' is not an integer — using 24"
   THROTTLE_HOURS=24
 fi
 
-now="$(date +%s)"
+now="${FRESHNESS_NOW:-$(date +%s)}"
 stamp="${STATE_DIR}/last-check"
 
 # Throttle: skip the registry call if we checked within the window.
 if [[ -r "$stamp" ]]; then
   last=""
-  read -r last < "$stamp" 2>/dev/null || last=""
+  read -r last < "$stamp" || last=""
   [[ "$last" =~ ^[0-9]+$ ]] || last=0
   if (( now - last < THROTTLE_HOURS * 3600 )); then
     exit 0
@@ -55,21 +55,31 @@ fi
 
 # Record the check up front so a slow/failed registry call still throttles the
 # next session rather than hammering the registry on every start.
-if mkdir -p "$STATE_DIR" 2>/dev/null; then
-  printf '%s\n' "$now" > "$stamp" 2>/dev/null || warn "cannot write throttle stamp ${stamp}"
+if mkdir -p "$STATE_DIR"; then
+  printf '%s\n' "$now" > "$stamp" || warn "cannot write throttle stamp ${stamp} — will re-check next session"
+else
+  warn "cannot create state dir ${STATE_DIR} — freshness check will not throttle"
 fi
 
-# Explicit fallback: a tessl/network failure is a no-op, not a broken session.
-out="$(tessl outdated --json 2>/dev/null)" || exit 0
+# Silence tessl's own diagnostic but explicitly handle the failure and warn —
+# an offline/registry error is a no-op, not a broken session.
+if ! out="$(tessl outdated --json 2>/dev/null)"; then
+  warn "tessl outdated failed (offline or registry error) — skipping freshness check"
+  exit 0
+fi
 
-# Build a compact notice line per outdated plugin. Empty list => silent.
-notice="$(printf '%s' "$out" | jq -r '
+# Build a compact notice line per outdated plugin. Empty list => silent. A parse
+# failure is surfaced, not swallowed as "nothing outdated".
+if ! notice="$(printf '%s' "$out" | jq -r '
   (.outdated // [])
   | map("- \(.current.tile.workspaceName)/\(.current.tile.tileName) \(.current.tile.version) -> \(.update.version)")
   | if length == 0 then empty else
       "Plugin updates available (run `tessl update`):\n" + (. | join("\n"))
     end
-' 2>/dev/null)" || exit 0
+' 2>/dev/null)"; then
+  warn "could not parse tessl outdated output — skipping freshness check"
+  exit 0
+fi
 
 [[ -n "$notice" ]] || exit 0
 jq -n --arg c "$notice" '{additionalContext: $c}'
