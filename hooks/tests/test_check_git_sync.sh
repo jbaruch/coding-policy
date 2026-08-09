@@ -105,7 +105,10 @@ main() {
   mk_origin o3
   clone_from "$BARE" "$TMP/r3"
   run "$TMP/r3" "$TMP/s3" SYNC_NOW=2000000               # fetch, stamp, up to date -> silent
-  [[ $RC -eq 0 && -z "$OUT" ]] || fail "throttle setup: first call should be silent, got RC=$RC OUT=$OUT"
+  # This establishes the throttle stamp the next two assertions depend on, so a
+  # failure here must abort, not merely tally (aggregate-reporting carve-out:
+  # later checks may not depend on an earlier one merely having incremented FAIL).
+  [[ $RC -eq 0 && -z "$OUT" ]] || die "throttle setup: first call should be silent, got RC=$RC OUT=$OUT"
   commit_push "$SEED" "c3"                                # origin moves; r3's tracking ref still old
   run "$TMP/r3" "$TMP/s3" SYNC_NOW=2000060               # +60s: throttled -> no fetch -> silent
   if [[ $RC -eq 0 && -z "$OUT" ]]; then pass; else fail "throttle active: inside window should skip fetch and stay silent, got OUT=$OUT"; fi

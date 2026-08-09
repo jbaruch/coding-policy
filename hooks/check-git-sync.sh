@@ -27,7 +27,8 @@
 #           Non-repo, no origin, no local default branch, and up-to-date are all
 #           silent no-ops — the common, uninteresting cases stay quiet.
 #   state : $SYNC_STATE_DIR/sync-<repo-key> (default ${TMPDIR:-/tmp}/coding-policy-sync),
-#           a single epoch-seconds throttle stamp per repo (keyed by toplevel path).
+#           a per-repo throttle stamp (keyed by toplevel path). Schema documented
+#           in hooks/state-schema.md: one line "<schema_version> <checked_at>".
 #   env   : SYNC_THROTTLE_HOURS (default 1), SYNC_FETCH_TIMEOUT (default 10s),
 #           SYNC_STATE_DIR (tests), SYNC_NOW (test-only injected clock; defaults
 #           to `date +%s`).
@@ -62,7 +63,7 @@ main() {
   local THROTTLE_HOURS="${SYNC_THROTTLE_HOURS:-1}"
   local FETCH_TIMEOUT="${SYNC_FETCH_TIMEOUT:-10}"
   local STATE_DIR="${SYNC_STATE_DIR:-${TMPDIR:-/tmp}/coding-policy-sync}"
-  local rc db inside cand now top repo_key stamp last should_fetch counts ahead behind notice
+  local rc db inside cand now top repo_key stamp sv ts should_fetch counts ahead behind notice
   local -a fetch
 
   # git is required to produce a signal; its absence is an expected environment
@@ -157,13 +158,16 @@ main() {
   fi
   stamp="${STATE_DIR}/sync-${repo_key}"
 
+  # Throttle stamp schema (see hooks/state-schema.md): one line "<schema_version>
+  # <checked_at-epoch>". A record whose version this hook does not accept (an old
+  # bare-integer stamp, or a future version) is treated as no usable prior state
+  # — re-fetch — never migrated in place (rules/stateful-artifacts.md).
   # With no throttle key the fallback fetches unconditionally (never throttles).
   should_fetch=1
   if [[ -n "$repo_key" && -r "$stamp" ]]; then
-    last=""
-    read -r last < "$stamp" || last=""
-    [[ "$last" =~ ^[0-9]+$ ]] || last=0
-    if (( now - last < THROTTLE_HOURS * 3600 )); then
+    sv=""; ts=""
+    read -r sv ts < "$stamp" || { sv=""; ts=""; }
+    if [[ "$sv" == "1" && "$ts" =~ ^[0-9]+$ ]] && (( now - ts < THROTTLE_HOURS * 3600 )); then
       should_fetch=0
     fi
   fi
@@ -174,7 +178,7 @@ main() {
     # throttle key was derived.
     if [[ -n "$repo_key" ]]; then
       if mkdir -p "$STATE_DIR"; then
-        printf '%s\n' "$now" > "$stamp" ||
+        printf '1 %s\n' "$now" > "$stamp" ||
           warn "cannot write throttle stamp ${stamp} — check permissions on ${STATE_DIR}; will re-fetch next session"
       else
         warn "cannot create state dir ${STATE_DIR} — check permissions or set SYNC_STATE_DIR; sync check will not throttle"

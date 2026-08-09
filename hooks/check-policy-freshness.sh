@@ -21,7 +21,8 @@
 #   exit  : always 0. Every best-effort failure emits an actionable stderr warning
 #           and continues/no-ops (rules/error-handling.md Shell Error Handling).
 #   state : $FRESHNESS_STATE_DIR/last-check (default ${TMPDIR:-/tmp}/coding-policy-freshness),
-#           a single epoch-seconds throttle stamp.
+#           a throttle stamp. Schema documented in hooks/state-schema.md:
+#           one line "<schema_version> <checked_at>".
 #   env   : FRESHNESS_THROTTLE_HOURS (default 24), FRESHNESS_STATE_DIR (tests),
 #           FRESHNESS_NOW (test-only injected clock; defaults to `date +%s`).
 set -euo pipefail
@@ -31,7 +32,7 @@ warn() { printf 'check-policy-freshness: %s\n' "$1" >&2; }
 main() {
   local THROTTLE_HOURS="${FRESHNESS_THROTTLE_HOURS:-24}"
   local STATE_DIR="${FRESHNESS_STATE_DIR:-${TMPDIR:-/tmp}/coding-policy-freshness}"
-  local now stamp last out notice
+  local now stamp sv ts out notice
 
   # jq and tessl are both required to produce a signal; a missing optional tool is
   # an expected environment condition, not a failure — warn and no-op.
@@ -59,12 +60,14 @@ main() {
 
   stamp="${STATE_DIR}/last-check"
 
-  # Throttle: skip the registry call if we checked within the window.
+  # Throttle stamp schema (see hooks/state-schema.md): one line "<schema_version>
+  # <checked_at-epoch>". A record whose version this hook does not accept (an old
+  # bare-integer stamp, or a future version) is treated as no usable prior state
+  # — re-check — never migrated in place (rules/stateful-artifacts.md).
   if [[ -r "$stamp" ]]; then
-    last=""
-    read -r last < "$stamp" || last=""
-    [[ "$last" =~ ^[0-9]+$ ]] || last=0
-    if (( now - last < THROTTLE_HOURS * 3600 )); then
+    sv=""; ts=""
+    read -r sv ts < "$stamp" || { sv=""; ts=""; }
+    if [[ "$sv" == "1" && "$ts" =~ ^[0-9]+$ ]] && (( now - ts < THROTTLE_HOURS * 3600 )); then
       return 0
     fi
   fi
@@ -72,7 +75,7 @@ main() {
   # Record the check up front so a slow/failed registry call still throttles the
   # next session rather than hammering the registry on every start.
   if mkdir -p "$STATE_DIR"; then
-    printf '%s\n' "$now" > "$stamp" ||
+    printf '1 %s\n' "$now" > "$stamp" ||
       warn "cannot write throttle stamp ${stamp} — check permissions on ${STATE_DIR}; will re-check next session"
   else
     warn "cannot create state dir ${STATE_DIR} — check permissions or set FRESHNESS_STATE_DIR; freshness check will not throttle"
