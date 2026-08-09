@@ -72,6 +72,18 @@
           ]
         }
       ]
+    },
+    "codex": {
+      "Stop": [
+        {
+          "hooks": [
+            {
+              "type": "command",
+              "command": "bash \"${TESSL_PLUGIN_DIR}/hooks/stop-handoff-hygiene.sh\""
+            }
+          ]
+        }
+      ]
     }
   }
 }
