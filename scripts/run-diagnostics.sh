@@ -22,21 +22,14 @@
 # Output:
 #   stderr: each engine's native findings plus per-engine progress.
 # Usage: scripts/run-diagnostics.sh [base-dir]
-#        scripts/run-diagnostics.sh --files <path>...
-#   base-dir       Tree whose skills/, scripts/, hooks/, .github/actions/, and
-#                  .github/codex-review/ are scanned for shell scripts.
-#                  Defaults to the repo root. The optional arg exists so the
-#                  runner's own test can point it at a fixture tree.
-#                  pyright always runs against pyrightconfig.json at the cwd,
-#                  independent of base-dir.
-#   --files ...    Changed-set mode: lint exactly the given paths — shellcheck
-#                  the .sh files, pyright the .py files. Non-.sh/.py paths and
-#                  paths that no longer exist (a deletion in the changed set)
-#                  are skipped. An engine is required only when the set holds a
-#                  file of its type. An empty lintable set exits 0 (nothing to
-#                  check). Used by hooks/stop-handoff-hygiene.sh to gate only
-#                  what a session changed, not the whole tree.
-# Exit: 0 if the relevant engines report zero findings, 1 on any finding, 2 on
+#   base-dir  Tree whose skills/, scripts/, hooks/, .github/actions/, and
+#             .github/codex-review/ are scanned for shell scripts.
+#             Defaults to the repo root. The
+#             optional arg exists so the runner's own test can point it at
+#             a fixture tree.
+#             pyright always runs against pyrightconfig.json at the cwd,
+#             independent of base-dir.
+# Exit: 0 if both engines report zero findings, 1 on any finding, 2 on
 #       setup error (base dir missing, no scripts found, engine absent).
 
 set -uo pipefail
@@ -51,70 +44,7 @@ discard() {
   fi
 }
 
-# Changed-set mode: lint exactly the given paths. shellcheck the .sh files,
-# pyright the .py files; skip non-.sh/.py and no-longer-existing paths. An
-# engine is required only when its file type is present. Empty set => exit 0.
-run_files() {
-  local sh_files=() py_files=() f rc=0
-  for f in "$@"; do
-    [[ -f "$f" ]] || continue
-    case "$f" in
-      *.sh) sh_files+=("$f") ;;
-      *.py) py_files+=("$f") ;;
-    esac
-  done
-
-  if [[ ${#sh_files[@]} -eq 0 && ${#py_files[@]} -eq 0 ]]; then
-    echo "run-diagnostics: no lintable (.sh/.py) files in the changed set — nothing to check" >&2
-    return 0
-  fi
-
-  if [[ ${#sh_files[@]} -gt 0 ]]; then
-    if ! command -v shellcheck >/dev/null 2>&1; then
-      echo "run-diagnostics: shellcheck not installed — install it (see .github/workflows/tests.yml)" >&2
-      return 2
-    fi
-    echo "▶ shellcheck (${#sh_files[@]} changed script(s))" >&2
-    if shellcheck "${sh_files[@]}"; then
-      echo "  ✓ shellcheck clean" >&2
-    else
-      echo "  ✗ shellcheck findings" >&2
-      rc=1
-    fi
-    echo "" >&2
-  fi
-
-  if [[ ${#py_files[@]} -gt 0 ]]; then
-    if ! command -v pyright >/dev/null 2>&1; then
-      echo "run-diagnostics: pyright not installed — install it (see .github/workflows/tests.yml)" >&2
-      return 2
-    fi
-    echo "▶ pyright (${#py_files[@]} changed file(s))" >&2
-    if pyright "${py_files[@]}"; then
-      echo "  ✓ pyright clean" >&2
-    else
-      echo "  ✗ pyright findings" >&2
-      rc=1
-    fi
-    echo "" >&2
-  fi
-
-  echo "─────────────────────────────────────────────" >&2
-  if [[ $rc -eq 0 ]]; then
-    echo "PASSED: changed-set diagnostics clean." >&2
-  else
-    echo "FAILED: changed-set diagnostics findings above." >&2
-  fi
-  return $rc
-}
-
 main() {
-  if [[ "${1:-}" == "--files" ]]; then
-    shift
-    run_files "$@"
-    return $?
-  fi
-
   local base="${1:-}"
   if [[ -z "$base" ]]; then
     base="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

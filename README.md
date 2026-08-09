@@ -69,7 +69,7 @@ tessl install jbaruch/coding-policy
 | ---- | ----- | ----------- |
 | [check-policy-freshness](hooks/check-policy-freshness.sh) | SessionStart | Warns (throttled once/day) when installed Tessl plugins are behind the registry — a `tessl update` reminder at session start. Informative only, never blocks. |
 | [check-git-sync](hooks/check-git-sync.sh) | SessionStart | Fetches origin (throttled once/hour per repo) and warns when the local default branch is behind `origin/<default>` — a `rules/sync-before-work.md` reminder at session start. Informative only, never blocks. |
-| [stop-handoff-hygiene](hooks/stop-handoff-hygiene.sh) | Stop (Claude Code) | Blocks the handoff once (loop-safe via `stop_hook_active`) on leftover local branches (merged, upstream gone), orphaned worktrees, or diagnostics findings in the changed set (uncommitted `.sh`/`.py`, via `run-diagnostics.sh --files`). A dirty working tree is reported, not blocked. Fail-open. |
+| [stop-handoff-hygiene](hooks/stop-handoff-hygiene.sh) | Stop (Claude Code) | Blocks the handoff once (loop-safe via `stop_hook_active`) on leftover local branches (merged, upstream gone), orphaned worktrees, or diagnostics findings in the changed set (uncommitted `.sh`/`.py`, linted with shellcheck/pyright). A dirty working tree is reported, not blocked. Fail-open. |
 
 ## Philosophy
 

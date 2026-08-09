@@ -23,6 +23,7 @@
 #   7. Diag clean      -> changed uncommitted .sh, engines clean -> no diag block.
 #   8. No jq           -> fail-open allow, exit 0.
 #   9. Not a repo      -> allow, exit 0.
+#  10. Engine absent   -> block with install guidance (changed .sh, no shellcheck).
 #
 # Run: bash hooks/tests/test_stop_handoff_hygiene.sh
 set -uo pipefail
@@ -133,7 +134,7 @@ main() {
   printf '#!/usr/bin/env bash\necho hi\n' > "$TMP/r6/new.sh" || die "r6 new.sh failed"
   mk_stub_bin "$TMP/r6-bin" 1 0     # stub engine exits 1 (a finding)
   run_hook "$TMP/r6" '{"stop_hook_active":false}' "$TMP/r6-bin:$PATH"
-  if [[ $RC -eq 0 ]] && reason_has "Diagnostics findings" \
+  if [[ $RC -eq 0 ]] && reason_has "shellcheck findings" \
      && [[ "$(printf '%s' "$OUT" | jq -r '.decision')" == "block" ]]; then
     pass; else fail "diag finding: expected block, got RC=$RC OUT=$OUT"; fi
 
@@ -160,6 +161,23 @@ main() {
   mkdir -p "$TMP/notrepo" || die "notrepo mkdir failed"
   run_hook "$TMP/notrepo" '{"stop_hook_active":false}'
   if [[ $RC -eq 0 && -z "$OUT" ]]; then pass; else fail "not a repo: expected allow/silence, got RC=$RC OUT=$OUT"; fi
+
+  # 10. engine unavailable for a present type -> block with install guidance
+  #     (rules/language-diagnostics.md: the gate can't clear findings without the
+  #     engine). PATH has git/jq/cat/bash but no shellcheck; a changed .sh forces
+  #     the check.
+  mk_origin o10; clone_from "$BARE" "$TMP/r10"
+  printf '#!/usr/bin/env bash\necho hi\n' > "$TMP/r10/new.sh" || die "r10 new.sh failed"
+  local engbin="$TMP/engbin"; mkdir -p "$engbin" || die "engbin mkdir failed"
+  local u p2
+  for u in bash git jq cat; do
+    p2="$(command -v "$u")" || die "no $u on PATH"
+    ln -s "$p2" "$engbin/$u" || die "symlink $u failed"
+  done
+  run_hook "$TMP/r10" '{"stop_hook_active":false}' "$engbin"
+  if [[ $RC -eq 0 ]] && reason_has "shellcheck is not installed" \
+     && [[ "$(printf '%s' "$OUT" | jq -r '.decision')" == "block" ]]; then
+    pass; else fail "engine unavailable: expected block with install guidance, got RC=$RC OUT=$OUT"; fi
 
   echo "─────────────────────────────────────────────" >&2
   if [[ $FAIL -gt 0 ]]; then echo "FAILED: ${FAIL} failed, ${PASS} passed" >&2; exit 1; fi

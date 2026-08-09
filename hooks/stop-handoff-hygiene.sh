@@ -19,9 +19,12 @@
 # Blocking findings (gate the stop, once):
 #   - Leftover local branches whose upstream is gone (merged then remote-deleted).
 #   - Orphaned linked worktrees whose branch's upstream is gone.
-#   - Diagnostics findings in the CHANGED set only (uncommitted .sh/.py), via the
-#     bundled scripts/run-diagnostics.sh --files — skipped when nothing lintable
-#     changed, so a clean handoff costs nothing.
+#   - Diagnostics findings in the CHANGED set only (uncommitted .sh/.py):
+#     lint the .sh with shellcheck, the .py with pyright. Skipped when nothing
+#     lintable changed, so a clean handoff costs nothing. An absent engine is
+#     blocking (the gate can't clear findings without it) — install and re-check.
+#     Inlined here rather than delegated to scripts/run-diagnostics.sh, which the
+#     Tessl packer does not ship (only rules/, skills/, hooks/ surfaces publish).
 # Report-only (never blocks on its own): a dirty working tree — often intentional
 #   work-in-progress, surfaced to the user but not trapped.
 #
@@ -165,22 +168,40 @@ build_branch_findings() {
 }
 
 # Diagnostics on the CHANGED set only: uncommitted .sh/.py files. Skips silently
-# when nothing lintable changed. run-diagnostics.sh --files exits 1 on findings
-# (block), 2 on setup error (engine missing — warn, don't block).
+# when nothing lintable changed. shellcheck the .sh, pyright the .py; findings
+# block. A required engine being absent is also blocking (rules/language-
+# diagnostics.md Install, Don't Skip — the gate cannot clear findings without it).
 run_changed_diagnostics() {
   collect_changed_lintable
   (( ${#changed[@]} > 0 )) || return 0
 
-  local diag="${BASH_SOURCE[0]%/*}/../scripts/run-diagnostics.sh" out drc=0
-  if [[ ! -f "$diag" ]]; then
-    warn "bundled run-diagnostics.sh not found at ${diag} — skipping the diagnostics check"
-    return 0
+  local f out
+  local -a sh_files=() py_files=()
+  for f in "${changed[@]}"; do
+    case "$f" in
+      *.sh) sh_files+=("$f") ;;
+      *.py) py_files+=("$f") ;;
+    esac
+  done
+
+  if (( ${#sh_files[@]} > 0 )); then
+    if command -v shellcheck >/dev/null 2>&1; then
+      if ! out="$(shellcheck "${sh_files[@]}" 2>&1)"; then
+        blocking+=("shellcheck findings in changed shell files — fix before handoff:"$'\n'"${out}")
+      fi
+    else
+      blocking+=("shellcheck is not installed but changed .sh files need checking — install shellcheck to clear the pre-handoff diagnostics gate (rules/language-diagnostics.md).")
+    fi
   fi
-  out="$(bash "$diag" --files "${changed[@]}" 2>&1)" || drc=$?
-  if (( drc == 1 )); then
-    blocking+=("Diagnostics findings in changed files — fix before handoff:"$'\n'"${out}")
-  elif (( drc == 2 )); then
-    warn "diagnostics engines unavailable (run-diagnostics exit 2) — install shellcheck/pyright to enable the check; not blocking"
+
+  if (( ${#py_files[@]} > 0 )); then
+    if command -v pyright >/dev/null 2>&1; then
+      if ! out="$(pyright "${py_files[@]}" 2>&1)"; then
+        blocking+=("pyright findings in changed Python files — fix before handoff:"$'\n'"${out}")
+      fi
+    else
+      blocking+=("pyright is not installed but changed .py files need checking — install pyright to clear the pre-handoff diagnostics gate (rules/language-diagnostics.md).")
+    fi
   fi
   return 0
 }
