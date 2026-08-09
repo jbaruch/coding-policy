@@ -39,16 +39,46 @@ STATE_DIR="${SYNC_STATE_DIR:-${TMPDIR:-/tmp}/coding-policy-sync}"
 
 warn() { printf 'check-git-sync: %s\n' "$1" >&2; }
 
+# Does a ref exist? `git show-ref --verify --quiet` exits 0 (exists) or 1 (the
+# expected "absent / malformed name" no-result); any other exit is a real git
+# failure — surface it and treat the ref as absent so best-effort work continues
+# visibly (rules/error-handling.md — distinguish a non-result from a tool error).
+ref_exists() { # <fully-qualified-ref>
+  local rc=0
+  git show-ref --verify --quiet "$1" || rc=$?
+  if (( rc == 0 )); then return 0; fi
+  if (( rc != 1 )); then
+    warn "git show-ref failed (exit ${rc}) checking $1 — treating the ref as absent"
+  fi
+  return 1
+}
+
 # git is required to produce a signal; its absence is an expected environment
 # condition, not a failure — warn and no-op.
 command -v git >/dev/null 2>&1 || { warn "git not found — install git to enable the sync check"; exit 0; }
 
-# Outside a work tree there is nothing to sync — the common non-repo session.
-# Silent no-op (git prints its own error to the discarded stderr).
-git rev-parse --is-inside-work-tree >/dev/null 2>&1 || exit 0
+# Outside a work tree there is nothing to sync. `--is-inside-work-tree` prints
+# true/false and exits 0 inside any repo; its only failure is exit 128 ("not a
+# git repository") — the expected non-repo session. Proceed only on a literal
+# "true"; a bare repo / gitdir ("false") and the non-repo case are silent
+# no-ops, and an unexpected value is surfaced.
+inside="$(git rev-parse --is-inside-work-tree 2>/dev/null)" || inside="__notrepo__"
+case "$inside" in
+  true) : ;;
+  false|__notrepo__) exit 0 ;;
+  *) warn "unexpected \`git rev-parse --is-inside-work-tree\` output '${inside}' — skipping sync check"; exit 0 ;;
+esac
 
-# No origin remote => nothing to compare against. Silent no-op.
-git remote get-url origin >/dev/null 2>&1 || exit 0
+# No origin remote => nothing to compare against. `git remote get-url` exits 2
+# for the documented "No such remote" (silent no-op); any other non-zero is a
+# real git failure and is surfaced (rules/error-handling.md).
+rc=0
+git remote get-url origin >/dev/null 2>&1 || rc=$?
+if (( rc != 0 )); then
+  if (( rc == 2 )); then exit 0; fi
+  warn "git remote get-url origin failed (exit ${rc}) — run \`git remote -v\` to inspect; skipping sync check"
+  exit 0
+fi
 
 if ! [[ "$THROTTLE_HOURS" =~ ^[0-9]+$ ]]; then
   warn "SYNC_THROTTLE_HOURS='${THROTTLE_HOURS}' is not an integer — using 1"
@@ -74,7 +104,7 @@ fi
 # Fallback: probe the conventional names among the remote-tracking refs we have.
 if [[ -z "$db" ]]; then
   for cand in main master; do
-    if git show-ref --verify --quiet "refs/remotes/origin/$cand"; then db="$cand"; break; fi
+    if ref_exists "refs/remotes/origin/$cand"; then db="$cand"; break; fi
   done
 fi
 if [[ -z "$db" ]]; then
@@ -83,8 +113,9 @@ if [[ -z "$db" ]]; then
 fi
 
 # No local default branch (e.g. only feature branches checked out) => nothing to
-# report as "behind". Silent no-op.
-git show-ref --verify --quiet "refs/heads/$db" || exit 0
+# report as "behind". Silent no-op when absent; ref_exists surfaces a real
+# git failure before returning "absent".
+ref_exists "refs/heads/$db" || exit 0
 
 # Resolve the clock. A test may inject SYNC_NOW; otherwise read the system clock
 # and handle its failure. Validate as an integer before any arithmetic so a
@@ -105,7 +136,10 @@ fi
 # A cksum/cut failure would abort the assignment under set -e and break the
 # always-exit-0 contract, so handle it: fall back to an un-throttled run rather
 # than crash the session.
-top="$(git rev-parse --show-toplevel 2>/dev/null || printf '%s' "$PWD")"
+if ! top="$(git rev-parse --show-toplevel 2>/dev/null)"; then
+  warn "git rev-parse --show-toplevel failed — keying the throttle stamp on \$PWD instead"
+  top="$PWD"
+fi
 if ! repo_key="$(printf '%s' "$top" | cksum | cut -d' ' -f1)"; then
   warn "could not derive a throttle key for ${top} — sync check will not throttle this run"
   repo_key=""
