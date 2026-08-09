@@ -80,15 +80,27 @@ main() {
     fi
   fi
 
-  # 2. Ensure the gitignore block is present.
+  # 2. Ensure the gitignore block is present. grep exit is classified explicitly
+  # (0 present / 1 absent / >1 read error) per rules/error-handling.md — never
+  # collapsed to "absent".
   local gi_state
-  if [[ -f .gitignore ]] && grep -qF "$MARKER" .gitignore; then
-    gi_state="unchanged"
-  elif [[ -f .gitignore ]]; then
-    # separate from prior content with a blank line if the file lacks a trailing newline
-    if [[ -n "$(tail -c1 .gitignore 2>/dev/null)" ]]; then echo >> .gitignore; fi
-    gitignore_block >> .gitignore
-    gi_state="appended"
+  if [[ -f .gitignore ]]; then
+    local grc=0
+    grep -qF "$MARKER" .gitignore || grc=$?
+    if (( grc == 0 )); then
+      gi_state="unchanged"
+    elif (( grc == 1 )); then
+      # Absent: append. Separate from prior content with a blank line when the
+      # file lacks a trailing newline; a tail failure is a real read error.
+      local last
+      last=$(tail -c1 .gitignore) || { echo "error: cannot read .gitignore — check its permissions and re-run" >&2; exit 1; }
+      [[ -n "$last" ]] && echo >> .gitignore
+      gitignore_block >> .gitignore
+      gi_state="appended"
+    else
+      echo "error: reading .gitignore failed (grep exit ${grc}) — check it is a readable text file and re-run" >&2
+      exit 1
+    fi
   else
     gitignore_block > .gitignore
     gi_state="created"

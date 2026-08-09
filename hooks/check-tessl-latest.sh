@@ -32,8 +32,14 @@ main() {
   # No tessl.json => not a tessl consumer; nothing to check. Silent no-op.
   [[ -f "$manifest" ]] || return 0
 
-  command -v jq >/dev/null 2>&1 \
-    || { warn "jq not found — install jq to enable the tessl-latest check"; return 0; }
+  # This hook IS the carve-out's enforcement, so an unavailable checker must be
+  # surfaced (not a silent no-op) — emit the gap via additionalContext without
+  # jq (a literal, no interpolation, so no escaping is needed).
+  if ! command -v jq >/dev/null 2>&1; then
+    warn "jq not found — cannot verify tessl.json specifiers"
+    printf '%s\n' '{"additionalContext":"check-tessl-latest could not verify tessl.json — jq is not installed. Install jq so the Runtime-Managed Manifest Carve-Out enforcement (jbaruch/* deps must be \"latest\") can run."}'
+    return 0
+  fi
 
   # Collect jbaruch/* deps whose version is not "latest". A parse failure is
   # surfaced, not swallowed as "all latest".
