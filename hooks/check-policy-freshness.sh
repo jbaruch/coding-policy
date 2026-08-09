@@ -32,7 +32,7 @@ warn() { printf 'check-policy-freshness: %s\n' "$1" >&2; }
 main() {
   local THROTTLE_HOURS="${FRESHNESS_THROTTLE_HOURS:-24}"
   local STATE_DIR="${FRESHNESS_STATE_DIR:-${TMPDIR:-/tmp}/coding-policy-freshness}"
-  local now stamp sv ts out notice
+  local now stamp sv ts preserve_future out notice
 
   # jq and tessl are both required to produce a signal; a missing optional tool is
   # an expected environment condition, not a failure — warn and no-op.
@@ -61,24 +61,33 @@ main() {
   stamp="${STATE_DIR}/last-check"
 
   # Throttle stamp schema (see hooks/state-schema.md): one line "<schema_version>
-  # <checked_at-epoch>". A record whose version this hook does not accept (an old
-  # bare-integer stamp, or a future version) is treated as no usable prior state
-  # — re-check — never migrated in place (rules/stateful-artifacts.md).
+  # <checked_at-epoch>". Per rules/stateful-artifacts.md Migration Policy:
+  #   - schema_version 1 within the window => throttle (return silently).
+  #   - a future version (sv > 1) => this hook is lagging: no usable prior state
+  #     (re-check), and DO NOT downgrade the record — preserve it.
+  #   - anything else (old bare-integer, corrupt, absent) => no prior state
+  #     (re-check), safe to rewrite as version 1.
+  preserve_future=0
   if [[ -r "$stamp" ]]; then
     sv=""; ts=""
     read -r sv ts < "$stamp" || { sv=""; ts=""; }
-    if [[ "$sv" == "1" && "$ts" =~ ^[0-9]+$ ]] && (( now - ts < THROTTLE_HOURS * 3600 )); then
+    if [[ "$sv" =~ ^[0-9]+$ ]] && (( sv > 1 )); then
+      preserve_future=1
+    elif [[ "$sv" == "1" && "$ts" =~ ^[0-9]+$ ]] && (( now - ts < THROTTLE_HOURS * 3600 )); then
       return 0
     fi
   fi
 
   # Record the check up front so a slow/failed registry call still throttles the
-  # next session rather than hammering the registry on every start.
-  if mkdir -p "$STATE_DIR"; then
-    printf '1 %s\n' "$now" > "$stamp" ||
-      warn "cannot write throttle stamp ${stamp} — check permissions on ${STATE_DIR}; will re-check next session"
-  else
-    warn "cannot create state dir ${STATE_DIR} — check permissions or set FRESHNESS_STATE_DIR; freshness check will not throttle"
+  # next session rather than hammering the registry on every start. Skipped when
+  # a future-version record must be preserved rather than downgraded.
+  if (( preserve_future == 0 )); then
+    if mkdir -p "$STATE_DIR"; then
+      printf '1 %s\n' "$now" > "$stamp" ||
+        warn "cannot write throttle stamp ${stamp} — check permissions on ${STATE_DIR}; will re-check next session"
+    else
+      warn "cannot create state dir ${STATE_DIR} — check permissions or set FRESHNESS_STATE_DIR; freshness check will not throttle"
+    fi
   fi
 
   # Silence tessl's own diagnostic but explicitly handle the failure and warn —

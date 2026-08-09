@@ -31,21 +31,26 @@ Example: `1 1734567890`
 ## Writer / Reader Contract
 
 - **Writer** (owner hook): writes `1 <now>` before running the throttled call,
-  so a slow or failed call still throttles the next session.
+  so a slow or failed call still throttles the next session. Never writes when
+  preserving a future-version record (see Migration).
 - **Reader** (owner hook): throttles only when the record's `schema_version` is
-  `1` **and** `checked_at` is an integer within the throttle window. Any other
-  record — a `schema_version` this hook does not accept, a non-integer
-  `checked_at`, an absent stamp — is treated as **no usable prior state**: the
-  hook runs its call (no throttle) and rewrites a current record.
+  `1` **and** `checked_at` is an integer within the throttle window. Every other
+  record is **no usable prior state**: the hook runs its call (no throttle).
 
 ## Migration
 
-- Only the owner hook migrates. On reading a record it does not accept — an
-  older bare-integer stamp (pre-versioning) or a future `schema_version` — it
-  takes the no-usable-prior-state path above and rewrites a `1 <now>` record on
-  its next throttled run.
-- This fallback is safe and non-disruptive: the only effect of discarding a
-  record is one extra network / registry call. It never escalates work.
+Only the owner hook migrates, and it distinguishes older records from newer ones
+per `rules/stateful-artifacts.md` Migration Policy:
+
+- **Older or corrupt record** — an old bare-integer stamp (pre-versioning), a
+  non-integer field, or an absent stamp: no usable prior state, and the hook
+  rewrites a current `1 <now>` record on its next run.
+- **Future-version record** (`schema_version` > 1): the hook is the lagging
+  reader, not the migrator. It takes the no-usable-prior-state path (runs its
+  call) but **must not downgrade** the record — it preserves the future stamp
+  untouched until the hook is updated to accept that schema.
+- Both fallbacks are safe and non-disruptive: discarding a record costs only one
+  extra network / registry call. Neither escalates work.
 - Bump `schema_version` for any shape change; do not repurpose `checked_at`
   silently.
 

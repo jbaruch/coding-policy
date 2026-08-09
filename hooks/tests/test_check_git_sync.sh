@@ -23,6 +23,8 @@
 #   7. Bad clock     -> silent no-op, exit 0 (never aborts SessionStart).
 #   8. Diverged      -> notice names divergence and recommends rebase, not a
 #                       fast-forward (local both ahead and behind origin).
+#   9. Future stamp  -> a schema_version > 1 record is not throttled on and is
+#                       preserved (not downgraded to version 1).
 #
 # Run: bash hooks/tests/test_check_git_sync.sh
 set -uo pipefail
@@ -156,6 +158,26 @@ main() {
   run "$TMP/r8" "$TMP/s8"
   if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | jq -e '.additionalContext | test("diverged") and test("rebase")' >/dev/null 2>&1; then
     pass; else fail "diverged: expected divergence notice, got RC=$RC OUT=$OUT"; fi
+
+  # 9. future-version throttle stamp -> not throttled on, and preserved (never
+  #    downgraded). Pre-seed a "2 <recent>" record at the stamp path the hook
+  #    derives (cksum of the repo toplevel), move origin ahead, and run inside
+  #    the window: a v1 stamp would throttle to silence, but the future record
+  #    must be ignored (the hook fires) and left untouched.
+  mk_origin o9
+  clone_from "$BARE" "$TMP/r9"
+  commit_push "$SEED" "c2"                                # origin ahead -> a non-throttled run fires
+  local top9 key9 stampdir9 sv9
+  top9="$(cd "$TMP/r9" && git rev-parse --show-toplevel)" || die "r9 toplevel failed"
+  key9="$(printf '%s' "$top9" | cksum | cut -d' ' -f1)"   || die "r9 key derivation failed"
+  stampdir9="$TMP/s9"
+  mkdir -p "$stampdir9" || die "could not create $stampdir9"
+  printf '2 %s\n' 2000000 > "$stampdir9/sync-$key9" || die "could not seed future stamp"
+  run "$TMP/r9" "$stampdir9" SYNC_NOW=2000060            # within window, but future schema
+  if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | jq -e '.additionalContext | test("behind")' >/dev/null 2>&1; then
+    pass; else fail "future stamp: expected fire (not throttled), got RC=$RC OUT=$OUT"; fi
+  sv9=""; read -r sv9 _ < "$stampdir9/sync-$key9" || sv9=""
+  if [[ "$sv9" == "2" ]]; then pass; else fail "future stamp: expected preserved version 2, got '$sv9'"; fi
 
   echo "─────────────────────────────────────────────" >&2
   if [[ $FAIL -gt 0 ]]; then echo "FAILED: ${FAIL} failed, ${PASS} passed" >&2; exit 1; fi

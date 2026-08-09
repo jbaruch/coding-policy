@@ -63,7 +63,7 @@ main() {
   local THROTTLE_HOURS="${SYNC_THROTTLE_HOURS:-1}"
   local FETCH_TIMEOUT="${SYNC_FETCH_TIMEOUT:-10}"
   local STATE_DIR="${SYNC_STATE_DIR:-${TMPDIR:-/tmp}/coding-policy-sync}"
-  local rc db inside cand now top repo_key stamp sv ts should_fetch counts ahead behind notice
+  local rc db inside cand now top repo_key stamp sv ts should_fetch preserve_future counts ahead behind notice
   local -a fetch
 
   # git is required to produce a signal; its absence is an expected environment
@@ -159,15 +159,21 @@ main() {
   stamp="${STATE_DIR}/sync-${repo_key}"
 
   # Throttle stamp schema (see hooks/state-schema.md): one line "<schema_version>
-  # <checked_at-epoch>". A record whose version this hook does not accept (an old
-  # bare-integer stamp, or a future version) is treated as no usable prior state
-  # — re-fetch — never migrated in place (rules/stateful-artifacts.md).
+  # <checked_at-epoch>". Per rules/stateful-artifacts.md Migration Policy:
+  #   - schema_version 1 within the window => throttle (skip the fetch).
+  #   - a future version (sv > 1) => this hook is lagging: no usable prior state
+  #     (fetch), and DO NOT downgrade the record — preserve it (preserve_future).
+  #   - anything else (old bare-integer, corrupt, absent) => no prior state
+  #     (fetch), safe to rewrite as version 1.
   # With no throttle key the fallback fetches unconditionally (never throttles).
   should_fetch=1
+  preserve_future=0
   if [[ -n "$repo_key" && -r "$stamp" ]]; then
     sv=""; ts=""
     read -r sv ts < "$stamp" || { sv=""; ts=""; }
-    if [[ "$sv" == "1" && "$ts" =~ ^[0-9]+$ ]] && (( now - ts < THROTTLE_HOURS * 3600 )); then
+    if [[ "$sv" =~ ^[0-9]+$ ]] && (( sv > 1 )); then
+      preserve_future=1
+    elif [[ "$sv" == "1" && "$ts" =~ ^[0-9]+$ ]] && (( now - ts < THROTTLE_HOURS * 3600 )); then
       should_fetch=0
     fi
   fi
@@ -175,8 +181,9 @@ main() {
   if (( should_fetch )); then
     # Record the fetch up front so a slow/failed fetch still throttles the next
     # session rather than retrying the network on every start. Skipped when no
-    # throttle key was derived.
-    if [[ -n "$repo_key" ]]; then
+    # throttle key was derived, and when a future-version record must be
+    # preserved rather than downgraded.
+    if [[ -n "$repo_key" ]] && (( preserve_future == 0 )); then
       if mkdir -p "$STATE_DIR"; then
         printf '1 %s\n' "$now" > "$stamp" ||
           warn "cannot write throttle stamp ${stamp} — check permissions on ${STATE_DIR}; will re-fetch next session"
