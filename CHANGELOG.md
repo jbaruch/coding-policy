@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.143 — 2026-08-09
+
 ### Hooks — stop-handoff-hygiene now runs on Codex too
 
 Dual-wire the `stop-handoff-hygiene` Stop hook to Codex via `nativeHooks.codex` in `.tessl-plugin/plugin.json` (#265). Codex's hooks system matches Claude Code's Stop contract — `decision:"block"` continues the turn with `reason` as the next prompt, guarded by a `stop_hook_active` stdin boolean — so the same script runs unchanged on both agents.
