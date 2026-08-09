@@ -54,6 +54,84 @@ class ComputeVersion(unittest.TestCase):
             stamp_changelog.compute_version("0.18.7", "vNext")
 
 
+class NeedsOwnPush(unittest.TestCase):
+    """The stamp commit must be pushed here only when no bump carries it."""
+
+    def test_first_publish_pushes(self):
+        # First publish: computed == manifest, publish step pushes nothing.
+        self.assertTrue(stamp_changelog.needs_own_push("0.1.0", "0.1.0", True))
+
+    def test_manifest_ahead_pushes(self):
+        # Manifest ahead of registry: published as-is, no bump commit.
+        self.assertTrue(stamp_changelog.needs_own_push("0.19.0", "0.19.0", True))
+
+    def test_normal_bump_does_not_push(self):
+        # Bump case: publish step's own commit carries the stamp.
+        self.assertFalse(stamp_changelog.needs_own_push("0.18.8", "0.18.7", True))
+
+    def test_noop_never_pushes(self):
+        # Nothing stamped — no commit exists to push.
+        self.assertFalse(stamp_changelog.needs_own_push("0.1.0", "0.1.0", False))
+
+
+class MainDecisionFile(unittest.TestCase):
+    """main() writes the push decision for the calling action to read."""
+
+    _BODY = "# Changelog\n\n### feat — x\n"
+
+    def _run(self, tmp, manifest_version, latest, body=None):
+        """Run main() with a temp changelog/manifest; return the decision text.
+
+        `latest=None` omits --latest and stubs the registry query to a 404
+        (first publish); a string passes --latest verbatim.
+        """
+        changelog = tmp / "CHANGELOG.md"
+        changelog.write_text(body if body is not None else self._BODY)
+        manifest = tmp / "plugin.json"
+        manifest.write_text('{"name": "ws/p", "version": "%s"}' % manifest_version)
+        decision = tmp / "decision"
+        argv = [
+            "stamp-changelog.py",
+            "--changelog", str(changelog),
+            "--manifest", str(manifest),
+            "--date", "2026-08-09",
+            "--decision-file", str(decision),
+        ]
+        if latest is not None:
+            argv += ["--latest", latest]
+        with mock.patch("sys.argv", argv):
+            if latest is None:
+                with mock.patch.object(stamp_changelog, "query_latest_version",
+                                       return_value=None):
+                    stamp_changelog.main()
+            else:
+                stamp_changelog.main()
+        return decision.read_text()
+
+    def test_first_publish_writes_true(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            # No registry version → computed == manifest → nothing carries it.
+            self.assertEqual(self._run(Path(d), "0.1.0", None), "true")
+
+    def test_manifest_ahead_writes_true(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            self.assertEqual(self._run(Path(d), "0.19.0", "0.18.7"), "true")
+
+    def test_normal_bump_writes_false(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            self.assertEqual(self._run(Path(d), "0.18.7", "0.18.7"), "false")
+
+    def test_noop_writes_false(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            # Top already headed → no stamp → no commit to push.
+            already = "# Changelog\n\n## 0.1.0 — 2026-08-09\n\n### feat — x\n"
+            self.assertEqual(self._run(Path(d), "0.1.0", None, body=already), "false")
+
+
 class QueryLatestVersion(unittest.TestCase):
     """query_latest_version degrades gracefully when the stamp step has no auth."""
 
