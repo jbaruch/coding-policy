@@ -56,5 +56,22 @@
         ]
       }
     ]
+  },
+  "nativeHooks": {
+    "claude-code": {
+      "Stop": [
+        {
+          "hooks": [
+            {
+              "type": "command",
+              "command": "bash",
+              "args": [
+                "${TESSL_PLUGIN_DIR}/hooks/stop-handoff-hygiene.sh"
+              ]
+            }
+          ]
+        }
+      ]
+    }
   }
 }
