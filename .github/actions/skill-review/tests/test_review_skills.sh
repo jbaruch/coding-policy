@@ -426,6 +426,56 @@ rc=0
 capture_identify "$GITREPO" "skills" "" "push" "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef" >/dev/null 2>&1 || rc=$?
 assert_eq "$rc" "2" "identify_skills: unreachable base hard-fails with exit 2"
 
+# --- #271: the last-publish marker is preferred over github.event.before, so a
+# publish that failed after the review step does not drop its skills. Fixture
+# reproduces the sequence: a bump-marker commit (last green publish), then a
+# skill change whose publish FAILED, then a later push whose event.before hides
+# the failed one.
+MARKERREPO="$FIXTURE/markerrepo"
+make_marker_fixture() {
+  rm -rf "$MARKERREPO"
+  mkdir -p "$MARKERREPO" || return 1
+  (
+    set -e
+    cd "$MARKERREPO"
+    git init -q
+    git config user.email t@e.test
+    git config user.name tester
+    mkdir -p skills/alpha; echo a > skills/alpha/SKILL.md
+    git add -A; git commit -q -m base
+    # Last successful publish — patch-version-publish's bump commit.
+    git commit -q --allow-empty -m "Bump acme/x to 1.0.0 [skip ci]"
+    # A push whose publish FAILED after review: gamma changed but never shipped.
+    mkdir -p skills/gamma; echo g > skills/gamma/SKILL.md
+    git add -A; git commit -q -m "add gamma skill"
+    # A later push (e.g. an action-pin bump) that re-triggers publish; its
+    # github.event.before is the gamma commit, hiding gamma from the diff.
+    mkdir -p skills/delta; echo d > skills/delta/SKILL.md
+    git add -A; git commit -q -m "add delta skill"
+  )
+}
+make_marker_fixture || { echo "fatal: could not build marker fixture" >&2; exit 2; }
+before_sha=$( cd "$MARKERREPO" && git rev-parse HEAD~1 )   # the gamma commit
+
+# event.before = gamma, but the marker base wins: BOTH gamma (the failed
+# publish) and delta are re-reviewed. event.before alone would yield delta only.
+got=$(capture_identify "$MARKERREPO" "skills" "" "push" "$before_sha")
+assert_eq "$got" "$(printf 'delta\ngamma')" "identify_skills: last-publish marker re-includes a failed publish's skills"
+
+# base-ref override still wins over the marker.
+got=$(capture_identify "$MARKERREPO" "skills" "$before_sha" "push" "$before_sha")
+assert_eq "$got" "delta" "identify_skills: explicit base-ref overrides the marker base"
+
+# The marker pattern is overridable for a different publish flow. Pointing it at
+# the gamma commit makes gamma the base, so only delta shows as changed after it.
+got=$( cd "$MARKERREPO" && SKILLS_DIR=skills BASE_OVERRIDE="" EVENT_NAME=push \
+         EVENT_BEFORE="$before_sha" PUBLISH_MARKER_PATTERN="^add gamma" identify_skills )
+assert_eq "$got" "delta" "identify_skills: PUBLISH_MARKER_PATTERN override selects a custom marker"
+
+# No marker in history → fall back to github.event.before (prior behaviour). The
+# GITREPO fixture above has no bump commit; its earlier assertion (base = HEAD~1
+# yields alpha+beta) already exercises this fallback through the new code path.
+
 # --- main: emits the unreviewed-skills output ---
 
 # Run main with the given context; its GITHUB_OUTPUT write is the artifact

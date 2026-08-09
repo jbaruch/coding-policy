@@ -16,6 +16,8 @@
 #   BASE_OVERRIDE   explicit diff base, or empty
 #   EVENT_NAME      github.event_name
 #   EVENT_BEFORE    github.event.before
+#   PUBLISH_MARKER_PATTERN  ERE for the publish-bump commit (optional; the
+#                   last-publish marker is preferred over EVENT_BEFORE — #271)
 #   CREDIT_OUTAGE   fail | skip                        (default fail)
 #   WORKSPACE       tessl workspace, or empty to derive it from the
 #                   consumer's plugin manifest name (<workspace>/<plugin>).
@@ -40,6 +42,14 @@ CREDIT_OUTAGE="${CREDIT_OUTAGE:-fail}"
 WORKSPACE="${WORKSPACE:-}"
 MANIFEST="${MANIFEST:-.tessl-plugin/plugin.json}"
 LEGACY_MANIFEST="${LEGACY_MANIFEST:-tile.json}"
+# The commit tesslio/patch-version-publish pushes after a green review+publish
+# ("Bump <name> to X.Y.Z [skip ci]"). identify_skills diffs from the nearest
+# such ancestor rather than github.event.before, so a publish that FAILED at or
+# after the review step does not drop its changed skills from the next run's
+# window (#271). An extended-regexp anchored to a message line (git log -E);
+# override for a publish flow with a different marker (a consumer can always
+# pass base-ref).
+PUBLISH_MARKER_PATTERN="${PUBLISH_MARKER_PATTERN:-^Bump .+ to [0-9]+\.[0-9]+\.[0-9]+.*\[skip ci\]}"
 
 # Skills skipped because the tessl org was out of credits. Populated by
 # run_reviews; read by main for the action output.
@@ -185,10 +195,33 @@ run_reviews() {
   return 0
 }
 
+# Echo the SHA of the nearest HEAD ancestor that marks a successful publish —
+# the commit tesslio/patch-version-publish pushes after a green review+publish
+# (PUBLISH_MARKER_PATTERN). That commit bounds every still-unpublished change,
+# so diffing from it re-reviews the skills a failed publish left behind, which
+# github.event.before would skip once a later push moves the window past them
+# (#271). Empty when no marker is in history — first publish ever, or a publish
+# flow that pushes no such commit — so the caller falls back to
+# github.event.before. A shallow clone that cannot see the marker is deepened
+# once (the calling workflow should set fetch-depth: 0); a deepen failure warns
+# and falls back rather than masking the miss.
+resolve_publish_marker() {
+  local sha=""
+  sha="$(git log -E --grep="$PUBLISH_MARKER_PATTERN" --max-count=1 --format='%H' HEAD 2>/dev/null)" \
+    || sha=""
+  if [ -z "$sha" ] && [ "$(git rev-parse --is-shallow-repository 2>/dev/null)" = "true" ]; then
+    git fetch --unshallow origin 2>/dev/null \
+      || echo "::warning::could not deepen the clone to find the last-publish marker; falling back to github.event.before" >&2
+    sha="$(git log -E --grep="$PUBLISH_MARKER_PATTERN" --max-count=1 --format='%H' HEAD 2>/dev/null)" \
+      || sha=""
+  fi
+  printf '%s' "$sha"
+}
+
 # Resolve the diff base and echo the changed skill names (one per line).
-# BASE_OVERRIDE wins; else github.event.before for push; else "" meaning
-# review every skill (workflow_dispatch / initial push expect a full
-# re-review). An unreachable non-empty base hard-fails rather than
+# BASE_OVERRIDE wins; else "" (review every skill) for workflow_dispatch /
+# initial push; else the last successful-publish marker (#271); else
+# github.event.before. An unreachable non-empty base hard-fails rather than
 # silently collapsing to "no changes".
 identify_skills() {
   local base
@@ -199,7 +232,10 @@ identify_skills() {
        || [ "$EVENT_BEFORE" = "0000000000000000000000000000000000000000" ]; then
     base=""
   else
-    base="$EVENT_BEFORE"
+    base="$(resolve_publish_marker)"
+    if [ -z "$base" ]; then
+      base="$EVENT_BEFORE"
+    fi
   fi
 
   if [ -z "$base" ]; then

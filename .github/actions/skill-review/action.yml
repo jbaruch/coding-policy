@@ -8,9 +8,12 @@ description: |
   time and Tessl credits.
 
   Detection: `git diff $BASE..HEAD -- $skills-dir/`. BASE is the input
-  `base-ref` if provided, else `github.event.before` for push events.
-  On `workflow_dispatch` or initial push (no usable base), reviews
-  every skill (manual triggers expect a full re-review).
+  `base-ref` if provided; else the nearest ancestor marking the last
+  successful publish (the `Bump … to X.Y.Z [skip ci]` commit), so a
+  publish that failed after the review step does not drop its changed
+  skills from the next run's window; else `github.event.before`. On
+  `workflow_dispatch` or initial push (no usable base), reviews every
+  skill (manual triggers expect a full re-review).
 
   Requirements (consumer must arrange):
     - `tessl` CLI on PATH (typically via `tesslio/setup-tessl@v2`).
@@ -32,9 +35,11 @@ inputs:
     default: 'skills'
   base-ref:
     description: |
-      Override the base ref/SHA for the diff. When empty, the action falls
-      back to `github.event.before` (push events) or "review all"
-      (workflow_dispatch / initial push).
+      Override the base ref/SHA for the diff. When empty, the action uses
+      the last successful-publish marker commit, falling back to
+      `github.event.before` (push events) or "review all"
+      (workflow_dispatch / initial push). Set this to recover explicitly
+      from a failed publish by passing the last-published SHA.
     required: false
     default: ''
   workspace:

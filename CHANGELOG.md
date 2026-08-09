@@ -1,5 +1,9 @@
 # Changelog
 
+### Actions — skill-review diffs from the last successful publish, not event.before
+
+The changed-skills review loop diffed `github.event.before..HEAD`. When a publish failed at or after the review step, the skills it changed were consumed by that run's diff window; the next push's `event.before` pointed past them, so `Reviewing 0 skill(s)` — and the next green publish shipped them unreviewed, silently (observed on `jbaruch/tripit-api` 0.6.0 shipping `using-tripit` unreviewed after run 31297263155 failed on the `--workspace` bug). `review-skills.sh` now resolves the base to the nearest ancestor marking the last successful publish — the `Bump … to X.Y.Z [skip ci]` commit `tesslio/patch-version-publish` pushes — which bounds every still-unpublished change, so a failed publish's skills stay in the next run's window until a publish actually reviews and ships them. Falls back to `event.before` when no marker is in history (first publish, or a publish flow with a different marker); the `base-ref` input still overrides, now documented as the explicit failed-publish recovery. The marker regex is `PUBLISH_MARKER_PATTERN` (overridable). Closes #271.
+
 ## 0.3.148 — 2026-08-09
 
 ### Release skill — Step 6 heading no longer contradicts its body
