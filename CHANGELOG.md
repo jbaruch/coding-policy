@@ -6,6 +6,8 @@ New `hooks/check-git-sync.sh`, wired as a second Tessl `SessionStart` hook (#261
 
 This mechanizes `rules/sync-before-work.md`, which prescribed fetch-before-work but relied on the agent remembering; stale-checkout ("main is behind") recurred in real work. The remote default is resolved from `origin/HEAD` (falling back to `main`/`master` among the remote-tracking refs), and the behind comparison runs even on throttled sessions against the last-fetched ref, so staleness surfaces without a network call every session.
 
+Also wraps both `SessionStart` hooks (`check-git-sync.sh` and, boy-scouted for consistency, `check-policy-freshness.sh`) in a `main()` with a `${BASH_SOURCE[0]} == "$0"` entry-point guard per `rules/file-hygiene.md`, so each script is sourceable for unit-testing its functions. No behavior change when executed.
+
 ## 0.3.140 — 2026-08-09
 
 ### Hooks — check-policy-freshness (SessionStart staleness warning)

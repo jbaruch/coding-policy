@@ -26,80 +26,87 @@
 #           FRESHNESS_NOW (test-only injected clock; defaults to `date +%s`).
 set -euo pipefail
 
-THROTTLE_HOURS="${FRESHNESS_THROTTLE_HOURS:-24}"
-STATE_DIR="${FRESHNESS_STATE_DIR:-${TMPDIR:-/tmp}/coding-policy-freshness}"
-
 warn() { printf 'check-policy-freshness: %s\n' "$1" >&2; }
 
-# jq and tessl are both required to produce a signal; a missing optional tool is
-# an expected environment condition, not a failure — warn and no-op.
-command -v jq >/dev/null 2>&1 || { warn "jq not found — install jq to enable the freshness check"; exit 0; }
-command -v tessl >/dev/null 2>&1 || { warn "tessl not found — install the Tessl CLI to enable the freshness check"; exit 0; }
+main() {
+  local THROTTLE_HOURS="${FRESHNESS_THROTTLE_HOURS:-24}"
+  local STATE_DIR="${FRESHNESS_STATE_DIR:-${TMPDIR:-/tmp}/coding-policy-freshness}"
+  local now stamp last out notice
 
-if ! [[ "$THROTTLE_HOURS" =~ ^[0-9]+$ ]]; then
-  warn "FRESHNESS_THROTTLE_HOURS='${THROTTLE_HOURS}' is not an integer — using 24"
-  THROTTLE_HOURS=24
-fi
+  # jq and tessl are both required to produce a signal; a missing optional tool is
+  # an expected environment condition, not a failure — warn and no-op.
+  command -v jq >/dev/null 2>&1 || { warn "jq not found — install jq to enable the freshness check"; return 0; }
+  command -v tessl >/dev/null 2>&1 || { warn "tessl not found — install the Tessl CLI to enable the freshness check"; return 0; }
 
-# Resolve the clock. A test may inject FRESHNESS_NOW; otherwise read the system
-# clock and handle its failure. Validate the result as an integer before any
-# arithmetic so a malformed value can't abort the hook under set -e.
-if [[ -n "${FRESHNESS_NOW:-}" ]]; then
-  now="$FRESHNESS_NOW"
-elif ! now="$(date +%s)"; then
-  warn "cannot read the system clock — skipping freshness check"
-  exit 0
-fi
-if ! [[ "$now" =~ ^[0-9]+$ ]]; then
-  warn "clock value '${now}' is not an integer — unset FRESHNESS_NOW; skipping freshness check"
-  exit 0
-fi
-
-stamp="${STATE_DIR}/last-check"
-
-# Throttle: skip the registry call if we checked within the window.
-if [[ -r "$stamp" ]]; then
-  last=""
-  read -r last < "$stamp" || last=""
-  [[ "$last" =~ ^[0-9]+$ ]] || last=0
-  if (( now - last < THROTTLE_HOURS * 3600 )); then
-    exit 0
+  if ! [[ "$THROTTLE_HOURS" =~ ^[0-9]+$ ]]; then
+    warn "FRESHNESS_THROTTLE_HOURS='${THROTTLE_HOURS}' is not an integer — using 24"
+    THROTTLE_HOURS=24
   fi
-fi
 
-# Record the check up front so a slow/failed registry call still throttles the
-# next session rather than hammering the registry on every start.
-if mkdir -p "$STATE_DIR"; then
-  printf '%s\n' "$now" > "$stamp" ||
-    warn "cannot write throttle stamp ${stamp} — check permissions on ${STATE_DIR}; will re-check next session"
-else
-  warn "cannot create state dir ${STATE_DIR} — check permissions or set FRESHNESS_STATE_DIR; freshness check will not throttle"
-fi
+  # Resolve the clock. A test may inject FRESHNESS_NOW; otherwise read the system
+  # clock and handle its failure. Validate the result as an integer before any
+  # arithmetic so a malformed value can't abort the hook under set -e.
+  if [[ -n "${FRESHNESS_NOW:-}" ]]; then
+    now="$FRESHNESS_NOW"
+  elif ! now="$(date +%s)"; then
+    warn "cannot read the system clock — skipping freshness check"
+    return 0
+  fi
+  if ! [[ "$now" =~ ^[0-9]+$ ]]; then
+    warn "clock value '${now}' is not an integer — unset FRESHNESS_NOW; skipping freshness check"
+    return 0
+  fi
 
-# Silence tessl's own diagnostic but explicitly handle the failure and warn —
-# an offline/registry error is a no-op, not a broken session.
-if ! out="$(tessl outdated --json 2>/dev/null)"; then
-  warn "tessl outdated failed — check connectivity and retry \`tessl outdated\`; skipping freshness check"
-  exit 0
-fi
+  stamp="${STATE_DIR}/last-check"
 
-# Build a notice line per outdated plugin. Empty list => silent. A parse failure
-# is surfaced, not swallowed as "nothing outdated".
-if ! notice="$(printf '%s' "$out" | jq -r '
-  (.outdated // [])
-  | map("- \(.current.tile.workspaceName)/\(.current.tile.tileName) \(.current.tile.version) -> \(.update.version)")
-  | if length == 0 then empty else
-      "Plugin updates available (run `tessl update`):\n" + (. | join("\n"))
-    end
-' 2>/dev/null)"; then
-  warn "could not parse \`tessl outdated --json\` output — run it manually to inspect; skipping freshness check"
-  exit 0
-fi
+  # Throttle: skip the registry call if we checked within the window.
+  if [[ -r "$stamp" ]]; then
+    last=""
+    read -r last < "$stamp" || last=""
+    [[ "$last" =~ ^[0-9]+$ ]] || last=0
+    if (( now - last < THROTTLE_HOURS * 3600 )); then
+      return 0
+    fi
+  fi
 
-[[ -n "$notice" ]] || exit 0
+  # Record the check up front so a slow/failed registry call still throttles the
+  # next session rather than hammering the registry on every start.
+  if mkdir -p "$STATE_DIR"; then
+    printf '%s\n' "$now" > "$stamp" ||
+      warn "cannot write throttle stamp ${stamp} — check permissions on ${STATE_DIR}; will re-check next session"
+  else
+    warn "cannot create state dir ${STATE_DIR} — check permissions or set FRESHNESS_STATE_DIR; freshness check will not throttle"
+  fi
 
-if ! jq -n --arg c "$notice" '{additionalContext: $c}'; then
-  warn "could not emit the update notice as JSON — skipping freshness check"
-  exit 0
+  # Silence tessl's own diagnostic but explicitly handle the failure and warn —
+  # an offline/registry error is a no-op, not a broken session.
+  if ! out="$(tessl outdated --json 2>/dev/null)"; then
+    warn "tessl outdated failed — check connectivity and retry \`tessl outdated\`; skipping freshness check"
+    return 0
+  fi
+
+  # Build a notice line per outdated plugin. Empty list => silent. A parse failure
+  # is surfaced, not swallowed as "nothing outdated".
+  if ! notice="$(printf '%s' "$out" | jq -r '
+    (.outdated // [])
+    | map("- \(.current.tile.workspaceName)/\(.current.tile.tileName) \(.current.tile.version) -> \(.update.version)")
+    | if length == 0 then empty else
+        "Plugin updates available (run `tessl update`):\n" + (. | join("\n"))
+      end
+  ' 2>/dev/null)"; then
+    warn "could not parse \`tessl outdated --json\` output — run it manually to inspect; skipping freshness check"
+    return 0
+  fi
+
+  [[ -n "$notice" ]] || return 0
+
+  jq -n --arg c "$notice" '{additionalContext: $c}' ||
+    warn "could not emit the update notice as JSON — skipping freshness check"
+  return 0
+}
+
+# Entry-point guard (rules/file-hygiene.md Standalone Scripts): run only when
+# executed, so the script can also be sourced to unit-test its functions.
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  main "$@"
 fi
-exit 0
