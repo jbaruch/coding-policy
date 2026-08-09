@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.148 — 2026-08-09
+
 ### Release skill — Step 6 heading no longer contradicts its body
 
 `skills/release/SKILL.md` Step 6 was titled `Address Feedback; No Re-request Needed`, but eight bullets down its body required a manual Copilot re-request on every push. The heading is what an agent scans for the next action, so the false "no re-request" claim stranded the pre-merge watcher: a PR that took feedback and pushed a fix left Copilot pinned to the superseded SHA, `watch-pr-reviews.sh` never reached `ready`, and the run burned its full budget — nudging the agent to hand-assemble the merge gate, the exact thing the watcher exists to prevent (observed on `jbaruch/jbaruch-travel-policy#36`). Retitled to `Address Feedback` (one action, no contradicted claim) and split the combined bullet: the Copilot re-request is now its own action bullet, the policy reviewer's automatic re-run its own context bullet. No change to `watch-pr-reviews.sh` or the head-binding — both behaved correctly. Closes #267.
