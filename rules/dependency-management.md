@@ -34,7 +34,7 @@ alwaysApply: true
 - Applies when a tool rewrites a manifest in-place at runtime AND the resolved-version state is gitignored
 - The manifest may use a floating-but-explicit specifier (e.g., `"version": "latest"`) and skip the lock file
 - Preconditions (each covered manifest, all required):
-  1. The project documents an authority-of-record rule in its own plugin naming the carve-out and listing every covered manifest
+  1. An authority-of-record rule names the carve-out and lists every covered manifest, in the project's own plugin or in a shared plugin the project installs (whose rules load as the project's policy)
   2. A deterministic check surfaces any disallowed specifier (literal pin, range, tag, or anything other than the permitted floating specifier), in either form:
      - a deploy-time gate that fails the deployment
      - a plugin-shipped `SessionStart` hook that reads the manifest and flags a disallowed specifier each session

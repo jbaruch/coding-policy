@@ -91,7 +91,7 @@ Install mode refuses if any of the three template targets already exists; upgrad
 .tessl/plugins/jbaruch/coding-policy/skills/onboard-repo/tessl-hygiene.sh
 ```
 
-Pins every `jbaruch/*` dependency in `tessl.json` to `latest` — stopping the auto-update churn that rewrites a pinned version on each coding-policy release; third-party pins (`tessl-labs/*`, `tessl/npm-*`) are left as-is — and ensures `.gitignore` carries the tessl-generated-artifacts block so agents never commit per-developer / per-agent output. `AGENTS.md` / `CLAUDE.md` / `GEMINI.md` stay committed: tessl appends to them and they don't churn. Emits `{"tessl_json":"pinned-latest|unchanged|absent","gitignore":"created|appended|unchanged"}`. Idempotent: a dep already at `latest`, and an already-present block, are left untouched. Runs the same in install and upgrade modes (no `--override` flag). Proceed immediately to Step 6.
+Sets every `jbaruch/*` dependency in `tessl.json` to `"version": "latest"` (third-party pins unchanged) and appends the tessl-generated-artifacts block to `.gitignore` when its marker is absent. `AGENTS.md` / `CLAUDE.md` / `GEMINI.md` are not ignored. Emits `{"tessl_json":"pinned-latest|unchanged|absent","gitignore":"created|appended|unchanged"}`. Idempotent; takes no `--override` flag and runs the same in both modes. Proceed immediately to Step 6.
 
 ## Step 6 — Commit
 
