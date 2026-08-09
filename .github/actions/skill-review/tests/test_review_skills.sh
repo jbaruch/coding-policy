@@ -340,7 +340,7 @@ mkdir -p "$WS_FIXTURE/none"
 resolve_in "$WS_FIXTURE/none" > "$FIXTURE/ws.out" 2>&1
 assert_rc_value $? 2 "workspace: no manifest is a setup error"
 assert_contains "$(cat "$FIXTURE/ws.out")" "workspace" "workspace: the diagnostic names what is missing"
-assert_contains "$(cat "$FIXTURE/ws.out")" '`workspace` input' "workspace: the diagnostic names the override"
+assert_contains "$(cat "$FIXTURE/ws.out")" "Set the action's" "workspace: the diagnostic names the override"
 
 mkdir -p "$WS_FIXTURE/unqualified/.tessl-plugin"
 echo '{"name":"widget"}' > "$WS_FIXTURE/unqualified/.tessl-plugin/plugin.json"
