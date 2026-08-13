@@ -82,11 +82,9 @@ alwaysApply: true
 - Do not promote a reviewer's check to a required branch-protection gate while a fail-open path exists
 - The pre-merge review watch has an agent-executable form — `skills/release/watch-pr-reviews.sh` (see `skills/release/SKILL.md` Step 5); it owns the interval and budget and watches exactly the gate fields above
 - The gating signal is not always a PR status check
-- An out-of-band `workflow_dispatch` run (a reseed, a manually dispatched job) never appears in the PR's `statusCheckRollup`
-- A PR-scoped watch on such a gate waits on an event that never fires
+- A run started out of band (a `workflow_dispatch` reseed, a manual job) may not surface in the PR's `statusCheckRollup`
 - Identify the run that gates the outcome and bind the watch to its `conclusion`
-- A failed PR check that no event re-triggers stays red until an explicit rerun
-- After fixing its cause, rerun such a check (`gh run rerun --failed`) rather than waiting for a re-fire
+- A failed PR check that no event re-triggers stays red until an explicit `gh run rerun --failed` once its cause is fixed
 - For plugin/package releases, the duty extends past merge — confirm the resolved run's conclusion, the registry advance, and the moderation clear; no single signal is authoritative
 - Release contract:
   1. Before merge: capture the registry's `Latest Version` as baseline
