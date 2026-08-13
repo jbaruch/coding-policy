@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.152 — 2026-08-13
+
 ### CI — run Python test suites; guard the release baseline capture (#183)
 
 `scripts/run-tests.sh` discovered only `test_*.sh`, silently orphaning every Python suite in the repo — `skills/release/tests/test_stamp_changelog.py` (10 tests for the shipped stamp-changelog action) looked covered while never executing in CI. Discovery now covers `test_*.{sh,py}` and dispatches by extension (`bash`/`python3`); a missing interpreter is surfaced as a setup error (rc 2), not counted as a failing suite, and a dispatch fault travels by a side channel so every exit code a suite returns stays its own verdict. Discovery also enforces the direct-child-of-`tests/` rule so a nested `test_*` fixture is not run as a suite.
