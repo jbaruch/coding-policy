@@ -26,3 +26,4 @@ This repo IS `jbaruch/coding-policy`. The rule files below are the source-of-tru
 @../rules/review-severity.md
 @../rules/response-clarity.md
 @../rules/ship-on-green.md
+@../rules/hook-action-reporting.md

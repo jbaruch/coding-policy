@@ -5,10 +5,11 @@
 # PATH (real jq/bash/date stay resolvable) and drive it via STUB_JSON / STUB_EXIT.
 #
 # Covers:
-#   1. Outdated present  -> emits additionalContext naming the plugin + new version.
-#   2. Nothing outdated  -> silent (empty stdout), exit 0.
+#   1. Outdated present  -> emits marker additionalContext naming the plugin + new version.
+#   2. Nothing outdated  -> emits a marker "policy: fresh" status, exit 0.
 #   3. Throttle          -> with an injected fixed clock (FRESHNESS_NOW): a call
-#                           inside the window is silent, a call past it fires again.
+#                           inside the window is silent (throttle skips the check
+#                           before any emit), a call past it fires again.
 #   4. tessl missing     -> silent no-op, exit 0 (no crash).
 #   5. tessl errors      -> silent no-op, exit 0 (network/registry failure tolerated).
 #
@@ -48,16 +49,17 @@ run() {
   RC=$?
 }
 
-# 1. outdated present -> notice
+# 1. outdated present -> marker notice
 d="$TMP/c1"
 run "$d" STUB_JSON="$OUTDATED"
-if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | jq -e '.additionalContext | test("coding-policy") and test("0.3.139")' >/dev/null 2>&1; then
-  pass; else fail "outdated present: expected notice, got RC=$RC OUT=$OUT"; fi
+if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | jq -e '.additionalContext | test("Session-start status") and test("coding-policy") and test("0.3.139")' >/dev/null 2>&1; then
+  pass; else fail "outdated present: expected marker notice, got RC=$RC OUT=$OUT"; fi
 
-# 2. nothing outdated -> silent
+# 2. nothing outdated -> marker "policy: fresh" status
 d="$TMP/c2"
 run "$d" STUB_JSON="$EMPTY"
-if [[ $RC -eq 0 && -z "$OUT" ]]; then pass; else fail "empty outdated: expected silence, got RC=$RC OUT=$OUT"; fi
+if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | jq -e '.additionalContext | test("Session-start status") and test("fresh")' >/dev/null 2>&1; then
+  pass; else fail "empty outdated: expected fresh status, got RC=$RC OUT=$OUT"; fi
 
 # 3. throttle -> deterministic via an injected clock (FRESHNESS_NOW), not the
 #    real wall clock. First call stamps t; a call 1h later is throttled; a call

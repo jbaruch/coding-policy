@@ -12,20 +12,25 @@
 #   - It DOES something (fetches + compares refs), it does not re-state a rule.
 #   - SessionStart fires once per session, not per turn — no per-turn tax.
 #   - Throttled: the fetch runs at most once per SYNC_THROTTLE_HOURS (default 1h)
-#     per repo, so rapid session churn doesn't hammer the network. The behind
-#     comparison still runs on throttled sessions against the last-fetched
-#     origin ref, so staleness surfaces even when the fetch is skipped.
+#     per repo, so rapid session churn doesn't hammer the network. Without a
+#     fresh fetch this session the remote-tracking ref may be stale, so a
+#     throttled (or failed) fetch reports "sync not verified" rather than a
+#     definitive conclusion (rules/sync-before-work.md).
 #   - The fetch is time-bounded (timeout, if available) so a hung network can't
 #     stall session start.
 #   - Informative only. Never blocks (always exits 0), never exits 2.
 #
 # Contract:
 #   stdin : consensus SessionStart JSON — not read (the script needs none of it).
-#   stdout: on a fire, one JSON object {"additionalContext": "<notice>"}; else nothing.
+#   stdout: once the repo's default branch is resolved, one JSON object
+#           {"additionalContext": "<status>"} whose text begins with the
+#           "Session-start status — " marker (rules/hook-action-reporting.md) —
+#           reporting in-sync, ahead, behind, or diverged after a fresh fetch, or
+#           "sync not verified" when the fetch was throttled or failed.
 #   exit  : always 0. Every best-effort failure emits an actionable stderr warning
 #           and continues/no-ops (rules/error-handling.md Shell Error Handling).
-#           Non-repo, no origin, no local default branch, and up-to-date are all
-#           silent no-ops — the common, uninteresting cases stay quiet.
+#           Non-repo, no origin, and no local default branch are silent no-ops —
+#           the sync check does not apply, so those sessions stay quiet.
 #   state : $SYNC_STATE_DIR/sync-<repo-key> (default ${TMPDIR:-/tmp}/coding-policy-sync),
 #           a per-repo throttle stamp (keyed by toplevel path). Schema documented
 #           in hooks/state-schema.md: one line "<schema_version> <checked_at>".
@@ -63,7 +68,7 @@ main() {
   local THROTTLE_HOURS="${SYNC_THROTTLE_HOURS:-1}"
   local FETCH_TIMEOUT="${SYNC_FETCH_TIMEOUT:-10}"
   local STATE_DIR="${SYNC_STATE_DIR:-${TMPDIR:-/tmp}/coding-policy-sync}"
-  local rc db inside cand now top repo_key stamp sv ts should_fetch preserve_future counts ahead behind notice
+  local rc db inside cand now top repo_key stamp sv ts should_fetch preserve_future fetch_failed counts ahead behind notice
   local -a fetch
 
   # git is required to produce a signal; its absence is an expected environment
@@ -168,6 +173,7 @@ main() {
   # With no throttle key the fallback fetches unconditionally (never throttles).
   should_fetch=1
   preserve_future=0
+  fetch_failed=0
   if [[ -n "$repo_key" && -r "$stamp" ]]; then
     sv=""; ts=""
     read -r sv ts < "$stamp" || { sv=""; ts=""; }
@@ -204,8 +210,19 @@ main() {
     fi
     # A fetch failure (offline, auth, timeout) is a no-op, not a broken session —
     # warn and fall through to compare against the last-known origin ref.
-    "${fetch[@]}" 2>/dev/null ||
-      warn "git fetch origin failed or timed out — check connectivity; comparing against the last-fetched origin/${db}"
+    "${fetch[@]}" 2>/dev/null || {
+      warn "git fetch origin failed or timed out — check connectivity; cannot verify sync against a current origin/${db}"
+      fetch_failed=1
+    }
+  fi
+
+  # A definitive sync conclusion requires a fresh fetch this session. A throttled
+  # or failed fetch leaves the remote-tracking ref possibly stale, and stale
+  # state poisons conclusions (rules/sync-before-work.md). Report unverified
+  # rather than a false "in sync".
+  if (( should_fetch == 0 || fetch_failed )); then
+    emit_notice "Session-start status — git: \`${db}\` sync not verified against a current \`origin/${db}\` this session — run \`git fetch origin\`, then \`git status\` (rules/sync-before-work.md)."
+    return 0
   fi
 
   # Compare the local default branch against its remote-tracking ref. --left-right
@@ -223,12 +240,24 @@ main() {
     warn "unexpected ahead/behind counts '${counts}' for ${db} — run \`git status\` to inspect; skipping sync check"
     return 0
   fi
-  (( behind > 0 )) || return 0
 
+  # Success path: nothing to pull from origin. Distinguish truly in-sync from
+  # ahead-only — a branch ahead of origin (unpushed commits) is not "in sync".
+  if (( behind == 0 )); then
+    if (( ahead == 0 )); then
+      emit_notice "Session-start status — git: local \`${db}\` is in sync with \`origin/${db}\`"
+    else
+      emit_notice "Session-start status — git: local \`${db}\` is ${ahead} commit(s) ahead of \`origin/${db}\` (unpushed), none behind"
+    fi
+    return 0
+  fi
+
+  # Problem path: keep the existing actionable text, prefixed with the marker so
+  # the agent surfaces it too (rules/hook-action-reporting.md).
   if (( ahead > 0 )); then
-    notice="Local \`${db}\` has diverged from \`origin/${db}\` (${behind} behind, ${ahead} ahead) — reconcile before working (rules/sync-before-work.md): \`git fetch origin\`, then rebase \`${db}\` onto \`origin/${db}\` (a fast-forward won't apply)."
+    notice="Session-start status — Local \`${db}\` has diverged from \`origin/${db}\` (${behind} behind, ${ahead} ahead) — reconcile before working (rules/sync-before-work.md): \`git fetch origin\`, then rebase \`${db}\` onto \`origin/${db}\` (a fast-forward won't apply)."
   else
-    notice="Local \`${db}\` is ${behind} commit(s) behind \`origin/${db}\` — sync before working (rules/sync-before-work.md): \`git fetch origin\`, then fast-forward \`${db}\` to \`origin/${db}\`."
+    notice="Session-start status — Local \`${db}\` is ${behind} commit(s) behind \`origin/${db}\` — sync before working (rules/sync-before-work.md): \`git fetch origin\`, then fast-forward \`${db}\` to \`origin/${db}\`."
   fi
 
   emit_notice "$notice"

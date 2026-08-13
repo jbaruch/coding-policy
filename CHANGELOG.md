@@ -1,5 +1,11 @@
 # Changelog
 
+### Hooks — session-start status report (version + update, git sync, policy freshness)
+
+The SessionStart hooks now surface an always-visible status block at session start, closing the recurring "did `tessl update` run? what coding-policy version am I on?" blind spot. `check-tessl-latest.sh` runs `tessl update --yes` each session and reports every `jbaruch/*` dependency's version transition — read from `.tessl/plugins/<ws>/<plugin>/tessl-package.json` before and after, leading with `jbaruch/coding-policy` (e.g. `jbaruch/coding-policy 0.3.147 → 0.3.156 (updated)` or `0.3.156 (latest)`). A missing CLI or a non-zero `tessl update` degrades to `update failed: <reason>` and never blocks the session (the update runs with stdin redirected from `/dev/null` so it can never hang on a prompt). `check-git-sync.sh` and `check-policy-freshness.sh` now emit a positive status on their success paths too. Each status payload begins with the `Session-start status — ` marker (its continuation lines — an update list, a pin `NOTE:` — are relayed with it); the pin check and freshness throttle are retained.
+
+A SessionStart hook's output reaches the model's context, not the user's transcript, so new rule `rules/hook-action-reporting.md` makes the agent relay the marker lines to the user as one concise block at session start (the sanctioned exception to `response-clarity` Lead With the Action) and act on any action they name. Wired into `plugin.json`, the README rules table, and the maintainer `.claude/CLAUDE.md`.
+
 ## 0.3.156 — 2026-08-13
 
 ### CI safety — credits never block publishing; a red publish run is the agent's to diagnose
