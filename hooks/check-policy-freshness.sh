@@ -16,8 +16,11 @@
 #
 # Contract:
 #   stdin : consensus SessionStart JSON — not read (the script needs none of it).
-#   stdout: on a fire, one JSON object {"additionalContext": "<notice>"}; else nothing.
-#           The notice may span multiple lines (a header plus one line per plugin).
+#   stdout: when the registry check runs, one JSON object
+#           {"additionalContext": "<status>"} whose text begins with the
+#           "Session-start status — " marker (rules/hook-action-reporting.md) —
+#           "policy: fresh" (success) or the available updates (a header plus one
+#           line per plugin). Throttled and tool-missing sessions stay silent.
 #   exit  : always 0. Every best-effort failure emits an actionable stderr warning
 #           and continues/no-ops (rules/error-handling.md Shell Error Handling).
 #   state : $FRESHNESS_STATE_DIR/last-check (default ${TMPDIR:-/tmp}/coding-policy-freshness),
@@ -103,14 +106,21 @@ main() {
     (.outdated // [])
     | map("- \(.current.tile.workspaceName)/\(.current.tile.tileName) \(.current.tile.version) -> \(.update.version)")
     | if length == 0 then empty else
-        "Plugin updates available (run `tessl update`):\n" + (. | join("\n"))
+        "Session-start status — policy: plugin updates available (run `tessl update`):\n" + (. | join("\n"))
       end
   ' 2>/dev/null)"; then
     warn "could not parse \`tessl outdated --json\` output — run it manually to inspect; skipping freshness check"
     return 0
   fi
 
-  [[ -n "$notice" ]] || return 0
+  # Success path: nothing outdated. Emit a positive marker status so the agent
+  # surfaces it (rules/hook-action-reporting.md). The problem path's notice
+  # already carries the marker (set in the jq program above).
+  if [[ -z "$notice" ]]; then
+    jq -n --arg c "Session-start status — policy: fresh" '{additionalContext: $c}' ||
+      warn "could not emit the freshness status as JSON — skipping freshness check"
+    return 0
+  fi
 
   jq -n --arg c "$notice" '{additionalContext: $c}' ||
     warn "could not emit the update notice as JSON — skipping freshness check"

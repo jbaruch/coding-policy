@@ -12,17 +12,19 @@
 # (rules/error-handling.md aggregate-reporting carve-out).
 #
 # Covers:
-#   1. Behind        -> emits additionalContext naming the branch + "behind".
-#   2. Up to date    -> silent (empty stdout), exit 0.
+#   1. Behind        -> emits marker additionalContext naming the branch + "behind".
+#   2. Up to date    -> emits a marker "in sync" status, exit 0.
 #   3. Throttle      -> with a fixed injected clock: a call inside the window
-#                       skips the fetch (stays silent though origin moved); a
-#                       call past the window fetches and fires.
+#                       skips the fetch and reports "not verified" (never a
+#                       definitive "in sync"/"behind" against the stale ref); a
+#                       call past the window fetches and fires "behind".
 #   4. Not a repo    -> silent no-op, exit 0.
 #   5. No origin     -> silent no-op, exit 0.
-#   6. Fetch failure -> silent no-op, exit 0 (offline/broken remote tolerated).
+#   6. Fetch failure -> marker "not verified" (never a false "in sync" against a
+#                       stale ref), exit 0 (offline/broken remote tolerated).
 #   7. Bad clock     -> silent no-op, exit 0 (never aborts SessionStart).
-#   8. Diverged      -> notice names divergence and recommends rebase, not a
-#                       fast-forward (local both ahead and behind origin).
+#   8. Diverged      -> marker notice names divergence and recommends rebase, not
+#                       a fast-forward (local both ahead and behind origin).
 #   9. Future stamp  -> a schema_version > 1 record is not throttled on and is
 #                       preserved (not downgraded to version 1).
 #
@@ -91,29 +93,42 @@ main() {
   clone_from "$BARE" "$TMP/r1"
   commit_push "$SEED" "c2"
   run "$TMP/r1" "$TMP/s1"
-  if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | jq -e '.additionalContext | test("behind") and test("main")' >/dev/null 2>&1; then
-    pass; else fail "behind: expected notice, got RC=$RC OUT=$OUT"; fi
+  if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | jq -e '.additionalContext | test("Session-start status") and test("behind") and test("main")' >/dev/null 2>&1; then
+    pass; else fail "behind: expected marker notice, got RC=$RC OUT=$OUT"; fi
 
-  # 2. up to date -> silent.
+  # 2. up to date -> marker "in sync" status.
   mk_origin o2
   clone_from "$BARE" "$TMP/r2"
   run "$TMP/r2" "$TMP/s2"
-  if [[ $RC -eq 0 && -z "$OUT" ]]; then pass; else fail "up-to-date: expected silence, got RC=$RC OUT=$OUT"; fi
+  if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | jq -e '.additionalContext | test("Session-start status") and test("in sync")' >/dev/null 2>&1; then
+    pass; else fail "up-to-date: expected in-sync status, got RC=$RC OUT=$OUT"; fi
 
-  # 3. throttle. Clone up to date. Call at t stamps and (nothing new) stays
-  #    silent. Move origin ahead WITHOUT the hook fetching: a call +60s is
-  #    throttled, so it skips the fetch and stays silent (proves no fetch). A
-  #    call past the 1h window fetches the new commit and fires.
+  # 2b. ahead only -> "ahead ... unpushed", never "in sync" (ahead>0, behind==0).
+  #     Clone up to date, add a local commit without pushing; origin unchanged.
+  mk_origin o2b
+  clone_from "$BARE" "$TMP/r2b"
+  g -C "$TMP/r2b" commit -q --allow-empty -m "local ahead"  || die "git commit in r2b failed"
+  run "$TMP/r2b" "$TMP/s2b"
+  if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | jq -e '.additionalContext | test("Session-start status") and test("ahead") and (test("in sync") | not)' >/dev/null 2>&1; then
+    pass; else fail "ahead-only: expected \"ahead\" (not \"in sync\"), got RC=$RC OUT=$OUT"; fi
+
+  # 3. throttle. Clone up to date. First call fetches, stamps, and reports a
+  #    definitive "in sync". Move origin ahead WITHOUT the hook fetching: a call
+  #    +60s is throttled, so it does not fetch and reports "not verified" (never
+  #    a definitive "in sync"/"behind" against a stale ref). A call past the 1h
+  #    window fetches the new commit and fires "behind".
   mk_origin o3
   clone_from "$BARE" "$TMP/r3"
-  run "$TMP/r3" "$TMP/s3" SYNC_NOW=2000000               # fetch, stamp, up to date -> silent
+  run "$TMP/r3" "$TMP/s3" SYNC_NOW=2000000               # fetch, stamp, up to date -> in sync
   # This establishes the throttle stamp the next two assertions depend on, so a
   # failure here must abort, not merely tally (aggregate-reporting carve-out:
   # later checks may not depend on an earlier one merely having incremented FAIL).
-  [[ $RC -eq 0 && -z "$OUT" ]] || die "throttle setup: first call should be silent, got RC=$RC OUT=$OUT"
+  { [[ $RC -eq 0 ]] && printf '%s' "$OUT" | jq -e '.additionalContext | test("in sync")' >/dev/null 2>&1; } \
+    || die "throttle setup: first call should report in sync, got RC=$RC OUT=$OUT"
   commit_push "$SEED" "c3"                                # origin moves; r3's tracking ref still old
-  run "$TMP/r3" "$TMP/s3" SYNC_NOW=2000060               # +60s: throttled -> no fetch -> silent
-  if [[ $RC -eq 0 && -z "$OUT" ]]; then pass; else fail "throttle active: inside window should skip fetch and stay silent, got OUT=$OUT"; fi
+  run "$TMP/r3" "$TMP/s3" SYNC_NOW=2000060               # +60s: throttled -> no fetch -> not verified
+  if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | jq -e '.additionalContext | test("Session-start status") and test("not verified") and (test("in sync") | not) and (test("behind") | not)' >/dev/null 2>&1; then
+    pass; else fail "throttle active: inside window should report 'not verified' (not 'in sync'/'behind'), got OUT=$OUT"; fi
   run "$TMP/r3" "$TMP/s3" SYNC_NOW=2003601               # +>1h: fetch -> behind -> fires
   if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | jq -e '.additionalContext | test("behind")' >/dev/null 2>&1; then
     pass; else fail "throttle expired: past window should fetch and fire, got OUT=$OUT"; fi
@@ -131,14 +146,16 @@ main() {
   run "$TMP/noorigin" "$TMP/s5"
   if [[ $RC -eq 0 && -z "$OUT" ]]; then pass; else fail "no origin: expected silent exit 0, got RC=$RC OUT=$OUT"; fi
 
-  # 6. fetch failure -> silent no-op (broken remote tolerated, no crash). Clone,
-  #    then delete the bare origin so the fetch fails; local == last-known
-  #    origin, so the comparison yields 0 and the hook exits 0 without crashing.
+  # 6. fetch failure -> "not verified" (broken remote tolerated, no crash, and
+  #    never a false "in sync" against a stale ref — sync-before-work). Clone,
+  #    then delete the bare origin so the fetch fails; the hook reports
+  #    not-verified and exits 0 without crashing.
   mk_origin o6
   clone_from "$BARE" "$TMP/r6"
   rm -rf "$BARE" || die "could not remove $BARE"
   run "$TMP/r6" "$TMP/s6"
-  if [[ $RC -eq 0 && -z "$OUT" ]]; then pass; else fail "fetch failure: expected silent exit 0, got RC=$RC OUT=$OUT"; fi
+  if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | jq -e '.additionalContext | test("Session-start status") and test("not verified") and (test("in sync") | not)' >/dev/null 2>&1; then
+    pass; else fail "fetch failure: expected 'not verified' (not 'in sync') exit 0, got RC=$RC OUT=$OUT"; fi
 
   # 7. malformed clock -> no-op, exit 0.
   mk_origin o7
@@ -156,8 +173,8 @@ main() {
   g -C "$TMP/r8" commit -q -m local       || die "git commit in r8 failed"   # ahead by 1
   commit_push "$SEED" "c2"                                                    # origin moves -> behind by 1
   run "$TMP/r8" "$TMP/s8"
-  if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | jq -e '.additionalContext | test("diverged") and test("rebase")' >/dev/null 2>&1; then
-    pass; else fail "diverged: expected divergence notice, got RC=$RC OUT=$OUT"; fi
+  if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | jq -e '.additionalContext | test("Session-start status") and test("diverged") and test("rebase")' >/dev/null 2>&1; then
+    pass; else fail "diverged: expected marker divergence notice, got RC=$RC OUT=$OUT"; fi
 
   # 9. future-version throttle stamp -> not throttled on, and preserved (never
   #    downgraded). Pre-seed a "2 <recent>" record at the stamp path the hook

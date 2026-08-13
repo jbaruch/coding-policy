@@ -33,7 +33,8 @@
     "rules/reviewer-feedback-reading.md",
     "rules/review-severity.md",
     "rules/response-clarity.md",
-    "rules/ship-on-green.md"
+    "rules/ship-on-green.md",
+    "rules/hook-action-reporting.md"
   ],
   "hooks": {
     "SessionStart": [
