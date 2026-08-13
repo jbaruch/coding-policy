@@ -136,7 +136,7 @@ main() {
     exit 2
   fi
   if [[ -z "$pre" ]]; then
-    echo "error: <pre-baseline> is empty — capture with 'tessl plugin info ${workspace}/${tile} | grep \"Latest Version\" | awk \"{print \\\$NF}\"' before merge" >&2
+    echo "error: <pre-baseline> is empty — capture it before merge with 'skills/release/capture-registry-baseline.sh ${workspace} ${tile}' and read .version (the guarded script this repo extracted, never a raw 'tessl plugin info | grep | awk' pipeline)" >&2
     exit 2
   fi
 
