@@ -1,5 +1,13 @@
 # Changelog
 
+### Actions — stamp-changelog always self-pushes, decoupling from the publish exit (#284, #281)
+
+`stamp-changelog` delegated its push to `patch-version-publish`'s downstream bump commit whenever a bump would carry it (the `needs_own_push()` / `--decision-file` mechanism from #270). That coupling stranded the stamp whenever the publish step exited non-zero AFTER the artifact was already published: a post-publish credit check aborts `patch-version-publish` under `set -e` before its `git add`/commit/push, so the registry advanced and moderation passed while the manifest bump AND the CHANGELOG stamp never reached `main` (observed on `jbaruch/jbaruch-travel-policy` — four consecutive publishes, registry at 0.7.55 while the branch manifest sat at 0.7.51 under four un-headed `### ` blocks). The manifest lag self-heals on the next green publish (`patch-version-publish` bumps from the registry), but the CHANGELOG attribution does not — accumulated un-headed blocks collapse under a single later heading. The action now always pushes its own stamp commit, so per-version headings land run-by-run even mid-outage, independent of the publish step's exit status; `[skip ci]` still prevents a publish re-trigger (ci-safety Publish-Pipeline Loop-Prevention Carve-Out). The `needs_own_push()` function, the `--decision-file` plumbing, and the `mktemp` temp file it required are removed as dead code — which also resolves the never-cleaned-up tempfile flagged in #281. Also folds in #281: `commit=false` now `git add`s the stamped CHANGELOG so it is genuinely staged for the caller, matching the input's documented contract. The action's git stage/commit/self-push side effects are extracted into `skills/release/commit-stamp.sh`, covered by `test_commit_stamp.sh` against a temporary remote (self-push lands one `[skip ci]` commit, no-op when the top is already headed, staged-only under `commit=false`, `[skip ci]` enforcement, and refusing a non-branch ref so a tag-triggered run cannot create a branch named after the tag). Closes #284, #281.
+
+### Fix — drop a stray merge-conflict marker from the CHANGELOG
+
+A leftover diff3 base marker (`||||||| parent of …`) and a duplicated `## 0.3.133` heading slipped into `CHANGELOG.md` during #183's conflict resolution and shipped in the published 0.3.152–0.3.154 "what's new". Removed (boy-scout, in the same file this PR already edits).
+
 ## 0.3.154 — 2026-08-13
 
 ### CI safety — the watch gate is not always a PR check
@@ -116,8 +124,6 @@ Measurement contradicted the theory. Mining 33,768 assistant responses across 46
 
 So the hook fought a decay that does not occur on the models in use, at the cost of a per-turn `UserPromptSubmit` fork in every consumer. `skill-authoring.md`'s `hooks`/`nativeHooks` manifest-field documentation is kept — it is accurate reference for the manifest schema regardless of this plugin using it.
 
-## 0.3.133 — 2026-08-05
-||||||| parent of 6fc6441 (fix(ci): run Python test suites; guard registry baseline capture)
 ## 0.3.133 — 2026-08-05
 
 ### Hooks — resurface-response-clarity (closes #254)

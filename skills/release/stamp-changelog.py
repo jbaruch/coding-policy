@@ -20,14 +20,10 @@ to stamp), it is a no-op.
 Usage:
     stamp-changelog.py [--changelog CHANGELOG.md] [--manifest PATH]
                        [--latest X.Y.Z] [--date YYYY-MM-DD]
-                       [--decision-file PATH]
 
     --latest         skip the registry query and use this as the latest
                      published version (for testing / manual runs). Omit in CI
                      to query the registry via `tessl plugin info`.
-    --decision-file  write `true` or `false` to PATH — whether the caller must
-                     push the stamp commit itself because no downstream version
-                     bump will carry it (first publish, or manifest ahead).
 """
 import argparse
 import json
@@ -61,18 +57,6 @@ def compute_version(local: str, latest: str | None) -> str:
     if local_num > latest_num:
         return local
     return f"{rp[0]}.{rp[1]}.{rp[2] + 1}"
-
-
-def needs_own_push(version: str, local: str, changed: bool) -> bool:
-    """True when this step must push the stamp commit itself.
-
-    The publish step pushes a commit only when it bumps the version away from
-    the manifest (computed != manifest). When they match — a first publish, or a
-    manifest already ahead of the registry — nothing downstream carries the
-    stamp, so the stamp commit is stranded on the runner unless this step pushes
-    it. No stamp applied (changed=False) means there is no commit to push.
-    """
-    return changed and version == local
 
 
 def stamp_changelog(text: str, version: str, date: str) -> tuple[str, bool]:
@@ -160,9 +144,6 @@ def main() -> None:
     ap.add_argument("--latest", default=None,
                     help="Latest published version (skip the registry query)")
     ap.add_argument("--date", default=None, help="Heading date (default: today, UTC)")
-    ap.add_argument("--decision-file", type=Path, default=None,
-                    help="Write 'true'/'false': must the caller push the stamp "
-                         "commit itself (no downstream bump will carry it)?")
     args = ap.parse_args()
 
     name, local = _read_manifest(args.manifest)
@@ -177,10 +158,6 @@ def main() -> None:
         print(f"Stamped {args.changelog} top entries as ## {version} — {date}")
     else:
         print(f"No un-headed entries to stamp in {args.changelog} (no-op)")
-
-    if args.decision_file is not None:
-        push = needs_own_push(version, local, changed)
-        args.decision_file.write_text("true" if push else "false")
 
 
 if __name__ == "__main__":
