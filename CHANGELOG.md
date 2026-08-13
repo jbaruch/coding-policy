@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.154 — 2026-08-13
+
 ### CI safety — the watch gate is not always a PR check
 
 `ci-safety.md` "Always Watch CI" assumed the gating signal lives on the PR. Two shapes break that. First, the signal can be an out-of-band `workflow_dispatch` run — a HAR reseed, a manually dispatched job — that may not surface in the PR's `statusCheckRollup`, so a PR-scoped watch waits on an event that never fires. Second, a failed PR check that nothing re-triggers (a pre-seed `bdd` run left `FAILURE`) stays red until an explicit `gh run rerun --failed`, so a green-and-approved PR looks stalled for reasons unrelated to the work. Added bullets naming both: identify the run that actually gates the outcome and bind the watch to its `conclusion`, and rerun a stale failed check rather than waiting for a re-fire that never comes. Prompted by a live case where an agent watched a PR's checks while the reseed run — the real gate — ran out-of-band, and the PR's own `bdd` sat red with nothing to re-fire it.
