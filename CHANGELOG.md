@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.156 — 2026-08-13
+
 ### CI safety — credits never block publishing; a red publish run is the agent's to diagnose
 
 Agents repeatedly blame a red publish run on "tessl out of credits," reading it as proof the publish was blocked. The tessl publish step never consumes credits and never blocks on org credit state — the artifact lands regardless. Credits can still fail a review or eval step and turn the run red (the `context-artifacts` Credit-Outage Review Carve-Out governs the review step), but a red run — credit-caused or not — is never proof that publishing was blocked: whether the artifact published is answered by the registry advance plus moderation `pass`, independent of the run's color. Prompted by a live case: an agent asserted "your org is out of credits, every publish run went red" while the artifacts had actually landed (registry advanced, moderation `pass`) and the review step correctly skipped under the carve-out — the red gate came from a later eval step hard-failing, not from credits blocking the publish. New `ci-safety.md` section "Credits Never Block Publishing" makes the diagnosis the agent's to own.
