@@ -203,6 +203,7 @@ t_discover_returns_empty_when_no_copilot_review() {
 t_main_verifies_bot_only_reviewers() {
   local out rc
   out=$(
+    # shellcheck disable=SC2317  # gh() runs indirectly through the sourced main(); shellcheck cannot trace the call
     gh() { _main_gh_mock "$@"; }
     MUT_FIXTURE='{"data":{"requestReviews":{"pullRequest":{"reviewRequests":{"nodes":[{"requestedReviewer":{"__typename":"Bot","login":"copilot-pull-request-reviewer"}}]}}}}}' \
       main owner repo 5 2>/dev/null
@@ -217,6 +218,7 @@ t_main_verifies_bot_only_reviewers() {
 t_main_fails_when_copilot_absent() {
   local err rc
   err=$(
+    # shellcheck disable=SC2317  # gh() runs indirectly through the sourced main(); shellcheck cannot trace the call
     gh() { _main_gh_mock "$@"; }
     MUT_FIXTURE='{"data":{"requestReviews":{"pullRequest":{"reviewRequests":{"nodes":[{"requestedReviewer":{"__typename":"Bot","login":"some-other-bot"}}]}}}}}' \
       main owner repo 5 2>&1 >/dev/null
@@ -233,6 +235,7 @@ t_main_falls_back_on_rejected_pinned_id() {
   local out rc flag
   flag=$(mktemp -u)
   out=$(
+    # shellcheck disable=SC2317  # gh() runs indirectly through the sourced main(); shellcheck cannot trace the call
     gh() { _main_gh_mock "$@"; }
     MUT_FAIL_ONCE=1 MUT_FAIL_FLAG="$flag" \
     DISCOVER_FIXTURE='{"data":{"repository":{"pullRequests":{"nodes":[{"reviews":{"nodes":[{"author":{"id":"BOT_discovered","login":"copilot-pull-request-reviewer"}}]}}]}}}}' \
