@@ -104,6 +104,18 @@ alwaysApply: true
 - If any conjunct fails, the publish is not confirmed — query the real moderation state, never invent one to hedge a failed publish
 - Naively re-running a failed publish can create an extra release when the workflow includes a version-bump step (e.g., `tesslio/patch-version-publish`) and the run got past it. Safer recovery: a follow-up commit fires a fresh publish on merge
 
+## Credits Never Block Publishing
+
+- The tessl publish step never consumes credits
+- The publish step never blocks on org credit state
+- The artifact lands regardless of the credit balance
+- Credits can still fail a review or eval step and turn the run red (see `rules/context-artifacts.md` Credit-Outage Review Carve-Out)
+- A red run (credit-caused or not) is never proof that publishing was blocked
+- Whether the artifact published is answered by the registry advance plus moderation `pass`, independent of the run's color
+- A red run whose artifact landed means a step other than the publish failed, not a blocked publish
+- Never blame a red publish run on credits without confirming the artifact landing and naming the failing step from the logs
+- A publish that did not land is the agent's own diagnosis, never a deflection to `tessl credits`
+
 ## Checks Not Starting
 
 - When pushed checks sit in `queued` and no `github-actions` run is created, check the PR's merge state before assuming an Actions outage
