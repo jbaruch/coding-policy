@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.153 — 2026-08-13
+
 ### Tests — reasoned SC2317 suppressions on the indirect gh() overrides (#280)
 
 The three `main()` tests added in #277 each define a local `gh()` override invoked indirectly through the sourced `main()`. A stricter ShellCheck than CI's 0.11.0 flags each as SC2317 ("command appears unreachable") because it cannot trace the call through the sourced function. Each override now carries an adjacent, reasoned `# shellcheck disable=SC2317` naming the indirect-through-`main` invocation — matching the existing `SC2329` precedent in the same file, with no blanket file-wide suppression (`rules/language-diagnostics.md` "Findings Are Non-Dismissible Without Cause"). Closes #280.
