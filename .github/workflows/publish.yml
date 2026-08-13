@@ -58,8 +58,8 @@ jobs:
 
       # Dogfoods the reusable action consumers call as
       # `uses: jbaruch/coding-policy/.github/actions/stamp-changelog@<ref>`.
-      # Commit only, no push — patch-version-publish's own commit/push
-      # carries it along; [skip ci] guards the re-trigger.
+      # The action self-pushes its stamp commit ([skip ci] guards the
+      # re-trigger), decoupled from patch-version-publish's exit status (#284).
       - name: Stamp CHANGELOG with the version being published
         uses: ./.github/actions/stamp-changelog
 

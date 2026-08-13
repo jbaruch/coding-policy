@@ -1,14 +1,18 @@
 name: 'Stamp CHANGELOG with the published version'
 description: |
   Stamps the CHANGELOG's newest (un-headed) entries with the version the
-  publish step is about to assign, then commits the result with `[skip ci]`.
+  publish step is about to assign, then commits the result with `[skip ci]`
+  and pushes that commit itself.
 
-  The commit is normally pushed by the publish step's own bump commit. On a
-  first publish (or when the manifest is already ahead of the registry) the
-  publish step assigns the manifest version verbatim and pushes nothing, so
-  this action pushes the stamp commit itself — otherwise the stamped heading
-  is stranded on the runner and the published artifact and `CHANGELOG.md` on
-  the branch disagree silently.
+  It always self-pushes the stamp commit rather than delegating to a downstream
+  bump commit. Delegating stranded the stamp whenever the publish step exited
+  non-zero AFTER publishing — e.g. a post-publish credit check aborts
+  `patch-version-publish` before its bump commit/push runs, so the artifact
+  ships while `CHANGELOG.md` on the branch keeps its un-headed `### ` entries
+  (`jbaruch/coding-policy#284`). Self-pushing decouples the stamp from the
+  publish step's exit status. The `[skip ci]` on the commit stops the push
+  re-triggering the publish workflow (ci-safety Publish-Pipeline
+  Loop-Prevention Carve-Out).
 
   Per `jbaruch/coding-policy: context-artifacts` "CHANGELOG Hygiene"
   (every merge publishes): PR authors add un-headed `### ` entry blocks at
@@ -52,9 +56,8 @@ inputs:
     default: ''
   commit:
     description: |
-      When 'true' (default), commit the stamped CHANGELOG with `[skip ci]`,
-      and push it when no downstream bump commit will carry it (first publish
-      / manifest ahead). Set 'false' to leave it staged for the caller to
+      When 'true' (default), commit the stamped CHANGELOG with `[skip ci]`
+      and push that commit. Set 'false' to leave it staged for the caller to
       commit.
     required: false
     default: 'true'
@@ -97,39 +100,15 @@ runs:
         if [ -n "$LATEST" ]; then args+=(--latest "$LATEST"); fi
         if [ -n "$DATE" ]; then args+=(--date "$DATE"); fi
 
-        # The script writes 'true'/'false' here: must this step push the stamp
-        # commit itself because no downstream bump commit will carry it? The
-        # decision needs the computed publish version, which the script owns —
-        # recomputing it in bash would duplicate its registry logic.
-        decision_file="$(mktemp)"
-        args+=(--decision-file "$decision_file")
-
         python3 "$script" "${args[@]}"
 
-        if [ "$DO_COMMIT" != "true" ]; then
-          echo "commit=false — leaving the stamped CHANGELOG uncommitted."
-          exit 0
+        # The deterministic git side effects (stage / commit with a guaranteed
+        # `[skip ci]` / self-push) live in a script so they are testable against
+        # a temporary remote — see skills/release/tests/test_commit_stamp.sh.
+        # Same three-levels-up resolution as the python script above.
+        commit_script="$GITHUB_ACTION_PATH/../../../skills/release/commit-stamp.sh"
+        if [ ! -f "$commit_script" ]; then
+          echo "::error::commit-stamp.sh not found at $commit_script — the coding-policy action repo did not check out fully."
+          exit 1
         fi
-
-        # Loop-prevention is non-negotiable: the stamp commit MUST carry
-        # `[skip ci]` or it re-triggers the publish workflow. Enforce it even
-        # when a caller overrode `commit-message` without it.
-        msg="$COMMIT_MESSAGE"
-        case "$msg" in
-          *"[skip ci]"*) ;;
-          *) msg="$msg [skip ci]" ;;
-        esac
-
-        git config user.name "github-actions[bot]"
-        git config user.email "github-actions[bot]@users.noreply.github.com"
-        git add "$CHANGELOG"
-        git diff --cached --quiet || git commit -m "$msg"
-
-        # Push only when the publish step will not carry the stamp commit for
-        # us. The `[skip ci]` on the commit stops it re-triggering the publish
-        # workflow (ci-safety Publish-Pipeline Loop-Prevention Carve-Out). A
-        # blocked/failed push must surface — no suppression (error-handling).
-        if [ "$(cat "$decision_file")" = "true" ]; then
-          echo "No downstream bump will carry the stamp — pushing it now."
-          git push origin "HEAD:${GITHUB_REF_NAME}"
-        fi
+        bash "$commit_script" "$CHANGELOG" "$DO_COMMIT" "$COMMIT_MESSAGE" "$GITHUB_REF_NAME" "$GITHUB_REF_TYPE"
