@@ -15,27 +15,31 @@
 # genuine eval failure, a bump-push failure. A registry advance alone does not
 # prove the non-zero exit was the tolerated out-of-credits case.
 #
-# So the tolerance is gated on TWO facts, not one:
+# So the tolerance is gated on THREE facts, not one:
 #   1. the registry advanced past the pre-publish baseline (the artifact
 #      shipped), AND
-#   2. the publish step's own output carried the out-of-credits SIGNATURE
+#   2. the publish step's outcome is FAILURE — the step RAN and exited non-zero.
+#      cancelled / skipped are not the credit-failure case (the publish never
+#      ran to a billing exit) and stay red even with a signature, AND
+#   3. the publish step's own output carried the out-of-credits SIGNATURE
 #      (rules/ci-safety.md — "confirming the artifact landing AND naming the
 #      failing step from the logs"). The signature is produced upstream by
 #      smart-publish.sh, which owns the publish call and reads its output; it
 #      arrives here as the <credit-signature> argument. The org's live credit
 #      state is NOT a sufficient discriminator — a genuine eval/bump-push
 #      failure during the same out-of-credits window would look identical.
-# Only when both hold is a non-zero exit tolerated.
+# Only when all three hold is a non-zero exit tolerated.
 #
 # Fail-safe decision table (implemented exactly):
-#   outcome  | advanced | credit-signature | gate
-#   ---------+----------+------------------+--------------------------------------
-#   success  | yes      | (ignored)        | PASS — confirmed
-#   success  | no       | (ignored)        | FAIL — green no-op / did not land
-#   non-succ | yes      | true             | PASS — out-of-credits after publish
-#   non-succ | yes      | false            | FAIL — non-credit post-publish failure
-#   non-succ | no       | (ignored)        | FAIL — nothing landed
-#   read err | —        | —                | FAIL — cannot read registry, cannot confirm
+#   outcome           | advanced | credit-signature | gate
+#   ------------------+----------+------------------+---------------------------------
+#   success           | yes      | (ignored)        | PASS — confirmed
+#   success           | no       | (ignored)        | FAIL — green no-op / did not land
+#   failure           | yes      | true             | PASS — out-of-credits after publish
+#   failure           | yes      | false            | FAIL — non-credit post-publish failure
+#   cancelled/skipped | yes      | (ignored)        | FAIL — not a post-publish credit failure
+#   any               | no       | (ignored)        | FAIL — nothing landed
+#   read err          | —        | —                | FAIL — cannot read registry, cannot confirm
 #
 # The versions API reflects a publish immediately (registry-version.sh reads
 # it, not the lagging plugin-info listing), so NO retry loop is needed — one
@@ -153,16 +157,20 @@ main() {
         "confirm-publish-landed: ${workspace}/${plugin}@${current} landed on the registry (baseline ${baseline:-<none>}), publish step outcome=success — confirmed." 0
     fi
 
-    # Non-success but the registry advanced. Tolerated ONLY when the publish
-    # step's own output carried the out-of-credits signature — otherwise this is
-    # a non-credit post-publish failure that also landed the artifact (a genuine
-    # eval failure, a bump-push failure) and MUST stay red.
-    if [[ "$credit_signature" == "true" ]]; then
+    # Advanced but not success. Tolerated ONLY for outcome=failure (the publish
+    # step RAN and exited non-zero) WITH the out-of-credits terminal signature.
+    # cancelled / skipped are not a post-publish billing failure (the step never
+    # ran to a credit exit) and stay red even with a signature; a failure whose
+    # terminal output was NOT the credit signature is a non-credit post-publish
+    # failure (a genuine eval failure, a bump-push failure) and also stays red.
+    local cs_json="false"
+    [[ "$credit_signature" == "true" ]] && cs_json="true"
+    if [[ "$outcome" == "failure" && "$credit_signature" == "true" ]]; then
       emit_and_exit "pass" true "$current" "$baseline" true \
-        "confirm-publish-landed: publish step for ${workspace}/${plugin} exited non-zero (outcome=${outcome}) but ${workspace}/${plugin}@${current} landed AND its output carried the out-of-credits signature — a post-publish billing exit AFTER the artifact shipped; treating as landed per rules/ci-safety.md Credits Never Block Publishing." 0
+        "confirm-publish-landed: publish step for ${workspace}/${plugin} exited non-zero (outcome=failure) but ${workspace}/${plugin}@${current} landed AND its terminal output was the out-of-credits signature — a post-publish billing exit AFTER the artifact shipped; treating as landed per rules/ci-safety.md Credits Never Block Publishing." 0
     fi
-    emit_and_exit "fail" true "$current" "$baseline" false \
-      "confirm-publish-landed: publish step for ${workspace}/${plugin} exited non-zero (outcome=${outcome}) and ${workspace}/${plugin}@${current} landed, but its output did NOT carry the out-of-credits signature (credit-signature=${credit_signature:-<none>}) — this is a non-credit post-publish failure (e.g. a genuine eval failure or a bump-push failure), NOT the tolerated out-of-credits case. Preserving RED; inspect the run's failing step." 1
+    emit_and_exit "fail" true "$current" "$baseline" "$cs_json" \
+      "confirm-publish-landed: publish step for ${workspace}/${plugin} exited without success (outcome=${outcome}, credit-signature=${credit_signature:-<none>}) and ${workspace}/${plugin}@${current} landed, but this is NOT a tolerated post-publish out-of-credits FAILURE — only outcome=failure WITH the terminal credit signature is tolerated; cancelled, skipped, and any non-credit failure stay red. Preserving RED; inspect the run's failing step." 1
   fi
 
   # The registry did NOT advance -> nothing landed, whatever the step reported.

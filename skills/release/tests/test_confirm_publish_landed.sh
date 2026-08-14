@@ -7,11 +7,12 @@
 # as the <credit-signature> argument by the smart-publish step). The publish
 # step's outcome is a hint, never proof, so the registry is ALWAYS read and
 # compared, including on `success`. The decision table under test (6 rows):
-#   success  + advanced                       -> pass (0), credit_signature null
-#   success  + NOT advanced                   -> fail (1), credit_signature null
-#   non-succ + advanced + signature=true      -> pass (0), credit_signature true
-#   non-succ + advanced + signature=false     -> fail (1), credit_signature false
-#   non-succ + NOT advanced                   -> fail (1), credit_signature null
+#   success            + advanced             -> pass (0), credit_signature null
+#   success            + NOT advanced         -> fail (1), credit_signature null
+#   failure            + advanced + sig=true  -> pass (0), credit_signature true
+#   failure            + advanced + sig=false -> fail (1), credit_signature false
+#   cancelled/skipped  + advanced + sig=true  -> fail (1) — only failure tolerated
+#   failure            + NOT advanced         -> fail (1), credit_signature null
 #   registry read error (cannot confirm)      -> fail (1), credit_signature null
 #
 # The script emits ONE JSON object on stdout (gate/landed/current/baseline/
@@ -126,7 +127,7 @@ if [[ "$CODE" == 1 ]] \
   && [[ "$OUT" == *'"gate":"fail"'* ]] \
   && [[ "$OUT" == *'"landed":true'* ]] \
   && [[ "$OUT" == *'"credit_signature":false'* ]] \
-  && [[ "$OUT" == *"non-credit post-publish failure"* ]]; then
+  && [[ "$OUT" == *"outcome=failure, credit-signature=false"* ]]; then
   pass "non-success + advanced + signature=false -> gate fail (non-credit failure preserved red)"
 else
   fail "failure+advanced+sig-false: code=$CODE out='$OUT' err='$ERR'"
@@ -156,13 +157,21 @@ else
   fail "registry-read-error: code=$CODE out='$OUT' err='$ERR'"
 fi
 
-# --- a non-success, non-failure outcome (cancelled) still reconciles: advanced
-#     + signature=true -> pass ---
+# --- cancelled is NOT the credit-failure case: advanced + signature=true still
+#     REDS (only outcome=failure is tolerated, never a cancellation) ---
 invoke current_0332 "0.3.31" "cancelled" "true"
-if [[ "$CODE" == 0 ]] && [[ "$OUT" == *'"gate":"pass"'* ]] && [[ "$OUT" == *'"credit_signature":true'* ]]; then
-  pass "outcome=cancelled + advanced + signature=true -> gate pass"
+if [[ "$CODE" == 1 ]] && [[ "$OUT" == *'"gate":"fail"'* ]] && [[ "$OUT" == *"cancelled, skipped"* ]]; then
+  pass "outcome=cancelled + advanced + signature=true -> gate FAIL (only failure tolerated)"
 else
   fail "cancelled+advanced+sig-true: code=$CODE out='$OUT' err='$ERR'"
+fi
+
+# --- skipped is likewise not tolerated even with advanced + signature=true ---
+invoke current_0332 "0.3.31" "skipped" "true"
+if [[ "$CODE" == 1 ]] && [[ "$OUT" == *'"gate":"fail"'* ]]; then
+  pass "outcome=skipped + advanced + signature=true -> gate FAIL (only failure tolerated)"
+else
+  fail "skipped+advanced+sig-true: code=$CODE out='$OUT' err='$ERR'"
 fi
 
 # --- first-ever publish: empty baseline, current present, signature=true ->
