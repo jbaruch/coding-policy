@@ -2,12 +2,12 @@
 # Outcome-based tests for registry-version.sh.
 #
 # The contract: read the tile's latest published version from the versions API
-# and print it, distinguishing three outcomes — a published version, a
-# never-published tile (empty stdout, exit 0), and a tool/parse failure (exit
-# 2, diagnostic on stderr). The load-bearing properties are (a) NUMERIC max
-# selection (0.3.119 outranks 0.3.20), (b) a tessl stderr warning must not
-# poison the parse, and (c) a non-JSON body / tessl failure must exit 2, never
-# emit a bogus version.
+# and emit it as JSON, distinguishing three outcomes — a published version
+# ({"version":"x.y.z"}), a never-published tile ({"version":null}, exit 0), and
+# a tool/parse failure (exit 2, empty stdout, diagnostic on stderr). The
+# load-bearing properties are (a) NUMERIC max selection (0.3.119 outranks
+# 0.3.20), (b) a tessl stderr warning must not poison the parse, and (c) a
+# non-JSON body / tessl failure must exit 2, never emit a bogus version.
 #
 # Approach: run the script as a subprocess with a `tessl` fake first on PATH
 # (real jq stays reachable), so the real `set -euo pipefail`, the EXIT trap,
@@ -86,25 +86,25 @@ invoke() {
 
 echo "== registry-version.sh tests =="
 
-# --- happy path: NUMERIC max across the page ---
+# --- happy path: NUMERIC max across the page, emitted as JSON ---
 invoke ok
-if [[ "$CODE" == 0 ]] && [[ "$OUT" == "0.3.119" ]]; then
-  pass "numeric max selection: 0.3.20 / 0.3.119 / 0.0.1 -> 0.3.119"
+if [[ "$CODE" == 0 ]] && [[ "$OUT" == '{"version":"0.3.119"}' ]]; then
+  pass "numeric max selection: 0.3.20 / 0.3.119 / 0.0.1 -> {\"version\":\"0.3.119\"}"
 else
   fail "happy path: code=$CODE out='$OUT' err='$ERR'"
 fi
 
-# --- never published: empty .data -> empty stdout, exit 0 (valid baseline) ---
+# --- never published: empty .data -> {"version":null}, exit 0 (valid baseline) ---
 invoke empty
-if [[ "$CODE" == 0 ]] && [[ -z "$OUT" ]]; then
-  pass "never-published (empty data) -> exit 0, empty stdout"
+if [[ "$CODE" == 0 ]] && [[ "$OUT" == '{"version":null}' ]]; then
+  pass "never-published (empty data) -> exit 0, {\"version\":null}"
 else
   fail "empty data: code=$CODE out='$OUT' err='$ERR'"
 fi
 
 # --- a tessl warning on stderr must not poison the parsed version ---
 invoke warning_on_stderr
-if [[ "$CODE" == 0 ]] && [[ "$OUT" == "0.3.31" ]]; then
+if [[ "$CODE" == 0 ]] && [[ "$OUT" == '{"version":"0.3.31"}' ]]; then
   pass "stderr warning does not poison the parsed version"
 else
   fail "stderr warning: code=$CODE out='$OUT' err='$ERR'"

@@ -10,22 +10,26 @@ description: |
   fleet publish run whose artifact actually shipped
   (rules/ci-safety.md "Credits Never Block Publishing").
 
-  This gate keeps the run green ONLY when the registry proves the artifact
-  landed, and keeps a genuine non-landing failure RED. The decision is the
-  registry's latest version, not the exit code.
+  This gate tolerates a non-zero publish exit ONLY when the registry proves the
+  artifact landed AND the org is verifiably out of credits; every other
+  non-landing OR non-credit failure stays RED. A registry advance alone does
+  not green the run — a different post-publish failure (a genuine eval failure,
+  a bump-push failure) can also land the artifact, and must stay red.
 
   Phases:
     - `capture` (before publish): reads the registry's current latest version
-      via `skills/release/registry-version.sh` and exposes it as the
-      `baseline` output. Empty is allowed — a tile that has never published is
-      a valid first-publish baseline.
+      via `skills/release/registry-version.sh` (which emits {"version":...}) and
+      exposes `.version` as the `baseline` output. Empty is allowed — a tile
+      that has never published is a valid first-publish baseline.
     - `confirm` (after publish): runs `skills/release/confirm-publish-landed.sh`
-      with the captured `baseline` and the publish step's `outcome`. Its exit
-      code IS the gate: 0 = landed (or the step succeeded), non-zero = did not
-      land / cannot confirm. Wire the confirm step WITHOUT `continue-on-error`
-      so its verdict gates the job; put `continue-on-error: true` on the
-      publish step it reconciles so a post-publish exit does not fail the job
-      before this gate runs.
+      with the captured `baseline` and the publish step's `outcome`. That script
+      emits a JSON verdict on stdout (gate/landed/current/baseline/credit_blocked
+      /reason) and NO annotations; this action translates the JSON into a
+      ::warning:: (landed despite a non-zero exit) or ::error:: (gate fail) and
+      exits with the gate result. Wire the confirm step WITHOUT
+      `continue-on-error` so its verdict gates the job; put
+      `continue-on-error: true` on the publish step it reconciles so a
+      post-publish exit does not fail the job before this gate runs.
 
   The workspace/plugin pair comes from the consumer's plugin manifest name
   (`<workspace>/<plugin>` in `.tessl-plugin/plugin.json`, then `tile.json`),
@@ -120,10 +124,13 @@ runs:
               echo "::error::publish-landed-gate: registry-version.sh not found at $registry_script — the coding-policy action repo did not check out fully." >&2
               exit 1
             fi
-            # Empty stdout (never published) is a valid first-publish baseline;
-            # a registry read error exits 2 and set -e fails the step (we must
+            # registry-version.sh emits {"version":"x.y.z"} or {"version":null}.
+            # A registry read error exits 2 and set -e fails the step (we must
             # not publish without an established baseline to later confirm).
-            baseline="$(bash "$registry_script" "$workspace" "$plugin")"
+            # Parse .version; null -> empty baseline (never published), a valid
+            # first-publish baseline.
+            registry_json="$(bash "$registry_script" "$workspace" "$plugin")"
+            baseline="$(printf '%s' "$registry_json" | jq -r '.version // empty')"
             echo "baseline=$baseline" >> "$GITHUB_OUTPUT"
             echo "publish-landed-gate: captured baseline for ${workspace}/${plugin}: '${baseline:-<none — first publish>}'"
             ;;
@@ -137,9 +144,45 @@ runs:
               echo "::error::publish-landed-gate: confirm phase requires the 'publish-outcome' input (the publish step's steps.<id>.outcome)." >&2
               exit 1
             fi
-            # confirm-publish-landed.sh's exit code IS the gate: it propagates as
-            # this step's exit code (last command under set -e).
-            bash "$confirm_script" "$workspace" "$plugin" "$BASELINE" "$PUBLISH_OUTCOME"
+            # confirm-publish-landed.sh emits ONE JSON object on stdout and NO
+            # workflow annotations (rules/script-delegation.md — the script
+            # emits structured data, the action translates it). Capture its JSON
+            # and its exit code (0 pass, 1 fail, 2 usage), then translate the
+            # JSON `reason` into a ::warning:: (gate pass with a landed-despite-
+            # non-zero exit) or ::error:: (gate fail), and exit with the gate
+            # result so the job is gated.
+            gate_rc=0
+            gate_json="$(bash "$confirm_script" "$workspace" "$plugin" "$BASELINE" "$PUBLISH_OUTCOME")" || gate_rc=$?
+
+            # No JSON (a usage error exits 2 with empty stdout, or a crash) ->
+            # cannot confirm -> fail-safe RED.
+            if [ -z "$gate_json" ]; then
+              echo "::error::publish-landed-gate: confirm-publish-landed.sh emitted no JSON (exit ${gate_rc}) — a usage error or crash. Treating as NOT confirmed (fail-safe)." >&2
+              exit 1
+            fi
+            if ! printf '%s' "$gate_json" | jq empty >/dev/null 2>&1; then
+              echo "::error::publish-landed-gate: confirm-publish-landed.sh produced invalid JSON (exit ${gate_rc}); output was '${gate_json}'. Treating as NOT confirmed (fail-safe)." >&2
+              exit 1
+            fi
+
+            gate="$(printf '%s' "$gate_json" | jq -r '.gate // "fail"')"
+            reason="$(printf '%s' "$gate_json" | jq -r '.reason // "confirm-publish-landed.sh emitted no reason"')"
+            credit_blocked="$(printf '%s' "$gate_json" | jq -r '.credit_blocked')"
+
+            # Fail-safe: only a clean pass (exit 0 AND gate==pass) greens; any
+            # other combination reds. A pass with credit_blocked==true is the
+            # tolerated landed-despite-non-zero case -> ::warning::; a plain pass
+            # -> a note.
+            if [ "$gate_rc" -eq 0 ] && [ "$gate" = "pass" ]; then
+              if [ "$credit_blocked" = "true" ]; then
+                echo "::warning::${reason}"
+              else
+                echo "${reason}"
+              fi
+              exit 0
+            fi
+            echo "::error::${reason}" >&2
+            exit 1
             ;;
           *)
             echo "::error::publish-landed-gate: 'phase' must be 'capture' or 'confirm', got '$PHASE'." >&2

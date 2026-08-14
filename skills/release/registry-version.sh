@@ -18,23 +18,25 @@
 # before the publish); this script reads the versions API for the POST
 # question (staleness is not).
 #
-# Sourceable AND runnable. verify-publish-landed.sh sources this file and
-# calls `registry_version` as a function so an in-process `tessl` shell-mock
-# (its unit suite) reaches the read; confirm-publish-landed.sh and the
-# composite action run it as a subprocess. The EXIT-trap cleanup is installed
-# inside main() (not at top level) so sourcing this file never clobbers the
-# caller's own trap.
+# Sourceable AND runnable, with TWO stdout contracts for the two entry points:
+#   - the registry_version FUNCTION prints the BARE version string (empty when
+#     never published) — verify-publish-landed.sh sources this file and calls
+#     it so an in-process `tessl` shell-mock (its unit suite) reaches the read.
+#   - the SCRIPT's main() emits STRUCTURED JSON (rules/script-delegation.md —
+#     deterministic scripts emit JSON, not prose) — confirm-publish-landed.sh
+#     and the composite action run it as a subprocess and parse `.version`.
+# The EXIT-trap cleanup is installed inside main() (not at top level) so
+# sourcing this file never clobbers the caller's own trap.
 #
 # Usage: registry-version.sh <workspace> <plugin>
-# Out:   the numeric latest version (major.minor.patch) on stdout, or NOTHING
-#        (empty, exit 0) when the tile has never published — an empty registry
-#        is a valid first-publish baseline, not an error. Callers that require
-#        a published version (verify-publish-landed.sh) treat empty as their
-#        own error; callers capturing a baseline (the gate) treat it as "no
-#        baseline yet".
-# Exit:  0 on a successful read (published version OR never-published empty);
+# Out:   one JSON object on stdout — {"version": "<major.minor.patch>"} for a
+#        published tile, or {"version": null} when the tile has never published
+#        (an empty registry is a valid first-publish baseline, not an error).
+#        Callers parse `.version`: the gate's capture phase reads null as "no
+#        baseline yet". Diagnostics go to stderr.
+# Exit:  0 on a successful read (published version OR never-published null);
 #        2 on tool/parse failure (tessl or jq absent, tessl unreachable,
-#        non-JSON body).
+#        non-JSON body). On exit 2 stdout is empty — no JSON is emitted.
 
 set -euo pipefail
 
@@ -148,13 +150,28 @@ main() {
     || { echo "error: jq is not installed; install with 'brew install jq' (macOS) or 'apt install jq' (Debian/Ubuntu) and re-run" >&2; exit 2; }
 
   # Backstop cleanup for an unexpected signal; registry_version() already
-  # clears RV_ERR_FILE on its own return paths.
+  # clears RV_ERR_FILE on its own return paths (and does so inside the command
+  # substitution's subshell below, so no temp file leaks).
   trap cleanup_rv_err_file EXIT
 
-  # Called directly (not in a command substitution) so its stdout is this
-  # script's stdout and, under `set -e`, a rc 2 propagates as this script's
-  # exit code.
-  registry_version "$1" "$2"
+  # Capture the BARE version through the function, then wrap it in the script's
+  # JSON contract. A tool/parse failure returns 2 with the actionable
+  # diagnostic already on stderr; propagate that exit code and emit NO JSON
+  # (stdout stays empty on failure, per the header contract).
+  local version rc=0
+  version=$(registry_version "$1" "$2") || rc=$?
+  if [[ $rc -ne 0 ]]; then
+    exit "$rc"
+  fi
+
+  # Empty -> JSON null (never published). A present version is numeric
+  # MAJOR.MINOR.PATCH (registry_version validated the shape), so it carries no
+  # character needing JSON string-escaping.
+  if [[ -z "$version" ]]; then
+    printf '{"version":null}\n'
+  else
+    printf '{"version":"%s"}\n' "$version"
+  fi
 }
 
 # `if` form, not `[[ ]] && main`: this file is SOURCED by
