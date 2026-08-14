@@ -31,7 +31,7 @@ Body of x.
 
 
 class ComputeVersion(unittest.TestCase):
-    """compute_version mirrors tesslio/patch-version-publish."""
+    """compute_version mirrors the publish step's --bump patch semantics."""
 
     def test_first_publish_uses_local(self):
         self.assertEqual(stamp_changelog.compute_version("0.1.0", None), "0.1.0")

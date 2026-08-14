@@ -56,7 +56,7 @@ Proceed immediately to Step 3.
 
 ## Step 3 — Reason About Versioning
 
-Decide the bump per semver. Patch is the default and is handled automatically by `tesslio/patch-version-publish` — only update the manifest version for minor or major.
+Decide the bump per semver. Patch is the default and is auto-bumped by the publish workflow's `smart-publish` step — only update the manifest version for minor or major.
 
 ## Step 4 — Policy Review Fires Automatically
 

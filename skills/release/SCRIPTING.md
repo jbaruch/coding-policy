@@ -36,12 +36,12 @@ The script MUST enforce all of:
 Contract:
 
 - **Inputs** — `--changelog` (default `CHANGELOG.md`), `--manifest` (default `.tessl-plugin/plugin.json`, then `tile.json`), `--latest` (skip the registry query; CI omits it and queries `tessl plugin info`), `--date` (default today, UTC)
-- **Side effect** — rewrites the CHANGELOG in place; the workflow commits it with `[skip ci]`, no push (the `patch-version-publish` commit carries it)
+- **Side effect** — rewrites the CHANGELOG in place; the stamp-changelog action then commits and self-pushes it (via `commit-stamp.sh`) with the CI-skip marker, decoupled from the publish step's exit (#284)
 - **Idempotent** — no-op when the top section is already under a `## ` heading
 - **Exit** — non-zero on a malformed version, a missing manifest field, or a non-404 `tessl plugin info` failure (auth/network is surfaced, not masked)
 - The version-computation and stamping logic is the source of truth in the script's module docstring and `compute_version` / `stamp_changelog` — do not restate it here
 
-The workflow step must run BEFORE `tesslio/patch-version-publish` so the stamped heading and the assigned version stay in lockstep.
+The workflow step must run BEFORE the publish step (`smart-publish`) so the stamped heading and the assigned version stay in lockstep.
 
 ## Why these gates have to be in the script, not just the skill prose
 

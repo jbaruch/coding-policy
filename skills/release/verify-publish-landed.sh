@@ -66,6 +66,27 @@ if ! command -v jq >/dev/null 2>&1; then
   exit 2
 fi
 
+# Shared deterministic helpers live in sibling scripts (rules/script-delegation.md
+# — one hardened home per operation). version-compare.sh provides version_gt;
+# registry-version.sh provides registry_version (the versions-API read this
+# script used to do inline). Both are SOURCED, not run as a subprocess, so a
+# caller that overrides `tessl`/`gh` with in-process shell functions (the unit
+# suite) reaches the read — a subprocess would miss those mocks. Sourcing
+# registry-version.sh installs no EXIT trap (its trap lives inside its own
+# main()), so this script's trap is untouched; its main() definition is
+# harmlessly overridden by this script's own main() defined below.
+_vpl_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=skills/release/version-compare.sh
+if ! source "${_vpl_dir}/version-compare.sh"; then
+  echo "error: cannot source ${_vpl_dir}/version-compare.sh — the release skill tree is incomplete; re-clone the repo or re-install the plugin, then re-run" >&2
+  exit 2
+fi
+# shellcheck source=skills/release/registry-version.sh
+if ! source "${_vpl_dir}/registry-version.sh"; then
+  echo "error: cannot source ${_vpl_dir}/registry-version.sh — the release skill tree is incomplete; re-clone the repo or re-install the plugin, then re-run" >&2
+  exit 2
+fi
+
 emit_and_exit() {
   local ok="$1" reason="$2" conclusion="$3" pre="$4" current="$5" rc="$6"
   printf '{"ok":%s,"reason":%s,"run_conclusion":%s,"pre":%s,"current":%s}\n' \
@@ -98,27 +119,6 @@ cleanup_err_file() {
     fi
   fi
   return 0
-}
-
-# Returns 0 iff $1 > $2 under semver ordering. Parses major.minor.patch
-# as integers in pure bash so the comparison stays portable across GNU
-# coreutils (Linux CI) and BSD userland (macOS) — `sort -V` is a GNU
-# extension and isn't guaranteed on BSD sort. Equality returns non-zero
-# so the caller can distinguish strict advance from no-op. Missing parts
-# default to 0 via parameter expansion.
-version_gt() {
-  [[ "$1" != "$2" ]] || return 1
-  local a1 a2 a3 b1 b2 b3
-  IFS='.' read -r a1 a2 a3 <<< "$1"
-  IFS='.' read -r b1 b2 b3 <<< "$2"
-  a1=${a1:-0}; a2=${a2:-0}; a3=${a3:-0}
-  b1=${b1:-0}; b2=${b2:-0}; b3=${b3:-0}
-  (( a1 > b1 )) && return 0
-  (( a1 < b1 )) && return 1
-  (( a2 > b2 )) && return 0
-  (( a2 < b2 )) && return 1
-  (( a3 > b3 )) && return 0
-  return 1
 }
 
 main() {
@@ -169,39 +169,23 @@ main() {
     exit 2
   fi
 
-  # Read the current latest version from the versions API. Separate stdout
-  # (the JSON body) from stderr so a tessl warning can't poison the parsed
-  # payload — same capture discipline as the gh call above and as
-  # verify-moderation-cleared.sh. One page suffices: the endpoint returns the
-  # newest versions first, a publish only ever adds a new highest version, so
-  # the maximum is always on page 1 — no --paginate needed.
-  local versions_endpoint="v1/tiles/${workspace}/${tile}/versions"
-  local versions_json
-  versions_json=$(tessl api "$versions_endpoint" 2>"$err_file") \
-    || { local err; err=$(cat "$err_file"); echo "error: 'tessl api ${versions_endpoint}' failed: ${err} — verify (1) tessl CLI is installed and on PATH ('command -v tessl'), (2) the workspace/plugin slug is correct, (3) you have network access to the registry, then re-run 'tessl api ${versions_endpoint}' directly to inspect the failure before retrying the publish verification" >&2; exit 2; }
-
-  # `jq empty`, not `jq -e .`: -e sets the exit from the last output's
-  # truthiness, so a valid body evaluating to false/null would misreport as
-  # "not JSON". `jq empty` parses and produces no output — exit reflects parse
-  # validity alone (same reasoning as verify-moderation-cleared.sh).
-  if ! printf '%s' "$versions_json" | jq empty >/dev/null 2>&1; then
-    echo "error: 'tessl api ${versions_endpoint}' returned a body that is not valid JSON — the registry may be returning an error page or the endpoint shape changed; inspect it directly with 'tessl api ${versions_endpoint}' before retrying (body was: ${versions_json})" >&2
+  # Read the current latest version through registry-version.sh (sourced
+  # above). It performs the versions-API fetch + JSON validation + numeric
+  # max-version parse this block used to inline, with the same stderr-
+  # separation and jq-empty discipline. A non-zero return is a tool/parse
+  # failure (tessl unreachable, non-JSON body) — registry_version already
+  # wrote the actionable diagnostic to stderr, so map it straight to this
+  # script's rc-2 tool-state path. An empty result means the versions API
+  # carried no published version — this script requires one for the
+  # conjunction, so it stays a rc-2 error here (a never-published tile is not
+  # a valid input to "did my publish advance the registry").
+  local current rc=0
+  current=$(registry_version "$workspace" "$tile") || rc=$?
+  if [[ $rc -ne 0 ]]; then
     exit 2
   fi
-
-  # Max version across the page, ranked numerically. sort_by a per-element
-  # parsed [major,minor,patch] key (jq compares arrays element-wise, so
-  # [0,3,119] outranks [0,3,20]) and take the last — this depends only on the
-  # `.version` string, not the endpoint's split-out int fields, so a shape
-  # change there can't silently mis-rank. `tonumber? // 0` neutralises a
-  # non-numeric component rather than aborting the whole rank.
-  local current
-  current=$(printf '%s' "$versions_json" | jq -r '
-    [.data[]?.attributes.version | select(. != null)]
-    | sort_by(split(".") | map(tonumber? // 0))
-    | last // empty')
   if [[ -z "$current" ]]; then
-    echo "error: 'tessl api ${versions_endpoint}' returned no published version — response carried no .data[].attributes.version entries; the endpoint shape may have changed or the plugin has never published. Inspect it directly with 'tessl api ${versions_endpoint}' (body was: ${versions_json})" >&2
+    echo "error: 'tessl api v1/tiles/${workspace}/${tile}/versions' returned no published version — response carried no .data[].attributes.version entries; the endpoint shape may have changed or the plugin has never published. Inspect it directly with 'tessl api v1/tiles/${workspace}/${tile}/versions'" >&2
     exit 2
   fi
 

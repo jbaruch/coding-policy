@@ -2,14 +2,15 @@
 """Stamp the CHANGELOG's newest (un-headed) entries with the version being published.
 
 Run by the publish pipeline (`.github/workflows/publish.yml`) immediately before
-`tesslio/patch-version-publish`. Every merge is published, so there is no
+the publish step (`smart-publish`). Every merge is published, so there is no
 "Unreleased" bucket: PR authors add `### ...` entry blocks at the TOP of
 `CHANGELOG.md` (below the `# Changelog` H1) with NO version heading. This script
 computes the version the publish step will assign and inserts a
 `## <version> — <date>` heading above those un-headed entries, so the published
 artifact (and the registry "what's new") shows them under their real version.
 
-Version computation MIRRORS `tesslio/patch-version-publish`: take the registry's
+Version computation MIRRORS the publish step's `--bump patch` semantics
+(`smart-publish` / `tessl plugin publish --bump patch`): take the registry's
 latest published version and bump the patch, unless the local manifest is already
 ahead (a manual bump), in which case use the manifest version as-is. Keeping the
 two in lockstep is what makes the stamped heading match the published version.
@@ -41,9 +42,9 @@ _ENTRY_RE = re.compile(r"^### ")
 def compute_version(local: str, latest: str | None) -> str:
     """Return the version the publish step will assign.
 
-    Mirrors tesslio/patch-version-publish: first publish (no registry version)
-    uses the manifest version as-is; otherwise bump the registry latest's patch,
-    unless the manifest is already ahead.
+    Mirrors the publish step's `--bump patch` semantics: first publish (no
+    registry version) uses the manifest version as-is; otherwise bump the
+    registry latest's patch, unless the manifest is already ahead.
     """
     for label, val in (("local", local), ("latest", latest)):
         if val is not None and not _VERSION_RE.match(val):
@@ -86,7 +87,7 @@ def stamp_changelog(text: str, version: str, date: str) -> tuple[str, bool]:
 def query_latest_version(plugin_name: str) -> str | None:
     """Return the registry's latest published version, or None if it can't be read.
 
-    Mirrors patch-version-publish's handling. Returns None in two cases so the
+    Mirrors the publish step's registry-query handling. Returns None in two cases so the
     caller falls back to the manifest version: a 404 (the plugin has never been
     published) and a Tessl auth failure (the stamp step ran without login — see
     the caller). Any other failure (network, etc.) is surfaced so it is not masked.
@@ -103,8 +104,8 @@ def query_latest_version(plugin_name: str) -> str | None:
         # stamps without running setup-tessl / `tessl login` first. Fall back to
         # the manifest version rather than wedging the publish: the manifest is the
         # version being published when kept ahead of the registry (the standard
-        # convention), and patch-version-publish still does its own authoritative
-        # bump downstream. Genuine (non-auth) failures still raise.
+        # convention), and the publish step (`smart-publish`) still does its own
+        # authoritative bump downstream. Genuine (non-auth) failures still raise.
         if re.search(r"authenticat|log ?in|sign (?:in|up)", combined, re.IGNORECASE):
             print(
                 f"warning: `tessl plugin info {plugin_name}` requires Tessl auth in "
