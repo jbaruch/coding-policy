@@ -8,9 +8,10 @@
 # equality, downgrades, and empty/short components (empty = a never-published
 # first-publish baseline that anything real must outrank).
 #
-# Approach: source the helper (no side effects, no main) and call version_gt
-# directly. `set -uo pipefail`, not `-e`: a failure-counting harness must not
-# die on the first red assertion.
+# Approach: source the helper (no top-level side effects) and call version_gt
+# directly, plus run the script as a subprocess to exercise the direct-execution
+# CLI guard's exit-code contract. `set -uo pipefail`, not `-e`: a failure-
+# counting harness must not die on the first red assertion.
 #
 # Run: bash skills/release/tests/test_version_compare.sh
 # Exit 0 on all-pass; 1 with a per-assertion diagnostic on failure.
@@ -70,6 +71,24 @@ assert_not_gt ""      ""        # both empty -> equal -> not greater
 assert_not_gt ""      "0.0.1"   # empty (0.0.0) is not greater than 0.0.1
 assert_gt     "1"     "0.9.9"   # missing minor/patch -> 1.0.0 > 0.9.9
 assert_gt     "0.3"   "0.2.9"   # missing patch -> 0.3.0 > 0.2.9
+
+# --- direct-execution CLI (the entry-point guard, run as a subprocess so the
+#     scoped `set -euo pipefail` and the exit-code contract are exercised) ---
+assert_cli() {
+  local want="$1" desc="$2"; shift 2
+  bash "$SCRIPT" "$@" >/dev/null 2>&1
+  local got=$?
+  if [[ "$got" == "$want" ]]; then
+    pass "CLI ${desc} -> exit ${want}"
+  else
+    fail "CLI ${desc} expected exit ${want}, got ${got}"
+  fi
+}
+assert_cli 0 "0.3.5 > 0.3.4"          0.3.5 0.3.4
+assert_cli 1 "0.3.4 not > 0.3.5"      0.3.4 0.3.5
+assert_cli 1 "equal is not greater"   0.3.5 0.3.5
+assert_cli 2 "wrong arity (1 arg)"    0.3.5
+assert_cli 2 "non-numeric input"      1.2 0.3.4
 
 echo ""
 echo "== summary: ${PASS_COUNT} passed, ${FAIL_COUNT} failed =="
