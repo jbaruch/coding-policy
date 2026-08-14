@@ -96,6 +96,14 @@ json.dump(d, open(m,"w"))' "$manifest"
       echo "✔ Uploaded 3 eval scenarios"
       echo "##[error]Out of credits"
       exit 1 ;;
+    credit_warning_then_fail)
+      # An early credit WARNING (contains 'out of credits'), then a DIFFERENT
+      # terminal ##[error]. The credit text is present but is NOT the record
+      # bound to the exit — must stay red.
+      echo "##[warning]Heads up — you are nearly out of credits"
+      echo "✔ Published testws/testplugin@0.1.1"
+      echo "##[error]Failed to publish eval scenarios: server error"
+      exit 1 ;;
     other_fail)
       echo "✘ Failed to upload eval scenarios: network error"
       exit 1 ;;
@@ -191,6 +199,19 @@ t_credit_fail_reports_signature_no_commit() {
   [[ "$(_remote_count "$root")" == "$before" ]] || { echo "    FAIL: a commit was pushed on a failed publish" >&2; return 1; }
 }
 
+t_credit_warning_then_other_fail_stays_red() {
+  local root; root="$(_sandbox 0.1.0)"
+  local before; before="$(_remote_count "$root")"
+  local out rc
+  out="$(_run "$root" found credit_warning_then_fail auto-bump . main branch)"; rc=$?
+  [[ "$rc" -ne 0 ]] || { echo "    FAIL: expected non-zero exit" >&2; return 1; }
+  # The out-of-credits text is present (early warning) but the TERMINAL error is
+  # a different failure -> credit_signature MUST be false (not matched anywhere).
+  echo "$out" | python3 -c 'import json,sys;d=json.load(sys.stdin);assert d["outcome"]=="failure" and d["credit_signature"] is False' \
+    || { echo "    FAIL: an early credit warning + a different terminal failure must report credit_signature=false: $out" >&2; return 1; }
+  [[ "$(_remote_count "$root")" == "$before" ]] || { echo "    FAIL: a commit was pushed on a failed publish" >&2; return 1; }
+}
+
 t_other_fail_no_signature_no_commit() {
   local root; root="$(_sandbox 0.1.0)"
   local before; before="$(_remote_count "$root")"
@@ -257,6 +278,7 @@ main() {
   echo "== smart-publish.sh tests =="
   run "auto-bump success commits + pushes the bump [skip ci]" t_autobump_success_commits_and_pushes_bump
   run "credit failure reports credit_signature, no commit"    t_credit_fail_reports_signature_no_commit
+  run "early credit warning + other terminal failure -> red"  t_credit_warning_then_other_fail_stays_red
   run "non-credit failure reports no signature, no commit"    t_other_fail_no_signature_no_commit
   run "as-is success does not commit back"                    t_asis_success_does_not_commit_back
   run "first publish (404) sets first_publish, no bump"       t_first_publish_no_bump_flag_set

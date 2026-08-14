@@ -18,10 +18,15 @@
 # step). So this script replaces that action: same auto-bump-from-registry +
 # commit-back behavior, plus the output capture the gate needs.
 #
-# The credit signature is matched CONSERVATIVELY and only on a non-zero exit:
-# an unmatched signature fails SAFE (the confirm gate reds an unrecognised
-# failure), so a tessl wording change degrades to red, never to a wrongly-green
-# release. The regex is the single top-of-file constant below.
+# The credit signature is bound CAUSALLY to the exit, not matched anywhere in
+# the log: an early low-credit WARNING followed by a different terminal failure
+# (a genuine eval or publish error) must stay red. tessl reports errors as
+# `##[error]…` GitHub workflow commands, and the LAST such line is the terminal
+# failure record bound to the non-zero exit — the signature is matched against
+# THAT line alone. Conservative and only on a non-zero exit: an unmatched or
+# absent terminal record fails SAFE (the confirm gate reds it), so a tessl
+# wording change degrades to red, never to a wrongly-green release. Both the
+# error-line marker and the credit text are the top-of-file constants below.
 #
 # Usage: smart-publish.sh <mode> <plugin-path> <ref-name> <ref-type>
 #   <mode>        auto-bump = publish --bump patch from the registry, then
@@ -48,11 +53,17 @@
 
 set -euo pipefail
 
-# The out-of-credits signature in `tessl plugin publish`'s output. Observed as
-# `##[error]Out of credits` on a live fleet publish (jbaruch-travel-policy
-# 0.7.59). Matched case-insensitively and ONLY on a non-zero exit. Conservative
-# by design: a wording change stops matching and the failure stays RED (safe),
-# never wrongly green. Update this one constant if tessl changes the wording.
+# The terminal failure record and the out-of-credits signature within it.
+# Observed as `##[error]Out of credits` on a live fleet publish
+# (jbaruch-travel-policy 0.7.59). ERROR_LINE_REGEX isolates tessl's error lines
+# (GitHub `##[error]…` workflow commands); the LAST one is the record bound to
+# the non-zero exit. CREDIT_SIGNATURE_REGEX is matched case-insensitively
+# against THAT line alone — never anywhere earlier, so an early credit warning
+# ahead of a different terminal failure does not green a genuine failure.
+# Conservative: a wording change stops matching and the failure stays RED
+# (safe), never wrongly green. Update these constants if tessl changes the
+# wording.
+readonly ERROR_LINE_REGEX='##\[error\]'
 readonly CREDIT_SIGNATURE_REGEX='out of credits'
 
 # Temp file for the captured publish output; script-global so the EXIT trap can
@@ -231,11 +242,24 @@ main() {
   set -e
   cat "$SP_LOG_FILE" >&2
 
-  # Credit signature ONLY on a non-zero exit: a low-credit warning printed
-  # during a SUCCESSFUL publish must never read as the tolerated failure case.
+  # Credit signature ONLY on a non-zero exit, and bound to the TERMINAL failure
+  # record — the LAST `##[error]` line, the one the non-zero exit came from.
+  # Matching anywhere in the log would let an early credit warning green a later
+  # unrelated failure (an eval/publish error). No `##[error]` line, or a
+  # different last error line, keeps the run RED (fail-safe). A grep tool error
+  # (rc>1, distinct from rc==1 no-match) also fails safe to no-signature.
   local credit_signature=false
-  if [[ $rc -ne 0 ]] && grep -qiE "$CREDIT_SIGNATURE_REGEX" "$SP_LOG_FILE"; then
-    credit_signature=true
+  if [[ $rc -ne 0 ]]; then
+    local err_lines err_rc=0 last_error_line=""
+    err_lines="$(grep -E "$ERROR_LINE_REGEX" "$SP_LOG_FILE")" || err_rc=$?
+    if [[ $err_rc -eq 0 ]]; then
+      last_error_line="$(printf '%s\n' "$err_lines" | tail -n 1)"
+      if printf '%s' "$last_error_line" | grep -qiE "$CREDIT_SIGNATURE_REGEX"; then
+        credit_signature=true
+      fi
+    elif [[ $err_rc -ne 1 ]]; then
+      echo "smart-publish: warning: could not scan the publish log for the terminal error record (grep exit ${err_rc}) — treating as no credit signature (fail-safe red)." >&2
+    fi
   fi
   cleanup_sp_log
 
