@@ -115,21 +115,7 @@ exit 2
 STUB
 chmod +x "$STUBDIR/tessl"
 
-# Fake gh: record `pr create` invocations so the PR-fallback test can assert it.
-cat > "$STUBDIR/gh" <<'STUB'
-#!/usr/bin/env bash
-if [[ "${1:-}" == "pr" && "${2:-}" == "create" ]]; then
-  echo "gh pr create $*" >> "$GH_CALLS_FILE"
-  exit 0
-fi
-echo "stub gh: unsupported invocation: $*" >&2
-exit 2
-STUB
-chmod +x "$STUBDIR/gh"
-
 export PATH="$STUBDIR:$PATH"
-export GH_CALLS_FILE="$TESTTMP/gh-calls.log"
-: > "$GH_CALLS_FILE"
 
 # Isolated bare remote + work clone on `main`, seeded with a plugin manifest at
 # the given version. Echoes the sandbox root ($root/work, $root/remote.git).
@@ -166,7 +152,7 @@ _advance_remote_main() {
 _remote_count()   { git -C "$1/remote.git" rev-list --count main; }
 _remote_msg()     { git -C "$1/remote.git" log -1 --format=%B main; }
 _remote_version() { git -C "$1/remote.git" show main:.tessl-plugin/plugin.json | python3 -c 'import json,sys;print(json.load(sys.stdin)["version"])'; }
-_remote_has_branch() { git -C "$1/remote.git" rev-parse --verify --quiet "refs/heads/$2" >/dev/null; }
+_remote_has_bump_branch() { git -C "$1/remote.git" for-each-ref --format='%(refname)' 'refs/heads/tessl-bump-*' | grep -q .; }
 
 # Run smart-publish.sh in $work with the given MOCK_* + args; capture JSON stdout.
 _run() {
@@ -255,15 +241,19 @@ t_registry_query_failure_publishes_nothing() {
   [[ "$(_remote_count "$root")" == "$before" ]] || { echo "    FAIL: nothing should be committed on a pre-publish failure" >&2; return 1; }
 }
 
-t_push_blocked_falls_back_to_branch_and_pr() {
+t_push_blocked_reds_the_run() {
   local root; root="$(_sandbox 0.1.0)"
-  _advance_remote_main "$root"   # make the direct HEAD:main push non-fast-forward
-  local out; out="$(_run "$root" found ok auto-bump . main branch)" \
-    || { echo "    FAIL: script exited non-zero" >&2; return 1; }
-  echo "$out" | python3 -c 'import json,sys;d=json.load(sys.stdin);assert d["outcome"]=="success" and d["version"]=="0.1.1"' \
-    || { echo "    FAIL: unexpected JSON: $out" >&2; return 1; }
-  _remote_has_branch "$root" "tessl-bump-0.1.1" || { echo "    FAIL: fallback branch tessl-bump-0.1.1 not pushed" >&2; return 1; }
-  grep -q "pr create" "$GH_CALLS_FILE" || { echo "    FAIL: gh pr create was not invoked on the fallback" >&2; return 1; }
+  _advance_remote_main "$root"   # make the direct HEAD:main push non-fast-forward (blocked)
+  local out rc
+  out="$(_run "$root" found ok auto-bump . main branch)"; rc=$?
+  # A rejected bump-push is a post-publish failure: the artifact published but
+  # the manifest bump could not land -> red run, NOT a check-suppressing PR.
+  [[ "$rc" -ne 0 ]] || { echo "    FAIL: a rejected bump-push must red the run" >&2; return 1; }
+  echo "$out" | python3 -c 'import json,sys;d=json.load(sys.stdin);assert d["outcome"]=="failure" and d["credit_signature"] is False and d["version"]=="0.1.1"' \
+    || { echo "    FAIL: blocked push should emit outcome=failure, credit_signature=false, version 0.1.1: $out" >&2; return 1; }
+  if _remote_has_bump_branch "$root"; then
+    echo "    FAIL: a fallback bump branch was pushed — there must be no PR fallback" >&2; return 1
+  fi
 }
 
 t_wrong_arity_is_usage_error() {
@@ -283,7 +273,7 @@ main() {
   run "as-is success does not commit back"                    t_asis_success_does_not_commit_back
   run "first publish (404) sets first_publish, no bump"       t_first_publish_no_bump_flag_set
   run "non-404 registry query failure publishes nothing"      t_registry_query_failure_publishes_nothing
-  run "blocked push falls back to a branch + PR"              t_push_blocked_falls_back_to_branch_and_pr
+  run "a blocked bump-push reds the run (no PR fallback)"     t_push_blocked_reds_the_run
   run "wrong arity is a usage error (exit 2)"                 t_wrong_arity_is_usage_error
   echo "== summary: ${PASS_COUNT} passed, ${FAIL_COUNT} failed =="
   [[ "$FAIL_COUNT" -eq 0 ]]

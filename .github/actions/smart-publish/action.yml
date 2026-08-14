@@ -25,8 +25,9 @@ description: |
     - `python3` on PATH (preinstalled) — the script emits its JSON with it.
     - The consumer repo checked out (`actions/checkout`) so the manifest and the
       coding-policy scripts (three levels up from this action) resolve.
-    - `permissions: contents: write` (commit-back) and `pull-requests: write`
-      (the blocked-push PR fallback).
+    - `permissions: contents: write` so auto-bump can push the manifest bump to
+      the protected branch. A rejected push reds the run (a bump-push failure) —
+      there is no PR fallback, so no `pull-requests` permission is needed.
 
 inputs:
   mode:
@@ -57,8 +58,6 @@ runs:
       env:
         MODE: ${{ inputs.mode }}
         PLUGIN_PATH: ${{ inputs.path }}
-        # gh (the blocked-push PR fallback) and any tessl git side effects.
-        GH_TOKEN: ${{ github.token }}
       run: |
         set -uo pipefail
 

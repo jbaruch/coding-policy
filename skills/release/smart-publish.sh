@@ -36,8 +36,9 @@
 #   <plugin-path> directory to publish (usually '.'); the manifest is
 #                 auto-detected under it (.tessl-plugin/plugin.json, then
 #                 tile.json).
-#   <ref-name>    GITHUB_REF_NAME — the branch the auto-bump commit is pushed
-#                 to (HEAD:<ref-name>). Unused by as-is mode.
+#   <ref-name>    GITHUB_REF_NAME — the protected branch the auto-bump commit is
+#                 pushed to (HEAD:<ref-name>). A rejected push reds the run (a
+#                 bump-push failure). Unused by as-is mode.
 #   <ref-type>    GITHUB_REF_TYPE — commit-back only pushes on "branch"; a
 #                 non-branch ref skips the bump-push with a warning (the publish
 #                 still succeeded), never fails a landed release.
@@ -117,11 +118,15 @@ v = d.get(sys.argv[2])
 print(v if isinstance(v, str) else "")' "$manifest" "$field"
 }
 
-# Commit the resolved version back to the manifest and push it to the branch —
-# the auto-bump half of tesslio/patch-version-publish. Pushes HEAD:<ref-name>
-# (not a bare `git push`, which fails on the detached HEAD actions/checkout
-# leaves), falling back to a branch + PR when a direct push is blocked by
-# branch protection. Diagnostics only; never changes the caller's exit code.
+# Commit the resolved version back to the manifest and push it directly to the
+# protected branch — the auto-bump half of tesslio/patch-version-publish.
+# Pushes HEAD:<ref-name> (not a bare `git push`, which fails on the detached
+# HEAD actions/checkout leaves). Returns non-zero when the push is REJECTED so
+# the caller reds the run: a blocked bump-push is a post-publish failure and
+# stays red (rules/ci-safety.md), never a PR carrying a check-suppressing
+# `[skip ci]` commit onto a feature branch — that marker is sanctioned ONLY on
+# the protected-branch bookkeeping commit (Publish-Pipeline Loop-Prevention
+# Carve-Out), and re-bumping through a PR would loop the publish on merge.
 commit_back() {
   local manifest="$1" name="$2" version="$3" ref_name="$4" ref_type="$5"
 
@@ -138,26 +143,18 @@ commit_back() {
     return 0
   fi
 
-  # [skip ci] is non-negotiable: the bump commit lands on the protected branch
-  # and would otherwise re-trigger this publish workflow (ci-safety Publish-
-  # Pipeline Loop-Prevention Carve-Out). Pathspec-scoped so an unrelated staged
-  # file is never swept into the bump commit.
+  # [skip ci] is non-negotiable HERE and sanctioned ONLY here: the bump commit
+  # lands on the PROTECTED branch and would otherwise re-trigger this publish
+  # workflow (ci-safety Publish-Pipeline Loop-Prevention Carve-Out). Pathspec-
+  # scoped so an unrelated staged file is never swept into the bump commit.
   git commit -m "Bump ${name} to ${version} [skip ci]" -- "$manifest" >&2
 
-  if git push origin "HEAD:${ref_name}" >&2; then
-    echo "smart-publish: pushed the manifest bump to ${version} on ${ref_name}." >&2
-    return 0
+  if ! git push origin "HEAD:${ref_name}" >&2; then
+    echo "error: published ${name}@${version} but the manifest bump-push to ${ref_name} was rejected — the protected branch likely blocks the github-actions bot. The artifact IS published (the registry advanced); land the manifest bump by hand, or set this repo to publish-mode: as-is. Surfacing a failed run per rules/ci-safety.md — a bump-push failure stays red, distinct from a tolerated out-of-credits exit." >&2
+    return 1
   fi
-
-  # Direct push blocked (branch protection) — open a branch + PR instead, the
-  # same fallback tesslio/patch-version-publish uses.
-  local branch="tessl-bump-${version}"
-  echo "smart-publish: direct push to ${ref_name} blocked — opening ${branch} + PR." >&2
-  git checkout -b "$branch" >&2
-  git push -u origin "$branch" >&2
-  gh pr create \
-    --title "Bump ${name} to ${version} [skip ci]" \
-    --body "Auto-created by smart-publish — direct push to the protected branch was blocked." >&2
+  echo "smart-publish: pushed the manifest bump to ${version} on ${ref_name}." >&2
+  return 0
 }
 
 main() {
@@ -276,7 +273,13 @@ main() {
   echo "smart-publish: published ${name}@${published_version}." >&2
 
   if [[ "$mode" == "auto-bump" ]]; then
-    commit_back "$manifest" "$name" "$published_version" "$ref_name" "$ref_type"
+    if ! commit_back "$manifest" "$name" "$published_version" "$ref_name" "$ref_type"; then
+      # The artifact published, but the manifest bump-push was rejected — a
+      # post-publish failure that stays red (the confirm gate sees advanced +
+      # failure + no credit signature -> non-credit post-publish failure).
+      emit_json failure 1 "$published_version" false "$first_publish"
+      exit 1
+    fi
   fi
 
   emit_json success 0 "$published_version" false "$first_publish"

@@ -60,8 +60,7 @@ on:
 
 permissions:
   id-token: write
-  contents: write
-  pull-requests: write # smart-publish falls back to a PR when a direct push is blocked
+  contents: write # smart-publish pushes the auto-bump commit to the protected branch
 
 concurrency:
   # One in-flight publish per consumer repo; never cancel a running publish.
