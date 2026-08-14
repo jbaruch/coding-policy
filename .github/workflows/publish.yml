@@ -74,21 +74,30 @@ jobs:
       - name: Stamp CHANGELOG with the version being published
         uses: ./.github/actions/stamp-changelog
 
-      # continue-on-error: a tessl out-of-credits (or any post-publish step)
-      # can exit this non-zero AFTER the artifact already published. Do NOT let
-      # that red the job here — the confirm gate below reads this step's real
-      # `outcome` and reconciles it against the registry (rules/ci-safety.md
-      # "Credits Never Block Publishing").
+      # Owned publish (skills/release/smart-publish.sh via the smart-publish
+      # action) rather than tesslio/patch-version-publish: it captures the
+      # publish command's output so the confirm gate can NAME an out-of-credits
+      # failure from the logs, not merely infer it from the org's live credit
+      # balance (rules/ci-safety.md "Credits Never Block Publishing" — a red run
+      # is attributed to credits only by confirming the artifact landed AND
+      # naming the failing step). Same auto-bump + manifest commit-back as
+      # patch-version-publish.
+      #
+      # continue-on-error: a post-publish out-of-credits exit lands the artifact
+      # then exits non-zero. Do NOT let that red the job here — the confirm gate
+      # below reconciles this step's real `outcome` + `credit-signature` against
+      # the registry.
       - name: Publish (auto-bump)
         id: publish_autobump
         continue-on-error: true
-        uses: tesslio/patch-version-publish@v1
+        uses: ./.github/actions/smart-publish
         with:
-          token: ${{ secrets.TESSL_TOKEN }}
+          mode: auto-bump
 
       # Fail-SAFE gate. No continue-on-error — its exit code gates the job:
-      # green only when the registry advanced (artifact landed) or the publish
-      # step succeeded; red on a genuine non-landing failure. This repo is
+      # green only when the registry advanced (artifact landed) AND either the
+      # publish succeeded or its output carried the out-of-credits signature;
+      # red on a genuine non-landing OR non-credit failure. This repo is
       # auto-bump only, so the outcome is the single publish step's.
       - name: Confirm publish landed
         uses: ./.github/actions/publish-landed-gate
@@ -96,3 +105,4 @@ jobs:
           phase: confirm
           baseline: ${{ steps.baseline.outputs.baseline }}
           publish-outcome: ${{ steps.publish_autobump.outcome }}
+          credit-signature: ${{ steps.publish_autobump.outputs.credit-signature }}

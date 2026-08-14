@@ -22,8 +22,9 @@ description: |
       exposes `.version` as the `baseline` output. Empty is allowed — a tile
       that has never published is a valid first-publish baseline.
     - `confirm` (after publish): runs `skills/release/confirm-publish-landed.sh`
-      with the captured `baseline` and the publish step's `outcome`. That script
-      emits a JSON verdict on stdout (gate/landed/current/baseline/credit_blocked
+      with the captured `baseline`, the publish step's `outcome`, and the
+      `credit-signature` the smart-publish step produced. That script emits a
+      JSON verdict on stdout (gate/landed/current/baseline/credit_signature
       /reason) and NO annotations; this action translates the JSON into a
       ::warning:: (landed despite a non-zero exit) or ::error:: (gate fail) and
       exits with the gate result. Wire the confirm step WITHOUT
@@ -55,6 +56,14 @@ inputs:
     description: 'confirm only: the GitHub Actions steps.<id>.outcome of the publish step (success|failure|cancelled|skipped).'
     required: false
     default: ''
+  credit-signature:
+    description: |
+      confirm only: 'true' when the failed publish's output carried the
+      out-of-credits signature (the smart-publish step's credit-signature
+      output). The gate tolerates a non-zero exit only when this is 'true' AND
+      the registry advanced. Empty/'false' keeps every other failure red.
+    required: false
+    default: ''
   manifest:
     description: |
       Path to the plugin manifest the workspace/plugin pair is read from. When
@@ -80,6 +89,7 @@ runs:
         PHASE: ${{ inputs.phase }}
         BASELINE: ${{ inputs.baseline }}
         PUBLISH_OUTCOME: ${{ inputs.publish-outcome }}
+        CREDIT_SIGNATURE: ${{ inputs.credit-signature }}
         MANIFEST: ${{ inputs.manifest }}
       run: |
         set -euo pipefail
@@ -152,7 +162,7 @@ runs:
             # non-zero exit) or ::error:: (gate fail), and exit with the gate
             # result so the job is gated.
             gate_rc=0
-            gate_json="$(bash "$confirm_script" "$workspace" "$plugin" "$BASELINE" "$PUBLISH_OUTCOME")" || gate_rc=$?
+            gate_json="$(bash "$confirm_script" "$workspace" "$plugin" "$BASELINE" "$PUBLISH_OUTCOME" "$CREDIT_SIGNATURE")" || gate_rc=$?
 
             # No JSON (a usage error exits 2 with empty stdout, or a crash) ->
             # cannot confirm -> fail-safe RED.
@@ -167,14 +177,14 @@ runs:
 
             gate="$(printf '%s' "$gate_json" | jq -r '.gate // "fail"')"
             reason="$(printf '%s' "$gate_json" | jq -r '.reason // "confirm-publish-landed.sh emitted no reason"')"
-            credit_blocked="$(printf '%s' "$gate_json" | jq -r '.credit_blocked')"
+            credit_signature="$(printf '%s' "$gate_json" | jq -r '.credit_signature')"
 
             # Fail-safe: only a clean pass (exit 0 AND gate==pass) greens; any
-            # other combination reds. A pass with credit_blocked==true is the
+            # other combination reds. A pass with credit_signature==true is the
             # tolerated landed-despite-non-zero case -> ::warning::; a plain pass
             # -> a note.
             if [ "$gate_rc" -eq 0 ] && [ "$gate" = "pass" ]; then
-              if [ "$credit_blocked" = "true" ]; then
+              if [ "$credit_signature" = "true" ]; then
                 echo "::warning::${reason}"
               else
                 echo "${reason}"

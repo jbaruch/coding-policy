@@ -18,24 +18,24 @@
 # So the tolerance is gated on TWO facts, not one:
 #   1. the registry advanced past the pre-publish baseline (the artifact
 #      shipped), AND
-#   2. the org is VERIFIABLY out of credits (org-credit-blocked.sh reads
-#      `tessl org usage --org <workspace> --json` -> .credits.blocked == true).
-# Only when both hold is a non-zero exit tolerated. If the credit state cannot
-# be read, the gate cannot verify this is the credit case and stays RED.
-#
-# The org-credit check is performed ONLY on the (non-success + advanced) path —
-# never queried otherwise.
+#   2. the publish step's own output carried the out-of-credits SIGNATURE
+#      (rules/ci-safety.md — "confirming the artifact landing AND naming the
+#      failing step from the logs"). The signature is produced upstream by
+#      smart-publish.sh, which owns the publish call and reads its output; it
+#      arrives here as the <credit-signature> argument. The org's live credit
+#      state is NOT a sufficient discriminator — a genuine eval/bump-push
+#      failure during the same out-of-credits window would look identical.
+# Only when both hold is a non-zero exit tolerated.
 #
 # Fail-safe decision table (implemented exactly):
-#   outcome  | advanced | credit-blocked | gate
-#   ---------+----------+----------------+---------------------------------------
-#   success  | yes      | (not checked)  | PASS — confirmed
-#   success  | no       | (not checked)  | FAIL — green no-op / did not land
-#   non-succ | yes      | YES            | PASS — credit outage, artifact landed
-#   non-succ | yes      | NO             | FAIL — non-credit post-publish failure
-#   non-succ | no       | (not checked)  | FAIL — nothing landed
-#   read err | —        | —              | FAIL — cannot read registry, cannot confirm
-#   non-succ | yes      | UNKNOWN        | FAIL — cannot verify it is the credit case
+#   outcome  | advanced | credit-signature | gate
+#   ---------+----------+------------------+--------------------------------------
+#   success  | yes      | (ignored)        | PASS — confirmed
+#   success  | no       | (ignored)        | FAIL — green no-op / did not land
+#   non-succ | yes      | true             | PASS — out-of-credits after publish
+#   non-succ | yes      | false            | FAIL — non-credit post-publish failure
+#   non-succ | no       | (ignored)        | FAIL — nothing landed
+#   read err | —        | —                | FAIL — cannot read registry, cannot confirm
 #
 # The versions API reflects a publish immediately (registry-version.sh reads
 # it, not the lagging plugin-info listing), so NO retry loop is needed — one
@@ -44,20 +44,24 @@
 # Output (rules/script-delegation.md — deterministic scripts emit JSON, not
 # annotation prose): ONE JSON object on stdout —
 #   {"gate":"pass"|"fail","landed":true|false,"current":"x.y.z"|null,
-#    "baseline":"x.y.z"|null,"credit_blocked":true|false|null,
+#    "baseline":"x.y.z"|null,"credit_signature":true|false|null,
 #    "reason":"<one-line human summary>"}
-# credit_blocked is null when the credit state was not checked or not readable.
-# NO ::warning::/::error:: is emitted here — the publish-landed-gate composite
+# credit_signature is null on paths where it was not the deciding factor (any
+# success path, any not-advanced path, a registry read error). NO
+# ::warning::/::error:: is emitted here — the publish-landed-gate composite
 # action translates this JSON into the workflow annotations and the job verdict.
 # The EXIT CODE still reflects the gate so a direct run is usable: 0 pass, 1
 # fail, 2 usage error.
 #
-# Usage: confirm-publish-landed.sh <workspace> <plugin> <baseline> <publish-outcome>
+# Usage: confirm-publish-landed.sh <workspace> <plugin> <baseline> <publish-outcome> <credit-signature>
 #   <baseline>         the registry's latest version captured BEFORE publish
 #                      (empty = tile had never published; a first publish still
 #                      counts as an advance past empty)
 #   <publish-outcome>  the GitHub Actions steps.<id>.outcome of the publish
 #                      step: success | failure | cancelled | skipped
+#   <credit-signature> "true" when the failed publish's output carried the
+#                      out-of-credits signature (from the smart-publish step's
+#                      credit-signature output); "false"/empty otherwise
 # Exit:  0 when the publish is confirmed landed (or the step succeeded);
 #        1 when it did not land or cannot be confirmed (the gate's fail signal);
 #        2 on a usage error (wrong argument count).
@@ -80,33 +84,33 @@ json_str() {
 }
 
 # Emit the gate result as one JSON object and exit with the gate's code.
-#   gate:           "pass" | "fail"
-#   landed:         true | false        (raw JSON token — registry advanced)
-#   current:        version string or "" (-> JSON null)
-#   baseline:       version string or "" (-> JSON null)
-#   credit_blocked: true | false | null (raw JSON token; null = not checked)
-#   reason:         human text
-#   rc:             process exit code (0 pass, 1 fail)
+#   gate:             "pass" | "fail"
+#   landed:           true | false        (raw JSON token — registry advanced)
+#   current:          version string or "" (-> JSON null)
+#   baseline:         version string or "" (-> JSON null)
+#   credit_signature: true | false | null (raw JSON token; null = not decisive)
+#   reason:           human text
+#   rc:               process exit code (0 pass, 1 fail)
 emit_and_exit() {
-  local gate="$1" landed="$2" current="$3" baseline="$4" credit_blocked="$5" reason="$6" rc="$7"
+  local gate="$1" landed="$2" current="$3" baseline="$4" credit_signature="$5" reason="$6" rc="$7"
   local current_json baseline_json
   if [[ -z "$current" ]]; then current_json="null"; else current_json="$(json_str "$current")"; fi
   if [[ -z "$baseline" ]]; then baseline_json="null"; else baseline_json="$(json_str "$baseline")"; fi
-  printf '{"gate":%s,"landed":%s,"current":%s,"baseline":%s,"credit_blocked":%s,"reason":%s}\n' \
-    "$(json_str "$gate")" "$landed" "$current_json" "$baseline_json" "$credit_blocked" "$(json_str "$reason")"
+  printf '{"gate":%s,"landed":%s,"current":%s,"baseline":%s,"credit_signature":%s,"reason":%s}\n' \
+    "$(json_str "$gate")" "$landed" "$current_json" "$baseline_json" "$credit_signature" "$(json_str "$reason")"
   exit "$rc"
 }
 
 main() {
-  if [[ $# -ne 4 ]]; then
-    echo "usage: $0 <workspace> <plugin> <baseline> <publish-outcome>" >&2
+  if [[ $# -ne 5 ]]; then
+    echo "usage: $0 <workspace> <plugin> <baseline> <publish-outcome> <credit-signature>" >&2
     exit 2
   fi
-  local workspace="$1" plugin="$2" baseline="$3" outcome="$4"
+  local workspace="$1" plugin="$2" baseline="$3" outcome="$4" credit_signature="$5"
 
   # version-compare.sh (version_gt) tests the registry advance; registry-version
-  # .sh reads the current latest; org-credit-blocked.sh reads the credit state.
-  # A missing helper is a fail-safe FAIL: we cannot confirm the artifact landed.
+  # .sh reads the current latest. A missing helper is a fail-safe FAIL: we
+  # cannot confirm the artifact landed.
   # shellcheck source=skills/release/version-compare.sh
   if ! source "${_cpl_dir}/version-compare.sh"; then
     emit_and_exit "fail" false "" "$baseline" null \
@@ -124,10 +128,9 @@ main() {
   # or a publish that did not land must NOT pass just because the step reported
   # success.
   #
-  # A subprocess call (not sourced): the gate and its unit suite exercise
-  # registry-version.sh through a `tessl` fake on PATH, which a subprocess picks
-  # up. registry-version.sh now emits {"version":...} JSON and exits non-zero on
-  # a tool/parse failure — that is "cannot confirm", which fails the gate.
+  # A subprocess call (not sourced): registry-version.sh emits {"version":...}
+  # JSON and exits non-zero on a tool/parse failure — that is "cannot confirm",
+  # which fails the gate.
   local rv_json rc=0
   rv_json=$(bash "$registry_script" "$workspace" "$plugin") || rc=$?
   if [[ $rc -ne 0 ]]; then
@@ -150,36 +153,19 @@ main() {
         "confirm-publish-landed: ${workspace}/${plugin}@${current} landed on the registry (baseline ${baseline:-<none>}), publish step outcome=success — confirmed." 0
     fi
 
-    # Non-success but the registry advanced. Tolerated ONLY when the org is
-    # verifiably out of credits — otherwise this is a non-credit post-publish
-    # failure that also landed the artifact (a genuine eval failure, a bump-push
-    # failure) and MUST stay red. Query the credit state on THIS path only.
-    local credit_script="${_cpl_dir}/org-credit-blocked.sh"
-    if [[ ! -f "$credit_script" || ! -r "$credit_script" ]]; then
-      emit_and_exit "fail" true "$current" "$baseline" null \
-        "confirm-publish-landed: ${credit_script} is missing or unreadable — cannot verify the org credit state, so cannot confirm the non-zero publish exit (outcome=${outcome}) was the tolerated out-of-credits case even though ${workspace}/${plugin}@${current} landed. Preserving RED (fail-safe); re-clone the repo or re-install the plugin." 1
-    fi
-    local credit_json crc=0
-    credit_json=$(bash "$credit_script" "$workspace") || crc=$?
-    if [[ $crc -ne 0 ]]; then
-      emit_and_exit "fail" true "$current" "$baseline" null \
-        "confirm-publish-landed: publish step for ${workspace}/${plugin} exited non-zero (outcome=${outcome}) and ${workspace}/${plugin}@${current} landed, but the org credit state could not be read (org-credit-blocked.sh exit ${crc}) — cannot verify this is a tolerated out-of-credits exit. Preserving RED (fail-safe); inspect 'tessl org usage --org ${workspace} --json'." 1
-    fi
-    local blocked
-    if ! blocked=$(printf '%s' "$credit_json" | jq -r '.blocked'); then
-      emit_and_exit "fail" true "$current" "$baseline" null \
-        "confirm-publish-landed: org-credit-blocked.sh returned an unparseable payload ('${credit_json}') for org ${workspace} — cannot verify the credit state. Preserving RED (fail-safe)." 1
-    fi
-    if [[ "$blocked" == "true" ]]; then
+    # Non-success but the registry advanced. Tolerated ONLY when the publish
+    # step's own output carried the out-of-credits signature — otherwise this is
+    # a non-credit post-publish failure that also landed the artifact (a genuine
+    # eval failure, a bump-push failure) and MUST stay red.
+    if [[ "$credit_signature" == "true" ]]; then
       emit_and_exit "pass" true "$current" "$baseline" true \
-        "confirm-publish-landed: publish step for ${workspace}/${plugin} exited non-zero (outcome=${outcome}) but ${workspace}/${plugin}@${current} landed AND the org is out of credits (credits.blocked=true) — a post-publish out-of-credits exit AFTER the artifact shipped; treating as landed per rules/ci-safety.md Credits Never Block Publishing." 0
+        "confirm-publish-landed: publish step for ${workspace}/${plugin} exited non-zero (outcome=${outcome}) but ${workspace}/${plugin}@${current} landed AND its output carried the out-of-credits signature — a post-publish billing exit AFTER the artifact shipped; treating as landed per rules/ci-safety.md Credits Never Block Publishing." 0
     fi
     emit_and_exit "fail" true "$current" "$baseline" false \
-      "confirm-publish-landed: publish step for ${workspace}/${plugin} exited non-zero (outcome=${outcome}) and ${workspace}/${plugin}@${current} landed, but the org is NOT out of credits (credits.blocked=false) — this is a non-credit post-publish failure (e.g. a genuine eval failure or a bump-push failure), NOT the tolerated out-of-credits case. Preserving RED; inspect the run's failing step." 1
+      "confirm-publish-landed: publish step for ${workspace}/${plugin} exited non-zero (outcome=${outcome}) and ${workspace}/${plugin}@${current} landed, but its output did NOT carry the out-of-credits signature (credit-signature=${credit_signature:-<none>}) — this is a non-credit post-publish failure (e.g. a genuine eval failure or a bump-push failure), NOT the tolerated out-of-credits case. Preserving RED; inspect the run's failing step." 1
   fi
 
   # The registry did NOT advance -> nothing landed, whatever the step reported.
-  # The org-credit check is NOT reached here — nothing shipped to tolerate.
   if [[ "$outcome" == "success" ]]; then
     emit_and_exit "fail" false "$current" "$baseline" null \
       "confirm-publish-landed: publish step for ${workspace}/${plugin} reported outcome=success but the registry did NOT advance — still at baseline ${baseline:-<none>} (current ${current:-<none>}). A no-op, a skipped publish, or a publish that did not land — NOT a confirmed release (rules/ci-safety.md release contract requires the registry to advance). Inspect the publish step." 1

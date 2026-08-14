@@ -1,0 +1,97 @@
+name: 'Smart publish (capture credit signature)'
+description: |
+  Publish a tessl plugin, capturing the publish command's output so the confirm
+  gate can NAME an out-of-credits failure from the logs.
+
+  Replaces `tesslio/patch-version-publish` in the fleet publish pipeline. That
+  third-party action is a `uses:` composite whose `tessl plugin publish` stdout
+  cannot be captured for a later step, so a post-publish out-of-credits exit is
+  indistinguishable from any other failure. This action runs the owned
+  `skills/release/smart-publish.sh` instead: same auto-bump-from-registry +
+  manifest commit-back behavior, plus the out-of-credits SIGNATURE the confirm
+  gate needs to tolerate ONLY a credit exit and red every other failure
+  (rules/ci-safety.md "Credits Never Block Publishing").
+
+  Wire the publish step WITH `continue-on-error: true` so a post-publish exit
+  does not fail the job before the confirm gate runs; the gate reads this step's
+  `outcome` and its `credit-signature` output. The step still exits with the
+  publish command's real code, so `outcome` reflects reality.
+
+  Requirements (consumer must arrange):
+    - `tessl` CLI set up and authenticated earlier in the job
+      (`tesslio/setup-tessl@v2`).
+    - `jq` on PATH (preinstalled on GitHub-hosted runners) to parse the script's
+      JSON result.
+    - `python3` on PATH (preinstalled) — the script emits its JSON with it.
+    - The consumer repo checked out (`actions/checkout`) so the manifest and the
+      coding-policy scripts (three levels up from this action) resolve.
+    - `permissions: contents: write` (commit-back) and `pull-requests: write`
+      (the blocked-push PR fallback).
+
+inputs:
+  mode:
+    description: "'auto-bump' (publish --bump patch from the registry, commit the resolved version back) or 'as-is' (publish the manifest version verbatim, no bump, no commit-back)."
+    required: true
+  path:
+    description: 'Plugin directory to publish; the manifest is auto-detected under it.'
+    required: false
+    default: '.'
+
+outputs:
+  credit-signature:
+    description: |
+      'true' when the publish exited non-zero AND its output carried the
+      out-of-credits signature; 'false' otherwise. The confirm phase tolerates a
+      non-zero exit only when this is 'true' AND the registry advanced.
+    value: ${{ steps.publish.outputs.credit-signature }}
+  version:
+    description: 'The published version (empty on a failed publish).'
+    value: ${{ steps.publish.outputs.version }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Smart publish
+      id: publish
+      shell: bash
+      env:
+        MODE: ${{ inputs.mode }}
+        PLUGIN_PATH: ${{ inputs.path }}
+        # gh (the blocked-push PR fallback) and any tessl git side effects.
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        set -uo pipefail
+
+        # Deterministic publish + capture logic lives in the sibling script
+        # (rules/script-delegation.md); this glue only resolves it and
+        # translates its JSON into step outputs. Scripts live in the plugin
+        # tree, three levels up from the action path (same as stamp-changelog /
+        # publish-landed-gate).
+        script="$GITHUB_ACTION_PATH/../../../skills/release/smart-publish.sh"
+        if [ ! -f "$script" ]; then
+          echo "::error::smart-publish: smart-publish.sh not found at $script — the coding-policy action repo did not check out fully." >&2
+          exit 1
+        fi
+
+        # The script emits ONE JSON line on stdout and streams the publish log +
+        # diagnostics to stderr (visible in the run log). Capture the JSON and
+        # the publish's real exit code; even on failure the JSON is emitted, so
+        # the credit-signature output is always set.
+        rc=0
+        result_json="$(bash "$script" "$MODE" "$PLUGIN_PATH" "$GITHUB_REF_NAME" "$GITHUB_REF_TYPE")" || rc=$?
+
+        credit_signature=false
+        version=""
+        if [ -n "$result_json" ] && printf '%s' "$result_json" | jq empty >/dev/null 2>&1; then
+          credit_signature="$(printf '%s' "$result_json" | jq -r '.credit_signature // false')"
+          version="$(printf '%s' "$result_json" | jq -r '.version // empty')"
+        else
+          echo "::warning::smart-publish: no parseable JSON result (exit ${rc}); treating credit-signature as false so the confirm gate reds an unconfirmed publish." >&2
+        fi
+
+        echo "credit-signature=$credit_signature" >> "$GITHUB_OUTPUT"
+        echo "version=$version" >> "$GITHUB_OUTPUT"
+
+        # Exit with the publish's real code so this step's `outcome` reflects it
+        # (the workflow sets continue-on-error so the job survives to the gate).
+        exit "$rc"

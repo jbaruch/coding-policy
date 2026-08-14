@@ -61,7 +61,7 @@ on:
 permissions:
   id-token: write
   contents: write
-  pull-requests: write # patch-version-publish falls back to a PR when a direct push is blocked
+  pull-requests: write # smart-publish falls back to a PR when a direct push is blocked
 
 concurrency:
   # One in-flight publish per consumer repo; never cancel a running publish.
@@ -145,44 +145,39 @@ jobs:
         if: inputs.stamp-changelog
         uses: jbaruch/coding-policy/.github/actions/stamp-changelog@main
 
-      # Default: patch-version-publish auto-bumps the manifest patch when it
-      # matches the registry, commits `Bump … [skip ci]` (publish-pipeline
-      # loop-prevention carve-out), and publishes.
+      # Owned publish (skills/release/smart-publish.sh via the smart-publish
+      # action) rather than tesslio/patch-version-publish: it captures the
+      # publish command's output so the confirm gate can NAME an out-of-credits
+      # failure from the logs, not merely infer it from the org's live credit
+      # balance (rules/ci-safety.md "Credits Never Block Publishing"). Handles
+      # both modes: auto-bump (--bump patch from the registry + a `Bump … [skip
+      # ci]` manifest commit-back per the publish-pipeline loop-prevention
+      # carve-out, mirroring patch-version-publish) and as-is (manifest version
+      # verbatim, no bump, no commit-back — a missing human bump surfaces as a
+      # red `version already exists`). Sibling action referenced by full path
+      # @main (same-repo reusable-workflow carve-out).
       #
-      # continue-on-error: a tessl out-of-credits (or any post-publish step)
-      # can exit this non-zero AFTER the artifact already published. Do NOT let
-      # that red the job here — the "Confirm publish landed" gate below reads
-      # this step's real `outcome` and reconciles it against the registry
-      # (rules/ci-safety.md "Credits Never Block Publishing").
-      - name: Publish (auto-bump)
-        id: publish_autobump
-        if: inputs.publish-mode == 'auto-bump'
+      # continue-on-error: a post-publish out-of-credits exit lands the artifact
+      # then exits non-zero. Do NOT let that red the job here — the confirm gate
+      # below reconciles this step's real `outcome` + `credit-signature` against
+      # the registry.
+      - name: Publish
+        id: publish
         continue-on-error: true
-        uses: tesslio/patch-version-publish@v1
+        uses: jbaruch/coding-policy/.github/actions/smart-publish@main
         with:
-          token: ${{ secrets.TESSL_TOKEN }}
-
-      # Alternative: publish the manifest version verbatim (no auto-bump, no
-      # commit-back). A missing human bump surfaces as a red `version already
-      # exists` run — the correct signal, not a silent auto-bump. Requires the
-      # release PR to carry the manifest + CHANGELOG version bump.
-      - name: Publish (manifest version as-is)
-        id: publish_asis
-        if: inputs.publish-mode == 'as-is'
-        continue-on-error: true
-        run: tessl plugin publish .
+          mode: ${{ inputs.publish-mode }}
 
       # Fail-SAFE gate. Reads the publish step's real `outcome` (before
-      # continue-on-error masks it) and the pre-publish baseline; passes only
-      # when the registry advanced (artifact landed) or the step succeeded, and
-      # reds a genuine non-landing failure. No continue-on-error — this step's
-      # exit code gates the job. publish-outcome selects the step that actually
-      # ran by mode: the other publish step is skipped, and 'skipped' is truthy,
-      # so a bare `a.outcome || b.outcome` would wrongly pick the skipped one —
-      # the mode ternary picks exactly the ran step's outcome.
+      # continue-on-error masks it), the pre-publish baseline, and the
+      # credit-signature; passes only when the registry advanced (artifact
+      # landed) AND either the step succeeded or its output carried the
+      # out-of-credits signature, and reds a genuine non-landing OR non-credit
+      # failure. No continue-on-error — this step's exit code gates the job.
       - name: Confirm publish landed
         uses: jbaruch/coding-policy/.github/actions/publish-landed-gate@main
         with:
           phase: confirm
           baseline: ${{ steps.baseline.outputs.baseline }}
-          publish-outcome: ${{ inputs.publish-mode == 'auto-bump' && steps.publish_autobump.outcome || steps.publish_asis.outcome }}
+          publish-outcome: ${{ steps.publish.outcome }}
+          credit-signature: ${{ steps.publish.outputs.credit-signature }}
