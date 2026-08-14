@@ -27,6 +27,17 @@ jobs:
         with:
           token: ${{ secrets.TESSL_TOKEN }}
 
+      # Capture the registry's latest version BEFORE publish so the post-
+      # publish gate can distinguish "artifact landed then a downstream step
+      # failed" (out-of-credits after `✔ Published`) from a genuine publish
+      # failure. Dogfoods the action consumers call as
+      # `uses: jbaruch/coding-policy/.github/actions/publish-landed-gate@<ref>`.
+      - name: Capture registry baseline
+        id: baseline
+        uses: ./.github/actions/publish-landed-gate
+        with:
+          phase: capture
+
       - name: Lint plugin
         run: tessl plugin lint
 
@@ -63,6 +74,25 @@ jobs:
       - name: Stamp CHANGELOG with the version being published
         uses: ./.github/actions/stamp-changelog
 
-      - uses: tesslio/patch-version-publish@v1
+      # continue-on-error: a tessl out-of-credits (or any post-publish step)
+      # can exit this non-zero AFTER the artifact already published. Do NOT let
+      # that red the job here — the confirm gate below reads this step's real
+      # `outcome` and reconciles it against the registry (rules/ci-safety.md
+      # "Credits Never Block Publishing").
+      - name: Publish (auto-bump)
+        id: publish_autobump
+        continue-on-error: true
+        uses: tesslio/patch-version-publish@v1
         with:
           token: ${{ secrets.TESSL_TOKEN }}
+
+      # Fail-SAFE gate. No continue-on-error — its exit code gates the job:
+      # green only when the registry advanced (artifact landed) or the publish
+      # step succeeded; red on a genuine non-landing failure. This repo is
+      # auto-bump only, so the outcome is the single publish step's.
+      - name: Confirm publish landed
+        uses: ./.github/actions/publish-landed-gate
+        with:
+          phase: confirm
+          baseline: ${{ steps.baseline.outputs.baseline }}
+          publish-outcome: ${{ steps.publish_autobump.outcome }}

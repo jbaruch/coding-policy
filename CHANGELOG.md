@@ -1,5 +1,9 @@
 # Changelog
 
+### Actions — publish-landed-gate keeps a credit-outage publish green when the artifact lands
+
+A tessl org out-of-credits makes the publish step (`tesslio/patch-version-publish` / `tessl plugin publish`) exit non-zero AFTER the artifact already published — `✔ Published …@X` → `✔ Uploaded evals` → `##[error]Out of credits` → exit 1 — reddening every fleet publish run whose release actually shipped (observed fleet-wide: `jbaruch-travel-policy` landed 0.7.59, `fifty-tabs-of-fares` landed 0.13.1, both on "failed" runs). The review-skip carve-out already lets the publish proceed, but the publish step's own post-publish exit still failed the job. New composite action `.github/actions/publish-landed-gate` reconciles it: a `capture` phase reads the pre-publish registry baseline, the publish step runs under `continue-on-error`, and a `confirm` phase passes the job ONLY when the registry advanced past the baseline (the artifact landed), emitting a `::warning::`, and reds a genuine non-landing failure. Fail-safe throughout: a publish that landed nothing, or a registry it cannot read (or an unestablishable baseline before publish), still fails — the gate never greens a release it cannot prove landed. New `skills/release/registry-version.sh` reads the current version from the authoritative versions API (immediate), not the `tessl plugin info` listing (which lags minutes and would false-negative a just-landed publish); it and `version_gt` are extracted into shared helpers (`registry-version.sh`, `version-compare.sh`) that `verify-publish-landed.sh` now also uses, one hardened home each. Wired into the reusable `publish-plugin.yml` (the fleet) and coding-policy's own `publish.yml`. Follow-ups: `fifty-tabs-of-fares`'s bespoke publish workflow, and bumping each consumer's `publish-plugin.yml@<sha>` pin so the gate reaches them.
+
 ## 0.3.157 — 2026-08-13
 
 ### Hooks — session-start status report (version + update, git sync, policy freshness)

@@ -1,0 +1,148 @@
+name: 'Publish landed gate'
+description: |
+  Fail-SAFE reconciliation of a publish step that exited non-zero (two phases).
+
+  A tessl org out-of-credits makes the publish step
+  (`tesslio/patch-version-publish` or `tessl plugin publish`) exit non-zero
+  AFTER the artifact already published — `✔ Published …@X` → `✔ Uploaded evals`
+  → `##[error]Out of credits` → exit 1. The release LANDED; the non-zero exit
+  is a post-publish billing failure, not a publish failure, and it reds every
+  fleet publish run whose artifact actually shipped
+  (rules/ci-safety.md "Credits Never Block Publishing").
+
+  This gate keeps the run green ONLY when the registry proves the artifact
+  landed, and keeps a genuine non-landing failure RED. The decision is the
+  registry's latest version, not the exit code.
+
+  Phases:
+    - `capture` (before publish): reads the registry's current latest version
+      via `skills/release/registry-version.sh` and exposes it as the
+      `baseline` output. Empty is allowed — a tile that has never published is
+      a valid first-publish baseline.
+    - `confirm` (after publish): runs `skills/release/confirm-publish-landed.sh`
+      with the captured `baseline` and the publish step's `outcome`. Its exit
+      code IS the gate: 0 = landed (or the step succeeded), non-zero = did not
+      land / cannot confirm. Wire the confirm step WITHOUT `continue-on-error`
+      so its verdict gates the job; put `continue-on-error: true` on the
+      publish step it reconciles so a post-publish exit does not fail the job
+      before this gate runs.
+
+  The workspace/plugin pair comes from the consumer's plugin manifest name
+  (`<workspace>/<plugin>` in `.tessl-plugin/plugin.json`, then `tile.json`),
+  auto-detected, or the `manifest` input.
+
+  Requirements (consumer must arrange):
+    - `tessl` CLI on PATH (typically `tesslio/setup-tessl@v2`) so the scripts
+      can read the versions API.
+    - `jq` on PATH (preinstalled on GitHub-hosted runners) to read the
+      manifest name and parse the versions API.
+    - The consumer repo checked out (`actions/checkout`) so the manifest and
+      the coding-policy scripts (three levels up from this action) resolve.
+
+inputs:
+  phase:
+    description: "'capture' (read the pre-publish baseline) or 'confirm' (decide whether a non-zero publish still landed)."
+    required: true
+  baseline:
+    description: 'confirm only: the baseline the capture phase produced.'
+    required: false
+    default: ''
+  publish-outcome:
+    description: 'confirm only: the GitHub Actions steps.<id>.outcome of the publish step (success|failure|cancelled|skipped).'
+    required: false
+    default: ''
+  manifest:
+    description: |
+      Path to the plugin manifest the workspace/plugin pair is read from. When
+      empty the action auto-detects `.tessl-plugin/plugin.json`, then `tile.json`.
+    required: false
+    default: ''
+
+outputs:
+  baseline:
+    description: |
+      capture only: the registry's latest published version before publish
+      (empty when the tile has never published). Pass it to the confirm phase's
+      `baseline` input.
+    value: ${{ steps.gate.outputs.baseline }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Reconcile publish against the registry
+      id: gate
+      shell: bash
+      env:
+        PHASE: ${{ inputs.phase }}
+        BASELINE: ${{ inputs.baseline }}
+        PUBLISH_OUTCOME: ${{ inputs.publish-outcome }}
+        MANIFEST: ${{ inputs.manifest }}
+      run: |
+        set -euo pipefail
+
+        # Deterministic decision logic lives in the sibling scripts
+        # (rules/script-delegation.md); this glue only resolves the manifest
+        # name and dispatches to them. Scripts live in the plugin tree, not the
+        # action dir — `uses: <owner>/coding-policy/.github/actions/
+        # publish-landed-gate@<ref>` checks out the whole repo, so they resolve
+        # three levels up from the action path (same as stamp-changelog).
+        script_dir="$GITHUB_ACTION_PATH/../../../skills/release"
+
+        # Resolve the workspace/plugin pair from the manifest name
+        # (<workspace>/<plugin>) — already declared there, so most consumers set
+        # nothing. Same derivation as the skill-review action.
+        manifest="$MANIFEST"
+        if [ -z "$manifest" ]; then
+          if [ -f ".tessl-plugin/plugin.json" ]; then
+            manifest=".tessl-plugin/plugin.json"
+          elif [ -f "tile.json" ]; then
+            manifest="tile.json"
+          else
+            echo "::error::publish-landed-gate: no plugin manifest found (.tessl-plugin/plugin.json or tile.json). Set the action's 'manifest' input." >&2
+            exit 1
+          fi
+        fi
+        if [ ! -f "$manifest" ]; then
+          echo "::error::publish-landed-gate: manifest '$manifest' not found. Fix the 'manifest' input or check out the repo before this step." >&2
+          exit 1
+        fi
+        name="$(jq -r '.name // empty' "$manifest")" \
+          || { echo "::error::publish-landed-gate: cannot read '$manifest' as JSON. Fix the manifest or set a correct 'manifest' input." >&2; exit 1; }
+        case "$name" in
+          */*) workspace="${name%%/*}"; plugin="${name#*/}" ;;
+          *) echo "::error::publish-landed-gate: '$manifest' has name '$name', expected '<workspace>/<plugin>'." >&2; exit 1 ;;
+        esac
+
+        case "$PHASE" in
+          capture)
+            registry_script="$script_dir/registry-version.sh"
+            if [ ! -f "$registry_script" ]; then
+              echo "::error::publish-landed-gate: registry-version.sh not found at $registry_script — the coding-policy action repo did not check out fully." >&2
+              exit 1
+            fi
+            # Empty stdout (never published) is a valid first-publish baseline;
+            # a registry read error exits 2 and set -e fails the step (we must
+            # not publish without an established baseline to later confirm).
+            baseline="$(bash "$registry_script" "$workspace" "$plugin")"
+            echo "baseline=$baseline" >> "$GITHUB_OUTPUT"
+            echo "publish-landed-gate: captured baseline for ${workspace}/${plugin}: '${baseline:-<none — first publish>}'"
+            ;;
+          confirm)
+            confirm_script="$script_dir/confirm-publish-landed.sh"
+            if [ ! -f "$confirm_script" ]; then
+              echo "::error::publish-landed-gate: confirm-publish-landed.sh not found at $confirm_script — the coding-policy action repo did not check out fully." >&2
+              exit 1
+            fi
+            if [ -z "$PUBLISH_OUTCOME" ]; then
+              echo "::error::publish-landed-gate: confirm phase requires the 'publish-outcome' input (the publish step's steps.<id>.outcome)." >&2
+              exit 1
+            fi
+            # confirm-publish-landed.sh's exit code IS the gate: it propagates as
+            # this step's exit code (last command under set -e).
+            bash "$confirm_script" "$workspace" "$plugin" "$BASELINE" "$PUBLISH_OUTCOME"
+            ;;
+          *)
+            echo "::error::publish-landed-gate: 'phase' must be 'capture' or 'confirm', got '$PHASE'." >&2
+            exit 1
+            ;;
+        esac

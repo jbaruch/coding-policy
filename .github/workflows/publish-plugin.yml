@@ -96,6 +96,19 @@ jobs:
         with:
           token: ${{ secrets.TESSL_TOKEN }}
 
+      # Capture the registry's latest version BEFORE publish, so the post-
+      # publish gate can tell "the artifact landed then a downstream step
+      # failed" (out-of-credits after `✔ Published`) from "publish genuinely
+      # failed". Empty output = the tile has never published (first-publish
+      # baseline). Sibling action referenced by full path @main (same-repo
+      # reusable-workflow carve-out) — a `./` path would resolve against the
+      # caller's checkout.
+      - name: Capture registry baseline
+        id: baseline
+        uses: jbaruch/coding-policy/.github/actions/publish-landed-gate@main
+        with:
+          phase: capture
+
       # Fail loudly on an unrecognized publish-mode: otherwise both publish
       # steps below would be skipped and the run would pass green having
       # published nothing (rules/error-handling.md — no silent success).
@@ -135,8 +148,16 @@ jobs:
       # Default: patch-version-publish auto-bumps the manifest patch when it
       # matches the registry, commits `Bump … [skip ci]` (publish-pipeline
       # loop-prevention carve-out), and publishes.
+      #
+      # continue-on-error: a tessl out-of-credits (or any post-publish step)
+      # can exit this non-zero AFTER the artifact already published. Do NOT let
+      # that red the job here — the "Confirm publish landed" gate below reads
+      # this step's real `outcome` and reconciles it against the registry
+      # (rules/ci-safety.md "Credits Never Block Publishing").
       - name: Publish (auto-bump)
+        id: publish_autobump
         if: inputs.publish-mode == 'auto-bump'
+        continue-on-error: true
         uses: tesslio/patch-version-publish@v1
         with:
           token: ${{ secrets.TESSL_TOKEN }}
@@ -146,5 +167,22 @@ jobs:
       # exists` run — the correct signal, not a silent auto-bump. Requires the
       # release PR to carry the manifest + CHANGELOG version bump.
       - name: Publish (manifest version as-is)
+        id: publish_asis
         if: inputs.publish-mode == 'as-is'
+        continue-on-error: true
         run: tessl plugin publish .
+
+      # Fail-SAFE gate. Reads the publish step's real `outcome` (before
+      # continue-on-error masks it) and the pre-publish baseline; passes only
+      # when the registry advanced (artifact landed) or the step succeeded, and
+      # reds a genuine non-landing failure. No continue-on-error — this step's
+      # exit code gates the job. publish-outcome selects the step that actually
+      # ran by mode: the other publish step is skipped, and 'skipped' is truthy,
+      # so a bare `a.outcome || b.outcome` would wrongly pick the skipped one —
+      # the mode ternary picks exactly the ran step's outcome.
+      - name: Confirm publish landed
+        uses: jbaruch/coding-policy/.github/actions/publish-landed-gate@main
+        with:
+          phase: confirm
+          baseline: ${{ steps.baseline.outputs.baseline }}
+          publish-outcome: ${{ inputs.publish-mode == 'auto-bump' && steps.publish_autobump.outcome || steps.publish_asis.outcome }}
