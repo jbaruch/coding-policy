@@ -92,9 +92,17 @@ json.dump(d, open(m,"w"))' "$manifest"
       echo "✔ Published"
       exit 0 ;;
     credit_fail)
+      # The REAL tessl out-of-credits tail, observed live (fifty-tabs-of-fares
+      # 0.16.3): the credit message is followed by a benign `→ URL` link, so the
+      # terminal SUBSTANTIVE line is the `✘ …out of credits…` line, NOT the URL.
+      # A fabricated single-`##[error]Out of credits`-last-line fixture passed
+      # while this real shape red-ed a landed release — the regression this
+      # asserts against.
       echo "✔ Published testws/testplugin@0.1.1"
       echo "✔ Uploaded 3 eval scenarios"
-      echo "##[error]Out of credits"
+      echo "##[error]Out of credits. Upgrade at https://tessl.io/pricing"
+      echo "✘ Your organization has run out of credits. Upgrade your plan or buy more credits to continue."
+      echo "→ https://tessl.io/pricing"
       exit 1 ;;
     credit_warning_then_fail)
       # An early credit WARNING (contains 'out of credits'), then a DIFFERENT
