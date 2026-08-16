@@ -4,6 +4,19 @@ alwaysApply: true
 
 # Testing Standards
 
+## Scope
+
+- Governs code the project ships: the published artifact, everything CI builds from it, and the tests covering both
+- Narrow exception for an instrument tree — code whose OUTPUT is the deliverable, read by a human (live-upstream probes, reverse-engineering scratch, one-off measurement scripts)
+- An instrument tree falls outside this rule in full — every section below, not Coverage alone
+- Preconditions (all required):
+  1. The project's publish-exclude manifest lists the tree (`.tesslignore`, `.npmignore`, `MANIFEST.in`) — readable from the repo under review, never asserted in prose
+  2. No shipped module imports from the tree
+  3. Deterministic logic the tree's findings rest on carries tests, wherever those tests live
+- A module the published artifact reaches does NOT qualify, whatever directory holds it
+- "It is scratch" does NOT qualify on its own — all three preconditions are required
+- Every other tree in the repo follows this rule in full
+
 ## Coverage
 
 - Every module gets tests — no untested code ships (narrow exception: Platform-Bound Untestable Carve-Out below)
