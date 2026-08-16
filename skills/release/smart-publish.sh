@@ -19,15 +19,15 @@
 # commit-back behavior, plus the output capture the gate needs.
 #
 # The credit signature is bound CAUSALLY to the exit, not matched anywhere in
-# the log: it must BE the TERMINAL output — the last non-empty line the process
-# printed right before exiting non-zero. Anything printed after the credit error
-# (another error, or a plain-text failure) means the credit error was NOT the
-# terminal cause, so the run stays red (fail CLOSED). This rejects an early
-# low-credit warning ahead of a different terminal failure AND a credit error
-# followed by an unrelated failure. Only on a non-zero exit; an absent terminal
-# line or a scan error also fails closed. A tessl wording change stops matching
-# and degrades to red, never to a wrongly-green release. The credit text is the
-# top-of-file constant below.
+# the log: it must BE the TERMINAL FAILURE line — the last SUBSTANTIVE line the
+# process printed before exiting non-zero, after tessl's benign trailing
+# continuation lines (a `→ https://tessl.io/pricing` link, blanks) are stripped.
+# A DIFFERENT failure after the credit mention leaves its own error text as the
+# terminal line and stays red (fail CLOSED); an early low-credit warning ahead of
+# a different terminal failure likewise stays red. Only on a non-zero exit; no
+# substantive line or a scan error also fails closed. A tessl wording change
+# stops matching and degrades to red, never to a wrongly-green release. The
+# credit text is the top-of-file constant below.
 #
 # Usage: smart-publish.sh <mode> <plugin-path> <ref-name> <ref-type>
 #   <mode>        auto-bump = publish --bump patch from the registry, then
@@ -55,14 +55,20 @@
 
 set -euo pipefail
 
-# The out-of-credits signature. Observed as `##[error]Out of credits` on a live
-# fleet publish (jbaruch-travel-policy 0.7.59). Matched case-insensitively
-# against the TERMINAL output line ALONE (the last non-empty line before the
-# non-zero exit) — never anywhere earlier and never when another line follows
-# it, so neither an early credit warning nor a credit error trailed by a
-# different failure greens a genuine failure. Conservative: a wording change
-# stops matching and the failure stays RED (safe), never wrongly green. Update
-# this constant if tessl changes the wording.
+# The out-of-credits signature. tessl's real out-of-credits tail is a multi-line
+# block, observed live (fifty-tabs-of-fares 0.16.3, jbaruch-travel-policy 0.7.59):
+#   ##[error]Out of credits. Upgrade at https://tessl.io/pricing
+#   ✘ Your organization has run out of credits. …
+#   → https://tessl.io/pricing            <- benign trailing link, NOT the failure
+# Matched case-insensitively against the TERMINAL FAILURE line — the last
+# SUBSTANTIVE output line, after tessl's benign trailing link/blank lines are
+# stripped — never anywhere earlier. So neither an early credit warning nor a
+# credit mention trailed by a DIFFERENT failure (its own error text, which
+# becomes the terminal line) greens a genuine failure, while the real block above
+# still matches on its `✘ …out of credits…` line. Conservative: a wording change
+# stops matching and the failure stays RED (safe). Update this constant if tessl
+# changes the wording; ONLY tessl's exact pricing link (optionally arrow-prefixed)
+# is stripped as benign — every other URL stays substantive.
 readonly CREDIT_SIGNATURE_REGEX='out of credits'
 
 # Temp file for the captured publish output; script-global so the EXIT trap can
@@ -237,23 +243,46 @@ main() {
   set -e
   cat "$SP_LOG_FILE" >&2
 
-  # Credit signature ONLY on a non-zero exit, and bound to the TERMINAL output —
-  # the LAST non-empty line the process printed right before exiting. The
-  # signature must BE that line: anything printed after the credit error
-  # (another error, or a plain-text failure) means the credit error was NOT the
-  # terminal cause, so the run stays RED (fail CLOSED). An absent terminal line
-  # (empty log, grep rc==1) or a scan error (grep rc>1) also fails closed.
+  # Credit signature ONLY on a non-zero exit, and bound to the TERMINAL FAILURE
+  # line. tessl prints its out-of-credits error then a benign trailing
+  # `→ https://tessl.io/pricing` link, so the terminal line is found by peeling
+  # ONLY that EXACT pricing continuation (and trailing blanks) off the end — no
+  # other URL is stripped, so an unrelated URL-only terminal failure stays
+  # substantive and keeps the run RED. A DIFFERENT failure after the credit
+  # mention (its own error text) is likewise the terminal line -> red. An empty
+  # result fails closed (no signature); a python scan error warns to stderr and
+  # also fails closed (rules/error-handling.md — a best-effort failure that
+  # continues emits a warning, never nothing). python3 (already a dependency)
+  # does the trailing-only strip precisely.
   local credit_signature=false
   if [[ $rc -ne 0 ]]; then
-    local non_empty scan_rc=0 last_line=""
-    non_empty="$(grep -vE '^[[:space:]]*$' "$SP_LOG_FILE")" || scan_rc=$?
-    if [[ $scan_rc -eq 0 ]]; then
-      last_line="$(printf '%s\n' "$non_empty" | tail -n 1)"
-      if printf '%s' "$last_line" | grep -qiE "$CREDIT_SIGNATURE_REGEX"; then
+    local last_line="" scan_rc=0
+    last_line="$(python3 -c '
+import re, sys
+# Benign TRAILING continuation only: a blank line, or the EXACT tessl pricing
+# link (optionally arrow-prefixed). Nothing else is stripped.
+benign = re.compile(r"^\s*$|^\s*(?:" + "→" + r"\s*)?" + re.escape("https://tessl.io/pricing") + r"\s*$")
+lines = sys.stdin.read().splitlines()
+while lines and benign.match(lines[-1]):
+    lines.pop()
+sys.stdout.write(lines[-1] if lines else "")
+' < "$SP_LOG_FILE")" || scan_rc=$?
+    if [[ $scan_rc -ne 0 ]]; then
+      echo "smart-publish: warning: terminal-line scan failed (python3 exit ${scan_rc}) — the run stays RED (no credit signature); inspect the publish step's captured output in the run log by hand before retrying." >&2
+      last_line=""
+    fi
+    if [[ -n "$last_line" ]]; then
+      # Distinguish grep no-match (exit 1 = no signature, the run stays red)
+      # from a grep TOOL failure (exit >1) — the latter warns and also fails
+      # closed, never a silent "no signature" (rules/error-handling.md Shell
+      # Error Handling: an expected non-result is not a tool failure).
+      local match_rc=0
+      printf '%s' "$last_line" | grep -qiE "$CREDIT_SIGNATURE_REGEX" || match_rc=$?
+      if [[ $match_rc -eq 0 ]]; then
         credit_signature=true
+      elif [[ $match_rc -ne 1 ]]; then
+        echo "smart-publish: warning: credit-signature match failed (grep exit ${match_rc}) — the run stays RED (no credit signature); inspect the publish step's captured output in the run log by hand before retrying." >&2
       fi
-    elif [[ $scan_rc -ne 1 ]]; then
-      echo "smart-publish: warning: could not scan the publish log for the terminal line (grep exit ${scan_rc}) — treating as no credit signature (fail-closed red)." >&2
     fi
   fi
   cleanup_sp_log
