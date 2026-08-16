@@ -67,7 +67,8 @@ set -euo pipefail
 # becomes the terminal line) greens a genuine failure, while the real block above
 # still matches on its `✘ …out of credits…` line. Conservative: a wording change
 # stops matching and the failure stays RED (safe). Update this constant if tessl
-# changes the wording; a bare/arrow-prefixed URL line is treated as benign.
+# changes the wording; ONLY tessl's exact pricing link (optionally arrow-prefixed)
+# is stripped as benign — every other URL stays substantive.
 readonly CREDIT_SIGNATURE_REGEX='out of credits'
 
 # Temp file for the captured publish output; script-global so the EXIT trap can
@@ -249,11 +250,13 @@ main() {
   # other URL is stripped, so an unrelated URL-only terminal failure stays
   # substantive and keeps the run RED. A DIFFERENT failure after the credit
   # mention (its own error text) is likewise the terminal line -> red. An empty
-  # result or a python error fails closed (no signature). python3 (already a
-  # dependency) does the trailing-only strip precisely.
+  # result fails closed (no signature); a python scan error warns to stderr and
+  # also fails closed (rules/error-handling.md — a best-effort failure that
+  # continues emits a warning, never nothing). python3 (already a dependency)
+  # does the trailing-only strip precisely.
   local credit_signature=false
   if [[ $rc -ne 0 ]]; then
-    local last_line=""
+    local last_line="" scan_rc=0
     last_line="$(python3 -c '
 import re, sys
 # Benign TRAILING continuation only: a blank line, or the EXACT tessl pricing
@@ -263,7 +266,11 @@ lines = sys.stdin.read().splitlines()
 while lines and benign.match(lines[-1]):
     lines.pop()
 sys.stdout.write(lines[-1] if lines else "")
-' < "$SP_LOG_FILE")" || last_line=""
+' < "$SP_LOG_FILE")" || scan_rc=$?
+    if [[ $scan_rc -ne 0 ]]; then
+      echo "smart-publish: warning: terminal-line scan failed (python3 exit ${scan_rc}) — treating as no credit signature (fail-closed red)." >&2
+      last_line=""
+    fi
     if [[ -n "$last_line" ]] && printf '%s' "$last_line" | grep -qiE "$CREDIT_SIGNATURE_REGEX"; then
       credit_signature=true
     fi
