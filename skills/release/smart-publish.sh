@@ -268,11 +268,21 @@ while lines and benign.match(lines[-1]):
 sys.stdout.write(lines[-1] if lines else "")
 ' < "$SP_LOG_FILE")" || scan_rc=$?
     if [[ $scan_rc -ne 0 ]]; then
-      echo "smart-publish: warning: terminal-line scan failed (python3 exit ${scan_rc}) — treating as no credit signature (fail-closed red)." >&2
+      echo "smart-publish: warning: terminal-line scan failed (python3 exit ${scan_rc}) — the run stays RED (no credit signature); inspect the publish step's captured output in the run log by hand before retrying." >&2
       last_line=""
     fi
-    if [[ -n "$last_line" ]] && printf '%s' "$last_line" | grep -qiE "$CREDIT_SIGNATURE_REGEX"; then
-      credit_signature=true
+    if [[ -n "$last_line" ]]; then
+      # Distinguish grep no-match (exit 1 = no signature, the run stays red)
+      # from a grep TOOL failure (exit >1) — the latter warns and also fails
+      # closed, never a silent "no signature" (rules/error-handling.md Shell
+      # Error Handling: an expected non-result is not a tool failure).
+      local match_rc=0
+      printf '%s' "$last_line" | grep -qiE "$CREDIT_SIGNATURE_REGEX" || match_rc=$?
+      if [[ $match_rc -eq 0 ]]; then
+        credit_signature=true
+      elif [[ $match_rc -ne 1 ]]; then
+        echo "smart-publish: warning: credit-signature match failed (grep exit ${match_rc}) — the run stays RED (no credit signature); inspect the publish step's captured output in the run log by hand before retrying." >&2
+      fi
     fi
   fi
   cleanup_sp_log
