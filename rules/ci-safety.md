@@ -81,9 +81,10 @@ alwaysApply: true
 - Build and publish runs still gate on `conclusion`
 - Do not promote a reviewer's check to a required branch-protection gate while a fail-open path exists
 - The pre-merge review watch runs ONLY through `skills/release/watch-pr-reviews.sh` (see `skills/release/SKILL.md` Step 5) — never a hand-rolled poll loop
-- `watch-pr-reviews.sh` owns the interval and budget and is the sole correct resolver of the gate fields above
-- The gating reviewer's bot login varies by repository — resolved inside `poll-pr-reviews.sh`, unreproducible by a hand-rolled poller keyed to a single login
-- A non-gating check that reds and surfaces as the watcher's `ci_failure` result is not a reason to hand-roll — read the returned snapshot and act on the check that actually failed
+- `watch-pr-reviews.sh` is the sole correct resolver of the gate fields above
+- The gating reviewer's bot login varies by repository — resolved inside `poll-pr-reviews.sh`
+- A non-gating check that reds and surfaces as the watcher's `ci_failure` result is not a reason to hand-roll
+- On a `ci_failure` result, read the returned snapshot and act on the check that actually failed
 - The gating signal is not always a PR status check
 - A run started out of band (a `workflow_dispatch` reseed, a manual job) may not surface in the PR's `statusCheckRollup`
 - Identify the run that gates the outcome and bind the watch to its `conclusion`
