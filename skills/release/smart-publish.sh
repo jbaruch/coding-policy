@@ -243,25 +243,29 @@ main() {
   cat "$SP_LOG_FILE" >&2
 
   # Credit signature ONLY on a non-zero exit, and bound to the TERMINAL FAILURE
-  # line — the last SUBSTANTIVE line before the exit, after stripping tessl's
-  # benign trailing continuation lines (a bare or `→ `-prefixed
-  # https://tessl.io/pricing link, and blanks) that follow the out-of-credits
-  # message. The signature must BE that terminal line: a DIFFERENT failure after
-  # the credit mention leaves its OWN error text as the terminal line and keeps
-  # the run RED (fail CLOSED); the real out-of-credits block still matches on its
-  # `✘ …out of credits…` line once the trailing link is stripped. No substantive
-  # line (empty log, grep rc==1) or a scan error (grep rc>1) also fails closed.
+  # line. tessl prints its out-of-credits error then a benign trailing
+  # `→ https://tessl.io/pricing` link, so the terminal line is found by peeling
+  # ONLY that EXACT pricing continuation (and trailing blanks) off the end — no
+  # other URL is stripped, so an unrelated URL-only terminal failure stays
+  # substantive and keeps the run RED. A DIFFERENT failure after the credit
+  # mention (its own error text) is likewise the terminal line -> red. An empty
+  # result or a python error fails closed (no signature). python3 (already a
+  # dependency) does the trailing-only strip precisely.
   local credit_signature=false
   if [[ $rc -ne 0 ]]; then
-    local substantive scan_rc=0 last_line=""
-    substantive="$(grep -vE '^[[:space:]]*$|^[[:space:]]*(→[[:space:]]*)?https?://[^[:space:]]*[[:space:]]*$' "$SP_LOG_FILE")" || scan_rc=$?
-    if [[ $scan_rc -eq 0 ]]; then
-      last_line="$(printf '%s\n' "$substantive" | tail -n 1)"
-      if printf '%s' "$last_line" | grep -qiE "$CREDIT_SIGNATURE_REGEX"; then
-        credit_signature=true
-      fi
-    elif [[ $scan_rc -ne 1 ]]; then
-      echo "smart-publish: warning: could not scan the publish log for the terminal failure line (grep exit ${scan_rc}) — treating as no credit signature (fail-closed red)." >&2
+    local last_line=""
+    last_line="$(python3 -c '
+import re, sys
+# Benign TRAILING continuation only: a blank line, or the EXACT tessl pricing
+# link (optionally arrow-prefixed). Nothing else is stripped.
+benign = re.compile(r"^\s*$|^\s*(?:" + "→" + r"\s*)?" + re.escape("https://tessl.io/pricing") + r"\s*$")
+lines = sys.stdin.read().splitlines()
+while lines and benign.match(lines[-1]):
+    lines.pop()
+sys.stdout.write(lines[-1] if lines else "")
+' < "$SP_LOG_FILE")" || last_line=""
+    if [[ -n "$last_line" ]] && printf '%s' "$last_line" | grep -qiE "$CREDIT_SIGNATURE_REGEX"; then
+      credit_signature=true
     fi
   fi
   cleanup_sp_log
