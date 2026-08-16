@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.160 — 2026-08-16
+
 ### CI safety — the always-on rule now forbids a hand-rolled review watch, not just the release skill
 
 An agent watching a fleet-consumer PR (`fifty-tabs-of-fares#251`) hand-rolled a poll loop keyed to `github-actions[bot]` — coding-policy's OWN review login — and sat blind at review state `none` for ~40 minutes while the consumer-repo reviewer `coding-policy-fleet-reviewer[bot]` had already `APPROVED`. `poll-pr-reviews.sh` already resolves BOTH logins, and the release skill Step 5 already says "do not hand-roll a poll loop" with the two-login trap spelled out in Step 7 — but those load only when the release skill is invoked. This watch was ad-hoc, so at the decision point the guardrail was not in context. An agent is steered by the context in front of it; a guardrail that lives only in a not-yet-loaded skill does not steer an ad-hoc action. The always-on `ci-safety` "Always Watch CI" rule only *permissively* named the tool ("has an agent-executable form"). It now mandates the review watch run ONLY through `watch-pr-reviews.sh` (never a hand-rolled loop), states the gating reviewer's bot login varies by repository (the accepted set is `poll-pr-reviews.sh`'s contract, unreproducible by a single-login hand-rolled poller), and notes that a non-gating check surfacing as the watcher's `ci_failure` result is not a reason to hand-roll — read the snapshot and interpret. The fix is the always-on rule because that is the context every fleet agent carries every session, skill-invoked or not.
