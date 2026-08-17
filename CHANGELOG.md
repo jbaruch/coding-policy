@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.162 — 2026-08-17
+
 ### Fix — auto-bump computes the next version registry-aware, so a stale manifest cannot collide
 
 `smart-publish.sh` auto-bump delegated the version choice to `tessl plugin publish --bump patch`, which bumps from the (possibly stale) manifest. The 0.3.158 credit-outage gate opened a gap it now trips: when an out-of-credits publish LANDS but exits non-zero, the script reds before the manifest bump-push (`rc != 0` returns before `commit_back`), so the artifact ships at version X while `CHANGELOG.md`/the manifest on the branch keep the pre-publish version X-1. The next auto-bump run then `--bump patch`es from X-1, targets X — which already exists on the registry — and dies with `already exists`, reddening a publish that had nothing wrong with it. The failure compounds: every subsequent run collides on the same number until a human hand-bumps the manifest past the registry.
