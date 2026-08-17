@@ -17,7 +17,8 @@
 # composite action (a `uses:` step's stdout cannot be captured for a later
 # step). So this script replaces that action: auto-bump on publish + a manifest
 # commit-back, plus the output capture the gate needs. The bump is REGISTRY-
-# aware (next = max(registry, manifest) + patch), not patch-version-publish's
+# aware (registry empty -> the manifest; manifest strictly ahead -> the manifest;
+# otherwise -> registry latest + one patch), not patch-version-publish's
 # manifest-based `--bump patch`, which collides once a credit-outage run skips
 # the commit-back and the manifest falls behind the registry.
 #
@@ -33,10 +34,11 @@
 # credit text is the top-of-file constant below.
 #
 # Usage: smart-publish.sh <mode> <plugin-path> <ref-name> <ref-type>
-#   <mode>        auto-bump = compute the next version REGISTRY-aware
-#                 (max(registry, manifest) + patch), write it into the manifest,
-#                 publish it, and commit the manifest back; as-is = publish the
-#                 manifest version verbatim, no bump, no commit-back.
+#   <mode>        auto-bump = compute the next version REGISTRY-aware (registry
+#                 empty -> the manifest; manifest strictly ahead -> the manifest;
+#                 otherwise -> registry latest + one patch), write it into the
+#                 manifest, publish it, and commit the manifest back; as-is =
+#                 publish the manifest version verbatim, no bump, no commit-back.
 #   <plugin-path> directory to publish (usually '.'); the manifest is
 #                 auto-detected under it (.tessl-plugin/plugin.json, then
 #                 tile.json).
@@ -285,7 +287,16 @@ main() {
       emit_json failure 1 "" false false
       exit 1
     fi
-    reg="$(printf '%s' "$reg_json" | python3 -c 'import json,sys;v=json.load(sys.stdin).get("version");print(v if v else "")')"
+    # registry-version.sh guarantees a well-formed {"version":...} on exit 0, so
+    # this parse should never fail; handle it explicitly anyway (fail CLOSED with
+    # a diagnosed JSON result, like the two neighbouring pre-publish failures)
+    # rather than leaning on set -e to abort with no result — a bad parse must
+    # never fall through to an empty reg and a wrong first-publish.
+    reg="$(printf '%s' "$reg_json" | python3 -c 'import json,sys;v=json.load(sys.stdin).get("version");print(v if v else "")')" || {
+      echo "error: registry-version.sh returned unparseable JSON for '${name}' (${reg_json}) — a pre-publish tool failure; nothing was published. Inspect the registry read and re-run." >&2
+      emit_json failure 1 "" false false
+      exit 1
+    }
     [[ -z "$reg" ]] && first_publish=true
     local target rc_t=0
     target="$(compute_target_version "$reg" "$manifest_version")" || rc_t=$?

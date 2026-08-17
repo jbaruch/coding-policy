@@ -4,9 +4,10 @@
 # NAME the failing step (rules/ci-safety.md "Credits Never Block Publishing").
 #
 # The load-bearing properties:
-#   - auto-bump computes the next version REGISTRY-aware (max(registry, manifest)
-#     + patch), so a manifest that fell behind the registry does NOT collide the
-#     way tessl `--bump patch` would;
+#   - auto-bump computes the next version REGISTRY-aware (registry empty -> the
+#     manifest; manifest strictly ahead -> the manifest; otherwise -> registry
+#     latest + one patch), so a manifest that fell behind the registry does NOT
+#     collide the way tessl `--bump patch` would;
 #   - the out-of-credits SIGNATURE is read from the publish command's own output
 #     (terminal failure line only) and reported only on a non-zero exit;
 #   - a non-credit failure reports credit_signature=false (stays red downstream);
