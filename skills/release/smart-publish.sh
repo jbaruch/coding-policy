@@ -15,8 +15,11 @@
 # is the discriminator, and reading it requires OWNING the publish call rather
 # than delegating to the opaque third-party `tesslio/patch-version-publish`
 # composite action (a `uses:` step's stdout cannot be captured for a later
-# step). So this script replaces that action: same auto-bump-from-registry +
-# commit-back behavior, plus the output capture the gate needs.
+# step). So this script replaces that action: auto-bump on publish + a manifest
+# commit-back, plus the output capture the gate needs. The bump is REGISTRY-
+# aware (next = max(registry, manifest) + patch), not patch-version-publish's
+# manifest-based `--bump patch`, which collides once a credit-outage run skips
+# the commit-back and the manifest falls behind the registry.
 #
 # The credit signature is bound CAUSALLY to the exit, not matched anywhere in
 # the log: it must BE the TERMINAL FAILURE line — the last SUBSTANTIVE line the
@@ -30,10 +33,10 @@
 # credit text is the top-of-file constant below.
 #
 # Usage: smart-publish.sh <mode> <plugin-path> <ref-name> <ref-type>
-#   <mode>        auto-bump = publish --bump patch from the registry, then
-#                 commit the resolved version back to the manifest (mirrors
-#                 tesslio/patch-version-publish); as-is = publish the manifest
-#                 version verbatim, no bump, no commit-back.
+#   <mode>        auto-bump = compute the next version REGISTRY-aware
+#                 (max(registry, manifest) + patch), write it into the manifest,
+#                 publish it, and commit the manifest back; as-is = publish the
+#                 manifest version verbatim, no bump, no commit-back.
 #   <plugin-path> directory to publish (usually '.'); the manifest is
 #                 auto-detected under it (.tessl-plugin/plugin.json, then
 #                 tile.json).
@@ -54,6 +57,9 @@
 #       registry unreachable) — nothing published, the confirm gate reds it.
 
 set -euo pipefail
+
+# Directory of this script — used to locate the sibling registry-version.sh.
+_sp_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # The out-of-credits signature. tessl's real out-of-credits tail is a multi-line
 # block, observed live (fifty-tabs-of-fares 0.16.3, jbaruch-travel-policy 0.7.59):
@@ -120,6 +126,57 @@ with open(sys.argv[1]) as f:
     d = json.load(f)
 v = d.get(sys.argv[2])
 print(v if isinstance(v, str) else "")' "$manifest" "$field"
+}
+
+# Compute the auto-bump target version, REGISTRY-aware. tessl `--bump patch`
+# bumps from the (possibly stale) MANIFEST and fails with "already exists" once
+# a credit-outage run skips the commit-back and the manifest falls behind the
+# registry; computing from the registry never collides. Rules:
+#   - registry empty (never published) -> the manifest version (first publish)
+#   - manifest strictly ahead of registry (a human minor/major bump) -> manifest
+#   - otherwise -> registry latest + one patch (always a free version)
+# Prints the target; exits 3 if a present registry version is not numeric
+# MAJOR.MINOR.PATCH (a tool/shape failure the caller reds).
+compute_target_version() {
+  local reg="$1" man="$2"
+  python3 -c '
+import sys
+reg, man = sys.argv[1], sys.argv[2]
+def parse(v):
+    p = v.split(".")
+    return tuple(int(x) for x in p) if len(p) == 3 and all(x.isdigit() for x in p) else None
+if not reg:
+    print(man); sys.exit(0)                 # first publish: manifest as-is
+rp = parse(reg)
+if rp is None:
+    sys.exit(3)                             # registry version unparseable
+mp = parse(man)
+if mp is not None and mp > rp:
+    print(man)                              # human bumped the manifest ahead
+else:
+    print(f"{rp[0]}.{rp[1]}.{rp[2] + 1}")   # registry latest + one patch
+' "$reg" "$man"
+}
+
+# Write a version into the manifest, preserving all other formatting — a
+# targeted swap of the `"version": "<current>"` value, not a json.dump rewrite
+# (which would reflow the file and noise up the commit-back diff). Exits 4 if
+# the manifest has no version, 5 if the value could not be located to replace.
+write_manifest_version() {
+  local manifest="$1" target="$2"
+  python3 -c '
+import json, re, sys
+m, target = sys.argv[1], sys.argv[2]
+text = open(m).read()
+cur = json.loads(text).get("version")
+if cur is None:
+    sys.exit(4)
+pat = re.compile(r"(\"version\"\s*:\s*\")" + re.escape(cur) + r"(\")")
+new, n = pat.subn(lambda _m: _m.group(1) + target + _m.group(2), text, count=1)
+if n != 1:
+    sys.exit(5)
+open(m, "w").write(new)
+' "$manifest" "$target"
 }
 
 # Commit the resolved version back to the manifest and push it directly to the
@@ -204,27 +261,47 @@ main() {
     exit 1
   fi
 
-  # Choose the publish invocation. auto-bump distinguishes a first publish (no
-  # prior version to --bump from) from an auth/network failure by the registry
-  # query's 404 — treating the latter as a first publish would silently publish
-  # unbumped. as-is always publishes the manifest version verbatim.
+  # Choose the version + publish invocation. Both modes publish the manifest
+  # version VERBATIM (`tessl plugin publish <path>`); the difference is what the
+  # manifest holds:
+  #   as-is     -> the pre-computed manifest version untouched (fifty-tabs-style;
+  #                no bump, no commit-back).
+  #   auto-bump -> the REGISTRY-aware next version, computed here and written into
+  #                the manifest before publishing. NOT tessl `--bump patch`,
+  #                which bumps from the manifest and collides once a credit-outage
+  #                run skips the commit-back and the manifest falls behind.
+  #                registry-version.sh reads the authoritative versions API
+  #                (immediate) and doubles as the first-publish / tool-failure
+  #                discriminator: {"version":null} = never published (first
+  #                publish, target = manifest); exit != 0 = auth/network failure.
   local -a pub_args
   local first_publish=false
   if [[ "$mode" == "auto-bump" ]]; then
-    local info_out
-    if info_out="$(tessl plugin info "$name" 2>&1)"; then
-      pub_args=(plugin publish --bump patch "$path")
-    elif printf '%s\n' "$info_out" | grep -qi '404'; then
-      pub_args=(plugin publish "$path")
-      first_publish=true
-    else
-      echo "error: could not query the tessl registry for '${name}': ${info_out} — this is a pre-publish failure (auth/network), nothing was published. Fix the cause and re-run." >&2
+    local workspace="${name%%/*}" plugin_slug="${name#*/}"
+    local reg_json reg="" rc_reg=0
+    reg_json="$(bash "${_sp_dir}/registry-version.sh" "$workspace" "$plugin_slug")" || rc_reg=$?
+    if [[ $rc_reg -ne 0 ]]; then
+      echo "error: could not read the registry latest for '${name}' (registry-version.sh exit ${rc_reg}) — a pre-publish auth/network failure; nothing was published. Fix the cause and re-run." >&2
       emit_json failure 1 "" false false
       exit 1
     fi
-  else
-    pub_args=(plugin publish "$path")
+    reg="$(printf '%s' "$reg_json" | python3 -c 'import json,sys;v=json.load(sys.stdin).get("version");print(v if v else "")')"
+    [[ -z "$reg" ]] && first_publish=true
+    local target rc_t=0
+    target="$(compute_target_version "$reg" "$manifest_version")" || rc_t=$?
+    if [[ $rc_t -ne 0 ]]; then
+      echo "error: could not compute the next version for '${name}' (registry='${reg:-<none>}', manifest='${manifest_version}') — the registry latest is not numeric MAJOR.MINOR.PATCH. Nothing was published; inspect the registry." >&2
+      emit_json failure 1 "" false false
+      exit 1
+    fi
+    echo "smart-publish: auto-bump target ${target} (registry=${reg:-<none>}, manifest=${manifest_version})." >&2
+    if ! write_manifest_version "$manifest" "$target"; then
+      echo "error: could not write version ${target} into '${manifest}' — nothing was published." >&2
+      emit_json failure 1 "" false false
+      exit 1
+    fi
   fi
+  pub_args=(plugin publish "$path")
 
   trap cleanup_sp_log EXIT
   SP_LOG_FILE="$(mktemp)" \
@@ -293,8 +370,10 @@ sys.stdout.write(lines[-1] if lines else "")
     exit "$rc"
   fi
 
-  # Success. `tessl plugin publish` wrote the resolved version back to the
-  # manifest on disk; read it for the result and the bump commit.
+  # Success. The manifest on disk already holds the published version — auto-bump
+  # wrote the target into it before publishing, as-is never touched it (neither
+  # path passes `--bump`, so tessl does not rewrite it); read it back for the
+  # result and the bump commit.
   local published_version
   published_version="$(manifest_field "$manifest" version)"
   echo "smart-publish: published ${name}@${published_version}." >&2
