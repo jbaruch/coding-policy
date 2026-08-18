@@ -15,7 +15,13 @@
 #      budget diagnostic and bounded total sleep.
 #   7. Arg-count + empty-arg validation — exit 2 with usage/diagnostic.
 #   8. Env-var validation — non-positive / inverted bounds exit 2.
-#   9. tessl failure — non-zero `tessl api` exits 2 with a diagnostic.
+#   9. Persistent tessl failure — non-zero `tessl api` is retried up to
+#      FETCH_RETRY_MAX consecutive times, then exits 2 (issue #304).
+#   9b. Transient then success — a fetch failure below the cap retries in the
+#       loop and clears on a later call, exit 0.
+#   9c. Retry cap is FETCH_RETRY_MAX — overriding it bounds the retries.
+#   9d. Persistent failure to budget — a high cap lets the budget stop the
+#       retries; still exit 2 (tool failure), never rc 1.
 #  10. Unparseable body — no moderation fields exits 2.
 #
 # Approach mirrors test_resolve_publish_run.sh: source the script (the
@@ -233,12 +239,56 @@ if [[ $rc -eq 2 ]]; then pass "base delay 0: exit 2"; else fail "base delay 0 (r
 if [[ $rc -eq 2 ]]; then pass "base > max: exit 2"; else fail "base > max (rc=$rc)"; fi
 ( BASE_DELAY_SEC=100 MAX_DELAY_SEC=100 BUDGET_SEC=10 main acme widget 1.2.3 ) >/dev/null 2>&1; rc=$?
 if [[ $rc -eq 2 ]]; then pass "base > budget: exit 2"; else fail "base > budget (rc=$rc)"; fi
+( FETCH_RETRY_MAX=0 main acme widget 1.2.3 ) >/dev/null 2>&1; rc=$?
+if [[ $rc -eq 2 ]]; then pass "fetch-retry-max 0: exit 2"; else fail "fetch-retry-max 0 (rc=$rc)"; fi
 
-# --- 9. tessl failure ---
+# --- 9. Persistent tessl failure: retried FETCH_RETRY_MAX times, then exit 2 ---
+# A single fixture is sticky-last, so every call fails. Default
+# FETCH_RETRY_MAX=3 => 3 consecutive failures before the hard exit 2.
 reset_mocks
 queue 1 "$(printf '__FAIL__\n500 Internal Server Error')"
 out=$(main acme widget 1.2.3 2>/dev/null); rc=$?
-if [[ $rc -eq 2 ]]; then pass "tessl api failure: exit 2"; else fail "tessl failure (rc=$rc out=$out)"; fi
+if [[ $rc -eq 2 ]] && [[ "$(count_calls)" == "3" ]]; then
+  pass "persistent tessl failure: retried to FETCH_RETRY_MAX then exit 2"
+else
+  fail "persistent tessl failure (rc=$rc calls=$(count_calls) out=$out)"
+fi
+
+# --- 9b. Transient failure then success: retry inside the loop, exit 0 ---
+# First call fails (below FETCH_RETRY_MAX), the next clears (issue #304).
+reset_mocks
+queue 1 "$(printf '__FAIL__\n502 Bad Gateway')"
+queue 2 "$(body_json pass true '')"
+out=$(main acme widget 1.2.3 2>/dev/null); rc=$?
+if [[ $rc -eq 0 ]] && echo "$out" | jq -e '.ok == true' >/dev/null 2>&1 && [[ "$(count_calls)" == "2" ]] && [[ "$(count_sleeps)" -ge 1 ]]; then
+  pass "transient failure then pass: retried and cleared, exit 0"
+else
+  fail "transient then pass (rc=$rc out=$out calls=$(count_calls) sleeps=$(count_sleeps))"
+fi
+
+# --- 9c. Retry cap is FETCH_RETRY_MAX ---
+# Command-scope the global (same pattern as the env-var tests): 2 consecutive
+# failures now exit 2, proving the cap is the constant, not hardcoded.
+reset_mocks
+queue 1 "$(printf '__FAIL__\n500 err')"
+out=$( FETCH_RETRY_MAX=2 main acme widget 1.2.3 2>/dev/null ); rc=$?
+if [[ $rc -eq 2 ]] && [[ "$(count_calls)" == "2" ]]; then
+  pass "FETCH_RETRY_MAX=2: exit 2 after exactly 2 failures"
+else
+  fail "retry cap override (rc=$rc calls=$(count_calls))"
+fi
+
+# --- 9d. Persistent failure hits the budget before a high retry cap ---
+# With a high FETCH_RETRY_MAX the budget bound stops the retries; it exits 2
+# (tool failure), never rc 1 (rc 1 is a moderation verdict, not a tool fault).
+reset_mocks
+queue 1 "$(printf '__FAIL__\n503 err')"
+err=$( { FETCH_RETRY_MAX=100 main acme widget 1.2.3 >/dev/null; } 2>&1 ); rc=$?
+if [[ $rc -eq 2 ]] && [[ "$err" == *"budget is exhausted"* ]]; then
+  pass "persistent failure to budget: exit 2 with budget diagnostic"
+else
+  fail "transient-to-budget (rc=$rc err=$err)"
+fi
 
 # --- 10. Unparseable body ---
 reset_mocks
