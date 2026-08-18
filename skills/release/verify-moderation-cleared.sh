@@ -17,6 +17,11 @@
 # would exceed BUDGET_SEC. Constants below; override via the matching
 # env vars (used by the test harness to keep runs fast).
 #
+# Transient fetch retry: a non-zero `tessl api` exit is retried inside the
+# backoff loop up to FETCH_RETRY_MAX consecutive times before exiting 2, so
+# a momentary CLI/network blip does not abort a wait for a release that
+# published fine (issue #304). A successful fetch resets the counter.
+#
 # Fail-loud-at-budget: a still-pending OR blocked state when the budget is
 # exhausted exits 1 — an unconfirmed release is never reported as success.
 #
@@ -32,8 +37,8 @@
 #            same fields and "ok": false). Wrappers MUST parse stdout only
 #            when exit code is 0 or 1.
 # Exit:  0 moderation cleared; 1 blocked or still-pending at budget
-#        exhaustion (fail loud); 2 argument-validation or external-tool
-#        failure (tessl unreachable, jq missing, bad env var).
+#        exhaustion (fail loud); 2 argument-validation, jq-missing, or a
+#        persistent `tessl api` failure (retried FETCH_RETRY_MAX times first).
 
 set -euo pipefail
 
@@ -42,6 +47,12 @@ set -euo pipefail
 BASE_DELAY_SEC="${VERIFY_MODERATION_BASE_DELAY_SEC:-5}"
 MAX_DELAY_SEC="${VERIFY_MODERATION_MAX_DELAY_SEC:-120}"
 BUDGET_SEC="${VERIFY_MODERATION_BUDGET_SEC:-600}"
+# Consecutive `tessl api` fetch failures tolerated before declaring a
+# persistent tool failure (issue #304). A single transient non-zero exit —
+# an outdated CLI's version-check blip, a momentary network drop — is retried
+# inside the backoff loop rather than aborting the whole moderation wait; a
+# genuinely persistent failure still exits 2 fast.
+FETCH_RETRY_MAX="${VERIFY_MODERATION_FETCH_RETRY_MAX:-3}"
 
 # Terminal "blocked" moderation states — fast-fail without waiting out the
 # budget. Anything not in here and not "pass" is treated as still-pending
@@ -105,6 +116,19 @@ is_block_state() {
   return 1
 }
 
+# Sleep one backoff interval and advance the schedule. Reads and WRITES the
+# caller's `delay` and `elapsed` locals via bash dynamic scope (same idiom as
+# the script-global `err_file`), so both the pending-poll path and the
+# transient-fetch-retry path share one backoff schedule rather than
+# duplicating it. Declares no `delay`/`elapsed` local of its own — that would
+# shadow the caller's and silently stall the schedule.
+advance_backoff() {
+  sleep "$delay"
+  elapsed=$(( elapsed + delay ))
+  delay=$(( delay * 2 ))
+  (( delay > MAX_DELAY_SEC )) && delay="$MAX_DELAY_SEC"
+}
+
 main() {
   if [[ $# -ne 3 ]]; then
     echo "usage: $0 <workspace> <plugin> <version>" >&2
@@ -119,6 +143,7 @@ main() {
   validate_positive_int "VERIFY_MODERATION_BASE_DELAY_SEC" "$BASE_DELAY_SEC"
   validate_positive_int "VERIFY_MODERATION_MAX_DELAY_SEC" "$MAX_DELAY_SEC"
   validate_positive_int "VERIFY_MODERATION_BUDGET_SEC" "$BUDGET_SEC"
+  validate_positive_int "VERIFY_MODERATION_FETCH_RETRY_MAX" "$FETCH_RETRY_MAX"
   if (( BASE_DELAY_SEC > MAX_DELAY_SEC )); then
     echo "error: VERIFY_MODERATION_BASE_DELAY_SEC (${BASE_DELAY_SEC}) must not exceed VERIFY_MODERATION_MAX_DELAY_SEC (${MAX_DELAY_SEC})" >&2
     exit 2
@@ -129,7 +154,7 @@ main() {
   fi
 
   local endpoint="v1/tiles/${workspace}/${tile}/versions/${version}"
-  local delay="$BASE_DELAY_SEC" elapsed=0 attempts=0
+  local delay="$BASE_DELAY_SEC" elapsed=0 attempts=0 fetch_failures=0
   err_file=$(mktemp) || { echo "error: mktemp failed — cannot run verify-moderation-cleared.sh without writable TMPDIR" >&2; exit 2; }
   # Named handler ending `return 0` — the EXIT trap's final command status
   # becomes the script's exit status, so a failing `rm` would rewrite the
@@ -142,9 +167,28 @@ main() {
     # Separate stdout (the JSON body) from stderr so a tessl warning can't
     # poison the parsed payload — same capture discipline as
     # verify-publish-landed.sh.
+    # A non-zero `tessl api` exit is retried, not fatal: an outdated CLI's
+    # version-check blip or a momentary network drop must not abort a wait
+    # for a release that already published (issue #304). Escalate to exit 2
+    # only after FETCH_RETRY_MAX CONSECUTIVE failures, or if the budget runs
+    # out first — a persistent tool/auth/network fault, not a missing version.
     local body
-    body=$(tessl api "$endpoint" 2>"$err_file") \
-      || { local err; err=$(cat "$err_file"); echo "error: 'tessl api ${endpoint}' failed: ${err} — verify (1) tessl CLI is installed and on PATH ('command -v tessl'), (2) the workspace/plugin/version slug is correct, (3) you have network access to the registry, then re-run; the version was already confirmed on the registry by verify-publish-landed.sh, so a persistent failure here is a tool/auth/network problem, not a missing version" >&2; exit 2; }
+    if ! body=$(tessl api "$endpoint" 2>"$err_file"); then
+      local err; err=$(cat "$err_file")
+      fetch_failures=$(( fetch_failures + 1 ))
+      if (( fetch_failures >= FETCH_RETRY_MAX )); then
+        echo "error: 'tessl api ${endpoint}' failed ${fetch_failures} consecutive time(s): ${err} — verify (1) tessl CLI is installed and on PATH ('command -v tessl'), (2) the workspace/plugin/version slug is correct, (3) you have network access to the registry, then re-run; the version was already confirmed on the registry by verify-publish-landed.sh, so a persistent failure here is a tool/auth/network problem, not a missing version" >&2
+        exit 2
+      fi
+      if (( elapsed + delay > BUDGET_SEC )); then
+        echo "error: 'tessl api ${endpoint}' kept failing (${fetch_failures} consecutive) and the ${BUDGET_SEC}s budget is exhausted: ${err} — treat as a tool/auth/network failure, not a moderation verdict; re-run once tessl is reachable" >&2
+        exit 2
+      fi
+      echo "verify-moderation-cleared.sh: warning: 'tessl api ${endpoint}' failed (attempt ${fetch_failures}/${FETCH_RETRY_MAX}), retrying after backoff" >&2
+      advance_backoff
+      continue
+    fi
+    fetch_failures=0
 
     # Validate the payload ONCE, explicitly, before extracting fields.
     # Each extraction previously carried `2>/dev/null || true`, collapsing
@@ -212,10 +256,7 @@ main() {
         "$status" "$version" "$attempts" "$elapsed" 1
     fi
 
-    sleep "$delay"
-    elapsed=$(( elapsed + delay ))
-    delay=$(( delay * 2 ))
-    (( delay > MAX_DELAY_SEC )) && delay="$MAX_DELAY_SEC"
+    advance_backoff
   done
 }
 
