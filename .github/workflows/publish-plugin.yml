@@ -14,6 +14,7 @@ name: Publish plugin (reusable)
 #       with:
 #         stamp-changelog: true          # optional
 #         python-version: '3.11'         # optional — only if the gate needs it
+#         node-version: '22'             # optional — only if a node gate needs it
 #         pre-publish-script: .github/pre-publish.sh   # optional repo-specific gate
 #         publish-mode: as-is            # optional — default auto-bump
 #
@@ -34,6 +35,10 @@ on:
         description: 'If set, sets up this Python before the pre-publish gate (for gates needing a pinned interpreter). Empty = no Python setup.'
         type: string
         default: ''
+      node-version:
+        description: 'If set, sets up this Node before the pre-publish gate (for node gates needing a pinned runtime). Empty = no Node setup.'
+        type: string
+        default: ''
       pre-publish-script:
         description: 'Path (in the caller repo) to a bash gate script run after checkout, before publish. Empty = no repo-specific gate.'
         type: string
@@ -51,7 +56,7 @@ on:
         type: boolean
         default: false
       publish-mode:
-        description: "'auto-bump' = tesslio/patch-version-publish (bump + commit + publish); 'as-is' = tessl plugin publish (manifest version verbatim, no bump)."
+        description: "Passed to the smart-publish action. 'auto-bump' = compute the registry-aware next version, publish it, commit the manifest bump back; 'as-is' = publish the manifest version verbatim, no bump, no commit-back (a human-bump model)."
         type: string
         default: 'auto-bump'
     secrets:
@@ -82,6 +87,12 @@ jobs:
         uses: actions/setup-python@v7
         with:
           python-version: ${{ inputs.python-version }}
+
+      - name: Set up Node
+        if: inputs.node-version != ''
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ inputs.node-version }}
 
       # Repo-specific gate (pyright, unit tests, custom lints, carve-out
       # checks). Deterministic gate logic lives in the caller's script per

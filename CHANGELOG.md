@@ -1,5 +1,9 @@
 # Changelog
 
+### Actions — the reusable publish workflow can pin a Node runtime for the pre-publish gate
+
+The reusable `publish-plugin.yml` pinned only Python (`python-version`), so a node plugin's pre-publish gate (typecheck, tests) had nowhere to pin its runtime — it would have to run on the runner's unpinned system Node, a reproducibility regression `dependency-management` Pinning forbids. New optional `node-version` input sets up a pinned Node before the gate (mirrors `python-version`, `actions/setup-node@v7`, empty = no setup). This unblocks migrating node consumers (`tripit-api`) onto the canonical pipeline with their `node-version` pinned. Also corrects the stale `publish-mode` input description, which still named `tesslio/patch-version-publish` — both modes run through `smart-publish` since 0.3.158.
+
 ## 0.3.162 — 2026-08-17
 
 ### Fix — auto-bump computes the next version registry-aware, so a stale manifest cannot collide
