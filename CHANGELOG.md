@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.166 — 2026-08-18
+
 ### Fix — the moderation wait retries a transient `tessl api` blip instead of aborting
 
 `verify-moderation-cleared.sh` treated any non-zero `tessl api` exit as a terminal tool failure (exit 2) with no retry. During the 0.3.165 release the local tessl CLI — a version behind the registry's latest — intermittently exited non-zero on its version-check path, so the first moderation poll aborted the whole wait even though the release had published cleanly; an immediate re-run cleared on attempt 1. The script now retries a failed fetch inside its existing backoff loop up to `FETCH_RETRY_MAX` (default 3) consecutive times, resets the counter on any successful fetch, and escalates to exit 2 only on a persistent failure or budget exhaustion — a genuine tool/auth/network fault, distinguished from a momentary blip. The pending-poll and transient-retry paths now share one `advance_backoff` schedule rather than duplicating the sleep/backoff. New `VERIFY_MODERATION_FETCH_RETRY_MAX` override; five new tests (retry-to-cap, transient-then-success, cap override, budget-during-failure, env validation). Closes #304.
