@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.165 — 2026-08-18
+
 ### Fix — CHANGELOG entry length lives in one rule, and it is not a cap
 
 `context-artifacts.md` CHANGELOG Hygiene carried a line — "CHANGELOG is archive but bounded ... an entry can be one or two sentences when the broader context lives elsewhere" — that read as a per-entry length cap, while `context-writing-style.md` carves CHANGELOG out of the cutting discipline entirely and names it the destination for the motivation, incidents, and worked examples stripped from rules. Two loaded rules, opposite readings. On jbaruch/speaker-toolkit#326 the policy reviewer took the cap reading and posted four advisory findings asking that multi-paragraph entries be cut "to one or two sentences" — against a CHANGELOG whose 211 entries run a median of 16 non-blank lines, so 98% of the file was non-conforming under that reading (issue #302).
