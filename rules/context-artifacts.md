@@ -86,7 +86,7 @@ When you add, remove, or rename a rule or skill, update **all** of these:
 - **Without a stamp step:** authors write the `## <version> — <date>` heading manually above their entries
 - Never leave un-headed `### ` blocks expecting auto-stamping when no stamp step is wired
 - Consolidation groups related entries, collapses redundant detail, retains load-bearing facts (what changed, references)
-- CHANGELOG is archive but bounded — a PR's full motivation lives in the PR body and commit messages; an entry can be one or two sentences when the broader context lives elsewhere
+- Entry length and archive discipline follow `rules/context-writing-style.md`, never a per-entry sentence cap
 - Audit the top section for duplication — multiple PRs reworking the same rule become one entry with the final outcome
 
 ## Consistency Check
