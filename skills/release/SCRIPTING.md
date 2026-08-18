@@ -45,7 +45,11 @@ The workflow step must run BEFORE the publish step (`smart-publish`) so the stam
 
 ## Enrolling a repo in the publish pipeline (not an agent step)
 
-The publish workflow above is a thin caller of the canonical reusable pipeline (`.github/workflows/publish-plugin.yml`). Wiring a new plugin repo onto that pipeline — or migrating one off a bespoke `tesslio/patch-version-publish` workflow — is a documented maintainer step, not part of the release flow. The caller template, the input guide, the Dependabot pin renewal, and the migration procedure live in `docs/fleet-publish-setup.md` (repo-internal; `docs/` is `.tesslignore`d, so read it from the repo, not an install).
+The publish workflow above is a thin caller of the canonical reusable pipeline (`.github/workflows/publish-plugin.yml`). Wiring a new plugin repo onto that pipeline — or migrating one off a bespoke `tesslio/patch-version-publish` workflow — is a documented maintainer step, not part of the release flow. The caller template, the input guide, the Dependabot pin renewal, and the migration procedure live in the reference doc (repo-internal; `docs/` is `.tesslignore`d, so read it from the repo, not an install):
+
+```text
+docs/fleet-publish-setup.md
+```
 
 ## Why these gates have to be in the script, not just the skill prose
 
