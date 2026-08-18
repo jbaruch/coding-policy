@@ -78,7 +78,7 @@ point `pre-publish-script` at it:
 ```yaml
     with:
       pre-publish-script: scripts/pre-publish-checks.sh
-      python-version: '3.12.7'   # exact patch; renew per Freshness (see below)
+      python-version: '3.12.7'   # exact patch; review + bump monthly (see below)
 ```
 
 The script is self-contained — it runs before `setup-tessl`, so it must not assume tessl.
@@ -87,9 +87,10 @@ Set the toolchain the gate needs and the workflow pins it before your script run
 `'22.11.0'` for `npm ci && npm run typecheck && npm test`). Pin the **exact** version
 (`'3.12.7'`, `'22.11.0'`), never a floating series (`'3.12'`, `'22'`) or the runner's
 system/default toolchain — a floating or absent pin is an unpinned-dependency regression
-(`dependency-management` Pinning). No scanner tracks a `setup-*` version input, so
-document a renewal cadence beside it (`dependency-management` Freshness — the un-scanned
-pin case).
+(`dependency-management` Pinning). No scanner tracks a `setup-*` version input, so its
+renewal cadence is manual: review and bump the runtime pin **monthly** (or sooner when a
+security patch lands), and record that cadence in a comment beside the pin
+(`dependency-management` Freshness — the un-scanned pin case).
 
 ## Pin renewal (Dependabot)
 
