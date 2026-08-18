@@ -15,6 +15,8 @@ description: Prose discipline for rules, skills, and READMEs — what to cut, wh
 - CHANGELOG entries load only on demand, not always-on
 - CHANGELOG entries are the archive — they carry the motivation and incident references stripped from rules, and follow looser discipline
 - `What to Cut` and `Structure` do not govern CHANGELOG. `What to Cut` names CHANGELOG as where the stripped explanation goes; a connective ban there would leave it nowhere to live. The rule reaches CHANGELOG only to say what belongs in it
+- A CHANGELOG entry runs as long as its archive role needs, carrying the motivation, incidents, and worked examples stripped from rules
+- The only length bounds are no duplication across entries and no verbatim restatement of the PR body (see `rules/context-artifacts.md` CHANGELOG Hygiene)
 - Line-count and section-count budgets target single-concept rules; rules that cover one coherent policy area with several sub-aspects (e.g., `context-artifacts` covering structure/review/sync/audit; `skill-authoring` covering frontmatter/preamble/steps/calls) may run larger
 - Lists and quoted literals naming the forbidden terms themselves (e.g., this rule's own bullets enumerating the connectives and intensifiers) are not violations — the directive is the list, not prose use of the listed words
 

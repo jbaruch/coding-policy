@@ -1,5 +1,11 @@
 # Changelog
 
+### Fix — CHANGELOG entry length lives in one rule, and it is not a cap
+
+`context-artifacts.md` CHANGELOG Hygiene carried a line — "CHANGELOG is archive but bounded ... an entry can be one or two sentences when the broader context lives elsewhere" — that read as a per-entry length cap, while `context-writing-style.md` carves CHANGELOG out of the cutting discipline entirely and names it the destination for the motivation, incidents, and worked examples stripped from rules. Two loaded rules, opposite readings. On jbaruch/speaker-toolkit#326 the policy reviewer took the cap reading and posted four advisory findings asking that multi-paragraph entries be cut "to one or two sentences" — against a CHANGELOG whose 211 entries run a median of 16 non-blank lines, so 98% of the file was non-conforming under that reading (issue #302).
+
+The "bounded" clause was also redundant: its real intent — no duplication across entries, no verbatim restatement of the PR body — was already carried by the same section's Consolidation and "Audit the top section for duplication" bullets. Removed the cap-able line; CHANGELOG Hygiene now states only that the PR body and commit messages hold an entry's full motivation, that an entry need not reproduce it, and that entry length follows `context-writing-style.md`. `context-writing-style.md` gains the positive statement: an entry runs as long as its archive role needs, bounded only by no-duplication and no-verbatim-PR-restatement. Length discipline now lives in one rule (matching Rules Are Prose — one concept per file), and no sentence anywhere reads as a ceiling. No existing-CHANGELOG sweep needed: long entries become conforming rather than 98%-flagged.
+
 ## 0.3.164 — 2026-08-18
 
 ### Docs — a canonical fleet-publish enrollment reference
