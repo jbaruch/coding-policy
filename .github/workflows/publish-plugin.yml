@@ -160,12 +160,12 @@ jobs:
       # publish command's output so the confirm gate can NAME an out-of-credits
       # failure from the logs, not merely infer it from the org's live credit
       # balance (rules/ci-safety.md "Credits Never Block Publishing"). Handles
-      # both modes: auto-bump (--bump patch from the registry + a `Bump … [skip
-      # ci]` manifest commit-back per the publish-pipeline loop-prevention
-      # carve-out, mirroring patch-version-publish) and as-is (manifest version
-      # verbatim, no bump, no commit-back — a missing human bump surfaces as a
-      # red `version already exists`). Sibling action referenced by full path
-      # @main (same-repo reusable-workflow carve-out).
+      # both modes: auto-bump (compute the registry-aware next version + a `Bump
+      # … [skip ci]` manifest commit-back per the publish-pipeline loop-
+      # prevention carve-out) and as-is (manifest version verbatim, no bump, no
+      # commit-back — a missing human bump surfaces as a red `version already
+      # exists`). Sibling action referenced by full path @main (same-repo
+      # reusable-workflow carve-out).
       #
       # continue-on-error: a post-publish out-of-credits exit lands the artifact
       # then exits non-zero. Do NOT let that red the job here — the confirm gate
