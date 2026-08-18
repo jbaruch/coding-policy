@@ -1,5 +1,9 @@
 # Changelog
 
+### Docs — a canonical fleet-publish enrollment reference
+
+Wiring a plugin repo onto the reusable publish pipeline (`.github/workflows/publish-plugin.yml`) was tribal knowledge — copied by hand from whatever sibling repo the author happened to look at, which is how ~11 repos ended up still on bespoke `tesslio/patch-version-publish` workflows after the `#206` unification. `onboard-repo` only wires the review side (single concern by design), so publish enrollment had no owner. New `docs/fleet-publish-setup.md` (repo-internal, `.tesslignore`d) is the canonical reference: the thin-caller template, the input guide (`publish-mode`, `stamp-changelog`, `pre-publish-script`, `python-version`, `node-version`, `skills-dir`, `skill-review-credit-outage`), the Dependabot pin-renewal snippet, the migration procedure off a bespoke `patch-version-publish` workflow, and the node-gate rule (a node gate pins its runtime via `node-version`). Referenced from `skills/release/SCRIPTING.md`.
+
 ## 0.3.163 — 2026-08-18
 
 ### Actions — the reusable publish workflow can pin a Node runtime for the pre-publish gate
