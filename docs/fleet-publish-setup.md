@@ -61,6 +61,7 @@ name. `Review & Publish Plugin` is the fleet default for new repos.
 | `stamp-changelog` | `false` | The repo keeps a `CHANGELOG.md` with un-headed `### ` blocks a PR adds. Set `true` to stamp the `## <version> — <date>` heading before publish. |
 | `pre-publish-script` | `''` | The repo has its own gates (typecheck, tests, carve-out checks). Point at one bash script — see below. |
 | `python-version` | `''` | The pre-publish gate needs a pinned Python interpreter. Sets up Python before the gate. |
+| `node-version` | `''` | The pre-publish gate needs a pinned Node runtime. Sets up Node before the gate. |
 | `skills-dir` | `skills` | The repo's skills live somewhere other than `skills/`. |
 | `skill-review-credit-outage` | `fail` | Set `skip` to opt into publishing an unreviewed skill during a tessl out-of-credits (403) outage (context-artifacts Credit-Outage Review Carve-Out). Every other review failure still hard-fails. |
 
@@ -81,12 +82,11 @@ point `pre-publish-script` at it:
 ```
 
 The script is self-contained — it runs before `setup-tessl`, so it must not assume tessl.
-For a **Python** gate, set `python-version` and the workflow sets the interpreter up for
-you. For a **node** gate there is no `node-version` input today: the workflow pins only
-Python. A node project either runs its `npm ci && npm run typecheck && npm test` against
-the runner's system/`nvm` node inside the script (unpinned), or the reusable workflow
-gains a `node-version` input first. Do not silently regress a pinned toolchain — decide
-that trade-off explicitly.
+Set the toolchain the gate needs and the workflow pins it before your script runs: a
+**Python** gate sets `python-version`, a **node** gate sets `node-version` (e.g. `'22'`
+for `npm ci && npm run typecheck && npm test`). Always pin the version — never run the
+gate against the runner's system/default toolchain, which is an unpinned-dependency
+regression (`dependency-management` Pinning).
 
 ## Pin renewal (Dependabot)
 
@@ -122,8 +122,13 @@ replaces that with `smart-publish` + the landed-gate reconciliation. Per repo:
 3. Open the change as its own PR **scoped as a CI change** — the PR title/body being an
    explicit CI-config change is the approval artifact (`rules/ci-safety.md` Hands Off CI
    Config forbids only *unannounced* CI edits).
-4. After merge, watch the first publish run to terminal state and confirm the registry
-   advanced — the reusable pipeline's own publish is the end-to-end test.
+4. After merge, confirm the first publish via the full release contract, not "it ran" —
+   `rules/ci-safety.md` Always Watch CI requires the whole ordered conjunction:
+   - Capture the registry's `Latest Version` as a baseline **before** the merge.
+   - Resolve the run by merge-commit SHA + `push` event (`skills/release/resolve-publish-run.sh`), watch it to terminal state, and require `conclusion == success`.
+   - Confirm the registry advanced past the baseline (`skills/release/verify-publish-landed.sh`).
+   - Confirm the published version's moderation cleared to `pass` (`skills/release/verify-moderation-cleared.sh`).
+   Report the migration confirmed only when all three hold. See `skills/release/SKILL.md` Step 7 for the agent-executable form.
 
 ## When NOT to use it
 
