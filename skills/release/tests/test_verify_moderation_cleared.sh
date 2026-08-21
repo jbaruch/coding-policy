@@ -23,6 +23,10 @@
 #   9d. Persistent failure to budget — a high cap lets the budget stop the
 #       retries; still exit 2 (tool failure), never rc 1.
 #  10. Unparseable body — no moderation fields exits 2.
+#  15. Subprocess run — the script spawned as its own process, so its
+#      `set -euo pipefail` is live, polls the whole budget and emits the
+#      JSON envelope (issue #306); every sourced case runs with `set +e`,
+#      the exact condition that hid a backoff abort.
 #
 # Approach mirrors test_resolve_publish_run.sh: source the script (the
 # main() guard prevents auto-run when sourced) and override `tessl` and
@@ -348,6 +352,48 @@ if [[ $rc -eq 2 ]] && [[ "$err" == *"response shape may have changed"* ]]; then
   pass "wrong shape (.data.attributes string): shape-changed diagnostic"
 else
   fail "wrong shape .attributes string (rc=$rc err=$err)"
+fi
+
+# --- 15. Subprocess run: backoff under the script's own `set -euo pipefail` ---
+# Every case above SOURCES the script and then runs `set +e`, which is exactly
+# the condition that hid issue #306: `advance_backoff` ended with a
+# `(( ... )) && delay=...` list whose false status became the function's return
+# status, and under a live `-e` that killed the script at the FIRST backoff —
+# one poll, empty stdout, rc 1, the code the contract reserves for a real
+# moderation finding. Spawn the script so its own `-e` is live and assert the
+# full schedule ran: base 1, cap 8 => sleeps 1,2,4,8 with the 5th check
+# stopping because another 8 would pass the 20s budget => attempts 5,
+# elapsed 15, and a parseable envelope on stdout.
+STUB_BIN="$TMPDIR_TEST/bin"
+if ! mkdir -p "$STUB_BIN"; then
+  echo "fatal: cannot create stub bin dir $STUB_BIN" >&2; exit 2
+fi
+# An always-pending registry and a no-op sleep, as real executables: a
+# subprocess resolves `tessl`/`sleep` through PATH. The assertions read the
+# script's OWN attempt/elapsed counters, so they hold whether the child picks
+# up these stubs or the exported mock functions above.
+cat > "$STUB_BIN/tessl" <<'STUB'
+#!/usr/bin/env bash
+printf '{"data":{"attributes":{"moderationStatus":"pending","moderationError":null}}}'
+STUB
+cat > "$STUB_BIN/sleep" <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+if ! chmod +x "$STUB_BIN/tessl" "$STUB_BIN/sleep"; then
+  echo "fatal: cannot make the stubs in $STUB_BIN executable" >&2; exit 2
+fi
+reset_mocks
+queue 1 "$(body_json pending '' '')"
+out=$( PATH="$STUB_BIN:$PATH" \
+       VERIFY_MODERATION_BASE_DELAY_SEC=1 \
+       VERIFY_MODERATION_MAX_DELAY_SEC=8 \
+       VERIFY_MODERATION_BUDGET_SEC=20 \
+       bash "$SCRIPT" acme widget 1.2.3 2>/dev/null ); rc=$?
+if [[ $rc -eq 1 ]] && echo "$out" | jq -e '.ok == false and .attempts == 5 and .elapsed_seconds == 15' >/dev/null 2>&1; then
+  pass "subprocess run: polls the whole budget, emits the JSON envelope on rc 1"
+else
+  fail "subprocess run (rc=$rc out=$out)"
 fi
 
 echo

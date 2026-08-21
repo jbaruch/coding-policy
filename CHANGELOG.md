@@ -1,5 +1,11 @@
 # Changelog
 
+### Fix — the moderation backoff no longer aborts the wait after one poll
+
+`verify-moderation-cleared.sh`'s `advance_backoff` ended with `(( delay > MAX_DELAY_SEC )) && delay="$MAX_DELAY_SEC"`. Below the cap — every attempt until the cap is reached — the arithmetic evaluates false, the `&&` short-circuits, and that status becomes the function's return status because the list is its last command. The `&&` list itself is exempt from `set -e`; the two call sites are plain simple commands and are not, so the script died at the first backoff: one poll instead of the whole budget, empty stdout, exit 1 — the code the contract reserves for a real moderation finding, leaving a caller nothing to parse and no diagnostic on stderr. A version still pending on the very first check, which is the normal state right after a publish, reported "not cleared" (issue #306).
+
+Fixed with the `if` form, so the function's status is structurally 0 rather than resting on a trailing statement nobody may notice is load-bearing — the same reasoning as the `return 0` ending the EXIT-trap handlers. The blind spot that let it ship: every case in `test_verify_moderation_cleared.sh` sources the script and then runs `set +e`, the exact condition under which the bug is invisible, and the budget-exhausted case asserts rc 1, which the broken path also returned. New case 15 spawns the script as its own process against PATH-stubbed `tessl`/`sleep` so its own `set -euo pipefail` is live, asserting the full schedule ran (5 checks, 15s elapsed, parseable envelope on stdout) rather than the exit code alone. A sibling audit of every `.sh` under `skills/`, `.github/`, and `hooks/` found no other guarded assignment landing as a function's last command.
+
 ## 0.3.166 — 2026-08-18
 
 ### Fix — the moderation wait retries a transient `tessl api` blip instead of aborting
