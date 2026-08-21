@@ -1,5 +1,9 @@
 # Changelog
 
+### Actions — the missing-script guards name a remedy
+
+Five composite-action guards said what broke and stopped there: "<script> not found at <path> — the coding-policy action repo did not check out fully." A consumer reading that in a red publish log learns nothing it can act on, which `error-handling.md` Actionable Messages forbids. Each now names the fix: verify the pinned `jbaruch/coding-policy/.github/actions/<action>@<ref>` carries the script under `skills/release/`, and bump the ref if it is stale — the actual cause, since a stale pin at a ref predating the script is how this fires in practice. `stamp-changelog` (both guards, the pair issue #288 raised as a deferred advisory from #286) plus the three siblings carrying the identical message, found by grepping for it: `publish-landed-gate` (two) and `smart-publish` (one).
+
 ### Fix — the session-start hooks say what they actually do
 
 Three deferred Copilot advisories from #290, folded in per `review-severity.md` rather than shipped as their own re-review round (issue #291).

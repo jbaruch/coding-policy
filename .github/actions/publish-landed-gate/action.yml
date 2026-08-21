@@ -131,7 +131,7 @@ runs:
           capture)
             registry_script="$script_dir/registry-version.sh"
             if [ ! -f "$registry_script" ]; then
-              echo "::error::publish-landed-gate: registry-version.sh not found at $registry_script — the coding-policy action repo did not check out fully." >&2
+              echo "::error::publish-landed-gate: registry-version.sh not found at $registry_script — verify the pinned jbaruch/coding-policy/.github/actions/publish-landed-gate@<ref> in this workflow points at a ref that carries skills/release/registry-version.sh, and bump the ref if it is stale." >&2
               exit 1
             fi
             # registry-version.sh emits {"version":"x.y.z"} or {"version":null}.
@@ -147,7 +147,7 @@ runs:
           confirm)
             confirm_script="$script_dir/confirm-publish-landed.sh"
             if [ ! -f "$confirm_script" ]; then
-              echo "::error::publish-landed-gate: confirm-publish-landed.sh not found at $confirm_script — the coding-policy action repo did not check out fully." >&2
+              echo "::error::publish-landed-gate: confirm-publish-landed.sh not found at $confirm_script — verify the pinned jbaruch/coding-policy/.github/actions/publish-landed-gate@<ref> in this workflow points at a ref that carries skills/release/confirm-publish-landed.sh, and bump the ref if it is stale." >&2
               exit 1
             fi
             if [ -z "$PUBLISH_OUTCOME" ]; then
