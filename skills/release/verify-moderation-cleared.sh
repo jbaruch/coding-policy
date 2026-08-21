@@ -126,7 +126,16 @@ advance_backoff() {
   sleep "$delay"
   elapsed=$(( elapsed + delay ))
   delay=$(( delay * 2 ))
-  (( delay > MAX_DELAY_SEC )) && delay="$MAX_DELAY_SEC"
+  # `if`, not `(( ... )) && delay=...`: below the cap — every attempt until the
+  # cap is reached — the arithmetic is false, and as the function's LAST command
+  # that false becomes advance_backoff's return status. Both call sites are
+  # plain simple commands, so `set -e` killed the script on the first backoff:
+  # the wait ended after ONE poll, stdout empty, rc 1 — the code the contract
+  # reserves for a real moderation finding (issue #306). The `if` form makes the
+  # status structurally 0 instead of resting on a trailing statement.
+  if (( delay > MAX_DELAY_SEC )); then
+    delay="$MAX_DELAY_SEC"
+  fi
 }
 
 main() {

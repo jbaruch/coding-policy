@@ -6,7 +6,10 @@
 #   - main() verifies the request from the mutation's OWN returned review
 #     requests, not the REST `requested_reviewers` field that omits bot
 #     reviewers (#276) — a bot-only reviewer list must verify clean, the case
-#     the earlier suite never exercised, which let the REST-verify bug ship.
+#     the earlier suite never exercised, which let the REST-verify bug ship;
+#   - the mutation runs in union mode (#297) — replace mode reports success and
+#     lands nothing for a bot-only request, so only the query TEXT can catch it;
+#   - a terminal retry failure surfaces the GraphQL error (#297).
 #
 # Approach: source the script (its main() guard prevents auto-run when
 # sourced) and override `gh` with a shell function that returns
@@ -121,6 +124,12 @@ _main_gh_mock() {
   done
   local fixture
   if [[ "$query" == *requestReviews* ]]; then
+    # MUT_FAIL_ALWAYS fails BOTH attempts, so the retry path is terminal — the
+    # only path whose diagnostic has to carry the GraphQL error text.
+    if [[ -n "${MUT_FAIL_ALWAYS:-}" ]]; then
+      echo "mock gh: GraphQL: Could not resolve to a node with the global id of 'BOT_stale'" >&2
+      return 1
+    fi
     if [[ -n "${MUT_FAIL_ONCE:-}" && ! -f "${MUT_FAIL_FLAG:-/nonexistent}" ]]; then
       : > "${MUT_FAIL_FLAG}"
       echo "mock gh: requestReviews rejected the botId" >&2
@@ -249,6 +258,56 @@ t_main_falls_back_on_rejected_pinned_id() {
     || { echo "    FAIL: expected the discovered bot id in the output: $out" >&2; return 1; }
 }
 
+# #297: without `union: true` the mutation runs in replace mode, which returns
+# success and lands nothing for a bot-only request — `reviewRequests` comes
+# back empty and the script exits 1 on every invocation against a valid bot ID.
+# A mocked response cannot reproduce that, so assert the query TEXT: the mode
+# is the contract here, and it is invisible everywhere else.
+t_mutation_runs_in_union_mode() {
+  local query_file query
+  query_file=$(mktemp) || { echo "    FAIL: mktemp failed" >&2; return 1; }
+  (
+    # shellcheck disable=SC2317  # gh() runs indirectly through the sourced request_with_bot_id
+    gh() {
+      local q=""
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          -f) q="${2#query=}"; shift 2 ;;
+          *)  shift ;;
+        esac
+      done
+      printf '%s' "$q" > "$query_file"
+      echo '[]'
+    }
+    request_with_bot_id "PR_kwDOX" "BOT_kgDOCnlnWA" >/dev/null
+  )
+  query=$(cat "$query_file")
+  rm -f "$query_file"
+  case "$query" in
+    *"union: true"*) return 0 ;;
+    *) echo "    FAIL: requestReviews mutation is missing 'union: true': ${query}" >&2; return 1 ;;
+  esac
+}
+
+# #297: both attempts discarded the mutation's stderr, so a terminal failure
+# reported only "request failed with discovered bot ID X" — indistinguishable
+# between a rejected bot ID and an auth or network fault. The retry path now
+# captures and surfaces the GraphQL error.
+t_main_surfaces_mutation_error_on_terminal_failure() {
+  local err rc
+  err=$(
+    # shellcheck disable=SC2317  # gh() runs indirectly through the sourced main(); shellcheck cannot trace the call
+    gh() { _main_gh_mock "$@"; }
+    MUT_FAIL_ALWAYS=1 \
+    DISCOVER_FIXTURE='{"data":{"repository":{"pullRequests":{"nodes":[{"reviews":{"nodes":[{"author":{"id":"BOT_discovered","login":"copilot-pull-request-reviewer"}}]}}]}}}}' \
+      main owner repo 5 2>&1 >/dev/null
+  )
+  rc=$?
+  assert_eq "exit code" "1" "$rc" || return 1
+  [[ "$err" == *"Could not resolve to a node"* ]] \
+    || { echo "    FAIL: stderr missing the GraphQL error text: $err" >&2; return 1; }
+}
+
 # --- driver ---
 
 echo "== request-copilot-review.sh tests =="
@@ -261,6 +320,8 @@ run "discover_copilot_bot_id returns empty when no Copilot review"   t_discover_
 run "main verifies a bot-only reviewer list clean (#276)"           t_main_verifies_bot_only_reviewers
 run "main fails when Copilot is absent from the mutation response"   t_main_fails_when_copilot_absent
 run "main falls back to discovery on a rejected pinned bot ID"       t_main_falls_back_on_rejected_pinned_id
+run "requestReviews mutation runs in union mode (#297)"              t_mutation_runs_in_union_mode
+run "main surfaces the GraphQL error on a terminal failure (#297)"   t_main_surfaces_mutation_error_on_terminal_failure
 
 echo "== summary: ${PASS_COUNT} passed, ${FAIL_COUNT} failed =="
 [[ "$FAIL_COUNT" -eq 0 ]]

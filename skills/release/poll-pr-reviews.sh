@@ -82,15 +82,38 @@ COPILOT_REVIEW_LOGIN="copilot-pull-request-reviewer[bot]"
 CODEX_COMMENT_LOGINS=("github-actions[bot]" "coding-policy-fleet-reviewer[bot]")
 COPILOT_COMMENT_LOGINS=("Copilot" "copilot-pull-request-reviewer[bot]")
 
-# `--paginate` is mandatory: GitHub's default per-page is 30, and a PR
-# with more than that many reviews/comments would otherwise return only
-# the first page. The script's `last` filter would then pick the last
-# entry on page 1 — not the actual latest review — and the gate could
-# approve a merge against stale data. `--jq` is incompatible with
-# `--paginate` here (it applies per page, not across the stream), so
-# pipe the raw paginated output through `jq -s 'add | ...'` to slurp
-# every page into one array before filtering. `per_page=100` is the API
-# maximum and keeps request volume bounded.
+# Slurp a paginated `gh api` array into one JSON array, dropping any element
+# that is not an object. A degraded or partial response can carry a string
+# element where an object belongs; indexing it (`.in_reply_to_id`,
+# `.user.login`) aborts jq mid-filter and fails the whole poll, which
+# watch-pr-reviews.sh then burns its full attempt budget on and reports as
+# `pending_at_budget` — "no reviewer posted" when the truth is "the tool
+# broke" (issue #300). A non-object element carries neither a verdict nor a
+# comment, so dropping it loses nothing; the warning keeps the drop visible
+# rather than silent (rules/error-handling.md — best-effort work that
+# continues past a failure warns, never nothing).
+#
+# `--paginate` is mandatory: GitHub's default per-page is 30, and a PR with
+# more than that many reviews/comments would otherwise return only the first
+# page. `--jq` is incompatible with `--paginate` here (it applies per page,
+# not across the stream), so slurp every page into one array with `jq -s`
+# before filtering. `per_page=100` is the API maximum and keeps request
+# volume bounded.
+slurp_api_array() {
+  local endpoint="$1" what="$2" payload malformed
+  payload=$(gh api --paginate "$endpoint" | jq -s '(add // [])') \
+    || { echo "error: failed to fetch ${what} from ${endpoint}" >&2; return 1; }
+  malformed=$(printf '%s' "$payload" | jq '[.[] | select(type != "object")] | length') \
+    || { echo "error: failed to inspect the ${what} payload from ${endpoint}" >&2; return 1; }
+  if (( malformed > 0 )); then
+    echo "warning: ${endpoint} returned ${malformed} non-object element(s) in the ${what} payload — dropped; re-run poll-pr-reviews.sh if the snapshot looks wrong, and inspect the response with 'gh api --paginate ${endpoint}' if it persists" >&2
+  fi
+  printf '%s' "$payload" | jq '[.[] | select(type == "object")]'
+}
+
+# Missing a page would let the `last` filter pick the last entry on page 1 —
+# not the actual latest review — and the gate could approve a merge against
+# stale data; slurp_api_array above owns the pagination.
 # Variadic on login so one reviewer's multiple identities collapse to a single
 # verdict — the policy reviewer is `github-actions[bot]` on coding-policy's own
 # PRs and `coding-policy-fleet-reviewer[bot]` on consumer repos (see the login
@@ -110,10 +133,9 @@ latest_review_by() {
   local logins_json
   logins_json=$(jq -n '$ARGS.positional' --args "$@") \
     || { echo "error: failed to encode login list for review lookup" >&2; return 1; }
-  gh api --paginate "repos/${owner}/${repo}/pulls/${pr}/reviews?per_page=100" \
-    | jq -s --argjson logins "$logins_json" '
-        (add // [])
-        | [.[] | select(.user.login | IN($logins[]))]
+  slurp_api_array "repos/${owner}/${repo}/pulls/${pr}/reviews?per_page=100" "review" \
+    | jq --argjson logins "$logins_json" '
+        [.[] | select(.user.login | IN($logins[]))]
         | (group_by(.user.login) | map(max_by(.submitted_at))) as $per_login_latest
         | ( ($per_login_latest | map(select(.state == "CHANGES_REQUESTED")) | first)
             // ($per_login_latest | sort_by(.submitted_at) | last) )
@@ -158,10 +180,9 @@ toplevel_comments_by() {
   local logins_json
   logins_json=$(jq -n '$ARGS.positional' --args "$@") \
     || { echo "error: failed to encode login list for comment count" >&2; return 1; }
-  gh api --paginate "repos/${owner}/${repo}/pulls/${pr}/comments?per_page=100" \
-    | jq -s --argjson logins "$logins_json" '
-        (add // [])
-        | [.[] | select(.in_reply_to_id == null) | select(.user.login | IN($logins[]))]
+  slurp_api_array "repos/${owner}/${repo}/pulls/${pr}/comments?per_page=100" "inline comment" \
+    | jq --argjson logins "$logins_json" '
+        [.[] | select(.in_reply_to_id == null) | select(.user.login | IN($logins[]))]
         | length'
 }
 
