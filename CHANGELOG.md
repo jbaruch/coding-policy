@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.167 — 2026-08-21
+
 ### Fix — the Copilot review request runs in union mode, so it actually lands
 
 `request-copilot-review.sh` sent `requestReviews` without `union: true`. In replace mode the mutation returns success and the bot request never lands: `reviewRequests` comes back empty, the script's own verification finds no Copilot, and it exits 1 — on every invocation, against a correct pinned bot ID. Reproduced twice in a row on `jbaruch/nanoclaw-admin#503`; the identical call WITH `union: true` landed Copilot on the first try. Same silent-drop family as the REST endpoint the script's header already warned about, and replace mode would additionally clear any reviewer already requested on the PR (issue #297). The canonical form in `jbaruch/nanoclaw`'s `ship-code` skill has carried `union: true` all along.
