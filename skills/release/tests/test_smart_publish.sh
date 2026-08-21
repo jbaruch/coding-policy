@@ -409,6 +409,31 @@ assert d["outcome"]=="success" and d["landed_after_error"] is True and d["credit
     || { echo "    FAIL: unexpected JSON: $out" >&2; return 1; }
 }
 
+# version_exists must answer "unknown" — never "false" — for a payload it
+# cannot read as an explicit boolean. "false" on the PRE-publish probe is
+# fail-OPEN: it asserts the version was absent beforehand, which is the
+# precondition that enables the landed-after-error tolerance. Sourcing the
+# script (its main() guard keeps main from running) exposes the helper, and
+# pointing _sp_dir at a stub replaces the probe it shells out to.
+t_version_exists_answers_unknown_for_a_non_boolean_payload() {
+  local stub_dir="$TESTTMP/rhv-stub"
+  mkdir -p "$stub_dir" || { echo "    FAIL: cannot create $stub_dir" >&2; return 1; }
+  # Parseable JSON, exit 0, but no boolean `exists`.
+  cat > "$stub_dir/registry-has-version.sh" <<'STUB'
+#!/usr/bin/env bash
+echo '{"version":"0.1.1"}'
+STUB
+  local out
+  out="$(
+    source "$SCRIPT" || true
+    set +e
+    _sp_dir="$stub_dir"
+    version_exists ws slug 0.1.1 "probe" 2>/dev/null
+  )"
+  [[ "$out" == "unknown" ]] \
+    || { echo "    FAIL: expected 'unknown' for a non-boolean payload, got '${out}'" >&2; return 1; }
+}
+
 # The tolerance is a CLOSED allowlist of terminal failures (the signature
 # constants at the top of smart-publish.sh), not "any failure whose version
 # turns up". An unrelated failure stays RED even when the exact version appears
@@ -523,6 +548,7 @@ main() {
   run "as-is landed-after-error greens without a commit"         t_asis_landed_after_error_greens_without_commit
   run "a pre-existing version earns no landed tolerance"         t_preexisting_version_earns_no_tolerance
   run "an unrelated failure stays red even if the version appears" t_unrelated_failure_stays_red_even_if_version_appears
+  run "version_exists answers unknown for a non-boolean payload" t_version_exists_answers_unknown_for_a_non_boolean_payload
   echo "== summary: ${PASS_COUNT} passed, ${FAIL_COUNT} failed =="
   [[ "$FAIL_COUNT" -eq 0 ]]
 }

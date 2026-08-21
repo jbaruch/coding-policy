@@ -288,11 +288,15 @@ version_exists() { # <workspace> <plugin> <version> <context-for-diagnostics>
     printf 'unknown'
     return 0
   fi
-  # registry-has-version.sh guarantees a well-formed {"exists":bool} on exit 0;
-  # an unparseable result is still "unknown", never a silent true
+  # registry-has-version.sh guarantees a well-formed {"exists":bool} on exit 0.
+  # Anything else is "unknown" — including JSON that PARSES but carries no
+  # explicit boolean. Reading such a payload as "false" would be fail-OPEN on
+  # the pre-publish probe below: "false" there asserts the version was absent
+  # beforehand, which is the precondition that ENABLES the landed-after-error
+  # tolerance. Only an explicit true or false is an answer
   # (rules/error-handling.md — a tool failure is not a result).
   local parsed="" parse_rc=0
-  parsed="$(printf '%s' "$json" | python3 -c 'import json,sys;print("true" if json.load(sys.stdin).get("exists") is True else "false")')" || parse_rc=$?
+  parsed="$(printf '%s' "$json" | python3 -c 'import json,sys;v=json.load(sys.stdin).get("exists");print("true" if v is True else "false" if v is False else "unknown")')" || parse_rc=$?
   if [[ $parse_rc -ne 0 ]]; then
     echo "smart-publish: warning: ${ctx}: registry-has-version.sh returned unparseable JSON (${json}) — treating the answer as unknown." >&2
     printf 'unknown'
