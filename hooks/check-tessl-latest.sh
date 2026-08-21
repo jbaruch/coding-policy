@@ -23,10 +23,14 @@
 # Contract:
 #   stdin : consensus SessionStart JSON — not read.
 #   stdout: on a consumer repo, one JSON object {"additionalContext": "<status>"}
-#           whose text begins with "Session-start status — versions: ". A
-#           non-consumer (no manifest, or no jbaruch/* deps) emits nothing.
-#   exit  : always 0. Best-effort failures warn to stderr and still emit the
-#           status (rules/error-handling.md Shell Error Handling).
+#           whose text begins with "Session-start status — versions: ".
+#           Three cases emit nothing at all: no manifest (not a consumer), no
+#           jbaruch/* dependency, and an unparseable manifest (warned to stderr,
+#           no status — there is no dependency list to report on).
+#   exit  : always 0. A best-effort failure that still leaves something to
+#           report — a failed `tessl update`, a missing jq, an unreadable
+#           resolved-state file — warns to stderr AND emits the status, which
+#           names the degradation (rules/error-handling.md Shell Error Handling).
 #   env   : TESSL_LATEST_MANIFEST (manifest path, default tessl.json),
 #           TESSL_STATE_DIR (resolved-state dir, default .tessl).
 set -euo pipefail
@@ -39,16 +43,22 @@ warn() { printf 'check-tessl-latest: %s\n' "$1" >&2; }
 # install-pending). An existing but unreadable or unparseable file is a tool
 # failure: warn, never swallow it as an absent-file non-result
 # (rules/error-handling.md — distinguish a non-result from a tool failure).
+#
+# The exit status separates the two empty-output cases so the caller can label
+# them differently: 0 = read it, or the dep is simply not resolved yet;
+# 3 = the file is there and broken. Both print nothing, and a status line
+# reading "(install pending)" for a broken file would report a tool failure as
+# a routine not-installed-yet state.
 installed_version() { # <state-dir> <dep-name>
   local pkg="$1/plugins/$2/tessl-package.json" v
   [[ -e "$pkg" ]] || return 0
   if [[ ! -r "$pkg" ]]; then
     warn "resolved-state file ${pkg} is unreadable — check permissions on the .tessl/ tree"
-    return 0
+    return 3
   fi
   if ! v="$(jq -r '.version // empty' "$pkg" 2>/dev/null)"; then
     warn "could not parse ${pkg} — check it is valid JSON"
-    return 0
+    return 3
   fi
   printf '%s' "$v"
 }
@@ -91,11 +101,13 @@ main() {
   # No jbaruch/* deps => nothing first-party to report. Silent no-op.
   (( ${#names[@]} > 0 )) || return 0
 
-  # Installed versions BEFORE the update.
-  local -a before=() after=()
-  local i
+  # Installed versions BEFORE the update. A broken state file (rc 3) reads the
+  # same as an absent one here — it only changes the label of the CURRENT state.
+  local -a before=() after=() after_broken=()
+  local i rc
   for (( i = 0; i < ${#names[@]}; i++ )); do
-    before[i]="$(installed_version "$state_dir" "${names[i]}")"
+    rc=0
+    before[i]="$(installed_version "$state_dir" "${names[i]}")" || rc=$?
   done
 
   # Run `tessl update --yes` best-effort. A missing CLI or a non-zero exit never
@@ -111,9 +123,13 @@ main() {
     [[ -n "$update_reason" ]] || update_reason="tessl update exited non-zero"
   fi
 
-  # Installed versions AFTER the update.
+  # Installed versions AFTER the update. Here rc 3 is retained: a state file that
+  # exists but cannot be read leaves the version genuinely unknown, which the
+  # status must not report as "install pending".
   for (( i = 0; i < ${#names[@]}; i++ )); do
-    after[i]="$(installed_version "$state_dir" "${names[i]}")"
+    rc=0
+    after[i]="$(installed_version "$state_dir" "${names[i]}")" || rc=$?
+    if (( rc == 3 )); then after_broken[i]=1; else after_broken[i]=0; fi
   done
 
   # Report order: jbaruch/coding-policy first, then the rest in manifest order.
@@ -130,7 +146,9 @@ main() {
   local idx b a seg
   for idx in "${order[@]}"; do
     b="${before[idx]}"; a="${after[idx]}"
-    if [[ -z "$a" ]]; then
+    if (( after_broken[idx] )); then
+      seg="${names[idx]} (version unknown — .tessl/ state file unreadable or invalid; check permissions and JSON validity, then re-run \`tessl install\`)"
+    elif [[ -z "$a" ]]; then
       seg="${names[idx]} (install pending)"
     elif [[ "$b" == "$a" ]]; then
       # A failed update never verified freshness — do not claim "latest".

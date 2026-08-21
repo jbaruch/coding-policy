@@ -209,7 +209,9 @@ main() {
       fi
     fi
     # A fetch failure (offline, auth, timeout) is a no-op, not a broken session —
-    # warn and fall through to compare against the last-known origin ref.
+    # warn and let the unverified-sync branch below report it. Comparing against
+    # a remote-tracking ref no fetch refreshed would risk a false "in sync"
+    # (rules/sync-before-work.md Staleness Poisons Conclusions).
     "${fetch[@]}" 2>/dev/null || {
       warn "git fetch origin failed or timed out — check connectivity; cannot verify sync against a current origin/${db}"
       fetch_failed=1

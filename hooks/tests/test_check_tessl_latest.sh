@@ -18,8 +18,12 @@
 #   7. no manifest     -> silent no-op, exit 0.
 #   8. third-party only -> silent (no jbaruch/* deps), exit 0.
 #   9. malformed JSON   -> silent no-op, exit 0 (never aborts SessionStart).
-#  10. unreadable state -> warns to stderr (existing-but-unreadable is a tool
-#                          failure, not an absent-file non-result), exit 0.
+#  10. unreadable state -> warns to stderr AND labels the dep "version unknown"
+#                          rather than "(install pending)" (existing-but-broken
+#                          is a tool failure, not an absent-file non-result),
+#                          exit 0.
+#  11. unparseable state -> same label from invalid JSON in the state file, no
+#                          chmod needed so it runs as root too.
 #
 # The harness drops `set -e` to aggregate results, so every fixture-setup command
 # is checked explicitly and aborts with a fatal diagnostic on failure
@@ -157,18 +161,36 @@ STUB
 
   # 10. unreadable resolved-state file: an existing but unreadable tessl-package
   #     .json is a tool failure, not an absent-file non-result — the hook warns
-  #     to stderr and still exits 0 (distinguished from case 5's absent file,
-  #     which is silent). Skipped as root: chmod 000 does not bind root.
+  #     to stderr, labels the dep "version unknown", and still exits 0. The
+  #     label is the user-facing half: "(install pending)" here would report a
+  #     broken state file as a routine not-installed-yet state (case 5), which
+  #     is the one thing the stderr warning cannot correct. Skipped as root:
+  #     chmod 000 does not bind root.
   if [[ "$(id -u)" -ne 0 ]]; then
     local m10="$TMP/m10.json" s10="$TMP/s10" errU pkg10
     printf '{"dependencies":{"jbaruch/coding-policy":{"version":"latest"}}}\n' > "$m10" || die "write m10 failed"
     seed_pkg "$s10" "jbaruch/coding-policy" "0.3.147"
     pkg10="$s10/plugins/jbaruch/coding-policy/tessl-package.json"
     chmod 000 "$pkg10" || die "chmod 000 $pkg10 failed"
-    errU="$(env "PATH=$STUBBIN:$PATH" TESSL_LATEST_MANIFEST="$m10" TESSL_STATE_DIR="$s10" bash "$SCRIPT" </dev/null 2>&1 >/dev/null)"; RC=$?
-    if [[ $RC -eq 0 ]] && printf '%s' "$errU" | grep -q "unreadable"; then
-      pass; else fail "unreadable state file: expected 'unreadable' warning + exit 0, got RC=$RC err=$errU"; fi
+    OUT="$(env "PATH=$STUBBIN:$PATH" TESSL_LATEST_MANIFEST="$m10" TESSL_STATE_DIR="$s10" bash "$SCRIPT" </dev/null 2>"$TMP/err10")"; RC=$?
+    errU="$(cat "$TMP/err10")" || die "read $TMP/err10 failed"
+    if [[ $RC -eq 0 ]] && printf '%s' "$errU" | grep -q "unreadable" \
+       && has "version unknown" && ! has "install pending"; then
+      pass; else fail "unreadable state file: expected 'unreadable' warning + 'version unknown' label, got RC=$RC err=$errU OUT=$OUT"; fi
   fi
+
+  # 11. unparseable resolved-state file: valid permissions, invalid JSON. Same
+  #     "version unknown" label, and no chmod, so this case also runs as root.
+  local m11="$TMP/m11.json" s11="$TMP/s11" err11 pkg11
+  printf '{"dependencies":{"jbaruch/coding-policy":{"version":"latest"}}}\n' > "$m11" || die "write m11 failed"
+  seed_pkg "$s11" "jbaruch/coding-policy" "0.3.147"
+  pkg11="$s11/plugins/jbaruch/coding-policy/tessl-package.json"
+  printf 'not json\n' > "$pkg11" || die "write $pkg11 failed"
+  OUT="$(env "PATH=$STUBBIN:$PATH" TESSL_LATEST_MANIFEST="$m11" TESSL_STATE_DIR="$s11" bash "$SCRIPT" </dev/null 2>"$TMP/err11")"; RC=$?
+  err11="$(cat "$TMP/err11")" || die "read $TMP/err11 failed"
+  if [[ $RC -eq 0 ]] && printf '%s' "$err11" | grep -q "could not parse" \
+     && has "version unknown" && ! has "install pending"; then
+    pass; else fail "unparseable state file: expected parse warning + 'version unknown' label, got RC=$RC err=$err11 OUT=$OUT"; fi
 
   echo "─────────────────────────────────────────────" >&2
   if [[ $FAIL -gt 0 ]]; then echo "FAILED: ${FAIL} failed, ${PASS} passed" >&2; exit 1; fi

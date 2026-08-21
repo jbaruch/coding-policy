@@ -1,5 +1,13 @@
 # Changelog
 
+### Fix — the session-start hooks say what they actually do
+
+Three deferred Copilot advisories from #290, folded in per `review-severity.md` rather than shipped as their own re-review round (issue #291).
+
+`check-tessl-latest.sh`'s exit contract claimed best-effort failures "still emit the status", but three paths are deliberately silent — no manifest (not a consumer), no `jbaruch/*` dependency, and an unparseable manifest — so the contract now names the emitting and the silent cases separately. The user-facing label was the one item with teeth: a resolved-state `tessl-package.json` that exists but is unreadable or invalid warned to stderr and then reported the dependency as `(install pending)`, which is the label for a dependency simply not resolved yet. A tool failure read as a routine state, and the stderr warning could not correct the line the user actually sees. `installed_version` now returns exit 3 for a present-but-broken file, distinct from the empty output of an absent one, and the status reads `(version unknown — .tessl/ state file unreadable or invalid; check permissions and JSON validity, then re-run \`tessl install\`)`. Case 10 of the hook suite now asserts the label as well as the warning, and a new case 11 covers the unparseable variant (no `chmod`, so it runs as root too).
+
+`check-git-sync.sh`'s pre-fetch comment described a fall-through "to compare against the last-known origin ref" that the code stopped doing when the unverified-sync branch landed: a failed fetch now returns early with `sync not verified` rather than comparing against a possibly stale remote-tracking ref. Comment corrected to match.
+
 ### Style — carve-out openers stand alone from their definitions
 
 `context-writing-style.md` Structure wants a carve-out to lead with a standalone `Narrow exception for X.` bullet. Two openers carried their definition attached with an em dash instead: `testing-standards.md` Scope (the instrument-tree opener, flagged as a presentation-only Structure violation by the policy reviewer on #295 and deferred per `review-severity.md` rather than burning a re-review round on a lone advisory — issue #296) and `ci-safety.md` Superseded-Bot-Review Dismissal, found by grepping every carve-out opener in `rules/` for the same shape. Both now split into the opener and a following bullet, wording otherwise unchanged. Directive unchanged in both.
