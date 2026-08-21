@@ -273,6 +273,51 @@ t_toplevel_comments_by_excludes_replies_and_other_logins() {
   assert_eq "replies and foreign logins excluded" "1" "$count"
 }
 
+# A degraded API response can put a non-object element (an error body, a bare
+# string) in the array. Indexing it aborted jq mid-filter and failed the whole
+# poll: watch-pr-reviews.sh then burned all 50 attempts and reported
+# `pending_at_budget`, which reads as "no reviewer posted" rather than "the
+# tool broke" (issue #300). Real comments around it must still be counted.
+t_toplevel_comments_by_survives_non_object_element() {
+  MOCK_COMMENTS_BODY='["Not Found",{"user":{"login":"Copilot"},"in_reply_to_id":null},{"user":{"login":"Copilot"},"in_reply_to_id":null}]'
+  local count
+  count=$(toplevel_comments_by "owner" "repo" "1" "${COPILOT_COMMENT_LOGINS[@]}" 2>/dev/null)
+  assert_eq "count survives a non-object element" "2" "$count"
+}
+
+# The drop is visible, never silent: best-effort work that continues past a
+# failure warns (rules/error-handling.md Shell Error Handling).
+t_toplevel_comments_by_warns_on_non_object_element() {
+  MOCK_COMMENTS_BODY='["Not Found",{"user":{"login":"Copilot"},"in_reply_to_id":null}]'
+  local err
+  err=$( { toplevel_comments_by "owner" "repo" "1" "${COPILOT_COMMENT_LOGINS[@]}" >/dev/null; } 2>&1 )
+  case "$err" in
+    *"1 non-object element"*) return 0 ;;
+    *) echo "    FAIL: expected a non-object-element warning on stderr, got: '${err}'" >&2; return 1 ;;
+  esac
+}
+
+# Same guard on the reviews surface — the merge gate reads it, and a
+# non-object element carries no verdict, so dropping it cannot mask one.
+t_latest_review_by_survives_non_object_element() {
+  MOCK_REVIEWS_BODY='["Not Found",{"user":{"login":"github-actions[bot]"},"state":"APPROVED","submitted_at":"2026-05-18T16:00:00Z","body":"ok","commit_id":"'"$HEAD_SHA"'"}]'
+  local out state
+  out=$(latest_review_by "owner" "repo" "1" "github-actions[bot]" 2>/dev/null)
+  state=$(echo "$out" | jq -r '.state')
+  assert_eq "verdict survives a non-object element" "APPROVED" "$state"
+}
+
+# End-to-end: the poll returns a snapshot instead of failing, which is what
+# kept watch-pr-reviews.sh from stalling to budget on a degraded response.
+t_main_survives_non_object_comment_element() {
+  MOCK_MERGE_STATE=clean
+  MOCK_COMMENTS_BODY='["Not Found",{"user":{"login":"Copilot"},"in_reply_to_id":null}]'
+  local out copilot
+  out=$(main "owner" "repo" "1" 2>/dev/null) || return 1
+  copilot=$(echo "$out" | jq -r '.inline_comments.copilot')
+  assert_eq "snapshot still produced, Copilot comment counted" "1" "$copilot"
+}
+
 # End-to-end through main() — the path the Step 7 merge gate actually reads.
 # Codex and Copilot counts must not bleed into each other.
 t_main_counts_copilot_comments_in_snapshot() {
@@ -512,6 +557,10 @@ run "toplevel_comments_by counts the 'Copilot' comment login"         t_toplevel
 run "toplevel_comments_by matches either Copilot login"               t_toplevel_comments_by_matches_either_copilot_login
 run "toplevel_comments_by excludes replies and foreign logins"        t_toplevel_comments_by_excludes_replies_and_other_logins
 run "main counts Copilot comments in the snapshot"                    t_main_counts_copilot_comments_in_snapshot
+run "toplevel_comments_by survives a non-object element (#300)"       t_toplevel_comments_by_survives_non_object_element
+run "toplevel_comments_by warns about the dropped element (#300)"     t_toplevel_comments_by_warns_on_non_object_element
+run "latest_review_by survives a non-object element (#300)"           t_latest_review_by_survives_non_object_element
+run "main returns a snapshot despite a non-object element (#300)"     t_main_survives_non_object_comment_element
 run "latest_review_by resolves the fleet App login (#202)"            t_latest_review_by_resolves_fleet_app_login
 run "latest_review_by picks newest policy verdict across logins"      t_latest_review_by_policy_reviewer_picks_newest_across_logins
 run "latest_review_by never masks an active block with a later clean" t_latest_review_by_changes_requested_not_masked_by_later_other_login

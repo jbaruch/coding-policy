@@ -1,5 +1,11 @@
 # Changelog
 
+### Fix — a degraded PR payload no longer fails the whole review poll
+
+`poll-pr-reviews.sh` indexed `.in_reply_to_id` and `.user.login` on every element of the `pulls/<n>/reviews` and `pulls/<n>/comments` arrays. When the API returned an element that is not an object — an error body, or a bare string under a partial response — jq aborted with `Cannot index string with string ("in_reply_to_id")` and the entire poll failed. During a nine-repo sweep that cost `watch-pr-reviews.sh` its full 50-attempt budget on `jbaruch/nanoclaw-untrusted#40`: a 12-minute stall ending in `pending_at_budget` with no snapshot, which reads to the caller as "a reviewer never posted" rather than "the tool broke". The eight other PRs in the same sweep polled fine against the same shapes and the next run of the same command succeeded, so the trigger is a transient response shape, not a property of the PR (issue #300).
+
+Both surfaces now go through one `slurp_api_array` helper that slurps the paginated pages, drops any non-object element, and warns to stderr naming the count and the endpoint. A non-object element carries neither a verdict nor a comment, so dropping it loses nothing a gate reads; warning rather than swallowing keeps a degraded response visible instead of silently lowering a count. Four regression tests: the comment count survives a mixed payload, the warning names the dropped element, the reviews surface survives the same shape, and `main` still returns a snapshot end-to-end.
+
 ### Fix — the moderation backoff no longer aborts the wait after one poll
 
 `verify-moderation-cleared.sh`'s `advance_backoff` ended with `(( delay > MAX_DELAY_SEC )) && delay="$MAX_DELAY_SEC"`. Below the cap — every attempt until the cap is reached — the arithmetic evaluates false, the `&&` short-circuits, and that status becomes the function's return status because the list is its last command. The `&&` list itself is exempt from `set -e`; the two call sites are plain simple commands and are not, so the script died at the first backoff: one poll instead of the whole budget, empty stdout, exit 1 — the code the contract reserves for a real moderation finding, leaving a caller nothing to parse and no diagnostic on stderr. A version still pending on the very first check, which is the normal state right after a publish, reported "not cleared" (issue #306).
