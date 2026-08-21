@@ -89,7 +89,7 @@ runs:
         # resolves three levels up from the action path.
         script="$GITHUB_ACTION_PATH/../../../skills/release/stamp-changelog.py"
         if [ ! -f "$script" ]; then
-          echo "::error::stamp-changelog.py not found at $script — the coding-policy action repo did not check out fully."
+          echo "::error::stamp-changelog.py not found at $script — verify the pinned jbaruch/coding-policy/.github/actions/stamp-changelog@<ref> in this workflow points at a ref that carries skills/release/stamp-changelog.py, and bump the ref if it is stale." >&2
           exit 1
         fi
 
@@ -108,7 +108,7 @@ runs:
         # Same three-levels-up resolution as the python script above.
         commit_script="$GITHUB_ACTION_PATH/../../../skills/release/commit-stamp.sh"
         if [ ! -f "$commit_script" ]; then
-          echo "::error::commit-stamp.sh not found at $commit_script — the coding-policy action repo did not check out fully."
+          echo "::error::commit-stamp.sh not found at $commit_script — verify the pinned jbaruch/coding-policy/.github/actions/stamp-changelog@<ref> in this workflow points at a ref that carries skills/release/commit-stamp.sh, and bump the ref if it is stale." >&2
           exit 1
         fi
         bash "$commit_script" "$CHANGELOG" "$DO_COMMIT" "$COMMIT_MESSAGE" "$GITHUB_REF_NAME" "$GITHUB_REF_TYPE"

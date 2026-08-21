@@ -68,7 +68,7 @@ runs:
         # publish-landed-gate).
         script="$GITHUB_ACTION_PATH/../../../skills/release/smart-publish.sh"
         if [ ! -f "$script" ]; then
-          echo "::error::smart-publish: smart-publish.sh not found at $script — the coding-policy action repo did not check out fully." >&2
+          echo "::error::smart-publish: smart-publish.sh not found at $script — verify the pinned jbaruch/coding-policy/.github/actions/smart-publish@<ref> in this workflow points at a ref that carries skills/release/smart-publish.sh, and bump the ref if it is stale." >&2
           exit 1
         fi
 
