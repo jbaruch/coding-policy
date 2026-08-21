@@ -46,8 +46,19 @@ outputs:
       non-zero exit only when this is 'true' AND the registry advanced.
     value: ${{ steps.publish.outputs.credit-signature }}
   version:
-    description: 'The published version (empty on a failed publish).'
+    description: |
+      The published version — including on the landed-after-error path, where
+      the publish command exited non-zero but the registry confirmed that exact
+      version landed. Empty only when nothing landed.
     value: ${{ steps.publish.outputs.version }}
+  landed-after-error:
+    description: |
+      'true' when the publish command exited non-zero AND the registry proved
+      the exact version landed anyway (an out-of-credits billing exit, or the
+      tessl CLI's ~20s client-side publish timeout). The step then exits 0 —
+      the release is real — and this action emits a ::warning:: naming the
+      failing line. 'false' otherwise.
+    value: ${{ steps.publish.outputs.landed-after-error }}
 
 runs:
   using: 'composite'
@@ -81,15 +92,29 @@ runs:
 
         credit_signature=false
         version=""
+        landed_after_error=false
+        terminal_line=""
         if [ -n "$result_json" ] && printf '%s' "$result_json" | jq empty >/dev/null 2>&1; then
           credit_signature="$(printf '%s' "$result_json" | jq -r '.credit_signature // false')"
           version="$(printf '%s' "$result_json" | jq -r '.version // empty')"
+          landed_after_error="$(printf '%s' "$result_json" | jq -r '.landed_after_error // false')"
+          terminal_line="$(printf '%s' "$result_json" | jq -r '.terminal_line // empty')"
         else
           echo "::warning::smart-publish: no parseable JSON result (exit ${rc}); treating credit-signature as false so the confirm gate reds an unconfirmed publish." >&2
         fi
 
         echo "credit-signature=$credit_signature" >> "$GITHUB_OUTPUT"
         echo "version=$version" >> "$GITHUB_OUTPUT"
+        echo "landed-after-error=$landed_after_error" >> "$GITHUB_OUTPUT"
+
+        # A landed-after-error publish is a REAL release with a failing step in
+        # it. rules/ci-safety.md tolerates that only when the artifact landing
+        # is confirmed AND the failing step is named — the script confirmed the
+        # landing against the exact version, so name the step here, loudly,
+        # rather than letting a green run hide it.
+        if [ "$landed_after_error" = "true" ]; then
+          echo "::warning::smart-publish: ${version} PUBLISHED, but the publish command exited ${rc} afterwards: ${terminal_line:-<no terminal line captured>}. The registry confirms the exact version landed, so the release is real; the failing step above still needs attention."
+        fi
 
         # Exit with the publish's real code so this step's `outcome` reflects it
         # (the workflow sets continue-on-error so the job survives to the gate).

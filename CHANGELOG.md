@@ -1,5 +1,24 @@
 # Changelog
 
+### Fix — a publish that timed out client-side no longer reds a release that landed
+
+`jbaruch/nanoclaw-admin` run 32450781941 published `0.1.497` and went red. The org was out of credits, and every credit fix behaved correctly — the review step skipped with its `::warning::` and the run continued — but the failure was something else entirely:
+
+```
+✔ Version 0.1.497 is available
+- Publishing...
+✘ Failed to publish
+✘ Publish timed out after 20 seconds: The operation timed out.
+```
+
+The tessl CLI gives up after ~20 seconds while the server finishes the upload, and `tessl plugin publish` exposes no timeout flag (CLI 0.97.0). The artifact landed anyway — `0.1.497` was created at 05:30:46, inside that run's window, with no other publish in flight — so the gate reded a real release, and `smart-publish.sh` returned before `commit_back`, leaving the manifest at `0.1.496` while the registry held `0.1.497`. The gate was right to red it under the old rule: only the out-of-credits SIGNATURE was tolerated, and this was not that.
+
+The tolerance is now evidence-based rather than signature-based. On ANY non-zero publish exit `smart-publish.sh` asks the registry whether the EXACT version it attempted is there (new `registry-has-version.sh`, the `versions/<v>` endpoint). If it is, the release landed: the manifest bump is committed back as usual, the script exits 0, and the JSON carries `landed_after_error` plus the `terminal_line`, which the `smart-publish` action turns into a `::warning::` naming the failing step. `ci-safety.md` already framed the test as "confirm the artifact landing AND name the failing step" — credits-only was an implementation narrowing of it, not the rule.
+
+Three things keep this from over-greening, each with a regression test. A pre-publish probe requires the version to be ABSENT before the run, so an as-is republish and the loser of two merges racing for the same auto-bump number cannot read as landed. An indeterminate read — an auth or network failure, a non-JSON body, a 200 whose version does not match — is never a landing; `registry-has-version.sh` separates a definitive 404 from a read it could not make, and every ambiguous answer fails closed. And a rejected bump-push after a landed publish still reds, deliberately outside the tolerance. The exact-version test is strictly stronger than the registry-advance test it replaces on this path: an interleaved publish advances the registry, but it cannot put someone else's version number there.
+
+New `ci-safety.md` section "A Non-Zero Publish Exit Is Not Proof Nothing Published" carries the contract. Seven new `smart-publish` cases and a nine-case suite for `registry-has-version.sh`. Reaches every fleet consumer through the `smart-publish@main` reference in the reusable `publish-plugin.yml`. Separately reportable upstream: the 20s timeout is unconfigurable, and it reports a successful publish as `✘ Failed to publish`.
+
 ## 0.3.170 — 2026-08-21
 
 ### Actions — the missing-script guards name a remedy

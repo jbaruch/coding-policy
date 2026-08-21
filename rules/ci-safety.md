@@ -121,6 +121,17 @@ alwaysApply: true
 - Never blame a red publish run on credits without confirming the artifact landing and naming the failing step from the logs
 - A publish that did not land is the agent's own diagnosis, never a deflection to `tessl credits`
 
+## A Non-Zero Publish Exit Is Not Proof Nothing Published
+
+- Two publish-command exits land the artifact and still exit non-zero — the out-of-credits billing exit, and the tessl CLI's client-side publish timeout
+- Confirm a landing by the EXACT version the run attempted, never by a registry advance
+- A registry advance can come from an interleaved publish
+- A version already present before the run proves nothing about that run
+- The pre-publish absence of that version is required
+- An indeterminate registry read is never a landing
+- A rejected manifest bump-push after a landed publish stays red
+- Deterministic form is `skills/release/registry-has-version.sh`, called from `skills/release/smart-publish.sh` — decision predicate in those headers, not restated here (`rules/script-as-black-box.md`)
+
 ## Checks Not Starting
 
 - When pushed checks sit in `queued` and no `github-actions` run is created, check the PR's merge state before assuming an Actions outage

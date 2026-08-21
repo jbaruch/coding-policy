@@ -22,6 +22,24 @@
 # manifest-based `--bump patch`, which collides once a credit-outage run skips
 # the commit-back and the manifest falls behind the registry.
 #
+# Landed-after-error reconciliation: a non-zero exit does NOT prove the artifact
+# did not land, and credits are not the only way that happens. The tessl CLI's
+# ~20s client-side publish timeout prints `✘ Failed to publish` / `✘ Publish
+# timed out after 20 seconds` and exits 1 for an upload the SERVER completed
+# (jbaruch/nanoclaw-admin run 32450781941: 0.1.497 was created at 05:30:46,
+# inside that run's window, with no other publish in flight). So on ANY non-zero
+# exit this script asks the registry whether the EXACT version it just tried to
+# publish is there (registry-has-version.sh). If it is, the release LANDED: the
+# manifest bump is committed back as usual and the script exits 0, reporting
+# `landed_after_error` with the terminal failure line so the caller can name the
+# failing step (rules/ci-safety.md — confirm the artifact landed AND name the
+# failing step). "Registry advanced past a baseline" could not do this job: an
+# interleaved publish advances it too. An exact-version hit cannot be faked, and
+# an INDETERMINATE read fails closed — still red.
+#
+# The bump-push is deliberately outside that tolerance: a rejected push after a
+# landed publish still exits non-zero and reds the run, exactly as before.
+#
 # The credit signature is bound CAUSALLY to the exit, not matched anywhere in
 # the log: it must BE the TERMINAL FAILURE line — the last SUBSTANTIVE line the
 # process printed before exiting non-zero, after tessl's benign trailing
@@ -51,12 +69,21 @@
 # Out:  ONE JSON object on stdout —
 #         {"outcome":"success"|"failure","exit_code":N,
 #          "version":"x.y.z"|null,"credit_signature":true|false,
-#          "first_publish":true|false}
-#       The publish command's own output and all diagnostics go to stderr (so
-#       the CI log still shows the publish), keeping stdout a clean JSON line.
-# Exit: the publish command's real exit code (0 success, non-zero failure);
-#       2 on a usage error; 1 on a pre-publish setup failure (bad manifest,
-#       registry unreachable) — nothing published, the confirm gate reds it.
+#          "first_publish":true|false,"landed_after_error":true|false,
+#          "terminal_line":"<last substantive line>"|null}
+#       `landed_after_error` is true when the publish command exited non-zero
+#       and the registry proved the exact version landed anyway;
+#       `terminal_line` carries that exit's last substantive output line so the
+#       caller can name the failing step. The publish command's own output and
+#       all diagnostics go to stderr (so the CI log still shows the publish),
+#       keeping stdout a clean JSON line.
+# Exit: 0 when the artifact is on the registry — a clean publish, OR a non-zero
+#       publish exit whose exact version the registry confirms landed (the
+#       landed-after-error path above); the publish command's real exit code
+#       when nothing landed or the check was indeterminate; 1 when the publish
+#       landed but the manifest bump-push was rejected (a post-publish failure
+#       that stays red); 2 on a usage error; 1 on a pre-publish setup failure
+#       (bad manifest, registry unreachable) — nothing published, gate reds it.
 
 set -euo pipefail
 
@@ -102,18 +129,21 @@ cleanup_sp_log() {
 # Emit the one-line JSON result. python3 (not printf/jq) handles escaping and
 # the null version, matching commit-stamp.sh (rules/script-authoring — shipped
 # scripts produce JSON via python3, never an undocumented jq dependency).
-#   $1 outcome  $2 exit_code  $3 version("" -> null)  $4 credit_signature  $5 first_publish
+#   $1 outcome  $2 exit_code  $3 version("" -> null)  $4 credit_signature
+#   $5 first_publish  $6 landed_after_error  $7 terminal_line("" -> null)
 emit_json() {
   python3 -c '
 import json, sys
-outcome, exit_code, version, credit_sig, first = sys.argv[1:6]
+outcome, exit_code, version, credit_sig, first, landed, terminal = sys.argv[1:8]
 print(json.dumps({
     "outcome": outcome,
     "exit_code": int(exit_code),
     "version": (None if version == "" else version),
     "credit_signature": credit_sig == "true",
     "first_publish": first == "true",
-}))' "$1" "$2" "$3" "$4" "$5"
+    "landed_after_error": landed == "true",
+    "terminal_line": (None if terminal == "" else terminal),
+}))' "$1" "$2" "$3" "$4" "$5" "$6" "${7:-}"
 }
 
 # Read a top-level string field from the plugin manifest with python3 (no jq
@@ -220,6 +250,31 @@ commit_back() {
   return 0
 }
 
+# Ask the registry whether <version> is published for the current
+# workspace/plugin. Prints "true", "false", or "unknown" — never fails the
+# caller, because every use of it must fail CLOSED on "unknown" rather than
+# abort. Callers read "unknown" as "not landed".
+version_exists() { # <workspace> <plugin> <version> <context-for-diagnostics>
+  local ws="$1" slug="$2" version="$3" ctx="$4" json="" rc=0
+  json="$(bash "${_sp_dir}/registry-has-version.sh" "$ws" "$slug" "$version")" || rc=$?
+  if [[ $rc -ne 0 ]]; then
+    echo "smart-publish: warning: ${ctx}: could not determine whether ${ws}/${slug}@${version} is on the registry (registry-has-version.sh exit ${rc}) — treating the answer as unknown. Re-check by hand with 'bash skills/release/registry-has-version.sh ${ws} ${slug} ${version}'." >&2
+    printf 'unknown'
+    return 0
+  fi
+  # registry-has-version.sh guarantees a well-formed {"exists":bool} on exit 0;
+  # an unparseable result is still "unknown", never a silent true
+  # (rules/error-handling.md — a tool failure is not a result).
+  local parsed="" parse_rc=0
+  parsed="$(printf '%s' "$json" | python3 -c 'import json,sys;print("true" if json.load(sys.stdin).get("exists") is True else "false")')" || parse_rc=$?
+  if [[ $parse_rc -ne 0 ]]; then
+    echo "smart-publish: warning: ${ctx}: registry-has-version.sh returned unparseable JSON (${json}) — treating the answer as unknown." >&2
+    printf 'unknown'
+    return 0
+  fi
+  printf '%s' "$parsed"
+}
+
 main() {
   if [[ $# -ne 4 ]]; then
     echo "usage: $0 <mode> <plugin-path> <ref-name> <ref-type>" >&2
@@ -250,7 +305,7 @@ main() {
     exit 1
   fi
 
-  local name manifest_version
+  local name manifest_version workspace plugin_slug
   name="$(manifest_field "$manifest" name)" \
     || { echo "error: cannot read '${manifest}' as JSON — fix the manifest and re-run" >&2; exit 1; }
   manifest_version="$(manifest_field "$manifest" version)"
@@ -262,6 +317,13 @@ main() {
     echo "error: '${manifest}' is missing a .version field" >&2
     exit 1
   fi
+  workspace="${name%%/*}"
+  plugin_slug="${name#*/}"
+
+  # The version this run is trying to put on the registry — the manifest version
+  # in as-is mode, the computed target in auto-bump (assigned below). The
+  # landed-after-error check asks the registry for exactly this.
+  local intended_version="$manifest_version"
 
   # Choose the version + publish invocation. Both modes publish the manifest
   # version VERBATIM (`tessl plugin publish <path>`); the difference is what the
@@ -279,12 +341,11 @@ main() {
   local -a pub_args
   local first_publish=false
   if [[ "$mode" == "auto-bump" ]]; then
-    local workspace="${name%%/*}" plugin_slug="${name#*/}"
     local reg_json reg="" rc_reg=0
     reg_json="$(bash "${_sp_dir}/registry-version.sh" "$workspace" "$plugin_slug")" || rc_reg=$?
     if [[ $rc_reg -ne 0 ]]; then
       echo "error: could not read the registry latest for '${name}' (registry-version.sh exit ${rc_reg}) — a pre-publish auth/network failure; nothing was published. Fix the cause and re-run." >&2
-      emit_json failure 1 "" false false
+      emit_json failure 1 "" false false false ""
       exit 1
     fi
     # registry-version.sh guarantees a well-formed {"version":...} on exit 0, so
@@ -294,7 +355,7 @@ main() {
     # never fall through to an empty reg and a wrong first-publish.
     reg="$(printf '%s' "$reg_json" | python3 -c 'import json,sys;v=json.load(sys.stdin).get("version");print(v if v else "")')" || {
       echo "error: registry-version.sh returned unparseable JSON for '${name}' (${reg_json}) — a pre-publish tool failure; nothing was published. Inspect the registry read and re-run." >&2
-      emit_json failure 1 "" false false
+      emit_json failure 1 "" false false false ""
       exit 1
     }
     [[ -z "$reg" ]] && first_publish=true
@@ -302,13 +363,14 @@ main() {
     target="$(compute_target_version "$reg" "$manifest_version")" || rc_t=$?
     if [[ $rc_t -ne 0 ]]; then
       echo "error: could not compute the next version for '${name}' (registry='${reg:-<none>}', manifest='${manifest_version}') — the registry latest is not numeric MAJOR.MINOR.PATCH. Nothing was published; inspect the registry." >&2
-      emit_json failure 1 "" false false
+      emit_json failure 1 "" false false false ""
       exit 1
     fi
+    intended_version="$target"
     echo "smart-publish: auto-bump target ${target} (registry=${reg:-<none>}, manifest=${manifest_version})." >&2
     if ! write_manifest_version "$manifest" "$target"; then
       echo "error: could not write version ${target} into '${manifest}' — nothing was published." >&2
-      emit_json failure 1 "" false false
+      emit_json failure 1 "" false false false ""
       exit 1
     fi
   fi
@@ -323,6 +385,20 @@ main() {
   # exit-code capture (rules/error-handling.md) — a bare pipeline under `set -e`
   # would abort before we read the publish's real code, and the whole point is
   # to keep going past a non-zero exit to inspect it.
+  # Pre-publish existence probe. The landed-after-error tolerance below rests on
+  # "the exact version is on the registry AFTER a failed publish" — which only
+  # means THIS run put it there if it was ABSENT beforehand. Without this probe
+  # two cases would wrongly read as landed: an as-is republish of an
+  # already-published version, and two concurrent merges computing the same
+  # auto-bump target where the loser fails with "already exists". Both would
+  # green a run that published nothing. "unknown" fails closed — the tolerance
+  # is simply unavailable for that run, which reds rather than over-greens.
+  local pre_existed
+  pre_existed="$(version_exists "$workspace" "$plugin_slug" "$intended_version" "pre-publish probe")"
+  if [[ "$pre_existed" == "true" ]]; then
+    echo "smart-publish: warning: ${name}@${intended_version} is ALREADY on the registry before this publish — a post-failure sighting of it cannot prove this run landed anything, so the landed-after-error tolerance is off for this run." >&2
+  fi
+
   echo "smart-publish: running 'tessl ${pub_args[*]}' (mode=${mode}) …" >&2
   local rc=0
   set +e
@@ -342,7 +418,7 @@ main() {
   # also fails closed (rules/error-handling.md — a best-effort failure that
   # continues emits a warning, never nothing). python3 (already a dependency)
   # does the trailing-only strip precisely.
-  local credit_signature=false
+  local credit_signature=false terminal_line=""
   if [[ $rc -ne 0 ]]; then
     local last_line="" scan_rc=0
     last_line="$(python3 -c '
@@ -359,6 +435,7 @@ sys.stdout.write(lines[-1] if lines else "")
       echo "smart-publish: warning: terminal-line scan failed (python3 exit ${scan_rc}) — the run stays RED (no credit signature); inspect the publish step's captured output in the run log by hand before retrying." >&2
       last_line=""
     fi
+    terminal_line="$last_line"
     if [[ -n "$last_line" ]]; then
       # Distinguish grep no-match (exit 1 = no signature, the run stays red)
       # from a grep TOOL failure (exit >1) — the latter warns and also fails
@@ -376,8 +453,40 @@ sys.stdout.write(lines[-1] if lines else "")
   cleanup_sp_log
 
   if [[ $rc -ne 0 ]]; then
-    echo "smart-publish: publish exited ${rc} (credit_signature=${credit_signature}). The confirm gate reconciles this against the registry." >&2
-    emit_json failure "$rc" "" "$credit_signature" "$first_publish"
+    # Did it land anyway? Ask the registry for the EXACT version this run tried
+    # to publish. A CLI that exits non-zero after a completed server-side upload
+    # (an out-of-credits billing exit, a ~20s publish timeout) is indistinguish-
+    # able from a real failure by exit code alone, and "the registry advanced"
+    # cannot tell either — an interleaved publish advances it too. The exact
+    # version can. An INDETERMINATE read is NOT a landing (fail closed).
+    local landed=false
+    if [[ "$pre_existed" == "false" ]]; then
+      if [[ "$(version_exists "$workspace" "$plugin_slug" "$intended_version" "landed check")" == "true" ]]; then
+        landed=true
+      fi
+    else
+      echo "smart-publish: the landed-after-error check is unavailable (the pre-publish probe answered '${pre_existed}' for ${name}@${intended_version}) — staying RED." >&2
+    fi
+
+    if [[ "$landed" == "true" ]]; then
+      echo "smart-publish: publish exited ${rc}, but ${name}@${intended_version} IS on the registry — the artifact LANDED and the exit is post-publish. Failing line: ${terminal_line:-<none captured>}" >&2
+      # The manifest bump-push runs on this path too — skipping it is what left
+      # the manifest behind the registry after every tolerated failure, drift
+      # that only a later successful publish cleaned up.
+      if [[ "$mode" == "auto-bump" ]]; then
+        if ! commit_back "$manifest" "$name" "$intended_version" "$ref_name" "$ref_type"; then
+          # Landed, but the bump-push was rejected — a post-publish failure that
+          # stays RED, deliberately outside this tolerance.
+          emit_json failure 1 "$intended_version" "$credit_signature" "$first_publish" true "$terminal_line"
+          exit 1
+        fi
+      fi
+      emit_json success 0 "$intended_version" "$credit_signature" "$first_publish" true "$terminal_line"
+      exit 0
+    fi
+
+    echo "smart-publish: publish exited ${rc} and ${name}@${intended_version} is not on the registry (credit_signature=${credit_signature}) — nothing landed. The confirm gate reds this." >&2
+    emit_json failure "$rc" "" "$credit_signature" "$first_publish" false "$terminal_line"
     exit "$rc"
   fi
 
@@ -394,12 +503,12 @@ sys.stdout.write(lines[-1] if lines else "")
       # The artifact published, but the manifest bump-push was rejected — a
       # post-publish failure that stays red (the confirm gate sees advanced +
       # failure + no credit signature -> non-credit post-publish failure).
-      emit_json failure 1 "$published_version" false "$first_publish"
+      emit_json failure 1 "$published_version" false "$first_publish" false ""
       exit 1
     fi
   fi
 
-  emit_json success 0 "$published_version" false "$first_publish"
+  emit_json success 0 "$published_version" false "$first_publish" false ""
 }
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then

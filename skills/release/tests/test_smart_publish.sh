@@ -60,6 +60,20 @@ mkdir -p "$STUBDIR"
 #   api v1/tiles/<ws>/<tile>/versions — MOCK_REGISTRY: a version string ->
 #       {"data":[{"attributes":{"version":"<v>"}}]}; "empty" -> {"data":[]}
 #       (never published); "error" -> non-zero (auth/network failure).
+#   api v1/tiles/<ws>/<tile>/versions/<v> — the EXACT-version endpoint
+#       registry-has-version.sh probes BEFORE the publish and again after a
+#       non-zero exit. MOCK_VERSION_EXISTS:
+#         "after" -> 404 until the publish stub runs, 200 afterwards. This is
+#                    the real landed-after-error sequence (absent before, there
+#                    after) and the only one that earns the tolerance.
+#         "yes"   -> 200 always: the version ALREADY existed, so a post-failure
+#                    sighting proves nothing (an as-is republish, or the loser
+#                    of two merges racing for the same auto-bump number).
+#         "error" -> non-zero with a NON-404 body (indeterminate, fails closed).
+#         default -> the real 404 body + exit 1 (absent).
+#       Body shapes are the live ones, probed against jbaruch/coding-policy.
+#       The publish stub records that it ran in $MOCK_STATE_DIR/published, which
+#       is what makes "after" a SEQUENCE rather than a constant.
 #   plugin publish <path> — MOCK_PUBLISH: ok -> exit 0 (verbatim; smart-publish
 #       has already written the target version into the manifest); the *_fail
 #       modes print their failure log and exit 1.
@@ -67,6 +81,20 @@ cat > "$STUBDIR/tessl" <<'STUB'
 #!/usr/bin/env bash
 set -uo pipefail
 if [[ "${1:-}" == "api" ]]; then
+  # A path with a segment AFTER `versions/` is the single-version probe.
+  if [[ "${2:-}" == */versions/* ]]; then
+    want="${2##*/versions/}"
+    case "${MOCK_VERSION_EXISTS:-}" in
+      yes)   printf '{"data":{"attributes":{"version":"%s"}}}\n' "$want"; exit 0 ;;
+      after)
+        if [[ -f "${MOCK_STATE_DIR:-/nonexistent}/published" ]]; then
+          printf '{"data":{"attributes":{"version":"%s"}}}\n' "$want"; exit 0
+        fi
+        echo '{"error":{"title":"Not Found","status":404,"message":"Not Found"}}'; exit 1 ;;
+      error) echo '{"error":{"title":"Unauthorized","status":401,"message":"Unauthorized"}}'; exit 1 ;;
+      *)     echo '{"error":{"title":"Not Found","status":404,"message":"Not Found"}}'; exit 1 ;;
+    esac
+  fi
   case "${MOCK_REGISTRY:-}" in
     empty) echo '{"data":[]}' ;;
     error) echo "error: registry unreachable" >&2; exit 1 ;;
@@ -75,6 +103,12 @@ if [[ "${1:-}" == "api" ]]; then
   exit 0
 fi
 if [[ "${1:-}" == "plugin" && "${2:-}" == "publish" ]]; then
+  # Modes whose SERVER side completes (a clean publish, and the two exits that
+  # happen after the artifact is already stored) record the landing.
+  case "${MOCK_PUBLISH:-}" in
+    ok|credit_fail|timeout_fail)
+      [[ -n "${MOCK_STATE_DIR:-}" ]] && : > "${MOCK_STATE_DIR}/published" ;;
+  esac
   case "${MOCK_PUBLISH:-}" in
     ok)
       echo "✔ Published"
@@ -109,6 +143,16 @@ if [[ "${1:-}" == "plugin" && "${2:-}" == "publish" ]]; then
       # stays substantive as the terminal line and the run stays red.
       echo "##[error]Out of credits. Upgrade at https://tessl.io/pricing"
       echo "https://status.example.com/incident/42"
+      exit 1 ;;
+    timeout_fail)
+      # The REAL client-side publish-timeout tail, observed live
+      # (jbaruch/nanoclaw-admin run 32450781941): the CLI gives up at 20s while
+      # the server completes the upload, so the artifact lands and the command
+      # still exits 1. No credit text anywhere — this is NOT the credit case.
+      echo "✔ Version 0.1.1 is available"
+      echo "- Publishing..."
+      echo "✘ Failed to publish"
+      echo "✘ Publish timed out after 20 seconds: The operation timed out."
       exit 1 ;;
     other_fail)
       echo "✘ Failed to upload eval scenarios: network error"
@@ -163,7 +207,9 @@ _remote_has_bump_branch() { git -C "$1/remote.git" for-each-ref --format='%(refn
 # Run smart-publish.sh in $work with the given MOCK_* + args; capture JSON stdout.
 _run() {
   local root="$1" registry="$2" pub="$3"; shift 3
-  ( cd "$root/work" && MOCK_REGISTRY="$registry" MOCK_PUBLISH="$pub" bash "$SCRIPT" "$@" )
+  ( cd "$root/work" && MOCK_REGISTRY="$registry" MOCK_PUBLISH="$pub" \
+      MOCK_VERSION_EXISTS="${MOCK_VERSION_EXISTS:-}" MOCK_STATE_DIR="$root" \
+      bash "$SCRIPT" "$@" )
 }
 
 # --- test bodies ---
@@ -310,6 +356,123 @@ t_wrong_arity_is_usage_error() {
   [[ "$err" == *"usage:"* ]] || { echo "    FAIL: missing usage message: $err" >&2; return 1; }
 }
 
+
+# --- landed-after-error reconciliation (the ~20s publish timeout) ---
+
+# THE REGRESSION this path exists for: the tessl CLI gave up at 20 seconds while
+# the server completed the upload, so `tessl plugin publish` exited 1 for a
+# publish that LANDED (jbaruch/nanoclaw-admin run 32450781941 — 0.1.497 was
+# created inside that run's window). Exit code alone cannot tell that from a
+# real failure, and "the registry advanced" cannot either (an interleaved
+# publish advances it too) — the EXACT version can.
+t_timeout_but_landed_greens_and_commits_back() {
+  local root; root="$(_sandbox 0.1.0)"
+  local out rc=0
+  out="$(MOCK_VERSION_EXISTS=after _run "$root" 0.1.0 timeout_fail auto-bump . main branch)" || rc=$?
+  [[ $rc -eq 0 ]] || { echo "    FAIL: expected exit 0 for a landed publish, got ${rc}" >&2; return 1; }
+  echo "$out" | python3 -c '
+import json,sys
+d=json.load(sys.stdin)
+assert d["outcome"]=="success", d
+assert d["landed_after_error"] is True, d
+assert d["version"]=="0.1.1", d
+assert d["credit_signature"] is False, d
+assert "timed out" in (d["terminal_line"] or ""), d' \
+    || { echo "    FAIL: unexpected JSON: $out" >&2; return 1; }
+  # The commit-back is the half that used to be skipped, leaving the manifest
+  # behind the registry after every tolerated failure.
+  [[ "$(_remote_version "$root")" == "0.1.1" ]] || { echo "    FAIL: manifest not bumped on the landed path: $(_remote_version "$root")" >&2; return 1; }
+  [[ "$(_remote_msg "$root")" == *"[skip ci]"* ]] || { echo "    FAIL: bump commit missing [skip ci]" >&2; return 1; }
+}
+
+# The real out-of-credits case lands the artifact too, so it greens on the same
+# evidence — the signature is now descriptive, not the deciding factor.
+t_credit_fail_that_landed_greens() {
+  local root; root="$(_sandbox 0.1.0)"
+  local out rc=0
+  out="$(MOCK_VERSION_EXISTS=after _run "$root" 0.1.0 credit_fail auto-bump . main branch)" || rc=$?
+  [[ $rc -eq 0 ]] || { echo "    FAIL: expected exit 0, got ${rc}" >&2; return 1; }
+  echo "$out" | python3 -c '
+import json,sys
+d=json.load(sys.stdin)
+assert d["outcome"]=="success" and d["landed_after_error"] is True and d["credit_signature"] is True, d' \
+    || { echo "    FAIL: unexpected JSON: $out" >&2; return 1; }
+}
+
+# A version that was ALREADY on the registry before this run cannot prove this
+# run landed anything: an as-is republish, or the loser of two merges racing for
+# the same auto-bump number, would otherwise green a run that published nothing.
+t_preexisting_version_earns_no_tolerance() {
+  local root; root="$(_sandbox 0.1.0)"
+  local out rc=0
+  out="$(MOCK_VERSION_EXISTS=yes _run "$root" 0.1.0 timeout_fail as-is . main branch 2>/dev/null)" || rc=$?
+  [[ $rc -eq 1 ]] || { echo "    FAIL: expected exit 1 for a pre-existing version, got ${rc}" >&2; return 1; }
+  echo "$out" | python3 -c '
+import json,sys
+d=json.load(sys.stdin)
+assert d["outcome"]=="failure" and d["landed_after_error"] is False, d' \
+    || { echo "    FAIL: unexpected JSON: $out" >&2; return 1; }
+}
+
+# Fail CLOSED: the version is NOT on the registry, so nothing landed — red, and
+# no bump commit.
+t_failed_publish_absent_version_stays_red() {
+  local root; root="$(_sandbox 0.1.0)"
+  local out rc=0
+  out="$(MOCK_VERSION_EXISTS=no _run "$root" 0.1.0 timeout_fail auto-bump . main branch)" || rc=$?
+  [[ $rc -eq 1 ]] || { echo "    FAIL: expected exit 1, got ${rc}" >&2; return 1; }
+  echo "$out" | python3 -c '
+import json,sys
+d=json.load(sys.stdin)
+assert d["outcome"]=="failure" and d["landed_after_error"] is False and d["version"] is None, d' \
+    || { echo "    FAIL: unexpected JSON: $out" >&2; return 1; }
+  [[ "$(_remote_count "$root")" == "1" ]] || { echo "    FAIL: nothing landed, so nothing should be committed back" >&2; return 1; }
+}
+
+# An INDETERMINATE read (auth/network, not a 404) is not a landing either — a
+# caller that cannot tell must never report a release.
+t_indeterminate_existence_read_stays_red() {
+  local root; root="$(_sandbox 0.1.0)"
+  local out rc=0
+  out="$(MOCK_VERSION_EXISTS=error _run "$root" 0.1.0 timeout_fail auto-bump . main branch)" || rc=$?
+  [[ $rc -eq 1 ]] || { echo "    FAIL: expected exit 1, got ${rc}" >&2; return 1; }
+  echo "$out" | python3 -c '
+import json,sys
+d=json.load(sys.stdin)
+assert d["outcome"]=="failure" and d["landed_after_error"] is False, d' \
+    || { echo "    FAIL: unexpected JSON: $out" >&2; return 1; }
+}
+
+# The bump-push stays deliberately OUTSIDE the tolerance: landed, but the push
+# was rejected -> still red (rules/ci-safety.md).
+t_landed_after_error_but_blocked_push_stays_red() {
+  local root; root="$(_sandbox 0.1.0)"
+  _advance_remote_main "$root"
+  local out rc=0
+  out="$(MOCK_VERSION_EXISTS=after _run "$root" 0.1.0 timeout_fail auto-bump . main branch 2>/dev/null)" || rc=$?
+  [[ $rc -eq 1 ]] || { echo "    FAIL: expected exit 1 on a blocked push, got ${rc}" >&2; return 1; }
+  echo "$out" | python3 -c '
+import json,sys
+d=json.load(sys.stdin)
+assert d["outcome"]=="failure" and d["landed_after_error"] is True and d["version"]=="0.1.1", d' \
+    || { echo "    FAIL: unexpected JSON: $out" >&2; return 1; }
+}
+
+# as-is mode has no commit-back, so a landed-after-error publish greens without
+# touching the remote.
+t_asis_landed_after_error_greens_without_commit() {
+  local root; root="$(_sandbox 0.1.0)"
+  local out rc=0
+  out="$(MOCK_VERSION_EXISTS=after _run "$root" 0.1.0 timeout_fail as-is . main branch)" || rc=$?
+  [[ $rc -eq 0 ]] || { echo "    FAIL: expected exit 0, got ${rc}" >&2; return 1; }
+  echo "$out" | python3 -c '
+import json,sys
+d=json.load(sys.stdin)
+assert d["outcome"]=="success" and d["landed_after_error"] is True and d["version"]=="0.1.0", d' \
+    || { echo "    FAIL: unexpected JSON: $out" >&2; return 1; }
+  [[ "$(_remote_count "$root")" == "1" ]] || { echo "    FAIL: as-is must not commit back" >&2; return 1; }
+}
+
 main() {
   echo "== smart-publish.sh tests =="
   run "auto-bump success commits + pushes the bump [skip ci]"    t_autobump_success_commits_and_pushes_bump
@@ -325,6 +488,13 @@ main() {
   run "registry read failure publishes nothing"                  t_registry_read_failure_publishes_nothing
   run "a blocked bump-push reds the run (no PR fallback)"        t_push_blocked_reds_the_run
   run "wrong arity is a usage error (exit 2)"                    t_wrong_arity_is_usage_error
+  run "publish timeout that LANDED greens + commits back (#310)" t_timeout_but_landed_greens_and_commits_back
+  run "out-of-credits exit that landed greens on the same test"  t_credit_fail_that_landed_greens
+  run "failed publish whose version is absent stays red"         t_failed_publish_absent_version_stays_red
+  run "indeterminate existence read stays red (fail closed)"     t_indeterminate_existence_read_stays_red
+  run "landed but blocked bump-push stays red"                   t_landed_after_error_but_blocked_push_stays_red
+  run "as-is landed-after-error greens without a commit"         t_asis_landed_after_error_greens_without_commit
+  run "a pre-existing version earns no landed tolerance"         t_preexisting_version_earns_no_tolerance
   echo "== summary: ${PASS_COUNT} passed, ${FAIL_COUNT} failed =="
   [[ "$FAIL_COUNT" -eq 0 ]]
 }
