@@ -1,5 +1,9 @@
 # Changelog
 
+### Style — carve-out openers stand alone from their definitions
+
+`context-writing-style.md` Structure wants a carve-out to lead with a standalone `Narrow exception for X.` bullet. Two openers carried their definition attached with an em dash instead: `testing-standards.md` Scope (the instrument-tree opener, flagged as a presentation-only Structure violation by the policy reviewer on #295 and deferred per `review-severity.md` rather than burning a re-review round on a lone advisory — issue #296) and `ci-safety.md` Superseded-Bot-Review Dismissal, found by grepping every carve-out opener in `rules/` for the same shape. Both now split into the opener and a following bullet, wording otherwise unchanged. Directive unchanged in both.
+
 ## 0.3.167 — 2026-08-21
 
 ### Fix — the Copilot review request runs in union mode, so it actually lands
