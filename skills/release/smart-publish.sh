@@ -29,7 +29,9 @@
 # (jbaruch/nanoclaw-admin run 32450781941: 0.1.497 was created at 05:30:46,
 # inside that run's window, with no other publish in flight). So on ANY non-zero
 # exit this script asks the registry whether the EXACT version it just tried to
-# publish is there (registry-has-version.sh). If it is, the release LANDED: the
+# publish is there (registry-has-version.sh) — and ONLY for the closed set of
+# terminal failures whose exit is known to follow a completed publish (the two
+# signature constants below). If it is, the release LANDED: the
 # manifest bump is committed back as usual and the script exits 0, reporting
 # `landed_after_error` with the terminal failure line so the caller can name the
 # failing step (rules/ci-safety.md — confirm the artifact landed AND name the
@@ -105,6 +107,22 @@ _sp_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # changes the wording; ONLY tessl's exact pricing link (optionally arrow-prefixed)
 # is stripped as benign — every other URL stays substantive.
 readonly CREDIT_SIGNATURE_REGEX='out of credits'
+
+# The OTHER terminal failure whose exit happens AFTER the server-side publish
+# completed: the tessl CLI's client-side publish timeout. It gives up at ~20s
+# while the upload finishes server-side, printing `✘ Failed to publish` then
+# `✘ Publish timed out after 20 seconds: The operation timed out.` and exiting
+# 1 (jbaruch/nanoclaw-admin run 32450781941). Matched the same way as the credit
+# signature — against the TERMINAL failure line only.
+#
+# These two constants are the CLOSED allowlist of exits the landed-after-error
+# reconciliation tolerates. Every other non-zero exit stays RED even when the
+# version appears on the registry afterwards: "the version is there" and "this
+# run put it there" are different claims, and only a known
+# publish-completed-then-exited failure makes the second safe to infer. Add a
+# class HERE, never by loosening the check; rules/ci-safety.md points at these
+# constants rather than restating them (rules/script-as-black-box.md).
+readonly TIMEOUT_SIGNATURE_REGEX='publish timed out'
 
 # Temp file for the captured publish output; script-global so the EXIT trap can
 # clean it up after main() returns (a main-local would be out of scope and
@@ -418,7 +436,9 @@ main() {
   # also fails closed (rules/error-handling.md — a best-effort failure that
   # continues emits a warning, never nothing). python3 (already a dependency)
   # does the trailing-only strip precisely.
-  local credit_signature=false terminal_line=""
+  # terminal_class: which known post-publish failure this exit was, if any.
+  # "other" covers every unrecognized failure and is NEVER tolerated below.
+  local credit_signature=false terminal_line="" terminal_class=other
   if [[ $rc -ne 0 ]]; then
     local last_line="" scan_rc=0
     last_line="$(python3 -c '
@@ -445,8 +465,18 @@ sys.stdout.write(lines[-1] if lines else "")
       printf '%s' "$last_line" | grep -qiE "$CREDIT_SIGNATURE_REGEX" || match_rc=$?
       if [[ $match_rc -eq 0 ]]; then
         credit_signature=true
+        terminal_class=credit
       elif [[ $match_rc -ne 1 ]]; then
         echo "smart-publish: warning: credit-signature match failed (grep exit ${match_rc}) — the run stays RED (no credit signature); inspect the publish step's captured output in the run log by hand before retrying." >&2
+      fi
+      if [[ "$terminal_class" == "other" ]]; then
+        local timeout_rc=0
+        printf '%s' "$last_line" | grep -qiE "$TIMEOUT_SIGNATURE_REGEX" || timeout_rc=$?
+        if [[ $timeout_rc -eq 0 ]]; then
+          terminal_class=timeout
+        elif [[ $timeout_rc -ne 1 ]]; then
+          echo "smart-publish: warning: timeout-signature match failed (grep exit ${timeout_rc}) — the run stays RED; inspect the publish step's captured output in the run log by hand before retrying." >&2
+        fi
       fi
     fi
   fi
@@ -460,7 +490,12 @@ sys.stdout.write(lines[-1] if lines else "")
     # cannot tell either — an interleaved publish advances it too. The exact
     # version can. An INDETERMINATE read is NOT a landing (fail closed).
     local landed=false
-    if [[ "$pre_existed" == "false" ]]; then
+    if [[ "$terminal_class" == "other" ]]; then
+      # An unrecognized failure. The version appearing afterwards would not mean
+      # THIS run published it (a concurrent publisher can take the same number),
+      # so the reconciliation is not attempted at all.
+      echo "smart-publish: publish exited ${rc} on an unrecognized failure — the landed-after-error tolerance covers only the signature constants at the top of this script, so the run stays RED. Failing line: ${terminal_line:-<none captured>}" >&2
+    elif [[ "$pre_existed" == "false" ]]; then
       if [[ "$(version_exists "$workspace" "$plugin_slug" "$intended_version" "landed check")" == "true" ]]; then
         landed=true
       fi
@@ -469,7 +504,7 @@ sys.stdout.write(lines[-1] if lines else "")
     fi
 
     if [[ "$landed" == "true" ]]; then
-      echo "smart-publish: publish exited ${rc}, but ${name}@${intended_version} IS on the registry — the artifact LANDED and the exit is post-publish. Failing line: ${terminal_line:-<none captured>}" >&2
+      echo "smart-publish: publish exited ${rc} (${terminal_class}), but ${name}@${intended_version} IS on the registry — the artifact LANDED and the exit is post-publish. Failing line: ${terminal_line:-<none captured>}" >&2
       # The manifest bump-push runs on this path too — skipping it is what left
       # the manifest behind the registry after every tolerated failure, drift
       # that only a later successful publish cleaned up.

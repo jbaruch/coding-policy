@@ -106,7 +106,7 @@ if [[ "${1:-}" == "plugin" && "${2:-}" == "publish" ]]; then
   # Modes whose SERVER side completes (a clean publish, and the two exits that
   # happen after the artifact is already stored) record the landing.
   case "${MOCK_PUBLISH:-}" in
-    ok|credit_fail|timeout_fail)
+    ok|credit_fail|timeout_fail|other_fail_landed)
       [[ -n "${MOCK_STATE_DIR:-}" ]] && : > "${MOCK_STATE_DIR}/published" ;;
   esac
   case "${MOCK_PUBLISH:-}" in
@@ -153,6 +153,12 @@ if [[ "${1:-}" == "plugin" && "${2:-}" == "publish" ]]; then
       echo "- Publishing..."
       echo "✘ Failed to publish"
       echo "✘ Publish timed out after 20 seconds: The operation timed out."
+      exit 1 ;;
+    other_fail_landed)
+      # An UNRELATED failure whose version still shows up afterwards — what a
+      # concurrent publisher taking the same number looks like from here. The
+      # version being present is not evidence THIS run published it.
+      echo "✘ Failed to upload eval scenarios: network error"
       exit 1 ;;
     other_fail)
       echo "✘ Failed to upload eval scenarios: network error"
@@ -399,6 +405,23 @@ assert d["outcome"]=="success" and d["landed_after_error"] is True and d["credit
     || { echo "    FAIL: unexpected JSON: $out" >&2; return 1; }
 }
 
+# The tolerance is a CLOSED allowlist of terminal failures (the signature
+# constants at the top of smart-publish.sh), not "any failure whose version
+# turns up". An unrelated failure stays RED even when the exact version appears
+# right afterwards — which is what a concurrent publisher taking that number
+# looks like from inside this run.
+t_unrelated_failure_stays_red_even_if_version_appears() {
+  local root; root="$(_sandbox 0.1.0)"
+  local out rc=0
+  out="$(MOCK_VERSION_EXISTS=after _run "$root" 0.1.0 other_fail_landed auto-bump . main branch 2>/dev/null)" || rc=$?
+  [[ $rc -eq 1 ]] || { echo "    FAIL: an unrecognized failure must stay red, got exit ${rc}" >&2; return 1; }
+  echo "$out" | python3 -c '
+import json,sys
+d=json.load(sys.stdin)
+assert d["outcome"]=="failure" and d["landed_after_error"] is False and d["version"] is None, d' \
+    || { echo "    FAIL: unexpected JSON: $out" >&2; return 1; }
+  [[ "$(_remote_count "$root")" == "1" ]] || { echo "    FAIL: an unrecognized failure must not commit a bump back" >&2; return 1; }
+}
 # A version that was ALREADY on the registry before this run cannot prove this
 # run landed anything: an as-is republish, or the loser of two merges racing for
 # the same auto-bump number, would otherwise green a run that published nothing.
@@ -495,6 +518,7 @@ main() {
   run "landed but blocked bump-push stays red"                   t_landed_after_error_but_blocked_push_stays_red
   run "as-is landed-after-error greens without a commit"         t_asis_landed_after_error_greens_without_commit
   run "a pre-existing version earns no landed tolerance"         t_preexisting_version_earns_no_tolerance
+  run "an unrelated failure stays red even if the version appears" t_unrelated_failure_stays_red_even_if_version_appears
   echo "== summary: ${PASS_COUNT} passed, ${FAIL_COUNT} failed =="
   [[ "$FAIL_COUNT" -eq 0 ]]
 }

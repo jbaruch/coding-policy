@@ -123,9 +123,10 @@ alwaysApply: true
 
 ## A Non-Zero Publish Exit Is Not Proof Nothing Published
 
-- Two publish-command exits land the artifact and still exit non-zero — the out-of-credits billing exit, and the tessl CLI's client-side publish timeout
+- A publish command can exit non-zero after the artifact already landed
+- Tolerate such an exit only for the terminal-failure classes the publisher's own allowlist names — see the signature constants at the top of `skills/release/smart-publish.sh`
+- Every other non-zero exit stays red, whether or not the version appears afterwards
 - Confirm a landing by the EXACT version the run attempted, never by a registry advance
-- A registry advance can come from an interleaved publish
 - A version already present before the run proves nothing about that run
 - The pre-publish absence of that version is required
 - An indeterminate registry read is never a landing
