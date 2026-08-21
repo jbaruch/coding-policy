@@ -107,10 +107,16 @@ main() {
   # error body), or indeterminate. Exit codes mirror this script's, so the
   # classification lives in ONE place rather than being re-derived in shell.
   #   0 -> exists, 3 -> absent, 4 -> indeterminate (with a reason on stderr)
+  #
+  # The BODY arrives on stdin, never as an argv element: a proxy error page can
+  # be arbitrarily large, and a body past ARG_MAX would fail the exec itself —
+  # turning a perfectly readable 404 into an indeterminate read. Only the small,
+  # bounded values (the exit code and the wanted version) go through argv.
   local cls_rc=0
-  python3 -c '
+  printf '%s' "$body" | python3 -c '
 import json, sys
-body, rc, want = sys.argv[1], int(sys.argv[2]), sys.argv[3]
+rc, want = int(sys.argv[1]), sys.argv[2]
+body = sys.stdin.read()
 try:
     doc = json.loads(body) if body.strip() else None
 except json.JSONDecodeError as e:
@@ -133,7 +139,7 @@ if status == 404:
     sys.exit(3)
 print(f"non-zero exit {rc} with no 404 in the body (error status {status!r})", file=sys.stderr)
 sys.exit(4)
-' "$body" "$rc" "$version" 2>>"$RHV_ERR_FILE" || cls_rc=$?
+' "$rc" "$version" 2>>"$RHV_ERR_FILE" || cls_rc=$?
 
   local detail
   detail="$(tr '\n' ' ' <"$RHV_ERR_FILE")" || detail="(could not read the captured stderr)"

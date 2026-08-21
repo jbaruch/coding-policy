@@ -21,7 +21,7 @@ Three further things keep this from over-greening, each with a regression test. 
 
 Two review rounds tightened it further: the composite action reports the PUBLISH command's own exit (`publish_exit_code`) rather than the script's reconciled one, which is 0 on this path and would have printed "the publish command exited 0" beside a warning that it failed; the action escapes `%`, CR, and LF in the values it interpolates into `::warning::`, since `terminal_line` is upstream CLI output and a bare `%0A` in it would end the annotation and let the rest parse as its own workflow command; and `registry-has-version.sh` serializes its JSON with python3 instead of interpolating the caller-supplied version into a format string.
 
-New `ci-safety.md` section "A Non-Zero Publish Exit Is Not Proof Nothing Published" carries the contract. Seven new `smart-publish` cases and a nine-case suite for `registry-has-version.sh`. Reaches every fleet consumer through the `smart-publish@main` reference in the reusable `publish-plugin.yml`. Separately reportable upstream: the 20s timeout is unconfigurable, and it reports a successful publish as `✘ Failed to publish`.
+New `ci-safety.md` section "A Non-Zero Publish Exit Is Not Proof Nothing Published" carries the contract. Eight new `smart-publish` cases and a ten-case suite for `registry-has-version.sh`. Reaches every fleet consumer through the `smart-publish@main` reference in the reusable `publish-plugin.yml`. Separately reportable upstream: the 20s timeout is unconfigurable, and it reports a successful publish as `✘ Failed to publish`.
 
 ## 0.3.170 — 2026-08-21
 
