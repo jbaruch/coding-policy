@@ -6,6 +6,11 @@
 # it cannot verify a bot request (issue #276) — the mutation response is the
 # authoritative surface.
 #
+# The mutation runs in UNION mode. Replace mode (the default) drops a bot-only
+# request the same way the REST endpoint does — it returns success and the bot
+# never lands in `reviewRequests` — and it would clear reviewers already
+# requested on the PR (issue #297).
+#
 # Usage: request-copilot-review.sh <owner> <repo> <pr-number>
 # Env:   COPILOT_BOT_ID (override default BOT_kgDOCnlnWA)
 # Out:   one JSON object on stdout: {"pr_number","bot_id","requested_reviewers"}
@@ -54,18 +59,32 @@ fetch_pr_node_id() {
 # the only surface that reports bot reviewers — the REST pulls endpoint's
 # `requested_reviewers` omits them (issue #276), so it cannot verify this. On a
 # GraphQL error (a stale/rejected bot ID) `gh api graphql` exits non-zero and
-# stdout is empty, so a caller can branch on the exit to fall back. stderr is
-# silenced because every caller emits its own actionable message on failure
-# (rules/error-handling.md — silencing a diagnostic while explicitly handling
-# the failure is not suppression).
+# stdout is empty, so a caller can branch on the exit to fall back.
+#
+# `union: true` is load-bearing. Without it the mutation runs in replace mode,
+# which reports success and lands nothing for a bot-only request:
+# `reviewRequests` comes back empty and the script exits 1 on its own
+# verification, on every invocation and against a perfectly valid bot ID
+# (issue #297). Replace mode would also clear any reviewer already requested
+# on the PR.
+#
+# $3 is an optional file to capture the mutation's stderr into. Omitted on the
+# first attempt, where a non-zero exit is the expected "the pinned ID may be
+# stale" signal the caller handles by rediscovering; passed on the retry, where
+# the failure is terminal and the GraphQL error text is the only thing that
+# separates a rejected bot ID from an auth or network fault. Discarding it on
+# both paths is what made the first failure undiagnosable (rules/error-handling.md
+# — silencing a diagnostic while explicitly handling the failure is not
+# suppression, but the terminal path must say what broke).
 request_with_bot_id() {
+  local pr_id="$1" bot_id="$2" err_path="${3:-/dev/null}"
   gh api graphql -f query="
     mutation { requestReviews(input: {
-      pullRequestId: \"$1\", botIds: [\"$2\"]
+      pullRequestId: \"${pr_id}\", botIds: [\"${bot_id}\"], union: true
     }) { pullRequest { reviewRequests(first: 20) { nodes {
       requestedReviewer { __typename ... on Bot { login } }
     } } } } }
-  " --jq '[.data.requestReviews.pullRequest.reviewRequests.nodes[]?.requestedReviewer.login // empty]' 2>/dev/null
+  " --jq '[.data.requestReviews.pullRequest.reviewRequests.nodes[]?.requestedReviewer.login // empty]' 2>"$err_path"
 }
 
 discover_copilot_bot_id() {
@@ -84,6 +103,25 @@ discover_copilot_bot_id() {
            | select(.author.login == "copilot-pull-request-reviewer"
                     or .author.login == "copilot-pull-request-reviewer[bot]")
            | .author.id] | unique | .[0] // empty'
+}
+
+# `mutation_err` is script-global, never a main() local: the EXIT trap fires
+# after main returns, when a main-local would be out of scope and this handler
+# would silently skip cleanup.
+mutation_err=""
+
+# EXIT-trap cleanup. `return 0` is load-bearing — the trap's final command
+# status becomes the script's exit status, so a failing `rm` would rewrite the
+# verdict (rules/error-handling.md Shell Error Handling). `if ! rm` rather than
+# a bare `rm`: under `set -e` a failing rm would abort the handler before
+# `return 0` runs, reintroducing the rewrite the handler exists to prevent.
+cleanup_mutation_err() {
+  if [[ -n "${mutation_err:-}" ]]; then
+    if ! rm -f "$mutation_err"; then
+      echo "request-copilot-review.sh: warning: could not remove temp file ${mutation_err} — remove it by hand" >&2
+    fi
+  fi
+  return 0
 }
 
 main() {
@@ -113,8 +151,14 @@ main() {
       echo "error: no Copilot bot ID found in recent reviews of ${owner}/${repo}" >&2
       exit 1
     fi
-    reviewers=$(request_with_bot_id "$pr_node_id" "$bot_id") || {
-      echo "error: request failed with discovered bot ID $bot_id" >&2; exit 1;
+    mutation_err=$(mktemp) || {
+      echo "error: mktemp failed — cannot capture the mutation's error output; verify TMPDIR is set to a writable directory and re-run" >&2
+      exit 2
+    }
+    trap cleanup_mutation_err EXIT
+    reviewers=$(request_with_bot_id "$pr_node_id" "$bot_id" "$mutation_err") || {
+      echo "error: requestReviews failed with discovered bot ID ${bot_id}: $(cat "$mutation_err") — the GraphQL error above names the cause; a rejected botId means Copilot is not enabled for ${owner}/${repo}, anything else is an auth or network fault ('gh auth status')" >&2
+      exit 1
     }
   fi
 
