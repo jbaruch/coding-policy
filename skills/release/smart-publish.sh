@@ -72,11 +72,14 @@
 #         {"outcome":"success"|"failure","exit_code":N,
 #          "version":"x.y.z"|null,"credit_signature":true|false,
 #          "first_publish":true|false,"landed_after_error":true|false,
-#          "terminal_line":"<last substantive line>"|null}
+#          "terminal_line":"<last substantive line>"|null,
+#          "publish_exit_code":N}
 #       `landed_after_error` is true when the publish command exited non-zero
 #       and the registry proved the exact version landed anyway;
-#       `terminal_line` carries that exit's last substantive output line so the
-#       caller can name the failing step. The publish command's own output and
+#       `terminal_line` carries that exit's last substantive output line and
+#       `publish_exit_code` the publish command's OWN exit, so the caller can
+#       name the failing step accurately — `exit_code` is this script's
+#       reconciled exit and is 0 on that path. The publish command's own output and
 #       all diagnostics go to stderr (so the CI log still shows the publish),
 #       keeping stdout a clean JSON line.
 # Exit: 0 when the artifact is on the registry — a clean publish, OR a non-zero
@@ -149,10 +152,14 @@ cleanup_sp_log() {
 # scripts produce JSON via python3, never an undocumented jq dependency).
 #   $1 outcome  $2 exit_code  $3 version("" -> null)  $4 credit_signature
 #   $5 first_publish  $6 landed_after_error  $7 terminal_line("" -> null)
+#   $8 publish_exit_code — the PUBLISH COMMAND's own exit, which is NOT $2 on
+#      the landed-after-error path (this script exits 0 there). A caller that
+#      reports the failure needs the real one, or it prints "the publish
+#      command exited 0" next to a warning about that command failing.
 emit_json() {
   python3 -c '
 import json, sys
-outcome, exit_code, version, credit_sig, first, landed, terminal = sys.argv[1:8]
+outcome, exit_code, version, credit_sig, first, landed, terminal, pub_exit = sys.argv[1:9]
 print(json.dumps({
     "outcome": outcome,
     "exit_code": int(exit_code),
@@ -161,7 +168,8 @@ print(json.dumps({
     "first_publish": first == "true",
     "landed_after_error": landed == "true",
     "terminal_line": (None if terminal == "" else terminal),
-}))' "$1" "$2" "$3" "$4" "$5" "$6" "${7:-}"
+    "publish_exit_code": int(pub_exit),
+}))' "$1" "$2" "$3" "$4" "$5" "$6" "${7:-}" "${8:-0}"
 }
 
 # Read a top-level string field from the plugin manifest with python3 (no jq
@@ -363,7 +371,7 @@ main() {
     reg_json="$(bash "${_sp_dir}/registry-version.sh" "$workspace" "$plugin_slug")" || rc_reg=$?
     if [[ $rc_reg -ne 0 ]]; then
       echo "error: could not read the registry latest for '${name}' (registry-version.sh exit ${rc_reg}) — a pre-publish auth/network failure; nothing was published. Fix the cause and re-run." >&2
-      emit_json failure 1 "" false false false ""
+      emit_json failure 1 "" false false false "" 0
       exit 1
     fi
     # registry-version.sh guarantees a well-formed {"version":...} on exit 0, so
@@ -373,7 +381,7 @@ main() {
     # never fall through to an empty reg and a wrong first-publish.
     reg="$(printf '%s' "$reg_json" | python3 -c 'import json,sys;v=json.load(sys.stdin).get("version");print(v if v else "")')" || {
       echo "error: registry-version.sh returned unparseable JSON for '${name}' (${reg_json}) — a pre-publish tool failure; nothing was published. Inspect the registry read and re-run." >&2
-      emit_json failure 1 "" false false false ""
+      emit_json failure 1 "" false false false "" 0
       exit 1
     }
     [[ -z "$reg" ]] && first_publish=true
@@ -381,14 +389,14 @@ main() {
     target="$(compute_target_version "$reg" "$manifest_version")" || rc_t=$?
     if [[ $rc_t -ne 0 ]]; then
       echo "error: could not compute the next version for '${name}' (registry='${reg:-<none>}', manifest='${manifest_version}') — the registry latest is not numeric MAJOR.MINOR.PATCH. Nothing was published; inspect the registry." >&2
-      emit_json failure 1 "" false false false ""
+      emit_json failure 1 "" false false false "" 0
       exit 1
     fi
     intended_version="$target"
     echo "smart-publish: auto-bump target ${target} (registry=${reg:-<none>}, manifest=${manifest_version})." >&2
     if ! write_manifest_version "$manifest" "$target"; then
       echo "error: could not write version ${target} into '${manifest}' — nothing was published." >&2
-      emit_json failure 1 "" false false false ""
+      emit_json failure 1 "" false false false "" 0
       exit 1
     fi
   fi
@@ -512,16 +520,16 @@ sys.stdout.write(lines[-1] if lines else "")
         if ! commit_back "$manifest" "$name" "$intended_version" "$ref_name" "$ref_type"; then
           # Landed, but the bump-push was rejected — a post-publish failure that
           # stays RED, deliberately outside this tolerance.
-          emit_json failure 1 "$intended_version" "$credit_signature" "$first_publish" true "$terminal_line"
+          emit_json failure 1 "$intended_version" "$credit_signature" "$first_publish" true "$terminal_line" "$rc"
           exit 1
         fi
       fi
-      emit_json success 0 "$intended_version" "$credit_signature" "$first_publish" true "$terminal_line"
+      emit_json success 0 "$intended_version" "$credit_signature" "$first_publish" true "$terminal_line" "$rc"
       exit 0
     fi
 
     echo "smart-publish: publish exited ${rc} and ${name}@${intended_version} is not on the registry (credit_signature=${credit_signature}) — nothing landed. The confirm gate reds this." >&2
-    emit_json failure "$rc" "" "$credit_signature" "$first_publish" false "$terminal_line"
+    emit_json failure "$rc" "" "$credit_signature" "$first_publish" false "$terminal_line" "$rc"
     exit "$rc"
   fi
 
@@ -538,12 +546,12 @@ sys.stdout.write(lines[-1] if lines else "")
       # The artifact published, but the manifest bump-push was rejected — a
       # post-publish failure that stays red (the confirm gate sees advanced +
       # failure + no credit signature -> non-credit post-publish failure).
-      emit_json failure 1 "$published_version" false "$first_publish" false ""
+      emit_json failure 1 "$published_version" false "$first_publish" false "" 0
       exit 1
     fi
   fi
 
-  emit_json success 0 "$published_version" false "$first_publish" false ""
+  emit_json success 0 "$published_version" false "$first_publish" false "" 0
 }
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then

@@ -383,7 +383,11 @@ assert d["outcome"]=="success", d
 assert d["landed_after_error"] is True, d
 assert d["version"]=="0.1.1", d
 assert d["credit_signature"] is False, d
-assert "timed out" in (d["terminal_line"] or ""), d' \
+assert "timed out" in (d["terminal_line"] or ""), d
+# The reconciled exit is 0, but the PUBLISH command exited 1 — a caller that
+# reports the failure needs the real one, not the reconciled verdict.
+assert d["exit_code"] == 0, d
+assert d["publish_exit_code"] == 1, d' \
     || { echo "    FAIL: unexpected JSON: $out" >&2; return 1; }
   # The commit-back is the half that used to be skipped, leaving the manifest
   # behind the registry after every tolerated failure.

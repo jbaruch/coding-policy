@@ -58,6 +58,18 @@ cleanup_rhv_err_file() {
   return 0
 }
 
+# Emit the result object. python3, not printf interpolation: <version> is a
+# caller-supplied argument, and a quote, a backslash, or a control character in
+# it would produce invalid JSON on stdout — breaking the contract this script
+# declares (rules/script-delegation.md — JSON-producing). A serializer escapes
+# whatever it is handed.
+#   $1 exists (true|false)  $2 version
+emit_result() {
+  python3 -c '
+import json, sys
+print(json.dumps({"exists": sys.argv[1] == "true", "version": sys.argv[2]}))' "$1" "$2"
+}
+
 main() {
   if [[ $# -ne 3 ]]; then
     echo "usage: $0 <workspace> <plugin> <version>" >&2
@@ -128,11 +140,11 @@ sys.exit(4)
 
   case "$cls_rc" in
     0)
-      printf '{"exists":true,"version":"%s"}\n' "$version"
+      emit_result true "$version"
       exit 0
       ;;
     3)
-      printf '{"exists":false,"version":"%s"}\n' "$version"
+      emit_result false "$version"
       exit 0
       ;;
     *)

@@ -94,11 +94,13 @@ runs:
         version=""
         landed_after_error=false
         terminal_line=""
+        publish_exit_code=""
         if [ -n "$result_json" ] && printf '%s' "$result_json" | jq empty >/dev/null 2>&1; then
           credit_signature="$(printf '%s' "$result_json" | jq -r '.credit_signature // false')"
           version="$(printf '%s' "$result_json" | jq -r '.version // empty')"
           landed_after_error="$(printf '%s' "$result_json" | jq -r '.landed_after_error // false')"
           terminal_line="$(printf '%s' "$result_json" | jq -r '.terminal_line // empty')"
+          publish_exit_code="$(printf '%s' "$result_json" | jq -r '.publish_exit_code // empty')"
         else
           echo "::warning::smart-publish: no parseable JSON result (exit ${rc}); treating credit-signature as false so the confirm gate reds an unconfirmed publish." >&2
         fi
@@ -113,7 +115,23 @@ runs:
         # landing against the exact version, so name the step here, loudly,
         # rather than letting a green run hide it.
         if [ "$landed_after_error" = "true" ]; then
-          echo "::warning::smart-publish: ${version} PUBLISHED, but the publish command exited ${rc} afterwards: ${terminal_line:-<no terminal line captured>}. The registry confirms the exact version landed, so the release is real; the failing step above still needs attention."
+          # `publish_exit_code`, NOT `rc`: on this path the script reconciled the
+          # failure and exited 0, so `rc` is 0 and a warning built from it would
+          # claim the publish command "exited 0" while reporting that it failed.
+          #
+          # Escape the interpolated values as GitHub workflow-command DATA before
+          # they reach the `::warning::`. `terminal_line` is upstream CLI output —
+          # untrusted text — and a bare `%0A`/`%0D` in it would end the annotation
+          # and let the rest of the line be parsed as its own workflow command.
+          # `%` first, or it would double-escape the sequences added after it.
+          esc() {
+            local v="$1"
+            v="${v//%/%25}"
+            v="${v//$'\r'/%0D}"
+            v="${v//$'\n'/%0A}"
+            printf '%s' "$v"
+          }
+          echo "::warning::smart-publish: $(esc "$version") PUBLISHED, but the publish command exited ${publish_exit_code:-non-zero} afterwards: $(esc "${terminal_line:-<no terminal line captured>}"). The registry confirms the exact version landed, so the release is real; the failing step above still needs attention."
         fi
 
         # Exit with the publish's real code so this step's `outcome` reflects it

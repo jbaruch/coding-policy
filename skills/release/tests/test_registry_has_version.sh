@@ -128,6 +128,20 @@ t_diagnostic_names_the_cause() {
   esac
 }
 
+# <version> is a caller-supplied argument. Interpolating it into a JSON string
+# with printf emits INVALID JSON for one carrying a quote or a backslash, which
+# breaks the contract this script declares (rules/script-delegation.md —
+# JSON-producing). The absent path exercises the serializer without needing the
+# stub to produce a matching hostile body.
+t_hostile_version_still_emits_valid_json() {
+  local out rc=0
+  local hostile='1.0.0"\\ evil'
+  out="$(MOCK_MODE=absent bash "$SCRIPT" testws testplugin "$hostile" 2>/dev/null)" || rc=$?
+  [[ $rc -eq 0 ]] || { echo "    FAIL: expected exit 0, got ${rc}" >&2; return 1; }
+  echo "$out" | python3 -c 'import json,sys;d=json.load(sys.stdin);assert d["exists"] is False and d["version"]==sys.argv[1], d' "$hostile" \
+    || { echo "    FAIL: hostile version broke the JSON contract: $out" >&2; return 1; }
+}
+
 t_wrong_arity_is_usage_error() {
   local rc=0
   MOCK_MODE=present bash "$SCRIPT" testws testplugin >/dev/null 2>&1 || rc=$?
@@ -148,6 +162,7 @@ run "a non-JSON body is indeterminate"                   t_non_json_body_is_inde
 run "an empty body is indeterminate"                     t_empty_body_is_indeterminate
 run "a mismatched version is indeterminate"              t_version_mismatch_is_indeterminate
 run "the indeterminate diagnostic names the cause"       t_diagnostic_names_the_cause
+run "a hostile version still emits valid JSON"           t_hostile_version_still_emits_valid_json
 run "wrong arity is a usage error (exit 2)"              t_wrong_arity_is_usage_error
 run "an empty version argument is a usage error"         t_empty_version_is_usage_error
 
