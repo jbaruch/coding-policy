@@ -425,6 +425,7 @@ echo '{"version":"0.1.1"}'
 STUB
   local out
   out="$(
+    # shellcheck disable=SC1090  # SCRIPT is resolved at runtime from this file's own dir; the sourced target is the script under test
     source "$SCRIPT" || true
     set +e
     _sp_dir="$stub_dir"
