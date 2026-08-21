@@ -1,5 +1,28 @@
 # Changelog
 
+### Fix — a publish that timed out client-side no longer reds a release that landed
+
+`jbaruch/nanoclaw-admin` run 32450781941 published `0.1.497` and went red. The org was out of credits, and every credit fix behaved correctly — the review step skipped with its `::warning::` and the run continued — but the failure was something else entirely:
+
+```
+✔ Version 0.1.497 is available
+- Publishing...
+✘ Failed to publish
+✘ Publish timed out after 20 seconds: The operation timed out.
+```
+
+The tessl CLI gives up after ~20 seconds while the server finishes the upload, and `tessl plugin publish` exposes no timeout flag (CLI 0.97.0). The artifact landed anyway — `0.1.497` was created at 05:30:46, inside that run's window, with no other publish in flight — so the gate reded a real release, and `smart-publish.sh` returned before `commit_back`, leaving the manifest at `0.1.496` while the registry held `0.1.497`. The gate was right to red it under the old rule: only the out-of-credits SIGNATURE was tolerated, and this was not that.
+
+The tolerance is now evidence-based rather than signature-based. On ANY non-zero publish exit `smart-publish.sh` asks the registry whether the EXACT version it attempted is there (new `registry-has-version.sh`, the `versions/<v>` endpoint). If it is, the release landed: the manifest bump is committed back as usual, the script exits 0, and the JSON carries `landed_after_error` plus the `terminal_line`, which the `smart-publish` action turns into a `::warning::` naming the failing step. `ci-safety.md` already framed the test as "confirm the artifact landing AND name the failing step" — credits-only was an implementation narrowing of it, not the rule.
+
+The tolerated exits are a CLOSED allowlist — the two signature constants at the top of `smart-publish.sh`, out-of-credits and the publish timeout. "The version is there" and "this run put it there" are different claims, and only a known publish-completed-then-exited failure makes the second safe to infer; an unrecognized failure stays red even when the exact version turns up right afterwards, which is what a concurrent publisher taking that number looks like from inside the run.
+
+Three further things keep this from over-greening, each with a regression test. A pre-publish probe requires the version to be ABSENT before the run, so an as-is republish and the loser of two merges racing for the same auto-bump number cannot read as landed. An indeterminate read — an auth or network failure, a non-JSON body, a 200 whose version does not match — is never a landing; `registry-has-version.sh` separates a definitive 404 from a read it could not make, and every ambiguous answer fails closed. And a rejected bump-push after a landed publish still reds, deliberately outside the tolerance. The exact-version test is strictly stronger than the registry-advance test it replaces on this path: an interleaved publish advances the registry, but it cannot put someone else's version number there.
+
+Two review rounds tightened it further: the composite action reports the PUBLISH command's own exit (`publish_exit_code`) rather than the script's reconciled one, which is 0 on this path and would have printed "the publish command exited 0" beside a warning that it failed; the action escapes `%`, CR, and LF in the values it interpolates into `::warning::`, since `terminal_line` is upstream CLI output and a bare `%0A` in it would end the annotation and let the rest parse as its own workflow command; and `registry-has-version.sh` serializes its JSON with python3 instead of interpolating the caller-supplied version into a format string.
+
+New `ci-safety.md` section "A Non-Zero Publish Exit Is Not Proof Nothing Published" carries the contract. Nine new `smart-publish` cases and a ten-case suite for `registry-has-version.sh`. Review also caught a fail-OPEN in the helper that reads the probe's answer: a payload that PARSED but carried no explicit boolean read as `false`, and `false` on the pre-publish probe is the precondition that ENABLES the tolerance. Only an explicit `true` or `false` is an answer now; anything else is `unknown`, which disables it. Reaches every fleet consumer through the `smart-publish@main` reference in the reusable `publish-plugin.yml`. Separately reportable upstream: the 20s timeout is unconfigurable, and it reports a successful publish as `✘ Failed to publish`.
+
 ## 0.3.170 — 2026-08-21
 
 ### Actions — the missing-script guards name a remedy
