@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.171 — 2026-08-21
+
 ### Fix — a publish that timed out client-side no longer reds a release that landed
 
 `jbaruch/nanoclaw-admin` run 32450781941 published `0.1.497` and went red. The org was out of credits, and every credit fix behaved correctly — the review step skipped with its `::warning::` and the run continued — but the failure was something else entirely:
