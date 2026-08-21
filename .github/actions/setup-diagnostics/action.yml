@@ -23,5 +23,5 @@ runs:
       run: |
         set -euo pipefail
         # renovate: datasource=npm depName=pyright
-        npm install -g pyright@1.1.411
+        npm install -g pyright@1.1.413
         pyright --version
