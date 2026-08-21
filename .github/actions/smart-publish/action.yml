@@ -134,6 +134,14 @@ runs:
           echo "::warning::smart-publish: $(esc "$version") PUBLISHED, but the publish command exited ${publish_exit_code:-non-zero} afterwards: $(esc "${terminal_line:-<no terminal line captured>}"). The registry confirms the exact version landed, so the release is real; the failing step above still needs attention."
         fi
 
-        # Exit with the publish's real code so this step's `outcome` reflects it
-        # (the workflow sets continue-on-error so the job survives to the gate).
+        # Exit with the SCRIPT's code, which is not always the publish command's.
+        # On the landed-after-error path the script deliberately exits 0 for a
+        # non-zero publish: the artifact is on the registry, so the step's
+        # `outcome` should say success and let the confirm gate pass the run.
+        # Exiting `publish_exit_code` here would red every landed release again
+        # and undo this action's whole purpose — the failing publish is not
+        # hidden, it is reported by the ::warning:: above (which names the exit
+        # and the failing line) and by the `landed-after-error` output. Every
+        # other path still exits the publish's real code, and the workflow sets
+        # continue-on-error so the job survives to the gate either way.
         exit "$rc"
