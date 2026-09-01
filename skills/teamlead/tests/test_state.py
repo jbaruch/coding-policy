@@ -18,7 +18,9 @@ from pathlib import Path
 from teamlead.errors import StateError
 from teamlead.state import (
     MAX_SNAPSHOTS,
+    MIGRATIONS,
     STATE_SCHEMA_VERSION,
+    UNVERSIONED,
     add_assignment,
     add_snapshot,
     default_state_path,
@@ -76,39 +78,184 @@ class RoundTripTest(unittest.TestCase):
         self.assertTrue(self.path.read_text(encoding="utf-8").endswith("}\n"))
 
 
-class ValidationTest(unittest.TestCase):
+class MigrationTest(unittest.TestCase):
+    """Older migrates and is rewritten; newer and corrupt start empty, untouched."""
+
     def setUp(self):
         self.tmp = tempfile.mkdtemp(prefix="teamlead-state-test-")
         self.addCleanup(shutil.rmtree, self.tmp)
         self.path = Path(self.tmp) / "state.json"
+        self.warnings = []
 
-    def test_malformed_json_tells_the_operator_to_move_it_aside(self):
+    def write(self, payload):
+        self.path.write_text(json.dumps(payload), encoding="utf-8")
+
+    def load(self):
+        return load_state(self.path, warn=self.warnings.append)
+
+    def on_disk(self):
+        return json.loads(self.path.read_text(encoding="utf-8"))
+
+    # -- older: migrate, then rewrite ---------------------------------------
+
+    def test_an_unversioned_document_is_migrated_and_its_rows_stamped(self):
+        self.write(
+            {
+                "snapshots": [],
+                "assignments": [{"at": "2026-01-01T00:00:00+00:00", "role": "developer", "agent": "grok"}],
+            }
+        )
+        state = self.load()
+        self.assertEqual(state["schema_version"], STATE_SCHEMA_VERSION)
+        self.assertEqual(state["assignments"][0]["schema_version"], STATE_SCHEMA_VERSION)
+        self.assertEqual(state["assignments"][0]["agent"], "grok")
+
+    def test_the_migrated_document_is_rewritten_to_disk(self):
+        self.write(
+            {
+                "snapshots": [],
+                "assignments": [{"at": "2026-01-01T00:00:00+00:00", "role": "tester", "agent": "codex"}],
+            }
+        )
+        self.load()
+        stored = self.on_disk()
+        self.assertEqual(stored["schema_version"], STATE_SCHEMA_VERSION)
+        self.assertEqual(stored["assignments"][0]["schema_version"], STATE_SCHEMA_VERSION)
+
+    def test_an_unversioned_row_inside_a_current_document_is_stamped(self):
+        self.write(
+            {
+                "schema_version": STATE_SCHEMA_VERSION,
+                "snapshots": [],
+                "assignments": [{"at": "2026-01-01T00:00:00+00:00", "role": "reviewer", "agent": "claude"}],
+            }
+        )
+        self.load()
+        self.assertEqual(self.on_disk()["assignments"][0]["schema_version"], STATE_SCHEMA_VERSION)
+
+    def test_migrating_preserves_the_ledger_contents(self):
+        rows = [
+            {"at": "2026-01-01T00:00:00+00:00", "role": "developer", "agent": "grok"},
+            {"at": "2026-01-02T00:00:00+00:00", "role": "developer", "agent": "claude"},
+        ]
+        self.write({"snapshots": [], "assignments": rows})
+        state = self.load()
+        self.assertEqual([r["agent"] for r in state["assignments"]], ["grok", "claude"])
+        self.assertEqual(role_counts(state), {"developer": {"grok": 1, "claude": 1}})
+
+    def test_a_current_document_is_not_rewritten(self):
+        state = empty_state()
+        add_assignment(state, "2026-01-01T00:00:00+00:00", "developer", "grok")
+        save_state(self.path, state)
+        before = self.path.read_text(encoding="utf-8")
+        self.assertEqual(self.load(), state)
+        self.assertEqual(self.path.read_text(encoding="utf-8"), before)
+        self.assertEqual(self.warnings, [])
+
+    def test_the_table_is_keyed_by_the_version_being_upgraded_from(self):
+        # Shape check: adding 1->2 later must be one more entry, not a rewrite.
+        self.assertIn(UNVERSIONED, MIGRATIONS)
+        produced, upgrade = MIGRATIONS[UNVERSIONED]
+        self.assertEqual(produced, 1)
+        self.assertTrue(callable(upgrade))
+
+    # -- newer: no usable prior state, file untouched ------------------------
+
+    def test_a_newer_document_starts_empty_and_is_left_untouched(self):
+        payload = {"schema_version": STATE_SCHEMA_VERSION + 1, "snapshots": [], "assignments": []}
+        self.write(payload)
+        before = self.path.read_text(encoding="utf-8")
+        self.assertEqual(self.load(), empty_state())
+        self.assertEqual(self.path.read_text(encoding="utf-8"), before)
+        self.assertTrue(any("schema_version" in w for w in self.warnings))
+
+    def test_a_newer_row_makes_the_whole_document_unusable_rather_than_dropping_it(self):
+        # Silently dropping the row would lose it on the next write.
+        self.write(
+            {
+                "schema_version": STATE_SCHEMA_VERSION,
+                "snapshots": [],
+                "assignments": [
+                    {
+                        "schema_version": STATE_SCHEMA_VERSION + 1,
+                        "at": "2026-01-01T00:00:00+00:00",
+                        "role": "developer",
+                        "agent": "grok",
+                    }
+                ],
+            }
+        )
+        before = self.path.read_text(encoding="utf-8")
+        self.assertEqual(self.load(), empty_state())
+        self.assertEqual(self.path.read_text(encoding="utf-8"), before)
+
+    def test_a_newer_snapshot_is_the_same_lagging_reader_case(self):
+        self.write(
+            {
+                "schema_version": STATE_SCHEMA_VERSION,
+                "snapshots": [{"schema_version": STATE_SCHEMA_VERSION + 1, "agents": {}}],
+                "assignments": [],
+            }
+        )
+        self.assertEqual(self.load(), empty_state())
+
+    # -- corrupt: no usable prior state, never an instruction to discard -----
+
+    def test_malformed_json_starts_empty_with_a_warning(self):
         self.path.write_text("{broken", encoding="utf-8")
-        with self.assertRaises(StateError) as caught:
-            load_state(self.path)
-        self.assertIn(".bak", str(caught.exception))
+        self.assertEqual(self.load(), empty_state())
+        self.assertEqual(len(self.warnings), 1)
+        self.assertIn("not valid JSON", self.warnings[0])
 
-    def test_unsupported_schema_version_is_refused(self):
-        self.path.write_text(
-            json.dumps({"schema_version": 99, "snapshots": [], "assignments": []}),
-            encoding="utf-8",
-        )
-        with self.assertRaises(StateError) as caught:
-            load_state(self.path)
-        self.assertIn("99", str(caught.exception))
+    def test_a_corrupt_file_is_never_told_to_be_discarded(self):
+        self.path.write_text("{broken", encoding="utf-8")
+        self.load()
+        self.assertNotIn(".bak", self.warnings[0])
+        self.assertNotIn("mv ", self.warnings[0])
 
-    def test_non_array_snapshots_is_refused(self):
-        self.path.write_text(
-            json.dumps({"schema_version": 1, "snapshots": {}, "assignments": []}),
-            encoding="utf-8",
-        )
-        with self.assertRaises(StateError):
-            load_state(self.path)
+    def test_a_corrupt_file_is_left_on_disk(self):
+        self.path.write_text("{broken", encoding="utf-8")
+        self.load()
+        self.assertEqual(self.path.read_text(encoding="utf-8"), "{broken")
 
-    def test_non_object_document_is_refused(self):
+    def test_a_non_object_document_starts_empty(self):
         self.path.write_text("[]", encoding="utf-8")
+        self.assertEqual(self.load(), empty_state())
+
+    def test_a_non_array_snapshots_field_starts_empty(self):
+        self.write({"schema_version": STATE_SCHEMA_VERSION, "snapshots": {}, "assignments": []})
+        self.assertEqual(self.load(), empty_state())
+
+    def test_a_non_object_assignment_row_starts_empty(self):
+        self.write({"schema_version": STATE_SCHEMA_VERSION, "snapshots": [], "assignments": ["nope"]})
+        self.assertEqual(self.load(), empty_state())
+
+    def test_a_non_integer_version_starts_empty(self):
+        self.write({"schema_version": "1", "snapshots": [], "assignments": []})
+        self.assertEqual(self.load(), empty_state())
+
+    # -- environment faults still raise -------------------------------------
+
+    def test_a_directory_in_the_way_is_still_a_tool_failure(self):
+        directory = Path(self.tmp) / "dir-state"
+        directory.mkdir()
         with self.assertRaises(StateError):
-            load_state(self.path)
+            load_state(directory, warn=self.warnings.append)
+
+
+class AssignmentRecordTest(unittest.TestCase):
+    def test_every_written_row_carries_its_own_version(self):
+        state = empty_state()
+        add_assignment(state, "2026-01-01T00:00:00+00:00", "developer", "grok")
+        self.assertEqual(
+            state["assignments"][0],
+            {
+                "schema_version": STATE_SCHEMA_VERSION,
+                "at": "2026-01-01T00:00:00+00:00",
+                "role": "developer",
+                "agent": "grok",
+            },
+        )
 
 
 class SnapshotRingTest(unittest.TestCase):

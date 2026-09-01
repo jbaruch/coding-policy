@@ -23,6 +23,7 @@ from pathlib import Path
 
 from teamlead.cli import build_parser, main
 from teamlead.herdr import HerdrClient
+from teamlead.state import STATE_SCHEMA_VERSION
 
 from tests.fakes import FakeRunner, agent_json, ok_json
 
@@ -527,8 +528,18 @@ class ApplyCommandTest(CliCase):
         self.assertEqual(
             ledger,
             [
-                {"at": AT, "role": "developer", "agent": "grok"},
-                {"at": AT, "role": "tester", "agent": "claude"},
+                {
+                    "schema_version": STATE_SCHEMA_VERSION,
+                    "at": AT,
+                    "role": "developer",
+                    "agent": "grok",
+                },
+                {
+                    "schema_version": STATE_SCHEMA_VERSION,
+                    "at": AT,
+                    "role": "tester",
+                    "agent": "claude",
+                },
             ],
         )
 

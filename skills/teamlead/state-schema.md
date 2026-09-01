@@ -26,7 +26,12 @@ Both are documented in `skills/teamlead/references/herdr.md`.
   "schema_version": 1,
   "snapshots": ["<measure output>, oldest first, ring capped at 20"],
   "assignments": [
-    { "at": "2026-09-01T21:00:00+00:00", "role": "developer", "agent": "grok" }
+    {
+      "schema_version": 1,
+      "at": "2026-09-01T21:00:00+00:00",
+      "role": "developer",
+      "agent": "grok"
+    }
   ]
 }
 ```
@@ -36,9 +41,15 @@ Both are documented in `skills/teamlead/references/herdr.md`.
 | `schema_version` | integer | Currently `1`. Bumped on any shape change |
 | `snapshots` | array | Whole `measure` documents, oldest first; the ring holds the last 20 |
 | `assignments` | array | Append-only ledger of who held which role |
+| `assignments[].schema_version` | integer | The row's own version, stamped on write |
 | `assignments[].at` | string | ISO-8601 timestamp, from `--now` or the CLI's clock |
 | `assignments[].role` | string | The role handed out |
 | `assignments[].agent` | string | The agent that received it |
+
+Every record carries `schema_version`, not only the document: a ledger row
+outlives the document it arrived in, and a version on the row is what makes a
+later migration auditable row by row. Each snapshot is a whole `measure`
+document and arrives already stamped.
 
 Each snapshot is one `measure` document: `schema_version`, `measured_at`, an
 `agents` object keyed by agent name (`kind`, `state`, `herdr_state`,
@@ -62,13 +73,33 @@ informational plan name and never feeds headroom.
 
 ## Migration
 
-- Only the owner migrates. A file whose `schema_version` is anything other than
-  `1` is refused with a `mv` command to move it aside, never silently
-  reinterpreted as the current shape.
-- Bump `schema_version` for any shape change; never repurpose a field.
-- The skill and the utility ship in the same plugin version, so writer and
-  readers move together — `rules/stateful-artifacts.md` Cross-Pipeline Schema
-  Bumps does not apply here.
+Only the owner migrates, and it reads a version in one of three directions.
+
+- **Older** — the document, or a single ledger row, is walked up the
+  `MIGRATIONS` / `RECORD_MIGRATIONS` chain in
+  `skills/teamlead/teamlead/state.py`, keyed by the version being upgraded
+  from, and the upgraded file is rewritten in place. A document or row carrying
+  no `schema_version` reads as the pre-versioning version `0`, which is what
+  gives the chain a step below `1`. Adding a `1 → 2` step later is one more
+  entry in each table.
+- **Newer** — this build is the lagging reader, not the migrator. The caller
+  gets an empty document in memory, the file on disk is left exactly as found,
+  and a warning goes to stderr. A single row stamped ahead of this build makes
+  the whole document unusable rather than being dropped, so the next write
+  cannot lose it.
+- **Corrupt** — unparseable JSON, a non-object document, a non-array field, a
+  non-object row: no usable prior state, treated exactly like the newer case.
+  The file is never deleted, and the warning never instructs the operator to
+  discard it. Losing a snapshot ring costs one re-measure; overwriting an
+  unread file costs the ledger.
+
+A tool failure is not a version case: unreadable permissions or a directory in
+the state path still raises, carrying the command that fixes it.
+
+Bump `schema_version` for any shape change; never repurpose a field. The skill
+and the utility ship in the same plugin version, so writer and readers move
+together — `rules/stateful-artifacts.md` Cross-Pipeline Schema Bumps does not
+apply here.
 
 ## Hints, Not Authority
 
