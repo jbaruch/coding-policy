@@ -76,7 +76,7 @@ tessl install jbaruch/coding-policy
 | [check-git-sync](hooks/check-git-sync.sh) | SessionStart | Fetches origin (throttled once/hour per repo) and warns when the local default branch is behind `origin/<default>` — a `rules/sync-before-work.md` reminder at session start. Informative only, never blocks. |
 | [check-tessl-latest](hooks/check-tessl-latest.sh) | SessionStart | Warns when `tessl.json` pins a `jbaruch/*` dependency instead of `latest` — the deterministic enforcement for the Runtime-Managed Manifest Carve-Out (`rules/dependency-management.md`). Third-party pins are out of scope. Informative only, never blocks. |
 | [stop-handoff-hygiene](hooks/stop-handoff-hygiene.sh) | Stop (Claude Code + Codex) | Blocks the handoff once (loop-safe via `stop_hook_active`) on leftover local branches (merged, upstream gone), orphaned worktrees, or diagnostics findings in the changed set (uncommitted `.sh`/`.py`, linted with shellcheck/pyright). A dirty working tree is reported, not blocked. Fail-open. |
-| [herdr-team-status](hooks/herdr-team-status.sh) | SessionStart | Names the live Herdr team — each named worker, its kind, and its lifecycle state — so a lead opens knowing who is mid-task. Silent outside Herdr and when no other named worker is live. Informative only, never blocks. |
+| [herdr-team-status](hooks/herdr-team-status.sh) | SessionStart | Names the live Herdr team: each named worker, its kind, and its lifecycle state. Silent outside Herdr and when no other named worker is live. Informative only, never blocks. |
 
 ## Philosophy
 
