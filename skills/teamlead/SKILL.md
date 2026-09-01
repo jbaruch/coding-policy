@@ -135,8 +135,10 @@ Step 5.
 Per role: re-reads the worker's live state, recovers a composer that already
 holds text, sends the native context-clear command, confirms the composer
 consumed it, waits for the worker to settle, confirms the composer is empty
-once more, then sends the assignment prompt and records the hand-off in the
-ledger. Emits one JSON object describing what was sent.
+once more, then sends the assignment prompt, confirms the worker actually
+started on it, and records the hand-off in the ledger. Emits one JSON object
+describing what was sent, each record carrying `landed`, `started`, and
+`status`.
 
 - A `working` or `blocked` worker makes the command refuse the whole round
   before a single keystroke goes out, with a JSON error on stderr and a
@@ -154,6 +156,13 @@ ledger. Emits one JSON object describing what was sent.
   step, never the composer gate.
 - `cleared: true` means the command was consumed AND the pane changed.
   Consumed-but-unchanged reports `cleared: false` with a warning.
+- An assignment the worker never started on records
+  `"status": "sent_but_not_started"`, warns, and exits non-zero. Treat it as an
+  observation and read the pane; do not re-dispatch on top of it.
+- A worker answering `unknown skill` or `Unrecognized command` fails that
+  worker at once. Recovery is one `esc`, then resend.
+- Claude Code's post-task ghost-text suggestion reads as an empty composer
+  through `composer_ignore_dim`. Nobody typed it, and Esc does not clear it.
 - A stuck composer is recovered with the worker's `recover_keys`, sent exactly
   once. A second `ctrl+c` exits Codex, so a still-occupied composer is a
   refusal rather than a retry. Glyphs, keys, and the settle knob are in

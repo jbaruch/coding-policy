@@ -125,7 +125,16 @@ def composer_screen(name, screen="idle transcript", held=""):
     return "{}\n{}\n".format(screen, composer_row(name, held))
 
 
-def composer_reads(name, screens=("before", "after"), held=""):
+#: A transcript showing the assignment as a user message, which is what
+#: `send_message` looks for before calling a hand-off started.
+LANDED_SCREEN = "> New assignment from the team lead. Your role for this task is DEVELOPER."
+
+#: The default read sequence for a full apply: the screen before the clear,
+#: the screen after it, the composer check, then the landed assignment.
+DEFAULT_COMPOSER_SCREENS = ("before", "after", "after", LANDED_SCREEN)
+
+
+def composer_reads(name, screens=DEFAULT_COMPOSER_SCREENS, held=""):
     """A ScriptedReads walking `screens`, composer empty unless `held` given.
 
     The last screen repeats, so an over-long sequence of reads is stable.

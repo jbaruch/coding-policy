@@ -172,6 +172,18 @@ the command text is gone from it:
 3. Still there — fail that worker, and never send the assignment. Pasting a
    brief onto a stuck command is the accident this exists to prevent.
 
+**Dim text is not occupied text.** Claude Code pre-fills its input box with a
+ghost-text suggestion after a task (`check the other issues (#28, #30) for
+follow-up work`). Nobody typed it, Esc does not remove it, and the next
+keystroke replaces it. A plain-text read cannot tell it from a real command, so
+the composer is read with `--format ansi` and characters rendered dim or in the
+grey palette are dropped before the decision. Bold counts as deliberate, and
+normal-weight text typed after a suggestion still counts, which keeps a real
+command from hiding behind one. `composer_ignore_dim` turns this on per worker
+(`true` for claude, `false` elsewhere), and a herdr that cannot produce ANSI
+falls back to plain text with a warning. The SGR codes are in
+`skills/teamlead/teamlead/composer.py`.
+
 Before any dispatch, a composer that already holds text is recovered by sending
 `recover_keys` **exactly once**. Never twice on Codex: a second `ctrl+c` exits
 it. A composer still occupied after the one attempt is a refusal, never
@@ -179,6 +191,27 @@ something to type over.
 
 A worker with no `composer_glyph` cannot be checked, so the read is skipped
 rather than spent on a row nothing can interpret.
+
+### Sending Is Not Starting
+
+A leftover `/` from the clear turned an assignment into `/New assignment …`.
+Claude Code answered `Args from unknown skill`, no turn ever began, and the
+round reported as applied. Every assignment is now confirmed:
+
+1. The clear gets a settle delay before the next paste — the redraw racing the
+   paste is what left the `/` behind.
+2. The transcript must show the message as a user message, and `unknown skill`
+   / `Unrecognized command` must NOT appear. Either one fails that worker
+   immediately, with the recovery: send `esc` once, then resend.
+3. The worker must leave idle, or the transcript must show the prompt.
+
+Neither confirmed records `"status": "sent_but_not_started"`, warns on stderr,
+and exits non-zero. Reporting a hand-off nobody started is worse than reporting
+nothing. Each record carries `landed`, `started`, and `status`.
+
+`sent_but_not_started` is an observation, never a diagnosis: a worker that
+finished a very short turn before the check looked is indistinguishable from
+one that never began.
 
 `cleared: true` in the `apply` output is earned, not assumed: the clear command
 was consumed AND the pane's content changed (a fresh Codex banner, an emptied
@@ -190,8 +223,14 @@ Three per-agent config keys drive it:
 | Key | Meaning |
 | --- | ------- |
 | `composer_glyph` | Prompt glyph starting the composer row (`"› "` Codex, `"❯ "` Claude, `"│ ❯"` Grok). Empty skips the check |
+| `composer_ignore_dim` | `true` reads dim/grey composer text as empty — Claude Code's ghost-text suggestion. Default `false` |
 | `recover_keys` | Keys that clear a stuck composer (`["ctrl+c"]` Codex, `["esc"]` Claude and Grok). Sent once, never twice |
 | `slash_delivery` | `paste` or `type`, per the table above |
+
+Dim detection is SGR parsing, not semantics: a runtime that draws a real draft
+in grey reads as empty, and one that draws its suggestion at normal weight
+reads as occupied. The per-worker setting keeps a runtime with no ghost text
+away from either.
 
 Glyph matching is signature matching: a TUI that restyles its prompt makes the
 composer unreadable, which surfaces as an unsent command going uncaught — the

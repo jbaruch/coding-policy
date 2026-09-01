@@ -494,7 +494,8 @@ class ApplyCommandTest(CliCase):
         self.assertEqual(shells[0], "herdr agent get grok")
         self.assertIn("herdr pane send-text PANE-ID-RESOLVED-AT-RUN-TIME /new", shells)
         self.assertIn("herdr pane send-keys PANE-ID-RESOLVED-AT-RUN-TIME enter", shells)
-        self.assertIn("DEVELOPER", shells[-1])
+        self.assertTrue(any("DEVELOPER" in shell for shell in shells))
+        self.assertEqual(shells[-1], "herdr agent wait grok --until working --timeout 15000")
         self.assertEqual(err, "")
 
     def test_dry_run_writes_nothing_to_the_state_file(self):

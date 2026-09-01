@@ -38,9 +38,10 @@ class Agent:
     __slots__ = REQUIRED_AGENT_FIELDS + OPTIONAL_LIST_FIELDS + (
         "slash_delivery",
         "composer_glyph",
+        "composer_ignore_dim",
     )
 
-    def __init__(self, name, kind, usage_prompt, usage_marker, usage_read_source, clear_prompt, close_keys=(), idle_markers=(), working_markers=(), dialog_next_tab_keys=(), recover_keys=(), slash_delivery=DEFAULT_SLASH_DELIVERY, composer_glyph=""):
+    def __init__(self, name, kind, usage_prompt, usage_marker, usage_read_source, clear_prompt, close_keys=(), idle_markers=(), working_markers=(), dialog_next_tab_keys=(), recover_keys=(), slash_delivery=DEFAULT_SLASH_DELIVERY, composer_glyph="", composer_ignore_dim=False):
         self.name = name
         self.kind = kind
         self.usage_prompt = usage_prompt
@@ -63,6 +64,10 @@ class Agent:
         # The prompt glyph that marks the composer row, so teamlead can see
         # whether a slash command was consumed. Empty disables the check.
         self.composer_glyph = composer_glyph
+        # Treat dim / grey composer text as empty. Claude Code pre-fills a
+        # ghost-text suggestion nobody typed; a runtime without ghost text
+        # leaves this off so every character still counts.
+        self.composer_ignore_dim = composer_ignore_dim
 
     def __repr__(self):
         return "Agent(name={!r}, kind={!r})".format(self.name, self.kind)
@@ -78,6 +83,7 @@ class Agent:
             record[field] = list(getattr(self, field))
         record["slash_delivery"] = self.slash_delivery
         record["composer_glyph"] = self.composer_glyph
+        record["composer_ignore_dim"] = self.composer_ignore_dim
         return record
 
 
@@ -199,6 +205,16 @@ def parse_config(payload, source="<memory>"):
                 ),
                 {"source": source, "index": index},
             )
+        ignore_dim = entry.get("composer_ignore_dim", False)
+        if not isinstance(ignore_dim, bool):
+            raise ConfigError(
+                "Config at {}: agents[{}].composer_ignore_dim must be true or "
+                "false - true treats dim ghost-text in the composer as empty, "
+                "which is what Claude Code's pre-filled suggestion needs.".format(
+                    source, index
+                ),
+                {"source": source, "index": index},
+            )
         agents.append(
             Agent(
                 name=name,
@@ -209,6 +225,7 @@ def parse_config(payload, source="<memory>"):
                 clear_prompt=entry["clear_prompt"],
                 slash_delivery=delivery,
                 composer_glyph=glyph,
+                composer_ignore_dim=ignore_dim,
                 **lists
             )
         )

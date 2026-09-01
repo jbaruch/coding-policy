@@ -20,6 +20,13 @@ the end of it, so Codex received `/newNew assignment from the team lead...`
 and rejected it. The assignment is never sent to an agent whose composer still
 holds text.
 
+Sending it is not the end either. A leftover `/` turned an assignment into
+`/New assignment ...`, Claude Code answered "Args from unknown skill", and no
+turn ever started -- while teamlead reported the round applied. So each
+hand-off is confirmed: the transcript must show the message, the runtime must
+not have read it as a command, and the agent must leave idle. Anything less is
+reported as `sent_but_not_started` rather than as success.
+
 `--dry-run` builds the same argv lists the live path would execute (the
 builders live on the transport) and prints them without running anything.
 """
@@ -27,7 +34,13 @@ builders live on the transport) and prints them without running anything.
 import os
 import time
 
-from .composer import COMPOSER_SETTLE_SEC, ensure_ready, send_command
+from .composer import (
+    COMPOSER_SETTLE_SEC,
+    DEFAULT_START_TIMEOUT_MS,
+    LANDING_ATTEMPTS,
+    send_command,
+    send_message,
+)
 from .errors import AgentBusyError, UsageError
 from .herdr import (
     BUSY_STATES,
@@ -46,6 +59,11 @@ SETTLE_STATES = ("idle", "done")
 #: Stand-in for a pane id in `--dry-run`, which resolves no pane because it
 #: makes no herdr calls.
 PANE_ID_PLACEHOLDER = "PANE-ID-RESOLVED-AT-RUN-TIME"
+
+#: The opening words looked for in the transcript to confirm the assignment
+#: landed as a user message. Short enough to survive the runtime re-wrapping
+#: it across rows.
+ASSIGNMENT_OPENING = "New assignment from the team lead."
 
 ASSIGNMENT_TEMPLATE = (
     "New assignment from the team lead. Your role for this task is {role}. "
@@ -126,7 +144,7 @@ def validate_agents(assignments, agents_by_name):
             )
 
 
-def build_steps(client, assignments, agents_by_name, paths, panes=None, no_clear=False, settle_timeout_ms=DEFAULT_SETTLE_TIMEOUT_MS):
+def build_steps(client, assignments, agents_by_name, paths, panes=None, no_clear=False, settle_timeout_ms=DEFAULT_SETTLE_TIMEOUT_MS, start_timeout_ms=DEFAULT_START_TIMEOUT_MS):
     """Build the per-role command plan. Pure with respect to herdr: nothing runs.
 
     This is what `--dry-run` prints, and what the live path walks. `panes` maps
@@ -141,7 +159,14 @@ def build_steps(client, assignments, agents_by_name, paths, panes=None, no_clear
         pane_id = panes.get(name) or PANE_ID_PLACEHOLDER
         text = assignment_text(role, paths["common"], paths[role])
         composer_reads = (
-            [client.argv_agent_read(name, source=COMPOSER_READ_SOURCE, lines=COMPOSER_READ_LINES)]
+            [
+                client.argv_agent_read(
+                    name,
+                    source=COMPOSER_READ_SOURCE,
+                    lines=COMPOSER_READ_LINES,
+                    fmt="ansi",
+                )
+            ]
             if checkable(agent)
             else []
         )
@@ -184,6 +209,11 @@ def build_steps(client, assignments, agents_by_name, paths, panes=None, no_clear
         commands.extend(composer_reads)
         # The assignment is real message text, so pasting it is correct.
         commands.append(client.argv_agent_prompt(name, text))
+        # Sending is not starting: confirm it landed as a user message.
+        commands.extend(composer_reads)
+        commands.append(
+            client.argv_agent_wait(name, until=("working",), timeout_ms=start_timeout_ms)
+        )
         steps.append(
             {
                 "role": role,
@@ -240,7 +270,7 @@ def check_all_ready(client, assignments, agents_by_name, warn=None):
     return statuses
 
 
-def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle_timeout_ms=DEFAULT_SETTLE_TIMEOUT_MS, on_assigned=None, warn=None, sleep=time.sleep, settle_sec=COMPOSER_SETTLE_SEC):
+def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle_timeout_ms=DEFAULT_SETTLE_TIMEOUT_MS, on_assigned=None, warn=None, sleep=time.sleep, settle_sec=COMPOSER_SETTLE_SEC, landing_attempts=LANDING_ATTEMPTS, start_timeout_ms=DEFAULT_START_TIMEOUT_MS):
     """Clear each agent and hand it its brief. Writes to the agents.
 
     `on_assigned(role, agent, at)` is called after each successful hand-off so
@@ -259,6 +289,7 @@ def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle
         panes={name: record.get("pane_id") for name, record in statuses.items()},
         no_clear=no_clear,
         settle_timeout_ms=settle_timeout_ms,
+        start_timeout_ms=start_timeout_ms,
     )
 
     applied = []
@@ -292,15 +323,28 @@ def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle
             # transcript, Grok redraws session_start. Consumed but unchanged is
             # reported honestly rather than assumed.
             cleared = outcome["screen_changed"]
+            # The clear's redraw races the next paste; a leftover `/` is what
+            # made Claude Code read the assignment as a slash command.
+            sleep(settle_sec)
             if not cleared:
                 (warn or stderr_warn)(
                     "teamlead: {} consumed {} but its screen did not change, so "
                     "the context may not have been cleared. Reported as "
                     "cleared: false.".format(name, agent.clear_prompt)
                 )
-        # Never paste an assignment onto text already sitting in the composer.
-        ensure_ready(client, agent, sleep=sleep, warn=warn, settle_sec=settle_sec)
-        client.agent_prompt(name, step["prompt"])
+        # send_message re-checks the composer, pastes, and confirms the
+        # message actually landed as a user message rather than as a command.
+        landing = send_message(
+            client,
+            agent,
+            step["prompt"],
+            ASSIGNMENT_OPENING,
+            sleep=sleep,
+            warn=warn,
+            settle_sec=settle_sec,
+            attempts=landing_attempts,
+            start_timeout_ms=start_timeout_ms,
+        )
         checked = statuses.get(name, {})
         record = {
             "role": step["role"],
@@ -310,6 +354,11 @@ def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle
             "state_source": checked.get("state_source"),
             "pane_id": checked.get("pane_id"),
             "cleared": cleared,
+            "landed": landing["landed"],
+            "started": landing["started"],
+            "status": "applied"
+            if (landing["landed"] or landing["started"])
+            else "sent_but_not_started",
             "brief": step["brief"],
             "common": step["common"],
             "at": at,

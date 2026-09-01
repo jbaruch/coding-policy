@@ -223,12 +223,16 @@ class HerdrClient:
     def argv_agent_list(self):
         return [self.binary, "agent", "list"]
 
-    def argv_agent_read(self, name, source=None, lines=None):
+    def argv_agent_read(self, name, source=None, lines=None, fmt=None):
         argv = [self.binary, "agent", "read", name]
         if source:
             argv += ["--source", source]
         if lines is not None:
             argv += ["--lines", str(lines)]
+        if fmt:
+            # `ansi` keeps the SGR sequences, which is the only way to tell a
+            # dim ghost-text suggestion from text somebody actually typed.
+            argv += ["--format", fmt]
         return argv
 
     def argv_agent_prompt(self, name, text, wait=False, until=(), timeout_ms=None):
@@ -450,9 +454,9 @@ class HerdrClient:
             )
         return agents
 
-    def agent_read(self, name, source=None, lines=None):
+    def agent_read(self, name, source=None, lines=None, fmt=None):
         """Return raw pane text. `agent read` is the one non-JSON command."""
-        return self._run(self.argv_agent_read(name, source=source, lines=lines))
+        return self._run(self.argv_agent_read(name, source=source, lines=lines, fmt=fmt))
 
     def agent_prompt(self, name, text, wait=False, until=(), timeout_ms=None):
         """Submit message text. Writes to the agent -- gate on status first.

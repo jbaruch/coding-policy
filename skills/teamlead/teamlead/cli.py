@@ -27,7 +27,7 @@ from .herdr import (
     HerdrClient,
     trace_enabled_in_env,
 )
-from .composer import COMPOSER_SETTLE_SEC
+from .composer import COMPOSER_SETTLE_SEC, DEFAULT_START_TIMEOUT_MS
 from .measure import (
     DEFAULT_MARKER_POLL_ATTEMPTS,
     DEFAULT_MARKER_POLL_INTERVAL_SEC,
@@ -232,6 +232,14 @@ def build_parser():
         "(default: %(default)s).",
     )
     apply_parser.add_argument(
+        "--start-timeout",
+        type=int,
+        default=DEFAULT_START_TIMEOUT_MS,
+        metavar="MS",
+        help="How long to wait for an agent to start its turn after the "
+        "assignment lands (default: %(default)s).",
+    )
+    apply_parser.add_argument(
         "--settle-timeout",
         type=int,
         default=DEFAULT_SETTLE_TIMEOUT_MS,
@@ -329,7 +337,14 @@ def cmd_measure(args, client=None, warn=None):
     state = load_state(_state_path(args))
     add_snapshot(state, snapshot)
     save_state(_state_path(args), state)
-    return snapshot, bool(snapshot["failed_agents"])
+    if not snapshot["failed_agents"]:
+        return snapshot, None
+    return snapshot, {
+        "error": "measure_incomplete",
+        "message": "Could not measure {} - see the `error` field on each agent "
+        "in the snapshot on stdout.".format(", ".join(snapshot["failed_agents"])),
+        "details": {"failed_agents": snapshot["failed_agents"]},
+    }
 
 
 def cmd_plan(args, client=None, warn=None):
@@ -378,7 +393,7 @@ def cmd_plan(args, client=None, warn=None):
             role_counts(state),
             snapshot_ref={"source": source, "measured_at": snapshot.get("measured_at")},
         ),
-        False,
+        None,
     )
 
 
@@ -399,7 +414,7 @@ def cmd_apply(args, client=None, warn=None):
                 no_clear=args.no_clear,
                 settle_timeout_ms=args.settle_timeout,
             ),
-            False,
+            None,
         )
 
     state_path = _state_path(args)
@@ -420,12 +435,26 @@ def cmd_apply(args, client=None, warn=None):
         on_assigned=record,
         warn=warn,
         settle_sec=args.composer_settle,
+        start_timeout_ms=args.start_timeout,
     )
-    return result, False
+    not_started = [
+        record["agent"]
+        for record in result["applied"]
+        if record.get("status") == "sent_but_not_started"
+    ]
+    if not not_started:
+        return result, None
+    return result, {
+        "error": "sent_but_not_started",
+        "message": "Sent the assignment to {} but neither saw it in the "
+        "transcript nor saw the agent start a turn. Check the pane before "
+        "assuming it is working.".format(", ".join(not_started)),
+        "details": {"sent_but_not_started": not_started},
+    }
 
 
 def cmd_state(args, client=None, warn=None):
-    return load_state(_state_path(args)), False
+    return load_state(_state_path(args)), None
 
 
 COMMANDS = {
@@ -446,7 +475,7 @@ def main(argv=None, stdout=None, stderr=None, client=None):
         stderr.write(message + "\n")
 
     try:
-        payload, failed = COMMANDS[args.command](args, client=client, warn=warn)
+        payload, failure = COMMANDS[args.command](args, client=client, warn=warn)
     except TeamLeadError as exc:
         json.dump(exc.to_dict(), stderr, indent=2)
         stderr.write("\n")
@@ -454,17 +483,10 @@ def main(argv=None, stdout=None, stderr=None, client=None):
 
     json.dump(payload, stdout, indent=2)
     stdout.write("\n")
-    if failed:
-        json.dump(
-            {
-                "error": "measure_incomplete",
-                "message": "Could not measure {} - see the `error` field on each "
-                "agent in the snapshot on stdout.".format(", ".join(payload["failed_agents"])),
-                "details": {"failed_agents": payload["failed_agents"]},
-            },
-            stderr,
-            indent=2,
-        )
+    if failure:
+        # stdout keeps the full document either way; stderr says why the exit
+        # code is non-zero.
+        json.dump(failure, stderr, indent=2)
         stderr.write("\n")
         return 1
     return 0

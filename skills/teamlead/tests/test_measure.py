@@ -165,9 +165,9 @@ class MeasureAgentTest(unittest.TestCase):
             runner.commands(),
             [
                 "agent get claude",
-                "agent read claude --source visible --lines 20",
+                "agent read claude --source visible --lines 20 --format ansi",
                 "agent prompt claude /usage",
-                "agent read claude --source visible --lines 20",
+                "agent read claude --source visible --lines 20 --format ansi",
                 "pane wait-output --match 'Current week' --source visible --timeout 20000 w2:p1",
                 "agent read claude --source visible --lines 80",
                 "agent send-keys claude esc",

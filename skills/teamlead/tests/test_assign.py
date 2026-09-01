@@ -137,7 +137,11 @@ def runner_with(statuses, footers=None, composer_screens=None):
     for name in statuses:
         runner.responses[
             "agent read {} --source visible --lines 20".format(name)
-        ] = composer_reads(name, screens=composer_screens or ("before", "after"))
+        ] = (
+            composer_reads(name, screens=composer_screens)
+            if composer_screens
+            else composer_reads(name)
+        )
     return runner
 
 
@@ -243,16 +247,18 @@ class BuildStepsTest(unittest.TestCase):
             [command["shell"] for command in steps[0]["commands"]],
             [
                 "herdr agent get grok",
-                "herdr agent read grok --source visible --lines 20",
+                "herdr agent read grok --source visible --lines 20 --format ansi",
                 "herdr pane send-text w4:p1 /new",
                 "herdr pane send-keys w4:p1 enter",
-                "herdr agent read grok --source visible --lines 20",
+                "herdr agent read grok --source visible --lines 20 --format ansi",
                 "herdr agent wait grok --until idle --until done --timeout 60000",
-                "herdr agent read grok --source visible --lines 20",
+                "herdr agent read grok --source visible --lines 20 --format ansi",
                 "herdr agent prompt grok 'New assignment from the team lead. Your role "
                 "for this task is DEVELOPER. Read /w/COMMON.md in full, then read "
                 "/w/dev.md in full, and execute that brief exactly. Finish with the "
                 "REPORT line it specifies.'",
+                "herdr agent read grok --source visible --lines 20 --format ansi",
+                "herdr agent wait grok --until working --timeout 15000",
             ],
         )
 
@@ -306,11 +312,20 @@ class BuildStepsTest(unittest.TestCase):
             self.client, {"developer": "grok"}, BY_NAME, self.paths, no_clear=True
         )
         shells = [command["shell"] for command in steps[0]["commands"]]
-        # get, the composer check that still gates the assignment, the message
-        self.assertEqual(len(shells), 3)
+        # get, the composer check that still gates the assignment, the message,
+        # then the two checks that it landed -- --no-clear skips the clear, not
+        # the verification.
+        self.assertEqual(len(shells), 5)
         self.assertEqual(shells[0], "herdr agent get grok")
-        self.assertEqual(shells[1], "herdr agent read grok --source visible --lines 20")
+        self.assertEqual(
+            shells[1], "herdr agent read grok --source visible --lines 20 --format ansi"
+        )
         self.assertIn("DEVELOPER", shells[2])
+        self.assertEqual(
+            shells[3], "herdr agent read grok --source visible --lines 20 --format ansi"
+        )
+        self.assertEqual(shells[4], "herdr agent wait grok --until working --timeout 15000")
+        self.assertEqual([s for s in shells if "/new" in s], [])
 
     def test_unknown_agent_name_is_refused(self):
         with self.assertRaises(UsageError) as caught:
@@ -718,6 +733,100 @@ class ComposerGateTest(unittest.TestCase):
         self.assertEqual(runner.pasted_prompts(), [])
 
 
+class AssignmentLandingTest(unittest.TestCase):
+    """Live: a leftover `/` turned the assignment into `/New assignment ...`.
+
+    Claude Code answered "Args from unknown skill", no turn started, and the
+    round was reported as applied.
+    """
+
+    UNKNOWN_SKILL = (
+        "  ⏺ Args from unknown skill: assignment from the team lead. Your role\n"
+        "    for this task is REVIEWER/ARCHITECT. Read /w/COMMON.md in full\n"
+        "  │ ❯                                        │\n"
+    )
+    LANDED = (
+        "  > New assignment from the team lead. Your role for this task is DEVELOPER.\n"
+        "  │ ❯                                        │\n"
+    )
+    QUIET = "  nothing happened\n  │ ❯                                        │\n"
+
+    def setUp(self):
+        self.paths = {"common": "/w/COMMON.md", "developer": "/w/dev.md"}
+
+    def _runner(self, screens, wait_ok=True):
+        runner = runner_with({"grok": "idle"})
+        runner.responses["agent read grok --source visible --lines 20"] = ScriptedReads(
+            screens
+        )
+        if not wait_ok:
+            runner.set(
+                "agent wait grok --until working",
+                stdout="",
+                returncode=1,
+                stderr='{"error":{"code":"timeout","message":"never left idle"}}',
+            )
+        return runner
+
+    def _apply(self, runner, **kwargs):
+        kwargs.setdefault("warn", lambda message: None)
+        return apply(
+            HerdrClient(runner=runner),
+            {"developer": "grok"},
+            BY_NAME,
+            self.paths,
+            AT,
+            **kwargs
+        )
+
+    def test_a_landed_assignment_is_recorded_as_applied(self):
+        runner = self._runner(
+            [composer_screen("grok", "old"), composer_screen("grok", "fresh"),
+             composer_screen("grok", "fresh"), self.LANDED]
+        )
+        record = self._apply(runner)["applied"][0]
+        self.assertTrue(record["landed"])
+        self.assertEqual(record["status"], "applied")
+
+    def test_the_unknown_skill_transcript_fails_the_round(self):
+        runner = self._runner(
+            [composer_screen("grok", "old"), composer_screen("grok", "fresh"),
+             composer_screen("grok", "fresh"), self.UNKNOWN_SKILL]
+        )
+        with self.assertRaises(HerdrError) as caught:
+            self._apply(runner)
+        message = str(caught.exception)
+        self.assertIn("slash command", message)
+        self.assertIn("esc", message)
+
+    def test_a_silent_agent_is_reported_sent_but_not_started(self):
+        runner = self._runner(
+            [composer_screen("grok", "old"), composer_screen("grok", "fresh"),
+             composer_screen("grok", "fresh"), self.QUIET],
+            wait_ok=False,
+        )
+        record = self._apply(runner, landing_attempts=2)["applied"][0]
+        self.assertFalse(record["landed"])
+        self.assertFalse(record["started"])
+        self.assertEqual(record["status"], "sent_but_not_started")
+
+    def test_the_clear_settles_before_the_assignment_is_pasted(self):
+        # The race that left a `/` behind: the clear's redraw against the next
+        # paste. One sleep per clear, before the message goes out.
+        slept = []
+        runner = self._runner(
+            [composer_screen("grok", "old"), composer_screen("grok", "fresh"),
+             composer_screen("grok", "fresh"), self.LANDED]
+        )
+        self._apply(runner, sleep=slept.append)
+        commands = runner.commands()
+        self.assertLess(
+            commands.index("pane send-text w4:p1 /new"),
+            next(i for i, c in enumerate(commands) if c.startswith("agent prompt")),
+        )
+        self.assertTrue(slept)
+
+
 class ClearedFlagTest(unittest.TestCase):
     """`cleared: true` means consumed AND the screen actually changed."""
 
@@ -790,16 +899,19 @@ class ApplyTest(unittest.TestCase):
             runner.commands(),
             [
                 "agent get grok",
-                "agent read grok --source visible --lines 20",
+                "agent read grok --source visible --lines 20 --format ansi",
                 "pane send-text w4:p1 /new",
                 "pane send-keys w4:p1 enter",
-                "agent read grok --source visible --lines 20",
+                "agent read grok --source visible --lines 20 --format ansi",
                 "agent wait grok --until idle --until done --timeout 60000",
-                "agent read grok --source visible --lines 20",
+                "agent read grok --source visible --lines 20 --format ansi",
                 "agent prompt grok 'New assignment from the team lead. Your role for "
                 "this task is DEVELOPER. Read /w/COMMON.md in full, then read /w/dev.md "
                 "in full, and execute that brief exactly. Finish with the REPORT line it "
                 "specifies.'",
+                # Sending is not starting.
+                "agent read grok --source visible --lines 20 --format ansi",
+                "agent wait grok --until working --timeout 15000",
             ],
         )
 
@@ -825,7 +937,7 @@ class ApplyTest(unittest.TestCase):
             [
                 "agent get grok",
                 "agent get claude",
-                "agent read grok --source visible --lines 20",
+                "agent read grok --source visible --lines 20 --format ansi",
             ],
         )
 
@@ -853,6 +965,9 @@ class ApplyTest(unittest.TestCase):
                     "state_source": "herdr",
                     "pane_id": "w4:p1",
                     "cleared": True,
+                    "landed": True,
+                    "started": True,
+                    "status": "applied",
                     "brief": "/w/dev.md",
                     "common": "/w/COMMON.md",
                     "at": AT,

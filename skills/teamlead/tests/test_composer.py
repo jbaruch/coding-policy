@@ -24,6 +24,10 @@ from teamlead.composer import (
     read_pane,
     screen_signature,
     send_command,
+    send_message,
+    strip_ansi,
+    transcript_holds,
+    unknown_skill_error,
 )
 from teamlead.config import parse_config
 from teamlead.errors import HerdrError
@@ -58,6 +62,29 @@ CONFIG = {
             "usage_read_source": "recent-unwrapped",
             "slash_delivery": "type",
             "clear_prompt": "/new",
+        },
+        {
+            "name": "claude",
+            "kind": "claude",
+            "usage_prompt": "/usage",
+            "usage_marker": "Current week",
+            "usage_read_source": "visible",
+            "slash_delivery": "paste",
+            "composer_glyph": "❯ ",
+            "composer_ignore_dim": True,
+            "recover_keys": ["esc"],
+            "clear_prompt": "/clear",
+        },
+        {
+            "name": "strict",
+            "kind": "claude",
+            "usage_prompt": "/usage",
+            "usage_marker": "Current week",
+            "usage_read_source": "visible",
+            "slash_delivery": "paste",
+            "composer_glyph": "❯ ",
+            "recover_keys": ["esc"],
+            "clear_prompt": "/clear",
         },
         {
             "name": "stubborn",
@@ -143,7 +170,8 @@ class ReadPaneTest(unittest.TestCase):
         runner.set("agent read codex", CODEX_EMPTY)
         read_pane(HerdrClient(runner=runner), BY_NAME["codex"])
         self.assertEqual(
-            runner.commands(), ["agent read codex --source visible --lines 20"]
+            runner.commands(),
+            ["agent read codex --source visible --lines 20 --format ansi"],
         )
 
 
@@ -314,3 +342,252 @@ class SendCommandTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# --- Claude Code's dim ghost-text suggestion --------------------------------
+#
+# Nobody typed these. Claude Code pre-fills its input box after a task; Esc
+# does not remove it, and the next thing typed replaces it.
+
+DIM = "\x1b[2m"
+GREY = "\x1b[38;5;242m"
+BRIGHT_BLACK = "\x1b[90m"
+BOLD = "\x1b[1m"
+RESET = "\x1b[0m"
+SUGGESTION = "check the other issues (#28, #30) for follow-up work"
+
+CLAUDE_SUGGESTION = "  ───────\n  ❯ {}{}{}\n  ───────\n".format(DIM, SUGGESTION, RESET)
+CLAUDE_GREY_SUGGESTION = "  ❯ {}{}{}\n".format(GREY, SUGGESTION, RESET)
+CLAUDE_BRIGHT_BLACK = "  ❯ {}{}{}\n".format(BRIGHT_BLACK, SUGGESTION, RESET)
+CLAUDE_TYPED = "  ❯ {}{}{}\n".format(BOLD, SUGGESTION, RESET)
+CLAUDE_TYPED_AFTER = "  ❯ {}{}{}/clear\n".format(DIM, SUGGESTION, RESET)
+
+
+class DimSuggestionTest(unittest.TestCase):
+    """A dim suggestion is an empty composer wearing a costume."""
+
+    def test_a_dim_suggestion_reads_as_empty(self):
+        self.assertEqual(composer_text(CLAUDE_SUGGESTION, "❯ ", True), "")
+
+    def test_a_grey_palette_suggestion_reads_as_empty(self):
+        self.assertEqual(composer_text(CLAUDE_GREY_SUGGESTION, "❯ ", True), "")
+
+    def test_bright_black_reads_as_empty(self):
+        self.assertEqual(composer_text(CLAUDE_BRIGHT_BLACK, "❯ ", True), "")
+
+    def test_the_same_text_in_bold_is_occupied(self):
+        self.assertEqual(composer_text(CLAUDE_TYPED, "❯ ", True), SUGGESTION)
+
+    def test_the_same_text_at_normal_weight_is_occupied(self):
+        plain = "  ❯ {}\n".format(SUGGESTION)
+        self.assertEqual(composer_text(plain, "❯ ", True), SUGGESTION)
+
+    def test_a_typed_command_after_a_suggestion_is_occupied(self):
+        self.assertEqual(composer_text(CLAUDE_TYPED_AFTER, "❯ ", True), "/clear")
+
+    def test_without_the_setting_a_suggestion_still_counts(self):
+        # A runtime with no ghost text must be unaffected.
+        self.assertEqual(composer_text(CLAUDE_SUGGESTION, "❯ ", False), SUGGESTION)
+
+    def test_the_earlier_live_suggestion_reads_as_empty_too(self):
+        text = "  ❯ {}Wait for the architect's design note and phase-2 prompt{}\n".format(
+            DIM, RESET
+        )
+        self.assertEqual(composer_text(text, "❯ ", True), "")
+
+    def test_plain_text_with_no_escapes_is_unchanged(self):
+        self.assertEqual(composer_text("  ❯ /clear\n", "❯ ", True), "/clear")
+
+    def test_strip_ansi_leaves_only_visible_characters(self):
+        self.assertEqual(strip_ansi("{}dim{}".format(DIM, RESET)), "dim")
+
+    def test_the_screen_signature_ignores_styling(self):
+        self.assertEqual(
+            screen_signature("{}banner{}\n".format(DIM, RESET), "❯ "),
+            screen_signature("banner\n", "❯ "),
+        )
+
+
+class DimAgentTest(unittest.TestCase):
+    """The setting is per agent, and it reaches the dispatch gate."""
+
+    def _runner(self, name, screens):
+        runner = FakeRunner()
+        runner.set("agent send-keys", ok_json("agent_send_keys"))
+        runner.responses[
+            "agent read {} --source visible --lines 20".format(name)
+        ] = ScriptedReads(screens)
+        return runner
+
+    def test_a_suggestion_does_not_trigger_recovery(self):
+        runner = self._runner("claude", [CLAUDE_SUGGESTION])
+        ensure_ready(HerdrClient(runner=runner), BY_NAME["claude"], sleep=NO_SLEEP)
+        self.assertEqual(runner.writes(), [])
+
+    def test_the_same_pane_refuses_an_agent_that_does_not_ignore_dim(self):
+        runner = self._runner("strict", [CLAUDE_SUGGESTION])
+        with self.assertRaises(HerdrError):
+            ensure_ready(
+                HerdrClient(runner=runner),
+                BY_NAME["strict"],
+                sleep=NO_SLEEP,
+                warn=lambda message: None,
+            )
+
+    def test_the_refusal_names_the_suggestion_possibility(self):
+        runner = self._runner("strict", [CLAUDE_SUGGESTION])
+        with self.assertRaises(HerdrError) as caught:
+            ensure_ready(
+                HerdrClient(runner=runner),
+                BY_NAME["strict"],
+                sleep=NO_SLEEP,
+                warn=lambda message: None,
+            )
+        message = str(caught.exception)
+        self.assertIn("dim ghost-text suggestion", message)
+        self.assertIn("composer_ignore_dim", message)
+
+    def test_the_read_asks_for_ansi(self):
+        runner = self._runner("claude", [CLAUDE_SUGGESTION])
+        read_pane(HerdrClient(runner=runner), BY_NAME["claude"])
+        self.assertEqual(
+            runner.commands(),
+            ["agent read claude --source visible --lines 20 --format ansi"],
+        )
+
+    def test_a_failed_ansi_read_falls_back_to_plain_text(self):
+        runner = FakeRunner()
+        runner.set(
+            "agent read claude --source visible --lines 20 --format ansi",
+            stdout="",
+            returncode=2,
+            stderr="unexpected argument '--format'",
+        )
+        runner.set("agent read claude --source visible --lines 20", "  ❯ /clear\n")
+        warnings = []
+        text = read_pane(
+            HerdrClient(runner=runner), BY_NAME["claude"], warn=warnings.append
+        )
+        self.assertEqual(composer_text(text, "❯ ", True), "/clear")
+        self.assertTrue(any("plain-text" in w for w in warnings))
+
+
+# --- the assignment has to land as a user message ---------------------------
+
+UNKNOWN_SKILL = (
+    "  ⏺ Args from unknown skill: assignment from the team lead. Your role for\n"
+    "    this task is REVIEWER/ARCHITECT. Read /w/COMMON.md in full\n"
+    "  ───────\n"
+    "  ❯ \n"
+)
+LANDED = (
+    "  > New assignment from the team lead. Your role for this task is REVIEWER.\n"
+    "  ───────\n"
+    "  ❯ \n"
+)
+WRAPPED = (
+    "  > New assignment from the team\n"
+    "    lead. Your role for this task is REVIEWER.\n"
+    "  ❯ \n"
+)
+NOTHING = "  ───────\n  ❯ \n"
+
+OPENING = "New assignment from the team lead."
+
+
+class TranscriptTest(unittest.TestCase):
+    def test_the_assignment_is_found_in_the_transcript(self):
+        self.assertTrue(transcript_holds(LANDED, OPENING))
+
+    def test_a_wrapped_message_is_still_found(self):
+        self.assertTrue(transcript_holds(WRAPPED, OPENING))
+
+    def test_an_empty_transcript_is_not_a_match(self):
+        self.assertFalse(transcript_holds(NOTHING, OPENING))
+
+    def test_styling_does_not_hide_the_match(self):
+        self.assertTrue(transcript_holds("{}{}{}".format(DIM, LANDED, RESET), OPENING))
+
+    def test_the_unknown_skill_shape_is_recognised(self):
+        self.assertEqual(unknown_skill_error(UNKNOWN_SKILL), "unknown skill")
+
+    def test_codexs_rejection_shape_is_recognised(self):
+        text = "  Unrecognized command '/newNew'\n  › \n"
+        self.assertEqual(unknown_skill_error(text), "Unrecognized command")
+
+    def test_a_clean_transcript_reports_no_complaint(self):
+        self.assertIsNone(unknown_skill_error(LANDED))
+
+
+class SendMessageTest(unittest.TestCase):
+    def _runner(self, screens, wait_ok=True):
+        runner = FakeRunner()
+        runner.set("agent prompt", ok_json("agent_prompt"))
+        runner.set("agent send-keys", ok_json("agent_send_keys"))
+        if wait_ok:
+            runner.set("agent wait", ok_json("agent_wait"))
+        else:
+            runner.set(
+                "agent wait",
+                stdout="",
+                returncode=1,
+                stderr='{"error":{"code":"timeout","message":"never left idle"}}',
+            )
+        runner.responses["agent read claude --source visible --lines 20"] = ScriptedReads(
+            screens
+        )
+        self.runner = runner
+        return HerdrClient(runner=runner)
+
+    def _send(self, client, **kwargs):
+        kwargs.setdefault("sleep", NO_SLEEP)
+        kwargs.setdefault("warn", lambda message: None)
+        return send_message(client, BY_NAME["claude"], "New assignment...", OPENING, **kwargs)
+
+    def test_a_landed_assignment_is_confirmed(self):
+        result = self._send(self._runner([NOTHING, LANDED]))
+        self.assertTrue(result["landed"])
+        self.assertTrue(result["started"])
+
+    def test_the_unknown_skill_transcript_fails_the_agent(self):
+        with self.assertRaises(HerdrError) as caught:
+            self._send(self._runner([NOTHING, UNKNOWN_SKILL]))
+        message = str(caught.exception)
+        self.assertIn("slash command", message)
+        self.assertIn("send-keys claude esc", message)
+
+    def test_the_unknown_skill_path_stops_before_waiting_on_a_turn(self):
+        with self.assertRaises(HerdrError):
+            self._send(self._runner([NOTHING, UNKNOWN_SKILL]))
+        self.assertEqual([c for c in self.runner.commands() if "agent wait" in c], [])
+
+    def test_a_message_that_never_appears_and_never_starts_is_not_started(self):
+        result = self._send(self._runner([NOTHING, NOTHING], wait_ok=False), attempts=2)
+        self.assertFalse(result["landed"])
+        self.assertFalse(result["started"])
+
+    def test_that_case_warns(self):
+        warnings = []
+        self._send(
+            self._runner([NOTHING, NOTHING], wait_ok=False),
+            attempts=2,
+            warn=warnings.append,
+        )
+        self.assertTrue(any("sent_but_not_started" in w for w in warnings))
+
+    def test_a_turn_that_started_counts_even_without_a_transcript_match(self):
+        result = self._send(self._runner([NOTHING, NOTHING]), attempts=1)
+        self.assertFalse(result["landed"])
+        self.assertTrue(result["started"])
+
+    def test_the_landing_poll_is_bounded(self):
+        self._send(self._runner([NOTHING, NOTHING], wait_ok=False), attempts=3)
+        reads = [c for c in self.runner.commands() if c.startswith("agent read claude")]
+        self.assertEqual(len(reads), 4)  # one for the composer gate, three polls
+
+    def test_the_composer_is_checked_before_the_paste(self):
+        client = self._runner([NOTHING, LANDED])
+        self._send(client)
+        commands = self.runner.commands()
+        self.assertTrue(commands[0].startswith("agent read claude"))
+        self.assertTrue(commands[1].startswith("agent prompt claude"))
