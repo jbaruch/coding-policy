@@ -11,6 +11,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import unittest
 
 from teamlead.config import parse_config
+from teamlead.errors import HerdrError, ParseError
 from teamlead.herdr import HerdrClient
 from teamlead.measure import DEFAULT_READ_LINES, marker_pattern, measure, measure_agent, ready_agents
 
@@ -43,8 +44,11 @@ CONFIG = {
             "kind": "grok",
             "usage_prompt": "/usage",
             "usage_marker": "Weekly limit",
-            "usage_read_source": "recent-unwrapped",
+            "usage_read_source": "visible",
+            "close_keys": ["esc"],
             "clear_prompt": "/new",
+            "idle_markers": ["Shift+Tab:mode"],
+            "working_markers": ["Esc:cancel"],
         },
     ],
 }
@@ -58,13 +62,27 @@ CODEX_PANE = (
     "│  Weekly limit: [███] 87% left (resets 17:26 on 7 Sep)  │\n"
 )
 GROK_PANE = "     Weekly limit: 0%\n     Next reset: September 6, 12:55\n     Credits: $16.42\n"
+GROK_DIALOG_PANE = (
+    "│  Weekly limit (X Premium+)      │\n"
+    "│  ░░░░░░░░░░░░░░░░░░░░░░  1%     │\n"
+    "│  Resets: September 6, 12:55     │\n"
+    "│  Credits: $16.42                │\n"
+)
+# Footers the idle probe reads. Working is idle plus `Esc:cancel`.
+GROK_IDLE_FOOTER = "  │ ❯          │\n  Shift+Tab:mode  │  Ctrl+.:shortcuts\n"
+GROK_WORKING_FOOTER = "  │ ❯ go       │\n  Shift+Tab:mode  │  Esc:cancel  │  Ctrl+.:shortcuts\n"
 
 AGENTS = parse_config(CONFIG)
 BY_NAME = {agent.name: agent for agent in AGENTS}
 
 
-def runner_with(statuses, panes):
-    """A FakeRunner scripted for the given agent statuses and pane texts."""
+def runner_with(statuses, panes, footers=None):
+    """A FakeRunner scripted for the given agent statuses and pane texts.
+
+    `footers` scripts the idle probe's read, which is a longer and therefore
+    more specific argv prefix than the usage read.
+    """
+    footers = footers or {}
     runner = FakeRunner()
     panes_by_name = {"claude": "w2:p1", "codex": "w3:p1", "grok": "w4:p1"}
     for name, status in statuses.items():
@@ -73,6 +91,10 @@ def runner_with(statuses, panes):
         runner.set("agent send-keys " + name, ok_json("agent_send_keys"))
         if name in panes:
             runner.set("agent read " + name, panes[name])
+        if name in footers:
+            runner.set(
+                "agent read {} --source visible --lines 40".format(name), footers[name]
+            )
     runner.set("pane wait-output", ok_json("output_matched"))
     return runner
 
@@ -112,6 +134,14 @@ class MeasureAgentTest(unittest.TestCase):
         measure_agent(HerdrClient(runner=runner), BY_NAME["claude"])
         self.assertIn("agent read claude --source visible", runner.commands())
 
+    def test_grok_dialog_format_is_measured_the_same_as_the_inline_one(self):
+        runner = runner_with({"grok": "idle"}, {"grok": GROK_DIALOG_PANE})
+        record = measure_agent(HerdrClient(runner=runner), BY_NAME["grok"])
+        self.assertEqual(record["headroom_pct"], 99.0)
+        self.assertEqual(record["plan"], "X Premium+")
+        self.assertEqual(record["credits"], 16.42)
+        self.assertIn("agent send-keys grok esc", runner.commands())
+
     def test_scrollback_reads_ask_for_lines(self):
         runner = runner_with({"codex": "idle"}, {"codex": CODEX_PANE})
         measure_agent(HerdrClient(runner=runner), BY_NAME["codex"])
@@ -121,8 +151,10 @@ class MeasureAgentTest(unittest.TestCase):
         )
 
     def test_agent_without_close_keys_gets_no_keystrokes(self):
-        runner = runner_with({"grok": "idle"}, {"grok": GROK_PANE})
-        measure_agent(HerdrClient(runner=runner), BY_NAME["grok"])
+        # codex prints its report inline and opens no dialog, so it configures
+        # no close_keys and must receive no keystrokes.
+        runner = runner_with({"codex": "idle"}, {"codex": CODEX_PANE})
+        measure_agent(HerdrClient(runner=runner), BY_NAME["codex"])
         self.assertEqual(
             [c for c in runner.commands() if c.startswith("agent send-keys")], []
         )
@@ -170,6 +202,106 @@ class BusyAgentTest(unittest.TestCase):
         runner = runner_with({"grok": "unknown"}, {"grok": GROK_PANE})
         record = measure_agent(HerdrClient(runner=runner), BY_NAME["grok"])
         self.assertFalse(record["skipped"])
+
+
+class ProbeIntegrationTest(unittest.TestCase):
+    """herdr's title-derived state goes stale; the pane is the tie-breaker."""
+
+    def test_stale_working_is_overturned_and_the_agent_is_measured(self):
+        runner = runner_with(
+            {"grok": "working"}, {"grok": GROK_PANE}, footers={"grok": GROK_IDLE_FOOTER}
+        )
+        record = measure_agent(
+            HerdrClient(runner=runner), BY_NAME["grok"], warn=lambda message: None
+        )
+        self.assertFalse(record["skipped"])
+        self.assertEqual(record["state"], "idle")
+        self.assertEqual(record["herdr_state"], "working")
+        self.assertEqual(record["state_source"], "probe")
+        self.assertEqual(record["headroom_pct"], 100.0)
+
+    def test_the_overturn_is_warned_about_on_stderr(self):
+        runner = runner_with(
+            {"grok": "working"}, {"grok": GROK_PANE}, footers={"grok": GROK_IDLE_FOOTER}
+        )
+        warnings = []
+        measure_agent(HerdrClient(runner=runner), BY_NAME["grok"], warn=warnings.append)
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("stale", warnings[0])
+
+    def test_a_genuinely_working_agent_is_still_skipped(self):
+        runner = runner_with(
+            {"grok": "working"}, {}, footers={"grok": GROK_WORKING_FOOTER}
+        )
+        record = measure_agent(HerdrClient(runner=runner), BY_NAME["grok"])
+        self.assertTrue(record["skipped"])
+        self.assertEqual(record["state"], "working")
+        self.assertEqual(record["state_source"], "probe")
+        self.assertEqual(runner.writes(), [])
+
+    def test_an_inconclusive_probe_keeps_the_refusal(self):
+        runner = runner_with(
+            {"grok": "working"}, {}, footers={"grok": "some other program\n"}
+        )
+        record = measure_agent(HerdrClient(runner=runner), BY_NAME["grok"])
+        self.assertTrue(record["skipped"])
+        self.assertEqual(record["state_source"], "herdr")
+        self.assertEqual(runner.writes(), [])
+
+    def test_a_blocked_agent_is_never_probed(self):
+        runner = runner_with({"grok": "blocked"}, {})
+        record = measure_agent(HerdrClient(runner=runner), BY_NAME["grok"])
+        self.assertTrue(record["skipped"])
+        self.assertEqual(record["state_source"], "herdr")
+        self.assertEqual(runner.commands(), ["agent get grok"])
+
+    def test_an_idle_agent_is_not_probed_at_all(self):
+        runner = runner_with({"grok": "idle"}, {"grok": GROK_PANE})
+        record = measure_agent(HerdrClient(runner=runner), BY_NAME["grok"])
+        self.assertEqual(record["state_source"], "herdr")
+        self.assertNotIn("agent read grok --source visible --lines 40", runner.commands())
+
+
+class DialogAlwaysClosesTest(unittest.TestCase):
+    """A usage dialog left open flips the agent to `working` and eats the
+    next prompt, so the close keys must go out on every failure path."""
+
+    def test_close_keys_are_sent_when_parsing_fails(self):
+        runner = runner_with({"grok": "idle"}, {"grok": "nothing useful here\n"})
+        with self.assertRaises(ParseError):
+            measure_agent(HerdrClient(runner=runner), BY_NAME["grok"])
+        self.assertEqual(runner.commands()[-1], "agent send-keys grok esc")
+
+    def test_close_keys_are_sent_when_the_marker_wait_times_out(self):
+        runner = runner_with({"grok": "idle"}, {"grok": GROK_DIALOG_PANE})
+        runner.set(
+            "pane wait-output",
+            stdout="",
+            returncode=1,
+            stderr='{"error":{"code":"timeout","message":"no match within 20000ms"}}',
+        )
+        with self.assertRaises(HerdrError):
+            measure_agent(HerdrClient(runner=runner), BY_NAME["grok"])
+        self.assertEqual(runner.commands()[-1], "agent send-keys grok esc")
+
+    def test_close_keys_are_sent_when_the_read_itself_fails(self):
+        runner = runner_with({"grok": "idle"}, {})
+        runner.set(
+            "agent read grok",
+            stdout="",
+            returncode=1,
+            stderr='{"error":{"code":"pane_gone","message":"pane not found"}}',
+        )
+        with self.assertRaises(HerdrError):
+            measure_agent(HerdrClient(runner=runner), BY_NAME["grok"])
+        self.assertEqual(runner.commands()[-1], "agent send-keys grok esc")
+
+    def test_the_failure_still_surfaces_on_the_snapshot(self):
+        runner = runner_with({"grok": "idle"}, {"grok": "nothing useful here\n"})
+        snapshot = measure(HerdrClient(runner=runner), [BY_NAME["grok"]], AT)
+        self.assertEqual(snapshot["failed_agents"], ["grok"])
+        self.assertEqual(snapshot["agents"]["grok"]["error"]["code"], "parse_error")
+        self.assertIn("agent send-keys grok esc", runner.commands())
 
 
 class FailureTest(unittest.TestCase):

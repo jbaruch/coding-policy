@@ -61,12 +61,14 @@ you did.
 ```
 
 Sends each configured worker its own usage command and parses the reply. Emits
-one snapshot document — per agent: `kind`, `state`, `windows`, `credits`,
-`headroom_pct`, `skipped` — and appends it to the state file
-(`skills/teamlead/state-schema.md`). A worker that is `working` or `blocked` is
-reported as skipped with null windows, never interrupted. Exit 1 means at least
-one agent could not be measured; the snapshot still prints and names it in
-`failed_agents`.
+one snapshot document — per agent: `kind`, `state`, `herdr_state`,
+`state_source`, `windows`, `credits`, `plan`, `headroom_pct`, `skipped` — and
+appends it to the state file (`skills/teamlead/state-schema.md`). A worker that
+is `working` or `blocked` is reported as skipped with null windows, never
+interrupted. A `working` verdict is confirmed against the pane before it counts:
+`state_source` names which signal decided, `herdr` or `probe`, and `herdr_state`
+carries what herdr claimed. Exit 1 means at least one agent could not be
+measured; the snapshot still prints and names it in `failed_agents`.
 
 Report a `failed_agents` entry to the user and measure that worker by hand
 before relying on its role. Proceed immediately to Step 3.
@@ -124,7 +126,10 @@ the hand-off in the ledger. Emits one JSON object describing what was sent.
 - A `working` or `blocked` worker makes the command refuse the whole round
   before a single keystroke goes out, with a JSON error on stderr and a
   non-zero exit. Wait for that worker, or dispatch a round without it.
-- `--dry-run` prints every command it would run and makes no herdr calls.
+- A `working` verdict is confirmed against the pane first, so a stale window
+  title does not refuse a worker sitting at an empty prompt.
+- `--dry-run` prints every command it would run and makes no herdr calls. The
+  pane confirmation appears separately under `conditional_commands`.
 - The prompt text and the `--force` override are the utility's own contract;
   see `skills/teamlead/teamlead/assign.py`.
 

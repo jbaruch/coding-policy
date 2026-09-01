@@ -17,13 +17,16 @@ REQUIRED_AGENT_FIELDS = ("name", "kind", "usage_prompt", "usage_marker", "usage_
 
 VALID_READ_SOURCES = frozenset({"visible", "recent", "recent-unwrapped", "detection"})
 
+#: Optional per-agent fields that default to an empty list of strings.
+OPTIONAL_LIST_FIELDS = ("close_keys", "idle_markers", "working_markers")
+
 
 class Agent:
     """One configured agent. A plain value object, never mutated after load."""
 
-    __slots__ = REQUIRED_AGENT_FIELDS + ("close_keys",)
+    __slots__ = REQUIRED_AGENT_FIELDS + OPTIONAL_LIST_FIELDS
 
-    def __init__(self, name, kind, usage_prompt, usage_marker, usage_read_source, clear_prompt, close_keys=()):
+    def __init__(self, name, kind, usage_prompt, usage_marker, usage_read_source, clear_prompt, close_keys=(), idle_markers=(), working_markers=()):
         self.name = name
         self.kind = kind
         self.usage_prompt = usage_prompt
@@ -31,6 +34,10 @@ class Agent:
         self.usage_read_source = usage_read_source
         self.clear_prompt = clear_prompt
         self.close_keys = tuple(close_keys)
+        # Footer signatures the idle probe matches when herdr's title-derived
+        # state says `working`. See teamlead/probe.py.
+        self.idle_markers = tuple(idle_markers)
+        self.working_markers = tuple(working_markers)
 
     def __repr__(self):
         return "Agent(name={!r}, kind={!r})".format(self.name, self.kind)
@@ -42,7 +49,8 @@ class Agent:
 
     def as_dict(self):
         record = {field: getattr(self, field) for field in REQUIRED_AGENT_FIELDS}
-        record["close_keys"] = list(self.close_keys)
+        for field in OPTIONAL_LIST_FIELDS:
+            record[field] = list(getattr(self, field))
         return record
 
 
@@ -130,13 +138,18 @@ def parse_config(payload, source="<memory>"):
             )
         seen.add(name)
 
-        close_keys = entry.get("close_keys", [])
-        if not isinstance(close_keys, list):
-            raise ConfigError(
-                "Config at {}: agents[{}].close_keys must be an array of herdr "
-                "key names such as [\"esc\"].".format(source, index),
-                {"source": source, "index": index},
-            )
+        lists = {}
+        for field in OPTIONAL_LIST_FIELDS:
+            value = entry.get(field, [])
+            if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+                raise ConfigError(
+                    "Config at {}: agents[{}].{} must be an array of strings - "
+                    "close_keys holds herdr key names such as [\"esc\"], "
+                    "idle_markers and working_markers hold literal footer text "
+                    "the idle probe looks for.".format(source, index, field),
+                    {"source": source, "index": index, "field": field},
+                )
+            lists[field] = value
         agents.append(
             Agent(
                 name=name,
@@ -145,7 +158,7 @@ def parse_config(payload, source="<memory>"):
                 usage_marker=entry["usage_marker"],
                 usage_read_source=read_source,
                 clear_prompt=entry["clear_prompt"],
-                close_keys=close_keys,
+                **lists
             )
         )
     return agents

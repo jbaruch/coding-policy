@@ -53,8 +53,11 @@ CONFIG = {
             "kind": "grok",
             "usage_prompt": "/usage",
             "usage_marker": "Weekly limit",
-            "usage_read_source": "recent-unwrapped",
+            "usage_read_source": "visible",
+            "close_keys": ["esc"],
             "clear_prompt": "/new",
+            "idle_markers": ["Shift+Tab:mode"],
+            "working_markers": ["Esc:cancel"],
         },
     ],
 }
@@ -74,6 +77,10 @@ CLAUDE_PANE = (
     "   Current week (all models)\n   █    2% used\n   Resets Sep 5 at 11:59pm (Europe/Oslo)\n"
 )
 GROK_PANE = "     Weekly limit: 0%\n     Next reset: September 6, 12:55\n     Credits: $16.42\n"
+
+# Verbatim grok footers, as the idle probe reads them.
+GROK_WORKING_FOOTER = "  │ ❯ go            │\n  Shift+Tab:mode  │  Esc:cancel  │  Ctrl+.:shortcuts\n"
+GROK_IDLE_FOOTER = "  │ ❯               │\n  Shift+Tab:mode  │  Ctrl+.:shortcuts\n"
 
 
 class CliCase(unittest.TestCase):
@@ -231,7 +238,8 @@ class PlanCommandTest(CliCase):
 
 
 class MeasureCommandTest(CliCase):
-    def _client(self, statuses):
+    def _client(self, statuses, footers=None):
+        footers = footers or {}
         runner = FakeRunner()
         panes = {"claude": "w2:p1", "codex": "w3:p1", "grok": "w4:p1"}
         texts = {"claude": CLAUDE_PANE, "grok": GROK_PANE}
@@ -241,6 +249,10 @@ class MeasureCommandTest(CliCase):
             runner.set("agent send-keys " + name, ok_json("agent_send_keys"))
             if name in texts:
                 runner.set("agent read " + name, texts[name])
+            if name in footers:
+                runner.set(
+                    "agent read {} --source visible --lines 40".format(name), footers[name]
+                )
         runner.set("pane wait-output", ok_json("output_matched"))
         self.runner = runner
         return HerdrClient(runner=runner)
@@ -283,6 +295,37 @@ class MeasureCommandTest(CliCase):
         self.assertEqual(json.loads(out)["failed_agents"], ["claude"])
         self.assertEqual(json.loads(err)["error"], "measure_incomplete")
 
+    def test_records_which_signal_decided_the_state(self):
+        client = self._client({"grok": "idle"})
+        _, out, _ = self.run_cli(
+            self.base() + ["measure", "--agent", "grok", "--now", AT], client=client
+        )
+        record = json.loads(out)["agents"]["grok"]
+        self.assertEqual(record["state_source"], "herdr")
+        self.assertEqual(record["herdr_state"], "idle")
+
+    def test_a_stale_herdr_state_is_overturned_and_warned_about_on_stderr(self):
+        client = self._client({"grok": "working"}, footers={"grok": GROK_IDLE_FOOTER})
+        code, out, err = self.run_cli(
+            self.base() + ["measure", "--agent", "grok", "--now", AT], client=client
+        )
+        self.assertEqual(code, 0)
+        record = json.loads(out)["agents"]["grok"]
+        self.assertEqual(record["state"], "idle")
+        self.assertEqual(record["herdr_state"], "working")
+        self.assertEqual(record["state_source"], "probe")
+        self.assertEqual(record["headroom_pct"], 100.0)
+        self.assertIn("stale", err)
+
+    def test_a_genuinely_working_agent_is_still_skipped(self):
+        client = self._client({"grok": "working"}, footers={"grok": GROK_WORKING_FOOTER})
+        code, out, _ = self.run_cli(
+            self.base() + ["measure", "--agent", "grok", "--now", AT], client=client
+        )
+        self.assertEqual(code, 0)
+        self.assertTrue(json.loads(out)["agents"]["grok"]["skipped"])
+        self.assertEqual(self.runner.writes(), [])
+
     def test_unknown_agent_name_is_an_actionable_error(self):
         code, out, err = self.run_cli(
             self.base() + ["measure", "--agent", "gemini", "--now", AT],
@@ -302,13 +345,18 @@ class MeasureCommandTest(CliCase):
 
 
 class ApplyCommandTest(CliCase):
-    def _client(self, statuses):
+    def _client(self, statuses, footers=None):
+        footers = footers or {}
         runner = FakeRunner()
         panes = {"claude": "w2:p1", "codex": "w3:p1", "grok": "w4:p1"}
         for name, status in statuses.items():
             runner.set("agent get " + name, agent_json(name, status, panes[name]))
             runner.set("agent prompt " + name, ok_json("agent_prompt"))
             runner.set("agent wait " + name, ok_json("agent_wait"))
+            runner.set(
+                "agent read {} --source visible --lines 40".format(name),
+                footers.get(name, GROK_WORKING_FOOTER),
+            )
         self.runner = runner
         return HerdrClient(binary="herdr", runner=runner)
 
@@ -421,6 +469,28 @@ class ApplyCommandTest(CliCase):
             client=client,
         )
         self.assertFalse(self.state.exists())
+
+    def test_apply_proceeds_when_the_probe_overturns_a_stale_herdr_state(self):
+        client = self._client({"grok": "working"}, footers={"grok": GROK_IDLE_FOOTER})
+        code, out, err = self.run_cli(
+            self.base()
+            + [
+                "apply",
+                "--assignments",
+                json.dumps({"developer": "grok"}),
+                "--common",
+                str(self.common),
+                "--now",
+                AT,
+            ]
+            + self.brief_args("developer"),
+            client=client,
+        )
+        self.assertEqual(code, 0)
+        applied = json.loads(out)["applied"][0]
+        self.assertEqual(applied["state_source"], "probe")
+        self.assertEqual(applied["herdr_state_before"], "working")
+        self.assertIn("stale", err)
 
     def test_force_assigns_to_a_busy_agent(self):
         client = self._client({"grok": "working"})

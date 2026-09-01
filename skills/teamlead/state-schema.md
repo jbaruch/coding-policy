@@ -12,7 +12,9 @@ owner: it writes every record and is the only thing that may change their shape.
 | `$XDG_CONFIG_HOME/teamlead/config.json` (default `~/.config/teamlead/config.json`, override `--config FILE`) | the operator | Per-agent usage / clear commands; teamlead reads it and never writes it |
 
 `skills/teamlead/config.example.json` is the ship-ready config to copy into
-place. A missing config is refused with the exact `cp` command to run.
+place. A missing config is refused with the exact `cp` command to run. The
+optional `idle_markers` / `working_markers` per-agent keys carry the footer
+signatures the stale-state probe reads; an agent with neither is never probed.
 
 ## State Record Format
 
@@ -36,9 +38,12 @@ place. A missing config is refused with the exact `cp` command to run.
 | `assignments[].agent` | string | The agent that received it |
 
 Each snapshot is one `measure` document: `schema_version`, `measured_at`, an
-`agents` object keyed by agent name (`kind`, `state`, `pane_id`, `windows`,
-`credits`, `headroom_pct`, `skipped`), and `failed_agents`. `headroom_pct` is
-the minimum `remaining_pct` across that agent's windows.
+`agents` object keyed by agent name (`kind`, `state`, `herdr_state`,
+`state_source`, `pane_id`, `windows`, `credits`, `plan`, `headroom_pct`,
+`skipped`), and `failed_agents`. `headroom_pct` is the minimum `remaining_pct`
+across that agent's windows. `state_source` is `herdr` or `probe`, naming which
+signal decided `state`; `herdr_state` carries what herdr claimed. `plan` is an
+informational plan name and never feeds headroom.
 
 ## Writer / Reader Contract
 

@@ -47,12 +47,29 @@ CODEX_SAMPLE = """\
 │  Weekly limit:                [████████████████████] 100% left (resets 21:19 on 8 Sep) │
 """
 
+# Grok's inline shape.
 GROK_SAMPLE = """\
      Session usage: no model calls yet in this session.
      Weekly limit: 0%
      Next reset: September 6, 12:55
      Credits: $16.42
      Auto topup: $20
+"""
+
+
+# Grok's dialog shape, verbatim from `herdr agent read grok --source visible
+# --lines 60` after a restart: a boxed modal on the alternate screen, with the
+# surrounding page text still visible on the closing border row.
+GROK_DIALOG_SAMPLE = """\
+                          ┌──────────────────────────────────────────────────────────────────────────────────────── [✗] ─┐
+                          │  Context usage  Usage limit  Session info                                                    │
+                          │──────────────────────────────────────────────────────────────────────────────────────────────│
+                          │  Weekly limit (X Premium+)                                                                   │
+                          │  ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░  1%                                                          │
+                          │  Resets: September 6, 12:55                                                                  │
+                          │  Credits: $16.42                                                                             │
+                          │                           Tab switch  |  ↑/↓ scroll  |  Esc close                            │
+  Help improve Grok       └──────────────────────────────────────────────────────────────────────────────────────────────┘      [Opt out] [Opt in]
 """
 
 
@@ -230,6 +247,93 @@ class GrokParserTest(unittest.TestCase):
             parse_grok_usage("Session usage: no model calls yet in this session.\n")
 
 
+class GrokDialogParserTest(unittest.TestCase):
+    """Grok renders `/usage` as a modal after a restart; both shapes must read."""
+
+    def test_dialog_percentage_is_percent_used(self):
+        window = parse_grok_usage(GROK_DIALOG_SAMPLE)["windows"]["Weekly limit"]
+        self.assertEqual(window["used_pct"], 1.0)
+        self.assertEqual(window["remaining_pct"], 99.0)
+
+    def test_dialog_resets_row_is_attached_to_the_window(self):
+        window = parse_grok_usage(GROK_DIALOG_SAMPLE)["windows"]["Weekly limit"]
+        self.assertEqual(window["resets"], "September 6, 12:55")
+
+    def test_dialog_credits_are_captured(self):
+        self.assertEqual(parse_grok_usage(GROK_DIALOG_SAMPLE)["credits"], 16.42)
+
+    def test_dialog_plan_name_is_captured_as_informational(self):
+        self.assertEqual(parse_grok_usage(GROK_DIALOG_SAMPLE)["plan"], "X Premium+")
+
+    def test_dialog_window_is_keyed_the_same_as_the_inline_one(self):
+        # Same key either way, so headroom and the planner never care which
+        # shape grok happened to render.
+        self.assertEqual(
+            list(parse_grok_usage(GROK_DIALOG_SAMPLE)["windows"]),
+            list(parse_grok_usage(GROK_SAMPLE)["windows"]),
+        )
+
+    def test_inline_shape_reports_no_plan(self):
+        self.assertIsNone(parse_grok_usage(GROK_SAMPLE)["plan"])
+
+    def test_box_borders_do_not_defeat_matching(self):
+        # The chrome row carrying "Esc close" and the closing border row with
+        # page text on it must both be ignored.
+        result = parse_grok_usage(GROK_DIALOG_SAMPLE)
+        self.assertEqual(len(result["windows"]), 1)
+
+    def test_dialog_without_a_plan_name_still_parses(self):
+        text = "│  Weekly limit  │\n│  ░░░░  7%  │\n│  Resets: September 6, 12:55  │\n"
+        result = parse_grok_usage(text)
+        self.assertEqual(result["windows"]["Weekly limit"]["used_pct"], 7.0)
+        self.assertIsNone(result["plan"])
+
+    def test_dialog_zero_and_hundred_percent(self):
+        zero = "│  Weekly limit (Pro)  │\n│  ░░░░░░░░  0%  │\n"
+        full = "│  Weekly limit (Pro)  │\n│  ████████  100%  │\n"
+        self.assertEqual(parse_grok_usage(zero)["windows"]["Weekly limit"]["remaining_pct"], 100.0)
+        self.assertEqual(parse_grok_usage(full)["windows"]["Weekly limit"]["remaining_pct"], 0.0)
+
+    def test_dialog_fractional_percentage(self):
+        text = "│  Weekly limit (Pro)  │\n│  ▒▒▒  12.5%  │\n"
+        self.assertEqual(parse_grok_usage(text)["windows"]["Weekly limit"]["remaining_pct"], 87.5)
+
+    def test_label_with_no_percentage_row_after_it_is_dropped(self):
+        text = "│  Weekly limit (Pro)  │\n│  Resets: September 6, 12:55  │\n"
+        with self.assertRaises(ParseError):
+            parse_grok_usage(text)
+
+    def test_a_later_dialog_supersedes_an_earlier_one(self):
+        stale = GROK_DIALOG_SAMPLE.replace("  1%", "  44%")
+        result = parse_grok_usage(stale + GROK_DIALOG_SAMPLE)
+        self.assertEqual(result["windows"]["Weekly limit"]["used_pct"], 1.0)
+
+    def test_a_dialog_after_an_inline_report_supersedes_it(self):
+        result = parse_grok_usage(GROK_SAMPLE + GROK_DIALOG_SAMPLE)
+        self.assertEqual(result["windows"]["Weekly limit"]["used_pct"], 1.0)
+        self.assertEqual(result["plan"], "X Premium+")
+
+    def test_an_inline_report_after_a_dialog_supersedes_it_and_clears_the_plan(self):
+        result = parse_grok_usage(GROK_DIALOG_SAMPLE + GROK_SAMPLE)
+        self.assertEqual(result["windows"]["Weekly limit"]["used_pct"], 0.0)
+        self.assertIsNone(result["plan"])
+
+    def test_a_screen_with_neither_shape_stays_a_loud_parse_error(self):
+        text = (
+            "  ╭──────────────────────────────────╮\n"
+            "  │ ❯                                │\n"
+            "  ╰──────────────────────────────────╯\n"
+            "  Shift+Tab:mode  │  Ctrl+.:shortcuts\n"
+        )
+        with self.assertRaises(ParseError) as caught:
+            parse_grok_usage(text)
+        self.assertIn("--source visible", str(caught.exception))
+
+    def test_a_stray_percentage_elsewhere_on_screen_is_not_a_reading(self):
+        with self.assertRaises(ParseError):
+            parse_grok_usage("Coverage rose to 91% this week.\nBuild green.\n")
+
+
 class DispatchTest(unittest.TestCase):
     def test_dispatch_picks_the_right_parser(self):
         self.assertEqual(
@@ -237,6 +341,7 @@ class DispatchTest(unittest.TestCase):
             87.0,
         )
         self.assertEqual(parse_usage("grok", GROK_SAMPLE)["credits"], 16.42)
+        self.assertEqual(parse_usage("grok", GROK_DIALOG_SAMPLE)["plan"], "X Premium+")
         self.assertIn("Current session", parse_usage("claude", CLAUDE_SAMPLE)["windows"])
 
     def test_unknown_kind_raises_parse_error_naming_the_supported_kinds(self):

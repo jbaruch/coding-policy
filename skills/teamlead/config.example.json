@@ -8,7 +8,9 @@
       "usage_marker": "Current week",
       "usage_read_source": "visible",
       "close_keys": ["esc"],
-      "clear_prompt": "/clear"
+      "clear_prompt": "/clear",
+      "idle_markers": ["⏵⏵ bypass permissions on", "? for shortcuts"],
+      "working_markers": ["Churned for"]
     },
     {
       "name": "codex",
@@ -16,15 +18,20 @@
       "usage_prompt": "/status",
       "usage_marker": "Weekly limit",
       "usage_read_source": "recent-unwrapped",
-      "clear_prompt": "/new"
+      "clear_prompt": "/new",
+      "idle_markers": ["› Ask Codex to do anything"],
+      "working_markers": []
     },
     {
       "name": "grok",
       "kind": "grok",
       "usage_prompt": "/usage",
       "usage_marker": "Weekly limit",
-      "usage_read_source": "recent-unwrapped",
-      "clear_prompt": "/new"
+      "usage_read_source": "visible",
+      "close_keys": ["esc"],
+      "clear_prompt": "/new",
+      "idle_markers": ["Shift+Tab:mode"],
+      "working_markers": ["Esc:cancel"]
     }
   ]
 }

@@ -60,8 +60,11 @@ CONFIG = {
             "kind": "grok",
             "usage_prompt": "/usage",
             "usage_marker": "Weekly limit",
-            "usage_read_source": "recent-unwrapped",
+            "usage_read_source": "visible",
+            "close_keys": ["esc"],
             "clear_prompt": "/new",
+            "idle_markers": ["Shift+Tab:mode"],
+            "working_markers": ["Esc:cancel"],
         },
     ],
 }
@@ -70,13 +73,34 @@ BY_NAME = {agent.name: agent for agent in parse_config(CONFIG)}
 ASSIGNMENTS = {"developer": "grok", "tester": "claude", "reviewer": "codex"}
 PANES = {"claude": "w2:p1", "codex": "w3:p1", "grok": "w4:p1"}
 
+# Verbatim grok footers. The working one is the idle one plus `Esc:cancel`,
+# which is why the probe checks working markers first.
+GROK_WORKING_FOOTER = (
+    "  ╭────────────────────────╮\n"
+    "  │ ❯ do the thing         │\n"
+    "  ╰────────────────────────╯\n"
+    "  Shift+Tab:mode  │  Esc:cancel  │  Ctrl+.:shortcuts\n"
+)
+GROK_IDLE_FOOTER = (
+    "  ╭────────────────────────╮\n"
+    "  │ ❯                      │\n"
+    "  ╰────────────────────────╯\n"
+    "  Shift+Tab:mode  │  Ctrl+.:shortcuts\n"
+)
 
-def runner_with(statuses):
+
+def runner_with(statuses, footers=None):
+    """Script agent statuses, and the pane footer the idle probe would read."""
+    footers = footers or {}
     runner = FakeRunner()
     for name, status in statuses.items():
         runner.set("agent get " + name, agent_json(name, status, PANES[name]))
         runner.set("agent prompt " + name, ok_json("agent_prompt"))
         runner.set("agent wait " + name, ok_json("agent_wait"))
+        runner.set(
+            "agent read {} --source visible --lines 40".format(name),
+            footers.get(name, GROK_WORKING_FOOTER),
+        )
     return runner
 
 
@@ -236,6 +260,15 @@ class DryRunTest(unittest.TestCase):
         self.assertEqual(len(result["steps"]), 3)
         self.assertEqual(self.runner.writes(), [])
 
+    def test_dry_run_lists_the_conditional_probe_read(self):
+        result = dry_run(self.client, {"developer": "grok"}, BY_NAME, self.paths)
+        conditional = result["steps"][0]["conditional_commands"]
+        self.assertEqual(
+            [command["shell"] for command in conditional],
+            ["herdr agent read grok --source visible --lines 40"],
+        )
+        self.assertIn("working", conditional[0]["when"])
+
     def test_dry_run_shows_the_prompt_text_that_would_be_sent(self):
         result = dry_run(self.client, {"developer": "grok"}, BY_NAME, self.paths)
         self.assertIn("DEVELOPER", result["steps"][0]["prompt"])
@@ -281,12 +314,80 @@ class RefusalTest(unittest.TestCase):
         self.assertEqual(result["applied"][0]["state_before"], "working")
         self.assertEqual(len(runner.writes()), 2)
 
+    def test_stale_working_is_overturned_and_the_round_proceeds(self):
+        # herdr's title-derived state says working; the pane footer says the
+        # agent is sitting at an empty prompt. The pane wins.
+        runner = runner_with({"grok": "working"}, footers={"grok": GROK_IDLE_FOOTER})
+        result = apply(
+            HerdrClient(runner=runner),
+            {"developer": "grok"},
+            BY_NAME,
+            self.paths,
+            AT,
+            warn=lambda message: None,
+        )
+        applied = result["applied"][0]
+        self.assertEqual(applied["state_before"], "idle")
+        self.assertEqual(applied["herdr_state_before"], "working")
+        self.assertEqual(applied["state_source"], "probe")
+
+    def test_the_overturn_warns_that_herdr_state_was_stale(self):
+        runner = runner_with({"grok": "working"}, footers={"grok": GROK_IDLE_FOOTER})
+        warnings = []
+        apply(
+            HerdrClient(runner=runner),
+            {"developer": "grok"},
+            BY_NAME,
+            self.paths,
+            AT,
+            warn=warnings.append,
+        )
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("stale", warnings[0])
+
+    def test_a_probe_confirming_working_still_refuses(self):
+        runner = runner_with({"grok": "working"}, footers={"grok": GROK_WORKING_FOOTER})
+        with self.assertRaises(AgentBusyError):
+            apply(HerdrClient(runner=runner), {"developer": "grok"}, BY_NAME, self.paths, AT)
+        self.assertEqual(runner.writes(), [])
+
+    def test_an_inconclusive_probe_still_refuses(self):
+        runner = runner_with({"grok": "working"}, footers={"grok": "unknown screen\n"})
+        with self.assertRaises(AgentBusyError):
+            apply(HerdrClient(runner=runner), {"developer": "grok"}, BY_NAME, self.paths, AT)
+        self.assertEqual(runner.writes(), [])
+
+    def test_a_blocked_agent_is_refused_without_a_probe_read(self):
+        runner = runner_with({"grok": "blocked"}, footers={"grok": GROK_IDLE_FOOTER})
+        with self.assertRaises(AgentBusyError):
+            apply(HerdrClient(runner=runner), {"developer": "grok"}, BY_NAME, self.paths, AT)
+        self.assertEqual(runner.commands(), ["agent get grok"])
+
+    def test_check_all_ready_reports_the_probe_verdict(self):
+        runner = runner_with({"grok": "working"}, footers={"grok": GROK_IDLE_FOOTER})
+        statuses = check_all_ready(
+            HerdrClient(runner=runner),
+            {"developer": "grok"},
+            BY_NAME,
+            warn=lambda message: None,
+        )
+        self.assertEqual(
+            statuses["grok"],
+            {"state": "idle", "herdr_state": "working", "state_source": "probe"},
+        )
+
     def test_check_all_ready_returns_statuses_when_everyone_is_free(self):
         runner = runner_with({"grok": "idle", "claude": "done"})
         statuses = check_all_ready(
-            HerdrClient(runner=runner), {"developer": "grok", "tester": "claude"}
+            HerdrClient(runner=runner), {"developer": "grok", "tester": "claude"}, BY_NAME
         )
-        self.assertEqual(statuses, {"grok": "idle", "claude": "done"})
+        self.assertEqual(
+            statuses,
+            {
+                "grok": {"state": "idle", "herdr_state": "idle", "state_source": "herdr"},
+                "claude": {"state": "done", "herdr_state": "done", "state_source": "herdr"},
+            },
+        )
 
 
 class ApplyTest(unittest.TestCase):
@@ -346,6 +447,8 @@ class ApplyTest(unittest.TestCase):
                     "role": "developer",
                     "agent": "grok",
                     "state_before": "idle",
+                    "herdr_state_before": "idle",
+                    "state_source": "herdr",
                     "cleared": True,
                     "brief": "/w/dev.md",
                     "common": "/w/COMMON.md",

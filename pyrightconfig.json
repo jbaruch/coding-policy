@@ -12,6 +12,7 @@
     "skills/teamlead/teamlead/measure.py",
     "skills/teamlead/teamlead/parsers.py",
     "skills/teamlead/teamlead/planner.py",
+    "skills/teamlead/teamlead/probe.py",
     "skills/teamlead/teamlead/state.py",
     "skills/teamlead/tests/__init__.py",
     "skills/teamlead/tests/fakes.py",
@@ -22,6 +23,7 @@
     "skills/teamlead/tests/test_measure.py",
     "skills/teamlead/tests/test_parsers.py",
     "skills/teamlead/tests/test_planner.py",
+    "skills/teamlead/tests/test_probe.py",
     "skills/teamlead/tests/test_state.py"
   ],
   "executionEnvironments": [

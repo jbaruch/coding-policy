@@ -17,6 +17,7 @@ Every parser returns the same shape::
         ...
       },
       "credits": float | None,      # informational, grok only
+      "plan": str | None,           # informational, grok's dialog only
     }
 
 `resets` stays a verbatim string on purpose: each agent prints a different
@@ -40,8 +41,10 @@ _CLAUDE_RESETS_RE = re.compile(r"^Resets\s+(.+)$")
 
 # --- codex ------------------------------------------------------------------
 
-# Codex draws a box; strip the frame before matching anything.
-_CODEX_FRAME = "│┃|"  # box-drawing light/heavy vertical, ASCII pipe
+#: Box-drawing frame glyphs stripped from either end of a line before
+#: matching. Codex boxes its `/status` output and Grok boxes its `/usage`
+#: dialog, so both parsers share this.
+_BOX_FRAME = "│┃|"  # box-drawing light/heavy vertical, ASCII pipe
 # "Weekly limit:  [████░░░] 87% left (resets 17:26 on 7 Sep)"
 # The bar is optional so a narrow terminal that drops it still parses.
 _CODEX_LIMIT_RE = re.compile(
@@ -60,9 +63,30 @@ _CODEX_WINDOW_LABELS = frozenset({"Weekly", "5h", "Hourly", "Daily", "Monthly"})
 
 # --- grok -------------------------------------------------------------------
 
-_GROK_WEEKLY_RE = re.compile(r"^Weekly limit:\s*(\d+(?:\.\d+)?)\s*%")
-_GROK_RESET_RE = re.compile(r"^Next reset:\s*(.+?)\s*$")
-_GROK_CREDITS_RE = re.compile(r"^Credits:\s*\$?\s*(-?\d+(?:\.\d+)?)")
+# Grok reports usage in two shapes depending on the build, and a restart can
+# switch between them:
+#
+#   inline  "Weekly limit: 0%" / "Next reset: ..." / "Credits: $16.42"
+#   dialog  a boxed modal on the alternate screen --
+#           "Weekly limit (X Premium+)" / "░░░░  1%" / "Resets: ..." / "Credits: ..."
+#
+# Both are accepted. In both the percentage is percent USED.
+#
+# Inline: label, colon, and percentage all on one line.
+_GROK_INLINE_RE = re.compile(r"^Weekly limit:\s*(?P<pct>\d+(?:\.\d+)?)\s*%")
+# Dialog: the label line carries the plan name and no percentage at all.
+_GROK_DIALOG_LABEL_RE = re.compile(r"^Weekly limit(?:\s*\((?P<plan>[^)]*)\))?\s*$")
+# Dialog: the percentage sits on the row after the label, behind a block-glyph
+# bar. Anchored at both ends so a stray percentage elsewhere cannot match.
+_GROK_DIALOG_PCT_RE = re.compile(r"^[░▒▓█▏▎▍▌▋▊▉\s]*(?P<pct>\d+(?:\.\d+)?)\s*%\s*$")
+# "Next reset:" inline, "Resets:" in the dialog.
+_GROK_RESET_RE = re.compile(r"^(?:Next reset|Resets):\s*(?P<resets>.+?)\s*$")
+_GROK_CREDITS_RE = re.compile(r"^Credits:\s*\$?\s*(?P<credits>-?\d+(?:\.\d+)?)")
+
+
+def _strip_frame(line):
+    """Strip whitespace and box-drawing verticals from both ends of a line."""
+    return line.strip().strip(_BOX_FRAME).strip()
 
 
 def _window(used_pct, resets):
@@ -117,7 +141,7 @@ def parse_claude_usage(text):
             "dialog is open.",
             {"kind": "claude"},
         )
-    return {"windows": windows, "credits": None}
+    return {"windows": windows, "credits": None, "plan": None}
 
 
 def _codex_last_block(text):
@@ -127,7 +151,7 @@ def _codex_last_block(text):
     such row the whole text is treated as a single block, so a snapshot that
     scrolled the account line away still parses.
     """
-    lines = [line.strip().strip(_CODEX_FRAME).strip() for line in text.splitlines()]
+    lines = [_strip_frame(line) for line in text.splitlines()]
     start = 0
     for index, line in enumerate(lines):
         if _CODEX_ACCOUNT_RE.match(line):
@@ -168,40 +192,88 @@ def parse_codex_usage(text):
             "`herdr agent read <name> --source recent-unwrapped --lines 80`.",
             {"kind": "codex"},
         )
-    return {"windows": windows, "credits": None}
+    return {"windows": windows, "credits": None, "plan": None}
 
 
 def parse_grok_usage(text):
-    """Parse the inline `/usage` report Grok prints.
+    """Parse either shape of Grok's `/usage` report.
 
-    Grok's `Weekly limit: N%` is percent **used**. The last report in the
-    snapshot wins, so a pane holding several `/usage` runs yields the newest.
-    `Credits` is captured as an informational number and never feeds headroom.
+    Grok renders usage inline on some builds and as a boxed modal on the
+    alternate screen on others; a restart can switch between them. Both are
+    read here, and in both the percentage is percent **used**.
+
+    Inline::
+
+        Weekly limit: 0%
+        Next reset: September 6, 12:55
+        Credits: $16.42
+
+    Dialog (box borders stripped before matching)::
+
+        Weekly limit (X Premium+)
+        ░░░░░░░░░░░░░░░░░░░░░░░░  1%
+        Resets: September 6, 12:55
+        Credits: $16.42
+
+    The last report in the snapshot wins, so a pane holding several `/usage`
+    runs yields the newest. `Credits` and the dialog's plan name are captured
+    as informational values and never feed headroom.
     """
     windows = {}
     credits = None
+    plan = None
+    # A dialog label seen but not yet followed by its percentage row. Tracked
+    # as a flag plus a value because the plan name is legitimately None on a
+    # label that carries no plan.
+    awaiting_pct = False
+    pending_plan = None
+
     for raw in text.splitlines():
-        line = raw.strip()
-        weekly = _GROK_WEEKLY_RE.match(line)
-        if weekly:
-            windows["Weekly limit"] = _window(weekly.group(1), None)
+        line = _strip_frame(raw)
+        if not line:
             continue
+
+        # The dialog puts the percentage on the row right after the label, so
+        # the very next non-empty row decides. Anything else abandons the wait
+        # and is re-examined below as an ordinary line.
+        if awaiting_pct:
+            awaiting_pct = False
+            dialog_pct = _GROK_DIALOG_PCT_RE.match(line)
+            if dialog_pct:
+                windows["Weekly limit"] = _window(dialog_pct.group("pct"), None)
+                plan = pending_plan
+                continue
+
+        inline = _GROK_INLINE_RE.match(line)
+        if inline:
+            windows["Weekly limit"] = _window(inline.group("pct"), None)
+            plan = None
+            continue
+
+        label = _GROK_DIALOG_LABEL_RE.match(line)
+        if label:
+            awaiting_pct = True
+            pending_plan = label.group("plan")
+            continue
+
         reset = _GROK_RESET_RE.match(line)
         if reset and "Weekly limit" in windows:
-            windows["Weekly limit"]["resets"] = reset.group(1)
+            windows["Weekly limit"]["resets"] = reset.group("resets")
             continue
+
         found_credits = _GROK_CREDITS_RE.match(line)
         if found_credits:
-            credits = round(float(found_credits.group(1)), 6)
+            credits = round(float(found_credits.group("credits")), 6)
 
     if not windows:
         raise ParseError(
-            "No `Weekly limit: N%` line found in the grok pane text - send "
-            "/usage and read with "
-            "`herdr agent read <name> --source recent-unwrapped --lines 60`.",
+            "No `Weekly limit` reading found in the grok pane text - send "
+            "/usage and read the pane. Grok renders the report inline on some "
+            "builds and as a modal dialog on others; read the dialog with "
+            "`herdr agent read <name> --source visible --lines 60`.",
             {"kind": "grok"},
         )
-    return {"windows": windows, "credits": credits}
+    return {"windows": windows, "credits": credits, "plan": plan}
 
 
 PARSERS = {

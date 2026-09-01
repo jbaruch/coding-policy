@@ -94,6 +94,40 @@ left in the scrollback by an earlier round can satisfy the wait immediately.
 Clear the worker's context between rounds and verify the file's content belongs
 to the current round.
 
+### A Stale `working` Is Not a Busy Worker
+
+Herdr derives the lifecycle state from the agent's window title, and that title
+goes stale. Grok keeps reporting `working` after a `/usage` dialog has been
+opened and dismissed while it sits at an empty prompt; taken at face value that
+refuses the agent forever.
+
+The utility therefore confirms a `working` verdict against the pane before
+acting on it. It reads
+`herdr agent read <name> --source visible --lines 40` and decides from the
+footer. Two invariants shape the probe:
+
+- `blocked` is never probed. Herdr recognizing an approval dialog is a positive
+  signal, not a stale one.
+- The bias runs toward refusing. A false `working` costs a skipped round; a
+  false `idle` types over somebody's work. Anything the probe cannot read
+  confidently stays inconclusive, and inconclusive keeps the refusal.
+
+Every measured record says which signal decided: `state_source` is `herdr` or
+`probe`, and `herdr_state` carries what herdr claimed. A probe that overturns
+herdr warns on stderr and the run continues.
+
+The footer signatures live in the config, never in code — a CLI that restyles
+its footer is a config edit. Two optional per-agent keys drive it:
+
+| Key | Meaning |
+| --- | ------- |
+| `idle_markers` | Literal footer text meaning "at the prompt". Empty (the default) means never probe, and herdr's verdict stands |
+| `working_markers` | Literal footer text meaning "mid-turn". Checked before `idle_markers` |
+
+Both are literal substrings matched against the last non-empty footer rows.
+Shipped defaults are in `skills/teamlead/config.example.json`; the precedence
+order and the row count are in `skills/teamlead/teamlead/probe.py`.
+
 ## Reading Subscription Headroom
 
 Each worker reports its own remaining budget through its native slash command,
@@ -106,12 +140,17 @@ it would queue as a prompt and land in the middle of that agent's work.
 | Codex | `/status` | Box in the transcript | `Weekly limit: [...] N% left (resets ...)`, `5h limit: ... N% left`; a line like `GPT-5.3-Codex-Spark limit:` starts a secondary-model section, and the lines after it belong to that model |
 | Grok | `/usage` | Two renderings — see below | `Weekly limit: N%` (used), plus `Credits: $X` |
 
-**Grok has two renderings.** On a fresh session `/usage` prints inline text in
-the transcript. After a restart it opens a tabbed modal dialog that must be
-closed with Esc (`close_keys: ["esc"]`, `usage_read_source: visible`). An
-unclosed dialog leaves the pane holding a modal, which flips the agent to
-`working` and blocks the next prompt — always send the close keys, including
-when parsing failed.
+**Grok has two renderings, and a restart can switch them.** On a fresh session
+`/usage` prints inline text in the transcript (`Weekly limit: 0%`,
+`Next reset:`, `Credits:`). After a restart it opens a boxed modal
+(`Weekly limit (X Premium+)`, a bar row carrying the percentage, `Resets:`,
+`Credits:`) that must be closed with Esc (`close_keys: ["esc"]`,
+`usage_read_source: visible`). Both parse to the same `Weekly limit` window, so
+nothing downstream cares which one appeared; the modal also reports a plan name,
+carried as the informational `plan` field. An unclosed dialog leaves the pane
+holding a modal, which flips the agent to `working` and swallows the next
+prompt — the close keys go out even when the wait, the read, or the parse
+failed.
 
 Headroom is the **minimum** remaining percentage across an agent's windows. A
 worker with 100% of its week and 2% of its five-hour window has 2% of headroom;

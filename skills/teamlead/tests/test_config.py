@@ -37,6 +37,8 @@ VALID = {
             "usage_read_source": "visible",
             "close_keys": ["esc"],
             "clear_prompt": "/clear",
+            "idle_markers": ["? for shortcuts"],
+            "working_markers": ["Churned for"],
         },
         {
             "name": "codex",
@@ -57,11 +59,43 @@ class ParseConfigTest(unittest.TestCase):
         self.assertEqual(agents[0].close_keys, ("esc",))
         self.assertEqual(agents[1].close_keys, ())
 
+    def test_probe_markers_are_read_into_the_agent(self):
+        agents = parse_config(VALID)
+        self.assertEqual(agents[0].idle_markers, ("? for shortcuts",))
+        self.assertEqual(agents[0].working_markers, ("Churned for",))
+
+    def test_probe_markers_default_to_empty(self):
+        # An agent with no markers is simply never probed; herdr's state stands.
+        agents = parse_config(VALID)
+        self.assertEqual(agents[1].idle_markers, ())
+        self.assertEqual(agents[1].working_markers, ())
+
+    def test_idle_markers_must_be_an_array_of_strings(self):
+        broken = json.loads(json.dumps(VALID))
+        broken["agents"][0]["idle_markers"] = "? for shortcuts"
+        with self.assertRaises(ConfigError) as caught:
+            parse_config(broken)
+        self.assertIn("idle_markers", str(caught.exception))
+
+    def test_working_markers_reject_non_string_items(self):
+        broken = json.loads(json.dumps(VALID))
+        broken["agents"][0]["working_markers"] = [42]
+        with self.assertRaises(ConfigError) as caught:
+            parse_config(broken)
+        self.assertIn("working_markers", str(caught.exception))
+
     def test_shipped_example_config_is_valid(self):
         payload = json.loads((REPO_ROOT / "config.example.json").read_text(encoding="utf-8"))
         agents = parse_config(payload, source="config.example.json")
         self.assertEqual([agent.name for agent in agents], ["claude", "codex", "grok"])
         self.assertEqual([agent.kind for agent in agents], ["claude", "codex", "grok"])
+        by_name = {agent.name: agent for agent in agents}
+        # Grok renders /usage as a modal after a restart, so it reads the
+        # viewport and dismisses the dialog just like claude does.
+        self.assertEqual(by_name["grok"].usage_read_source, "visible")
+        self.assertEqual(by_name["grok"].close_keys, ("esc",))
+        # Every shipped agent carries an idle signature for the probe.
+        self.assertTrue(all(agent.idle_markers for agent in agents))
 
     def test_wrong_schema_version_is_rejected(self):
         payload = dict(VALID, schema_version=2)

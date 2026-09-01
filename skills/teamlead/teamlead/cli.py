@@ -269,7 +269,7 @@ def _load_assignments(value):
     return normalize_assignments(payload)
 
 
-def cmd_measure(args, client=None):
+def cmd_measure(args, client=None, warn=None):
     agents = select_agents(load_config(_config_path(args)), args.agents)
     client = client if client is not None else _client(args)
     snapshot = measure(
@@ -279,6 +279,7 @@ def cmd_measure(args, client=None):
         marker_timeout_ms=args.marker_timeout,
         read_lines=args.lines,
         force=args.force,
+        warn=warn,
     )
     state = load_state(_state_path(args))
     add_snapshot(state, snapshot)
@@ -286,7 +287,7 @@ def cmd_measure(args, client=None):
     return snapshot, bool(snapshot["failed_agents"])
 
 
-def cmd_plan(args, client=None):
+def cmd_plan(args, client=None, warn=None):
     roles = [role.strip() for role in args.roles.split(",") if role.strip()]
     state_path = _state_path(args)
     state = load_state(state_path)
@@ -336,7 +337,7 @@ def cmd_plan(args, client=None):
     )
 
 
-def cmd_apply(args, client=None):
+def cmd_apply(args, client=None, warn=None):
     agents = load_config(_config_path(args))
     agents_by_name = {agent.name: agent for agent in agents}
     assignments = _load_assignments(args.assignments)
@@ -373,11 +374,12 @@ def cmd_apply(args, client=None):
         force=args.force,
         settle_timeout_ms=args.settle_timeout,
         on_assigned=record,
+        warn=warn,
     )
     return result, False
 
 
-def cmd_state(args, client=None):
+def cmd_state(args, client=None, warn=None):
     return load_state(_state_path(args)), False
 
 
@@ -395,8 +397,11 @@ def main(argv=None, stdout=None, stderr=None, client=None):
     stderr = stderr if stderr is not None else sys.stderr
     args = build_parser().parse_args(argv)
 
+    def warn(message):
+        stderr.write(message + "\n")
+
     try:
-        payload, failed = COMMANDS[args.command](args, client=client)
+        payload, failed = COMMANDS[args.command](args, client=client, warn=warn)
     except TeamLeadError as exc:
         json.dump(exc.to_dict(), stderr, indent=2)
         stderr.write("\n")
