@@ -27,6 +27,11 @@
 #  13. No set -u abort -> every case's stderr is checked for "unbound
 #                         variable", including the success path, which emits
 #                         its JSON and exits 0 before the abort would fire.
+#  14. Soft-wrapped     -> the prefix and the basename on different rows still
+#                         complete: the long line wraps in `--source visible`.
+#  15. Decoy REPORT     -> another report's line does NOT complete this wait,
+#                         including one whose basename ENDS with this one's.
+#  16. Confirm read     -> a failing `pane read` is a tool failure (exit 2).
 #
 # Run: bash skills/teamlead/tests/test_wait_report.sh
 set -uo pipefail
@@ -64,6 +69,10 @@ case "${1:-} ${2:-}" in
     printf '{"id":"cli:agent:get","result":{"type":"agent_info","agent":{"agent":"claude","agent_status":"%s","pane_id":"%s","name":"%s"}}}\n' \
       "${FAKE_STATUS:-idle}" "${FAKE_PANE:-w2:p1}" "${3:-worker}"
     exit 0
+    ;;
+  "pane read")
+    printf '%s\n' "${FAKE_PANE_TEXT-REPORT: /tmp/report.md}"
+    exit "${FAKE_PANE_READ_RC:-0}"
     ;;
   "pane wait-output")
     [[ -n "${FAKE_ARGV_FILE:-}" ]] && printf '%s\n' "$*" >> "$FAKE_ARGV_FILE"
@@ -105,6 +114,7 @@ run() {
   local err="$TMP/stderr.$RUN_SEQ"
   OUT="$(env HERDR_ENV=1 HERDR_BIN="$FAKE" \
     TEAMLEAD_WAIT_INTERVAL_SEC=0 TEAMLEAD_WAIT_BUDGET_SEC=0 \
+    FAKE_PANE_TEXT="REPORT: ${report}" \
     "$@" bash "$SCRIPT" worker "$report" </dev/null 2>"$err")"
   RC=$?
   ERRTEXT="$(cat "$err")"
@@ -138,6 +148,7 @@ main() {
   printf '# report\n' > "$report" || die "could not write $report"
 
   FAIL=0; PASS=0; RUN_SEQ=0
+  local base=""
 
   # 1. Both signals present -> found, exit 0, and the envelope carries every
   #    field the contract promises.
@@ -255,6 +266,58 @@ main() {
     bash "$SCRIPT" worker "$report" </dev/null 2>"$TMP/e13")"; RC=$?
   if [[ $RC -eq 0 && ! -s "$TMP/e13" ]] && printf '%s' "$OUT" | jq -e '.found == true' >/dev/null 2>&1; then
     pass; else fail "clean success: expected exit 0 with empty stderr, got RC=$RC ERR=$(cat "$TMP/e13")"; fi
+
+  # 14. The real pane shape this has to read: Claude Code and Grok soft-wrap
+  #     the long REPORT line, so the prefix lands on one row and the path
+  #     continues on the next. A full-path literal would never match; the
+  #     basename on the wrapped row is what confirms it.
+  RUN_SEQ=$((RUN_SEQ+1))
+  local wrapped
+  base="$(basename "$report")"
+  wrapped="REPORT: /Users/jbaruch/.worktrees/round-3/reports/
+${base}"
+  OUT="$(env HERDR_ENV=1 HERDR_BIN="$FAKE" \
+    TEAMLEAD_WAIT_INTERVAL_SEC=0 TEAMLEAD_WAIT_BUDGET_SEC=0 \
+    FAKE_MARKER=found FAKE_STATUS=idle FAKE_PANE_TEXT="$wrapped" \
+    bash "$SCRIPT" worker "$report" </dev/null 2>"$TMP/e14")"; RC=$?
+  if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | jq -e '.found == true' >/dev/null 2>&1; then
+    pass; else fail "wrapped marker: expected found true, got RC=$RC OUT=$OUT ERR=$(cat "$TMP/e14")"; fi
+  assert_no_unbound "$(cat "$TMP/e14")" "wrapped marker"
+
+  # 15. A `REPORT: ` line for a DIFFERENT report — the previous round's, or
+  #     another worker's — must not complete this wait. The report file exists
+  #     the whole time, so the pane text is the only thing separating them.
+  RUN_SEQ=$((RUN_SEQ+1))
+  OUT="$(env HERDR_ENV=1 HERDR_BIN="$FAKE" \
+    TEAMLEAD_WAIT_INTERVAL_SEC=0 TEAMLEAD_WAIT_BUDGET_SEC=0 \
+    FAKE_MARKER=found FAKE_STATUS=idle \
+    FAKE_PANE_TEXT="REPORT: /tmp/other-round/developer-notes.md" \
+    bash "$SCRIPT" worker "$report" </dev/null 2>"$TMP/e15")"; RC=$?
+  if [[ $RC -eq 1 ]] && printf '%s' "$OUT" | jq -e '.found == false' >/dev/null 2>&1; then
+    pass; else fail "decoy marker: expected found false, got RC=$RC OUT=$OUT"; fi
+
+  # 15b. The decoy that a substring test gets wrong: another worker's
+  #      `reviewer-report.md` CONTAINS this worker's `report.md`. The basename
+  #      has to match as a whole path component, not as a suffix.
+  RUN_SEQ=$((RUN_SEQ+1))
+  OUT="$(env HERDR_ENV=1 HERDR_BIN="$FAKE" \
+    TEAMLEAD_WAIT_INTERVAL_SEC=0 TEAMLEAD_WAIT_BUDGET_SEC=0 \
+    FAKE_MARKER=found FAKE_STATUS=idle \
+    FAKE_PANE_TEXT="REPORT: /tmp/other-round/reviewer-${base}" \
+    bash "$SCRIPT" worker "$report" </dev/null 2>"$TMP/e15b")"; RC=$?
+  if [[ $RC -eq 1 ]] && printf '%s' "$OUT" | jq -e '.found == false' >/dev/null 2>&1; then
+    pass; else fail "suffix decoy: expected found false, got RC=$RC OUT=$OUT"; fi
+
+  # 16. The confirming read failing is a tool failure, not "not yet" — the
+  #     marker was seen and the answer is unknown, which must not read as a
+  #     worker still working.
+  RUN_SEQ=$((RUN_SEQ+1))
+  OUT="$(env HERDR_ENV=1 HERDR_BIN="$FAKE" \
+    TEAMLEAD_WAIT_INTERVAL_SEC=0 TEAMLEAD_WAIT_BUDGET_SEC=0 \
+    FAKE_MARKER=found FAKE_STATUS=idle FAKE_PANE_READ_RC=1 FAKE_PANE_TEXT="" \
+    bash "$SCRIPT" worker "$report" </dev/null 2>"$TMP/e16")"; RC=$?
+  if [[ $RC -eq 2 && -z "$OUT" ]] && grep -q "could not be confirmed" "$TMP/e16"; then
+    pass; else fail "confirm read failure: expected exit 2, got RC=$RC OUT=$OUT ERR=$(cat "$TMP/e16")"; fi
 
   echo "─────────────────────────────────────────────" >&2
   if [[ $FAIL -gt 0 ]]; then echo "FAILED: ${FAIL} failed, ${PASS} passed" >&2; exit 1; fi

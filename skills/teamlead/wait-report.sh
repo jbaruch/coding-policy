@@ -2,7 +2,8 @@
 # Wait for one worker's round report to land, then report what was observed.
 #
 # Completion is TWO signals, never one: the report FILE exists on disk AND the
-# worker's pane shows the `REPORT: ` marker line its brief ends with. Herdr's
+# worker's pane shows the `REPORT: ` marker line its brief ends with, carrying
+# THIS report's basename. Herdr's
 # lifecycle state alone does not decide it — a Claude Code pane reports `done`
 # between tool calls while the turn is still running, and a Grok pane reports
 # `working` while idle at startup, so a single idle/done observation would end
@@ -43,9 +44,17 @@ TEAMLEAD_PROBE_TIMEOUT_MS="${TEAMLEAD_PROBE_TIMEOUT_MS:-2000}"
 # render on the alternate screen, so rows that scrolled off are unrecoverable;
 # the marker is the LAST line of the final message and stays on screen.
 TEAMLEAD_PROBE_LINES="${TEAMLEAD_PROBE_LINES:-40}"
-# The literal the brief requires as the final message's last line. Matched with
-# `--match`, never `--regex`: it is a literal, and a regex engine would only
-# add a second opinion about what its space means.
+# The literal the brief requires at the head of the final message's last line.
+# Matched with `--match`, never `--regex`: it is a literal, and a regex engine
+# would only add a second opinion about what its space means.
+#
+# The prefix ALONE is not proof. A pane can still show the previous round's
+# line, or another worker's, so a hit is confirmed against the report file's
+# BASENAME in the same window. The full path cannot be the matched literal:
+# Claude Code and Grok soft-wrap a long `REPORT: /Users/.../round-3/dev.md`
+# across two rows in `--source visible`, and a match runs within a row, so a
+# full-path literal never matches on exactly the panes this has to read. A
+# basename is short enough to survive the wrap.
 REPORT_MARKER='REPORT: '
 
 HERDR_BIN="${HERDR_BIN:-herdr}"
@@ -58,6 +67,7 @@ ERRFILE=""
 # (rules/error-handling.md: fail visibly, never half-way).
 AGENT=""
 REPORT_PATH=""
+REPORT_BASENAME=""
 
 warn() { printf 'wait-report: %s\n' "$1" >&2; }
 
@@ -97,13 +107,18 @@ agent_info() { # <agent-name>
   return 0
 }
 
-# 0 = marker on screen, 1 = not yet (the expected no-result), 2 = tool failure.
-# `herdr pane wait-output` reports a no-match as exit 1 with an
+# 0 = this worker's marker is on screen, 1 = not yet (the expected no-result),
+# 2 = tool failure.
+#
+# Two steps, and both must hold. `pane wait-output` waits on the prefix, which
+# is event-driven and cheap; a hit is then confirmed by reading the same window
+# and requiring the report's basename in it, so the previous round's line or
+# another worker's cannot complete this wait. A no-match is exit 1 with an
 # {"error":{"code":"timeout"}} payload on stderr; every other error code is a
 # real failure and must not read as "the worker is still working"
 # (rules/error-handling.md — distinguish an expected non-result from a fault).
-marker_seen() { # <pane-id>
-  local rc=0 code
+marker_seen() { # <pane-id> <report-basename>
+  local rc=0 code text
   # Argument order follows herdr's own usage line -- `pane wait-output
   # [OPTIONS] <--match|--regex> <PANE_ID>` -- and the builder in
   # skills/teamlead/teamlead/herdr.py, so the two surfaces cannot drift.
@@ -113,11 +128,41 @@ marker_seen() { # <pane-id>
     --lines "$TEAMLEAD_PROBE_LINES" \
     --timeout "$TEAMLEAD_PROBE_TIMEOUT_MS" \
     "$1" >/dev/null 2>"$ERRFILE" || rc=$?
-  if (( rc == 0 )); then return 0; fi
-  code="$(jq -r '.error.code // "unparseable"' < "$ERRFILE" 2>/dev/null)" || code="unparseable"
-  if [[ "$code" == "timeout" ]]; then return 1; fi
-  warn "\`${HERDR_BIN} pane wait-output $1\` failed (exit ${rc}, code ${code}): $(tr '\n' ' ' < "$ERRFILE")"
-  return 2
+  if (( rc != 0 )); then
+    code="$(jq -r '.error.code // "unparseable"' < "$ERRFILE" 2>/dev/null)" || code="unparseable"
+    if [[ "$code" == "timeout" ]]; then return 1; fi
+    warn "\`${HERDR_BIN} pane wait-output $1\` failed (exit ${rc}, code ${code}): $(tr '\n' ' ' < "$ERRFILE")"
+    return 2
+  fi
+
+  # The prefix is on screen. Read the same window and confirm whose report it
+  # announces. `pane read` is used rather than `agent read`, which refuses with
+  # `agent_not_idle` on exactly the working pane this has to inspect.
+  rc=0
+  text="$("$HERDR_BIN" pane read "$1" \
+    --source visible \
+    --lines "$TEAMLEAD_PROBE_LINES" 2>"$ERRFILE")" || rc=$?
+  if (( rc != 0 )); then
+    warn "\`${HERDR_BIN} pane read $1\` failed (exit ${rc}): $(tr '\n' ' ' < "$ERRFILE") — the marker was seen but could not be confirmed"
+    return 2
+  fi
+  # Both halves in the same window, in either row: the line soft-wraps, so the
+  # basename may sit on the row after the prefix.
+  [[ "$text" == *"$REPORT_MARKER"* ]] || return 1
+  basename_on_screen "$text" "$2" || return 1
+  return 0
+}
+
+# Is <basename> present in <pane-text> as a whole path component?
+#
+# A plain substring test is not enough: `reviewer-report.md` contains
+# `report.md`, so another worker's line would complete this worker's wait. The
+# name must start at a path boundary -- start of text, whitespace, or `/` --
+# and end at one, so only the component itself matches. The name is matched
+# literally (quoted inside the pattern), since a basename carries `.` and other
+# characters a regex would otherwise read as syntax.
+basename_on_screen() { # <pane-text> <basename>
+  [[ "$1" =~ (^|[[:space:]]|/)"$2"($|[[:space:]]) ]]
 }
 
 main() {
@@ -127,6 +172,7 @@ main() {
   fi
   AGENT="$1"
   REPORT_PATH="$2"
+  REPORT_BASENAME="$(basename -- "$2")"
 
   # The contract says absolute, and the -f test below resolves a relative path
   # against whatever cwd the caller happens to be in -- a different directory
@@ -187,7 +233,7 @@ main() {
     fi
 
     rc=0
-    marker_seen "$pane" || rc=$?
+    marker_seen "$pane" "$REPORT_BASENAME" || rc=$?
     if (( rc == 2 )); then return 2; fi
     marker=$(( rc == 0 ? 1 : 0 ))
 
