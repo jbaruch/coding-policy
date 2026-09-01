@@ -132,9 +132,11 @@ Step 5.
   --common <path-to-COMMON.md>
 ```
 
-Per role: re-reads the worker's live state, sends its native context-clear
-command, waits for it to settle, then sends the assignment prompt and records
-the hand-off in the ledger. Emits one JSON object describing what was sent.
+Per role: re-reads the worker's live state, recovers a composer that already
+holds text, sends the native context-clear command, confirms the composer
+consumed it, waits for the worker to settle, confirms the composer is empty
+once more, then sends the assignment prompt and records the hand-off in the
+ledger. Emits one JSON object describing what was sent.
 
 - A `working` or `blocked` worker makes the command refuse the whole round
   before a single keystroke goes out, with a JSON error on stderr and a
@@ -147,6 +149,15 @@ the hand-off in the ledger. Emits one JSON object describing what was sent.
   pane confirmation appears separately under `conditional_commands`.
 - A busy target has no override. The refusal is unconditional, and it fires
   before any keystroke goes out.
+- A slash command that the composer still holds fails that worker, and the
+  assignment is never sent onto the end of it. `--no-clear` skips the clearing
+  step, never the composer gate.
+- `cleared: true` means the command was consumed AND the pane changed.
+  Consumed-but-unchanged reports `cleared: false` with a warning.
+- A stuck composer is recovered with the worker's `recover_keys`, sent exactly
+  once. A second `ctrl+c` exits Codex, so a still-occupied composer is a
+  refusal rather than a retry. Glyphs, keys, and the settle knob are in
+  `skills/teamlead/teamlead/composer.py` and the config.
 - The prompt text is the utility's own contract; see
   `skills/teamlead/teamlead/assign.py`.
 

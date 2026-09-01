@@ -142,22 +142,63 @@ worker names its own mechanism in config as `slash_delivery`:
 
 | Value | Mechanism | Ships for |
 | ----- | --------- | --------- |
-| `paste` | `herdr agent prompt <name> <text>` | claude, codex |
-| `type` | `herdr pane send-text <pane> <text>`, then `herdr pane send-keys <pane> enter` | grok |
+| `paste` | `herdr agent prompt <name> <text>` | claude |
+| `type` | `herdr pane send-text <pane> <text>`, then `herdr pane send-keys <pane> enter` | codex, grok |
 
 Both failure modes were found live:
 
 - **Pasting into Grok.** `agent prompt` delivers through the pane's live
   bracketed-paste mode, and Grok reads `/usage` as a chat message — it reasons
   about billing and starts reading files instead of opening the panel.
-- **Typing into Codex.** Codex opens an autocomplete popup on `/`, where the
-  first Enter accepts the completion and a second submits. One `send-text` plus
-  one Enter leaves `› /status` sitting unsent in the composer.
+- **Pasting into Codex.** Codex opens an autocomplete popup on `/` and swallows
+  the Enter that `agent prompt` sends. `/new` sat unsent in the composer,
+  `agent wait --until idle` returned at once (Codex never left idle), and the
+  assignment was pasted onto the end of it — Codex received
+  `/newNew assignment from the team lead…` and rejected it.
 
-The tell for a new worker: a command that lands as prose wants `type`, one that
-sits unsent in the composer wants `paste`. An unrecognized value is a config
-error, never a silent fallback. An assignment message always pastes — it is a
-message.
+The tell for a new worker: a command that lands as prose wants `type`. An
+unrecognized value is a config error, never a silent fallback. An assignment
+message always pastes — it is a message.
+
+### Sending Is Not Receiving
+
+Every slash command is confirmed after it goes out. The composer row is the
+last row starting with the worker's `composer_glyph`, and the check is whether
+the command text is gone from it:
+
+1. Composer empty — consumed, carry on.
+2. Command still there — one more Enter, then re-read. An extra Enter on an
+   empty composer is harmless.
+3. Still there — fail that worker, and never send the assignment. Pasting a
+   brief onto a stuck command is the accident this exists to prevent.
+
+Before any dispatch, a composer that already holds text is recovered by sending
+`recover_keys` **exactly once**. Never twice on Codex: a second `ctrl+c` exits
+it. A composer still occupied after the one attempt is a refusal, never
+something to type over.
+
+A worker with no `composer_glyph` cannot be checked, so the read is skipped
+rather than spent on a row nothing can interpret.
+
+`cleared: true` in the `apply` output is earned, not assumed: the clear command
+was consumed AND the pane's content changed (a fresh Codex banner, an emptied
+Claude transcript, Grok's redrawn `session_start`). Consumed but unchanged
+reports `cleared: false` with a warning.
+
+Three per-agent config keys drive it:
+
+| Key | Meaning |
+| --- | ------- |
+| `composer_glyph` | Prompt glyph starting the composer row (`"› "` Codex, `"❯ "` Claude, `"│ ❯"` Grok). Empty skips the check |
+| `recover_keys` | Keys that clear a stuck composer (`["ctrl+c"]` Codex, `["esc"]` Claude and Grok). Sent once, never twice |
+| `slash_delivery` | `paste` or `type`, per the table above |
+
+Glyph matching is signature matching: a TUI that restyles its prompt makes the
+composer unreadable, which surfaces as an unsent command going uncaught — the
+very failure the check exists for. The glyph lives in config, so the fix is an
+edit. The screen-change half cannot tell a cleared session from a repaint
+either; it gates a status flag, never a keystroke. Both live in
+`skills/teamlead/teamlead/composer.py`.
 
 ### Tracing a Live Run
 
@@ -233,9 +274,9 @@ percentage are not the same currency.
 | Codex | `/new` |
 | Grok | `/new` |
 
-Each goes out by that worker's own `slash_delivery` path. Wait for the agent to
-settle before sending the brief, so the brief does not land in the clearing
-dialog.
+Each goes out by that worker's own `slash_delivery` path and is confirmed
+consumed before anything else is sent. Wait for the agent to settle before the
+brief, so the brief does not land in the clearing dialog.
 
 ## Worker Runtime Quirks
 

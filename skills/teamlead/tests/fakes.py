@@ -108,6 +108,31 @@ class ScriptedReads:
         return FakeCompleted(0, text, "")
 
 
+#: The composer row each agent draws, keyed by the glyph in its config.
+COMPOSER_GLYPHS = {"claude": "❯ ", "codex": "› ", "grok": "│ ❯"}
+
+
+def composer_row(name, held=""):
+    """One rendered composer row for `name`, holding `held` (empty by default)."""
+    glyph = COMPOSER_GLYPHS[name]
+    if name == "grok":
+        return "  {}{:<40}│".format(glyph, held)
+    return "  {}{}".format(glyph, held)
+
+
+def composer_screen(name, screen="idle transcript", held=""):
+    """A viewport: some content, then the composer row last."""
+    return "{}\n{}\n".format(screen, composer_row(name, held))
+
+
+def composer_reads(name, screens=("before", "after"), held=""):
+    """A ScriptedReads walking `screens`, composer empty unless `held` given.
+
+    The last screen repeats, so an over-long sequence of reads is stable.
+    """
+    return ScriptedReads([composer_screen(name, screen, held) for screen in screens])
+
+
 def agent_json(name, status, pane_id):
     """A minimal `herdr agent get` response body."""
     return (

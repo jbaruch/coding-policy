@@ -135,8 +135,14 @@ class ParseConfigTest(unittest.TestCase):
         # autocomplete popup.
         self.assertEqual(
             {agent.name: agent.slash_delivery for agent in agents},
-            {"claude": "paste", "codex": "paste", "grok": "type"},
+            {"claude": "paste", "codex": "type", "grok": "type"},
         )
+        # Every agent can be checked for a stuck composer, and every one has a
+        # way to clear it. Codex's is a single ctrl+c -- a second would exit it.
+        self.assertTrue(all(agent.composer_glyph for agent in agents))
+        self.assertTrue(all(agent.recover_keys for agent in agents))
+        self.assertEqual(by_name["codex"].recover_keys, ("ctrl+c",))
+        self.assertEqual(by_name["codex"].composer_glyph, "\u203a ")
         self.assertEqual(by_name["grok"].dialog_next_tab_keys, ("tab",))
 
     def test_wrong_schema_version_is_rejected(self):

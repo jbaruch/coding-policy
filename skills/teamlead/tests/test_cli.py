@@ -25,7 +25,7 @@ from teamlead.cli import build_parser, main
 from teamlead.herdr import HerdrClient
 from teamlead.state import STATE_SCHEMA_VERSION
 
-from tests.fakes import FakeRunner, agent_json, ok_json
+from tests.fakes import FakeRunner, agent_json, composer_reads, ok_json
 
 AT = "2026-02-03T10:00:00+00:00"
 
@@ -39,6 +39,8 @@ CONFIG = {
             "usage_marker": "Current week",
             "usage_read_source": "visible",
             "slash_delivery": "paste",
+            "composer_glyph": "❯ ",
+            "recover_keys": ["esc"],
             "close_keys": ["esc"],
             "clear_prompt": "/clear",
         },
@@ -48,7 +50,9 @@ CONFIG = {
             "usage_prompt": "/status",
             "usage_marker": "Weekly limit",
             "usage_read_source": "recent-unwrapped",
-            "slash_delivery": "paste",
+            "slash_delivery": "type",
+            "composer_glyph": "› ",
+            "recover_keys": ["ctrl+c"],
             "clear_prompt": "/new",
         },
         {
@@ -58,6 +62,8 @@ CONFIG = {
             "usage_marker": "Weekly limit",
             "usage_read_source": "visible",
             "slash_delivery": "type",
+            "composer_glyph": "│ ❯",
+            "recover_keys": ["esc"],
             "close_keys": ["esc"],
             "clear_prompt": "/new",
             "dialog_next_tab_keys": ["tab"],
@@ -324,13 +330,17 @@ class MeasureCommandTest(CliCase):
         runner.set("pane wait-output", ok_json("output_matched"))
         runner.set("pane send-text", ok_json("pane_send_text"))
         runner.set("pane send-keys", ok_json("pane_send_keys"))
+        for name in statuses:
+            runner.responses[
+                "agent read {} --source visible --lines 20".format(name)
+            ] = composer_reads(name)
         self.runner = runner
         return HerdrClient(runner=runner)
 
     def test_measures_the_named_agents_only(self):
         client = self._client({"claude": "idle", "grok": "done"})
         code, out, err = self.run_cli(
-            self.base() + ["measure", "--marker-poll-interval", "0", "--agent", "claude", "--agent", "grok", "--now", AT],
+            self.base() + ["measure", "--marker-poll-interval", "0", "--composer-settle", "0", "--agent", "claude", "--agent", "grok", "--now", AT],
             client=client,
         )
         self.assertEqual(code, 0)
@@ -341,14 +351,14 @@ class MeasureCommandTest(CliCase):
 
     def test_snapshot_is_appended_to_the_state_file(self):
         client = self._client({"grok": "idle"})
-        self.run_cli(self.base() + ["measure", "--marker-poll-interval", "0", "--agent", "grok", "--now", AT], client=client)
+        self.run_cli(self.base() + ["measure", "--marker-poll-interval", "0", "--composer-settle", "0", "--agent", "grok", "--now", AT], client=client)
         state = json.loads(self.state.read_text(encoding="utf-8"))
         self.assertEqual(len(state["snapshots"]), 1)
         self.assertEqual(state["snapshots"][0]["agents"]["grok"]["headroom_pct"], 100.0)
 
     def test_a_busy_agent_is_skipped_and_never_written_to(self):
         client = self._client({"claude": "idle", "codex": "working", "grok": "done"})
-        code, out, _ = self.run_cli(self.base() + ["measure", "--marker-poll-interval", "0", "--now", AT], client=client)
+        code, out, _ = self.run_cli(self.base() + ["measure", "--marker-poll-interval", "0", "--composer-settle", "0", "--now", AT], client=client)
         self.assertEqual(code, 0)
         codex = json.loads(out)["agents"]["codex"]
         self.assertEqual(codex["state"], "working")
@@ -359,7 +369,7 @@ class MeasureCommandTest(CliCase):
         client = self._client({"claude": "idle"})
         self.runner.set("agent read claude", "nothing useful here\n")
         code, out, err = self.run_cli(
-            self.base() + ["measure", "--marker-poll-interval", "0", "--agent", "claude", "--now", AT], client=client
+            self.base() + ["measure", "--marker-poll-interval", "0", "--composer-settle", "0", "--agent", "claude", "--now", AT], client=client
         )
         self.assertEqual(code, 1)
         self.assertEqual(json.loads(out)["failed_agents"], ["claude"])
@@ -368,7 +378,7 @@ class MeasureCommandTest(CliCase):
     def test_records_which_signal_decided_the_state(self):
         client = self._client({"grok": "idle"})
         _, out, _ = self.run_cli(
-            self.base() + ["measure", "--marker-poll-interval", "0", "--agent", "grok", "--now", AT], client=client
+            self.base() + ["measure", "--marker-poll-interval", "0", "--composer-settle", "0", "--agent", "grok", "--now", AT], client=client
         )
         record = json.loads(out)["agents"]["grok"]
         self.assertEqual(record["state_source"], "herdr")
@@ -377,7 +387,7 @@ class MeasureCommandTest(CliCase):
     def test_a_stale_herdr_state_is_overturned_and_warned_about_on_stderr(self):
         client = self._client({"grok": "working"}, footers={"grok": GROK_IDLE_FOOTER})
         code, out, err = self.run_cli(
-            self.base() + ["measure", "--marker-poll-interval", "0", "--agent", "grok", "--now", AT], client=client
+            self.base() + ["measure", "--marker-poll-interval", "0", "--composer-settle", "0", "--agent", "grok", "--now", AT], client=client
         )
         self.assertEqual(code, 0)
         record = json.loads(out)["agents"]["grok"]
@@ -390,7 +400,7 @@ class MeasureCommandTest(CliCase):
     def test_a_genuinely_working_agent_is_still_skipped(self):
         client = self._client({"grok": "working"}, footers={"grok": GROK_WORKING_FOOTER})
         code, out, _ = self.run_cli(
-            self.base() + ["measure", "--marker-poll-interval", "0", "--agent", "grok", "--now", AT], client=client
+            self.base() + ["measure", "--marker-poll-interval", "0", "--composer-settle", "0", "--agent", "grok", "--now", AT], client=client
         )
         self.assertEqual(code, 0)
         self.assertTrue(json.loads(out)["agents"]["grok"]["skipped"])
@@ -421,7 +431,7 @@ class MeasureCommandTest(CliCase):
 
     def test_unknown_agent_name_is_an_actionable_error(self):
         code, out, err = self.run_cli(
-            self.base() + ["measure", "--marker-poll-interval", "0", "--agent", "gemini", "--now", AT],
+            self.base() + ["measure", "--marker-poll-interval", "0", "--composer-settle", "0", "--agent", "gemini", "--now", AT],
             client=HerdrClient(runner=FakeRunner()),
         )
         self.assertEqual(code, 1)
@@ -452,6 +462,10 @@ class ApplyCommandTest(CliCase):
             )
         runner.set("pane send-text", ok_json("pane_send_text"))
         runner.set("pane send-keys", ok_json("pane_send_keys"))
+        for name in statuses:
+            runner.responses[
+                "agent read {} --source visible --lines 20".format(name)
+            ] = composer_reads(name)
         self.runner = runner
         return HerdrClient(binary="herdr", runner=runner)
 
@@ -461,6 +475,8 @@ class ApplyCommandTest(CliCase):
             self.base()
             + [
                 "apply",
+                "--composer-settle",
+                "0",
                 "--assignments",
                 json.dumps({"developer": "grok"}),
                 "--common",
@@ -485,7 +501,7 @@ class ApplyCommandTest(CliCase):
         client = self._client({})
         self.run_cli(
             self.base()
-            + ["apply", "--assignments", json.dumps({"developer": "grok"}), "--common", str(self.common), "--dry-run"]
+            + ["apply", "--composer-settle", "0", "--assignments", json.dumps({"developer": "grok"}), "--common", str(self.common), "--dry-run"]
             + self.brief_args("developer"),
             client=client,
         )
@@ -499,7 +515,7 @@ class ApplyCommandTest(CliCase):
         client = self._client({})
         code, out, _ = self.run_cli(
             self.base()
-            + ["apply", "--assignments", str(plan_file), "--common", str(self.common), "--dry-run"]
+            + ["apply", "--composer-settle", "0", "--assignments", str(plan_file), "--common", str(self.common), "--dry-run"]
             + self.brief_args("developer"),
             client=client,
         )
@@ -512,6 +528,8 @@ class ApplyCommandTest(CliCase):
             self.base()
             + [
                 "apply",
+                "--composer-settle",
+                "0",
                 "--assignments",
                 json.dumps({"developer": "grok", "tester": "claude"}),
                 "--common",
@@ -549,6 +567,8 @@ class ApplyCommandTest(CliCase):
             self.base()
             + [
                 "apply",
+                "--composer-settle",
+                "0",
                 "--assignments",
                 json.dumps({"developer": "grok", "tester": "claude"}),
                 "--common",
@@ -571,6 +591,8 @@ class ApplyCommandTest(CliCase):
             self.base()
             + [
                 "apply",
+                "--composer-settle",
+                "0",
                 "--assignments",
                 json.dumps({"developer": "grok"}),
                 "--common",
@@ -592,7 +614,7 @@ class ApplyCommandTest(CliCase):
         client = self._client({"grok": "blocked"})
         self.run_cli(
             self.base()
-            + ["apply", "--assignments", json.dumps({"developer": "grok"}), "--common", str(self.common), "--now", AT]
+            + ["apply", "--composer-settle", "0", "--assignments", json.dumps({"developer": "grok"}), "--common", str(self.common), "--now", AT]
             + self.brief_args("developer"),
             client=client,
         )
@@ -604,6 +626,8 @@ class ApplyCommandTest(CliCase):
             self.base()
             + [
                 "apply",
+                "--composer-settle",
+                "0",
                 "--assignments",
                 json.dumps({"developer": "grok"}),
                 "--common",
@@ -640,6 +664,8 @@ class ApplyCommandTest(CliCase):
             self.base()
             + [
                 "apply",
+                "--composer-settle",
+                "0",
                 "--assignments",
                 json.dumps({"developer": "grok"}),
                 "--common",
@@ -660,6 +686,8 @@ class ApplyCommandTest(CliCase):
             self.base()
             + [
                 "apply",
+                "--composer-settle",
+                "0",
                 "--assignments",
                 json.dumps({"developer": "grok"}),
                 "--common",
@@ -677,7 +705,7 @@ class ApplyCommandTest(CliCase):
         client = self._client({})
         code, _, err = self.run_cli(
             self.base()
-            + ["apply", "--assignments", json.dumps({"developer": "grok"}), "--common", str(self.common), "--dry-run"],
+            + ["apply", "--composer-settle", "0", "--assignments", json.dumps({"developer": "grok"}), "--common", str(self.common), "--dry-run"],
             client=client,
         )
         self.assertEqual(code, 1)
@@ -689,6 +717,8 @@ class ApplyCommandTest(CliCase):
             self.base()
             + [
                 "apply",
+                "--composer-settle",
+                "0",
                 "--assignments",
                 json.dumps({"developer": "grok"}),
                 "--common",
@@ -708,6 +738,8 @@ class ApplyCommandTest(CliCase):
             self.base()
             + [
                 "apply",
+                "--composer-settle",
+                "0",
                 "--assignments",
                 json.dumps({"developer": "grok"}),
                 "--common",
@@ -727,7 +759,7 @@ class ApplyCommandTest(CliCase):
         client = self._client({})
         code, _, err = self.run_cli(
             self.base()
-            + ["apply", "--assignments", "{not json", "--common", str(self.common), "--dry-run"],
+            + ["apply", "--composer-settle", "0", "--assignments", "{not json", "--common", str(self.common), "--dry-run"],
             client=client,
         )
         self.assertEqual(code, 1)

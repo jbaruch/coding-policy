@@ -16,8 +16,10 @@ place. A missing config is refused with the exact `cp` command to run. The
 optional `idle_markers` / `working_markers` per-agent keys carry the footer
 signatures the stale-state probe reads; an agent with neither is never probed.
 `slash_delivery` picks how that worker's slash commands go out, `paste` or
-`type`; `dialog_next_tab_keys` names the keys that cycle a usage dialog's tabs.
-Both are documented in `skills/teamlead/references/herdr.md`.
+`type`; `dialog_next_tab_keys` names the keys that cycle a usage dialog's tabs;
+`composer_glyph` and `recover_keys` drive the consumed-command check and the
+one-shot recovery of a stuck composer. All are documented in
+`skills/teamlead/references/herdr.md`.
 
 ## State Record Format
 

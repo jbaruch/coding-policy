@@ -27,6 +27,7 @@ from .herdr import (
     HerdrClient,
     trace_enabled_in_env,
 )
+from .composer import COMPOSER_SETTLE_SEC
 from .measure import (
     DEFAULT_MARKER_POLL_ATTEMPTS,
     DEFAULT_MARKER_POLL_INTERVAL_SEC,
@@ -142,6 +143,14 @@ def build_parser():
         "the marker (default: %(default)s).",
     )
     measure_parser.add_argument(
+        "--composer-settle",
+        type=float,
+        default=COMPOSER_SETTLE_SEC,
+        metavar="SECONDS",
+        help="Seconds to let a TUI repaint before re-reading its composer "
+        "(default: %(default)s).",
+    )
+    measure_parser.add_argument(
         "--marker-poll-interval",
         type=float,
         default=DEFAULT_MARKER_POLL_INTERVAL_SEC,
@@ -213,6 +222,14 @@ def build_parser():
         "--now",
         metavar="ISO8601",
         help="Timestamp for the ledger entries (default: the current UTC time).",
+    )
+    apply_parser.add_argument(
+        "--composer-settle",
+        type=float,
+        default=COMPOSER_SETTLE_SEC,
+        metavar="SECONDS",
+        help="Seconds to let a TUI repaint before re-reading its composer "
+        "(default: %(default)s).",
     )
     apply_parser.add_argument(
         "--settle-timeout",
@@ -307,6 +324,7 @@ def cmd_measure(args, client=None, warn=None):
         warn=warn,
         poll_attempts=args.marker_poll_attempts,
         poll_interval_sec=args.marker_poll_interval,
+        settle_sec=args.composer_settle,
     )
     state = load_state(_state_path(args))
     add_snapshot(state, snapshot)
@@ -401,6 +419,7 @@ def cmd_apply(args, client=None, warn=None):
         settle_timeout_ms=args.settle_timeout,
         on_assigned=record,
         warn=warn,
+        settle_sec=args.composer_settle,
     )
     return result, False
 

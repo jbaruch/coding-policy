@@ -24,6 +24,7 @@ OPTIONAL_LIST_FIELDS = (
     "idle_markers",
     "working_markers",
     "dialog_next_tab_keys",
+    "recover_keys",
 )
 
 #: Default when an agent does not name one. `paste` is the older path and the
@@ -34,9 +35,12 @@ DEFAULT_SLASH_DELIVERY = SLASH_DELIVERY_PASTE
 class Agent:
     """One configured agent. A plain value object, never mutated after load."""
 
-    __slots__ = REQUIRED_AGENT_FIELDS + OPTIONAL_LIST_FIELDS + ("slash_delivery",)
+    __slots__ = REQUIRED_AGENT_FIELDS + OPTIONAL_LIST_FIELDS + (
+        "slash_delivery",
+        "composer_glyph",
+    )
 
-    def __init__(self, name, kind, usage_prompt, usage_marker, usage_read_source, clear_prompt, close_keys=(), idle_markers=(), working_markers=(), dialog_next_tab_keys=(), slash_delivery=DEFAULT_SLASH_DELIVERY):
+    def __init__(self, name, kind, usage_prompt, usage_marker, usage_read_source, clear_prompt, close_keys=(), idle_markers=(), working_markers=(), dialog_next_tab_keys=(), recover_keys=(), slash_delivery=DEFAULT_SLASH_DELIVERY, composer_glyph=""):
         self.name = name
         self.kind = kind
         self.usage_prompt = usage_prompt
@@ -51,8 +55,14 @@ class Agent:
         # Keys that move a usage dialog to its next tab, when the report is
         # behind one teamlead did not land on.
         self.dialog_next_tab_keys = tuple(dialog_next_tab_keys)
+        # Keys that clear a stuck composer. Sent EXACTLY once, never in a
+        # loop: for Codex this is ctrl+c, and a second ctrl+c exits Codex.
+        self.recover_keys = tuple(recover_keys)
         # "paste" (agent prompt) or "type" (pane send-text plus Enter).
         self.slash_delivery = slash_delivery
+        # The prompt glyph that marks the composer row, so teamlead can see
+        # whether a slash command was consumed. Empty disables the check.
+        self.composer_glyph = composer_glyph
 
     def __repr__(self):
         return "Agent(name={!r}, kind={!r})".format(self.name, self.kind)
@@ -67,6 +77,7 @@ class Agent:
         for field in OPTIONAL_LIST_FIELDS:
             record[field] = list(getattr(self, field))
         record["slash_delivery"] = self.slash_delivery
+        record["composer_glyph"] = self.composer_glyph
         return record
 
 
@@ -178,6 +189,16 @@ def parse_config(payload, source="<memory>"):
                 ),
                 {"source": source, "index": index, "slash_delivery": delivery},
             )
+        glyph = entry.get("composer_glyph", "")
+        if not isinstance(glyph, str):
+            raise ConfigError(
+                "Config at {}: agents[{}].composer_glyph must be a string - the "
+                "prompt glyph that starts the composer row, e.g. \"\u203a \" "
+                "for codex. Omit it to skip the consumed-command check.".format(
+                    source, index
+                ),
+                {"source": source, "index": index},
+            )
         agents.append(
             Agent(
                 name=name,
@@ -187,6 +208,7 @@ def parse_config(payload, source="<memory>"):
                 usage_read_source=read_source,
                 clear_prompt=entry["clear_prompt"],
                 slash_delivery=delivery,
+                composer_glyph=glyph,
                 **lists
             )
         )

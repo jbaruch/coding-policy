@@ -6,7 +6,8 @@ The flow per agent is always the same:
 2. when herdr says `working`, confirm it against the pane (see teamlead/probe.py)
 3. refuse to write to a `working` or `blocked` agent, always
 4. send the agent's usage slash command by the mechanism its config names
-   (see SLASH_DELIVERIES in teamlead/herdr.py -- the TUIs disagree)
+   (see SLASH_DELIVERIES in teamlead/herdr.py -- the TUIs disagree), and
+   confirm the composer consumed it (see teamlead/composer.py)
 5. wait for its marker, `herdr pane wait-output` first and a bounded
    `herdr agent read` poll second
 6. read the pane and parse it
@@ -28,6 +29,7 @@ CLI-layer concern, which is what lets the tests assert on an exact timestamp.
 
 import time
 
+from .composer import COMPOSER_SETTLE_SEC, send_command
 from .errors import HerdrError, ParseError
 from .herdr import BUSY_STATES, DEFAULT_MARKER_TIMEOUT_MS, READY_STATES, format_argv
 from .parsers import headroom_pct, parse_usage
@@ -164,7 +166,7 @@ def skipped_record(agent, status, herdr_status, state_source):
     }
 
 
-def measure_agent(client, agent, marker_timeout_ms=DEFAULT_MARKER_TIMEOUT_MS, read_lines=DEFAULT_READ_LINES, warn=None, poll_attempts=DEFAULT_MARKER_POLL_ATTEMPTS, poll_interval_sec=DEFAULT_MARKER_POLL_INTERVAL_SEC, sleep=time.sleep, max_tabs=MAX_DIALOG_TABS):
+def measure_agent(client, agent, marker_timeout_ms=DEFAULT_MARKER_TIMEOUT_MS, read_lines=DEFAULT_READ_LINES, warn=None, poll_attempts=DEFAULT_MARKER_POLL_ATTEMPTS, poll_interval_sec=DEFAULT_MARKER_POLL_INTERVAL_SEC, sleep=time.sleep, max_tabs=MAX_DIALOG_TABS, settle_sec=COMPOSER_SETTLE_SEC):
     """Measure one agent and return its record.
 
     Raises HerdrError or ParseError; the caller decides whether one bad agent
@@ -187,8 +189,17 @@ def measure_agent(client, agent, marker_timeout_ms=DEFAULT_MARKER_TIMEOUT_MS, re
             {"agent": agent.name},
         )
 
-    client.deliver_slash_command(
-        agent.slash_delivery, agent.name, pane_id, agent.usage_prompt
+    send_command(
+        client,
+        agent,
+        pane_id,
+        agent.usage_prompt,
+        sleep=sleep,
+        warn=warn,
+        settle_sec=settle_sec,
+        # A usage command opens a dialog; whether the screen "changed" is not
+        # a question this flow asks, and waiting on it would cost reads.
+        screen_attempts=0,
     )
     try:
         text = wait_for_usage_report(
@@ -226,7 +237,7 @@ def measure_agent(client, agent, marker_timeout_ms=DEFAULT_MARKER_TIMEOUT_MS, re
     }
 
 
-def measure(client, agents, measured_at, marker_timeout_ms=DEFAULT_MARKER_TIMEOUT_MS, read_lines=DEFAULT_READ_LINES, warn=None, poll_attempts=DEFAULT_MARKER_POLL_ATTEMPTS, poll_interval_sec=DEFAULT_MARKER_POLL_INTERVAL_SEC, sleep=time.sleep):
+def measure(client, agents, measured_at, marker_timeout_ms=DEFAULT_MARKER_TIMEOUT_MS, read_lines=DEFAULT_READ_LINES, warn=None, poll_attempts=DEFAULT_MARKER_POLL_ATTEMPTS, poll_interval_sec=DEFAULT_MARKER_POLL_INTERVAL_SEC, sleep=time.sleep, settle_sec=COMPOSER_SETTLE_SEC):
     """Measure every agent in `agents` and return the snapshot document.
 
     A failure on one agent is recorded on that agent's record and does not
@@ -247,6 +258,7 @@ def measure(client, agents, measured_at, marker_timeout_ms=DEFAULT_MARKER_TIMEOU
                 poll_attempts=poll_attempts,
                 poll_interval_sec=poll_interval_sec,
                 sleep=sleep,
+                settle_sec=settle_sec,
             )
         except (HerdrError, ParseError) as exc:
             failures.append(agent.name)

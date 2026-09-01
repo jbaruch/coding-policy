@@ -44,7 +44,7 @@ _CLAUDE_RESETS_RE = re.compile(r"^Resets\s+(.+)$")
 #: Box-drawing frame glyphs stripped from either end of a line before
 #: matching. Codex boxes its `/status` output and Grok boxes its `/usage`
 #: dialog, so both parsers share this.
-_BOX_FRAME = "│┃|"  # box-drawing light/heavy vertical, ASCII pipe
+BOX_FRAME = "│┃|"  # box-drawing light/heavy vertical, ASCII pipe
 # "Weekly limit:  [████░░░] 87% left (resets 17:26 on 7 Sep)"
 # The bar is optional so a narrow terminal that drops it still parses.
 _CODEX_LIMIT_RE = re.compile(
@@ -86,7 +86,7 @@ _GROK_CREDITS_RE = re.compile(r"^Credits:\s*\$?\s*(?P<credits>-?\d+(?:\.\d+)?)")
 
 def _strip_frame(line):
     """Strip whitespace and box-drawing verticals from both ends of a line."""
-    return line.strip().strip(_BOX_FRAME).strip()
+    return line.strip().strip(BOX_FRAME).strip()
 
 
 def _box_interior(line):
@@ -106,7 +106,7 @@ def _box_interior(line):
     first = -1
     last = -1
     for index, char in enumerate(line):
-        if char in _BOX_FRAME:
+        if char in BOX_FRAME:
             if first < 0:
                 first = index
             last = index

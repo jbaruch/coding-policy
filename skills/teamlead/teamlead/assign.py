@@ -14,12 +14,20 @@ agent's config names -- see SLASH_DELIVERIES in teamlead/herdr.py, because the
 TUIs disagree about what a pasted slash command means. The assignment itself
 IS a message, so it always goes through `agent prompt`.
 
+Both are gated on the composer being empty (see teamlead/composer.py). Live,
+an unsent `/new` sat in Codex's composer and the assignment was pasted onto
+the end of it, so Codex received `/newNew assignment from the team lead...`
+and rejected it. The assignment is never sent to an agent whose composer still
+holds text.
+
 `--dry-run` builds the same argv lists the live path would execute (the
 builders live on the transport) and prints them without running anything.
 """
 
 import os
+import time
 
+from .composer import COMPOSER_SETTLE_SEC, ensure_ready, send_command
 from .errors import AgentBusyError, UsageError
 from .herdr import (
     BUSY_STATES,
@@ -27,7 +35,8 @@ from .herdr import (
     SLASH_DELIVERY_TYPE,
     format_argv,
 )
-from .probe import PROBE_READ_LINES, PROBE_READ_SOURCE, resolve_status
+from .composer import COMPOSER_READ_LINES, COMPOSER_READ_SOURCE, checkable
+from .probe import PROBE_READ_LINES, PROBE_READ_SOURCE, resolve_status, stderr_warn
 
 APPLY_SCHEMA_VERSION = 1
 
@@ -131,21 +140,48 @@ def build_steps(client, assignments, agents_by_name, paths, panes=None, no_clear
         agent = agents_by_name[name]
         pane_id = panes.get(name) or PANE_ID_PLACEHOLDER
         text = assignment_text(role, paths["common"], paths[role])
+        composer_reads = (
+            [client.argv_agent_read(name, source=COMPOSER_READ_SOURCE, lines=COMPOSER_READ_LINES)]
+            if checkable(agent)
+            else []
+        )
         commands = [client.argv_agent_get(name)]
         # Runs only when the `agent get` above reports `working`; see
         # teamlead/probe.py.
         conditional = [
-            client.argv_agent_read(name, source=PROBE_READ_SOURCE, lines=PROBE_READ_LINES)
+            (
+                client.argv_agent_read(name, source=PROBE_READ_SOURCE, lines=PROBE_READ_LINES),
+                "herdr reports the agent as working; confirms it against the "
+                "pane footer before refusing",
+            )
         ]
         if not no_clear:
+            commands.extend(composer_reads)
             commands.extend(
                 client.argv_deliver_slash_command(
                     agent.slash_delivery, name, pane_id, agent.clear_prompt
                 )
             )
+            commands.extend(composer_reads)
             commands.append(
                 client.argv_agent_wait(name, until=SETTLE_STATES, timeout_ms=settle_timeout_ms)
             )
+            if agent.recover_keys:
+                conditional.append(
+                    (
+                        client.argv_agent_send_keys(name, agent.recover_keys),
+                        "the composer already holds text before dispatch; sent "
+                        "exactly once, never twice",
+                    )
+                )
+            conditional.append(
+                (
+                    client.argv_pane_send_keys(pane_id, ["enter"]),
+                    "the clear command is still in the composer after the "
+                    "first Enter (Codex's autocomplete popup eats it)",
+                )
+            )
+        commands.extend(composer_reads)
         # The assignment is real message text, so pasting it is correct.
         commands.append(client.argv_agent_prompt(name, text))
         steps.append(
@@ -159,13 +195,8 @@ def build_steps(client, assignments, agents_by_name, paths, panes=None, no_clear
                 "prompt": text,
                 "commands": [{"argv": argv, "shell": format_argv(argv)} for argv in commands],
                 "conditional_commands": [
-                    {
-                        "argv": argv,
-                        "shell": format_argv(argv),
-                        "when": "herdr reports the agent as working; confirms it "
-                        "against the pane footer before refusing",
-                    }
-                    for argv in conditional
+                    {"argv": argv, "shell": format_argv(argv), "when": when}
+                    for argv, when in conditional
                 ],
             }
         )
@@ -209,7 +240,7 @@ def check_all_ready(client, assignments, agents_by_name, warn=None):
     return statuses
 
 
-def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle_timeout_ms=DEFAULT_SETTLE_TIMEOUT_MS, on_assigned=None, warn=None):
+def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle_timeout_ms=DEFAULT_SETTLE_TIMEOUT_MS, on_assigned=None, warn=None, sleep=time.sleep, settle_sec=COMPOSER_SETTLE_SEC):
     """Clear each agent and hand it its brief. Writes to the agents.
 
     `on_assigned(role, agent, at)` is called after each successful hand-off so
@@ -234,6 +265,7 @@ def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle
     for step in steps:
         name = step["agent"]
         agent = agents_by_name[name]
+        cleared = False
         if not no_clear:
             pane_id = step["pane_id"]
             if agent.slash_delivery == SLASH_DELIVERY_TYPE and pane_id == PANE_ID_PLACEHOLDER:
@@ -245,10 +277,29 @@ def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle
                     ),
                     {"agent": name},
                 )
-            client.deliver_slash_command(
-                agent.slash_delivery, name, pane_id, agent.clear_prompt
+            outcome = send_command(
+                client,
+                agent,
+                pane_id,
+                agent.clear_prompt,
+                sleep=sleep,
+                warn=warn,
+                settle_sec=settle_sec,
             )
             client.agent_wait(name, until=SETTLE_STATES, timeout_ms=settle_timeout_ms)
+            # `cleared` means the command was consumed AND the screen changed:
+            # a fresh Codex session draws its banner, Claude empties the
+            # transcript, Grok redraws session_start. Consumed but unchanged is
+            # reported honestly rather than assumed.
+            cleared = outcome["screen_changed"]
+            if not cleared:
+                (warn or stderr_warn)(
+                    "teamlead: {} consumed {} but its screen did not change, so "
+                    "the context may not have been cleared. Reported as "
+                    "cleared: false.".format(name, agent.clear_prompt)
+                )
+        # Never paste an assignment onto text already sitting in the composer.
+        ensure_ready(client, agent, sleep=sleep, warn=warn, settle_sec=settle_sec)
         client.agent_prompt(name, step["prompt"])
         checked = statuses.get(name, {})
         record = {
@@ -258,7 +309,7 @@ def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle
             "herdr_state_before": checked.get("herdr_state"),
             "state_source": checked.get("state_source"),
             "pane_id": checked.get("pane_id"),
-            "cleared": not no_clear,
+            "cleared": cleared,
             "brief": step["brief"],
             "common": step["common"],
             "at": at,

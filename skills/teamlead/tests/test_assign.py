@@ -20,7 +20,7 @@ import unittest
 from pathlib import Path
 
 from teamlead.assign import (
-    apply,
+    apply as _apply,
     assignment_text,
     build_steps,
     check_all_ready,
@@ -29,12 +29,28 @@ from teamlead.assign import (
     resolve_paths,
 )
 from teamlead.config import parse_config
-from teamlead.errors import AgentBusyError, UsageError
+from teamlead.errors import AgentBusyError, HerdrError, UsageError
 from teamlead.herdr import HerdrClient
 
-from tests.fakes import FakeRunner, agent_json, ok_json
+from tests.fakes import (
+    FakeRunner,
+    ScriptedReads,
+    agent_json,
+    composer_reads,
+    composer_screen,
+    ok_json,
+)
 
 AT = "2026-02-03T10:00:00+00:00"
+
+
+def NO_SLEEP(seconds):
+    """Stand-in for time.sleep. Composer re-reads must never wait in tests."""
+
+
+def apply(client, assignments, agents_by_name, paths, at, **kwargs):
+    kwargs.setdefault("sleep", NO_SLEEP)
+    return _apply(client, assignments, agents_by_name, paths, at, **kwargs)
 
 CONFIG = {
     "schema_version": 1,
@@ -46,6 +62,8 @@ CONFIG = {
             "usage_marker": "Current week",
             "usage_read_source": "visible",
             "slash_delivery": "paste",
+            "composer_glyph": "❯ ",
+            "recover_keys": ["esc"],
             "close_keys": ["esc"],
             "clear_prompt": "/clear",
         },
@@ -55,7 +73,9 @@ CONFIG = {
             "usage_prompt": "/status",
             "usage_marker": "Weekly limit",
             "usage_read_source": "recent-unwrapped",
-            "slash_delivery": "paste",
+            "slash_delivery": "type",
+            "composer_glyph": "› ",
+            "recover_keys": ["ctrl+c"],
             "clear_prompt": "/new",
         },
         {
@@ -65,6 +85,8 @@ CONFIG = {
             "usage_marker": "Weekly limit",
             "usage_read_source": "visible",
             "slash_delivery": "type",
+            "composer_glyph": "│ ❯",
+            "recover_keys": ["esc"],
             "close_keys": ["esc"],
             "clear_prompt": "/new",
             "dialog_next_tab_keys": ["tab"],
@@ -94,7 +116,7 @@ GROK_IDLE_FOOTER = (
 )
 
 
-def runner_with(statuses, footers=None):
+def runner_with(statuses, footers=None, composer_screens=None):
     """Script agent statuses, and the pane footer the idle probe would read."""
     footers = footers or {}
     runner = FakeRunner()
@@ -108,6 +130,14 @@ def runner_with(statuses, footers=None):
         )
     runner.set("pane send-text", ok_json("pane_send_text"))
     runner.set("pane send-keys", ok_json("pane_send_keys"))
+    # Composer recovery: ctrl+c for codex, esc for the others.
+    runner.set("agent send-keys", ok_json("agent_send_keys"))
+    # Composer empty throughout, and the screen changes after the clear --
+    # which is what `cleared: true` is allowed to mean.
+    for name in statuses:
+        runner.responses[
+            "agent read {} --source visible --lines 20".format(name)
+        ] = composer_reads(name, screens=composer_screens or ("before", "after"))
     return runner
 
 
@@ -213,9 +243,12 @@ class BuildStepsTest(unittest.TestCase):
             [command["shell"] for command in steps[0]["commands"]],
             [
                 "herdr agent get grok",
+                "herdr agent read grok --source visible --lines 20",
                 "herdr pane send-text w4:p1 /new",
                 "herdr pane send-keys w4:p1 enter",
+                "herdr agent read grok --source visible --lines 20",
                 "herdr agent wait grok --until idle --until done --timeout 60000",
+                "herdr agent read grok --source visible --lines 20",
                 "herdr agent prompt grok 'New assignment from the team lead. Your role "
                 "for this task is DEVELOPER. Read /w/COMMON.md in full, then read "
                 "/w/dev.md in full, and execute that brief exactly. Finish with the "
@@ -242,7 +275,7 @@ class BuildStepsTest(unittest.TestCase):
             [
                 "herdr pane send-text w4:p1 /new",  # grok types
                 "herdr agent prompt claude /clear",  # claude pastes
-                "herdr agent prompt codex /new",  # codex pastes
+                "herdr pane send-text w3:p1 /new",  # codex types
             ],
         )
 
@@ -273,9 +306,11 @@ class BuildStepsTest(unittest.TestCase):
             self.client, {"developer": "grok"}, BY_NAME, self.paths, no_clear=True
         )
         shells = [command["shell"] for command in steps[0]["commands"]]
-        self.assertEqual(len(shells), 2)
+        # get, the composer check that still gates the assignment, the message
+        self.assertEqual(len(shells), 3)
         self.assertEqual(shells[0], "herdr agent get grok")
-        self.assertIn("DEVELOPER", shells[1])
+        self.assertEqual(shells[1], "herdr agent read grok --source visible --lines 20")
+        self.assertIn("DEVELOPER", shells[2])
 
     def test_unknown_agent_name_is_refused(self):
         with self.assertRaises(UsageError) as caught:
@@ -311,10 +346,27 @@ class DryRunTest(unittest.TestCase):
         result = dry_run(self.client, {"developer": "grok"}, BY_NAME, self.paths)
         conditional = result["steps"][0]["conditional_commands"]
         self.assertEqual(
-            [command["shell"] for command in conditional],
-            ["herdr agent read grok --source visible --lines 40"],
+            conditional[0]["shell"], "herdr agent read grok --source visible --lines 40"
         )
         self.assertIn("working", conditional[0]["when"])
+
+    def test_dry_run_lists_the_conditional_recovery_and_second_enter(self):
+        result = dry_run(self.client, {"developer": "grok"}, BY_NAME, self.paths)
+        shells = [command["shell"] for command in result["steps"][0]["conditional_commands"]]
+        self.assertIn("herdr agent send-keys grok esc", shells)
+        self.assertIn(
+            "herdr pane send-keys PANE-ID-RESOLVED-AT-RUN-TIME enter", shells
+        )
+
+    def test_the_recovery_command_says_it_runs_exactly_once(self):
+        result = dry_run(self.client, {"developer": "grok"}, BY_NAME, self.paths)
+        recovery = [
+            command
+            for command in result["steps"][0]["conditional_commands"]
+            if "send-keys grok esc" in command["shell"]
+        ]
+        self.assertEqual(len(recovery), 1)
+        self.assertIn("exactly once", recovery[0]["when"])
 
     def test_dry_run_shows_the_prompt_text_that_would_be_sent(self):
         result = dry_run(self.client, {"developer": "grok"}, BY_NAME, self.paths)
@@ -486,20 +538,19 @@ class SlashCommandDeliveryTest(unittest.TestCase):
         )
         self.assertIn("pane send-text w4:p1 /new", runner.commands())
 
-    def test_only_grok_types_its_clear(self):
+    def test_grok_and_codex_type_their_clears(self):
         runner = runner_with({"grok": "idle", "claude": "idle", "codex": "idle"})
         apply(HerdrClient(runner=runner), ASSIGNMENTS, BY_NAME, self.paths, AT)
         self.assertEqual(
             [c for c in runner.commands() if c.startswith("pane send-text")],
-            ["pane send-text w4:p1 /new"],
+            ["pane send-text w4:p1 /new", "pane send-text w3:p1 /new"],
         )
 
-    def test_claude_and_codex_have_their_clears_pasted(self):
+    def test_claude_has_its_clear_pasted(self):
         runner = runner_with({"grok": "idle", "claude": "idle", "codex": "idle"})
         apply(HerdrClient(runner=runner), ASSIGNMENTS, BY_NAME, self.paths, AT)
-        commands = runner.commands()
-        self.assertIn("agent prompt claude /clear", commands)
-        self.assertIn("agent prompt codex /new", commands)
+        self.assertIn("agent prompt claude /clear", runner.commands())
+        self.assertNotIn("agent prompt codex /new", runner.commands())
 
     def test_every_role_still_gets_its_assignment_message_pasted(self):
         runner = runner_with({"grok": "idle", "claude": "idle", "codex": "idle"})
@@ -557,6 +608,173 @@ class SlashCommandDeliveryTest(unittest.TestCase):
         self.assertEqual(runner.writes(), [])
 
 
+class ComposerGateTest(unittest.TestCase):
+    """The live failure: an unsent /new, then the assignment pasted onto it.
+
+    Codex received `/newNew assignment from the team lead...` and rejected it
+    twice, because `agent wait --until idle` returned instantly (the agent had
+    been idle the whole time) and nothing ever checked the composer.
+    """
+
+    def setUp(self):
+        self.paths = {"common": "/w/COMMON.md", "developer": "/w/dev.md"}
+
+    def _runner(self, screens):
+        runner = runner_with({"codex": "idle"})
+        runner.responses["agent read codex --source visible --lines 20"] = ScriptedReads(
+            screens
+        )
+        return runner
+
+    def test_an_unsent_clear_stops_the_round_before_the_assignment(self):
+        held = composer_screen("codex", "transcript", "/new")
+        runner = self._runner([composer_screen("codex"), held])
+        with self.assertRaises(HerdrError) as caught:
+            apply(
+                HerdrClient(runner=runner),
+                {"developer": "codex"},
+                BY_NAME,
+                self.paths,
+                AT,
+                warn=lambda message: None,
+            )
+        self.assertIn("/new", str(caught.exception))
+        # The exact regression: no assignment is appended to the stuck text.
+        self.assertEqual(runner.pasted_prompts(), [])
+
+    def test_the_second_enter_recovers_the_round(self):
+        runner = self._runner(
+            [
+                composer_screen("codex", "old transcript"),
+                composer_screen("codex", "old transcript", "/new"),
+                composer_screen("codex", "fresh session banner"),
+            ]
+        )
+        result = apply(
+            HerdrClient(runner=runner),
+            {"developer": "codex"},
+            BY_NAME,
+            self.paths,
+            AT,
+            warn=lambda message: None,
+        )
+        self.assertEqual(len(result["applied"]), 1)
+        self.assertTrue(result["applied"][0]["cleared"])
+        self.assertEqual(
+            len([c for c in runner.commands() if c == "pane send-keys w3:p1 enter"]), 2
+        )
+        self.assertEqual(len(runner.pasted_prompts()), 1)
+        self.assertIn("DEVELOPER", runner.pasted_prompts()[0])
+
+    def test_a_composer_holding_text_before_dispatch_is_recovered_once(self):
+        runner = self._runner(
+            [
+                composer_screen("codex", "old", "leftover text"),
+                composer_screen("codex", "old"),
+                composer_screen("codex", "fresh session banner"),
+            ]
+        )
+        apply(
+            HerdrClient(runner=runner),
+            {"developer": "codex"},
+            BY_NAME,
+            self.paths,
+            AT,
+            warn=lambda message: None,
+        )
+        self.assertEqual(
+            [c for c in runner.commands() if c == "agent send-keys codex ctrl+c"],
+            ["agent send-keys codex ctrl+c"],
+        )
+
+    def test_an_unrecoverable_composer_refuses_before_any_write(self):
+        runner = self._runner([composer_screen("codex", "old", "stuck")])
+        with self.assertRaises(HerdrError):
+            apply(
+                HerdrClient(runner=runner),
+                {"developer": "codex"},
+                BY_NAME,
+                self.paths,
+                AT,
+                warn=lambda message: None,
+            )
+        self.assertEqual(runner.pasted_prompts(), [])
+        self.assertEqual(
+            [c for c in runner.commands() if c.startswith("pane send-text")], []
+        )
+
+    def test_no_clear_still_gates_the_assignment_on_an_empty_composer(self):
+        runner = self._runner([composer_screen("codex", "old", "leftover")])
+        with self.assertRaises(HerdrError):
+            apply(
+                HerdrClient(runner=runner),
+                {"developer": "codex"},
+                BY_NAME,
+                self.paths,
+                AT,
+                no_clear=True,
+                warn=lambda message: None,
+            )
+        self.assertEqual(runner.pasted_prompts(), [])
+
+
+class ClearedFlagTest(unittest.TestCase):
+    """`cleared: true` means consumed AND the screen actually changed."""
+
+    def setUp(self):
+        self.paths = {"common": "/w/COMMON.md", "developer": "/w/dev.md"}
+
+    def _apply(self, screens, **kwargs):
+        runner = runner_with({"codex": "idle"})
+        runner.responses["agent read codex --source visible --lines 20"] = ScriptedReads(
+            screens
+        )
+        self.runner = runner
+        return apply(
+            HerdrClient(runner=runner),
+            {"developer": "codex"},
+            BY_NAME,
+            self.paths,
+            AT,
+            warn=lambda message: None,
+            **kwargs
+        )
+
+    def test_a_fresh_session_banner_counts_as_cleared(self):
+        result = self._apply(
+            [composer_screen("codex", "old transcript"), composer_screen("codex", "fresh banner")]
+        )
+        self.assertTrue(result["applied"][0]["cleared"])
+
+    def test_an_unchanged_screen_is_reported_as_not_cleared(self):
+        result = self._apply(
+            [composer_screen("codex", "same"), composer_screen("codex", "same")]
+        )
+        self.assertFalse(result["applied"][0]["cleared"])
+        # Consumed, so the assignment is still safe to send.
+        self.assertEqual(len(self.runner.pasted_prompts()), 1)
+
+    def test_an_unchanged_screen_warns(self):
+        runner = runner_with({"codex": "idle"})
+        runner.responses["agent read codex --source visible --lines 20"] = ScriptedReads(
+            [composer_screen("codex", "same")]
+        )
+        warnings = []
+        apply(
+            HerdrClient(runner=runner),
+            {"developer": "codex"},
+            BY_NAME,
+            self.paths,
+            AT,
+            warn=warnings.append,
+        )
+        self.assertTrue(any("did not change" in w for w in warnings))
+
+    def test_no_clear_reports_cleared_false(self):
+        result = self._apply([composer_screen("codex")], no_clear=True)
+        self.assertFalse(result["applied"][0]["cleared"])
+
+
 class ApplyTest(unittest.TestCase):
     def setUp(self):
         self.paths = {
@@ -572,9 +790,12 @@ class ApplyTest(unittest.TestCase):
             runner.commands(),
             [
                 "agent get grok",
+                "agent read grok --source visible --lines 20",
                 "pane send-text w4:p1 /new",
                 "pane send-keys w4:p1 enter",
+                "agent read grok --source visible --lines 20",
                 "agent wait grok --until idle --until done --timeout 60000",
+                "agent read grok --source visible --lines 20",
                 "agent prompt grok 'New assignment from the team lead. Your role for "
                 "this task is DEVELOPER. Read /w/COMMON.md in full, then read /w/dev.md "
                 "in full, and execute that brief exactly. Finish with the REPORT line it "
@@ -597,7 +818,16 @@ class ApplyTest(unittest.TestCase):
             for index, c in enumerate(commands)
             if c.startswith(runner.WRITE_PREFIXES)
         )
-        self.assertEqual(commands[:first_write], ["agent get grok", "agent get claude"])
+        # Both statuses are read before anything is sent; the composer check
+        # that precedes the first dispatch is a read too.
+        self.assertEqual(
+            commands[:first_write],
+            [
+                "agent get grok",
+                "agent get claude",
+                "agent read grok --source visible --lines 20",
+            ],
+        )
 
     def test_no_clear_sends_only_the_assignment(self):
         runner = runner_with({"grok": "idle"})

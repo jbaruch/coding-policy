@@ -19,7 +19,14 @@ from teamlead.measure import measure as _measure
 from teamlead.measure import measure_agent as _measure_agent
 from teamlead.measure import wait_for_usage_report as _wait_for_usage_report
 
-from tests.fakes import FakeRunner, ScriptedReads, agent_json, ok_json
+from tests.fakes import (
+    FakeRunner,
+    ScriptedReads,
+    agent_json,
+    composer_reads,
+    composer_screen,
+    ok_json,
+)
 
 AT = "2026-02-03T10:00:00+00:00"
 
@@ -52,6 +59,8 @@ CONFIG = {
             "usage_marker": "Current week",
             "usage_read_source": "visible",
             "slash_delivery": "paste",
+            "composer_glyph": "❯ ",
+            "recover_keys": ["esc"],
             "close_keys": ["esc"],
             "clear_prompt": "/clear",
         },
@@ -61,7 +70,9 @@ CONFIG = {
             "usage_prompt": "/status",
             "usage_marker": "Weekly limit",
             "usage_read_source": "recent-unwrapped",
-            "slash_delivery": "paste",
+            "slash_delivery": "type",
+            "composer_glyph": "› ",
+            "recover_keys": ["ctrl+c"],
             "clear_prompt": "/new",
         },
         {
@@ -71,6 +82,8 @@ CONFIG = {
             "usage_marker": "Weekly limit",
             "usage_read_source": "visible",
             "slash_delivery": "type",
+            "composer_glyph": "│ ❯",
+            "recover_keys": ["esc"],
             "close_keys": ["esc"],
             "clear_prompt": "/new",
             "dialog_next_tab_keys": ["tab"],
@@ -126,9 +139,13 @@ def runner_with(statuses, panes, footers=None):
                 "agent read {} --source visible --lines 40".format(name), footers[name]
             )
     runner.set("pane wait-output", ok_json("output_matched"))
-    # Slash commands are typed into the pane, never pasted via agent prompt.
     runner.set("pane send-text", ok_json("pane_send_text"))
     runner.set("pane send-keys", ok_json("pane_send_keys"))
+    # The composer check: an empty composer before and after the command.
+    for name in statuses:
+        runner.responses[
+            "agent read {} --source visible --lines 20".format(name)
+        ] = composer_reads(name)
     return runner
 
 
@@ -148,7 +165,9 @@ class MeasureAgentTest(unittest.TestCase):
             runner.commands(),
             [
                 "agent get claude",
+                "agent read claude --source visible --lines 20",
                 "agent prompt claude /usage",
+                "agent read claude --source visible --lines 20",
                 "pane wait-output --match 'Current week' --source visible --timeout 20000 w2:p1",
                 "agent read claude --source visible --lines 80",
                 "agent send-keys claude esc",
@@ -175,24 +194,25 @@ class MeasureAgentTest(unittest.TestCase):
         self.assertIn("pane send-text w4:p1 /usage", runner.commands())
         self.assertIn("pane send-keys w4:p1 enter", runner.commands())
 
-    def test_claude_and_codex_paste_theirs(self):
-        # Codex opens an autocomplete popup on `/`, where the first Enter only
-        # accepts the completion, so a typed command sits in the composer.
-        for name, pane, command in (
-            ("claude", CLAUDE_PANE, "claude /usage"),
-            ("codex", CODEX_PANE, "codex /status"),
-        ):
-            runner = runner_with({name: "idle"}, {name: pane})
-            measure_agent(HerdrClient(runner=runner), BY_NAME[name])
-            self.assertEqual(runner.pasted_prompts(), [command], name)
-            self.assertEqual(
-                [c for c in runner.commands() if c.startswith("pane send-")], [], name
-            )
+    def test_claude_pastes_its_usage_command(self):
+        runner = runner_with({"claude": "idle"}, {"claude": CLAUDE_PANE})
+        measure_agent(HerdrClient(runner=runner), BY_NAME["claude"])
+        self.assertEqual(runner.pasted_prompts(), ["claude /usage"])
+        self.assertEqual([c for c in runner.commands() if c.startswith("pane send-")], [])
+
+    def test_codex_types_its_usage_command(self):
+        # Pasting worked until the live apply: the autocomplete popup ate the
+        # Enter and `/new` sat unsent in the composer.
+        runner = runner_with({"codex": "idle"}, {"codex": CODEX_PANE})
+        measure_agent(HerdrClient(runner=runner), BY_NAME["codex"])
+        self.assertEqual(runner.pasted_prompts(), [])
+        self.assertIn("pane send-text w3:p1 /status", runner.commands())
+        self.assertIn("pane send-keys w3:p1 enter", runner.commands())
 
     def test_each_kind_uses_the_path_its_config_names(self):
         expected = {
             "claude": ("agent prompt claude /usage", CLAUDE_PANE),
-            "codex": ("agent prompt codex /status", CODEX_PANE),
+            "codex": ("pane send-text w3:p1 /status", CODEX_PANE),
             "grok": ("pane send-text w4:p1 /usage", GROK_PANE),
         }
         for name, (command, pane) in expected.items():
@@ -360,6 +380,8 @@ class ProbeIntegrationTest(unittest.TestCase):
         runner = runner_with({"grok": "idle"}, {"grok": GROK_PANE})
         record = measure_agent(HerdrClient(runner=runner), BY_NAME["grok"])
         self.assertEqual(record["state_source"], "herdr")
+        # 40 lines is the probe's read; 20 is the composer check, which always
+        # runs. Distinct counts keep the two apart in a --trace log.
         self.assertNotIn("agent read grok --source visible --lines 40", runner.commands())
 
 
@@ -400,7 +422,12 @@ class MarkerWaitFallbackTest(unittest.TestCase):
     def test_a_successful_wait_polls_no_further(self):
         runner = runner_with({"grok": "idle"}, {"grok": GROK_DIALOG_PANE})
         measure_agent(HerdrClient(runner=runner), BY_NAME["grok"])
-        reads = [c for c in runner.commands() if c.startswith("agent read grok")]
+        # Usage reads only: the composer check reads 20 lines, not 80.
+        reads = [
+            c
+            for c in runner.commands()
+            if c.startswith("agent read grok --source visible --lines 80")
+        ]
         self.assertEqual(len(reads), 1)
 
     def test_the_poll_is_bounded_and_then_fails_loudly(self):
@@ -413,7 +440,11 @@ class MarkerWaitFallbackTest(unittest.TestCase):
                 max_tabs=0,
                 warn=lambda message: None,
             )
-        reads = [c for c in runner.commands() if c.startswith("agent read grok --source visible --lines")]
+        reads = [
+            c
+            for c in runner.commands()
+            if c.startswith("agent read grok --source visible --lines 80")
+        ]
         self.assertEqual(len(reads), 4)  # the first read plus three retries
         self.assertIn("--trace", str(caught.exception))
 
@@ -495,6 +526,76 @@ class SilentPaneCommandTest(unittest.TestCase):
         self.assertNotIn("pane send-keys w4:p1 enter", runner.commands())
 
 
+class UnconsumedUsageCommandTest(unittest.TestCase):
+    """A usage command left in the composer is a failure, not a slow report."""
+
+    def _runner(self, name, screens, pane):
+        runner = runner_with({name: "idle"}, {name: pane})
+        runner.responses[
+            "agent read {} --source visible --lines 20".format(name)
+        ] = ScriptedReads(screens)
+        return runner
+
+    def test_a_stuck_usage_command_fails_the_agent(self):
+        runner = self._runner(
+            "codex",
+            [composer_screen("codex"), composer_screen("codex", held="/status")],
+            CODEX_PANE,
+        )
+        with self.assertRaises(HerdrError) as caught:
+            measure_agent(
+                HerdrClient(runner=runner), BY_NAME["codex"], warn=lambda message: None
+            )
+        self.assertIn("/status", str(caught.exception))
+
+    def test_it_never_reaches_the_wait_or_the_read(self):
+        runner = self._runner(
+            "codex",
+            [composer_screen("codex"), composer_screen("codex", held="/status")],
+            CODEX_PANE,
+        )
+        with self.assertRaises(HerdrError):
+            measure_agent(
+                HerdrClient(runner=runner), BY_NAME["codex"], warn=lambda message: None
+            )
+        self.assertEqual(
+            [c for c in runner.commands() if c.startswith("pane wait-output")], []
+        )
+
+    def test_the_second_enter_rescues_it(self):
+        runner = self._runner(
+            "codex",
+            [
+                composer_screen("codex"),
+                composer_screen("codex", held="/status"),
+                composer_screen("codex", "status box"),
+            ],
+            CODEX_PANE,
+        )
+        record = measure_agent(
+            HerdrClient(runner=runner), BY_NAME["codex"], warn=lambda message: None
+        )
+        self.assertEqual(record["headroom_pct"], 87.0)
+        self.assertEqual(
+            len([c for c in runner.commands() if c == "pane send-keys w3:p1 enter"]), 2
+        )
+
+    def test_the_snapshot_records_the_failure_for_that_agent(self):
+        runner = self._runner(
+            "codex",
+            [composer_screen("codex"), composer_screen("codex", held="/status")],
+            CODEX_PANE,
+        )
+        snapshot = measure(
+            HerdrClient(runner=runner),
+            [BY_NAME["codex"]],
+            AT,
+            warn=lambda message: None,
+        )
+        self.assertEqual(snapshot["failed_agents"], ["codex"])
+        self.assertEqual(snapshot["agents"]["codex"]["error"]["code"], "herdr_error")
+
+
 class DialogTabTest(unittest.TestCase):
     """A usage dialog can open on the wrong tab.
 
@@ -505,6 +606,7 @@ class DialogTabTest(unittest.TestCase):
 
     def _runner(self, texts):
         runner = runner_with({"grok": "idle"}, {})
+        # The usage read is scripted per test; the composer read is not it.
         # A ScriptedReads is its own response object, not a stdout string.
         runner.responses["agent read grok --source visible --lines 80"] = ScriptedReads(
             texts
