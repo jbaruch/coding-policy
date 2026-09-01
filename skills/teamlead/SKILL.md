@@ -103,8 +103,8 @@ Copy `skills/teamlead/templates/COMMON.md` into the round's reports directory
 once per repo, substituting `{{SHARED_CHECKOUT}}`. Every worker reads the same
 copy.
 
-A worker starts each round with a cleared context, so a brief that says "see
-the reviewer's earlier comment" reaches an agent that cannot see it. Name the
+A worker starts each round with a cleared context. A brief that says "see the
+reviewer's earlier comment" reaches an agent that cannot see it. Name the
 issue, the file, the finding, and the path in full. Proceed immediately to
 Step 5.
 
@@ -140,7 +140,7 @@ One call per dispatched worker, in the order the round needs them:
 
 Emits `{"agent","state","report_path","found","elapsed_seconds"}` on every
 outcome. Completion requires both the report file on disk and the `REPORT: `
-marker in the worker's pane; a single `idle` or `done` observation is not
+marker in the worker's pane. A single `idle` or `done` observation is not
 completion. Poll interval and give-up budget are the script's own constants.
 
 - **Exit 0** — the report is there. Continue to the next worker.
