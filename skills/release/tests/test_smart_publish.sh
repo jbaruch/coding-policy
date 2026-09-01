@@ -74,9 +74,10 @@ mkdir -p "$STUBDIR"
 #       Body shapes are the live ones, probed against jbaruch/coding-policy.
 #       The publish stub records that it ran in $MOCK_STATE_DIR/published, which
 #       is what makes "after" a SEQUENCE rather than a constant.
-#   plugin publish <path> — MOCK_PUBLISH: ok -> exit 0 (verbatim; smart-publish
-#       has already written the target version into the manifest); the *_fail
-#       modes print their failure log and exit 1.
+#   plugin publish [--skip-evals] <path> — records the invocation, then
+#       MOCK_PUBLISH: ok -> exit 0 (verbatim; smart-publish has already written
+#       the target version into the manifest); the *_fail modes print their
+#       failure log and exit 1.
 cat > "$STUBDIR/tessl" <<'STUB'
 #!/usr/bin/env bash
 set -uo pipefail
@@ -103,6 +104,9 @@ if [[ "${1:-}" == "api" ]]; then
   exit 0
 fi
 if [[ "${1:-}" == "plugin" && "${2:-}" == "publish" ]]; then
+  if [[ -n "${MOCK_STATE_DIR:-}" ]]; then
+    printf '%s\n' "$*" > "${MOCK_STATE_DIR}/publish-invocation"
+  fi
   # Modes whose SERVER side completes (a clean publish, and the two exits that
   # happen after the artifact is already stored) record the landing.
   case "${MOCK_PUBLISH:-}" in
@@ -209,6 +213,7 @@ _remote_count()   { git -C "$1/remote.git" rev-list --count main; }
 _remote_msg()     { git -C "$1/remote.git" log -1 --format=%B main; }
 _remote_version() { git -C "$1/remote.git" show main:.tessl-plugin/plugin.json | python3 -c 'import json,sys;print(json.load(sys.stdin)["version"])'; }
 _remote_has_bump_branch() { git -C "$1/remote.git" for-each-ref --format='%(refname)' 'refs/heads/tessl-bump-*' | grep -q .; }
+_publish_invocation() { cat "$1/publish-invocation"; }
 
 # Run smart-publish.sh in $work with the given MOCK_* + args; capture JSON stdout.
 _run() {
@@ -326,6 +331,33 @@ t_first_publish_sets_flag_no_bump() {
   echo "$out" | python3 -c 'import json,sys;d=json.load(sys.stdin);assert d["outcome"]=="success" and d["first_publish"] is True and d["version"]=="0.1.0"' \
     || { echo "    FAIL: first publish should set first_publish=true, version 0.1.0: $out" >&2; return 1; }
   [[ "$(_remote_count "$root")" == "$before" ]] || { echo "    FAIL: first publish should not commit a bump" >&2; return 1; }
+}
+
+t_default_publish_includes_evals() {
+  local root; root="$(_sandbox 0.1.0)"
+  _run "$root" error ok as-is . main branch >/dev/null \
+    || { echo "    FAIL: script exited non-zero" >&2; return 1; }
+  [[ "$(_publish_invocation "$root")" == "plugin publish ." ]] \
+    || { echo "    FAIL: default invocation changed: $(_publish_invocation "$root")" >&2; return 1; }
+}
+
+t_skip_evals_forwards_flag() {
+  local root; root="$(_sandbox 0.1.0)"
+  _run "$root" error ok as-is . main branch true >/dev/null \
+    || { echo "    FAIL: script exited non-zero" >&2; return 1; }
+  [[ "$(_publish_invocation "$root")" == "plugin publish --skip-evals ." ]] \
+    || { echo "    FAIL: --skip-evals was not forwarded: $(_publish_invocation "$root")" >&2; return 1; }
+}
+
+t_invalid_skip_evals_is_usage_error() {
+  local root; root="$(_sandbox 0.1.0)"
+  local err rc=0
+  err="$(_run "$root" error ok as-is . main branch yes 2>&1 >/dev/null)" || rc=$?
+  [[ "$rc" -eq 2 ]] || { echo "    FAIL: expected exit 2, got $rc" >&2; return 1; }
+  [[ "$err" == *"skip-evals must be 'true' or 'false'"* ]] \
+    || { echo "    FAIL: missing validation diagnostic: $err" >&2; return 1; }
+  [[ ! -e "$root/publish-invocation" ]] \
+    || { echo "    FAIL: invalid skip-evals reached tessl" >&2; return 1; }
 }
 
 t_registry_read_failure_publishes_nothing() {
@@ -538,6 +570,9 @@ main() {
   run "non-credit failure reports no signature, no commit"       t_other_fail_no_signature_no_commit
   run "as-is success does not commit back"                       t_asis_success_does_not_commit_back
   run "first publish (empty registry) sets flag, no bump"        t_first_publish_sets_flag_no_bump
+  run "default publish leaves eval upload enabled"              t_default_publish_includes_evals
+  run "skip-evals forwards Tessl's supported flag"              t_skip_evals_forwards_flag
+  run "invalid skip-evals is rejected before publish"           t_invalid_skip_evals_is_usage_error
   run "registry read failure publishes nothing"                  t_registry_read_failure_publishes_nothing
   run "a blocked bump-push reds the run (no PR fallback)"        t_push_blocked_reds_the_run
   run "wrong arity is a usage error (exit 2)"                    t_wrong_arity_is_usage_error

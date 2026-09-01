@@ -37,6 +37,10 @@ inputs:
     description: 'Plugin directory to publish; the manifest is auto-detected under it.'
     required: false
     default: '.'
+  skip-evals:
+    description: "Pass '--skip-evals' to 'tessl plugin publish', leaving local eval scenarios unpublished."
+    required: false
+    default: 'false'
 
 outputs:
   credit-signature:
@@ -88,7 +92,7 @@ runs:
         # the publish's real exit code; even on failure the JSON is emitted, so
         # the credit-signature output is always set.
         rc=0
-        result_json="$(bash "$script" "$MODE" "$PLUGIN_PATH" "$GITHUB_REF_NAME" "$GITHUB_REF_TYPE")" || rc=$?
+        result_json="$(bash "$script" "$MODE" "$PLUGIN_PATH" "$GITHUB_REF_NAME" "$GITHUB_REF_TYPE" "${{ inputs.skip-evals }}")" || rc=$?
 
         credit_signature=false
         version=""
