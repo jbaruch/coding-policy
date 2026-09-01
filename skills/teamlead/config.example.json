@@ -7,6 +7,7 @@
       "usage_prompt": "/usage",
       "usage_marker": "Current week",
       "usage_read_source": "visible",
+      "slash_delivery": "paste",
       "close_keys": ["esc"],
       "clear_prompt": "/clear",
       "idle_markers": ["⏵⏵ bypass permissions on", "? for shortcuts"],
@@ -18,6 +19,7 @@
       "usage_prompt": "/status",
       "usage_marker": "Weekly limit",
       "usage_read_source": "recent-unwrapped",
+      "slash_delivery": "paste",
       "clear_prompt": "/new",
       "idle_markers": ["› Ask Codex to do anything"],
       "working_markers": []
@@ -28,8 +30,10 @@
       "usage_prompt": "/usage",
       "usage_marker": "Weekly limit",
       "usage_read_source": "visible",
+      "slash_delivery": "type",
       "close_keys": ["esc"],
       "clear_prompt": "/new",
+      "dialog_next_tab_keys": ["tab"],
       "idle_markers": ["Shift+Tab:mode"],
       "working_markers": ["Esc:cancel"]
     }

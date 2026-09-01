@@ -12,10 +12,16 @@ Two halves, deliberately split:
 
 Herdr's I/O contract, from `herdr --skill`:
 
-* control commands return JSON on stdout
+* most control commands return JSON on stdout
 * `agent read` returns raw pane text on stdout, not JSON
+* `pane send-text` and `pane send-keys` exit 0 with EMPTY stdout on success
 * server errors are JSON on stderr with exit status 1
 * CLI syntax errors exit with status 2
+
+Commands whose result teamlead actually consumes are parsed strictly. Commands
+teamlead only fires and forgets go through `_run_optional_json`, which treats
+exit 0 with no output as success -- the exit code is the contract there, and
+demanding a JSON body it never reads only invents failures.
 
 Pass a `trace` sink to record every invocation -- argv, exit status, and raw
 stdout and stderr -- so a live run that goes wrong is diagnosable without
@@ -45,6 +51,24 @@ READY_STATES = frozenset({"idle", "done"})
 
 #: Agent lifecycle states teamlead refuses to write to without --force.
 BUSY_STATES = frozenset({"working", "blocked"})
+
+#: The key that submits a line. Named because `send_slash_command` sends it as
+#: a keystroke rather than as part of the text.
+SUBMIT_KEY = "enter"
+
+#: How an agent's slash commands reach it. Neither is universally right:
+#:
+#: * `paste` -- `agent prompt`, which delivers through bracketed paste. Grok
+#:   reads a pasted `/usage` as a chat message and answers it in prose.
+#: * `type` -- `pane send-text` then Enter as a keystroke. Codex opens a
+#:   slash-command autocomplete popup on `/`, where the first Enter accepts
+#:   the completion and only a second Enter submits, so a typed command sits
+#:   in the composer unsent.
+#:
+#: Per-agent, from config. See `slash_delivery` in config.example.json.
+SLASH_DELIVERY_PASTE = "paste"
+SLASH_DELIVERY_TYPE = "type"
+SLASH_DELIVERIES = (SLASH_DELIVERY_PASTE, SLASH_DELIVERY_TYPE)
 
 
 #: Environment switch for tracing, equivalent to the `--trace` flag.
@@ -125,6 +149,32 @@ class HerdrClient:
         if timeout_ms is not None:
             argv += ["--timeout", str(timeout_ms)]
         return argv
+
+    def argv_pane_send_text(self, pane_id, text):
+        return [self.binary, "pane", "send-text", pane_id, text]
+
+    def argv_pane_send_keys(self, pane_id, keys):
+        return [self.binary, "pane", "send-keys", pane_id] + list(keys)
+
+    def argv_send_slash_command(self, pane_id, text):
+        """The two argv lists `send_slash_command` runs, in order."""
+        return [
+            self.argv_pane_send_text(pane_id, text),
+            self.argv_pane_send_keys(pane_id, [SUBMIT_KEY]),
+        ]
+
+    def argv_deliver_slash_command(self, delivery, agent_name, pane_id, text):
+        """The argv lists `deliver_slash_command` runs, in order."""
+        if delivery == SLASH_DELIVERY_PASTE:
+            return [self.argv_agent_prompt(agent_name, text)]
+        if delivery == SLASH_DELIVERY_TYPE:
+            return self.argv_send_slash_command(pane_id, text)
+        raise HerdrError(
+            "Unknown slash_delivery {!r} for agent {!r} - use {}.".format(
+                delivery, agent_name, " or ".join(repr(v) for v in SLASH_DELIVERIES)
+            ),
+            {"agent": agent_name, "slash_delivery": delivery},
+        )
 
     def argv_pane_wait_output(self, pane_id, regex=None, match=None, source=None, lines=None, timeout_ms=None):
         if (regex is None) == (match is None):
@@ -221,6 +271,29 @@ class HerdrClient:
             )
         return "herdr failed running `{}`: {}".format(argv and format_argv(argv), detail or "no detail")
 
+    def _run_optional_json(self, argv):
+        """Run a command whose result teamlead never reads.
+
+        `pane send-text` and `pane send-keys` exit 0 with empty stdout on
+        success rather than returning a JSON control response. Live, that made
+        a successful `pane send-text w4:p1 /usage` look like a transport
+        failure and the run died before pressing Enter, leaving `/usage`
+        sitting unsent in Grok's input box.
+
+        Exit status stays the contract: a non-zero exit is still a HerdrError
+        carrying herdr's own stderr.
+        """
+        stdout = self._run(argv)
+        if not stdout.strip():
+            return {}
+        try:
+            payload = json.loads(stdout)
+        except json.JSONDecodeError:
+            return {}
+        if isinstance(payload, dict) and isinstance(payload.get("result"), dict):
+            return payload["result"]
+        return {}
+
     def _run_json(self, argv):
         stdout = self._run(argv)
         try:
@@ -273,18 +346,76 @@ class HerdrClient:
         return self._run(self.argv_agent_read(name, source=source, lines=lines))
 
     def agent_prompt(self, name, text, wait=False, until=(), timeout_ms=None):
-        """Submit a prompt. Writes to the agent -- callers gate on status first."""
+        """Submit message text. Writes to the agent -- gate on status first.
+
+        For a slash command use `send_slash_command`: this path pastes, and a
+        pasted `/usage` is a chat message, not a command.
+        """
         return self._run_json(
             self.argv_agent_prompt(name, text, wait=wait, until=until, timeout_ms=timeout_ms)
         )
 
     def agent_send_keys(self, name, keys):
-        """Send logical key names (`esc`, `ctrl+c`) to the agent."""
-        return self._run_json(self.argv_agent_send_keys(name, keys))
+        """Send logical key names (`esc`, `ctrl+c`) to the agent.
+
+        Fire and forget: nothing reads the result, so exit 0 is success
+        whether or not herdr prints a body.
+        """
+        return self._run_optional_json(self.argv_agent_send_keys(name, keys))
 
     def agent_wait(self, name, until=(), timeout_ms=None):
         """Block until the agent reaches one of `until` (default: settled)."""
         return self._run_json(self.argv_agent_wait(name, until=until, timeout_ms=timeout_ms))
+
+    def pane_send_text(self, pane_id, text):
+        """Type literal text into a pane, with no Enter and no paste framing.
+
+        Exits 0 with empty stdout on success; see `_run_optional_json`.
+        """
+        return self._run_optional_json(self.argv_pane_send_text(pane_id, text))
+
+    def pane_send_keys(self, pane_id, keys):
+        """Send logical key names to a pane.
+
+        Exits 0 with empty stdout on success; see `_run_optional_json`.
+        """
+        return self._run_optional_json(self.argv_pane_send_keys(pane_id, keys))
+
+    def send_slash_command(self, pane_id, text):
+        """Deliver a slash command the way a human types it.
+
+        `agent prompt` delivers text through the pane's live bracketed-paste
+        mode, and a TUI that has bracketed paste enabled reads the result as a
+        pasted chat message rather than as a command. Live, `/usage` reached
+        Grok as a user turn: it answered in prose about billing and started
+        reading files instead of opening its usage panel. Typing the
+        characters and then pressing Enter as a keystroke is what a slash
+        command needs, so every slash command goes through here.
+
+        `agent prompt` stays correct for real message text -- an assignment
+        brief is a message, and pasting it is exactly right.
+        """
+        text_result = self.pane_send_text(pane_id, text)
+        key_result = self.pane_send_keys(pane_id, [SUBMIT_KEY])
+        return {"send_text": text_result, "send_keys": key_result}
+
+    def deliver_slash_command(self, delivery, agent_name, pane_id, text):
+        """Send a slash command by whichever mechanism this agent needs.
+
+        The choice is per-agent because the TUIs disagree: pasting is read as
+        a chat message by one, and typing is swallowed by another's
+        autocomplete popup. See SLASH_DELIVERIES.
+        """
+        if delivery == SLASH_DELIVERY_PASTE:
+            return {"paste": self.agent_prompt(agent_name, text)}
+        if delivery == SLASH_DELIVERY_TYPE:
+            return self.send_slash_command(pane_id, text)
+        raise HerdrError(
+            "Unknown slash_delivery {!r} for agent {!r} - use {}.".format(
+                delivery, agent_name, " or ".join(repr(v) for v in SLASH_DELIVERIES)
+            ),
+            {"agent": agent_name, "slash_delivery": delivery},
+        )
 
     def pane_wait_output(self, pane_id, regex=None, match=None, source=None, lines=None, timeout_ms=None):
         """Block until the pane snapshot contains the marker, or time out."""

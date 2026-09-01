@@ -44,6 +44,7 @@ CONFIG = {
             "usage_prompt": "/usage",
             "usage_marker": "Current week",
             "usage_read_source": "visible",
+            "slash_delivery": "paste",
             "close_keys": ["esc"],
             "clear_prompt": "/clear",
         },
@@ -53,6 +54,7 @@ CONFIG = {
             "usage_prompt": "/status",
             "usage_marker": "Weekly limit",
             "usage_read_source": "recent-unwrapped",
+            "slash_delivery": "paste",
             "clear_prompt": "/new",
         },
         {
@@ -61,8 +63,10 @@ CONFIG = {
             "usage_prompt": "/usage",
             "usage_marker": "Weekly limit",
             "usage_read_source": "visible",
+            "slash_delivery": "type",
             "close_keys": ["esc"],
             "clear_prompt": "/new",
+            "dialog_next_tab_keys": ["tab"],
             "idle_markers": ["Shift+Tab:mode"],
             "working_markers": ["Esc:cancel"],
         },
@@ -101,6 +105,8 @@ def runner_with(statuses, footers=None):
             "agent read {} --source visible --lines 40".format(name),
             footers.get(name, GROK_WORKING_FOOTER),
         )
+    runner.set("pane send-text", ok_json("pane_send_text"))
+    runner.set("pane send-keys", ok_json("pane_send_keys"))
     return runner
 
 
@@ -195,13 +201,19 @@ class BuildStepsTest(unittest.TestCase):
 
     def test_commands_are_check_clear_wait_assign(self):
         steps = build_steps(
-            self.client, {"developer": "grok"}, BY_NAME, self.paths, settle_timeout_ms=60000
+            self.client,
+            {"developer": "grok"},
+            BY_NAME,
+            self.paths,
+            panes={"grok": "w4:p1"},
+            settle_timeout_ms=60000,
         )
         self.assertEqual(
             [command["shell"] for command in steps[0]["commands"]],
             [
                 "herdr agent get grok",
-                "herdr agent prompt grok /new",
+                "herdr pane send-text w4:p1 /new",
+                "herdr pane send-keys w4:p1 enter",
                 "herdr agent wait grok --until idle --until done --timeout 60000",
                 "herdr agent prompt grok 'New assignment from the team lead. Your role "
                 "for this task is DEVELOPER. Read /w/COMMON.md in full, then read "
@@ -210,8 +222,14 @@ class BuildStepsTest(unittest.TestCase):
             ],
         )
 
-    def test_each_agent_gets_its_native_clear_command(self):
-        steps = build_steps(self.client, ASSIGNMENTS, BY_NAME, self.paths)
+    def test_each_agent_gets_its_native_clear_by_its_configured_path(self):
+        steps = build_steps(
+            self.client,
+            ASSIGNMENTS,
+            BY_NAME,
+            self.paths,
+            panes={"grok": "w4:p1", "claude": "w2:p1", "codex": "w3:p1"},
+        )
         clears = [
             command["shell"]
             for step in steps
@@ -220,11 +238,39 @@ class BuildStepsTest(unittest.TestCase):
         ]
         self.assertEqual(
             clears,
-            ["herdr agent prompt grok /new", "herdr agent prompt claude /clear", "herdr agent prompt codex /new"],
+            [
+                "herdr pane send-text w4:p1 /new",  # grok types
+                "herdr agent prompt claude /clear",  # claude pastes
+                "herdr agent prompt codex /new",  # codex pastes
+            ],
+        )
+
+    def test_grok_never_has_its_clear_pasted(self):
+        steps = build_steps(
+            self.client, {"developer": "grok"}, BY_NAME, self.paths, panes={"grok": "w4:p1"}
+        )
+        prompts = [
+            command["shell"]
+            for command in steps[0]["commands"]
+            if " agent prompt " in command["shell"]
+        ]
+        self.assertEqual(len(prompts), 1)  # the assignment message alone
+        self.assertIn("New assignment from the team lead.", prompts[0])
+        self.assertNotIn("/new", prompts[0])
+
+    def test_an_unresolved_pane_renders_as_a_placeholder(self):
+        # --dry-run resolves no panes because it makes no herdr calls.
+        steps = build_steps(self.client, {"developer": "grok"}, BY_NAME, self.paths)
+        self.assertEqual(steps[0]["pane_id"], "PANE-ID-RESOLVED-AT-RUN-TIME")
+        self.assertIn(
+            "herdr pane send-text PANE-ID-RESOLVED-AT-RUN-TIME /new",
+            [command["shell"] for command in steps[0]["commands"]],
         )
 
     def test_no_clear_drops_the_clear_and_the_settle_wait(self):
-        steps = build_steps(self.client, {"developer": "grok"}, BY_NAME, self.paths, no_clear=True)
+        steps = build_steps(
+            self.client, {"developer": "grok"}, BY_NAME, self.paths, no_clear=True
+        )
         shells = [command["shell"] for command in steps[0]["commands"]]
         self.assertEqual(len(shells), 2)
         self.assertEqual(shells[0], "herdr agent get grok")
@@ -312,7 +358,8 @@ class RefusalTest(unittest.TestCase):
             HerdrClient(runner=runner), {"developer": "grok"}, BY_NAME, self.paths, AT, force=True
         )
         self.assertEqual(result["applied"][0]["state_before"], "working")
-        self.assertEqual(len(runner.writes()), 2)
+        # typed clear (text + enter) plus the pasted assignment message
+        self.assertEqual(len(runner.writes()), 3)
 
     def test_stale_working_is_overturned_and_the_round_proceeds(self):
         # herdr's title-derived state says working; the pane footer says the
@@ -373,7 +420,12 @@ class RefusalTest(unittest.TestCase):
         )
         self.assertEqual(
             statuses["grok"],
-            {"state": "idle", "herdr_state": "working", "state_source": "probe"},
+            {
+                "state": "idle",
+                "herdr_state": "working",
+                "state_source": "probe",
+                "pane_id": "w4:p1",
+            },
         )
 
     def test_check_all_ready_returns_statuses_when_everyone_is_free(self):
@@ -384,10 +436,110 @@ class RefusalTest(unittest.TestCase):
         self.assertEqual(
             statuses,
             {
-                "grok": {"state": "idle", "herdr_state": "idle", "state_source": "herdr"},
-                "claude": {"state": "done", "herdr_state": "done", "state_source": "herdr"},
+                "grok": {
+                    "state": "idle",
+                    "herdr_state": "idle",
+                    "state_source": "herdr",
+                    "pane_id": "w4:p1",
+                },
+                "claude": {
+                    "state": "done",
+                    "herdr_state": "done",
+                    "state_source": "herdr",
+                    "pane_id": "w2:p1",
+                },
             },
         )
+
+
+class SlashCommandDeliveryTest(unittest.TestCase):
+    """Regression: `agent prompt` pastes, and a pasted /clear is a message."""
+
+    def setUp(self):
+        self.paths = {
+            "common": "/w/COMMON.md",
+            "developer": "/w/dev.md",
+            "tester": "/w/test.md",
+            "reviewer": "/w/review.md",
+        }
+
+    def test_groks_clear_never_goes_through_agent_prompt(self):
+        runner = runner_with({"grok": "idle", "claude": "idle", "codex": "idle"})
+        apply(HerdrClient(runner=runner), ASSIGNMENTS, BY_NAME, self.paths, AT)
+        self.assertNotIn(
+            "agent prompt grok /new", runner.commands()
+        )
+        self.assertIn("pane send-text w4:p1 /new", runner.commands())
+
+    def test_only_grok_types_its_clear(self):
+        runner = runner_with({"grok": "idle", "claude": "idle", "codex": "idle"})
+        apply(HerdrClient(runner=runner), ASSIGNMENTS, BY_NAME, self.paths, AT)
+        self.assertEqual(
+            [c for c in runner.commands() if c.startswith("pane send-text")],
+            ["pane send-text w4:p1 /new"],
+        )
+
+    def test_claude_and_codex_have_their_clears_pasted(self):
+        runner = runner_with({"grok": "idle", "claude": "idle", "codex": "idle"})
+        apply(HerdrClient(runner=runner), ASSIGNMENTS, BY_NAME, self.paths, AT)
+        commands = runner.commands()
+        self.assertIn("agent prompt claude /clear", commands)
+        self.assertIn("agent prompt codex /new", commands)
+
+    def test_every_role_still_gets_its_assignment_message_pasted(self):
+        runner = runner_with({"grok": "idle", "claude": "idle", "codex": "idle"})
+        apply(HerdrClient(runner=runner), ASSIGNMENTS, BY_NAME, self.paths, AT)
+        messages = [
+            text
+            for text in runner.pasted_prompts()
+            if "New assignment from the team lead." in text
+        ]
+        self.assertEqual(len(messages), 3)
+
+    def test_every_typed_command_is_followed_by_enter(self):
+        runner = runner_with({"grok": "idle"})
+        apply(HerdrClient(runner=runner), {"developer": "grok"}, BY_NAME, self.paths, AT)
+        commands = runner.commands()
+        index = commands.index("pane send-text w4:p1 /new")
+        self.assertEqual(commands[index + 1], "pane send-keys w4:p1 enter")
+
+    def test_a_silent_send_text_still_gets_its_enter(self):
+        # herdr's `pane send-text` exits 0 with empty stdout on success.
+        runner = runner_with({"grok": "idle"})
+        runner.set("pane send-text", stdout="")
+        runner.set("pane send-keys", stdout="")
+        result = apply(
+            HerdrClient(runner=runner), {"developer": "grok"}, BY_NAME, self.paths, AT
+        )
+        commands = runner.commands()
+        self.assertEqual(
+            commands[commands.index("pane send-text w4:p1 /new") + 1],
+            "pane send-keys w4:p1 enter",
+        )
+        self.assertEqual(len(result["applied"]), 1)
+
+    def test_no_clear_types_nothing_at_all(self):
+        runner = runner_with({"grok": "idle"})
+        apply(
+            HerdrClient(runner=runner),
+            {"developer": "grok"},
+            BY_NAME,
+            self.paths,
+            AT,
+            no_clear=True,
+        )
+        self.assertEqual([c for c in runner.commands() if c.startswith("pane send-")], [])
+
+    def test_a_typing_agent_with_no_pane_is_refused_rather_than_typed_at_blindly(self):
+        runner = FakeRunner()
+        runner.set(
+            "agent get grok",
+            '{"id":"cli:agent:get","result":{"agent":{"name":"grok","agent_status":"idle"}}}',
+        )
+        with self.assertRaises(UsageError) as caught:
+            apply(HerdrClient(runner=runner), {"developer": "grok"}, BY_NAME, self.paths, AT)
+        self.assertIn("--no-clear", str(caught.exception))
+        self.assertEqual(runner.writes(), [])
 
 
 class ApplyTest(unittest.TestCase):
@@ -405,7 +557,8 @@ class ApplyTest(unittest.TestCase):
             runner.commands(),
             [
                 "agent get grok",
-                "agent prompt grok /new",
+                "pane send-text w4:p1 /new",
+                "pane send-keys w4:p1 enter",
                 "agent wait grok --until idle --until done --timeout 60000",
                 "agent prompt grok 'New assignment from the team lead. Your role for "
                 "this task is DEVELOPER. Read /w/COMMON.md in full, then read /w/dev.md "
@@ -424,7 +577,11 @@ class ApplyTest(unittest.TestCase):
             AT,
         )
         commands = runner.commands()
-        first_write = min(index for index, c in enumerate(commands) if c.startswith("agent prompt"))
+        first_write = min(
+            index
+            for index, c in enumerate(commands)
+            if c.startswith(runner.WRITE_PREFIXES)
+        )
         self.assertEqual(commands[:first_write], ["agent get grok", "agent get claude"])
 
     def test_no_clear_sends_only_the_assignment(self):
@@ -449,6 +606,7 @@ class ApplyTest(unittest.TestCase):
                     "state_before": "idle",
                     "herdr_state_before": "idle",
                     "state_source": "herdr",
+                    "pane_id": "w4:p1",
                     "cleared": True,
                     "brief": "/w/dev.md",
                     "common": "/w/COMMON.md",

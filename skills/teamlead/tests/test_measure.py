@@ -50,6 +50,7 @@ CONFIG = {
             "usage_prompt": "/usage",
             "usage_marker": "Current week",
             "usage_read_source": "visible",
+            "slash_delivery": "paste",
             "close_keys": ["esc"],
             "clear_prompt": "/clear",
         },
@@ -59,6 +60,7 @@ CONFIG = {
             "usage_prompt": "/status",
             "usage_marker": "Weekly limit",
             "usage_read_source": "recent-unwrapped",
+            "slash_delivery": "paste",
             "clear_prompt": "/new",
         },
         {
@@ -67,8 +69,10 @@ CONFIG = {
             "usage_prompt": "/usage",
             "usage_marker": "Weekly limit",
             "usage_read_source": "visible",
+            "slash_delivery": "type",
             "close_keys": ["esc"],
             "clear_prompt": "/new",
+            "dialog_next_tab_keys": ["tab"],
             "idle_markers": ["Shift+Tab:mode"],
             "working_markers": ["Esc:cancel"],
         },
@@ -121,6 +125,9 @@ def runner_with(statuses, panes, footers=None):
                 "agent read {} --source visible --lines 40".format(name), footers[name]
             )
     runner.set("pane wait-output", ok_json("output_matched"))
+    # Slash commands are typed into the pane, never pasted via agent prompt.
+    runner.set("pane send-text", ok_json("pane_send_text"))
+    runner.set("pane send-keys", ok_json("pane_send_keys"))
     return runner
 
 
@@ -147,8 +154,8 @@ class MeasureAgentTest(unittest.TestCase):
             ],
         )
 
-    def test_the_usage_prompt_is_sent_before_the_wait(self):
-        # The wait can only ever see a report the prompt asked for; ordering
+    def test_the_usage_command_is_sent_before_the_wait(self):
+        # The wait can only ever see a report the command asked for; ordering
         # them the other way round guarantees a timeout.
         runner = runner_with({"claude": "idle"}, {"claude": CLAUDE_PANE})
         measure_agent(HerdrClient(runner=runner), BY_NAME["claude"])
@@ -156,6 +163,51 @@ class MeasureAgentTest(unittest.TestCase):
         self.assertLess(
             commands.index("agent prompt claude /usage"),
             next(i for i, c in enumerate(commands) if c.startswith("pane wait-output")),
+        )
+
+    def test_grok_types_its_usage_command(self):
+        # Live, `agent prompt grok /usage` pasted the text through bracketed
+        # paste and Grok answered it as a chat message about billing.
+        runner = runner_with({"grok": "idle"}, {"grok": GROK_DIALOG_PANE})
+        measure_agent(HerdrClient(runner=runner), BY_NAME["grok"])
+        self.assertEqual(runner.pasted_prompts(), [])
+        self.assertIn("pane send-text w4:p1 /usage", runner.commands())
+        self.assertIn("pane send-keys w4:p1 enter", runner.commands())
+
+    def test_claude_and_codex_paste_theirs(self):
+        # Codex opens an autocomplete popup on `/`, where the first Enter only
+        # accepts the completion, so a typed command sits in the composer.
+        for name, pane, command in (
+            ("claude", CLAUDE_PANE, "claude /usage"),
+            ("codex", CODEX_PANE, "codex /status"),
+        ):
+            runner = runner_with({name: "idle"}, {name: pane})
+            measure_agent(HerdrClient(runner=runner), BY_NAME[name])
+            self.assertEqual(runner.pasted_prompts(), [command], name)
+            self.assertEqual(
+                [c for c in runner.commands() if c.startswith("pane send-")], [], name
+            )
+
+    def test_each_kind_uses_the_path_its_config_names(self):
+        expected = {
+            "claude": ("agent prompt claude /usage", CLAUDE_PANE),
+            "codex": ("agent prompt codex /status", CODEX_PANE),
+            "grok": ("pane send-text w4:p1 /usage", GROK_PANE),
+        }
+        for name, (command, pane) in expected.items():
+            runner = runner_with({name: "idle"}, {name: pane})
+            measure_agent(HerdrClient(runner=runner), BY_NAME[name])
+            self.assertIn(command, runner.commands(), name)
+
+    def test_the_text_and_the_enter_are_separate_calls(self):
+        # Enter has to be a keystroke; appending a newline to the text would
+        # be pasted along with it.
+        runner = runner_with({"grok": "idle"}, {"grok": GROK_PANE})
+        measure_agent(HerdrClient(runner=runner), BY_NAME["grok"])
+        commands = runner.commands()
+        self.assertEqual(
+            commands[commands.index("pane send-text w4:p1 /usage") + 1],
+            "pane send-keys w4:p1 enter",
         )
 
     def test_the_marker_is_matched_literally_not_as_a_regex(self):
@@ -354,6 +406,7 @@ class MarkerWaitFallbackTest(unittest.TestCase):
                 HerdrClient(runner=runner),
                 BY_NAME["grok"],
                 poll_attempts=3,
+                max_tabs=0,
                 warn=lambda message: None,
             )
         reads = [c for c in runner.commands() if c.startswith("agent read grok --source visible --lines")]
@@ -373,13 +426,163 @@ class MarkerWaitFallbackTest(unittest.TestCase):
         reads = [c for c in runner.commands() if c.startswith("agent read grok --source visible --lines 80")]
         self.assertEqual(len(reads), 3)
 
-    def test_the_prompt_is_never_re_sent_by_the_fallback(self):
-        # Re-prompting would toggle the dialog shut. Only reads may repeat.
+    def test_the_command_is_never_re_sent_by_the_fallback(self):
+        # Re-sending would toggle the dialog shut. Only reads may repeat.
         runner = self._timing_out_runner(GROK_DIALOG_PANE)
         measure_agent(HerdrClient(runner=runner), BY_NAME["grok"], warn=lambda m: None)
         self.assertEqual(
-            [c for c in runner.commands() if c.startswith("agent prompt")],
-            ["agent prompt grok /usage"],
+            [c for c in runner.commands() if c.startswith("pane send-text")],
+            ["pane send-text w4:p1 /usage"],
+        )
+
+
+class SilentPaneCommandTest(unittest.TestCase):
+    """Regression: send-text exits 0 with empty stdout, and that is success.
+
+    Live, the strict JSON check turned that into a transport error and the run
+    stopped between typing `/usage` and pressing Enter.
+    """
+
+    def _silent_runner(self, pane=GROK_DIALOG_PANE):
+        runner = runner_with({"grok": "idle"}, {"grok": pane})
+        # Overwrite the JSON stubs with what herdr actually does.
+        runner.set("pane send-text", stdout="")
+        runner.set("pane send-keys", stdout="")
+        runner.set("agent send-keys", stdout="")
+        return runner
+
+    def test_the_enter_is_still_sent_after_a_silent_send_text(self):
+        runner = self._silent_runner()
+        measure_agent(HerdrClient(runner=runner), BY_NAME["grok"])
+        commands = runner.commands()
+        self.assertEqual(
+            commands[commands.index("pane send-text w4:p1 /usage") + 1],
+            "pane send-keys w4:p1 enter",
+        )
+
+    def test_measurement_proceeds_to_a_parsed_result(self):
+        runner = self._silent_runner()
+        record = measure_agent(HerdrClient(runner=runner), BY_NAME["grok"])
+        self.assertEqual(record["headroom_pct"], 99.0)
+        self.assertEqual(record["plan"], "X Premium+")
+
+    def test_the_dialog_is_still_dismissed(self):
+        runner = self._silent_runner()
+        measure_agent(HerdrClient(runner=runner), BY_NAME["grok"])
+        self.assertEqual(runner.commands()[-1], "agent send-keys grok esc")
+
+    def test_the_snapshot_records_no_failure(self):
+        runner = self._silent_runner()
+        snapshot = measure(HerdrClient(runner=runner), [BY_NAME["grok"]], AT)
+        self.assertEqual(snapshot["failed_agents"], [])
+        self.assertNotIn("error", snapshot["agents"]["grok"])
+
+    def test_a_real_send_text_failure_still_stops_the_run(self):
+        runner = self._silent_runner()
+        runner.set(
+            "pane send-text",
+            stdout="",
+            returncode=1,
+            stderr='{"error":{"code":"pane_not_found","message":"pane not found"}}',
+        )
+        snapshot = measure(HerdrClient(runner=runner), [BY_NAME["grok"]], AT)
+        self.assertEqual(snapshot["failed_agents"], ["grok"])
+        # Nothing was typed, so no Enter follows it.
+        self.assertNotIn("pane send-keys w4:p1 enter", runner.commands())
+
+
+class DialogTabTest(unittest.TestCase):
+    """A usage dialog can open on the wrong tab.
+
+    Grok's has three (Context usage / Usage limit / Session info). It landed on
+    the right one both live runs, but a dialog that opens elsewhere would look
+    exactly like a missing report.
+    """
+
+    def _runner(self, texts):
+        runner = runner_with({"grok": "idle"}, {})
+        # A ScriptedReads is its own response object, not a stdout string.
+        runner.responses["agent read grok --source visible --lines 80"] = ScriptedReads(
+            texts
+        )
+        return runner
+
+    def test_a_report_behind_one_tab_is_found(self):
+        runner = self._runner(["wrong tab\n", GROK_DIALOG_PANE])
+        record = measure_agent(
+            HerdrClient(runner=runner), BY_NAME["grok"], poll_attempts=0
+        )
+        self.assertEqual(record["headroom_pct"], 99.0)
+        self.assertEqual(
+            [c for c in runner.commands() if c.startswith("agent send-keys grok tab")],
+            ["agent send-keys grok tab"],
+        )
+
+    def test_a_report_behind_two_tabs_is_found(self):
+        runner = self._runner(["wrong\n", "still wrong\n", GROK_DIALOG_PANE])
+        record = measure_agent(
+            HerdrClient(runner=runner), BY_NAME["grok"], poll_attempts=0
+        )
+        self.assertEqual(record["headroom_pct"], 99.0)
+        self.assertEqual(
+            len([c for c in runner.commands() if c == "agent send-keys grok tab"]), 2
+        )
+
+    def test_tabbing_is_bounded_at_three(self):
+        runner = self._runner(["never here\n"])
+        with self.assertRaises(HerdrError) as caught:
+            measure_agent(
+                HerdrClient(runner=runner),
+                BY_NAME["grok"],
+                poll_attempts=0,
+                warn=lambda message: None,
+            )
+        self.assertEqual(
+            len([c for c in runner.commands() if c == "agent send-keys grok tab"]), 3
+        )
+        self.assertIn("Tabbed through the dialog 3 times", str(caught.exception))
+
+    def test_no_tabbing_when_the_marker_is_already_there(self):
+        runner = runner_with({"grok": "idle"}, {"grok": GROK_DIALOG_PANE})
+        measure_agent(HerdrClient(runner=runner), BY_NAME["grok"])
+        self.assertEqual(
+            [c for c in runner.commands() if c == "agent send-keys grok tab"], []
+        )
+
+    def test_an_agent_with_no_tab_keys_never_tabs(self):
+        # claude configures none; a missing report there is just a failure.
+        runner = runner_with({"claude": "idle"}, {"claude": "no report\n"})
+        with self.assertRaises(HerdrError):
+            measure_agent(
+                HerdrClient(runner=runner),
+                BY_NAME["claude"],
+                poll_attempts=0,
+                warn=lambda message: None,
+            )
+        self.assertEqual(
+            [c for c in runner.commands() if c.endswith(" tab")], []
+        )
+
+    def test_the_dialog_is_still_dismissed_after_tabbing_fails(self):
+        runner = self._runner(["never here\n"])
+        with self.assertRaises(HerdrError):
+            measure_agent(
+                HerdrClient(runner=runner),
+                BY_NAME["grok"],
+                poll_attempts=0,
+                warn=lambda message: None,
+            )
+        self.assertEqual(runner.commands()[-1], "agent send-keys grok esc")
+
+    def test_tabbing_happens_after_the_read_poll_not_before(self):
+        # Reading again is free; pressing keys into somebody's dialog is not.
+        runner = self._runner(["wrong tab\n", "wrong tab\n", GROK_DIALOG_PANE])
+        measure_agent(HerdrClient(runner=runner), BY_NAME["grok"], poll_attempts=1)
+        commands = runner.commands()
+        reads_before_first_tab = commands.index("agent send-keys grok tab")
+        self.assertEqual(
+            len([c for c in commands[:reads_before_first_tab] if c.startswith("agent read grok --source visible --lines 80")]),
+            2,
         )
 
 
@@ -396,7 +599,9 @@ class DialogAlwaysClosesTest(unittest.TestCase):
     def test_close_keys_are_sent_when_the_marker_never_appears(self):
         runner = runner_with({"grok": "idle"}, {"grok": "nothing useful here\n"})
         with self.assertRaises(HerdrError):
-            measure_agent(HerdrClient(runner=runner), BY_NAME["grok"], poll_attempts=2)
+            measure_agent(
+                HerdrClient(runner=runner), BY_NAME["grok"], poll_attempts=2, max_tabs=0
+            )
         self.assertEqual(runner.commands()[-1], "agent send-keys grok esc")
 
     def test_close_keys_are_sent_when_the_read_itself_fails(self):

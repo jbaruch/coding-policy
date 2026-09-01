@@ -90,6 +90,148 @@ class ArgvBuilderTest(unittest.TestCase):
         self.assertEqual(client.argv_agent_get("x")[0], "/opt/herdr")
 
 
+class SendSlashCommandTest(unittest.TestCase):
+    """A slash command is typed, not pasted.
+
+    Live, `agent prompt grok /usage` went through the pane's bracketed-paste
+    mode and Grok read it as a chat message: it answered in prose about
+    billing and started reading files instead of opening its usage panel.
+    """
+
+    def _client(self):
+        self.runner = FakeRunner()
+        self.runner.set("pane send-text", ok_json("pane_send_text"))
+        self.runner.set("pane send-keys", ok_json("pane_send_keys"))
+        return HerdrClient(binary="herdr", runner=self.runner)
+
+    def test_argv_builder_returns_text_then_enter(self):
+        client = HerdrClient(binary="herdr", runner=FakeRunner())
+        self.assertEqual(
+            client.argv_send_slash_command("w4:p1", "/usage"),
+            [
+                ["herdr", "pane", "send-text", "w4:p1", "/usage"],
+                ["herdr", "pane", "send-keys", "w4:p1", "enter"],
+            ],
+        )
+
+    def test_it_runs_send_text_then_send_keys_in_that_order(self):
+        self._client().send_slash_command("w4:p1", "/usage")
+        self.assertEqual(
+            self.runner.commands(),
+            ["pane send-text w4:p1 /usage", "pane send-keys w4:p1 enter"],
+        )
+
+    def test_it_never_touches_agent_prompt(self):
+        self._client().send_slash_command("w4:p1", "/usage")
+        self.assertEqual(self.runner.pasted_prompts(), [])
+
+    def test_the_newline_is_a_keystroke_not_part_of_the_text(self):
+        self._client().send_slash_command("w4:p1", "/clear")
+        sent = [c for c in self.runner.commands() if c.startswith("pane send-text")]
+        self.assertEqual(sent, ["pane send-text w4:p1 /clear"])
+
+    def test_it_returns_both_results(self):
+        result = self._client().send_slash_command("w4:p1", "/new")
+        self.assertEqual(result["send_text"]["type"], "pane_send_text")
+        self.assertEqual(result["send_keys"]["type"], "pane_send_keys")
+
+    def test_a_failed_send_text_stops_before_the_enter(self):
+        client = self._client()
+        self.runner.set(
+            "pane send-text",
+            stdout="",
+            returncode=1,
+            stderr='{"error":{"code":"pane_gone","message":"pane not found"}}',
+        )
+        with self.assertRaises(HerdrError):
+            client.send_slash_command("w4:p1", "/usage")
+        self.assertEqual(self.runner.commands(), ["pane send-text w4:p1 /usage"])
+
+
+class EmptyStdoutTest(unittest.TestCase):
+    """`pane send-text` succeeds with exit 0 and NO output.
+
+    Live, demanding a JSON body turned a successful send-text into a
+    transport error, and the run died before pressing Enter -- leaving
+    `/usage` sitting unsent in Grok's input box.
+    """
+
+    def _silent_runner(self):
+        runner = FakeRunner()
+        runner.set("pane send-text", stdout="")
+        runner.set("pane send-keys", stdout="")
+        runner.set("agent send-keys", stdout="")
+        return runner
+
+    def test_send_text_accepts_exit_zero_with_no_output(self):
+        runner = self._silent_runner()
+        self.assertEqual(HerdrClient(runner=runner).pane_send_text("w4:p1", "/usage"), {})
+
+    def test_send_keys_accepts_exit_zero_with_no_output(self):
+        runner = self._silent_runner()
+        self.assertEqual(HerdrClient(runner=runner).pane_send_keys("w4:p1", ["enter"]), {})
+
+    def test_agent_send_keys_accepts_exit_zero_with_no_output(self):
+        # The close-keys path runs in a finally; a body it never reads must
+        # not be able to mask the error it is cleaning up after.
+        runner = self._silent_runner()
+        self.assertEqual(HerdrClient(runner=runner).agent_send_keys("grok", ["esc"]), {})
+
+    def test_whitespace_only_output_is_also_success(self):
+        runner = FakeRunner()
+        runner.set("pane send-text", stdout="\n  \n")
+        self.assertEqual(HerdrClient(runner=runner).pane_send_text("w4:p1", "/new"), {})
+
+    def test_a_json_body_is_still_unwrapped_when_herdr_sends_one(self):
+        runner = FakeRunner()
+        runner.set("pane send-text", ok_json("pane_send_text"))
+        self.assertEqual(
+            HerdrClient(runner=runner).pane_send_text("w4:p1", "/usage"),
+            {"type": "pane_send_text"},
+        )
+
+    def test_unparseable_output_is_tolerated_not_fatal(self):
+        runner = FakeRunner()
+        runner.set("pane send-text", stdout="sent 6 bytes")
+        self.assertEqual(HerdrClient(runner=runner).pane_send_text("w4:p1", "/usage"), {})
+
+    def test_a_non_zero_exit_is_still_an_error_carrying_stderr(self):
+        runner = FakeRunner()
+        runner.set(
+            "pane send-text",
+            stdout="",
+            returncode=1,
+            stderr='{"error":{"code":"pane_not_found","message":"pane w9:p9 not found"}}',
+        )
+        with self.assertRaises(HerdrError) as caught:
+            HerdrClient(runner=runner).pane_send_text("w9:p9", "/usage")
+        message = str(caught.exception)
+        self.assertIn("pane_not_found", message)
+        self.assertIn("pane w9:p9 not found", message)
+
+    def test_a_syntax_error_exit_is_still_an_error(self):
+        runner = FakeRunner()
+        runner.set("pane send-keys", stdout="", returncode=2, stderr="unknown key 'retrun'")
+        with self.assertRaises(HerdrError) as caught:
+            HerdrClient(runner=runner).pane_send_keys("w4:p1", ["retrun"])
+        self.assertIn("syntax error", str(caught.exception))
+
+    def test_commands_whose_result_is_read_stay_strict(self):
+        # agent get feeds the busy-agent gate; an empty body there is a real
+        # failure and must not be waved through.
+        runner = FakeRunner()
+        runner.set("agent get grok", stdout="")
+        with self.assertRaises(HerdrError) as caught:
+            HerdrClient(runner=runner).agent_get("grok")
+        self.assertIn("non-JSON", str(caught.exception))
+
+    def test_pane_wait_output_stays_strict(self):
+        runner = FakeRunner()
+        runner.set("pane wait-output", stdout="")
+        with self.assertRaises(HerdrError):
+            HerdrClient(runner=runner).pane_wait_output("w4:p1", match="Weekly limit")
+
+
 class ExecutionTest(unittest.TestCase):
     def test_agent_get_returns_the_agent_record(self):
         runner = FakeRunner({"agent get grok": None})

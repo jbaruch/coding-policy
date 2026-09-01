@@ -73,6 +73,22 @@ GROK_DIALOG_SAMPLE = """\
 """
 
 
+# The same modal painted OVER the transcript, verbatim from a live
+# `--source visible --lines 80` read. Every row carries transcript text to the
+# left of the box's first vertical, and some carry more to the right of its
+# last one.
+GROK_OVERLAID_SAMPLE = """\
+         /usage is credit/bill│  Context usage  Usage limit  Session info                                                    │              10:36 PM
+                              │──────────────────────────────────────────────────────────────────────────────────────────────│
+         ◈ Read 4 files, Searc│  Weekly limit (X Premium+)                                                                   │
+         ◆ Thought for 4.2s   │  ██░░░░░░░░░░░░░░░░░░░░░░░░░░░░  7%                                                          │
+                              │  Resets: September 6, 12:55                                                                  │
+         Turn cancelled by use│                                                                                              │
+                              │  Credits: $16.42                                                                             │
+      ┃  We shipped the tester│    Input tokens:   7,616,129 (7,387,392 cached)                                              │an independent
+"""
+
+
 class ClaudeParserTest(unittest.TestCase):
     def test_captures_every_window_in_order(self):
         result = parse_claude_usage(CLAUDE_SAMPLE)
@@ -332,6 +348,62 @@ class GrokDialogParserTest(unittest.TestCase):
     def test_a_stray_percentage_elsewhere_on_screen_is_not_a_reading(self):
         with self.assertRaises(ParseError):
             parse_grok_usage("Coverage rose to 91% this week.\nBuild green.\n")
+
+
+class GrokOverlaidDialogTest(unittest.TestCase):
+    """The modal is painted over the transcript, not into a clear screen.
+
+    Stripping frame characters from the ends of a row leaves the transcript
+    text attached to it. Only what lies between the first and last vertical is
+    the dialog.
+    """
+
+    def test_the_percentage_comes_from_the_box_not_the_transcript(self):
+        window = parse_grok_usage(GROK_OVERLAID_SAMPLE)["windows"]["Weekly limit"]
+        self.assertEqual(window["used_pct"], 7.0)
+        self.assertEqual(window["remaining_pct"], 93.0)
+
+    def test_the_plan_name_survives_the_transcript_prefix(self):
+        self.assertEqual(parse_grok_usage(GROK_OVERLAID_SAMPLE)["plan"], "X Premium+")
+
+    def test_the_reset_row_is_attached(self):
+        window = parse_grok_usage(GROK_OVERLAID_SAMPLE)["windows"]["Weekly limit"]
+        self.assertEqual(window["resets"], "September 6, 12:55")
+
+    def test_credits_come_from_the_box(self):
+        self.assertEqual(parse_grok_usage(GROK_OVERLAID_SAMPLE)["credits"], 16.42)
+
+    def test_exactly_one_window_is_found(self):
+        # The transcript to either side must contribute nothing.
+        self.assertEqual(len(parse_grok_usage(GROK_OVERLAID_SAMPLE)["windows"]), 1)
+
+    def test_text_to_the_right_of_the_box_is_ignored(self):
+        # The last row ends "│an independent" outside the box.
+        result = parse_grok_usage(GROK_OVERLAID_SAMPLE)
+        self.assertEqual(result["windows"]["Weekly limit"]["used_pct"], 7.0)
+
+    def test_a_transcript_percentage_left_of_the_box_is_not_read(self):
+        text = GROK_OVERLAID_SAMPLE.replace(
+            "         ◆ Thought for 4.2s   │", "  we were at 99% capacity     │"
+        )
+        self.assertEqual(parse_grok_usage(text)["windows"]["Weekly limit"]["used_pct"], 7.0)
+
+    def test_a_row_whose_right_edge_ran_off_the_viewport_still_reads(self):
+        text = (
+            "  transcript here             │  Weekly limit (Pro)\n"
+            "  more transcript             │  ███  4%\n"
+        )
+        result = parse_grok_usage(text)
+        self.assertEqual(result["windows"]["Weekly limit"]["used_pct"], 4.0)
+        self.assertEqual(result["plan"], "Pro")
+
+    def test_the_inline_format_still_parses_with_no_box_at_all(self):
+        self.assertEqual(parse_grok_usage(GROK_SAMPLE)["windows"]["Weekly limit"]["used_pct"], 0.0)
+
+    def test_a_clean_dialog_with_no_overlay_still_parses(self):
+        self.assertEqual(
+            parse_grok_usage(GROK_DIALOG_SAMPLE)["windows"]["Weekly limit"]["used_pct"], 1.0
+        )
 
 
 class DispatchTest(unittest.TestCase):

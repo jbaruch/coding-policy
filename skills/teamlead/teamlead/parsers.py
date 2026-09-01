@@ -89,6 +89,34 @@ def _strip_frame(line):
     return line.strip().strip(_BOX_FRAME).strip()
 
 
+def _box_interior(line):
+    """Return the text inside a box drawn over other content.
+
+    Grok's usage modal is painted OVER the transcript, so a row reads::
+
+        /usage is credit/bill│  Weekly limit (X Premium+)   │   10:36 PM
+
+    Stripping the frame from the ends leaves the transcript text attached.
+    Taking what lies between the first and last vertical drops it.
+
+    A row with a single vertical is a box edge whose other side ran off the
+    viewport: keep what follows it. A row with none is not boxed at all --
+    Grok's inline report, for one -- so it is returned whole.
+    """
+    first = -1
+    last = -1
+    for index, char in enumerate(line):
+        if char in _BOX_FRAME:
+            if first < 0:
+                first = index
+            last = index
+    if first < 0:
+        return line.strip()
+    if first == last:
+        return line[first + 1 :].strip()
+    return line[first + 1 : last].strip()
+
+
 def _window(used_pct, resets):
     """Build one window record from a used-percentage and a reset string."""
     used = round(float(used_pct), 6)
@@ -208,7 +236,8 @@ def parse_grok_usage(text):
         Next reset: September 6, 12:55
         Credits: $16.42
 
-    Dialog (box borders stripped before matching)::
+    Dialog -- painted over the transcript, so only the box interior is
+    matched (see `_box_interior`)::
 
         Weekly limit (X Premium+)
         ░░░░░░░░░░░░░░░░░░░░░░░░  1%
@@ -229,7 +258,7 @@ def parse_grok_usage(text):
     pending_plan = None
 
     for raw in text.splitlines():
-        line = _strip_frame(raw)
+        line = _box_interior(raw)
         if not line:
             continue
 

@@ -9,6 +9,11 @@ all rather than half the assignments.
 teamlead/probe.py) -- herdr's title-derived state goes stale and would
 otherwise refuse a genuinely idle agent forever. `blocked` is never probed.
 
+The clear command (`/clear`, `/new`) goes out by whichever mechanism the
+agent's config names -- see SLASH_DELIVERIES in teamlead/herdr.py, because the
+TUIs disagree about what a pasted slash command means. The assignment itself
+IS a message, so it always goes through `agent prompt`.
+
 `--dry-run` builds the same argv lists the live path would execute (the
 builders live on the transport) and prints them without running anything.
 """
@@ -16,13 +21,22 @@ builders live on the transport) and prints them without running anything.
 import os
 
 from .errors import AgentBusyError, UsageError
-from .herdr import BUSY_STATES, DEFAULT_SETTLE_TIMEOUT_MS, format_argv
+from .herdr import (
+    BUSY_STATES,
+    DEFAULT_SETTLE_TIMEOUT_MS,
+    SLASH_DELIVERY_TYPE,
+    format_argv,
+)
 from .probe import PROBE_READ_LINES, PROBE_READ_SOURCE, resolve_status
 
 APPLY_SCHEMA_VERSION = 1
 
 #: States teamlead will type into. Anything else is a refusal without --force.
 SETTLE_STATES = ("idle", "done")
+
+#: Stand-in for a pane id in `--dry-run`, which resolves no pane because it
+#: makes no herdr calls.
+PANE_ID_PLACEHOLDER = "PANE-ID-RESOLVED-AT-RUN-TIME"
 
 ASSIGNMENT_TEMPLATE = (
     "New assignment from the team lead. Your role for this task is {role}. "
@@ -90,15 +104,10 @@ def resolve_paths(assignments, briefs, common):
     return resolved
 
 
-def build_steps(client, assignments, agents_by_name, paths, no_clear=False, settle_timeout_ms=DEFAULT_SETTLE_TIMEOUT_MS):
-    """Build the per-role command plan. Pure with respect to herdr: nothing runs.
-
-    This is what `--dry-run` prints, and what the live path walks.
-    """
-    steps = []
+def validate_agents(assignments, agents_by_name):
+    """Refuse an assignment naming an agent the config does not know."""
     for role, name in assignments.items():
-        agent = agents_by_name.get(name)
-        if agent is None:
+        if name not in agents_by_name:
             raise UsageError(
                 "Assignment for role {!r} names agent {!r}, which is not in the "
                 "config - configured agents are {}.".format(
@@ -106,6 +115,21 @@ def build_steps(client, assignments, agents_by_name, paths, no_clear=False, sett
                 ),
                 {"role": role, "agent": name},
             )
+
+
+def build_steps(client, assignments, agents_by_name, paths, panes=None, no_clear=False, settle_timeout_ms=DEFAULT_SETTLE_TIMEOUT_MS):
+    """Build the per-role command plan. Pure with respect to herdr: nothing runs.
+
+    This is what `--dry-run` prints, and what the live path walks. `panes` maps
+    agent name to pane id; `--dry-run` has resolved no panes, so its rendering
+    carries PANE_ID_PLACEHOLDER where the live path substitutes the real id.
+    """
+    validate_agents(assignments, agents_by_name)
+    panes = panes or {}
+    steps = []
+    for role, name in assignments.items():
+        agent = agents_by_name[name]
+        pane_id = panes.get(name) or PANE_ID_PLACEHOLDER
         text = assignment_text(role, paths["common"], paths[role])
         commands = [client.argv_agent_get(name)]
         # Runs only when the `agent get` above reports `working`; see
@@ -114,16 +138,22 @@ def build_steps(client, assignments, agents_by_name, paths, no_clear=False, sett
             client.argv_agent_read(name, source=PROBE_READ_SOURCE, lines=PROBE_READ_LINES)
         ]
         if not no_clear:
-            commands.append(client.argv_agent_prompt(name, agent.clear_prompt))
+            commands.extend(
+                client.argv_deliver_slash_command(
+                    agent.slash_delivery, name, pane_id, agent.clear_prompt
+                )
+            )
             commands.append(
                 client.argv_agent_wait(name, until=SETTLE_STATES, timeout_ms=settle_timeout_ms)
             )
+        # The assignment is real message text, so pasting it is correct.
         commands.append(client.argv_agent_prompt(name, text))
         steps.append(
             {
                 "role": role,
                 "agent": name,
                 "kind": agent.kind,
+                "pane_id": pane_id,
                 "brief": paths[role],
                 "common": paths["common"],
                 "prompt": text,
@@ -149,14 +179,17 @@ def check_all_ready(client, assignments, agents_by_name, force=False, warn=None)
     Raises AgentBusyError -- having sent nothing -- when any target is
     `working` or `blocked` and `force` is not set.
     """
+    validate_agents(assignments, agents_by_name)
     statuses = {}
     for name in assignments.values():
-        herdr_status = client.agent_get(name).get("agent_status")
+        info = client.agent_get(name)
+        herdr_status = info.get("agent_status")
         status, source = resolve_status(client, agents_by_name[name], herdr_status, warn=warn)
         statuses[name] = {
             "state": status,
             "herdr_state": herdr_status,
             "state_source": source,
+            "pane_id": info.get("pane_id"),
         }
     busy = {
         name: record["state"]
@@ -181,22 +214,38 @@ def apply(client, assignments, agents_by_name, paths, at, no_clear=False, force=
     the caller records it in the state ledger as it goes -- an interrupted run
     still leaves a truthful record of what was actually sent.
     """
+    validate_agents(assignments, agents_by_name)
+    # Status first: it is the refusal gate, and it is also where the pane ids
+    # the clear command needs come from.
+    statuses = check_all_ready(client, assignments, agents_by_name, force=force, warn=warn)
     steps = build_steps(
         client,
         assignments,
         agents_by_name,
         paths,
+        panes={name: record.get("pane_id") for name, record in statuses.items()},
         no_clear=no_clear,
         settle_timeout_ms=settle_timeout_ms,
     )
-    statuses = check_all_ready(client, assignments, agents_by_name, force=force, warn=warn)
 
     applied = []
     for step in steps:
         name = step["agent"]
         agent = agents_by_name[name]
         if not no_clear:
-            client.agent_prompt(name, agent.clear_prompt)
+            pane_id = step["pane_id"]
+            if agent.slash_delivery == SLASH_DELIVERY_TYPE and pane_id == PANE_ID_PLACEHOLDER:
+                raise UsageError(
+                    "herdr reported no pane for agent {!r}, so its {} command "
+                    "cannot be typed - confirm the agent is live with "
+                    "`herdr agent list`, or pass --no-clear.".format(
+                        name, agent.clear_prompt
+                    ),
+                    {"agent": name},
+                )
+            client.deliver_slash_command(
+                agent.slash_delivery, name, pane_id, agent.clear_prompt
+            )
             client.agent_wait(name, until=SETTLE_STATES, timeout_ms=settle_timeout_ms)
         client.agent_prompt(name, step["prompt"])
         checked = statuses.get(name, {})
@@ -206,6 +255,7 @@ def apply(client, assignments, agents_by_name, paths, at, no_clear=False, force=
             "state_before": checked.get("state"),
             "herdr_state_before": checked.get("herdr_state"),
             "state_source": checked.get("state_source"),
+            "pane_id": checked.get("pane_id"),
             "cleared": not no_clear,
             "brief": step["brief"],
             "common": step["common"],

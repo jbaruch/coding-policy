@@ -135,6 +135,39 @@ Both are literal substrings matched against the last non-empty footer rows.
 Shipped defaults are in `skills/teamlead/config.example.json`; the precedence
 order and the row count are in `skills/teamlead/teamlead/probe.py`.
 
+## Sending a Slash Command Is Per-Agent
+
+There is no one way to deliver a slash command. The TUIs disagree, and each
+worker names its own mechanism in config as `slash_delivery`:
+
+| Value | Mechanism | Ships for |
+| ----- | --------- | --------- |
+| `paste` | `herdr agent prompt <name> <text>` | claude, codex |
+| `type` | `herdr pane send-text <pane> <text>`, then `herdr pane send-keys <pane> enter` | grok |
+
+Both failure modes were found live:
+
+- **Pasting into Grok.** `agent prompt` delivers through the pane's live
+  bracketed-paste mode, and Grok reads `/usage` as a chat message — it reasons
+  about billing and starts reading files instead of opening the panel.
+- **Typing into Codex.** Codex opens an autocomplete popup on `/`, where the
+  first Enter accepts the completion and a second submits. One `send-text` plus
+  one Enter leaves `› /status` sitting unsent in the composer.
+
+The tell for a new worker: a command that lands as prose wants `type`, one that
+sits unsent in the composer wants `paste`. An unrecognized value is a config
+error, never a silent fallback. An assignment message always pastes — it is a
+message.
+
+`pane send-text`, `pane send-keys`, and `agent send-keys` exit 0 with **empty
+stdout**. herdr's stdout contract is per-command: most control commands return
+JSON, `agent read` returns raw pane text, and the pane writes return nothing.
+Judge a write on its exit status alone.
+
+A `type` worker needs a pane id, which comes from the same status read that
+gates the refusal. A worker herdr reports with no pane is refused rather than
+typed at blindly.
+
 ## Reading Subscription Headroom
 
 Each worker reports its own remaining budget through its native slash command,
@@ -154,7 +187,15 @@ it would queue as a prompt and land in the middle of that agent's work.
 `Credits:`) that must be closed with Esc (`close_keys: ["esc"]`,
 `usage_read_source: visible`). Both parse to the same `Weekly limit` window, so
 nothing downstream cares which one appeared; the modal also reports a plan name,
-carried as the informational `plan` field. An unclosed dialog leaves the pane
+carried as the informational `plan` field. The modal is painted OVER the
+transcript, so each row carries transcript text outside the box — the parser
+reads the interior between the row's first and last `│`.
+
+A usage dialog can also open on the wrong tab: Grok's has three (Context usage,
+Usage limit, Session info). The optional `dialog_next_tab_keys` per-agent key
+names the keys that cycle it, tried a bounded number of times when the marker is
+absent. Empty (the default) means never tab. Pressing keys into somebody's
+dialog is the last resort, after the wait and the read poll. An unclosed dialog leaves the pane
 holding a modal, which flips the agent to `working` and swallows the next
 prompt — the close keys go out even when the wait, the read, or the parse
 failed.
@@ -173,8 +214,9 @@ percentage are not the same currency.
 | Codex | `/new` |
 | Grok | `/new` |
 
-Each is sent as a prompt. Wait for the agent to settle before sending the
-brief, so the brief does not land in the clearing dialog.
+Each goes out by that worker's own `slash_delivery` path. Wait for the agent to
+settle before sending the brief, so the brief does not land in the clearing
+dialog.
 
 ## Worker Runtime Quirks
 

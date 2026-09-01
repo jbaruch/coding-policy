@@ -37,6 +37,7 @@ CONFIG = {
             "usage_prompt": "/usage",
             "usage_marker": "Current week",
             "usage_read_source": "visible",
+            "slash_delivery": "paste",
             "close_keys": ["esc"],
             "clear_prompt": "/clear",
         },
@@ -46,6 +47,7 @@ CONFIG = {
             "usage_prompt": "/status",
             "usage_marker": "Weekly limit",
             "usage_read_source": "recent-unwrapped",
+            "slash_delivery": "paste",
             "clear_prompt": "/new",
         },
         {
@@ -54,8 +56,10 @@ CONFIG = {
             "usage_prompt": "/usage",
             "usage_marker": "Weekly limit",
             "usage_read_source": "visible",
+            "slash_delivery": "type",
             "close_keys": ["esc"],
             "clear_prompt": "/new",
+            "dialog_next_tab_keys": ["tab"],
             "idle_markers": ["Shift+Tab:mode"],
             "working_markers": ["Esc:cancel"],
         },
@@ -317,6 +321,8 @@ class MeasureCommandTest(CliCase):
                     "agent read {} --source visible --lines 40".format(name), footers[name]
                 )
         runner.set("pane wait-output", ok_json("output_matched"))
+        runner.set("pane send-text", ok_json("pane_send_text"))
+        runner.set("pane send-keys", ok_json("pane_send_keys"))
         self.runner = runner
         return HerdrClient(runner=runner)
 
@@ -389,6 +395,29 @@ class MeasureCommandTest(CliCase):
         self.assertTrue(json.loads(out)["agents"]["grok"]["skipped"])
         self.assertEqual(self.runner.writes(), [])
 
+    def test_each_agent_asks_for_usage_by_its_configured_path_end_to_end(self):
+        client = self._client({"claude": "idle", "grok": "done"})
+        code, _, _ = self.run_cli(
+            self.base()
+            + [
+                "measure",
+                "--marker-poll-interval",
+                "0",
+                "--agent",
+                "claude",
+                "--agent",
+                "grok",
+                "--now",
+                AT,
+            ],
+            client=client,
+        )
+        self.assertEqual(code, 0)
+        commands = self.runner.commands()
+        self.assertIn("agent prompt claude /usage", commands)  # claude pastes
+        self.assertIn("pane send-text w4:p1 /usage", commands)  # grok types
+        self.assertNotIn("agent prompt grok /usage", commands)
+
     def test_unknown_agent_name_is_an_actionable_error(self):
         code, out, err = self.run_cli(
             self.base() + ["measure", "--marker-poll-interval", "0", "--agent", "gemini", "--now", AT],
@@ -420,6 +449,8 @@ class ApplyCommandTest(CliCase):
                 "agent read {} --source visible --lines 40".format(name),
                 footers.get(name, GROK_WORKING_FOOTER),
             )
+        runner.set("pane send-text", ok_json("pane_send_text"))
+        runner.set("pane send-keys", ok_json("pane_send_keys"))
         self.runner = runner
         return HerdrClient(binary="herdr", runner=runner)
 
@@ -444,7 +475,8 @@ class ApplyCommandTest(CliCase):
         self.assertEqual(self.runner.calls, [])
         shells = [command["shell"] for command in payload["steps"][0]["commands"]]
         self.assertEqual(shells[0], "herdr agent get grok")
-        self.assertIn("herdr agent prompt grok /new", shells)
+        self.assertIn("herdr pane send-text PANE-ID-RESOLVED-AT-RUN-TIME /new", shells)
+        self.assertIn("herdr pane send-keys PANE-ID-RESOLVED-AT-RUN-TIME enter", shells)
         self.assertIn("DEVELOPER", shells[-1])
         self.assertEqual(err, "")
 
@@ -499,6 +531,28 @@ class ApplyCommandTest(CliCase):
                 {"at": AT, "role": "tester", "agent": "claude"},
             ],
         )
+
+    def test_each_agent_clears_by_its_configured_path_end_to_end(self):
+        client = self._client({"grok": "idle", "claude": "done"})
+        code, _, _ = self.run_cli(
+            self.base()
+            + [
+                "apply",
+                "--assignments",
+                json.dumps({"developer": "grok", "tester": "claude"}),
+                "--common",
+                str(self.common),
+                "--now",
+                AT,
+            ]
+            + self.brief_args("developer", "tester"),
+            client=client,
+        )
+        self.assertEqual(code, 0)
+        commands = self.runner.commands()
+        self.assertIn("pane send-text w4:p1 /new", commands)  # grok types
+        self.assertIn("agent prompt claude /clear", commands)  # claude pastes
+        self.assertNotIn("agent prompt grok /new", commands)
 
     def test_busy_agent_is_refused_with_a_json_error_and_no_writes(self):
         client = self._client({"grok": "working"})

@@ -59,12 +59,33 @@ class FakeRunner:
         """Every call as a shell string, binary dropped."""
         return [shlex.join(argv[1:]) for argv in self.calls]
 
+    #: Every argv prefix that puts bytes into somebody's terminal.
+    WRITE_PREFIXES = (
+        "agent prompt ",
+        "agent send-keys ",
+        "pane send-text ",
+        "pane send-keys ",
+        "pane run ",
+    )
+
     def writes(self):
-        """Only the calls that write to an agent: prompt and send-keys."""
+        """Only the calls that write to an agent's terminal."""
         return [
             command
             for command in self.commands()
-            if command.startswith("agent prompt ") or command.startswith("agent send-keys ")
+            if command.startswith(self.WRITE_PREFIXES)
+        ]
+
+    def pasted_prompts(self):
+        """Text delivered through `agent prompt`, which pastes it.
+
+        A slash command must never appear here: pasted into a TUI with
+        bracketed paste on, it lands as a chat message rather than a command.
+        """
+        return [
+            command[len("agent prompt ") :]
+            for command in self.commands()
+            if command.startswith("agent prompt ")
         ]
 
 

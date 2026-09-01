@@ -70,6 +70,40 @@ class ParseConfigTest(unittest.TestCase):
         self.assertEqual(agents[1].idle_markers, ())
         self.assertEqual(agents[1].working_markers, ())
 
+    def test_slash_delivery_defaults_to_paste(self):
+        # The older path, and the one claude and codex need.
+        self.assertEqual(parse_config(VALID)[0].slash_delivery, "paste")
+
+    def test_slash_delivery_is_read_when_given(self):
+        entry = json.loads(json.dumps(VALID))
+        entry["agents"][0]["slash_delivery"] = "type"
+        self.assertEqual(parse_config(entry)[0].slash_delivery, "type")
+
+    def test_an_unknown_slash_delivery_is_a_config_error(self):
+        broken = json.loads(json.dumps(VALID))
+        broken["agents"][0]["slash_delivery"] = "sendkeys"
+        with self.assertRaises(ConfigError) as caught:
+            parse_config(broken)
+        message = str(caught.exception)
+        self.assertIn("slash_delivery", message)
+        self.assertIn("'paste'", message)
+        self.assertIn("'type'", message)
+
+    def test_dialog_next_tab_keys_default_to_empty(self):
+        self.assertEqual(parse_config(VALID)[0].dialog_next_tab_keys, ())
+
+    def test_dialog_next_tab_keys_are_read_when_given(self):
+        entry = json.loads(json.dumps(VALID))
+        entry["agents"][0]["dialog_next_tab_keys"] = ["tab"]
+        self.assertEqual(parse_config(entry)[0].dialog_next_tab_keys, ("tab",))
+
+    def test_dialog_next_tab_keys_must_be_an_array_of_strings(self):
+        broken = json.loads(json.dumps(VALID))
+        broken["agents"][0]["dialog_next_tab_keys"] = "tab"
+        with self.assertRaises(ConfigError) as caught:
+            parse_config(broken)
+        self.assertIn("dialog_next_tab_keys", str(caught.exception))
+
     def test_idle_markers_must_be_an_array_of_strings(self):
         broken = json.loads(json.dumps(VALID))
         broken["agents"][0]["idle_markers"] = "? for shortcuts"
@@ -96,6 +130,14 @@ class ParseConfigTest(unittest.TestCase):
         self.assertEqual(by_name["grok"].close_keys, ("esc",))
         # Every shipped agent carries an idle signature for the probe.
         self.assertTrue(all(agent.idle_markers for agent in agents))
+        # Delivery is per-agent because the TUIs disagree: grok reads a pasted
+        # slash command as a chat message, codex swallows a typed one in its
+        # autocomplete popup.
+        self.assertEqual(
+            {agent.name: agent.slash_delivery for agent in agents},
+            {"claude": "paste", "codex": "paste", "grok": "type"},
+        )
+        self.assertEqual(by_name["grok"].dialog_next_tab_keys, ("tab",))
 
     def test_wrong_schema_version_is_rejected(self):
         payload = dict(VALID, schema_version=2)

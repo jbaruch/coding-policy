@@ -5,7 +5,8 @@ The flow per agent is always the same:
 1. read live status with `herdr agent get` -- never trust the last snapshot
 2. when herdr says `working`, confirm it against the pane (see teamlead/probe.py)
 3. refuse to write to a `working` or `blocked` agent unless --force
-4. send the agent's usage slash command
+4. send the agent's usage slash command by the mechanism its config names
+   (see SLASH_DELIVERIES in teamlead/herdr.py -- the TUIs disagree)
 5. wait for its marker, `herdr pane wait-output` first and a bounded
    `herdr agent read` poll second
 6. read the pane and parse it
@@ -44,8 +45,13 @@ DEFAULT_READ_LINES = 80
 DEFAULT_MARKER_POLL_ATTEMPTS = 10
 DEFAULT_MARKER_POLL_INTERVAL_SEC = 1.0
 
+#: A usage dialog can have several tabs, and the report may not be on the one
+#: it opens with. Grok's has three (Context usage / Usage limit / Session
+#: info). Bounded so a dialog whose tabs do not cycle cannot spin forever.
+MAX_DIALOG_TABS = 3
 
-def wait_for_usage_report(client, agent, pane_id, marker_timeout_ms=DEFAULT_MARKER_TIMEOUT_MS, read_lines=DEFAULT_READ_LINES, poll_attempts=DEFAULT_MARKER_POLL_ATTEMPTS, poll_interval_sec=DEFAULT_MARKER_POLL_INTERVAL_SEC, sleep=time.sleep, warn=None):
+
+def wait_for_usage_report(client, agent, pane_id, marker_timeout_ms=DEFAULT_MARKER_TIMEOUT_MS, read_lines=DEFAULT_READ_LINES, poll_attempts=DEFAULT_MARKER_POLL_ATTEMPTS, poll_interval_sec=DEFAULT_MARKER_POLL_INTERVAL_SEC, sleep=time.sleep, warn=None, max_tabs=MAX_DIALOG_TABS):
     """Return pane text containing `agent.usage_marker`.
 
     The marker is a literal substring, never a pattern, so the wait uses
@@ -58,6 +64,11 @@ def wait_for_usage_report(client, agent, pane_id, marker_timeout_ms=DEFAULT_MARK
     1. `herdr pane wait-output --match ...` -- event-driven, no sleeping.
     2. a bounded `herdr agent read` poll -- the prompt-then-read sequence that
        works by hand against a modal on the alternate screen.
+
+    If neither finds the marker and the agent configures
+    `dialog_next_tab_keys`, the dialog is tabbed through up to `max_tabs`
+    times, re-reading each time: a multi-tab usage dialog may not open on the
+    tab carrying the report.
 
     A failed wait is a warning, not the end: the marker is confirmed in the
     text that will actually be parsed. Raises HerdrError naming both
@@ -85,22 +96,36 @@ def wait_for_usage_report(client, agent, pane_id, marker_timeout_ms=DEFAULT_MARK
             )
         )
 
-    text = client.agent_read(
-        agent.name, source=agent.usage_read_source, lines=read_lines
-    )
+    def read():
+        return client.agent_read(
+            agent.name, source=agent.usage_read_source, lines=read_lines
+        )
+
+    text = read()
     attempts = 0
     while agent.usage_marker not in text and attempts < poll_attempts:
         attempts += 1
         sleep(poll_interval_sec)
-        text = client.agent_read(
-            agent.name, source=agent.usage_read_source, lines=read_lines
-        )
+        text = read()
+
+    # Still nothing: the dialog may have opened on a tab that does not carry
+    # the report. Cycle through the others before giving up.
+    tabs = 0
+    while (
+        agent.usage_marker not in text
+        and agent.dialog_next_tab_keys
+        and tabs < max_tabs
+    ):
+        tabs += 1
+        client.agent_send_keys(agent.name, agent.dialog_next_tab_keys)
+        sleep(poll_interval_sec)
+        text = read()
 
     if agent.usage_marker not in text:
         raise HerdrError(
             "{!r} never appeared in {}'s pane. Tried `herdr pane wait-output "
             "--match` for {}ms, then {} reads of `herdr agent read {} --source "
-            "{} --lines {}` {}s apart. Check the marker against what the agent "
+            "{} --lines {}` {}s apart.{} Check the marker against what the agent "
             "actually prints, and rerun with --trace to see every command and "
             "its raw output.".format(
                 agent.usage_marker,
@@ -111,12 +136,14 @@ def wait_for_usage_report(client, agent, pane_id, marker_timeout_ms=DEFAULT_MARK
                 agent.usage_read_source,
                 read_lines,
                 poll_interval_sec,
+                " Tabbed through the dialog {} times too.".format(tabs) if tabs else "",
             ),
             {
                 "agent": agent.name,
                 "marker": agent.usage_marker,
                 "pane_id": pane_id,
                 "poll_attempts": poll_attempts,
+                "dialog_tabs_tried": tabs,
             },
         )
     return text
@@ -137,7 +164,7 @@ def skipped_record(agent, status, herdr_status, state_source):
     }
 
 
-def measure_agent(client, agent, marker_timeout_ms=DEFAULT_MARKER_TIMEOUT_MS, read_lines=DEFAULT_READ_LINES, force=False, warn=None, poll_attempts=DEFAULT_MARKER_POLL_ATTEMPTS, poll_interval_sec=DEFAULT_MARKER_POLL_INTERVAL_SEC, sleep=time.sleep):
+def measure_agent(client, agent, marker_timeout_ms=DEFAULT_MARKER_TIMEOUT_MS, read_lines=DEFAULT_READ_LINES, force=False, warn=None, poll_attempts=DEFAULT_MARKER_POLL_ATTEMPTS, poll_interval_sec=DEFAULT_MARKER_POLL_INTERVAL_SEC, sleep=time.sleep, max_tabs=MAX_DIALOG_TABS):
     """Measure one agent and return its record.
 
     Raises HerdrError or ParseError; the caller decides whether one bad agent
@@ -160,7 +187,9 @@ def measure_agent(client, agent, marker_timeout_ms=DEFAULT_MARKER_TIMEOUT_MS, re
             {"agent": agent.name},
         )
 
-    client.agent_prompt(agent.name, agent.usage_prompt)
+    client.deliver_slash_command(
+        agent.slash_delivery, agent.name, pane_id, agent.usage_prompt
+    )
     try:
         text = wait_for_usage_report(
             client,
@@ -172,6 +201,7 @@ def measure_agent(client, agent, marker_timeout_ms=DEFAULT_MARKER_TIMEOUT_MS, re
             poll_interval_sec=poll_interval_sec,
             sleep=sleep,
             warn=warn,
+            max_tabs=max_tabs,
         )
         parsed = parse_usage(agent.kind, text)
     finally:

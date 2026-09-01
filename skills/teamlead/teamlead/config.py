@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 
 from .errors import ConfigError
+from .herdr import SLASH_DELIVERIES, SLASH_DELIVERY_PASTE
 
 CONFIG_SCHEMA_VERSION = 1
 
@@ -18,15 +19,24 @@ REQUIRED_AGENT_FIELDS = ("name", "kind", "usage_prompt", "usage_marker", "usage_
 VALID_READ_SOURCES = frozenset({"visible", "recent", "recent-unwrapped", "detection"})
 
 #: Optional per-agent fields that default to an empty list of strings.
-OPTIONAL_LIST_FIELDS = ("close_keys", "idle_markers", "working_markers")
+OPTIONAL_LIST_FIELDS = (
+    "close_keys",
+    "idle_markers",
+    "working_markers",
+    "dialog_next_tab_keys",
+)
+
+#: Default when an agent does not name one. `paste` is the older path and the
+#: one that works for claude and codex; grok needs `type`.
+DEFAULT_SLASH_DELIVERY = SLASH_DELIVERY_PASTE
 
 
 class Agent:
     """One configured agent. A plain value object, never mutated after load."""
 
-    __slots__ = REQUIRED_AGENT_FIELDS + OPTIONAL_LIST_FIELDS
+    __slots__ = REQUIRED_AGENT_FIELDS + OPTIONAL_LIST_FIELDS + ("slash_delivery",)
 
-    def __init__(self, name, kind, usage_prompt, usage_marker, usage_read_source, clear_prompt, close_keys=(), idle_markers=(), working_markers=()):
+    def __init__(self, name, kind, usage_prompt, usage_marker, usage_read_source, clear_prompt, close_keys=(), idle_markers=(), working_markers=(), dialog_next_tab_keys=(), slash_delivery=DEFAULT_SLASH_DELIVERY):
         self.name = name
         self.kind = kind
         self.usage_prompt = usage_prompt
@@ -38,6 +48,11 @@ class Agent:
         # state says `working`. See teamlead/probe.py.
         self.idle_markers = tuple(idle_markers)
         self.working_markers = tuple(working_markers)
+        # Keys that move a usage dialog to its next tab, when the report is
+        # behind one teamlead did not land on.
+        self.dialog_next_tab_keys = tuple(dialog_next_tab_keys)
+        # "paste" (agent prompt) or "type" (pane send-text plus Enter).
+        self.slash_delivery = slash_delivery
 
     def __repr__(self):
         return "Agent(name={!r}, kind={!r})".format(self.name, self.kind)
@@ -51,6 +66,7 @@ class Agent:
         record = {field: getattr(self, field) for field in REQUIRED_AGENT_FIELDS}
         for field in OPTIONAL_LIST_FIELDS:
             record[field] = list(getattr(self, field))
+        record["slash_delivery"] = self.slash_delivery
         return record
 
 
@@ -150,6 +166,18 @@ def parse_config(payload, source="<memory>"):
                     {"source": source, "index": index, "field": field},
                 )
             lists[field] = value
+
+        delivery = entry.get("slash_delivery", DEFAULT_SLASH_DELIVERY)
+        if delivery not in SLASH_DELIVERIES:
+            raise ConfigError(
+                "Config at {}: agents[{}].slash_delivery is {!r}; use {}. "
+                "\"paste\" sends the command with `herdr agent prompt`; "
+                "\"type\" types it into the pane and presses Enter. Which one "
+                "an agent needs depends on its TUI.".format(
+                    source, index, delivery, " or ".join(repr(v) for v in SLASH_DELIVERIES)
+                ),
+                {"source": source, "index": index, "slash_delivery": delivery},
+            )
         agents.append(
             Agent(
                 name=name,
@@ -158,6 +186,7 @@ def parse_config(payload, source="<memory>"):
                 usage_marker=entry["usage_marker"],
                 usage_read_source=read_source,
                 clear_prompt=entry["clear_prompt"],
+                slash_delivery=delivery,
                 **lists
             )
         )

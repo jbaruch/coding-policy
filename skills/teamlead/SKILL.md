@@ -138,6 +138,8 @@ the hand-off in the ledger. Emits one JSON object describing what was sent.
   non-zero exit. Wait for that worker, or dispatch a round without it.
 - A `working` verdict is confirmed against the pane first, so a stale window
   title does not refuse a worker sitting at an empty prompt.
+- A worker whose clear command is typed rather than pasted needs a pane id from
+  that status read. Herdr reporting it with no pane refuses the round.
 - `--dry-run` prints every command it would run and makes no herdr calls. The
   pane confirmation appears separately under `conditional_commands`.
 - The prompt text and the `--force` override are the utility's own contract;
