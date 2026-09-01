@@ -31,7 +31,7 @@ from .probe import PROBE_READ_LINES, PROBE_READ_SOURCE, resolve_status
 
 APPLY_SCHEMA_VERSION = 1
 
-#: States teamlead will type into. Anything else is a refusal without --force.
+#: States teamlead will type into. Anything else is refused, always.
 SETTLE_STATES = ("idle", "done")
 
 #: Stand-in for a pane id in `--dry-run`, which resolves no pane because it
@@ -172,12 +172,14 @@ def build_steps(client, assignments, agents_by_name, paths, panes=None, no_clear
     return steps
 
 
-def check_all_ready(client, assignments, agents_by_name, force=False, warn=None):
+def check_all_ready(client, assignments, agents_by_name, warn=None):
     """Read every target's live status before anything is sent.
 
     Returns `{agent: {"state": ..., "herdr_state": ..., "state_source": ...}}`.
     Raises AgentBusyError -- having sent nothing -- when any target is
-    `working` or `blocked` and `force` is not set.
+    `working` or `blocked`. There is no override: rules/agent-team-operation.md
+    Dispatch Safety is unconditional, and a keystroke into a working agent
+    lands in the middle of somebody's turn.
     """
     validate_agents(assignments, agents_by_name)
     statuses = {}
@@ -196,10 +198,10 @@ def check_all_ready(client, assignments, agents_by_name, force=False, warn=None)
         for name, record in statuses.items()
         if record["state"] in BUSY_STATES
     }
-    if busy and not force:
+    if busy:
         raise AgentBusyError(
-            "Refusing to interrupt {} - wait for them to finish, or pass "
-            "--force to type into a busy agent anyway.".format(
+            "Refusing to interrupt {} - wait for them to reach idle or done, "
+            "then run this again.".format(
                 ", ".join("{} ({})".format(name, status) for name, status in sorted(busy.items()))
             ),
             {"busy": busy},
@@ -207,7 +209,7 @@ def check_all_ready(client, assignments, agents_by_name, force=False, warn=None)
     return statuses
 
 
-def apply(client, assignments, agents_by_name, paths, at, no_clear=False, force=False, settle_timeout_ms=DEFAULT_SETTLE_TIMEOUT_MS, on_assigned=None, warn=None):
+def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle_timeout_ms=DEFAULT_SETTLE_TIMEOUT_MS, on_assigned=None, warn=None):
     """Clear each agent and hand it its brief. Writes to the agents.
 
     `on_assigned(role, agent, at)` is called after each successful hand-off so
@@ -217,7 +219,7 @@ def apply(client, assignments, agents_by_name, paths, at, no_clear=False, force=
     validate_agents(assignments, agents_by_name)
     # Status first: it is the refusal gate, and it is also where the pane ids
     # the clear command needs come from.
-    statuses = check_all_ready(client, assignments, agents_by_name, force=force, warn=warn)
+    statuses = check_all_ready(client, assignments, agents_by_name, warn=warn)
     steps = build_steps(
         client,
         assignments,

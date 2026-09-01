@@ -49,12 +49,14 @@ a `## BLOCKED` section can sit under a report that otherwise reads as finished.
   the findings; do not send "see the reviewer's comment" and expect a worker
   with a cleared context to find it.
 - **A `## BLOCKED` section** — the worker stopped on something it could not
-  decide. Resolve it in the next brief, or answer it yourself; never leave a
-  blocked worker waiting on a message it cannot receive.
+  decide. Resolve it in the NEXT brief, which reaches it through a fresh
+  dispatch. Never type the answer into the worker that is waiting.
 - **`wait-report.sh` exit 3** — the worker is at an approval or question
-  dialog. Read the pane, answer the dialog with the operator's consent, then
-  re-run the wait. Never answer an approval dialog on the operator's behalf
-  when it authorizes something outside the brief.
+  dialog. Read the pane, relay the dialog text to the operator verbatim, and
+  stop the round for that worker. The lead never answers it — an approval
+  dialog is input, and input to a blocked agent is exactly what Dispatch
+  Safety forbids. The operator answers; the wait resumes once
+  `herdr agent get <name>` reports a state other than `blocked`.
 - **`wait-report.sh` exit 1** — the budget ran out. Read the pane before
   re-dispatching; a worker that is still working needs more budget, not a
   second copy of the same brief.
@@ -93,5 +95,6 @@ whatever GitHub's merge box says.
 
 - Edit the shared checkout. The lead reads it and dispatches; workers write.
 - Answer a question by typing into a working worker. Wait for the report.
+- Answer a blocked worker's approval dialog. Relay it to the operator and stop.
 - Treat a single `idle` or `done` observation as completion.
 - Merge on a worker's behalf. The developer runs the release skill.

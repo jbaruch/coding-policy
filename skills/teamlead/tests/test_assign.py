@@ -12,6 +12,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import inspect
 import os
 import shutil
 import tempfile
@@ -352,14 +353,28 @@ class RefusalTest(unittest.TestCase):
             )
         self.assertEqual(runner.writes(), [])
 
-    def test_force_overrides_the_refusal(self):
+    def test_a_busy_agent_has_no_override(self):
+        # rules/agent-team-operation.md Dispatch Safety is unconditional. The
+        # refusal is the whole behavior: nothing is typed, and no argument
+        # exists that would type it anyway.
         runner = runner_with({"grok": "working"})
-        result = apply(
-            HerdrClient(runner=runner), {"developer": "grok"}, BY_NAME, self.paths, AT, force=True
-        )
-        self.assertEqual(result["applied"][0]["state_before"], "working")
-        # typed clear (text + enter) plus the pasted assignment message
-        self.assertEqual(len(runner.writes()), 3)
+        with self.assertRaises(AgentBusyError):
+            apply(HerdrClient(runner=runner), {"developer": "grok"}, BY_NAME, self.paths, AT)
+        self.assertEqual(runner.writes(), [])
+        # No override parameter exists to be passed. Asserted on the signature
+        # rather than by calling with an invalid keyword, which a type checker
+        # rightly rejects at the call site.
+        self.assertNotIn("force", inspect.signature(apply).parameters)
+        self.assertNotIn("force", inspect.signature(check_all_ready).parameters)
+
+    def test_the_refusal_names_the_state_to_wait_for(self):
+        runner = runner_with({"grok": "working"})
+        with self.assertRaises(AgentBusyError) as caught:
+            apply(HerdrClient(runner=runner), {"developer": "grok"}, BY_NAME, self.paths, AT)
+        message = str(caught.exception)
+        self.assertIn("grok (working)", message)
+        self.assertIn("idle or done", message)
+        self.assertNotIn("--force", message)
 
     def test_stale_working_is_overturned_and_the_round_proceeds(self):
         # herdr's title-derived state says working; the pane footer says the

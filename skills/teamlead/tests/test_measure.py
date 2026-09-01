@@ -8,6 +8,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import inspect
 import unittest
 
 from teamlead.config import parse_config
@@ -286,12 +287,15 @@ class BusyAgentTest(unittest.TestCase):
         self.assertTrue(record["skipped"])
         self.assertEqual(runner.writes(), [])
 
-    def test_force_measures_a_working_agent(self):
+    def test_a_working_agent_has_no_override(self):
+        # The usage command is a prompt. There is no argument that sends it to
+        # an agent mid-turn (rules/agent-team-operation.md Dispatch Safety).
         runner = runner_with({"codex": "working"}, {"codex": CODEX_PANE})
-        record = measure_agent(HerdrClient(runner=runner), BY_NAME["codex"], force=True)
-        self.assertFalse(record["skipped"])
-        self.assertEqual(record["headroom_pct"], 87.0)
-        self.assertIn("agent prompt codex /status", runner.commands())
+        record = measure_agent(HerdrClient(runner=runner), BY_NAME["codex"])
+        self.assertTrue(record["skipped"])
+        self.assertEqual(runner.writes(), [])
+        self.assertNotIn("force", inspect.signature(measure_agent).parameters)
+        self.assertNotIn("force", inspect.signature(measure).parameters)
 
     def test_unknown_status_is_measured_rather_than_skipped(self):
         # `unknown` does not prove the agent is busy, and herdr's own prompt

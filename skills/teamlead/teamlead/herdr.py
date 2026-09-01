@@ -58,7 +58,7 @@ DEFAULT_SETTLE_TIMEOUT_MS = 60000
 #: Agent lifecycle states that mean "ready for input".
 READY_STATES = frozenset({"idle", "done"})
 
-#: Agent lifecycle states teamlead refuses to write to without --force.
+#: Agent lifecycle states teamlead refuses to write to. No override.
 BUSY_STATES = frozenset({"working", "blocked"})
 
 #: The key that submits a line. Named because `send_slash_command` sends it as

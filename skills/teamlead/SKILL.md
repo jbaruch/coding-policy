@@ -145,8 +145,10 @@ the hand-off in the ledger. Emits one JSON object describing what was sent.
   that status read. Herdr reporting it with no pane refuses the round.
 - `--dry-run` prints every command it would run and makes no herdr calls. The
   pane confirmation appears separately under `conditional_commands`.
-- The prompt text and the `--force` override are the utility's own contract;
-  see `skills/teamlead/teamlead/assign.py`.
+- A busy target has no override. The refusal is unconditional, and it fires
+  before any keystroke goes out.
+- The prompt text is the utility's own contract; see
+  `skills/teamlead/teamlead/assign.py`.
 
 Proceed immediately to Step 6.
 
@@ -168,8 +170,10 @@ completion. Poll interval and give-up budget are the script's own constants.
   `herdr agent read <name> --source visible` before re-dispatching.
 - **Exit 2** — a tool failure. Report the message verbatim and stop the round.
 - **Exit 3** — the worker is blocked at an approval or question dialog. Read
-  the dialog, surface it to the user, and answer it only with the user's
-  consent when it authorizes anything outside the brief.
+  the dialog with `herdr pane read <pane-id> --source visible`, relay its text
+  to the operator verbatim, and stop the round for that worker. You never
+  answer it: the operator does. Resume only once `herdr agent get <name>`
+  reports a state other than `blocked`, then re-run the wait.
 
 Proceed immediately to Step 7 once every dispatched worker has been waited on.
 

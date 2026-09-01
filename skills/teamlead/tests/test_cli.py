@@ -620,9 +620,23 @@ class ApplyCommandTest(CliCase):
         self.assertEqual(applied["herdr_state_before"], "working")
         self.assertIn("stale", err)
 
-    def test_force_assigns_to_a_busy_agent(self):
+    def _rejects(self, argv):
+        # argparse prints its usage to stderr on a bad flag; swallow it so the
+        # suite's own output stays readable.
+        with contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit):
+                build_parser().parse_args(argv)
+
+    def test_apply_has_no_force_flag(self):
+        # The override is gone from the surface, not merely discouraged.
+        self._rejects(["apply", "--assignments", "{}", "--common", "x", "--force"])
+
+    def test_measure_has_no_force_flag(self):
+        self._rejects(["measure", "--force"])
+
+    def test_a_busy_agent_refuses_the_whole_round(self):
         client = self._client({"grok": "working"})
-        code, out, _ = self.run_cli(
+        code, out, err = self.run_cli(
             self.base()
             + [
                 "apply",
@@ -632,13 +646,13 @@ class ApplyCommandTest(CliCase):
                 str(self.common),
                 "--now",
                 AT,
-                "--force",
             ]
             + self.brief_args("developer"),
             client=client,
         )
-        self.assertEqual(code, 0)
-        self.assertEqual(json.loads(out)["applied"][0]["state_before"], "working")
+        self.assertNotEqual(code, 0)
+        self.assertEqual(out, "")
+        self.assertIn("Refusing to interrupt", err)
 
     def test_no_clear_skips_the_clear_prompt(self):
         client = self._client({"grok": "idle"})

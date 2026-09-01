@@ -120,11 +120,6 @@ def build_parser():
         help="Timestamp to stamp the snapshot with (default: the current UTC time).",
     )
     measure_parser.add_argument(
-        "--force",
-        action="store_true",
-        help="Measure even an agent that is working or blocked. Interrupts real work.",
-    )
-    measure_parser.add_argument(
         "--marker-timeout",
         type=int,
         default=DEFAULT_MARKER_TIMEOUT_MS,
@@ -213,11 +208,6 @@ def build_parser():
         "--no-clear",
         action="store_true",
         help="Skip the context-clearing prompt and send only the assignment.",
-    )
-    apply_parser.add_argument(
-        "--force",
-        action="store_true",
-        help="Assign even to an agent that is working or blocked. Interrupts real work.",
     )
     apply_parser.add_argument(
         "--now",
@@ -314,7 +304,6 @@ def cmd_measure(args, client=None, warn=None):
         args.now or now_iso(),
         marker_timeout_ms=args.marker_timeout,
         read_lines=args.lines,
-        force=args.force,
         warn=warn,
         poll_attempts=args.marker_poll_attempts,
         poll_interval_sec=args.marker_poll_interval,
@@ -409,7 +398,6 @@ def cmd_apply(args, client=None, warn=None):
         paths,
         args.now or now_iso(),
         no_clear=args.no_clear,
-        force=args.force,
         settle_timeout_ms=args.settle_timeout,
         on_assigned=record,
         warn=warn,

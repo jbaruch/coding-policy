@@ -4,7 +4,7 @@ The flow per agent is always the same:
 
 1. read live status with `herdr agent get` -- never trust the last snapshot
 2. when herdr says `working`, confirm it against the pane (see teamlead/probe.py)
-3. refuse to write to a `working` or `blocked` agent unless --force
+3. refuse to write to a `working` or `blocked` agent, always
 4. send the agent's usage slash command by the mechanism its config names
    (see SLASH_DELIVERIES in teamlead/herdr.py -- the TUIs disagree)
 5. wait for its marker, `herdr pane wait-output` first and a bounded
@@ -164,7 +164,7 @@ def skipped_record(agent, status, herdr_status, state_source):
     }
 
 
-def measure_agent(client, agent, marker_timeout_ms=DEFAULT_MARKER_TIMEOUT_MS, read_lines=DEFAULT_READ_LINES, force=False, warn=None, poll_attempts=DEFAULT_MARKER_POLL_ATTEMPTS, poll_interval_sec=DEFAULT_MARKER_POLL_INTERVAL_SEC, sleep=time.sleep, max_tabs=MAX_DIALOG_TABS):
+def measure_agent(client, agent, marker_timeout_ms=DEFAULT_MARKER_TIMEOUT_MS, read_lines=DEFAULT_READ_LINES, warn=None, poll_attempts=DEFAULT_MARKER_POLL_ATTEMPTS, poll_interval_sec=DEFAULT_MARKER_POLL_INTERVAL_SEC, sleep=time.sleep, max_tabs=MAX_DIALOG_TABS):
     """Measure one agent and return its record.
 
     Raises HerdrError or ParseError; the caller decides whether one bad agent
@@ -175,7 +175,7 @@ def measure_agent(client, agent, marker_timeout_ms=DEFAULT_MARKER_TIMEOUT_MS, re
     pane_id = info.get("pane_id")
     status, state_source = resolve_status(client, agent, herdr_status, warn=warn)
 
-    if status in BUSY_STATES and not force:
+    if status in BUSY_STATES:
         record = skipped_record(agent, status, herdr_status, state_source)
         record["pane_id"] = pane_id
         return record
@@ -226,7 +226,7 @@ def measure_agent(client, agent, marker_timeout_ms=DEFAULT_MARKER_TIMEOUT_MS, re
     }
 
 
-def measure(client, agents, measured_at, marker_timeout_ms=DEFAULT_MARKER_TIMEOUT_MS, read_lines=DEFAULT_READ_LINES, force=False, warn=None, poll_attempts=DEFAULT_MARKER_POLL_ATTEMPTS, poll_interval_sec=DEFAULT_MARKER_POLL_INTERVAL_SEC, sleep=time.sleep):
+def measure(client, agents, measured_at, marker_timeout_ms=DEFAULT_MARKER_TIMEOUT_MS, read_lines=DEFAULT_READ_LINES, warn=None, poll_attempts=DEFAULT_MARKER_POLL_ATTEMPTS, poll_interval_sec=DEFAULT_MARKER_POLL_INTERVAL_SEC, sleep=time.sleep):
     """Measure every agent in `agents` and return the snapshot document.
 
     A failure on one agent is recorded on that agent's record and does not
@@ -243,7 +243,6 @@ def measure(client, agents, measured_at, marker_timeout_ms=DEFAULT_MARKER_TIMEOU
                 agent,
                 marker_timeout_ms=marker_timeout_ms,
                 read_lines=read_lines,
-                force=force,
                 warn=warn,
                 poll_attempts=poll_attempts,
                 poll_interval_sec=poll_interval_sec,
