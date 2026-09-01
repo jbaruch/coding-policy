@@ -7,7 +7,8 @@
     "skills/release",
     "skills/onboard-repo",
     "skills/adopt-fork-pr",
-    "skills/migrate-to-plugin"
+    "skills/migrate-to-plugin",
+    "skills/teamlead"
   ],
   "rules": [
     "rules/commit-conventions.md",
@@ -34,7 +35,8 @@
     "rules/review-severity.md",
     "rules/response-clarity.md",
     "rules/ship-on-green.md",
-    "rules/hook-action-reporting.md"
+    "rules/hook-action-reporting.md",
+    "rules/agent-team-operation.md"
   ],
   "hooks": {
     "SessionStart": [
@@ -59,6 +61,13 @@
             "command": "bash",
             "args": [
               "${TESSL_PLUGIN_DIR}/hooks/check-tessl-latest.sh"
+            ]
+          },
+          {
+            "type": "command",
+            "command": "bash",
+            "args": [
+              "${TESSL_PLUGIN_DIR}/hooks/herdr-team-status.sh"
             ]
           }
         ]

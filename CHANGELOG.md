@@ -1,5 +1,23 @@
 # Changelog
 
+### Teamwork — a lead agent that runs a three-agent round instead of a human guessing
+
+New `teamlead` skill, `agent-team-operation` rule, and `herdr-team-status` SessionStart hook, plus the vendored `teamlead` Python utility (`measure` / `plan` / `apply` / `state`). Everything here was learned on 2026-09-01 running a real round in [Herdr](https://herdr.dev) that built `github.com/jbaruch/agentic-context-registry` with three workers: `claude` (Claude Code), `codex` (OpenAI Codex CLI), and `grok` (Grok CLI).
+
+The round is seven steps — roster, measure, plan, brief, dispatch, wait, gate — and only two of them need judgment. Who has budget left is arithmetic, so it went to a script: each worker is asked for its own usage numbers through its native slash command (`/usage` for claude and grok, `/status` for codex), and its headroom is the MINIMUM remaining window, never the average. A worker with 100% of its week and 2% of its five-hour window has 2% of headroom, and handing that one the developer role stalls the round ten minutes in. Roles are passed heaviest-first and a headroom tie breaks on who has held that role fewest times, so nobody owns `developer` forever.
+
+**Completion is two signals, and this is the expensive lesson.** `herdr agent wait claude` returned `done` several times during the round while Claude Code was mid-task — between tool calls, while streaming — and Grok reported `working` while sitting idle at startup. A lead that treats one `idle`/`done` observation as "finished" collects an empty report and dispatches the next round on nothing. `wait-report.sh` gates on the conjunction instead: the report FILE exists on disk AND the worker's pane shows the `REPORT: ` marker its brief requires as the last line of its final message. The pane read is deliberately thin, because Claude Code and Grok render on the terminal's alternate screen and rows that scroll off never enter Herdr's scrollback — no `--lines` value recovers them. Substantive output therefore travels through report files, never through pane text. A `blocked` worker returns immediately (exit 3) rather than burning the wait budget on a pane that is waiting for a human.
+
+**Internal review runs before the PR opens.** The registry build's PR #27 went through 12 automated review rounds — the policy reviewer plus Copilot — because the diff reached the bots before the team's own reviewer and tester had read it. A plain branch push does not fire the policy reviewer, and that gap is now the design: the developer pushes the branch and STOPS, the tester and reviewer work against the pushed branch, the developer folds the blocking findings in, and only then does `Skill(skill: "release")` Steps 1–4 open the PR. Steps 5–7 run after the bots post. The workers also share one GitHub account, and GitHub refuses `APPROVE` / `REQUEST_CHANGES` on that account's own PR (HTTP 422), so every internal review is a COMMENT review whose state gates nothing — the lead is the gate, and each finding carries a `blocking` / `advisory` label per `rules/review-severity.md`.
+
+Two more field notes are baked into the templates. Grok reads `AGENTS.md` and Claude's settings but does NOT follow the `@.tessl/RULES.md` include, so a Grok worker's brief tells it to read the index and every linked rule by hand; without that the round runs one worker on no policy at all. And Grok's `/usage` has two renderings — inline text on a fresh session, a tabbed modal on a restarted one — where an unclosed modal flips the agent to `working` and blocks the next prompt.
+
+`roster.sh` lists only NAMED agents other than the caller's pane: a name is the dispatch handle (`herdr agent prompt` takes a live name or a pane id, and the name follows the pane occupant), so an unnamed pane has nothing stable to address, and excluding the caller keeps a lead from briefing itself. The hook reads that same script rather than a second copy of the herdr parsing. 24 shell cases across `roster.sh`, `wait-report.sh`, `teamlead.sh`, and the hook, all against a fake `herdr` on PATH; the vendored utility brings its own 208 unittest cases, each suite carrying a `sys.path` shim so `scripts/run-tests.sh` can run it standalone from any cwd.
+
+### Docs — the README's rule count matches the rules again
+
+The What's New line claimed 24 rules (18 always-on); the tree holds 26 (20 always-on, 6 conditional) with `agent-team-operation` added. `hook-action-reporting` had never made it into the category breakdown either. Both corrected in the same pass.
+
 ## 0.3.172 — 2026-09-01
 
 ### Actions — consumers can publish without uploading or running eval scenarios
