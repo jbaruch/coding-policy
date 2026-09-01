@@ -1,0 +1,372 @@
+"""Tests for teamlead.assign.
+
+The load-bearing test in this file is that a busy agent is never typed into,
+and that a refused run sends nothing at all.
+"""
+
+# Standalone-run shim: scripts/run-tests.sh executes each suite as
+# `python3 <file>` from the repo root, so put the skill directory (this file's
+# grandparent) on sys.path before the package imports below.
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+import os
+import shutil
+import tempfile
+import unittest
+from pathlib import Path
+
+from teamlead.assign import (
+    apply,
+    assignment_text,
+    build_steps,
+    check_all_ready,
+    dry_run,
+    normalize_assignments,
+    resolve_paths,
+)
+from teamlead.config import parse_config
+from teamlead.errors import AgentBusyError, UsageError
+from teamlead.herdr import HerdrClient
+
+from tests.fakes import FakeRunner, agent_json, ok_json
+
+AT = "2026-02-03T10:00:00+00:00"
+
+CONFIG = {
+    "schema_version": 1,
+    "agents": [
+        {
+            "name": "claude",
+            "kind": "claude",
+            "usage_prompt": "/usage",
+            "usage_marker": "Current week",
+            "usage_read_source": "visible",
+            "close_keys": ["esc"],
+            "clear_prompt": "/clear",
+        },
+        {
+            "name": "codex",
+            "kind": "codex",
+            "usage_prompt": "/status",
+            "usage_marker": "Weekly limit",
+            "usage_read_source": "recent-unwrapped",
+            "clear_prompt": "/new",
+        },
+        {
+            "name": "grok",
+            "kind": "grok",
+            "usage_prompt": "/usage",
+            "usage_marker": "Weekly limit",
+            "usage_read_source": "recent-unwrapped",
+            "clear_prompt": "/new",
+        },
+    ],
+}
+
+BY_NAME = {agent.name: agent for agent in parse_config(CONFIG)}
+ASSIGNMENTS = {"developer": "grok", "tester": "claude", "reviewer": "codex"}
+PANES = {"claude": "w2:p1", "codex": "w3:p1", "grok": "w4:p1"}
+
+
+def runner_with(statuses):
+    runner = FakeRunner()
+    for name, status in statuses.items():
+        runner.set("agent get " + name, agent_json(name, status, PANES[name]))
+        runner.set("agent prompt " + name, ok_json("agent_prompt"))
+        runner.set("agent wait " + name, ok_json("agent_wait"))
+    return runner
+
+
+class PromptTextTest(unittest.TestCase):
+    def test_exact_wording(self):
+        self.assertEqual(
+            assignment_text("developer", "/w/COMMON.md", "/w/dev.md"),
+            "New assignment from the team lead. Your role for this task is "
+            "DEVELOPER. Read /w/COMMON.md in full, then read /w/dev.md in full, "
+            "and execute that brief exactly. Finish with the REPORT line it "
+            "specifies.",
+        )
+
+    def test_role_is_upper_cased(self):
+        self.assertIn("Your role for this task is TESTER.", assignment_text("tester", "c", "b"))
+
+
+class NormalizeAssignmentsTest(unittest.TestCase):
+    def test_accepts_plan_output(self):
+        self.assertEqual(
+            normalize_assignments({"schema_version": 1, "assignments": ASSIGNMENTS}), ASSIGNMENTS
+        )
+
+    def test_accepts_a_bare_role_to_agent_mapping(self):
+        self.assertEqual(normalize_assignments(ASSIGNMENTS), ASSIGNMENTS)
+
+    def test_preserves_role_order(self):
+        self.assertEqual(list(normalize_assignments(ASSIGNMENTS)), list(ASSIGNMENTS))
+
+    def test_rejects_a_non_object(self):
+        with self.assertRaises(UsageError):
+            normalize_assignments(["developer", "grok"])
+
+    def test_rejects_an_empty_object(self):
+        with self.assertRaises(UsageError):
+            normalize_assignments({})
+
+    def test_rejects_a_non_string_agent(self):
+        with self.assertRaises(UsageError) as caught:
+            normalize_assignments({"developer": ["grok"]})
+        self.assertIn("developer", str(caught.exception))
+
+
+class ResolvePathsTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="teamlead-brief-test-")
+        self.addCleanup(shutil.rmtree, self.tmp)
+        self.briefs = {}
+        for role in ASSIGNMENTS:
+            path = Path(self.tmp) / (role + ".md")
+            path.write_text("# " + role, encoding="utf-8")
+            self.briefs[role] = str(path)
+        self.common = str(Path(self.tmp) / "COMMON.md")
+        Path(self.common).write_text("# common", encoding="utf-8")
+
+    def test_paths_are_made_absolute(self):
+        paths = resolve_paths(ASSIGNMENTS, self.briefs, self.common)
+        self.assertTrue(os.path.isabs(paths["common"]))
+        self.assertTrue(all(os.path.isabs(paths[role]) for role in ASSIGNMENTS))
+
+    def test_missing_brief_for_a_role_names_the_role(self):
+        del self.briefs["tester"]
+        with self.assertRaises(UsageError) as caught:
+            resolve_paths(ASSIGNMENTS, self.briefs, self.common)
+        self.assertIn("tester", str(caught.exception))
+
+    def test_nonexistent_brief_file_is_refused(self):
+        self.briefs["tester"] = str(Path(self.tmp) / "nope.md")
+        with self.assertRaises(UsageError) as caught:
+            resolve_paths(ASSIGNMENTS, self.briefs, self.common)
+        self.assertIn("nope.md", str(caught.exception))
+
+    def test_nonexistent_common_file_is_refused(self):
+        with self.assertRaises(UsageError):
+            resolve_paths(ASSIGNMENTS, self.briefs, str(Path(self.tmp) / "gone.md"))
+
+
+class BuildStepsTest(unittest.TestCase):
+    def setUp(self):
+        self.client = HerdrClient(binary="herdr", runner=FakeRunner())
+        self.paths = {
+            "common": "/w/COMMON.md",
+            "developer": "/w/dev.md",
+            "tester": "/w/test.md",
+            "reviewer": "/w/review.md",
+        }
+
+    def test_one_step_per_role_in_assignment_order(self):
+        steps = build_steps(self.client, ASSIGNMENTS, BY_NAME, self.paths)
+        self.assertEqual([step["role"] for step in steps], ["developer", "tester", "reviewer"])
+        self.assertEqual([step["agent"] for step in steps], ["grok", "claude", "codex"])
+
+    def test_commands_are_check_clear_wait_assign(self):
+        steps = build_steps(
+            self.client, {"developer": "grok"}, BY_NAME, self.paths, settle_timeout_ms=60000
+        )
+        self.assertEqual(
+            [command["shell"] for command in steps[0]["commands"]],
+            [
+                "herdr agent get grok",
+                "herdr agent prompt grok /new",
+                "herdr agent wait grok --until idle --until done --timeout 60000",
+                "herdr agent prompt grok 'New assignment from the team lead. Your role "
+                "for this task is DEVELOPER. Read /w/COMMON.md in full, then read "
+                "/w/dev.md in full, and execute that brief exactly. Finish with the "
+                "REPORT line it specifies.'",
+            ],
+        )
+
+    def test_each_agent_gets_its_native_clear_command(self):
+        steps = build_steps(self.client, ASSIGNMENTS, BY_NAME, self.paths)
+        clears = [
+            command["shell"]
+            for step in steps
+            for command in step["commands"]
+            if command["shell"].endswith(("/new", "/clear"))
+        ]
+        self.assertEqual(
+            clears,
+            ["herdr agent prompt grok /new", "herdr agent prompt claude /clear", "herdr agent prompt codex /new"],
+        )
+
+    def test_no_clear_drops_the_clear_and_the_settle_wait(self):
+        steps = build_steps(self.client, {"developer": "grok"}, BY_NAME, self.paths, no_clear=True)
+        shells = [command["shell"] for command in steps[0]["commands"]]
+        self.assertEqual(len(shells), 2)
+        self.assertEqual(shells[0], "herdr agent get grok")
+        self.assertIn("DEVELOPER", shells[1])
+
+    def test_unknown_agent_name_is_refused(self):
+        with self.assertRaises(UsageError) as caught:
+            build_steps(self.client, {"developer": "gemini"}, BY_NAME, self.paths)
+        self.assertIn("gemini", str(caught.exception))
+
+
+class DryRunTest(unittest.TestCase):
+    def setUp(self):
+        self.runner = FakeRunner()
+        self.client = HerdrClient(binary="herdr", runner=self.runner)
+        self.paths = {
+            "common": "/w/COMMON.md",
+            "developer": "/w/dev.md",
+            "tester": "/w/test.md",
+            "reviewer": "/w/review.md",
+        }
+
+    def test_dry_run_makes_no_herdr_calls_at_all(self):
+        result = dry_run(self.client, ASSIGNMENTS, BY_NAME, self.paths)
+        self.assertTrue(result["dry_run"])
+        self.assertFalse(result["sent"])
+        self.assertEqual(self.runner.calls, [])
+
+    def test_dry_run_plans_even_when_every_agent_is_busy(self):
+        # No status check happens, so a dry run against a busy fleet still
+        # shows the plan instead of refusing it.
+        result = dry_run(self.client, ASSIGNMENTS, BY_NAME, self.paths)
+        self.assertEqual(len(result["steps"]), 3)
+        self.assertEqual(self.runner.writes(), [])
+
+    def test_dry_run_shows_the_prompt_text_that_would_be_sent(self):
+        result = dry_run(self.client, {"developer": "grok"}, BY_NAME, self.paths)
+        self.assertIn("DEVELOPER", result["steps"][0]["prompt"])
+
+
+class RefusalTest(unittest.TestCase):
+    def setUp(self):
+        self.paths = {"common": "/w/COMMON.md", "developer": "/w/dev.md"}
+
+    def test_working_agent_is_refused_and_nothing_is_sent(self):
+        runner = runner_with({"grok": "working"})
+        with self.assertRaises(AgentBusyError) as caught:
+            apply(HerdrClient(runner=runner), {"developer": "grok"}, BY_NAME, self.paths, AT)
+        self.assertIn("grok (working)", str(caught.exception))
+        self.assertEqual(runner.writes(), [])
+
+    def test_blocked_agent_is_refused(self):
+        runner = runner_with({"grok": "blocked"})
+        with self.assertRaises(AgentBusyError):
+            apply(HerdrClient(runner=runner), {"developer": "grok"}, BY_NAME, self.paths, AT)
+        self.assertEqual(runner.writes(), [])
+
+    def test_one_busy_agent_blocks_the_whole_round(self):
+        # claude is idle, but codex is working: nothing goes out, so the round
+        # is never half-applied.
+        runner = runner_with({"claude": "idle", "codex": "working"})
+        paths = {"common": "/w/COMMON.md", "developer": "/w/dev.md", "tester": "/w/t.md"}
+        with self.assertRaises(AgentBusyError):
+            apply(
+                HerdrClient(runner=runner),
+                {"developer": "claude", "tester": "codex"},
+                BY_NAME,
+                paths,
+                AT,
+            )
+        self.assertEqual(runner.writes(), [])
+
+    def test_force_overrides_the_refusal(self):
+        runner = runner_with({"grok": "working"})
+        result = apply(
+            HerdrClient(runner=runner), {"developer": "grok"}, BY_NAME, self.paths, AT, force=True
+        )
+        self.assertEqual(result["applied"][0]["state_before"], "working")
+        self.assertEqual(len(runner.writes()), 2)
+
+    def test_check_all_ready_returns_statuses_when_everyone_is_free(self):
+        runner = runner_with({"grok": "idle", "claude": "done"})
+        statuses = check_all_ready(
+            HerdrClient(runner=runner), {"developer": "grok", "tester": "claude"}
+        )
+        self.assertEqual(statuses, {"grok": "idle", "claude": "done"})
+
+
+class ApplyTest(unittest.TestCase):
+    def setUp(self):
+        self.paths = {
+            "common": "/w/COMMON.md",
+            "developer": "/w/dev.md",
+            "tester": "/w/test.md",
+        }
+
+    def test_clear_settle_then_assign_in_order(self):
+        runner = runner_with({"grok": "idle"})
+        apply(HerdrClient(runner=runner), {"developer": "grok"}, BY_NAME, self.paths, AT)
+        self.assertEqual(
+            runner.commands(),
+            [
+                "agent get grok",
+                "agent prompt grok /new",
+                "agent wait grok --until idle --until done --timeout 60000",
+                "agent prompt grok 'New assignment from the team lead. Your role for "
+                "this task is DEVELOPER. Read /w/COMMON.md in full, then read /w/dev.md "
+                "in full, and execute that brief exactly. Finish with the REPORT line it "
+                "specifies.'",
+            ],
+        )
+
+    def test_status_of_every_target_is_checked_before_the_first_write(self):
+        runner = runner_with({"grok": "idle", "claude": "idle"})
+        apply(
+            HerdrClient(runner=runner),
+            {"developer": "grok", "tester": "claude"},
+            BY_NAME,
+            self.paths,
+            AT,
+        )
+        commands = runner.commands()
+        first_write = min(index for index, c in enumerate(commands) if c.startswith("agent prompt"))
+        self.assertEqual(commands[:first_write], ["agent get grok", "agent get claude"])
+
+    def test_no_clear_sends_only_the_assignment(self):
+        runner = runner_with({"grok": "idle"})
+        apply(
+            HerdrClient(runner=runner), {"developer": "grok"}, BY_NAME, self.paths, AT, no_clear=True
+        )
+        self.assertEqual(len(runner.writes()), 1)
+        self.assertIn("DEVELOPER", runner.writes()[0])
+
+    def test_result_records_what_was_applied(self):
+        runner = runner_with({"grok": "idle"})
+        result = apply(HerdrClient(runner=runner), {"developer": "grok"}, BY_NAME, self.paths, AT)
+        self.assertFalse(result["dry_run"])
+        self.assertEqual(result["applied_at"], AT)
+        self.assertEqual(
+            result["applied"],
+            [
+                {
+                    "role": "developer",
+                    "agent": "grok",
+                    "state_before": "idle",
+                    "cleared": True,
+                    "brief": "/w/dev.md",
+                    "common": "/w/COMMON.md",
+                    "at": AT,
+                }
+            ],
+        )
+
+    def test_the_ledger_callback_fires_once_per_hand_off(self):
+        runner = runner_with({"grok": "idle", "claude": "idle"})
+        seen = []
+        apply(
+            HerdrClient(runner=runner),
+            {"developer": "grok", "tester": "claude"},
+            BY_NAME,
+            self.paths,
+            AT,
+            on_assigned=lambda role, agent, at: seen.append((role, agent, at)),
+        )
+        self.assertEqual(seen, [("developer", "grok", AT), ("tester", "claude", AT)])
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -1,7 +1,36 @@
 {
   "include": [
     "skills/release/stamp-changelog.py",
-    "skills/release/tests/test_stamp_changelog.py"
+    "skills/release/tests/test_stamp_changelog.py",
+    "skills/teamlead/teamlead/__init__.py",
+    "skills/teamlead/teamlead/__main__.py",
+    "skills/teamlead/teamlead/assign.py",
+    "skills/teamlead/teamlead/cli.py",
+    "skills/teamlead/teamlead/config.py",
+    "skills/teamlead/teamlead/errors.py",
+    "skills/teamlead/teamlead/herdr.py",
+    "skills/teamlead/teamlead/measure.py",
+    "skills/teamlead/teamlead/parsers.py",
+    "skills/teamlead/teamlead/planner.py",
+    "skills/teamlead/teamlead/state.py",
+    "skills/teamlead/tests/__init__.py",
+    "skills/teamlead/tests/fakes.py",
+    "skills/teamlead/tests/test_assign.py",
+    "skills/teamlead/tests/test_cli.py",
+    "skills/teamlead/tests/test_config.py",
+    "skills/teamlead/tests/test_herdr.py",
+    "skills/teamlead/tests/test_measure.py",
+    "skills/teamlead/tests/test_parsers.py",
+    "skills/teamlead/tests/test_planner.py",
+    "skills/teamlead/tests/test_state.py"
+  ],
+  "executionEnvironments": [
+    {
+      "root": "skills/teamlead",
+      "extraPaths": [
+        "skills/teamlead"
+      ]
+    }
   ],
   "pythonVersion": "3.11",
   "typeCheckingMode": "standard",

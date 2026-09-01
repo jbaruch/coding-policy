@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "agents": [
+    {
+      "name": "claude",
+      "kind": "claude",
+      "usage_prompt": "/usage",
+      "usage_marker": "Current week",
+      "usage_read_source": "visible",
+      "close_keys": ["esc"],
+      "clear_prompt": "/clear"
+    },
+    {
+      "name": "codex",
+      "kind": "codex",
+      "usage_prompt": "/status",
+      "usage_marker": "Weekly limit",
+      "usage_read_source": "recent-unwrapped",
+      "clear_prompt": "/new"
+    },
+    {
+      "name": "grok",
+      "kind": "grok",
+      "usage_prompt": "/usage",
+      "usage_marker": "Weekly limit",
+      "usage_read_source": "recent-unwrapped",
+      "clear_prompt": "/new"
+    }
+  ]
+}
