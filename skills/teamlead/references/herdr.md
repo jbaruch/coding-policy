@@ -83,7 +83,7 @@ message ends with the literal last line `REPORT: <path>`. The reliable wait
 primitive is
 
 ```bash
-herdr pane wait-output <pane-id> --regex 'REPORT: ' --source visible --lines 40 --timeout <ms>
+herdr pane wait-output --match 'REPORT: ' --source visible --lines 40 --timeout <ms> <pane-id>
 ```
 
 followed by verifying the file. `skills/teamlead/wait-report.sh` does both;

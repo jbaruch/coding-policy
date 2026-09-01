@@ -21,6 +21,12 @@
 #   7. Probe fails     -> a non-timeout probe error is exit 2, not "not yet".
 #   8. Usage error     -> exit 2 with a usage line.
 #   9. Outside Herdr   -> exit 2, empty stdout.
+#  10. Relative path   -> refused up front (exit 2), never probed.
+#  11. Probe argv      -> options first, PANE_ID last, matched with --match.
+#  12. No pane id     -> a payload without one is exit 2, named once.
+#  13. No set -u abort -> every case's stderr is checked for "unbound
+#                         variable", including the success path, which emits
+#                         its JSON and exits 0 before the abort would fire.
 #
 # Run: bash skills/teamlead/tests/test_wait_report.sh
 set -uo pipefail
@@ -50,11 +56,17 @@ case "${1:-} ${2:-}" in
       printf '{"id":"cli:agent:get","result":{"type":"agent_info"}}\n'
       exit 0
     fi
+    if [[ -n "${FAKE_GET_NO_PANE:-}" ]]; then
+      printf '{"id":"cli:agent:get","result":{"type":"agent_info","agent":{"agent":"claude","agent_status":"%s","name":"%s"}}}\n' \
+        "${FAKE_STATUS:-idle}" "${3:-worker}"
+      exit 0
+    fi
     printf '{"id":"cli:agent:get","result":{"type":"agent_info","agent":{"agent":"claude","agent_status":"%s","pane_id":"%s","name":"%s"}}}\n' \
       "${FAKE_STATUS:-idle}" "${FAKE_PANE:-w2:p1}" "${3:-worker}"
     exit 0
     ;;
   "pane wait-output")
+    [[ -n "${FAKE_ARGV_FILE:-}" ]] && printf '%s\n' "$*" >> "$FAKE_ARGV_FILE"
     case "${FAKE_MARKER:-timeout}" in
       found) printf '{"id":"cli:pane:wait-output","result":{"type":"pane_output_match"}}\n'; exit 0 ;;
       late)
@@ -96,6 +108,19 @@ run() {
     "$@" bash "$SCRIPT" worker "$report" </dev/null 2>"$err")"
   RC=$?
   ERRTEXT="$(cat "$err")"
+  assert_no_unbound "$ERRTEXT" "run #${RUN_SEQ}"
+}
+
+# A `set -u` abort fires mid-flight, after output has already been emitted, so
+# an exit code and a stdout payload can both look correct while the script died
+# on its way out. Every case checks for it (a live run hit exactly that: the
+# success JSON, exit 0, then `pane: unbound variable`).
+assert_no_unbound() { # <stderr-text> <label>
+  case "$1" in
+    *"unbound variable"*)
+      fail "$2: stderr carries a set -u abort: $1" ;;
+    *) pass ;;
+  esac
 }
 
 main() {
@@ -176,6 +201,60 @@ main() {
   OUT="$(env -u HERDR_ENV HERDR_BIN="$FAKE" bash "$SCRIPT" worker "$report" </dev/null 2>"$TMP/e9")"; RC=$?
   if [[ $RC -eq 2 && -z "$OUT" ]] && grep -q "Herdr" "$TMP/e9"; then
     pass; else fail "outside Herdr: expected exit 2 + empty stdout, got RC=$RC OUT=$OUT"; fi
+
+  # 10. A relative report path resolves against the caller's cwd, so it is
+  #     refused before any probe rather than silently answering about the
+  #     wrong file.
+  OUT="$(env HERDR_ENV=1 HERDR_BIN="$FAKE" FAKE_MARKER=found \
+    bash "$SCRIPT" worker "reports/worker.md" </dev/null 2>"$TMP/e10")"; RC=$?
+  if [[ $RC -eq 2 && -z "$OUT" ]] && grep -q "relative" "$TMP/e10"; then
+    pass; else fail "relative path: expected exit 2 naming it, got RC=$RC OUT=$OUT"; fi
+
+  # 10b. The refusal names the absolute form to pass instead. The literal
+  #      searched for is `$PWD/`, so the pattern stays single-quoted
+  #      (shellcheck SC2016 does not apply: no expansion is wanted here).
+  # shellcheck disable=SC2016
+  if grep -q '\$PWD/' "$TMP/e10"; then
+    pass; else fail "relative path: expected an actionable message, got $(cat "$TMP/e10")"; fi
+
+  # 11. herdr's usage line is `pane wait-output [OPTIONS] <--match|--regex>
+  #     <PANE_ID>`; the probe must match it, and use --match for a literal.
+  local argvfile="$TMP/probe-argv"
+  RUN_SEQ=$((RUN_SEQ+1))
+  env HERDR_ENV=1 HERDR_BIN="$FAKE" \
+    TEAMLEAD_WAIT_INTERVAL_SEC=0 TEAMLEAD_WAIT_BUDGET_SEC=0 \
+    FAKE_MARKER=found FAKE_ARGV_FILE="$argvfile" FAKE_PANE="w9:p9" \
+    bash "$SCRIPT" worker "$report" </dev/null >/dev/null 2>"$TMP/stderr.$RUN_SEQ"
+  local probe_argv=""
+  [[ -r "$argvfile" ]] && read -r probe_argv < "$argvfile"
+  if [[ "$probe_argv" == *"--match REPORT: "* && "$probe_argv" == *" w9:p9" ]]; then
+    pass; else fail "probe argv: expected options first and the pane id last, got '$probe_argv'"; fi
+  if [[ "$probe_argv" != *"--regex"* ]]; then
+    pass; else fail "probe argv: a literal marker must use --match, got '$probe_argv'"; fi
+
+  # 12. An `agent get` payload with no pane id would otherwise probe the
+  #     literal pane "unknown" on every attempt and report a generic herdr
+  #     error; name the real cause once instead.
+  RUN_SEQ=$((RUN_SEQ+1))
+  OUT="$(env HERDR_ENV=1 HERDR_BIN="$FAKE" \
+    TEAMLEAD_WAIT_INTERVAL_SEC=0 TEAMLEAD_WAIT_BUDGET_SEC=0 \
+    FAKE_MARKER=found FAKE_GET_NO_PANE=1 \
+    bash "$SCRIPT" worker "$report" </dev/null 2>"$TMP/e12")"; RC=$?
+  ERRTEXT="$(cat "$TMP/e12")"
+  if [[ $RC -eq 2 && -z "$OUT" ]] && printf '%s' "$ERRTEXT" | grep -q "reported no pane id"; then
+    pass; else fail "no pane id: expected exit 2 naming it, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
+  assert_no_unbound "$ERRTEXT" "no pane id"
+
+  # 13. The success path specifically: stdout is the envelope and stderr is
+  #     EMPTY. A `set -u` abort here would arrive after the JSON, where an
+  #     exit-code check alone would call the run clean.
+  RUN_SEQ=$((RUN_SEQ+1))
+  OUT="$(env HERDR_ENV=1 HERDR_BIN="$FAKE" \
+    TEAMLEAD_WAIT_INTERVAL_SEC=0 TEAMLEAD_WAIT_BUDGET_SEC=0 \
+    FAKE_MARKER=found FAKE_STATUS=idle \
+    bash "$SCRIPT" worker "$report" </dev/null 2>"$TMP/e13")"; RC=$?
+  if [[ $RC -eq 0 && ! -s "$TMP/e13" ]] && printf '%s' "$OUT" | jq -e '.found == true' >/dev/null 2>&1; then
+    pass; else fail "clean success: expected exit 0 with empty stderr, got RC=$RC ERR=$(cat "$TMP/e13")"; fi
 
   echo "─────────────────────────────────────────────" >&2
   if [[ $FAIL -gt 0 ]]; then echo "FAILED: ${FAIL} failed, ${PASS} passed" >&2; exit 1; fi

@@ -11,7 +11,8 @@
 # Contract:
 #   argv  : <agent-name> <report-path>
 #           agent-name  a live Herdr agent name (or the pane id hosting it).
-#           report-path absolute path the brief told that worker to write.
+#           report-path absolute path the brief told that worker to write; a
+#                       relative path is refused (exit 2).
 #   stdout: one JSON object, emitted on every terminal outcome —
 #           {"agent":"<n>","state":"<s>","report_path":"<p>",
 #            "found":<bool>,"elapsed_seconds":<int>}
@@ -42,12 +43,21 @@ TEAMLEAD_PROBE_TIMEOUT_MS="${TEAMLEAD_PROBE_TIMEOUT_MS:-2000}"
 # render on the alternate screen, so rows that scrolled off are unrecoverable;
 # the marker is the LAST line of the final message and stays on screen.
 TEAMLEAD_PROBE_LINES="${TEAMLEAD_PROBE_LINES:-40}"
-# The literal the brief requires as the final message's last line.
-REPORT_MARKER_REGEX='REPORT: '
+# The literal the brief requires as the final message's last line. Matched with
+# `--match`, never `--regex`: it is a literal, and a regex engine would only
+# add a second opinion about what its space means.
+REPORT_MARKER='REPORT: '
 
 HERDR_BIN="${HERDR_BIN:-herdr}"
 
 ERRFILE=""
+
+# Set by main from argv. Initialized here rather than only there so every
+# function that reads them is safe under `set -u` whatever the call order --
+# an unset read aborts the script mid-flight, after output has already gone out
+# (rules/error-handling.md: fail visibly, never half-way).
+AGENT=""
+REPORT_PATH=""
 
 warn() { printf 'wait-report: %s\n' "$1" >&2; }
 
@@ -94,11 +104,15 @@ agent_info() { # <agent-name>
 # (rules/error-handling.md — distinguish an expected non-result from a fault).
 marker_seen() { # <pane-id>
   local rc=0 code
-  "$HERDR_BIN" pane wait-output "$1" \
-    --regex "$REPORT_MARKER_REGEX" \
+  # Argument order follows herdr's own usage line -- `pane wait-output
+  # [OPTIONS] <--match|--regex> <PANE_ID>` -- and the builder in
+  # skills/teamlead/teamlead/herdr.py, so the two surfaces cannot drift.
+  "$HERDR_BIN" pane wait-output \
+    --match "$REPORT_MARKER" \
     --source visible \
     --lines "$TEAMLEAD_PROBE_LINES" \
-    --timeout "$TEAMLEAD_PROBE_TIMEOUT_MS" >/dev/null 2>"$ERRFILE" || rc=$?
+    --timeout "$TEAMLEAD_PROBE_TIMEOUT_MS" \
+    "$1" >/dev/null 2>"$ERRFILE" || rc=$?
   if (( rc == 0 )); then return 0; fi
   code="$(jq -r '.error.code // "unparseable"' < "$ERRFILE" 2>/dev/null)" || code="unparseable"
   if [[ "$code" == "timeout" ]]; then return 1; fi
@@ -114,6 +128,15 @@ main() {
   AGENT="$1"
   REPORT_PATH="$2"
 
+  # The contract says absolute, and the -f test below resolves a relative path
+  # against whatever cwd the caller happens to be in -- a different directory
+  # per round would report a present report as missing, or an unrelated file as
+  # present.
+  if [[ "$REPORT_PATH" != /* ]]; then
+    warn "report path '${REPORT_PATH}' is relative — pass the absolute path the brief gave the worker (e.g. \"\$PWD/${REPORT_PATH#./}\")"
+    return 2
+  fi
+
   if [[ "${HERDR_ENV:-}" != "1" ]]; then
     warn "not running inside Herdr (HERDR_ENV='${HERDR_ENV:-}') — run the team round from a pane Herdr manages"
     return 2
@@ -127,7 +150,11 @@ main() {
     return 2
   fi
 
-  local start now elapsed info state pane rc marker
+  # Initialized, not just declared: `local pane` alone leaves an UNSET
+  # variable, and under `set -u` any path that reads it before the assignment
+  # aborts the run. Giving each one a value makes that class impossible rather
+  # than making it depend on statement order holding forever.
+  local start=0 now=0 elapsed=0 info="" state="unknown" pane="" rc=0 marker=0
   if ! start="$(date +%s)"; then
     warn "cannot read the system clock — the wait cannot be bounded"
     return 2
@@ -136,13 +163,19 @@ main() {
   ERRFILE="$(mktemp)"
   trap cleanup EXIT
 
-  state="unknown"
   while :; do
     rc=0
     info="$(agent_info "$AGENT")" || rc=$?
     if (( rc != 0 )); then return 2; fi
     state="${info%% *}"
     pane="${info##* }"
+    # jq fills an absent pane_id with the literal "unknown" rather than failing,
+    # and probing a pane id that does not exist would surface as a generic herdr
+    # error on every attempt. Name the real cause once instead.
+    if [[ -z "$pane" || "$pane" == "unknown" ]]; then
+      warn "\`${HERDR_BIN} agent get ${AGENT}\` reported no pane id — the agent may have exited; run \`${HERDR_BIN} agent list\` to see the live panes"
+      return 2
+    fi
 
     # A blocked worker is waiting on a human, not producing a report. Return
     # now so the lead inspects the dialog instead of burning the budget.
