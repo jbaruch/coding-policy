@@ -53,7 +53,7 @@
 # stops matching and degrades to red, never to a wrongly-green release. The
 # credit text is the top-of-file constant below.
 #
-# Usage: smart-publish.sh <mode> <plugin-path> <ref-name> <ref-type>
+# Usage: smart-publish.sh <mode> <plugin-path> <ref-name> <ref-type> [<skip-evals>]
 #   <mode>        auto-bump = compute the next version REGISTRY-aware (registry
 #                 empty -> the manifest; manifest strictly ahead -> the manifest;
 #                 otherwise -> registry latest + one patch), write it into the
@@ -68,6 +68,9 @@
 #   <ref-type>    GITHUB_REF_TYPE — commit-back only pushes on "branch"; a
 #                 non-branch ref skips the bump-push with a warning (the publish
 #                 still succeeded), never fails a landed release.
+#   <skip-evals>  true = pass `--skip-evals` to `tessl plugin publish`; false
+#                 (default) = publish scenarios from <plugin-path>/evals when
+#                 present.
 # Out:  ONE JSON object on stdout —
 #         {"outcome":"success"|"failure","exit_code":N,
 #          "version":"x.y.z"|null,"credit_signature":true|false,
@@ -306,15 +309,19 @@ version_exists() { # <workspace> <plugin> <version> <context-for-diagnostics>
 }
 
 main() {
-  if [[ $# -ne 4 ]]; then
-    echo "usage: $0 <mode> <plugin-path> <ref-name> <ref-type>" >&2
+  if [[ $# -lt 4 || $# -gt 5 ]]; then
+    echo "usage: $0 <mode> <plugin-path> <ref-name> <ref-type> [<skip-evals>]" >&2
     exit 2
   fi
-  local mode="$1" path="$2" ref_name="$3" ref_type="$4"
+  local mode="$1" path="$2" ref_name="$3" ref_type="$4" skip_evals="${5:-false}"
 
   case "$mode" in
     auto-bump|as-is) ;;
     *) echo "error: mode must be 'auto-bump' or 'as-is', got '${mode}'" >&2; exit 2 ;;
+  esac
+  case "$skip_evals" in
+    true|false) ;;
+    *) echo "error: skip-evals must be 'true' or 'false', got '${skip_evals}'" >&2; exit 2 ;;
   esac
 
   command -v tessl >/dev/null 2>&1 \
@@ -404,7 +411,11 @@ main() {
       exit 1
     fi
   fi
-  pub_args=(plugin publish "$path")
+  pub_args=(plugin publish)
+  if [[ "$skip_evals" == "true" ]]; then
+    pub_args+=(--skip-evals)
+  fi
+  pub_args+=("$path")
 
   trap cleanup_sp_log EXIT
   SP_LOG_FILE="$(mktemp)" \

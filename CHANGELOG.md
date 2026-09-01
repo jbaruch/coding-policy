@@ -1,5 +1,11 @@
 # Changelog
 
+### Actions — consumers can publish without uploading or running eval scenarios
+
+The reusable publish workflow now exposes `skip-evals: true`, forwarding Tessl's supported `tessl plugin publish --skip-evals` flag through the `smart-publish` action and script. This is distinct from skill review: `tessl review run` remains enabled and continues to gate changed skills, while scenarios under the consumer's local `evals/` directory are neither uploaded nor launched during publish.
+
+The control closes a misleading packaging boundary found in `jbaruch/blog-writer@1.1.34`: `.tesslignore` excluded `evals/` from the normal plugin archive, but `tessl plugin publish` discovers that directory separately, uploaded all six scenarios, attached them to the registry version, and launched a credit-consuming task eval. The new input defaults to `false` so every existing consumer keeps its current behavior until it opts in explicitly. Script tests cover the default invocation, flag forwarding, and rejection of invalid boolean values before Tessl is called.
+
 ## 0.3.171 — 2026-08-21
 
 ### Fix — a publish that timed out client-side no longer reds a release that landed

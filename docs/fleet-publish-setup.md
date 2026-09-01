@@ -64,6 +64,7 @@ name. `Review & Publish Plugin` is the fleet default for new repos.
 | `node-version` | `''` | The pre-publish gate needs a pinned Node runtime. Sets up Node before the gate. |
 | `skills-dir` | `skills` | The repo's skills live somewhere other than `skills/`. |
 | `skill-review-credit-outage` | `fail` | Set `skip` to opt into publishing an unreviewed skill during a tessl out-of-credits (403) outage (context-artifacts Credit-Outage Review Carve-Out). Every other review failure still hard-fails. |
+| `skip-evals` | `false` | Set `true` to pass `--skip-evals` at publish time. Local `evals/` scenarios stay in the repo but are neither uploaded nor run; skill review remains enabled. |
 
 `TESSL_TOKEN` is passed as a secret (never an input). The review threshold is fixed at 85
 inside the reusable workflow — it is not a caller input (context-artifacts forbids
