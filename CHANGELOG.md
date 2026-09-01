@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.172 — 2026-09-01
+
 ### Actions — consumers can publish without uploading or running eval scenarios
 
 The reusable publish workflow now exposes `skip-evals: true`, forwarding Tessl's supported `tessl plugin publish --skip-evals` flag through the `smart-publish` action and script. This is distinct from skill review: `tessl review run` remains enabled and continues to gate changed skills, while scenarios under the consumer's local `evals/` directory are neither uploaded nor launched during publish.
