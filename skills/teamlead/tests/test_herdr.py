@@ -12,7 +12,7 @@ import subprocess
 import unittest
 
 from teamlead.errors import HerdrError
-from teamlead.herdr import HerdrClient, format_argv
+from teamlead.herdr import HerdrClient, format_argv, trace_enabled_in_env
 
 from tests.fakes import FakeRunner, agent_json, ok_json
 
@@ -193,6 +193,77 @@ class FailureTest(unittest.TestCase):
         with self.assertRaises(HerdrError) as caught:
             HerdrClient(runner=runner).agent_wait("x")
         self.assertIn("agent wait x", str(caught.exception))
+
+
+class TraceTest(unittest.TestCase):
+    """Tracing exists so a live run that goes wrong is diagnosable."""
+
+    def test_no_sink_means_no_output(self):
+        runner = FakeRunner()
+        runner.set("agent get grok", agent_json("grok", "idle", "w4:p1"))
+        HerdrClient(runner=runner).agent_get("grok")  # must not raise
+
+    def test_a_successful_call_records_argv_exit_and_raw_streams(self):
+        runner = FakeRunner()
+        runner.set("agent read grok", "Weekly limit: 0%\n")
+        lines = []
+        HerdrClient(runner=runner, trace=lines.append).agent_read(
+            "grok", source="visible", lines=80
+        )
+        self.assertEqual(len(lines), 1)
+        self.assertIn("herdr> herdr agent read grok --source visible --lines 80", lines[0])
+        self.assertIn("exit=0", lines[0])
+        self.assertIn("Weekly limit: 0%", lines[0])
+
+    def test_a_failing_call_records_the_stderr_payload(self):
+        runner = FakeRunner()
+        runner.set(
+            "pane wait-output",
+            stdout="",
+            returncode=1,
+            stderr='{"error":{"code":"timeout","message":"timed out waiting for output match"}}',
+        )
+        lines = []
+        client = HerdrClient(runner=runner, trace=lines.append)
+        with self.assertRaises(HerdrError):
+            client.pane_wait_output("w4:p1", match="Weekly limit", timeout_ms=20000)
+        self.assertEqual(len(lines), 1)
+        self.assertIn("pane wait-output --match 'Weekly limit'", lines[0])
+        self.assertIn("exit=1", lines[0])
+        self.assertIn("timed out waiting for output match", lines[0])
+
+    def test_a_missing_binary_is_traced_too(self):
+        runner = FakeRunner(raises={"agent get x": FileNotFoundError()})
+        lines = []
+        with self.assertRaises(HerdrError):
+            HerdrClient(runner=runner, trace=lines.append).agent_get("x")
+        self.assertIn("executable not found", lines[0])
+
+    def test_every_call_is_traced_in_order(self):
+        runner = FakeRunner()
+        runner.set("agent get grok", agent_json("grok", "idle", "w4:p1"))
+        runner.set("agent read grok", "text\n")
+        lines = []
+        client = HerdrClient(runner=runner, trace=lines.append)
+        client.agent_get("grok")
+        client.agent_read("grok")
+        self.assertEqual(len(lines), 2)
+        self.assertIn("agent get grok", lines[0])
+        self.assertIn("agent read grok", lines[1])
+
+
+class TraceEnvTest(unittest.TestCase):
+    def test_unset_or_empty_is_off(self):
+        self.assertFalse(trace_enabled_in_env({}))
+        self.assertFalse(trace_enabled_in_env({"TEAMLEAD_TRACE": ""}))
+        self.assertFalse(trace_enabled_in_env({"TEAMLEAD_TRACE": "  "}))
+
+    def test_zero_is_off(self):
+        self.assertFalse(trace_enabled_in_env({"TEAMLEAD_TRACE": "0"}))
+
+    def test_anything_else_is_on(self):
+        self.assertTrue(trace_enabled_in_env({"TEAMLEAD_TRACE": "1"}))
+        self.assertTrue(trace_enabled_in_env({"TEAMLEAD_TRACE": "yes"}))
 
 
 class FormatArgvTest(unittest.TestCase):

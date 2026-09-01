@@ -94,6 +94,13 @@ left in the scrollback by an earlier round can satisfy the wait immediately.
 Clear the worker's context between rounds and verify the file's content belongs
 to the current round.
 
+`pane wait-output` is also not trustworthy on its own: it timed out against
+Grok's modal on the alternate screen while the dialog was plainly up. Treat a
+failed wait as a warning and confirm the marker in the text that gets parsed —
+`herdr agent read` on a bounded poll. Match a marker with `--match`, never
+`--regex`: the marker is literal config text, and a regex engine only adds a
+second opinion about what an escaped space means. Pass `--lines` on every read.
+
 ### A Stale `working` Is Not a Busy Worker
 
 Herdr derives the lifecycle state from the agent's window title, and that title

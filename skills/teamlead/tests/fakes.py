@@ -50,7 +50,10 @@ class FakeRunner:
                     joined, sorted(self.responses)
                 )
             )
-        return self.responses[best]
+        response = self.responses[best]
+        if isinstance(response, ScriptedReads):
+            return response.next_completed()
+        return response
 
     def commands(self):
         """Every call as a shell string, binary dropped."""
@@ -63,6 +66,25 @@ class FakeRunner:
             for command in self.commands()
             if command.startswith("agent prompt ") or command.startswith("agent send-keys ")
         ]
+
+
+class ScriptedReads:
+    """A response that yields a different stdout on each successive call.
+
+    Stands in for a pane that takes a few reads to finish painting. The last
+    entry repeats once the script runs out, so an over-long poll is stable.
+    The runner materializes one FakeCompleted per call, so reading `.stdout`
+    twice within a call (tracing does) never advances the script.
+    """
+
+    def __init__(self, texts):
+        self._texts = list(texts)
+        self._index = 0
+
+    def next_completed(self):
+        text = self._texts[min(self._index, len(self._texts) - 1)]
+        self._index += 1
+        return FakeCompleted(0, text, "")
 
 
 def agent_json(name, status, pane_id):

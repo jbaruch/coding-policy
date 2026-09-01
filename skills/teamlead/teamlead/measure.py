@@ -6,9 +6,16 @@ The flow per agent is always the same:
 2. when herdr says `working`, confirm it against the pane (see teamlead/probe.py)
 3. refuse to write to a `working` or `blocked` agent unless --force
 4. send the agent's usage slash command
-5. wait for its marker to appear with `herdr pane wait-output`, never sleep
+5. wait for its marker, `herdr pane wait-output` first and a bounded
+   `herdr agent read` poll second
 6. read the pane and parse it
 7. close the dialog when the agent opens one -- always, including on failure
+
+Step 5 has two mechanisms on purpose. `pane wait-output` is event-driven and
+cheap, but it did not deliver against Grok's modal on the alternate screen,
+while prompt-then-read is the sequence that works by hand. Neither is trusted
+alone: the wait is best-effort, and the marker is confirmed in the text that
+actually gets parsed.
 
 Step 7 runs in a `finally`: a usage dialog left open flips the agent to
 `working` and swallows the next prompt, so a failed read must not leave one
@@ -18,23 +25,101 @@ standing.
 CLI-layer concern, which is what lets the tests assert on an exact timestamp.
 """
 
-import re
+import time
 
 from .errors import HerdrError, ParseError
-from .herdr import BUSY_STATES, DEFAULT_MARKER_TIMEOUT_MS, READY_STATES
+from .herdr import BUSY_STATES, DEFAULT_MARKER_TIMEOUT_MS, READY_STATES, format_argv
 from .parsers import headroom_pct, parse_usage
-from .probe import resolve_status
+from .probe import resolve_status, stderr_warn
 
 MEASURE_SCHEMA_VERSION = 1
 
-#: Lines to pull for an inline report. `visible` reads the viewport and needs
-#: no line count, so this applies to the scrollback sources only.
+#: Lines to pull when reading a usage report. Always passed: the read that
+#: works by hand names a line count explicitly, and relying on herdr's default
+#: risks a viewport clipped short of the numbers.
 DEFAULT_READ_LINES = 80
 
+#: Bounded fallback poll, used when `pane wait-output` does not deliver the
+#: marker. Ten attempts a second apart, then the measurement fails loudly.
+DEFAULT_MARKER_POLL_ATTEMPTS = 10
+DEFAULT_MARKER_POLL_INTERVAL_SEC = 1.0
 
-def marker_pattern(marker):
-    """Turn a literal config marker into a regex herdr's engine accepts."""
-    return re.escape(marker)
+
+def wait_for_usage_report(client, agent, pane_id, marker_timeout_ms=DEFAULT_MARKER_TIMEOUT_MS, read_lines=DEFAULT_READ_LINES, poll_attempts=DEFAULT_MARKER_POLL_ATTEMPTS, poll_interval_sec=DEFAULT_MARKER_POLL_INTERVAL_SEC, sleep=time.sleep, warn=None):
+    """Return pane text containing `agent.usage_marker`.
+
+    The marker is a literal substring, never a pattern, so the wait uses
+    herdr's `--match` rather than `--regex`. An escaped regex is one more
+    engine to be wrong about, and the config field is documented as literal
+    text.
+
+    Two mechanisms, tried in order, with the second covering the first:
+
+    1. `herdr pane wait-output --match ...` -- event-driven, no sleeping.
+    2. a bounded `herdr agent read` poll -- the prompt-then-read sequence that
+       works by hand against a modal on the alternate screen.
+
+    A failed wait is a warning, not the end: the marker is confirmed in the
+    text that will actually be parsed. Raises HerdrError naming both
+    mechanisms when the marker never appears.
+    """
+    warn = warn or stderr_warn
+    argv = client.argv_pane_wait_output(
+        pane_id,
+        match=agent.usage_marker,
+        source=agent.usage_read_source,
+        timeout_ms=marker_timeout_ms,
+    )
+    try:
+        client.pane_wait_output(
+            pane_id,
+            match=agent.usage_marker,
+            source=agent.usage_read_source,
+            timeout_ms=marker_timeout_ms,
+        )
+    except HerdrError as exc:
+        warn(
+            "teamlead: `{}` did not deliver {!r} for {} ({}). Falling back to "
+            "polling `herdr agent read` up to {} times.".format(
+                format_argv(argv), agent.usage_marker, agent.name, exc.message, poll_attempts
+            )
+        )
+
+    text = client.agent_read(
+        agent.name, source=agent.usage_read_source, lines=read_lines
+    )
+    attempts = 0
+    while agent.usage_marker not in text and attempts < poll_attempts:
+        attempts += 1
+        sleep(poll_interval_sec)
+        text = client.agent_read(
+            agent.name, source=agent.usage_read_source, lines=read_lines
+        )
+
+    if agent.usage_marker not in text:
+        raise HerdrError(
+            "{!r} never appeared in {}'s pane. Tried `herdr pane wait-output "
+            "--match` for {}ms, then {} reads of `herdr agent read {} --source "
+            "{} --lines {}` {}s apart. Check the marker against what the agent "
+            "actually prints, and rerun with --trace to see every command and "
+            "its raw output.".format(
+                agent.usage_marker,
+                agent.name,
+                marker_timeout_ms,
+                poll_attempts + 1,
+                agent.name,
+                agent.usage_read_source,
+                read_lines,
+                poll_interval_sec,
+            ),
+            {
+                "agent": agent.name,
+                "marker": agent.usage_marker,
+                "pane_id": pane_id,
+                "poll_attempts": poll_attempts,
+            },
+        )
+    return text
 
 
 def skipped_record(agent, status, herdr_status, state_source):
@@ -52,7 +137,7 @@ def skipped_record(agent, status, herdr_status, state_source):
     }
 
 
-def measure_agent(client, agent, marker_timeout_ms=DEFAULT_MARKER_TIMEOUT_MS, read_lines=DEFAULT_READ_LINES, force=False, warn=None):
+def measure_agent(client, agent, marker_timeout_ms=DEFAULT_MARKER_TIMEOUT_MS, read_lines=DEFAULT_READ_LINES, force=False, warn=None, poll_attempts=DEFAULT_MARKER_POLL_ATTEMPTS, poll_interval_sec=DEFAULT_MARKER_POLL_INTERVAL_SEC, sleep=time.sleep):
     """Measure one agent and return its record.
 
     Raises HerdrError or ParseError; the caller decides whether one bad agent
@@ -77,14 +162,17 @@ def measure_agent(client, agent, marker_timeout_ms=DEFAULT_MARKER_TIMEOUT_MS, re
 
     client.agent_prompt(agent.name, agent.usage_prompt)
     try:
-        client.pane_wait_output(
+        text = wait_for_usage_report(
+            client,
+            agent,
             pane_id,
-            regex=marker_pattern(agent.usage_marker),
-            source=agent.usage_read_source,
-            timeout_ms=marker_timeout_ms,
+            marker_timeout_ms=marker_timeout_ms,
+            read_lines=read_lines,
+            poll_attempts=poll_attempts,
+            poll_interval_sec=poll_interval_sec,
+            sleep=sleep,
+            warn=warn,
         )
-        lines = None if agent.usage_read_source == "visible" else read_lines
-        text = client.agent_read(agent.name, source=agent.usage_read_source, lines=lines)
         parsed = parse_usage(agent.kind, text)
     finally:
         # Always dismiss the report, including when the wait timed out, the
@@ -108,7 +196,7 @@ def measure_agent(client, agent, marker_timeout_ms=DEFAULT_MARKER_TIMEOUT_MS, re
     }
 
 
-def measure(client, agents, measured_at, marker_timeout_ms=DEFAULT_MARKER_TIMEOUT_MS, read_lines=DEFAULT_READ_LINES, force=False, warn=None):
+def measure(client, agents, measured_at, marker_timeout_ms=DEFAULT_MARKER_TIMEOUT_MS, read_lines=DEFAULT_READ_LINES, force=False, warn=None, poll_attempts=DEFAULT_MARKER_POLL_ATTEMPTS, poll_interval_sec=DEFAULT_MARKER_POLL_INTERVAL_SEC, sleep=time.sleep):
     """Measure every agent in `agents` and return the snapshot document.
 
     A failure on one agent is recorded on that agent's record and does not
@@ -127,6 +215,9 @@ def measure(client, agents, measured_at, marker_timeout_ms=DEFAULT_MARKER_TIMEOU
                 read_lines=read_lines,
                 force=force,
                 warn=warn,
+                poll_attempts=poll_attempts,
+                poll_interval_sec=poll_interval_sec,
+                sleep=sleep,
             )
         except (HerdrError, ParseError) as exc:
             failures.append(agent.name)

@@ -101,6 +101,14 @@ class CliCase(unittest.TestCase):
             path = self.tmp / (role + ".md")
             path.write_text("# " + role + "\n", encoding="utf-8")
             self.briefs[role] = path
+        # A stand-in herdr that always fails, for the paths that build a real
+        # client instead of taking an injected one.
+        self.fake_herdr = self.tmp / "herdr-stub"
+        self.fake_herdr.write_text(
+            '#!/bin/sh\necho \'{"error":{"code":"agent_not_found","message":"no"}}\' >&2\nexit 1\n',
+            encoding="utf-8",
+        )
+        self.fake_herdr.chmod(0o755)
         self.out = io.StringIO()
         self.err = io.StringIO()
 
@@ -137,6 +145,61 @@ class ParserTest(unittest.TestCase):
         with contextlib.redirect_stderr(io.StringIO()):
             with self.assertRaises(SystemExit):
                 build_parser().parse_args(["apply"])
+
+
+class TraceFlagTest(CliCase):
+    """--trace has to reach the real client, which tests never inject."""
+
+    def test_the_flag_is_accepted_before_and_after_the_subcommand(self):
+        parser = build_parser()
+        self.assertTrue(parser.parse_args(["--trace", "state"]).trace)
+        self.assertTrue(parser.parse_args(["state", "--trace"]).trace)
+
+    def test_it_is_absent_by_default(self):
+        self.assertFalse(getattr(build_parser().parse_args(["state"]), "trace", False))
+
+    def test_every_herdr_command_is_printed_to_stderr(self):
+        # No client injected: the CLI builds one and wires the trace sink to
+        # the same stderr stream the warnings use.
+        code, out, err = self.run_cli(
+            self.base()
+            + [
+                "--trace",
+                "measure",
+                "--marker-poll-interval",
+                "0",
+                "--agent",
+                "grok",
+                "--now",
+                AT,
+                "--herdr-bin",
+                str(self.fake_herdr),
+            ]
+        )
+        self.assertEqual(code, 1)  # the stub herdr refuses every command
+        self.assertIn("herdr> {} agent get grok".format(self.fake_herdr), err)
+        self.assertIn("exit=1", err)
+        self.assertIn("agent_not_found", err)
+        # stdout stays the machine-readable snapshot; tracing never pollutes it
+        self.assertEqual(json.loads(out)["failed_agents"], ["grok"])
+
+    def test_without_the_flag_nothing_is_traced(self):
+        code, _, err = self.run_cli(
+            self.base()
+            + [
+                "measure",
+                "--marker-poll-interval",
+                "0",
+                "--agent",
+                "grok",
+                "--now",
+                AT,
+                "--herdr-bin",
+                str(self.fake_herdr),
+            ]
+        )
+        self.assertEqual(code, 1)
+        self.assertNotIn("herdr>", err)
 
 
 class StateCommandTest(CliCase):
@@ -260,7 +323,7 @@ class MeasureCommandTest(CliCase):
     def test_measures_the_named_agents_only(self):
         client = self._client({"claude": "idle", "grok": "done"})
         code, out, err = self.run_cli(
-            self.base() + ["measure", "--agent", "claude", "--agent", "grok", "--now", AT],
+            self.base() + ["measure", "--marker-poll-interval", "0", "--agent", "claude", "--agent", "grok", "--now", AT],
             client=client,
         )
         self.assertEqual(code, 0)
@@ -271,14 +334,14 @@ class MeasureCommandTest(CliCase):
 
     def test_snapshot_is_appended_to_the_state_file(self):
         client = self._client({"grok": "idle"})
-        self.run_cli(self.base() + ["measure", "--agent", "grok", "--now", AT], client=client)
+        self.run_cli(self.base() + ["measure", "--marker-poll-interval", "0", "--agent", "grok", "--now", AT], client=client)
         state = json.loads(self.state.read_text(encoding="utf-8"))
         self.assertEqual(len(state["snapshots"]), 1)
         self.assertEqual(state["snapshots"][0]["agents"]["grok"]["headroom_pct"], 100.0)
 
     def test_a_busy_agent_is_skipped_and_never_written_to(self):
         client = self._client({"claude": "idle", "codex": "working", "grok": "done"})
-        code, out, _ = self.run_cli(self.base() + ["measure", "--now", AT], client=client)
+        code, out, _ = self.run_cli(self.base() + ["measure", "--marker-poll-interval", "0", "--now", AT], client=client)
         self.assertEqual(code, 0)
         codex = json.loads(out)["agents"]["codex"]
         self.assertEqual(codex["state"], "working")
@@ -289,7 +352,7 @@ class MeasureCommandTest(CliCase):
         client = self._client({"claude": "idle"})
         self.runner.set("agent read claude", "nothing useful here\n")
         code, out, err = self.run_cli(
-            self.base() + ["measure", "--agent", "claude", "--now", AT], client=client
+            self.base() + ["measure", "--marker-poll-interval", "0", "--agent", "claude", "--now", AT], client=client
         )
         self.assertEqual(code, 1)
         self.assertEqual(json.loads(out)["failed_agents"], ["claude"])
@@ -298,7 +361,7 @@ class MeasureCommandTest(CliCase):
     def test_records_which_signal_decided_the_state(self):
         client = self._client({"grok": "idle"})
         _, out, _ = self.run_cli(
-            self.base() + ["measure", "--agent", "grok", "--now", AT], client=client
+            self.base() + ["measure", "--marker-poll-interval", "0", "--agent", "grok", "--now", AT], client=client
         )
         record = json.loads(out)["agents"]["grok"]
         self.assertEqual(record["state_source"], "herdr")
@@ -307,7 +370,7 @@ class MeasureCommandTest(CliCase):
     def test_a_stale_herdr_state_is_overturned_and_warned_about_on_stderr(self):
         client = self._client({"grok": "working"}, footers={"grok": GROK_IDLE_FOOTER})
         code, out, err = self.run_cli(
-            self.base() + ["measure", "--agent", "grok", "--now", AT], client=client
+            self.base() + ["measure", "--marker-poll-interval", "0", "--agent", "grok", "--now", AT], client=client
         )
         self.assertEqual(code, 0)
         record = json.loads(out)["agents"]["grok"]
@@ -320,7 +383,7 @@ class MeasureCommandTest(CliCase):
     def test_a_genuinely_working_agent_is_still_skipped(self):
         client = self._client({"grok": "working"}, footers={"grok": GROK_WORKING_FOOTER})
         code, out, _ = self.run_cli(
-            self.base() + ["measure", "--agent", "grok", "--now", AT], client=client
+            self.base() + ["measure", "--marker-poll-interval", "0", "--agent", "grok", "--now", AT], client=client
         )
         self.assertEqual(code, 0)
         self.assertTrue(json.loads(out)["agents"]["grok"]["skipped"])
@@ -328,7 +391,7 @@ class MeasureCommandTest(CliCase):
 
     def test_unknown_agent_name_is_an_actionable_error(self):
         code, out, err = self.run_cli(
-            self.base() + ["measure", "--agent", "gemini", "--now", AT],
+            self.base() + ["measure", "--marker-poll-interval", "0", "--agent", "gemini", "--now", AT],
             client=HerdrClient(runner=FakeRunner()),
         )
         self.assertEqual(code, 1)

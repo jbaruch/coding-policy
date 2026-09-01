@@ -21,8 +21,18 @@ from .assign import apply as apply_assignments
 from .assign import dry_run, normalize_assignments, resolve_paths
 from .config import default_config_path, load_config, select_agents
 from .errors import PlanError, TeamLeadError, UsageError
-from .herdr import DEFAULT_MARKER_TIMEOUT_MS, DEFAULT_SETTLE_TIMEOUT_MS, HerdrClient
-from .measure import DEFAULT_READ_LINES, measure
+from .herdr import (
+    DEFAULT_MARKER_TIMEOUT_MS,
+    DEFAULT_SETTLE_TIMEOUT_MS,
+    HerdrClient,
+    trace_enabled_in_env,
+)
+from .measure import (
+    DEFAULT_MARKER_POLL_ATTEMPTS,
+    DEFAULT_MARKER_POLL_INTERVAL_SEC,
+    DEFAULT_READ_LINES,
+    measure,
+)
 from .planner import plan as build_plan
 from .state import (
     add_assignment,
@@ -68,6 +78,13 @@ def build_parser():
         metavar="PATH",
         default=argparse.SUPPRESS,
         help="herdr executable to invoke (default: $TEAMLEAD_HERDR_BIN or `herdr`).",
+    )
+    common.add_argument(
+        "--trace",
+        action="store_true",
+        default=argparse.SUPPRESS,
+        help="Print every herdr command and its raw stdout, stderr, and exit "
+        "status to stderr. Same as TEAMLEAD_TRACE=1.",
     )
 
     parser = argparse.ArgumentParser(
@@ -119,7 +136,22 @@ def build_parser():
         type=int,
         default=DEFAULT_READ_LINES,
         metavar="N",
-        help="Scrollback lines to read for inline reports (default: %(default)s).",
+        help="Pane lines to read for a usage report (default: %(default)s).",
+    )
+    measure_parser.add_argument(
+        "--marker-poll-attempts",
+        type=int,
+        default=DEFAULT_MARKER_POLL_ATTEMPTS,
+        metavar="N",
+        help="Re-reads of the pane after `pane wait-output` fails to deliver "
+        "the marker (default: %(default)s).",
+    )
+    measure_parser.add_argument(
+        "--marker-poll-interval",
+        type=float,
+        default=DEFAULT_MARKER_POLL_INTERVAL_SEC,
+        metavar="SECONDS",
+        help="Seconds between those re-reads (default: %(default)s).",
     )
 
     plan_parser = sub.add_parser(
@@ -219,8 +251,12 @@ def _state_path(args):
     return Path(value) if value else default_state_path()
 
 
-def _client(args):
-    return HerdrClient(binary=getattr(args, "herdr_bin", None))
+def _client(args, trace=None):
+    tracing = getattr(args, "trace", False) or trace_enabled_in_env()
+    return HerdrClient(
+        binary=getattr(args, "herdr_bin", None),
+        trace=trace if tracing else None,
+    )
 
 
 def _parse_briefs(pairs):
@@ -271,7 +307,7 @@ def _load_assignments(value):
 
 def cmd_measure(args, client=None, warn=None):
     agents = select_agents(load_config(_config_path(args)), args.agents)
-    client = client if client is not None else _client(args)
+    client = client if client is not None else _client(args, trace=warn)
     snapshot = measure(
         client,
         agents,
@@ -280,6 +316,8 @@ def cmd_measure(args, client=None, warn=None):
         read_lines=args.lines,
         force=args.force,
         warn=warn,
+        poll_attempts=args.marker_poll_attempts,
+        poll_interval_sec=args.marker_poll_interval,
     )
     state = load_state(_state_path(args))
     add_snapshot(state, snapshot)
@@ -342,7 +380,7 @@ def cmd_apply(args, client=None, warn=None):
     agents_by_name = {agent.name: agent for agent in agents}
     assignments = _load_assignments(args.assignments)
     paths = resolve_paths(assignments, _parse_briefs(args.briefs), args.common)
-    client = client if client is not None else _client(args)
+    client = client if client is not None else _client(args, trace=warn)
 
     if args.dry_run:
         return (

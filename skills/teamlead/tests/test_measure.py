@@ -13,11 +13,33 @@ import unittest
 from teamlead.config import parse_config
 from teamlead.errors import HerdrError, ParseError
 from teamlead.herdr import HerdrClient
-from teamlead.measure import DEFAULT_READ_LINES, marker_pattern, measure, measure_agent, ready_agents
+from teamlead.measure import DEFAULT_READ_LINES, ready_agents
+from teamlead.measure import measure as _measure
+from teamlead.measure import measure_agent as _measure_agent
+from teamlead.measure import wait_for_usage_report as _wait_for_usage_report
 
-from tests.fakes import FakeRunner, agent_json, ok_json
+from tests.fakes import FakeRunner, ScriptedReads, agent_json, ok_json
 
 AT = "2026-02-03T10:00:00+00:00"
+
+
+def NO_SLEEP(seconds):
+    """Stand-in for time.sleep. The fallback poll must never wait in tests."""
+
+
+def measure_agent(client, agent, **kwargs):
+    kwargs.setdefault("sleep", NO_SLEEP)
+    return _measure_agent(client, agent, **kwargs)
+
+
+def measure(client, agents, measured_at, **kwargs):
+    kwargs.setdefault("sleep", NO_SLEEP)
+    return _measure(client, agents, measured_at, **kwargs)
+
+
+def wait_for_usage_report(client, agent, pane_id, **kwargs):
+    kwargs.setdefault("sleep", NO_SLEEP)
+    return _wait_for_usage_report(client, agent, pane_id, **kwargs)
 
 CONFIG = {
     "schema_version": 1,
@@ -62,6 +84,9 @@ CODEX_PANE = (
     "│  Weekly limit: [███] 87% left (resets 17:26 on 7 Sep)  │\n"
 )
 GROK_PANE = "     Weekly limit: 0%\n     Next reset: September 6, 12:55\n     Credits: $16.42\n"
+# Marker present, numbers absent: gets past the marker wait, fails the parse.
+GROK_UNPARSEABLE_PANE = "  Weekly limit is a thing this agent has, apparently\n"
+CLAUDE_UNPARSEABLE_PANE = "  Current week was fine, no numbers though\n"
 GROK_DIALOG_PANE = (
     "│  Weekly limit (X Premium+)      │\n"
     "│  ░░░░░░░░░░░░░░░░░░░░░░  1%     │\n"
@@ -99,13 +124,6 @@ def runner_with(statuses, panes, footers=None):
     return runner
 
 
-class MarkerPatternTest(unittest.TestCase):
-    def test_literal_marker_becomes_an_escaped_pattern(self):
-        # Herdr matches with a Rust regex; escaping keeps a literal marker
-        # literal even when it grows punctuation.
-        self.assertEqual(marker_pattern("Current week (all models)"), r"Current\ week\ \(all\ models\)")
-
-
 class MeasureAgentTest(unittest.TestCase):
     def test_idle_claude_is_measured_and_the_dialog_is_closed(self):
         runner = runner_with({"claude": "idle"}, {"claude": CLAUDE_PANE})
@@ -123,16 +141,43 @@ class MeasureAgentTest(unittest.TestCase):
             [
                 "agent get claude",
                 "agent prompt claude /usage",
-                "pane wait-output --regex 'Current\\ week' --source visible --timeout 20000 w2:p1",
-                "agent read claude --source visible",
+                "pane wait-output --match 'Current week' --source visible --timeout 20000 w2:p1",
+                "agent read claude --source visible --lines 80",
                 "agent send-keys claude esc",
             ],
         )
 
-    def test_visible_reads_omit_a_line_count(self):
+    def test_the_usage_prompt_is_sent_before_the_wait(self):
+        # The wait can only ever see a report the prompt asked for; ordering
+        # them the other way round guarantees a timeout.
         runner = runner_with({"claude": "idle"}, {"claude": CLAUDE_PANE})
         measure_agent(HerdrClient(runner=runner), BY_NAME["claude"])
-        self.assertIn("agent read claude --source visible", runner.commands())
+        commands = runner.commands()
+        self.assertLess(
+            commands.index("agent prompt claude /usage"),
+            next(i for i, c in enumerate(commands) if c.startswith("pane wait-output")),
+        )
+
+    def test_the_marker_is_matched_literally_not_as_a_regex(self):
+        # A marker is literal config text. Escaping it into a regex adds an
+        # engine that can disagree about what an escaped space means; --match
+        # cannot.
+        runner = runner_with({"claude": "idle"}, {"claude": CLAUDE_PANE})
+        measure_agent(HerdrClient(runner=runner), BY_NAME["claude"])
+        waits = [c for c in runner.commands() if c.startswith("pane wait-output")]
+        self.assertEqual(len(waits), 1)
+        self.assertIn("--match 'Current week'", waits[0])
+        self.assertNotIn("--regex", waits[0])
+
+    def test_visible_reads_still_ask_for_a_line_count(self):
+        # The read that works by hand names --lines explicitly; herdr's
+        # default could clip the viewport short of the numbers.
+        runner = runner_with({"claude": "idle"}, {"claude": CLAUDE_PANE})
+        measure_agent(HerdrClient(runner=runner), BY_NAME["claude"])
+        self.assertIn(
+            "agent read claude --source visible --lines {}".format(DEFAULT_READ_LINES),
+            runner.commands(),
+        )
 
     def test_grok_dialog_format_is_measured_the_same_as_the_inline_one(self):
         runner = runner_with({"grok": "idle"}, {"grok": GROK_DIALOG_PANE})
@@ -262,26 +307,96 @@ class ProbeIntegrationTest(unittest.TestCase):
         self.assertNotIn("agent read grok --source visible --lines 40", runner.commands())
 
 
+class MarkerWaitFallbackTest(unittest.TestCase):
+    """Regression: a `pane wait-output` that never delivers used to be fatal.
+
+    Live, grok's modal opened but the wait timed out against it, and the
+    measurement failed on the wait alone -- without ever trying the
+    prompt-then-read sequence that works by hand.
+    """
+
+    def _timing_out_runner(self, pane):
+        runner = runner_with({"grok": "idle"}, {"grok": pane})
+        runner.set(
+            "pane wait-output",
+            stdout="",
+            returncode=1,
+            stderr='{"error":{"code":"timeout","message":"timed out waiting for output match"}}',
+        )
+        return runner
+
+    def test_a_timed_out_wait_falls_back_to_reading_and_succeeds(self):
+        runner = self._timing_out_runner(GROK_DIALOG_PANE)
+        record = measure_agent(
+            HerdrClient(runner=runner), BY_NAME["grok"], warn=lambda message: None
+        )
+        self.assertEqual(record["headroom_pct"], 99.0)
+        self.assertEqual(record["plan"], "X Premium+")
+
+    def test_the_fallback_is_warned_about_and_names_the_command_that_failed(self):
+        runner = self._timing_out_runner(GROK_DIALOG_PANE)
+        warnings = []
+        measure_agent(HerdrClient(runner=runner), BY_NAME["grok"], warn=warnings.append)
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("pane wait-output", warnings[0])
+        self.assertIn("agent read", warnings[0])
+
+    def test_a_successful_wait_polls_no_further(self):
+        runner = runner_with({"grok": "idle"}, {"grok": GROK_DIALOG_PANE})
+        measure_agent(HerdrClient(runner=runner), BY_NAME["grok"])
+        reads = [c for c in runner.commands() if c.startswith("agent read grok")]
+        self.assertEqual(len(reads), 1)
+
+    def test_the_poll_is_bounded_and_then_fails_loudly(self):
+        runner = self._timing_out_runner("no report here\n")
+        with self.assertRaises(HerdrError) as caught:
+            measure_agent(
+                HerdrClient(runner=runner),
+                BY_NAME["grok"],
+                poll_attempts=3,
+                warn=lambda message: None,
+            )
+        reads = [c for c in runner.commands() if c.startswith("agent read grok --source visible --lines")]
+        self.assertEqual(len(reads), 4)  # the first read plus three retries
+        self.assertIn("--trace", str(caught.exception))
+
+    def test_a_marker_that_arrives_late_is_still_caught(self):
+        # The dialog takes two reads to paint; the third read sees it.
+        runner = self._timing_out_runner("still rendering\n")
+        runner.responses["agent read grok --source visible --lines 80"] = ScriptedReads(
+            ["still rendering\n", "still rendering\n", GROK_DIALOG_PANE]
+        )
+        record = measure_agent(
+            HerdrClient(runner=runner), BY_NAME["grok"], warn=lambda message: None
+        )
+        self.assertEqual(record["headroom_pct"], 99.0)
+        reads = [c for c in runner.commands() if c.startswith("agent read grok --source visible --lines 80")]
+        self.assertEqual(len(reads), 3)
+
+    def test_the_prompt_is_never_re_sent_by_the_fallback(self):
+        # Re-prompting would toggle the dialog shut. Only reads may repeat.
+        runner = self._timing_out_runner(GROK_DIALOG_PANE)
+        measure_agent(HerdrClient(runner=runner), BY_NAME["grok"], warn=lambda m: None)
+        self.assertEqual(
+            [c for c in runner.commands() if c.startswith("agent prompt")],
+            ["agent prompt grok /usage"],
+        )
+
+
 class DialogAlwaysClosesTest(unittest.TestCase):
     """A usage dialog left open flips the agent to `working` and eats the
     next prompt, so the close keys must go out on every failure path."""
 
     def test_close_keys_are_sent_when_parsing_fails(self):
-        runner = runner_with({"grok": "idle"}, {"grok": "nothing useful here\n"})
+        runner = runner_with({"grok": "idle"}, {"grok": GROK_UNPARSEABLE_PANE})
         with self.assertRaises(ParseError):
             measure_agent(HerdrClient(runner=runner), BY_NAME["grok"])
         self.assertEqual(runner.commands()[-1], "agent send-keys grok esc")
 
-    def test_close_keys_are_sent_when_the_marker_wait_times_out(self):
-        runner = runner_with({"grok": "idle"}, {"grok": GROK_DIALOG_PANE})
-        runner.set(
-            "pane wait-output",
-            stdout="",
-            returncode=1,
-            stderr='{"error":{"code":"timeout","message":"no match within 20000ms"}}',
-        )
+    def test_close_keys_are_sent_when_the_marker_never_appears(self):
+        runner = runner_with({"grok": "idle"}, {"grok": "nothing useful here\n"})
         with self.assertRaises(HerdrError):
-            measure_agent(HerdrClient(runner=runner), BY_NAME["grok"])
+            measure_agent(HerdrClient(runner=runner), BY_NAME["grok"], poll_attempts=2)
         self.assertEqual(runner.commands()[-1], "agent send-keys grok esc")
 
     def test_close_keys_are_sent_when_the_read_itself_fails(self):
@@ -297,7 +412,7 @@ class DialogAlwaysClosesTest(unittest.TestCase):
         self.assertEqual(runner.commands()[-1], "agent send-keys grok esc")
 
     def test_the_failure_still_surfaces_on_the_snapshot(self):
-        runner = runner_with({"grok": "idle"}, {"grok": "nothing useful here\n"})
+        runner = runner_with({"grok": "idle"}, {"grok": GROK_UNPARSEABLE_PANE})
         snapshot = measure(HerdrClient(runner=runner), [BY_NAME["grok"]], AT)
         self.assertEqual(snapshot["failed_agents"], ["grok"])
         self.assertEqual(snapshot["agents"]["grok"]["error"]["code"], "parse_error")
@@ -306,7 +421,7 @@ class DialogAlwaysClosesTest(unittest.TestCase):
 
 class FailureTest(unittest.TestCase):
     def test_unparseable_pane_still_closes_the_dialog(self):
-        runner = runner_with({"claude": "idle"}, {"claude": "nothing useful\n"})
+        runner = runner_with({"claude": "idle"}, {"claude": CLAUDE_UNPARSEABLE_PANE})
         snapshot = measure(HerdrClient(runner=runner), [BY_NAME["claude"]], AT)
         self.assertEqual(snapshot["failed_agents"], ["claude"])
         self.assertEqual(snapshot["agents"]["claude"]["error"]["code"], "parse_error")

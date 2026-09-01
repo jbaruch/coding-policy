@@ -70,6 +70,16 @@ interrupted. A `working` verdict is confirmed against the pane before it counts:
 carries what herdr claimed. Exit 1 means at least one agent could not be
 measured; the snapshot still prints and names it in `failed_agents`.
 
+The usage marker is confirmed in the text that gets parsed, never in a wait
+alone. `--marker-poll-attempts` and `--marker-poll-interval` bound the
+confirming poll; `--marker-timeout` and `--lines` size the pane read. Attempt
+counts and intervals default to the script's own constants; see
+`skills/teamlead/teamlead/measure.py`.
+
+Add `--trace` (or `TEAMLEAD_TRACE=1`) when a live run does something the JSON
+does not explain: every herdr invocation, its exit status, and its raw output
+go to stderr, and stdout stays the machine-readable document.
+
 Report a `failed_agents` entry to the user and measure that worker by hand
 before relying on its role. Proceed immediately to Step 3.
 

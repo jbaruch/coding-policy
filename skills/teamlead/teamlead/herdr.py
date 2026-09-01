@@ -16,6 +16,10 @@ Herdr's I/O contract, from `herdr --skill`:
 * `agent read` returns raw pane text on stdout, not JSON
 * server errors are JSON on stderr with exit status 1
 * CLI syntax errors exit with status 2
+
+Pass a `trace` sink to record every invocation -- argv, exit status, and raw
+stdout and stderr -- so a live run that goes wrong is diagnosable without
+guessing at what teamlead sent. `--trace` or `TEAMLEAD_TRACE=1` turns it on.
 """
 
 import json
@@ -43,9 +47,19 @@ READY_STATES = frozenset({"idle", "done"})
 BUSY_STATES = frozenset({"working", "blocked"})
 
 
+#: Environment switch for tracing, equivalent to the `--trace` flag.
+TRACE_ENV_VAR = "TEAMLEAD_TRACE"
+
+
 def default_binary():
     """The herdr executable to invoke, overridable for an unusual install."""
     return os.environ.get("TEAMLEAD_HERDR_BIN", "herdr")
+
+
+def trace_enabled_in_env(environ=None):
+    """True when TEAMLEAD_TRACE is set to something other than 0 or empty."""
+    value = (environ if environ is not None else os.environ).get(TRACE_ENV_VAR, "")
+    return value.strip() not in ("", "0")
 
 
 def subprocess_runner(argv):
@@ -68,9 +82,12 @@ def format_argv(argv):
 class HerdrClient:
     """A thin, injectable wrapper over the `herdr` CLI."""
 
-    def __init__(self, binary=None, runner=None):
+    def __init__(self, binary=None, runner=None, trace=None):
         self.binary = binary or default_binary()
         self._runner = runner if runner is not None else subprocess_runner
+        # A callable taking one string, or None for no tracing. Diagnostics go
+        # to stderr so stdout stays machine-readable JSON.
+        self._trace = trace
 
     # -- argv builders (pure) ------------------------------------------------
 
@@ -132,22 +149,42 @@ class HerdrClient:
 
     # -- execution -----------------------------------------------------------
 
+    def _emit_trace(self, argv, completed=None, outcome=None):
+        """Record one invocation on the trace sink, if there is one."""
+        if self._trace is None:
+            return
+        if completed is None:
+            self._trace("herdr> {}{}".format(format_argv(argv), outcome or ""))
+            return
+        self._trace(
+            "herdr> {}\nherdr< exit={} stdout={!r} stderr={!r}".format(
+                format_argv(argv),
+                completed.returncode,
+                completed.stdout or "",
+                completed.stderr or "",
+            )
+        )
+
     def _run(self, argv):
         """Execute `argv`, raising HerdrError on anything but a clean exit."""
         try:
             completed = self._runner(argv)
         except FileNotFoundError:
+            self._emit_trace(argv, outcome="\nherdr< executable not found")
             raise HerdrError(
                 "herdr executable {!r} not found on PATH - install Herdr or set "
                 "TEAMLEAD_HERDR_BIN to its absolute path.".format(self.binary),
                 {"command": format_argv(argv)},
             ) from None
         except subprocess.TimeoutExpired:
+            self._emit_trace(argv, outcome="\nherdr< subprocess timeout")
             raise HerdrError(
                 "herdr did not return within {}s running `{}` - check the pane "
                 "with `herdr agent list`.".format(SUBPROCESS_TIMEOUT_SEC, format_argv(argv)),
                 {"command": format_argv(argv)},
             ) from None
+
+        self._emit_trace(argv, completed)
 
         if completed.returncode != 0:
             raise HerdrError(
