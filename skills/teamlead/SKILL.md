@@ -77,8 +77,11 @@ counts and intervals default to the script's own constants; see
 `skills/teamlead/teamlead/measure.py`.
 
 Add `--trace` (or `TEAMLEAD_TRACE=1`) when a live run does something the JSON
-does not explain: every herdr invocation, its exit status, and its raw output
-go to stderr, and stdout stays the machine-readable document.
+does not explain: every herdr invocation, its exit status, and its output go to
+stderr, and stdout stays the machine-readable document. Traced fields are
+redacted for credential shapes and capped per field with a `[truncated N bytes]`
+marker; the shape list and the cap are constants in
+`skills/teamlead/teamlead/herdr.py`.
 
 Report a `failed_agents` entry to the user and measure that worker by hand
 before relying on its role. Proceed immediately to Step 3.

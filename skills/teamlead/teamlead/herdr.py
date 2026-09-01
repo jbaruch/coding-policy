@@ -23,13 +23,22 @@ teamlead only fires and forgets go through `_run_optional_json`, which treats
 exit 0 with no output as success -- the exit code is the contract there, and
 demanding a JSON body it never reads only invents failures.
 
-Pass a `trace` sink to record every invocation -- argv, exit status, and raw
+Pass a `trace` sink to record every invocation -- argv, exit status, and its
 stdout and stderr -- so a live run that goes wrong is diagnosable without
 guessing at what teamlead sent. `--trace` or `TEAMLEAD_TRACE=1` turns it on.
+
+Traced text is never raw. Pane output is arbitrary text an agent drew on a
+terminal, and an agent that just ran `gh auth status` or echoed an env var has
+credentials on screen; argv can carry them too. Every traced field goes through
+`scrub_for_trace` first, which masks the credential shapes in SECRET_PATTERNS
+and then caps the field at TRACE_FIELD_CAP_BYTES with an explicit truncation
+marker. Redaction runs BEFORE the cap so a truncation cannot slice a token in
+half and leave the front of it standing.
 """
 
 import json
 import os
+import re
 import shlex
 import subprocess
 
@@ -96,6 +105,99 @@ def subprocess_runner(argv):
         check=False,
         text=True,
     )
+
+
+#: What a masked value is replaced with. One token, easy to grep for.
+SECRET_MASK = "[redacted]"
+
+#: Per-field ceiling for traced text, in BYTES of UTF-8. A pane read can carry
+#: a whole viewport, and a trace is a diagnostic, not a transcript.
+TRACE_FIELD_CAP_BYTES = 2048
+
+#: Marker appended when the cap bites, naming what was dropped.
+TRUNCATION_MARKER = " [truncated {} bytes]"
+
+#: Credential shapes masked before any text reaches the trace sink. Each entry
+#: is (pattern, replacement); a replacement keeping a group preserves the
+#: non-secret half (the `Bearer` keyword, the assignment's key name) so a trace
+#: still shows WHAT was sent without showing the value.
+#:
+#: This is signature matching, not proof: a shape absent from this list reaches
+#: the sink. Add one here rather than at a call site, so every traced field
+#: gains it at once.
+SECRET_PATTERNS = (
+    # GitHub tokens: ghp_ (classic PAT), gho_/ghu_/ghs_/ghr_ (OAuth, user,
+    # server, refresh), and the fine-grained github_pat_ form. No leading
+    # \b on the high-entropy prefixes: pane text glues a token to whatever
+    # printed before it, and a boundary there would let it through. `sk-`
+    # keeps its boundary, where task-/disk-/risk- would false-positive.
+    (re.compile(r"gh[pousr]_[A-Za-z0-9]{20,}"), SECRET_MASK),
+    (re.compile(r"github_pat_[A-Za-z0-9_]{20,}"), SECRET_MASK),
+    # OpenAI-style API keys, including the sk-proj-/sk-ant- prefixed variants.
+    (re.compile(r"\bsk-[A-Za-z0-9_-]{16,}"), SECRET_MASK),
+    # AWS access key ids.
+    (re.compile(r"AKIA[0-9A-Z]{12,}"), SECRET_MASK),
+    # JWTs (header.payload.signature), which carry claims even unsigned.
+    (re.compile(r"eyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]+"), SECRET_MASK),
+    # `Authorization: <value>` headers. The whole value goes, scheme keyword
+    # included, so `Authorization: Bearer <token>` cannot leave the token
+    # standing behind a masked keyword. Stops at a quote or a JSON delimiter
+    # so a header inside a JSON body does not swallow the rest of the object.
+    (
+        re.compile(r"(?i)\b(authorization\"?\s*[:=]\s*\"?)[^\r\n\"',}]+"),
+        r"\1" + SECRET_MASK,
+    ),
+    # `Bearer <token>` outside a header, keyword kept.
+    (re.compile(r"(?i)\b(bearer\s+)[A-Za-z0-9._~+/=-]{8,}"), r"\1" + SECRET_MASK),
+    # key= / token= / password= / secret= assignments, with or without a
+    # prefix (api_key, access_token), quoted or bare, in `k=v` and JSON `k: v`
+    # form. The key name survives; the value does not. The value class
+    # deliberately excludes `[` and `{`, so a config-shaped `"close_keys":
+    # ["esc"]` reads through unmangled while `token=abc123` does not.
+    (
+        re.compile(
+            r"(?i)([\w.-]*(?:key|token|password|passwd|secret)[\w.-]*\"?\s*[=:]\s*)"
+            r"(\"|')?([A-Za-z0-9_./+=~@-]+)",
+        ),
+        lambda m: m.group(1) + (m.group(2) or "") + SECRET_MASK,
+    ),
+)
+
+
+def redact_secrets(text):
+    """Mask every SECRET_PATTERNS match in `text`.
+
+    Signature matching over arbitrary terminal text, so it is a floor rather
+    than a guarantee: it removes the shapes that show up in practice and never
+    claims the remainder is secret-free.
+    """
+    if not text:
+        return text
+    for pattern, replacement in SECRET_PATTERNS:
+        text = pattern.sub(replacement, text)
+    return text
+
+
+def bound_field(text, cap=TRACE_FIELD_CAP_BYTES):
+    """Cap `text` at `cap` UTF-8 bytes, naming how many bytes were dropped."""
+    if not text:
+        return text
+    raw = text.encode("utf-8")
+    if len(raw) <= cap:
+        return text
+    # Decode with errors="ignore" so a cut through a multi-byte character
+    # drops that character rather than raising or emitting a replacement.
+    kept = raw[:cap].decode("utf-8", errors="ignore")
+    return kept + TRUNCATION_MARKER.format(len(raw) - cap)
+
+
+def scrub_for_trace(text, cap=TRACE_FIELD_CAP_BYTES):
+    """Make one field safe to trace: redact first, then bound.
+
+    The order is load-bearing. Bounding first could cut a credential in half
+    and emit the front of it, which no later redaction would recognize.
+    """
+    return bound_field(redact_secrets(text), cap)
 
 
 def format_argv(argv):
@@ -200,18 +302,25 @@ class HerdrClient:
     # -- execution -----------------------------------------------------------
 
     def _emit_trace(self, argv, completed=None, outcome=None):
-        """Record one invocation on the trace sink, if there is one."""
+        """Record one invocation on the trace sink, if there is one.
+
+        Every field crosses `scrub_for_trace` on its way out: argv can carry a
+        token an operator passed, and stdout/stderr are pane text that may hold
+        anything the agent had on screen. `outcome` is this module's own
+        literal and needs no scrubbing.
+        """
         if self._trace is None:
             return
+        command = scrub_for_trace(format_argv(argv))
         if completed is None:
-            self._trace("herdr> {}{}".format(format_argv(argv), outcome or ""))
+            self._trace("herdr> {}{}".format(command, outcome or ""))
             return
         self._trace(
             "herdr> {}\nherdr< exit={} stdout={!r} stderr={!r}".format(
-                format_argv(argv),
+                command,
                 completed.returncode,
-                completed.stdout or "",
-                completed.stderr or "",
+                scrub_for_trace(completed.stdout or ""),
+                scrub_for_trace(completed.stderr or ""),
             )
         )
 

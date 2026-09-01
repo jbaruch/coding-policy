@@ -159,6 +159,25 @@ sits unsent in the composer wants `paste`. An unrecognized value is a config
 error, never a silent fallback. An assignment message always pastes — it is a
 message.
 
+### Tracing a Live Run
+
+`--trace` (or `TEAMLEAD_TRACE=1`) prints every herdr invocation to stderr with
+its exit status and its output, while stdout stays the machine-readable
+document.
+
+Traced text is never raw. Pane output is whatever the worker had on screen, and
+a worker that just ran `gh auth status` has a token there. Every traced field,
+argv included, is redacted for credential shapes and then capped per field with
+an explicit `[truncated N bytes]` marker; redaction runs before the cap, so a
+truncation cannot slice a token in half and emit the front of it. The masked
+value's key name survives, so the trace still says what was sent.
+
+The shape list and the cap are the script's own constants — see
+`SECRET_PATTERNS` and `TRACE_FIELD_CAP_BYTES` at the top of
+`skills/teamlead/teamlead/herdr.py`. It is signature matching, never proof: a
+shape absent from that list reaches the sink, and the fix is a pattern there
+rather than a guard at a call site.
+
 `pane send-text`, `pane send-keys`, and `agent send-keys` exit 0 with **empty
 stdout**. herdr's stdout contract is per-command: most control commands return
 JSON, `agent read` returns raw pane text, and the pane writes return nothing.

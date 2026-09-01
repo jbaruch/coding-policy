@@ -12,7 +12,16 @@ import subprocess
 import unittest
 
 from teamlead.errors import HerdrError
-from teamlead.herdr import HerdrClient, format_argv, trace_enabled_in_env
+from teamlead.herdr import (
+    SECRET_MASK,
+    TRACE_FIELD_CAP_BYTES,
+    HerdrClient,
+    bound_field,
+    format_argv,
+    redact_secrets,
+    scrub_for_trace,
+    trace_enabled_in_env,
+)
 
 from tests.fakes import FakeRunner, agent_json, ok_json
 
@@ -414,6 +423,164 @@ class FormatArgvTest(unittest.TestCase):
             format_argv(["herdr", "agent", "prompt", "grok", "hello world"]),
             "herdr agent prompt grok 'hello world'",
         )
+
+
+#: One credential shape per row: (label, text carrying it, the part that must
+#: not survive). Every fixture is a made-up literal, never a real credential.
+SECRET_FIXTURES = (
+    ("classic github pat", "GH_TOKEN is ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ012345 ok", "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ012345"),
+    ("github oauth token", "using gho_ABCDEFGHIJKLMNOPQRSTUVWXYZ012345", "gho_ABCDEFGHIJKLMNOPQRSTUVWXYZ012345"),
+    ("fine-grained pat", "github_pat_11ABCDEFG0abcdefghijklmnopqrstuvwxyz", "github_pat_11ABCDEFG0abcdefghijklmnopqrstuvwxyz"),
+    ("openai-style key", "OPENAI key sk-proj-abcdefghijklmnopqrstuvwxyz0123", "sk-proj-abcdefghijklmnopqrstuvwxyz0123"),
+    ("aws access key id", "aws_access_key_id AKIAIOSFODNN7EXAMPLE", "AKIAIOSFODNN7EXAMPLE"),
+    ("bearer token", "curl -H 'Bearer abcdefghijklmnopqrst'", "abcdefghijklmnopqrst"),
+    ("authorization header", "Authorization: Bearer abcdefghijklmnopqrst", "abcdefghijklmnopqrst"),
+    ("authorization in json", '{"Authorization": "Bearer abcdefghijklmnopqrst"}', "abcdefghijklmnopqrst"),
+    ("token assignment", "GITHUB_TOKEN=abcdef123456", "abcdef123456"),
+    ("key assignment in json", '{"api_key": "abcdef123456"}', "abcdef123456"),
+    ("password assignment", "password=hunter2", "hunter2"),
+    ("secret assignment", "client_secret = s3cr3tvalue", "s3cr3tvalue"),
+    (
+        "jwt",
+        "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dBjftJeZ4CVPmB92K27uhbUJU1p1r",
+        "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dBjftJeZ4CVPmB92K27uhbUJU1p1r",
+    ),
+)
+
+
+class RedactSecretsTest(unittest.TestCase):
+    """The trace redactor is a floor under `no-secrets`: shapes never reach a log."""
+
+    def test_every_known_shape_is_masked(self):
+        for label, text, secret in SECRET_FIXTURES:
+            with self.subTest(shape=label):
+                out = redact_secrets(text)
+                self.assertNotIn(secret, out)
+                self.assertIn(SECRET_MASK, out)
+
+    def test_the_key_name_survives_so_the_trace_still_says_what_was_sent(self):
+        self.assertEqual(redact_secrets("GITHUB_TOKEN=abcdef123456"), "GITHUB_TOKEN=" + SECRET_MASK)
+        self.assertEqual(
+            redact_secrets("Authorization: Bearer abcdefghijklmnopqrst"),
+            "Authorization: " + SECRET_MASK,
+        )
+
+    def test_ordinary_pane_text_is_untouched(self):
+        text = "Weekly limit: 0% (resets September 6)  Credits: $16.42"
+        self.assertEqual(redact_secrets(text), text)
+
+    def test_a_herdr_json_response_is_untouched(self):
+        payload = '{"id":"cli:agent:get","result":{"agent":{"agent_status":"idle","pane_id":"w4:p1"}}}'
+        self.assertEqual(redact_secrets(payload), payload)
+
+    def test_a_config_shaped_list_value_is_not_mangled(self):
+        text = '{"close_keys": ["esc"], "usage_marker": "Weekly limit"}'
+        self.assertEqual(redact_secrets(text), text)
+
+    def test_empty_input_is_returned_as_is(self):
+        self.assertEqual(redact_secrets(""), "")
+
+
+class BoundFieldTest(unittest.TestCase):
+    def test_text_under_the_cap_is_returned_whole(self):
+        self.assertEqual(bound_field("short"), "short")
+
+    def test_text_over_the_cap_is_cut_and_marked(self):
+        out = bound_field("x" * 3000)
+        self.assertTrue(out.startswith("x" * 100))
+        self.assertIn("[truncated 952 bytes]", out)
+        self.assertLess(len(out), 3000)
+
+    def test_the_cap_counts_bytes_not_characters(self):
+        # 4 bytes per character: 10 characters is 40 bytes, so a 20-byte cap
+        # keeps 5 of them and reports the other 20 bytes as dropped.
+        out = bound_field("🔑" * 10, cap=20)
+        self.assertEqual(out.count("🔑"), 5)
+        self.assertIn("[truncated 20 bytes]", out)
+
+    def test_a_cut_through_a_multibyte_character_drops_it_cleanly(self):
+        out = bound_field("🔑" * 10, cap=18)
+        self.assertEqual(out.count("🔑"), 4)
+        self.assertNotIn("\ufffd", out)
+
+
+class ScrubForTraceTest(unittest.TestCase):
+    def test_redaction_runs_before_the_cap(self):
+        # A token straddling the cap boundary must be masked whole, never cut
+        # in half with its front half emitted.
+        secret = "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ012345"
+        text = "a" * (TRACE_FIELD_CAP_BYTES - 10) + secret + "b" * 100
+        out = scrub_for_trace(text)
+        self.assertNotIn("ghp_", out)
+        self.assertIn(SECRET_MASK, out)
+
+    def test_it_both_masks_and_bounds(self):
+        out = scrub_for_trace("password=hunter2 " + "z" * 4000)
+        self.assertNotIn("hunter2", out)
+        self.assertIn("[truncated", out)
+
+
+class TraceRedactionTest(unittest.TestCase):
+    """Nothing reaches the sink unscrubbed - argv, stdout, and stderr alike."""
+
+    def test_a_token_in_argv_is_masked(self):
+        runner = FakeRunner()
+        runner.set("agent prompt grok", ok_json("agent_prompt"))
+        lines = []
+        HerdrClient(runner=runner, trace=lines.append).agent_prompt(
+            "grok", "export GITHUB_TOKEN=ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ012345"
+        )
+        self.assertNotIn("ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ012345", lines[0])
+        self.assertIn(SECRET_MASK, lines[0])
+
+    def test_a_credential_in_pane_output_is_masked(self):
+        runner = FakeRunner()
+        runner.set("agent read grok", "$ echo $GH_TOKEN\nghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ012345\n")
+        lines = []
+        HerdrClient(runner=runner, trace=lines.append).agent_read("grok", lines=40)
+        self.assertNotIn("ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ012345", lines[0])
+        self.assertIn(SECRET_MASK, lines[0])
+
+    def test_a_credential_in_a_failure_payload_is_masked(self):
+        runner = FakeRunner()
+        runner.set(
+            "pane wait-output",
+            stdout="",
+            returncode=1,
+            stderr='{"error":{"code":"auth","message":"bad token=abcdef123456"}}',
+        )
+        lines = []
+        client = HerdrClient(runner=runner, trace=lines.append)
+        with self.assertRaises(HerdrError):
+            client.pane_wait_output("w4:p1", match="Weekly limit", timeout_ms=20000)
+        self.assertNotIn("abcdef123456", lines[0])
+        self.assertIn("exit=1", lines[0])
+
+    def test_a_huge_pane_read_is_capped_in_the_trace(self):
+        runner = FakeRunner()
+        runner.set("agent read grok", "y" * 8000)
+        lines = []
+        HerdrClient(runner=runner, trace=lines.append).agent_read("grok", lines=200)
+        self.assertIn("[truncated", lines[0])
+        self.assertLess(len(lines[0]), 4000)
+
+    def test_the_returned_payload_is_never_the_scrubbed_one(self):
+        # Scrubbing is a property of the TRACE, not of the data teamlead
+        # consumes: stdout still parses into the full document.
+        runner = FakeRunner()
+        runner.set("agent get grok", agent_json("grok", "idle", "w4:p1"))
+        lines = []
+        result = HerdrClient(runner=runner, trace=lines.append).agent_get("grok")
+        self.assertEqual(result["pane_id"], "w4:p1")
+        self.assertEqual(result["agent_status"], "idle")
+        self.assertTrue(lines)
+
+    def test_a_long_pane_read_is_returned_in_full_to_the_caller(self):
+        runner = FakeRunner()
+        runner.set("agent read grok", "y" * 8000)
+        lines = []
+        text = HerdrClient(runner=runner, trace=lines.append).agent_read("grok", lines=200)
+        self.assertEqual(len(text), 8000)
 
 
 if __name__ == "__main__":
