@@ -415,7 +415,7 @@ ${base}"
     FAKE_MARKER=timeout FAKE_STATUS=idle \
     bash "$SCRIPT" worker "$report" </dev/null 2>"$TMP/e21")"; RC=$?
   if [[ $RC -eq 4 ]] && printf '%s' "$OUT" | jq -e '.found == false and (.reason | test("marker unconfirmed"))' >/dev/null 2>&1 \
-     && grep -q "never showed" "$TMP/e21"; then
+     && grep -q "still unconfirmed after 2 consecutive reads" "$TMP/e21"; then
     pass; else fail "unconfirmed idle: expected exit 4 with a reason, got RC=$RC OUT=$OUT ERR=$(cat "$TMP/e21")"; fi
   assert_no_unbound "$(cat "$TMP/e21")" "unconfirmed idle"
 

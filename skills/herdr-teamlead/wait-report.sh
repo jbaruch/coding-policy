@@ -358,7 +358,7 @@ main() {
       unconfirmed_idle=$(( unconfirmed_idle + 1 ))
       if (( unconfirmed_idle >= TEAMLEAD_UNCONFIRMED_IDLE_READS )); then
         emit "$state" false "$elapsed" "report file present, worker ${state} on ${unconfirmed_idle} consecutive reads, marker unconfirmed"
-        warn "${AGENT}: the report file exists and the worker reads ${state}, but its pane never showed \`${REPORT_MARKER}\` with \`${REPORT_BASENAME}\` — read the pane with \`${HERDR_BIN} agent read ${AGENT} --source visible\` and confirm by eye before treating the report as final"
+        warn "${AGENT}: the report file exists and the worker reads ${state}, but \`${REPORT_MARKER}\` with \`${REPORT_BASENAME}\` is still unconfirmed after ${unconfirmed_idle} consecutive reads — not a delivered report: re-run this wait once if the worker is blocked or working, record no report if it is idle or done; a report path that fits one pane row prevents this"
         return 4
       fi
     else
