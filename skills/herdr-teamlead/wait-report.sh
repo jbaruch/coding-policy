@@ -183,21 +183,38 @@ marker_seen() { # <pane-id> <report-basename>
   fi
   # Both halves in the same window. The line soft-wraps, and the wrap can land
   # anywhere: after the prefix, inside the path, or INSIDE THE BASENAME. The
-  # row view catches the first two; the joined view -- rows glued back
-  # together with the continuation indentation dropped -- catches the third.
-  # Either view confirming is enough; the whole-component boundary applies in
-  # both, so gluing rows cannot manufacture a decoy match.
+  # row view catches the first two; the marker line reassembled from its own
+  # continuation rows catches the third. Either confirming is enough; the
+  # whole-component boundary applies in both, and the reassembly never reaches
+  # past the marker's paragraph, so unrelated rows cannot be glued into a name.
   [[ "$text" == *"$REPORT_MARKER"* ]] || return 1
   if basename_on_screen "$text" "$2"; then return 0; fi
-  if basename_on_screen "$(unwrap_rows "$text")" "$2"; then return 0; fi
+  if basename_on_screen "$(marker_line_unwrapped "$text")" "$2"; then return 0; fi
   return 1
 }
 
-# Glue soft-wrapped rows back into one line: every row break goes, and so does
-# the indentation the TUI puts at the start of a continuation row. A basename
-# the wrap split as `reports/12-` + `developer-fix.md` reads whole again.
-unwrap_rows() { # <pane-text>
-  printf '%s' "$1" | awk 'BEGIN { ORS = "" } { sub(/^[[:space:]]+/, ""); print }'
+# Reassemble the soft-wrapped marker line and nothing else: the LAST row that
+# carries the prefix, plus the consecutive non-blank rows after it with their
+# continuation indentation dropped. A TUI ends the worker's final message with
+# a blank row before its footer, so the join stops there; a footer that abuts
+# the message would be glued onto the end, where it cannot complete a name that
+# the path boundary must follow. A basename the wrap split as `reports/12-` +
+# `developer-fix.md` reads whole again; two unrelated rows do not.
+marker_line_unwrapped() { # <pane-text>
+  printf '%s\n' "$1" | awk -v marker="$REPORT_MARKER" '
+    { rows[NR] = $0 }
+    index($0, marker) { start = NR }
+    END {
+      if (!start) exit
+      out = rows[start]
+      for (i = start + 1; i <= NR; i++) {
+        line = rows[i]
+        if (line ~ /^[[:space:]]*$/) break
+        sub(/^[[:space:]]+/, "", line)
+        out = out line
+      }
+      printf "%s", out
+    }'
 }
 
 # Does the visible pane show a dialog waiting on a human?

@@ -30,7 +30,9 @@
 #  14. Soft-wrapped     -> the prefix and the basename on different rows still
 #                         complete: the long line wraps in `--source visible`.
 #  14b. Wrap in basename-> the row break inside the basename still completes.
-#  14c. Glued decoy      -> joining rows cannot turn another report into ours.
+#  14c. Glued decoy      -> reassembly cannot turn another report into ours.
+#  14d. Beyond paragraph -> a blank row ends the reassembly; later rows never join.
+#  14e. Footer abuts     -> a footer glued on the end cannot complete a name.
 #  16. Unconfirmed idle  -> file present + idle twice + no marker = exit 4.
 #  15. Decoy REPORT     -> another report's line does NOT complete this wait,
 #                         including one whose basename ENDS with this one's.
@@ -316,7 +318,7 @@ ${base}"
     pass; else fail "wrap inside basename: expected found true, got RC=$RC OUT=$OUT ERR=$(cat "$TMP/e14b")"; fi
   assert_no_unbound "$(cat "$TMP/e14b")" "wrap inside basename"
 
-  # 14c. Gluing rows must not manufacture a match: another worker's
+  # 14c. Reassembly must not manufacture a match: another worker's
   #      `reviewer-<base>` wrapped inside ITS basename reads as one component
   #      once joined, and that component is not this report's. (A row holding
   #      exactly `<base>` is accepted by the row view on purpose -- case 14 --
@@ -331,6 +333,35 @@ ${base}"
     bash "$SCRIPT" worker "$report" </dev/null 2>"$TMP/e14c")"; RC=$?
   if [[ $RC -ne 0 ]] && printf '%s' "$OUT" | jq -e '.found == false' >/dev/null 2>&1; then
     pass; else fail "glued decoy: expected found false, got RC=$RC OUT=$OUT"; fi
+
+  # 14d. Reassembly stops at the marker's paragraph: a blank row ends it, so a
+  #      later unrelated row that happens to hold the rest of the name is never
+  #      glued on. This is the completion gate; it must not be satisfiable by
+  #      two rows that were never one line.
+  RUN_SEQ=$((RUN_SEQ+1))
+  local beyond_paragraph
+  beyond_paragraph="REPORT: /Users/jbaruch/.worktrees/round-3/reports/${base:0:3}
+
+  ${base:3}"
+  OUT="$(env HERDR_ENV=1 HERDR_BIN="$FAKE" \
+    TEAMLEAD_WAIT_INTERVAL_SEC=0 TEAMLEAD_WAIT_BUDGET_SEC=0 TEAMLEAD_BLOCKED_CONFIRM_SEC=0 \
+    FAKE_MARKER=found FAKE_STATUS=idle FAKE_PANE_TEXT="$beyond_paragraph" \
+    bash "$SCRIPT" worker "$report" </dev/null 2>"$TMP/e14d")"; RC=$?
+  if [[ $RC -ne 0 ]] && printf '%s' "$OUT" | jq -e '.found == false' >/dev/null 2>&1; then
+    pass; else fail "beyond paragraph: expected found false, got RC=$RC OUT=$OUT"; fi
+
+  # 14e. A footer abutting the marker line is glued onto its END and cannot
+  #      complete a name: the boundary after the basename must be a path end.
+  RUN_SEQ=$((RUN_SEQ+1))
+  local footer_abuts
+  footer_abuts="REPORT: /Users/jbaruch/.worktrees/round-3/reports/${base:0:3}
+─ Worked for 28m 50s ─────"
+  OUT="$(env HERDR_ENV=1 HERDR_BIN="$FAKE" \
+    TEAMLEAD_WAIT_INTERVAL_SEC=0 TEAMLEAD_WAIT_BUDGET_SEC=0 TEAMLEAD_BLOCKED_CONFIRM_SEC=0 \
+    FAKE_MARKER=found FAKE_STATUS=idle FAKE_PANE_TEXT="$footer_abuts" \
+    bash "$SCRIPT" worker "$report" </dev/null 2>"$TMP/e14e")"; RC=$?
+  if [[ $RC -ne 0 ]] && printf '%s' "$OUT" | jq -e '.found == false' >/dev/null 2>&1; then
+    pass; else fail "footer abuts: expected found false, got RC=$RC OUT=$OUT"; fi
 
   # 16. The file is there, the worker reads idle twice, and the marker never
   #     confirms: exit 4 with a reason, well inside the budget, instead of an
