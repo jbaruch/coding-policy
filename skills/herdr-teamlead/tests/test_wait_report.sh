@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Outcome-based tests for skills/teamlead/wait-report.sh.
+# Outcome-based tests for skills/herdr-teamlead/wait-report.sh.
 #
 # Every case points HERDR_BIN at a fake binary this harness writes, replaying
 # an agent state and a pane-probe verdict the case chooses (no live Herdr
@@ -36,7 +36,7 @@
 #  18. Blocked twice    -> two `blocked` reads plus a dialog row is exit 3.
 #  19. Blocked, no UI   -> two `blocked` reads without a dialog keep waiting.
 #
-# Run: bash skills/teamlead/tests/test_wait_report.sh
+# Run: bash skills/herdr-teamlead/tests/test_wait_report.sh
 set -uo pipefail
 
 die() { echo "fatal: $*" >&2; exit 2; }

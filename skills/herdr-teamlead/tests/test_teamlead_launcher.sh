@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Outcome-based tests for skills/teamlead/teamlead.sh.
+# Outcome-based tests for skills/herdr-teamlead/teamlead.sh.
 #
 # The launcher is copied into a temp skill dir per case, so the assertions are
 # about the launcher's own behavior (interpreter probe, package probe, argument
@@ -18,7 +18,7 @@
 #   4. Missing python  -> exit 1 naming the interpreter.
 #   5. Exit passthrough-> the module's own status reaches the caller.
 #
-# Run: bash skills/teamlead/tests/test_teamlead_launcher.sh
+# Run: bash skills/herdr-teamlead/tests/test_teamlead_launcher.sh
 set -uo pipefail
 
 die() { echo "fatal: $*" >&2; exit 2; }

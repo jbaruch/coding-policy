@@ -1,7 +1,7 @@
 # Round Flow
 
 The shape of one task round, and what the lead does between the steps of
-`skills/teamlead/SKILL.md`. Read this when a round deviates from the happy path.
+`skills/herdr-teamlead/SKILL.md`. Read this when a round deviates from the happy path.
 
 ## The Three Roles
 

@@ -12,7 +12,7 @@
 #   env   : PY_BIN overrides the interpreter (default python3); the tests and
 #           a venv shim point it elsewhere. PYTHONPATH is prefixed, never
 #           replaced. Every other variable the module reads is documented in
-#           skills/teamlead/state-schema.md.
+#           skills/herdr-teamlead/state-schema.md.
 set -euo pipefail
 
 PY_BIN="${PY_BIN:-python3}"

@@ -9,7 +9,7 @@ description: Running a multi-agent team — headroom-driven role rotation, one w
 
 - A team round runs three roles: developer, reviewer/architect, tester
 - Roles rotate between tasks
-- Rotation follows measured subscription headroom through the team skill's script, never an impression of who looks fresh
+- Rotation follows measured subscription headroom through the `herdr-teamlead` skill's script, never an impression of who looks fresh
 - Headroom is the minimum remaining window per worker, never the average
 - Each assignment clears the worker's context, then sends a fresh role brief
 - Fewer live workers than roles is a decision to record, never a silently dropped role

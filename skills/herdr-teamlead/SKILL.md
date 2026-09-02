@@ -1,5 +1,5 @@
 ---
-name: teamlead
+name: herdr-teamlead
 description: >
   Run one task round as the team lead of three coding agents inside Herdr
   (https://herdr.dev): measure each worker's subscription headroom, assign the
@@ -12,7 +12,7 @@ description: >
   reports. Requires HERDR_ENV=1.
 ---
 
-# Team Lead Skill
+# Herdr Team Lead Skill
 
 Process steps in order. Do not skip ahead.
 
@@ -32,19 +32,19 @@ A round runs in two phases:
 Herdr command surface, worker quirks, and the usage-parsing details:
 
 ```text
-skills/teamlead/references/herdr.md
+skills/herdr-teamlead/references/herdr.md
 ```
 
 Role weights, report reading, and the pre-PR review sequence:
 
 ```text
-skills/teamlead/references/round-flow.md
+skills/herdr-teamlead/references/round-flow.md
 ```
 
 ## Step 1 — Verify Herdr and the Roster
 
 ```bash
-.tessl/plugins/jbaruch/coding-policy/skills/teamlead/roster.sh
+.tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/roster.sh
 ```
 
 Takes no arguments. Emits `{"caller":{"pane_id":...},"agents":[{"name","kind","pane_id","state"}]}`,
@@ -65,7 +65,7 @@ you did.
 ## Step 2 — Verify Authority for the Repo
 
 ```bash
-.tessl/plugins/jbaruch/coding-policy/skills/teamlead/verify-authority.sh <owner/repo>
+.tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/verify-authority.sh <owner/repo>
 ```
 
 Emits `{"repo","viewer_login","owner_login","owner_type","viewer_permission","namespace_owner","authorized"}`.
@@ -90,13 +90,13 @@ Proceed immediately to Step 3.
 ## Step 3 — Measure Headroom
 
 ```bash
-.tessl/plugins/jbaruch/coding-policy/skills/teamlead/teamlead.sh measure
+.tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/teamlead.sh measure
 ```
 
 Sends each configured worker its own usage command and parses the reply. Emits
 one snapshot document — per agent: `kind`, `state`, `herdr_state`,
 `state_source`, `windows`, `credits`, `plan`, `headroom_pct`, `skipped` — and
-appends it to the state file (`skills/teamlead/state-schema.md`). A worker that
+appends it to the state file (`skills/herdr-teamlead/state-schema.md`). A worker that
 is `working` or `blocked` is reported as skipped with null windows, never
 interrupted. A `working` verdict is confirmed against the pane before it counts:
 `state_source` names which signal decided, `herdr` or `probe`, and `herdr_state`
@@ -107,14 +107,14 @@ The usage marker is confirmed in the text that gets parsed, never in a wait
 alone. `--marker-poll-attempts` and `--marker-poll-interval` bound the
 confirming poll; `--marker-timeout` and `--lines` size the pane read. Attempt
 counts and intervals default to the script's own constants; see
-`skills/teamlead/teamlead/measure.py`.
+`skills/herdr-teamlead/teamlead/measure.py`.
 
 Add `--trace` (or `TEAMLEAD_TRACE=1`) when a live run does something the JSON
 does not explain: every herdr invocation, its exit status, and its output go to
 stderr, and stdout stays the machine-readable document. Traced fields are
 redacted for credential shapes and capped per field with a `[truncated N bytes]`
 marker; the shape list and the cap are constants in
-`skills/teamlead/teamlead/herdr.py`.
+`skills/herdr-teamlead/teamlead/herdr.py`.
 
 Report a `failed_agents` entry to the user and measure that worker by hand
 before relying on its role. Proceed immediately to Step 4.
@@ -122,13 +122,13 @@ before relying on its role. Proceed immediately to Step 4.
 ## Step 4 — Plan the Roles
 
 ```bash
-.tessl/plugins/jbaruch/coding-policy/skills/teamlead/teamlead.sh plan --roles developer,tester,reviewer
+.tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/teamlead.sh plan --roles developer,tester,reviewer
 ```
 
 Pure computation over the newest snapshot plus the assignment ledger. Contacts
 no agent, writes nothing. Emits `{"assignments":{"<role>":"<agent>"},"rationale":[...],"snapshot_ref":{...}}`.
 Exit 1 names the reason it could not plan. The `--roles` order is load-bearing;
-what it means and how ties break are in `skills/teamlead/teamlead/planner.py`
+what it means and how ties break are in `skills/herdr-teamlead/teamlead/planner.py`
 (the `plan` docstring).
 
 Save the output to a file for Step 5. Relay the `rationale` lines to the user
@@ -139,8 +139,8 @@ as the round's role announcement. Proceed immediately to Step 5.
 Write a values file for the round, then compose:
 
 ```bash
-.tessl/plugins/jbaruch/coding-policy/skills/teamlead/compose-briefs.sh \
-  .tessl/plugins/jbaruch/coding-policy/skills/teamlead/templates \
+.tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/compose-briefs.sh \
+  .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/templates \
   <values.json> <round-reports-dir>
 ```
 
@@ -152,7 +152,7 @@ template uses, or a value that is not text. Exit 3 means the placeholder scan
 itself failed, so whether the briefs are clean is unknown: re-run, never
 dispatch on it. The placeholder set and both validation directions are the
 script's contract; see the header of
-`skills/teamlead/compose-briefs.sh`.
+`skills/herdr-teamlead/compose-briefs.sh`.
 
 What you decide, and it is the whole of your job here:
 
@@ -183,7 +183,7 @@ Step 6.
 One call per worker that writes anything:
 
 ```bash
-.tessl/plugins/jbaruch/coding-policy/skills/teamlead/provision-worktree.sh \
+.tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/provision-worktree.sh \
   <shared-checkout> <branch> <worktree-path> [base-ref]
 ```
 
@@ -192,7 +192,7 @@ Emits `{"path","branch","base_ref","state"}`, where `state` is `created`,
 branch name, a path outside the worktree root); exit 2 means git refused, or
 the path holds something else. Branch-name and path rules are the script's
 contract; see the header of
-`skills/teamlead/provision-worktree.sh`.
+`skills/herdr-teamlead/provision-worktree.sh`.
 
 The lead provisions every worktree a brief names, so a worker never runs git
 against the shared checkout (`rules/agent-team-operation.md` Writers and
@@ -205,7 +205,7 @@ dispatch a brief whose worktree does not exist. Proceed immediately to Step 7.
 ## Step 7 — Dispatch the Briefs
 
 ```bash
-.tessl/plugins/jbaruch/coding-policy/skills/teamlead/teamlead.sh apply \
+.tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/teamlead.sh apply \
   --assignments <plan-file> \
   --brief developer=<path> --brief tester=<path> --brief reviewer=<path> \
   --common <path-to-COMMON.md>
@@ -246,11 +246,11 @@ The delivery mechanics behind those outcomes — composer confirmation, recovery
 keys, ghost text, the rejection strings, the settle knobs — are in:
 
 ```text
-skills/teamlead/references/herdr.md
+skills/herdr-teamlead/references/herdr.md
 ```
 
 The prompt text, the refusal predicate, and every constant are the utility's
-own contract; see `skills/teamlead/teamlead/assign.py`.
+own contract; see `skills/herdr-teamlead/teamlead/assign.py`.
 
 Proceed to Step 8 with the roles that were dispatched.
 
@@ -259,7 +259,7 @@ Proceed to Step 8 with the roles that were dispatched.
 One call per dispatched worker, in the order the round needs them:
 
 ```bash
-.tessl/plugins/jbaruch/coding-policy/skills/teamlead/wait-report.sh <agent-name> <report-path>
+.tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/wait-report.sh <agent-name> <report-path>
 ```
 
 Emits `{"agent","state","report_path","found","elapsed_seconds"}` on every

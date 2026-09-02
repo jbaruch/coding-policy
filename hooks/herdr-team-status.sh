@@ -12,7 +12,7 @@
 #   - Silent in every session that is not a team session: outside Herdr, with
 #     no herdr binary, or with no named worker but this pane.
 #   - Informative only. Never blocks (always exits 0), never exits 2.
-#   - The roster read is skills/teamlead/roster.sh, the same script the skill
+#   - The roster read is skills/herdr-teamlead/roster.sh, the same script the skill
 #     calls, so "who is on the team" has one implementation.
 #
 # Contract:
@@ -38,7 +38,7 @@ main() {
   [[ "${HERDR_ENV:-}" == "1" ]] || return 0
 
   hook_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  roster_script="${hook_dir}/../skills/teamlead/roster.sh"
+  roster_script="${hook_dir}/../skills/herdr-teamlead/roster.sh"
   if [[ ! -r "$roster_script" ]]; then
     warn "roster script not found at ${roster_script} — reinstall the plugin with \`tessl install jbaruch/coding-policy\`; skipping the team status"
     return 0

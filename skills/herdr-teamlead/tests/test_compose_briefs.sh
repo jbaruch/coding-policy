@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Outcome-based tests for skills/teamlead/compose-briefs.sh.
+# Outcome-based tests for skills/herdr-teamlead/compose-briefs.sh.
 #
 # Templates and values are built in the test, so the assertions are about the
 # script's own behavior rather than about the shipped templates' current text
@@ -26,7 +26,7 @@
 #  13. Object value     -> exit 2 for the same reason.
 #  14. Number value     -> accepted; an issue number is legitimate text.
 #
-# Run: bash skills/teamlead/tests/test_compose_briefs.sh
+# Run: bash skills/herdr-teamlead/tests/test_compose_briefs.sh
 set -uo pipefail
 
 die() { echo "fatal: $*" >&2; exit 2; }

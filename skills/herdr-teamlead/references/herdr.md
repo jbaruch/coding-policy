@@ -1,6 +1,6 @@
 # Herdr Reference for the Team Lead
 
-Everything the `teamlead` skill needs to know about driving [Herdr](https://herdr.dev),
+Everything the `herdr-teamlead` skill needs to know about driving [Herdr](https://herdr.dev),
 a terminal multiplexer that recognizes coding agents running in its panes.
 Gathered from a real three-agent round on 2026-09-01 that built
 `github.com/jbaruch/agentic-context-registry` with workers `claude` (Claude
@@ -39,7 +39,7 @@ herdr agent rename <pane-id> <name>
 follow the pane occupant — a name is cleared when that agent exits or is
 replaced. Name each worker once; every later command addresses it by name.
 
-`skills/teamlead/roster.sh` is the skill's read of this surface — see its
+`skills/herdr-teamlead/roster.sh` is the skill's read of this surface — see its
 header for the contract.
 
 ## Driving a Worker
@@ -102,13 +102,13 @@ primitive is
 herdr pane wait-output --match 'REPORT: ' --source visible --lines 40 --timeout <ms> <pane-id>
 ```
 
-followed by verifying the file. `skills/teamlead/wait-report.sh` does both;
+followed by verifying the file. `skills/herdr-teamlead/wait-report.sh` does both;
 its header carries the contract, its constants the poll interval and budget.
 
 `blocked` gets the same treatment as `done`: it is terminal only when two reads
 a confirmation delay apart both say `blocked` AND the visible pane shows a
 dialog row. A lone `blocked` read keeps the wait alive. The delay and the
-marker list are constants at the top of `skills/teamlead/wait-report.sh`.
+marker list are constants at the top of `skills/herdr-teamlead/wait-report.sh`.
 
 Herdr is deliberately strict about `blocked`: it reports it only when the live
 bottom-buffer snapshot matches known visible approval, question, or permission
@@ -167,8 +167,8 @@ its footer is a config edit. Two optional per-agent keys drive it:
 | `working_markers` | Literal footer text meaning "mid-turn". Checked before `idle_markers` |
 
 Both are literal substrings matched against the last non-empty footer rows.
-Shipped defaults are in `skills/teamlead/config.example.json`; the precedence
-order and the row count are in `skills/teamlead/teamlead/probe.py`.
+Shipped defaults are in `skills/herdr-teamlead/config.example.json`; the precedence
+order and the row count are in `skills/herdr-teamlead/teamlead/probe.py`.
 
 ## Sending a Slash Command Is Per-Agent
 
@@ -217,7 +217,7 @@ normal-weight text typed after a suggestion still counts, which keeps a real
 command from hiding behind one. `composer_ignore_dim` turns this on per worker
 (`true` for claude, `false` elsewhere), and a herdr that cannot produce ANSI
 falls back to plain text with a warning. The SGR codes are in
-`skills/teamlead/teamlead/composer.py`.
+`skills/herdr-teamlead/teamlead/composer.py`.
 
 **A runtime's empty-composer placeholder is not text either.** Codex draws
 `Ask Codex to do anything` whenever nothing is typed. Live, that read as
@@ -297,7 +297,7 @@ composer unreadable, which surfaces as an unsent command going uncaught — the
 very failure the check exists for. The glyph lives in config, so the fix is an
 edit. The screen-change half cannot tell a cleared session from a repaint
 either; it gates a status flag, never a keystroke. Both live in
-`skills/teamlead/teamlead/composer.py`.
+`skills/herdr-teamlead/teamlead/composer.py`.
 
 ### Tracing a Live Run
 
@@ -314,7 +314,7 @@ value's key name survives, so the trace still says what was sent.
 
 The shape list and the cap are the script's own constants — see
 `SECRET_PATTERNS` and `TRACE_FIELD_CAP_BYTES` at the top of
-`skills/teamlead/teamlead/herdr.py`. It is signature matching, never proof: a
+`skills/herdr-teamlead/teamlead/herdr.py`. It is signature matching, never proof: a
 shape absent from that list reaches the sink, and the fix is a pattern there
 rather than a guard at a call site.
 

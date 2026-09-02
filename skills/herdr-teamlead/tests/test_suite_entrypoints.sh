@@ -18,7 +18,7 @@
 # command is checked explicitly and aborts with a fatal diagnostic on failure
 # (rules/error-handling.md aggregate-reporting carve-out).
 #
-# Run: bash skills/teamlead/tests/test_suite_entrypoints.sh
+# Run: bash skills/herdr-teamlead/tests/test_suite_entrypoints.sh
 set -uo pipefail
 
 die() { echo "fatal: $*" >&2; exit 2; }

@@ -114,7 +114,7 @@ main() {
     return 1
   fi
   if [[ ! -d "$templates" ]]; then
-    warn "templates dir not found: ${templates} — point at skills/teamlead/templates"
+    warn "templates dir not found: ${templates} — point at skills/herdr-teamlead/templates"
     return 1
   fi
   if [[ ! -r "$values_file" ]]; then

@@ -2,7 +2,7 @@
 
 ### Teamwork — a lead agent that runs a three-agent round instead of a human guessing
 
-New `teamlead` skill, `agent-team-operation` rule, and `herdr-team-status` SessionStart hook, plus the vendored `teamlead` Python utility (`measure` / `plan` / `apply` / `state`). Everything here was learned on 2026-09-01 running a real round in [Herdr](https://herdr.dev) that built `github.com/jbaruch/agentic-context-registry` with three workers: `claude` (Claude Code), `codex` (OpenAI Codex CLI), and `grok` (Grok CLI).
+New `herdr-teamlead` skill, `agent-team-operation` rule, and `herdr-team-status` SessionStart hook, plus the vendored `teamlead` Python utility (`measure` / `plan` / `apply` / `state`). Everything here was learned on 2026-09-01 running a real round in [Herdr](https://herdr.dev) that built `github.com/jbaruch/agentic-context-registry` with three workers: `claude` (Claude Code), `codex` (OpenAI Codex CLI), and `grok` (Grok CLI).
 
 The round is seven steps — roster, measure, plan, brief, dispatch, wait, gate — and only two of them need judgment. Who has budget left is arithmetic, so it went to a script: each worker is asked for its own usage numbers through its native slash command (`/usage` for claude and grok, `/status` for codex), and its headroom is the MINIMUM remaining window, never the average. A worker with 100% of its week and 2% of its five-hour window has 2% of headroom, and handing that one the developer role stalls the round ten minutes in. Roles are passed heaviest-first and a headroom tie breaks on who has held that role fewest times, so nobody owns `developer` forever.
 

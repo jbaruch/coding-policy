@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Outcome-based tests for hooks/herdr-team-status.sh.
 #
-# The hook reads the live roster through skills/teamlead/roster.sh, which
+# The hook reads the live roster through skills/herdr-teamlead/roster.sh, which
 # shells out to `herdr`, so every case points HERDR_BIN at a fake binary this
 # harness writes, replaying a payload built programmatically in the test
 # (rules/testing-standards.md Fixtures — no binary fixtures, no live session).

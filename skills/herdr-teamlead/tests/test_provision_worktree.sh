@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Outcome-based tests for skills/teamlead/provision-worktree.sh.
+# Outcome-based tests for skills/herdr-teamlead/provision-worktree.sh.
 #
 # Real local git repos, driven offline: a bare "origin" plus a shared checkout
 # cloned from it, per scenario, so the cases share no state and run in any
@@ -25,7 +25,7 @@
 #                          is refused, naming both git dirs. Same branch name
 #                          is not identity; the shared object store is.
 #
-# Run: bash skills/teamlead/tests/test_provision_worktree.sh
+# Run: bash skills/herdr-teamlead/tests/test_provision_worktree.sh
 set -uo pipefail
 
 die() { echo "fatal: $*" >&2; exit 2; }

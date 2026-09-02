@@ -1,6 +1,6 @@
 # Team-Lead State Schema
 
-Schema for the cross-invocation state the `teamlead` skill's Python utility
+Schema for the cross-invocation state the `herdr-teamlead` skill's Python utility
 writes and reads, per `rules/stateful-artifacts.md`. The utility is the sole
 owner: it writes every record and is the only thing that may change their shape.
 
@@ -8,10 +8,10 @@ owner: it writes every record and is the only thing that may change their shape.
 
 | Path | Owner | Purpose |
 | ---- | ----- | ------- |
-| `$XDG_STATE_HOME/teamlead/state.json` (default `~/.local/state/teamlead/state.json`, override `--state FILE`) | `skills/teamlead/teamlead/state.py` | Headroom snapshots plus the append-only role-assignment ledger |
+| `$XDG_STATE_HOME/teamlead/state.json` (default `~/.local/state/teamlead/state.json`, override `--state FILE`) | `skills/herdr-teamlead/teamlead/state.py` | Headroom snapshots plus the append-only role-assignment ledger |
 | `$XDG_CONFIG_HOME/teamlead/config.json` (default `~/.config/teamlead/config.json`, override `--config FILE`) | the operator | Per-agent usage / clear commands; teamlead reads it and never writes it |
 
-`skills/teamlead/config.example.json` is the ship-ready config to copy into
+`skills/herdr-teamlead/config.example.json` is the ship-ready config to copy into
 place. A missing config is refused with the exact `cp` command to run. The
 optional `idle_markers` / `working_markers` per-agent keys carry the footer
 signatures the stale-state probe reads; an agent with neither is never probed.
@@ -20,7 +20,7 @@ signatures the stale-state probe reads; an agent with neither is never probed.
 `composer_glyph`, `composer_ignore_dim`, `composer_placeholders`, and
 `recover_keys` drive the consumed-command check, the ghost-text and placeholder
 exemptions, and the guarded one-shot recovery of a stuck composer. All are documented in
-`skills/teamlead/references/herdr.md`.
+`skills/herdr-teamlead/references/herdr.md`.
 
 ## State Record Format
 
@@ -90,7 +90,7 @@ Only the owner migrates, and it reads a version in one of three directions.
 
 - **Older** — the document, or a single ledger row, is walked up the
   `MIGRATIONS` / `RECORD_MIGRATIONS` chain in
-  `skills/teamlead/teamlead/state.py`, keyed by the version being upgraded
+  `skills/herdr-teamlead/teamlead/state.py`, keyed by the version being upgraded
   from, and the upgraded file is rewritten in place. A document or row carrying
   no `schema_version` reads as the pre-versioning version `0`, which is what
   gives the chain a step below `1`. The `1 → 2` step stamps `status: unknown`

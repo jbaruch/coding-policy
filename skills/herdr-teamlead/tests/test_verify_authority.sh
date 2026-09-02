@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Outcome-based tests for skills/teamlead/verify-authority.sh.
+# Outcome-based tests for skills/herdr-teamlead/verify-authority.sh.
 #
 # Every case points GH_BIN at a fake this harness writes, replaying payloads
 # built in the test (rules/testing-standards.md Fixtures — no network, no real
@@ -23,7 +23,7 @@
 #   9. gh absent         -> exit 1.
 #  10. API failure       -> exit 2, never a verdict.
 #
-# Run: bash skills/teamlead/tests/test_verify_authority.sh
+# Run: bash skills/herdr-teamlead/tests/test_verify_authority.sh
 set -uo pipefail
 
 die() { echo "fatal: $*" >&2; exit 2; }

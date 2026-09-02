@@ -143,7 +143,7 @@ marker_seen() { # <pane-id> <report-basename>
   local rc=0 code text
   # Argument order follows herdr's own usage line -- `pane wait-output
   # [OPTIONS] <--match|--regex> <PANE_ID>` -- and the builder in
-  # skills/teamlead/teamlead/herdr.py, so the two surfaces cannot drift.
+  # skills/herdr-teamlead/teamlead/herdr.py, so the two surfaces cannot drift.
   "$HERDR_BIN" pane wait-output \
     --match "$REPORT_MARKER" \
     --source visible \

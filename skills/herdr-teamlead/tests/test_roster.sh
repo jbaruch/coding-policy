@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Outcome-based tests for skills/teamlead/roster.sh.
+# Outcome-based tests for skills/herdr-teamlead/roster.sh.
 #
 # The script shells out to `herdr`, so every case points HERDR_BIN at a fake
 # binary this harness writes, replaying a fixture payload built programmatically
@@ -22,7 +22,7 @@
 #   8. herdr error        -> exit 2, empty stdout, the CLI's message surfaced.
 #   9. Unreadable payload -> exit 2, empty stdout (never an empty roster).
 #
-# Run: bash skills/teamlead/tests/test_roster.sh
+# Run: bash skills/herdr-teamlead/tests/test_roster.sh
 set -uo pipefail
 
 die() { echo "fatal: $*" >&2; exit 2; }
