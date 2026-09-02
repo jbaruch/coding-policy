@@ -140,6 +140,18 @@ def plan(roles, snapshot, counts=None, snapshot_ref=None, warn=None):
         assignments[role] = chosen
         rationale.append(_explain(role, chosen, ranked, headrooms, counts))
 
+    # The loop discards each choice from `remaining`, so a duplicate is
+    # unreachable today. Asserted anyway: `apply` refuses a plan that repeats
+    # an agent, and a refactor that broke this would surface there, one herdr
+    # session later, as a refusal nobody could trace back to here.
+    if len(set(assignments.values())) != len(assignments):
+        raise PlanError(
+            "Planner produced the same agent for several roles ({}) - this is a "
+            "bug in the planner, not in the input; report it with the snapshot "
+            "that triggered it.".format(assignments),
+            {"assignments": assignments},
+        )
+
     return {
         "schema_version": PLAN_SCHEMA_VERSION,
         "assignments": assignments,

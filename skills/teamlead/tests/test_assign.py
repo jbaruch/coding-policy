@@ -1137,5 +1137,55 @@ class ApplyTest(unittest.TestCase):
         )
 
 
+class OneAgentOneRoleTest(unittest.TestCase):
+    """A repeated agent would clear its own pane between two briefs."""
+
+    def setUp(self):
+        self.paths = {
+            "common": "/w/COMMON.md",
+            "developer": "/w/dev.md",
+            "tester": "/w/test.md",
+        }
+
+    def test_the_same_agent_in_two_roles_is_refused(self):
+        with self.assertRaises(UsageError) as caught:
+            normalize_assignments({"developer": "grok", "tester": "grok"})
+        message = str(caught.exception)
+        self.assertIn("grok -> developer, tester", message)
+        self.assertIn("one role per round", message)
+        self.assertIn("--assignments", message)
+
+    def test_the_refusal_names_every_doubled_agent(self):
+        with self.assertRaises(UsageError) as caught:
+            normalize_assignments(
+                {"developer": "grok", "tester": "grok", "reviewer": "codex", "scribe": "codex"}
+            )
+        message = str(caught.exception)
+        self.assertIn("codex -> reviewer, scribe", message)
+        self.assertIn("grok -> developer, tester", message)
+
+    def test_distinct_agents_pass(self):
+        self.assertEqual(
+            normalize_assignments({"developer": "grok", "tester": "codex"}),
+            {"developer": "grok", "tester": "codex"},
+        )
+
+    def test_nothing_is_sent_when_the_assignments_repeat_an_agent(self):
+        # The refusal has to land before any herdr call: a paste cannot be
+        # unsent, and the second brief would arrive after the first pane was
+        # cleared.
+        runner = runner_with({"grok": "idle"})
+        with self.assertRaises(UsageError):
+            apply(
+                HerdrClient(runner=runner),
+                {"developer": "grok", "tester": "grok"},
+                BY_NAME,
+                self.paths,
+                AT,
+            )
+        self.assertEqual(runner.commands(), [])
+        self.assertEqual(runner.writes(), [])
+
+
 if __name__ == "__main__":
     unittest.main()

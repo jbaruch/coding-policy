@@ -98,7 +98,39 @@ def normalize_assignments(payload):
                 "agent name string.".format(role, agent),
                 {"role": role},
             )
+
+    reject_repeated_agents(payload, "--assignments")
     return dict(payload)
+
+
+def reject_repeated_agents(assignments, source):
+    """Refuse a mapping that gives one agent more than one role.
+
+    `apply` walks the roles in order, clearing each agent's context before
+    handing it its brief. An agent holding two roles therefore gets cleared
+    between its own two briefs: the second wipes the first, the earlier role is
+    silently dropped, and whatever the first brief had already started is gone.
+
+    Checked on the CLI input AND inside `apply`, since `apply`, `dry_run`, and
+    `check_all_ready` are all reachable without going through the CLI parser,
+    and a paste cannot be unsent.
+    """
+    by_agent = {}
+    for role, agent in assignments.items():
+        by_agent.setdefault(agent, []).append(role)
+    doubled = {agent: sorted(roles) for agent, roles in by_agent.items() if len(roles) > 1}
+    if not doubled:
+        return
+    detail = "; ".join(
+        "{} -> {}".format(agent, ", ".join(roles)) for agent, roles in sorted(doubled.items())
+    )
+    raise UsageError(
+        "{} gives one agent several roles ({}). One agent takes one role per "
+        "round: dispatching both would clear the pane between them and leave "
+        "only the last brief. Give each role its own agent, or run the roles as "
+        "separate rounds.".format(source, detail),
+        {"duplicates": {agent: roles for agent, roles in sorted(doubled.items())}},
+    )
 
 
 def resolve_paths(assignments, briefs, common):
@@ -133,7 +165,8 @@ def resolve_paths(assignments, briefs, common):
 
 
 def validate_agents(assignments, agents_by_name):
-    """Refuse an assignment naming an agent the config does not know."""
+    """Refuse an assignment naming an unknown agent, or one held twice."""
+    reject_repeated_agents(assignments, "the assignments")
     for role, name in assignments.items():
         if name not in agents_by_name:
             raise UsageError(

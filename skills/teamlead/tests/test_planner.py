@@ -260,5 +260,39 @@ class MalformedHeadroomTest(unittest.TestCase):
         )
 
 
+class OneAgentOneRoleTest(unittest.TestCase):
+    """apply refuses a repeated agent, so the planner must never emit one."""
+
+    def test_every_role_gets_a_distinct_agent(self):
+        snapshot = {
+            "agents": {
+                "grok": {"headroom_pct": 90.0},
+                "codex": {"headroom_pct": 90.0},
+                "claude": {"headroom_pct": 90.0},
+            }
+        }
+        result = plan(["developer", "tester", "reviewer"], snapshot)
+        agents = list(result["assignments"].values())
+        self.assertEqual(len(agents), len(set(agents)))
+
+    def test_identical_headrooms_still_produce_distinct_agents(self):
+        # A tie is where a naive "pick the best" would hand the same agent to
+        # every role.
+        snapshot = {
+            "agents": {name: {"headroom_pct": 50.0} for name in ("a", "b", "c", "d")}
+        }
+        result = plan(["developer", "tester", "reviewer"], snapshot)
+        agents = list(result["assignments"].values())
+        self.assertEqual(sorted(agents), ["a", "b", "c"])
+
+    def test_null_headrooms_still_produce_distinct_agents(self):
+        snapshot = {
+            "agents": {name: {"headroom_pct": None} for name in ("a", "b", "c")}
+        }
+        result = plan(["developer", "tester"], snapshot)
+        agents = list(result["assignments"].values())
+        self.assertEqual(len(agents), len(set(agents)))
+
+
 if __name__ == "__main__":
     unittest.main()
