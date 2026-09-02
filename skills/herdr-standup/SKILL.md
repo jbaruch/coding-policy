@@ -69,15 +69,19 @@ budget is the script's constant, never a number chosen here; see the header of
 inside it: it is not chased twice. Move it to Step 3's list with what you know.
 Exit 3 means a dialog is up — relay it and leave that worker to the operator.
 Exit 4 means the answer file exists but the pane did not show the marker the
-script expects. Read the pane and pick exactly one continuation: the last
-message is the four lines ending in a `REPORT: ` line that names this worker's
-answer file — use the file; otherwise read the live state with
-`herdr agent get <agent-name>`: the command fails — report its message
-verbatim and finish here; the state is `blocked` or `working` — re-run the
-wait for that worker once, since one read decides nothing and the script is
-what confirms a block across two reads and the pane before returning exit 3;
-the state is `idle` or `done` — the worker answered without the marker, move
-it to Step 3's list with what you know. Proceed immediately to Step 3.
+script expects. Read the pane and take the first continuation that applies:
+
+- The last message is the four lines ending in a `REPORT: ` line that names
+  this worker's answer file — use the file.
+- Otherwise read the live state with `herdr agent get <agent-name>`. The
+  command fails — report its message verbatim and finish here.
+- The state is `blocked` or `working` — re-run the wait for that worker once.
+  The script confirms a block across two reads and the pane before returning
+  exit 3.
+- The state is `idle` or `done` — the worker answered without the marker.
+  Move it to Step 3's list with what you know.
+
+Proceed immediately to Step 3.
 
 ## Step 3 — Write the Rows Nobody Answered
 

@@ -14,9 +14,11 @@
 #           agent-name  a live Herdr agent name (or the pane id hosting it).
 #           report-path absolute path the brief told that worker to write; a
 #                       relative path is refused (exit 2).
-#   stdout: one JSON object, emitted on every terminal outcome —
+#   stdout: one JSON object on every terminal outcome except exit 2, which
+#           leaves stdout empty (its diagnostic is on stderr) —
 #           {"agent":"<n>","state":"<s>","report_path":"<p>",
 #            "found":<bool>,"elapsed_seconds":<int>}
+#           plus "reason":"<why>" on exit 4 only.
 #   stderr: diagnostics and per-attempt progress.
 #   exit  : 0 report found (`found` true),
 #           1 budget exhausted (`found` false, `state` last observed),
