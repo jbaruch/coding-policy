@@ -301,9 +301,9 @@ completion. Poll interval and give-up budget are the script's own constants.
   report.
 - **Exit 2** — a tool failure. Report the message verbatim and finish here; the
   round has no reliable view of any worker.
-- **Exit 4** — the report file exists and the worker reads idle on consecutive
-  polls, but the pane never showed the marker in a shape the script
-  recognizes. Read the pane with `herdr agent read <name> --source visible`.
+- **Exit 4** — the report file exists and the worker reads `idle` or `done` on
+  consecutive polls, but the pane never showed the marker in a shape the
+  script recognizes. Read the pane with `herdr agent read <name> --source visible`.
   A `REPORT: ` line naming this report, in any wrapping, confirms it: treat the
   report as delivered and continue to the next worker. Anything else is a
   worker that wrote the file and did not finish: keep waiting by re-running
