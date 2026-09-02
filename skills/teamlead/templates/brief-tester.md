@@ -25,8 +25,9 @@ code, and name the path in your report.
 
 ## Mode B — Executable Acceptance Tests
 
-Write the tests from the plan on a branch of your own, then deliver them as a
-patch — never a push:
+Your worktree at `{{WORKTREE}}` already exists; the lead created it. Write the
+tests there, on the branch it is already on, then deliver them as a patch —
+never a push, and never a git command against `{{SHARED_CHECKOUT}}`:
 
 ```bash
 cd {{WORKTREE}} && git format-patch origin/<default> --stdout > {{REPORTS_DIR}}/acceptance-tests.patch

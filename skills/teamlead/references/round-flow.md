@@ -20,6 +20,27 @@ Fewer live workers than roles is an error, not a silent drop — a role nobody
 holds is work nobody is doing. Either name another agent into the roster or
 fold two roles onto one worker deliberately, in that worker's brief.
 
+## Two Phases
+
+A task runs through the round twice, and only the second pass gates anything.
+
+**Phase 1 — pre-development (optional).** The architect posts a design note on
+the issue (reviewer Mode A). The tester writes a plan mapping each acceptance
+criterion to a test, or delivers those tests as a patch (tester Mode A or B).
+The developer implements against both, runs the repo's gates, pushes the
+branch, and stops without opening a PR.
+
+Skip Phase 1 for a change small enough that a design note would say less than
+the diff. Nothing in Phase 1 is a pass; it is preparation.
+
+**Phase 2 — post-push verification (mandatory).** The reviewer reviews the
+pushed branch and posts a COMMENT review (Mode B). The tester runs the gates
+and the acceptance tests against that same branch (Mode C). Both report against
+the current tip by SHA.
+
+The release hand-off reads Phase 2 reports and nothing else. A design note is
+not a review of the code that got written, and a test plan is not a test run.
+
 ## One Round, End to End
 
 1. **Roster** — `roster.sh` names the live workers. An unnamed pane has no
@@ -29,15 +50,19 @@ fold two roles onto one worker deliberately, in that worker's brief.
    than interrupted.
 3. **Plan** — `teamlead.sh plan --roles developer,tester,reviewer` assigns
    roles heaviest-first. It contacts nobody and writes nothing.
-4. **Brief** — the lead fills the templates for this round. `COMMON.md` is
-   copied once per repo; each role gets its own brief file with the issue,
-   branch, worktree, and report paths substituted.
-5. **Dispatch** — `teamlead.sh apply` clears each worker's context, then sends
+4. **Brief** — the lead fills the templates for this round, naming each
+   worker's phase and mode. `COMMON.md` is copied once per repo; each role gets
+   its own brief file with the issue, branch, worktree, and report paths
+   substituted.
+5. **Provision** — the lead creates every worktree the briefs name, from the
+   shared checkout. A worker never runs `git` there, so its checkout has to
+   exist before the brief arrives.
+6. **Dispatch** — `teamlead.sh apply` clears each worker's context, then sends
    the assignment prompt. It re-reads live status first and refuses the round
    rather than typing into a busy worker.
-6. **Wait** — `wait-report.sh <agent> <report-path>` per worker, in the order
+7. **Wait** — `wait-report.sh <agent> <report-path>` per worker, in the order
    the round needs them.
-7. **Gate** — the lead reads every report in full and decides: another round,
+8. **Gate** — the lead reads every report in full and decides: another round,
    or the release hand-off.
 
 ## Reading a Report
@@ -61,7 +86,7 @@ a `## BLOCKED` section can sit under a report that otherwise reads as finished.
   re-dispatching; a worker that is still working needs more budget, not a
   second copy of the same brief.
 
-## Why the Internal Pass Runs Before the PR
+## Why Phase 2 Runs Before the PR
 
 The registry build's PR #27 went through **12 automated review rounds** —
 policy reviewer plus Copilot — because the code reached the bots before the
@@ -82,6 +107,10 @@ The hand-off is therefore split around the bots:
 - Developer runs **Steps 5–7** — watch the reviews, act on blocking findings,
   merge and clean up.
 
+The lead releases nothing until it holds a reviewer Mode B report and a tester
+Mode C report against the SHA the developer pushed. A newer push invalidates
+both: re-run Phase 2 against the new tip.
+
 ## Shared-Account Reviews
 
 The workers share one GitHub account, and GitHub refuses `APPROVE` and
@@ -96,5 +125,7 @@ whatever GitHub's merge box says.
 - Edit the shared checkout. The lead reads it and dispatches; workers write.
 - Answer a question by typing into a working worker. Wait for the report.
 - Answer a blocked worker's approval dialog. Relay it to the operator and stop.
+- Create a worktree for a worker after dispatch. Provision before briefing.
+- Release on a Phase 1 report. A plan is not a verification.
 - Treat a single `idle` or `done` observation as completion.
 - Merge on a worker's behalf. The developer runs the release skill.

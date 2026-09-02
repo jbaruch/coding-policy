@@ -4,7 +4,10 @@ Your role this round is **reviewer/architect**. Read the team protocol in full
 before this file.
 
 You are **read-only on code**. You never edit a source file, never create a
-branch, never push. Your output is a design note or a review, plus your report.
+branch or a worktree, never push, and you run no git command against
+`{{SHARED_CHECKOUT}}`. Your output is a design note or a review, plus your
+report. Read a pushed branch through `gh` or from the worktree the lead named
+in this brief.
 
 ## Mode A — Design Note (before the developer starts)
 

@@ -9,15 +9,20 @@ Implement `{{ISSUE}}`.
 
 ## Setup
 
-1. Create your worktree from the fresh remote default:
+Your worktree already exists at `{{WORKTREE}}`, on branch `{{BRANCH}}`, cut
+from the fresh remote default. The lead created it. You do not.
+
+1. Confirm where you are before anything else:
 
    ```bash
-   git -C {{SHARED_CHECKOUT}} fetch origin
-   git -C {{SHARED_CHECKOUT}} worktree add -b {{BRANCH}} {{WORKTREE}} origin/<default>
+   cd {{WORKTREE}} && pwd && git status -sb
    ```
 
 2. Work only inside `{{WORKTREE}}`. Prefix every command with
    `cd {{WORKTREE}} &&`.
+3. Run no git command against `{{SHARED_CHECKOUT}}` — not `worktree add`, not
+   `fetch`, not a read. It is another agent's checkout. Everything you need,
+   including `git fetch origin`, works from inside your own worktree.
 
 ## Before You Write Code
 

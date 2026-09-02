@@ -21,6 +21,14 @@ reviewer/architect, and a tester. You assign the roles, write the briefs, read
 the reports, and gate the round. You never edit the shared checkout, and you
 never write code for a worker.
 
+A round runs in two phases:
+
+- **Phase 1, pre-development** — optional. The architect writes a design note,
+  the tester writes a test plan, the developer implements and pushes.
+- **Phase 2, post-push verification** — mandatory. The reviewer reviews the
+  pushed branch, the tester verifies it. Both report against the current branch
+  tip, and the release hand-off reads those reports alone.
+
 Herdr command surface, worker quirks, and the usage-parsing details:
 
 ```text
@@ -114,6 +122,19 @@ Substitute every placeholder: `{{ISSUE}}`, `{{BRANCH}}`, `{{WORKTREE}}`,
 `{{REPORT}}`, `{{REPORTS_DIR}}`. Give each worker its own worktree path under
 `~/.worktrees/` and its own report path under the round's reports directory.
 
+Name the mode each brief runs, and say so in the brief itself:
+
+| Phase | Role | Mode | Output |
+| ----- | ---- | ---- | ------ |
+| 1 | reviewer | A | design note on the issue |
+| 1 | tester | A or B | test plan, or acceptance tests as a patch |
+| 1 | developer | — | implementation, pushed branch, no PR |
+| 2 | reviewer | B | COMMENT review of the pushed branch |
+| 2 | tester | C | gates plus acceptance tests against the pushed branch |
+
+Phase 2 briefs name the branch AND the commit SHA the worker must report
+against. A report against an older tip does not gate anything.
+
 Copy `skills/teamlead/templates/COMMON.md` into the round's reports directory
 once per repo, substituting `{{SHARED_CHECKOUT}}`. Every worker reads the same
 copy.
@@ -123,7 +144,31 @@ reviewer's earlier comment" reaches an agent that cannot see it. Name the
 issue, the file, the finding, and the path in full. Proceed immediately to
 Step 5.
 
-## Step 5 — Dispatch the Briefs
+## Step 5 — Provision the Worktrees
+
+The lead creates every worktree a brief names. A worker never runs `git` against
+the shared checkout (`rules/agent-team-operation.md` Writers and Checkouts), so
+the checkout it writes in has to exist before its brief arrives.
+
+From the shared checkout, once per worker that needs one:
+
+```bash
+git -C <shared-checkout> fetch origin
+git -C <shared-checkout> worktree add -b <branch> ~/.worktrees/<repo>-<role> origin/<default>
+```
+
+A read-only role (a Phase 1 reviewer) needs no worktree. A Phase 2 worker
+verifying a pushed branch gets one attached to that branch:
+
+```bash
+git -C <shared-checkout> worktree add ~/.worktrees/<repo>-<role> <branch>
+```
+
+Confirm each path exists and sits on the intended branch before Step 6. Remove
+them per `rules/agent-worktree-isolation.md` Cleanup once the branch lands.
+Proceed immediately to Step 6.
+
+## Step 6 — Dispatch the Briefs
 
 ```bash
 .tessl/plugins/jbaruch/coding-policy/skills/teamlead/teamlead.sh apply \
@@ -132,47 +177,34 @@ Step 5.
   --common <path-to-COMMON.md>
 ```
 
-Per role: re-reads the worker's live state, recovers a composer that already
-holds text, sends the native context-clear command, confirms the composer
-consumed it, waits for the worker to settle, confirms the composer is empty
-once more, then sends the assignment prompt, confirms the worker actually
-started on it, and records the hand-off in the ledger. Emits one JSON object
-describing what was sent, each record carrying `landed`, `started`, and
-`status`.
+Clears each worker's context and hands it its brief. Emits one JSON object:
+per role a record carrying `cleared`, `landed`, `started`, and `status`.
 
-- A `working` or `blocked` worker makes the command refuse the whole round
-  before a single keystroke goes out, with a JSON error on stderr and a
-  non-zero exit. Wait for that worker, or dispatch a round without it.
-- A `working` verdict is confirmed against the pane first, so a stale window
-  title does not refuse a worker sitting at an empty prompt.
-- A worker whose clear command is typed rather than pasted needs a pane id from
-  that status read. Herdr reporting it with no pane refuses the round.
-- `--dry-run` prints every command it would run and makes no herdr calls. The
-  pane confirmation appears separately under `conditional_commands`.
-- A busy target has no override. The refusal is unconditional, and it fires
-  before any keystroke goes out.
-- A slash command that the composer still holds fails that worker, and the
-  assignment is never sent onto the end of it. `--no-clear` skips the clearing
-  step, never the composer gate.
-- `cleared: true` means the command was consumed AND the pane changed.
-  Consumed-but-unchanged reports `cleared: false` with a warning.
-- An assignment the worker never started on records
-  `"status": "sent_but_not_started"`, warns, and exits non-zero. Treat it as an
-  observation and read the pane; do not re-dispatch on top of it.
-- A worker answering `unknown skill` or `Unrecognized command` fails that
-  worker at once. Recovery is one `esc`, then resend.
-- Claude Code's post-task ghost-text suggestion reads as an empty composer
-  through `composer_ignore_dim`. Nobody typed it, and Esc does not clear it.
-- A stuck composer is recovered with the worker's `recover_keys`, sent exactly
-  once. A second `ctrl+c` exits Codex, so a still-occupied composer is a
-  refusal rather than a retry. Glyphs, keys, and the settle knob are in
-  `skills/teamlead/teamlead/composer.py` and the config.
-- The prompt text is the utility's own contract; see
-  `skills/teamlead/teamlead/assign.py`.
+Exit conditions that change what you do next:
 
-Proceed immediately to Step 6.
+- **Non-zero with a busy target** — the whole round is refused before any
+  keystroke goes out. Wait for that worker, or dispatch a round without it.
+- **Non-zero with `"status": "sent_but_not_started"`** — the message was sent
+  and no turn began. Read that worker's pane; do not re-dispatch on top of it.
+- **A worker failed on its clear command** — its assignment was never sent.
+  Nothing landed for that role, so the round is short one worker.
+- **`cleared: false` on a record** — the clear was consumed and the pane did
+  not change. The worker still got its brief, with a stale context behind it.
+- `--dry-run` prints every command it would run and makes no herdr calls.
 
-## Step 6 — Wait for the Reports
+The delivery mechanics behind those outcomes — composer confirmation, recovery
+keys, ghost text, the rejection strings, the settle knobs — are in:
+
+```text
+skills/teamlead/references/herdr.md
+```
+
+The prompt text, the refusal predicate, and every constant are the utility's
+own contract; see `skills/teamlead/teamlead/assign.py`.
+
+Proceed immediately to Step 7.
+
+## Step 7 — Wait for the Reports
 
 One call per dispatched worker, in the order the round needs them:
 
@@ -189,15 +221,16 @@ completion. Poll interval and give-up budget are the script's own constants.
 - **Exit 1** — the budget ran out. Read the pane with
   `herdr agent read <name> --source visible` before re-dispatching.
 - **Exit 2** — a tool failure. Report the message verbatim and stop the round.
-- **Exit 3** — the worker is blocked at an approval or question dialog. Read
-  the dialog with `herdr pane read <pane-id> --source visible`, relay its text
-  to the operator verbatim, and stop the round for that worker. You never
-  answer it: the operator does. Resume only once `herdr agent get <name>`
-  reports a state other than `blocked`, then re-run the wait.
+- **Exit 3** — the worker is blocked at an approval or question dialog,
+  confirmed across two reads and the pane. Read the dialog with
+  `herdr pane read <pane-id> --source visible`, relay its text to the operator
+  verbatim, and stop the round for that worker. You never answer it: the
+  operator does. Resume only once `herdr agent get <name>` reports a state
+  other than `blocked`, then re-run the wait.
 
-Proceed immediately to Step 7 once every dispatched worker has been waited on.
+Proceed immediately to Step 8 once every dispatched worker has been waited on.
 
-## Step 7 — Gate the Round
+## Step 8 — Gate the Round
 
 Read every report file in full, including a report whose worker exited cleanly.
 A `## BLOCKED` section can sit under a report that otherwise reads as finished.
@@ -205,13 +238,27 @@ Classify each finding blocking or advisory per `rules/review-severity.md`.
 
 - **Any blocking finding** — run another round: return to Step 2 with fresh
   briefs naming the findings in full. Say what changed from the prior round.
-- **Branch green, tester and reviewer clear** — prompt the developer to run
-  `Skill(skill: "release")` Steps 1–4, which opens the PR and requests the
-  bots. After the bots post, prompt it to run Steps 5–7 for the merge and
-  cleanup. The developer merges; you do not.
 - **Advisory findings only** — record them in the round log and fold them into
   the next round that is already happening. Never spend a round on a lone
   advisory.
+
+The release hand-off has one condition, and all four parts are required:
+
+1. The developer's report names the branch and the commit SHA it pushed.
+2. A reviewer **Mode B** report reviews that same SHA and carries no blocking
+   finding.
+3. A tester **Mode C** report verifies that same SHA, with the repo's gates run
+   and every acceptance criterion met.
+4. Nothing has been pushed to the branch after those two reports.
+
+A Phase 1 design note or test plan does NOT satisfy 2 or 3
+(`rules/agent-team-operation.md` Review Before PR). A report against an older
+SHA does not either — re-run Phase 2 against the current tip.
+
+With all four met, prompt the developer to run `Skill(skill: "release")`
+Steps 1–4, which opens the PR and requests the bots. After the bots post,
+prompt it to run Steps 5–7 for the merge and cleanup. The developer merges; you
+do not.
 
 Log the round: the assignments, the report paths, the findings, and the
 outcome. If the round produced no findings at all, log it and say so in one
