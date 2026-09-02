@@ -22,7 +22,9 @@ from teamlead.config import (
     Agent,
     default_config_path,
     load_config,
+    load_role_costs,
     parse_config,
+    parse_role_costs,
     select_agents,
 )
 from teamlead.errors import ConfigError
@@ -272,6 +274,85 @@ class SelectAgentsTest(unittest.TestCase):
         with self.assertRaises(ConfigError) as caught:
             select_agents(self.agents, ["grok"])
         self.assertIn("grok", str(caught.exception))
+
+
+class RoleCostsTest(unittest.TestCase):
+    """The optional `role_costs` override the planner merges over its defaults."""
+
+    def _with(self, costs):
+        payload = dict(VALID)
+        payload["role_costs"] = costs
+        return payload
+
+    def test_a_config_without_role_costs_has_no_overrides(self):
+        self.assertEqual(parse_role_costs(VALID), {})
+
+    def test_values_come_back_as_floats(self):
+        self.assertEqual(
+            parse_role_costs(self._with({"developer": 12, "reviewer": 5.5})),
+            {"developer": 12.0, "reviewer": 5.5},
+        )
+
+    def test_zero_is_a_legal_weight(self):
+        self.assertEqual(parse_role_costs(self._with({"reviewer": 0})), {"reviewer": 0.0})
+
+    def test_a_non_object_role_costs_is_an_error_naming_the_file(self):
+        with self.assertRaises(ConfigError) as caught:
+            parse_role_costs(self._with([12, 10, 5]), source="/tmp/config.json")
+        self.assertIn("/tmp/config.json", str(caught.exception))
+        self.assertIn("role_costs", str(caught.exception))
+
+    def test_a_negative_weight_is_an_error(self):
+        with self.assertRaises(ConfigError) as caught:
+            parse_role_costs(self._with({"developer": -1}))
+        self.assertIn("developer", str(caught.exception))
+
+    def test_a_non_numeric_weight_is_an_error(self):
+        with self.assertRaises(ConfigError) as caught:
+            parse_role_costs(self._with({"developer": "heavy"}))
+        self.assertIn("heavy", str(caught.exception))
+
+    def test_a_boolean_weight_is_an_error_not_one_point(self):
+        with self.assertRaises(ConfigError) as caught:
+            parse_role_costs(self._with({"developer": True}))
+        self.assertIn("developer", str(caught.exception))
+
+    def test_an_unorderable_weight_is_an_error(self):
+        with self.assertRaises(ConfigError) as caught:
+            parse_role_costs(self._with({"developer": float("inf")}))
+        self.assertIn("developer", str(caught.exception))
+
+
+class LoadRoleCostsTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="teamlead-costs-test-"))
+        self.addCleanup(shutil.rmtree, self.tmp)
+        self.path = self.tmp / "config.json"
+
+    def test_no_config_file_means_no_overrides(self):
+        # `plan` contacts no agent, so it runs on a machine never set up.
+        self.assertEqual(load_role_costs(self.path), {})
+
+    def test_reads_the_map_from_the_file(self):
+        payload = dict(VALID)
+        payload["role_costs"] = {"tester": 20}
+        self.path.write_text(json.dumps(payload), encoding="utf-8")
+        self.assertEqual(load_role_costs(self.path), {"tester": 20.0})
+
+    def test_a_config_that_exists_and_is_broken_still_fails_loudly(self):
+        self.path.write_text("{not json", encoding="utf-8")
+        with self.assertRaises(ConfigError) as caught:
+            load_role_costs(self.path)
+        self.assertIn(str(self.path), str(caught.exception))
+
+    def test_the_shipped_example_parses(self):
+        example = json.loads(
+            (REPO_ROOT / "config.example.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            parse_role_costs(example),
+            {"developer": 12.0, "tester": 10.0, "reviewer": 5.0},
+        )
 
 
 class AgentValueObjectTest(unittest.TestCase):

@@ -6,6 +6,7 @@ with an actionable message instead of silently inventing agents.
 """
 
 import json
+import math
 import os
 from pathlib import Path
 
@@ -284,9 +285,13 @@ def parse_config(payload, source="<memory>"):
     return agents
 
 
-def load_config(path):
-    """Read and validate the config file at `path`."""
-    path = Path(path)
+def _read_config(path):
+    """Decode the config JSON at `path`, or raise an actionable ConfigError.
+
+    Split out from `load_config` so the two readers of this one file -- the
+    agent list and the `role_costs` weights -- share every read and decode
+    error message rather than growing a second, drifting copy.
+    """
     try:
         text = path.read_text(encoding="utf-8")
     except FileNotFoundError:
@@ -305,7 +310,7 @@ def load_config(path):
         ) from None
 
     try:
-        payload = json.loads(text)
+        return json.loads(text)
     except json.JSONDecodeError as exc:
         raise ConfigError(
             "Agent config at {} is not valid JSON ({} at line {} column {}) - "
@@ -315,7 +320,72 @@ def load_config(path):
             {"path": str(path)},
         ) from None
 
-    return parse_config(payload, source=str(path))
+
+def load_config(path):
+    """Read and validate the config file at `path`."""
+    path = Path(path)
+    return parse_config(_read_config(path), source=str(path))
+
+
+def parse_role_costs(payload, source="<memory>"):
+    """Validate the optional `role_costs` override map, `{}` when it is absent.
+
+    Each value is what one round in that seat is expected to burn out of an
+    agent's remaining headroom percentage; the planner merges the map over its
+    own defaults, one role at a time. Validation lives here rather than in the
+    planner so the message names the file the operator has to edit.
+    """
+    if not isinstance(payload, dict):
+        raise ConfigError(
+            "Config at {} must be a JSON object with `schema_version` and "
+            "`agents` - see config.example.json.".format(source),
+            {"source": source},
+        )
+    costs = payload.get("role_costs")
+    if costs is None:
+        return {}
+    if not isinstance(costs, dict):
+        raise ConfigError(
+            "Config at {}: `role_costs` is a JSON {}, not an object mapping a "
+            "role to its cost weight - write it as "
+            "{{\"developer\": 12, \"tester\": 10, \"reviewer\": 5}}, or remove "
+            "it to take the planner's defaults.".format(
+                source, type(costs).__name__
+            ),
+            {"source": source, "role_costs_type": type(costs).__name__},
+        )
+    validated = {}
+    for role, value in costs.items():
+        # bool is a subclass of int, and `true` is not a one-point round.
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or math.isnan(float(value))
+            or math.isinf(float(value))
+            or value < 0
+        ):
+            raise ConfigError(
+                "Config at {}: role_costs[{!r}] is {!r}; use a non-negative "
+                "number of headroom points, e.g. 12. A weight only has to "
+                "order the seats against each other.".format(source, role, value),
+                {"source": source, "role": role, "value": value},
+            )
+        validated[role] = float(value)
+    return validated
+
+
+def load_role_costs(path):
+    """`role_costs` from the config at `path`; `{}` when there is no config.
+
+    `plan` contacts no agent and needs no roster, so it runs on a machine that
+    has never been set up. A missing config there means "no overrides", not a
+    failed plan -- but a config that EXISTS and is malformed still fails
+    loudly, exactly as it does for `measure`.
+    """
+    path = Path(path)
+    if not path.exists():
+        return {}
+    return parse_role_costs(_read_config(path), source=str(path))
 
 
 def select_agents(agents, names):

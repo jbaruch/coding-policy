@@ -5,16 +5,24 @@ The shape of one task round, and what the lead does between the steps of
 
 ## The Three Roles
 
-| Role | Token appetite | Writes code | Output |
-| ---- | -------------- | ----------- | ------ |
+| Role | Seat weight | Writes code | Output |
+| ---- | ----------- | ----------- | ------ |
 | developer | heaviest | yes, in its own worktree | pushed branch + report |
-| tester | medium | test code only, delivered as a patch file | plan or patch + report |
+| tester | middle | test code only, delivered as a patch file | plan or patch + report |
 | reviewer / architect | lightest | never | design note or COMMENT review + report |
 
 Roles rotate between tasks. The rotation is decided by measured headroom
 through `teamlead.sh plan`, never by the lead's impression of who looks fresh.
 `plan` breaks a headroom tie on who has held the role fewest times, so nobody
 owns `developer` forever.
+
+The weights those three words stand for are named constants —
+`DEFAULT_ROLE_COSTS` in `skills/herdr-teamlead/teamlead/planner.py` — and a
+`role_costs` map in `config.json` re-weighs any of them per install. `plan`
+fills the heaviest seat first whatever order `--roles` names them in, and hands
+each seat to the eligible worker that leaves the round's smallest projected
+headroom highest. Re-weigh from measurements: run `measure` before and after a
+round and read what the seat actually cost.
 
 Fewer live workers than roles is an error, not a silent drop — a role nobody
 holds is work nobody is doing. Either name another agent into the roster or
@@ -41,6 +49,12 @@ the current tip by SHA.
 The release hand-off reads Phase 2 reports and nothing else. A design note is
 not a review of the code that got written, and a test plan is not a test run.
 
+Phase 2 plans with the author barred from the seats that judge its work:
+`plan --exclude reviewer=<author> --exclude tester=<author>`. The author keeps
+whatever seat is left to it — a bar that would strand another role is refused,
+naming the role and the exclusions, rather than quietly seating somebody to
+review their own branch.
+
 ## One Round, End to End
 
 1. **Roster** — `roster.sh` names the live workers. An unnamed pane has no
@@ -52,7 +66,8 @@ not a review of the code that got written, and a test plan is not a test run.
    A worker that is `working` or `blocked` is skipped with null windows rather
    than interrupted.
 4. **Plan** — `teamlead.sh plan --roles developer,tester,reviewer` assigns the
-   roles. It contacts nobody and writes nothing.
+   roles, with `--exclude <role>=<agent>` for every seat a worker must not
+   hold. It contacts nobody and writes nothing.
 5. **Compose** — `compose-briefs.sh` renders the templates from one values
    file, refusing to write anything when a placeholder is unfilled or a
    supplied key matches no template. The lead decides the values; the script

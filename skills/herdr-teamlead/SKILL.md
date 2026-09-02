@@ -123,17 +123,31 @@ before relying on its role. Proceed immediately to Step 4.
 ## Step 4 — Plan the Roles
 
 ```bash
-.tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/teamlead.sh plan --roles developer,tester,reviewer
+.tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/teamlead.sh plan \
+  --roles developer,tester,reviewer \
+  [--exclude <role>=<agent>[,<agent>...]]...
 ```
 
 Pure computation over the newest snapshot plus the assignment ledger. Contacts
 no agent, writes nothing. Emits `{"assignments":{"<role>":"<agent>"},"rationale":[...],"snapshot_ref":{...}}`.
-Exit 1 names the reason it could not plan. The `--roles` order is load-bearing;
-what it means and how ties break are in `skills/herdr-teamlead/teamlead/planner.py`
-(the `plan` docstring).
+Exit 1 names the reason it could not plan.
+
+`--exclude` bars agents from one role and repeats, once per role. Phase 2 bars
+the author of the branch from `reviewer` and `tester` (`rules/agent-team-operation.md`
+Review Before PR). Exit 1 covers an exclusion naming a role outside `--roles`,
+and an exclusion set no assignment satisfies.
+
+Each seat carries a cost weight, and the heaviest is filled first; `--roles`
+keys the output document and no longer decides which seat that is. `role_costs`
+in config.json re-weighs a seat per install. The weights, the fill order, and
+the tie-breaks are the planner's contract; see
+`skills/herdr-teamlead/teamlead/planner.py` — the `plan` docstring and
+`DEFAULT_ROLE_COSTS`.
 
 Save the output to a file for Step 5. Relay the `rationale` lines to the user
-as the round's role announcement. Proceed immediately to Step 5.
+as the round's role announcement: they name the weight behind each seat, the
+exclusions applied, and any worker whose headroom reading is stale. Proceed
+immediately to Step 5.
 
 ## Step 5 — Compose the Briefs
 

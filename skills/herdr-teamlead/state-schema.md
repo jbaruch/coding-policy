@@ -24,6 +24,14 @@ exemptions, and the guarded one-shot recovery of a stuck composer.
 dispatch. All are documented in
 `skills/herdr-teamlead/references/herdr.md`.
 
+The optional top-level `role_costs` key is the one config entry that is not
+per-agent: `{"<role>": <number>}`, what one round in that seat is expected to
+burn out of a worker's remaining headroom percentage. It overrides the
+planner's own weights one role at a time, and a role it omits keeps the
+default (`DEFAULT_ROLE_COSTS` in `skills/herdr-teamlead/teamlead/planner.py`).
+A missing map means no overrides; a value that is not a non-negative finite
+number is refused, naming the file and the role. `plan` is the only reader.
+
 ## State Record Format
 
 ```json
@@ -81,7 +89,8 @@ informational plan name and never feeds headroom.
   was sent. Writes are atomic: temp file in the same directory, `fsync`,
   `os.replace`.
 - **Readers** — `plan` reads the newest snapshot plus the ledger (role history
-  breaks a headroom tie); `state` prints the document. Neither writes.
+  breaks a headroom tie), and the config's `role_costs` for its seat weights;
+  `state` prints the document. Neither writes.
 - **Absent state** — a first run has no file. Every reader treats that as no
   prior state and continues; `plan` still requires a snapshot, passed with
   `--snapshot` when the state file holds none.

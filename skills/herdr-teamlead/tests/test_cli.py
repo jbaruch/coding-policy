@@ -321,6 +321,93 @@ class PlanCommandTest(CliCase):
         self.assertEqual(code, 0)
         self.assertEqual(runner.calls, [])
 
+    def test_exclude_bars_an_agent_from_one_role(self):
+        code, out, _ = self.run_cli(
+            self.base()
+            + ["plan", "--snapshot", str(self.snapshot), "--exclude", "developer=grok"]
+        )
+        self.assertEqual(code, 0)
+        assignments = json.loads(out)["assignments"]
+        self.assertEqual(assignments["developer"], "claude")
+        self.assertNotEqual(assignments["developer"], "grok")
+
+    def test_exclude_repeats_to_bar_the_author_from_two_seats(self):
+        code, out, _ = self.run_cli(
+            self.base()
+            + [
+                "plan",
+                "--snapshot",
+                str(self.snapshot),
+                "--exclude",
+                "reviewer=grok",
+                "--exclude",
+                "tester=grok",
+            ]
+        )
+        self.assertEqual(code, 0)
+        assignments = json.loads(out)["assignments"]
+        self.assertEqual(assignments["developer"], "grok")
+        self.assertNotIn("grok", [assignments["reviewer"], assignments["tester"]])
+
+    def test_exclude_takes_a_comma_separated_list(self):
+        code, out, _ = self.run_cli(
+            self.base()
+            + [
+                "plan",
+                "--roles",
+                "developer,reviewer",
+                "--snapshot",
+                str(self.snapshot),
+                "--exclude",
+                "reviewer=grok,claude",
+            ]
+        )
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(out)["assignments"]["reviewer"], "codex")
+
+    def test_a_malformed_exclude_is_an_actionable_usage_error(self):
+        code, out, err = self.run_cli(
+            self.base() + ["plan", "--snapshot", str(self.snapshot), "--exclude", "grok"]
+        )
+        self.assertEqual(code, 1)
+        self.assertEqual(out, "")
+        self.assertEqual(json.loads(err)["error"], "usage_error")
+        self.assertIn("ROLE=AGENT", json.loads(err)["message"])
+
+    def test_role_costs_in_the_config_reweigh_the_seats(self):
+        config = json.loads(json.dumps(CONFIG))
+        config["role_costs"] = {"reviewer": 40}
+        self.config.write_text(json.dumps(config), encoding="utf-8")
+        code, out, _ = self.run_cli(self.base() + ["plan", "--snapshot", str(self.snapshot)])
+        self.assertEqual(code, 0)
+        # reviewer now outweighs developer, so it is filled first and takes
+        # the agent with the most headroom.
+        self.assertEqual(json.loads(out)["assignments"]["reviewer"], "grok")
+
+    def test_a_broken_role_costs_map_fails_naming_the_config(self):
+        config = json.loads(json.dumps(CONFIG))
+        config["role_costs"] = {"reviewer": "cheap"}
+        self.config.write_text(json.dumps(config), encoding="utf-8")
+        code, _, err = self.run_cli(self.base() + ["plan", "--snapshot", str(self.snapshot)])
+        self.assertEqual(code, 1)
+        self.assertEqual(json.loads(err)["error"], "config_error")
+        self.assertIn(str(self.config), json.loads(err)["message"])
+
+    def test_planning_works_on_a_machine_with_no_config_at_all(self):
+        code, out, _ = self.run_cli(
+            [
+                "--config",
+                str(self.tmp / "absent.json"),
+                "--state",
+                str(self.state),
+                "plan",
+                "--snapshot",
+                str(self.snapshot),
+            ]
+        )
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(out)["assignments"]["developer"], "grok")
+
 
 class MeasureCommandTest(CliCase):
     CORRUPT_STATE = '{"schema_version": 2, "snapshots": [broken'
