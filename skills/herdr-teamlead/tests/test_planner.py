@@ -43,12 +43,23 @@ class OrderingTest(unittest.TestCase):
         result = plan(ROLES, snapshot(claude=92.0, codex=87.0, grok=100.0))
         self.assertEqual(list(result["assignments"]), ROLES)
 
-    def test_reordering_the_roles_reorders_the_agents(self):
+    def test_reordering_the_roles_no_longer_reorders_the_agents(self):
+        # --roles used to decide which seat was heaviest. The cost weights do
+        # now, so the lightest-first caller gets the same plan as before.
         result = plan(
             ["reviewer", "tester", "developer"], snapshot(claude=92.0, codex=87.0, grok=100.0)
         )
-        self.assertEqual(result["assignments"]["reviewer"], "grok")
-        self.assertEqual(result["assignments"]["developer"], "codex")
+        self.assertEqual(result["assignments"]["developer"], "grok")
+        self.assertEqual(result["assignments"]["tester"], "claude")
+        self.assertEqual(result["assignments"]["reviewer"], "codex")
+
+    def test_reordering_the_roles_still_keys_the_document_that_way(self):
+        result = plan(
+            ["reviewer", "tester", "developer"], snapshot(claude=92.0, codex=87.0, grok=100.0)
+        )
+        self.assertEqual(
+            list(result["assignments"]), ["reviewer", "tester", "developer"]
+        )
 
     def test_is_deterministic_across_repeated_calls(self):
         data = snapshot(claude=92.0, codex=87.0, grok=100.0)
@@ -150,6 +161,176 @@ class OutputShapeTest(unittest.TestCase):
         ref = {"source": "/tmp/snap.json", "measured_at": "2026-02-03T10:00:00+00:00"}
         result = plan(["developer"], snapshot(grok=100.0), snapshot_ref=ref)
         self.assertEqual(result["snapshot_ref"], ref)
+
+
+class CostWeightTest(unittest.TestCase):
+    """The seat's weight, not the caller's --roles order, decides who fills it."""
+
+    def test_the_heaviest_seat_is_filled_first_whatever_roles_says(self):
+        # reviewer arrives first and still gets the smallest agent, because
+        # developer outweighs it.
+        result = plan(["reviewer", "developer"], snapshot(alpha=90.0, zeta=60.0))
+        self.assertEqual(result["assignments"], {"reviewer": "zeta", "developer": "alpha"})
+
+    def test_an_override_can_make_the_lightest_seat_the_heaviest(self):
+        result = plan(
+            ["developer", "reviewer"],
+            snapshot(alpha=60.0, zeta=55.0),
+            role_costs={"reviewer": 30.0},
+        )
+        self.assertEqual(result["assignments"], {"developer": "zeta", "reviewer": "alpha"})
+
+    def test_an_override_replaces_only_the_role_it_names(self):
+        result = plan(
+            ["developer", "reviewer"],
+            snapshot(alpha=60.0, zeta=55.0),
+            role_costs={"tester": 99.0},
+        )
+        self.assertEqual(result["assignments"], {"developer": "alpha", "reviewer": "zeta"})
+
+    def test_roles_nobody_weighed_keep_the_callers_order(self):
+        result = plan(["scribe", "courier"], snapshot(alpha=90.0, zeta=60.0))
+        self.assertEqual(result["assignments"], {"scribe": "alpha", "courier": "zeta"})
+
+    def test_the_pick_maximises_the_rounds_minimum_projected_headroom(self):
+        # developer costs 12 and tester 10, so giving the 70 to the heavier
+        # seat would floor the round at 58; the other way floors it at 60.
+        result = plan(["developer", "tester"], snapshot(alpha=70.0, zeta=72.0))
+        self.assertEqual(result["assignments"], {"developer": "zeta", "tester": "alpha"})
+
+    def test_the_rationale_names_the_weight_it_used(self):
+        result = plan(["developer"], snapshot(grok=100.0))
+        self.assertIn("weight 12", result["rationale"][0])
+        self.assertIn("88% projected", result["rationale"][0])
+
+    def test_the_rationale_names_an_overridden_weight(self):
+        result = plan(["developer"], snapshot(grok=100.0), role_costs={"developer": 40.0})
+        self.assertIn("weight 40", result["rationale"][0])
+
+
+class ExclusionTest(unittest.TestCase):
+    """Nobody reviews or verifies the branch they wrote."""
+
+    def test_an_excluded_agent_does_not_get_that_role(self):
+        result = plan(
+            ROLES,
+            snapshot(claude=92.0, codex=87.0, grok=100.0),
+            exclude={"reviewer": ["grok"], "tester": ["grok"]},
+        )
+        self.assertEqual(result["assignments"]["developer"], "grok")
+        self.assertNotIn(result["assignments"]["reviewer"], ["grok"])
+        self.assertNotIn(result["assignments"]["tester"], ["grok"])
+
+    def test_the_author_still_gets_the_one_seat_left_to_it(self):
+        # grok has the LEAST headroom, so the plain headroom order would hand
+        # developer to claude and then have nowhere to put grok.
+        result = plan(
+            ROLES,
+            snapshot(claude=92.0, codex=87.0, grok=40.0),
+            exclude={"reviewer": ["grok"], "tester": ["grok"]},
+        )
+        self.assertEqual(
+            result["assignments"],
+            {"developer": "grok", "tester": "claude", "reviewer": "codex"},
+        )
+
+    def test_several_agents_can_be_barred_from_one_role(self):
+        result = plan(
+            ["developer", "reviewer"],
+            snapshot(alpha=90.0, zeta=60.0, mu=80.0),
+            exclude={"reviewer": ["alpha", "mu"]},
+        )
+        self.assertEqual(result["assignments"]["reviewer"], "zeta")
+
+    def test_an_exclusion_that_leaves_no_candidate_is_an_error(self):
+        with self.assertRaises(PlanError) as caught:
+            plan(
+                ["developer", "reviewer"],
+                snapshot(alpha=90.0, zeta=60.0),
+                exclude={"reviewer": ["alpha", "zeta"]},
+            )
+        self.assertIn("reviewer", str(caught.exception))
+        self.assertIn("alpha, zeta", str(caught.exception))
+
+    def test_an_exclusion_set_no_assignment_satisfies_is_an_error(self):
+        # Both roles can only go to alpha, and one agent cannot hold two.
+        with self.assertRaises(PlanError) as caught:
+            plan(
+                ["developer", "reviewer"],
+                snapshot(alpha=90.0, zeta=60.0),
+                exclude={"reviewer": ["zeta"], "developer": ["zeta"]},
+            )
+        self.assertIn("Cannot fill role", str(caught.exception))
+        self.assertIn("Drop an exclusion", str(caught.exception))
+
+    def test_excluding_a_role_nobody_is_assigning_is_an_error(self):
+        with self.assertRaises(PlanError) as caught:
+            plan(
+                ["developer", "tester"],
+                snapshot(alpha=90.0, zeta=60.0),
+                exclude={"reviewr": ["alpha"]},
+            )
+        self.assertIn("reviewr", str(caught.exception))
+        self.assertIn("developer, tester", str(caught.exception))
+
+    def test_excluding_an_agent_the_snapshot_lacks_warns_rather_than_refusing(self):
+        # The author may be busy and therefore unmeasured; refusing would
+        # block a round the exclusion does not actually affect.
+        warnings = []
+        result = plan(
+            ["developer"],
+            snapshot(alpha=90.0, zeta=60.0),
+            exclude={"developer": ["ghost"]},
+            warn=warnings.append,
+        )
+        self.assertEqual(result["assignments"]["developer"], "alpha")
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("ghost", warnings[0])
+        self.assertIn("ghost", result["rationale"][-1])
+        self.assertIn("changed nothing", result["rationale"][-1])
+
+    def test_the_rationale_names_the_exclusions_applied(self):
+        result = plan(
+            ["developer", "reviewer"],
+            snapshot(alpha=90.0, zeta=60.0),
+            exclude={"reviewer": ["alpha"]},
+        )
+        developer_line, reviewer_line = result["rationale"]
+        self.assertIn("excluded: none", developer_line)
+        self.assertIn("excluded: alpha", reviewer_line)
+
+    def test_no_exclusions_is_the_same_plan_as_before(self):
+        data = snapshot(claude=92.0, codex=87.0, grok=100.0)
+        self.assertEqual(plan(ROLES, data), plan(ROLES, data, exclude={}))
+
+
+class SkippedSnapshotTest(unittest.TestCase):
+    """A worker measured as working carries the headroom of some earlier round."""
+
+    def _snapshot(self, **skipped):
+        data = snapshot(alpha=90.0, zeta=60.0)
+        for name, value in skipped.items():
+            data["agents"][name]["skipped"] = value
+        return data
+
+    def test_a_skipped_agent_is_named_in_the_rationale(self):
+        result = plan(["developer"], self._snapshot(zeta=True))
+        self.assertIn("stale headroom for zeta", result["rationale"][-1])
+
+    def test_every_skipped_agent_is_named_once_in_one_note(self):
+        result = plan(["developer"], self._snapshot(zeta=True, alpha=True))
+        notes = [line for line in result["rationale"] if line.startswith("note:")]
+        self.assertEqual(len(notes), 1)
+        self.assertIn("alpha, zeta", notes[0])
+
+    def test_a_snapshot_with_nothing_skipped_adds_no_note(self):
+        result = plan(["developer"], self._snapshot(zeta=False))
+        self.assertEqual(len(result["rationale"]), 1)
+
+    def test_the_note_does_not_disturb_the_assignment_lines(self):
+        result = plan(["developer", "reviewer"], self._snapshot(zeta=True))
+        self.assertIn("developer -> alpha", result["rationale"][0])
+        self.assertIn("reviewer -> zeta", result["rationale"][1])
 
 
 class RefusalTest(unittest.TestCase):

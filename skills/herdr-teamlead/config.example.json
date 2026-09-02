@@ -1,5 +1,10 @@
 {
   "schema_version": 1,
+  "role_costs": {
+    "developer": 12,
+    "tester": 10,
+    "reviewer": 5
+  },
   "agents": [
     {
       "name": "claude",

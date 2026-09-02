@@ -19,7 +19,7 @@ from pathlib import Path
 from . import __version__
 from .assign import apply as apply_assignments
 from .assign import dry_run, normalize_assignments, resolve_paths
-from .config import default_config_path, load_config, select_agents
+from .config import default_config_path, load_config, load_role_costs, select_agents
 from .errors import PlanError, StateError, TeamLeadError, UsageError
 from .herdr import (
     DEFAULT_MARKER_TIMEOUT_MS,
@@ -170,15 +170,27 @@ def build_parser():
         parents=[common],
         help="Assign roles to agents by remaining headroom. Touches no agent.",
         description=(
-            "Deterministic assignment: roles are given heaviest first and agents "
-            "are ranked by their smallest remaining usage window."
+            "Deterministic assignment: each role carries a cost weight, the "
+            "heaviest seat is filled first, and every seat goes to the eligible "
+            "agent that leaves the round's smallest projected usage window "
+            "highest."
         ),
     )
     plan_parser.add_argument(
         "--roles",
         default="developer,tester,reviewer",
         metavar="LIST",
-        help="Comma-separated roles, heaviest first (default: %(default)s).",
+        help="Comma-separated roles to assign (default: %(default)s). The cost "
+        "weights decide which seat is filled first, not this order.",
+    )
+    plan_parser.add_argument(
+        "--exclude",
+        action="append",
+        default=[],
+        dest="excludes",
+        metavar="ROLE=AGENT[,AGENT...]",
+        help="Bar these agents from that role; repeat per role. Bar the branch's "
+        "author from reviewer and tester -- nobody verifies their own work.",
     )
     plan_parser.add_argument(
         "--snapshot",
@@ -309,6 +321,29 @@ def _parse_briefs(pairs):
     return briefs
 
 
+def _parse_excludes(pairs):
+    """`--exclude ROLE=AGENT[,AGENT...]` into `{role: [agent, ...]}`.
+
+    Repeats of the same role merge rather than replace, so a lead can bar the
+    author from two seats in two flags or one.
+    """
+    excludes = {}
+    for pair in pairs:
+        role, separator, names = pair.partition("=")
+        role = role.strip()
+        agents = [name.strip() for name in names.split(",") if name.strip()]
+        if not separator or not role or not agents:
+            raise UsageError(
+                "--exclude expects ROLE=AGENT[,AGENT...], got {!r} - for example "
+                "--exclude reviewer=grok or --exclude tester=grok,claude.".format(pair),
+                {"value": pair},
+            )
+        for name in agents:
+            if name not in excludes.setdefault(role, []):
+                excludes[role].append(name)
+    return excludes
+
+
 def _load_assignments(value):
     """`--assignments` takes inline JSON or a path to a JSON file."""
     text = value.strip()
@@ -393,6 +428,8 @@ def cmd_measure(args, client=None, warn=None, trace=None):
 
 def cmd_plan(args, client=None, warn=None, trace=None):
     roles = [role.strip() for role in args.roles.split(",") if role.strip()]
+    excludes = _parse_excludes(args.excludes)
+    role_costs = load_role_costs(_config_path(args))
     state_path = _state_path(args)
     state = load_state(state_path)
 
@@ -435,6 +472,8 @@ def cmd_plan(args, client=None, warn=None, trace=None):
             roles,
             snapshot,
             role_counts(state),
+            exclude=excludes,
+            role_costs=role_costs,
             snapshot_ref={"source": source, "measured_at": snapshot.get("measured_at")},
             warn=warn,
         ),
