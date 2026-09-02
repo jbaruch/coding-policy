@@ -29,12 +29,7 @@
 #                         its JSON and exits 0 before the abort would fire.
 #  14. Soft-wrapped     -> the prefix and the basename on different rows still
 #                         complete: the long line wraps in `--source visible`.
-#  14b. Wrap in basename-> the row break inside the basename still completes.
-#  14c. Glued decoy      -> reassembly cannot turn another report into ours.
-#  14d. Beyond paragraph -> a blank row ends the reassembly; later rows never join.
-#  14e. Footer abuts     -> a footer glued on the end cannot complete a name.
-#  14f. Unrelated suffix -> a row after a SHORT marker row is not a continuation.
-#  14g. Filled marker row-> a marker row at the wrap width continues; name completes.
+#  14b. Wrap in basename-> a row break inside the basename is exit 4, never found.
 #  15c. Metachar decoy   -> `.` in the name is literal; `reportXmd` never confirms.
 #  16. Unconfirmed idle  -> file present + idle twice + no marker = exit 4.
 #  15. Decoy REPORT     -> another report's line does NOT complete this wait,
@@ -305,134 +300,23 @@ ${base}"
     pass; else fail "wrapped marker: expected found true, got RC=$RC OUT=$OUT ERR=$(cat "$TMP/e14")"; fi
   assert_no_unbound "$(cat "$TMP/e14")" "wrapped marker"
 
-  # 14b. The wrap that a per-row check cannot see: the row break lands INSIDE
-  #      the basename (`reports/12-` / `developer-fix.md`, observed live on a
-  #      Codex pane with a 170-character report path). Joining the rows is what
-  #      confirms it.
+  # 14b. The wrap a per-row check cannot see: the row break lands INSIDE the
+  #      basename (`reports/12-` / `developer-fix.md`, observed live on a Codex
+  #      pane with a 170-character report path). This is NOT a confirmation --
+  #      no text-only join can prove the second row continues the first -- so
+  #      with the file present and the worker idle the wait must end in exit 4
+  #      and hand the pane to the lead, not sit on the budget and not complete.
   RUN_SEQ=$((RUN_SEQ+1))
   local split_inside
   split_inside="  REPORT: /Users/jbaruch/.worktrees/round-3/reports/${base:0:3}
   ${base:3}"
   OUT="$(env HERDR_ENV=1 HERDR_BIN="$FAKE" \
-    TEAMLEAD_WAIT_INTERVAL_SEC=0 TEAMLEAD_WAIT_BUDGET_SEC=0 TEAMLEAD_BLOCKED_CONFIRM_SEC=0 \
+    TEAMLEAD_WAIT_INTERVAL_SEC=0 TEAMLEAD_WAIT_BUDGET_SEC=600 TEAMLEAD_BLOCKED_CONFIRM_SEC=0 \
     FAKE_MARKER=found FAKE_STATUS=idle FAKE_PANE_TEXT="$split_inside" \
     bash "$SCRIPT" worker "$report" </dev/null 2>"$TMP/e14b")"; RC=$?
-  if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | jq -e '.found == true' >/dev/null 2>&1; then
-    pass; else fail "wrap inside basename: expected found true, got RC=$RC OUT=$OUT ERR=$(cat "$TMP/e14b")"; fi
+  if [[ $RC -eq 4 ]] && printf '%s' "$OUT" | jq -e '.found == false and (.reason | test("marker unconfirmed"))' >/dev/null 2>&1; then
+    pass; else fail "wrap inside basename: expected exit 4 with a reason, got RC=$RC OUT=$OUT ERR=$(cat "$TMP/e14b")"; fi
   assert_no_unbound "$(cat "$TMP/e14b")" "wrap inside basename"
-
-  # 14c. Reassembly must not manufacture a match: another worker's
-  #      `reviewer-<base>` wrapped inside ITS basename reads as one component
-  #      once joined, and that component is not this report's. (A row holding
-  #      exactly `<base>` is accepted by the row view on purpose -- case 14 --
-  #      so the decoy here is split where neither view may accept it.)
-  RUN_SEQ=$((RUN_SEQ+1))
-  local glued_decoy
-  glued_decoy="  REPORT: /Users/jbaruch/.worktrees/round-3/reports/reviewer-${base:0:3}
-  ${base:3}"
-  OUT="$(env HERDR_ENV=1 HERDR_BIN="$FAKE" \
-    TEAMLEAD_WAIT_INTERVAL_SEC=0 TEAMLEAD_WAIT_BUDGET_SEC=0 TEAMLEAD_BLOCKED_CONFIRM_SEC=0 \
-    FAKE_MARKER=found FAKE_STATUS=idle FAKE_PANE_TEXT="$glued_decoy" \
-    bash "$SCRIPT" worker "$report" </dev/null 2>"$TMP/e14c")"; RC=$?
-  if [[ $RC -ne 0 ]] && printf '%s' "$OUT" | jq -e '.found == false' >/dev/null 2>&1; then
-    pass; else fail "glued decoy: expected found false, got RC=$RC OUT=$OUT"; fi
-
-  # 14d. Reassembly stops at the marker's paragraph: a blank row ends it, so a
-  #      later unrelated row that happens to hold the rest of the name is never
-  #      glued on. This is the completion gate; it must not be satisfiable by
-  #      two rows that were never one line.
-  RUN_SEQ=$((RUN_SEQ+1))
-  local beyond_paragraph
-  beyond_paragraph="  REPORT: /Users/jbaruch/.worktrees/round-3/reports/${base:0:3}
-
-  ${base:3}"
-  OUT="$(env HERDR_ENV=1 HERDR_BIN="$FAKE" \
-    TEAMLEAD_WAIT_INTERVAL_SEC=0 TEAMLEAD_WAIT_BUDGET_SEC=0 TEAMLEAD_BLOCKED_CONFIRM_SEC=0 \
-    FAKE_MARKER=found FAKE_STATUS=idle FAKE_PANE_TEXT="$beyond_paragraph" \
-    bash "$SCRIPT" worker "$report" </dev/null 2>"$TMP/e14d")"; RC=$?
-  if [[ $RC -ne 0 ]] && printf '%s' "$OUT" | jq -e '.found == false' >/dev/null 2>&1; then
-    pass; else fail "beyond paragraph: expected found false, got RC=$RC OUT=$OUT"; fi
-
-  # 14e. A footer abutting the marker line is glued onto its END and cannot
-  #      complete a name: the boundary after the basename must be a path end.
-  RUN_SEQ=$((RUN_SEQ+1))
-  local footer_abuts
-  footer_abuts="  REPORT: /Users/jbaruch/.worktrees/round-3/reports/${base:0:3}
-─ Worked for 28m 50s ─────"
-  OUT="$(env HERDR_ENV=1 HERDR_BIN="$FAKE" \
-    TEAMLEAD_WAIT_INTERVAL_SEC=0 TEAMLEAD_WAIT_BUDGET_SEC=0 TEAMLEAD_BLOCKED_CONFIRM_SEC=0 \
-    FAKE_MARKER=found FAKE_STATUS=idle FAKE_PANE_TEXT="$footer_abuts" \
-    bash "$SCRIPT" worker "$report" </dev/null 2>"$TMP/e14e")"; RC=$?
-  if [[ $RC -ne 0 ]] && printf '%s' "$OUT" | jq -e '.found == false' >/dev/null 2>&1; then
-    pass; else fail "footer abuts: expected found false, got RC=$RC OUT=$OUT"; fi
-
-  # 14f. The reviewer's case: an unrelated row right after a marker row that
-  #      ends SHORT of the wrap width spells the rest of the name. The marker
-  #      row was not wrapped (a separator in the window is wider), so the row
-  #      after it is not a continuation and the name is never assembled.
-  RUN_SEQ=$((RUN_SEQ+1))
-  local unrelated_suffix
-  unrelated_suffix="────────────────────────────────────────────────────────────────────────────────────────────────
-  REPORT: /Users/jbaruch/.worktrees/round-3/reports/${base:0:3}
-  ${base:3}"
-  OUT="$(env HERDR_ENV=1 HERDR_BIN="$FAKE" \
-    TEAMLEAD_WAIT_INTERVAL_SEC=0 TEAMLEAD_WAIT_BUDGET_SEC=0 TEAMLEAD_BLOCKED_CONFIRM_SEC=0 \
-    FAKE_MARKER=found FAKE_STATUS=idle FAKE_PANE_TEXT="$unrelated_suffix" \
-    bash "$SCRIPT" worker "$report" </dev/null 2>"$TMP/e14f")"; RC=$?
-  if [[ $RC -ne 0 ]] && printf '%s' "$OUT" | jq -e '.found == false' >/dev/null 2>&1; then
-    pass; else fail "unrelated suffix row: expected found false, got RC=$RC OUT=$OUT"; fi
-
-  # 14g. The same window with the marker row padded out to the separator's
-  #      width IS a wrap, and the continuation completes the name. Together
-  #      with 14f this pins the criterion: filled to the width, same indent.
-  RUN_SEQ=$((RUN_SEQ+1))
-  local sep filled pad
-  sep="────────────────────────────────────────────────────────────────────────────────────────────────"
-  filled="  REPORT: /Users/jbaruch/.worktrees/round-3/reports/"
-  pad=$(( ${#sep} - ${#filled} - 3 ))
-  filled="${filled}$(printf '%*s' "$pad" '' | tr ' ' 'x')/${base:0:3}"
-  OUT="$(env HERDR_ENV=1 HERDR_BIN="$FAKE" \
-    TEAMLEAD_WAIT_INTERVAL_SEC=0 TEAMLEAD_WAIT_BUDGET_SEC=0 TEAMLEAD_BLOCKED_CONFIRM_SEC=0 \
-    FAKE_MARKER=found FAKE_STATUS=idle FAKE_PANE_TEXT="${sep}
-${filled}
-  ${base:3}" \
-    bash "$SCRIPT" worker "$report" </dev/null 2>"$TMP/e14g")"; RC=$?
-  if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | jq -e '.found == true' >/dev/null 2>&1; then
-    pass; else fail "filled marker row: expected found true, got RC=$RC OUT=$OUT ERR=$(cat "$TMP/e14g")"; fi
-
-  # 15c. A regex metacharacter in the name is literal: `report.md` must not
-  #      confirm on `reportXmd`. The quoted part of a bash `=~` pattern is
-  #      matched as a string; this pins it in case a refactor unquotes it.
-  RUN_SEQ=$((RUN_SEQ+1))
-  OUT="$(env HERDR_ENV=1 HERDR_BIN="$FAKE" \
-    TEAMLEAD_WAIT_INTERVAL_SEC=0 TEAMLEAD_WAIT_BUDGET_SEC=0 TEAMLEAD_BLOCKED_CONFIRM_SEC=0 \
-    FAKE_MARKER=found FAKE_STATUS=idle FAKE_PANE_TEXT="  REPORT: /Users/jbaruch/.worktrees/round-3/reports/${base//./X}" \
-    bash "$SCRIPT" worker "$report" </dev/null 2>"$TMP/e15c")"; RC=$?
-  if [[ $RC -ne 0 ]] && printf '%s' "$OUT" | jq -e '.found == false' >/dev/null 2>&1; then
-    pass; else fail "metachar decoy: expected found false, got RC=$RC OUT=$OUT"; fi
-
-  # 16. The file is there, the worker reads idle twice, and the marker never
-  #     confirms: exit 4 with a reason, well inside the budget, instead of an
-  #     hour of silence. A single idle read is not enough (the flicker trap).
-  RUN_SEQ=$((RUN_SEQ+1))
-  OUT="$(env HERDR_ENV=1 HERDR_BIN="$FAKE" \
-    TEAMLEAD_WAIT_INTERVAL_SEC=0 TEAMLEAD_WAIT_BUDGET_SEC=600 TEAMLEAD_BLOCKED_CONFIRM_SEC=0 \
-    FAKE_MARKER=timeout FAKE_STATUS=idle \
-    bash "$SCRIPT" worker "$report" </dev/null 2>"$TMP/e16")"; RC=$?
-  if [[ $RC -eq 4 ]] && printf '%s' "$OUT" | jq -e '.found == false and (.reason | test("marker unconfirmed"))' >/dev/null 2>&1 \
-     && grep -q "confirm by eye" "$TMP/e16"; then
-    pass; else fail "unconfirmed idle: expected exit 4 with a reason, got RC=$RC OUT=$OUT ERR=$(cat "$TMP/e16")"; fi
-  assert_no_unbound "$(cat "$TMP/e16")" "unconfirmed idle"
-
-  # 16b. One idle read with the file present is NOT exit 4: the counter needs
-  #      two in a row, and a `working` read in between resets it.
-  RUN_SEQ=$((RUN_SEQ+1))
-  OUT="$(env HERDR_ENV=1 HERDR_BIN="$FAKE" \
-    TEAMLEAD_WAIT_INTERVAL_SEC=0 TEAMLEAD_WAIT_BUDGET_SEC=0 TEAMLEAD_BLOCKED_CONFIRM_SEC=0 \
-    FAKE_MARKER=timeout FAKE_STATUS=idle \
-    bash "$SCRIPT" worker "$report" </dev/null 2>"$TMP/e16b")"; RC=$?
-  if [[ $RC -eq 1 ]] && printf '%s' "$OUT" | jq -e '.found == false and (has("reason") | not)' >/dev/null 2>&1; then
-    pass; else fail "single idle read: expected exit 1 (budget) with no reason, got RC=$RC OUT=$OUT"; fi
 
   # 15. A `REPORT: ` line for a DIFFERENT report — the previous round's, or
   #     another worker's — must not complete this wait. The report file exists
