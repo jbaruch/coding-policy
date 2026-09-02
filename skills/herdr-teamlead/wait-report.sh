@@ -29,9 +29,10 @@
 #             `herdr agent read <name> --source visible` before answering it,
 #           4 the report FILE is present and the worker has read idle or done
 #             on consecutive polls, yet the marker could not be confirmed
-#             (`found` false, `reason` set) — read the pane; the answer is
-#             almost certainly there in a shape this probe did not recognize.
-#             Never a completion on its own: the lead confirms by eye.
+#             (`found` false, `reason` set) — never delivery: a marker the
+#             pane wrapped cannot be told from a newline. The skill re-runs
+#             for a blocked or working worker and records no report for an
+#             idle one; compose-briefs.sh prevents the wrap up front.
 #   env   : HERDR_ENV must be 1. HERDR_BIN overrides the herdr binary.
 #           Poll interval, give-up budget, and the pane-probe parameters are
 #           the named constants below (rules/ci-safety.md Always Watch CI —
@@ -48,7 +49,8 @@ TEAMLEAD_WAIT_BUDGET_SEC="${TEAMLEAD_WAIT_BUDGET_SEC:-5400}"
 # Consecutive polls on which the report file exists AND the worker reads idle
 # or done AND the marker is still unconfirmed before the wait gives up with
 # exit 4 instead of sitting on the budget. Two, so a `done` flicker between a
-# worker's tool calls cannot end the wait by itself.
+# worker's tool calls cannot end the wait by itself. Exit 4 is a diagnostic,
+# never a completion.
 TEAMLEAD_UNCONFIRMED_IDLE_READS="${TEAMLEAD_UNCONFIRMED_IDLE_READS:-2}"
 # Per-attempt pane-probe timeout in milliseconds. `herdr pane wait-output`
 # searches the existing snapshot first, so this bounds one probe, not the wait.
@@ -190,7 +192,8 @@ marker_seen() { # <pane-id> <report-basename>
   # no pane metadata recovers the logical line, and every text-only join --
   # adjacency, blank-row paragraphs, filled-to-width rows -- can be satisfied
   # by an unrelated row spelling the rest of the name. That case reaches the
-  # exit-4 path below, where the lead confirms by eye.
+  # exit-4 path below and is never delivery; compose-briefs.sh keeps it from
+  # arising by refusing a report path that would wrap.
   [[ "$text" == *"$REPORT_MARKER"* ]] || return 1
   basename_on_screen "$text" "$2" || return 1
   return 0

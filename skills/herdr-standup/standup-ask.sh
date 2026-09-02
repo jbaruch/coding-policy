@@ -18,7 +18,7 @@
 #           {"agent":"<n>","report_path":"<p>","state":"<s>","sent":true}
 #   stderr: diagnostics only.
 #   exit  : 0 the prompt was accepted by a worker that was idle or done,
-#           1 precondition unmet (usage, relative path, not inside Herdr,
+#           1 precondition unmet (usage, relative or over-long path, not inside Herdr,
 #             `herdr` or `jq` absent),
 #           2 a herdr failure, or an unreadable `agent get` payload,
 #           3 the worker is not idle or done — nothing was sent. A standup
@@ -31,6 +31,10 @@ HERDR_BIN="${HERDR_BIN:-herdr}"
 
 # States that may receive a message. Anything else is left alone.
 READY_STATES="idle done"
+# Longest report path the prompt may name; the same limit compose-briefs.sh
+# applies to a brief's REPORT, for the same reason: the worker's final
+# `REPORT: <path>` line must fit one pane row for the wait to confirm it.
+STANDUP_REPORT_PATH_MAX_COLS="${STANDUP_REPORT_PATH_MAX_COLS:-100}"
 
 ERRFILE=""
 AGENT=""
@@ -72,6 +76,10 @@ main() {
 
   if [[ "$REPORT_PATH" != /* ]]; then
     warn "report path '${REPORT_PATH}' is relative — pass an absolute path; the worker resolves it in its own working directory, not yours"
+    return 1
+  fi
+  if (( ${#REPORT_PATH} > STANDUP_REPORT_PATH_MAX_COLS )); then
+    warn "report path is ${#REPORT_PATH} characters; the limit is ${STANDUP_REPORT_PATH_MAX_COLS} so the worker's \`REPORT: <path>\` line fits one pane row — use a shorter reports directory (e.g. one under \$HOME/.local/state)"
     return 1
   fi
   if [[ "${HERDR_ENV:-}" != "1" ]]; then

@@ -158,6 +158,24 @@ JSON
      && grep -q 'Skill(skill: "release")' "$o6b/brief-release.md"; then
     pass; else fail "packaged templates: expected exit 0 and a filled release brief, got RC=$RC ERR=$ERRTEXT"; fi
 
+  # 6c. A REPORT path that would wrap the worker's marker line is refused
+  #     before any file is written: the wait confirms the report's basename on
+  #     one visible row, and a wrap inside the name cannot be confirmed.
+  local v6c="$TMP/v6c.json" o6c="$TMP/out6c" long_report
+  long_report="/very/long/reports/directory/that/keeps/going/and/going/round-3/reports/developer-report-for-issue-12.md"
+  cat > "$v6c" <<JSON || die "could not write $v6c"
+{
+  "shared": {"SHARED_CHECKOUT": "/repo", "AUTHORITY_STATEMENT": "a"},
+  "roles": {"tester": {"ISSUE": "#7", "REPORT": "${long_report}"}}
+}
+JSON
+  run "$TPL" "$v6c" "$o6c"
+  if [[ $RC -eq 2 && -z "$OUT" ]] && printf '%s' "$ERRTEXT" | grep -q "REPORT for role 'tester'" && [[ ! -e "$o6c/brief-tester.md" ]]; then
+    pass; else fail "long REPORT: expected exit 2 naming the role and nothing written, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
+  TEAMLEAD_REPORT_PATH_MAX_COLS=200 run "$TPL" "$v6c" "$o6c"
+  if [[ $RC -eq 0 ]]; then
+    pass; else fail "long REPORT under a raised limit: expected exit 0, got RC=$RC ERR=$ERRTEXT"; fi
+
   # 7. A role with no template is named, not guessed at.
   local v7="$TMP/v7.json" o7="$TMP/out7"
   cat > "$v7" <<'JSON' || die "could not write $v7"

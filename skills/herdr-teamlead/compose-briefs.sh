@@ -18,8 +18,9 @@
 #   exit  : 0 every file written with no placeholder left,
 #           1 precondition unmet (usage, missing dir/file/template, no jq),
 #           2 validation failed — an unfilled placeholder, a supplied key no
-#             template uses, or a value that is not text. Nothing is written on
-#             a validation failure,
+#             template uses, a value that is not text, or a REPORT longer
+#             than TEAMLEAD_REPORT_PATH_MAX_COLS. Nothing is written on a
+#             validation failure,
 #           3 a tool this depends on failed (the placeholder scan itself). The
 #             answer is unknown, which is never reported as "no placeholders".
 #   env   : none.
@@ -31,6 +32,13 @@ set -euo pipefail
 
 # A placeholder is upper-case, digits, and underscores between double braces.
 PLACEHOLDER_RE='\{\{[A-Z0-9_]+\}\}'
+# Longest REPORT value a brief may carry. The worker's final message ends with
+# `REPORT: <path>`, and the wait confirms it by finding the report's basename
+# whole on a visible row. A TUI wraps that line at its own content width and
+# a wrap inside the name cannot be told from a newline, so the only sound fix
+# is a path that fits one row on every pane this fleet runs: the widest marker
+# line is the prefix plus indentation plus this many characters.
+TEAMLEAD_REPORT_PATH_MAX_COLS="${TEAMLEAD_REPORT_PATH_MAX_COLS:-100}"
 
 warn() { printf 'compose-briefs: %s\n' "$1" >&2; }
 
@@ -162,7 +170,7 @@ main() {
   # Compose into memory first: a validation failure must leave no half-written
   # round behind (`rules/file-hygiene.md` Idempotency).
   local -a out_paths=() out_bodies=()
-  local merged rendered leftovers supplied known unused key
+  local merged rendered leftovers supplied known unused key report
   local common_body scan_rc=0
   validate_values "$shared" "the shared values" || return 2
   common_body="$(substitute "$common_tpl" "$shared")"
@@ -178,6 +186,11 @@ main() {
   while IFS= read -r role; do
     merged="$(jq -c -n --argjson a "$shared" --argjson b "$(printf '%s' "$values" | jq -c --arg r "$role" '.roles[$r]')" '$a * $b')"
     validate_values "$merged" "the values for role '${role}'" || return 2
+    report="$(printf '%s' "$merged" | jq -r '.REPORT // ""')"
+    if (( ${#report} > TEAMLEAD_REPORT_PATH_MAX_COLS )); then
+      warn "REPORT for role '${role}' is ${#report} characters; the limit is ${TEAMLEAD_REPORT_PATH_MAX_COLS} so the worker's \`REPORT: <path>\` line fits one pane row and the wait can confirm it — use a shorter reports directory (e.g. one under \$HOME/.local/state) and re-run"
+      return 2
+    fi
     rendered="$(substitute "${templates}/brief-${role}.md" "$merged")"
     scan_rc=0
     leftovers="$(leftover_placeholders "$rendered")" || scan_rc=$?

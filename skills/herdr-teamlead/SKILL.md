@@ -149,7 +149,9 @@ The values file is `{"shared": {...}, "roles": {"<role>": {...}}}`; a role's
 own value beats the shared one. Emits
 `{"common":"<path>","briefs":{"<role>":"<path>"}}`. Exit 2 means validation
 failed and nothing was written — an unfilled placeholder, a supplied key no
-template uses, or a value that is not text. Exit 3 means the placeholder scan
+template uses, a value that is not text, or a `REPORT` longer than the
+script's limit (the worker's `REPORT: <path>` line must fit one pane row for
+Step 9 to confirm it; use a short reports directory). Exit 3 means the placeholder scan
 itself failed, so whether the briefs are clean is unknown: re-run, never
 dispatch on it. The placeholder set and both validation directions are the
 script's contract; see the header of
@@ -303,19 +305,19 @@ completion. Poll interval and give-up budget are the script's own constants.
 - **Exit 2** — a tool failure. Report the message verbatim and finish here; the
   round has no reliable view of any worker.
 - **Exit 4** — the report file exists and the worker reads `idle` or `done` on
-  consecutive polls, but the pane never showed the marker in a shape the
-  script recognizes. Read the pane with `herdr agent read <name> --source visible`
-  and take the first continuation that applies:
-  - The last message shows a `REPORT: ` line naming this report, in any
-    wrapping — the report is delivered. Continue to the next worker.
-  - Otherwise read the live state with `herdr agent get <name>`. The command
-    fails — report its message verbatim and finish here, as for exit 2.
+  consecutive polls, but the pane never showed the marker whole. This is not
+  delivery: a marker the pane wrapped cannot be told from a newline, so no
+  reading of the pane confirms it. Read the live state with
+  `herdr agent get <name>` and take the first continuation that applies:
+  - The command fails — report its message verbatim and finish here, as for
+    exit 2.
   - The state is `blocked` or `working` — re-run this step for that worker
     once. The script confirms a block across two reads and the pane and
     returns exit 3, whose branch above then applies.
-  - The state is `idle` or `done` — the worker wrote the file without
-    finishing. Record it as producing no report and continue to the next
-    worker. Never re-dispatch on top of it.
+  - The state is `idle` or `done` — record the worker as producing no report
+    and continue to the next worker. Never re-dispatch on top of it. The
+    cause is a report path too long for one pane row; Step 5's compose gate
+    refuses those, so this outcome means a brief bypassed it.
 - **Exit 3** — the worker is blocked at an approval or question dialog,
   confirmed across two reads and the pane. Read the dialog with
   `herdr pane read <pane-id> --source visible`, relay its text to the operator
