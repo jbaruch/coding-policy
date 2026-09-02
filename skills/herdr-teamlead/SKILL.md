@@ -289,7 +289,7 @@ One call per dispatched worker, in the order the round needs them:
 ```
 
 Emits `{"agent","state","report_path","found","elapsed_seconds"}` on every
-outcome. Completion requires both the report file on disk and the `REPORT: `
+outcome, plus `reason` on exit 4 only. Completion requires both the report file on disk and the `REPORT: `
 marker in the worker's pane. A single `idle` or `done` observation is not
 completion. Poll interval and give-up budget are the script's own constants.
 
