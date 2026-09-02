@@ -30,14 +30,16 @@
 #  14. Soft-wrapped     -> the prefix and the basename on different rows still
 #                         complete: the long line wraps in `--source visible`.
 #  14b. Wrap in basename-> a row break inside the basename is exit 4, never found.
-#  15c. Metachar decoy   -> `.` in the name is literal; `reportXmd` never confirms.
-#  16. Unconfirmed idle  -> file present + idle twice + no marker = exit 4.
 #  15. Decoy REPORT     -> another report's line does NOT complete this wait,
 #                         including one whose basename ENDS with this one's.
 #  16. Confirm read     -> a failing `pane read` is a tool failure (exit 2).
 #  17. Blocked flicker  -> one `blocked` read with no dialog keeps waiting.
 #  18. Blocked twice    -> two `blocked` reads plus a dialog row is exit 3.
 #  19. Blocked, no UI   -> two `blocked` reads without a dialog keep waiting.
+#  20. Metachar decoy   -> `.` in the name is literal; `reportXmd` never confirms.
+#  21. Unconfirmed idle -> file present + idle twice + no marker = exit 4.
+#  21b. Single idle read-> one idle read is not exit 4; the budget ends it.
+#  21c. Bad idle-reads  -> a non-integer override is exit 2, not an abort.
 #
 # Run: bash skills/herdr-teamlead/tests/test_wait_report.sh
 set -uo pipefail
@@ -392,6 +394,48 @@ ${base}"
     bash "$SCRIPT" worker "$report" </dev/null 2>"$TMP/e19")"; RC=$?
   if [[ $RC -eq 1 ]] && printf '%s' "$OUT" | jq -e '.found == false' >/dev/null 2>&1; then
     pass; else fail "blocked without a dialog: expected the wait to continue, got RC=$RC OUT=$OUT"; fi
+
+  # 20. A regex metacharacter in the name is literal: `report.md` must not
+  #     confirm on `reportXmd`. The quoted part of a bash `=~` pattern is
+  #     matched as a string; this pins it in case a refactor unquotes it.
+  RUN_SEQ=$((RUN_SEQ+1))
+  OUT="$(env HERDR_ENV=1 HERDR_BIN="$FAKE" \
+    TEAMLEAD_WAIT_INTERVAL_SEC=0 TEAMLEAD_WAIT_BUDGET_SEC=0 TEAMLEAD_BLOCKED_CONFIRM_SEC=0 \
+    FAKE_MARKER=found FAKE_STATUS=idle FAKE_PANE_TEXT="  REPORT: /Users/jbaruch/.worktrees/round-3/reports/${base//./X}" \
+    bash "$SCRIPT" worker "$report" </dev/null 2>"$TMP/e20")"; RC=$?
+  if [[ $RC -ne 0 ]] && printf '%s' "$OUT" | jq -e '.found == false' >/dev/null 2>&1; then
+    pass; else fail "metachar decoy: expected found false, got RC=$RC OUT=$OUT"; fi
+
+  # 21. The file is there, the worker reads idle twice, and the marker is never
+  #     seen at all (wait-output times out): exit 4 with a reason, well inside
+  #     the budget, instead of an hour of silence.
+  RUN_SEQ=$((RUN_SEQ+1))
+  OUT="$(env HERDR_ENV=1 HERDR_BIN="$FAKE" \
+    TEAMLEAD_WAIT_INTERVAL_SEC=0 TEAMLEAD_WAIT_BUDGET_SEC=600 TEAMLEAD_BLOCKED_CONFIRM_SEC=0 \
+    FAKE_MARKER=timeout FAKE_STATUS=idle \
+    bash "$SCRIPT" worker "$report" </dev/null 2>"$TMP/e21")"; RC=$?
+  if [[ $RC -eq 4 ]] && printf '%s' "$OUT" | jq -e '.found == false and (.reason | test("marker unconfirmed"))' >/dev/null 2>&1 \
+     && grep -q "never showed" "$TMP/e21"; then
+    pass; else fail "unconfirmed idle: expected exit 4 with a reason, got RC=$RC OUT=$OUT ERR=$(cat "$TMP/e21")"; fi
+  assert_no_unbound "$(cat "$TMP/e21")" "unconfirmed idle"
+
+  # 21b. One idle read with the file present is NOT exit 4: the counter needs
+  #      two in a row. With a zero budget the wait ends on exit 1, no reason.
+  RUN_SEQ=$((RUN_SEQ+1))
+  OUT="$(env HERDR_ENV=1 HERDR_BIN="$FAKE" \
+    TEAMLEAD_WAIT_INTERVAL_SEC=0 TEAMLEAD_WAIT_BUDGET_SEC=0 TEAMLEAD_BLOCKED_CONFIRM_SEC=0 \
+    FAKE_MARKER=timeout FAKE_STATUS=idle \
+    bash "$SCRIPT" worker "$report" </dev/null 2>"$TMP/e21b")"; RC=$?
+  if [[ $RC -eq 1 ]] && printf '%s' "$OUT" | jq -e '.found == false and (has("reason") | not)' >/dev/null 2>&1; then
+    pass; else fail "single idle read: expected exit 1 (budget) with no reason, got RC=$RC OUT=$OUT"; fi
+
+  # 21c. A bad TEAMLEAD_UNCONFIRMED_IDLE_READS is exit 2 with a named cause,
+  #      never an arithmetic abort with no JSON.
+  RUN_SEQ=$((RUN_SEQ+1))
+  OUT="$(env HERDR_ENV=1 HERDR_BIN="$FAKE" TEAMLEAD_UNCONFIRMED_IDLE_READS=soon \
+    bash "$SCRIPT" worker "$report" </dev/null 2>"$TMP/e21c")"; RC=$?
+  if [[ $RC -eq 2 && -z "$OUT" ]] && grep -q "TEAMLEAD_UNCONFIRMED_IDLE_READS must be a positive integer" "$TMP/e21c"; then
+    pass; else fail "bad idle-reads override: expected exit 2 naming it, got RC=$RC OUT=$OUT ERR=$(cat "$TMP/e21c")"; fi
 
   echo "─────────────────────────────────────────────" >&2
   if [[ $FAIL -gt 0 ]]; then echo "FAILED: ${FAIL} failed, ${PASS} passed" >&2; exit 1; fi
