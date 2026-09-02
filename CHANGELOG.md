@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.173 — 2026-09-02
+
 ### Teamwork — a lead agent that runs a three-agent round instead of a human guessing
 
 New `herdr-teamlead` skill, `agent-team-operation` rule, and `herdr-team-status` SessionStart hook, plus the vendored `teamlead` Python utility (`measure` / `plan` / `apply` / `state`). Everything here was learned on 2026-09-01 running a real round in [Herdr](https://herdr.dev) that built `github.com/jbaruch/agentic-context-registry` with three workers: `claude` (Claude Code), `codex` (OpenAI Codex CLI), and `grok` (Grok CLI).
