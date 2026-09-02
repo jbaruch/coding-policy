@@ -5,14 +5,22 @@ looked like when it was measured; it never substitutes for reading the agent's
 live status before writing to it. `plan` may run off a stale snapshot on
 purpose (planning has no side effects); `apply` always re-checks live status.
 
-Schema (schema_version 1)::
+Schema (schema_version 2)::
 
     {
-      "schema_version": 1,
+      "schema_version": 2,
       "snapshots":  [ <measure output>, ... ],   # newest last, capped at 20
-      "assignments":[ {"schema_version": 1, "at": <ISO-8601>,
-                       "role": <str>, "agent": <str>}, ... ]
+      "assignments":[ {"schema_version": 2, "at": <ISO-8601>,
+                       "role": <str>, "agent": <str>,
+                       "status": "applied" | "sent_but_not_started"
+                                 | "unknown"}, ... ]
     }
+
+`status` records whether the hand-off was confirmed: `applied` counts toward
+an agent's role history, `sent_but_not_started` does not (see
+UNCOUNTED_STATUSES), and `unknown` marks a version-1 row migrated without the
+information. Version 1 documents and rows carry no `status`; the 1 -> 2
+migration below stamps them `unknown`.
 
 Every RECORD carries its own `schema_version`, not just the document: a ledger
 row outlives the document it arrived in, and a version on the row is what makes
