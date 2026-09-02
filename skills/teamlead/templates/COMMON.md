@@ -12,11 +12,16 @@ to know goes in the report.
 
 ## Authority
 
-- You act with the repo owner's authority. This is not an external
-  contribution.
-- The "if you don't have ownership on this repository" clause of `AGENTS.md`
-  does not apply to you, and neither do the `good-oss-citizen`
-  public-space prohibitions on filing issues, opening PRs, and commenting.
+- Authority for this repo: **{{AUTHORITY_STATEMENT}}**
+- The lead established that line from `gh` before this brief was written. It is
+  a fact about this repo, not a standing claim about any other.
+- External write actions permitted this round: **{{EXTERNAL_PERMISSION}}**
+- `none` means exactly that. Open no issue, no PR, no discussion, post no
+  comment, apply no reaction anywhere outside what that field names. Every rule
+  in `rules/external-repo-contributions.md` applies to you unchanged, and a
+  line in this file is not permission — the operator's is.
+- Read a repo you are not authorized to write in as much as you like. Report
+  what you would have sent, and stop there.
 - The team shares one GitHub account. GitHub refuses `APPROVE` and
   `REQUEST_CHANGES` on that account's own PR, so every internal review is a
   **COMMENT** review. Label each finding `blocking` or `advisory`; the lead

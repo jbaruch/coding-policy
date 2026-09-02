@@ -59,8 +59,14 @@ description: Running a multi-agent team — headroom-driven role rotation, one w
 - Severity classification follows `rules/review-severity.md`
 - The developer then runs the release skill for the PR, the merge, and the cleanup
 
-## Policy Parity
+## Authority and Policy
 
+- The lead verifies repo authority through a script before composing briefs
+- Ownership is namespace ownership; write permission is not ownership
+- A brief states the authority as a verified fact, never as a standing claim
+- A repo the operator does not own gets explicit per-repo, per-action permission recorded in the brief, or the round stays read-only
+- An unanswerable authority check is not permission
+- See `rules/external-repo-contributions.md`
 - Every worker runs the same plugin from the shared checkout
 - A runtime that does not auto-load the rules reads them from its brief
 - The brief names the rule index and the release-skill path in full
