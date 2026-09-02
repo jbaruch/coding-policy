@@ -232,7 +232,7 @@ Clears each worker's context and hands it its brief. Emits one JSON object:
 per role a record carrying `cleared`, `landed`, `started`, and `status`.
 
 Each outcome names where the round goes next. Only a dispatched worker can
-produce a report, so Step 8 waits on exactly the roles that landed here.
+produce a report, so Step 9 waits on exactly the roles that landed here.
 
 - **Exit 0** — every role was dispatched. Proceed to Step 9.
 - **Non-zero with a busy target** — the whole round was refused before any
