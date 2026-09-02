@@ -97,7 +97,7 @@ def resolve_status(client, agent, herdr_status, warn=None):
 
     if verdict == IDLE:
         (warn or stderr_warn)(
-            "teamlead: herdr reports {!r} as working, but its pane footer says "
+            "herdr reports {!r} as working, but its pane footer says "
             "idle - herdr's title-derived state is stale. Proceeding on the "
             "pane read.".format(agent.name)
         )

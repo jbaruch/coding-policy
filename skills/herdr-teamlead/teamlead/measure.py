@@ -92,7 +92,7 @@ def wait_for_usage_report(client, agent, pane_id, marker_timeout_ms=DEFAULT_MARK
         )
     except HerdrError as exc:
         warn(
-            "teamlead: `{}` did not deliver {!r} for {} ({}). Falling back to "
+            "`{}` did not deliver {!r} for {} ({}). Falling back to "
             "polling `herdr agent read` up to {} times.".format(
                 format_argv(argv), agent.usage_marker, agent.name, exc.message, poll_attempts
             )

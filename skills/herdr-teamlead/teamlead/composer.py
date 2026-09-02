@@ -290,7 +290,7 @@ def read_pane(client, agent, warn=None):
         )
     except HerdrError as exc:
         (warn or stderr_warn)(
-            "teamlead: `herdr agent read {} --format ansi` failed ({}). Falling "
+            "`herdr agent read {} --format ansi` failed ({}). Falling "
             "back to a plain-text read: teamlead can still refuse, but it will "
             "not send recovery keys on a read it cannot interpret.".format(
                 agent.name, exc.message
@@ -450,7 +450,7 @@ def ensure_ready(client, agent, pane_id=None, session=None, sleep=time.sleep, wa
         raise _stuck_composer_error(agent, pane_id, composer, reason)
 
     warn(
-        "teamlead: {}'s composer holds {!r}, which teamlead sent earlier in "
+        "{}'s composer holds {!r}, which teamlead sent earlier in "
         "this run. Sending {} once to clear it.".format(
             agent.name, composer.content, " ".join(agent.recover_keys)
         )
@@ -527,7 +527,7 @@ def send_message(client, agent, text, landing_needle, pane_id=None, session=None
     started = _left_idle(client, agent, start_timeout_ms, warn)
     if not started and not landed:
         warn(
-            "teamlead: {} was sent its assignment but neither left idle nor "
+            "{} was sent its assignment but neither left idle nor "
             "showed it in the transcript. Reported as sent_but_not_started; "
             "check the pane before assuming it is working.".format(agent.name)
         )
@@ -601,7 +601,7 @@ def send_command(client, agent, pane_id, command, session=None, sleep=time.sleep
     while command_still_present(text, agent, command) and extra_enters < max_extra_enters:
         extra_enters += 1
         warn(
-            "teamlead: {} still shows {!r} in its composer. Pressing Enter "
+            "{} still shows {!r} in its composer. Pressing Enter "
             "again ({} of {}).".format(
                 agent.name, command, extra_enters, max_extra_enters
             )

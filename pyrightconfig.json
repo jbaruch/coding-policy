@@ -22,6 +22,7 @@
     "skills/herdr-teamlead/tests/test_cli.py",
     "skills/herdr-teamlead/tests/test_composer.py",
     "skills/herdr-teamlead/tests/test_config.py",
+    "skills/herdr-teamlead/tests/test_diagnostics.py",
     "skills/herdr-teamlead/tests/test_entrypoints.py",
     "skills/herdr-teamlead/tests/test_herdr.py",
     "skills/herdr-teamlead/tests/test_measure.py",
