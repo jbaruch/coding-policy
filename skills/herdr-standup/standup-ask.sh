@@ -90,6 +90,8 @@ main() {
     warn "STANDUP_REPORT_PATH_MAX_COLS must be a positive integer, got '${STANDUP_REPORT_PATH_MAX_COLS}' — unset it to use the script's default"
     return 1
   fi
+  # Normalize to decimal once, so a validated `08` is not reparsed as octal.
+  STANDUP_REPORT_PATH_MAX_COLS=$(( 10#$STANDUP_REPORT_PATH_MAX_COLS ))
   if (( ${#REPORT_PATH} > STANDUP_REPORT_PATH_MAX_COLS )); then
     warn "report path is ${#REPORT_PATH} characters; the limit is ${STANDUP_REPORT_PATH_MAX_COLS} so the worker's \`REPORT: <path>\` line fits one pane row — use a shorter reports directory (e.g. one under \$HOME/.local/state)"
     return 1

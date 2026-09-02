@@ -129,6 +129,8 @@ main() {
     warn "TEAMLEAD_REPORT_PATH_MAX_COLS must be a positive integer, got '${TEAMLEAD_REPORT_PATH_MAX_COLS}' — unset it to use the script's default"
     return 1
   fi
+  # Normalize to decimal once, so a validated `08` is not reparsed as octal.
+  TEAMLEAD_REPORT_PATH_MAX_COLS=$(( 10#$TEAMLEAD_REPORT_PATH_MAX_COLS ))
 
   if ! command -v jq >/dev/null 2>&1; then
     warn "jq not found on PATH — install it (\`brew install jq\`) to compose briefs"

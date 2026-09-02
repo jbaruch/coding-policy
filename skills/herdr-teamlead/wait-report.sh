@@ -275,6 +275,9 @@ main() {
   fi
 
   validate_positive_int TEAMLEAD_UNCONFIRMED_IDLE_READS "$TEAMLEAD_UNCONFIRMED_IDLE_READS" || return 2
+  # Normalize to decimal once: a validated `08` would otherwise be reparsed as
+  # octal by every later bare arithmetic expansion.
+  TEAMLEAD_UNCONFIRMED_IDLE_READS=$(( 10#$TEAMLEAD_UNCONFIRMED_IDLE_READS ))
 
   if [[ "${HERDR_ENV:-}" != "1" ]]; then
     warn "not running inside Herdr (HERDR_ENV='${HERDR_ENV:-}') — run the team round from a pane Herdr manages"

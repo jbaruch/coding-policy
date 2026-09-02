@@ -175,6 +175,12 @@ JSON
   TEAMLEAD_REPORT_PATH_MAX_COLS=200 run "$TPL" "$v6c" "$o6c"
   if [[ $RC -eq 0 ]]; then
     pass; else fail "long REPORT under a raised limit: expected exit 0, got RC=$RC ERR=$ERRTEXT"; fi
+  # 6e. A leading-zero override is decimal downstream: `0200` raises the limit
+  #     like `200` does, with no octal reparse.
+  TEAMLEAD_REPORT_PATH_MAX_COLS=0200 run "$TPL" "$v6c" "$o6c"
+  if [[ $RC -eq 0 ]] && ! printf '%s' "$ERRTEXT" | grep -q "value too great"; then
+    pass; else fail "leading-zero limit: expected exit 0 and no octal error, got RC=$RC ERR=$ERRTEXT"; fi
+
   # 6d. A bad limit override is a precondition failure, never an arithmetic abort.
   TEAMLEAD_REPORT_PATH_MAX_COLS=soon run "$TPL" "$v6c" "$o6c"
   if [[ $RC -eq 1 && -z "$OUT" ]] && printf '%s' "$ERRTEXT" | grep -q "TEAMLEAD_REPORT_PATH_MAX_COLS must be a positive integer"; then
