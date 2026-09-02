@@ -25,6 +25,8 @@
 #             never interrupts a turn (`rules/agent-team-operation.md`
 #             Dispatch Safety).
 #   env   : HERDR_BIN overrides the herdr binary; the tests point it at a fake.
+#           STANDUP_REPORT_PATH_MAX_COLS overrides the report path length
+#           limit; a non-integer or zero value is a precondition failure.
 set -euo pipefail
 
 HERDR_BIN="${HERDR_BIN:-herdr}"
@@ -76,6 +78,16 @@ main() {
 
   if [[ "$REPORT_PATH" != /* ]]; then
     warn "report path '${REPORT_PATH}' is relative — pass an absolute path; the worker resolves it in its own working directory, not yours"
+    return 1
+  fi
+  case "$STANDUP_REPORT_PATH_MAX_COLS" in
+    ''|*[!0-9]*)
+      warn "STANDUP_REPORT_PATH_MAX_COLS must be a positive integer, got '${STANDUP_REPORT_PATH_MAX_COLS}' — unset it to use the script's default"
+      return 1
+      ;;
+  esac
+  if (( 10#$STANDUP_REPORT_PATH_MAX_COLS < 1 )); then
+    warn "STANDUP_REPORT_PATH_MAX_COLS must be a positive integer, got '${STANDUP_REPORT_PATH_MAX_COLS}' — unset it to use the script's default"
     return 1
   fi
   if (( ${#REPORT_PATH} > STANDUP_REPORT_PATH_MAX_COLS )); then

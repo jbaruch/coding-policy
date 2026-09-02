@@ -58,11 +58,17 @@ TEAMLEAD_UNCONFIRMED_IDLE_READS="${TEAMLEAD_UNCONFIRMED_IDLE_READS:-2}"
 # arithmetic abort with no JSON and no named cause.
 validate_positive_int() { # <name> <value>
   case "$2" in
-    ''|*[!0-9]*|0)
+    ''|*[!0-9]*)
       warn "$1 must be a positive integer, got '${2}' — unset it to use the script's default"
       return 2
       ;;
   esac
+  # Digits only from here; compare in base 10 so `00` and `000` read as zero
+  # rather than slipping past a literal-"0" test.
+  if (( 10#$2 < 1 )); then
+    warn "$1 must be a positive integer, got '${2}' — unset it to use the script's default"
+    return 2
+  fi
   return 0
 }
 # Per-attempt pane-probe timeout in milliseconds. `herdr pane wait-output`

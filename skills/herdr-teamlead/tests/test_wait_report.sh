@@ -40,6 +40,7 @@
 #  21. Unconfirmed idle -> file present + idle twice + no marker = exit 4.
 #  21b. Single idle read-> one idle read is not exit 4; the budget ends it.
 #  21c. Bad idle-reads  -> a non-integer override is exit 2, not an abort.
+#  21d. Zero as `00`    -> refused too; the count is compared in base 10.
 #
 # Run: bash skills/herdr-teamlead/tests/test_wait_report.sh
 set -uo pipefail
@@ -436,6 +437,12 @@ ${base}"
     bash "$SCRIPT" worker "$report" </dev/null 2>"$TMP/e21c")"; RC=$?
   if [[ $RC -eq 2 && -z "$OUT" ]] && grep -q "TEAMLEAD_UNCONFIRMED_IDLE_READS must be a positive integer" "$TMP/e21c"; then
     pass; else fail "bad idle-reads override: expected exit 2 naming it, got RC=$RC OUT=$OUT ERR=$(cat "$TMP/e21c")"; fi
+  # 21d. `00` is zero, not a positive count: refused the same way.
+  RUN_SEQ=$((RUN_SEQ+1))
+  OUT="$(env HERDR_ENV=1 HERDR_BIN="$FAKE" TEAMLEAD_UNCONFIRMED_IDLE_READS=00 \
+    bash "$SCRIPT" worker "$report" </dev/null 2>"$TMP/e21d")"; RC=$?
+  if [[ $RC -eq 2 && -z "$OUT" ]] && grep -q "must be a positive integer" "$TMP/e21d"; then
+    pass; else fail "zero-with-leading-zero override: expected exit 2, got RC=$RC OUT=$OUT ERR=$(cat "$TMP/e21d")"; fi
 
   echo "─────────────────────────────────────────────" >&2
   if [[ $FAIL -gt 0 ]]; then echo "FAILED: ${FAIL} failed, ${PASS} passed" >&2; exit 1; fi

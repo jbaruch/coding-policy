@@ -23,7 +23,9 @@
 #             validation failure,
 #           3 a tool this depends on failed (the placeholder scan itself). The
 #             answer is unknown, which is never reported as "no placeholders".
-#   env   : none.
+#   env   : TEAMLEAD_REPORT_PATH_MAX_COLS overrides the REPORT length limit
+#           (tests, a fleet whose narrowest pane is wider); a non-integer or
+#           zero value is a precondition failure (exit 1).
 #
 # Validation runs in both directions on purpose. An unfilled placeholder is a
 # brief that lies to a worker; a supplied key nothing uses is a value the lead
@@ -116,6 +118,17 @@ main() {
     return 1
   fi
   local templates="$1" values_file="$2" outdir="$3"
+
+  case "$TEAMLEAD_REPORT_PATH_MAX_COLS" in
+    ''|*[!0-9]*)
+      warn "TEAMLEAD_REPORT_PATH_MAX_COLS must be a positive integer, got '${TEAMLEAD_REPORT_PATH_MAX_COLS}' — unset it to use the script's default"
+      return 1
+      ;;
+  esac
+  if (( 10#$TEAMLEAD_REPORT_PATH_MAX_COLS < 1 )); then
+    warn "TEAMLEAD_REPORT_PATH_MAX_COLS must be a positive integer, got '${TEAMLEAD_REPORT_PATH_MAX_COLS}' — unset it to use the script's default"
+    return 1
+  fi
 
   if ! command -v jq >/dev/null 2>&1; then
     warn "jq not found on PATH — install it (\`brew install jq\`) to compose briefs"

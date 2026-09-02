@@ -175,6 +175,10 @@ JSON
   TEAMLEAD_REPORT_PATH_MAX_COLS=200 run "$TPL" "$v6c" "$o6c"
   if [[ $RC -eq 0 ]]; then
     pass; else fail "long REPORT under a raised limit: expected exit 0, got RC=$RC ERR=$ERRTEXT"; fi
+  # 6d. A bad limit override is a precondition failure, never an arithmetic abort.
+  TEAMLEAD_REPORT_PATH_MAX_COLS=soon run "$TPL" "$v6c" "$o6c"
+  if [[ $RC -eq 1 && -z "$OUT" ]] && printf '%s' "$ERRTEXT" | grep -q "TEAMLEAD_REPORT_PATH_MAX_COLS must be a positive integer"; then
+    pass; else fail "bad limit override: expected exit 1 naming it, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
 
   # 7. A role with no template is named, not guessed at.
   local v7="$TMP/v7.json" o7="$TMP/out7"
