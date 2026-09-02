@@ -113,11 +113,14 @@ main() {
     elif (( membership_rc != 0 )); then
       # A 404 IS the answer for a non-member, and it is the common case for
       # any org the operator does not belong to. Warning on it would cry wolf
-      # on every ordinary run; anything else is a fault worth surfacing.
+      # on every ordinary run. Anything else means the API did not answer,
+      # and an unanswered question is exit 2, never a false verdict: a
+      # transient fault must not read as "the operator does not own this".
       if grep -q '404' "$ERRFILE"; then
         : # not a member — not an owner, nothing to report
       else
-        warn "could not read org membership for ${viewer_login} in ${owner_login} (exit ${membership_rc}): $(tr '\n' ' ' < "$ERRFILE") — treating it as not an owner"
+        warn "could not read org membership for ${viewer_login} in ${owner_login} (exit ${membership_rc}): $(tr '\n' ' ' < "$ERRFILE") — no verdict; check \`gh auth status\` and the network, then rerun"
+        return 2
       fi
     fi
   fi

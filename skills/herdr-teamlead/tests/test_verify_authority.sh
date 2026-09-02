@@ -18,7 +18,8 @@
 #   6. Org member        -> role member is not ownership.
 #   7. Org 404           -> not a member, not an owner, still a verdict, and
 #                          SILENT: a non-member is the ordinary case.
-#  7b. Org fault         -> a non-404 membership failure warns.
+#  7b. Org fault         -> a non-404 membership failure is exit 2 and NO
+#                          verdict; a fault is not a denial.
 #   8. Usage / bad slug  -> exit 1, no verdict.
 #   9. gh absent         -> exit 1.
 #  10. API failure       -> exit 2, never a verdict.
@@ -118,10 +119,11 @@ main() {
   if [[ -z "$ERRTEXT" ]]; then
     pass; else fail "org 404: expected no warning, got ERR=$ERRTEXT"; fi
 
-  # 7b. A membership call that fails for any other reason is still surfaced.
+  # 7b. A membership call that fails for any other reason is an unanswered
+  # question: exit 2, nothing on stdout, and the diagnostic names the fix.
   run FAKE_VIEWER=jbaruch FAKE_OWNER=acme FAKE_OWNER_TYPE=Organization FAKE_ORG_FAULT=1 acme/thing
-  if [[ $RC -eq 0 ]] && printf '%s' "$ERRTEXT" | grep -q "could not read org membership"; then
-    pass; else fail "org fault: expected a warning, got RC=$RC ERR=$ERRTEXT"; fi
+  if [[ $RC -eq 2 && -z "$OUT" ]] && printf '%s' "$ERRTEXT" | grep -q "could not read org membership"; then
+    pass; else fail "org fault: expected exit 2 and no verdict, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
 
   # 8. A bare name is not a slug.
   run FAKE_VIEWER=jbaruch coding-policy
