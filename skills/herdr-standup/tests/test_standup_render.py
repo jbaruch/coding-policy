@@ -86,6 +86,16 @@ class ParseReportTest(unittest.TestCase):
         with self.assertRaises(ReportError):
             parse_report("Sure! Here's my standup:\n- did stuff\n", "grok.md")
 
+    def test_prose_before_the_four_lines_is_refused(self):
+        # The four fields plus commentary is the non-compliant answer the
+        # four-line contract exists to catch; it must not parse as compliant.
+        with self.assertRaisesRegex(ReportError, "unexpected line .Sure!"):
+            parse_report("Sure! Here's my standup:\n" + GOOD, "grok.md")
+
+    def test_a_sign_off_after_the_four_lines_is_refused(self):
+        with self.assertRaisesRegex(ReportError, "unexpected line .Let me know"):
+            parse_report(GOOD + "Let me know if you need more.\n", "grok.md")
+
     def test_an_empty_file_is_refused(self):
         with self.assertRaises(ReportError):
             parse_report("", "grok.md")

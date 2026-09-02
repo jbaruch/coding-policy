@@ -64,11 +64,13 @@ class ReportError(Exception):
 def parse_report(text, source):
     """Parse the four standup lines out of `text`.
 
-    Tolerant about surroundings, strict about content: a worker may wrap its
-    answer in blank lines, and the fields must still be the four named ones,
-    each present exactly once, in order. Anything else is refused by name --
-    a half-parsed standup row is worse than a missing one, because it looks
-    answered.
+    Tolerant about blank lines, strict about everything else: a worker may
+    wrap its answer in blank lines, and every other line must be one of the
+    four named fields, each present exactly once, in order. A line that is
+    none of them -- prose before, a sign-off after -- is refused by name,
+    because a report that carries the four fields plus commentary is exactly
+    the non-compliant answer the four-line contract exists to catch, and a
+    half-parsed standup row is worse than a missing one: it looks answered.
     """
     found = {}
     order = []
@@ -87,6 +89,13 @@ def parse_report(text, source):
                 found[field] = stripped[len(prefix):].strip()
                 order.append(field)
                 break
+        else:
+            raise ReportError(
+                "{}: unexpected line {!r} — the answer is exactly four lines "
+                "(DONE:, PLAN:, BLOCKED:, REPORT:), nothing before or after.".format(
+                    source, stripped
+                )
+            )
 
     missing = [f for f in REQUIRED_FIELDS if f not in found]
     if missing:
