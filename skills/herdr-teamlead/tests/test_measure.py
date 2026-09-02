@@ -1,12 +1,15 @@
 """Tests for teamlead.measure. The herdr client is always a fake."""
 
-# Standalone-run shim: scripts/run-tests.sh executes each suite as
-# `python3 <file>` from the repo root, so put the skill directory (this file's
-# grandparent) on sys.path before the package imports below.
-import os
-import sys
+import os as _os
+import sys as _sys
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Run as a script (`python3 tests/test_x.py`), Python puts tests/ on sys.path
+# rather than the repo root, so neither `teamlead` nor `tests.fakes` would
+# resolve. Under `-m unittest` from the root this is already true and the
+# insert is a no-op. The consuming repo's runner executes files as scripts.
+_ROOT = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+if _ROOT not in _sys.path:
+    _sys.path.insert(0, _ROOT)
 
 import inspect
 import unittest
@@ -71,6 +74,7 @@ CONFIG = {
             "usage_marker": "Weekly limit",
             "usage_read_source": "recent-unwrapped",
             "slash_delivery": "type",
+            "slash_enter_count": 2,
             "composer_glyph": "› ",
             "composer_placeholders": ["Ask Codex to do anything"],
             "recover_keys": [],
@@ -563,7 +567,7 @@ class UnconsumedUsageCommandTest(unittest.TestCase):
             [c for c in runner.commands() if c.startswith("pane wait-output")], []
         )
 
-    def test_the_second_enter_rescues_it(self):
+    def test_an_extra_enter_rescues_it(self):
         runner = self._runner(
             "codex",
             [
@@ -577,8 +581,9 @@ class UnconsumedUsageCommandTest(unittest.TestCase):
             HerdrClient(runner=runner), BY_NAME["codex"], warn=lambda message: None
         )
         self.assertEqual(record["headroom_pct"], 87.0)
+        # codex's configured 2, plus 1 more once the command was still shown
         self.assertEqual(
-            len([c for c in runner.commands() if c == "pane send-keys w3:p1 enter"]), 2
+            len([c for c in runner.commands() if c == "pane send-keys w3:p1 enter"]), 3
         )
 
     def test_the_snapshot_records_the_failure_for_that_agent(self):

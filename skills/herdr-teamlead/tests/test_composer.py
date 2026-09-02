@@ -7,19 +7,23 @@ never left idle, and the assignment was then pasted onto the unsent text.
 Codex received `/newNew assignment from the team lead...` and rejected it.
 """
 
-# Standalone-run shim: scripts/run-tests.sh executes each suite as
-# `python3 <file>` from the repo root, so put the skill directory (this file's
-# grandparent) on sys.path before the package imports below.
-import os
-import sys
+import os as _os
+import sys as _sys
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Run as a script (`python3 tests/test_x.py`), Python puts tests/ on sys.path
+# rather than the repo root, so neither `teamlead` nor `tests.fakes` would
+# resolve. Under `-m unittest` from the root this is already true and the
+# insert is a no-op. The consuming repo's runner executes files as scripts.
+_ROOT = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+if _ROOT not in _sys.path:
+    _sys.path.insert(0, _ROOT)
 
 import unittest
 
 from teamlead.composer import (
     DispatchSession,
     checkable,
+    command_still_present,
     composer_text,
     ensure_ready,
     read_pane,
@@ -69,6 +73,19 @@ CONFIG = {
             "composer_glyph": "› ",
             "composer_placeholders": ["Ask Codex to do anything"],
             "recover_keys": ["esc"],
+            "clear_prompt": "/new",
+        },
+        {
+            "name": "twoenter",
+            "kind": "codex",
+            "usage_prompt": "/status",
+            "usage_marker": "Weekly limit",
+            "usage_read_source": "recent-unwrapped",
+            "slash_delivery": "type",
+            "slash_enter_count": 2,
+            "composer_glyph": "› ",
+            "composer_placeholders": ["Ask Codex to do anything"],
+            "recover_keys": [],
             "clear_prompt": "/new",
         },
         {
@@ -292,7 +309,7 @@ class SendCommandTest(unittest.TestCase):
     def test_a_consumed_command_needs_no_second_enter(self):
         result = self._send(self._runner([CODEX_EMPTY, CODEX_FRESH]))
         self.assertTrue(result["consumed"])
-        self.assertFalse(result["extra_enter"])
+        self.assertEqual(result["extra_enters"], 0)
         self.assertFalse(result["recovered"])
         self.assertTrue(result["screen_changed"])
 
@@ -300,28 +317,28 @@ class SendCommandTest(unittest.TestCase):
         # First Enter accepts the completion; the second submits.
         runner = self._runner([CODEX_EMPTY, CODEX_HELD, CODEX_FRESH])
         result = self._send(runner)
-        self.assertTrue(result["extra_enter"])
+        self.assertEqual(result["extra_enters"], 1)
         self.assertTrue(result["consumed"])
         self.assertEqual(
-            [c for c in runner.commands() if c == "pane send-keys w3:p1 enter"],
-            ["pane send-keys w3:p1 enter", "pane send-keys w3:p1 enter"],
+            len([c for c in runner.commands() if c == "pane send-keys w3:p1 enter"]), 2
         )
 
-    def test_a_command_still_stuck_after_two_enters_is_refused(self):
+    def test_a_command_that_will_not_submit_is_refused(self):
         runner = self._runner([CODEX_EMPTY, CODEX_HELD])
         with self.assertRaises(HerdrError) as caught:
             self._send(runner)
         message = str(caught.exception)
         self.assertIn("/new", message)
         self.assertIn("Nothing further was sent", message)
-        self.assertIn("slash_delivery", message)
+        self.assertIn("slash_enter_count", message)
 
-    def test_the_refusal_pressed_enter_only_twice(self):
+    def test_the_extra_enters_are_bounded(self):
         runner = self._runner([CODEX_EMPTY, CODEX_HELD])
         with self.assertRaises(HerdrError):
             self._send(runner)
+        # one from delivery, then MAX_EXTRA_ENTERS more, and no further
         self.assertEqual(
-            len([c for c in runner.commands() if c == "pane send-keys w3:p1 enter"]), 2
+            len([c for c in runner.commands() if c == "pane send-keys w3:p1 enter"]), 3
         )
 
     def test_a_composer_holding_a_strangers_text_refuses_before_sending(self):
@@ -381,6 +398,8 @@ class SendCommandTest(unittest.TestCase):
         self.assertEqual(
             [c for c in runner.commands() if c.startswith("agent read")], []
         )
+
+
 
 
 # --- Claude Code's dim ghost-text suggestion --------------------------------
@@ -784,6 +803,128 @@ class LiveKillSequenceTest(unittest.TestCase):
                 warn=lambda message: None,
             )
         self.assertEqual([c for c in runner.commands() if "ctrl+c" in c], [])
+
+
+
+
+# --- the dim-slash-text kill ----------------------------------------------
+#
+# Codex renders a slash command in a dim/highlight style while its
+# autocomplete popup is open. `composer_ignore_dim: true` filtered the real,
+# unsent `/new` out as if it were ghost text, teamlead declared it consumed,
+# and the brief was pasted onto it: "Unrecognized command '/newNew
+# assignment...'". So while looking for the command it just typed, teamlead
+# ignores dimness entirely.
+
+CODEX_HELD_DIM = "  Codex v1.2\n  ─────────\n  › {}/new{}\n".format(DIM, RESET)
+CODEX_HELD_GREY = "  Codex v1.2\n  ─────────\n  › {}/new{}\n".format(GREY, RESET)
+
+
+class DimSlashTextTest(unittest.TestCase):
+    """A dim slash command is still a slash command."""
+
+    def test_a_dim_command_counts_as_still_present(self):
+        self.assertTrue(command_still_present(CODEX_HELD_DIM, BY_NAME["codex"], "/new"))
+
+    def test_a_grey_command_counts_as_still_present(self):
+        self.assertTrue(command_still_present(CODEX_HELD_GREY, BY_NAME["codex"], "/new"))
+
+    def test_a_normal_weight_command_counts_too(self):
+        self.assertTrue(command_still_present(CODEX_HELD, BY_NAME["codex"], "/new"))
+
+    def test_an_empty_composer_does_not(self):
+        self.assertFalse(command_still_present(CODEX_EMPTY, BY_NAME["codex"], "/new"))
+
+    def test_the_placeholder_does_not(self):
+        self.assertFalse(
+            command_still_present(CODEX_PLACEHOLDER_DIM, BY_NAME["codex"], "/new")
+        )
+
+    def test_the_appended_shape_from_the_live_failure_counts(self):
+        text = "  › /newNew assignment from the team lead.\n"
+        self.assertTrue(command_still_present(text, BY_NAME["codex"], "/new"))
+
+    def test_the_dim_filter_would_have_hidden_it(self):
+        # The bug, stated: with dim filtering the composer looks empty.
+        self.assertEqual(composer_text(CODEX_HELD_DIM, "› ", True), "")
+        self.assertEqual(composer_text(CODEX_HELD_DIM, "› ", False), "/new")
+
+
+class DimSlashTextSendTest(unittest.TestCase):
+    def _runner(self, screens):
+        runner = FakeRunner()
+        runner.set("pane send-text", ok_json("pane_send_text"))
+        runner.set("pane send-keys", ok_json("pane_send_keys"))
+        runner.set("agent send-keys", ok_json("agent_send_keys"))
+        runner.responses["agent read codex --source visible --lines 20"] = ScriptedReads(
+            screens
+        )
+        self.runner = runner
+        return HerdrClient(runner=runner)
+
+    def _send(self, client, **kwargs):
+        kwargs.setdefault("sleep", NO_SLEEP)
+        kwargs.setdefault("warn", lambda message: None)
+        return send_command(client, BY_NAME["codex"], "w3:p1", "/new", **kwargs)
+
+    def test_a_dim_command_triggers_another_enter_rather_than_success(self):
+        client = self._runner([CODEX_EMPTY, CODEX_HELD_DIM, CODEX_FRESH])
+        result = self._send(client)
+        self.assertEqual(result["extra_enters"], 1)
+        self.assertTrue(result["consumed"])
+
+    def test_a_dim_command_that_never_submits_is_refused(self):
+        client = self._runner([CODEX_EMPTY, CODEX_HELD_DIM])
+        with self.assertRaises(HerdrError) as caught:
+            self._send(client)
+        self.assertIn("/new", str(caught.exception))
+
+    def test_nothing_is_pasted_after_that_refusal(self):
+        client = self._runner([CODEX_EMPTY, CODEX_HELD_DIM])
+        with self.assertRaises(HerdrError):
+            self._send(client)
+        self.assertEqual(self.runner.pasted_prompts(), [])
+
+    def test_a_dim_placeholder_after_the_command_is_still_consumed(self):
+        # Once the command text is gone, placeholder and dim rules apply
+        # again -- otherwise Codex could never be dispatched at all.
+        client = self._runner([CODEX_EMPTY, CODEX_PLACEHOLDER_DIM, CODEX_FRESH])
+        result = self._send(client)
+        self.assertEqual(result["extra_enters"], 0)
+        self.assertTrue(result["consumed"])
+
+
+class SlashEnterCountTest(unittest.TestCase):
+    def test_codex_ships_with_two_enters(self):
+        import json as _json
+
+        from teamlead.config import parse_config as _parse
+
+        path = _os.path.join(_ROOT, "config.example.json")
+        with open(path, encoding="utf-8") as handle:
+            agents = {a.name: a for a in _parse(_json.load(handle))}
+        self.assertEqual(agents["codex"].slash_enter_count, 2)
+        self.assertEqual(agents["claude"].slash_enter_count, 1)
+        self.assertEqual(agents["grok"].slash_enter_count, 1)
+
+    def test_the_configured_count_is_what_gets_sent(self):
+        runner = FakeRunner()
+        runner.set("pane send-text", ok_json("pane_send_text"))
+        runner.set("pane send-keys", ok_json("pane_send_keys"))
+        runner.responses["agent read twoenter --source visible --lines 20"] = ScriptedReads(
+            [CODEX_EMPTY, CODEX_FRESH]
+        )
+        send_command(
+            HerdrClient(runner=runner),
+            BY_NAME["twoenter"],
+            "w3:p1",
+            "/new",
+            sleep=NO_SLEEP,
+            warn=lambda message: None,
+        )
+        self.assertEqual(
+            len([c for c in runner.commands() if c == "pane send-keys w3:p1 enter"]), 2
+        )
 
 
 if __name__ == "__main__":

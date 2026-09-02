@@ -4,13 +4,16 @@ The load-bearing test in this file is that a busy agent is never typed into,
 and that a refused run sends nothing at all.
 """
 
-# Standalone-run shim: scripts/run-tests.sh executes each suite as
-# `python3 <file>` from the repo root, so put the skill directory (this file's
-# grandparent) on sys.path before the package imports below.
-import os
-import sys
+import os as _os
+import sys as _sys
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Run as a script (`python3 tests/test_x.py`), Python puts tests/ on sys.path
+# rather than the repo root, so neither `teamlead` nor `tests.fakes` would
+# resolve. Under `-m unittest` from the root this is already true and the
+# insert is a no-op. The consuming repo's runner executes files as scripts.
+_ROOT = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+if _ROOT not in _sys.path:
+    _sys.path.insert(0, _ROOT)
 
 import inspect
 import os
@@ -74,6 +77,7 @@ CONFIG = {
             "usage_marker": "Weekly limit",
             "usage_read_source": "recent-unwrapped",
             "slash_delivery": "type",
+            "slash_enter_count": 2,
             "composer_glyph": "› ",
             "composer_placeholders": ["Ask Codex to do anything"],
             "recover_keys": [],
@@ -284,6 +288,34 @@ class BuildStepsTest(unittest.TestCase):
                 "herdr agent prompt claude /clear",  # claude pastes
                 "herdr pane send-text w3:p1 /new",  # codex types
             ],
+        )
+
+    def test_the_plan_shows_every_enter_the_agent_needs(self):
+        # codex ships slash_enter_count 2; the plan must show both, or a
+        # --dry-run reader would not know what actually happens.
+        steps = build_steps(
+            self.client,
+            {"reviewer": "codex"},
+            BY_NAME,
+            self.paths,
+            panes={"codex": "w3:p1"},
+        )
+        shells = [command["shell"] for command in steps[0]["commands"]]
+        self.assertEqual(
+            len([sh for sh in shells if sh == "herdr pane send-keys w3:p1 enter"]), 2
+        )
+
+    def test_a_single_enter_agent_shows_one(self):
+        steps = build_steps(
+            self.client,
+            {"developer": "grok"},
+            BY_NAME,
+            self.paths,
+            panes={"grok": "w4:p1"},
+        )
+        shells = [command["shell"] for command in steps[0]["commands"]]
+        self.assertEqual(
+            len([sh for sh in shells if sh == "herdr pane send-keys w4:p1 enter"]), 1
         )
 
     def test_grok_never_has_its_clear_pasted(self):
@@ -658,7 +690,7 @@ class ComposerGateTest(unittest.TestCase):
         # The exact regression: no assignment is appended to the stuck text.
         self.assertEqual(runner.pasted_prompts(), [])
 
-    def test_the_second_enter_recovers_the_round(self):
+    def test_an_extra_enter_recovers_the_round(self):
         runner = self._runner(
             [
                 composer_screen("codex", "old transcript"),
@@ -676,8 +708,9 @@ class ComposerGateTest(unittest.TestCase):
         )
         self.assertEqual(len(result["applied"]), 1)
         self.assertTrue(result["applied"][0]["cleared"])
+        # codex's configured 2, plus 1 more once the command was still shown
         self.assertEqual(
-            len([c for c in runner.commands() if c == "pane send-keys w3:p1 enter"]), 2
+            len([c for c in runner.commands() if c == "pane send-keys w3:p1 enter"]), 3
         )
         self.assertEqual(len(runner.pasted_prompts()), 1)
         self.assertIn("DEVELOPER", runner.pasted_prompts()[0])
@@ -995,33 +1028,103 @@ class ClearedFlagTest(unittest.TestCase):
         )
         self.assertTrue(result["applied"][0]["cleared"])
 
-    def test_an_unchanged_screen_is_reported_as_not_cleared(self):
-        result = self._apply(
-            [composer_screen("codex", "same"), composer_screen("codex", "same")]
-        )
-        self.assertFalse(result["applied"][0]["cleared"])
-        # Consumed, so the assignment is still safe to send.
-        self.assertEqual(len(self.runner.pasted_prompts()), 1)
+    def test_an_unchanged_screen_refuses_before_the_brief(self):
+        # Gating, not advisory: briefing an agent that still holds the last
+        # task's context is exactly what the clear exists to prevent.
+        with self.assertRaises(HerdrError) as caught:
+            self._apply(
+                [composer_screen("codex", "same"), composer_screen("codex", "same")]
+            )
+        message = str(caught.exception)
+        self.assertIn("did not change", message)
+        self.assertIn("was not cleared", message)
 
-    def test_an_unchanged_screen_warns(self):
-        runner = runner_with({"codex": "idle"})
-        runner.responses["agent read codex --source visible --lines 20"] = ScriptedReads(
-            [composer_screen("codex", "same")]
-        )
-        warnings = []
-        apply(
-            HerdrClient(runner=runner),
-            {"developer": "codex"},
-            BY_NAME,
-            self.paths,
-            AT,
-            warn=warnings.append,
-        )
-        self.assertTrue(any("did not change" in w for w in warnings))
+    def test_nothing_is_pasted_after_that_refusal(self):
+        with self.assertRaises(HerdrError):
+            self._apply(
+                [composer_screen("codex", "same"), composer_screen("codex", "same")]
+            )
+        self.assertEqual(self.runner.pasted_prompts(), [])
+
+    def test_no_clear_skips_the_screen_gate_entirely(self):
+        result = self._apply([composer_screen("codex", "same")], no_clear=True)
+        self.assertEqual(len(result["applied"]), 1)
 
     def test_no_clear_reports_cleared_false(self):
         result = self._apply([composer_screen("codex")], no_clear=True)
         self.assertFalse(result["applied"][0]["cleared"])
+
+    def test_a_cleared_round_always_reports_true(self):
+        # `cleared` is now either True or the round raised, so a False here
+        # can only mean --no-clear.
+        result = self._apply(
+            [composer_screen("codex", "old"), composer_screen("codex", "fresh")]
+        )
+        self.assertTrue(result["applied"][0]["cleared"])
+
+
+class DuplicateAgentTest(unittest.TestCase):
+    """One agent, one role. Two briefs to one pane means the second wins."""
+
+    def setUp(self):
+        self.paths = {
+            "common": "/w/COMMON.md",
+            "developer": "/w/dev.md",
+            "tester": "/w/test.md",
+        }
+
+    def test_the_same_agent_in_two_roles_is_rejected(self):
+        with self.assertRaises(UsageError) as caught:
+            normalize_assignments({"developer": "grok", "tester": "grok"})
+        message = str(caught.exception)
+        self.assertIn("grok", message)
+        self.assertIn("developer", message)
+        self.assertIn("tester", message)
+
+    def test_the_rejection_explains_what_would_happen(self):
+        with self.assertRaises(UsageError) as caught:
+            normalize_assignments({"developer": "grok", "tester": "grok"})
+        self.assertIn("overwrite", str(caught.exception))
+
+    def test_plan_output_carrying_a_duplicate_is_rejected_too(self):
+        with self.assertRaises(UsageError):
+            normalize_assignments(
+                {"schema_version": 1, "assignments": {"a": "grok", "b": "grok"}}
+            )
+
+    def test_three_roles_on_one_agent_are_all_named(self):
+        with self.assertRaises(UsageError) as caught:
+            normalize_assignments({"a": "grok", "b": "grok", "c": "grok"})
+        details = caught.exception.details["doubled"]
+        self.assertEqual(details, {"grok": ["a", "b", "c"]})
+
+    def test_distinct_agents_pass(self):
+        self.assertEqual(
+            normalize_assignments({"developer": "grok", "tester": "claude"}),
+            {"developer": "grok", "tester": "claude"},
+        )
+
+    def test_the_dry_run_plan_refuses_it_too(self):
+        with self.assertRaises(UsageError):
+            build_steps(
+                HerdrClient(binary="herdr", runner=FakeRunner()),
+                {"developer": "grok", "tester": "grok"},
+                BY_NAME,
+                self.paths,
+            )
+
+    def test_apply_refuses_before_any_herdr_call(self):
+        runner = runner_with({"grok": "idle"})
+        with self.assertRaises(UsageError):
+            apply(
+                HerdrClient(runner=runner),
+                {"developer": "grok", "tester": "grok"},
+                BY_NAME,
+                self.paths,
+                AT,
+                warn=lambda message: None,
+            )
+        self.assertEqual(runner.calls, [])
 
 
 class ApplyTest(unittest.TestCase):
@@ -1135,56 +1238,6 @@ class ApplyTest(unittest.TestCase):
                 ("tester", "claude", AT, "applied"),
             ],
         )
-
-
-class OneAgentOneRoleTest(unittest.TestCase):
-    """A repeated agent would clear its own pane between two briefs."""
-
-    def setUp(self):
-        self.paths = {
-            "common": "/w/COMMON.md",
-            "developer": "/w/dev.md",
-            "tester": "/w/test.md",
-        }
-
-    def test_the_same_agent_in_two_roles_is_refused(self):
-        with self.assertRaises(UsageError) as caught:
-            normalize_assignments({"developer": "grok", "tester": "grok"})
-        message = str(caught.exception)
-        self.assertIn("grok -> developer, tester", message)
-        self.assertIn("one role per round", message)
-        self.assertIn("--assignments", message)
-
-    def test_the_refusal_names_every_doubled_agent(self):
-        with self.assertRaises(UsageError) as caught:
-            normalize_assignments(
-                {"developer": "grok", "tester": "grok", "reviewer": "codex", "scribe": "codex"}
-            )
-        message = str(caught.exception)
-        self.assertIn("codex -> reviewer, scribe", message)
-        self.assertIn("grok -> developer, tester", message)
-
-    def test_distinct_agents_pass(self):
-        self.assertEqual(
-            normalize_assignments({"developer": "grok", "tester": "codex"}),
-            {"developer": "grok", "tester": "codex"},
-        )
-
-    def test_nothing_is_sent_when_the_assignments_repeat_an_agent(self):
-        # The refusal has to land before any herdr call: a paste cannot be
-        # unsent, and the second brief would arrive after the first pane was
-        # cleared.
-        runner = runner_with({"grok": "idle"})
-        with self.assertRaises(UsageError):
-            apply(
-                HerdrClient(runner=runner),
-                {"developer": "grok", "tester": "grok"},
-                BY_NAME,
-                self.paths,
-                AT,
-            )
-        self.assertEqual(runner.commands(), [])
-        self.assertEqual(runner.writes(), [])
 
 
 if __name__ == "__main__":

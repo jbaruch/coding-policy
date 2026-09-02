@@ -1,12 +1,15 @@
 """Tests for teamlead.planner. Pure function in, pure dict out."""
 
-# Standalone-run shim: scripts/run-tests.sh executes each suite as
-# `python3 <file>` from the repo root, so put the skill directory (this file's
-# grandparent) on sys.path before the package imports below.
-import os
-import sys
+import os as _os
+import sys as _sys
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Run as a script (`python3 tests/test_x.py`), Python puts tests/ on sys.path
+# rather than the repo root, so neither `teamlead` nor `tests.fakes` would
+# resolve. Under `-m unittest` from the root this is already true and the
+# insert is a no-op. The consuming repo's runner executes files as scripts.
+_ROOT = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+if _ROOT not in _sys.path:
+    _sys.path.insert(0, _ROOT)
 
 import unittest
 
@@ -174,6 +177,8 @@ class RefusalTest(unittest.TestCase):
         self.assertIn("3 roles", str(caught.exception))
 
 
+
+
 class MalformedHeadroomTest(unittest.TestCase):
     """A snapshot is a file on disk: hand-edited, stale, or truncated.
 
@@ -260,38 +265,50 @@ class MalformedHeadroomTest(unittest.TestCase):
         )
 
 
-class OneAgentOneRoleTest(unittest.TestCase):
-    """apply refuses a repeated agent, so the planner must never emit one."""
+class NoDuplicateAgentTest(unittest.TestCase):
+    """The planner must never hand one agent two roles.
 
-    def test_every_role_gets_a_distinct_agent(self):
-        snapshot = {
-            "agents": {
-                "grok": {"headroom_pct": 90.0},
-                "codex": {"headroom_pct": 90.0},
-                "claude": {"headroom_pct": 90.0},
-            }
-        }
-        result = plan(["developer", "tester", "reviewer"], snapshot)
-        agents = list(result["assignments"].values())
-        self.assertEqual(len(agents), len(set(agents)))
+    `apply` briefs one pane per role, so a duplicate would mean the second
+    brief overwriting the first and one role silently going undone.
+    """
 
-    def test_identical_headrooms_still_produce_distinct_agents(self):
-        # A tie is where a naive "pick the best" would hand the same agent to
-        # every role.
-        snapshot = {
-            "agents": {name: {"headroom_pct": 50.0} for name in ("a", "b", "c", "d")}
-        }
-        result = plan(["developer", "tester", "reviewer"], snapshot)
+    def test_every_role_gets_a_different_agent(self):
+        result = plan(ROLES, snapshot(claude=92.0, codex=87.0, grok=100.0))
         agents = list(result["assignments"].values())
-        self.assertEqual(sorted(agents), ["a", "b", "c"])
+        self.assertEqual(len(set(agents)), len(agents))
 
-    def test_null_headrooms_still_produce_distinct_agents(self):
-        snapshot = {
-            "agents": {name: {"headroom_pct": None} for name in ("a", "b", "c")}
-        }
-        result = plan(["developer", "tester"], snapshot)
+    def test_a_full_tie_still_produces_distinct_agents(self):
+        result = plan(ROLES, snapshot(claude=50.0, codex=50.0, grok=50.0))
         agents = list(result["assignments"].values())
-        self.assertEqual(len(agents), len(set(agents)))
+        self.assertEqual(sorted(agents), ["claude", "codex", "grok"])
+
+    def test_all_null_headroom_still_produces_distinct_agents(self):
+        result = plan(ROLES, snapshot(claude=None, codex=None, grok=None))
+        agents = list(result["assignments"].values())
+        self.assertEqual(sorted(agents), ["claude", "codex", "grok"])
+
+    def test_all_malformed_headroom_still_produces_distinct_agents(self):
+        result = plan(
+            ROLES,
+            {"agents": {n: {"headroom_pct": "?"} for n in ("claude", "codex", "grok")}},
+            warn=[].append,
+        )
+        agents = list(result["assignments"].values())
+        self.assertEqual(sorted(agents), ["claude", "codex", "grok"])
+
+    def test_more_agents_than_roles_leaves_the_extras_unassigned(self):
+        result = plan(["developer"], snapshot(claude=92.0, codex=87.0, grok=100.0))
+        self.assertEqual(list(result["assignments"].values()), ["grok"])
+
+    def test_the_planner_output_is_accepted_by_apply(self):
+        # The two halves of the contract meet here: whatever the planner
+        # emits, assign.normalize_assignments must not reject it.
+        from teamlead.assign import normalize_assignments
+
+        result = plan(ROLES, snapshot(claude=50.0, codex=50.0, grok=50.0))
+        self.assertEqual(
+            normalize_assignments(result), result["assignments"]
+        )
 
 
 if __name__ == "__main__":

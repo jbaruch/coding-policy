@@ -5,15 +5,13 @@ looked like when it was measured; it never substitutes for reading the agent's
 live status before writing to it. `plan` may run off a stale snapshot on
 purpose (planning has no side effects); `apply` always re-checks live status.
 
-Schema (schema_version 2)::
+Schema (schema_version 1)::
 
     {
-      "schema_version": 2,
+      "schema_version": 1,
       "snapshots":  [ <measure output>, ... ],   # newest last, capped at 20
-      "assignments":[ {"schema_version": 2, "at": <ISO-8601>,
-                       "role": <str>, "agent": <str>,
-                       "status": "applied"|"sent_but_not_started"|"unknown"},
-                      ... ]
+      "assignments":[ {"schema_version": 1, "at": <ISO-8601>,
+                       "role": <str>, "agent": <str>}, ... ]
     }
 
 Every RECORD carries its own `schema_version`, not just the document: a ledger
@@ -49,12 +47,12 @@ from .errors import StateError
 STATE_SCHEMA_VERSION = 2
 
 #: An assignment row records what teamlead did, including what did not work.
-#: `applied` -- the message REACHED the worker: it landed in the transcript, or
-#:     the worker left idle. Landing alone earns it; a completed turn is not
-#:     claimed, and none of this says the work was done well (assign.py `apply`
-#:     sets it on `landed or started`).
-#: `sent_but_not_started` -- the paste went out and neither signal appeared
-#:     (see teamlead/composer.py send_message).
+#: `applied` -- the hand-off was CONFIRMED: the brief appeared in the agent's
+#:     transcript, or the agent left idle. Either is enough, and neither
+#:     proves the work finished -- see `landed` and `started` on the apply
+#:     record for which one it was.
+#: `sent_but_not_started` -- the paste went out and NEITHER was observed (see
+#:     teamlead/composer.py send_message).
 #: `unknown` -- written before rows carried a status.
 STATUS_APPLIED = "applied"
 STATUS_NOT_STARTED = "sent_but_not_started"

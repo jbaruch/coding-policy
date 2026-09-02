@@ -262,19 +262,25 @@ class HerdrClient:
     def argv_pane_send_keys(self, pane_id, keys):
         return [self.binary, "pane", "send-keys", pane_id] + list(keys)
 
-    def argv_send_slash_command(self, pane_id, text):
-        """The two argv lists `send_slash_command` runs, in order."""
-        return [
-            self.argv_pane_send_text(pane_id, text),
-            self.argv_pane_send_keys(pane_id, [SUBMIT_KEY]),
-        ]
+    def argv_send_slash_command(self, pane_id, text, enter_count=1):
+        """The argv lists `send_slash_command` runs, in order.
 
-    def argv_deliver_slash_command(self, delivery, agent_name, pane_id, text):
+        `enter_count` above 1 is for a composer whose autocomplete popup eats
+        the first Enter: Codex's first Enter only accepts the completion. Each
+        Enter is its own call so a --trace log shows how many were needed. An
+        extra Enter on an already-empty composer is harmless.
+        """
+        argvs = [self.argv_pane_send_text(pane_id, text)]
+        for _ in range(max(1, enter_count)):
+            argvs.append(self.argv_pane_send_keys(pane_id, [SUBMIT_KEY]))
+        return argvs
+
+    def argv_deliver_slash_command(self, delivery, agent_name, pane_id, text, enter_count=1):
         """The argv lists `deliver_slash_command` runs, in order."""
         if delivery == SLASH_DELIVERY_PASTE:
             return [self.argv_agent_prompt(agent_name, text)]
         if delivery == SLASH_DELIVERY_TYPE:
-            return self.argv_send_slash_command(pane_id, text)
+            return self.argv_send_slash_command(pane_id, text, enter_count=enter_count)
         raise HerdrError(
             "Unknown slash_delivery {!r} for agent {!r} - use {}.".format(
                 delivery, agent_name, " or ".join(repr(v) for v in SLASH_DELIVERIES)
@@ -494,7 +500,7 @@ class HerdrClient:
         """
         return self._run_optional_json(self.argv_pane_send_keys(pane_id, keys))
 
-    def send_slash_command(self, pane_id, text):
+    def send_slash_command(self, pane_id, text, enter_count=1):
         """Deliver a slash command the way a human types it.
 
         `agent prompt` delivers text through the pane's live bracketed-paste
@@ -509,10 +515,13 @@ class HerdrClient:
         brief is a message, and pasting it is exactly right.
         """
         text_result = self.pane_send_text(pane_id, text)
-        key_result = self.pane_send_keys(pane_id, [SUBMIT_KEY])
-        return {"send_text": text_result, "send_keys": key_result}
+        key_results = [
+            self.pane_send_keys(pane_id, [SUBMIT_KEY])
+            for _ in range(max(1, enter_count))
+        ]
+        return {"send_text": text_result, "send_keys": key_results[-1]}
 
-    def deliver_slash_command(self, delivery, agent_name, pane_id, text):
+    def deliver_slash_command(self, delivery, agent_name, pane_id, text, enter_count=1):
         """Send a slash command by whichever mechanism this agent needs.
 
         The choice is per-agent because the TUIs disagree: pasting is read as
@@ -522,7 +531,7 @@ class HerdrClient:
         if delivery == SLASH_DELIVERY_PASTE:
             return {"paste": self.agent_prompt(agent_name, text)}
         if delivery == SLASH_DELIVERY_TYPE:
-            return self.send_slash_command(pane_id, text)
+            return self.send_slash_command(pane_id, text, enter_count=enter_count)
         raise HerdrError(
             "Unknown slash_delivery {!r} for agent {!r} - use {}.".format(
                 delivery, agent_name, " or ".join(repr(v) for v in SLASH_DELIVERIES)

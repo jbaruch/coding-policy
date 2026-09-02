@@ -24,6 +24,7 @@
       "usage_marker": "Weekly limit",
       "usage_read_source": "recent-unwrapped",
       "slash_delivery": "type",
+      "slash_enter_count": 2,
       "composer_glyph": "› ",
       "composer_ignore_dim": true,
       "composer_placeholders": ["Ask Codex to do anything"],

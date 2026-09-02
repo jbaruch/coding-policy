@@ -40,6 +40,11 @@ COMPOSER_SETTLE_SEC = 1.0
 #: Re-reads allowed while waiting for the screen to change after a clear.
 SCREEN_CHANGE_ATTEMPTS = 3
 
+#: Extra Enters teamlead will press when a typed slash command is still
+#: visible in the composer. Bounded: past this, something is wrong that more
+#: keystrokes will not fix.
+MAX_EXTRA_ENTERS = 2
+
 #: Re-reads allowed while waiting for a sent assignment to appear as a user
 #: message in the transcript.
 LANDING_ATTEMPTS = 5
@@ -233,6 +238,25 @@ def unknown_skill_error(pane_text):
         if marker in flat:
             return marker
     return None
+
+
+def command_still_present(pane_text, agent, command):
+    """True when `command` is still visible in the composer, in ANY style.
+
+    Dimness is deliberately IGNORED here. Codex renders a slash command in a
+    dim/highlight style while its autocomplete popup is open, so the
+    `composer_ignore_dim` filter erased the real, unsent `/new` and teamlead
+    declared it consumed. The brief was then pasted onto it and Codex answered
+    "Unrecognized command '/newNew assignment...'".
+
+    So: while teamlead is looking for the command it just typed, every
+    character counts. Placeholder and dim rules only apply once the command
+    text is gone.
+    """
+    literal = composer_text(pane_text, agent.composer_glyph, ignore_dim=False)
+    if not literal:
+        return False
+    return command.strip() in literal
 
 
 def checkable(agent):
@@ -524,14 +548,14 @@ def _left_idle(client, agent, timeout_ms, warn):
     return True
 
 
-def send_command(client, agent, pane_id, command, session=None, sleep=time.sleep, warn=None, settle_sec=COMPOSER_SETTLE_SEC, screen_attempts=SCREEN_CHANGE_ATTEMPTS):
+def send_command(client, agent, pane_id, command, session=None, sleep=time.sleep, warn=None, settle_sec=COMPOSER_SETTLE_SEC, screen_attempts=SCREEN_CHANGE_ATTEMPTS, max_extra_enters=MAX_EXTRA_ENTERS):
     """Send a slash command and confirm the composer consumed it.
 
     Returns::
 
         {
           "consumed": True,          # always -- anything else raises
-          "extra_enter": bool,       # a second Enter was needed
+          "extra_enters": int,       # Enters beyond the configured count
           "recovered": bool,         # the composer had to be cleared first
           "screen_changed": bool,    # the pane's content actually changed
         }
@@ -560,38 +584,61 @@ def send_command(client, agent, pane_id, command, session=None, sleep=time.sleep
     # Remembered before it is sent, so a command that fails to submit is one
     # teamlead can account for -- and therefore one it may clear later.
     session.remember(command)
-    client.deliver_slash_command(agent.slash_delivery, agent.name, pane_id, command)
+    client.deliver_slash_command(
+        agent.slash_delivery,
+        agent.name,
+        pane_id,
+        command,
+        enter_count=agent.slash_enter_count,
+    )
     sleep(settle_sec)
     text, ansi = read_pane(client, agent, warn=warn)
 
-    extra_enter = False
-    if inspect_composer(text, agent, ansi=ansi).occupied:
-        # Codex opens an autocomplete popup on `/`, where the first Enter only
-        # accepts the completion. A second Enter submits, and an extra Enter
-        # on an empty composer is harmless.
-        extra_enter = True
+    # Phase 1 -- is the command still there, in ANY style? Dimness plays no
+    # part: Codex styles an open autocomplete popup dim, and filtering that
+    # out is what let an unsent /new pass as consumed.
+    extra_enters = 0
+    while command_still_present(text, agent, command) and extra_enters < max_extra_enters:
+        extra_enters += 1
         warn(
-            "teamlead: {} still shows {!r} in its composer after {!r}. Pressing "
-            "Enter once more.".format(agent.name, command, command)
+            "teamlead: {} still shows {!r} in its composer. Pressing Enter "
+            "again ({} of {}).".format(
+                agent.name, command, extra_enters, max_extra_enters
+            )
         )
         client.pane_send_keys(pane_id, ["enter"])
         sleep(settle_sec)
         text, ansi = read_pane(client, agent, warn=warn)
 
+    if command_still_present(text, agent, command):
+        raise HerdrError(
+            "{!r} is still sitting unsent in {}'s composer after {} Enters. "
+            "Nothing further was sent -- pasting a brief onto it is how Codex "
+            "came to read `/newNew assignment...`. Look at pane {}, submit the "
+            "command by hand, and check whether {} needs a higher "
+            "slash_enter_count.".format(
+                command,
+                agent.name,
+                agent.slash_enter_count + extra_enters,
+                pane_id or "(unknown)",
+                agent.name,
+            ),
+            {
+                "agent": agent.name,
+                "command": command,
+                "pane_id": pane_id,
+                "enters_sent": agent.slash_enter_count + extra_enters,
+            },
+        )
+
+    # Phase 2 -- the command is gone; NOW placeholder and dim rules decide
+    # whether anything else is sitting there.
     held = inspect_composer(text, agent, ansi=ansi).content
     if held:
         raise HerdrError(
-            "{!r} is still sitting unsent in {}'s composer (it shows {!r}) "
-            "after two Enters. Nothing further was sent. Clear the composer "
-            "with `herdr agent send-keys {} {}` -- once only -- submit the "
-            "command by hand, and check whether {} needs "
-            "slash_delivery \"type\" instead of \"paste\".".format(
-                command,
-                agent.name,
-                held,
-                agent.name,
-                " ".join(agent.recover_keys) if agent.recover_keys else "<recover-key>",
-                agent.name,
+            "{} consumed {!r}, but its composer now holds {!r}. Nothing "
+            "further was sent. Look at pane {} before assigning to it.".format(
+                agent.name, command, held, pane_id or "(unknown)"
             ),
             {"agent": agent.name, "command": command, "composer": held},
         )
@@ -606,7 +653,7 @@ def send_command(client, agent, pane_id, command, session=None, sleep=time.sleep
 
     return {
         "consumed": True,
-        "extra_enter": extra_enter,
+        "extra_enters": extra_enters,
         "recovered": recovered,
         "screen_changed": screen_changed,
     }

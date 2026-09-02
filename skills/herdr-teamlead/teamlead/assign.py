@@ -42,7 +42,7 @@ from .composer import (
     send_command,
     send_message,
 )
-from .errors import AgentBusyError, UsageError
+from .errors import AgentBusyError, HerdrError, UsageError
 from .herdr import (
     BUSY_STATES,
     DEFAULT_SETTLE_TIMEOUT_MS,
@@ -99,37 +99,36 @@ def normalize_assignments(payload):
                 {"role": role},
             )
 
-    reject_repeated_agents(payload, "--assignments")
+    reject_duplicate_agents(payload)
     return dict(payload)
 
 
-def reject_repeated_agents(assignments, source):
-    """Refuse a mapping that gives one agent more than one role.
+def reject_duplicate_agents(assignments):
+    """Refuse an agent that appears in more than one role.
 
-    `apply` walks the roles in order, clearing each agent's context before
-    handing it its brief. An agent holding two roles therefore gets cleared
-    between its own two briefs: the second wipes the first, the earlier role is
-    silently dropped, and whatever the first brief had already started is gone.
-
-    Checked on the CLI input AND inside `apply`, since `apply`, `dry_run`, and
-    `check_all_ready` are all reachable without going through the CLI parser,
-    and a paste cannot be unsent.
+    Briefing the same pane twice in a round means the second brief overwrites
+    the first, so the earlier role is simply not being done -- silently, since
+    both hand-offs report success. Checked before any herdr call, and checked
+    again inside `apply` in case the mapping arrived some other way.
     """
-    by_agent = {}
+    roles_by_agent = {}
     for role, agent in assignments.items():
-        by_agent.setdefault(agent, []).append(role)
-    doubled = {agent: sorted(roles) for agent, roles in by_agent.items() if len(roles) > 1}
+        roles_by_agent.setdefault(agent, []).append(role)
+    doubled = {
+        agent: roles for agent, roles in roles_by_agent.items() if len(roles) > 1
+    }
     if not doubled:
         return
-    detail = "; ".join(
-        "{} -> {}".format(agent, ", ".join(roles)) for agent, roles in sorted(doubled.items())
-    )
     raise UsageError(
-        "{} gives one agent several roles ({}). One agent takes one role per "
-        "round: dispatching both would clear the pane between them and leave "
-        "only the last brief. Give each role its own agent, or run the roles as "
-        "separate rounds.".format(source, detail),
-        {"duplicates": {agent: roles for agent, roles in sorted(doubled.items())}},
+        "One agent is assigned several roles: {}. Each brief would overwrite "
+        "the last in the same pane, so the earlier roles would go undone. "
+        "Assign one agent per role.".format(
+            "; ".join(
+                "{} -> {}".format(agent, ", ".join(roles))
+                for agent, roles in sorted(doubled.items())
+            )
+        ),
+        {"doubled": {agent: sorted(roles) for agent, roles in doubled.items()}},
     )
 
 
@@ -165,8 +164,8 @@ def resolve_paths(assignments, briefs, common):
 
 
 def validate_agents(assignments, agents_by_name):
-    """Refuse an assignment naming an unknown agent, or one held twice."""
-    reject_repeated_agents(assignments, "the assignments")
+    """Refuse an assignment naming an unknown agent, or one used twice."""
+    reject_duplicate_agents(assignments)
     for role, name in assignments.items():
         if name not in agents_by_name:
             raise UsageError(
@@ -218,7 +217,11 @@ def build_steps(client, assignments, agents_by_name, paths, panes=None, no_clear
             commands.extend(composer_reads)
             commands.extend(
                 client.argv_deliver_slash_command(
-                    agent.slash_delivery, name, pane_id, agent.clear_prompt
+                    agent.slash_delivery,
+                    name,
+                    pane_id,
+                    agent.clear_prompt,
+                    enter_count=agent.slash_enter_count,
                 )
             )
             commands.extend(composer_reads)
@@ -363,16 +366,24 @@ def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle
             # a fresh Codex session draws its banner, Claude empties the
             # transcript, Grok redraws session_start. Consumed but unchanged is
             # reported honestly rather than assumed.
-            cleared = outcome["screen_changed"]
+            # A clear that changed nothing did not clear anything. Gating,
+            # not advisory: briefing an agent that still holds the last task's
+            # context is the failure the clear exists to prevent.
+            if not outcome["screen_changed"]:
+                raise HerdrError(
+                    "{} consumed {} but its screen did not change, so the "
+                    "context was not cleared -- a fresh session redraws (Codex "
+                    "prints its banner, Claude Code empties the transcript). "
+                    "Nothing further was sent. Look at pane {}, clear it by "
+                    "hand, or pass --no-clear if that is what you want.".format(
+                        name, agent.clear_prompt, step["pane_id"] or "(unknown)"
+                    ),
+                    {"agent": name, "clear_prompt": agent.clear_prompt},
+                )
+            cleared = True
             # The clear's redraw races the next paste; a leftover `/` is what
             # made Claude Code read the assignment as a slash command.
             sleep(settle_sec)
-            if not cleared:
-                (warn or stderr_warn)(
-                    "teamlead: {} consumed {} but its screen did not change, so "
-                    "the context may not have been cleared. Reported as "
-                    "cleared: false.".format(name, agent.clear_prompt)
-                )
         # send_message re-checks the composer, pastes, and confirms the
         # message actually landed as a user message rather than as a command.
         landing = send_message(

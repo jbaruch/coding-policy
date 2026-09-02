@@ -37,6 +37,11 @@ DEFAULT_SLASH_DELIVERY = SLASH_DELIVERY_PASTE
 #: occupied is what killed an idle Codex.
 DEFAULT_COMPOSER_IGNORE_DIM = True
 
+#: Enters sent with a typed slash command. Codex opens an autocomplete popup
+#: on `/` where the first Enter only accepts the completion, so it needs 2.
+DEFAULT_SLASH_ENTER_COUNT = 1
+MAX_SLASH_ENTER_COUNT = 5
+
 
 class Agent:
     """One configured agent. A plain value object, never mutated after load."""
@@ -45,9 +50,10 @@ class Agent:
         "slash_delivery",
         "composer_glyph",
         "composer_ignore_dim",
+        "slash_enter_count",
     )
 
-    def __init__(self, name, kind, usage_prompt, usage_marker, usage_read_source, clear_prompt, close_keys=(), idle_markers=(), working_markers=(), dialog_next_tab_keys=(), recover_keys=(), composer_placeholders=(), slash_delivery=DEFAULT_SLASH_DELIVERY, composer_glyph="", composer_ignore_dim=DEFAULT_COMPOSER_IGNORE_DIM):
+    def __init__(self, name, kind, usage_prompt, usage_marker, usage_read_source, clear_prompt, close_keys=(), idle_markers=(), working_markers=(), dialog_next_tab_keys=(), recover_keys=(), composer_placeholders=(), slash_delivery=DEFAULT_SLASH_DELIVERY, composer_glyph="", composer_ignore_dim=DEFAULT_COMPOSER_IGNORE_DIM, slash_enter_count=DEFAULT_SLASH_ENTER_COUNT):
         self.name = name
         self.kind = kind
         self.usage_prompt = usage_prompt
@@ -79,6 +85,9 @@ class Agent:
         # ghost-text suggestion nobody typed; a runtime without ghost text
         # leaves this off so every character still counts.
         self.composer_ignore_dim = composer_ignore_dim
+        # How many Enters a typed slash command needs to submit. Codex's
+        # autocomplete popup swallows the first one.
+        self.slash_enter_count = slash_enter_count
 
     def __repr__(self):
         return "Agent(name={!r}, kind={!r})".format(self.name, self.kind)
@@ -95,6 +104,7 @@ class Agent:
         record["slash_delivery"] = self.slash_delivery
         record["composer_glyph"] = self.composer_glyph
         record["composer_ignore_dim"] = self.composer_ignore_dim
+        record["slash_enter_count"] = self.slash_enter_count
         return record
 
 
@@ -227,6 +237,20 @@ def parse_config(payload, source="<memory>"):
                 ),
                 {"source": source, "index": index},
             )
+        enters = entry.get("slash_enter_count", DEFAULT_SLASH_ENTER_COUNT)
+        if (
+            isinstance(enters, bool)
+            or not isinstance(enters, int)
+            or not 1 <= enters <= MAX_SLASH_ENTER_COUNT
+        ):
+            raise ConfigError(
+                "Config at {}: agents[{}].slash_enter_count is {!r}; use an "
+                "integer from 1 to {}. Codex needs 2 because its autocomplete "
+                "popup swallows the first Enter.".format(
+                    source, index, enters, MAX_SLASH_ENTER_COUNT
+                ),
+                {"source": source, "index": index, "slash_enter_count": enters},
+            )
         agents.append(
             Agent(
                 name=name,
@@ -238,6 +262,7 @@ def parse_config(payload, source="<memory>"):
                 slash_delivery=delivery,
                 composer_glyph=glyph,
                 composer_ignore_dim=ignore_dim,
+                slash_enter_count=enters,
                 **lists
             )
         )

@@ -4,13 +4,16 @@ Every fixture is an inline string copied from a real pane read. No clock, no
 randomness, no files on disk.
 """
 
-# Standalone-run shim: scripts/run-tests.sh executes each suite as
-# `python3 <file>` from the repo root, so put the skill directory (this file's
-# grandparent) on sys.path before the package imports below.
-import os
-import sys
+import os as _os
+import sys as _sys
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Run as a script (`python3 tests/test_x.py`), Python puts tests/ on sys.path
+# rather than the repo root, so neither `teamlead` nor `tests.fakes` would
+# resolve. Under `-m unittest` from the root this is already true and the
+# insert is a no-op. The consuming repo's runner executes files as scripts.
+_ROOT = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+if _ROOT not in _sys.path:
+    _sys.path.insert(0, _ROOT)
 
 import unittest
 
