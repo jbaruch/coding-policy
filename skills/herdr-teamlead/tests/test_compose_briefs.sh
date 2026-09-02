@@ -139,8 +139,8 @@ JSON
   # 6b. The PACKAGED templates compose from the values Step 5 documents — for
   #     every shipped role, the release brief included. A template that grows
   #     a placeholder nobody documented fails here before it fails a worker.
-  local v6b="$TMP/v6b.json" o6b="$TMP/out6b"
-  local PKG="$(dirname "$SCRIPT")/templates"
+  local v6b="$TMP/v6b.json" o6b="$TMP/out6b" PKG
+  PKG="$(dirname "$SCRIPT")/templates"
   cat > "$v6b" <<'JSON' || die "could not write $v6b"
 {
   "shared": {"SHARED_CHECKOUT": "/repo", "AUTHORITY_STATEMENT": "owner of jbaruch/x",
