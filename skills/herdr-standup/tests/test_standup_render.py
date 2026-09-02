@@ -223,7 +223,7 @@ class CliTest(unittest.TestCase):
         code = main(argv, stdout=self.out, stderr=self.err)
         return code, self.out.getvalue(), self.err.getvalue()
 
-    def test_it_writes_the_markdown_and_prints_the_fenced_block(self):
+    def test_it_writes_the_markdown_and_emits_the_block_inside_json(self):
         code, out, _err = self.run_cli(
             [
                 "--reports", str(self.reports),
@@ -232,11 +232,47 @@ class CliTest(unittest.TestCase):
             ]
         )
         self.assertEqual(code, 0)
-        self.assertTrue(out.startswith("```\n"))
-        self.assertTrue(out.rstrip().endswith("```"))
+        # One JSON line on stdout, never the block itself: the skill relays it.
+        self.assertEqual(out.count("\n"), 1)
+        payload = json.loads(out)
+        self.assertTrue(payload["block"].startswith("```\n"))
+        self.assertTrue(payload["block"].endswith("```"))
         written = self.reports / "standup-2026-09-02.md"
+        self.assertEqual(payload["markdown_path"], str(written))
+        self.assertEqual(payload["answered"], ["claude"])
+        self.assertEqual(payload["unasked"], [])
         self.assertTrue(written.exists())
         self.assertIn("| claude |", written.read_text(encoding="utf-8"))
+
+    def test_an_unreadable_roles_file_names_the_fix(self):
+        code, out, err = self.run_cli(
+            [
+                "--reports", str(self.reports),
+                "--now", NOW,
+                "--agent", "claude={}".format(self.report),
+                "--roles", str(self.tmp / "nope" / "roles.json"),
+            ]
+        )
+        self.assertEqual(code, 1)
+        self.assertEqual(out, "")
+        self.assertIn("--roles", err)
+        self.assertIn("rerun", err)
+
+    def test_an_unwritable_out_path_names_the_fix(self):
+        blocker = self.tmp / "blocker"
+        blocker.write_text("not a directory", encoding="utf-8")
+        code, out, err = self.run_cli(
+            [
+                "--reports", str(self.reports),
+                "--now", NOW,
+                "--agent", "claude={}".format(self.report),
+                "--out", str(blocker / "standup.md"),
+            ]
+        )
+        self.assertEqual(code, 1)
+        self.assertEqual(out, "")
+        self.assertIn("--out", err)
+        self.assertIn("rerun", err)
 
     def test_the_same_inputs_render_the_same_bytes(self):
         first = self.run_cli(
@@ -277,7 +313,9 @@ class CliTest(unittest.TestCase):
             ]
         )
         self.assertEqual(code, 0)
-        self.assertIn("grok (busy:", out)
+        payload = json.loads(out)
+        self.assertIn("grok (busy:", payload["block"])
+        self.assertEqual(payload["unasked"], ["grok"])
 
     def test_a_bad_agent_pair_is_refused(self):
         code, _out, err = self.run_cli(

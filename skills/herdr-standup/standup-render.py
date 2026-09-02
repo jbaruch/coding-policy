@@ -14,7 +14,9 @@ Contract:
   argv  : --reports <dir> --now <ISO-8601> [--agent name=path]...
           [--extra <json-file>] [--team <label>] [--out <markdown-path>]
   stdin : not read.
-  stdout: the terminal block, fenced, ready to relay verbatim.
+  stdout: one JSON object — {"markdown_path": "<path>", "block": "<fenced
+          terminal table>", "answered": [...], "unasked": [...]}. The skill
+          relays `block` verbatim.
   stderr: diagnostics only.
   exit  : 0 rendered,
           1 usage or a missing input file,
@@ -244,7 +246,14 @@ def main(argv=None, stdout=sys.stdout, stderr=sys.stderr):
             with open(args.roles, encoding="utf-8") as handle:
                 roles = json.load(handle)
         except (OSError, ValueError) as exc:
-            print("standup-render: cannot read --roles {}: {}".format(args.roles, exc), file=stderr)
+            print(
+                "standup-render: cannot read --roles {}: {} — check that the path "
+                "exists and holds a JSON object mapping agent name to role, then "
+                "rerun; or drop --roles to leave the roles column empty.".format(
+                    args.roles, exc
+                ),
+                file=stderr,
+            )
             return 1
 
     answered = {}
@@ -279,7 +288,12 @@ def main(argv=None, stdout=sys.stdout, stderr=sys.stderr):
             with open(args.extra, encoding="utf-8") as handle:
                 extra = json.load(handle)
         except (OSError, ValueError) as exc:
-            print("standup-render: cannot read --extra {}: {}".format(args.extra, exc), file=stderr)
+            print(
+                "standup-render: cannot read --extra {}: {} — check that the path "
+                "exists and holds a JSON object keyed by agent name, then rerun; "
+                "or drop --extra if nobody was skipped.".format(args.extra, exc),
+                file=stderr,
+            )
             return 1
         if not isinstance(extra, dict):
             print("standup-render: --extra must hold a JSON object keyed by agent name", file=stderr)
@@ -293,13 +307,25 @@ def main(argv=None, stdout=sys.stdout, stderr=sys.stderr):
         with open(out_path, "w", encoding="utf-8") as handle:
             handle.write(render_markdown(rows, args.now, args.team))
     except OSError as exc:
-        print("standup-render: cannot write {}: {}".format(out_path, exc), file=stderr)
+        print(
+            "standup-render: cannot write {}: {} — create that directory, or pass "
+            "--out with a path in a writable directory, then rerun.".format(
+                out_path, exc
+            ),
+            file=stderr,
+        )
         return 1
 
-    print("```", file=stdout)
-    print(render_terminal(rows, args.now, args.team), file=stdout)
-    print("```", file=stdout)
-    print(out_path, file=stderr)
+    # stdout is one JSON object (rules/script-delegation.md): the fenced block
+    # travels inside it and the skill relays `block` verbatim. `sort_keys` and
+    # a fixed `--now` keep the bytes identical for identical inputs.
+    payload = {
+        "markdown_path": out_path,
+        "block": "```\n" + render_terminal(rows, args.now, args.team) + "\n```",
+        "answered": sorted(answered),
+        "unasked": sorted(extra),
+    }
+    print(json.dumps(payload, ensure_ascii=False, sort_keys=True), file=stdout)
     return 0
 
 

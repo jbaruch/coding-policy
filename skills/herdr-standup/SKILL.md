@@ -105,10 +105,12 @@ python3 .tessl/plugins/jbaruch/coding-policy/skills/herdr-standup/standup-render
   [--roles <roles-json>] [--extra <extra-json>]
 ```
 
-Writes `standup-<date>.md` into the reports directory and prints the terminal
-block on stdout. Exit 2 means a report file did not carry the four-line shape,
-naming the file — ask that worker again, or move it to `--extra`. Exit 1 is a
-missing input.
+Writes `standup-<date>.md` into the reports directory and prints one JSON
+object on stdout: `{"markdown_path","block","answered","unasked"}`, where
+`block` is the fenced terminal table. Save the output to a file. Exit 2 means a
+report file did not carry the four-line shape, naming the file — ask that
+worker again, or move it to `--extra`. Exit 1 is a missing or unwritable input,
+and the message says what to fix.
 
 `--now` is required and never defaults to the clock, so the same inputs render
 the same bytes. The column widths and the wrapping are the script's contract;
@@ -119,12 +121,12 @@ Proceed immediately to Step 5.
 
 ## Step 5 — Relay the Block
 
-Print the fenced block verbatim, exactly as the renderer emitted it. Do not
-reformat it, do not summarize it, and do not replace it with prose: the fixed
-width and the banner are what make it findable when the operator scrolls back
-through a session full of agent output.
+Print `block` from the saved output verbatim (`jq -r .block <file>`), exactly
+as the renderer emitted it. Do not reformat it, do not summarize it, and do not
+replace it with prose: the fixed width and the banner are what make it findable
+when the operator scrolls back through a session full of agent output.
 
-Name the Markdown file's path underneath, in one line. Add your own reading of
+Name `markdown_path` underneath, in one line. Add your own reading of
 the standup only if a row carries something the operator should act on today —
 a blocker naming another worker, or a plan that contradicts the round in
 flight. Otherwise the table speaks for itself. Finish here.
