@@ -30,7 +30,16 @@ set -euo pipefail
 # lowercase with hyphens, or the accepted `<type>-<issue-number>` alternative.
 BRANCH_RE='^[a-z]+(/[a-z0-9]+(-[a-z0-9]+)*|-[0-9]+)$'
 
+ERRFILE=""
+
 warn() { printf 'provision-worktree: %s\n' "$1" >&2; }
+
+cleanup() {
+  if [[ -n "$ERRFILE" ]] && ! rm -f "$ERRFILE"; then
+    warn "could not remove temp file ${ERRFILE} — remove it by hand"
+  fi
+  return 0
+}
 
 main() {
   if (( $# < 3 || $# > 4 )); then
@@ -44,6 +53,8 @@ main() {
     warn "git not found on PATH"
     return 1
   fi
+  ERRFILE="$(mktemp)"
+  trap cleanup EXIT
   if ! command -v jq >/dev/null 2>&1; then
     warn "jq not found on PATH — install it (\`brew install jq\`) to emit the result"
     return 1
@@ -87,8 +98,8 @@ main() {
     warn "${shared} has no origin remote — provisioning needs one to fetch from"
     return 1
   fi
-  if ! git -C "$shared" fetch --quiet origin 2>/dev/null; then
-    warn "\`git -C ${shared} fetch origin\` failed — check connectivity; provisioning from possibly stale refs"
+  if ! git -C "$shared" fetch --quiet origin 2>"$ERRFILE"; then
+    warn "\`git -C ${shared} fetch origin\` failed: $(tr '\n' ' ' < "$ERRFILE") — check connectivity; provisioning from possibly stale refs"
   fi
 
   # Resolve the default branch for the base ref, when the caller gave none.
@@ -117,8 +128,16 @@ main() {
       warn "'${abs_path}' already exists and is not a git work tree — remove it or choose another path"
       return 2
     fi
-    local on=""
-    on="$(git -C "$abs_path" rev-parse --abbrev-ref HEAD 2>/dev/null)" || on=""
+    # A failing rev-parse is a tool failure, not a branch name. Collapsing it
+    # into an empty string would report the work tree as being on '' — the
+    # wrong branch — and send the operator to fix something that is not broken
+    # (rules/error-handling.md Shell Error Handling).
+    local on="" rc=0
+    on="$(git -C "$abs_path" rev-parse --abbrev-ref HEAD 2>"$ERRFILE")" || rc=$?
+    if (( rc != 0 )); then
+      warn "\`git -C ${abs_path} rev-parse --abbrev-ref HEAD\` failed (exit ${rc}): $(tr '\n' ' ' < "$ERRFILE") — cannot tell which branch that work tree is on; inspect it by hand"
+      return 2
+    fi
     if [[ "$on" != "$branch" ]]; then
       warn "'${abs_path}' is a work tree on '${on}', not '${branch}' — choose another path, or remove it with \`git worktree remove\`"
       return 2
@@ -132,15 +151,15 @@ main() {
   local state="created" rc=0
   if git -C "$shared" show-ref --verify --quiet "refs/heads/${branch}"; then
     state="attached"
-    git -C "$shared" worktree add "$abs_path" "$branch" >/dev/null 2>&1 || rc=$?
+    git -C "$shared" worktree add "$abs_path" "$branch" >/dev/null 2>"$ERRFILE" || rc=$?
   elif git -C "$shared" show-ref --verify --quiet "refs/remotes/origin/${branch}"; then
     state="attached"
-    git -C "$shared" worktree add --track -b "$branch" "$abs_path" "origin/${branch}" >/dev/null 2>&1 || rc=$?
+    git -C "$shared" worktree add --track -b "$branch" "$abs_path" "origin/${branch}" >/dev/null 2>"$ERRFILE" || rc=$?
   else
-    git -C "$shared" worktree add -b "$branch" "$abs_path" "$base" >/dev/null 2>&1 || rc=$?
+    git -C "$shared" worktree add -b "$branch" "$abs_path" "$base" >/dev/null 2>"$ERRFILE" || rc=$?
   fi
   if (( rc != 0 )); then
-    warn "\`git worktree add\` failed (exit ${rc}) for ${abs_path} on ${branch} — run it by hand from ${shared} to see git's own message"
+    warn "\`git worktree add\` failed (exit ${rc}) for ${abs_path} on ${branch}: $(tr '\n' ' ' < "$ERRFILE")"
     return 2
   fi
 

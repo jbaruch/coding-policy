@@ -20,6 +20,11 @@
 #   8. Bad JSON         -> exit 1.
 #   9. Idempotent       -> a second identical run rewrites the same content.
 #  10. Usage            -> exit 1 with a usage line.
+#  11. Broken grep      -> a failing scan is exit 3, never "no placeholders".
+#  12. Null value       -> exit 2, nothing written (a `null` would render as
+#                          the literal text and leave no placeholder behind).
+#  13. Object value     -> exit 2 for the same reason.
+#  14. Number value     -> accepted; an issue number is legitimate text.
 #
 # Run: bash skills/teamlead/tests/test_compose_briefs.sh
 set -uo pipefail
@@ -156,6 +161,61 @@ JSON
   OUT="$(bash "$SCRIPT" 2>"$TMP/e10")"; RC=$?
   if [[ $RC -eq 1 && -z "$OUT" ]] && grep -q "usage:" "$TMP/e10"; then
     pass; else fail "usage: expected exit 1 with a usage line, got RC=$RC"; fi
+
+  # 11. A scan that cannot run must never report a clean render. A grep that
+  #     exits 2 (unreadable input, bad pattern) is a tool failure, and
+  #     collapsing it into "no placeholders left" is what would ship an
+  #     unrendered brief to a worker.
+  local bin="$TMP/brokenbin"
+  mkdir -p "$bin" || die "could not create $bin"
+  printf '#!/usr/bin/env bash\nexit 2\n' > "$bin/grep" || die "could not write the failing grep"
+  chmod +x "$bin/grep" || die "could not chmod the failing grep"
+  RUN_SEQ=$((RUN_SEQ+1))
+  OUT="$(PATH="$bin:$PATH" bash "$SCRIPT" "$TPL" "$v1" "$TMP/out11" 2>"$TMP/e11")"; RC=$?
+  if [[ $RC -eq 3 && -z "$OUT" ]] && grep -q "placeholder scan failed" "$TMP/e11"; then
+    pass; else fail "broken grep: expected exit 3 naming the scan, got RC=$RC ERR=$(cat "$TMP/e11")"; fi
+  if [[ ! -e "$TMP/out11/COMMON.md" ]]; then
+    pass; else fail "broken grep: nothing may be written when the scan failed"; fi
+
+  # 12. `jq -r` prints a JSON null as the four characters `null`, which
+  #     substitutes cleanly and leaves no placeholder behind — the brief reads
+  #     as fully rendered while telling a worker its worktree is at `null`.
+  local v12="$TMP/v12.json" o12="$TMP/out12"
+  cat > "$v12" <<'JSON' || die "could not write $v12"
+{
+  "shared": {"SHARED_CHECKOUT": "/repo", "AUTHORITY_STATEMENT": "a"},
+  "roles": {"developer": {"BRANCH": "feat/x", "WORKTREE": null, "ISSUE": "#7", "REPORT": "/r.md"}}
+}
+JSON
+  run "$TPL" "$v12" "$o12"
+  if [[ $RC -eq 2 && -z "$OUT" ]] && printf '%s' "$ERRTEXT" | grep -q "WORKTREE (null)"; then
+    pass; else fail "null value: expected exit 2 naming it, got RC=$RC ERR=$ERRTEXT"; fi
+  if [[ ! -e "$o12/brief-developer.md" && ! -e "$o12/COMMON.md" ]]; then
+    pass; else fail "null value: nothing may be written on a validation failure"; fi
+
+  # 13. An object arrives as a JSON fragment the same way.
+  local v13="$TMP/v13.json" o13="$TMP/out13"
+  cat > "$v13" <<'JSON' || die "could not write $v13"
+{
+  "shared": {"SHARED_CHECKOUT": {"path": "/repo"}, "AUTHORITY_STATEMENT": "a"},
+  "roles": {"tester": {"ISSUE": "#7", "REPORT": "/r.md"}}
+}
+JSON
+  run "$TPL" "$v13" "$o13"
+  if [[ $RC -eq 2 && -z "$OUT" ]] && printf '%s' "$ERRTEXT" | grep -q "SHARED_CHECKOUT (object)"; then
+    pass; else fail "object value: expected exit 2 naming it, got RC=$RC ERR=$ERRTEXT"; fi
+
+  # 14. A number is legitimate text — an issue number reads the same either way.
+  local v14="$TMP/v14.json" o14="$TMP/out14"
+  cat > "$v14" <<'JSON' || die "could not write $v14"
+{
+  "shared": {"SHARED_CHECKOUT": "/repo", "AUTHORITY_STATEMENT": "a"},
+  "roles": {"tester": {"ISSUE": 42, "REPORT": "/r.md"}}
+}
+JSON
+  run "$TPL" "$v14" "$o14"
+  if [[ $RC -eq 0 ]] && grep -q "Tester for 42" "$o14/brief-tester.md"; then
+    pass; else fail "number value: expected it to render, got RC=$RC ERR=$ERRTEXT"; fi
 
   echo "─────────────────────────────────────────────" >&2
   if [[ $FAIL -gt 0 ]]; then echo "FAILED: ${FAIL} failed, ${PASS} passed" >&2; exit 1; fi

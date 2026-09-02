@@ -17,8 +17,11 @@
 #   stderr: diagnostics only.
 #   exit  : 0 every file written with no placeholder left,
 #           1 precondition unmet (usage, missing dir/file/template, no jq),
-#           2 validation failed — an unfilled placeholder, or a supplied key no
-#             template uses. Nothing is written on a validation failure.
+#           2 validation failed — an unfilled placeholder, a supplied key no
+#             template uses, or a value that is not text. Nothing is written on
+#             a validation failure,
+#           3 a tool this depends on failed (the placeholder scan itself). The
+#             answer is unknown, which is never reported as "no placeholders".
 #   env   : none.
 #
 # Validation runs in both directions on purpose. An unfilled placeholder is a
@@ -34,6 +37,57 @@ warn() { printf 'compose-briefs: %s\n' "$1" >&2; }
 # Echo every distinct placeholder name in <file>, one per line.
 placeholders_in() { # <file>
   grep -oE "$PLACEHOLDER_RE" "$1" | sed -e 's/^{{//' -e 's/}}$//' | sort -u
+}
+
+# Echo the placeholders still standing in <text>, space separated and sorted.
+#
+# Returns 0 when the scan RAN — empty output then means none are left — and 2
+# when the scan itself failed. `grep` exits 1 on no-match and 2 on a real error
+# (an unreadable input, a bad pattern), and collapsing those two into "nothing
+# found" is what would let an unrendered brief pass validation
+# (rules/error-handling.md Shell Error Handling).
+leftover_placeholders() { # <text>
+  local found rc=0 sorted
+  found="$(printf '%s' "$1" | grep -oE "$PLACEHOLDER_RE")" || rc=$?
+  if (( rc == 1 )); then
+    printf ''
+    return 0
+  fi
+  if (( rc != 0 )); then
+    warn "the placeholder scan failed (grep exit ${rc}) — the rendered text could not be checked; re-run, and check that grep is a working GNU/BSD grep"
+    return 2
+  fi
+  rc=0
+  sorted="$(printf '%s' "$found" | sort -u | tr '\n' ' ')" || rc=$?
+  if (( rc != 0 )); then
+    warn "the placeholder scan failed while sorting its matches (exit ${rc}) — the rendered text could not be checked; re-run"
+    return 2
+  fi
+  printf '%s' "$sorted"
+  return 0
+}
+
+# Refuse a value that is not text before it reaches a brief.
+#
+# `jq -r` prints a JSON null as the four characters `null`, which substitutes
+# cleanly and leaves NO placeholder behind — the brief then reads as fully
+# rendered while telling a worker its worktree is at `null`. Objects and arrays
+# arrive as JSON fragments the same way.
+validate_values() { # <values-json> <label>
+  local offenders
+  offenders="$(printf '%s' "$1" | jq -r '
+    to_entries
+    | map(select((.value | type) as $t | $t != "string" and $t != "number"))
+    | map("\(.key) (\(.value | type))")
+    | join(", ")')" || {
+    warn "could not inspect the values for ${2} — check that they are a JSON object"
+    return 2
+  }
+  if [[ -n "$offenders" ]]; then
+    warn "${2} carries values that are not text: ${offenders} — give each one a string (a JSON null renders as the literal 'null' in a brief)"
+    return 2
+  fi
+  return 0
 }
 
 # Echo <template> with every KEY=VALUE pair in the given JSON object applied.
@@ -109,9 +163,11 @@ main() {
   # round behind (`rules/file-hygiene.md` Idempotency).
   local -a out_paths=() out_bodies=()
   local merged rendered leftovers supplied known unused key
-  local common_body
+  local common_body scan_rc=0
+  validate_values "$shared" "the shared values" || return 2
   common_body="$(substitute "$common_tpl" "$shared")"
-  leftovers="$(printf '%s' "$common_body" | grep -oE "$PLACEHOLDER_RE" | sort -u | tr '\n' ' ' || true)"
+  leftovers="$(leftover_placeholders "$common_body")" || scan_rc=$?
+  if (( scan_rc != 0 )); then return 3; fi
   if [[ -n "${leftovers// /}" ]]; then
     warn "COMMON.md still holds unfilled placeholders: ${leftovers}— add them to .shared"
     return 2
@@ -121,8 +177,11 @@ main() {
 
   while IFS= read -r role; do
     merged="$(jq -c -n --argjson a "$shared" --argjson b "$(printf '%s' "$values" | jq -c --arg r "$role" '.roles[$r]')" '$a * $b')"
+    validate_values "$merged" "the values for role '${role}'" || return 2
     rendered="$(substitute "${templates}/brief-${role}.md" "$merged")"
-    leftovers="$(printf '%s' "$rendered" | grep -oE "$PLACEHOLDER_RE" | sort -u | tr '\n' ' ' || true)"
+    scan_rc=0
+    leftovers="$(leftover_placeholders "$rendered")" || scan_rc=$?
+    if (( scan_rc != 0 )); then return 3; fi
     if [[ -n "${leftovers// /}" ]]; then
       warn "brief-${role}.md still holds unfilled placeholders: ${leftovers}— add them to .roles.${role} or .shared"
       return 2

@@ -147,8 +147,10 @@ Write a values file for the round, then compose:
 The values file is `{"shared": {...}, "roles": {"<role>": {...}}}`; a role's
 own value beats the shared one. Emits
 `{"common":"<path>","briefs":{"<role>":"<path>"}}`. Exit 2 means validation
-failed and nothing was written — an unfilled placeholder, or a supplied key no
-template uses. The placeholder set and both validation directions are the
+failed and nothing was written — an unfilled placeholder, a supplied key no
+template uses, or a value that is not text. Exit 3 means the placeholder scan
+itself failed, so whether the briefs are clean is unknown: re-run, never
+dispatch on it. The placeholder set and both validation directions are the
 script's contract; see the header of
 `skills/teamlead/compose-briefs.sh`.
 
