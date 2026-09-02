@@ -171,6 +171,19 @@ class RefusalTest(unittest.TestCase):
         with self.assertRaises(PlanError):
             plan(ROLES, None)
 
+    def test_agents_that_is_not_an_object_is_a_plan_error_not_a_crash(self):
+        # A hand-edited snapshot with `agents` as a list used to reach
+        # `.items()` and die with AttributeError.
+        with self.assertRaises(PlanError) as caught:
+            plan(ROLES, {"agents": ["claude", "grok", "codex"]})
+        self.assertIn("not an object keyed by agent name", str(caught.exception))
+        self.assertIn("teamlead measure", str(caught.exception))
+
+    def test_a_snapshot_that_is_not_an_object_is_a_plan_error(self):
+        with self.assertRaises(PlanError) as caught:
+            plan(ROLES, ["claude", "grok", "codex"])
+        self.assertIn("not an object", str(caught.exception))
+
     def test_more_roles_than_agents_is_an_error_not_a_silent_drop(self):
         with self.assertRaises(PlanError) as caught:
             plan(ROLES, snapshot(grok=100.0, claude=92.0))

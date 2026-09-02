@@ -111,7 +111,26 @@ def plan(roles, snapshot, counts=None, snapshot_ref=None, warn=None):
             {"duplicates": duplicates},
         )
 
-    agents = (snapshot or {}).get("agents") or {}
+    # A snapshot is `teamlead measure` output: an object whose `agents` is an
+    # object keyed by agent name. Anything else is a hand-edited or wrong file,
+    # and reading it as if it were the right shape crashes on `.items()` a few
+    # lines down instead of naming the problem.
+    if snapshot is None:
+        snapshot = {}
+    if not isinstance(snapshot, dict):
+        raise PlanError(
+            "Snapshot is a JSON {}, not an object - pass --snapshot pointing at "
+            "a file `teamlead measure` wrote.".format(type(snapshot).__name__),
+            {"snapshot_type": type(snapshot).__name__},
+        )
+    agents = snapshot.get("agents") or {}
+    if not isinstance(agents, dict):
+        raise PlanError(
+            "Snapshot `agents` is a JSON {}, not an object keyed by agent name - "
+            "re-run `teamlead measure`, or pass --snapshot pointing at its "
+            "output.".format(type(agents).__name__),
+            {"agents_type": type(agents).__name__},
+        )
     if not agents:
         raise PlanError(
             "Snapshot contains no agents - run `teamlead measure` first, or "
