@@ -6,7 +6,7 @@ Coding policy plugin for Baruch's AI agents. Language-agnostic code quality rule
 
 ## What's New
 
-- `herdr-teamlead` skill + `agent-team-operation` rule + `herdr-team-status` hook — run a three-agent team round inside [Herdr](https://herdr.dev): measure each worker's subscription headroom, assign developer / tester / reviewer by measured headroom, clear each worker's context and send a fresh role brief, wait on the report file plus its `REPORT: ` marker, and hand the merge to `release`
+- `herdr-teamlead` and `herdr-standup` skills + `agent-team-operation` rule + `herdr-team-status` hook — run a three-agent team round inside [Herdr](https://herdr.dev): measure each worker's subscription headroom, assign developer / tester / reviewer by measured headroom, clear each worker's context and send a fresh role brief, wait on the report file plus its `REPORT: ` marker, and hand the merge to `release`
 - `stop-handoff-hygiene` hook — a `Stop` hook (Claude Code + Codex) that blocks the handoff once (loop-safe via `stop_hook_active`) when it finds leftover local branches (merged, upstream deleted), orphaned worktrees, or diagnostics findings in the changed set; a dirty working tree is reported, not blocked
 - `check-tessl-latest` hook — a Tessl `SessionStart` hook that warns when a consumer's `tessl.json` pins a `jbaruch/*` dependency instead of `latest`; it's the deterministic enforcement for the Runtime-Managed Manifest Carve-Out (`rules/dependency-management.md`). Informative only, never blocks
 - `check-git-sync` hook — a Tessl `SessionStart` hook that fetches origin (throttled) and warns when the local default branch is behind `origin/<default>`, mechanizing `rules/sync-before-work.md`. Informative only, never blocks
@@ -67,6 +67,7 @@ tessl install jbaruch/coding-policy
 | [adopt-fork-pr](skills/adopt-fork-pr/SKILL.md) | Classify a PR by number. Same-repo PRs pass through to the reviewer; fork PRs get adopted into the base repo as a same-repo PR, preserving the contributor's commits. |
 | [migrate-to-plugin](skills/migrate-to-plugin/SKILL.md) | Migrate a legacy `tile.json` plugin to the `.tessl-plugin/plugin.json` form: runs `tessl plugin migrate`, renames `.tileignore`, removes the obsolete `tile.json`, re-lints, then reconciles residual "tile" wording to "plugin" while preserving contract surfaces. |
 | [herdr-teamlead](skills/herdr-teamlead/SKILL.md) | Run one task round as the lead of three coding agents in [Herdr](https://herdr.dev): roster the named workers, verify repo authority, measure each one's subscription headroom, assign developer / tester / reviewer by measured headroom, compose the role briefs and provision their worktrees through scripts, dispatch, wait on the report file plus its `REPORT: ` marker (never on a single idle observation), then gate the round on the post-push reviewer and tester reports and hand the PR + merge to `release`. |
+| [herdr-standup](skills/herdr-standup/SKILL.md) | Hold a daily standup with the named [Herdr](https://herdr.dev) agents: ask each idle worker for four lines (DONE / PLAN / BLOCKED / REPORT), never interrupt a working one, fill its row from the round log instead, then render a banner-topped fixed-width table the operator can find while scrolling back — plus a Markdown record under the round's reports directory. |
 
 ### Hooks
 

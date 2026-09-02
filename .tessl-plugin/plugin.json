@@ -8,7 +8,8 @@
     "skills/onboard-repo",
     "skills/adopt-fork-pr",
     "skills/migrate-to-plugin",
-    "skills/herdr-teamlead"
+    "skills/herdr-teamlead",
+    "skills/herdr-standup"
   ],
   "rules": [
     "rules/commit-conventions.md",

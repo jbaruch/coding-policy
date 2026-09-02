@@ -28,13 +28,21 @@
     "skills/herdr-teamlead/tests/test_parsers.py",
     "skills/herdr-teamlead/tests/test_planner.py",
     "skills/herdr-teamlead/tests/test_probe.py",
-    "skills/herdr-teamlead/tests/test_state.py"
+    "skills/herdr-teamlead/tests/test_state.py",
+    "skills/herdr-standup/standup-render.py",
+    "skills/herdr-standup/tests/test_standup_render.py"
   ],
   "executionEnvironments": [
     {
       "root": "skills/herdr-teamlead",
       "extraPaths": [
         "skills/herdr-teamlead"
+      ]
+    },
+    {
+      "root": "skills/herdr-standup",
+      "extraPaths": [
+        "skills/herdr-standup"
       ]
     }
   ],
