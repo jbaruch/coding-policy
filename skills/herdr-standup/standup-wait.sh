@@ -14,7 +14,8 @@
 #   stdout: wait-report.sh's one JSON object.
 #   stderr: diagnostics.
 #   exit  : wait-report.sh's code — 0 report found, 1 budget exhausted,
-#           2 usage error or tool failure, 3 blocked at a dialog; also 2 when
+#           2 usage error or tool failure, 3 blocked at a dialog, 4 file
+#           present but marker unconfirmed (read the pane); also 2 when
 #           wait-report.sh is not installed beside this skill or the budget
 #           override is not an integer. In both of those cases nothing is run.
 #   env   : STANDUP_WAIT_BUDGET_SEC overrides the budget (tests, a slow fleet).

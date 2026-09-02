@@ -29,6 +29,9 @@
 #                         its JSON and exits 0 before the abort would fire.
 #  14. Soft-wrapped     -> the prefix and the basename on different rows still
 #                         complete: the long line wraps in `--source visible`.
+#  14b. Wrap in basename-> the row break inside the basename still completes.
+#  14c. Glued decoy      -> joining rows cannot turn another report into ours.
+#  16. Unconfirmed idle  -> file present + idle twice + no marker = exit 4.
 #  15. Decoy REPORT     -> another report's line does NOT complete this wait,
 #                         including one whose basename ENDS with this one's.
 #  16. Confirm read     -> a failing `pane read` is a tool failure (exit 2).

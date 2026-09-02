@@ -68,7 +68,9 @@ budget is the script's constant, never a number chosen here; see the header of
 `skills/herdr-standup/standup-wait.sh`. Exit 1 means the worker did not answer
 inside it: it is not chased twice. Move it to Step 3's list with what you know.
 Exit 3 means a dialog is up — relay it and leave that worker to the operator.
-Proceed immediately to Step 3.
+Exit 4 means the answer file exists but the pane did not show the marker the
+script expects: read the pane, and if its last message is the four lines with
+the `REPORT: ` line, use the file. Proceed immediately to Step 3.
 
 ## Step 3 — Write the Rows Nobody Answered
 

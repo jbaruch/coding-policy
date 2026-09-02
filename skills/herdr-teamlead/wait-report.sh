@@ -24,7 +24,12 @@
 #           3 the worker is blocked at an approval or question dialog,
 #             confirmed by two reads and the pane
 #             (`found` false) — inspect the dialog with
-#             `herdr agent read <name> --source visible` before answering it.
+#             `herdr agent read <name> --source visible` before answering it,
+#           4 the report FILE is present and the worker has read idle or done
+#             on consecutive polls, yet the marker could not be confirmed
+#             (`found` false, `reason` set) — read the pane; the answer is
+#             almost certainly there in a shape this probe did not recognize.
+#             Never a completion on its own: the lead confirms by eye.
 #   env   : HERDR_ENV must be 1. HERDR_BIN overrides the herdr binary.
 #           Poll interval, give-up budget, and the pane-probe parameters are
 #           the named constants below (rules/ci-safety.md Always Watch CI —
@@ -38,6 +43,11 @@ TEAMLEAD_WAIT_INTERVAL_SEC="${TEAMLEAD_WAIT_INTERVAL_SEC:-15}"
 # Give-up budget in seconds. A worker round on a real task runs long; this is
 # the point at which the lead inspects the pane by hand instead of waiting.
 TEAMLEAD_WAIT_BUDGET_SEC="${TEAMLEAD_WAIT_BUDGET_SEC:-5400}"
+# Consecutive polls on which the report file exists AND the worker reads idle
+# or done AND the marker is still unconfirmed before the wait gives up with
+# exit 4 instead of sitting on the budget. Two, so a `done` flicker between a
+# worker's tool calls cannot end the wait by itself.
+TEAMLEAD_UNCONFIRMED_IDLE_READS="${TEAMLEAD_UNCONFIRMED_IDLE_READS:-2}"
 # Per-attempt pane-probe timeout in milliseconds. `herdr pane wait-output`
 # searches the existing snapshot first, so this bounds one probe, not the wait.
 TEAMLEAD_PROBE_TIMEOUT_MS="${TEAMLEAD_PROBE_TIMEOUT_MS:-2000}"
@@ -100,10 +110,13 @@ cleanup() {
   return 0
 }
 
-emit() { # <state> <found-bool> <elapsed-seconds>
+emit() { # <state> <found-bool> <elapsed-seconds> [reason]
+  # `reason` appears only when set: the object stays the documented shape on
+  # every outcome, with one extra field on the exit-4 path.
   jq -n --arg a "$AGENT" --arg s "$1" --arg p "$REPORT_PATH" \
-        --argjson f "$2" --argjson e "$3" \
-    '{agent: $a, state: $s, report_path: $p, found: $f, elapsed_seconds: $e}'
+        --argjson f "$2" --argjson e "$3" --arg r "${4:-}" \
+    '{agent: $a, state: $s, report_path: $p, found: $f, elapsed_seconds: $e}
+     + (if $r == "" then {} else {reason: $r} end)'
 }
 
 # Echo "<state> <pane_id>" for the agent, or return 2 on a herdr failure.
@@ -261,6 +274,7 @@ main() {
   # aborts the run. Giving each one a value makes that class impossible rather
   # than making it depend on statement order holding forever.
   local start=0 now=0 elapsed=0 info="" state="unknown" pane="" rc=0 marker=0
+  local unconfirmed_idle=0
   if ! start="$(date +%s)"; then
     warn "cannot read the system clock — the wait cannot be bounded"
     return 2
@@ -321,6 +335,21 @@ main() {
 
     now="$(date +%s)"
     elapsed=$(( now - start ))
+
+    # The file is there and the worker looks finished, but the marker did not
+    # confirm. That is a probe blind spot, not a worker still working, and
+    # sitting on the budget hides it for an hour. Two consecutive reads, so a
+    # `done` flicker mid-turn cannot trip it alone.
+    if (( marker == 0 )) && [[ -f "$REPORT_PATH" ]] && [[ "$state" == "idle" || "$state" == "done" ]]; then
+      unconfirmed_idle=$(( unconfirmed_idle + 1 ))
+      if (( unconfirmed_idle >= TEAMLEAD_UNCONFIRMED_IDLE_READS )); then
+        emit "$state" false "$elapsed" "report file present, worker ${state} on ${unconfirmed_idle} consecutive reads, marker unconfirmed"
+        warn "${AGENT}: the report file exists and the worker reads ${state}, but its pane never showed \`${REPORT_MARKER}\` with \`${REPORT_BASENAME}\` — read the pane with \`${HERDR_BIN} agent read ${AGENT} --source visible\` and confirm by eye before treating the report as final"
+        return 4
+      fi
+    else
+      unconfirmed_idle=0
+    fi
     if (( elapsed >= TEAMLEAD_WAIT_BUDGET_SEC )); then
       emit "$state" false "$elapsed"
       warn "${AGENT} produced no report within ${TEAMLEAD_WAIT_BUDGET_SEC}s (marker seen: ${marker}, file present: $([[ -f "$REPORT_PATH" ]] && echo 1 || echo 0)) — read the pane with \`${HERDR_BIN} agent read ${AGENT} --source visible\` before re-dispatching"
