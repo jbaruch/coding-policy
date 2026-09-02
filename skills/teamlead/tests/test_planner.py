@@ -174,10 +174,6 @@ class RefusalTest(unittest.TestCase):
         self.assertIn("3 roles", str(caught.exception))
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class MalformedHeadroomTest(unittest.TestCase):
     """A snapshot is a file on disk: hand-edited, stale, or truncated.
 
@@ -262,3 +258,7 @@ class MalformedHeadroomTest(unittest.TestCase):
         self.assertEqual(
             result["assignments"], {"developer": "alpha", "tester": "zeta"}
         )
+
+
+if __name__ == "__main__":
+    unittest.main()

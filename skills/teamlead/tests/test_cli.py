@@ -319,6 +319,8 @@ class PlanCommandTest(CliCase):
 
 
 class MeasureCommandTest(CliCase):
+    CORRUPT_STATE = '{"schema_version": 2, "snapshots": [broken'
+
     def _client(self, statuses, footers=None):
         footers = footers or {}
         runner = FakeRunner()
@@ -454,7 +456,49 @@ class MeasureCommandTest(CliCase):
         self.assertIn("config.example.json", json.loads(err)["message"])
 
 
+    def test_an_unreadable_state_file_is_never_overwritten(self):
+        # load_state leaves such a file exactly as found and hands back an
+        # empty document. Saving that document over it would undo precisely
+        # that preservation, taking the ledger with it.
+        self.state.write_text(self.CORRUPT_STATE, encoding="utf-8")
+        client = self._client({"grok": "done"})
+        code, out, err = self.run_cli(
+            self.base()
+            + [
+                "measure",
+                "--marker-poll-interval", "0",
+                "--composer-settle", "0",
+                "--agent", "grok",
+                "--now", AT,
+            ],
+            client=client,
+        )
+        self.assertNotEqual(code, 0)
+        self.assertIn("would destroy its contents", err)
+        self.assertIn(".bak", err)
+        self.assertEqual(self.state.read_text(encoding="utf-8"), self.CORRUPT_STATE)
+        self.assertEqual(out, "")
+
+    def test_a_missing_state_file_still_writes(self):
+        # Nothing to lose is not the same as something unreadable.
+        client = self._client({"grok": "done"})
+        code, _out, _err = self.run_cli(
+            self.base()
+            + [
+                "measure",
+                "--marker-poll-interval", "0",
+                "--composer-settle", "0",
+                "--agent", "grok",
+                "--now", AT,
+            ],
+            client=client,
+        )
+        self.assertEqual(code, 0)
+        self.assertTrue(self.state.exists())
+
 class ApplyCommandTest(CliCase):
+    CORRUPT_STATE = '{"schema_version": 2, "snapshots": [broken'
+
     def _client(self, statuses, footers=None):
         footers = footers or {}
         runner = FakeRunner()
@@ -819,6 +863,27 @@ class ApplyCommandTest(CliCase):
         self.assertEqual(code, 1)
         self.assertEqual(json.loads(err)["error"], "usage_error")
 
+
+    def test_an_unreadable_state_file_is_never_overwritten(self):
+        self.state.write_text(self.CORRUPT_STATE, encoding="utf-8")
+        client = self._client({"grok": "idle"})
+        code, _out, err = self.run_cli(
+            self.base()
+            + [
+                "apply",
+                "--assignments",
+                json.dumps({"developer": "grok"}),
+                "--common",
+                str(self.common),
+                "--now",
+                AT,
+            ]
+            + self.brief_args("developer"),
+            client=client,
+        )
+        self.assertNotEqual(code, 0)
+        self.assertIn("would destroy its contents", err)
+        self.assertEqual(self.state.read_text(encoding="utf-8"), self.CORRUPT_STATE)
 
 if __name__ == "__main__":
     unittest.main()

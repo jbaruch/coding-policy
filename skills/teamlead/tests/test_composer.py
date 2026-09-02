@@ -383,10 +383,6 @@ class SendCommandTest(unittest.TestCase):
         )
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 # --- Claude Code's dim ghost-text suggestion --------------------------------
 #
 # Nobody typed these. Claude Code pre-fills its input box after a task; Esc
@@ -788,3 +784,7 @@ class LiveKillSequenceTest(unittest.TestCase):
                 warn=lambda message: None,
             )
         self.assertEqual([c for c in runner.commands() if "ctrl+c" in c], [])
+
+
+if __name__ == "__main__":
+    unittest.main()

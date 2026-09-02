@@ -27,6 +27,7 @@ from teamlead.state import (
     empty_state,
     latest_snapshot,
     load_state,
+    load_state_checked,
     role_counts,
     save_state,
 )
@@ -317,10 +318,6 @@ class DefaultPathTest(unittest.TestCase):
         )
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class AssignmentStatusTest(unittest.TestCase):
     """A hand-off that never started is recorded, but is not experience."""
 
@@ -440,3 +437,55 @@ class StatusMigrationTest(unittest.TestCase):
         state = load_state(self.path, warn=self.warnings.append)
         self.assertEqual(state["schema_version"], 2)
         self.assertEqual(state["assignments"][0]["status"], "unknown")
+
+
+class UsableFlagTest(unittest.TestCase):
+    """A caller that will WRITE has to know the file could not be read."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="teamlead-state-test-")
+        self.addCleanup(shutil.rmtree, self.tmp)
+        self.path = Path(self.tmp) / "state.json"
+        self.warnings = []
+
+    def load(self):
+        return load_state_checked(self.path, warn=self.warnings.append)
+
+    def test_a_missing_file_is_usable(self):
+        # Nothing to lose: an empty document is the honest starting point.
+        state, usable = self.load()
+        self.assertEqual(state, empty_state())
+        self.assertTrue(usable)
+
+    def test_a_good_file_is_usable(self):
+        save_state(self.path, empty_state())
+        _state, usable = self.load()
+        self.assertTrue(usable)
+
+    def test_a_corrupt_file_is_not_usable(self):
+        self.path.write_text("{broken", encoding="utf-8")
+        state, usable = self.load()
+        self.assertEqual(state, empty_state())
+        self.assertFalse(usable)
+
+    def test_a_newer_file_is_not_usable(self):
+        self.path.write_text(
+            json.dumps(
+                {
+                    "schema_version": STATE_SCHEMA_VERSION + 1,
+                    "snapshots": [],
+                    "assignments": [],
+                }
+            ),
+            encoding="utf-8",
+        )
+        _state, usable = self.load()
+        self.assertFalse(usable)
+
+    def test_load_state_still_returns_the_document_alone(self):
+        save_state(self.path, empty_state())
+        self.assertEqual(load_state(self.path), empty_state())
+
+
+if __name__ == "__main__":
+    unittest.main()
