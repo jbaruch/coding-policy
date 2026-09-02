@@ -281,6 +281,7 @@ Three per-agent config keys drive it:
 | `composer_ignore_dim` | `true` (the default for every kind) reads dim/grey composer text as empty — ghost-text suggestions and placeholders alike |
 | `composer_placeholders` | Hint text a runtime draws in an empty composer, matched exactly after trimming (`["Ask Codex to do anything"]`). Always counts as empty |
 | `recover_keys` | Keys that clear a stuck composer, sent at most once and only under the five conditions above. **Empty for Codex**: its clear key is `ctrl+c`, which exits an idle Codex |
+| `model_label` | Model name shown on the worker's pane after a dispatch (`"gpt-5.6"`). Optional; empty leaves the label carrying the role alone |
 | `slash_delivery` | `paste` or `type`, per the table above |
 
 The placeholder list is per runtime and hand-maintained: a Codex release that
@@ -364,6 +365,26 @@ worker with 100% of its week and 2% of its five-hour window has 2% of headroom;
 handing it the developer role stalls the round in ten minutes. Grok's credit
 balance is informational and never feeds headroom — a dollar balance and a
 percentage are not the same currency.
+
+## Naming the Layout
+
+A sidebar of `w1 w2 w3 w4` tells the operator nothing at 3am.
+`skills/herdr-teamlead/label-workspaces.sh` names the lead's workspace `lead`,
+each worker's workspace after its agent, and each worker's pane after its kind.
+Run it once per team, not once per round.
+
+After a CONFIRMED hand-off, `apply` relabels the worker's pane with the work:
+`<role> #<task> · <model>`, dropping whichever parts the round did not supply.
+The agent's name is deliberately absent — the workspace row above already
+carries it, and repeating it spends the sidebar's width saying the same thing
+twice. A hand-off that never started is not labelled: a pane claiming a role
+nobody began is worse than an unlabelled one.
+
+The sidebar's own layout is the operator's, not the skill's. Herdr reads
+`~/.config/herdr/config.toml`, and setting the agents rows to
+`[["state_icon","pane"],["state_text"]]` with the spaces rows to
+`[["state_icon","workspace"]]` stops the two lists repeating each other once
+the panes carry roles. This skill never writes that file; the operator does.
 
 ## Clearing Context
 

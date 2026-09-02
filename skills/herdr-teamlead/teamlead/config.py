@@ -51,9 +51,10 @@ class Agent:
         "composer_glyph",
         "composer_ignore_dim",
         "slash_enter_count",
+        "model_label",
     )
 
-    def __init__(self, name, kind, usage_prompt, usage_marker, usage_read_source, clear_prompt, close_keys=(), idle_markers=(), working_markers=(), dialog_next_tab_keys=(), recover_keys=(), composer_placeholders=(), slash_delivery=DEFAULT_SLASH_DELIVERY, composer_glyph="", composer_ignore_dim=DEFAULT_COMPOSER_IGNORE_DIM, slash_enter_count=DEFAULT_SLASH_ENTER_COUNT):
+    def __init__(self, name, kind, usage_prompt, usage_marker, usage_read_source, clear_prompt, close_keys=(), idle_markers=(), working_markers=(), dialog_next_tab_keys=(), recover_keys=(), composer_placeholders=(), slash_delivery=DEFAULT_SLASH_DELIVERY, composer_glyph="", composer_ignore_dim=DEFAULT_COMPOSER_IGNORE_DIM, slash_enter_count=DEFAULT_SLASH_ENTER_COUNT, model_label=""):
         self.name = name
         self.kind = kind
         self.usage_prompt = usage_prompt
@@ -76,6 +77,10 @@ class Agent:
         # after trimming. Codex draws "Ask Codex to do anything"; reading that
         # as typed text is what sent ctrl+c into an idle Codex and killed it.
         self.composer_placeholders = tuple(composer_placeholders)
+        # Shown on the worker's pane after a dispatch, so the sidebar says
+        # which model is doing the work. Cosmetic and optional: empty means the
+        # label carries the role alone.
+        self.model_label = model_label
         # "paste" (agent prompt) or "type" (pane send-text plus Enter).
         self.slash_delivery = slash_delivery
         # The prompt glyph that marks the composer row, so teamlead can see
@@ -217,6 +222,15 @@ def parse_config(payload, source="<memory>"):
                 {"source": source, "index": index, "slash_delivery": delivery},
             )
         glyph = entry.get("composer_glyph", "")
+        model_label = entry.get("model_label", "")
+        if not isinstance(model_label, str):
+            raise ConfigError(
+                "Config at {}: agents[{}].model_label is {!r}; use a string "
+                "such as \"gpt-5.6\", or leave it out.".format(
+                    source, index, model_label
+                ),
+                {"source": source, "index": index, "model_label": model_label},
+            )
         if not isinstance(glyph, str):
             raise ConfigError(
                 "Config at {}: agents[{}].composer_glyph must be a string - the "
@@ -262,6 +276,7 @@ def parse_config(payload, source="<memory>"):
                 slash_delivery=delivery,
                 composer_glyph=glyph,
                 composer_ignore_dim=ignore_dim,
+                model_label=model_label,
                 slash_enter_count=enters,
                 **lists
             )

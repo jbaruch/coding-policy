@@ -486,6 +486,18 @@ class HerdrClient:
         """Block until the agent reaches one of `until` (default: settled)."""
         return self._run_json(self.argv_agent_wait(name, until=until, timeout_ms=timeout_ms))
 
+    def argv_pane_rename(self, pane_id, label):
+        """`pane rename` sets the pane's title in the sidebar."""
+        return [self.binary, "pane", "rename", pane_id, label]
+
+    def pane_rename(self, pane_id, label):
+        """Retitle a pane. Returns the control response.
+
+        Purely cosmetic, so every caller treats a failure as a warning: a
+        sidebar label is not worth failing a dispatch that already landed.
+        """
+        return self._run_json(self.argv_pane_rename(pane_id, label))
+
     def pane_send_text(self, pane_id, text):
         """Type literal text into a pane, with no Enter and no paste framing.
 

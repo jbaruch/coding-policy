@@ -343,6 +343,7 @@ class MeasureCommandTest(CliCase):
         runner.set("pane wait-output", ok_json("output_matched"))
         runner.set("pane send-text", ok_json("pane_send_text"))
         runner.set("pane send-keys", ok_json("pane_send_keys"))
+        runner.set("pane rename", ok_json("pane_rename"))
         for name in statuses:
             runner.responses[
                 "agent read {} --source visible --lines 20".format(name)
@@ -517,6 +518,7 @@ class ApplyCommandTest(CliCase):
             )
         runner.set("pane send-text", ok_json("pane_send_text"))
         runner.set("pane send-keys", ok_json("pane_send_keys"))
+        runner.set("pane rename", ok_json("pane_rename"))
         for name in statuses:
             runner.responses[
                 "agent read {} --source visible --lines 20".format(name)

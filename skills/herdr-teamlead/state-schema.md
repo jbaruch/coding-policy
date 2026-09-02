@@ -19,7 +19,9 @@ signatures the stale-state probe reads; an agent with neither is never probed.
 `type`; `dialog_next_tab_keys` names the keys that cycle a usage dialog's tabs;
 `composer_glyph`, `composer_ignore_dim`, `composer_placeholders`, and
 `recover_keys` drive the consumed-command check, the ghost-text and placeholder
-exemptions, and the guarded one-shot recovery of a stuck composer. All are documented in
+exemptions, and the guarded one-shot recovery of a stuck composer.
+`model_label` is cosmetic: it names the model on the worker's pane after a
+dispatch. All are documented in
 `skills/herdr-teamlead/references/herdr.md`.
 
 ## State Record Format

@@ -202,13 +202,30 @@ Checkouts). A read-only Phase 1 reviewer needs none. Remove them per
 On any non-zero exit, fix the input it names and re-run this step; do not
 dispatch a brief whose worktree does not exist. Proceed immediately to Step 7.
 
-## Step 7 — Dispatch the Briefs
+## Step 7 — Label the Layout (optional, once per team)
+
+```bash
+.tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/label-workspaces.sh \
+  <lead-label> [<agent>=<workspace-id>]...
+```
+
+Names the lead's workspace, each worker's workspace after its agent, and each
+worker's pane after its kind. With no pairs, the workspaces come from the
+roster. Emits `{"lead":{...},"agents":[...]}` with a per-target
+`renamed|unchanged|failed`. Exit 3 means at least one rename failed and the
+JSON says which — labels are cosmetic, so that never stops a round.
+
+Run this once per team, not once per round: a name already in place is
+reported `unchanged` and nothing is sent. Skip it on a team whose sidebar is
+already named. Proceed immediately to Step 8.
+
+## Step 8 — Dispatch the Briefs
 
 ```bash
 .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/teamlead.sh apply \
   --assignments <plan-file> \
   --brief developer=<path> --brief tester=<path> --brief reviewer=<path> \
-  --common <path-to-COMMON.md>
+  --common <path-to-COMMON.md> [--task <label>]
 ```
 
 Clears each worker's context and hands it its brief. Emits one JSON object:
@@ -217,21 +234,21 @@ per role a record carrying `cleared`, `landed`, `started`, and `status`.
 Each outcome names where the round goes next. Only a dispatched worker can
 produce a report, so Step 8 waits on exactly the roles that landed here.
 
-- **Exit 0** — every role was dispatched. Proceed to Step 8.
+- **Exit 0** — every role was dispatched. Proceed to Step 9.
 - **Non-zero with a busy target** — the whole round was refused before any
   keystroke went out. Nothing was dispatched, so there is nothing to wait for:
   wait for that worker to reach idle and re-run this step, or re-run it with a
-  plan that omits the busy worker. Do not go to Step 8.
+  plan that omits the busy worker. Do not go to Step 9.
 - **Non-zero with `"status": "sent_but_not_started"`** — the message was sent
   and no turn began for that role. Read that worker's pane; do not re-dispatch
-  on top of it. Go to Step 8 for the roles whose records say `started`, and
+  on top of it. Go to Step 9 for the roles whose records say `started`, and
   treat this role as producing no report this round.
 - **A worker failed on its clear command** — its assignment was never sent, and
-  the round is short that role. Go to Step 8 for the rest; re-dispatch this one
+  the round is short that role. Go to Step 9 for the rest; re-dispatch this one
   by re-running this step for that role alone once its pane is clear.
 - **`cleared: false` on a record** — the clear was consumed and the pane did
   not change. That worker still got its brief, with a stale context behind it.
-  Proceed to Step 8, and weigh its report knowing the context was not fresh.
+  Proceed to Step 9, and weigh its report knowing the context was not fresh.
 - **A refusal naming an unaccounted composer** — the worker's input line holds
   text the lead did not send. Nothing was dispatched for that role. Read the
   pane and clear it by hand, or re-run this step with `--allow-recovery` once
@@ -241,6 +258,9 @@ produce a report, so Step 8 waits on exactly the roles that landed here.
   here. A dispatch nobody understands is not a round to wait on.
 - `--dry-run` prints every command it would run and makes no herdr calls. It
   dispatches nothing, so finish here after reading it.
+- Each confirmed hand-off relabels that worker's pane with the work it took.
+  `--task <label>` puts the round's task in the label. A hand-off that never
+  started is left unlabelled.
 
 The delivery mechanics behind those outcomes — composer confirmation, recovery
 keys, ghost text, the rejection strings, the settle knobs — are in:
@@ -252,9 +272,9 @@ skills/herdr-teamlead/references/herdr.md
 The prompt text, the refusal predicate, and every constant are the utility's
 own contract; see `skills/herdr-teamlead/teamlead/assign.py`.
 
-Proceed to Step 8 with the roles that were dispatched.
+Proceed to Step 9 with the roles that were dispatched.
 
-## Step 8 — Wait for the Reports
+## Step 9 — Wait for the Reports
 
 One call per dispatched worker, in the order the round needs them:
 
@@ -267,10 +287,10 @@ outcome. Completion requires both the report file on disk and the `REPORT: `
 marker in the worker's pane. A single `idle` or `done` observation is not
 completion. Poll interval and give-up budget are the script's own constants.
 
-- **Exit 0** — the report is there. Continue to the next worker, then Step 9.
+- **Exit 0** — the report is there. Continue to the next worker, then Step 10.
 - **Exit 1** — the budget ran out. Read the pane with
   `herdr agent read <name> --source visible`. Either re-run this step for that
-  worker with a longer budget, or go to Step 9 recording that it produced no
+  worker with a longer budget, or go to Step 10 recording that it produced no
   report.
 - **Exit 2** — a tool failure. Report the message verbatim and finish here; the
   round has no reliable view of any worker.
@@ -281,10 +301,10 @@ completion. Poll interval and give-up budget are the script's own constants.
   operator does. Resume only once `herdr agent get <name>` reports a state
   other than `blocked`, then re-run this step for that worker.
 
-Proceed to Step 9 once every dispatched worker has been waited on, or once you
+Proceed to Step 10 once every dispatched worker has been waited on, or once you
 have recorded which of them produced no report.
 
-## Step 9 — Gate the Round
+## Step 10 — Gate the Round
 
 Read every report file in full, including a report whose worker exited cleanly.
 A `## BLOCKED` section can sit under a report that otherwise reads as finished.
@@ -317,3 +337,6 @@ do not.
 Log the round: the assignments, the report paths, the findings, and the
 outcome. If the round produced no findings at all, log it and say so in one
 line rather than reproducing the reports. Finish here.
+
+For the daily standup, which is a different round shape entirely, use
+`Skill(skill: "herdr-standup")`.

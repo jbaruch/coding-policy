@@ -226,6 +226,11 @@ def build_parser():
         help="Skip the context-clearing prompt and send only the assignment.",
     )
     apply_parser.add_argument(
+        "--task",
+        metavar="LABEL",
+        help="Task label for the pane titles, e.g. 12 or #12 (default: none).",
+    )
+    apply_parser.add_argument(
         "--now",
         metavar="ISO8601",
         help="Timestamp for the ledger entries (default: the current UTC time).",
@@ -470,6 +475,7 @@ def cmd_apply(args, client=None, warn=None, trace=None):
         settle_timeout_ms=args.settle_timeout,
         on_assigned=record,
         warn=warn,
+        task=args.task,
         settle_sec=args.composer_settle,
         start_timeout_ms=args.start_timeout,
         allow_recovery=args.allow_recovery,

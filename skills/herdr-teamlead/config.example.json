@@ -8,14 +8,24 @@
       "usage_marker": "Current week",
       "usage_read_source": "visible",
       "slash_delivery": "paste",
-      "composer_glyph": "❯ ",
+      "composer_glyph": "\u276f ",
       "composer_ignore_dim": true,
       "composer_placeholders": [],
-      "recover_keys": ["esc"],
-      "close_keys": ["esc"],
+      "recover_keys": [
+        "esc"
+      ],
+      "close_keys": [
+        "esc"
+      ],
       "clear_prompt": "/clear",
-      "idle_markers": ["⏵⏵ bypass permissions on", "? for shortcuts"],
-      "working_markers": ["Churned for"]
+      "idle_markers": [
+        "\u23f5\u23f5 bypass permissions on",
+        "? for shortcuts"
+      ],
+      "working_markers": [
+        "Churned for"
+      ],
+      "model_label": "claude-opus-5"
     },
     {
       "name": "codex",
@@ -25,13 +35,18 @@
       "usage_read_source": "recent-unwrapped",
       "slash_delivery": "type",
       "slash_enter_count": 2,
-      "composer_glyph": "› ",
+      "composer_glyph": "\u203a ",
       "composer_ignore_dim": true,
-      "composer_placeholders": ["Ask Codex to do anything"],
+      "composer_placeholders": [
+        "Ask Codex to do anything"
+      ],
       "recover_keys": [],
       "clear_prompt": "/new",
-      "idle_markers": ["› Ask Codex to do anything"],
-      "working_markers": []
+      "idle_markers": [
+        "\u203a Ask Codex to do anything"
+      ],
+      "working_markers": [],
+      "model_label": "gpt-5.6"
     },
     {
       "name": "grok",
@@ -40,15 +55,26 @@
       "usage_marker": "Weekly limit",
       "usage_read_source": "visible",
       "slash_delivery": "type",
-      "composer_glyph": "│ ❯",
+      "composer_glyph": "\u2502 \u276f",
       "composer_ignore_dim": true,
       "composer_placeholders": [],
-      "recover_keys": ["esc"],
-      "close_keys": ["esc"],
+      "recover_keys": [
+        "esc"
+      ],
+      "close_keys": [
+        "esc"
+      ],
       "clear_prompt": "/new",
-      "dialog_next_tab_keys": ["tab"],
-      "idle_markers": ["Shift+Tab:mode"],
-      "working_markers": ["Esc:cancel"]
+      "dialog_next_tab_keys": [
+        "tab"
+      ],
+      "idle_markers": [
+        "Shift+Tab:mode"
+      ],
+      "working_markers": [
+        "Esc:cancel"
+      ],
+      "model_label": "grok-4"
     }
   ]
 }

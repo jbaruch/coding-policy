@@ -23,6 +23,7 @@ import unittest
 from pathlib import Path
 
 from teamlead.assign import (
+    pane_label,
     apply as _apply,
     assignment_text,
     build_steps,
@@ -135,6 +136,7 @@ def runner_with(statuses, footers=None, composer_screens=None):
         )
     runner.set("pane send-text", ok_json("pane_send_text"))
     runner.set("pane send-keys", ok_json("pane_send_keys"))
+    runner.set("pane rename", ok_json("pane_rename"))
     # Composer recovery: ctrl+c for codex, esc for the others.
     runner.set("agent send-keys", ok_json("agent_send_keys"))
     # Composer empty throughout, and the screen changes after the clear --
@@ -622,6 +624,7 @@ class SlashCommandDeliveryTest(unittest.TestCase):
         runner = runner_with({"grok": "idle"})
         runner.set("pane send-text", stdout="")
         runner.set("pane send-keys", stdout="")
+        runner.set("pane rename", ok_json("pane_rename"))
         result = apply(
             HerdrClient(runner=runner), {"developer": "grok"}, BY_NAME, self.paths, AT
         )
@@ -1155,6 +1158,8 @@ class ApplyTest(unittest.TestCase):
                 # Sending is not starting.
                 "agent read grok --source visible --lines 20 --format ansi",
                 "agent wait grok --until working --timeout 15000",
+                # Confirmed hand-off, so the sidebar says who is doing what.
+                "pane rename w4:p1 developer",
             ],
         )
 
@@ -1214,6 +1219,7 @@ class ApplyTest(unittest.TestCase):
                     "brief": "/w/dev.md",
                     "common": "/w/COMMON.md",
                     "at": AT,
+                    "pane_label": "developer",
                 }
             ],
         )
@@ -1238,6 +1244,97 @@ class ApplyTest(unittest.TestCase):
                 ("tester", "claude", AT, "applied"),
             ],
         )
+
+
+class PaneLabelTest(unittest.TestCase):
+    """The sidebar says who is doing what, once the hand-off is confirmed."""
+
+    def setUp(self):
+        self.paths = {
+            "common": "/w/COMMON.md",
+            "developer": "/w/dev.md",
+            "tester": "/w/test.md",
+        }
+
+    def test_the_label_leads_with_the_role_and_omits_the_agent(self):
+        # The workspace row already carries the agent's name.
+        self.assertEqual(pane_label("developer"), "developer")
+
+    def test_a_task_label_is_appended_with_a_hash(self):
+        self.assertEqual(pane_label("developer", "12"), "developer #12")
+
+    def test_a_task_that_already_carries_a_hash_is_not_doubled(self):
+        self.assertEqual(pane_label("developer", "#12"), "developer #12")
+
+    def test_the_model_label_trails_after_a_dot(self):
+        self.assertEqual(
+            pane_label("developer", "12", "gpt-5.6"), "developer #12 \u00b7 gpt-5.6"
+        )
+
+    def test_a_model_with_no_task_still_reads(self):
+        self.assertEqual(pane_label("developer", None, "grok-4"), "developer \u00b7 grok-4")
+
+    def test_the_task_reaches_the_pane(self):
+        runner = runner_with({"grok": "idle"})
+        apply(
+            HerdrClient(runner=runner),
+            {"developer": "grok"},
+            BY_NAME,
+            self.paths,
+            AT,
+            task="12",
+        )
+        self.assertIn("pane rename w4:p1 'developer #12'", runner.commands())
+
+    QUIET_SCREEN = "  nothing happened\n  │ ❯                                        │\n"
+
+    def test_a_hand_off_that_never_started_is_not_labelled(self):
+        # A label claiming a role nobody started is worse than no label. Drive
+        # the not-started path the way the landing tests do: a transcript that
+        # never shows the message, and a `wait --until working` that times out.
+        runner = runner_with({"grok": "idle"})
+        runner.responses["agent read grok --source visible --lines 20"] = ScriptedReads(
+            [
+                composer_screen("grok", "old"),
+                composer_screen("grok", "fresh"),
+                composer_screen("grok", "fresh"),
+                self.QUIET_SCREEN,
+            ]
+        )
+        runner.set(
+            "agent wait grok --until working",
+            stdout="",
+            returncode=1,
+            stderr='{"error":{"code":"timeout","message":"never left idle"}}',
+        )
+        result = apply(
+            HerdrClient(runner=runner),
+            {"developer": "grok"},
+            BY_NAME,
+            self.paths,
+            AT,
+            warn=lambda message: None,
+            landing_attempts=2,
+        )
+        self.assertEqual(result["applied"][0]["status"], "sent_but_not_started")
+        self.assertIsNone(result["applied"][0]["pane_label"])
+        self.assertFalse([c for c in runner.commands() if c.startswith("pane rename")])
+
+    def test_a_failed_rename_never_fails_the_dispatch(self):
+        runner = runner_with({"grok": "idle"})
+        runner.set("pane rename", stdout="", returncode=1, stderr='{"error":{"code":"no_pane"}}')
+        warnings = []
+        result = apply(
+            HerdrClient(runner=runner),
+            {"developer": "grok"},
+            BY_NAME,
+            self.paths,
+            AT,
+            warn=warnings.append,
+        )
+        self.assertEqual(result["applied"][0]["status"], "applied")
+        self.assertIsNone(result["applied"][0]["pane_label"])
+        self.assertTrue(any("only the sidebar name did not" in w for w in warnings))
 
 
 if __name__ == "__main__":

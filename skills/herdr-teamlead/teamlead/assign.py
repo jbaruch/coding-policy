@@ -163,6 +163,25 @@ def resolve_paths(assignments, briefs, common):
     return resolved
 
 
+def pane_label(role, task=None, model=""):
+    """`<role> #<task> · <model>`, dropping whichever parts are absent.
+
+    Role first, and the agent's name is deliberately NOT in it: the workspace
+    row already carries the name, so repeating it in the pane row spends the
+    sidebar's width saying the same thing twice. The separator is a middle dot
+    because roles and model names both carry hyphens.
+
+    Pure, so the shape is testable without a herdr session.
+    """
+    label = str(role)
+    if task:
+        marker = str(task) if str(task).startswith("#") else "#{}".format(task)
+        label = "{} {}".format(label, marker)
+    if model:
+        label = "{} · {}".format(label, model)
+    return label
+
+
 def validate_agents(assignments, agents_by_name):
     """Refuse an assignment naming an unknown agent, or one used twice."""
     reject_duplicate_agents(assignments)
@@ -307,7 +326,7 @@ def check_all_ready(client, assignments, agents_by_name, warn=None):
     return statuses
 
 
-def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle_timeout_ms=DEFAULT_SETTLE_TIMEOUT_MS, on_assigned=None, warn=None, sleep=time.sleep, settle_sec=COMPOSER_SETTLE_SEC, landing_attempts=LANDING_ATTEMPTS, start_timeout_ms=DEFAULT_START_TIMEOUT_MS, allow_recovery=False):
+def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle_timeout_ms=DEFAULT_SETTLE_TIMEOUT_MS, on_assigned=None, warn=None, sleep=time.sleep, settle_sec=COMPOSER_SETTLE_SEC, landing_attempts=LANDING_ATTEMPTS, start_timeout_ms=DEFAULT_START_TIMEOUT_MS, allow_recovery=False, task=None):
     """Clear each agent and hand it its brief. Writes to the agents.
 
     `on_assigned(role, agent, at, status)` is called after each hand-off so the
@@ -317,6 +336,10 @@ def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle
     and must not count as experience of the role.
     """
     validate_agents(assignments, agents_by_name)
+    # Resolve the sink once. Every helper below defaults it too, but this
+    # function calls it directly on the label path, and a None there would
+    # raise instead of warning -- exactly when something already went wrong.
+    warn = warn or stderr_warn
     # Status first: it is the refusal gate, and it is also where the pane ids
     # the clear command needs come from.
     statuses = check_all_ready(client, assignments, agents_by_name, warn=warn)
@@ -417,6 +440,28 @@ def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle
             "common": step["common"],
             "at": at,
         }
+        # A sidebar of w1 w2 w3 tells the operator nothing. Label the pane with
+        # who is doing what, but only once the hand-off is CONFIRMED: a label
+        # claiming a role nobody started is worse than no label. Cosmetic, so a
+        # failure warns and the dispatch stands.
+        if record["status"] == "applied" and record.get("pane_id"):
+            label = pane_label(
+                step["role"], task, getattr(agents_by_name[name], "model_label", "")
+            )
+            try:
+                client.pane_rename(record["pane_id"], label)
+                record["pane_label"] = label
+            except HerdrError as exc:
+                warn(
+                    "could not label {}'s pane {} as {!r}: {} - the assignment "
+                    "landed, only the sidebar name did not.".format(
+                        name, record["pane_id"], label, exc
+                    )
+                )
+                record["pane_label"] = None
+        else:
+            record["pane_label"] = None
+
         applied.append(record)
         if on_assigned is not None:
             on_assigned(step["role"], name, at, record["status"])
