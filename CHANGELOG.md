@@ -1,5 +1,9 @@
 # Changelog
 
+### wait-report.sh: a wrap inside the basename stalled a round for an hour
+
+**The marker probe could not see a report whose name the pane split in two.** `wait-report.sh` confirms a worker's `REPORT: ` line by finding the report's basename as a whole path component in the visible rows, on the row with the prefix or the one after it — the CHANGELOG entry that introduced it said the basename "is short enough to survive the wrap". Live on 2026-09-02, a Codex pane wrapped a 170-character report path as `.../reports/12-` on one row and `developer-fix.md` on the next. No row held `12-developer-fix.md`, the file sat on disk, and the wait ran toward its 90-minute budget while the worker idled; the lead noticed by eye twenty minutes in. The probe now checks two views of the same window: the rows as they are, and the rows glued back together with each continuation row's indentation dropped. Either confirming completes the wait; the whole-component boundary applies in both, so gluing cannot turn `reviewer-report.md` into `report.md`, and a decoy split inside its own basename is refused by both views.
+
 ## 0.3.173 — 2026-09-02
 
 ### Teamwork — a lead agent that runs a three-agent round instead of a human guessing

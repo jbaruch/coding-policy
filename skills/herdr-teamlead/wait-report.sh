@@ -168,11 +168,23 @@ marker_seen() { # <pane-id> <report-basename>
     warn "\`${HERDR_BIN} pane read $1\` failed (exit ${rc}): $(tr '\n' ' ' < "$ERRFILE") — the marker was seen but could not be confirmed"
     return 2
   fi
-  # Both halves in the same window, in either row: the line soft-wraps, so the
-  # basename may sit on the row after the prefix.
+  # Both halves in the same window. The line soft-wraps, and the wrap can land
+  # anywhere: after the prefix, inside the path, or INSIDE THE BASENAME. The
+  # row view catches the first two; the joined view -- rows glued back
+  # together with the continuation indentation dropped -- catches the third.
+  # Either view confirming is enough; the whole-component boundary applies in
+  # both, so gluing rows cannot manufacture a decoy match.
   [[ "$text" == *"$REPORT_MARKER"* ]] || return 1
-  basename_on_screen "$text" "$2" || return 1
-  return 0
+  if basename_on_screen "$text" "$2"; then return 0; fi
+  if basename_on_screen "$(unwrap_rows "$text")" "$2"; then return 0; fi
+  return 1
+}
+
+# Glue soft-wrapped rows back into one line: every row break goes, and so does
+# the indentation the TUI puts at the start of a continuation row. A basename
+# the wrap split as `reports/12-` + `developer-fix.md` reads whole again.
+unwrap_rows() { # <pane-text>
+  printf '%s' "$1" | awk 'BEGIN { ORS = "" } { sub(/^[[:space:]]+/, ""); print }'
 }
 
 # Does the visible pane show a dialog waiting on a human?

@@ -297,6 +297,61 @@ ${base}"
     pass; else fail "wrapped marker: expected found true, got RC=$RC OUT=$OUT ERR=$(cat "$TMP/e14")"; fi
   assert_no_unbound "$(cat "$TMP/e14")" "wrapped marker"
 
+  # 14b. The wrap that a per-row check cannot see: the row break lands INSIDE
+  #      the basename (`reports/12-` / `developer-fix.md`, observed live on a
+  #      Codex pane with a 170-character report path). Joining the rows is what
+  #      confirms it.
+  RUN_SEQ=$((RUN_SEQ+1))
+  local split_inside
+  split_inside="REPORT: /Users/jbaruch/.worktrees/round-3/reports/${base:0:3}
+  ${base:3}"
+  OUT="$(env HERDR_ENV=1 HERDR_BIN="$FAKE" \
+    TEAMLEAD_WAIT_INTERVAL_SEC=0 TEAMLEAD_WAIT_BUDGET_SEC=0 TEAMLEAD_BLOCKED_CONFIRM_SEC=0 \
+    FAKE_MARKER=found FAKE_STATUS=idle FAKE_PANE_TEXT="$split_inside" \
+    bash "$SCRIPT" worker "$report" </dev/null 2>"$TMP/e14b")"; RC=$?
+  if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | jq -e '.found == true' >/dev/null 2>&1; then
+    pass; else fail "wrap inside basename: expected found true, got RC=$RC OUT=$OUT ERR=$(cat "$TMP/e14b")"; fi
+  assert_no_unbound "$(cat "$TMP/e14b")" "wrap inside basename"
+
+  # 14c. Gluing rows must not manufacture a match: another worker's
+  #      `reviewer-<base>` wrapped inside ITS basename reads as one component
+  #      once joined, and that component is not this report's. (A row holding
+  #      exactly `<base>` is accepted by the row view on purpose -- case 14 --
+  #      so the decoy here is split where neither view may accept it.)
+  RUN_SEQ=$((RUN_SEQ+1))
+  local glued_decoy
+  glued_decoy="REPORT: /Users/jbaruch/.worktrees/round-3/reports/reviewer-${base:0:3}
+  ${base:3}"
+  OUT="$(env HERDR_ENV=1 HERDR_BIN="$FAKE" \
+    TEAMLEAD_WAIT_INTERVAL_SEC=0 TEAMLEAD_WAIT_BUDGET_SEC=0 TEAMLEAD_BLOCKED_CONFIRM_SEC=0 \
+    FAKE_MARKER=found FAKE_STATUS=idle FAKE_PANE_TEXT="$glued_decoy" \
+    bash "$SCRIPT" worker "$report" </dev/null 2>"$TMP/e14c")"; RC=$?
+  if [[ $RC -ne 0 ]] && printf '%s' "$OUT" | jq -e '.found == false' >/dev/null 2>&1; then
+    pass; else fail "glued decoy: expected found false, got RC=$RC OUT=$OUT"; fi
+
+  # 16. The file is there, the worker reads idle twice, and the marker never
+  #     confirms: exit 4 with a reason, well inside the budget, instead of an
+  #     hour of silence. A single idle read is not enough (the flicker trap).
+  RUN_SEQ=$((RUN_SEQ+1))
+  OUT="$(env HERDR_ENV=1 HERDR_BIN="$FAKE" \
+    TEAMLEAD_WAIT_INTERVAL_SEC=0 TEAMLEAD_WAIT_BUDGET_SEC=600 TEAMLEAD_BLOCKED_CONFIRM_SEC=0 \
+    FAKE_MARKER=timeout FAKE_STATUS=idle \
+    bash "$SCRIPT" worker "$report" </dev/null 2>"$TMP/e16")"; RC=$?
+  if [[ $RC -eq 4 ]] && printf '%s' "$OUT" | jq -e '.found == false and (.reason | test("marker unconfirmed"))' >/dev/null 2>&1 \
+     && grep -q "confirm by eye" "$TMP/e16"; then
+    pass; else fail "unconfirmed idle: expected exit 4 with a reason, got RC=$RC OUT=$OUT ERR=$(cat "$TMP/e16")"; fi
+  assert_no_unbound "$(cat "$TMP/e16")" "unconfirmed idle"
+
+  # 16b. One idle read with the file present is NOT exit 4: the counter needs
+  #      two in a row, and a `working` read in between resets it.
+  RUN_SEQ=$((RUN_SEQ+1))
+  OUT="$(env HERDR_ENV=1 HERDR_BIN="$FAKE" \
+    TEAMLEAD_WAIT_INTERVAL_SEC=0 TEAMLEAD_WAIT_BUDGET_SEC=0 TEAMLEAD_BLOCKED_CONFIRM_SEC=0 \
+    FAKE_MARKER=timeout FAKE_STATUS=idle \
+    bash "$SCRIPT" worker "$report" </dev/null 2>"$TMP/e16b")"; RC=$?
+  if [[ $RC -eq 1 ]] && printf '%s' "$OUT" | jq -e '.found == false and (has("reason") | not)' >/dev/null 2>&1; then
+    pass; else fail "single idle read: expected exit 1 (budget) with no reason, got RC=$RC OUT=$OUT"; fi
+
   # 15. A `REPORT: ` line for a DIFFERENT report — the previous round's, or
   #     another worker's — must not complete this wait. The report file exists
   #     the whole time, so the pane text is the only thing separating them.
