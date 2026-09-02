@@ -306,12 +306,15 @@ completion. Poll interval and give-up budget are the script's own constants.
   script recognizes. Read the pane with `herdr agent read <name> --source visible`
   and pick exactly one continuation, in this order. First, the last message
   shows a `REPORT: ` line naming this report, in any wrapping: the report is
-  delivered, continue to the next worker. Otherwise, if
-  `herdr agent get <name>` now reports `working`, the idle reads were a
-  flicker: re-run this step for that worker once. Otherwise, the state is
-  `idle` or `done` and the worker wrote the file without finishing: record it
-  as producing no report and continue to the next worker; never re-dispatch
-  on top of it.
+  delivered, continue to the next worker. Otherwise, read the live state with
+  `herdr agent get <name>`. If that command fails, report its message
+  verbatim and finish here, as for exit 2. If the state is `blocked`, treat it
+  exactly as exit 3: read the dialog, relay it verbatim to the operator, stop
+  this worker's round, and resume only once the state leaves `blocked`. If the
+  state is `working`, the idle reads were a flicker: re-run this step for that
+  worker once. Only if the state is `idle` or `done` did the worker write the
+  file without finishing: record it as producing no report and continue to
+  the next worker; never re-dispatch on top of it.
 - **Exit 3** — the worker is blocked at an approval or question dialog,
   confirmed across two reads and the pane. Read the dialog with
   `herdr pane read <pane-id> --source visible`, relay its text to the operator

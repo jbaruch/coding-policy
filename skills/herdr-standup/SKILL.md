@@ -71,10 +71,13 @@ Exit 3 means a dialog is up — relay it and leave that worker to the operator.
 Exit 4 means the answer file exists but the pane did not show the marker the
 script expects. Read the pane and pick exactly one continuation: the last
 message is the four lines ending in a `REPORT: ` line that names this worker's
-answer file — use the file; otherwise, `herdr agent get <agent-name>` reports
-`working` — re-run the wait for that worker once; otherwise — the worker is
-idle or done without the marker — move it to Step 3's list with what you know.
-Proceed immediately to Step 3.
+answer file — use the file; otherwise read the live state with
+`herdr agent get <agent-name>`: the command fails — report its message
+verbatim and finish here; the state is `blocked` — relay the dialog to the
+operator and leave that worker to them, as for exit 3; the state is `working`
+— re-run the wait for that worker once; the state is `idle` or `done` — the
+worker answered without the marker, move it to Step 3's list with what you
+know. Proceed immediately to Step 3.
 
 ## Step 3 — Write the Rows Nobody Answered
 
