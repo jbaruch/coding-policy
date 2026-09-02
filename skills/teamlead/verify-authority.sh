@@ -111,7 +111,14 @@ main() {
     if (( membership_rc == 0 )) && [[ "$role" == "admin" ]]; then
       owner=true
     elif (( membership_rc != 0 )); then
-      warn "could not read org membership for ${viewer_login} in ${owner_login} (exit ${membership_rc}) — treating it as not an owner"
+      # A 404 IS the answer for a non-member, and it is the common case for
+      # any org the operator does not belong to. Warning on it would cry wolf
+      # on every ordinary run; anything else is a fault worth surfacing.
+      if grep -q '404' "$ERRFILE"; then
+        : # not a member — not an owner, nothing to report
+      else
+        warn "could not read org membership for ${viewer_login} in ${owner_login} (exit ${membership_rc}): $(tr '\n' ' ' < "$ERRFILE") — treating it as not an owner"
+      fi
     fi
   fi
 

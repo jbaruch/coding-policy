@@ -16,7 +16,9 @@
 #   4. Admin collaborator-> permission admin on someone else's repo, still false.
 #   5. Org admin         -> authorized true through org membership.
 #   6. Org member        -> role member is not ownership.
-#   7. Org 404           -> not a member, not an owner, still a verdict.
+#   7. Org 404           -> not a member, not an owner, still a verdict, and
+#                          SILENT: a non-member is the ordinary case.
+#  7b. Org fault         -> a non-404 membership failure warns.
 #   8. Usage / bad slug  -> exit 1, no verdict.
 #   9. gh absent         -> exit 1.
 #  10. API failure       -> exit 2, never a verdict.
@@ -45,7 +47,8 @@ case "${2:-}" in
       "${FAKE_OWNER:-jbaruch}" "${FAKE_OWNER_TYPE:-User}" "${FAKE_ADMIN:-true}" "${FAKE_PUSH:-true}"
     ;;
   orgs/*/memberships/*)
-    [[ -n "${FAKE_ORG_404:-}" ]] && { printf 'gh: HTTP 404\n' >&2; exit 1; }
+    [[ -n "${FAKE_ORG_404:-}" ]] && { printf 'gh: HTTP 404: Not Found\n' >&2; exit 1; }
+    [[ -n "${FAKE_ORG_FAULT:-}" ]] && { printf 'gh: HTTP 500: server error\n' >&2; exit 1; }
     printf '%s\n' "${FAKE_ORG_ROLE:-member}"
     ;;
   *) echo '{"error":"unsupported path"}' >&2; exit 2 ;;
@@ -110,6 +113,15 @@ main() {
   run FAKE_VIEWER=jbaruch FAKE_OWNER=acme FAKE_OWNER_TYPE=Organization FAKE_ORG_404=1 acme/thing
   if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | jq -e '.authorized == false' >/dev/null 2>&1; then
     pass; else fail "org 404: expected a false verdict, got RC=$RC OUT=$OUT"; fi
+  # Not being in an org is the ordinary case, so it must not warn — a warning
+  # on every run is one nobody reads by the time it matters.
+  if [[ -z "$ERRTEXT" ]]; then
+    pass; else fail "org 404: expected no warning, got ERR=$ERRTEXT"; fi
+
+  # 7b. A membership call that fails for any other reason is still surfaced.
+  run FAKE_VIEWER=jbaruch FAKE_OWNER=acme FAKE_OWNER_TYPE=Organization FAKE_ORG_FAULT=1 acme/thing
+  if [[ $RC -eq 0 ]] && printf '%s' "$ERRTEXT" | grep -q "could not read org membership"; then
+    pass; else fail "org fault: expected a warning, got RC=$RC ERR=$ERRTEXT"; fi
 
   # 8. A bare name is not a slug.
   run FAKE_VIEWER=jbaruch coding-policy
