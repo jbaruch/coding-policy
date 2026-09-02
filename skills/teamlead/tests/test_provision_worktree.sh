@@ -21,6 +21,9 @@
 #   8. Outside the root -> exit 1, nothing created.
 #   9. Not a repo       -> exit 1.
 #  10. Usage            -> exit 1 with a usage line.
+#  11. Foreign worktree -> a work tree of ANOTHER repo on the same branch name
+#                          is refused, naming both git dirs. Same branch name
+#                          is not identity; the shared object store is.
 #
 # Run: bash skills/teamlead/tests/test_provision_worktree.sh
 set -uo pipefail
@@ -130,6 +133,37 @@ main() {
   OUT="$(env WORKTREE_ROOT="$ROOT" bash "$SCRIPT" 2>"$TMP/e10")"; RC=$?
   if [[ $RC -eq 1 && -z "$OUT" ]] && grep -q "usage:" "$TMP/e10"; then
     pass; else fail "usage: expected exit 1 with a usage line, got RC=$RC"; fi
+
+  # 11. Two unrelated repos both have a `feat/thing`. Accepting one as the
+  #     other's provisioned worktree would hand a worker somebody else's tree,
+  #     which is why identity is the common git dir and not the branch name.
+  mk_repo r11                       # SHARED = the checkout we provision from
+  local ours="$SHARED"
+  mk_repo r11b                      # a second, unrelated repo
+  local theirs="$SHARED"
+  # Their worktree, on the same branch name, at the path we are about to ask
+  # for. Created by THEIR repo, so its common dir differs from ours.
+  git -C "$theirs" worktree add -q -b "feat/thing" "$ROOT/r11-dev" >/dev/null 2>&1 \
+    || die "could not create the foreign worktree"
+  run "$ours" "feat/thing" "$ROOT/r11-dev"
+  if [[ $RC -eq 2 && -z "$OUT" ]] \
+     && printf '%s' "$ERRTEXT" | grep -q "DIFFERENT repository" \
+     && printf '%s' "$ERRTEXT" | grep -q "$(basename "$theirs")"; then
+    pass; else fail "foreign worktree: expected exit 2 naming both git dirs, got RC=$RC ERR=$ERRTEXT"; fi
+  # And it is left exactly as it was.
+  if [[ "$(git -C "$ROOT/r11-dev" rev-parse --abbrev-ref HEAD)" == "feat/thing" ]]; then
+    pass; else fail "foreign worktree: the other repo's work tree was disturbed"; fi
+
+  # 11b. Our own worktree on that branch still reads as already-provisioned,
+  #      so the identity check did not simply forbid every re-run.
+  run "$ours" "feat/other" "$ROOT/r11-ours"
+  if [[ $RC -eq 0 ]]; then
+    run "$ours" "feat/other" "$ROOT/r11-ours"
+    if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | jq -e '.state == "already-provisioned"' >/dev/null 2>&1; then
+      pass; else fail "own worktree: expected already-provisioned, got RC=$RC OUT=$OUT"; fi
+  else
+    fail "own worktree: could not provision it in the first place (RC=$RC ERR=$ERRTEXT)"
+  fi
 
   echo "─────────────────────────────────────────────" >&2
   if [[ $FAIL -gt 0 ]]; then echo "FAILED: ${FAIL} failed, ${PASS} passed" >&2; exit 1; fi

@@ -34,6 +34,31 @@ ERRFILE=""
 
 warn() { printf 'provision-worktree: %s\n' "$1" >&2; }
 
+# Echo the ABSOLUTE common git dir for the work tree at <dir>, or return 1.
+#
+# The common dir is what identifies the repository: every worktree of one
+# checkout resolves to the same one, and two unrelated repos never do.
+# `--path-format=absolute` needs git >= 2.31, so an older git falls back to the
+# relative answer resolved against the work tree itself.
+common_dir_of() { # <dir>
+  local dir="$1" out rc=0
+  out="$(git -C "$dir" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || rc=$?
+  if (( rc == 0 )) && [[ -n "$out" ]]; then
+    printf '%s' "$out"
+    return 0
+  fi
+  rc=0
+  out="$(git -C "$dir" rev-parse --git-common-dir 2>"$ERRFILE")" || rc=$?
+  if (( rc != 0 )) || [[ -z "$out" ]]; then
+    return 1
+  fi
+  if [[ "$out" != /* ]]; then
+    out="$(cd "$dir" && cd "$out" && pwd)" || return 1
+  fi
+  printf '%s' "$out"
+  return 0
+}
+
 cleanup() {
   if [[ -n "$ERRFILE" ]] && ! rm -f "$ERRFILE"; then
     warn "could not remove temp file ${ERRFILE} — remove it by hand"
@@ -122,10 +147,26 @@ main() {
   fi
 
   # An existing path is either this exact worktree (idempotent re-run) or
-  # something this must not touch.
+  # something this must not touch. "Same branch name" is not identity: two
+  # unrelated repos both have a `feat/x`, and treating one as provisioned from
+  # the other would hand a worker somebody else's tree. Identity is the shared
+  # object store — the common dir both sides resolve to.
   if [[ -e "$abs_path" ]]; then
     if ! git -C "$abs_path" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
       warn "'${abs_path}' already exists and is not a git work tree — remove it or choose another path"
+      return 2
+    fi
+    local shared_common="" path_common=""
+    if ! shared_common="$(common_dir_of "$shared")"; then
+      warn "cannot resolve the git common dir of ${shared}: $(tr '\n' ' ' < "$ERRFILE") — cannot establish which repository ${abs_path} would belong to"
+      return 2
+    fi
+    if ! path_common="$(common_dir_of "$abs_path")"; then
+      warn "cannot resolve the git common dir of ${abs_path}: $(tr '\n' ' ' < "$ERRFILE") — cannot tell which repository that work tree belongs to"
+      return 2
+    fi
+    if [[ "$path_common" != "$shared_common" ]]; then
+      warn "'${abs_path}' is a work tree of a DIFFERENT repository (its git dir is ${path_common}, this checkout's is ${shared_common}) — choose another path, or remove that work tree from the repository that owns it"
       return 2
     fi
     # A failing rev-parse is a tool failure, not a branch name. Collapsing it
