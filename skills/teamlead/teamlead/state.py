@@ -5,13 +5,15 @@ looked like when it was measured; it never substitutes for reading the agent's
 live status before writing to it. `plan` may run off a stale snapshot on
 purpose (planning has no side effects); `apply` always re-checks live status.
 
-Schema (schema_version 1)::
+Schema (schema_version 2)::
 
     {
-      "schema_version": 1,
+      "schema_version": 2,
       "snapshots":  [ <measure output>, ... ],   # newest last, capped at 20
-      "assignments":[ {"schema_version": 1, "at": <ISO-8601>,
-                       "role": <str>, "agent": <str>}, ... ]
+      "assignments":[ {"schema_version": 2, "at": <ISO-8601>,
+                       "role": <str>, "agent": <str>,
+                       "status": "applied"|"sent_but_not_started"|"unknown"},
+                      ... ]
     }
 
 Every RECORD carries its own `schema_version`, not just the document: a ledger
@@ -47,9 +49,12 @@ from .errors import StateError
 STATE_SCHEMA_VERSION = 2
 
 #: An assignment row records what teamlead did, including what did not work.
-#: `applied` -- the agent took the brief and started a turn.
-#: `sent_but_not_started` -- the paste went out, nothing began (see
-#:     teamlead/composer.py send_message).
+#: `applied` -- the message REACHED the worker: it landed in the transcript, or
+#:     the worker left idle. Landing alone earns it; a completed turn is not
+#:     claimed, and none of this says the work was done well (assign.py `apply`
+#:     sets it on `landed or started`).
+#: `sent_but_not_started` -- the paste went out and neither signal appeared
+#:     (see teamlead/composer.py send_message).
 #: `unknown` -- written before rows carried a status.
 STATUS_APPLIED = "applied"
 STATUS_NOT_STARTED = "sent_but_not_started"
@@ -227,7 +232,20 @@ def _validate(payload, path):
 
 
 def load_state(path, warn=None):
+    """Read the state file. See `load_state_checked` for the full contract."""
+    state, _usable = load_state_checked(path, warn=warn)
+    return state
+
+
+def load_state_checked(path, warn=None):
     """Read the state file, migrating an older one and rewriting it.
+
+    Returns `(state, usable)`. `usable` is False when a file EXISTS and could
+    not be read as prior state -- corrupt, or written by a newer build. A
+    caller that intends to WRITE must refuse on False: this function promised
+    to leave that file exactly as found, and saving over it would destroy the
+    ledger it just preserved. A missing file is usable: there is nothing to
+    lose, and an empty document is the honest starting point.
 
     A missing file and a never-written file are the same thing: no prior state.
     So is a corrupt one, and so is one written by a newer build -- in both of
@@ -241,7 +259,7 @@ def load_state(path, warn=None):
     try:
         text = path.read_text(encoding="utf-8")
     except FileNotFoundError:
-        return empty_state()
+        return empty_state(), True
     except PermissionError as exc:
         raise StateError(
             "State file {} is not readable: {} - fix its permissions with "
@@ -264,7 +282,7 @@ def load_state(path, warn=None):
                 path, exc.msg, exc.lineno, exc.colno
             )
         )
-        return empty_state()
+        return empty_state(), False
 
     try:
         state, migrated = _validate(payload, path)
@@ -273,7 +291,7 @@ def load_state(path, warn=None):
             "state file {}: {} - starting from an empty ledger; the file is left "
             "untouched.".format(path, exc)
         )
-        return empty_state()
+        return empty_state(), False
 
     if migrated:
         try:
@@ -286,7 +304,7 @@ def load_state(path, warn=None):
                     path, STATE_SCHEMA_VERSION, exc
                 )
             )
-    return state
+    return state, True
 
 
 def save_state(path, state):

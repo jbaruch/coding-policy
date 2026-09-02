@@ -20,7 +20,7 @@ from . import __version__
 from .assign import apply as apply_assignments
 from .assign import dry_run, normalize_assignments, resolve_paths
 from .config import default_config_path, load_config, select_agents
-from .errors import PlanError, TeamLeadError, UsageError
+from .errors import PlanError, StateError, TeamLeadError, UsageError
 from .herdr import (
     DEFAULT_MARKER_TIMEOUT_MS,
     DEFAULT_SETTLE_TIMEOUT_MS,
@@ -42,6 +42,7 @@ from .state import (
     default_state_path,
     latest_snapshot,
     load_state,
+    load_state_checked,
     role_counts,
     save_state,
 )
@@ -331,6 +332,27 @@ def _load_assignments(value):
     return normalize_assignments(payload)
 
 
+def _load_state_for_write(path, warn):
+    """Read state a caller intends to write back, or refuse.
+
+    `load_state_checked` leaves an unreadable file exactly as found and hands
+    back an empty document. Writing that document over the file would undo
+    precisely the preservation it just performed, taking the operator's whole
+    ledger with it -- so a write path refuses instead, and says how to keep
+    both.
+    """
+    state, usable = load_state_checked(path, warn=warn)
+    if not usable:
+        raise StateError(
+            "State file {} could not be read (see the warning above), and "
+            "writing an empty ledger over it would destroy its contents. "
+            "Move it aside with `mv {} {}.bak` to start fresh, or pass "
+            "--state at another path to keep it.".format(path, path, path),
+            {"path": str(path)},
+        )
+    return state
+
+
 def cmd_measure(args, client=None, warn=None, trace=None):
     agents = select_agents(load_config(_config_path(args)), args.agents)
     client = client if client is not None else _client(args, trace=trace)
@@ -346,9 +368,10 @@ def cmd_measure(args, client=None, warn=None, trace=None):
         settle_sec=args.composer_settle,
         allow_recovery=args.allow_recovery,
     )
-    state = load_state(_state_path(args))
+    state_path = _state_path(args)
+    state = _load_state_for_write(state_path, warn)
     add_snapshot(state, snapshot)
-    save_state(_state_path(args), state)
+    save_state(state_path, state)
     if not snapshot["failed_agents"]:
         return snapshot, None
     return snapshot, {
@@ -431,7 +454,7 @@ def cmd_apply(args, client=None, warn=None, trace=None):
         )
 
     state_path = _state_path(args)
-    state = load_state(state_path)
+    state = _load_state_for_write(state_path, warn)
 
     def record(role, agent, at, status):
         add_assignment(state, at, role, agent, status=status)
