@@ -76,8 +76,8 @@ first continuation that applies:
 
 - The command fails — report its message verbatim and finish here.
 - The state is `blocked` or `working` — re-run the wait for that worker once.
-  The script confirms a block across two reads and the pane before returning
-  exit 3.
+  Exits 0–3 from that re-run take their branches above. A second exit 4 is
+  terminal: move the worker to Step 3's list with what you know.
 - The state is `idle` or `done` — move the worker to Step 3's list with what
   you know. `standup-ask.sh` refuses a report path too long for one pane row,
   so this outcome means the path bypassed it.

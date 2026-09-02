@@ -312,8 +312,9 @@ completion. Poll interval and give-up budget are the script's own constants.
   - The command fails — report its message verbatim and finish here, as for
     exit 2.
   - The state is `blocked` or `working` — re-run this step for that worker
-    once. The script confirms a block across two reads and the pane and
-    returns exit 3, whose branch above then applies.
+    once. Exits 0–3 from that re-run take their branches above. A second
+    exit 4 is terminal: record the worker as producing no report and
+    continue to the next worker.
   - The state is `idle` or `done` — record the worker as producing no report
     and continue to the next worker. Never re-dispatch on top of it. The
     cause is a report path too long for one pane row; Step 5's compose gate

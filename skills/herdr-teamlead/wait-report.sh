@@ -52,6 +52,19 @@ TEAMLEAD_WAIT_BUDGET_SEC="${TEAMLEAD_WAIT_BUDGET_SEC:-5400}"
 # worker's tool calls cannot end the wait by itself. Exit 4 is a diagnostic,
 # never a completion.
 TEAMLEAD_UNCONFIRMED_IDLE_READS="${TEAMLEAD_UNCONFIRMED_IDLE_READS:-2}"
+
+# Every env-overridable count is validated before it reaches arithmetic: a
+# bad override must fail as exit 2 with a diagnostic, never as a bash
+# arithmetic abort with no JSON and no named cause.
+validate_positive_int() { # <name> <value>
+  case "$2" in
+    ''|*[!0-9]*|0)
+      warn "$1 must be a positive integer, got '${2}' — unset it to use the script's default"
+      return 2
+      ;;
+  esac
+  return 0
+}
 # Per-attempt pane-probe timeout in milliseconds. `herdr pane wait-output`
 # searches the existing snapshot first, so this bounds one probe, not the wait.
 TEAMLEAD_PROBE_TIMEOUT_MS="${TEAMLEAD_PROBE_TIMEOUT_MS:-2000}"
@@ -254,6 +267,8 @@ main() {
     warn "report path '${REPORT_PATH}' is relative — pass the absolute path the brief gave the worker (e.g. \"\$PWD/${REPORT_PATH#./}\")"
     return 2
   fi
+
+  validate_positive_int TEAMLEAD_UNCONFIRMED_IDLE_READS "$TEAMLEAD_UNCONFIRMED_IDLE_READS" || return 2
 
   if [[ "${HERDR_ENV:-}" != "1" ]]; then
     warn "not running inside Herdr (HERDR_ENV='${HERDR_ENV:-}') — run the team round from a pane Herdr manages"
