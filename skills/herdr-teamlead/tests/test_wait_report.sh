@@ -33,6 +33,9 @@
 #  14c. Glued decoy      -> reassembly cannot turn another report into ours.
 #  14d. Beyond paragraph -> a blank row ends the reassembly; later rows never join.
 #  14e. Footer abuts     -> a footer glued on the end cannot complete a name.
+#  14f. Unrelated suffix -> a row after a SHORT marker row is not a continuation.
+#  14g. Filled marker row-> a marker row at the wrap width continues; name completes.
+#  15c. Metachar decoy   -> `.` in the name is literal; `reportXmd` never confirms.
 #  16. Unconfirmed idle  -> file present + idle twice + no marker = exit 4.
 #  15. Decoy REPORT     -> another report's line does NOT complete this wait,
 #                         including one whose basename ENDS with this one's.
@@ -308,7 +311,7 @@ ${base}"
   #      confirms it.
   RUN_SEQ=$((RUN_SEQ+1))
   local split_inside
-  split_inside="REPORT: /Users/jbaruch/.worktrees/round-3/reports/${base:0:3}
+  split_inside="  REPORT: /Users/jbaruch/.worktrees/round-3/reports/${base:0:3}
   ${base:3}"
   OUT="$(env HERDR_ENV=1 HERDR_BIN="$FAKE" \
     TEAMLEAD_WAIT_INTERVAL_SEC=0 TEAMLEAD_WAIT_BUDGET_SEC=0 TEAMLEAD_BLOCKED_CONFIRM_SEC=0 \
@@ -325,7 +328,7 @@ ${base}"
   #      so the decoy here is split where neither view may accept it.)
   RUN_SEQ=$((RUN_SEQ+1))
   local glued_decoy
-  glued_decoy="REPORT: /Users/jbaruch/.worktrees/round-3/reports/reviewer-${base:0:3}
+  glued_decoy="  REPORT: /Users/jbaruch/.worktrees/round-3/reports/reviewer-${base:0:3}
   ${base:3}"
   OUT="$(env HERDR_ENV=1 HERDR_BIN="$FAKE" \
     TEAMLEAD_WAIT_INTERVAL_SEC=0 TEAMLEAD_WAIT_BUDGET_SEC=0 TEAMLEAD_BLOCKED_CONFIRM_SEC=0 \
@@ -340,7 +343,7 @@ ${base}"
   #      two rows that were never one line.
   RUN_SEQ=$((RUN_SEQ+1))
   local beyond_paragraph
-  beyond_paragraph="REPORT: /Users/jbaruch/.worktrees/round-3/reports/${base:0:3}
+  beyond_paragraph="  REPORT: /Users/jbaruch/.worktrees/round-3/reports/${base:0:3}
 
   ${base:3}"
   OUT="$(env HERDR_ENV=1 HERDR_BIN="$FAKE" \
@@ -354,7 +357,7 @@ ${base}"
   #      complete a name: the boundary after the basename must be a path end.
   RUN_SEQ=$((RUN_SEQ+1))
   local footer_abuts
-  footer_abuts="REPORT: /Users/jbaruch/.worktrees/round-3/reports/${base:0:3}
+  footer_abuts="  REPORT: /Users/jbaruch/.worktrees/round-3/reports/${base:0:3}
 ─ Worked for 28m 50s ─────"
   OUT="$(env HERDR_ENV=1 HERDR_BIN="$FAKE" \
     TEAMLEAD_WAIT_INTERVAL_SEC=0 TEAMLEAD_WAIT_BUDGET_SEC=0 TEAMLEAD_BLOCKED_CONFIRM_SEC=0 \
@@ -362,6 +365,51 @@ ${base}"
     bash "$SCRIPT" worker "$report" </dev/null 2>"$TMP/e14e")"; RC=$?
   if [[ $RC -ne 0 ]] && printf '%s' "$OUT" | jq -e '.found == false' >/dev/null 2>&1; then
     pass; else fail "footer abuts: expected found false, got RC=$RC OUT=$OUT"; fi
+
+  # 14f. The reviewer's case: an unrelated row right after a marker row that
+  #      ends SHORT of the wrap width spells the rest of the name. The marker
+  #      row was not wrapped (a separator in the window is wider), so the row
+  #      after it is not a continuation and the name is never assembled.
+  RUN_SEQ=$((RUN_SEQ+1))
+  local unrelated_suffix
+  unrelated_suffix="────────────────────────────────────────────────────────────────────────────────────────────────
+  REPORT: /Users/jbaruch/.worktrees/round-3/reports/${base:0:3}
+  ${base:3}"
+  OUT="$(env HERDR_ENV=1 HERDR_BIN="$FAKE" \
+    TEAMLEAD_WAIT_INTERVAL_SEC=0 TEAMLEAD_WAIT_BUDGET_SEC=0 TEAMLEAD_BLOCKED_CONFIRM_SEC=0 \
+    FAKE_MARKER=found FAKE_STATUS=idle FAKE_PANE_TEXT="$unrelated_suffix" \
+    bash "$SCRIPT" worker "$report" </dev/null 2>"$TMP/e14f")"; RC=$?
+  if [[ $RC -ne 0 ]] && printf '%s' "$OUT" | jq -e '.found == false' >/dev/null 2>&1; then
+    pass; else fail "unrelated suffix row: expected found false, got RC=$RC OUT=$OUT"; fi
+
+  # 14g. The same window with the marker row padded out to the separator's
+  #      width IS a wrap, and the continuation completes the name. Together
+  #      with 14f this pins the criterion: filled to the width, same indent.
+  RUN_SEQ=$((RUN_SEQ+1))
+  local sep filled pad
+  sep="────────────────────────────────────────────────────────────────────────────────────────────────"
+  filled="  REPORT: /Users/jbaruch/.worktrees/round-3/reports/"
+  pad=$(( ${#sep} - ${#filled} - 3 ))
+  filled="${filled}$(printf '%*s' "$pad" '' | tr ' ' 'x')/${base:0:3}"
+  OUT="$(env HERDR_ENV=1 HERDR_BIN="$FAKE" \
+    TEAMLEAD_WAIT_INTERVAL_SEC=0 TEAMLEAD_WAIT_BUDGET_SEC=0 TEAMLEAD_BLOCKED_CONFIRM_SEC=0 \
+    FAKE_MARKER=found FAKE_STATUS=idle FAKE_PANE_TEXT="${sep}
+${filled}
+  ${base:3}" \
+    bash "$SCRIPT" worker "$report" </dev/null 2>"$TMP/e14g")"; RC=$?
+  if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | jq -e '.found == true' >/dev/null 2>&1; then
+    pass; else fail "filled marker row: expected found true, got RC=$RC OUT=$OUT ERR=$(cat "$TMP/e14g")"; fi
+
+  # 15c. A regex metacharacter in the name is literal: `report.md` must not
+  #      confirm on `reportXmd`. The quoted part of a bash `=~` pattern is
+  #      matched as a string; this pins it in case a refactor unquotes it.
+  RUN_SEQ=$((RUN_SEQ+1))
+  OUT="$(env HERDR_ENV=1 HERDR_BIN="$FAKE" \
+    TEAMLEAD_WAIT_INTERVAL_SEC=0 TEAMLEAD_WAIT_BUDGET_SEC=0 TEAMLEAD_BLOCKED_CONFIRM_SEC=0 \
+    FAKE_MARKER=found FAKE_STATUS=idle FAKE_PANE_TEXT="  REPORT: /Users/jbaruch/.worktrees/round-3/reports/${base//./X}" \
+    bash "$SCRIPT" worker "$report" </dev/null 2>"$TMP/e15c")"; RC=$?
+  if [[ $RC -ne 0 ]] && printf '%s' "$OUT" | jq -e '.found == false' >/dev/null 2>&1; then
+    pass; else fail "metachar decoy: expected found false, got RC=$RC OUT=$OUT"; fi
 
   # 16. The file is there, the worker reads idle twice, and the marker never
   #     confirms: exit 4 with a reason, well inside the budget, instead of an

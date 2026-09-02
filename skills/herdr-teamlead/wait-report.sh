@@ -48,6 +48,11 @@ TEAMLEAD_WAIT_BUDGET_SEC="${TEAMLEAD_WAIT_BUDGET_SEC:-5400}"
 # exit 4 instead of sitting on the budget. Two, so a `done` flicker between a
 # worker's tool calls cannot end the wait by itself.
 TEAMLEAD_UNCONFIRMED_IDLE_READS="${TEAMLEAD_UNCONFIRMED_IDLE_READS:-2}"
+# Columns a row may fall short of the window's widest row and still count as
+# filled to the wrap width (a trimmed trailing space, a one-column margin).
+# The wrap width is the TUI's own, not the terminal's: `--source
+# recent-unwrapped` returns the same rows, because the TUI draws them.
+TEAMLEAD_WRAP_SLACK_COLS="${TEAMLEAD_WRAP_SLACK_COLS:-2}"
 # Per-attempt pane-probe timeout in milliseconds. `herdr pane wait-output`
 # searches the existing snapshot first, so this bounds one probe, not the wait.
 TEAMLEAD_PROBE_TIMEOUT_MS="${TEAMLEAD_PROBE_TIMEOUT_MS:-2000}"
@@ -183,38 +188,53 @@ marker_seen() { # <pane-id> <report-basename>
   fi
   # Both halves in the same window. The line soft-wraps, and the wrap can land
   # anywhere: after the prefix, inside the path, or INSIDE THE BASENAME. The
-  # row view catches the first two; the marker line reassembled from its own
-  # continuation rows catches the third. Either confirming is enough; the
-  # whole-component boundary applies in both, and the reassembly never reaches
-  # past the marker's paragraph, so unrelated rows cannot be glued into a name.
+  # row view catches the first two; the marker line reassembled from rows
+  # positively identified as its continuations catches the third. Either
+  # confirming is enough; the whole-component boundary applies in both.
   [[ "$text" == *"$REPORT_MARKER"* ]] || return 1
   if basename_on_screen "$text" "$2"; then return 0; fi
   if basename_on_screen "$(marker_line_unwrapped "$text")" "$2"; then return 0; fi
   return 1
 }
 
-# Reassemble the soft-wrapped marker line and nothing else: the LAST row that
-# carries the prefix, plus the consecutive non-blank rows after it with their
-# continuation indentation dropped. A TUI ends the worker's final message with
-# a blank row before its footer, so the join stops there; a footer that abuts
-# the message would be glued onto the end, where it cannot complete a name that
-# the path boundary must follow. A basename the wrap split as `reports/12-` +
-# `developer-fix.md` reads whole again; two unrelated rows do not.
+# Reassemble the wrapped marker line from rows that are provably its
+# continuations, and nothing else. The wrap rule is the proof: a TUI moves text
+# to the next row only when the current row is filled to its wrap width, so a
+# row continues the marker line iff the row before it reached the widest width
+# in the window (within TEAMLEAD_WRAP_SLACK_COLS) AND it carries the marker
+# row's own indentation. A marker row that ends short of the width was not
+# wrapped, and whatever follows it -- a footer, another worker's line, a row
+# that happens to spell the rest of the name -- is never glued on. The
+# reassembly starts at the LAST row carrying the prefix and stops at the first
+# row that fails either test. `wc -m` counts columns, not bytes, so a
+# box-drawing separator measures at its true width.
 marker_line_unwrapped() { # <pane-text>
-  printf '%s\n' "$1" | awk -v marker="$REPORT_MARKER" '
-    { rows[NR] = $0 }
-    index($0, marker) { start = NR }
-    END {
-      if (!start) exit
-      out = rows[start]
-      for (i = start + 1; i <= NR; i++) {
-        line = rows[i]
-        if (line ~ /^[[:space:]]*$/) break
-        sub(/^[[:space:]]+/, "", line)
-        out = out line
-      }
-      printf "%s", out
-    }'
+  local -a rows=()
+  local row width max_width=0 start=-1 i=0 indent="" out="" prev_width=0 stripped=""
+  while IFS= read -r row; do
+    rows+=("$row")
+  done <<< "$1"
+  for (( i = 0; i < ${#rows[@]}; i++ )); do
+    row="${rows[$i]}"
+    width="$(printf '%s' "$row" | LC_ALL=C.UTF-8 wc -m | tr -d '[:space:]')"
+    if (( width > max_width )); then max_width=$width; fi
+    if [[ "$row" == *"$REPORT_MARKER"* ]]; then start=$i; fi
+  done
+  (( start >= 0 )) || return 0
+  row="${rows[$start]}"
+  indent="${row%%[![:space:]]*}"
+  out="$row"
+  prev_width="$(printf '%s' "$row" | LC_ALL=C.UTF-8 wc -m | tr -d '[:space:]')"
+  for (( i = start + 1; i < ${#rows[@]}; i++ )); do
+    row="${rows[$i]}"
+    (( prev_width + TEAMLEAD_WRAP_SLACK_COLS >= max_width )) || break
+    [[ "$row" == "$indent"* ]] || break
+    stripped="${row#"$indent"}"
+    [[ -n "$stripped" && "$stripped" != [[:space:]]* ]] || break
+    out="${out}${stripped}"
+    prev_width="$(printf '%s' "$row" | LC_ALL=C.UTF-8 wc -m | tr -d '[:space:]')"
+  done
+  printf '%s' "$out"
 }
 
 # Does the visible pane show a dialog waiting on a human?
