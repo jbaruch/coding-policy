@@ -223,7 +223,11 @@ def build_parser():
     apply_parser.add_argument(
         "--no-clear",
         action="store_true",
-        help="Skip the context-clearing prompt and send only the assignment.",
+        help=(
+            "Skip the context-clearing prompt and send only the assignment. "
+            "For a pane the lead already cleared by hand; the record carries "
+            "cleared: false."
+        ),
     )
     apply_parser.add_argument(
         "--task",

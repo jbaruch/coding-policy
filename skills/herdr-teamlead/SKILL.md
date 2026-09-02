@@ -246,9 +246,13 @@ produce a report, so Step 9 waits on exactly the roles that landed here.
 - **A worker failed on its clear command** — its assignment was never sent, and
   the round is short that role. Go to Step 9 for the rest; re-dispatch this one
   by re-running this step for that role alone once its pane is clear.
-- **`cleared: false` on a record** — the clear was consumed and the pane did
-  not change. That worker still got its brief, with a stale context behind it.
-  Proceed to Step 9, and weigh its report knowing the context was not fresh.
+- **A refusal saying the screen did not change** — the clear command was
+  consumed and the pane did not redraw, so the context was not cleared and
+  `apply` sent that worker nothing: a brief goes out only behind a confirmed
+  clear. Read the pane and clear it by hand. Once the pane shows a fresh
+  session, re-run this step for that role with `--no-clear`; that is the one
+  path on which a record carries `cleared: false`, and it means the lead did
+  the clearing. Never brief a worker on top of the previous task's context.
 - **A refusal naming an unaccounted composer** — the worker's input line holds
   text the lead did not send. Nothing was dispatched for that role. Read the
   pane and clear it by hand, or re-run this step with `--allow-recovery` once

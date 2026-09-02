@@ -270,8 +270,10 @@ one that never began.
 
 `cleared: true` in the `apply` output is earned, not assumed: the clear command
 was consumed AND the pane's content changed (a fresh Codex banner, an emptied
-Claude transcript, Grok's redrawn `session_start`). Consumed but unchanged
-reports `cleared: false` with a warning.
+Claude transcript, Grok's redrawn `session_start`). Consumed but unchanged is
+refused before the brief goes out — nothing is pasted onto a context that was
+not cleared. `cleared: false` appears only under `--no-clear`, the path for a
+pane the lead cleared by hand.
 
 Three per-agent config keys drive it:
 
