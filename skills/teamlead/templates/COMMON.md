@@ -29,11 +29,17 @@ to know goes in the report.
 
 ## Checkouts
 
-- The shared checkout is `{{SHARED_CHECKOUT}}`. It stays on the default branch.
-- Never edit it, never switch its branch, never stash in it, never run any
-  mutating git command there. Read it freely.
-- Every write you make happens in the worktree your brief names, under
-  `~/.worktrees/`.
+- The shared checkout is `{{SHARED_CHECKOUT}}`. It stays on the default branch,
+  and the lead alone touches it.
+- Run NO git command against it. Not `worktree add`, not `stash`, not `fetch`,
+  not `log` — a `fetch` writes to its `.git` too, and another agent is working
+  in there. Reading its files with `cat`, `grep`, or an editor is fine.
+- Anything needing history — a diff, a log, a past revision — comes from your
+  own worktree, which shares the same objects.
+- Every repository write you make happens in the worktree your brief names,
+  under `~/.worktrees/`.
+- Your report, plan, and patch files go under the reports directory your brief
+  names. Nothing you write lands anywhere else.
 - Prefix every code-touching shell command with `cd <worktree> &&`. Your shell
   does not keep a working directory between calls.
 - Confirm `pwd` before running the build, the tests, or any gate.

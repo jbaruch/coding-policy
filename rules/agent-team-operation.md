@@ -19,10 +19,13 @@ description: Running a multi-agent team — headroom-driven role rotation, one w
 - One writer per worktree
 - The shared checkout stays on the default branch
 - The lead reads the shared checkout and never edits it
-- The lead provisions every worker's worktree before dispatch
+- The lead provisions every worktree a brief names, before dispatch
+- A read-only role that writes no repository content needs no worktree
 - A worker never creates, moves, or removes a worktree
 - A worker runs no git command against the shared checkout, mutating or otherwise
-- A worker writes only in the worktree its brief names, under `~/.worktrees/`
+- A worker's repository writes happen only in the worktree its brief names, under `~/.worktrees/`
+- A worker's report, plan, and patch artifacts go only under the reports directory its brief names
+- A worker writes nowhere else
 - Every code-touching command carries its own `cd <worktree> &&` prefix
 - See `rules/agent-worktree-isolation.md`
 
