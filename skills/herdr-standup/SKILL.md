@@ -50,8 +50,9 @@ One call per idle or done worker:
 
 Sends the standup question as a plain message and emits
 `{"agent","report_path","state","sent"}`. Exit 3 means the worker was not ready
-and nothing was sent — move it to Step 3's list. Exit 1 is a precondition, exit
-2 a herdr failure. The question text and the four-line shape it demands are the
+and nothing was sent — move it to Step 3's list. Exit 1 is a precondition,
+including a report path longer than the script's limit (the worker's
+`REPORT: <path>` line must fit one pane row), exit 2 a herdr failure. The question text and the four-line shape it demands are the
 script's contract; see the header of
 `skills/herdr-standup/standup-ask.sh`.
 
@@ -68,6 +69,19 @@ budget is the script's constant, never a number chosen here; see the header of
 `skills/herdr-standup/standup-wait.sh`. Exit 1 means the worker did not answer
 inside it: it is not chased twice. Move it to Step 3's list with what you know.
 Exit 3 means a dialog is up — relay it and leave that worker to the operator.
+Exit 4 means the answer file exists but the pane did not show the marker
+whole. That is not an answer: a marker the pane wrapped cannot be told from a
+newline. Read the live state with `herdr agent get <agent-name>` and take the
+first continuation that applies:
+
+- The command fails — report its message verbatim and finish here.
+- The state is `blocked` or `working` — re-run the wait for that worker once.
+  Exits 0–3 from that re-run take their branches above. A second exit 4 is
+  terminal: move the worker to Step 3's list with what you know.
+- The state is `idle` or `done` — move the worker to Step 3's list with what
+  you know. `standup-ask.sh` refuses a report path too long for one pane row,
+  so this outcome means the path bypassed it.
+
 Proceed immediately to Step 3.
 
 ## Step 3 — Write the Rows Nobody Answered

@@ -14,9 +14,11 @@
 #           agent-name  a live Herdr agent name (or the pane id hosting it).
 #           report-path absolute path the brief told that worker to write; a
 #                       relative path is refused (exit 2).
-#   stdout: one JSON object, emitted on every terminal outcome —
+#   stdout: one JSON object on every terminal outcome except exit 2, which
+#           leaves stdout empty (its diagnostic is on stderr) —
 #           {"agent":"<n>","state":"<s>","report_path":"<p>",
 #            "found":<bool>,"elapsed_seconds":<int>}
+#           plus "reason":"<why>" on exit 4 only.
 #   stderr: diagnostics and per-attempt progress.
 #   exit  : 0 report found (`found` true),
 #           1 budget exhausted (`found` false, `state` last observed),
@@ -24,7 +26,13 @@
 #           3 the worker is blocked at an approval or question dialog,
 #             confirmed by two reads and the pane
 #             (`found` false) — inspect the dialog with
-#             `herdr agent read <name> --source visible` before answering it.
+#             `herdr agent read <name> --source visible` before answering it,
+#           4 the report FILE is present and the worker has read idle or done
+#             on consecutive polls, yet the marker could not be confirmed
+#             (`found` false, `reason` set) — never delivery: a marker the
+#             pane wrapped cannot be told from a newline. The skill re-runs
+#             for a blocked or working worker and records no report for an
+#             idle one; compose-briefs.sh prevents the wrap up front.
 #   env   : HERDR_ENV must be 1. HERDR_BIN overrides the herdr binary.
 #           Poll interval, give-up budget, and the pane-probe parameters are
 #           the named constants below (rules/ci-safety.md Always Watch CI —
@@ -38,6 +46,42 @@ TEAMLEAD_WAIT_INTERVAL_SEC="${TEAMLEAD_WAIT_INTERVAL_SEC:-15}"
 # Give-up budget in seconds. A worker round on a real task runs long; this is
 # the point at which the lead inspects the pane by hand instead of waiting.
 TEAMLEAD_WAIT_BUDGET_SEC="${TEAMLEAD_WAIT_BUDGET_SEC:-5400}"
+# Consecutive polls on which the report file exists AND the worker reads idle
+# or done AND the marker is still unconfirmed before the wait gives up with
+# exit 4 instead of sitting on the budget. Two, so a `done` flicker between a
+# worker's tool calls cannot end the wait by itself. Exit 4 is a diagnostic,
+# never a completion.
+TEAMLEAD_UNCONFIRMED_IDLE_READS="${TEAMLEAD_UNCONFIRMED_IDLE_READS:-2}"
+
+# Every numeric override is validated before it reaches arithmetic, `sleep`,
+# or a herdr argument: a bad override must fail as exit 2 with a diagnostic,
+# never as a bash arithmetic abort or a tool error with no JSON and no named
+# cause. Counts that must be at least one use the positive form; seconds may
+# be zero (the tests run with zero intervals and budgets).
+validate_nonneg_int() { # <name> <value>
+  case "$2" in
+    ''|*[!0-9]*)
+      warn "$1 must be a non-negative integer, got '${2}' — unset it to use the script's default"
+      return 2
+      ;;
+  esac
+  return 0
+}
+validate_positive_int() { # <name> <value>
+  case "$2" in
+    ''|*[!0-9]*)
+      warn "$1 must be a positive integer, got '${2}' — unset it to use the script's default"
+      return 2
+      ;;
+  esac
+  # Digits only from here; compare in base 10 so `00` and `000` read as zero
+  # rather than slipping past a literal-"0" test.
+  if (( 10#$2 < 1 )); then
+    warn "$1 must be a positive integer, got '${2}' — unset it to use the script's default"
+    return 2
+  fi
+  return 0
+}
 # Per-attempt pane-probe timeout in milliseconds. `herdr pane wait-output`
 # searches the existing snapshot first, so this bounds one probe, not the wait.
 TEAMLEAD_PROBE_TIMEOUT_MS="${TEAMLEAD_PROBE_TIMEOUT_MS:-2000}"
@@ -100,10 +144,13 @@ cleanup() {
   return 0
 }
 
-emit() { # <state> <found-bool> <elapsed-seconds>
+emit() { # <state> <found-bool> <elapsed-seconds> [reason]
+  # `reason` appears only when set: the object stays the documented shape on
+  # every outcome, with one extra field on the exit-4 path.
   jq -n --arg a "$AGENT" --arg s "$1" --arg p "$REPORT_PATH" \
-        --argjson f "$2" --argjson e "$3" \
-    '{agent: $a, state: $s, report_path: $p, found: $f, elapsed_seconds: $e}'
+        --argjson f "$2" --argjson e "$3" --arg r "${4:-}" \
+    '{agent: $a, state: $s, report_path: $p, found: $f, elapsed_seconds: $e}
+     + (if $r == "" then {} else {reason: $r} end)'
 }
 
 # Echo "<state> <pane_id>" for the agent, or return 2 on a herdr failure.
@@ -169,7 +216,14 @@ marker_seen() { # <pane-id> <report-basename>
     return 2
   fi
   # Both halves in the same window, in either row: the line soft-wraps, so the
-  # basename may sit on the row after the prefix.
+  # basename may sit on the row after the prefix. A wrap that lands INSIDE the
+  # basename is not confirmed here, on purpose: the TUIs draw their own
+  # transcript rows (`--source recent-unwrapped` returns the same two rows), so
+  # no pane metadata recovers the logical line, and every text-only join --
+  # adjacency, blank-row paragraphs, filled-to-width rows -- can be satisfied
+  # by an unrelated row spelling the rest of the name. That case reaches the
+  # exit-4 path below and is never delivery; compose-briefs.sh keeps it from
+  # arising by refusing a report path that would wrap.
   [[ "$text" == *"$REPORT_MARKER"* ]] || return 1
   basename_on_screen "$text" "$2" || return 1
   return 0
@@ -231,6 +285,21 @@ main() {
     return 2
   fi
 
+  validate_positive_int TEAMLEAD_UNCONFIRMED_IDLE_READS "$TEAMLEAD_UNCONFIRMED_IDLE_READS" || return 2
+  validate_nonneg_int TEAMLEAD_WAIT_INTERVAL_SEC "$TEAMLEAD_WAIT_INTERVAL_SEC" || return 2
+  validate_nonneg_int TEAMLEAD_WAIT_BUDGET_SEC "$TEAMLEAD_WAIT_BUDGET_SEC" || return 2
+  validate_nonneg_int TEAMLEAD_BLOCKED_CONFIRM_SEC "$TEAMLEAD_BLOCKED_CONFIRM_SEC" || return 2
+  validate_positive_int TEAMLEAD_PROBE_TIMEOUT_MS "$TEAMLEAD_PROBE_TIMEOUT_MS" || return 2
+  validate_positive_int TEAMLEAD_PROBE_LINES "$TEAMLEAD_PROBE_LINES" || return 2
+  # Normalize to decimal once: a validated `08` would otherwise be reparsed as
+  # octal by every later bare arithmetic expansion.
+  TEAMLEAD_UNCONFIRMED_IDLE_READS=$(( 10#$TEAMLEAD_UNCONFIRMED_IDLE_READS ))
+  TEAMLEAD_WAIT_INTERVAL_SEC=$(( 10#$TEAMLEAD_WAIT_INTERVAL_SEC ))
+  TEAMLEAD_WAIT_BUDGET_SEC=$(( 10#$TEAMLEAD_WAIT_BUDGET_SEC ))
+  TEAMLEAD_BLOCKED_CONFIRM_SEC=$(( 10#$TEAMLEAD_BLOCKED_CONFIRM_SEC ))
+  TEAMLEAD_PROBE_TIMEOUT_MS=$(( 10#$TEAMLEAD_PROBE_TIMEOUT_MS ))
+  TEAMLEAD_PROBE_LINES=$(( 10#$TEAMLEAD_PROBE_LINES ))
+
   if [[ "${HERDR_ENV:-}" != "1" ]]; then
     warn "not running inside Herdr (HERDR_ENV='${HERDR_ENV:-}') — run the team round from a pane Herdr manages"
     return 2
@@ -249,6 +318,7 @@ main() {
   # aborts the run. Giving each one a value makes that class impossible rather
   # than making it depend on statement order holding forever.
   local start=0 now=0 elapsed=0 info="" state="unknown" pane="" rc=0 marker=0
+  local unconfirmed_idle=0
   if ! start="$(date +%s)"; then
     warn "cannot read the system clock — the wait cannot be bounded"
     return 2
@@ -309,6 +379,21 @@ main() {
 
     now="$(date +%s)"
     elapsed=$(( now - start ))
+
+    # The file is there and the worker looks finished, but the marker did not
+    # confirm. That is a probe blind spot, not a worker still working, and
+    # sitting on the budget hides it for an hour. Two consecutive reads, so a
+    # `done` flicker mid-turn cannot trip it alone.
+    if (( marker == 0 )) && [[ -f "$REPORT_PATH" ]] && [[ "$state" == "idle" || "$state" == "done" ]]; then
+      unconfirmed_idle=$(( unconfirmed_idle + 1 ))
+      if (( unconfirmed_idle >= TEAMLEAD_UNCONFIRMED_IDLE_READS )); then
+        emit "$state" false "$elapsed" "report file present, worker ${state} on ${unconfirmed_idle} consecutive reads, marker unconfirmed"
+        warn "${AGENT}: the report file exists and the worker reads ${state}, but \`${REPORT_MARKER}\` with \`${REPORT_BASENAME}\` is still unconfirmed after ${unconfirmed_idle} consecutive reads — not a delivered report: re-run this wait once if the worker is blocked or working, record no report if it is idle or done; a report path that fits one pane row prevents this"
+        return 4
+      fi
+    else
+      unconfirmed_idle=0
+    fi
     if (( elapsed >= TEAMLEAD_WAIT_BUDGET_SEC )); then
       emit "$state" false "$elapsed"
       warn "${AGENT} produced no report within ${TEAMLEAD_WAIT_BUDGET_SEC}s (marker seen: ${marker}, file present: $([[ -f "$REPORT_PATH" ]] && echo 1 || echo 0)) — read the pane with \`${HERDR_BIN} agent read ${AGENT} --source visible\` before re-dispatching"

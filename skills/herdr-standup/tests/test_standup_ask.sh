@@ -16,6 +16,9 @@
 #   5. Message shape  -> `agent prompt`, never a slash command, and the four
 #                        field names plus the report path are in the text.
 #   6. Relative path  -> exit 1 before any herdr call.
+#  6b. Over-long path -> exit 1; the marker line must fit one pane row.
+#  6c. Bad limit      -> a non-integer override is exit 1, not an abort.
+#  6d. `0100` is 100  -> a leading zero is decimal, never octal, downstream.
 #   7. Outside Herdr  -> exit 1.
 #   8. herdr failure  -> exit 2, no verdict.
 #   9. Bad payload    -> exit 2.
@@ -72,6 +75,9 @@ main() {
   trap cleanup EXIT
   FAKE="$TMP/herdr"; mk_fake_herdr "$FAKE"
   REPORT="$TMP/reports/worker.md"
+  # The temp dir alone is near the production path limit; the limit has its
+  # own case (6b) and every other case runs under a limit it cannot hit.
+  export STANDUP_REPORT_PATH_MAX_COLS=1000
   FAIL=0; PASS=0; RUN_SEQ=0
 
   # 1. An idle worker is asked.
@@ -113,6 +119,25 @@ main() {
   OUT="$(env HERDR_ENV=1 HERDR_BIN="$FAKE" bash "$SCRIPT" worker "reports/w.md" 2>"$TMP/e6")"; RC=$?
   if [[ $RC -eq 1 && -z "$OUT" ]] && grep -q "relative" "$TMP/e6"; then
     pass; else fail "relative path: expected exit 1, got RC=$RC"; fi
+
+  # 6b. A report path that would wrap the worker's marker line is refused.
+  RUN_SEQ=$((RUN_SEQ+1))
+  OUT="$(env HERDR_ENV=1 HERDR_BIN="$FAKE" STANDUP_REPORT_PATH_MAX_COLS=100 bash "$SCRIPT" worker "/very/long/reports/directory/that/keeps/going/and/going/round-3/reports/standup-answer-from-worker.md" 2>"$TMP/e6b")"; RC=$?
+  if [[ $RC -eq 1 && -z "$OUT" ]] && grep -q "limit" "$TMP/e6b"; then
+    pass; else fail "long path: expected exit 1 naming the limit, got RC=$RC OUT=$OUT"; fi
+
+  # 6c. A bad limit override is a precondition failure, never an arithmetic abort.
+  RUN_SEQ=$((RUN_SEQ+1))
+  OUT="$(env HERDR_ENV=1 HERDR_BIN="$FAKE" STANDUP_REPORT_PATH_MAX_COLS=soon bash "$SCRIPT" worker "$REPORT" 2>"$TMP/e6c")"; RC=$?
+  if [[ $RC -eq 1 && -z "$OUT" ]] && grep -q "STANDUP_REPORT_PATH_MAX_COLS must be a positive integer" "$TMP/e6c"; then
+    pass; else fail "bad limit override: expected exit 1 naming it, got RC=$RC OUT=$OUT"; fi
+
+  # 6d. A leading-zero override is decimal downstream: `0100` rejects the long
+  #     path like `100` does, with no octal reparse.
+  RUN_SEQ=$((RUN_SEQ+1))
+  OUT="$(env HERDR_ENV=1 HERDR_BIN="$FAKE" STANDUP_REPORT_PATH_MAX_COLS=0100 bash "$SCRIPT" worker "/very/long/reports/directory/that/keeps/going/and/going/round-3/reports/standup-answer-from-worker.md" 2>"$TMP/e6d")"; RC=$?
+  if [[ $RC -eq 1 && -z "$OUT" ]] && grep -q "limit is 100" "$TMP/e6d" && ! grep -q "value too great" "$TMP/e6d"; then
+    pass; else fail "leading-zero limit: expected exit 1 naming limit 100, got RC=$RC OUT=$OUT ERR=$(cat "$TMP/e6d")"; fi
 
   # 7. Outside Herdr.
   OUT="$(env -u HERDR_ENV HERDR_BIN="$FAKE" bash "$SCRIPT" worker "$REPORT" 2>"$TMP/e7")"; RC=$?

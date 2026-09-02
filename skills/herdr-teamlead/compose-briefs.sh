@@ -18,11 +18,14 @@
 #   exit  : 0 every file written with no placeholder left,
 #           1 precondition unmet (usage, missing dir/file/template, no jq),
 #           2 validation failed — an unfilled placeholder, a supplied key no
-#             template uses, or a value that is not text. Nothing is written on
-#             a validation failure,
+#             template uses, a value that is not text, or a REPORT longer
+#             than TEAMLEAD_REPORT_PATH_MAX_COLS. Nothing is written on a
+#             validation failure,
 #           3 a tool this depends on failed (the placeholder scan itself). The
 #             answer is unknown, which is never reported as "no placeholders".
-#   env   : none.
+#   env   : TEAMLEAD_REPORT_PATH_MAX_COLS overrides the REPORT length limit
+#           (tests, a fleet whose narrowest pane is wider); a non-integer or
+#           zero value is a precondition failure (exit 1).
 #
 # Validation runs in both directions on purpose. An unfilled placeholder is a
 # brief that lies to a worker; a supplied key nothing uses is a value the lead
@@ -31,6 +34,13 @@ set -euo pipefail
 
 # A placeholder is upper-case, digits, and underscores between double braces.
 PLACEHOLDER_RE='\{\{[A-Z0-9_]+\}\}'
+# Longest REPORT value a brief may carry. The worker's final message ends with
+# `REPORT: <path>`, and the wait confirms it by finding the report's basename
+# whole on a visible row. A TUI wraps that line at its own content width and
+# a wrap inside the name cannot be told from a newline, so the only sound fix
+# is a path that fits one row on every pane this fleet runs: the widest marker
+# line is the prefix plus indentation plus this many characters.
+TEAMLEAD_REPORT_PATH_MAX_COLS="${TEAMLEAD_REPORT_PATH_MAX_COLS:-100}"
 
 warn() { printf 'compose-briefs: %s\n' "$1" >&2; }
 
@@ -109,6 +119,19 @@ main() {
   fi
   local templates="$1" values_file="$2" outdir="$3"
 
+  case "$TEAMLEAD_REPORT_PATH_MAX_COLS" in
+    ''|*[!0-9]*)
+      warn "TEAMLEAD_REPORT_PATH_MAX_COLS must be a positive integer, got '${TEAMLEAD_REPORT_PATH_MAX_COLS}' — unset it to use the script's default"
+      return 1
+      ;;
+  esac
+  if (( 10#$TEAMLEAD_REPORT_PATH_MAX_COLS < 1 )); then
+    warn "TEAMLEAD_REPORT_PATH_MAX_COLS must be a positive integer, got '${TEAMLEAD_REPORT_PATH_MAX_COLS}' — unset it to use the script's default"
+    return 1
+  fi
+  # Normalize to decimal once, so a validated `08` is not reparsed as octal.
+  TEAMLEAD_REPORT_PATH_MAX_COLS=$(( 10#$TEAMLEAD_REPORT_PATH_MAX_COLS ))
+
   if ! command -v jq >/dev/null 2>&1; then
     warn "jq not found on PATH — install it (\`brew install jq\`) to compose briefs"
     return 1
@@ -154,15 +177,11 @@ main() {
     fi
   done <<< "$roles"
 
-  if ! mkdir -p "$outdir"; then
-    warn "cannot create the output dir ${outdir} — check permissions"
-    return 1
-  fi
-
   # Compose into memory first: a validation failure must leave no half-written
-  # round behind (`rules/file-hygiene.md` Idempotency).
+  # round behind, and no output directory either (`rules/file-hygiene.md`
+  # Idempotency); the directory is created only once every check has passed.
   local -a out_paths=() out_bodies=()
-  local merged rendered leftovers supplied known unused key
+  local merged rendered leftovers supplied known unused key report
   local common_body scan_rc=0
   validate_values "$shared" "the shared values" || return 2
   common_body="$(substitute "$common_tpl" "$shared")"
@@ -178,6 +197,11 @@ main() {
   while IFS= read -r role; do
     merged="$(jq -c -n --argjson a "$shared" --argjson b "$(printf '%s' "$values" | jq -c --arg r "$role" '.roles[$r]')" '$a * $b')"
     validate_values "$merged" "the values for role '${role}'" || return 2
+    report="$(printf '%s' "$merged" | jq -r '.REPORT // ""')"
+    if (( ${#report} > TEAMLEAD_REPORT_PATH_MAX_COLS )); then
+      warn "REPORT for role '${role}' is ${#report} characters; the limit is ${TEAMLEAD_REPORT_PATH_MAX_COLS} so the worker's \`REPORT: <path>\` line fits one pane row and the wait can confirm it — use a shorter reports directory (e.g. one under \$HOME/.local/state) and re-run"
+      return 2
+    fi
     rendered="$(substitute "${templates}/brief-${role}.md" "$merged")"
     scan_rc=0
     leftovers="$(leftover_placeholders "$rendered")" || scan_rc=$?
@@ -208,6 +232,10 @@ main() {
     out_bodies+=("$rendered")
   done <<< "$roles"
 
+  if ! mkdir -p "$outdir"; then
+    warn "cannot create the output dir ${outdir} — check permissions"
+    return 1
+  fi
   local i
   for i in "${!out_paths[@]}"; do
     if ! printf '%s\n' "${out_bodies[$i]}" > "${out_paths[$i]}"; then

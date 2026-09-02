@@ -11,10 +11,14 @@
 #
 # Contract:
 #   argv  : <agent-name> <report-path>   forwarded verbatim to wait-report.sh
-#   stdout: wait-report.sh's one JSON object.
+#   stdout: wait-report.sh's one JSON object on exits 0, 1, 3, and 4. Empty on
+#           any exit 2 — wait-report.sh's own, or this wrapper's preflight
+#           (bad budget override, sibling script missing) — with the
+#           diagnostic on stderr.
 #   stderr: diagnostics.
 #   exit  : wait-report.sh's code — 0 report found, 1 budget exhausted,
-#           2 usage error or tool failure, 3 blocked at a dialog; also 2 when
+#           2 usage error or tool failure, 3 blocked at a dialog, 4 file
+#           present but marker unconfirmed (read the pane); also 2 when
 #           wait-report.sh is not installed beside this skill or the budget
 #           override is not an integer. In both of those cases nothing is run.
 #   env   : STANDUP_WAIT_BUDGET_SEC overrides the budget (tests, a slow fleet).
