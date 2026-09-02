@@ -76,6 +76,9 @@ Observed in the 2026-09-01 round:
 - `herdr agent wait claude` returned `done` several times while Claude Code was
   mid-task, between tool calls and while streaming.
 - Grok reported `working` while sitting idle at startup.
+- Codex read `blocked` for a single read while working with nothing on screen.
+  It runs in Full Access, where a permission prompt resolves itself before
+  anything can observe it.
 
 A single `idle` or `done` observation is therefore never completion. Completion
 is the conjunction: the report file exists on disk AND the worker's final
@@ -88,6 +91,11 @@ herdr pane wait-output --match 'REPORT: ' --source visible --lines 40 --timeout 
 
 followed by verifying the file. `skills/teamlead/wait-report.sh` does both;
 its header carries the contract, its constants the poll interval and budget.
+
+`blocked` gets the same treatment as `done`: it is terminal only when two reads
+a confirmation delay apart both say `blocked` AND the visible pane shows a
+dialog row. A lone `blocked` read keeps the wait alive. The delay and the
+marker list are constants at the top of `skills/teamlead/wait-report.sh`.
 
 `pane wait-output` searches the existing snapshot before it polls, so a marker
 left in the scrollback by an earlier round can satisfy the wait immediately.

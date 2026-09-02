@@ -32,6 +32,9 @@
 #  15. Decoy REPORT     -> another report's line does NOT complete this wait,
 #                         including one whose basename ENDS with this one's.
 #  16. Confirm read     -> a failing `pane read` is a tool failure (exit 2).
+#  17. Blocked flicker  -> one `blocked` read with no dialog keeps waiting.
+#  18. Blocked twice    -> two `blocked` reads plus a dialog row is exit 3.
+#  19. Blocked, no UI   -> two `blocked` reads without a dialog keep waiting.
 #
 # Run: bash skills/teamlead/tests/test_wait_report.sh
 set -uo pipefail
@@ -66,8 +69,17 @@ case "${1:-} ${2:-}" in
         "${FAKE_STATUS:-idle}" "${3:-worker}"
       exit 0
     fi
+    status="${FAKE_STATUS:-idle}"
+    # A status that changes after the first read, for the flicker cases.
+    if [[ -n "${FAKE_STATUS_AFTER:-}" && -n "${FAKE_GET_COUNTER:-}" ]]; then
+      n=0
+      [[ -r "$FAKE_GET_COUNTER" ]] && read -r n < "$FAKE_GET_COUNTER"
+      n=$((n + 1))
+      printf '%s\n' "$n" > "$FAKE_GET_COUNTER"
+      (( n >= 2 )) && status="$FAKE_STATUS_AFTER"
+    fi
     printf '{"id":"cli:agent:get","result":{"type":"agent_info","agent":{"agent":"claude","agent_status":"%s","pane_id":"%s","name":"%s"}}}\n' \
-      "${FAKE_STATUS:-idle}" "${FAKE_PANE:-w2:p1}" "${3:-worker}"
+      "$status" "${FAKE_PANE:-w2:p1}" "${3:-worker}"
     exit 0
     ;;
   "pane read")
@@ -113,7 +125,7 @@ run() {
   RUN_SEQ=$((RUN_SEQ+1))
   local err="$TMP/stderr.$RUN_SEQ"
   OUT="$(env HERDR_ENV=1 HERDR_BIN="$FAKE" \
-    TEAMLEAD_WAIT_INTERVAL_SEC=0 TEAMLEAD_WAIT_BUDGET_SEC=0 \
+    TEAMLEAD_WAIT_INTERVAL_SEC=0 TEAMLEAD_WAIT_BUDGET_SEC=0 TEAMLEAD_BLOCKED_CONFIRM_SEC=0 \
     FAKE_PANE_TEXT="REPORT: ${report}" \
     "$@" bash "$SCRIPT" worker "$report" </dev/null 2>"$err")"
   RC=$?
@@ -174,7 +186,7 @@ main() {
   local counter="$TMP/probe-count"
   RUN_SEQ=$((RUN_SEQ+1))
   OUT="$(env HERDR_ENV=1 HERDR_BIN="$FAKE" \
-    TEAMLEAD_WAIT_INTERVAL_SEC=0 TEAMLEAD_WAIT_BUDGET_SEC=60 \
+    TEAMLEAD_WAIT_INTERVAL_SEC=0 TEAMLEAD_WAIT_BUDGET_SEC=60 TEAMLEAD_BLOCKED_CONFIRM_SEC=0 \
     FAKE_MARKER=late FAKE_COUNTER="$counter" FAKE_STATUS=working \
     bash "$SCRIPT" worker "$report" </dev/null 2>"$TMP/stderr.$RUN_SEQ")"; RC=$?
   local probes=0
@@ -184,7 +196,8 @@ main() {
 
   # 5. A blocked worker is waiting on a human — return at once, do not spend
   #    the budget.
-  run "$report" FAKE_MARKER=found FAKE_STATUS=blocked
+  run "$report" FAKE_MARKER=found FAKE_STATUS=blocked \
+    FAKE_PANE_TEXT="Do you want to allow this edit?"
   if [[ $RC -eq 3 ]] && printf '%s' "$OUT" | jq -e '.found == false and .state == "blocked"' >/dev/null 2>&1; then
     pass; else fail "blocked: expected exit 3 with state blocked, got RC=$RC OUT=$OUT"; fi
 
@@ -233,7 +246,7 @@ main() {
   local argvfile="$TMP/probe-argv"
   RUN_SEQ=$((RUN_SEQ+1))
   env HERDR_ENV=1 HERDR_BIN="$FAKE" \
-    TEAMLEAD_WAIT_INTERVAL_SEC=0 TEAMLEAD_WAIT_BUDGET_SEC=0 \
+    TEAMLEAD_WAIT_INTERVAL_SEC=0 TEAMLEAD_WAIT_BUDGET_SEC=0 TEAMLEAD_BLOCKED_CONFIRM_SEC=0 \
     FAKE_MARKER=found FAKE_ARGV_FILE="$argvfile" FAKE_PANE="w9:p9" \
     bash "$SCRIPT" worker "$report" </dev/null >/dev/null 2>"$TMP/stderr.$RUN_SEQ"
   local probe_argv=""
@@ -248,7 +261,7 @@ main() {
   #     error; name the real cause once instead.
   RUN_SEQ=$((RUN_SEQ+1))
   OUT="$(env HERDR_ENV=1 HERDR_BIN="$FAKE" \
-    TEAMLEAD_WAIT_INTERVAL_SEC=0 TEAMLEAD_WAIT_BUDGET_SEC=0 \
+    TEAMLEAD_WAIT_INTERVAL_SEC=0 TEAMLEAD_WAIT_BUDGET_SEC=0 TEAMLEAD_BLOCKED_CONFIRM_SEC=0 \
     FAKE_MARKER=found FAKE_GET_NO_PANE=1 \
     bash "$SCRIPT" worker "$report" </dev/null 2>"$TMP/e12")"; RC=$?
   ERRTEXT="$(cat "$TMP/e12")"
@@ -261,7 +274,7 @@ main() {
   #     exit-code check alone would call the run clean.
   RUN_SEQ=$((RUN_SEQ+1))
   OUT="$(env HERDR_ENV=1 HERDR_BIN="$FAKE" \
-    TEAMLEAD_WAIT_INTERVAL_SEC=0 TEAMLEAD_WAIT_BUDGET_SEC=0 \
+    TEAMLEAD_WAIT_INTERVAL_SEC=0 TEAMLEAD_WAIT_BUDGET_SEC=0 TEAMLEAD_BLOCKED_CONFIRM_SEC=0 \
     FAKE_MARKER=found FAKE_STATUS=idle \
     bash "$SCRIPT" worker "$report" </dev/null 2>"$TMP/e13")"; RC=$?
   if [[ $RC -eq 0 && ! -s "$TMP/e13" ]] && printf '%s' "$OUT" | jq -e '.found == true' >/dev/null 2>&1; then
@@ -277,7 +290,7 @@ main() {
   wrapped="REPORT: /Users/jbaruch/.worktrees/round-3/reports/
 ${base}"
   OUT="$(env HERDR_ENV=1 HERDR_BIN="$FAKE" \
-    TEAMLEAD_WAIT_INTERVAL_SEC=0 TEAMLEAD_WAIT_BUDGET_SEC=0 \
+    TEAMLEAD_WAIT_INTERVAL_SEC=0 TEAMLEAD_WAIT_BUDGET_SEC=0 TEAMLEAD_BLOCKED_CONFIRM_SEC=0 \
     FAKE_MARKER=found FAKE_STATUS=idle FAKE_PANE_TEXT="$wrapped" \
     bash "$SCRIPT" worker "$report" </dev/null 2>"$TMP/e14")"; RC=$?
   if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | jq -e '.found == true' >/dev/null 2>&1; then
@@ -289,7 +302,7 @@ ${base}"
   #     the whole time, so the pane text is the only thing separating them.
   RUN_SEQ=$((RUN_SEQ+1))
   OUT="$(env HERDR_ENV=1 HERDR_BIN="$FAKE" \
-    TEAMLEAD_WAIT_INTERVAL_SEC=0 TEAMLEAD_WAIT_BUDGET_SEC=0 \
+    TEAMLEAD_WAIT_INTERVAL_SEC=0 TEAMLEAD_WAIT_BUDGET_SEC=0 TEAMLEAD_BLOCKED_CONFIRM_SEC=0 \
     FAKE_MARKER=found FAKE_STATUS=idle \
     FAKE_PANE_TEXT="REPORT: /tmp/other-round/developer-notes.md" \
     bash "$SCRIPT" worker "$report" </dev/null 2>"$TMP/e15")"; RC=$?
@@ -301,7 +314,7 @@ ${base}"
   #      has to match as a whole path component, not as a suffix.
   RUN_SEQ=$((RUN_SEQ+1))
   OUT="$(env HERDR_ENV=1 HERDR_BIN="$FAKE" \
-    TEAMLEAD_WAIT_INTERVAL_SEC=0 TEAMLEAD_WAIT_BUDGET_SEC=0 \
+    TEAMLEAD_WAIT_INTERVAL_SEC=0 TEAMLEAD_WAIT_BUDGET_SEC=0 TEAMLEAD_BLOCKED_CONFIRM_SEC=0 \
     FAKE_MARKER=found FAKE_STATUS=idle \
     FAKE_PANE_TEXT="REPORT: /tmp/other-round/reviewer-${base}" \
     bash "$SCRIPT" worker "$report" </dev/null 2>"$TMP/e15b")"; RC=$?
@@ -313,11 +326,51 @@ ${base}"
   #     worker still working.
   RUN_SEQ=$((RUN_SEQ+1))
   OUT="$(env HERDR_ENV=1 HERDR_BIN="$FAKE" \
-    TEAMLEAD_WAIT_INTERVAL_SEC=0 TEAMLEAD_WAIT_BUDGET_SEC=0 \
+    TEAMLEAD_WAIT_INTERVAL_SEC=0 TEAMLEAD_WAIT_BUDGET_SEC=0 TEAMLEAD_BLOCKED_CONFIRM_SEC=0 \
     FAKE_MARKER=found FAKE_STATUS=idle FAKE_PANE_READ_RC=1 FAKE_PANE_TEXT="" \
     bash "$SCRIPT" worker "$report" </dev/null 2>"$TMP/e16")"; RC=$?
   if [[ $RC -eq 2 && -z "$OUT" ]] && grep -q "could not be confirmed" "$TMP/e16"; then
     pass; else fail "confirm read failure: expected exit 2, got RC=$RC OUT=$OUT ERR=$(cat "$TMP/e16")"; fi
+
+  # 17. herdr flickered `blocked` for a single read on a Codex pane running in
+  #     Full Access, where a permission prompt resolves itself before anything
+  #     can see it — the script reported a dialog that was never on screen,
+  #     with elapsed_seconds 0. One `blocked` read is not a blocked worker.
+  RUN_SEQ=$((RUN_SEQ+1))
+  local counter17="$TMP/get-count-17"
+  OUT="$(env HERDR_ENV=1 HERDR_BIN="$FAKE" \
+    TEAMLEAD_WAIT_INTERVAL_SEC=0 TEAMLEAD_WAIT_BUDGET_SEC=0 TEAMLEAD_BLOCKED_CONFIRM_SEC=0 \
+    FAKE_MARKER=timeout FAKE_STATUS=blocked FAKE_STATUS_AFTER=working \
+    FAKE_GET_COUNTER="$counter17" FAKE_PANE_TEXT="thinking…" \
+    bash "$SCRIPT" worker "$report" </dev/null 2>"$TMP/e17")"; RC=$?
+  if [[ $RC -eq 1 ]] && printf '%s' "$OUT" | jq -e '.found == false' >/dev/null 2>&1 \
+     && grep -q "flicker" "$TMP/e17"; then
+    pass; else fail "blocked flicker: expected the wait to continue, got RC=$RC OUT=$OUT ERR=$(cat "$TMP/e17")"; fi
+
+  # 18. Two `blocked` reads AND a dialog row on the pane is the real thing.
+  RUN_SEQ=$((RUN_SEQ+1))
+  OUT="$(env HERDR_ENV=1 HERDR_BIN="$FAKE" \
+    TEAMLEAD_WAIT_INTERVAL_SEC=0 TEAMLEAD_WAIT_BUDGET_SEC=0 TEAMLEAD_BLOCKED_CONFIRM_SEC=0 \
+    FAKE_MARKER=timeout FAKE_STATUS=blocked \
+    FAKE_PANE_TEXT="  1. Yes  2. No
+  Press enter to continue" \
+    bash "$SCRIPT" worker "$report" </dev/null 2>"$TMP/e18")"; RC=$?
+  if [[ $RC -eq 3 ]] && printf '%s' "$OUT" | jq -e '.state == "blocked" and .found == false' >/dev/null 2>&1; then
+    pass; else fail "blocked confirmed: expected exit 3, got RC=$RC OUT=$OUT"; fi
+
+  # 18b. The refusal points at the operator, never at the lead answering it.
+  if grep -q "let them answer it" "$TMP/e18"; then
+    pass; else fail "blocked confirmed: expected the operator-answers message, got $(cat "$TMP/e18")"; fi
+
+  # 19. Two `blocked` reads with nothing on screen is still not a dialog: a
+  #     pane with no marker keeps the wait alive rather than ending the round.
+  RUN_SEQ=$((RUN_SEQ+1))
+  OUT="$(env HERDR_ENV=1 HERDR_BIN="$FAKE" \
+    TEAMLEAD_WAIT_INTERVAL_SEC=0 TEAMLEAD_WAIT_BUDGET_SEC=0 TEAMLEAD_BLOCKED_CONFIRM_SEC=0 \
+    FAKE_MARKER=timeout FAKE_STATUS=blocked FAKE_PANE_TEXT="⠧ working on it" \
+    bash "$SCRIPT" worker "$report" </dev/null 2>"$TMP/e19")"; RC=$?
+  if [[ $RC -eq 1 ]] && printf '%s' "$OUT" | jq -e '.found == false' >/dev/null 2>&1; then
+    pass; else fail "blocked without a dialog: expected the wait to continue, got RC=$RC OUT=$OUT"; fi
 
   echo "─────────────────────────────────────────────" >&2
   if [[ $FAIL -gt 0 ]]; then echo "FAILED: ${FAIL} failed, ${PASS} passed" >&2; exit 1; fi

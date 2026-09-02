@@ -21,7 +21,8 @@
 #   exit  : 0 report found (`found` true),
 #           1 budget exhausted (`found` false, `state` last observed),
 #           2 usage error, precondition unmet, or a herdr/tool failure,
-#           3 the worker is blocked at an approval or question dialog
+#           3 the worker is blocked at an approval or question dialog,
+#             confirmed by two reads and the pane
 #             (`found` false) — inspect the dialog with
 #             `herdr agent read <name> --source visible` before answering it.
 #   env   : HERDR_ENV must be 1. HERDR_BIN overrides the herdr binary.
@@ -44,6 +45,27 @@ TEAMLEAD_PROBE_TIMEOUT_MS="${TEAMLEAD_PROBE_TIMEOUT_MS:-2000}"
 # render on the alternate screen, so rows that scrolled off are unrecoverable;
 # the marker is the LAST line of the final message and stays on screen.
 TEAMLEAD_PROBE_LINES="${TEAMLEAD_PROBE_LINES:-40}"
+# Seconds between the two reads that a `blocked` verdict has to survive. Herdr
+# flickered `blocked` for a single read on a Codex pane running in Full Access,
+# where a permission prompt resolves itself before anything can see it; the
+# script reported a dialog that was never on screen, with elapsed_seconds 0.
+TEAMLEAD_BLOCKED_CONFIRM_SEC="${TEAMLEAD_BLOCKED_CONFIRM_SEC:-5}"
+
+# Literal rows that mean a dialog really is waiting for a human, matched
+# case-insensitively against the visible pane. One per line, any kind's markers
+# accepted for any worker: a marker list keyed by kind would need the kind at
+# every call site, and a false MATCH here only costs a second read that already
+# said `blocked`.
+#   Codex   `Press enter to continue`, `Allow`, numbered choices (`1.` / `2.`)
+#   Claude  `Do you want to`
+#   Grok    bracketed choice rows (`[Opt in]`, `[Yes]`, `[No]`)
+TEAMLEAD_DIALOG_MARKERS="${TEAMLEAD_DIALOG_MARKERS:-Press enter to continue
+Do you want to
+Allow
+[Opt in]
+[Yes]
+[No]}"
+
 # The literal the brief requires at the head of the final message's last line.
 # Matched with `--match`, never `--regex`: it is a literal, and a regex engine
 # would only add a second opinion about what its space means.
@@ -153,6 +175,32 @@ marker_seen() { # <pane-id> <report-basename>
   return 0
 }
 
+# Does the visible pane show a dialog waiting on a human?
+#
+# 0 = a marker is on screen, 1 = none, 2 = the pane could not be read. A pane
+# this cannot read is NOT a dialog: an unreadable pane must never promote a
+# flickered `blocked` into a terminal one.
+dialog_on_screen() { # <pane-id>
+  local rc=0 text marker
+  text="$("$HERDR_BIN" pane read "$1" \
+    --source visible \
+    --lines "$TEAMLEAD_PROBE_LINES" 2>"$ERRFILE")" || rc=$?
+  if (( rc != 0 )); then
+    warn "\`${HERDR_BIN} pane read $1\` failed (exit ${rc}): $(tr '\n' ' ' < "$ERRFILE") — cannot confirm whether a dialog is on screen"
+    return 2
+  fi
+  # Lowercased through tr, not `${var,,}`: that expansion is bash 4+, and this
+  # runs under macOS's stock bash 3.2 as well.
+  local lower_text lower_marker
+  lower_text="$(printf '%s' "$text" | tr '[:upper:]' '[:lower:]')"
+  while IFS= read -r marker; do
+    [[ -n "$marker" ]] || continue
+    lower_marker="$(printf '%s' "$marker" | tr '[:upper:]' '[:lower:]')"
+    if [[ "$lower_text" == *"$lower_marker"* ]]; then return 0; fi
+  done <<< "$TEAMLEAD_DIALOG_MARKERS"
+  return 1
+}
+
 # Is <basename> present in <pane-text> as a whole path component?
 #
 # A plain substring test is not enough: `reviewer-report.md` contains
@@ -223,13 +271,29 @@ main() {
       return 2
     fi
 
-    # A blocked worker is waiting on a human, not producing a report. Return
-    # now so the lead inspects the dialog instead of burning the budget.
+    # A blocked worker is waiting on a human, not producing a report -- once
+    # that is actually true. A single `blocked` read is the same
+    # one-observation trap as a single `done` read, so it has to survive a
+    # second read TEAMLEAD_BLOCKED_CONFIRM_SEC later AND a dialog on the pane.
+    # A lone `blocked` just keeps polling.
     if [[ "$state" == "blocked" ]]; then
-      now="$(date +%s)"
-      emit "$state" false "$(( now - start ))"
-      warn "${AGENT} is blocked at an approval or question dialog — inspect it with \`${HERDR_BIN} agent read ${AGENT} --source visible\`"
-      return 3
+      sleep "$TEAMLEAD_BLOCKED_CONFIRM_SEC"
+      rc=0
+      info="$(agent_info "$AGENT")" || rc=$?
+      if (( rc != 0 )); then return 2; fi
+      state="${info%% *}"
+      if [[ "$state" == "blocked" ]]; then
+        rc=0
+        dialog_on_screen "$pane" || rc=$?
+        if (( rc == 2 )); then return 2; fi
+        if (( rc == 0 )); then
+          now="$(date +%s)"
+          emit "$state" false "$(( now - start ))"
+          warn "${AGENT} is blocked at an approval or question dialog — inspect it with \`${HERDR_BIN} pane read ${pane} --source visible\`, relay it to the operator, and let them answer it"
+          return 3
+        fi
+      fi
+      warn "${AGENT} read \`blocked\` once with no dialog on screen — treating it as a flicker and continuing to wait"
     fi
 
     rc=0
