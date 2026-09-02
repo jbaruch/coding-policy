@@ -137,12 +137,20 @@ class ParseConfigTest(unittest.TestCase):
             {agent.name: agent.slash_delivery for agent in agents},
             {"claude": "paste", "codex": "type", "grok": "type"},
         )
-        # Every agent can be checked for a stuck composer, and every one has a
-        # way to clear it. Codex's is a single ctrl+c -- a second would exit it.
+        # Every agent can be checked for a stuck composer.
         self.assertTrue(all(agent.composer_glyph for agent in agents))
-        self.assertTrue(all(agent.recover_keys for agent in agents))
-        self.assertEqual(by_name["codex"].recover_keys, ("ctrl+c",))
         self.assertEqual(by_name["codex"].composer_glyph, "\u203a ")
+        # Codex ships with NO recovery keys: the key that clears its composer
+        # is ctrl+c, and ctrl+c on an idle Codex exits the process. That is
+        # how a live agent was killed.
+        self.assertEqual(by_name["codex"].recover_keys, ())
+        # And its empty-composer placeholder is declared, so the hint text is
+        # never read as somebody's typing.
+        self.assertEqual(
+            by_name["codex"].composer_placeholders, ("Ask Codex to do anything",)
+        )
+        # Dim composer text is never typing, on every kind.
+        self.assertTrue(all(agent.composer_ignore_dim for agent in agents))
         self.assertEqual(by_name["grok"].dialog_next_tab_keys, ("tab",))
 
     def test_wrong_schema_version_is_rejected(self):

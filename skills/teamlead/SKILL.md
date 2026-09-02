@@ -190,6 +190,10 @@ Exit conditions that change what you do next:
   Nothing landed for that role, so the round is short one worker.
 - **`cleared: false` on a record** — the clear was consumed and the pane did
   not change. The worker still got its brief, with a stale context behind it.
+- **A refusal naming an unaccounted composer** — the worker's input line holds
+  text the lead did not send. Read the pane and clear it by hand, or re-run
+  with `--allow-recovery` once you know whose text it is. Codex sends no
+  recovery key at all: its clear key exits an idle Codex.
 - `--dry-run` prints every command it would run and makes no herdr calls.
 
 The delivery mechanics behind those outcomes — composer confirmation, recovery

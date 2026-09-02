@@ -25,11 +25,17 @@ OPTIONAL_LIST_FIELDS = (
     "working_markers",
     "dialog_next_tab_keys",
     "recover_keys",
+    "composer_placeholders",
 )
 
 #: Default when an agent does not name one. `paste` is the older path and the
 #: one that works for claude and codex; grok needs `type`.
 DEFAULT_SLASH_DELIVERY = SLASH_DELIVERY_PASTE
+
+#: Dim composer text is never somebody's typing: it is a placeholder or a
+#: ghost-text suggestion. On for every kind, because reading dim hint text as
+#: occupied is what killed an idle Codex.
+DEFAULT_COMPOSER_IGNORE_DIM = True
 
 
 class Agent:
@@ -41,7 +47,7 @@ class Agent:
         "composer_ignore_dim",
     )
 
-    def __init__(self, name, kind, usage_prompt, usage_marker, usage_read_source, clear_prompt, close_keys=(), idle_markers=(), working_markers=(), dialog_next_tab_keys=(), recover_keys=(), slash_delivery=DEFAULT_SLASH_DELIVERY, composer_glyph="", composer_ignore_dim=False):
+    def __init__(self, name, kind, usage_prompt, usage_marker, usage_read_source, clear_prompt, close_keys=(), idle_markers=(), working_markers=(), dialog_next_tab_keys=(), recover_keys=(), composer_placeholders=(), slash_delivery=DEFAULT_SLASH_DELIVERY, composer_glyph="", composer_ignore_dim=DEFAULT_COMPOSER_IGNORE_DIM):
         self.name = name
         self.kind = kind
         self.usage_prompt = usage_prompt
@@ -57,8 +63,13 @@ class Agent:
         # behind one teamlead did not land on.
         self.dialog_next_tab_keys = tuple(dialog_next_tab_keys)
         # Keys that clear a stuck composer. Sent EXACTLY once, never in a
-        # loop: for Codex this is ctrl+c, and a second ctrl+c exits Codex.
+        # loop, and only for text teamlead can account for. Codex ships with
+        # NONE: ctrl+c on an idle Codex exits the process.
         self.recover_keys = tuple(recover_keys)
+        # Hint text a runtime draws in an EMPTY composer, matched exactly
+        # after trimming. Codex draws "Ask Codex to do anything"; reading that
+        # as typed text is what sent ctrl+c into an idle Codex and killed it.
+        self.composer_placeholders = tuple(composer_placeholders)
         # "paste" (agent prompt) or "type" (pane send-text plus Enter).
         self.slash_delivery = slash_delivery
         # The prompt glyph that marks the composer row, so teamlead can see
@@ -205,12 +216,13 @@ def parse_config(payload, source="<memory>"):
                 ),
                 {"source": source, "index": index},
             )
-        ignore_dim = entry.get("composer_ignore_dim", False)
+        ignore_dim = entry.get("composer_ignore_dim", DEFAULT_COMPOSER_IGNORE_DIM)
         if not isinstance(ignore_dim, bool):
             raise ConfigError(
                 "Config at {}: agents[{}].composer_ignore_dim must be true or "
-                "false - true treats dim ghost-text in the composer as empty, "
-                "which is what Claude Code's pre-filled suggestion needs.".format(
+                "false - true (the default) treats dim composer text as empty, "
+                "which is what Claude Code's ghost-text suggestion and Codex's "
+                "\"Ask Codex to do anything\" placeholder both need.".format(
                     source, index
                 ),
                 {"source": source, "index": index},

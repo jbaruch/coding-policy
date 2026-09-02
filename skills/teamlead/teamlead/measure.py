@@ -29,7 +29,7 @@ CLI-layer concern, which is what lets the tests assert on an exact timestamp.
 
 import time
 
-from .composer import COMPOSER_SETTLE_SEC, send_command
+from .composer import COMPOSER_SETTLE_SEC, DispatchSession, send_command
 from .errors import HerdrError, ParseError
 from .herdr import BUSY_STATES, DEFAULT_MARKER_TIMEOUT_MS, READY_STATES, format_argv
 from .parsers import headroom_pct, parse_usage
@@ -166,7 +166,7 @@ def skipped_record(agent, status, herdr_status, state_source):
     }
 
 
-def measure_agent(client, agent, marker_timeout_ms=DEFAULT_MARKER_TIMEOUT_MS, read_lines=DEFAULT_READ_LINES, warn=None, poll_attempts=DEFAULT_MARKER_POLL_ATTEMPTS, poll_interval_sec=DEFAULT_MARKER_POLL_INTERVAL_SEC, sleep=time.sleep, max_tabs=MAX_DIALOG_TABS, settle_sec=COMPOSER_SETTLE_SEC):
+def measure_agent(client, agent, marker_timeout_ms=DEFAULT_MARKER_TIMEOUT_MS, read_lines=DEFAULT_READ_LINES, warn=None, poll_attempts=DEFAULT_MARKER_POLL_ATTEMPTS, poll_interval_sec=DEFAULT_MARKER_POLL_INTERVAL_SEC, sleep=time.sleep, max_tabs=MAX_DIALOG_TABS, settle_sec=COMPOSER_SETTLE_SEC, session=None):
     """Measure one agent and return its record.
 
     Raises HerdrError or ParseError; the caller decides whether one bad agent
@@ -194,6 +194,7 @@ def measure_agent(client, agent, marker_timeout_ms=DEFAULT_MARKER_TIMEOUT_MS, re
         agent,
         pane_id,
         agent.usage_prompt,
+        session=session,
         sleep=sleep,
         warn=warn,
         settle_sec=settle_sec,
@@ -237,7 +238,7 @@ def measure_agent(client, agent, marker_timeout_ms=DEFAULT_MARKER_TIMEOUT_MS, re
     }
 
 
-def measure(client, agents, measured_at, marker_timeout_ms=DEFAULT_MARKER_TIMEOUT_MS, read_lines=DEFAULT_READ_LINES, warn=None, poll_attempts=DEFAULT_MARKER_POLL_ATTEMPTS, poll_interval_sec=DEFAULT_MARKER_POLL_INTERVAL_SEC, sleep=time.sleep, settle_sec=COMPOSER_SETTLE_SEC):
+def measure(client, agents, measured_at, marker_timeout_ms=DEFAULT_MARKER_TIMEOUT_MS, read_lines=DEFAULT_READ_LINES, warn=None, poll_attempts=DEFAULT_MARKER_POLL_ATTEMPTS, poll_interval_sec=DEFAULT_MARKER_POLL_INTERVAL_SEC, sleep=time.sleep, settle_sec=COMPOSER_SETTLE_SEC, allow_recovery=False):
     """Measure every agent in `agents` and return the snapshot document.
 
     A failure on one agent is recorded on that agent's record and does not
@@ -247,6 +248,9 @@ def measure(client, agents, measured_at, marker_timeout_ms=DEFAULT_MARKER_TIMEOU
     """
     records = {}
     failures = []
+    # One session per run: recovery may only ever clear a command teamlead
+    # itself typed during it.
+    session = DispatchSession(allow_recovery=allow_recovery)
     for agent in agents:
         try:
             records[agent.name] = measure_agent(
@@ -259,6 +263,7 @@ def measure(client, agents, measured_at, marker_timeout_ms=DEFAULT_MARKER_TIMEOU
                 poll_interval_sec=poll_interval_sec,
                 sleep=sleep,
                 settle_sec=settle_sec,
+                session=session,
             )
         except (HerdrError, ParseError) as exc:
             failures.append(agent.name)

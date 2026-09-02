@@ -75,7 +75,8 @@ CONFIG = {
             "usage_read_source": "recent-unwrapped",
             "slash_delivery": "type",
             "composer_glyph": "› ",
-            "recover_keys": ["ctrl+c"],
+            "composer_placeholders": ["Ask Codex to do anything"],
+            "recover_keys": [],
             "clear_prompt": "/new",
         },
         {
@@ -681,26 +682,81 @@ class ComposerGateTest(unittest.TestCase):
         self.assertEqual(len(runner.pasted_prompts()), 1)
         self.assertIn("DEVELOPER", runner.pasted_prompts()[0])
 
-    def test_a_composer_holding_text_before_dispatch_is_recovered_once(self):
-        runner = self._runner(
+    def test_a_composer_holding_text_before_dispatch_is_refused_not_cleared(self):
+        # Live, teamlead sent the one recovery ctrl+c into an idle Codex and
+        # killed the process. By default it now refuses and names the pane.
+        runner = self._runner([composer_screen("codex", "old", "leftover text")])
+        with self.assertRaises(HerdrError) as caught:
+            apply(
+                HerdrClient(runner=runner),
+                {"developer": "codex"},
+                BY_NAME,
+                self.paths,
+                AT,
+                warn=lambda message: None,
+            )
+        message = str(caught.exception)
+        self.assertIn("leftover text", message)
+        self.assertIn("w3:p1", message)  # the refusal names the pane
+        self.assertEqual(runner.writes(), [])
+
+    def test_an_agent_with_keys_is_still_refused_without_the_opt_in(self):
+        runner = runner_with({"grok": "idle"})
+        runner.responses["agent read grok --source visible --lines 20"] = ScriptedReads(
+            [composer_screen("grok", "old", "somebody's draft")]
+        )
+        with self.assertRaises(HerdrError) as caught:
+            apply(
+                HerdrClient(runner=runner),
+                {"developer": "grok"},
+                BY_NAME,
+                {"common": "/w/COMMON.md", "developer": "/w/dev.md"},
+                AT,
+                warn=lambda message: None,
+            )
+        message = str(caught.exception)
+        self.assertIn("--allow-recovery", message)
+        self.assertIn("somebody's draft", message)
+        self.assertEqual(runner.writes(), [])
+
+    def test_the_opt_in_lets_an_agent_with_keys_be_cleared(self):
+        runner = runner_with({"grok": "idle"})
+        runner.responses["agent read grok --source visible --lines 20"] = ScriptedReads(
             [
-                composer_screen("codex", "old", "leftover text"),
-                composer_screen("codex", "old"),
-                composer_screen("codex", "fresh session banner"),
+                composer_screen("grok", "old", "somebody's draft"),
+                composer_screen("grok", "old"),
+                composer_screen("grok", "fresh"),
+                composer_screen("grok", "fresh"),
+                "  > New assignment from the team lead.\n  │ ❯      │\n",
             ]
         )
         apply(
             HerdrClient(runner=runner),
-            {"developer": "codex"},
+            {"developer": "grok"},
             BY_NAME,
-            self.paths,
+            {"common": "/w/COMMON.md", "developer": "/w/dev.md"},
             AT,
+            allow_recovery=True,
             warn=lambda message: None,
         )
-        self.assertEqual(
-            [c for c in runner.commands() if c == "agent send-keys codex ctrl+c"],
-            ["agent send-keys codex ctrl+c"],
-        )
+        self.assertIn("agent send-keys grok esc", runner.commands())
+
+    def test_allow_recovery_still_sends_nothing_to_an_agent_without_keys(self):
+        # codex ships with recover_keys [] precisely so the opt-in cannot
+        # reach it.
+        runner = self._runner([composer_screen("codex", "old", "leftover text")])
+        with self.assertRaises(HerdrError) as caught:
+            apply(
+                HerdrClient(runner=runner),
+                {"developer": "codex"},
+                BY_NAME,
+                self.paths,
+                AT,
+                allow_recovery=True,
+                warn=lambda message: None,
+            )
+        self.assertIn("recover_keys", str(caught.exception))
+        self.assertEqual(runner.writes(), [])
 
     def test_an_unrecoverable_composer_refuses_before_any_write(self):
         runner = self._runner([composer_screen("codex", "old", "stuck")])
@@ -825,6 +881,90 @@ class AssignmentLandingTest(unittest.TestCase):
             next(i for i, c in enumerate(commands) if c.startswith("agent prompt")),
         )
         self.assertTrue(slept)
+
+
+class CodexPlaceholderTest(unittest.TestCase):
+    """End to end: the live sequence that killed a Codex process.
+
+    `agent get` reported idle, the composer showed `Ask Codex to do anything`
+    -- Codex's empty-composer hint -- teamlead read it as typed text and sent
+    the one recovery ctrl+c. Ctrl+C on an empty Codex composer exits Codex.
+    """
+
+    PLACEHOLDER = (
+        "  Codex v1.2  ~/Projects/x\n"
+        "  ─────────────\n"
+        "  › \x1b[2mAsk Codex to do anything\x1b[0m\n"
+    )
+    FRESH = "  ╭─ Codex ─╮\n  │ new session │\n  ╰─────────╯\n  › \n"
+    LANDED = (
+        "  > New assignment from the team lead. Your role for this task is DEVELOPER.\n"
+        "  › \n"
+    )
+
+    def setUp(self):
+        self.paths = {"common": "/w/COMMON.md", "developer": "/w/dev.md"}
+
+    def _runner(self, screens):
+        runner = runner_with({"codex": "idle"})
+        runner.responses["agent read codex --source visible --lines 20"] = ScriptedReads(
+            screens
+        )
+        return runner
+
+    def test_no_ctrl_c_is_ever_sent(self):
+        runner = self._runner([self.PLACEHOLDER, self.FRESH, self.FRESH, self.LANDED])
+        apply(
+            HerdrClient(runner=runner),
+            {"developer": "codex"},
+            BY_NAME,
+            self.paths,
+            AT,
+            warn=lambda message: None,
+        )
+        self.assertEqual([c for c in runner.commands() if "ctrl+c" in c], [])
+
+    def test_no_recovery_keys_of_any_kind_are_sent(self):
+        runner = self._runner([self.PLACEHOLDER, self.FRESH, self.FRESH, self.LANDED])
+        apply(
+            HerdrClient(runner=runner),
+            {"developer": "codex"},
+            BY_NAME,
+            self.paths,
+            AT,
+            warn=lambda message: None,
+        )
+        self.assertEqual(
+            [c for c in runner.commands() if c.startswith("agent send-keys")], []
+        )
+
+    def test_the_round_completes_over_the_placeholder(self):
+        runner = self._runner([self.PLACEHOLDER, self.FRESH, self.FRESH, self.LANDED])
+        result = apply(
+            HerdrClient(runner=runner),
+            {"developer": "codex"},
+            BY_NAME,
+            self.paths,
+            AT,
+            warn=lambda message: None,
+        )
+        record = result["applied"][0]
+        self.assertEqual(record["status"], "applied")
+        self.assertTrue(record["cleared"])
+        self.assertIn("pane send-text w3:p1 /new", runner.commands())
+
+    def test_the_opt_in_cannot_route_ctrl_c_to_codex_either(self):
+        runner = self._runner([self.PLACEHOLDER, self.FRESH, self.FRESH, self.LANDED])
+        apply(
+            HerdrClient(runner=runner),
+            {"developer": "codex"},
+            BY_NAME,
+            self.paths,
+            AT,
+            allow_recovery=True,
+            warn=lambda message: None,
+        )
+        self.assertEqual([c for c in runner.commands() if "ctrl+c" in c], [])
 
 
 class ClearedFlagTest(unittest.TestCase):

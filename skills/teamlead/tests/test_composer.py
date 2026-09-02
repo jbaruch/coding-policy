@@ -18,11 +18,15 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import unittest
 
 from teamlead.composer import (
+    DispatchSession,
     checkable,
     composer_text,
     ensure_ready,
     read_pane,
     screen_signature,
+    inspect_composer,
+    is_placeholder,
+    recovery_allowed,
     send_command,
     send_message,
     strip_ansi,
@@ -51,7 +55,20 @@ CONFIG = {
             "usage_read_source": "recent-unwrapped",
             "slash_delivery": "type",
             "composer_glyph": "› ",
-            "recover_keys": ["ctrl+c"],
+            "composer_placeholders": ["Ask Codex to do anything"],
+            "recover_keys": [],
+            "clear_prompt": "/new",
+        },
+        {
+            "name": "recoverable",
+            "kind": "codex",
+            "usage_prompt": "/status",
+            "usage_marker": "Weekly limit",
+            "usage_read_source": "recent-unwrapped",
+            "slash_delivery": "type",
+            "composer_glyph": "› ",
+            "composer_placeholders": ["Ask Codex to do anything"],
+            "recover_keys": ["esc"],
             "clear_prompt": "/new",
         },
         {
@@ -83,6 +100,7 @@ CONFIG = {
             "usage_read_source": "visible",
             "slash_delivery": "paste",
             "composer_glyph": "❯ ",
+            "composer_ignore_dim": False,
             "recover_keys": ["esc"],
             "clear_prompt": "/clear",
         },
@@ -162,13 +180,16 @@ class ScreenSignatureTest(unittest.TestCase):
 class ReadPaneTest(unittest.TestCase):
     def test_an_agent_with_no_glyph_is_never_read(self):
         runner = FakeRunner()
-        self.assertEqual(read_pane(HerdrClient(runner=runner), BY_NAME["blind"]), "")
+        self.assertEqual(
+            read_pane(HerdrClient(runner=runner), BY_NAME["blind"]), ("", False)
+        )
         self.assertEqual(runner.calls, [])
 
     def test_an_agent_with_a_glyph_reads_its_viewport(self):
         runner = FakeRunner()
         runner.set("agent read codex", CODEX_EMPTY)
-        read_pane(HerdrClient(runner=runner), BY_NAME["codex"])
+        text, ansi = read_pane(HerdrClient(runner=runner), BY_NAME["codex"])
+        self.assertTrue(ansi)
         self.assertEqual(
             runner.commands(),
             ["agent read codex --source visible --lines 20 --format ansi"],
@@ -176,81 +197,89 @@ class ReadPaneTest(unittest.TestCase):
 
 
 class EnsureReadyTest(unittest.TestCase):
-    def _runner(self, screens):
+    """Recovery keys are the most dangerous thing teamlead can send.
+
+    On Codex the key that clears a composer is ctrl+c, and ctrl+c on an EMPTY
+    Codex composer exits the process. Live, teamlead read Codex's placeholder
+    `Ask Codex to do anything` as typed text, sent the one recovery ctrl+c,
+    and killed the agent. Every gate below exists because of that.
+    """
+
+    def _runner(self, screens, name="recoverable"):
         runner = FakeRunner()
         runner.set("agent send-keys", ok_json("agent_send_keys"))
-        runner.responses["agent read codex --source visible --lines 20"] = ScriptedReads(
-            screens
-        )
+        runner.responses[
+            "agent read {} --source visible --lines 20".format(name)
+        ] = ScriptedReads(screens)
         return runner
+
+    def _ready(self, runner, name="recoverable", **kwargs):
+        kwargs.setdefault("sleep", NO_SLEEP)
+        kwargs.setdefault("warn", lambda message: None)
+        return ensure_ready(HerdrClient(runner=runner), BY_NAME[name], **kwargs)
 
     def test_an_empty_composer_needs_no_recovery(self):
         runner = self._runner([CODEX_EMPTY])
-        ensure_ready(HerdrClient(runner=runner), BY_NAME["codex"], sleep=NO_SLEEP)
+        self._ready(runner)
         self.assertEqual(runner.writes(), [])
 
-    def test_a_held_composer_is_recovered_once(self):
+    def test_text_teamlead_did_not_type_is_refused_not_cleared(self):
+        runner = self._runner([CODEX_HELD])
+        with self.assertRaises(HerdrError) as caught:
+            self._ready(runner)
+        self.assertIn("--allow-recovery", str(caught.exception))
+        self.assertEqual(runner.writes(), [])
+
+    def test_a_command_teamlead_typed_this_run_may_be_cleared(self):
+        session = DispatchSession()
+        session.remember("/new")
         runner = self._runner([CODEX_HELD, CODEX_EMPTY])
-        ensure_ready(
-            HerdrClient(runner=runner),
-            BY_NAME["codex"],
-            sleep=NO_SLEEP,
-            warn=lambda message: None,
-        )
-        self.assertEqual(runner.writes(), ["agent send-keys codex ctrl+c"])
+        self._ready(runner, session=session)
+        self.assertEqual(runner.writes(), ["agent send-keys recoverable esc"])
+
+    def test_allow_recovery_opts_in_to_clearing_a_strangers_text(self):
+        runner = self._runner([CODEX_HELD, CODEX_EMPTY])
+        self._ready(runner, session=DispatchSession(allow_recovery=True))
+        self.assertEqual(runner.writes(), ["agent send-keys recoverable esc"])
 
     def test_recovery_is_sent_exactly_once_even_when_it_fails(self):
         # A second ctrl+c would exit Codex, so this must never loop.
         runner = self._runner([CODEX_HELD])
         with self.assertRaises(HerdrError):
-            ensure_ready(
-                HerdrClient(runner=runner),
-                BY_NAME["codex"],
-                sleep=NO_SLEEP,
-                warn=lambda message: None,
-            )
-        self.assertEqual(runner.writes(), ["agent send-keys codex ctrl+c"])
+            self._ready(runner, session=DispatchSession(allow_recovery=True))
+        self.assertEqual(runner.writes(), ["agent send-keys recoverable esc"])
 
-    def test_the_failure_names_the_stuck_text_and_says_once_only(self):
+    def test_the_refusal_names_the_pane_and_the_text(self):
         runner = self._runner([CODEX_HELD])
         with self.assertRaises(HerdrError) as caught:
-            ensure_ready(
-                HerdrClient(runner=runner),
-                BY_NAME["codex"],
-                sleep=NO_SLEEP,
-                warn=lambda message: None,
-            )
+            self._ready(runner, pane_id="w3:p1")
         message = str(caught.exception)
         self.assertIn("/new", message)
-        self.assertIn("never twice", message)
+        self.assertIn("w3:p1", message)
 
     def test_an_agent_with_no_recover_keys_refuses_without_sending(self):
-        runner = FakeRunner()
-        runner.responses["agent read stubborn --source visible --lines 20"] = ScriptedReads(
-            [CODEX_HELD]
-        )
+        runner = self._runner([CODEX_HELD], name="codex")
         with self.assertRaises(HerdrError) as caught:
-            ensure_ready(HerdrClient(runner=runner), BY_NAME["stubborn"], sleep=NO_SLEEP)
+            self._ready(runner, name="codex", session=DispatchSession(allow_recovery=True))
         self.assertIn("recover_keys", str(caught.exception))
+        self.assertIn("exits the process", str(caught.exception))
         self.assertEqual(runner.writes(), [])
 
     def test_a_caller_supplied_read_is_reused(self):
         runner = self._runner([CODEX_EMPTY])
-        ensure_ready(
-            HerdrClient(runner=runner), BY_NAME["codex"], sleep=NO_SLEEP, text=CODEX_EMPTY
-        )
+        self._ready(runner, text=CODEX_EMPTY)
         self.assertEqual(runner.calls, [])
 
 
 class SendCommandTest(unittest.TestCase):
-    def _runner(self, screens):
+    def _runner(self, screens, name="codex"):
         runner = FakeRunner()
         runner.set("pane send-text", ok_json("pane_send_text"))
         runner.set("pane send-keys", ok_json("pane_send_keys"))
         runner.set("agent send-keys", ok_json("agent_send_keys"))
-        runner.responses["agent read codex --source visible --lines 20"] = ScriptedReads(
-            screens
-        )
+        runner.responses[
+            "agent read {} --source visible --lines 20".format(name)
+        ] = ScriptedReads(screens)
         return runner
 
     def _send(self, runner, **kwargs):
@@ -295,14 +324,28 @@ class SendCommandTest(unittest.TestCase):
             len([c for c in runner.commands() if c == "pane send-keys w3:p1 enter"]), 2
         )
 
-    def test_a_composer_holding_text_beforehand_is_recovered_first(self):
+    def test_a_composer_holding_a_strangers_text_refuses_before_sending(self):
         runner = self._runner([CODEX_HELD, CODEX_EMPTY, CODEX_FRESH])
-        result = self._send(runner)
+        with self.assertRaises(HerdrError):
+            self._send(runner)
+        self.assertEqual(runner.writes(), [])
+
+    def test_a_composer_holding_teamleads_own_command_is_recovered_first(self):
+        session = DispatchSession()
+        session.remember("/new")
+        runner = self._runner([CODEX_HELD, CODEX_EMPTY, CODEX_FRESH], name="recoverable")
+        result = send_command(
+            HerdrClient(runner=runner),
+            BY_NAME["recoverable"],
+            "w3:p1",
+            "/new",
+            session=session,
+            sleep=NO_SLEEP,
+            warn=lambda message: None,
+        )
         self.assertTrue(result["recovered"])
         self.assertTrue(result["consumed"])
-        self.assertEqual(
-            runner.commands()[1], "agent send-keys codex ctrl+c"
-        )
+        self.assertEqual(runner.commands()[1], "agent send-keys recoverable esc")
 
     def test_an_unchanged_screen_is_reported_not_assumed(self):
         runner = self._runner([CODEX_EMPTY, CODEX_EMPTY])
@@ -434,18 +477,20 @@ class DimAgentTest(unittest.TestCase):
                 warn=lambda message: None,
             )
 
-    def test_the_refusal_names_the_suggestion_possibility(self):
+    def test_dim_text_is_never_cleared_even_with_allow_recovery(self):
+        # Nobody typed it, so no key is warranted whatever the operator asked
+        # for. This is the gate that would have saved the Codex process.
         runner = self._runner("strict", [CLAUDE_SUGGESTION])
         with self.assertRaises(HerdrError) as caught:
             ensure_ready(
                 HerdrClient(runner=runner),
                 BY_NAME["strict"],
+                session=DispatchSession(allow_recovery=True),
                 sleep=NO_SLEEP,
                 warn=lambda message: None,
             )
-        message = str(caught.exception)
-        self.assertIn("dim ghost-text suggestion", message)
-        self.assertIn("composer_ignore_dim", message)
+        self.assertIn("dim", str(caught.exception))
+        self.assertEqual(runner.writes(), [])
 
     def test_the_read_asks_for_ansi(self):
         runner = self._runner("claude", [CLAUDE_SUGGESTION])
@@ -455,7 +500,7 @@ class DimAgentTest(unittest.TestCase):
             ["agent read claude --source visible --lines 20 --format ansi"],
         )
 
-    def test_a_failed_ansi_read_falls_back_to_plain_text(self):
+    def _fallback_runner(self, plain):
         runner = FakeRunner()
         runner.set(
             "agent read claude --source visible --lines 20 --format ansi",
@@ -463,13 +508,48 @@ class DimAgentTest(unittest.TestCase):
             returncode=2,
             stderr="unexpected argument '--format'",
         )
-        runner.set("agent read claude --source visible --lines 20", "  ❯ /clear\n")
+        runner.set("agent read claude --source visible --lines 20", plain)
+        runner.set("agent send-keys", ok_json("agent_send_keys"))
+        return runner
+
+    def test_a_failed_ansi_read_falls_back_to_plain_text(self):
+        runner = self._fallback_runner("  ❯ /clear\n")
         warnings = []
-        text = read_pane(
+        text, ansi = read_pane(
             HerdrClient(runner=runner), BY_NAME["claude"], warn=warnings.append
         )
+        self.assertFalse(ansi)
         self.assertEqual(composer_text(text, "❯ ", True), "/clear")
         self.assertTrue(any("plain-text" in w for w in warnings))
+
+    def test_the_plain_text_fallback_can_only_refuse_never_recover(self):
+        # Without intensity, a dim placeholder is indistinguishable from typed
+        # text -- so the fallback is never allowed to authorise a keystroke.
+        runner = self._fallback_runner("  ❯ Ask Codex to do anything\n")
+        with self.assertRaises(HerdrError) as caught:
+            ensure_ready(
+                HerdrClient(runner=runner),
+                BY_NAME["claude"],
+                session=DispatchSession(allow_recovery=True),
+                sleep=NO_SLEEP,
+                warn=lambda message: None,
+            )
+        self.assertIn("plain text", str(caught.exception))
+        self.assertEqual(runner.writes(), [])
+
+    def test_the_fallback_refuses_even_text_teamlead_typed(self):
+        session = DispatchSession()
+        session.remember("/clear")
+        runner = self._fallback_runner("  ❯ /clear\n")
+        with self.assertRaises(HerdrError):
+            ensure_ready(
+                HerdrClient(runner=runner),
+                BY_NAME["claude"],
+                session=session,
+                sleep=NO_SLEEP,
+                warn=lambda message: None,
+            )
+        self.assertEqual(runner.writes(), [])
 
 
 # --- the assignment has to land as a user message ---------------------------
@@ -591,3 +671,120 @@ class SendMessageTest(unittest.TestCase):
         commands = self.runner.commands()
         self.assertTrue(commands[0].startswith("agent read claude"))
         self.assertTrue(commands[1].startswith("agent prompt claude"))
+
+
+# --- the live kill --------------------------------------------------------
+#
+# `apply` read Codex's empty-composer placeholder as typed text, sent the one
+# recovery ctrl+c, and ctrl+c on an EMPTY Codex composer exits the process.
+# The agent died and had to be restarted. Every assertion below is a gate that
+# would have stopped it.
+
+CODEX_PLACEHOLDER_DIM = "  Codex v1.2\n  ─────────\n  › {}Ask Codex to do anything{}\n".format(
+    DIM, RESET
+)
+CODEX_PLACEHOLDER_PLAIN = "  Codex v1.2\n  ─────────\n  › Ask Codex to do anything\n"
+CODEX_PLACEHOLDER_THEN_TYPED = "  › {}Ask Codex to do anything{}/new\n".format(DIM, RESET)
+
+
+class PlaceholderTest(unittest.TestCase):
+    def test_the_hint_matches_exactly_after_trimming(self):
+        self.assertTrue(is_placeholder("  Ask Codex to do anything  ", BY_NAME["codex"]))
+
+    def test_a_command_appended_to_the_hint_is_not_the_hint(self):
+        self.assertFalse(
+            is_placeholder("Ask Codex to do anything/new", BY_NAME["codex"])
+        )
+
+    def test_an_agent_that_declares_none_matches_nothing(self):
+        self.assertFalse(is_placeholder("Ask Codex to do anything", BY_NAME["claude"]))
+
+    def test_empty_text_is_not_a_placeholder(self):
+        self.assertFalse(is_placeholder("", BY_NAME["codex"]))
+        self.assertFalse(is_placeholder(None, BY_NAME["codex"]))
+
+    def test_a_dim_placeholder_reads_as_an_empty_composer(self):
+        composer = inspect_composer(CODEX_PLACEHOLDER_DIM, BY_NAME["codex"])
+        self.assertFalse(composer.occupied)
+        self.assertEqual(composer.content, "")
+
+    def test_a_normal_weight_placeholder_reads_as_empty_too(self):
+        # Belt as well as braces: the exact-match list catches it even if the
+        # runtime stops drawing the hint dim.
+        composer = inspect_composer(CODEX_PLACEHOLDER_PLAIN, BY_NAME["codex"])
+        self.assertFalse(composer.occupied)
+        self.assertTrue(composer.placeholder)
+
+    def test_a_command_typed_over_the_placeholder_is_occupied(self):
+        composer = inspect_composer(CODEX_PLACEHOLDER_THEN_TYPED, BY_NAME["codex"])
+        self.assertTrue(composer.occupied)
+        self.assertEqual(composer.content, "/new")
+
+    def test_recovery_is_refused_for_a_placeholder(self):
+        composer = inspect_composer(CODEX_PLACEHOLDER_PLAIN, BY_NAME["codex"])
+        allowed, reason = recovery_allowed(
+            BY_NAME["codex"], composer, DispatchSession(allow_recovery=True)
+        )
+        self.assertFalse(allowed)
+
+
+class LiveKillSequenceTest(unittest.TestCase):
+    """`agent get` ok, composer shows the placeholder -- send NO keys."""
+
+    def _runner(self, screen, name="codex"):
+        runner = FakeRunner()
+        runner.set("agent send-keys", ok_json("agent_send_keys"))
+        runner.set("pane send-text", ok_json("pane_send_text"))
+        runner.set("pane send-keys", ok_json("pane_send_keys"))
+        runner.responses[
+            "agent read {} --source visible --lines 20".format(name)
+        ] = ScriptedReads([screen])
+        return runner
+
+    def test_the_placeholder_sends_no_keys_at_all(self):
+        runner = self._runner(CODEX_PLACEHOLDER_DIM)
+        ensure_ready(HerdrClient(runner=runner), BY_NAME["codex"], sleep=NO_SLEEP)
+        self.assertEqual(runner.writes(), [])
+
+    def test_no_ctrl_c_reaches_codex_on_the_live_pane(self):
+        runner = self._runner(CODEX_PLACEHOLDER_DIM)
+        ensure_ready(HerdrClient(runner=runner), BY_NAME["codex"], sleep=NO_SLEEP)
+        self.assertEqual([c for c in runner.commands() if "ctrl+c" in c], [])
+
+    def test_the_undimmed_placeholder_sends_no_keys_either(self):
+        runner = self._runner(CODEX_PLACEHOLDER_PLAIN)
+        ensure_ready(HerdrClient(runner=runner), BY_NAME["codex"], sleep=NO_SLEEP)
+        self.assertEqual(runner.writes(), [])
+
+    def test_dispatch_proceeds_normally_over_the_placeholder(self):
+        runner = FakeRunner()
+        runner.set("agent send-keys", ok_json("agent_send_keys"))
+        runner.set("pane send-text", ok_json("pane_send_text"))
+        runner.set("pane send-keys", ok_json("pane_send_keys"))
+        runner.responses["agent read codex --source visible --lines 20"] = ScriptedReads(
+            [CODEX_PLACEHOLDER_DIM, CODEX_FRESH]
+        )
+        result = send_command(
+            HerdrClient(runner=runner),
+            BY_NAME["codex"],
+            "w3:p1",
+            "/new",
+            sleep=NO_SLEEP,
+            warn=lambda message: None,
+        )
+        self.assertTrue(result["consumed"])
+        self.assertFalse(result["recovered"])
+        self.assertEqual([c for c in runner.commands() if "ctrl+c" in c], [])
+
+    def test_even_a_stranger_text_cannot_reach_ctrl_c_on_codex(self):
+        # The last line of defence: codex ships with recover_keys [].
+        runner = self._runner(CODEX_HELD)
+        with self.assertRaises(HerdrError):
+            ensure_ready(
+                HerdrClient(runner=runner),
+                BY_NAME["codex"],
+                session=DispatchSession(allow_recovery=True),
+                sleep=NO_SLEEP,
+                warn=lambda message: None,
+            )
+        self.assertEqual([c for c in runner.commands() if "ctrl+c" in c], [])

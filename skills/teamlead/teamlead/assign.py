@@ -38,6 +38,7 @@ from .composer import (
     COMPOSER_SETTLE_SEC,
     DEFAULT_START_TIMEOUT_MS,
     LANDING_ATTEMPTS,
+    DispatchSession,
     send_command,
     send_message,
 )
@@ -270,7 +271,7 @@ def check_all_ready(client, assignments, agents_by_name, warn=None):
     return statuses
 
 
-def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle_timeout_ms=DEFAULT_SETTLE_TIMEOUT_MS, on_assigned=None, warn=None, sleep=time.sleep, settle_sec=COMPOSER_SETTLE_SEC, landing_attempts=LANDING_ATTEMPTS, start_timeout_ms=DEFAULT_START_TIMEOUT_MS):
+def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle_timeout_ms=DEFAULT_SETTLE_TIMEOUT_MS, on_assigned=None, warn=None, sleep=time.sleep, settle_sec=COMPOSER_SETTLE_SEC, landing_attempts=LANDING_ATTEMPTS, start_timeout_ms=DEFAULT_START_TIMEOUT_MS, allow_recovery=False):
     """Clear each agent and hand it its brief. Writes to the agents.
 
     `on_assigned(role, agent, at)` is called after each successful hand-off so
@@ -292,6 +293,10 @@ def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle
         start_timeout_ms=start_timeout_ms,
     )
 
+    # One session per run. Recovery keys clear somebody's input line, and for
+    # Codex the key that does it exits the process when the line is empty, so
+    # teamlead only clears text it can account for.
+    session = DispatchSession(allow_recovery=allow_recovery)
     applied = []
     for step in steps:
         name = step["agent"]
@@ -313,6 +318,7 @@ def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle
                 agent,
                 pane_id,
                 agent.clear_prompt,
+                session=session,
                 sleep=sleep,
                 warn=warn,
                 settle_sec=settle_sec,
@@ -339,6 +345,8 @@ def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle
             agent,
             step["prompt"],
             ASSIGNMENT_OPENING,
+            pane_id=step["pane_id"],
+            session=session,
             sleep=sleep,
             warn=warn,
             settle_sec=settle_sec,

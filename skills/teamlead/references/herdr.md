@@ -192,10 +192,30 @@ command from hiding behind one. `composer_ignore_dim` turns this on per worker
 falls back to plain text with a warning. The SGR codes are in
 `skills/teamlead/teamlead/composer.py`.
 
-Before any dispatch, a composer that already holds text is recovered by sending
-`recover_keys` **exactly once**. Never twice on Codex: a second `ctrl+c` exits
-it. A composer still occupied after the one attempt is a refusal, never
-something to type over.
+**A runtime's empty-composer placeholder is not text either.** Codex draws
+`Ask Codex to do anything` whenever nothing is typed. Live, that read as
+somebody's input, the one recovery keystroke went out — `ctrl+c` — and ctrl+c
+on an empty Codex composer EXITS Codex. The process died and had to be
+restarted. Two independent guards stop it now: dim text is dropped, and
+`composer_placeholders` lists the hint verbatim so an exact match after
+trimming counts as empty even if the runtime stops drawing it dim. A command
+typed over a placeholder is still a command.
+
+### Recovery Keys Are the Most Dangerous Thing the Lead Sends
+
+They clear somebody's input line, and on Codex the key that does it kills an
+idle process. `recover_keys` go out only when every one of these holds:
+
+1. The composer is genuinely occupied — non-empty, not a placeholder.
+2. The read carried ANSI. A plain-text fallback can only refuse: without
+   intensity, a placeholder is indistinguishable from typed text.
+3. The text is not dim. `--allow-recovery` cannot override this.
+4. The worker configures `recover_keys` at all. **Codex ships with `[]`**.
+5. The text is a command the lead itself sent earlier in this run, or the
+   operator passed `--allow-recovery`.
+
+By default nothing recovers text the lead did not type: it refuses and names
+the pane for a human to look at. Sent once, never twice.
 
 A worker with no `composer_glyph` cannot be checked, so the read is skipped
 rather than spent on a row nothing can interpret.
@@ -231,9 +251,14 @@ Three per-agent config keys drive it:
 | Key | Meaning |
 | --- | ------- |
 | `composer_glyph` | Prompt glyph starting the composer row (`"› "` Codex, `"❯ "` Claude, `"│ ❯"` Grok). Empty skips the check |
-| `composer_ignore_dim` | `true` reads dim/grey composer text as empty — Claude Code's ghost-text suggestion. Default `false` |
-| `recover_keys` | Keys that clear a stuck composer (`["ctrl+c"]` Codex, `["esc"]` Claude and Grok). Sent once, never twice |
+| `composer_ignore_dim` | `true` (the default for every kind) reads dim/grey composer text as empty — ghost-text suggestions and placeholders alike |
+| `composer_placeholders` | Hint text a runtime draws in an empty composer, matched exactly after trimming (`["Ask Codex to do anything"]`). Always counts as empty |
+| `recover_keys` | Keys that clear a stuck composer, sent at most once and only under the five conditions above. **Empty for Codex**: its clear key is `ctrl+c`, which exits an idle Codex |
 | `slash_delivery` | `paste` or `type`, per the table above |
+
+The placeholder list is per runtime and hand-maintained: a Codex release that
+reworded its hint would reintroduce the failure, which is why the dim check
+sits in front of it rather than behind it. Two guards, either one sufficient.
 
 Dim detection is SGR parsing, not semantics: a runtime that draws a real draft
 in grey reads as empty, and one that draws its suggestion at normal weight

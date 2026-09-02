@@ -241,89 +241,212 @@ def checkable(agent):
 
 
 def read_pane(client, agent, warn=None):
-    """Read the agent's viewport, or return "" when there is no glyph to find.
+    """Return `(pane_text, ansi)` for the agent's viewport.
 
-    Reads with `--format ansi`, because the SGR sequences are the only way to
-    tell a dim ghost-text suggestion from a command somebody typed. A herdr
-    that cannot produce them falls back to plain text, which reads every
-    character as deliberate -- the older, stricter behaviour.
+    `ansi` is False when the SGR read failed and teamlead fell back to plain
+    text. That flag is load-bearing: without intensity information teamlead
+    cannot tell a runtime's empty-composer placeholder, or a ghost-text
+    suggestion, from something a human typed -- so a plain-text read is never
+    allowed to authorise a recovery keystroke.
 
     An agent with no `composer_glyph` cannot be checked, so teamlead does not
     spend a read it could not interpret.
     """
     if not checkable(agent):
-        return ""
+        return "", False
     try:
-        return client.agent_read(
-            agent.name,
-            source=COMPOSER_READ_SOURCE,
-            lines=COMPOSER_READ_LINES,
-            fmt="ansi",
+        return (
+            client.agent_read(
+                agent.name,
+                source=COMPOSER_READ_SOURCE,
+                lines=COMPOSER_READ_LINES,
+                fmt="ansi",
+            ),
+            True,
         )
     except HerdrError as exc:
         (warn or stderr_warn)(
             "teamlead: `herdr agent read {} --format ansi` failed ({}). Falling "
-            "back to a plain-text read, which cannot recognise a dim "
-            "suggestion.".format(agent.name, exc.message)
+            "back to a plain-text read: teamlead can still refuse, but it will "
+            "not send recovery keys on a read it cannot interpret.".format(
+                agent.name, exc.message
+            )
         )
-        return client.agent_read(
-            agent.name, source=COMPOSER_READ_SOURCE, lines=COMPOSER_READ_LINES
+        return (
+            client.agent_read(
+                agent.name, source=COMPOSER_READ_SOURCE, lines=COMPOSER_READ_LINES
+            ),
+            False,
         )
 
 
-def ensure_ready(client, agent, sleep=time.sleep, warn=None, settle_sec=COMPOSER_SETTLE_SEC, text=None):
-    """Return pane text once the composer is empty, recovering once if needed.
+class Composer(object):
+    """What the composer holds, and how confidently teamlead knows it."""
 
-    Recovery sends `agent.recover_keys` EXACTLY once. For Codex that is a
-    single `ctrl+c`, which clears the composer and leaves the session running;
-    a second `ctrl+c` would exit Codex, which is why this never loops.
+    __slots__ = ("visible", "content", "dim", "placeholder", "ansi", "literal")
 
-    Pass `text` to reuse a read the caller already made. Raises HerdrError when
-    the composer still holds text afterwards, having sent nothing else.
+    def __init__(self, visible, content, dim, placeholder, ansi, literal):
+        self.visible = visible
+        self.content = content
+        self.dim = dim
+        self.placeholder = placeholder
+        self.ansi = ansi
+        # Everything drawn on the row, dim included. Only ever used in
+        # messages, never to decide whether to send a key.
+        self.literal = literal
+
+    @property
+    def occupied(self):
+        """True only when somebody's own text is sitting there."""
+        return bool(self.content)
+
+    def __repr__(self):
+        return "Composer(content={!r}, dim={}, placeholder={}, ansi={})".format(
+            self.content, self.dim, self.placeholder, self.ansi
+        )
+
+
+def is_placeholder(text, agent):
+    """True when `text` is this runtime's empty-composer hint.
+
+    Codex draws `Ask Codex to do anything` whenever nothing is typed. Reading
+    that as occupied is what sent `ctrl+c` into an idle Codex and killed the
+    process. Matched exactly after trimming, so a placeholder with a real
+    command appended is still a real command.
+    """
+    stripped = (text or "").strip()
+    if not stripped:
+        return False
+    return any(stripped == hint.strip() for hint in agent.composer_placeholders)
+
+
+def inspect_composer(pane_text, agent, ansi=True):
+    """Classify the composer row. Pure: no herdr, no keys, no decisions."""
+    literal = composer_text(pane_text, agent.composer_glyph, ignore_dim=False)
+    if literal is None:
+        return Composer(False, "", False, False, ansi, None)
+
+    lit = composer_text(pane_text, agent.composer_glyph, ignore_dim=True)
+    all_dim = bool(literal) and not lit
+    judged = lit if agent.composer_ignore_dim else literal
+    placeholder = is_placeholder(literal, agent) or is_placeholder(judged, agent)
+    content = "" if placeholder else judged
+    return Composer(True, content, all_dim, placeholder, ansi, literal)
+
+
+class DispatchSession(object):
+    """Remembers what teamlead itself typed during this run.
+
+    Recovery keys clear somebody's input line, and for Codex the key that does
+    it also exits the process when the line is empty. So teamlead only ever
+    clears text it can account for: a command it sent earlier in this run, or
+    text the operator explicitly opted in to clearing with --allow-recovery.
+    """
+
+    __slots__ = ("sent", "allow_recovery")
+
+    def __init__(self, allow_recovery=False):
+        self.sent = set()
+        self.allow_recovery = allow_recovery
+
+    def remember(self, text):
+        self.sent.add((text or "").strip())
+
+    def typed_by_teamlead(self, text):
+        return (text or "").strip() in self.sent
+
+
+def recovery_allowed(agent, composer, session):
+    """Return `(allowed, refusal_reason)` for sending the recovery keys.
+
+    Every condition here exists because one of them, absent, killed an agent.
+    """
+    if not composer.occupied:
+        return False, "the composer is not occupied"
+    if not composer.ansi:
+        return False, (
+            "the composer was read as plain text, so teamlead cannot tell a "
+            "placeholder or a dim suggestion from text somebody typed"
+        )
+    if composer.dim:
+        return False, "the text is dim, which means nobody typed it"
+    if composer.placeholder:
+        return False, "the text is this runtime's empty-composer placeholder"
+    if not agent.recover_keys:
+        return False, (
+            "no recover_keys are configured for {} -- Codex ships with none "
+            "because ctrl+c on an idle Codex exits the process".format(agent.name)
+        )
+    if session.typed_by_teamlead(composer.content):
+        return True, None
+    if session.allow_recovery:
+        return True, None
+    return False, (
+        "teamlead did not type it, so it is somebody's work in progress; pass "
+        "--allow-recovery to clear text teamlead did not put there"
+    )
+
+
+def _stuck_composer_error(agent, pane_id, composer, reason):
+    return HerdrError(
+        "{}'s composer holds {!r} and teamlead will not clear it: {}. Look at "
+        "pane {} yourself, clear it if it is safe to, then run this again.".format(
+            agent.name, composer.content, reason, pane_id or "(unknown)"
+        ),
+        {
+            "agent": agent.name,
+            "pane_id": pane_id,
+            "composer": composer.content,
+            "reason": reason,
+            "dim": composer.dim,
+            "placeholder": composer.placeholder,
+            "ansi_read": composer.ansi,
+        },
+    )
+
+
+def ensure_ready(client, agent, pane_id=None, session=None, sleep=time.sleep, warn=None, settle_sec=COMPOSER_SETTLE_SEC, text=None, ansi=True):
+    """Return pane text once the composer is empty.
+
+    Recovery keys are sent only when every condition in `recovery_allowed`
+    holds, and then EXACTLY once. Anything else refuses and names the pane:
+    a keystroke into a composer teamlead cannot account for is how an idle
+    Codex got killed.
     """
     warn = warn or stderr_warn
+    session = session if session is not None else DispatchSession()
     if text is None:
-        text = read_pane(client, agent, warn=warn)
-    held = composer_text(text, agent.composer_glyph, agent.composer_ignore_dim)
-    if not held:
+        text, ansi = read_pane(client, agent, warn=warn)
+    composer = inspect_composer(text, agent, ansi=ansi)
+    if not composer.occupied:
         return text
 
-    if not agent.recover_keys:
-        raise HerdrError(
-            "{}'s composer already holds {!r} and no recover_keys are "
-            "configured for it. Clear the composer by hand, then run this "
-            "again.".format(agent.name, held),
-            {"agent": agent.name, "composer": held},
-        )
+    allowed, reason = recovery_allowed(agent, composer, session)
+    if not allowed:
+        raise _stuck_composer_error(agent, pane_id, composer, reason)
 
     warn(
-        "teamlead: {}'s composer holds {!r} before dispatch. Sending {} once "
-        "to clear it.".format(agent.name, held, " ".join(agent.recover_keys))
+        "teamlead: {}'s composer holds {!r}, which teamlead sent earlier in "
+        "this run. Sending {} once to clear it.".format(
+            agent.name, composer.content, " ".join(agent.recover_keys)
+        )
     )
     client.agent_send_keys(agent.name, agent.recover_keys)
     sleep(settle_sec)
-    text = read_pane(client, agent, warn=warn)
-    held = composer_text(text, agent.composer_glyph, agent.composer_ignore_dim)
-    if held:
-        raise HerdrError(
-            "{}'s composer still holds {!r} after sending {}. If that is a dim "
-            "ghost-text suggestion rather than typed text, it is not really "
-            "occupied: set composer_ignore_dim true for {} so teamlead reads "
-            "the intensity instead of the characters. Otherwise clear it by "
-            "hand -- teamlead sends the recover keys once and never twice, "
-            "because a second ctrl+c exits Codex -- then run this again.".format(
-                agent.name, held, " ".join(agent.recover_keys), agent.name
-            ),
-            {
-                "agent": agent.name,
-                "composer": held,
-                "composer_ignore_dim": agent.composer_ignore_dim,
-            },
+    text, ansi = read_pane(client, agent, warn=warn)
+    composer = inspect_composer(text, agent, ansi=ansi)
+    if composer.occupied:
+        raise _stuck_composer_error(
+            agent,
+            pane_id,
+            composer,
+            "it survived the one recovery keystroke teamlead is willing to "
+            "send (never two: a second ctrl+c exits Codex)",
         )
     return text
 
 
-def send_message(client, agent, text, landing_needle, sleep=time.sleep, warn=None, settle_sec=COMPOSER_SETTLE_SEC, attempts=LANDING_ATTEMPTS, start_timeout_ms=DEFAULT_START_TIMEOUT_MS):
+def send_message(client, agent, text, landing_needle, pane_id=None, session=None, sleep=time.sleep, warn=None, settle_sec=COMPOSER_SETTLE_SEC, attempts=LANDING_ATTEMPTS, start_timeout_ms=DEFAULT_START_TIMEOUT_MS):
     """Paste a real message and confirm the agent actually took it.
 
     Sending is not starting. Live, an assignment pasted onto a leftover `/`
@@ -339,7 +462,16 @@ def send_message(client, agent, text, landing_needle, sleep=time.sleep, warn=Non
     start, it is a wrong send.
     """
     warn = warn or stderr_warn
-    ensure_ready(client, agent, sleep=sleep, warn=warn, settle_sec=settle_sec)
+    session = session if session is not None else DispatchSession()
+    ensure_ready(
+        client,
+        agent,
+        pane_id=pane_id,
+        session=session,
+        sleep=sleep,
+        warn=warn,
+        settle_sec=settle_sec,
+    )
     client.agent_prompt(agent.name, text)
 
     landed = False
@@ -347,7 +479,7 @@ def send_message(client, agent, text, landing_needle, sleep=time.sleep, warn=Non
     pane = ""
     for _ in range(max(1, attempts)):
         sleep(settle_sec)
-        pane = read_pane(client, agent, warn=warn)
+        pane, _ansi = read_pane(client, agent, warn=warn)
         if not pane:
             break
         complaint = unknown_skill_error(pane)
@@ -392,7 +524,7 @@ def _left_idle(client, agent, timeout_ms, warn):
     return True
 
 
-def send_command(client, agent, pane_id, command, sleep=time.sleep, warn=None, settle_sec=COMPOSER_SETTLE_SEC, screen_attempts=SCREEN_CHANGE_ATTEMPTS):
+def send_command(client, agent, pane_id, command, session=None, sleep=time.sleep, warn=None, settle_sec=COMPOSER_SETTLE_SEC, screen_attempts=SCREEN_CHANGE_ATTEMPTS):
     """Send a slash command and confirm the composer consumed it.
 
     Returns::
@@ -408,20 +540,32 @@ def send_command(client, agent, pane_id, command, sleep=time.sleep, warn=None, s
     a second Enter. The caller must not send anything further to that agent.
     """
     warn = warn or stderr_warn
-    before = read_pane(client, agent, warn=warn)
-    recovered = bool(composer_text(before, agent.composer_glyph, agent.composer_ignore_dim))
+    session = session if session is not None else DispatchSession()
+    before, ansi = read_pane(client, agent, warn=warn)
+    recovered = inspect_composer(before, agent, ansi=ansi).occupied
     if recovered:
         before = ensure_ready(
-            client, agent, sleep=sleep, warn=warn, settle_sec=settle_sec, text=before
+            client,
+            agent,
+            pane_id=pane_id,
+            session=session,
+            sleep=sleep,
+            warn=warn,
+            settle_sec=settle_sec,
+            text=before,
+            ansi=ansi,
         )
     before_signature = screen_signature(before, agent.composer_glyph)
 
+    # Remembered before it is sent, so a command that fails to submit is one
+    # teamlead can account for -- and therefore one it may clear later.
+    session.remember(command)
     client.deliver_slash_command(agent.slash_delivery, agent.name, pane_id, command)
     sleep(settle_sec)
-    text = read_pane(client, agent, warn=warn)
+    text, ansi = read_pane(client, agent, warn=warn)
 
     extra_enter = False
-    if composer_text(text, agent.composer_glyph, agent.composer_ignore_dim):
+    if inspect_composer(text, agent, ansi=ansi).occupied:
         # Codex opens an autocomplete popup on `/`, where the first Enter only
         # accepts the completion. A second Enter submits, and an extra Enter
         # on an empty composer is harmless.
@@ -432,9 +576,9 @@ def send_command(client, agent, pane_id, command, sleep=time.sleep, warn=None, s
         )
         client.pane_send_keys(pane_id, ["enter"])
         sleep(settle_sec)
-        text = read_pane(client, agent, warn=warn)
+        text, ansi = read_pane(client, agent, warn=warn)
 
-    held = composer_text(text, agent.composer_glyph, agent.composer_ignore_dim)
+    held = inspect_composer(text, agent, ansi=ansi).content
     if held:
         raise HerdrError(
             "{!r} is still sitting unsent in {}'s composer (it shows {!r}) "
@@ -457,7 +601,7 @@ def send_command(client, agent, pane_id, command, sleep=time.sleep, warn=None, s
     while not screen_changed and attempts < screen_attempts:
         attempts += 1
         sleep(settle_sec)
-        text = read_pane(client, agent, warn=warn)
+        text, _ansi = read_pane(client, agent, warn=warn)
         screen_changed = screen_signature(text, agent.composer_glyph) != before_signature
 
     return {

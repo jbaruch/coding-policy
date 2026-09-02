@@ -143,6 +143,11 @@ def build_parser():
         "the marker (default: %(default)s).",
     )
     measure_parser.add_argument(
+        "--allow-recovery",
+        action="store_true",
+        help="Let teamlead clear a composer holding text it did not type. Off by default: the recovery key is ctrl+c on some runtimes, and ctrl+c on an idle Codex exits the process.",
+    )
+    measure_parser.add_argument(
         "--composer-settle",
         type=float,
         default=COMPOSER_SETTLE_SEC,
@@ -222,6 +227,11 @@ def build_parser():
         "--now",
         metavar="ISO8601",
         help="Timestamp for the ledger entries (default: the current UTC time).",
+    )
+    apply_parser.add_argument(
+        "--allow-recovery",
+        action="store_true",
+        help="Let teamlead clear a composer holding text it did not type. Off by default: the recovery key is ctrl+c on some runtimes, and ctrl+c on an idle Codex exits the process.",
     )
     apply_parser.add_argument(
         "--composer-settle",
@@ -333,6 +343,7 @@ def cmd_measure(args, client=None, warn=None):
         poll_attempts=args.marker_poll_attempts,
         poll_interval_sec=args.marker_poll_interval,
         settle_sec=args.composer_settle,
+        allow_recovery=args.allow_recovery,
     )
     state = load_state(_state_path(args))
     add_snapshot(state, snapshot)
@@ -436,6 +447,7 @@ def cmd_apply(args, client=None, warn=None):
         warn=warn,
         settle_sec=args.composer_settle,
         start_timeout_ms=args.start_timeout,
+        allow_recovery=args.allow_recovery,
     )
     not_started = [
         record["agent"]

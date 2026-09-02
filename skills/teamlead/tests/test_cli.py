@@ -52,7 +52,8 @@ CONFIG = {
             "usage_read_source": "recent-unwrapped",
             "slash_delivery": "type",
             "composer_glyph": "› ",
-            "recover_keys": ["ctrl+c"],
+            "composer_placeholders": ["Ask Codex to do anything"],
+            "recover_keys": [],
             "clear_prompt": "/new",
         },
         {
