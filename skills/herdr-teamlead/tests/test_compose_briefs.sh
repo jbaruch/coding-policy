@@ -136,6 +136,28 @@ JSON
   if [[ $RC -eq 2 ]] && [[ ! -e "$o6/brief-developer.md" ]] && [[ ! -e "$o6/COMMON.md" ]]; then
     pass; else fail "atomicity: a failed round left files behind (RC=$RC)"; fi
 
+  # 6b. The PACKAGED templates compose from the values Step 5 documents — for
+  #     every shipped role, the release brief included. A template that grows
+  #     a placeholder nobody documented fails here before it fails a worker.
+  local v6b="$TMP/v6b.json" o6b="$TMP/out6b"
+  local PKG="$(dirname "$SCRIPT")/templates"
+  cat > "$v6b" <<'JSON' || die "could not write $v6b"
+{
+  "shared": {"SHARED_CHECKOUT": "/repo", "AUTHORITY_STATEMENT": "owner of jbaruch/x",
+             "EXTERNAL_PERMISSION": "none", "ISSUE": "#7", "BRANCH": "feat/x"},
+  "roles": {
+    "developer": {"WORKTREE": "/wt/dev", "REPORTS_DIR": "/r", "REPORT": "/r/dev.md"},
+    "reviewer": {"REPORT": "/r/review.md"},
+    "tester": {"WORKTREE": "/wt/test", "REPORTS_DIR": "/r", "REPORT": "/r/test.md"},
+    "release": {"WORKTREE": "/wt/dev", "REPORTS_DIR": "/r", "REPORT": "/r/release.md"}
+  }
+}
+JSON
+  run "$PKG" "$v6b" "$o6b"
+  if [[ $RC -eq 0 ]] && grep -q 'cd /wt/dev && pwd' "$o6b/brief-release.md" \
+     && grep -q 'Skill(skill: "release")' "$o6b/brief-release.md"; then
+    pass; else fail "packaged templates: expected exit 0 and a filled release brief, got RC=$RC ERR=$ERRTEXT"; fi
+
   # 7. A role with no template is named, not guessed at.
   local v7="$TMP/v7.json" o7="$TMP/out7"
   cat > "$v7" <<'JSON' || die "could not write $v7"

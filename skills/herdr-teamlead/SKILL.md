@@ -169,6 +169,7 @@ What you decide, and it is the whole of your job here:
 | 1 | developer | — | implementation, pushed branch, no PR |
 | 2 | reviewer | B | COMMENT review of the pushed branch |
 | 2 | tester | C | gates plus acceptance tests against the pushed branch |
+| 3 | release | — | PR opened, bot rounds answered, merged, branch deleted |
 
 Phase 2 briefs name the branch AND the commit SHA the worker must report
 against. A report against an older tip does not gate anything.
@@ -333,10 +334,14 @@ A Phase 1 design note or test plan does NOT satisfy 2 or 3
 (`rules/agent-team-operation.md` Review Before PR). A report against an older
 SHA does not either — re-run Phase 2 against the current tip.
 
-With all four met, prompt the developer to run `Skill(skill: "release")`
-Steps 1–4, which opens the PR and requests the bots. After the bots post,
-prompt it to run Steps 5–7 for the merge and cleanup. The developer merges; you
-do not.
+With all four met, the release is one more assignment, never a prompt into
+the developer's existing context: return to Step 5 with the role `release` for
+the developer's agent (template `templates/brief-release.md`, the same
+`WORKTREE` and `BRANCH`, a fresh `REPORT`), run Step 6 (it reports
+`already-provisioned`), dispatch through Step 8 so the context is cleared and
+the brief is fresh, and wait on the report in Step 9. The worker merges; you
+do not. After its report, fast-forward the shared checkout, remove the
+worktree, and delete the branch per `rules/agent-worktree-isolation.md`.
 
 Log the round: the assignments, the report paths, the findings, and the
 outcome. If the round produced no findings at all, log it and say so in one
