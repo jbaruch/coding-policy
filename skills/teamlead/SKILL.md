@@ -62,7 +62,32 @@ Fewer named workers than roles is a decision, not a detail: either name another
 agent or fold two roles onto one worker in that worker's brief, and say which
 you did.
 
-## Step 2 — Measure Headroom
+## Step 2 — Verify Authority for the Repo
+
+```bash
+.tessl/plugins/jbaruch/coding-policy/skills/teamlead/verify-authority.sh <owner/repo>
+```
+
+Emits `{"repo","viewer_login","owner_login","owner_type","viewer_permission","namespace_owner","authorized"}`.
+`authorized` reflects namespace ownership alone; write permission never sets it
+(`rules/external-repo-contributions.md` Default Deny).
+
+- **`authorized: true`** — record the authority line for the briefs:
+  `owner of <owner/repo>`. Set `EXTERNAL_PERMISSION` to `none`. Proceed to
+  Step 3.
+- **`authorized: false`** — the operator does not own this repo. Ask the
+  operator for permission naming the repo AND each action type, then record
+  their exact words in `EXTERNAL_PERMISSION` and set the authority line to
+  `not owner; permitted this round: <their words>`. Without that answer, the
+  round is read-only: compose briefs that forbid every external write, or stop.
+  Never compose a brief that claims authority the operator did not give.
+- **Exit 1** — a precondition failed. Report the message verbatim, finish here.
+- **Exit 2** — GitHub could not answer. An unanswerable question is not a
+  permission. Report it and finish here.
+
+Proceed immediately to Step 3.
+
+## Step 3 — Measure Headroom
 
 ```bash
 .tessl/plugins/jbaruch/coding-policy/skills/teamlead/teamlead.sh measure
@@ -92,9 +117,9 @@ marker; the shape list and the cap are constants in
 `skills/teamlead/teamlead/herdr.py`.
 
 Report a `failed_agents` entry to the user and measure that worker by hand
-before relying on its role. Proceed immediately to Step 3.
+before relying on its role. Proceed immediately to Step 4.
 
-## Step 3 — Plan the Roles
+## Step 4 — Plan the Roles
 
 ```bash
 .tessl/plugins/jbaruch/coding-policy/skills/teamlead/teamlead.sh plan --roles developer,tester,reviewer
@@ -102,27 +127,38 @@ before relying on its role. Proceed immediately to Step 3.
 
 Pure computation over the newest snapshot plus the assignment ledger. Contacts
 no agent, writes nothing. Emits `{"assignments":{"<role>":"<agent>"},"rationale":[...],"snapshot_ref":{...}}`.
-Roles are passed heaviest-first; the ordering rules live in
-`skills/teamlead/teamlead/planner.py`.
+Exit 1 names the reason it could not plan. The `--roles` order is load-bearing;
+what it means and how ties break are in `skills/teamlead/teamlead/planner.py`
+(the `plan` docstring).
 
 Save the output to a file for Step 5. Relay the `rationale` lines to the user
-as the round's role announcement. Proceed immediately to Step 4.
+as the round's role announcement. Proceed immediately to Step 5.
 
-## Step 4 — Write the Round's Briefs
+## Step 5 — Compose the Briefs
 
-Fill one brief per assigned role from the templates:
+Write a values file for the round, then compose:
 
-```text
-skills/teamlead/templates/brief-developer.md
-skills/teamlead/templates/brief-reviewer.md
-skills/teamlead/templates/brief-tester.md
+```bash
+.tessl/plugins/jbaruch/coding-policy/skills/teamlead/compose-briefs.sh \
+  .tessl/plugins/jbaruch/coding-policy/skills/teamlead/templates \
+  <values.json> <round-reports-dir>
 ```
 
-Substitute every placeholder: `{{ISSUE}}`, `{{BRANCH}}`, `{{WORKTREE}}`,
-`{{REPORT}}`, `{{REPORTS_DIR}}`. Give each worker its own worktree path under
-`~/.worktrees/` and its own report path under the round's reports directory.
+The values file is `{"shared": {...}, "roles": {"<role>": {...}}}`; a role's
+own value beats the shared one. Emits
+`{"common":"<path>","briefs":{"<role>":"<path>"}}`. Exit 2 means validation
+failed and nothing was written — an unfilled placeholder, or a supplied key no
+template uses. The placeholder set and both validation directions are the
+script's contract; see the header of
+`skills/teamlead/compose-briefs.sh`.
 
-Name the mode each brief runs, and say so in the brief itself:
+What you decide, and it is the whole of your job here:
+
+- `SHARED_CHECKOUT` — the checkout the workers read.
+- `AUTHORITY_STATEMENT` and `EXTERNAL_PERMISSION` — verbatim from Step 2. Never
+  a claim you composed yourself.
+- Per role: `ISSUE`, `BRANCH`, `WORKTREE`, `REPORT`, `REPORTS_DIR`, and the
+  phase and mode that role runs this round.
 
 | Phase | Role | Mode | Output |
 | ----- | ---- | ---- | ------ |
@@ -135,40 +171,36 @@ Name the mode each brief runs, and say so in the brief itself:
 Phase 2 briefs name the branch AND the commit SHA the worker must report
 against. A report against an older tip does not gate anything.
 
-Copy `skills/teamlead/templates/COMMON.md` into the round's reports directory
-once per repo, substituting `{{SHARED_CHECKOUT}}`. Every worker reads the same
-copy.
-
 A worker starts each round with a cleared context. A brief that says "see the
 reviewer's earlier comment" reaches an agent that cannot see it. Name the
 issue, the file, the finding, and the path in full. Proceed immediately to
-Step 5.
+Step 6.
 
-## Step 5 — Provision the Worktrees
+## Step 6 — Provision the Worktrees
 
-The lead creates every worktree a brief names. A worker never runs `git` against
-the shared checkout (`rules/agent-team-operation.md` Writers and Checkouts), so
-the checkout it writes in has to exist before its brief arrives.
-
-From the shared checkout, once per worker that needs one:
+One call per worker that writes anything:
 
 ```bash
-git -C <shared-checkout> fetch origin
-git -C <shared-checkout> worktree add -b <branch> ~/.worktrees/<repo>-<role> origin/<default>
+.tessl/plugins/jbaruch/coding-policy/skills/teamlead/provision-worktree.sh \
+  <shared-checkout> <branch> <worktree-path> [base-ref]
 ```
 
-A read-only role (a Phase 1 reviewer) needs no worktree. A Phase 2 worker
-verifying a pushed branch gets one attached to that branch:
+Emits `{"path","branch","base_ref","state"}`, where `state` is `created`,
+`attached`, or `already-provisioned`. Exit 1 is a precondition (an invalid
+branch name, a path outside the worktree root); exit 2 means git refused, or
+the path holds something else. Branch-name and path rules are the script's
+contract; see the header of
+`skills/teamlead/provision-worktree.sh`.
 
-```bash
-git -C <shared-checkout> worktree add ~/.worktrees/<repo>-<role> <branch>
-```
+The lead provisions every worktree a brief names, so a worker never runs git
+against the shared checkout (`rules/agent-team-operation.md` Writers and
+Checkouts). A read-only Phase 1 reviewer needs none. Remove them per
+`rules/agent-worktree-isolation.md` Cleanup once the branch lands.
 
-Confirm each path exists and sits on the intended branch before Step 6. Remove
-them per `rules/agent-worktree-isolation.md` Cleanup once the branch lands.
-Proceed immediately to Step 6.
+On any non-zero exit, fix the input it names and re-run this step; do not
+dispatch a brief whose worktree does not exist. Proceed immediately to Step 7.
 
-## Step 6 — Dispatch the Briefs
+## Step 7 — Dispatch the Briefs
 
 ```bash
 .tessl/plugins/jbaruch/coding-policy/skills/teamlead/teamlead.sh apply \
@@ -180,21 +212,33 @@ Proceed immediately to Step 6.
 Clears each worker's context and hands it its brief. Emits one JSON object:
 per role a record carrying `cleared`, `landed`, `started`, and `status`.
 
-Exit conditions that change what you do next:
+Each outcome names where the round goes next. Only a dispatched worker can
+produce a report, so Step 8 waits on exactly the roles that landed here.
 
-- **Non-zero with a busy target** — the whole round is refused before any
-  keystroke goes out. Wait for that worker, or dispatch a round without it.
+- **Exit 0** — every role was dispatched. Proceed to Step 8.
+- **Non-zero with a busy target** — the whole round was refused before any
+  keystroke went out. Nothing was dispatched, so there is nothing to wait for:
+  wait for that worker to reach idle and re-run this step, or re-run it with a
+  plan that omits the busy worker. Do not go to Step 8.
 - **Non-zero with `"status": "sent_but_not_started"`** — the message was sent
-  and no turn began. Read that worker's pane; do not re-dispatch on top of it.
-- **A worker failed on its clear command** — its assignment was never sent.
-  Nothing landed for that role, so the round is short one worker.
+  and no turn began for that role. Read that worker's pane; do not re-dispatch
+  on top of it. Go to Step 8 for the roles whose records say `started`, and
+  treat this role as producing no report this round.
+- **A worker failed on its clear command** — its assignment was never sent, and
+  the round is short that role. Go to Step 8 for the rest; re-dispatch this one
+  by re-running this step for that role alone once its pane is clear.
 - **`cleared: false` on a record** — the clear was consumed and the pane did
-  not change. The worker still got its brief, with a stale context behind it.
+  not change. That worker still got its brief, with a stale context behind it.
+  Proceed to Step 8, and weigh its report knowing the context was not fresh.
 - **A refusal naming an unaccounted composer** — the worker's input line holds
-  text the lead did not send. Read the pane and clear it by hand, or re-run
-  with `--allow-recovery` once you know whose text it is. Codex sends no
-  recovery key at all: its clear key exits an idle Codex.
-- `--dry-run` prints every command it would run and makes no herdr calls.
+  text the lead did not send. Nothing was dispatched for that role. Read the
+  pane and clear it by hand, or re-run this step with `--allow-recovery` once
+  you know whose text it is. Codex sends no recovery key at all: its clear key
+  exits an idle Codex.
+- **A refusal the message does not cover** — report it verbatim and finish
+  here. A dispatch nobody understands is not a round to wait on.
+- `--dry-run` prints every command it would run and makes no herdr calls. It
+  dispatches nothing, so finish here after reading it.
 
 The delivery mechanics behind those outcomes — composer confirmation, recovery
 keys, ghost text, the rejection strings, the settle knobs — are in:
@@ -206,9 +250,9 @@ skills/teamlead/references/herdr.md
 The prompt text, the refusal predicate, and every constant are the utility's
 own contract; see `skills/teamlead/teamlead/assign.py`.
 
-Proceed immediately to Step 7.
+Proceed to Step 8 with the roles that were dispatched.
 
-## Step 7 — Wait for the Reports
+## Step 8 — Wait for the Reports
 
 One call per dispatched worker, in the order the round needs them:
 
@@ -221,26 +265,30 @@ outcome. Completion requires both the report file on disk and the `REPORT: `
 marker in the worker's pane. A single `idle` or `done` observation is not
 completion. Poll interval and give-up budget are the script's own constants.
 
-- **Exit 0** — the report is there. Continue to the next worker.
+- **Exit 0** — the report is there. Continue to the next worker, then Step 9.
 - **Exit 1** — the budget ran out. Read the pane with
-  `herdr agent read <name> --source visible` before re-dispatching.
-- **Exit 2** — a tool failure. Report the message verbatim and stop the round.
+  `herdr agent read <name> --source visible`. Either re-run this step for that
+  worker with a longer budget, or go to Step 9 recording that it produced no
+  report.
+- **Exit 2** — a tool failure. Report the message verbatim and finish here; the
+  round has no reliable view of any worker.
 - **Exit 3** — the worker is blocked at an approval or question dialog,
   confirmed across two reads and the pane. Read the dialog with
   `herdr pane read <pane-id> --source visible`, relay its text to the operator
   verbatim, and stop the round for that worker. You never answer it: the
   operator does. Resume only once `herdr agent get <name>` reports a state
-  other than `blocked`, then re-run the wait.
+  other than `blocked`, then re-run this step for that worker.
 
-Proceed immediately to Step 8 once every dispatched worker has been waited on.
+Proceed to Step 9 once every dispatched worker has been waited on, or once you
+have recorded which of them produced no report.
 
-## Step 8 — Gate the Round
+## Step 9 — Gate the Round
 
 Read every report file in full, including a report whose worker exited cleanly.
 A `## BLOCKED` section can sit under a report that otherwise reads as finished.
 Classify each finding blocking or advisory per `rules/review-severity.md`.
 
-- **Any blocking finding** — run another round: return to Step 2 with fresh
+- **Any blocking finding** — run another round: return to Step 3 with fresh
   briefs naming the findings in full. Say what changed from the prior round.
 - **Advisory findings only** — record them in the round log and fold them into
   the next round that is already happening. Never spend a round on a lone

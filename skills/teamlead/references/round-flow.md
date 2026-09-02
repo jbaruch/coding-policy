@@ -45,24 +45,27 @@ not a review of the code that got written, and a test plan is not a test run.
 
 1. **Roster** — `roster.sh` names the live workers. An unnamed pane has no
    dispatch handle; name it first.
-2. **Measure** — `teamlead.sh measure` reads each worker's own usage numbers.
+2. **Authority** — `verify-authority.sh <owner/repo>` answers whether the
+   operator owns the repo. Ownership is the namespace, never write permission,
+   and the answer becomes the authority line in every brief.
+3. **Measure** — `teamlead.sh measure` reads each worker's own usage numbers.
    A worker that is `working` or `blocked` is skipped with null windows rather
    than interrupted.
-3. **Plan** — `teamlead.sh plan --roles developer,tester,reviewer` assigns
-   roles heaviest-first. It contacts nobody and writes nothing.
-4. **Brief** — the lead fills the templates for this round, naming each
-   worker's phase and mode. `COMMON.md` is copied once per repo; each role gets
-   its own brief file with the issue, branch, worktree, and report paths
-   substituted.
-5. **Provision** — the lead creates every worktree the briefs name, from the
-   shared checkout. A worker never runs `git` there, so its checkout has to
-   exist before the brief arrives.
-6. **Dispatch** — `teamlead.sh apply` clears each worker's context, then sends
+4. **Plan** — `teamlead.sh plan --roles developer,tester,reviewer` assigns the
+   roles. It contacts nobody and writes nothing.
+5. **Compose** — `compose-briefs.sh` renders the templates from one values
+   file, refusing to write anything when a placeholder is unfilled or a
+   supplied key matches no template. The lead decides the values; the script
+   decides nothing.
+6. **Provision** — `provision-worktree.sh` creates every worktree the briefs
+   name, from the shared checkout. A worker never runs `git` there, so its
+   checkout has to exist before the brief arrives.
+7. **Dispatch** — `teamlead.sh apply` clears each worker's context, then sends
    the assignment prompt. It re-reads live status first and refuses the round
    rather than typing into a busy worker.
-7. **Wait** — `wait-report.sh <agent> <report-path>` per worker, in the order
+8. **Wait** — `wait-report.sh <agent> <report-path>` per worker, in the order
    the round needs them.
-8. **Gate** — the lead reads every report in full and decides: another round,
+9. **Gate** — the lead reads every report in full and decides: another round,
    or the release hand-off.
 
 ## Reading a Report
@@ -126,6 +129,9 @@ whatever GitHub's merge box says.
 - Answer a question by typing into a working worker. Wait for the report.
 - Answer a blocked worker's approval dialog. Relay it to the operator and stop.
 - Create a worktree for a worker after dispatch. Provision before briefing.
+- Write an authority line by hand. It comes from `verify-authority.sh`.
+- Brief a write action on a repo the operator does not own without their
+  explicit per-repo, per-action permission recorded in the brief.
 - Release on a Phase 1 report. A plan is not a verification.
 - Treat a single `idle` or `done` observation as completion.
 - Merge on a worker's behalf. The developer runs the release skill.
