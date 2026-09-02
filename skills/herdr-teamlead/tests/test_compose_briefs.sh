@@ -170,8 +170,8 @@ JSON
 }
 JSON
   run "$TPL" "$v6c" "$o6c"
-  if [[ $RC -eq 2 && -z "$OUT" ]] && printf '%s' "$ERRTEXT" | grep -q "REPORT for role 'tester'" && [[ ! -e "$o6c/brief-tester.md" ]]; then
-    pass; else fail "long REPORT: expected exit 2 naming the role and nothing written, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
+  if [[ $RC -eq 2 && -z "$OUT" ]] && printf '%s' "$ERRTEXT" | grep -q "REPORT for role 'tester'" && [[ ! -e "$o6c" ]]; then
+    pass; else fail "long REPORT: expected exit 2 naming the role and no output dir at all, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
   TEAMLEAD_REPORT_PATH_MAX_COLS=200 run "$TPL" "$v6c" "$o6c"
   if [[ $RC -eq 0 ]]; then
     pass; else fail "long REPORT under a raised limit: expected exit 0, got RC=$RC ERR=$ERRTEXT"; fi

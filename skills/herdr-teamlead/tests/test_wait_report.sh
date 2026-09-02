@@ -42,6 +42,7 @@
 #  21c. Bad idle-reads  -> a non-integer override is exit 2, not an abort.
 #  21d. Zero as `00`    -> refused too; the count is compared in base 10.
 #  21e. `02` is two     -> a leading zero is decimal, never octal, downstream.
+#  21f. Bad budget      -> the seconds knobs are validated the same way.
 #
 # Run: bash skills/herdr-teamlead/tests/test_wait_report.sh
 set -uo pipefail
@@ -453,6 +454,13 @@ ${base}"
     bash "$SCRIPT" worker "$report" </dev/null 2>"$TMP/e21e")"; RC=$?
   if [[ $RC -eq 4 ]] && printf '%s' "$OUT" | jq -e '.found == false' >/dev/null 2>&1 && ! grep -q "octal\|value too great" "$TMP/e21e"; then
     pass; else fail "leading-zero override: expected exit 4 with no arithmetic error, got RC=$RC OUT=$OUT ERR=$(cat "$TMP/e21e")"; fi
+  # 21f. The seconds knobs are validated too: a non-integer budget is exit 2
+  #      with a named cause, never an arithmetic abort or a `sleep` error.
+  RUN_SEQ=$((RUN_SEQ+1))
+  OUT="$(env HERDR_ENV=1 HERDR_BIN="$FAKE" TEAMLEAD_WAIT_BUDGET_SEC=soon \
+    bash "$SCRIPT" worker "$report" </dev/null 2>"$TMP/e21f")"; RC=$?
+  if [[ $RC -eq 2 && -z "$OUT" ]] && grep -q "TEAMLEAD_WAIT_BUDGET_SEC must be a non-negative integer" "$TMP/e21f"; then
+    pass; else fail "bad budget override: expected exit 2 naming it, got RC=$RC OUT=$OUT ERR=$(cat "$TMP/e21f")"; fi
 
   echo "─────────────────────────────────────────────" >&2
   if [[ $FAIL -gt 0 ]]; then echo "FAILED: ${FAIL} failed, ${PASS} passed" >&2; exit 1; fi

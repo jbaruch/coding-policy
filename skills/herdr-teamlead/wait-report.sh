@@ -53,9 +53,20 @@ TEAMLEAD_WAIT_BUDGET_SEC="${TEAMLEAD_WAIT_BUDGET_SEC:-5400}"
 # never a completion.
 TEAMLEAD_UNCONFIRMED_IDLE_READS="${TEAMLEAD_UNCONFIRMED_IDLE_READS:-2}"
 
-# Every env-overridable count is validated before it reaches arithmetic: a
-# bad override must fail as exit 2 with a diagnostic, never as a bash
-# arithmetic abort with no JSON and no named cause.
+# Every numeric override is validated before it reaches arithmetic, `sleep`,
+# or a herdr argument: a bad override must fail as exit 2 with a diagnostic,
+# never as a bash arithmetic abort or a tool error with no JSON and no named
+# cause. Counts that must be at least one use the positive form; seconds may
+# be zero (the tests run with zero intervals and budgets).
+validate_nonneg_int() { # <name> <value>
+  case "$2" in
+    ''|*[!0-9]*)
+      warn "$1 must be a non-negative integer, got '${2}' — unset it to use the script's default"
+      return 2
+      ;;
+  esac
+  return 0
+}
 validate_positive_int() { # <name> <value>
   case "$2" in
     ''|*[!0-9]*)
@@ -275,9 +286,19 @@ main() {
   fi
 
   validate_positive_int TEAMLEAD_UNCONFIRMED_IDLE_READS "$TEAMLEAD_UNCONFIRMED_IDLE_READS" || return 2
+  validate_nonneg_int TEAMLEAD_WAIT_INTERVAL_SEC "$TEAMLEAD_WAIT_INTERVAL_SEC" || return 2
+  validate_nonneg_int TEAMLEAD_WAIT_BUDGET_SEC "$TEAMLEAD_WAIT_BUDGET_SEC" || return 2
+  validate_nonneg_int TEAMLEAD_BLOCKED_CONFIRM_SEC "$TEAMLEAD_BLOCKED_CONFIRM_SEC" || return 2
+  validate_positive_int TEAMLEAD_PROBE_TIMEOUT_MS "$TEAMLEAD_PROBE_TIMEOUT_MS" || return 2
+  validate_positive_int TEAMLEAD_PROBE_LINES "$TEAMLEAD_PROBE_LINES" || return 2
   # Normalize to decimal once: a validated `08` would otherwise be reparsed as
   # octal by every later bare arithmetic expansion.
   TEAMLEAD_UNCONFIRMED_IDLE_READS=$(( 10#$TEAMLEAD_UNCONFIRMED_IDLE_READS ))
+  TEAMLEAD_WAIT_INTERVAL_SEC=$(( 10#$TEAMLEAD_WAIT_INTERVAL_SEC ))
+  TEAMLEAD_WAIT_BUDGET_SEC=$(( 10#$TEAMLEAD_WAIT_BUDGET_SEC ))
+  TEAMLEAD_BLOCKED_CONFIRM_SEC=$(( 10#$TEAMLEAD_BLOCKED_CONFIRM_SEC ))
+  TEAMLEAD_PROBE_TIMEOUT_MS=$(( 10#$TEAMLEAD_PROBE_TIMEOUT_MS ))
+  TEAMLEAD_PROBE_LINES=$(( 10#$TEAMLEAD_PROBE_LINES ))
 
   if [[ "${HERDR_ENV:-}" != "1" ]]; then
     warn "not running inside Herdr (HERDR_ENV='${HERDR_ENV:-}') — run the team round from a pane Herdr manages"

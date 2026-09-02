@@ -177,13 +177,9 @@ main() {
     fi
   done <<< "$roles"
 
-  if ! mkdir -p "$outdir"; then
-    warn "cannot create the output dir ${outdir} — check permissions"
-    return 1
-  fi
-
   # Compose into memory first: a validation failure must leave no half-written
-  # round behind (`rules/file-hygiene.md` Idempotency).
+  # round behind, and no output directory either (`rules/file-hygiene.md`
+  # Idempotency); the directory is created only once every check has passed.
   local -a out_paths=() out_bodies=()
   local merged rendered leftovers supplied known unused key report
   local common_body scan_rc=0
@@ -236,6 +232,10 @@ main() {
     out_bodies+=("$rendered")
   done <<< "$roles"
 
+  if ! mkdir -p "$outdir"; then
+    warn "cannot create the output dir ${outdir} — check permissions"
+    return 1
+  fi
   local i
   for i in "${!out_paths[@]}"; do
     if ! printf '%s\n' "${out_bodies[$i]}" > "${out_paths[$i]}"; then
