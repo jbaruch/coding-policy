@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.175 — 2026-09-02
+
 ### herdr-teamlead: `plan` gained seat weights and author exclusion, and the lead stopped hand-writing the assignment
 
 **The balancer was consulted three times in a day because it could not express the two things every round needs.** Observed 2026-09-02 on the agentic-context-registry team: weekly headroom from 12:50Z to 19:22Z went grok 74→42, codex 80→76, claude 50→42, with grok holding the tester seat plus a five-round developer churn. `plan` could not say "this worker wrote the branch, so it cannot review or verify it", and it could not say "the tester seat costs twice the reviewer seat" — the caller's `--roles` order was the only thing that ranked the seats, and every seat compared against headroom as though they cost the same. So the lead wrote the assignment JSON by hand for every Phase 2 round, which is the balancer being bypassed rather than used (jbaruch/coding-policy#318).
