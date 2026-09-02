@@ -1124,9 +1124,17 @@ class ApplyTest(unittest.TestCase):
             BY_NAME,
             self.paths,
             AT,
-            on_assigned=lambda role, agent, at: seen.append((role, agent, at)),
+            on_assigned=lambda role, agent, at, status: seen.append(
+                (role, agent, at, status)
+            ),
         )
-        self.assertEqual(seen, [("developer", "grok", AT), ("tester", "claude", AT)])
+        self.assertEqual(
+            seen,
+            [
+                ("developer", "grok", AT, "applied"),
+                ("tester", "claude", AT, "applied"),
+            ],
+        )
 
 
 if __name__ == "__main__":

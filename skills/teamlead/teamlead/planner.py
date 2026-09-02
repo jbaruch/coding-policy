@@ -22,6 +22,9 @@ Ordering, in full:
    the ledger has nothing useful to say about an agent nobody could measure.
 """
 
+import math
+
+from .diagnostics import stderr_warn
 from .errors import PlanError
 
 PLAN_SCHEMA_VERSION = 1
@@ -34,14 +37,55 @@ def _sort_key(name, headroom, role, counts):
     return (0, -float(headroom), counts.get(role, {}).get(name, 0), name)
 
 
-def _headroom_of(record):
+def _headroom_of(name, record, warn):
+    """This agent's headroom as a float, or None when it is not a usable number.
+
+    A snapshot is a file on disk: hand-edited, written by an older build, or
+    truncated mid-write. `float()` on whatever it happens to hold crashes the
+    plan, and a crash here loses the whole round over one bad field. Anything
+    that is not a finite number reads as unknown instead, which already has a
+    defined place in the ordering -- last, and named in the rationale.
+    """
     if not isinstance(record, dict):
+        warn(
+            "snapshot entry for {!r} is {}, not an object; treating its "
+            "headroom as unknown.".format(name, type(record).__name__)
+        )
         return None
-    headroom = record.get("headroom_pct")
-    return None if headroom is None else float(headroom)
+
+    value = record.get("headroom_pct")
+    if value is None:
+        return None
+
+    # bool is a subclass of int, and `true` is not 100% headroom.
+    if isinstance(value, bool):
+        warn(
+            "headroom_pct for {!r} is {!r}, not a number; treating it as "
+            "unknown.".format(name, value)
+        )
+        return None
+
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        warn(
+            "headroom_pct for {!r} is {!r}, which is not a number; treating it "
+            "as unknown.".format(name, value)
+        )
+        return None
+
+    # NaN compares false against everything, which would make the sort order
+    # depend on input order -- and this planner is documented deterministic.
+    if math.isnan(number) or math.isinf(number):
+        warn(
+            "headroom_pct for {!r} is {!r}, which cannot be ordered; treating "
+            "it as unknown.".format(name, value)
+        )
+        return None
+    return number
 
 
-def plan(roles, snapshot, counts=None, snapshot_ref=None):
+def plan(roles, snapshot, counts=None, snapshot_ref=None, warn=None):
     """Assign `roles` (heaviest first) to the agents in `snapshot`.
 
     `counts` is `{role: {agent: times_held}}` from the state ledger; omit it
@@ -81,7 +125,10 @@ def plan(roles, snapshot, counts=None, snapshot_ref=None):
             {"roles": roles, "agents": sorted(agents)},
         )
 
-    headrooms = {name: _headroom_of(record) for name, record in agents.items()}
+    warn = warn or stderr_warn
+    headrooms = {
+        name: _headroom_of(name, record, warn) for name, record in agents.items()
+    }
     remaining = set(headrooms)
     assignments = {}
     rationale = []

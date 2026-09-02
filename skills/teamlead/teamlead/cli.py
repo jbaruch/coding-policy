@@ -28,6 +28,7 @@ from .herdr import (
     trace_enabled_in_env,
 )
 from .composer import COMPOSER_SETTLE_SEC, DEFAULT_START_TIMEOUT_MS
+from .diagnostics import PREFIX as DIAGNOSTIC_PREFIX
 from .measure import (
     DEFAULT_MARKER_POLL_ATTEMPTS,
     DEFAULT_MARKER_POLL_INTERVAL_SEC,
@@ -330,9 +331,9 @@ def _load_assignments(value):
     return normalize_assignments(payload)
 
 
-def cmd_measure(args, client=None, warn=None):
+def cmd_measure(args, client=None, warn=None, trace=None):
     agents = select_agents(load_config(_config_path(args)), args.agents)
-    client = client if client is not None else _client(args, trace=warn)
+    client = client if client is not None else _client(args, trace=trace)
     snapshot = measure(
         client,
         agents,
@@ -358,7 +359,7 @@ def cmd_measure(args, client=None, warn=None):
     }
 
 
-def cmd_plan(args, client=None, warn=None):
+def cmd_plan(args, client=None, warn=None, trace=None):
     roles = [role.strip() for role in args.roles.split(",") if role.strip()]
     state_path = _state_path(args)
     state = load_state(state_path)
@@ -403,17 +404,18 @@ def cmd_plan(args, client=None, warn=None):
             snapshot,
             role_counts(state),
             snapshot_ref={"source": source, "measured_at": snapshot.get("measured_at")},
+            warn=warn,
         ),
         None,
     )
 
 
-def cmd_apply(args, client=None, warn=None):
+def cmd_apply(args, client=None, warn=None, trace=None):
     agents = load_config(_config_path(args))
     agents_by_name = {agent.name: agent for agent in agents}
     assignments = _load_assignments(args.assignments)
     paths = resolve_paths(assignments, _parse_briefs(args.briefs), args.common)
-    client = client if client is not None else _client(args, trace=warn)
+    client = client if client is not None else _client(args, trace=trace)
 
     if args.dry_run:
         return (
@@ -431,8 +433,8 @@ def cmd_apply(args, client=None, warn=None):
     state_path = _state_path(args)
     state = load_state(state_path)
 
-    def record(role, agent, at):
-        add_assignment(state, at, role, agent)
+    def record(role, agent, at, status):
+        add_assignment(state, at, role, agent, status=status)
         save_state(state_path, state)
 
     result = apply_assignments(
@@ -465,7 +467,7 @@ def cmd_apply(args, client=None, warn=None):
     }
 
 
-def cmd_state(args, client=None, warn=None):
+def cmd_state(args, client=None, warn=None, trace=None):
     return load_state(_state_path(args)), None
 
 
@@ -483,11 +485,15 @@ def main(argv=None, stdout=None, stderr=None, client=None):
     stderr = stderr if stderr is not None else sys.stderr
     args = build_parser().parse_args(argv)
 
-    def warn(message):
+    def trace(message):
+        # Trace lines identify themselves ("herdr> ..."), so they go out bare.
         stderr.write(message + "\n")
 
+    def warn(message):
+        stderr.write(DIAGNOSTIC_PREFIX + message + "\n")
+
     try:
-        payload, failure = COMMANDS[args.command](args, client=client, warn=warn)
+        payload, failure = COMMANDS[args.command](args, client=client, warn=warn, trace=trace)
     except TeamLeadError as exc:
         json.dump(exc.to_dict(), stderr, indent=2)
         stderr.write("\n")

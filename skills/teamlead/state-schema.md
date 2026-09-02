@@ -26,14 +26,15 @@ exemptions, and the guarded one-shot recovery of a stuck composer. All are docum
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "snapshots": ["<measure output>, oldest first, ring capped at 20"],
   "assignments": [
     {
-      "schema_version": 1,
+      "schema_version": 2,
       "at": "2026-09-01T21:00:00+00:00",
       "role": "developer",
-      "agent": "grok"
+      "agent": "grok",
+      "status": "applied"
     }
   ]
 }
@@ -41,13 +42,22 @@ exemptions, and the guarded one-shot recovery of a stuck composer. All are docum
 
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
-| `schema_version` | integer | Currently `1`. Bumped on any shape change |
+| `schema_version` | integer | Currently `2`. Bumped on any shape change |
 | `snapshots` | array | Whole `measure` documents, oldest first; the ring holds the last 20 |
 | `assignments` | array | Append-only ledger of who held which role |
 | `assignments[].schema_version` | integer | The row's own version, stamped on write |
 | `assignments[].at` | string | ISO-8601 timestamp, from `--now` or the CLI's clock |
 | `assignments[].role` | string | The role handed out |
 | `assignments[].agent` | string | The agent that received it |
+| `assignments[].status` | string | `applied`, `sent_but_not_started`, or `unknown` |
+
+Every hand-off is recorded, one that never started included: the ledger is what
+the tool did, and a round that went out and died is the thing worth looking up
+afterwards. `status` keeps that honesty out of the plan — `role_counts` skips
+rows marked `sent_but_not_started`, so an assignment nobody began never counts
+as experience of the role. The skip list is a deny-list: a version 1 row
+migrated forward carries `unknown` and still counts, which says the tool cannot
+prove the outcome rather than that the history should vanish.
 
 Every record carries `schema_version`, not only the document: a ledger row
 outlives the document it arrived in, and a version on the row is what makes a
@@ -83,8 +93,8 @@ Only the owner migrates, and it reads a version in one of three directions.
   `skills/teamlead/teamlead/state.py`, keyed by the version being upgraded
   from, and the upgraded file is rewritten in place. A document or row carrying
   no `schema_version` reads as the pre-versioning version `0`, which is what
-  gives the chain a step below `1`. Adding a `1 → 2` step later is one more
-  entry in each table.
+  gives the chain a step below `1`. The `1 → 2` step stamps `status: unknown`
+  on every row written before the field existed.
 - **Newer** — this build is the lagging reader, not the migrator. The caller
   gets an empty document in memory, the file on disk is left exactly as found,
   and a warning goes to stderr. A single row stamped ahead of this build makes
@@ -106,6 +116,10 @@ apply here.
 
 ## Hints, Not Authority
 
+- A `headroom_pct` that is not a finite number — a string, an object, `true`,
+  `NaN` — reads as unknown with a warning naming the agent and the value,
+  never a crash. Unknown already has a defined place in the ordering, and a
+  numeric string is coerced rather than discarded.
 - A snapshot is a last-seen reading, never ground truth. `plan` may run off a
   stale snapshot deliberately; planning has no side effects.
 - `apply` never trusts a snapshot for an agent's lifecycle state. It re-reads

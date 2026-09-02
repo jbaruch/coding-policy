@@ -20,7 +20,7 @@ agent's config, so the per-agent signatures live with the operator and the
 decision logic is testable against inline fixtures.
 """
 
-import sys
+from .diagnostics import stderr_warn  # noqa: F401  (re-exported for callers)
 
 #: Probe verdicts.
 IDLE = "idle"
@@ -41,11 +41,6 @@ FOOTER_LINES = 15
 #: "Creating…", "Waiting for response…"). Present in the footer on every kind
 #: here while a turn is running, absent when the agent is at its prompt.
 SPINNER_GLYPH = "…"
-
-
-def stderr_warn(message):
-    """Default warning sink. Diagnostics go to stderr, never stdout."""
-    print(message, file=sys.stderr)
 
 
 def footer(text, limit=FOOTER_LINES):

@@ -36,15 +36,31 @@ Reading follows one rule per direction:
 
 import json
 import os
-import sys
 import tempfile
 from pathlib import Path
 
+from .diagnostics import stderr_warn as _warn
 from .errors import StateError
 
 #: The version this build writes, for the document and for every record in it.
 #: They move together: one owner, one file, one release train.
-STATE_SCHEMA_VERSION = 1
+STATE_SCHEMA_VERSION = 2
+
+#: An assignment row records what teamlead did, including what did not work.
+#: `applied` -- the agent took the brief and started a turn.
+#: `sent_but_not_started` -- the paste went out, nothing began (see
+#:     teamlead/composer.py send_message).
+#: `unknown` -- written before rows carried a status.
+STATUS_APPLIED = "applied"
+STATUS_NOT_STARTED = "sent_but_not_started"
+STATUS_UNKNOWN = "unknown"
+
+#: Statuses that do NOT count toward "held this role N times". A hand-off
+#: nobody started is not experience, and letting it count would push the next
+#: round's tie-break away from an agent that never did the work.
+#: Deny-list, not an allow-list: rows migrated from before the field are
+#: `unknown`, and those were real hand-offs whose history should not vanish.
+UNCOUNTED_STATUSES = frozenset({STATUS_NOT_STARTED})
 
 #: The version a document or record carries when it has no `schema_version` at
 #: all -- the pre-versioning shape. Reading an absent key as 0 is what lets the
@@ -70,15 +86,33 @@ class _NoUsableState(Exception):
     """Internal signal: this file cannot be read, and must not be written."""
 
 
-def _warn(message):
-    """Default warning sink. Diagnostics go to stderr; stdout stays JSON."""
-    print("teamlead: {}".format(message), file=sys.stderr)
-
-
 def _migrate_record_0_to_1(record):
     """Pre-versioning assignment row -> version 1: stamp it."""
     record["schema_version"] = 1
     return record
+
+
+def _migrate_record_1_to_2(record):
+    """Assignment row version 1 -> 2: stamp a status.
+
+    Version 1 rows were appended whether or not the agent started, so their
+    real outcome is not recoverable -- `unknown` says so rather than claiming
+    `applied`. Unknown still counts toward role history: these were genuine
+    hand-offs, and the failure the status was added for is the rare case.
+    """
+    record["schema_version"] = 2
+    record.setdefault("status", STATUS_UNKNOWN)
+    return record
+
+
+def _migrate_document_1_to_2(payload):
+    """Document version 1 -> 2: carry every assignment row up with it."""
+    payload["schema_version"] = 2
+    payload["assignments"] = [
+        _migrate_record_1_to_2(record) if isinstance(record, dict) else record
+        for record in payload.get("assignments", [])
+    ]
+    return payload
 
 
 def _migrate_document_0_to_1(payload):
@@ -103,11 +137,13 @@ def _migrate_document_0_to_1(payload):
 #: until it reaches STATE_SCHEMA_VERSION, so a future 1->2 is one entry.
 MIGRATIONS = {
     UNVERSIONED: (1, _migrate_document_0_to_1),
+    1: (2, _migrate_document_1_to_2),
 }
 
 #: The same table for one assignment record, walked the same way.
 RECORD_MIGRATIONS = {
     UNVERSIONED: (1, _migrate_record_0_to_1),
+    1: (2, _migrate_record_1_to_2),
 }
 
 
@@ -302,8 +338,13 @@ def add_snapshot(state, snapshot):
     return state
 
 
-def add_assignment(state, at, role, agent):
+def add_assignment(state, at, role, agent, status=STATUS_APPLIED):
     """Append one role-to-agent assignment to the ledger.
+
+    Every hand-off is recorded, including one that never started -- the ledger
+    is what teamlead did, and a round that went out and died is exactly the
+    thing worth being able to look up afterwards. `status` is what keeps that
+    honesty from corrupting the role history: see UNCOUNTED_STATUSES.
 
     The row carries its own `schema_version`, so a later migration can walk the
     ledger row by row rather than inferring a row's shape from the document.
@@ -314,6 +355,7 @@ def add_assignment(state, at, role, agent):
             "at": at,
             "role": role,
             "agent": agent,
+            "status": status,
         }
     )
     return state
@@ -331,9 +373,17 @@ def role_counts(state):
     Returns ``{role: {agent: count}}``. The planner uses it to break headroom
     ties toward the agent that has held the role least often, which spreads
     roles around instead of pinning one agent to `developer` forever.
+
+    Rows whose status is in UNCOUNTED_STATUSES are skipped: an assignment that
+    was sent but never started is not experience of the role, and counting it
+    would steer the next round away from the agent that never did the work.
     """
     counts = {}
     for record in state.get("assignments", []):
+        if not isinstance(record, dict):
+            continue
+        if record.get("status") in UNCOUNTED_STATUSES:
+            continue
         role = record.get("role")
         agent = record.get("agent")
         if role is None or agent is None:

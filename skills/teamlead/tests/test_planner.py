@@ -176,3 +176,89 @@ class RefusalTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MalformedHeadroomTest(unittest.TestCase):
+    """A snapshot is a file on disk: hand-edited, stale, or truncated.
+
+    `float()` on whatever it happens to hold used to crash the whole plan over
+    one bad field. Tracked as jbaruch/coding-policy#315.
+    """
+
+    def _plan(self, value, roles=("developer",), extra=None):
+        self.warnings = []
+        agents = {"broken": {"kind": "x", "state": "idle", "headroom_pct": value}}
+        agents.update(extra or {"healthy": {"headroom_pct": 50.0}})
+        return plan(
+            list(roles),
+            {"agents": agents},
+            warn=self.warnings.append,
+        )
+
+    def test_a_string_that_is_not_a_number_is_unknown(self):
+        result = self._plan("lots")
+        self.assertEqual(result["assignments"]["developer"], "healthy")
+
+    def test_an_object_is_unknown(self):
+        result = self._plan({"pct": 90})
+        self.assertEqual(result["assignments"]["developer"], "healthy")
+
+    def test_a_list_is_unknown(self):
+        result = self._plan([90])
+        self.assertEqual(result["assignments"]["developer"], "healthy")
+
+    def test_a_boolean_is_unknown_not_one_percent(self):
+        # bool subclasses int, so float(True) is 1.0 -- a silently wrong
+        # ranking rather than a crash, which is worse.
+        result = self._plan(True)
+        self.assertEqual(result["assignments"]["developer"], "healthy")
+
+    def test_nan_is_unknown_because_it_cannot_be_ordered(self):
+        result = self._plan(float("nan"))
+        self.assertEqual(result["assignments"]["developer"], "healthy")
+
+    def test_infinity_is_unknown(self):
+        result = self._plan(float("inf"))
+        self.assertEqual(result["assignments"]["developer"], "healthy")
+
+    def test_a_numeric_string_is_coerced_not_discarded(self):
+        result = self._plan("87")
+        self.assertEqual(result["assignments"]["developer"], "broken")
+
+    def test_an_agent_entry_that_is_not_an_object_is_unknown(self):
+        result = plan(
+            ["developer"],
+            {"agents": {"broken": "idle", "healthy": {"headroom_pct": 50.0}}},
+            warn=[].append,
+        )
+        self.assertEqual(result["assignments"]["developer"], "healthy")
+
+    def test_the_warning_names_the_agent_and_the_value(self):
+        self._plan("lots")
+        self.assertEqual(len(self.warnings), 1)
+        self.assertIn("broken", self.warnings[0])
+        self.assertIn("lots", self.warnings[0])
+
+    def test_a_good_value_warns_about_nothing(self):
+        self._plan(70.0)
+        self.assertEqual(self.warnings, [])
+
+    def test_a_null_headroom_is_not_a_warning(self):
+        # Busy or skipped agents legitimately have none.
+        self._plan(None)
+        self.assertEqual(self.warnings, [])
+
+    def test_the_bad_value_sorts_last_and_is_named_in_the_rationale(self):
+        result = self._plan("lots", roles=("developer", "tester"))
+        self.assertEqual(result["assignments"]["tester"], "broken")
+        self.assertIn("broken=null", result["rationale"][0])
+
+    def test_every_agent_being_malformed_still_produces_a_plan(self):
+        result = plan(
+            ["developer", "tester"],
+            {"agents": {"zeta": {"headroom_pct": "?"}, "alpha": {"headroom_pct": "?"}}},
+            warn=[].append,
+        )
+        self.assertEqual(
+            result["assignments"], {"developer": "alpha", "tester": "zeta"}
+        )

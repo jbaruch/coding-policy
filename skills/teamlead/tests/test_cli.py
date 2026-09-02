@@ -25,7 +25,13 @@ from teamlead.cli import build_parser, main
 from teamlead.herdr import HerdrClient
 from teamlead.state import STATE_SCHEMA_VERSION
 
-from tests.fakes import FakeRunner, agent_json, composer_reads, ok_json
+from tests.fakes import (
+    FakeRunner,
+    ScriptedReads,
+    agent_json,
+    composer_reads,
+    ok_json,
+)
 
 AT = "2026-02-03T10:00:00+00:00"
 
@@ -219,7 +225,7 @@ class StateCommandTest(CliCase):
         code, out, err = self.run_cli(self.base() + ["state"])
         self.assertEqual(code, 0)
         self.assertEqual(
-            json.loads(out), {"schema_version": 1, "snapshots": [], "assignments": []}
+            json.loads(out), {"schema_version": 2, "snapshots": [], "assignments": []}
         )
         self.assertEqual(err, "")
 
@@ -553,12 +559,14 @@ class ApplyCommandTest(CliCase):
                     "at": AT,
                     "role": "developer",
                     "agent": "grok",
+                    "status": "applied",
                 },
                 {
                     "schema_version": STATE_SCHEMA_VERSION,
                     "at": AT,
                     "role": "tester",
                     "agent": "claude",
+                    "status": "applied",
                 },
             ],
         )
@@ -586,6 +594,50 @@ class ApplyCommandTest(CliCase):
         self.assertIn("pane send-text w4:p1 /new", commands)  # grok types
         self.assertIn("agent prompt claude /clear", commands)  # claude pastes
         self.assertNotIn("agent prompt grok /new", commands)
+
+    def test_a_not_started_round_is_recorded_but_never_counted(self):
+        # End to end: apply writes the row, plan does not count it as
+        # experience of the role.
+        client = self._client({"grok": "idle"}, footers={"grok": GROK_IDLE_FOOTER})
+        self.runner.responses[
+            "agent read grok --source visible --lines 20"
+        ] = ScriptedReads(["  quiet\n  │ ❯          │\n"])
+        self.runner.set(
+            "agent wait grok --until working",
+            stdout="",
+            returncode=1,
+            stderr='{"error":{"code":"timeout","message":"never left idle"}}',
+        )
+        code, out, err = self.run_cli(
+            self.base()
+            + [
+                "apply",
+                "--composer-settle",
+                "0",
+                "--assignments",
+                json.dumps({"developer": "grok"}),
+                "--common",
+                str(self.common),
+                "--now",
+                AT,
+            ]
+            + self.brief_args("developer"),
+            client=client,
+        )
+        self.assertEqual(code, 1)
+        self.assertEqual(json.loads(out)["applied"][0]["status"], "sent_but_not_started")
+        self.assertIn("sent_but_not_started", err)
+
+        ledger = json.loads(self.state.read_text(encoding="utf-8"))["assignments"]
+        self.assertEqual(len(ledger), 1)
+        self.assertEqual(ledger[0]["status"], "sent_but_not_started")
+
+        self.out, self.err = io.StringIO(), io.StringIO()
+        code, out, _ = self.run_cli(
+            self.base() + ["plan", "--roles", "developer", "--snapshot", str(self.snapshot)]
+        )
+        self.assertEqual(code, 0)
+        self.assertIn("held this role 0x before", json.loads(out)["rationale"][0])
 
     def test_busy_agent_is_refused_with_a_json_error_and_no_writes(self):
         client = self._client({"grok": "working"})

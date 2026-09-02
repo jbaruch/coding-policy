@@ -254,6 +254,7 @@ class AssignmentRecordTest(unittest.TestCase):
                 "at": "2026-01-01T00:00:00+00:00",
                 "role": "developer",
                 "agent": "grok",
+                "status": "applied",
             },
         )
 
@@ -318,3 +319,124 @@ class DefaultPathTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AssignmentStatusTest(unittest.TestCase):
+    """A hand-off that never started is recorded, but is not experience."""
+
+    def test_a_row_defaults_to_applied(self):
+        state = empty_state()
+        add_assignment(state, "2026-01-01T00:00:00+00:00", "developer", "grok")
+        self.assertEqual(state["assignments"][0]["status"], "applied")
+
+    def test_a_not_started_row_is_still_written(self):
+        # The ledger is what teamlead did, and a round that went out and died
+        # is exactly what is worth looking up afterwards.
+        state = empty_state()
+        add_assignment(
+            state,
+            "2026-01-01T00:00:00+00:00",
+            "developer",
+            "grok",
+            status="sent_but_not_started",
+        )
+        self.assertEqual(len(state["assignments"]), 1)
+        self.assertEqual(state["assignments"][0]["status"], "sent_but_not_started")
+
+    def test_a_not_started_row_does_not_count_toward_role_history(self):
+        state = empty_state()
+        add_assignment(state, "a", "developer", "grok", status="sent_but_not_started")
+        self.assertEqual(role_counts(state), {})
+
+    def test_applied_rows_count(self):
+        state = empty_state()
+        add_assignment(state, "a", "developer", "grok")
+        add_assignment(state, "b", "developer", "grok")
+        self.assertEqual(role_counts(state), {"developer": {"grok": 2}})
+
+    def test_a_mixed_ledger_counts_only_the_started_rounds(self):
+        state = empty_state()
+        add_assignment(state, "a", "developer", "grok")
+        add_assignment(state, "b", "developer", "grok", status="sent_but_not_started")
+        add_assignment(state, "c", "developer", "grok")
+        self.assertEqual(role_counts(state), {"developer": {"grok": 2}})
+
+    def test_a_row_migrated_from_before_the_field_still_counts(self):
+        # Version 1 rows were real hand-offs; `unknown` says teamlead cannot
+        # prove the outcome, not that it should be forgotten.
+        state = empty_state()
+        state["assignments"] = [
+            {"schema_version": 2, "at": "a", "role": "developer", "agent": "grok",
+             "status": "unknown"}
+        ]
+        self.assertEqual(role_counts(state), {"developer": {"grok": 1}})
+
+    def test_a_row_with_no_status_at_all_still_counts(self):
+        state = empty_state()
+        state["assignments"] = [{"at": "a", "role": "developer", "agent": "grok"}]
+        self.assertEqual(role_counts(state), {"developer": {"grok": 1}})
+
+    def test_a_non_object_row_is_skipped_rather_than_crashing(self):
+        state = empty_state()
+        state["assignments"] = ["nonsense", {"role": "developer", "agent": "grok"}]
+        self.assertEqual(role_counts(state), {"developer": {"grok": 1}})
+
+
+class StatusMigrationTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="teamlead-status-test-")
+        self.addCleanup(shutil.rmtree, self.tmp)
+        self.path = Path(self.tmp) / "state.json"
+        self.warnings = []
+
+    def test_a_version_one_ledger_is_upgraded_and_stamped_unknown(self):
+        self.path.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "snapshots": [],
+                    "assignments": [
+                        {"schema_version": 1, "at": "a", "role": "developer",
+                         "agent": "grok"}
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        state = load_state(self.path, warn=self.warnings.append)
+        self.assertEqual(state["schema_version"], 2)
+        row = state["assignments"][0]
+        self.assertEqual(row["schema_version"], 2)
+        self.assertEqual(row["status"], "unknown")
+
+    def test_the_upgraded_ledger_keeps_its_role_history(self):
+        self.path.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "snapshots": [],
+                    "assignments": [
+                        {"schema_version": 1, "at": "a", "role": "developer",
+                         "agent": "grok"},
+                        {"schema_version": 1, "at": "b", "role": "developer",
+                         "agent": "grok"},
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        state = load_state(self.path, warn=self.warnings.append)
+        self.assertEqual(role_counts(state), {"developer": {"grok": 2}})
+
+    def test_an_unversioned_ledger_walks_the_whole_chain(self):
+        self.path.write_text(
+            json.dumps(
+                {"snapshots": [], "assignments": [
+                    {"at": "a", "role": "developer", "agent": "grok"}
+                ]}
+            ),
+            encoding="utf-8",
+        )
+        state = load_state(self.path, warn=self.warnings.append)
+        self.assertEqual(state["schema_version"], 2)
+        self.assertEqual(state["assignments"][0]["status"], "unknown")

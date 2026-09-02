@@ -274,9 +274,11 @@ def check_all_ready(client, assignments, agents_by_name, warn=None):
 def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle_timeout_ms=DEFAULT_SETTLE_TIMEOUT_MS, on_assigned=None, warn=None, sleep=time.sleep, settle_sec=COMPOSER_SETTLE_SEC, landing_attempts=LANDING_ATTEMPTS, start_timeout_ms=DEFAULT_START_TIMEOUT_MS, allow_recovery=False):
     """Clear each agent and hand it its brief. Writes to the agents.
 
-    `on_assigned(role, agent, at)` is called after each successful hand-off so
-    the caller records it in the state ledger as it goes -- an interrupted run
-    still leaves a truthful record of what was actually sent.
+    `on_assigned(role, agent, at, status)` is called after each hand-off so the
+    caller records it in the state ledger as it goes -- an interrupted run
+    still leaves a truthful record of what was actually sent. The status rides
+    along because a round that went out and never started is worth recording
+    and must not count as experience of the role.
     """
     validate_agents(assignments, agents_by_name)
     # Status first: it is the refusal gate, and it is also where the pane ids
@@ -373,7 +375,7 @@ def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle
         }
         applied.append(record)
         if on_assigned is not None:
-            on_assigned(step["role"], name, at)
+            on_assigned(step["role"], name, at, record["status"])
 
     return {
         "schema_version": APPLY_SCHEMA_VERSION,

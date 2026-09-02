@@ -9,6 +9,7 @@
     "skills/teamlead/teamlead/composer.py",
     "skills/teamlead/teamlead/config.py",
     "skills/teamlead/teamlead/errors.py",
+    "skills/teamlead/teamlead/diagnostics.py",
     "skills/teamlead/teamlead/herdr.py",
     "skills/teamlead/teamlead/measure.py",
     "skills/teamlead/teamlead/parsers.py",
