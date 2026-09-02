@@ -20,7 +20,9 @@
 #           `authorized` mirrors `namespace_owner`. Permission never sets it.
 #   stderr: diagnostics only.
 #   exit  : 0 verdict emitted (authorized either way),
-#           1 precondition unmet (usage, `gh` or `jq` absent, not logged in),
+#           1 precondition unmet (usage, `gh` or `jq` absent, `gh` not logged
+#             in — checked up front with `gh auth status`, so an auth problem
+#             is never reported as an API fault),
 #           2 the GitHub API could not answer — never a verdict.
 #   env   : GH_BIN overrides the gh binary; the tests point it at a fake.
 set -euo pipefail
@@ -71,6 +73,16 @@ main() {
 
   ERRFILE="$(mktemp)"
   trap cleanup EXIT
+
+  # Logged-in is a precondition, not an API answer: check it first so a missing
+  # session exits 1 with the fix, instead of surfacing as exit 2 from the
+  # first `gh api` call and reading as "GitHub could not answer".
+  local auth_rc=0
+  "$GH_BIN" auth status >/dev/null 2>"$ERRFILE" || auth_rc=$?
+  if (( auth_rc != 0 )); then
+    warn "not logged in to GitHub (\`${GH_BIN} auth status\` exit ${auth_rc}): $(tr '\n' ' ' < "$ERRFILE") — run \`${GH_BIN} auth login\` and retry"
+    return 1
+  fi
 
   local rc=0 viewer repo
   viewer="$(api user)" || rc=$?

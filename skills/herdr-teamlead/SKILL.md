@@ -81,7 +81,8 @@ Emits `{"repo","viewer_login","owner_login","owner_type","viewer_permission","na
   `not owner; permitted this round: <their words>`. Without that answer, the
   round is read-only: compose briefs that forbid every external write, or stop.
   Never compose a brief that claims authority the operator did not give.
-- **Exit 1** — a precondition failed. Report the message verbatim, finish here.
+- **Exit 1** — a precondition failed: usage, `gh` or `jq` absent, or `gh` not
+  logged in. Report the message verbatim, finish here.
 - **Exit 2** — GitHub could not answer. An unanswerable question is not a
   permission. Report it and finish here.
 

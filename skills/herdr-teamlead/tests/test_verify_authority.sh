@@ -22,6 +22,7 @@
 #                          verdict; a fault is not a denial.
 #   8. Usage / bad slug  -> exit 1, no verdict.
 #   9. gh absent         -> exit 1.
+#  9b. gh not logged in  -> exit 1 naming `gh auth login`, before any API call.
 #  10. API failure       -> exit 2, never a verdict.
 #
 # Run: bash skills/herdr-teamlead/tests/test_verify_authority.sh
@@ -36,7 +37,12 @@ mk_fake_gh() { # <path>
   cat > "$1" <<'FAKE' || die "could not write the fake gh"
 #!/usr/bin/env bash
 set -uo pipefail
+if [[ "${1:-} ${2:-}" == "auth status" ]]; then
+  [[ -n "${FAKE_AUTH_ERR:-}" ]] && { printf 'You are not logged into any GitHub hosts.\n' >&2; exit 1; }
+  printf 'Logged in to github.com\n'; exit 0
+fi
 [[ "${1:-}" == "api" ]] || { echo '{"error":"unsupported"}' >&2; exit 2; }
+[[ -n "${FAKE_ARGV_FILE:-}" ]] && printf '%s\n' "$*" >> "$FAKE_ARGV_FILE"
 case "${2:-}" in
   user)
     [[ -n "${FAKE_USER_ERR:-}" ]] && { printf 'gh: auth required\n' >&2; exit 1; }
@@ -139,6 +145,13 @@ main() {
   OUT="$(env GH_BIN="$TMP/no-such-gh" bash "$SCRIPT" jbaruch/coding-policy 2>"$TMP/e9")"; RC=$?
   if [[ $RC -eq 1 && -z "$OUT" ]] && grep -q "no-such-gh" "$TMP/e9"; then
     pass; else fail "gh absent: expected exit 1 naming it, got RC=$RC"; fi
+
+  # 9b. Not logged in is a precondition (exit 1) with the fix named, and no
+  #     API call is made — it must not surface as exit 2 "could not answer".
+  ARGVLOG="$TMP/argv.9b"; : > "$ARGVLOG" || die "could not create $ARGVLOG"
+  OUT="$(env GH_BIN="$FAKE" FAKE_AUTH_ERR=1 FAKE_ARGV_FILE="$ARGVLOG" bash "$SCRIPT" jbaruch/coding-policy 2>"$TMP/e9b")"; RC=$?
+  if [[ $RC -eq 1 && -z "$OUT" && ! -s "$ARGVLOG" ]] && grep -q "auth login" "$TMP/e9b"; then
+    pass; else fail "not logged in: expected exit 1 naming gh auth login and no api call, got RC=$RC OUT=$OUT ERR=$(cat "$TMP/e9b") CALLS=$(cat "$ARGVLOG")"; fi
 
   # 10. An API failure is never a verdict — an unanswerable question must not
   #     read as "not authorized" OR as "authorized".
