@@ -55,17 +55,20 @@ and nothing was sent — move it to Step 3's list. Exit 1 is a precondition, exi
 script's contract; see the header of
 `skills/herdr-standup/standup-ask.sh`.
 
-Then wait for each one, with a short budget — a standup answer is four lines,
-not a task:
+Then wait for each one:
 
 ```bash
-TEAMLEAD_WAIT_BUDGET_SEC=180 \
-  .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/wait-report.sh \
+.tessl/plugins/jbaruch/coding-policy/skills/herdr-standup/standup-wait.sh \
   <agent-name> <absolute-report-path>
 ```
 
-A worker that does not answer inside the budget is not chased twice. Move it to
-Step 3's list with what you know. Proceed immediately to Step 3.
+Same argv, stdout, and exit codes as `wait-report.sh`, which it runs with the
+standup's own give-up budget — a standup answer is four lines, not a task. The
+budget is the script's constant, never a number chosen here; see the header of
+`skills/herdr-standup/standup-wait.sh`. Exit 1 means the worker did not answer
+inside it: it is not chased twice. Move it to Step 3's list with what you know.
+Exit 3 means a dialog is up — relay it and leave that worker to the operator.
+Proceed immediately to Step 3.
 
 ## Step 3 — Write the Rows Nobody Answered
 
