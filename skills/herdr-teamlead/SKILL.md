@@ -294,8 +294,9 @@ completion. Poll interval and give-up budget are the script's own constants.
 
 - **Exit 0** — the report is there. Continue to the next worker, then Step 10.
 - **Exit 1** — the budget ran out. Read the pane with
-  `herdr agent read <name> --source visible`. Either re-run this step for that
-  worker with a longer budget, or go to Step 10 recording that it produced no
+  `herdr agent read <name> --source visible`. If the worker is still working,
+  re-run this step for it: the script's own budget applies again, never a
+  number chosen here. Otherwise go to Step 10 recording that it produced no
   report.
 - **Exit 2** — a tool failure. Report the message verbatim and finish here; the
   round has no reliable view of any worker.
