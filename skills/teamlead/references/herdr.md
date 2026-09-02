@@ -69,7 +69,20 @@ Every substantive worker output therefore travels through a REPORT FILE. Pane
 reads are for lifecycle state and the last few lines — never for the work
 product.
 
-## State Flicker Is Real
+## State Flicker Is Structural, Not a Bug
+
+None of the three workers has a lifecycle-authority integration. Herdr
+classifies Claude Code, Codex, and Grok from the live bottom-buffer screen
+snapshot, matched against TOML manifests, and the hooks that
+`herdr integration install` adds provide session identity and restore only —
+Claude Code and Codex need no restart for them
+([agents](https://herdr.dev/docs/agents/),
+[integrations](https://herdr.dev/docs/integrations/)).
+
+A screen-derived state flickers by construction: it is whatever the pane looked
+like at the moment of the read. The report file plus the `REPORT: ` marker is
+therefore the primary completion signal by design, not a workaround for a
+broken lifecycle.
 
 Observed in the 2026-09-01 round:
 
@@ -96,6 +109,20 @@ its header carries the contract, its constants the poll interval and budget.
 a confirmation delay apart both say `blocked` AND the visible pane shows a
 dialog row. A lone `blocked` read keeps the wait alive. The delay and the
 marker list are constants at the top of `skills/teamlead/wait-report.sh`.
+
+Herdr is deliberately strict about `blocked`: it reports it only when the live
+bottom-buffer snapshot matches known visible approval, question, or permission
+UI, and an unrecognized prompt defaults to `idle`
+([agents](https://herdr.dev/docs/agents/)). A `blocked` that vanishes on the
+next read is therefore a real dialog that flashed past — a permission prompt
+auto-resolving under Codex's Full Access, for instance — rather than a
+misclassification. Confirming across two reads is what tells those apart.
+
+When a classification surprises you, ask herdr why before theorizing:
+
+```bash
+herdr agent explain <name-or-pane-id> --json
+```
 
 `pane wait-output` searches the existing snapshot before it polls, so a marker
 left in the scrollback by an earlier round can satisfy the wait immediately.
@@ -358,6 +385,14 @@ brief, so the brief does not land in the clearing dialog.
 - **Same plugin, every worker.** All workers run from the shared checkout with
   the same tessl plugin installed, so the same hooks and skills load at session
   start and the same policy governs every role.
+- **A restarted Codex comes up asking permission.** `herdr agent start <name>
+  --kind codex` launches it in its default approval mode, where it blocks on
+  every edit and command — the round then stalls on a worker that looks
+  `blocked` because it genuinely is. Pass its approval flags after `--` when
+  the operator wants a hands-off worker: `codex --help` names the current set
+  (`-a, --ask-for-approval <on-request|never>`, `--full-auto`, and
+  `-s, --sandbox <read-only|workspace-write|danger-full-access>` at the time of
+  writing). Read that help rather than trusting this list; the flags change.
 - **One GitHub account.** The workers usually share the operator's GitHub
   account, and GitHub refuses `APPROVE` / `REQUEST_CHANGES` on that account's
   own PR. Internal reviews are therefore COMMENT reviews, and the lead enforces
