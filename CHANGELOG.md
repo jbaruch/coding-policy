@@ -1,5 +1,9 @@
 # Changelog
 
+### herdr-teamlead: harden CLI warning routing and shell portability
+
+`plan` and `state` now route state-file warnings through the CLI's injected stderr sink. The launcher rejects Python older than 3.11 before importing the package, report basename extraction no longer depends on GNU-style `basename --`, and workspace labeling reads the workspace list once per run instead of once per target.
+
 ## 0.3.177 — 2026-09-03
 
 ### herdr skills: flatten orchestration steps and remove rationale from loaded instructions

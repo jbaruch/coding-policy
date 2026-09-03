@@ -18,6 +18,7 @@
 #   6. Rename failure   -> exit 3, the JSON names it, the run continues.
 #   7. Roster failure   -> exit 2.
 #   8. Usage / env      -> exit 1.
+#   9. Workspace list   -> fetched once and reused for every target.
 #
 # Run: bash skills/herdr-teamlead/tests/test_label_workspaces.sh
 set -uo pipefail
@@ -103,6 +104,8 @@ JSON
   if printf '%s' "$ARGVTEXT" | grep -q "workspace rename w1 lead" \
      && printf '%s' "$ARGVTEXT" | grep -q "workspace rename w3 codex"; then
     pass; else fail "labels: expected the workspace renames, got ARGV=$ARGVTEXT"; fi
+  if [[ "$(printf '%s\n' "$ARGVTEXT" | grep -c '^workspace list$')" -eq 1 ]]; then
+    pass; else fail "workspace list: expected one cached read, got ARGV=$ARGVTEXT"; fi
 
   # 2. A pane starts as its kind; the workspace row above already names the
   #    agent, and the first dispatch relabels the pane with the role.

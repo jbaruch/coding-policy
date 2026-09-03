@@ -26,6 +26,11 @@ main() {
     return 1
   fi
 
+  if ! "$PY_BIN" -c 'import sys; raise SystemExit(sys.version_info < (3, 11))' >/dev/null 2>&1; then
+    echo "teamlead: '${PY_BIN}' is older than Python 3.11 — install Python 3.11+ (\`brew install python@3.11\`) or point PY_BIN at a compatible interpreter" >&2
+    return 1
+  fi
+
   if [[ ! -d "${skill_dir}/teamlead" ]]; then
     echo "teamlead: the teamlead package is missing from ${skill_dir} — reinstall the plugin with \`tessl install jbaruch/coding-policy\`" >&2
     return 1

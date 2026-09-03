@@ -32,6 +32,7 @@ set -euo pipefail
 HERDR_BIN="${HERDR_BIN:-herdr}"
 
 ERRFILE=""
+WORKSPACE_LIST=""
 
 warn() { printf 'label-workspaces: %s\n' "$1" >&2; }
 
@@ -44,12 +45,7 @@ cleanup() {
 
 # Echo the current name of a workspace, empty when it has none.
 workspace_name() { # <workspace-id>
-  local raw rc=0
-  raw="$("$HERDR_BIN" workspace list 2>"$ERRFILE")" || rc=$?
-  if (( rc != 0 )); then
-    return 1
-  fi
-  printf '%s' "$raw" | jq -r --arg id "$1" '
+  printf '%s' "$WORKSPACE_LIST" | jq -r --arg id "$1" '
     (.result.workspaces // [])[] | select(.workspace_id == $id) | .name // ""' 2>/dev/null
 }
 
@@ -96,6 +92,8 @@ main() {
 
   ERRFILE="$(mktemp)"
   trap cleanup EXIT
+
+  WORKSPACE_LIST="$("$HERDR_BIN" workspace list 2>"$ERRFILE")" || WORKSPACE_LIST='{}'
 
   # Explicit pairs override the roster; with none, every named worker is taken
   # from `herdr agent list`.
