@@ -20,7 +20,7 @@
 #   exit  : 0 every rename landed or was already in place,
 #           1 precondition unmet (usage, not inside Herdr, `herdr`/`jq` absent,
 #             no caller workspace id),
-#           2 the roster could not be read,
+#           2 the roster or workspace list could not be read,
 #           3 at least one rename failed — the JSON says which. Labels are
 #             cosmetic, so a failure is reported rather than fatal to a round.
 #   env   : HERDR_BIN overrides the herdr binary; the tests point it at a fake.
@@ -93,7 +93,12 @@ main() {
   ERRFILE="$(mktemp)"
   trap cleanup EXIT
 
-  WORKSPACE_LIST="$("$HERDR_BIN" workspace list 2>"$ERRFILE")" || WORKSPACE_LIST='{}'
+  rc=0
+  WORKSPACE_LIST="$("$HERDR_BIN" workspace list 2>"$ERRFILE")" || rc=$?
+  if (( rc != 0 )); then
+    warn "\`${HERDR_BIN} workspace list\` failed (exit ${rc}): $(tr '\n' ' ' < "$ERRFILE")"
+    return 2
+  fi
 
   # Explicit pairs override the roster; with none, every named worker is taken
   # from `herdr agent list`.
