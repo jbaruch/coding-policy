@@ -16,13 +16,11 @@ through `teamlead.sh plan`, never by the lead's impression of who looks fresh.
 `plan` breaks a headroom tie on who has held the role fewest times, so nobody
 owns `developer` forever.
 
-The weights those three words stand for are named constants —
-`DEFAULT_ROLE_COSTS` in `skills/herdr-teamlead/teamlead/planner.py` — and a
-`role_costs` map in `config.json` re-weighs any of them per install. `plan`
-fills the heaviest seat first whatever order `--roles` names them in, and hands
-each seat to the eligible worker that leaves the round's smallest projected
-headroom highest. Re-weigh from measurements: run `measure` before and after a
-round and read what the seat actually cost.
+The default weights are `DEFAULT_ROLE_COSTS` in
+`skills/herdr-teamlead/teamlead/planner.py`. A `role_costs` map in
+`config.json` re-weighs them per install. The planner docstring defines the
+assignment algorithm. Re-weigh from measurements: run `measure` before and
+after a round and read what the seat actually cost.
 
 Fewer live workers than roles is an error, not a silent drop — a role nobody
 holds is work nobody is doing. Either name another agent into the roster or

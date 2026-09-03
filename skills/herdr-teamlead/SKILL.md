@@ -137,12 +137,10 @@ the author of the branch from `reviewer` and `tester` (`rules/agent-team-operati
 Review Before PR). Exit 1 covers an exclusion naming a role outside `--roles`,
 and an exclusion set no assignment satisfies.
 
-Each seat carries a cost weight, and the heaviest is filled first; `--roles`
-keys the output document and no longer decides which seat that is. `role_costs`
-in config.json re-weighs a seat per install. The weights, the fill order, and
-the tie-breaks are the planner's contract; see
-`skills/herdr-teamlead/teamlead/planner.py` — the `plan` docstring and
-`DEFAULT_ROLE_COSTS`.
+`--roles` keys the output document. `role_costs` in config.json re-weighs a
+seat per install. The weights, fill order, and tie-breaks are the planner's
+contract; see `skills/herdr-teamlead/teamlead/planner.py` — the `plan`
+docstring and `DEFAULT_ROLE_COSTS`.
 
 Save the output to a file for Step 5. Relay the `rationale` lines to the user
 as the round's role announcement: they name the weight behind each seat, the
