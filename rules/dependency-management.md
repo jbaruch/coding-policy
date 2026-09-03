@@ -121,6 +121,9 @@ alwaysApply: true
 - Use the language's package manager to install dependencies
 - Tessl plugins count as dependencies — never vendor them. Install via `tessl install` at runtime; don't commit plugin content (e.g., `.tessl/plugins/<workspace>/<plugin>/...`) into the consumer repo
 - Install Tessl plugins to a non-workspace path for CI agents
+- Governs this repository's own dependencies and the content this repository commits — never a product's documented runtime behavior toward a user's project
+- Product code that copies third-party content into a user's project by documented design (e.g., a migration bridge, an offline mirror, a fallback the product installs and later removes) is out of scope
+- Reviewing that copying is a correctness question under the other rules, not a No Vendoring violation
 
 ## Dependency Groups
 
