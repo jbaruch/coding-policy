@@ -322,6 +322,15 @@ class RoleCostsTest(unittest.TestCase):
             parse_role_costs(self._with({"developer": float("inf")}))
         self.assertIn("developer", str(caught.exception))
 
+    def test_a_weight_too_large_for_float_is_an_error_naming_role_and_file(self):
+        with self.assertRaises(ConfigError) as caught:
+            parse_role_costs(
+                self._with({"developer": int("1" + "0" * 400)}),
+                source="/tmp/config.json",
+            )
+        self.assertIn("/tmp/config.json", str(caught.exception))
+        self.assertIn("developer", str(caught.exception))
+
 
 class LoadRoleCostsTest(unittest.TestCase):
     def setUp(self):

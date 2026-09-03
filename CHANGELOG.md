@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### herdr-teamlead: reject role weights too large for a float
+
+`role_costs` validation now converts each numeric value once and reports a `ConfigError` naming the config file and role when an integer overflows Python's float range. The planner algorithm now has one documentation source in `teamlead/planner.py`; the skill and round-flow reference point to that contract instead of repeating its fill order.
+
 ## 0.3.175 — 2026-09-02
 
 ### herdr-teamlead: `plan` gained seat weights and author exclusion, and the lead stopped hand-writing the assignment

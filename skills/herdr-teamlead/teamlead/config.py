@@ -357,12 +357,17 @@ def parse_role_costs(payload, source="<memory>"):
     validated = {}
     for role, value in costs.items():
         # bool is a subclass of int, and `true` is not a one-point round.
+        numeric_value = None
+        if not isinstance(value, bool) and isinstance(value, (int, float)):
+            try:
+                numeric_value = float(value)
+            except OverflowError:
+                pass
         if (
-            isinstance(value, bool)
-            or not isinstance(value, (int, float))
-            or math.isnan(float(value))
-            or math.isinf(float(value))
-            or value < 0
+            numeric_value is None
+            or math.isnan(numeric_value)
+            or math.isinf(numeric_value)
+            or numeric_value < 0
         ):
             raise ConfigError(
                 "Config at {}: role_costs[{!r}] is {!r}; use a non-negative "
@@ -370,7 +375,7 @@ def parse_role_costs(payload, source="<memory>"):
                 "order the seats against each other.".format(source, role, value),
                 {"source": source, "role": role, "value": value},
             )
-        validated[role] = float(value)
+        validated[role] = numeric_value
     return validated
 
 
