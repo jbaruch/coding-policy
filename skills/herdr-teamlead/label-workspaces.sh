@@ -97,7 +97,7 @@ main() {
   rc=0
   workspace_raw="$("$HERDR_BIN" workspace list 2>"$ERRFILE")" || rc=$?
   if (( rc != 0 )); then
-    warn "\`${HERDR_BIN} workspace list\` failed (exit ${rc}): $(tr '\n' ' ' < "$ERRFILE")"
+    warn "\`${HERDR_BIN} workspace list\` failed (exit ${rc}): $(tr '\n' ' ' < "$ERRFILE") — restore the Herdr session or connection, then retry"
     return 2
   fi
   rc=0
@@ -112,7 +112,7 @@ main() {
       error("herdr workspace list payload has no .result.workspaces array")
     end' 2>"$ERRFILE")" || rc=$?
   if (( rc != 0 )); then
-    warn "could not read the herdr workspace list payload (jq exit ${rc}): $(tr '\n' ' ' < "$ERRFILE")"
+    warn "could not read the herdr workspace list payload (jq exit ${rc}): $(tr '\n' ' ' < "$ERRFILE") — update or reinstall the Herdr CLI, then retry"
     return 2
   fi
 
