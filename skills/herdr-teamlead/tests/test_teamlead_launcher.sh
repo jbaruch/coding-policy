@@ -16,7 +16,9 @@
 #   2. PYTHONPATH      -> the skill dir is prefixed, a prior value preserved.
 #   3. Missing package -> exit 1 naming the reinstall command.
 #   4. Missing python  -> exit 1 naming the interpreter.
-#   5. Exit passthrough-> the module's own status reaches the caller.
+#   5. Old Python      -> exit 1 naming the minimum version.
+#   6. Broken Python   -> probe failure is distinct from an old version.
+#   7. Exit passthrough-> the module's own status reaches the caller.
 #
 # Run: bash skills/herdr-teamlead/tests/test_teamlead_launcher.sh
 set -uo pipefail
@@ -33,6 +35,14 @@ mk_fake_python() { # <path>
   cat > "$1" <<'FAKE' || die "could not write the fake interpreter at $1"
 #!/usr/bin/env bash
 set -uo pipefail
+if [[ "${1:-}" == "-c" ]]; then
+  if [[ "${FAKE_PY_VERSION_RC:-0}" -ne 0 ]]; then
+    printf 'interpreter startup failed\n' >&2
+    exit "$FAKE_PY_VERSION_RC"
+  fi
+  printf '%s\n' "${FAKE_PY_VERSION:-3.11}"
+  exit 0
+fi
 printf 'ARGV: %s\n' "$*"
 printf 'PYTHONPATH: %s\n' "${PYTHONPATH:-}"
 exit "${FAKE_PY_RC:-0}"
@@ -79,7 +89,18 @@ main() {
   if [[ $rc -eq 1 ]] && printf '%s' "$out" | grep -q "no-such-python"; then
     pass; else fail "missing interpreter: expected exit 1 naming it, got rc=$rc out=$out"; fi
 
-  # 5. The module's own exit status is the launcher's exit status.
+  # 5. An installed interpreter below the minimum version is refused early.
+  out="$(env PY_BIN="$fakepy" FAKE_PY_VERSION=3.10 bash "$skill/teamlead.sh" measure 2>&1)"; rc=$?
+  if [[ $rc -eq 1 ]] && printf '%s' "$out" | grep -q "Python 3.11"; then
+    pass; else fail "old interpreter: expected exit 1 naming Python 3.11, got rc=$rc out=$out"; fi
+
+  # A broken interpreter is not misreported as an old one.
+  out="$(env PY_BIN="$fakepy" FAKE_PY_VERSION_RC=7 bash "$skill/teamlead.sh" measure 2>&1)"; rc=$?
+  if [[ $rc -eq 1 ]] && printf '%s' "$out" | grep -q "failed while checking" \
+     && printf '%s' "$out" | grep -q "exit 7"; then
+    pass; else fail "broken interpreter: expected a distinct probe failure, got rc=$rc out=$out"; fi
+
+  # 7. The module's own exit status is the launcher's exit status.
   out="$(env PY_BIN="$fakepy" FAKE_PY_RC=7 bash "$skill/teamlead.sh" measure 2>&1)"; rc=$?
   if [[ $rc -eq 7 ]]; then
     pass; else fail "exit passthrough: expected 7, got rc=$rc out=$out"; fi

@@ -248,6 +248,14 @@ class StateCommandTest(CliCase):
         self.assertEqual(code, 0)
         self.assertEqual(json.loads(out)["assignments"][0]["agent"], "grok")
 
+    def test_routes_state_warnings_to_the_cli_stderr(self):
+        self.state.write_text('{"schema_version": 2, broken', encoding="utf-8")
+        code, out, err = self.run_cli(self.base() + ["state"])
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(out)["snapshots"], [])
+        self.assertIn("teamlead: state file", err)
+        self.assertIn(str(self.state), err)
+
 
 class PlanCommandTest(CliCase):
     def test_plans_from_a_snapshot_file(self):
@@ -260,6 +268,16 @@ class PlanCommandTest(CliCase):
             {"developer": "grok", "tester": "claude", "reviewer": "codex"},
         )
         self.assertEqual(err, "")
+
+    def test_routes_state_warnings_to_the_cli_stderr(self):
+        self.state.write_text('{"schema_version": 2, broken', encoding="utf-8")
+        code, out, err = self.run_cli(
+            self.base() + ["plan", "--snapshot", str(self.snapshot)]
+        )
+        self.assertEqual(code, 0)
+        self.assertIn("assignments", json.loads(out))
+        self.assertIn("teamlead: state file", err)
+        self.assertIn(str(self.state), err)
 
     def test_roles_default_to_developer_tester_reviewer(self):
         code, out, _ = self.run_cli(self.base() + ["plan", "--snapshot", str(self.snapshot)])

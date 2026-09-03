@@ -274,7 +274,7 @@ main() {
   fi
   AGENT="$1"
   REPORT_PATH="$2"
-  REPORT_BASENAME="$(basename -- "$2")"
+  REPORT_BASENAME="${REPORT_PATH##*/}"
 
   # The contract says absolute, and the -f test below resolves a relative path
   # against whatever cwd the caller happens to be in -- a different directory

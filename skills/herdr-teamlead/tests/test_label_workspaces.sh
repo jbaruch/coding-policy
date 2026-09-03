@@ -18,6 +18,7 @@
 #   6. Rename failure   -> exit 3, the JSON names it, the run continues.
 #   7. Roster failure   -> exit 2.
 #   8. Usage / env      -> exit 1.
+#   9. Workspace list   -> fetched once and reused for every target.
 #
 # Run: bash skills/herdr-teamlead/tests/test_label_workspaces.sh
 set -uo pipefail
@@ -39,6 +40,9 @@ case "${1:-} ${2:-}" in
     exit 0
     ;;
   "workspace list")
+    [[ -n "${FAKE_WS_ERR:-}" ]] && { printf '{"error":{"code":"no_session"}}\n' >&2; exit 1; }
+    [[ -n "${FAKE_WS_BAD:-}" ]] && { printf '{"result":{}}\n'; exit 0; }
+    [[ -n "${FAKE_WS_BAD_MEMBER:-}" ]] && { printf '{"result":{"workspaces":[42]}}\n'; exit 0; }
     cat "${FAKE_WS_FILE:?FAKE_WS_FILE unset}"
     exit 0
     ;;
@@ -103,6 +107,8 @@ JSON
   if printf '%s' "$ARGVTEXT" | grep -q "workspace rename w1 lead" \
      && printf '%s' "$ARGVTEXT" | grep -q "workspace rename w3 codex"; then
     pass; else fail "labels: expected the workspace renames, got ARGV=$ARGVTEXT"; fi
+  if [[ "$(printf '%s\n' "$ARGVTEXT" | grep -c '^workspace list$')" -eq 1 ]]; then
+    pass; else fail "workspace list: expected one cached read, got ARGV=$ARGVTEXT"; fi
 
   # 2. A pane starts as its kind; the workspace row above already names the
   #    agent, and the first dispatch relabels the pane with the role.
@@ -146,6 +152,20 @@ JSON
   run FAKE_LIST_ERR=1
   if [[ $RC -eq 2 && -z "$OUT" ]]; then
     pass; else fail "roster failure: expected exit 2, got RC=$RC OUT=$OUT"; fi
+
+  # A failed workspace inventory is a tool failure, never an empty inventory.
+  ARGS=(lead)
+  run FAKE_WS_ERR=1
+  if [[ $RC -eq 2 && -z "$OUT" ]] && [[ "$ERRTEXT" == *"workspace list"* ]]; then
+    pass; else fail "workspace-list failure: expected exit 2 naming the command, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
+  ARGS=(lead)
+  run FAKE_WS_BAD=1
+  if [[ $RC -eq 2 && -z "$OUT" ]] && [[ "$ERRTEXT" == *"workspace list payload"* ]]; then
+    pass; else fail "malformed workspace list: expected exit 2 naming the payload, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
+  ARGS=(lead)
+  run FAKE_WS_BAD_MEMBER=1
+  if [[ $RC -eq 2 && -z "$OUT" ]] && [[ "$ERRTEXT" == *"workspace list payload"* ]]; then
+    pass; else fail "malformed workspace member: expected exit 2 naming the payload, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
 
   # 8. Usage and environment.
   OUT="$(env HERDR_ENV=1 HERDR_WORKSPACE_ID=w1 HERDR_BIN="$FAKE" bash "$SCRIPT" 2>"$TMP/e8")"; RC=$?

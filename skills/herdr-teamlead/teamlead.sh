@@ -26,6 +26,22 @@ main() {
     return 1
   fi
 
+  local py_version py_rc=0 py_major py_minor
+  py_version="$("$PY_BIN" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")' 2>&1)" || py_rc=$?
+  if (( py_rc != 0 )); then
+    echo "teamlead: '${PY_BIN}' failed while checking its version (exit ${py_rc}): ${py_version} — repair that interpreter or point PY_BIN at Python 3.11+" >&2
+    return 1
+  fi
+  if [[ ! "$py_version" =~ ^[0-9]+\.[0-9]+$ ]]; then
+    echo "teamlead: '${PY_BIN}' returned an unreadable version '${py_version}' — repair that interpreter or point PY_BIN at Python 3.11+" >&2
+    return 1
+  fi
+  IFS=. read -r py_major py_minor <<<"$py_version"
+  if (( py_major < 3 || (py_major == 3 && py_minor < 11) )); then
+    echo "teamlead: '${PY_BIN}' is older than Python 3.11 — install Python 3.11+ (\`brew install python@3.11\`) or point PY_BIN at a compatible interpreter" >&2
+    return 1
+  fi
+
   if [[ ! -d "${skill_dir}/teamlead" ]]; then
     echo "teamlead: the teamlead package is missing from ${skill_dir} — reinstall the plugin with \`tessl install jbaruch/coding-policy\`" >&2
     return 1

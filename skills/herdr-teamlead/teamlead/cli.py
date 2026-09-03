@@ -431,7 +431,7 @@ def cmd_plan(args, client=None, warn=None, trace=None):
     excludes = _parse_excludes(args.excludes)
     role_costs = load_role_costs(_config_path(args))
     state_path = _state_path(args)
-    state = load_state(state_path)
+    state = load_state(state_path, warn=warn)
 
     if args.snapshot:
         snapshot_path = Path(args.snapshot)
@@ -540,7 +540,7 @@ def cmd_apply(args, client=None, warn=None, trace=None):
 
 
 def cmd_state(args, client=None, warn=None, trace=None):
-    return load_state(_state_path(args)), None
+    return load_state(_state_path(args), warn=warn), None
 
 
 COMMANDS = {

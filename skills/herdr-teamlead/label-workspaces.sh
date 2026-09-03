@@ -20,7 +20,7 @@
 #   exit  : 0 every rename landed or was already in place,
 #           1 precondition unmet (usage, not inside Herdr, `herdr`/`jq` absent,
 #             no caller workspace id),
-#           2 the roster could not be read,
+#           2 the roster or workspace list could not be read,
 #           3 at least one rename failed — the JSON says which. Labels are
 #             cosmetic, so a failure is reported rather than fatal to a round.
 #   env   : HERDR_BIN overrides the herdr binary; the tests point it at a fake.
@@ -32,6 +32,7 @@ set -euo pipefail
 HERDR_BIN="${HERDR_BIN:-herdr}"
 
 ERRFILE=""
+WORKSPACE_LIST=""
 
 warn() { printf 'label-workspaces: %s\n' "$1" >&2; }
 
@@ -44,13 +45,8 @@ cleanup() {
 
 # Echo the current name of a workspace, empty when it has none.
 workspace_name() { # <workspace-id>
-  local raw rc=0
-  raw="$("$HERDR_BIN" workspace list 2>"$ERRFILE")" || rc=$?
-  if (( rc != 0 )); then
-    return 1
-  fi
-  printf '%s' "$raw" | jq -r --arg id "$1" '
-    (.result.workspaces // [])[] | select(.workspace_id == $id) | .name // ""' 2>/dev/null
+  printf '%s' "$WORKSPACE_LIST" | jq -r --arg id "$1" '
+    .[] | select(.workspace_id == $id) | .name'
 }
 
 # Rename one thing. Echoes renamed|unchanged|failed; never aborts the run.
@@ -96,6 +92,29 @@ main() {
 
   ERRFILE="$(mktemp)"
   trap cleanup EXIT
+
+  local workspace_raw
+  rc=0
+  workspace_raw="$("$HERDR_BIN" workspace list 2>"$ERRFILE")" || rc=$?
+  if (( rc != 0 )); then
+    warn "\`${HERDR_BIN} workspace list\` failed (exit ${rc}): $(tr '\n' ' ' < "$ERRFILE") — restore the Herdr session or connection, then retry"
+    return 2
+  fi
+  rc=0
+  WORKSPACE_LIST="$(printf '%s' "$workspace_raw" | jq -ce '
+    if (.result.workspaces | type) == "array"
+       and all(.result.workspaces[];
+         type == "object"
+         and (.workspace_id | type) == "string"
+         and ((.name // "") | type) == "string") then
+      [.result.workspaces[] | {workspace_id, name: (.name // "")}]
+    else
+      error("herdr workspace list payload has no .result.workspaces array")
+    end' 2>"$ERRFILE")" || rc=$?
+  if (( rc != 0 )); then
+    warn "could not read the herdr workspace list payload (jq exit ${rc}): $(tr '\n' ' ' < "$ERRFILE") — update or reinstall the Herdr CLI, then retry"
+    return 2
+  fi
 
   # Explicit pairs override the roster; with none, every named worker is taken
   # from `herdr agent list`.
