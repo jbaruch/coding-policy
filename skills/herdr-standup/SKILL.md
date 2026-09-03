@@ -34,7 +34,7 @@ Split the roster by state:
 
 - `idle` or `done` — ask them in Step 2.
 - `working` or `blocked` — never asked. Their row comes from the round log or
-  the assignment ledger, with what they are on, in Step 3.
+  the assignment ledger, with what they are on, in Step 4.
 
 An empty roster means there is no team to stand up. Say so and finish here.
 Proceed immediately to Step 2.
