@@ -46,7 +46,7 @@ cleanup() {
 # Echo the current name of a workspace, empty when it has none.
 workspace_name() { # <workspace-id>
   printf '%s' "$WORKSPACE_LIST" | jq -r --arg id "$1" '
-    .[] | select(.workspace_id == $id) | .name // ""' 2>/dev/null
+    .[] | select(.workspace_id == $id) | .name'
 }
 
 # Rename one thing. Echoes renamed|unchanged|failed; never aborts the run.
@@ -102,8 +102,12 @@ main() {
   fi
   rc=0
   WORKSPACE_LIST="$(printf '%s' "$workspace_raw" | jq -ce '
-    if (.result.workspaces | type) == "array" then
-      .result.workspaces
+    if (.result.workspaces | type) == "array"
+       and all(.result.workspaces[];
+         type == "object"
+         and (.workspace_id | type) == "string"
+         and ((.name // "") | type) == "string") then
+      [.result.workspaces[] | {workspace_id, name: (.name // "")}]
     else
       error("herdr workspace list payload has no .result.workspaces array")
     end' 2>"$ERRFILE")" || rc=$?
