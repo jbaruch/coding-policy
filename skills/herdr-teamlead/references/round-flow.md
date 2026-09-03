@@ -16,9 +16,9 @@ through `teamlead.sh plan`, never by the lead's impression of who looks fresh.
 `plan` breaks a headroom tie on who has held the role fewest times, so nobody
 owns `developer` forever.
 
-The default weights and assignment algorithm are documented by Step 4 in
-`skills/herdr-teamlead/SKILL.md`. Re-weigh from measurements: run `measure`
-before and after a round and read what the seat actually cost.
+Step 4 in `skills/herdr-teamlead/SKILL.md` identifies the source for the
+default weights and assignment algorithm. Re-weigh from measurements: run
+`measure` before and after a round and read what the seat actually cost.
 
 Fewer live workers than roles is an error, not a silent drop — a role nobody
 holds is work nobody is doing. Either name another agent into the roster or
