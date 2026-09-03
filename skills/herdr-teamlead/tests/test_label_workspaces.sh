@@ -41,6 +41,7 @@ case "${1:-} ${2:-}" in
     ;;
   "workspace list")
     [[ -n "${FAKE_WS_ERR:-}" ]] && { printf '{"error":{"code":"no_session"}}\n' >&2; exit 1; }
+    [[ -n "${FAKE_WS_BAD:-}" ]] && { printf '{"result":{}}\n'; exit 0; }
     cat "${FAKE_WS_FILE:?FAKE_WS_FILE unset}"
     exit 0
     ;;
@@ -156,6 +157,10 @@ JSON
   run FAKE_WS_ERR=1
   if [[ $RC -eq 2 && -z "$OUT" ]] && [[ "$ERRTEXT" == *"workspace list"* ]]; then
     pass; else fail "workspace-list failure: expected exit 2 naming the command, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
+  ARGS=(lead)
+  run FAKE_WS_BAD=1
+  if [[ $RC -eq 2 && -z "$OUT" ]] && [[ "$ERRTEXT" == *"workspace list payload"* ]]; then
+    pass; else fail "malformed workspace list: expected exit 2 naming the payload, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
 
   # 8. Usage and environment.
   OUT="$(env HERDR_ENV=1 HERDR_WORKSPACE_ID=w1 HERDR_BIN="$FAKE" bash "$SCRIPT" 2>"$TMP/e8")"; RC=$?

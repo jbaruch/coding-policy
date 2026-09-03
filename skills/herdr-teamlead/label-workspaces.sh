@@ -46,7 +46,7 @@ cleanup() {
 # Echo the current name of a workspace, empty when it has none.
 workspace_name() { # <workspace-id>
   printf '%s' "$WORKSPACE_LIST" | jq -r --arg id "$1" '
-    (.result.workspaces // [])[] | select(.workspace_id == $id) | .name // ""' 2>/dev/null
+    .[] | select(.workspace_id == $id) | .name // ""' 2>/dev/null
 }
 
 # Rename one thing. Echoes renamed|unchanged|failed; never aborts the run.
@@ -93,10 +93,22 @@ main() {
   ERRFILE="$(mktemp)"
   trap cleanup EXIT
 
+  local workspace_raw
   rc=0
-  WORKSPACE_LIST="$("$HERDR_BIN" workspace list 2>"$ERRFILE")" || rc=$?
+  workspace_raw="$("$HERDR_BIN" workspace list 2>"$ERRFILE")" || rc=$?
   if (( rc != 0 )); then
     warn "\`${HERDR_BIN} workspace list\` failed (exit ${rc}): $(tr '\n' ' ' < "$ERRFILE")"
+    return 2
+  fi
+  rc=0
+  WORKSPACE_LIST="$(printf '%s' "$workspace_raw" | jq -ce '
+    if (.result.workspaces | type) == "array" then
+      .result.workspaces
+    else
+      error("herdr workspace list payload has no .result.workspaces array")
+    end' 2>"$ERRFILE")" || rc=$?
+  if (( rc != 0 )); then
+    warn "could not read the herdr workspace list payload (jq exit ${rc}): $(tr '\n' ' ' < "$ERRFILE")"
     return 2
   fi
 
