@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.179 — 2026-09-03
+
 ### dependency-management: scope No Vendoring to the repository's own dependencies
 
 The fleet policy reviewer cited No Vendoring against `--vendor-unmapped` in jbaruch/agentic-context-registry#61 on 2026-09-03 — a product feature that materializes an unmapped Tessl package into a user's project as a journaled, hash-locked, removable migration bridge. The section governs this repository's own dependency hygiene and what this repository commits, never a product's documented runtime behavior toward a user's project; a migration bridge, an offline mirror, or an install-then-remove fallback was never in scope. Three bullets make that explicit, and reviewing that kind of copying is now stated as a correctness question under the other rules rather than a No Vendoring violation.
