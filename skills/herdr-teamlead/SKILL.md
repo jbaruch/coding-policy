@@ -229,7 +229,7 @@ Names the lead's workspace, each worker's workspace after its agent, and each
 worker's pane after its kind. With no pairs, the workspaces come from the
 roster. Emits `{"lead":{...},"agents":[...]}` with a per-target
 `renamed|unchanged|failed`. Exit 3 means at least one rename failed and the
-JSON says which — labels are cosmetic, so that never stops a round.
+JSON says which. A label failure never stops a round.
 
 Run this once per team, not once per round: a name already in place is
 reported `unchanged` and nothing is sent. Skip it on a team whose sidebar is
@@ -318,8 +318,7 @@ completion. Poll interval and give-up budget are the script's own constants.
   round has no reliable view of any worker.
 - **Exit 4** — the report file exists and the worker reads `idle` or `done` on
   consecutive polls, but the pane never showed the marker whole. This is not
-  delivery: a marker the pane wrapped cannot be told from a newline, so no
-  reading of the pane confirms it. Read the live state with
+  delivery. Read the live state with
   `herdr agent get <name>` and take the first continuation that applies:
   - The command fails — report its message verbatim and finish here, as for
     exit 2.
@@ -366,14 +365,24 @@ A Phase 1 design note or test plan does NOT satisfy 2 or 3
 (`rules/agent-team-operation.md` Review Before PR). A report against an older
 SHA does not either — re-run Phase 2 against the current tip.
 
-With all four met, the release is one more assignment, never a prompt into
-the developer's existing context: return to Step 5 with the role `release` for
+With all four met, proceed immediately to Step 11.
+
+## Step 11 — Release the Pull Request
+
+The release is one more assignment, never a prompt into the developer's
+existing context. Return to Step 5 with the role `release` for
 the developer's agent (template `templates/brief-release.md`, the same
 `WORKTREE` and `BRANCH`, a fresh `REPORT`), run Step 6 (it reports
 `already-provisioned`), dispatch through Step 8 so the context is cleared and
-the brief is fresh, and wait on the report in Step 9. The worker merges; you
-do not. After its report, fast-forward the shared checkout, remove the
-worktree, and delete the branch per `rules/agent-worktree-isolation.md`.
+the brief is fresh, and wait on the report in Step 9. The worker merges. You
+do not. Proceed immediately to Step 12 after its report.
+
+## Step 12 — Clean Up the Worktree
+
+Fast-forward the shared checkout, remove the worktree, and delete the branch
+per `rules/agent-worktree-isolation.md`. Proceed immediately to Step 13.
+
+## Step 13 — Log the Round
 
 Log the round: the assignments, the report paths, the findings, and the
 outcome. If the round produced no findings at all, log it and say so in one
