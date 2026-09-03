@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+### herdr skills: flatten orchestration steps and remove rationale from loaded instructions
+
+The standup now asks and waits in separate steps, while the team-lead flow gates, releases, cleans up, and logs in separate steps. Directive-only wording replaces incident rationale on the loaded skill surfaces. The 0.3.176 entry is stamped explicitly after its `Unreleased` heading prevented the publish workflow from doing so, and the planner contract now has one script reference across the skill bundle.
+
+## 0.3.176 — 2026-09-03
 
 ### herdr-teamlead: reject role weights too large for a float
 
