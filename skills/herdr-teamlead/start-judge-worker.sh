@@ -8,6 +8,11 @@
 # alone silently resets effort to that model's default, which is why the
 # banner check below demands BOTH.
 #
+# The banner line is identified by the `banner_pattern` the judge config
+# declares, never guessed: each harness prints its own banner, and a
+# transcript row that happens to name the model is not proof of how the worker
+# was started.
+#
 # The tier is read from the plan document rather than the command line: the
 # `judge` block in config.json is the single place a model swap happens, and
 # `teamlead plan` echoes it into its output. A model typed here by hand would
@@ -22,7 +27,7 @@
 #           {"agent":"<n>","model":"<m>","effort":"<e>"|null,
 #            "pane":"<p>","banner_verified":true}
 #   stderr: diagnostics.
-#   exit  : 0 started and ONE banner line echoed the whole tier,
+#   exit  : 0 started and the startup-banner line echoed the whole tier,
 #           2 usage error, missing tool, or a plan with no usable judge tier,
 #           3 `herdr agent start` failed,
 #           4 the worker started and its banner did not echo the tier —
@@ -65,17 +70,22 @@ main() {
     .judge // error("plan has no `judge` object — re-run `teamlead plan --roles judge` against a config carrying a judge block")
     | (.agent // "") as $a
     | (.model // "") as $m
+    | (.banner_pattern // "") as $b
     | if $a == "" then error("plan judge.agent is empty — name the worker in the config judge block")
       elif $m == "" then error("plan judge.model is empty — name the model in the config judge block")
-      else "\($a)\t\($m)\t\(.effort // "")" end
+      elif $b == "" then error("plan judge.banner_pattern is empty — declare the worker\u0027s startup-banner pattern in the config judge block")
+      else "\($a)\u001f\($m)\u001f\(.effort // "")\u001f\($b)" end
   ' < "$plan_file" 2>&1)" || rc=$?
   if (( rc != 0 )); then
     warn "could not read a judge tier from '${plan_file}': ${tier}"
     return 2
   fi
 
-  local agent model effort
-  IFS=$'\t' read -r agent model effort <<<"$tier"
+  # Split on the unit separator, never a tab: tab is IFS whitespace, so `read`
+  # collapses a run of them and an empty `effort` would shift the banner
+  # pattern into the effort field.
+  local agent model effort banner_pattern
+  IFS=$'\x1f' read -r agent model effort banner_pattern <<<"$tier"
 
   # Effort is omitted, never passed empty: a model that accepts no effort flag
   # would take `--effort ''` as a flag with a missing value.
@@ -107,11 +117,15 @@ main() {
     return 4
   fi
 
-  # ONE line has to carry the whole tier. Searching the pane as a single blob
-  # would accept a model named on a transcript row and an effort named on an
-  # unrelated one -- two coincidences reading as a verified banner.
-  local line found_model=0 verified=0
+  # The STARTUP BANNER has to carry the whole tier, on one line. A transcript
+  # row that happens to name the model proves nothing about how the worker was
+  # started, and a model on one row plus an effort on another is two
+  # coincidences, not a banner. So: find the banner line first, then read the
+  # tier off THAT line.
+  local line banner_seen=0 found_model=0 verified=0
   while IFS= read -r line; do
+    grep -Eq -- "$banner_pattern" <<<"$line" || continue
+    banner_seen=1
     [[ "$line" == *"$model"* ]] || continue
     found_model=1
     if [[ -z "$effort" || "$line" == *"$effort"* ]]; then
@@ -121,10 +135,12 @@ main() {
   done <<<"$banner"
 
   if (( verified == 0 )); then
-    if (( found_model == 1 )); then
-      warn "pane ${pane} named model '${model}' but no single line carried effort '${effort}' with it — setting the model alone resets effort to that model's default, so the dispatch is invalid"
+    if (( banner_seen == 0 )); then
+      warn "pane ${pane} showed no line matching the banner pattern '${banner_pattern}' in its first ${JUDGE_BANNER_LINES} lines — the worker may not have started; read the pane, or fix judge.banner_pattern if the harness changed its banner"
+    elif (( found_model == 1 )); then
+      warn "pane ${pane}'s startup banner named model '${model}' but not effort '${effort}' — setting the model alone resets effort to that model's default, so the dispatch is invalid"
     else
-      warn "pane ${pane} did not echo model '${model}' in its first ${JUDGE_BANNER_LINES} lines — the worker is not provably on its pinned tier; read the pane and start it by hand"
+      warn "pane ${pane}'s startup banner did not name model '${model}' — the worker is not provably on its pinned tier; read the pane and start it by hand"
     fi
     return 4
   fi

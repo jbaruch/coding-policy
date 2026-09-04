@@ -476,7 +476,13 @@ def cmd_plan(args, client=None, warn=None, trace=None):
             exclude=excludes,
             role_costs=role_costs,
             judge_agent=judge.agent if judge else None,
-            judge_tier={"model": judge.model, "effort": judge.effort} if judge else None,
+            judge_tier={
+                "model": judge.model,
+                "effort": judge.effort,
+                "banner_pattern": judge.banner_pattern,
+            }
+            if judge
+            else None,
             snapshot_ref={"source": source, "measured_at": snapshot.get("measured_at")},
             warn=warn,
         ),

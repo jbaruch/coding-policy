@@ -500,6 +500,7 @@ def plan(roles, snapshot, counts=None, exclude=None, role_costs=None, snapshot_r
             "agent": judge_agent,
             "model": tier.get("model") or None,
             "effort": tier.get("effort") or None,
+            "banner_pattern": tier.get("banner_pattern") or None,
         }
 
     return document

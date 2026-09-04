@@ -403,7 +403,14 @@ class ParseJudgeTest(unittest.TestCase):
 
     def test_a_full_block_parses(self):
         judge = parse_judge(
-            {"judge": {"agent": "judge", "model": "claude-fable-5-1", "effort": "max"}}
+            {
+                "judge": {
+                    "agent": "judge",
+                    "model": "claude-fable-5-1",
+                    "effort": "max",
+                    "banner_pattern": "Claude Code",
+                }
+            }
         )
         assert judge is not None
         self.assertEqual(judge.agent, "judge")
@@ -416,18 +423,35 @@ class ParseJudgeTest(unittest.TestCase):
     def test_a_model_taking_no_effort_flag_omits_it(self):
         # claude-haiku-4-5 accepts no --effort, so a tier must be able to
         # name a model and no level without failing validation.
-        judge = parse_judge({"judge": {"agent": "judge", "model": "claude-haiku-4-5"}})
+        judge = parse_judge(
+            {
+                "judge": {
+                    "agent": "judge",
+                    "model": "claude-haiku-4-5",
+                    "banner_pattern": "Claude Code",
+                }
+            }
+        )
         assert judge is not None
         self.assertEqual(judge.effort, "")
 
     def test_an_unknown_effort_is_refused(self):
         with self.assertRaises(ConfigError) as caught:
-            parse_judge({"judge": {"agent": "j", "model": "m", "effort": "turbo"}})
+            parse_judge(
+                {
+                    "judge": {
+                        "agent": "j",
+                        "model": "m",
+                        "effort": "turbo",
+                        "banner_pattern": "x",
+                    }
+                }
+            )
         self.assertIn("judge.effort", str(caught.exception))
 
     def test_a_missing_agent_is_refused(self):
         with self.assertRaises(ConfigError) as caught:
-            parse_judge({"judge": {"model": "m"}})
+            parse_judge({"judge": {"model": "m", "banner_pattern": "x"}})
         self.assertIn("judge.agent", str(caught.exception))
 
     def test_a_non_object_block_is_refused(self):
@@ -464,6 +488,27 @@ class WindowGroupTest(unittest.TestCase):
         self.assertTrue(groups["judge"])
         self.assertEqual(groups["claude"], groups["judge"])
         self.assertEqual(groups["codex"], "")
+
+
+class JudgeBannerPatternTest(unittest.TestCase):
+    """A tier is proved from the startup banner, so its shape is declared."""
+
+    def test_a_missing_pattern_is_refused(self):
+        with self.assertRaises(ConfigError) as caught:
+            parse_judge({"judge": {"agent": "j", "model": "m"}})
+        self.assertIn("banner_pattern", str(caught.exception))
+
+    def test_an_invalid_regex_is_refused_at_parse_time(self):
+        with self.assertRaises(ConfigError) as caught:
+            parse_judge(
+                {"judge": {"agent": "j", "model": "m", "banner_pattern": "a["}}
+            )
+        self.assertIn("not a valid regex", str(caught.exception))
+
+    def test_the_shipped_example_declares_one(self):
+        judge = parse_judge(_example_config())
+        assert judge is not None
+        self.assertEqual(judge.banner_pattern, "Claude Code")
 
 
 if __name__ == "__main__":

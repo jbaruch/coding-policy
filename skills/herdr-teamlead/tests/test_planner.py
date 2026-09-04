@@ -732,11 +732,20 @@ class JudgeTierEchoTest(unittest.TestCase):
             payload,
             warn=lambda message: None,
             judge_agent="judge",
-            judge_tier={"model": "claude-fable-5-1", "effort": "max"},
+            judge_tier={
+                "model": "claude-fable-5-1",
+                "effort": "max",
+                "banner_pattern": "Claude Code",
+            },
         )
         self.assertEqual(
             result["judge"],
-            {"agent": "judge", "model": "claude-fable-5-1", "effort": "max"},
+            {
+                "agent": "judge",
+                "model": "claude-fable-5-1",
+                "effort": "max",
+                "banner_pattern": "Claude Code",
+            },
         )
 
     def test_a_model_taking_no_effort_flag_echoes_null(self):

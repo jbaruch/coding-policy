@@ -8,6 +8,7 @@ with an actionable message instead of silently inventing agents.
 import json
 import math
 import os
+import re
 from pathlib import Path
 
 from .errors import ConfigError
@@ -350,12 +351,13 @@ VALID_JUDGE_EFFORTS = frozenset({"low", "medium", "high", "xhigh", "max"})
 class Judge:
     """The pinned judge tier. A plain value object, never mutated after load."""
 
-    __slots__ = ("agent", "model", "effort")
+    __slots__ = ("agent", "model", "effort", "banner_pattern")
 
-    def __init__(self, agent, model, effort=""):
+    def __init__(self, agent, model, effort="", banner_pattern=""):
         self.agent = agent
         self.model = model
         self.effort = effort
+        self.banner_pattern = banner_pattern
 
 
 def parse_judge(payload, source="<memory>"):
@@ -413,7 +415,36 @@ def parse_judge(payload, source="<memory>"):
             ),
             {"source": source, "effort": effort},
         )
-    return Judge(agent=raw["agent"], model=raw["model"], effort=effort)
+    # The tier check has to tell a startup banner from ordinary transcript
+    # text: a row that happens to mention the model and the effort is not
+    # proof the worker came up on them. Each harness prints its own banner, so
+    # the operator declares the pattern rather than the script guessing it.
+    banner_pattern = raw.get("banner_pattern", "")
+    if not isinstance(banner_pattern, str) or not banner_pattern:
+        raise ConfigError(
+            "Config at {}: `judge.banner_pattern` is {!r}; give an extended "
+            "regex matching the worker's startup banner line (e.g. "
+            "\"Claude Code\"), so a tier is proved from the banner and not "
+            "from transcript text that happens to name the model.".format(
+                source, raw.get("banner_pattern")
+            ),
+            {"source": source, "banner_pattern": raw.get("banner_pattern")},
+        )
+    try:
+        re.compile(banner_pattern)
+    except re.error as exc:
+        raise ConfigError(
+            "Config at {}: `judge.banner_pattern` {!r} is not a valid regex "
+            "({}) - fix the pattern or simplify it to a literal the banner "
+            "contains.".format(source, banner_pattern, exc),
+            {"source": source, "banner_pattern": banner_pattern},
+        )
+    return Judge(
+        agent=raw["agent"],
+        model=raw["model"],
+        effort=effort,
+        banner_pattern=banner_pattern,
+    )
 
 
 def load_judge(path):
