@@ -123,6 +123,33 @@ main() {
      && ! reason_has "Leftover local branches"; then
     pass; else fail "orphaned worktree: expected worktree block only, got RC=$RC OUT=$OUT"; fi
 
+  # 4b. The same orphaned worktree, seen from INSIDE a linked worktree with
+  # HERDR_ENV set: that is a worker session, and removing a worktree is the
+  # lead's job (rules/agent-team-operation.md). Blocking here would force the
+  # worker to either disobey the rule or fail to hand off.
+  OUT="$(cd "$TMP/r4-wt" && printf '%s' '{"stop_hook_active":false}' \
+    | HERDR_ENV=1 bash "$HOOK" 2>/dev/null)"; RC=$?
+  if [[ $RC -eq 0 && -z "$OUT" ]]; then
+    pass; else fail "worker session: expected silence, got RC=$RC OUT=$OUT"; fi
+
+  # 4b-ii. A worker's OWN changed files still gate: only branch/worktree
+  # cleanup is suppressed, never the diagnostics its handoff depends on.
+  # shellcheck disable=SC2016  # The literal `$x` IS the fixture: the hook's
+  # own shellcheck run has to find something to report.
+  printf 'if [ $x = 1 ]; then :; fi\n' > "$TMP/r4-wt/bad.sh" || die "r4-wt bad.sh failed"
+  OUT="$(cd "$TMP/r4-wt" && printf '%s' '{"stop_hook_active":false}' \
+    | HERDR_ENV=1 bash "$HOOK" 2>/dev/null)"; RC=$?
+  if [[ $RC -eq 0 ]] && reason_has "shellcheck findings" && ! reason_has "Orphaned worktrees"; then
+    pass; else fail "worker diagnostics: expected a diagnostics block without the worktree finding, got RC=$RC OUT=$OUT"; fi
+  rm -f "$TMP/r4-wt/bad.sh" || die "r4-wt cleanup failed"
+
+  # 4c. The lead's own session (main checkout) still blocks with HERDR_ENV set:
+  # the suppression keys on being in a linked worktree, not on Herdr alone.
+  OUT="$(cd "$TMP/r4" && printf '%s' '{"stop_hook_active":false}' \
+    | HERDR_ENV=1 bash "$HOOK" 2>/dev/null)"; RC=$?
+  if [[ $RC -eq 0 ]] && reason_has "Orphaned worktrees"; then
+    pass; else fail "lead session: expected the worktree block, got RC=$RC OUT=$OUT"; fi
+
   # 5. dirty tree only -> allow (report-only).
   mk_origin o5; clone_from "$BARE" "$TMP/r5"
   printf 'dirty\n' >> "$TMP/r5/f" || die "r5 dirty failed"
