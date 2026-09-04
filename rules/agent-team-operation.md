@@ -21,7 +21,8 @@ description: Running a multi-agent team — headroom-driven role rotation, one w
 - The judge is read-only: it never edits a repository file, never runs a mutating git or `gh` command, never posts to GitHub, never dispatches a subagent — its only output is its report file
 - The judge reads both positions and the governing rule, verifies the disputed facts against the tree, and returns `RULING: uphold A | uphold B | amend — <line> | blocked — <question>` with numbered reasons, an `ACTION:` naming the minimal step, and an `UNVERIFIED:` line
 - The judge's ruling binds the round; only the operator overrides it
-- `blocked` is the judge declining to rule; the round stops and the named question goes to the operator
+- `blocked` is the judge declining to rule
+- A `blocked` ruling stops the round and sends the named question to the operator
 - The judge is declared in `config.json`, measured, and planned like every other seat
 - The judge worker and the `claude` worker authenticate as one Claude subscription and draw on one weekly window
 - `window_group` names the usage window an agent shares with other agents
@@ -29,9 +30,11 @@ description: Running a multi-agent team — headroom-driven role rotation, one w
 - The `judge` block names the seat's agent, and the model and effort its worker is launched with
 - The planner seats the judge on the named agent and echoes the tier in its plan
 - The model and effort are the worker's launch flags, applied by starting that worker before the dispatch
-- The `judge` block declares the worker's startup-banner pattern; a tier is proved from that line, never from transcript text naming the model
+- The `judge` block declares the worker's startup-banner pattern
+- A tier is proved from the banner line alone, never from transcript text naming the model
 - A judge dispatch is invalid unless the startup-banner line echoes the requested model, and the effort when one was requested
-- The planner never ranks the judge seat, and never gives the pinned worker another seat
+- The planner never ranks the judge seat
+- The pinned judge worker never holds another seat
 - No exclusion bars the judge from a dispute involving its own model
 - A judge round the pinned worker's window cannot cover halts the round — no substitution, no fallback to another vendor's flagship, no degraded ruling
 - The lead runs on the strongest generally-available model at high effort; the most capable model is reserved for the judge

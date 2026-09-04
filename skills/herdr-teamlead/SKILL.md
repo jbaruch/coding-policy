@@ -386,10 +386,9 @@ judge is read-only and writes no repository content, so it needs no worktree
 ## Step 12 — Re-measure the Shared Window
 
 Step 3's snapshot is a hint, not authority (`rules/stateful-artifacts.md`).
-A full development and review round has burned the shared window since it was
-taken, so the judge's affordability cannot be decided from it.
+The judge's affordability is decided from a fresh reading, never from it.
 
-Re-run Step 3's `measure`. That step's outcomes govern this run unchanged: a
+Re-run Step 3's `measure`. That step's outcomes govern this run unchanged. A
 `measure` that cannot read the judge worker's window is a stale-state failure,
 resolved there before a ruling is planned.
 

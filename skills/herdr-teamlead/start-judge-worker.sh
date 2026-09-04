@@ -105,7 +105,7 @@ main() {
   "$HERDR_BIN" agent start "$agent" --kind "$kind" --pane "$pane" -- "${flags[@]}" \
     >/dev/null 2>"$errfile" || rc=$?
   if (( rc != 0 )); then
-    warn "\`${HERDR_BIN} agent start ${agent}\` failed (exit ${rc}): $(tr '\n' ' ' < "$errfile") — read the pane with \`${HERDR_BIN} pane read ${pane} --source visible\` and start it by hand"
+    warn "\`${HERDR_BIN} agent start ${agent}\` failed (exit ${rc}): $(tr '\n' ' ' < "$errfile") — read the pane with \`${HERDR_BIN} pane read ${pane} --source visible\`, fix what it names, and re-run this script"
     return 3
   fi
 
@@ -140,7 +140,7 @@ main() {
     elif (( found_model == 1 )); then
       warn "pane ${pane}'s startup banner named model '${model}' but not effort '${effort}' — setting the model alone resets effort to that model's default, so the dispatch is invalid"
     else
-      warn "pane ${pane}'s startup banner did not name model '${model}' — the worker is not provably on its pinned tier; read the pane and start it by hand"
+      warn "pane ${pane}'s startup banner did not name model '${model}' — the harness did not come up on the configured tier; reconcile judge.model with what the harness accepts and re-run this script"
     fi
     return 4
   fi
