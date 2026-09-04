@@ -21,7 +21,9 @@
 #   9. Usage           -> wrong argc is exit 2.
 #  10. Missing plan    -> unreadable plan file is exit 2.
 #  11. Launch argv     -> --model/--effort land after the `--` separator.
-#  12. No set -u abort -> no case aborts on an unbound variable.
+#  12. Split lines     -> model on one row and effort on another is NOT a
+#                         verified banner: the tier has to be on one line.
+#  13. No set -u abort -> no case aborts on an unbound variable.
 #
 # Run: bash skills/herdr-teamlead/tests/test_start_judge_worker.sh
 set -uo pipefail
@@ -174,6 +176,14 @@ case "$grep_rc" in
   1) fail "11: no \`agent start\` line in the argv log" ;;
   *) fail "11: could not read the argv log (grep exit ${grep_rc})" ;;
 esac
+
+# 12. Model and effort on DIFFERENT rows is not a verified tier: two unrelated
+# transcript lines must never add up to a banner.
+FAKE_BANNER='Claude Code · claude-fable-5-1
+some transcript row mentioning max elsewhere' run_sut "${TMP}/plan.json" "w1:p1"
+if (( RC == 4 )); then pass; else fail "12: split-line banner passed as verified (rc ${RC})"; fi
+if [[ -z "$OUT" ]]; then pass; else fail "12: emitted stdout on a split-line banner: ${OUT}"; fi
+check_no_abort "12"
 
 echo
 echo "results: ${PASS} pass, ${FAIL} fail"

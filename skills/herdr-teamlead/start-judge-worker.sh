@@ -22,7 +22,7 @@
 #           {"agent":"<n>","model":"<m>","effort":"<e>"|null,
 #            "pane":"<p>","banner_verified":true}
 #   stderr: diagnostics.
-#   exit  : 0 started and the banner echoed the tier,
+#   exit  : 0 started and ONE banner line echoed the whole tier,
 #           2 usage error, missing tool, or a plan with no usable judge tier,
 #           3 `herdr agent start` failed,
 #           4 the worker started and its banner did not echo the tier —
@@ -107,12 +107,25 @@ main() {
     return 4
   fi
 
-  if [[ "$banner" != *"$model"* ]]; then
-    warn "pane ${pane} did not echo model '${model}' in its first ${JUDGE_BANNER_LINES} lines — the worker is not provably on its pinned tier; read the pane and start it by hand"
-    return 4
-  fi
-  if [[ -n "$effort" && "$banner" != *"$effort"* ]]; then
-    warn "pane ${pane} echoed model '${model}' but not effort '${effort}' — setting the model alone resets effort to that model's default, so the dispatch is invalid"
+  # ONE line has to carry the whole tier. Searching the pane as a single blob
+  # would accept a model named on a transcript row and an effort named on an
+  # unrelated one -- two coincidences reading as a verified banner.
+  local line found_model=0 verified=0
+  while IFS= read -r line; do
+    [[ "$line" == *"$model"* ]] || continue
+    found_model=1
+    if [[ -z "$effort" || "$line" == *"$effort"* ]]; then
+      verified=1
+      break
+    fi
+  done <<<"$banner"
+
+  if (( verified == 0 )); then
+    if (( found_model == 1 )); then
+      warn "pane ${pane} named model '${model}' but no single line carried effort '${effort}' with it — setting the model alone resets effort to that model's default, so the dispatch is invalid"
+    else
+      warn "pane ${pane} did not echo model '${model}' in its first ${JUDGE_BANNER_LINES} lines — the worker is not provably on its pinned tier; read the pane and start it by hand"
+    fi
     return 4
   fi
 

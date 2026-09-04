@@ -387,12 +387,14 @@ judge is read-only and writes no repository content, so it needs no worktree
 
 Step 3's snapshot is a hint, not authority (`rules/stateful-artifacts.md`).
 A full development and review round has burned the shared window since it was
-taken, so the judge's affordability cannot be decided from it. Re-run Step 3's
-`measure` and plan the seat from that snapshot alone.
+taken, so the judge's affordability cannot be decided from it.
 
-Proceed immediately to Step 13 with the fresh snapshot. A `measure` that
-cannot read the judge worker's window is a stale-state failure under Step 3's
-outcomes — resolve it there before planning a ruling.
+Re-run Step 3's `measure`. That step's outcomes govern this run unchanged: a
+`measure` that cannot read the judge worker's window is a stale-state failure,
+resolved there before a ruling is planned.
+
+Hand the fresh snapshot to Step 13 and plan nothing here. Proceed immediately
+to Step 13.
 
 ## Step 13 — Plan the Judge Seat
 
