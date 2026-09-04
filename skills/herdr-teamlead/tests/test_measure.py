@@ -841,6 +841,26 @@ class WindowGroupPassthroughTest(unittest.TestCase):
         self.assertEqual(record["window_group"], "claude-max-weekly")
         self.assertTrue(record["skipped"])
 
+    def test_a_failed_measurement_keeps_its_window_group(self):
+        # Pool membership is not a measurement result; dropping it on failure
+        # unlinks the worker from its window, and affordability reads the
+        # minimum across that window.
+        agent = self._agent_with_group("claude-max-weekly")
+        runner = runner_with({"claude": "idle"}, {"claude": CLAUDE_PANE})
+        # `agent get` is the first call on every agent's path, whatever its
+        # slash delivery, so failing it exercises the error record directly.
+        runner.set(
+            "agent get claude",
+            stdout="",
+            returncode=1,
+            stderr='{"error":{"code":"agent_not_found","message":"no such agent"}}',
+        )
+        snapshot_doc = measure(HerdrClient(runner=runner), [agent], AT)
+        self.assertEqual(snapshot_doc["failed_agents"], ["claude"])
+        record = snapshot_doc["agents"]["claude"]
+        self.assertIn("error", record)
+        self.assertEqual(record["window_group"], "claude-max-weekly")
+
     def test_an_agent_declaring_no_group_records_an_empty_one(self):
         agent = self._agent_with_group("")
         runner = runner_with({"claude": "idle"}, {"claude": CLAUDE_PANE})

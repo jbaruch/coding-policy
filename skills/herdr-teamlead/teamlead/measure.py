@@ -288,6 +288,11 @@ def measure(client, agents, measured_at, marker_timeout_ms=DEFAULT_MARKER_TIMEOU
                 "credits": None,
                 "plan": None,
                 "headroom_pct": None,
+                # Pool membership survives a failed measurement. Dropping it
+                # would unlink this worker from its window, and affordability
+                # reads the minimum across that window -- a judge whose own
+                # measurement failed would then be judged against nobody.
+                "window_group": agent.window_group,
                 "skipped": False,
                 "error": {"code": exc.code, "message": exc.message},
             }
