@@ -6,11 +6,14 @@ description: >
   developer / tester / reviewer roles to the workers that can afford them,
   clear each worker's context and send it a fresh role brief, wait for the
   report files, gate the round, dispatch a non-rotating judge on a dispute,
-  and hand the merge to the `release` skill. Use when the
-  user wants to run a team round, dispatch a task to the agent team, assign
-  roles to the Herdr agents, load-balance the agents by usage or headroom,
-  brief the developer / reviewer / tester, or collect the workers' reports.
-  Requires HERDR_ENV=1.
+  and hand the merge to the `release` skill. Use ONLY when the
+  user wants to run a round across the three Herdr worker panes: dispatch a
+  task to the agent team, assign roles to the Herdr agents, load-balance the
+  agents by usage or headroom, brief the developer / reviewer / tester, or
+  collect the workers' reports. Requires HERDR_ENV to be set; without it this
+  skill does not apply. Never use it for a single agent working a task on its
+  own, however careful that work needs to be — an isolated edit, fix, review
+  or investigation is not a team round.
 ---
 
 # Herdr Team Lead Skill
@@ -43,10 +46,28 @@ Role weights, report reading, and the pre-PR review sequence:
 skills/herdr-teamlead/references/round-flow.md
 ```
 
+## Before Step 1 — Which Mode Are You In?
+
+There are two modes, and `HERDR_ENV` is what tells them apart. Read it before
+running anything.
+
+**Standalone — `HERDR_ENV` unset or empty.** No Herdr session is around you.
+This skill does not apply. Say so in one line and do the task yourself: no
+roster, no briefs, no worktree provisioning, no report files, and no
+pretending to be three agents in turn. Do not run the scripts below to
+confirm what the variable already told you. Finish here.
+
+**Herdr team round — `HERDR_ENV` set.** You are the lead of three worker
+panes. Proceed to Step 1.
+
+Even in Herdr mode, a task with nothing to hand to three workers is not a
+round: a single edit, a question, a lookup, a review of work already done.
+Those are yours to do directly.
+
 ## Step 1 — Verify Herdr and the Roster
 
 ```bash
-.tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/roster.sh
+bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/roster.sh
 ```
 
 Takes no arguments. Emits `{"caller":{"pane_id":...},"agents":[{"name","kind","pane_id","state"}]}`,
@@ -67,7 +88,7 @@ you did.
 ## Step 2 — Verify Authority for the Repo
 
 ```bash
-.tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/verify-authority.sh <owner/repo>
+bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/verify-authority.sh <owner/repo>
 ```
 
 Emits `{"repo","viewer_login","owner_login","owner_type","viewer_permission","namespace_owner","authorized"}`.
@@ -93,7 +114,7 @@ Proceed immediately to Step 3.
 ## Step 3 — Measure Headroom
 
 ```bash
-.tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/teamlead.sh measure
+bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/teamlead.sh measure
 ```
 
 Sends each configured worker its own usage command and parses the reply. Emits
@@ -125,7 +146,7 @@ before relying on its role. Proceed immediately to Step 4.
 ## Step 4 — Plan the Roles
 
 ```bash
-.tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/teamlead.sh plan \
+bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/teamlead.sh plan \
   --roles developer,tester,reviewer \
   [--exclude <role>=<agent>[,<agent>...]]...
 ```
@@ -154,7 +175,7 @@ immediately to Step 5.
 Write a values file for the round, then compose:
 
 ```bash
-.tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/compose-briefs.sh \
+bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/compose-briefs.sh \
   .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/templates \
   <values.json> <round-reports-dir>
 ```
@@ -201,7 +222,7 @@ Step 6.
 One call per worker that writes anything:
 
 ```bash
-.tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/provision-worktree.sh \
+bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/provision-worktree.sh \
   <shared-checkout> <branch> <worktree-path> [base-ref]
 ```
 
@@ -223,7 +244,7 @@ dispatch a brief whose worktree does not exist. Proceed immediately to Step 7.
 ## Step 7 — Label the Layout (optional, once per team)
 
 ```bash
-.tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/label-workspaces.sh \
+bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/label-workspaces.sh \
   <lead-label> [<agent>=<workspace-id>]...
 ```
 
@@ -240,7 +261,7 @@ already named. Proceed immediately to Step 8.
 ## Step 8 — Dispatch the Briefs
 
 ```bash
-.tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/teamlead.sh apply \
+bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/teamlead.sh apply \
   --assignments <plan-file> \
   --brief developer=<path> --brief tester=<path> --brief reviewer=<path> \
   --common <path-to-COMMON.md> [--task <label>]
@@ -301,7 +322,7 @@ Proceed to Step 9 with the roles that were dispatched.
 One call per dispatched worker, in the order the round needs them:
 
 ```bash
-.tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/wait-report.sh <agent-name> <report-path>
+bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/wait-report.sh <agent-name> <report-path>
 ```
 
 Emits `{"agent","state","report_path","found","elapsed_seconds"}` on every
@@ -401,7 +422,7 @@ names the worker the `judge` block pins, and refuses the round when that
 window cannot cover a ruling:
 
 ```bash
-.tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/teamlead.sh plan \
+bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/teamlead.sh plan \
   --roles judge --snapshot <step-12-measure-output>
 ```
 
@@ -443,7 +464,7 @@ Dispatch under Step 8's outcome contract exactly, passing the plan file from
 Step 13 rather than a hand-written mapping:
 
 ```bash
-.tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/teamlead.sh apply \
+bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/teamlead.sh apply \
   --assignments <plan-file> \
   --brief judge=<round>-judge.md \
   --common <path-to-COMMON.md> \

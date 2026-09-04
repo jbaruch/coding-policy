@@ -58,6 +58,43 @@ in_list() { # <needle> <haystack...>
   return 1
 }
 
+# Is this session a Herdr WORKER rather than the lead?
+#
+# The team rules reserve the shared checkout and every worktree operation for
+# the lead: a worker "runs no git command against the shared checkout,
+# mutating or otherwise" and "never creates, moves, or removes a worktree"
+# (rules/agent-team-operation.md Writers and Checkouts). A hook that tells a
+# worker to fast-forward `main` or remove a worktree is instructing it to
+# break that rule -- which is exactly what happened in a live round, where the
+# worker reported the contradiction and then obeyed the hook.
+#
+# Herdr exports no lead/worker flag, so the role is derived from where the
+# session sits: the lead works in the shared checkout, every worker works in a
+# linked worktree. In a linked worktree `--git-dir` and `--git-common-dir`
+# resolve differently; in the main checkout they are the same.
+#
+# 0 = a Herdr worker (suppress lead-only advice), 1 = the lead, a standalone
+# agent, or anything this cannot determine. Fail open: a hook that goes silent
+# because a git command failed would be worse than one that speaks up.
+is_herdr_worker() {
+  [[ -n "${HERDR_ENV:-}" ]] || return 1
+
+  local git_dir common_dir rc=0
+  git_dir="$(git rev-parse --absolute-git-dir 2>/dev/null)" || rc=$?
+  if (( rc != 0 )); then
+    warn "git rev-parse --absolute-git-dir failed (exit ${rc}) — cannot tell a Herdr worker from the lead; treating this as the lead"
+    return 1
+  fi
+  rc=0
+  common_dir="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || rc=$?
+  if (( rc != 0 )); then
+    warn "git rev-parse --git-common-dir failed (exit ${rc}) — cannot tell a Herdr worker from the lead; treating this as the lead"
+    return 1
+  fi
+
+  [[ "$git_dir" != "$common_dir" ]]
+}
+
 main() {
   local input active inside
   local -a gone_branches=() wt_paths=() wt_branches=() leftover=() orphaned=() changed=()
@@ -92,21 +129,35 @@ main() {
   fi
   [[ "$inside" == "true" ]] || return 0
 
-  collect_gone_branches
-  collect_worktrees
+  # Branch and worktree cleanup is the lead's, never a worker's
+  # (rules/agent-team-operation.md Writers and Checkouts). Blocking a worker's
+  # stop over leftovers it is forbidden to remove would force it to either
+  # disobey the rule or fail to hand off. The lead's own teardown runs at the
+  # end of its round.
+  #
+  # ONLY that cleanup is suppressed. The diagnostics gate and the dirty-tree
+  # report apply to a worker's own changed files, which are its to fix
+  # (rules/language-diagnostics.md Gate It Deterministically) -- skipping them
+  # here would let a worker hand off findings nobody else is going to see.
+  if ! is_herdr_worker; then
+    collect_gone_branches
+    collect_worktrees
 
-  # Partition gone branches: those checked out in a linked worktree are reported
-  # as orphaned worktrees (remove the worktree); the rest as leftover branches.
-  local b p i
-  for b in "${gone_branches[@]}"; do
-    in_list "$b" "${wt_branches[@]}" || leftover+=("$b")
-  done
-  for (( i = 0; i < ${#wt_paths[@]}; i++ )); do
-    b="${wt_branches[$i]}"; p="${wt_paths[$i]}"
-    if in_list "$b" "${gone_branches[@]}"; then orphaned+=("${p} (branch ${b})"); fi
-  done
+    # Partition gone branches: those checked out in a linked worktree are
+    # reported as orphaned worktrees (remove the worktree); the rest as
+    # leftover branches.
+    local b p i
+    for b in "${gone_branches[@]}"; do
+      in_list "$b" "${wt_branches[@]}" || leftover+=("$b")
+    done
+    for (( i = 0; i < ${#wt_paths[@]}; i++ )); do
+      b="${wt_branches[$i]}"; p="${wt_paths[$i]}"
+      if in_list "$b" "${gone_branches[@]}"; then orphaned+=("${p} (branch ${b})"); fi
+    done
 
-  build_branch_findings
+    build_branch_findings
+  fi
+
   run_changed_diagnostics
   check_dirty_tree
 
