@@ -1,5 +1,9 @@
 # Changelog
 
+### herdr-teamlead: diagnose legacy Python before importing
+
+The launcher version probe uses syntax accepted by Python 2.7 and 3.5, so an old interpreter receives the actionable Python 3.11 minimum-version message instead of a probe syntax error. The header now documents every explicit launcher failure, and fixtures exercise the actual probe with pre-f-string grammar plus malformed output. Resolves #328.
+
 ## 0.3.184 — 2026-09-04
 
 ### herdr-teamlead: number the mode gate as the first step

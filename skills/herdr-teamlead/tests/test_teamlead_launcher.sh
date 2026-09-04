@@ -19,6 +19,8 @@
 #   5. Old Python      -> exit 1 naming the minimum version.
 #   6. Broken Python   -> probe failure is distinct from an old version.
 #   7. Exit passthrough-> the module's own status reaches the caller.
+#   8. Legacy grammar -> Python 2.7/3.5 is diagnosed as unsupported.
+#   9. Unreadable     -> malformed probe output names the repair.
 #
 # Run: bash skills/herdr-teamlead/tests/test_teamlead_launcher.sh
 set -uo pipefail
@@ -36,6 +38,13 @@ mk_fake_python() { # <path>
 #!/usr/bin/env bash
 set -uo pipefail
 if [[ "${1:-}" == "-c" ]]; then
+  # Parse the actual probe with Python's pre-f-string grammar. This catches
+  # a modern-only probe before returning the legacy interpreter's version.
+  if [[ "${FAKE_PY_LEGACY_GRAMMAR:-0}" == 1 ]]; then
+    if ! python3 -c 'import ast, sys; ast.parse(sys.argv[1], feature_version=(3, 5))' "$2"; then
+      exit 1
+    fi
+  fi
   if [[ "${FAKE_PY_VERSION_RC:-0}" -ne 0 ]]; then
     printf 'interpreter startup failed\n' >&2
     exit "$FAKE_PY_VERSION_RC"
@@ -104,6 +113,28 @@ main() {
   out="$(env PY_BIN="$fakepy" FAKE_PY_RC=7 bash "$skill/teamlead.sh" measure 2>&1)"; rc=$?
   if [[ $rc -eq 7 ]]; then
     pass; else fail "exit passthrough: expected 7, got rc=$rc out=$out"; fi
+
+  # 8. A legacy interpreter must reach the unsupported-version branch,
+  # not fail to parse the probe. Both plausible legacy version values use
+  # Python 3.5's pre-f-string grammar; no claim of a full Python 2 emulator.
+  local legacy_version
+  for legacy_version in 2.7 3.5; do
+    out="$(env PY_BIN="$fakepy" FAKE_PY_VERSION="$legacy_version" FAKE_PY_LEGACY_GRAMMAR=1 \
+      bash "$skill/teamlead.sh" measure 2>&1)"; rc=$?
+    if [[ $rc -eq 1 && "$out" == *"older than Python 3.11"* ]]; then
+      pass
+    else
+      fail "legacy $legacy_version: expected unsupported-version diagnosis, got rc=$rc out=$out"
+    fi
+  done
+
+  # 9. Malformed output is an unreadable probe, not an unsupported version.
+  out="$(env PY_BIN="$fakepy" FAKE_PY_VERSION=invalid bash "$skill/teamlead.sh" measure 2>&1)"; rc=$?
+  if [[ $rc -eq 1 && "$out" == *"returned an unreadable version"* && "$out" == *"point PY_BIN"* ]]; then
+    pass
+  else
+    fail "unreadable version: expected a repair instruction, got rc=$rc out=$out"
+  fi
 
   echo "─────────────────────────────────────────────" >&2
   if [[ $FAIL -gt 0 ]]; then echo "FAILED: ${FAIL} failed, ${PASS} passed" >&2; exit 1; fi
