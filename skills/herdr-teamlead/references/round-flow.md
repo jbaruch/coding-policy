@@ -139,7 +139,7 @@ whatever GitHub's merge box says.
 A fifth seat, outside the three-role rotation, on the most capable model
 available. It never holds developer, reviewer, or tester. `rules/agent-team-operation.md`
 Judge Seat is the contract; this section is the operational detail for
-Step 11 of `skills/herdr-teamlead/SKILL.md`.
+Steps 11-15 of `skills/herdr-teamlead/SKILL.md`.
 
 Dispatch it on exactly one of four triggers:
 
