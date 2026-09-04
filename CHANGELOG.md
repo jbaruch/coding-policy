@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.184 — 2026-09-04
+
 ### herdr-teamlead: number the mode gate as the first step
 
 The standalone/Herdr gate is now Step 1, followed by the existing workflow as Steps 2–21. All team-lead step references and example input names move with their targets, including the judge's complete compose-through-ruling range. The invocation guard checks that the standalone exit stays inside the first step, before roster execution. Resolves #335 after #332 and #333 landed.
