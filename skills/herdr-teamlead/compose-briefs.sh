@@ -19,7 +19,9 @@
 #           1 precondition unmet (usage, missing dir/file/template, no jq),
 #           2 validation failed — an unfilled placeholder, a supplied key no
 #             template uses, a value that is not text, or a REPORT longer
-#             than TEAMLEAD_REPORT_PATH_MAX_COLS. Nothing is written on a
+#             than TEAMLEAD_REPORT_PATH_MAX_COLS, or a reviewer/tester
+#             REVIEW_PACKAGE that is not an absolute readable non-empty file.
+#             Nothing is written on a
 #             validation failure,
 #           3 a tool this depends on failed (the placeholder scan itself). The
 #             answer is unknown, which is never reported as "no placeholders".
@@ -46,7 +48,17 @@ warn() { printf 'compose-briefs: %s\n' "$1" >&2; }
 
 # Echo every distinct placeholder name in <file>, one per line.
 placeholders_in() { # <file>
-  grep -oE "$PLACEHOLDER_RE" "$1" | sed -e 's/^{{//' -e 's/}}$//' | sort -u
+  local found rc=0
+  found="$(grep -oE "$PLACEHOLDER_RE" "$1")" || rc=$?
+  if (( rc == 1 )); then return 0; fi
+  if (( rc != 0 )); then
+    warn "cannot scan placeholders in ${1} — check file permissions and the grep installation"
+    return 2
+  fi
+  if ! printf '%s\n' "$found" | sed -e 's/^{{//' -e 's/}}$//' | sort -u; then
+    warn "cannot normalize placeholders in ${1} — check the sed and sort installation"
+    return 2
+  fi
 }
 
 # Echo the placeholders still standing in <text>, space separated and sorted.
@@ -98,6 +110,17 @@ validate_values() { # <values-json> <label>
     return 2
   fi
   return 0
+}
+
+validate_review_package() { # <merged-values-json> <role>
+  case "$2" in reviewer|tester) ;; *) return 0 ;; esac
+  local package
+  package="$(printf '%s' "$1" | jq -r '.REVIEW_PACKAGE // ""')" || return 2
+  if [[ "$package" != /* || "$package" == *[[:cntrl:]]* \
+        || ! -f "$package" || ! -r "$package" || ! -s "$package" ]]; then
+    warn "REVIEW_PACKAGE for role '${2}' must name an absolute readable non-empty file — run review-package.sh for the recorded range and pass its output path"
+    return 2
+  fi
 }
 
 # Echo <template> with every KEY=VALUE pair in the given JSON object applied.
@@ -181,7 +204,7 @@ main() {
   # round behind, and no output directory either (`rules/file-hygiene.md`
   # Idempotency); the directory is created only once every check has passed.
   local -a out_paths=() out_bodies=()
-  local merged rendered leftovers supplied known unused key report
+  local merged rendered leftovers supplied known common_known unused key report
   local common_body scan_rc=0
   validate_values "$shared" "the shared values" || return 2
   common_body="$(substitute "$common_tpl" "$shared")"
@@ -216,7 +239,9 @@ main() {
     # whenever grep exits early on a match and SIGPIPEs the producer, which
     # reads as "not found" for every key that IS found.
     supplied="$(printf '%s' "$merged" | jq -r 'keys[]')"
-    known="$(placeholders_in "${templates}/brief-${role}.md"; placeholders_in "$common_tpl")"
+    known="$(placeholders_in "${templates}/brief-${role}.md")" || return 3
+    common_known="$(placeholders_in "$common_tpl")" || return 3
+    known+=$'\n'"$common_known"
     unused=""
     while IFS= read -r key; do
       [[ -n "$key" ]] || continue
@@ -228,6 +253,7 @@ main() {
       warn "values for role '${role}' carry keys no template uses: ${unused}— remove them or fix the name"
       return 2
     fi
+    validate_review_package "$merged" "$role" || return 2
     out_paths+=("${outdir}/brief-${role}.md")
     out_bodies+=("$rendered")
   done <<< "$roles"

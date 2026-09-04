@@ -1,5 +1,14 @@
 # Changelog
 
+### Added
+
+- **Range-pinned review packages (#323).** `review-package.sh BASE HEAD [OUTFILE]` collects the commit list, stat, and ten-context-line patch into one file under the round reports directory. It resolves refs once, preserves existing different artifacts, and publishes no partial package after a Git failure. Its path-only stdout has an explicit exception to the JSON script contract. Reviewer and tester briefs require a readable package before composition and identify its full range in their reports. Full reviews retain the original task base across multi-commit fixes; scoped re-checks use the prior reviewed tip.
+
+### Fixed
+
+- **Stable task-label input (#338 follow-up).** Dispatch rejects leading/trailing whitespace without trimming or merging persisted task identities. Existing ledger history remains intact.
+- **Placeholder-free shared templates compose cleanly.** The package-gate tests exposed a no-match scan exiting silently before validation. Empty placeholder sets now remain valid; real scan failures produce a diagnostic and stop composition.
+
 ## 0.3.186 — 2026-09-04
 
 ### Added

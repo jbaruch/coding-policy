@@ -33,8 +33,13 @@ freshly cleared context.
 ## Mode B — Branch Review (after the developer pushes)
 
 Branch: `{{BRANCH}}`.
+Review package: `{{REVIEW_PACKAGE}}`.
+Expected range: `{{REVIEW_BASE}}..{{REVIEW_HEAD}}`.
 
-1. Fetch and read the pushed branch. Read the full diff, not the summary.
+1. Read the package in full, including its commit list, stat, and patch.
+   Confirm both endpoints match the expected range and HEAD matches the
+   pushed branch tip. A mismatch is BLOCKED; request a fresh package.
+   Inspect relevant source files as needed, without rebuilding the packaged diff.
 2. Check it against the issue, against the design note, and against the rules
    linked from `{{SHARED_CHECKOUT}}/.tessl/RULES.md`.
 3. Post a **COMMENT** review — the shared account cannot approve or request
@@ -64,6 +69,7 @@ The final review before release stays full; a scoped pass cannot replace it.
 Write `{{REPORT}}` covering:
 
 - Which mode and scope you ran, and the reviewed commit SHA.
+- The package path and its full BASE/HEAD commit IDs for Mode B.
 - The design note or review content in full, or a link plus its substance.
 - Every finding with its severity label.
 - What you deliberately did not flag, and why.

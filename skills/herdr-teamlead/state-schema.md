@@ -120,7 +120,7 @@ informational plan name and never feeds headroom.
 - **Readers** — `plan` reads the newest snapshot plus the ledger (role history
   breaks a headroom tie), and the config's `role_costs` for its seat weights;
   `state` prints the document. Neither writes. Live `apply` reads the most
-  recent assignment for the named worker before retaining context; Step 9
+  recent assignment for the named worker before retaining context; Step 10
   documents the retained-dispatch contract. `apply --dry-run` reads no history
   and does not authorize retention.
 - **Fix history** — live developer fixes advance the task's confirmed fix

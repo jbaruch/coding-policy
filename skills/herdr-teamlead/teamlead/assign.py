@@ -213,6 +213,11 @@ def validate_context_mode(assignments, no_clear, retain_context, task, fix_round
         raise UsageError("Choose --no-clear or --retain-context, never both.", {})
     if task is not None and (not isinstance(task, str) or not task.strip()):
         raise UsageError("Pass a non-empty --task label, or omit it.", {})
+    if isinstance(task, str) and task != task.strip():
+        raise UsageError(
+            "Pass --task without leading or trailing whitespace; use the task's "
+            "existing exact identifier, never rename or merge its ledger history.", {}
+        )
     if fix_round is not None and (
         isinstance(fix_round, bool) or not isinstance(fix_round, int)
         or not 1 <= fix_round <= MAX_FIX_ROUNDS
