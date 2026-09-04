@@ -76,7 +76,7 @@ jobs:
 
       # renovate: datasource=npm depName=@openai/codex
       - name: Install Codex CLI
-        run: npm install -g @openai/codex@0.149.0
+        run: npm install -g @openai/codex@0.153.2
 
       - name: Mint the reviewer App installation token
         id: apptoken
