@@ -477,9 +477,15 @@ def plan(roles, snapshot, counts=None, exclude=None, role_costs=None, snapshot_r
         # One window, two workers: a seat's burn reduces what its pool-mates
         # have left, so the next seat ranks against what the pool actually
         # holds. Skipping this double-counts one window and over-commits it.
+        #
+        # EVERY worker on the window is charged, not just the unassigned ones.
+        # Affordability reads the minimum across the whole window, so a worker
+        # already holding a seat keeps a stale reading that the minimum then
+        # believes -- a window spent to zero by an earlier seat still looked
+        # affordable through its pool-mate's untouched number.
         group = groups.get(chosen)
         if group is not None:
-            for name in remaining:
+            for name in headrooms:
                 if groups.get(name) == group and headrooms[name] is not None:
                     headrooms[name] -= cost
 

@@ -866,5 +866,47 @@ class JudgeAffordabilityAfterOtherSeatsTest(unittest.TestCase):
         self.assertEqual(result["assignments"]["judge"], "judge")
 
 
+class AssignedWorkerStillChargedTest(unittest.TestCase):
+    """A worker that holds a seat keeps spending from its window.
+
+    Charging only the unassigned workers leaves the assigned one carrying a
+    stale reading, and affordability takes the minimum across the whole
+    window -- so a pool an earlier seat spent to zero still looked affordable
+    through its pool-mate's untouched number.
+    """
+
+    def test_divergent_readings_with_an_earlier_seat_halt_the_judge(self):
+        # claude reads 20 and judge 100 on one window. The developer seat
+        # costs 20 and lands on claude, spending the window to 0; a ruling
+        # costs 15.
+        payload = pooled_snapshot(
+            {"claude": "pool", "judge": "pool"}, claude=20, judge=100
+        )
+        with self.assertRaises(PlanError) as caught:
+            plan(
+                ["developer", "judge"],
+                payload,
+                warn=lambda message: None,
+                judge_agent="judge",
+                role_costs={"developer": 20, "judge": 15},
+            )
+        self.assertIn("0% headroom", str(caught.exception))
+
+    def test_the_charge_reaches_a_worker_already_holding_a_seat(self):
+        payload = pooled_snapshot(
+            {"claude": "pool", "judge": "pool"}, claude=100, judge=100
+        )
+        result = plan(
+            ["developer", "judge"],
+            payload,
+            warn=lambda message: None,
+            judge_agent="judge",
+            role_costs={"developer": 20, "judge": 15},
+        )
+        # Both fit: 100 - 20 - 15 = 65 left on the window.
+        self.assertEqual(result["assignments"]["developer"], "claude")
+        self.assertEqual(result["assignments"]["judge"], "judge")
+
+
 if __name__ == "__main__":
     unittest.main()
