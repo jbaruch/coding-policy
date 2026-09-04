@@ -165,6 +165,53 @@ class MigrationTest(unittest.TestCase):
 
     # -- newer: no usable prior state, file untouched ------------------------
 
+    def test_v2_context_migration_preserves_counts_and_snapshot_version(self):
+        snapshot = {"schema_version": 2, "agents": {"grok": {"window_group": "pool"}}}
+        row = {"schema_version": 2, "at": "2026-01-01T00:00:00+00:00",
+               "role": "developer", "agent": "grok", "status": "applied"}
+        for version in (2, STATE_SCHEMA_VERSION):
+            with self.subTest(document_version=version):
+                self.write({"schema_version": version, "snapshots": [snapshot],
+                            "assignments": [row]})
+                migrated = self.load()
+                self.assertEqual(migrated["schema_version"], STATE_SCHEMA_VERSION)
+                self.assertEqual(migrated["snapshots"], [snapshot])
+                self.assertEqual(migrated["assignments"], [dict(
+                    row, schema_version=STATE_SCHEMA_VERSION, cleared=None,
+                    clear_reason="unknown", task=None, fix_round=None, context_session=None,
+                )])
+                self.assertEqual(role_counts(migrated), {"developer": {"grok": 1}})
+                self.assertEqual(self.on_disk(), migrated)
+                self.assertEqual(self.load(), migrated)
+
+    def test_context_modes_round_trip_without_conflating_their_evidence(self):
+        state = empty_state()
+        for cleared, reason in ((True, "automatic"), (False, "hand"),
+                                (False, "retained"), (None, "unknown")):
+            add_assignment(state, "2026-01-01T00:00:00+00:00", "developer", "grok",
+                           cleared=cleared, clear_reason=reason, task="repo#322", fix_round=1)
+        save_state(self.path, state)
+        self.assertEqual(self.load(), state)
+
+    def test_malformed_context_evidence_is_preserved_but_not_used(self):
+        for fields in (
+            {"cleared": False, "clear_reason": "automatic"},
+            {"cleared": True, "clear_reason": "retained"},
+            {"cleared": None, "clear_reason": "hand"},
+            {"clear_reason": []}, {"task": " "}, {"fix_round": True},
+            {"fix_round": 0}, {"fix_round": 6}, {"fix_round": "1"},
+            {"context_session": {}}, {"context_session": "session"},
+        ):
+            with self.subTest(fields=fields):
+                state = empty_state()
+                add_assignment(state, "2026-01-01T00:00:00+00:00", "developer", "grok")
+                state["assignments"][0].update(fields)
+                self.write(state)
+                before = self.path.read_bytes()
+                self.assertEqual(self.load(), empty_state())
+                self.assertEqual(self.path.read_bytes(), before)
+                self.assertTrue(self.warnings)
+
     def test_a_newer_document_starts_empty_and_is_left_untouched(self):
         payload = {"schema_version": STATE_SCHEMA_VERSION + 1, "snapshots": [], "assignments": []}
         self.write(payload)
@@ -259,6 +306,11 @@ class AssignmentRecordTest(unittest.TestCase):
                 "role": "developer",
                 "agent": "grok",
                 "status": "applied",
+                "cleared": None,
+                "clear_reason": "unknown",
+                "task": None,
+                "fix_round": None,
+                "context_session": None,
             },
         )
 
@@ -406,9 +458,9 @@ class StatusMigrationTest(unittest.TestCase):
             encoding="utf-8",
         )
         state = load_state(self.path, warn=self.warnings.append)
-        self.assertEqual(state["schema_version"], 2)
+        self.assertEqual(state["schema_version"], STATE_SCHEMA_VERSION)
         row = state["assignments"][0]
-        self.assertEqual(row["schema_version"], 2)
+        self.assertEqual(row["schema_version"], STATE_SCHEMA_VERSION)
         self.assertEqual(row["status"], "unknown")
 
     def test_the_upgraded_ledger_keeps_its_role_history(self):
@@ -440,7 +492,7 @@ class StatusMigrationTest(unittest.TestCase):
             encoding="utf-8",
         )
         state = load_state(self.path, warn=self.warnings.append)
-        self.assertEqual(state["schema_version"], 2)
+        self.assertEqual(state["schema_version"], STATE_SCHEMA_VERSION)
         self.assertEqual(state["assignments"][0]["status"], "unknown")
 
 

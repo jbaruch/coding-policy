@@ -28,6 +28,7 @@ from teamlead.assign import (
     assignment_text,
     build_steps,
     check_all_ready,
+    native_context_session,
     dry_run,
     normalize_assignments,
     resolve_paths,
@@ -542,6 +543,7 @@ class RefusalTest(unittest.TestCase):
                 "herdr_state": "working",
                 "state_source": "probe",
                 "pane_id": "w4:p1",
+                "context_session": None,
             },
         )
 
@@ -558,12 +560,14 @@ class RefusalTest(unittest.TestCase):
                     "herdr_state": "idle",
                     "state_source": "herdr",
                     "pane_id": "w4:p1",
+                    "context_session": None,
                 },
                 "claude": {
                     "state": "done",
                     "herdr_state": "done",
                     "state_source": "herdr",
                     "pane_id": "w2:p1",
+                    "context_session": None,
                 },
             },
         )
@@ -1213,6 +1217,10 @@ class ApplyTest(unittest.TestCase):
                     "state_source": "herdr",
                     "pane_id": "w4:p1",
                     "cleared": True,
+                    "clear_reason": "automatic",
+                    "task": None,
+                    "fix_round": None,
+                    "context_session": None,
                     "landed": True,
                     "started": True,
                     "status": "applied",
@@ -1233,15 +1241,15 @@ class ApplyTest(unittest.TestCase):
             BY_NAME,
             self.paths,
             AT,
-            on_assigned=lambda role, agent, at, status: seen.append(
-                (role, agent, at, status)
+            on_assigned=lambda role, agent, at, status, context: seen.append(
+                (role, agent, at, status, context["clear_reason"], context["cleared"])
             ),
         )
         self.assertEqual(
             seen,
             [
-                ("developer", "grok", AT, "applied"),
-                ("tester", "claude", AT, "applied"),
+                ("developer", "grok", AT, "applied", "automatic", True),
+                ("tester", "claude", AT, "applied", "automatic", True),
             ],
         )
 
@@ -1335,6 +1343,24 @@ class PaneLabelTest(unittest.TestCase):
         self.assertEqual(result["applied"][0]["status"], "applied")
         self.assertIsNone(result["applied"][0]["pane_label"])
         self.assertTrue(any("only the sidebar name did not" in w for w in warnings))
+
+
+class NativeContextSessionTest(unittest.TestCase):
+    def test_official_native_reference_is_scoped_to_the_live_pane(self):
+        for kind in ("claude", "codex", "grok"):
+            for reference_kind in ("id", "path"):
+                ref = {"source": "herdr:" + kind, "agent": kind,
+                       "kind": reference_kind, "value": "native-session"}
+                self.assertEqual(native_context_session({"pane_id": "w1:p2", "agent_session": ref}, kind),
+                                 dict(ref, pane_id="w1:p2"))
+
+    def test_missing_malformed_or_non_native_evidence_is_unknown(self):
+        valid = {"source": "herdr:grok", "agent": "grok", "kind": "id", "value": "session"}
+        for ref in (None, "session", {}, dict(valid, source="user:label"),
+                    dict(valid, agent="claude"), dict(valid, kind="label"),
+                    dict(valid, value=""), dict(valid, value=5)):
+            self.assertIsNone(native_context_session({"pane_id": "w1:p2", "agent_session": ref}, "grok"))
+        self.assertIsNone(native_context_session({"agent_session": valid}, "grok"))
 
 
 if __name__ == "__main__":

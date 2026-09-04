@@ -6,6 +6,7 @@ result. Nothing here starts a process.
 """
 
 import shlex
+import json
 
 
 class FakeCompleted:
@@ -142,13 +143,20 @@ def composer_reads(name, screens=DEFAULT_COMPOSER_SCREENS, held=""):
     return ScriptedReads([composer_screen(name, screen, held) for screen in screens])
 
 
-def agent_json(name, status, pane_id):
+def agent_json(name, status, pane_id, session_id=None):
     """A minimal `herdr agent get` response body."""
-    return (
+    payload = (
         '{"id":"cli:agent:get","result":{"type":"agent_info","agent":'
         '{"agent":"%s","name":"%s","agent_status":"%s","pane_id":"%s",'
         '"workspace_id":"w1","tab_id":"w1:t1"}}}' % (name, name, status, pane_id)
     )
+    if session_id is not None:
+        result = json.loads(payload)
+        result["result"]["agent"]["agent_session"] = {
+            "source": "herdr:" + name, "agent": name, "kind": "id", "value": session_id,
+        }
+        return json.dumps(result)
+    return payload
 
 
 def ok_json(kind="ok"):

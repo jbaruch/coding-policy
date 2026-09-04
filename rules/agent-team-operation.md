@@ -23,7 +23,8 @@ description: Running a multi-agent team — headroom-driven role rotation, one w
 - Roles rotate between tasks
 - Rotation follows measured subscription headroom through the `herdr-teamlead` skill's script, never an impression of who looks fresh
 - Headroom is the minimum remaining window per worker, never the average
-- Each assignment clears the worker's context, then sends a fresh role brief
+- Each assignment clears the worker's context, except the retained fix rounds under Fix Loops
+- Every assignment sends a self-contained role brief
 - Fewer live workers than roles is a decision to record, never a silently dropped role
 
 ## Judge Seat
@@ -50,6 +51,32 @@ description: Running a multi-agent team — headroom-driven role rotation, one w
 - No exclusion bars the judge from a dispute involving its own model
 - A judge round the pinned worker's window cannot cover halts the round — no substitution, no fallback to another vendor's flagship, no degraded ruling
 - The lead runs on the strongest generally-available model at high effort; the most capable model is reserved for the judge
+
+## Fix Loops
+
+- Count fix rounds per task after its initial implementation
+- Cap each task's fix loop at five rounds
+- Fix rounds 1–3 retain the same developer's context
+- Narrow exception for retaining context on a same-role fix round.
+- Preconditions (all required):
+  1. The worker remains the developer for the same task
+  2. The assignment follows that worker's confirmed preceding developer round
+  3. Live native session identity matches the preceding assignment's recorded identity
+  4. The lead uses `--retain-context` with the task identifier and fix-round number
+- Every other assignment clears context
+- `--no-clear` records a hand-cleared pane, never retained context
+- Fix rounds 4–5 use a freshly cleared worker
+- Each fresh-worker brief includes the task, prior report, and open findings
+- Frame the handoff as "a prior developer attempted this N times; you own it now"
+- At the cap without approval, dispatch the judge before any further action
+- Never dispatch a sixth fix round
+- Surface a ruling that requires further implementation after the cap as BLOCKED to the operator
+- Scope fix re-checks to each prior finding: RESOLVED, OPEN, or DECLINED with a reason
+- Restrict NEW findings in a scoped re-check to blocking severity
+- Record new advisories in the round's follow-up issue without extending the fix loop
+- Run a broad whole-branch review before release
+- Every reviewer and tester brief forbids dispatching subagents
+- Prove delegated work from the VCS diff, never the worker's self-report
 
 ## Writers and Checkouts
 
