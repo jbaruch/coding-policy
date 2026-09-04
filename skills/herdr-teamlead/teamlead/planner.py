@@ -239,30 +239,57 @@ def _unfillable_message(role, barred, remaining, later_roles):
     return " ".join(part for part in parts if part)
 
 
-def _refuse_unaffordable_judge(judge_agent, agents, cost, warn):
-    """Halt the round when the pinned judge cannot afford it.
+def _refuse_unaffordable_judge(judge_agent, agents, cost, groups, warn):
+    """Halt the round when the pinned judge's window cannot afford it.
 
     The judge seat has no substitute: it is pinned, and its worker shares a
     window with `claude`. When that window cannot cover one ruling there is no
     second-best seat to fall back to, so the planner refuses rather than
-    dispatching a round it cannot finish. An unknown headroom is not
-    exhaustion and does not refuse -- it is unmeasured, and the existing
-    unknown-headroom handling already names it in the rationale.
+    dispatching a round it cannot finish.
+
+    One window reports through every worker on it, and those workers are
+    measured one after another rather than at one instant. Two records for the
+    same window can therefore disagree, and the lower reading is the later
+    truth about a pool that only drains. Affordability is the MINIMUM known
+    headroom across the window, never the judge's own record alone.
+
+    An unknown headroom is not exhaustion and never refuses on its own -- it
+    is unmeasured, and the existing unknown-headroom handling already names it
+    in the rationale.
     """
-    headroom = _headroom_of(judge_agent, agents.get(judge_agent), warn)
-    if headroom is None:
+    group = groups.get(judge_agent)
+    if group is None:
+        window = [judge_agent] if judge_agent in agents else []
+    else:
+        window = [name for name in agents if groups.get(name) == group]
+
+    readings = {}
+    for name in window:
+        headroom = _headroom_of(name, agents.get(name), warn)
+        if headroom is not None:
+            readings[name] = headroom
+    if not readings:
         return
+
+    lowest = min(readings, key=lambda name: (readings[name], name))
+    headroom = readings[lowest]
     if headroom - cost < 0:
+        through = (
+            "" if lowest == judge_agent
+            else " (read through {!r}, which shares its window)".format(lowest)
+        )
         raise PlanError(
-            "Judge worker {!r} has {:g}% headroom and one ruling costs {:g}% - "
-            "the round halts. There is no substitute judge: wait for the "
+            "Judge worker {!r} has {:g}% headroom{} and one ruling costs {:g}% "
+            "- the round halts. There is no substitute judge: wait for the "
             "window to reset, or have the operator rule.".format(
-                judge_agent, headroom, cost
+                judge_agent, headroom, through, cost
             ),
             {
                 "role": "judge",
                 "judge_agent": judge_agent,
                 "headroom_pct": headroom,
+                "measured_through": lowest,
+                "window_group": group,
                 "cost": cost,
             },
         )
@@ -355,7 +382,11 @@ def plan(roles, snapshot, counts=None, exclude=None, role_costs=None, snapshot_r
                     name for name in agents if name != judge_agent
                 )
                 _refuse_unaffordable_judge(
-                    judge_agent, agents, _costs_for(["judge"], role_costs)["judge"], warn
+                    judge_agent,
+                    agents,
+                    _costs_for(["judge"], role_costs)["judge"],
+                    _window_groups(agents),
+                    warn,
                 )
             elif judge_agent in agents and judge_agent not in excluded[role]:
                 excluded[role] = sorted(set(excluded[role]) | {judge_agent})

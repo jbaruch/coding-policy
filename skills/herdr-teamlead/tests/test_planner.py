@@ -646,5 +646,52 @@ class JudgeWindowExhaustionTest(unittest.TestCase):
         self.assertEqual(result["assignments"]["judge"], "judge")
 
 
+class DivergentWindowReadingTest(unittest.TestCase):
+    """One window, several readings: the lowest is the one that binds.
+
+    Workers on a shared window are measured one after another, not at one
+    instant, so two records for the same pool can disagree. A pool only
+    drains, so the lower reading is the later truth. Trusting the judge's own
+    record alone would dispatch a ruling the window cannot cover.
+    """
+
+    def test_a_spent_pool_mate_halts_a_healthy_looking_judge(self):
+        payload = pooled_snapshot(
+            {"judge": "pool", "claude": "pool"}, judge=20, claude=5, codex=90
+        )
+        with self.assertRaises(PlanError) as caught:
+            plan(["judge"], payload, warn=lambda message: None, judge_agent="judge")
+        message = str(caught.exception)
+        self.assertIn("5% headroom", message)
+        self.assertIn("'claude'", message)
+
+    def test_the_details_name_the_record_the_reading_came_from(self):
+        payload = pooled_snapshot(
+            {"judge": "pool", "claude": "pool"}, judge=20, claude=5, codex=90
+        )
+        with self.assertRaises(PlanError) as caught:
+            plan(["judge"], payload, warn=lambda message: None, judge_agent="judge")
+        self.assertEqual(caught.exception.details["measured_through"], "claude")
+        self.assertEqual(caught.exception.details["window_group"], "pool")
+
+    def test_a_spent_worker_outside_the_window_does_not_halt(self):
+        payload = pooled_snapshot(
+            {"judge": "pool", "claude": "pool"}, judge=40, claude=40, codex=1
+        )
+        result = plan(
+            ["judge"], payload, warn=lambda message: None, judge_agent="judge"
+        )
+        self.assertEqual(result["assignments"]["judge"], "judge")
+
+    def test_an_unmeasured_pool_mate_does_not_halt_a_funded_window(self):
+        payload = pooled_snapshot(
+            {"judge": "pool", "claude": "pool"}, judge=40, claude=None, codex=90
+        )
+        result = plan(
+            ["judge"], payload, warn=lambda message: None, judge_agent="judge"
+        )
+        self.assertEqual(result["assignments"]["judge"], "judge")
+
+
 if __name__ == "__main__":
     unittest.main()
