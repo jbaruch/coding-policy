@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.182 — 2026-09-04
+
 ### Fixed
 
 - **Standalone and Herdr are named as two modes, and `HERDR_ENV` tells them apart.** `rules/agent-team-operation.md` is `alwaysApply: true`, so every agent in every consumer repo loaded the whole team machinery — roles, briefs, report files, worktree-per-writer, the judge seat — whether or not a Herdr session was around it. Solo agents on isolated tasks reached for `herdr-teamlead`, ran `roster.sh`, got `not running inside Herdr (HERDR_ENV='')`, and reasoned their way back out mid-task. The rule now opens with a Two Modes section stating that everything below governs a Herdr round only, and the skill's entry gate names both modes and turns a standalone agent away by reading rather than by running a script and interpreting its error.
