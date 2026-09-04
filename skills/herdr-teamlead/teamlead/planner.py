@@ -295,7 +295,7 @@ def _refuse_unaffordable_judge(judge_agent, agents, cost, groups, warn):
         )
 
 
-def plan(roles, snapshot, counts=None, exclude=None, role_costs=None, snapshot_ref=None, warn=None, judge_agent=None):
+def plan(roles, snapshot, counts=None, exclude=None, role_costs=None, snapshot_ref=None, warn=None, judge_agent=None, judge_tier=None):
     """Assign `roles` to the agents in `snapshot`, heaviest seat first.
 
     `counts` is `{role: {agent: times_held}}` from the state ledger; omit it
@@ -305,7 +305,10 @@ def plan(roles, snapshot, counts=None, exclude=None, role_costs=None, snapshot_r
     validated from `config.parse_role_costs`. `snapshot_ref` is echoed back so
     a caller can tell which measurement the plan was built on. `judge_agent`
     is the worker the `judge` block pins the seat to: the planner never ranks
-    that seat, and never gives the pinned worker any other one.
+    that seat, and never gives the pinned worker any other one. `judge_tier`
+    is that block's `{model, effort}`; when the judge seat is planned the
+    document echoes it back as the tier the worker is started on, so a caller
+    builds the launch flags from the config rather than typing them by hand.
 
     Raises PlanError when there are no roles, no agents, fewer agents than
     roles, an exclusion naming a role nobody is assigning, or a role whose
@@ -475,7 +478,7 @@ def plan(roles, snapshot, counts=None, exclude=None, role_costs=None, snapshot_r
             {"assignments": dict(picks)},
         )
 
-    return {
+    document = {
         "schema_version": PLAN_SCHEMA_VERSION,
         # Keyed in the caller's order, not the fill order: --roles still shapes
         # the document even though it no longer decides which seat is heaviest.
@@ -485,6 +488,21 @@ def plan(roles, snapshot, counts=None, exclude=None, role_costs=None, snapshot_r
         if snapshot_ref is not None
         else {"source": None, "measured_at": (snapshot or {}).get("measured_at")},
     }
+
+    # The judge seat is pinned to a tier, not just a worker. Echoing the tier
+    # here is what makes the config the single place a model swap happens: the
+    # caller builds the worker's launch flags from this, never by hand. A
+    # model that takes no effort flag echoes `null` rather than an empty
+    # string, so a caller can tell "no effort" from "unset".
+    if "judge" in roles and judge_agent:
+        tier = judge_tier or {}
+        document["judge"] = {
+            "agent": judge_agent,
+            "model": tier.get("model") or None,
+            "effort": tier.get("effort") or None,
+        }
+
+    return document
 
 
 def _notes(excluded, agents, warn):

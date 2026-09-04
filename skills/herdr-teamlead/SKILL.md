@@ -375,8 +375,8 @@ With all four met, proceed immediately to Step 11.
 
 Optional. Triggers and the ruling contract are in
 `skills/herdr-teamlead/references/round-flow.md` "The Judge" (a bot
-disagreement inside Step 17 returns here first). No trigger — proceed to
-Step 17.
+disagreement inside Step 18 returns here first). No trigger — proceed to
+Step 18.
 
 Compose the brief from `templates/brief-judge.md` through Step 5: the
 dispute, both positions with report paths, the governing rule, the tree. The
@@ -414,7 +414,31 @@ window cannot cover a ruling:
   diagnostic verbatim and finish here. Do not hand-write an assignment to
   work around it.
 
-## Step 14 — Dispatch the Judge
+The plan's `judge` object carries the seat's tier — `agent`, `model` and
+`effort`, straight from the `judge` block. Step 14 launches the worker from
+those values. Proceed immediately to Step 14.
+
+## Step 14 — Start the Judge Worker on Its Pinned Tier
+
+Neither harness sets reasoning effort from inside a session, so the tier is a
+launch flag and the switch is a worker start. Build the argv from the plan's
+`judge` object — never from a model typed by hand, which is what makes the
+config the single place a tier swap happens:
+
+```bash
+herdr agent start <judge.agent> --kind claude --pane <pane> -- \
+  --model <judge.model> --effort <judge.effort>
+```
+
+Omit `--effort` when the plan's `effort` is `null`: some models accept no
+effort flag.
+
+Read the pane's startup banner and refuse the dispatch unless it echoes the
+model, and the effort when one was requested. A dispatch that cannot prove
+its tier is invalid — report the banner verbatim and finish here. On a
+verified banner, proceed immediately to Step 15.
+
+## Step 15 — Dispatch the Judge
 
 Dispatch under Step 8's outcome contract exactly, passing the plan file from
 Step 13 rather than a hand-written mapping:
@@ -428,26 +452,26 @@ Step 13 rather than a hand-written mapping:
 ```
 
 Step 8's outcomes govern this dispatch unchanged. Proceed immediately to
-Step 15.
+Step 16.
 
-## Step 15 — Wait for the Ruling
+## Step 16 — Wait for the Ruling
 
 Wait with Step 9's `wait-report.sh judge <report-path>`. Proceed immediately
-to Step 16 once the report lands.
+to Step 17 once the report lands.
 
-## Step 16 — Act on the Ruling
+## Step 17 — Act on the Ruling
 
 The `RULING:` line binds the round. Only the operator overrides it.
 
 - **`uphold A` / `uphold B` / `amend`** — carry out the `ACTION:` line.
-  `ACTION:` with no branch change — proceed to Step 17. `ACTION:` that
+  `ACTION:` with no branch change — proceed to Step 18. `ACTION:` that
   changes the branch — implement it, return to Step 3, and hold at Step 10
   until its four conditions hold again for the resulting tip.
 - **`blocked`** — the judge declined to rule. Stop the round and put its
   named question to the operator. Do not dispatch a second judge and do not
   rule in its place. Finish here.
 
-## Step 17 — Release the Pull Request
+## Step 18 — Release the Pull Request
 
 The release is one more assignment, never a prompt into the developer's
 existing context. Return to Step 5 with the role `release` for
@@ -455,14 +479,14 @@ the developer's agent (template `templates/brief-release.md`, the same
 `WORKTREE` and `BRANCH`, a fresh `REPORT`), run Step 6 (it reports
 `already-provisioned`), dispatch through Step 8 so the context is cleared and
 the brief is fresh, and wait on the report in Step 9. The worker merges. You
-do not. Proceed immediately to Step 18 after its report.
+do not. Proceed immediately to Step 19 after its report.
 
-## Step 18 — Clean Up the Worktree
+## Step 19 — Clean Up the Worktree
 
 Fast-forward the shared checkout, remove the worktree, and delete the branch
-per `rules/agent-worktree-isolation.md`. Proceed immediately to Step 19.
+per `rules/agent-worktree-isolation.md`. Proceed immediately to Step 20.
 
-## Step 19 — Log the Round
+## Step 20 — Log the Round
 
 Log the round: the assignments, the report paths, the findings, and the
 outcome. If the round produced no findings at all, log it and say so in one

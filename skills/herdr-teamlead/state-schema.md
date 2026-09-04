@@ -30,7 +30,9 @@ copies it onto each record (snapshot `schema_version` 2), and `plan` charges a s
 worker in that window. An agent that declares none has a window to itself.
 
 Two top-level config keys are not per-agent. The optional `judge` key pins the
-judge seat: `{"agent": <name>, "model": <id>, "effort": <level>}`, where
+judge seat, and `plan` echoes it back as the document's `judge` object when the
+seat is planned, so the worker's launch argv is built from the config rather
+than by hand: `{"agent": <name>, "model": <id>, "effort": <level>}`, where
 `effort` is one of `low`, `medium`, `high`, `xhigh`, `max`, or absent for a
 model that accepts no effort flag. The planner never ranks that seat and never
 gives the pinned worker another one.

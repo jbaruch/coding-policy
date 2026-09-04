@@ -716,5 +716,58 @@ class LegacySnapshotTest(unittest.TestCase):
         self.assertEqual(result["assignments"]["judge"], "judge")
 
 
+class JudgeTierEchoTest(unittest.TestCase):
+    """The plan carries the tier the judge worker is launched on.
+
+    Effort is a launch flag on both harnesses, so a tier switch is a worker
+    start. Echoing the configured tier here is what keeps the config the
+    single place a model swap happens: the caller builds the launch argv from
+    this document rather than typing a model by hand.
+    """
+
+    def test_the_tier_is_echoed_when_the_judge_seat_is_planned(self):
+        payload = snapshot(judge=50, codex=80)
+        result = plan(
+            ["judge"],
+            payload,
+            warn=lambda message: None,
+            judge_agent="judge",
+            judge_tier={"model": "claude-fable-5-1", "effort": "max"},
+        )
+        self.assertEqual(
+            result["judge"],
+            {"agent": "judge", "model": "claude-fable-5-1", "effort": "max"},
+        )
+
+    def test_a_model_taking_no_effort_flag_echoes_null(self):
+        # The caller omits --effort on null; an empty string would be typed
+        # onto the command line as a flag with no value.
+        payload = snapshot(judge=50, codex=80)
+        result = plan(
+            ["judge"],
+            payload,
+            warn=lambda message: None,
+            judge_agent="judge",
+            judge_tier={"model": "claude-haiku-4-5", "effort": ""},
+        )
+        self.assertIsNone(result["judge"]["effort"])
+        self.assertEqual(result["judge"]["model"], "claude-haiku-4-5")
+
+    def test_a_plan_without_the_judge_seat_carries_no_tier(self):
+        payload = snapshot(claude=90, codex=70, grok=60)
+        result = plan(
+            ROLES, payload, warn=lambda message: None, judge_agent="judge"
+        )
+        self.assertNotIn("judge", result)
+
+    def test_an_unconfigured_tier_still_names_the_agent(self):
+        payload = snapshot(judge=50, codex=80)
+        result = plan(
+            ["judge"], payload, warn=lambda message: None, judge_agent="judge"
+        )
+        self.assertEqual(result["judge"]["agent"], "judge")
+        self.assertIsNone(result["judge"]["model"])
+
+
 if __name__ == "__main__":
     unittest.main()
