@@ -8,7 +8,9 @@
 #   argv  : forwarded verbatim to `python3 -m teamlead`.
 #   stdout: whatever the module emits — one JSON object per subcommand.
 #   stderr: diagnostics from this launcher and from the module.
-#   exit  : the module's own exit status, or 1 when python3 is absent.
+#   exit  : the module's own exit status, or 1 when the interpreter is absent,
+#           its version probe fails or is unreadable, it is older than 3.11,
+#           or the packaged module is missing.
 #   env   : PY_BIN overrides the interpreter (default python3); the tests and
 #           a venv shim point it elsewhere. PYTHONPATH is prefixed, never
 #           replaced. Every other variable the module reads is documented in
@@ -27,7 +29,7 @@ main() {
   fi
 
   local py_version py_rc=0 py_major py_minor
-  py_version="$("$PY_BIN" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")' 2>&1)" || py_rc=$?
+  py_version="$("$PY_BIN" -c 'import sys; sys.stdout.write("%s.%s\n" % sys.version_info[:2])' 2>&1)" || py_rc=$?
   if (( py_rc != 0 )); then
     echo "teamlead: '${PY_BIN}' failed while checking its version (exit ${py_rc}): ${py_version} — repair that interpreter or point PY_BIN at Python 3.11+" >&2
     return 1
