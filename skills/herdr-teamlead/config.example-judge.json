@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "agents": [
+    {
+      "name": "judge",
+      "kind": "claude",
+      "usage_prompt": "/usage",
+      "usage_marker": "Current week",
+      "usage_read_source": "visible",
+      "slash_delivery": "paste",
+      "composer_glyph": "❯ ",
+      "composer_ignore_dim": true,
+      "composer_placeholders": [],
+      "recover_keys": [
+        "esc"
+      ],
+      "close_keys": [
+        "esc"
+      ],
+      "clear_prompt": "/clear",
+      "idle_markers": [
+        "⏵⏵ bypass permissions on",
+        "? for shortcuts"
+      ],
+      "working_markers": [
+        "Churned for"
+      ],
+      "model_label": "Fable 5.1"
+    }
+  ]
+}

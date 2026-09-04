@@ -14,6 +14,16 @@ description: Running a multi-agent team — headroom-driven role rotation, one w
 - Each assignment clears the worker's context, then sends a fresh role brief
 - Fewer live workers than roles is a decision to record, never a silently dropped role
 
+## Judge Seat
+
+- A fifth seat, `judge`, sits outside the three-role rotation on the most capable model available, never assigned developer, reviewer, or tester
+- The lead dispatches the judge only for one of four triggers: a contested reviewer or tester verdict, a lead override of a blocking finding, a fix loop that reached its fifth round, or a bot finding the team disagrees with
+- The judge is read-only: it never edits a repository file, never runs a mutating git or `gh` command, never posts to GitHub, never dispatches a subagent — its only output is its report file
+- The judge reads both positions and the governing rule, verifies the disputed facts against the tree, and returns `RULING: uphold A | uphold B | amend — <line>` with numbered reasons, an `ACTION:` naming the minimal step, and an `UNVERIFIED:` line
+- The judge's ruling binds the round; only the operator overrides it
+- The judge is not load-balanced — it lives in its own balancer config, dispatched directly, never through `measure`/`plan`
+- The lead runs on the strongest generally-available model at high effort; the most capable model is reserved for the judge
+
 ## Writers and Checkouts
 
 - One writer per worktree
