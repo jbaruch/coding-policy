@@ -68,8 +68,8 @@ number is refused, naming the file and the role. `plan` is the only reader.
 | `schema_version` | integer | Currently `2`. Bumped on any shape change |
 | `snapshots` | array | Whole `measure` documents, oldest first; the ring holds the last 20 |
 | `assignments` | array | Append-only ledger of who held which role |
-| `snapshots[].schema_version` | integer | Currently `2`. Version 2 added `window_group` to every agent record |
-| `snapshots[].agents[].window_group` | string | The usage window this agent shares with others; absent on a version-1 snapshot, which reads as a window of its own |
+| `snapshots[].schema_version` | integer | Currently `2`. Version 2 added `window_group` to every agent record; a version-1 snapshot is migrated on read and rewritten, its agents stamped with an empty `window_group` |
+| `snapshots[].agents[].window_group` | string | The usage window this agent shares with others; empty means a window of its own |
 | `assignments[].schema_version` | integer | The row's own version, stamped on write |
 | `assignments[].at` | string | ISO-8601 timestamp, from `--now` or the CLI's clock |
 | `assignments[].role` | string | The role handed out |

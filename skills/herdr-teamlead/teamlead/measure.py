@@ -34,12 +34,16 @@ from .errors import HerdrError, ParseError
 from .herdr import BUSY_STATES, DEFAULT_MARKER_TIMEOUT_MS, READY_STATES, format_argv
 from .parsers import headroom_pct, parse_usage
 from .probe import resolve_status, stderr_warn
+from .state import SNAPSHOT_SCHEMA_VERSION
 
-#: Snapshot document version. 2 adds `window_group` to every agent record;
-#: a version-1 snapshot carries none, and readers treat its absence as "this
-#: agent has a window to itself" -- an additive change, so an old snapshot
-#: still plans rather than being migrated (rules/stateful-artifacts.md).
-MEASURE_SCHEMA_VERSION = 2
+#: Snapshot document version. 2 adds `window_group` to every agent record.
+#: `state.py` owns the file a snapshot is stored in, so it owns both the
+#: version and the migration that carries a version-1 snapshot up to it
+#: (rules/stateful-artifacts.md Migration Policy). Read from there rather than
+#: declared again here: two constants for one shape drift apart, and a writer
+#: stamping a version no migration table knows is exactly the state that rule
+#: exists to prevent.
+MEASURE_SCHEMA_VERSION = SNAPSHOT_SCHEMA_VERSION
 
 #: Lines to pull when reading a usage report. Always passed: the read that
 #: works by hand names a line count explicitly, and relying on herdr's default
