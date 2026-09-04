@@ -84,18 +84,26 @@ main() {
     flags+=(--effort "$effort")
   fi
 
+  # herdr's own diagnostic is captured rather than discarded: it names why the
+  # start failed, and this script's message cannot reconstruct that.
+  local errfile
+  errfile="$(mktemp)" || { warn "could not create a temp file for herdr's diagnostics"; return 2; }
+  # shellcheck disable=SC2064  # errfile is expanded now, on purpose.
+  trap "rm -f '${errfile}'" RETURN
+
   rc=0
-  "$HERDR_BIN" agent start "$agent" --kind "$kind" --pane "$pane" -- "${flags[@]}" >/dev/null 2>&1 || rc=$?
+  "$HERDR_BIN" agent start "$agent" --kind "$kind" --pane "$pane" -- "${flags[@]}" \
+    >/dev/null 2>"$errfile" || rc=$?
   if (( rc != 0 )); then
-    warn "\`${HERDR_BIN} agent start ${agent}\` failed (exit ${rc}) — read the pane with \`${HERDR_BIN} pane read ${pane} --source visible\` and start it by hand"
+    warn "\`${HERDR_BIN} agent start ${agent}\` failed (exit ${rc}): $(tr '\n' ' ' < "$errfile") — read the pane with \`${HERDR_BIN} pane read ${pane} --source visible\` and start it by hand"
     return 3
   fi
 
   local banner
   rc=0
-  banner="$("$HERDR_BIN" pane read "$pane" --source visible --lines "$JUDGE_BANNER_LINES" 2>&1)" || rc=$?
+  banner="$("$HERDR_BIN" pane read "$pane" --source visible --lines "$JUDGE_BANNER_LINES" 2>"$errfile")" || rc=$?
   if (( rc != 0 )); then
-    warn "\`${HERDR_BIN} pane read ${pane}\` failed (exit ${rc}): $(printf '%s' "$banner" | tr '\n' ' ') — the worker started but its tier is unproven, so the dispatch is invalid"
+    warn "\`${HERDR_BIN} pane read ${pane}\` failed (exit ${rc}): $(tr '\n' ' ' < "$errfile") — the worker started but its tier is unproven, so the dispatch is invalid"
     return 4
   fi
 

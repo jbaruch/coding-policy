@@ -96,7 +96,13 @@ write_plan "${TMP}/plan-noeffort.json" "$NOEFFORT"
 FAKE_BANNER='Claude Code · claude-haiku-4-5' run_sut "${TMP}/plan-noeffort.json" "w1:p1"
 if (( RC == 0 )); then pass; else fail "2: expected exit 0, got ${RC} (${ERR})"; fi
 if printf '%s' "$OUT" | grep -q '"effort": *null'; then pass; else fail "2: expected null effort in ${OUT}"; fi
-if grep -q -- "--effort" "$FAKE_ARGV_LOG"; then fail "2: passed --effort for a model with none"; else pass; fi
+grep_rc=0
+grep -q -- "--effort" "$FAKE_ARGV_LOG" || grep_rc=$?
+case "$grep_rc" in
+  0) fail "2: passed --effort for a model with none" ;;
+  1) pass ;;
+  *) fail "2: could not read the argv log (grep exit ${grep_rc})" ;;
+esac
 check_no_abort "2"
 
 # 3. The banner does not name the model.
@@ -133,7 +139,13 @@ check_no_abort "7"
 write_plan "${TMP}/plan-nomodel.json" '{"agent":"judge","model":"","effort":"max"}'
 run_sut "${TMP}/plan-nomodel.json" "w1:p1"
 if (( RC == 2 )); then pass; else fail "8: expected exit 2, got ${RC}"; fi
-if grep -q "agent start" "$FAKE_ARGV_LOG"; then fail "8: started a worker with no model"; else pass; fi
+grep_rc=0
+grep -q "agent start" "$FAKE_ARGV_LOG" || grep_rc=$?
+case "$grep_rc" in
+  0) fail "8: started a worker with no model" ;;
+  1) pass ;;
+  *) fail "8: could not read the argv log (grep exit ${grep_rc})" ;;
+esac
 check_no_abort "8"
 
 # 9. Usage.
@@ -148,10 +160,19 @@ check_no_abort "10"
 
 # 11. The launch flags land after the `--` separator herdr passes through.
 FAKE_BANNER='Claude Code · claude-fable-5-1 · effort max' run_sut "${TMP}/plan.json" "w1:p1"
-start_line="$(grep "agent start" "$FAKE_ARGV_LOG" || true)"
-case "$start_line" in
-  *"-- --model claude-fable-5-1 --effort max"*) pass ;;
-  *) fail "11: launch argv is wrong: ${start_line}" ;;
+# grep exits 1 on no-match and 2 on error; `|| true` would read an unreadable
+# log as "no start line" (rules/error-handling.md Shell Error Handling).
+grep_rc=0
+start_line="$(grep "agent start" "$FAKE_ARGV_LOG")" || grep_rc=$?
+case "$grep_rc" in
+  0)
+    case "$start_line" in
+      *"-- --model claude-fable-5-1 --effort max"*) pass ;;
+      *) fail "11: launch argv is wrong: ${start_line}" ;;
+    esac
+    ;;
+  1) fail "11: no \`agent start\` line in the argv log" ;;
+  *) fail "11: could not read the argv log (grep exit ${grep_rc})" ;;
 esac
 
 echo
