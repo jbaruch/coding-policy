@@ -162,6 +162,7 @@ def skipped_record(agent, status, herdr_status, state_source):
         "credits": None,
         "plan": None,
         "headroom_pct": None,
+        "window_group": agent.window_group,
         "skipped": True,
     }
 
@@ -234,6 +235,9 @@ def measure_agent(client, agent, marker_timeout_ms=DEFAULT_MARKER_TIMEOUT_MS, re
         "credits": parsed["credits"],
         "plan": parsed.get("plan"),
         "headroom_pct": headroom_pct(windows),
+        # Copied through so `plan` reads one window's membership from the
+        # snapshot, the same place it reads the headroom it belongs to.
+        "window_group": agent.window_group,
         "skipped": False,
     }
 

@@ -58,6 +58,11 @@ DEFAULT_ROLE_COSTS = {
     "developer": 12.0,
     "tester": 10.0,
     "reviewer": 5.0,
+    # The judge runs the top model at its highest effort against a window it
+    # shares with another worker, so one ruling costs more than one build.
+    # Weighed explicitly: an unweighed role inherits DEFAULT_ROLE_COST below,
+    # which would price the most expensive seat under `developer` by accident.
+    "judge": 15.0,
 }
 
 #: Weight for a role nobody has weighed -- a folded seat, or a role a later
@@ -121,6 +126,26 @@ def _headroom_of(name, record, warn):
         )
         return None
     return number
+
+
+def _window_groups(agents):
+    """`{agent: window_group}` for every agent that declares one.
+
+    Two workers can authenticate as one subscription -- the judge seat runs a
+    dedicated worker on the same Claude account as `claude`, and Fable draws
+    on that account's weekly pool rather than a pool of its own. `measure`
+    copies each agent's declared `window_group` onto its record; agents
+    sharing a value share one window, and an agent that declares none has a
+    window to itself.
+    """
+    groups = {}
+    for name, record in agents.items():
+        if not isinstance(record, dict):
+            continue
+        group = record.get("window_group")
+        if isinstance(group, str) and group:
+            groups[name] = group
+    return groups
 
 
 def _costs_for(roles, role_costs):
@@ -214,7 +239,7 @@ def _unfillable_message(role, barred, remaining, later_roles):
     return " ".join(part for part in parts if part)
 
 
-def plan(roles, snapshot, counts=None, exclude=None, role_costs=None, snapshot_ref=None, warn=None):
+def plan(roles, snapshot, counts=None, exclude=None, role_costs=None, snapshot_ref=None, warn=None, judge_agent=None):
     """Assign `roles` to the agents in `snapshot`, heaviest seat first.
 
     `counts` is `{role: {agent: times_held}}` from the state ledger; omit it
@@ -222,7 +247,9 @@ def plan(roles, snapshot, counts=None, exclude=None, role_costs=None, snapshot_r
     barred from that role, the author of the branch under review first among
     them. `role_costs` overrides DEFAULT_ROLE_COSTS per role and arrives
     validated from `config.parse_role_costs`. `snapshot_ref` is echoed back so
-    a caller can tell which measurement the plan was built on.
+    a caller can tell which measurement the plan was built on. `judge_agent`
+    is the worker the `judge` block pins the seat to: the planner never ranks
+    that seat, and never gives the pinned worker any other one.
 
     Raises PlanError when there are no roles, no agents, fewer agents than
     roles, an exclusion naming a role nobody is assigning, or a role whose
@@ -280,6 +307,26 @@ def plan(roles, snapshot, counts=None, exclude=None, role_costs=None, snapshot_r
 
     warn = warn or stderr_warn
     excluded = _normalize_exclusions(exclude, roles)
+
+    # The judge seat is pinned, never ranked: the planner does not choose who
+    # judges. Expressed as exclusions so eligibility, fillability and the
+    # rationale all read the same way they do for every other seat.
+    if judge_agent:
+        if "judge" in roles and judge_agent not in agents:
+            raise PlanError(
+                "Role 'judge' is pinned to worker {!r}, which is not in the "
+                "snapshot ({}) - measure it, or drop 'judge' from --roles.".format(
+                    judge_agent, ", ".join(sorted(agents))
+                ),
+                {"role": "judge", "judge_agent": judge_agent, "agents": sorted(agents)},
+            )
+        for role in roles:
+            if role == "judge":
+                excluded[role] = tuple(
+                    sorted(name for name in agents if name != judge_agent)
+                )
+            elif judge_agent in agents and judge_agent not in excluded[role]:
+                excluded[role] = tuple(sorted(set(excluded[role]) | {judge_agent}))
     for role in roles:
         if all(name in excluded[role] for name in agents):
             raise PlanError(
@@ -294,6 +341,7 @@ def plan(roles, snapshot, counts=None, exclude=None, role_costs=None, snapshot_r
     headrooms = {
         name: _headroom_of(name, record, warn) for name, record in agents.items()
     }
+    groups = _window_groups(agents)
     remaining = set(headrooms)
     picks = {}
     rationale = []
@@ -341,6 +389,15 @@ def plan(roles, snapshot, counts=None, exclude=None, role_costs=None, snapshot_r
         if headroom is not None:
             projected = headroom - cost
             floor = projected if floor is None else min(floor, projected)
+
+        # One window, two workers: a seat's burn reduces what its pool-mates
+        # have left, so the next seat ranks against what the pool actually
+        # holds. Skipping this double-counts one window and over-commits it.
+        group = groups.get(chosen)
+        if group is not None:
+            for name in remaining:
+                if groups.get(name) == group and headrooms[name] is not None:
+                    headrooms[name] -= cost
 
     rationale.extend(_notes(excluded, agents, warn))
 

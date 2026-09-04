@@ -53,9 +53,10 @@ class Agent:
         "composer_ignore_dim",
         "slash_enter_count",
         "model_label",
+        "window_group",
     )
 
-    def __init__(self, name, kind, usage_prompt, usage_marker, usage_read_source, clear_prompt, close_keys=(), idle_markers=(), working_markers=(), dialog_next_tab_keys=(), recover_keys=(), composer_placeholders=(), slash_delivery=DEFAULT_SLASH_DELIVERY, composer_glyph="", composer_ignore_dim=DEFAULT_COMPOSER_IGNORE_DIM, slash_enter_count=DEFAULT_SLASH_ENTER_COUNT, model_label=""):
+    def __init__(self, name, kind, usage_prompt, usage_marker, usage_read_source, clear_prompt, close_keys=(), idle_markers=(), working_markers=(), dialog_next_tab_keys=(), recover_keys=(), composer_placeholders=(), slash_delivery=DEFAULT_SLASH_DELIVERY, composer_glyph="", composer_ignore_dim=DEFAULT_COMPOSER_IGNORE_DIM, slash_enter_count=DEFAULT_SLASH_ENTER_COUNT, model_label="", window_group=""):
         self.name = name
         self.kind = kind
         self.usage_prompt = usage_prompt
@@ -82,6 +83,7 @@ class Agent:
         # which model is doing the work. Cosmetic and optional: empty means the
         # label carries the role alone.
         self.model_label = model_label
+        self.window_group = window_group
         # "paste" (agent prompt) or "type" (pane send-text plus Enter).
         self.slash_delivery = slash_delivery
         # The prompt glyph that marks the composer row, so teamlead can see
@@ -223,6 +225,17 @@ def parse_config(payload, source="<memory>"):
                 {"source": source, "index": index, "slash_delivery": delivery},
             )
         glyph = entry.get("composer_glyph", "")
+        window_group = entry.get("window_group", "")
+        if not isinstance(window_group, str):
+            raise ConfigError(
+                "Config at {}: agents[{}].window_group is {!r}; use a string "
+                "naming the usage window this agent shares with others, or "
+                "omit it when the agent has a window of its own.".format(
+                    source, index, window_group
+                ),
+                {"source": source, "index": index, "window_group": window_group},
+            )
+
         model_label = entry.get("model_label", "")
         if not isinstance(model_label, str):
             raise ConfigError(
@@ -278,6 +291,7 @@ def parse_config(payload, source="<memory>"):
                 composer_glyph=glyph,
                 composer_ignore_dim=ignore_dim,
                 model_label=model_label,
+                window_group=window_group,
                 slash_enter_count=enters,
                 **lists
             )
@@ -325,6 +339,95 @@ def load_config(path):
     """Read and validate the config file at `path`."""
     path = Path(path)
     return parse_config(_read_config(path), source=str(path))
+
+
+#: Reasoning-effort levels `claude --effort` accepts. A tier may name no
+#: effort at all: claude-haiku-4-5 takes no effort flag, and a model that
+#: does not accept one must not be forced to carry a value here.
+VALID_JUDGE_EFFORTS = frozenset({"low", "medium", "high", "xhigh", "max"})
+
+
+class Judge:
+    """The pinned judge tier. A plain value object, never mutated after load."""
+
+    __slots__ = ("agent", "model", "effort")
+
+    def __init__(self, agent, model, effort=""):
+        self.agent = agent
+        self.model = model
+        self.effort = effort
+
+
+def parse_judge(payload, source="<memory>"):
+    """Validate the optional top-level `judge` block, `None` when absent.
+
+    The judge seat is pinned rather than ranked: the planner never chooses who
+    judges, so the model lives in config where swapping the top tier is a
+    one-line edit rather than a code change and a republish.
+    """
+    if not isinstance(payload, dict):
+        raise ConfigError(
+            "Config at {} must be a JSON object with `schema_version` and "
+            "`agents` - see config.example.json.".format(source),
+            {"source": source},
+        )
+    raw = payload.get("judge")
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise ConfigError(
+            "Config at {}: `judge` is a JSON {}, not an object naming the "
+            "pinned seat - write it as {{\"agent\": \"judge\", \"model\": "
+            "\"claude-fable-5-1\", \"effort\": \"max\"}}, or remove it.".format(
+                source, type(raw).__name__
+            ),
+            {"source": source, "judge_type": type(raw).__name__},
+        )
+    for field in ("agent", "model"):
+        value = raw.get(field)
+        if not isinstance(value, str) or not value:
+            raise ConfigError(
+                "Config at {}: `judge.{}` is {!r}; name the {} as a non-empty "
+                "string.".format(
+                    source,
+                    field,
+                    value,
+                    "agent that holds the seat" if field == "agent" else "model it is pinned to",
+                ),
+                {"source": source, "field": field, "value": value},
+            )
+    effort = raw.get("effort", "")
+    if not isinstance(effort, str):
+        raise ConfigError(
+            "Config at {}: `judge.effort` is {!r}; use one of {}, or omit it "
+            "for a model that accepts no effort flag.".format(
+                source, effort, ", ".join(sorted(VALID_JUDGE_EFFORTS))
+            ),
+            {"source": source, "effort": effort},
+        )
+    if effort and effort not in VALID_JUDGE_EFFORTS:
+        raise ConfigError(
+            "Config at {}: `judge.effort` is {!r}; use one of {}, or omit it "
+            "for a model that accepts no effort flag.".format(
+                source, effort, ", ".join(sorted(VALID_JUDGE_EFFORTS))
+            ),
+            {"source": source, "effort": effort},
+        )
+    return Judge(agent=raw["agent"], model=raw["model"], effort=effort)
+
+
+def load_judge(path):
+    """The `judge` block from the config at `path`; None when there is none.
+
+    Missing-config tolerance matches `load_role_costs`: `plan` contacts no
+    agent and runs on a machine that was never set up, so no config means "no
+    pinned judge", not a failed plan. A config that EXISTS and names a
+    malformed `judge` block still fails loudly.
+    """
+    path = Path(path)
+    if not path.exists():
+        return None
+    return parse_judge(_read_config(path), source=str(path))
 
 
 def parse_role_costs(payload, source="<memory>"):

@@ -3,7 +3,13 @@
   "role_costs": {
     "developer": 12,
     "tester": 10,
-    "reviewer": 5
+    "reviewer": 5,
+    "judge": 15
+  },
+  "judge": {
+    "agent": "judge",
+    "model": "claude-fable-5-1",
+    "effort": "max"
   },
   "agents": [
     {
@@ -30,7 +36,8 @@
       "working_markers": [
         "Churned for"
       ],
-      "model_label": "claude-opus-5"
+      "model_label": "claude-opus-5",
+      "window_group": "claude-max-weekly"
     },
     {
       "name": "codex",
@@ -80,6 +87,33 @@
         "Esc:cancel"
       ],
       "model_label": "grok-4"
+    },
+    {
+      "name": "judge",
+      "kind": "claude",
+      "usage_prompt": "/usage",
+      "usage_marker": "Current week",
+      "usage_read_source": "visible",
+      "slash_delivery": "paste",
+      "composer_glyph": "\u276f ",
+      "composer_ignore_dim": true,
+      "composer_placeholders": [],
+      "recover_keys": [
+        "esc"
+      ],
+      "close_keys": [
+        "esc"
+      ],
+      "clear_prompt": "/clear",
+      "idle_markers": [
+        "\u23f5\u23f5 bypass permissions on",
+        "? for shortcuts"
+      ],
+      "working_markers": [
+        "Churned for"
+      ],
+      "model_label": "Fable 5.1",
+      "window_group": "claude-max-weekly"
     }
   ]
 }

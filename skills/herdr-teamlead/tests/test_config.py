@@ -126,8 +126,12 @@ class ParseConfigTest(unittest.TestCase):
     def test_shipped_example_config_is_valid(self):
         payload = json.loads((REPO_ROOT / "config.example.json").read_text(encoding="utf-8"))
         agents = parse_config(payload, source="config.example.json")
-        self.assertEqual([agent.name for agent in agents], ["claude", "codex", "grok"])
-        self.assertEqual([agent.kind for agent in agents], ["claude", "codex", "grok"])
+        self.assertEqual(
+            [agent.name for agent in agents], ["claude", "codex", "grok", "judge"]
+        )
+        self.assertEqual(
+            [agent.kind for agent in agents], ["claude", "codex", "grok", "claude"]
+        )
         by_name = {agent.name: agent for agent in agents}
         # Grok renders /usage as a modal after a restart, so it reads the
         # viewport and dismisses the dialog just like claude does.
@@ -140,7 +144,7 @@ class ParseConfigTest(unittest.TestCase):
         # autocomplete popup.
         self.assertEqual(
             {agent.name: agent.slash_delivery for agent in agents},
-            {"claude": "paste", "codex": "type", "grok": "type"},
+            {"claude": "paste", "codex": "type", "grok": "type", "judge": "paste"},
         )
         # Every agent can be checked for a stuck composer.
         self.assertTrue(all(agent.composer_glyph for agent in agents))
@@ -360,7 +364,7 @@ class LoadRoleCostsTest(unittest.TestCase):
         )
         self.assertEqual(
             parse_role_costs(example),
-            {"developer": 12.0, "tester": 10.0, "reviewer": 5.0},
+            {"developer": 12.0, "tester": 10.0, "reviewer": 5.0, "judge": 15.0},
         )
 
 

@@ -19,7 +19,7 @@ from pathlib import Path
 from . import __version__
 from .assign import apply as apply_assignments
 from .assign import dry_run, normalize_assignments, resolve_paths
-from .config import default_config_path, load_config, load_role_costs, select_agents
+from .config import default_config_path, load_config, load_judge, load_role_costs, select_agents
 from .errors import PlanError, StateError, TeamLeadError, UsageError
 from .herdr import (
     DEFAULT_MARKER_TIMEOUT_MS,
@@ -430,6 +430,7 @@ def cmd_plan(args, client=None, warn=None, trace=None):
     roles = [role.strip() for role in args.roles.split(",") if role.strip()]
     excludes = _parse_excludes(args.excludes)
     role_costs = load_role_costs(_config_path(args))
+    judge = load_judge(_config_path(args))
     state_path = _state_path(args)
     state = load_state(state_path, warn=warn)
 
@@ -474,6 +475,7 @@ def cmd_plan(args, client=None, warn=None, trace=None):
             role_counts(state),
             exclude=excludes,
             role_costs=role_costs,
+            judge_agent=judge.agent if judge else None,
             snapshot_ref={"source": source, "measured_at": snapshot.get("measured_at")},
             warn=warn,
         ),
