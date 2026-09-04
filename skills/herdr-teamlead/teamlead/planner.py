@@ -46,7 +46,13 @@ import math
 from .diagnostics import stderr_warn
 from .errors import PlanError
 
-PLAN_SCHEMA_VERSION = 1
+#: Plan document version. 2 adds the optional `judge` object carrying the
+#: pinned seat's agent, model, effort and banner pattern. Additive: a version-1
+#: plan simply has no `judge` key, which is indistinguishable from a version-2
+#: plan that assigned no judge seat, so both readers take the same path.
+#: A plan is a round's instruction, not stored state -- it is produced and
+#: consumed inside one round and never migrated (rules/stateful-artifacts.md).
+PLAN_SCHEMA_VERSION = 2
 
 #: What one round in each seat is expected to burn, in points of the agent's
 #: remaining headroom percentage. The ORDER is what the planner acts on:
@@ -58,6 +64,11 @@ DEFAULT_ROLE_COSTS = {
     "developer": 12.0,
     "tester": 10.0,
     "reviewer": 5.0,
+    # The judge runs the top model at its highest effort against a window it
+    # shares with another worker, so one ruling costs more than one build.
+    # Weighed explicitly: an unweighed role inherits DEFAULT_ROLE_COST below,
+    # which would price the most expensive seat under `developer` by accident.
+    "judge": 15.0,
 }
 
 #: Weight for a role nobody has weighed -- a folded seat, or a role a later
@@ -121,6 +132,26 @@ def _headroom_of(name, record, warn):
         )
         return None
     return number
+
+
+def _window_groups(agents):
+    """`{agent: window_group}` for every agent that declares one.
+
+    Two workers can authenticate as one subscription -- the judge seat runs a
+    dedicated worker on the same Claude account as `claude`, and Fable draws
+    on that account's weekly pool rather than a pool of its own. `measure`
+    copies each agent's declared `window_group` onto its record; agents
+    sharing a value share one window, and an agent that declares none has a
+    window to itself.
+    """
+    groups = {}
+    for name, record in agents.items():
+        if not isinstance(record, dict):
+            continue
+        group = record.get("window_group")
+        if isinstance(group, str) and group:
+            groups[name] = group
+    return groups
 
 
 def _costs_for(roles, role_costs):
@@ -214,7 +245,67 @@ def _unfillable_message(role, barred, remaining, later_roles):
     return " ".join(part for part in parts if part)
 
 
-def plan(roles, snapshot, counts=None, exclude=None, role_costs=None, snapshot_ref=None, warn=None):
+def _refuse_unaffordable_judge(judge_agent, headrooms, cost, groups):
+    """Halt the round when the pinned judge's window cannot afford it.
+
+    The judge seat has no substitute: it is pinned, and its worker shares a
+    window with `claude`. When that window cannot cover one ruling there is no
+    second-best seat to fall back to, so the planner refuses rather than
+    dispatching a round it cannot finish.
+
+    One window reports through every worker on it, and those workers are
+    measured one after another rather than at one instant. Two records for the
+    same window can therefore disagree, and the lower reading is the later
+    truth about a pool that only drains. Affordability is the MINIMUM known
+    headroom across the window, never the judge's own record alone.
+
+    An unknown headroom is not exhaustion and never refuses on its own -- it
+    is unmeasured, and the existing unknown-headroom handling already names it
+    in the rationale.
+
+    Called from inside the fill loop, at the judge's own turn, so `headrooms`
+    already reflects what the seats filled before it spent from the same
+    window. Checked before the loop instead, a round seating a heavier
+    developer on the shared pool would pass the check and leave the judge
+    projected below zero.
+    """
+    group = groups.get(judge_agent)
+    if group is None:
+        window = [judge_agent] if judge_agent in headrooms else []
+    else:
+        window = [name for name in headrooms if groups.get(name) == group]
+
+    readings = {
+        name: headrooms[name] for name in window if headrooms.get(name) is not None
+    }
+    if not readings:
+        return
+
+    lowest = min(readings, key=lambda name: (readings[name], name))
+    headroom = readings[lowest]
+    if headroom - cost < 0:
+        through = (
+            "" if lowest == judge_agent
+            else " (read through {!r}, which shares its window)".format(lowest)
+        )
+        raise PlanError(
+            "Judge worker {!r} has {:g}% headroom{} and one ruling costs {:g}% "
+            "- the round halts. There is no substitute judge: wait for the "
+            "window to reset, or have the operator rule.".format(
+                judge_agent, headroom, through, cost
+            ),
+            {
+                "role": "judge",
+                "judge_agent": judge_agent,
+                "headroom_pct": headroom,
+                "measured_through": lowest,
+                "window_group": group,
+                "cost": cost,
+            },
+        )
+
+
+def plan(roles, snapshot, counts=None, exclude=None, role_costs=None, snapshot_ref=None, warn=None, judge_agent=None, judge_tier=None):
     """Assign `roles` to the agents in `snapshot`, heaviest seat first.
 
     `counts` is `{role: {agent: times_held}}` from the state ledger; omit it
@@ -222,7 +313,12 @@ def plan(roles, snapshot, counts=None, exclude=None, role_costs=None, snapshot_r
     barred from that role, the author of the branch under review first among
     them. `role_costs` overrides DEFAULT_ROLE_COSTS per role and arrives
     validated from `config.parse_role_costs`. `snapshot_ref` is echoed back so
-    a caller can tell which measurement the plan was built on.
+    a caller can tell which measurement the plan was built on. `judge_agent`
+    is the worker the `judge` block pins the seat to: the planner never ranks
+    that seat, and never gives the pinned worker any other one. `judge_tier`
+    is that block's `{model, effort}`; when the judge seat is planned the
+    document echoes it back as the tier the worker is started on, so a caller
+    builds the launch flags from the config rather than typing them by hand.
 
     Raises PlanError when there are no roles, no agents, fewer agents than
     roles, an exclusion naming a role nobody is assigning, or a role whose
@@ -280,6 +376,39 @@ def plan(roles, snapshot, counts=None, exclude=None, role_costs=None, snapshot_r
 
     warn = warn or stderr_warn
     excluded = _normalize_exclusions(exclude, roles)
+
+    # The judge seat is pinned, never ranked. Without a `judge` block there is
+    # nothing to pin it to, and ranking an ordinary worker into the seat would
+    # produce a plan carrying no usable tier -- which fails later, at worker
+    # startup, a long way from the config that caused it.
+    if "judge" in roles and not judge_agent:
+        raise PlanError(
+            "Role 'judge' needs a `judge` block in config.json naming the "
+            "worker, model, effort and banner_pattern the seat is pinned to - "
+            "this config has none, and the planner never ranks an ordinary "
+            "worker into the judge seat. Add the block, or drop 'judge' from "
+            "--roles.",
+            {"role": "judge"},
+        )
+
+    # Expressed as exclusions so eligibility, fillability and the rationale all
+    # read the same way they do for every other seat.
+    if judge_agent:
+        if "judge" in roles and judge_agent not in agents:
+            raise PlanError(
+                "Role 'judge' is pinned to worker {!r}, which is not in the "
+                "snapshot ({}) - measure it, or drop 'judge' from --roles.".format(
+                    judge_agent, ", ".join(sorted(agents))
+                ),
+                {"role": "judge", "judge_agent": judge_agent, "agents": sorted(agents)},
+            )
+        for role in roles:
+            if role == "judge":
+                excluded[role] = sorted(
+                    name for name in agents if name != judge_agent
+                )
+            elif judge_agent in agents and judge_agent not in excluded[role]:
+                excluded[role] = sorted(set(excluded[role]) | {judge_agent})
     for role in roles:
         if all(name in excluded[role] for name in agents):
             raise PlanError(
@@ -294,6 +423,7 @@ def plan(roles, snapshot, counts=None, exclude=None, role_costs=None, snapshot_r
     headrooms = {
         name: _headroom_of(name, record, warn) for name, record in agents.items()
     }
+    groups = _window_groups(agents)
     remaining = set(headrooms)
     picks = {}
     rationale = []
@@ -306,6 +436,8 @@ def plan(roles, snapshot, counts=None, exclude=None, role_costs=None, snapshot_r
     for index, role in enumerate(fill_order):
         cost = costs[role]
         barred = excluded[role]
+        if role == "judge" and judge_agent:
+            _refuse_unaffordable_judge(judge_agent, headrooms, cost, groups)
         later_roles = fill_order[index + 1:]
         ranked = sorted(
             (name for name in remaining if name not in barred),
@@ -342,6 +474,21 @@ def plan(roles, snapshot, counts=None, exclude=None, role_costs=None, snapshot_r
             projected = headroom - cost
             floor = projected if floor is None else min(floor, projected)
 
+        # One window, two workers: a seat's burn reduces what its pool-mates
+        # have left, so the next seat ranks against what the pool actually
+        # holds. Skipping this double-counts one window and over-commits it.
+        #
+        # EVERY worker on the window is charged, not just the unassigned ones.
+        # Affordability reads the minimum across the whole window, so a worker
+        # already holding a seat keeps a stale reading that the minimum then
+        # believes -- a window spent to zero by an earlier seat still looked
+        # affordable through its pool-mate's untouched number.
+        group = groups.get(chosen)
+        if group is not None:
+            for name in headrooms:
+                if groups.get(name) == group and headrooms[name] is not None:
+                    headrooms[name] -= cost
+
     rationale.extend(_notes(excluded, agents, warn))
 
     # The loop removes each pick from `remaining`, so a repeat is impossible
@@ -355,7 +502,7 @@ def plan(roles, snapshot, counts=None, exclude=None, role_costs=None, snapshot_r
             {"assignments": dict(picks)},
         )
 
-    return {
+    document = {
         "schema_version": PLAN_SCHEMA_VERSION,
         # Keyed in the caller's order, not the fill order: --roles still shapes
         # the document even though it no longer decides which seat is heaviest.
@@ -365,6 +512,22 @@ def plan(roles, snapshot, counts=None, exclude=None, role_costs=None, snapshot_r
         if snapshot_ref is not None
         else {"source": None, "measured_at": (snapshot or {}).get("measured_at")},
     }
+
+    # The judge seat is pinned to a tier, not just a worker. Echoing the tier
+    # here is what makes the config the single place a model swap happens: the
+    # caller builds the worker's launch flags from this, never by hand. A
+    # model that takes no effort flag echoes `null` rather than an empty
+    # string, so a caller can tell "no effort" from "unset".
+    if "judge" in roles and judge_agent:
+        tier = judge_tier or {}
+        document["judge"] = {
+            "agent": judge_agent,
+            "model": tier.get("model") or None,
+            "effort": tier.get("effort") or None,
+            "banner_pattern": tier.get("banner_pattern") or None,
+        }
+
+    return document
 
 
 def _notes(excluded, agents, warn):

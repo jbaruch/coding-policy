@@ -146,6 +146,37 @@ def _migrate_document_0_to_1(payload):
 #: Document migrations, keyed by the version being upgraded FROM. Each value is
 #: (version_produced, upgrade_callable). `_apply_migrations` walks the chain
 #: until it reaches STATE_SCHEMA_VERSION, so a future 1->2 is one entry.
+def _migrate_snapshot_1_to_2(snapshot):
+    """Snapshot version 1 -> 2: stamp every agent record's `window_group`.
+
+    Version 1 predates shared usage windows, so no agent in it declared one.
+    The safe value is the empty string -- "this worker has a window of its
+    own" -- which is what a v1 roster meant: the planner charges a seat's cost
+    to nobody else, exactly as it did when the snapshot was written. Guessing
+    a group here would invent a link the measurement never observed and could
+    halt a judge round on another worker's headroom.
+    """
+    snapshot["schema_version"] = 2
+    agents = snapshot.get("agents")
+    if isinstance(agents, dict):
+        for record in agents.values():
+            if isinstance(record, dict):
+                record.setdefault("window_group", "")
+    return snapshot
+
+
+#: Snapshot documents carry their own version, like assignment rows: a
+#: snapshot outlives the state document it arrived in, and `measure` bumps it
+#: on its own release train.
+SNAPSHOT_MIGRATIONS = {
+    1: (2, _migrate_snapshot_1_to_2),
+}
+
+#: The snapshot version this build owns. Kept beside the migration table so
+#: the two move together; `measure.MEASURE_SCHEMA_VERSION` writes it.
+SNAPSHOT_SCHEMA_VERSION = 2
+
+
 MIGRATIONS = {
     UNVERSIONED: (1, _migrate_document_0_to_1),
     1: (2, _migrate_document_1_to_2),
@@ -221,19 +252,28 @@ def _validate(payload, path):
         rows.append(record)
     payload["assignments"] = rows
 
-    # A snapshot is a whole `measure` document and arrives already stamped. One
-    # that is not an object, or is stamped ahead of this build, is the same
-    # lagging-reader case as the document itself.
+    # A snapshot is a whole `measure` document and arrives already stamped. An
+    # older one is migrated and rewritten here -- this module owns the file it
+    # sits in (rules/stateful-artifacts.md Migration Policy) -- while one
+    # stamped ahead of this build is the same lagging-reader case as the
+    # document itself.
+    snapshots = []
     for snapshot in payload["snapshots"]:
         if not isinstance(snapshot, dict):
             raise _NoUsableState("a snapshot entry is not a JSON object")
         found = _version_of(snapshot)
-        if found > STATE_SCHEMA_VERSION:
+        if found > SNAPSHOT_SCHEMA_VERSION:
             raise _NoUsableState(
                 "a snapshot is at schema_version {}; this build owns {}".format(
-                    found, STATE_SCHEMA_VERSION
+                    found, SNAPSHOT_SCHEMA_VERSION
                 )
             )
+        snapshot, snap_migrated = _apply_migrations(
+            snapshot, SNAPSHOT_MIGRATIONS, "a snapshot"
+        )
+        migrated = migrated or snap_migrated
+        snapshots.append(snapshot)
+    payload["snapshots"] = snapshots
     return payload, migrated
 
 

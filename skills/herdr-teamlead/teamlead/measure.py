@@ -34,8 +34,16 @@ from .errors import HerdrError, ParseError
 from .herdr import BUSY_STATES, DEFAULT_MARKER_TIMEOUT_MS, READY_STATES, format_argv
 from .parsers import headroom_pct, parse_usage
 from .probe import resolve_status, stderr_warn
+from .state import SNAPSHOT_SCHEMA_VERSION
 
-MEASURE_SCHEMA_VERSION = 1
+#: Snapshot document version. 2 adds `window_group` to every agent record.
+#: `state.py` owns the file a snapshot is stored in, so it owns both the
+#: version and the migration that carries a version-1 snapshot up to it
+#: (rules/stateful-artifacts.md Migration Policy). Read from there rather than
+#: declared again here: two constants for one shape drift apart, and a writer
+#: stamping a version no migration table knows is exactly the state that rule
+#: exists to prevent.
+MEASURE_SCHEMA_VERSION = SNAPSHOT_SCHEMA_VERSION
 
 #: Lines to pull when reading a usage report. Always passed: the read that
 #: works by hand names a line count explicitly, and relying on herdr's default
@@ -162,6 +170,7 @@ def skipped_record(agent, status, herdr_status, state_source):
         "credits": None,
         "plan": None,
         "headroom_pct": None,
+        "window_group": agent.window_group,
         "skipped": True,
     }
 
@@ -234,6 +243,9 @@ def measure_agent(client, agent, marker_timeout_ms=DEFAULT_MARKER_TIMEOUT_MS, re
         "credits": parsed["credits"],
         "plan": parsed.get("plan"),
         "headroom_pct": headroom_pct(windows),
+        # Copied through so `plan` reads one window's membership from the
+        # snapshot, the same place it reads the headroom it belongs to.
+        "window_group": agent.window_group,
         "skipped": False,
     }
 
@@ -276,6 +288,11 @@ def measure(client, agents, measured_at, marker_timeout_ms=DEFAULT_MARKER_TIMEOU
                 "credits": None,
                 "plan": None,
                 "headroom_pct": None,
+                # Pool membership survives a failed measurement. Dropping it
+                # would unlink this worker from its window, and affordability
+                # reads the minimum across that window -- a judge whose own
+                # measurement failed would then be judged against nobody.
+                "window_group": agent.window_group,
                 "skipped": False,
                 "error": {"code": exc.code, "message": exc.message},
             }

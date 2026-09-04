@@ -132,7 +132,7 @@ class NullHeadroomTest(unittest.TestCase):
 
 class OutputShapeTest(unittest.TestCase):
     def test_carries_a_schema_version(self):
-        self.assertEqual(plan(["developer"], snapshot(grok=100.0))["schema_version"], 1)
+        self.assertEqual(plan(["developer"], snapshot(grok=100.0))["schema_version"], 2)
 
     def test_rationale_has_one_line_per_role_naming_the_field(self):
         result = plan(ROLES, snapshot(claude=92.0, codex=87.0, grok=100.0))
@@ -503,6 +503,409 @@ class NoDuplicateAgentTest(unittest.TestCase):
         self.assertEqual(
             normalize_assignments(result), result["assignments"]
         )
+
+
+def pooled_snapshot(groups, **headrooms):
+    """A snapshot whose agents declare shared usage windows.
+
+    `groups` maps an agent name to the `window_group` it declares; an agent
+    absent from it has a window of its own.
+    """
+    payload = snapshot(**headrooms)
+    for name, record in payload["agents"].items():
+        if name in groups:
+            record["window_group"] = groups[name]
+    return payload
+
+
+class SharedWindowTest(unittest.TestCase):
+    """Two workers on one subscription draw on one window.
+
+    The judge worker runs the same Claude account as `claude`, so a seat's
+    cost has to reduce what its pool-mates have left. Modelled as independent
+    headrooms, the planner reads one window as two and over-commits it.
+    """
+
+    def test_a_seat_charges_every_worker_sharing_its_window(self):
+        payload = pooled_snapshot(
+            {"claude": "pool", "judge": "pool"},
+            claude=75,
+            judge=75,
+            codex=70,
+            grok=60,
+        )
+        result = plan(
+            ["developer", "judge"], payload, warn=lambda message: None, judge_agent="judge"
+        )
+        # judge fills first (15.0, the heaviest seat) and spends the pool down
+        # to 60, which puts codex at 70 ahead of claude for the developer seat.
+        self.assertEqual(result["assignments"]["judge"], "judge")
+        self.assertEqual(result["assignments"]["developer"], "codex")
+
+    def test_unlinked_workers_keep_independent_headroom(self):
+        payload = snapshot(claude=75, judge=75, codex=70, grok=60)
+        result = plan(
+            ["developer", "judge"], payload, warn=lambda message: None, judge_agent="judge"
+        )
+        self.assertEqual(result["assignments"]["developer"], "claude")
+
+    def test_an_agent_declaring_no_group_is_never_charged(self):
+        payload = pooled_snapshot(
+            {"claude": "pool", "judge": "pool"}, claude=90, judge=90, codex=50, grok=40
+        )
+        result = plan(
+            ["developer", "tester", "judge"],
+            payload,
+            warn=lambda message: None,
+            judge_agent="judge",
+        )
+        # codex holds a window of its own, so the judge round never touches it.
+        self.assertEqual(result["assignments"]["tester"], "codex")
+
+
+class PinnedJudgeSeatTest(unittest.TestCase):
+    """The planner does not choose who judges."""
+
+    def test_the_judge_seat_goes_to_the_pinned_worker(self):
+        payload = snapshot(claude=99, judge=40, codex=80, grok=70)
+        result = plan(
+            ["developer", "judge"], payload, warn=lambda message: None, judge_agent="judge"
+        )
+        # Lowest headroom on the board still holds the seat: it is pinned.
+        self.assertEqual(result["assignments"]["judge"], "judge")
+
+    def test_the_pinned_worker_holds_no_other_seat(self):
+        payload = snapshot(claude=10, judge=99, codex=20, grok=30)
+        result = plan(ROLES, payload, warn=lambda message: None, judge_agent="judge")
+        self.assertNotIn("judge", result["assignments"].values())
+
+    def test_a_pinned_worker_absent_from_the_snapshot_is_refused(self):
+        payload = snapshot(claude=80, codex=70)
+        with self.assertRaises(PlanError) as caught:
+            plan(["judge"], payload, warn=lambda message: None, judge_agent="judge")
+        self.assertIn("pinned to worker 'judge'", str(caught.exception))
+
+    def test_no_pin_leaves_the_planner_ranking_as_before(self):
+        payload = snapshot(claude=90, codex=70, grok=60)
+        result = plan(ROLES, payload, warn=lambda message: None)
+        self.assertEqual(result["assignments"]["developer"], "claude")
+
+
+class JudgeCostTest(unittest.TestCase):
+    """The judge is weighed explicitly, never by the unweighed-role default."""
+
+    def test_the_judge_outweighs_every_other_seat(self):
+        from teamlead.planner import DEFAULT_ROLE_COST, DEFAULT_ROLE_COSTS
+
+        self.assertEqual(DEFAULT_ROLE_COSTS["judge"], 15.0)
+        self.assertGreater(DEFAULT_ROLE_COSTS["judge"], DEFAULT_ROLE_COSTS["developer"])
+        self.assertNotEqual(DEFAULT_ROLE_COSTS["judge"], DEFAULT_ROLE_COST)
+
+
+class JudgeWindowExhaustionTest(unittest.TestCase):
+    """A judge round the pinned window cannot cover halts, never degrades.
+
+    The seat has no substitute, so there is no second-best worker to fall
+    back to when the window runs out. The planner refuses rather than
+    dispatching a round it cannot finish.
+    """
+
+    def test_a_window_that_cannot_cover_a_ruling_is_refused(self):
+        payload = snapshot(claude=90, judge=10, codex=80)
+        with self.assertRaises(PlanError) as caught:
+            plan(["judge"], payload, warn=lambda message: None, judge_agent="judge")
+        message = str(caught.exception)
+        self.assertIn("10% headroom", message)
+        self.assertIn("no substitute judge", message)
+
+    def test_exactly_enough_headroom_is_allowed(self):
+        payload = snapshot(judge=15, codex=80)
+        result = plan(
+            ["judge"], payload, warn=lambda message: None, judge_agent="judge"
+        )
+        self.assertEqual(result["assignments"]["judge"], "judge")
+
+    def test_an_unmeasured_window_is_not_exhaustion(self):
+        # Unknown is unmeasured, not spent; the existing unknown-headroom
+        # handling names it in the rationale rather than halting the round.
+        payload = snapshot(judge=None, codex=80)
+        result = plan(
+            ["judge"], payload, warn=lambda message: None, judge_agent="judge"
+        )
+        self.assertEqual(result["assignments"]["judge"], "judge")
+
+    def test_an_operator_weight_moves_the_threshold(self):
+        payload = snapshot(judge=10, codex=80)
+        result = plan(
+            ["judge"],
+            payload,
+            warn=lambda message: None,
+            judge_agent="judge",
+            role_costs={"judge": 5},
+        )
+        self.assertEqual(result["assignments"]["judge"], "judge")
+
+
+class DivergentWindowReadingTest(unittest.TestCase):
+    """One window, several readings: the lowest is the one that binds.
+
+    Workers on a shared window are measured one after another, not at one
+    instant, so two records for the same pool can disagree. A pool only
+    drains, so the lower reading is the later truth. Trusting the judge's own
+    record alone would dispatch a ruling the window cannot cover.
+    """
+
+    def test_a_spent_pool_mate_halts_a_healthy_looking_judge(self):
+        payload = pooled_snapshot(
+            {"judge": "pool", "claude": "pool"}, judge=20, claude=5, codex=90
+        )
+        with self.assertRaises(PlanError) as caught:
+            plan(["judge"], payload, warn=lambda message: None, judge_agent="judge")
+        message = str(caught.exception)
+        self.assertIn("5% headroom", message)
+        self.assertIn("'claude'", message)
+
+    def test_the_details_name_the_record_the_reading_came_from(self):
+        payload = pooled_snapshot(
+            {"judge": "pool", "claude": "pool"}, judge=20, claude=5, codex=90
+        )
+        with self.assertRaises(PlanError) as caught:
+            plan(["judge"], payload, warn=lambda message: None, judge_agent="judge")
+        self.assertEqual(caught.exception.details["measured_through"], "claude")
+        self.assertEqual(caught.exception.details["window_group"], "pool")
+
+    def test_a_spent_worker_outside_the_window_does_not_halt(self):
+        payload = pooled_snapshot(
+            {"judge": "pool", "claude": "pool"}, judge=40, claude=40, codex=1
+        )
+        result = plan(
+            ["judge"], payload, warn=lambda message: None, judge_agent="judge"
+        )
+        self.assertEqual(result["assignments"]["judge"], "judge")
+
+    def test_an_unmeasured_pool_mate_does_not_halt_a_funded_window(self):
+        payload = pooled_snapshot(
+            {"judge": "pool", "claude": "pool"}, judge=40, claude=None, codex=90
+        )
+        result = plan(
+            ["judge"], payload, warn=lambda message: None, judge_agent="judge"
+        )
+        self.assertEqual(result["assignments"]["judge"], "judge")
+
+
+class LegacySnapshotTest(unittest.TestCase):
+    """A version-1 snapshot carries no `window_group` and still plans.
+
+    The snapshot bump to 2 is additive: an older document's records simply
+    lack the field, which reads as "this agent has a window of its own". The
+    planner never migrates a snapshot -- it is a measurement, not a ledger.
+    """
+
+    def test_a_version_1_snapshot_plans_without_window_groups(self):
+        payload = snapshot(claude=90, codex=70, grok=60)
+        payload["schema_version"] = 1
+        result = plan(ROLES, payload, warn=lambda message: None)
+        self.assertEqual(result["assignments"]["developer"], "claude")
+
+    def test_a_version_1_snapshot_never_halts_the_judge(self):
+        payload = snapshot(judge=40, codex=70)
+        payload["schema_version"] = 1
+        result = plan(
+            ["judge"], payload, warn=lambda message: None, judge_agent="judge"
+        )
+        self.assertEqual(result["assignments"]["judge"], "judge")
+
+
+class JudgeTierEchoTest(unittest.TestCase):
+    """The plan carries the tier the judge worker is launched on.
+
+    Effort is a launch flag on both harnesses, so a tier switch is a worker
+    start. Echoing the configured tier here is what keeps the config the
+    single place a model swap happens: the caller builds the launch argv from
+    this document rather than typing a model by hand.
+    """
+
+    def test_the_tier_is_echoed_when_the_judge_seat_is_planned(self):
+        payload = snapshot(judge=50, codex=80)
+        result = plan(
+            ["judge"],
+            payload,
+            warn=lambda message: None,
+            judge_agent="judge",
+            judge_tier={
+                "model": "claude-fable-5-1",
+                "effort": "max",
+                "banner_pattern": "Claude Code",
+            },
+        )
+        self.assertEqual(
+            result["judge"],
+            {
+                "agent": "judge",
+                "model": "claude-fable-5-1",
+                "effort": "max",
+                "banner_pattern": "Claude Code",
+            },
+        )
+
+    def test_a_model_taking_no_effort_flag_echoes_null(self):
+        # The caller omits --effort on null; an empty string would be typed
+        # onto the command line as a flag with no value.
+        payload = snapshot(judge=50, codex=80)
+        result = plan(
+            ["judge"],
+            payload,
+            warn=lambda message: None,
+            judge_agent="judge",
+            judge_tier={"model": "claude-haiku-4-5", "effort": ""},
+        )
+        self.assertIsNone(result["judge"]["effort"])
+        self.assertEqual(result["judge"]["model"], "claude-haiku-4-5")
+
+    def test_a_plan_without_the_judge_seat_carries_no_tier(self):
+        payload = snapshot(claude=90, codex=70, grok=60)
+        result = plan(
+            ROLES, payload, warn=lambda message: None, judge_agent="judge"
+        )
+        self.assertNotIn("judge", result)
+
+    def test_the_judge_role_without_a_config_block_is_refused(self):
+        # Ranking an ordinary worker into the seat would emit a plan with no
+        # usable tier, which fails later at worker startup -- a long way from
+        # the config that caused it.
+        payload = snapshot(claude=90, codex=70)
+        with self.assertRaises(PlanError) as caught:
+            plan(["judge"], payload, warn=lambda message: None)
+        self.assertIn("`judge` block", str(caught.exception))
+
+    def test_other_roles_are_unaffected_by_a_missing_judge_block(self):
+        payload = snapshot(claude=90, codex=70, grok=60)
+        result = plan(ROLES, payload, warn=lambda message: None)
+        self.assertEqual(result["assignments"]["developer"], "claude")
+
+    def test_an_unconfigured_tier_still_names_the_agent(self):
+        payload = snapshot(judge=50, codex=80)
+        result = plan(
+            ["judge"], payload, warn=lambda message: None, judge_agent="judge"
+        )
+        self.assertEqual(result["judge"]["agent"], "judge")
+        self.assertIsNone(result["judge"]["model"])
+
+
+class PlanSchemaVersionTest(unittest.TestCase):
+    """The judge object is an additive bump readers absorb through absence."""
+
+    def test_a_plan_with_no_judge_seat_carries_no_judge_key(self):
+        # Indistinguishable from a version-1 plan, on purpose: a reader takes
+        # the same path for both.
+        result = plan(ROLES, snapshot(claude=90, codex=70, grok=60), warn=lambda m: None)
+        self.assertEqual(result["schema_version"], 2)
+        self.assertNotIn("judge", result)
+
+    def test_the_assignments_shape_is_unchanged_by_the_bump(self):
+        # `apply` reads `assignments` alone, which every plan version carries
+        # identically; the bump must not disturb it.
+        result = plan(ROLES, snapshot(claude=90, codex=70, grok=60), warn=lambda m: None)
+        self.assertEqual(sorted(result["assignments"]), sorted(ROLES))
+        for agent in result["assignments"].values():
+            self.assertIsInstance(agent, str)
+
+
+class JudgeAffordabilityAfterOtherSeatsTest(unittest.TestCase):
+    """Affordability is judged after the seats ahead of it have spent.
+
+    Checked once before the fill loop, a heavier seat on the same window
+    passes its own check, spends the pool, and leaves the judge projected
+    below zero -- a round the window cannot cover, planned anyway.
+    """
+
+    def test_a_heavier_seat_on_the_same_window_can_halt_the_judge(self):
+        # Only the shared pool can hold the developer seat, so it must spend
+        # from the window the judge needs: 25 - 20 = 5, and a ruling costs 15.
+        payload = pooled_snapshot(
+            {"claude": "pool", "judge": "pool"}, claude=25, judge=25
+        )
+        with self.assertRaises(PlanError) as caught:
+            plan(
+                ["developer", "judge"],
+                payload,
+                warn=lambda message: None,
+                judge_agent="judge",
+                role_costs={"developer": 20, "judge": 15},
+            )
+        self.assertIn("5% headroom", str(caught.exception))
+
+    def test_a_window_that_covers_both_seats_still_plans(self):
+        payload = pooled_snapshot(
+            {"claude": "pool", "judge": "pool"}, claude=90, judge=90
+        )
+        result = plan(
+            ["developer", "judge"],
+            payload,
+            warn=lambda message: None,
+            judge_agent="judge",
+            role_costs={"developer": 20, "judge": 15},
+        )
+        self.assertEqual(result["assignments"]["judge"], "judge")
+        self.assertEqual(result["assignments"]["developer"], "claude")
+
+    def test_a_seat_off_the_window_does_not_halt_the_judge(self):
+        # codex holds its own window, so the developer seat lands there and
+        # the pool is untouched.
+        payload = pooled_snapshot(
+            {"claude": "pool", "judge": "pool"}, claude=25, judge=25, codex=90
+        )
+        result = plan(
+            ["developer", "judge"],
+            payload,
+            warn=lambda message: None,
+            judge_agent="judge",
+            role_costs={"developer": 20, "judge": 15},
+        )
+        self.assertEqual(result["assignments"]["developer"], "codex")
+        self.assertEqual(result["assignments"]["judge"], "judge")
+
+
+class AssignedWorkerStillChargedTest(unittest.TestCase):
+    """A worker that holds a seat keeps spending from its window.
+
+    Charging only the unassigned workers leaves the assigned one carrying a
+    stale reading, and affordability takes the minimum across the whole
+    window -- so a pool an earlier seat spent to zero still looked affordable
+    through its pool-mate's untouched number.
+    """
+
+    def test_divergent_readings_with_an_earlier_seat_halt_the_judge(self):
+        # claude reads 20 and judge 100 on one window. The developer seat
+        # costs 20 and lands on claude, spending the window to 0; a ruling
+        # costs 15.
+        payload = pooled_snapshot(
+            {"claude": "pool", "judge": "pool"}, claude=20, judge=100
+        )
+        with self.assertRaises(PlanError) as caught:
+            plan(
+                ["developer", "judge"],
+                payload,
+                warn=lambda message: None,
+                judge_agent="judge",
+                role_costs={"developer": 20, "judge": 15},
+            )
+        self.assertIn("0% headroom", str(caught.exception))
+
+    def test_the_charge_reaches_a_worker_already_holding_a_seat(self):
+        payload = pooled_snapshot(
+            {"claude": "pool", "judge": "pool"}, claude=100, judge=100
+        )
+        result = plan(
+            ["developer", "judge"],
+            payload,
+            warn=lambda message: None,
+            judge_agent="judge",
+            role_costs={"developer": 20, "judge": 15},
+        )
+        # Both fit: 100 - 20 - 15 = 65 left on the window.
+        self.assertEqual(result["assignments"]["developer"], "claude")
+        self.assertEqual(result["assignments"]["judge"], "judge")
 
 
 if __name__ == "__main__":

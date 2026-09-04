@@ -24,8 +24,25 @@ exemptions, and the guarded one-shot recovery of a stuck composer.
 dispatch. All are documented in
 `skills/herdr-teamlead/references/herdr.md`.
 
-The optional top-level `role_costs` key is the one config entry that is not
-per-agent: `{"<role>": <number>}`, what one round in that seat is expected to
+`window_group` names the usage window an agent shares with other agents: two
+workers authenticating as one subscription declare the same value, `measure`
+copies it onto each record (snapshot `schema_version` 2), and `plan` charges a seat's cost against every
+worker in that window. An agent that declares none has a window to itself.
+
+Two top-level config keys are not per-agent. The optional `judge` key pins the
+judge seat and declares its worker's startup-banner pattern (anchored at line
+start, `^...`). `plan` echoes it into its document as a `judge` object at plan
+`schema_version` 2; the bump is additive, and a plan with no judge seat simply
+has no such key, which every reader treats the same as a version-1 plan, and `plan` echoes it back as the document's `judge` object when the
+seat is planned, so the worker's launch argv is built from the config rather
+than by hand: `{"agent": <name>, "model": <id>, "effort": <level>}`, where
+`effort` is optional, absent for a model that accepts no effort flag; the
+accepted values are `VALID_JUDGE_EFFORTS` in
+`skills/herdr-teamlead/teamlead/config.py`. The planner never ranks that seat and never
+gives the pinned worker another one.
+
+The optional `role_costs` key is the second:
+`{"<role>": <number>}`, what one round in that seat is expected to
 burn out of a worker's remaining headroom percentage. It overrides the
 planner's own weights one role at a time, and a role it omits keeps the
 default (`DEFAULT_ROLE_COSTS` in `skills/herdr-teamlead/teamlead/planner.py`).
@@ -55,6 +72,8 @@ number is refused, naming the file and the role. `plan` is the only reader.
 | `schema_version` | integer | Currently `2`. Bumped on any shape change |
 | `snapshots` | array | Whole `measure` documents, oldest first; the ring holds the last 20 |
 | `assignments` | array | Append-only ledger of who held which role |
+| `snapshots[].schema_version` | integer | Currently `2`. Version 2 added `window_group` to every agent record; a version-1 snapshot is migrated on read and rewritten, its agents stamped with an empty `window_group` |
+| `snapshots[].agents[].window_group` | string | The usage window this agent shares with others; empty means a window of its own. Present on every agent record, including skipped and failed ones — pool membership is config, not a measurement result |
 | `assignments[].schema_version` | integer | The row's own version, stamped on write |
 | `assignments[].at` | string | ISO-8601 timestamp, from `--now` or the CLI's clock |
 | `assignments[].role` | string | The role handed out |

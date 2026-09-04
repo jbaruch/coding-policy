@@ -48,13 +48,18 @@ command against it, and no git command against `{{SHARED_CHECKOUT}}`.
 Your report opens with these three lines, in order:
 
 ```
-RULING: uphold A | uphold B | amend — <line>
+RULING: uphold A | uphold B | amend — <line> | blocked — <question>
 ACTION: <the minimal step that carries out the ruling>
 UNVERIFIED: <any claim you could not check against the tree, or "none">
 ```
 
 `amend` names the amended line inline; give it precisely enough that the
-developer applies it without asking you a question. Follow the three lines
+developer applies it without asking you a question.
+
+`blocked` is for a dispute you cannot settle from the tree and the rule text
+alone — a question only the operator can answer. Name that question inline.
+Reach for it rather than ruling on a fact you could not verify; a ruling the
+round has to unwind costs more than a question asked once. Follow the three lines
 with your numbered reasons — each reason ties a verified fact to the rule
 text.
 

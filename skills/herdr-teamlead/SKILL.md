@@ -392,37 +392,110 @@ SHA does not either — re-run Phase 2 against the current tip.
 
 With all four met, proceed immediately to Step 11.
 
-## Step 11 — Dispatch the Judge on a Dispute
+## Step 11 — Compose the Judge Brief
 
-Optional — triggers and the ruling contract are in
+Optional. Triggers and the ruling contract are in
 `skills/herdr-teamlead/references/round-flow.md` "The Judge" (a bot
-disagreement inside Step 12 returns here first). No trigger — proceed to
-Step 12.
+disagreement inside Step 18 returns here first). No trigger — proceed to
+Step 18.
 
-1. Compose the brief from `templates/brief-judge.md` through Step 5: the
-   dispute, both positions with report paths, the governing rule, the tree.
-2. Read-only — skip Step 6. No plan step — pass the mapping inline.
-3. Dispatch from its own config, under Step 8's outcome contract exactly
-   (scoped to `judge` alone):
+Compose the brief from `templates/brief-judge.md` through Step 5: the
+dispute, both positions with report paths, the governing rule, the tree. Skip
+Step 6 for the read-only judge. Proceed immediately to Step 12.
 
-   ```bash
-   bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/teamlead.sh apply \
-     --config <judge-config-path> \
-     --assignments '{"judge":"judge"}' \
-     --brief judge=<round>-judge.md \
-     --common <path-to-COMMON.md> \
-     --task <round>
-   ```
+## Step 12 — Re-measure the Shared Window
 
-   `<judge-config-path>`: the operator's copy of `config.example-judge.json`.
-4. Wait with Step 9's `wait-report.sh judge <report-path>`.
-5. Its `RULING:` line binds the round. Only the operator overrides it.
+Step 3's snapshot is a hint, not authority (`rules/stateful-artifacts.md`).
+The judge's affordability is decided from a fresh reading, never from it.
 
-`ACTION:` with no branch change — proceed to Step 12. `ACTION:` that changes
-the branch — implement it, return to Step 3, and hold at Step 10 until its
-four conditions hold again for the resulting tip.
+Re-run Step 3's `measure`. That step's outcomes govern this run unchanged. A
+`measure` that cannot read the judge worker's window is a stale-state failure,
+resolved there before a ruling is planned.
 
-## Step 12 — Release the Pull Request
+Hand the fresh snapshot to Step 13 and plan nothing here. Proceed immediately
+to Step 13.
+
+## Step 13 — Plan the Judge Seat
+
+Run Step 4's `plan` with `--roles judge`, against the Step 12 snapshot. It
+names the worker the `judge` block pins, and refuses the round when that
+window cannot cover a ruling:
+
+```bash
+bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/teamlead.sh plan \
+  --roles judge --snapshot <step-12-measure-output>
+```
+
+- **Exit 0** — the plan file names the judge worker. Proceed to Step 14.
+- **Non-zero naming the judge's headroom** — the window cannot cover a
+  ruling. Report it and finish here. There is no substitute judge, no
+  fallback to another model, and no degraded ruling.
+- **Any other non-zero** — a malformed config, a pinned worker absent from
+  the snapshot, an unreadable snapshot, or a plan nobody can fill. Report the
+  diagnostic verbatim and finish here. Do not hand-write an assignment to
+  work around it.
+
+The plan's `judge` object carries the seat's tier — `agent`, `model` and
+`effort`, straight from the `judge` block. Step 14 launches the worker from
+those values. Proceed immediately to Step 14.
+
+## Step 14 — Start the Judge Worker on Its Pinned Tier
+
+Run:
+
+```bash
+bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/start-judge-worker.sh \
+  <step-13-plan-file> <pane> [claude|codex]
+```
+
+It reads the tier from the plan's `judge` object, starts the worker on it,
+and refuses unless the pane's startup banner echoes that tier. Its argument
+contract, exit codes and banner predicate are in the script header.
+
+- **Exit 0** — the banner proved the tier. Its JSON names the agent, model
+  and effort. Proceed immediately to Step 15.
+- **Any non-zero** — report the script's diagnostic verbatim and finish here.
+  A worker whose tier is unproven does not get briefed, and no tier is set by
+  hand to work around it.
+
+## Step 15 — Dispatch the Judge
+
+Dispatch under Step 8's outcome contract exactly, passing the plan file from
+Step 13 rather than a hand-written mapping:
+
+```bash
+bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/teamlead.sh apply \
+  --assignments <plan-file> \
+  --brief judge=<round>-judge.md \
+  --common <path-to-COMMON.md> \
+  --task <round>
+```
+
+Step 8's outcomes govern this dispatch unchanged. Proceed immediately to
+Step 16.
+
+## Step 16 — Wait for the Ruling
+
+Wait with Step 9's `wait-report.sh <agent> <report-path>`, where `<agent>` is
+the worker the Step 13 plan named. Proceed immediately to Step 17 once the
+report lands.
+
+## Step 17 — Act on the Ruling
+
+The `RULING:` line binds the round. Only the operator overrides it.
+
+- **`uphold A` / `uphold B` / `amend`, `ACTION:` changing no branch content**
+  — record the ruling and proceed to Step 18.
+- **`uphold A` / `uphold B` / `amend`, `ACTION:` changing the branch** — the
+  lead never edits the branch itself. Compose a fresh developer brief through
+  Step 5 carrying the judge's `ACTION:` line verbatim as the task, dispatch it
+  from Step 8, and hold at Step 10 until its four conditions hold again for
+  the resulting tip.
+- **`blocked`** — the judge declined to rule. Stop the round and put its
+  named question to the operator. Do not dispatch a second judge and do not
+  rule in its place. Finish here.
+
+## Step 18 — Release the Pull Request
 
 The release is one more assignment, never a prompt into the developer's
 existing context. Return to Step 5 with the role `release` for
@@ -430,14 +503,14 @@ the developer's agent (template `templates/brief-release.md`, the same
 `WORKTREE` and `BRANCH`, a fresh `REPORT`), run Step 6 (it reports
 `already-provisioned`), dispatch through Step 8 so the context is cleared and
 the brief is fresh, and wait on the report in Step 9. The worker merges. You
-do not. Proceed immediately to Step 13 after its report.
+do not. Proceed immediately to Step 19 after its report.
 
-## Step 13 — Clean Up the Worktree
+## Step 19 — Clean Up the Worktree
 
 Fast-forward the shared checkout, remove the worktree, and delete the branch
-per `rules/agent-worktree-isolation.md`. Proceed immediately to Step 14.
+per `rules/agent-worktree-isolation.md`. Proceed immediately to Step 20.
 
-## Step 14 — Log the Round
+## Step 20 — Log the Round
 
 Log the round: the assignments, the report paths, the findings, and the
 outcome. If the round produced no findings at all, log it and say so in one

@@ -492,5 +492,72 @@ class UsableFlagTest(unittest.TestCase):
         self.assertEqual(load_state(self.path), empty_state())
 
 
+class SnapshotMigrationTest(unittest.TestCase):
+    """A version-1 snapshot is upgraded and rewritten, not read as-is.
+
+    This module owns the file snapshots live in, so it owns their migration
+    (rules/stateful-artifacts.md Migration Policy). The safe value for a
+    window a v1 measurement never observed is "a window of its own": guessing
+    a shared group would invent a link and could halt a judge round on another
+    worker's headroom.
+    """
+
+    def _state_with_v1_snapshot(self):
+        return {
+            "schema_version": 2,
+            "snapshots": [
+                {
+                    "schema_version": 1,
+                    "measured_at": "2026-02-03T10:00:00+00:00",
+                    "agents": {"claude": {"headroom_pct": 90}},
+                }
+            ],
+            "assignments": [],
+        }
+
+    def test_a_v1_snapshot_is_stamped_and_given_an_empty_window_group(self):
+        path = Path(self.tmp) / "state.json"
+        path.write_text(json.dumps(self._state_with_v1_snapshot()), encoding="utf-8")
+        state = load_state(path, warn=lambda message: None)
+        snapshot = state["snapshots"][0]
+        self.assertEqual(snapshot["schema_version"], 2)
+        self.assertEqual(snapshot["agents"]["claude"]["window_group"], "")
+
+    def test_the_upgrade_is_written_back(self):
+        path = Path(self.tmp) / "state.json"
+        path.write_text(json.dumps(self._state_with_v1_snapshot()), encoding="utf-8")
+        load_state(path, warn=lambda message: None)
+        on_disk = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual(on_disk["snapshots"][0]["schema_version"], 2)
+        self.assertEqual(
+            on_disk["snapshots"][0]["agents"]["claude"]["window_group"], ""
+        )
+
+    def test_a_declared_group_survives_the_migration_untouched(self):
+        payload = self._state_with_v1_snapshot()
+        payload["snapshots"][0]["agents"]["claude"]["window_group"] = "pool"
+        path = Path(self.tmp) / "state.json"
+        path.write_text(json.dumps(payload), encoding="utf-8")
+        state = load_state(path, warn=lambda message: None)
+        self.assertEqual(
+            state["snapshots"][0]["agents"]["claude"]["window_group"], "pool"
+        )
+
+    def test_a_snapshot_from_a_newer_build_is_no_usable_prior_state(self):
+        payload = self._state_with_v1_snapshot()
+        payload["snapshots"][0]["schema_version"] = 99
+        path = Path(self.tmp) / "state.json"
+        path.write_text(json.dumps(payload), encoding="utf-8")
+        _state, usable = load_state_checked(path, warn=lambda message: None)
+        self.assertFalse(usable)
+
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.tmp = self._tmpdir.name
+
+    def tearDown(self):
+        self._tmpdir.cleanup()
+
+
 if __name__ == "__main__":
     unittest.main()
