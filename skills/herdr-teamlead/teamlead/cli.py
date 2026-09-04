@@ -232,7 +232,8 @@ def build_parser():
         action="store_true",
         help="Print the herdr commands and send nothing. Makes no herdr calls at all.",
     )
-    apply_parser.add_argument(
+    context_flags = apply_parser.add_mutually_exclusive_group()
+    context_flags.add_argument(
         "--no-clear",
         action="store_true",
         help=(
@@ -240,6 +241,14 @@ def build_parser():
             "For a pane the lead already cleared by hand; the record carries "
             "cleared: false."
         ),
+    )
+    context_flags.add_argument(
+        "--retain-context", action="store_true",
+        help="Keep the same developer's context for fix rounds 1–3; requires --task and --fix-round.",
+    )
+    apply_parser.add_argument(
+        "--fix-round", type=int, metavar="N",
+        help="Fix-round number for this task; the dispatcher validates the cap.",
     )
     apply_parser.add_argument(
         "--task",
@@ -505,6 +514,9 @@ def cmd_apply(args, client=None, warn=None, trace=None):
                 agents_by_name,
                 paths,
                 no_clear=args.no_clear,
+                retain_context=args.retain_context,
+                task=args.task,
+                fix_round=args.fix_round,
                 settle_timeout_ms=args.settle_timeout,
             ),
             None,
@@ -513,8 +525,8 @@ def cmd_apply(args, client=None, warn=None, trace=None):
     state_path = _state_path(args)
     state = _load_state_for_write(state_path, warn)
 
-    def record(role, agent, at, status):
-        add_assignment(state, at, role, agent, status=status)
+    def record(role, agent, at, status, context):
+        add_assignment(state, at, role, agent, status=status, **context)
         save_state(state_path, state)
 
     result = apply_assignments(
@@ -524,6 +536,9 @@ def cmd_apply(args, client=None, warn=None, trace=None):
         paths,
         args.now or now_iso(),
         no_clear=args.no_clear,
+        retain_context=args.retain_context,
+        fix_round=args.fix_round,
+        history=state["assignments"],
         settle_timeout_ms=args.settle_timeout,
         on_assigned=record,
         warn=warn,

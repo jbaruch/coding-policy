@@ -5,15 +5,18 @@ looked like when it was measured; it never substitutes for reading the agent's
 live status before writing to it. `plan` may run off a stale snapshot on
 purpose (planning has no side effects); `apply` always re-checks live status.
 
-Schema (schema_version 2)::
+Schema (schema_version 3)::
 
     {
-      "schema_version": 2,
+      "schema_version": 3,
       "snapshots":  [ <measure output>, ... ],   # newest last, capped at 20
-      "assignments":[ {"schema_version": 2, "at": <ISO-8601>,
+      "assignments":[ {"schema_version": 3, "at": <ISO-8601>,
                        "role": <str>, "agent": <str>,
                        "status": "applied" | "sent_but_not_started"
-                                 | "unknown"}, ... ]
+                                 | "unknown",
+                       "cleared": <bool> | null,
+                       "clear_reason": "automatic" | "hand" | "retained" | "unknown",
+                       "task": <str> | null, "fix_round": <int> | null}, ... ]
     }
 
 `status` records whether the hand-off was confirmed: `applied` counts toward
@@ -21,6 +24,10 @@ an agent's role history, `sent_but_not_started` does not (see
 UNCOUNTED_STATUSES), and `unknown` marks a version-1 row migrated without the
 information. Version 1 documents and rows carry no `status`; the 1 -> 2
 migration below stamps them `unknown`.
+
+Version 3 records context handling, the task and the fix-round number.
+Version-2 history cannot prove those facts: migration stamps null values and
+an unknown reason. Snapshot versions evolve independently of ledger versions.
 
 Every RECORD carries its own `schema_version`, not just the document: a ledger
 row outlives the document it arrived in, and a version on the row is what makes
@@ -50,9 +57,11 @@ from pathlib import Path
 from .diagnostics import stderr_warn as _warn
 from .errors import StateError
 
-#: The version this build writes, for the document and for every record in it.
-#: They move together: one owner, one file, one release train.
-STATE_SCHEMA_VERSION = 2
+#: The version this build writes for the document and assignment rows.
+#: Snapshots have their own version and migration chain below.
+STATE_SCHEMA_VERSION = 3
+
+CLEAR_REASONS = frozenset({"automatic", "hand", "retained", "unknown"})
 
 #: An assignment row records what teamlead did, including what did not work.
 #: `applied` -- the hand-off was CONFIRMED: the brief appeared in the agent's
@@ -143,6 +152,21 @@ def _migrate_document_0_to_1(payload):
     return payload
 
 
+def _migrate_record_2_to_3(record):
+    """Preserve old history without inventing context or task evidence."""
+    record.update(
+        schema_version=3, cleared=None, clear_reason="unknown",
+        task=None, fix_round=None,
+    )
+    return record
+
+
+def _migrate_document_2_to_3(payload):
+    """Rows are migrated independently by the owner during validation."""
+    payload["schema_version"] = 3
+    return payload
+
+
 #: Document migrations, keyed by the version being upgraded FROM. Each value is
 #: (version_produced, upgrade_callable). `_apply_migrations` walks the chain
 #: until it reaches STATE_SCHEMA_VERSION, so a future 1->2 is one entry.
@@ -180,12 +204,14 @@ SNAPSHOT_SCHEMA_VERSION = 2
 MIGRATIONS = {
     UNVERSIONED: (1, _migrate_document_0_to_1),
     1: (2, _migrate_document_1_to_2),
+    2: (3, _migrate_document_2_to_3),
 }
 
 #: The same table for one assignment record, walked the same way.
 RECORD_MIGRATIONS = {
     UNVERSIONED: (1, _migrate_record_0_to_1),
     1: (2, _migrate_record_1_to_2),
+    2: (3, _migrate_record_2_to_3),
 }
 
 
@@ -197,16 +223,16 @@ def _version_of(payload):
     return version
 
 
-def _apply_migrations(payload, table, label):
+def _apply_migrations(payload, table, label, target_version=STATE_SCHEMA_VERSION):
     """Walk `payload` up the migration chain. Returns (payload, migrated?)."""
     version = _version_of(payload)
     migrated = False
     seen = set()
-    while version != STATE_SCHEMA_VERSION:
-        if version > STATE_SCHEMA_VERSION:
+    while version != target_version:
+        if version > target_version:
             raise _NoUsableState(
                 "{} is at schema_version {}; this build owns {}".format(
-                    label, version, STATE_SCHEMA_VERSION
+                    label, version, target_version
                 )
             )
         if version in seen:
@@ -248,6 +274,24 @@ def _validate(payload, path):
         if not isinstance(record, dict):
             raise _NoUsableState("an assignment row is not a JSON object")
         record, row_migrated = _apply_migrations(record, RECORD_MIGRATIONS, "an assignment row")
+        cleared = record.get("cleared")
+        reason = record.get("clear_reason")
+        if not isinstance(reason, str) or reason not in CLEAR_REASONS or (
+            (reason == "automatic" and cleared is not True)
+            or (reason in {"hand", "retained"} and cleared is not False)
+            or (reason == "unknown" and cleared is not None)
+        ):
+            raise _NoUsableState("an assignment row has invalid context evidence")
+        if record.get("task") is not None and (
+            not isinstance(record["task"], str) or not record["task"].strip()
+        ):
+            raise _NoUsableState("an assignment row has an invalid task label")
+        fix_round = record.get("fix_round")
+        if fix_round is not None and (
+            isinstance(fix_round, bool) or not isinstance(fix_round, int)
+            or fix_round < 1
+        ):
+            raise _NoUsableState("an assignment row has an invalid fix-round number")
         migrated = migrated or row_migrated
         rows.append(record)
     payload["assignments"] = rows
@@ -269,7 +313,7 @@ def _validate(payload, path):
                 )
             )
         snapshot, snap_migrated = _apply_migrations(
-            snapshot, SNAPSHOT_MIGRATIONS, "a snapshot"
+            snapshot, SNAPSHOT_MIGRATIONS, "a snapshot", SNAPSHOT_SCHEMA_VERSION
         )
         migrated = migrated or snap_migrated
         snapshots.append(snapshot)
@@ -402,7 +446,8 @@ def add_snapshot(state, snapshot):
     return state
 
 
-def add_assignment(state, at, role, agent, status=STATUS_APPLIED):
+def add_assignment(state, at, role, agent, status=STATUS_APPLIED, *,
+                   cleared=None, clear_reason="unknown", task=None, fix_round=None):
     """Append one role-to-agent assignment to the ledger.
 
     Every hand-off is recorded, including one that never started -- the ledger
@@ -420,6 +465,10 @@ def add_assignment(state, at, role, agent, status=STATUS_APPLIED):
             "role": role,
             "agent": agent,
             "status": status,
+            "cleared": cleared,
+            "clear_reason": clear_reason,
+            "task": task,
+            "fix_round": fix_round,
         }
     )
     return state

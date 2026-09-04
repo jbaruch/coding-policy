@@ -1213,6 +1213,9 @@ class ApplyTest(unittest.TestCase):
                     "state_source": "herdr",
                     "pane_id": "w4:p1",
                     "cleared": True,
+                    "clear_reason": "automatic",
+                    "task": None,
+                    "fix_round": None,
                     "landed": True,
                     "started": True,
                     "status": "applied",
@@ -1233,15 +1236,15 @@ class ApplyTest(unittest.TestCase):
             BY_NAME,
             self.paths,
             AT,
-            on_assigned=lambda role, agent, at, status: seen.append(
-                (role, agent, at, status)
+            on_assigned=lambda role, agent, at, status, context: seen.append(
+                (role, agent, at, status, context["clear_reason"], context["cleared"])
             ),
         )
         self.assertEqual(
             seen,
             [
-                ("developer", "grok", AT, "applied"),
-                ("tester", "claude", AT, "applied"),
+                ("developer", "grok", AT, "applied", "automatic", True),
+                ("tester", "claude", AT, "applied", "automatic", True),
             ],
         )
 

@@ -26,7 +26,7 @@ from pathlib import Path
 
 from teamlead.cli import build_parser, main
 from teamlead.herdr import HerdrClient
-from teamlead.state import STATE_SCHEMA_VERSION
+from teamlead.state import STATE_SCHEMA_VERSION, add_assignment, empty_state, save_state
 
 from tests.fakes import (
     FakeRunner,
@@ -229,7 +229,7 @@ class StateCommandTest(CliCase):
         code, out, err = self.run_cli(self.base() + ["state"])
         self.assertEqual(code, 0)
         self.assertEqual(
-            json.loads(out), {"schema_version": 2, "snapshots": [], "assignments": []}
+            json.loads(out), {"schema_version": STATE_SCHEMA_VERSION, "snapshots": [], "assignments": []}
         )
         self.assertEqual(err, "")
 
@@ -715,6 +715,10 @@ class ApplyCommandTest(CliCase):
                     "role": "developer",
                     "agent": "grok",
                     "status": "applied",
+                    "cleared": True,
+                    "clear_reason": "automatic",
+                    "task": None,
+                    "fix_round": None,
                 },
                 {
                     "schema_version": STATE_SCHEMA_VERSION,
@@ -722,6 +726,10 @@ class ApplyCommandTest(CliCase):
                     "role": "tester",
                     "agent": "claude",
                     "status": "applied",
+                    "cleared": True,
+                    "clear_reason": "automatic",
+                    "task": None,
+                    "fix_round": None,
                 },
             ],
         )
@@ -918,6 +926,192 @@ class ApplyCommandTest(CliCase):
             client=client,
         )
         self.assertEqual(len(self.runner.writes()), 1)
+        row = json.loads(self.state.read_text(encoding="utf-8"))["assignments"][-1]
+        self.assertFalse(row["cleared"])
+        self.assertEqual(row["clear_reason"], "hand")
+
+    def _seed_context(self, *, task="repo#322", role="developer", status="applied", fix_round=None):
+        state = empty_state()
+        add_assignment(
+            state, AT, role, "grok", status=status, task=task, fix_round=fix_round,
+            cleared=True, clear_reason="automatic",
+        )
+        save_state(self.state, state)
+
+    def _fix_args(self, round_number=1, *extra):
+        return self.base() + [
+            "apply", "--composer-settle", "0", "--assignments",
+            json.dumps({"developer": "grok"}), "--common", str(self.common),
+            "--now", AT, "--task", "repo#322", "--fix-round", str(round_number),
+            *extra,
+        ] + self.brief_args("developer")
+
+    def test_retained_context_sends_one_prompt_and_persists_its_reason(self):
+        self._seed_context()
+        code, out, err = self.run_cli(
+            self._fix_args(1, "--retain-context"), client=self._client({"grok": "idle"})
+        )
+        self.assertEqual(code, 0, err)
+        self.assertEqual(len(self.runner.writes()), 1)
+        row = json.loads(self.state.read_text(encoding="utf-8"))["assignments"][-1]
+        self.assertFalse(row["cleared"])
+        self.assertEqual(row["clear_reason"], "retained")
+        self.assertEqual((row["task"], row["fix_round"]), ("repo#322", 1))
+        self.assertEqual(json.loads(out)["applied"][0]["clear_reason"], "retained")
+
+    def test_retention_rejects_wrong_task_role_status_or_round_before_herdr(self):
+        for task, role, status, fix_round in (
+            ("another", "developer", "applied", None),
+            ("repo#322", "tester", "applied", None),
+            ("repo#322", "developer", "sent_but_not_started", None),
+            ("repo#322", "developer", "applied", 2),
+        ):
+            with self.subTest(task=task, role=role, status=status, fix_round=fix_round):
+                self.out = io.StringIO()
+                self.err = io.StringIO()
+                self._seed_context(task=task, role=role, status=status, fix_round=fix_round)
+                code, _, err = self.run_cli(
+                    self._fix_args(1, "--retain-context"), client=self._client({"grok": "idle"})
+                )
+                self.assertEqual(code, 1)
+                self.assertEqual(json.loads(err)["error"], "usage_error")
+                self.assertEqual(self.runner.calls, [])
+
+    def test_retention_requires_confirmed_history(self):
+        code, _, err = self.run_cli(
+            self._fix_args(1, "--retain-context"), client=self._client({"grok": "idle"})
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("preceding confirmed", err)
+        self.assertEqual(self.runner.calls, [])
+
+    def test_fix_round_four_clears_context(self):
+        self._seed_context(fix_round=3)
+        code, out, err = self.run_cli(
+            self._fix_args(4), client=self._client({"grok": "idle"})
+        )
+        self.assertEqual(code, 0, err)
+        row = json.loads(out)["applied"][0]
+        self.assertTrue(row["cleared"])
+        self.assertEqual((row["clear_reason"], row["fix_round"]), ("automatic", 4))
+        self.assertGreater(len(self.runner.writes()), 1)
+
+    def test_retention_at_four_and_fix_round_six_are_refused(self):
+        for number, extra in ((4, ["--retain-context"]), (6, [])):
+            with self.subTest(number=number):
+                self.out = io.StringIO()
+                self.err = io.StringIO()
+                code, _, _ = self.run_cli(
+                    self._fix_args(number, *extra), client=self._client({"grok": "idle"})
+                )
+                self.assertEqual(code, 1)
+                self.assertEqual(self.runner.calls, [])
+
+    def test_retained_dry_run_has_no_clear_and_no_state_write(self):
+        code, out, err = self.run_cli(
+            self._fix_args(1, "--retain-context", "--dry-run"), client=self._client({})
+        )
+        self.assertEqual(code, 0, err)
+        payload = json.loads(out)
+        self.assertEqual(payload["clear_reason"], "retained")
+        commands = [command["argv"] for command in payload["steps"][0]["commands"]]
+        self.assertFalse(any("/new" in command for command in commands))
+        self.assertEqual(self.runner.calls, [])
+        self.assertFalse(self.state.exists())
+
+    def test_context_flags_are_mutually_exclusive(self):
+        self._rejects(self._fix_args(1, "--retain-context", "--no-clear"))
+
+    def test_retention_round_three_succeeds_after_confirmed_round_two(self):
+        self._seed_context(fix_round=2)
+        code, out, err = self.run_cli(
+            self._fix_args(3, "--retain-context"), client=self._client({"grok": "idle"})
+        )
+        self.assertEqual(code, 0, err)
+        self.assertEqual(len(self.runner.writes()), 1)
+        self.assertEqual(json.loads(out)["applied"][0]["fix_round"], 3)
+
+    def test_retention_still_refuses_a_live_busy_worker(self):
+        self._seed_context()
+        before = self.state.read_bytes()
+        code, _, err = self.run_cli(
+            self._fix_args(1, "--retain-context"), client=self._client({"grok": "blocked"})
+        )
+        self.assertEqual(code, 1)
+        self.assertEqual(json.loads(err)["error"], "agent_busy")
+        self.assertEqual(self.runner.writes(), [])
+        self.assertEqual(self.state.read_bytes(), before)
+
+    def test_fresh_rounds_refuse_no_clear(self):
+        for number in (4, 5):
+            with self.subTest(number=number):
+                self.out, self.err = io.StringIO(), io.StringIO()
+                code, _, err = self.run_cli(
+                    self._fix_args(number, "--no-clear"), client=self._client({})
+                )
+                self.assertEqual(code, 1)
+                self.assertIn("automatic clear", err)
+                self.assertEqual(self.runner.calls, [])
+
+    def test_retention_cannot_use_migrated_history(self):
+        self.state.write_text(json.dumps({"schema_version": 2, "snapshots": [],
+            "assignments": [{"schema_version": 2, "at": AT, "agent": "grok",
+                             "role": "developer", "status": "applied"}]}), encoding="utf-8")
+        code, _, err = self.run_cli(
+            self._fix_args(1, "--retain-context"), client=self._client({})
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("preceding confirmed", err)
+        self.assertEqual(self.runner.calls, [])
+        row = json.loads(self.state.read_text(encoding="utf-8"))["assignments"][0]
+        self.assertEqual(row["clear_reason"], "unknown")
+
+    def test_completed_fixes_cannot_restart_as_initial_development(self):
+        self._seed_context(fix_round=5)
+        args = self._fix_args(5)
+        position = args.index("--fix-round")
+        del args[position:position + 2]
+        code, _, err = self.run_cli(args, client=self._client({}))
+        self.assertEqual(code, 1)
+        self.assertIn("do not reset", err)
+        self.assertEqual(self.runner.calls, [])
+
+    def test_fresh_fix_cannot_skip_the_task_history(self):
+        self._seed_context(fix_round=1)
+        code, _, err = self.run_cli(self._fix_args(4), client=self._client({}))
+        self.assertEqual(code, 1)
+        self.assertIn("next fix number 2", err)
+        self.assertEqual(self.runner.calls, [])
+
+    def test_early_developer_fix_requires_explicit_retention(self):
+        self._seed_context()
+        code, _, err = self.run_cli(self._fix_args(1), client=self._client({}))
+        self.assertEqual(code, 1)
+        self.assertIn("require --retain-context", err)
+        self.assertEqual(self.runner.calls, [])
+
+    def test_fresh_worker_continues_another_workers_fix_count(self):
+        state = empty_state()
+        add_assignment(state, AT, "developer", "claude", task="repo#322",
+                       fix_round=3, cleared=False, clear_reason="retained")
+        save_state(self.state, state)
+        code, out, err = self.run_cli(self._fix_args(4), client=self._client({"grok": "idle"}))
+        self.assertEqual(code, 0, err)
+        row = json.loads(out)["applied"][0]
+        self.assertEqual((row["agent"], row["fix_round"]), ("grok", 4))
+        self.assertTrue(row["cleared"])
+
+    def test_intervening_role_prevents_retention_even_with_matching_task_history(self):
+        state = empty_state()
+        add_assignment(state, AT, "developer", "grok", task="repo#322",
+                       cleared=True, clear_reason="automatic")
+        add_assignment(state, AT, "tester", "grok", task="another-task",
+                       cleared=True, clear_reason="automatic")
+        save_state(self.state, state)
+        code, _, err = self.run_cli(self._fix_args(1, "--retain-context"), client=self._client({}))
+        self.assertEqual(code, 1)
+        self.assertIn("Cannot retain", err)
+        self.assertEqual(self.runner.calls, [])
 
     def test_missing_brief_flag_is_an_actionable_error(self):
         client = self._client({})

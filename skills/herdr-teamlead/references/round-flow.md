@@ -71,9 +71,9 @@ review their own branch.
 6. **Provision** — `provision-worktree.sh` creates every worktree the briefs
    name, from the shared checkout. A worker never runs `git` there, so its
    checkout has to exist before the brief arrives.
-7. **Dispatch** — `teamlead.sh apply` clears each worker's context, then sends
-   the assignment prompt. It re-reads live status first and refuses the round
-   rather than typing into a busy worker.
+7. **Dispatch** — `teamlead.sh apply` uses Step 9's explicit context mode,
+   then sends the assignment prompt. Only a same-role fix may retain context.
+   It re-reads live status and refuses to type into a busy worker.
 8. **Wait** — `wait-report.sh <agent> <report-path>` per worker, in the order
    the round needs them.
 9. **Gate** — the lead reads every report in full and decides: another round,
@@ -84,9 +84,11 @@ review their own branch.
 A report is the worker's only channel to the lead. Read all of it, every time —
 a `## BLOCKED` section can sit under a report that otherwise reads as finished.
 
-- **Blocking findings present** — run another round. Write fresh briefs naming
-  the findings; do not send "see the reviewer's comment" and expect a worker
-  with a cleared context to find it.
+- **Blocking findings present** — take Step 11's bounded fix path under
+  `rules/agent-team-operation.md` Fix Loops. Keep a stable task identifier and
+  advance its fix counter; changing worker or scope never restarts it.
+  Name the findings and prior report in each brief. Re-check the findings
+  with scoped briefs, then run full verification before release.
 - **A `## BLOCKED` section** — the worker stopped on something it could not
   decide. Resolve it in the NEXT brief, which reaches it through a fresh
   dispatch. Never type the answer into the worker that is waiting.
@@ -148,9 +150,9 @@ Dispatch it on exactly one of four triggers:
   re-reading the rule.
 - A lead override of a blocking finding — the lead about to waive a finding a
   worker labelled blocking gets a second, independent read first.
-- A fix loop that reached its fifth round — five returns to Step 4 on the same
-  finding is a stuck loop, not a slow one; the judge breaks the tie before a
-  sixth.
+- A fix loop exhausted its cap without approval — the judge rules before
+  any further action. If the ruling requires more implementation, Step 18
+  reports BLOCKED to the operator rather than dispatching another fix.
 - A bot finding the team disagrees with — the policy reviewer or Copilot flags
   something the developer and reviewer both think is wrong.
 

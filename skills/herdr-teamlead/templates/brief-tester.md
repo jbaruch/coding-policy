@@ -3,6 +3,9 @@
 Your role this round is **tester**. Read the team protocol in full before this
 file.
 
+You do not dispatch subagents. Prove delegated work from the VCS diff,
+never from the worker's self-report. A delegated verdict is not evidence.
+
 You are **read-only on the developer's code**. You never edit the
 implementation, never push a branch, never open a PR.
 
@@ -48,11 +51,21 @@ Branch: `{{BRANCH}}`.
 A failing gate is a **blocking** finding. A gap in coverage the issue asked for
 is a blocking finding. A test-naming preference is advisory.
 
+When the lead names a **scoped re-check**, verify each prior finding against
+the current tip and report `RESOLVED`, `OPEN`, or `DECLINED — <reason>`.
+Restrict `NEW` findings to blocking severity. Record new advisories in the
+brief's follow-up issue; they never extend the fix loop. Name missing scope
+inputs in a `## BLOCKED` report instead of guessing which findings to check.
+
+A **full** verification covers the whole branch, every gate and every
+acceptance criterion. The final verification before release stays full;
+a scoped pass cannot replace it.
+
 ## Report
 
 Write `{{REPORT}}` covering:
 
-- Which mode you ran.
+- Which mode and scope you ran, and the verified commit SHA.
 - The criterion-to-test map, or the verification result per criterion.
 - Every gate command and its output summary.
 - Every finding with its severity label.

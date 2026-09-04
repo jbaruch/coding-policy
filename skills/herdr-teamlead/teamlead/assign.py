@@ -52,7 +52,11 @@ from .herdr import (
 from .composer import COMPOSER_READ_LINES, COMPOSER_READ_SOURCE, checkable
 from .probe import PROBE_READ_LINES, PROBE_READ_SOURCE, resolve_status, stderr_warn
 
-APPLY_SCHEMA_VERSION = 1
+# Version 2 adds context-reason and task/fix-round evidence to each hand-off.
+APPLY_SCHEMA_VERSION = 2
+
+MAX_FIX_ROUNDS = 5
+RETAIN_CONTEXT_ROUNDS = frozenset({1, 2, 3})
 
 #: States teamlead will type into. Anything else is refused, always.
 SETTLE_STATES = ("idle", "done")
@@ -203,6 +207,73 @@ def validate_agents(assignments, agents_by_name):
             )
 
 
+def validate_context_mode(assignments, no_clear, retain_context, task, fix_round):
+    """Validate the explicit context choice before any herdr operation."""
+    if no_clear and retain_context:
+        raise UsageError("Choose --no-clear or --retain-context, never both.", {})
+    if task is not None and (not isinstance(task, str) or not task.strip()):
+        raise UsageError("Pass a non-empty --task label, or omit it.", {})
+    if fix_round is not None and (
+        isinstance(fix_round, bool) or not isinstance(fix_round, int)
+        or not 1 <= fix_round <= MAX_FIX_ROUNDS
+    ):
+        raise UsageError(
+            "Fix rounds must be 1–{}; after the cap, dispatch the judge.".format(MAX_FIX_ROUNDS), {}
+        )
+    if fix_round is not None and (not isinstance(task, str) or not task.strip()):
+        raise UsageError("Pass --task with --fix-round to identify the task.", {})
+    if retain_context and (
+        set(assignments) != {"developer"} or fix_round not in RETAIN_CONTEXT_ROUNDS
+    ):
+        raise UsageError(
+            "--retain-context requires one developer assignment and --fix-round 1, 2 or 3.", {}
+        )
+    if "developer" in assignments and fix_round in RETAIN_CONTEXT_ROUNDS and not retain_context:
+        raise UsageError("Early developer fix rounds require --retain-context.", {})
+    if no_clear and fix_round is not None and fix_round not in RETAIN_CONTEXT_ROUNDS:
+        raise UsageError("Fresh fix rounds require an automatic clear; omit --no-clear.", {})
+
+
+def validate_fix_history(assignments, history, task, fix_round):
+    """A worker change cannot reset or skip the task's confirmed fix count."""
+    if "developer" not in assignments or task is None:
+        return
+    prior = [row for row in (history or []) if row.get("task") == task
+             and row.get("role") == "developer" and row.get("status") == "applied"]
+    completed = max((row.get("fix_round") or 0 for row in prior), default=0)
+    if fix_round is None:
+        if completed:
+            raise UsageError("Task {!r} already has fixes; do not reset its counter.".format(task), {})
+        return
+    if not prior or fix_round != completed + 1:
+        raise UsageError(
+            "Task {!r} requires its preceding confirmed developer assignment and next "
+            "fix number {}; do not skip or reset the counter.".format(task, completed + 1), {}
+        )
+
+
+def validate_retained_history(assignments, history, task, fix_round):
+    """Only the same agent's last confirmed task/role can retain context.
+
+    The ledger is a necessary history check, never proof of a live pane:
+    check_all_ready and composer checks still run before sending the brief.
+    """
+    name = assignments["developer"]
+    prior = next(
+        (row for row in reversed(history or []) if row.get("agent") == name), None
+    )
+    if prior is None or (
+        prior.get("role") != "developer" or prior.get("task") != task
+        or prior.get("status") != "applied"
+        or (prior.get("fix_round") or 0) + 1 != fix_round
+    ):
+        raise UsageError(
+            "Cannot retain {}'s context: the ledger must show its preceding confirmed "
+            "developer round for task {!r}. Report lost context; do not reset the "
+            "task's fix counter.".format(name, task), {}
+        )
+
+
 def build_steps(client, assignments, agents_by_name, paths, panes=None, no_clear=False, settle_timeout_ms=DEFAULT_SETTLE_TIMEOUT_MS, start_timeout_ms=DEFAULT_START_TIMEOUT_MS):
     """Build the per-role command plan. Pure with respect to herdr: nothing runs.
 
@@ -333,16 +404,22 @@ def check_all_ready(client, assignments, agents_by_name, warn=None):
     return statuses
 
 
-def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle_timeout_ms=DEFAULT_SETTLE_TIMEOUT_MS, on_assigned=None, warn=None, sleep=time.sleep, settle_sec=COMPOSER_SETTLE_SEC, landing_attempts=LANDING_ATTEMPTS, start_timeout_ms=DEFAULT_START_TIMEOUT_MS, allow_recovery=False, task=None):
-    """Clear each agent and hand it its brief. Writes to the agents.
+def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle_timeout_ms=DEFAULT_SETTLE_TIMEOUT_MS, on_assigned=None, warn=None, sleep=time.sleep, settle_sec=COMPOSER_SETTLE_SEC, landing_attempts=LANDING_ATTEMPTS, start_timeout_ms=DEFAULT_START_TIMEOUT_MS, allow_recovery=False, task=None, retain_context=False, fix_round=None, history=None):
+    """Hand each agent its brief using the selected context mode.
 
-    `on_assigned(role, agent, at, status)` is called after each hand-off so the
+    `on_assigned(role, agent, at, status, context)` is called after each hand-off so the
     caller records it in the state ledger as it goes -- an interrupted run
     still leaves a truthful record of what was actually sent. The status rides
     along because a round that went out and never started is worth recording
     and must not count as experience of the role.
     """
     validate_agents(assignments, agents_by_name)
+    validate_context_mode(assignments, no_clear, retain_context, task, fix_round)
+    validate_fix_history(assignments, history, task, fix_round)
+    if retain_context:
+        validate_retained_history(assignments, history, task, fix_round)
+    skip_clear = no_clear or retain_context
+    clear_reason = "retained" if retain_context else "hand" if no_clear else "automatic"
     # Resolve the sink once. Every helper below defaults it too, but this
     # function calls it directly on the label path, and a None there would
     # raise instead of warning -- exactly when something already went wrong.
@@ -356,7 +433,7 @@ def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle
         agents_by_name,
         paths,
         panes={name: record.get("pane_id") for name, record in statuses.items()},
-        no_clear=no_clear,
+        no_clear=skip_clear,
         settle_timeout_ms=settle_timeout_ms,
         start_timeout_ms=start_timeout_ms,
     )
@@ -370,7 +447,7 @@ def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle
         name = step["agent"]
         agent = agents_by_name[name]
         cleared = False
-        if not no_clear:
+        if not skip_clear:
             pane_id = step["pane_id"]
             if agent.slash_delivery == SLASH_DELIVERY_TYPE and pane_id == PANE_ID_PLACEHOLDER:
                 raise UsageError(
@@ -438,6 +515,9 @@ def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle
             "state_source": checked.get("state_source"),
             "pane_id": checked.get("pane_id"),
             "cleared": cleared,
+            "clear_reason": clear_reason,
+            "task": task,
+            "fix_round": fix_round,
             "landed": landing["landed"],
             "started": landing["started"],
             "status": "applied"
@@ -471,7 +551,8 @@ def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle
 
         applied.append(record)
         if on_assigned is not None:
-            on_assigned(step["role"], name, at, record["status"])
+            context = {key: record[key] for key in ("cleared", "clear_reason", "task", "fix_round")}
+            on_assigned(step["role"], name, at, record["status"], context)
 
     return {
         "schema_version": APPLY_SCHEMA_VERSION,
@@ -481,23 +562,27 @@ def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle
     }
 
 
-def dry_run(client, assignments, agents_by_name, paths, no_clear=False, settle_timeout_ms=DEFAULT_SETTLE_TIMEOUT_MS):
+def dry_run(client, assignments, agents_by_name, paths, no_clear=False, settle_timeout_ms=DEFAULT_SETTLE_TIMEOUT_MS, retain_context=False, task=None, fix_round=None):
     """Print the plan without contacting herdr at all.
 
     Deliberately makes zero herdr calls, including the status check: a dry run
     against busy agents must show the plan rather than refuse it. The live
     `apply` re-checks status for real before sending anything.
     """
+    validate_context_mode(assignments, no_clear, retain_context, task, fix_round)
     return {
         "schema_version": APPLY_SCHEMA_VERSION,
         "dry_run": True,
         "sent": False,
+        "clear_reason": "retained" if retain_context else "hand" if no_clear else "automatic",
+        "task": task,
+        "fix_round": fix_round,
         "steps": build_steps(
             client,
             assignments,
             agents_by_name,
             paths,
-            no_clear=no_clear,
+            no_clear=no_clear or retain_context,
             settle_timeout_ms=settle_timeout_ms,
         ),
     }

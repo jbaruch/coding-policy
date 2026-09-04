@@ -4,7 +4,7 @@ description: >
   Run one task round as the team lead of three coding agents inside Herdr
   (https://herdr.dev): measure each worker's subscription headroom, assign the
   developer / tester / reviewer roles to the workers that can afford them,
-  clear each worker's context and send it a fresh role brief, wait for the
+  manage each worker's context and send it a self-contained role brief, wait for the
   report files, gate the round, dispatch a non-rotating judge on a dispute,
   and hand the merge to the `release` skill. Use ONLY when the
   user wants to run a round across the three Herdr worker panes: dispatch a
@@ -212,10 +212,13 @@ What you decide, and it is the whole of your job here:
 Phase 2 briefs name the branch AND the commit SHA the worker must report
 against. A report against an older tip does not gate anything.
 
-A worker starts each round with a cleared context. A brief that says "see the
-reviewer's earlier comment" reaches an agent that cannot see it. Name the
-issue, the file, the finding, and the path in full. Proceed immediately to
-Step 7.
+Name the issue, file, finding, and report path in full in every brief.
+Context retention is limited to the same-role fix rounds in
+`rules/agent-team-operation.md` Fix Loops. Fresh-worker fix briefs include
+the prior attempt count and the ownership handoff that section requires.
+Reviewer and tester verification briefs name `full` or `scoped` review,
+the prior findings, and the follow-up issue for new advisories. The final
+release-gating verification is `full`. Proceed immediately to Step 7.
 
 ## Step 7 — Provision the Worktrees
 
@@ -264,11 +267,23 @@ already named. Proceed immediately to Step 9.
 bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/teamlead.sh apply \
   --assignments <plan-file> \
   --brief developer=<path> --brief tester=<path> --brief reviewer=<path> \
-  --common <path-to-COMMON.md> [--task <label>]
+  --common <path-to-COMMON.md> --task <task-id> \
+  [--fix-round <N>] [--retain-context | --no-clear]
 ```
 
-Clears each worker's context and hands it its brief. Emits one JSON object:
-per role a record carrying `cleared`, `landed`, `started`, and `status`.
+Hands each worker its brief using the selected context mode. Emits one JSON
+object: per role a record carrying `cleared`, `clear_reason`, `task`,
+`fix_round`, `landed`, `started`, and `status`.
+
+Keep the same `--task` identifier from initial development through all its
+fixes. Omit `--fix-round` on the initial assignment; supply it on every fix.
+Dispatch a retained fix as a developer-only assignment with
+`--retain-context`. Other roles receive separate, cleared assignments.
+The utility refuses an invalid mode or an exhausted fix counter before any
+Herdr operation. Live fixes must advance the task's confirmed history;
+retention also requires the same worker's matching prior assignment.
+Missing or migrated history cannot authorize it. If context is unavailable,
+stop the retained path and report the loss; do not reset the fix counter.
 
 Each outcome names where the round goes next. Only a dispatched worker can
 produce a report, so Step 10 waits on exactly the roles that landed here.
@@ -285,13 +300,13 @@ produce a report, so Step 10 waits on exactly the roles that landed here.
 - **A worker failed on its clear command** — its assignment was never sent, and
   the round is short that role. Go to Step 10 for the rest; re-dispatch this one
   by re-running this step for that role alone once its pane is clear.
-- **A refusal saying the screen did not change** — the clear command was
-  consumed and the pane did not redraw, so the context was not cleared and
-  `apply` sent that worker nothing: a brief goes out only behind a confirmed
-  clear. Read the pane and clear it by hand. Once the pane shows a fresh
-  session, re-run this step for that role with `--no-clear`; that is the one
-  path on which a record carries `cleared: false`, and it means the lead did
-  the clearing. Never brief a worker on top of the previous task's context.
+- **A refusal saying the screen did not change** — the clear was unconfirmed;
+  no brief was sent to that worker. Read the pane and clear it by hand.
+  Re-run with `--no-clear` once the pane shows a fresh session. Fresh fix
+  rounds that require an automatic clear must re-run without that flag.
+  `--no-clear` records `cleared: false, clear_reason: hand`;
+  `--retain-context` records `cleared: false, clear_reason: retained`.
+  Never retain the previous task's context or retain across a role change.
 - **A refusal naming an unaccounted composer** — the worker's input line holds
   text the lead did not send. Nothing was dispatched for that role. Read the
   pane and clear it by hand, or re-run this step with `--allow-recovery` once
@@ -299,8 +314,9 @@ produce a report, so Step 10 waits on exactly the roles that landed here.
   exits an idle Codex.
 - **A refusal the message does not cover** — report it verbatim and finish
   here. A dispatch nobody understands is not a round to wait on.
-- `--dry-run` prints every command it would run and makes no herdr calls. It
-  dispatches nothing, so finish here after reading it.
+- `--dry-run` prints the context choice and commands without Herdr calls or
+  state writes. It validates the mode, not retained history or live readiness.
+  It dispatches nothing; finish here after reading it.
 - Each confirmed hand-off relabels that worker's pane with the work it took.
   `--task <label>` puts the round's task in the label. A hand-off that never
   started is left unlabelled.
@@ -369,10 +385,12 @@ Read every report file in full, including a report whose worker exited cleanly.
 A `## BLOCKED` section can sit under a report that otherwise reads as finished.
 Classify each finding blocking or advisory per `rules/review-severity.md`.
 
-- **Any blocking finding** — run another round: return to Step 4 with fresh
-  briefs naming the findings in full. Say what changed from the prior round. A
-  fifth return, a contested verdict, or a lead override is a Step 12 trigger
-  first.
+- **Any blocking finding** — follow `rules/agent-team-operation.md` Fix Loops.
+  Read this task's confirmed fix history, name the next fix number, and return
+  to Step 4 with self-contained briefs carrying the findings and prior
+  reports. Preserve the developer for retained fixes; use a fresh context
+  for the fresh-worker stage. Never reset the counter during re-planning.
+  At the cap, a contested verdict, or a lead override, go to Step 12 first.
 - **Advisory findings only** — record them in the round log and fold them into
   the next round that is already happening. Never spend a round on a lone
   advisory.
@@ -380,15 +398,17 @@ Classify each finding blocking or advisory per `rules/review-severity.md`.
 The release hand-off has one condition, and all four parts are required:
 
 1. The developer's report names the branch and the commit SHA it pushed.
-2. A reviewer **Mode B** report reviews that same SHA and carries no blocking
-   finding.
-3. A tester **Mode C** report verifies that same SHA, with the repo's gates run
-   and every acceptance criterion met.
+2. A broad reviewer **Mode B** report reviews that same SHA and carries no
+   blocking finding.
+3. A broad tester **Mode C** report verifies that same SHA, with the repo's
+   gates run and every acceptance criterion met.
 4. Nothing has been pushed to the branch after those two reports.
 
 A Phase 1 design note or test plan does NOT satisfy 2 or 3
 (`rules/agent-team-operation.md` Review Before PR). A report against an older
 SHA does not either — re-run Phase 2 against the current tip.
+After scoped re-checks close the findings, re-run Phase 2 with `full` briefs
+before handing off to release. Scoped reports alone never satisfy this gate.
 
 With all four met, proceed immediately to Step 12.
 
@@ -485,12 +505,15 @@ report lands.
 The `RULING:` line binds the round. Only the operator overrides it.
 
 - **`uphold A` / `uphold B` / `amend`, `ACTION:` changing no branch content**
-  — record the ruling and proceed to Step 19.
+  — record the ruling. Proceed to Step 19 only with Step 11's broad reports
+  against the current tip. Otherwise re-run Phase 2 with full briefs carrying
+  the ruling. Do not re-dispatch the judge for the same settled dispute.
 - **`uphold A` / `uphold B` / `amend`, `ACTION:` changing the branch** — the
-  lead never edits the branch itself. Compose a fresh developer brief through
-  Step 6 carrying the judge's `ACTION:` line verbatim as the task, dispatch it
-  from Step 9, and hold at Step 11 until its four conditions hold again for
-  the resulting tip.
+  lead never edits the branch itself. At an exhausted fix cap, report BLOCKED
+  with the ruling and proposed plan to the operator; finish here. Otherwise
+  return to Step 11 carrying `ACTION:` verbatim as required work. Count that
+  implementation as the next fix, under the same task identifier, and gate
+  the resulting tip again before release.
 - **`blocked`** — the judge declined to rule. Stop the round and put its
   named question to the operator. Do not dispatch a second judge and do not
   rule in its place. Finish here.
