@@ -46,7 +46,7 @@ Role weights, report reading, and the pre-PR review sequence:
 skills/herdr-teamlead/references/round-flow.md
 ```
 
-## Before Step 1 — Which Mode Are You In?
+## Step 1 — Determine the Mode
 
 There are two modes, and `HERDR_ENV` is what tells them apart. Read it before
 running anything.
@@ -58,13 +58,13 @@ pretending to be three agents in turn. Do not run the scripts below to
 confirm what the variable already told you. Finish here.
 
 **Herdr team round — `HERDR_ENV` set.** You are the lead of three worker
-panes. Proceed to Step 1.
+panes. Proceed to Step 2.
 
 Even in Herdr mode, a task with nothing to hand to three workers is not a
 round: a single edit, a question, a lookup, a review of work already done.
 Those are yours to do directly.
 
-## Step 1 — Verify Herdr and the Roster
+## Step 2 — Verify Herdr and the Roster
 
 ```bash
 bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/roster.sh
@@ -73,7 +73,7 @@ bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/roster.sh
 Takes no arguments. Emits `{"caller":{"pane_id":...},"agents":[{"name","kind","pane_id","state"}]}`,
 listing every named live agent other than your own pane.
 
-- **Exit 0 with a populated `agents`** — proceed to Step 2.
+- **Exit 0 with a populated `agents`** — proceed to Step 3.
 - **Exit 0 with `agents: []`** — nobody is named. Report the unnamed panes from
   `herdr agent list` and the `herdr agent rename <pane-id> <name>` command that
   fixes it, then finish here.
@@ -85,7 +85,7 @@ Fewer named workers than roles is a decision, not a detail: either name another
 agent or fold two roles onto one worker in that worker's brief, and say which
 you did.
 
-## Step 2 — Verify Authority for the Repo
+## Step 3 — Verify Authority for the Repo
 
 ```bash
 bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/verify-authority.sh <owner/repo>
@@ -97,7 +97,7 @@ Emits `{"repo","viewer_login","owner_login","owner_type","viewer_permission","na
 
 - **`authorized: true`** — record the authority line for the briefs:
   `owner of <owner/repo>`. Set `EXTERNAL_PERMISSION` to `none`. Proceed to
-  Step 3.
+  Step 4.
 - **`authorized: false`** — the operator does not own this repo. Ask the
   operator for permission naming the repo AND each action type, then record
   their exact words in `EXTERNAL_PERMISSION` and set the authority line to
@@ -109,9 +109,9 @@ Emits `{"repo","viewer_login","owner_login","owner_type","viewer_permission","na
 - **Exit 2** — GitHub could not answer. An unanswerable question is not a
   permission. Report it and finish here.
 
-Proceed immediately to Step 3.
+Proceed immediately to Step 4.
 
-## Step 3 — Measure Headroom
+## Step 4 — Measure Headroom
 
 ```bash
 bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/teamlead.sh measure
@@ -141,9 +141,9 @@ marker; the shape list and the cap are constants in
 `skills/herdr-teamlead/teamlead/herdr.py`.
 
 Report a `failed_agents` entry to the user and measure that worker by hand
-before relying on its role. Proceed immediately to Step 4.
+before relying on its role. Proceed immediately to Step 5.
 
-## Step 4 — Plan the Roles
+## Step 5 — Plan the Roles
 
 ```bash
 bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/teamlead.sh plan \
@@ -165,12 +165,12 @@ seat per install. The weights, fill order, and tie-breaks are the planner's
 contract; see `skills/herdr-teamlead/teamlead/planner.py` — the `plan`
 docstring and `DEFAULT_ROLE_COSTS`.
 
-Save the output to a file for Step 5. Relay the `rationale` lines to the user
+Save the output to a file for Step 6. Relay the `rationale` lines to the user
 as the round's role announcement: they name the weight behind each seat, the
 exclusions applied, and any worker whose headroom reading is stale. Proceed
-immediately to Step 5.
+immediately to Step 6.
 
-## Step 5 — Compose the Briefs
+## Step 6 — Compose the Briefs
 
 Write a values file for the round, then compose:
 
@@ -186,7 +186,7 @@ own value beats the shared one. Emits
 failed and nothing was written — an unfilled placeholder, a supplied key no
 template uses, a value that is not text, or a `REPORT` longer than the
 script's limit (the worker's `REPORT: <path>` line must fit one pane row for
-Step 9 to confirm it; use a short reports directory). Exit 3 means the placeholder scan
+Step 10 to confirm it; use a short reports directory). Exit 3 means the placeholder scan
 itself failed, so whether the briefs are clean is unknown: re-run, never
 dispatch on it. The placeholder set and both validation directions are the
 script's contract; see the header of
@@ -195,7 +195,7 @@ script's contract; see the header of
 What you decide, and it is the whole of your job here:
 
 - `SHARED_CHECKOUT` — the checkout the workers read.
-- `AUTHORITY_STATEMENT` and `EXTERNAL_PERMISSION` — verbatim from Step 2. Never
+- `AUTHORITY_STATEMENT` and `EXTERNAL_PERMISSION` — verbatim from Step 3. Never
   a claim you composed yourself.
 - Per role: `ISSUE`, `BRANCH`, `WORKTREE`, `REPORT`, `REPORTS_DIR`, and the
   phase and mode that role runs this round.
@@ -215,9 +215,9 @@ against. A report against an older tip does not gate anything.
 A worker starts each round with a cleared context. A brief that says "see the
 reviewer's earlier comment" reaches an agent that cannot see it. Name the
 issue, the file, the finding, and the path in full. Proceed immediately to
-Step 6.
+Step 7.
 
-## Step 6 — Provision the Worktrees
+## Step 7 — Provision the Worktrees
 
 One call per worker that writes anything:
 
@@ -239,9 +239,9 @@ Checkouts). A read-only Phase 1 reviewer needs none. Remove them per
 `rules/agent-worktree-isolation.md` Cleanup once the branch lands.
 
 On any non-zero exit, fix the input it names and re-run this step; do not
-dispatch a brief whose worktree does not exist. Proceed immediately to Step 7.
+dispatch a brief whose worktree does not exist. Proceed immediately to Step 8.
 
-## Step 7 — Label the Layout (optional, once per team)
+## Step 8 — Label the Layout (optional, once per team)
 
 ```bash
 bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/label-workspaces.sh \
@@ -256,9 +256,9 @@ JSON says which. A label failure never stops a round.
 
 Run this once per team, not once per round: a name already in place is
 reported `unchanged` and nothing is sent. Skip it on a team whose sidebar is
-already named. Proceed immediately to Step 8.
+already named. Proceed immediately to Step 9.
 
-## Step 8 — Dispatch the Briefs
+## Step 9 — Dispatch the Briefs
 
 ```bash
 bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/teamlead.sh apply \
@@ -271,19 +271,19 @@ Clears each worker's context and hands it its brief. Emits one JSON object:
 per role a record carrying `cleared`, `landed`, `started`, and `status`.
 
 Each outcome names where the round goes next. Only a dispatched worker can
-produce a report, so Step 9 waits on exactly the roles that landed here.
+produce a report, so Step 10 waits on exactly the roles that landed here.
 
-- **Exit 0** — every role was dispatched. Proceed to Step 9.
+- **Exit 0** — every role was dispatched. Proceed to Step 10.
 - **Non-zero with a busy target** — the whole round was refused before any
   keystroke went out. Nothing was dispatched, so there is nothing to wait for:
   wait for that worker to reach idle and re-run this step, or re-run it with a
-  plan that omits the busy worker. Do not go to Step 9.
+  plan that omits the busy worker. Do not go to Step 10.
 - **Non-zero with `"status": "sent_but_not_started"`** — the message was sent
   and no turn began for that role. Read that worker's pane; do not re-dispatch
-  on top of it. Go to Step 9 for the roles whose records say `started`, and
+  on top of it. Go to Step 10 for the roles whose records say `started`, and
   treat this role as producing no report this round.
 - **A worker failed on its clear command** — its assignment was never sent, and
-  the round is short that role. Go to Step 9 for the rest; re-dispatch this one
+  the round is short that role. Go to Step 10 for the rest; re-dispatch this one
   by re-running this step for that role alone once its pane is clear.
 - **A refusal saying the screen did not change** — the clear command was
   consumed and the pane did not redraw, so the context was not cleared and
@@ -315,9 +315,9 @@ skills/herdr-teamlead/references/herdr.md
 The prompt text, the refusal predicate, and every constant are the utility's
 own contract; see `skills/herdr-teamlead/teamlead/assign.py`.
 
-Proceed to Step 9 with the roles that were dispatched.
+Proceed to Step 10 with the roles that were dispatched.
 
-## Step 9 — Wait for the Reports
+## Step 10 — Wait for the Reports
 
 One call per dispatched worker, in the order the round needs them:
 
@@ -331,11 +331,11 @@ stderr. Exit 4 adds `reason`. Completion requires both the report file on disk a
 marker in the worker's pane. A single `idle` or `done` observation is not
 completion. Poll interval and give-up budget are the script's own constants.
 
-- **Exit 0** — the report is there. Continue to the next worker, then Step 10.
+- **Exit 0** — the report is there. Continue to the next worker, then Step 11.
 - **Exit 1** — the budget ran out. Read the pane with
   `herdr agent read <name> --source visible`. If the worker is still working,
   re-run this step for it: the script's own budget applies again, never a
-  number chosen here. Otherwise go to Step 10 recording that it produced no
+  number chosen here. Otherwise go to Step 11 recording that it produced no
   report.
 - **Exit 2** — a tool failure. Report the message verbatim and finish here; the
   round has no reliable view of any worker.
@@ -351,7 +351,7 @@ completion. Poll interval and give-up budget are the script's own constants.
     continue to the next worker.
   - The state is `idle` or `done` — record the worker as producing no report
     and continue to the next worker. Never re-dispatch on top of it. The
-    cause is a report path too long for one pane row; Step 5's compose gate
+    cause is a report path too long for one pane row; Step 6's compose gate
     refuses those, so this outcome means a brief bypassed it.
 - **Exit 3** — the worker is blocked at an approval or question dialog,
   confirmed across two reads and the pane. Read the dialog with
@@ -360,18 +360,18 @@ completion. Poll interval and give-up budget are the script's own constants.
   operator does. Resume only once `herdr agent get <name>` reports a state
   other than `blocked`, then re-run this step for that worker.
 
-Proceed to Step 10 once every dispatched worker has been waited on, or once you
+Proceed to Step 11 once every dispatched worker has been waited on, or once you
 have recorded which of them produced no report.
 
-## Step 10 — Gate the Round
+## Step 11 — Gate the Round
 
 Read every report file in full, including a report whose worker exited cleanly.
 A `## BLOCKED` section can sit under a report that otherwise reads as finished.
 Classify each finding blocking or advisory per `rules/review-severity.md`.
 
-- **Any blocking finding** — run another round: return to Step 3 with fresh
+- **Any blocking finding** — run another round: return to Step 4 with fresh
   briefs naming the findings in full. Say what changed from the prior round. A
-  fifth return, a contested verdict, or a lead override is a Step 11 trigger
+  fifth return, a contested verdict, or a lead override is a Step 12 trigger
   first.
 - **Advisory findings only** — record them in the round log and fold them into
   the next round that is already happening. Never spend a round on a lone
@@ -390,43 +390,43 @@ A Phase 1 design note or test plan does NOT satisfy 2 or 3
 (`rules/agent-team-operation.md` Review Before PR). A report against an older
 SHA does not either — re-run Phase 2 against the current tip.
 
-With all four met, proceed immediately to Step 11.
+With all four met, proceed immediately to Step 12.
 
-## Step 11 — Compose the Judge Brief
+## Step 12 — Compose the Judge Brief
 
 Optional. Triggers and the ruling contract are in
 `skills/herdr-teamlead/references/round-flow.md` "The Judge" (a bot
-disagreement inside Step 18 returns here first). No trigger — proceed to
-Step 18.
+disagreement inside Step 19 returns here first). No trigger — proceed to
+Step 19.
 
-Compose the brief from `templates/brief-judge.md` through Step 5: the
+Compose the brief from `templates/brief-judge.md` through Step 6: the
 dispute, both positions with report paths, the governing rule, the tree. Skip
-Step 6 for the read-only judge. Proceed immediately to Step 12.
+Step 7 for the read-only judge. Proceed immediately to Step 13.
 
-## Step 12 — Re-measure the Shared Window
+## Step 13 — Re-measure the Shared Window
 
-Step 3's snapshot is a hint, not authority (`rules/stateful-artifacts.md`).
+Step 4's snapshot is a hint, not authority (`rules/stateful-artifacts.md`).
 The judge's affordability is decided from a fresh reading, never from it.
 
-Re-run Step 3's `measure`. That step's outcomes govern this run unchanged. A
+Re-run Step 4's `measure`. That step's outcomes govern this run unchanged. A
 `measure` that cannot read the judge worker's window is a stale-state failure,
 resolved there before a ruling is planned.
 
-Hand the fresh snapshot to Step 13 and plan nothing here. Proceed immediately
-to Step 13.
+Hand the fresh snapshot to Step 14 and plan nothing here. Proceed immediately
+to Step 14.
 
-## Step 13 — Plan the Judge Seat
+## Step 14 — Plan the Judge Seat
 
-Run Step 4's `plan` with `--roles judge`, against the Step 12 snapshot. It
+Run Step 5's `plan` with `--roles judge`, against the Step 13 snapshot. It
 names the worker the `judge` block pins, and refuses the round when that
 window cannot cover a ruling:
 
 ```bash
 bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/teamlead.sh plan \
-  --roles judge --snapshot <step-12-measure-output>
+  --roles judge --snapshot <step-13-measure-output>
 ```
 
-- **Exit 0** — the plan file names the judge worker. Proceed to Step 14.
+- **Exit 0** — the plan file names the judge worker. Proceed to Step 15.
 - **Non-zero naming the judge's headroom** — the window cannot cover a
   ruling. Report it and finish here. There is no substitute judge, no
   fallback to another model, and no degraded ruling.
@@ -436,16 +436,16 @@ bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/teamlead.sh plan
   work around it.
 
 The plan's `judge` object carries the seat's tier — `agent`, `model` and
-`effort`, straight from the `judge` block. Step 14 launches the worker from
-those values. Proceed immediately to Step 14.
+`effort`, straight from the `judge` block. Step 15 launches the worker from
+those values. Proceed immediately to Step 15.
 
-## Step 14 — Start the Judge Worker on Its Pinned Tier
+## Step 15 — Start the Judge Worker on Its Pinned Tier
 
 Run:
 
 ```bash
 bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/start-judge-worker.sh \
-  <step-13-plan-file> <pane> [claude|codex]
+  <step-14-plan-file> <pane> [claude|codex]
 ```
 
 It reads the tier from the plan's `judge` object, starts the worker on it,
@@ -453,15 +453,15 @@ and refuses unless the pane's startup banner echoes that tier. Its argument
 contract, exit codes and banner predicate are in the script header.
 
 - **Exit 0** — the banner proved the tier. Its JSON names the agent, model
-  and effort. Proceed immediately to Step 15.
+  and effort. Proceed immediately to Step 16.
 - **Any non-zero** — report the script's diagnostic verbatim and finish here.
   A worker whose tier is unproven does not get briefed, and no tier is set by
   hand to work around it.
 
-## Step 15 — Dispatch the Judge
+## Step 16 — Dispatch the Judge
 
-Dispatch under Step 8's outcome contract exactly, passing the plan file from
-Step 13 rather than a hand-written mapping:
+Dispatch under Step 9's outcome contract exactly, passing the plan file from
+Step 14 rather than a hand-written mapping:
 
 ```bash
 bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/teamlead.sh apply \
@@ -471,46 +471,46 @@ bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/teamlead.sh appl
   --task <round>
 ```
 
-Step 8's outcomes govern this dispatch unchanged. Proceed immediately to
-Step 16.
+Step 9's outcomes govern this dispatch unchanged. Proceed immediately to
+Step 17.
 
-## Step 16 — Wait for the Ruling
+## Step 17 — Wait for the Ruling
 
-Wait with Step 9's `wait-report.sh <agent> <report-path>`, where `<agent>` is
-the worker the Step 13 plan named. Proceed immediately to Step 17 once the
+Wait with Step 10's `wait-report.sh <agent> <report-path>`, where `<agent>` is
+the worker the Step 14 plan named. Proceed immediately to Step 18 once the
 report lands.
 
-## Step 17 — Act on the Ruling
+## Step 18 — Act on the Ruling
 
 The `RULING:` line binds the round. Only the operator overrides it.
 
 - **`uphold A` / `uphold B` / `amend`, `ACTION:` changing no branch content**
-  — record the ruling and proceed to Step 18.
+  — record the ruling and proceed to Step 19.
 - **`uphold A` / `uphold B` / `amend`, `ACTION:` changing the branch** — the
   lead never edits the branch itself. Compose a fresh developer brief through
-  Step 5 carrying the judge's `ACTION:` line verbatim as the task, dispatch it
-  from Step 8, and hold at Step 10 until its four conditions hold again for
+  Step 6 carrying the judge's `ACTION:` line verbatim as the task, dispatch it
+  from Step 9, and hold at Step 11 until its four conditions hold again for
   the resulting tip.
 - **`blocked`** — the judge declined to rule. Stop the round and put its
   named question to the operator. Do not dispatch a second judge and do not
   rule in its place. Finish here.
 
-## Step 18 — Release the Pull Request
+## Step 19 — Release the Pull Request
 
 The release is one more assignment, never a prompt into the developer's
-existing context. Return to Step 5 with the role `release` for
+existing context. Return to Step 6 with the role `release` for
 the developer's agent (template `templates/brief-release.md`, the same
-`WORKTREE` and `BRANCH`, a fresh `REPORT`), run Step 6 (it reports
-`already-provisioned`), dispatch through Step 8 so the context is cleared and
-the brief is fresh, and wait on the report in Step 9. The worker merges. You
-do not. Proceed immediately to Step 19 after its report.
+`WORKTREE` and `BRANCH`, a fresh `REPORT`), run Step 7 (it reports
+`already-provisioned`), dispatch through Step 9 so the context is cleared and
+the brief is fresh, and wait on the report in Step 10. The worker merges. You
+do not. Proceed immediately to Step 20 after its report.
 
-## Step 19 — Clean Up the Worktree
+## Step 20 — Clean Up the Worktree
 
 Fast-forward the shared checkout, remove the worktree, and delete the branch
-per `rules/agent-worktree-isolation.md`. Proceed immediately to Step 20.
+per `rules/agent-worktree-isolation.md`. Proceed immediately to Step 21.
 
-## Step 20 — Log the Round
+## Step 21 — Log the Round
 
 Log the round: the assignments, the report paths, the findings, and the
 outcome. If the round produced no findings at all, log it and say so in one

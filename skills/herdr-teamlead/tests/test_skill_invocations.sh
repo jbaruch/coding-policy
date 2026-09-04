@@ -6,7 +6,7 @@
 #    every consumer, and `chmod +x` in this repo does not survive publish.
 #    Deterministic because the failure is invisible here: the scripts run fine
 #    from a clone and break only once installed.
-# 2. The skill gates on HERDR_ENV before any step, and the gate turns a
+# 2. The first step gates on HERDR_ENV before any script, and the gate turns a
 #    standalone agent away by reading rather than by running a script.
 #
 # `set -e` is dropped so every check runs and the suite reports an aggregate;
@@ -79,29 +79,32 @@ main() {
   local body_file="${TMPDIR:-/tmp}/skill-body.$$.md"
   printf '%s\n' "$body" > "$body_file" || die "could not stage the skill body"
 
-  # 3. The standalone exit is stated in the body, before the first step.
-  local gate_line step1_line
+  # 3. The mode gate is the first step, before roster/script execution.
+  local gate_line step1_line step2_line
   gate_line="$(first_match_line 'HERDR_ENV' "$body_file")"
   step1_line="$(first_match_line '^## Step 1 ' "$body_file")"
+  step2_line="$(first_match_line '^## Step 2 ' "$body_file")"
   if [[ -z "$gate_line" ]]; then
     fail "the body states no HERDR_ENV gate — the frontmatter alone does not gate execution"
   elif [[ -z "$step1_line" ]]; then
     fail "could not locate the Step 1 heading in the body"
-  elif (( gate_line < step1_line )); then pass
-  else fail "the HERDR_ENV gate (body line ${gate_line}) comes after Step 1 (body line ${step1_line})"; fi
+  elif [[ -z "$step2_line" ]]; then
+    fail "could not locate the Step 2 heading in the body"
+  elif (( step1_line < gate_line && gate_line < step2_line )); then pass
+  else fail "the HERDR_ENV gate (body line ${gate_line}) is outside Step 1"; fi
 
   # 4. That gate tells a standalone agent to stop, and says so before the
-  # first step rather than anywhere in the file.
+  # next step rather than anywhere in the file.
   local head flat
-  if [[ -n "$step1_line" ]]; then
-    head="$(head -n "$step1_line" "$body_file")" || die "could not read the body preamble"
+  if [[ -n "$step1_line" && -n "$step2_line" ]]; then
+    head="$(sed -n "${step1_line},${step2_line}p" "$body_file")" || die "could not read the mode gate"
   else
     head=""
   fi
   flat="$(printf '%s' "$head" | tr '\n' ' ' | tr -s '[:space:]' ' ' \
     | tr '[:upper:]' '[:lower:]')" || die "could not flatten the preamble"
   if [[ "$flat" == *"this skill does not apply"* ]]; then pass
-  else fail "nothing before Step 1 tells a non-Herdr agent the skill does not apply"; fi
+  else fail "Step 1 does not tell a non-Herdr agent the skill does not apply"; fi
 
   rm -f "$body_file" || warn_cleanup "$body_file"
 

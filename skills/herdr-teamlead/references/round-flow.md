@@ -16,7 +16,7 @@ through `teamlead.sh plan`, never by the lead's impression of who looks fresh.
 `plan` breaks a headroom tie on who has held the role fewest times, so nobody
 owns `developer` forever.
 
-Step 4 in `skills/herdr-teamlead/SKILL.md` identifies the source for the
+Step 5 in `skills/herdr-teamlead/SKILL.md` identifies the source for the
 default weights and assignment algorithm. Re-weigh from measurements: run
 `measure` before and after a round and read what the seat actually cost.
 
@@ -139,7 +139,7 @@ whatever GitHub's merge box says.
 A fifth seat, outside the three-role rotation, on the most capable model
 available. It never holds developer, reviewer, or tester. `rules/agent-team-operation.md`
 Judge Seat is the contract; this section is the operational detail for
-Steps 11-16 of `skills/herdr-teamlead/SKILL.md`.
+Steps 12–18 of `skills/herdr-teamlead/SKILL.md`.
 
 Dispatch it on exactly one of four triggers:
 
@@ -148,7 +148,7 @@ Dispatch it on exactly one of four triggers:
   re-reading the rule.
 - A lead override of a blocking finding — the lead about to waive a finding a
   worker labelled blocking gets a second, independent read first.
-- A fix loop that reached its fifth round — five returns to Step 3 on the same
+- A fix loop that reached its fifth round — five returns to Step 4 on the same
   finding is a stuck loop, not a slow one; the judge breaks the tie before a
   sixth.
 - A bot finding the team disagrees with — the policy reviewer or Copilot flags
