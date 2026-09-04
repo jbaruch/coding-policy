@@ -55,8 +55,7 @@ running anything.
 This skill does not apply. Say so in one line and do the task yourself: no
 roster, no briefs, no worktree provisioning, no report files, and no
 pretending to be three agents in turn. Do not run the scripts below to
-confirm what the variable already told you — `roster.sh` will only tell you
-what you already know, in a longer and more confusing way. Finish here.
+confirm what the variable already told you. Finish here.
 
 **Herdr team round — `HERDR_ENV` set.** You are the lead of three worker
 panes. Proceed to Step 1.

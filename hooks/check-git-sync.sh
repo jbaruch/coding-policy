@@ -87,9 +87,16 @@ is_herdr_worker() {
 
   local git_dir common_dir rc=0
   git_dir="$(git rev-parse --absolute-git-dir 2>/dev/null)" || rc=$?
-  (( rc == 0 )) || return 1
+  if (( rc != 0 )); then
+    warn "git rev-parse --absolute-git-dir failed (exit ${rc}) — cannot tell a Herdr worker from the lead; treating this as the lead"
+    return 1
+  fi
+  rc=0
   common_dir="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || rc=$?
-  (( rc == 0 )) || return 1
+  if (( rc != 0 )); then
+    warn "git rev-parse --git-common-dir failed (exit ${rc}) — cannot tell a Herdr worker from the lead; treating this as the lead"
+    return 1
+  fi
 
   [[ "$git_dir" != "$common_dir" ]]
 }
