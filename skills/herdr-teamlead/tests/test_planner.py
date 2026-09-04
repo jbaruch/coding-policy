@@ -811,5 +811,60 @@ class PlanSchemaVersionTest(unittest.TestCase):
             self.assertIsInstance(agent, str)
 
 
+class JudgeAffordabilityAfterOtherSeatsTest(unittest.TestCase):
+    """Affordability is judged after the seats ahead of it have spent.
+
+    Checked once before the fill loop, a heavier seat on the same window
+    passes its own check, spends the pool, and leaves the judge projected
+    below zero -- a round the window cannot cover, planned anyway.
+    """
+
+    def test_a_heavier_seat_on_the_same_window_can_halt_the_judge(self):
+        # Only the shared pool can hold the developer seat, so it must spend
+        # from the window the judge needs: 25 - 20 = 5, and a ruling costs 15.
+        payload = pooled_snapshot(
+            {"claude": "pool", "judge": "pool"}, claude=25, judge=25
+        )
+        with self.assertRaises(PlanError) as caught:
+            plan(
+                ["developer", "judge"],
+                payload,
+                warn=lambda message: None,
+                judge_agent="judge",
+                role_costs={"developer": 20, "judge": 15},
+            )
+        self.assertIn("5% headroom", str(caught.exception))
+
+    def test_a_window_that_covers_both_seats_still_plans(self):
+        payload = pooled_snapshot(
+            {"claude": "pool", "judge": "pool"}, claude=90, judge=90
+        )
+        result = plan(
+            ["developer", "judge"],
+            payload,
+            warn=lambda message: None,
+            judge_agent="judge",
+            role_costs={"developer": 20, "judge": 15},
+        )
+        self.assertEqual(result["assignments"]["judge"], "judge")
+        self.assertEqual(result["assignments"]["developer"], "claude")
+
+    def test_a_seat_off_the_window_does_not_halt_the_judge(self):
+        # codex holds its own window, so the developer seat lands there and
+        # the pool is untouched.
+        payload = pooled_snapshot(
+            {"claude": "pool", "judge": "pool"}, claude=25, judge=25, codex=90
+        )
+        result = plan(
+            ["developer", "judge"],
+            payload,
+            warn=lambda message: None,
+            judge_agent="judge",
+            role_costs={"developer": 20, "judge": 15},
+        )
+        self.assertEqual(result["assignments"]["developer"], "codex")
+        self.assertEqual(result["assignments"]["judge"], "judge")
+
+
 if __name__ == "__main__":
     unittest.main()

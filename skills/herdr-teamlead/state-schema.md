@@ -36,8 +36,9 @@ start, `^...`). `plan` echoes it into its document as a `judge` object at plan
 has no such key, which every reader treats the same as a version-1 plan, and `plan` echoes it back as the document's `judge` object when the
 seat is planned, so the worker's launch argv is built from the config rather
 than by hand: `{"agent": <name>, "model": <id>, "effort": <level>}`, where
-`effort` is one of `low`, `medium`, `high`, `xhigh`, `max`, or absent for a
-model that accepts no effort flag. The planner never ranks that seat and never
+`effort` is optional, absent for a model that accepts no effort flag; the
+accepted values are `VALID_JUDGE_EFFORTS` in
+`skills/herdr-teamlead/teamlead/config.py`. The planner never ranks that seat and never
 gives the pinned worker another one.
 
 The optional `role_costs` key is the second:

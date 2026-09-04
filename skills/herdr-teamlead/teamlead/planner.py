@@ -245,7 +245,7 @@ def _unfillable_message(role, barred, remaining, later_roles):
     return " ".join(part for part in parts if part)
 
 
-def _refuse_unaffordable_judge(judge_agent, agents, cost, groups, warn):
+def _refuse_unaffordable_judge(judge_agent, headrooms, cost, groups):
     """Halt the round when the pinned judge's window cannot afford it.
 
     The judge seat has no substitute: it is pinned, and its worker shares a
@@ -262,18 +262,22 @@ def _refuse_unaffordable_judge(judge_agent, agents, cost, groups, warn):
     An unknown headroom is not exhaustion and never refuses on its own -- it
     is unmeasured, and the existing unknown-headroom handling already names it
     in the rationale.
+
+    Called from inside the fill loop, at the judge's own turn, so `headrooms`
+    already reflects what the seats filled before it spent from the same
+    window. Checked before the loop instead, a round seating a heavier
+    developer on the shared pool would pass the check and leave the judge
+    projected below zero.
     """
     group = groups.get(judge_agent)
     if group is None:
-        window = [judge_agent] if judge_agent in agents else []
+        window = [judge_agent] if judge_agent in headrooms else []
     else:
-        window = [name for name in agents if groups.get(name) == group]
+        window = [name for name in headrooms if groups.get(name) == group]
 
-    readings = {}
-    for name in window:
-        headroom = _headroom_of(name, agents.get(name), warn)
-        if headroom is not None:
-            readings[name] = headroom
+    readings = {
+        name: headrooms[name] for name in window if headrooms.get(name) is not None
+    }
     if not readings:
         return
 
@@ -403,13 +407,6 @@ def plan(roles, snapshot, counts=None, exclude=None, role_costs=None, snapshot_r
                 excluded[role] = sorted(
                     name for name in agents if name != judge_agent
                 )
-                _refuse_unaffordable_judge(
-                    judge_agent,
-                    agents,
-                    _costs_for(["judge"], role_costs)["judge"],
-                    _window_groups(agents),
-                    warn,
-                )
             elif judge_agent in agents and judge_agent not in excluded[role]:
                 excluded[role] = sorted(set(excluded[role]) | {judge_agent})
     for role in roles:
@@ -439,6 +436,8 @@ def plan(roles, snapshot, counts=None, exclude=None, role_costs=None, snapshot_r
     for index, role in enumerate(fill_order):
         cost = costs[role]
         barred = excluded[role]
+        if role == "judge" and judge_agent:
+            _refuse_unaffordable_judge(judge_agent, headrooms, cost, groups)
         later_roles = fill_order[index + 1:]
         ranked = sorted(
             (name for name in remaining if name not in barred),
