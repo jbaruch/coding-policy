@@ -12,6 +12,7 @@ if _ROOT not in _sys.path:
     _sys.path.insert(0, _ROOT)
 
 import inspect
+import copy
 import unittest
 
 from teamlead.config import parse_config
@@ -20,6 +21,7 @@ from teamlead.herdr import HerdrClient
 from teamlead.measure import DEFAULT_READ_LINES, ready_agents
 from teamlead.measure import measure as _measure
 from teamlead.measure import measure_agent as _measure_agent
+from teamlead.measure import skipped_record
 from teamlead.measure import wait_for_usage_report as _wait_for_usage_report
 
 from tests.fakes import (
@@ -806,6 +808,44 @@ class SnapshotTest(unittest.TestCase):
         )
         snapshot = measure(HerdrClient(runner=runner), AGENTS, AT)
         self.assertEqual(ready_agents(snapshot), ["claude", "grok"])
+
+
+class WindowGroupPassthroughTest(unittest.TestCase):
+    """`plan` reads a shared window off the snapshot, so `measure` writes it.
+
+    Config declares which workers share a usage window; the planner charges a
+    seat's cost against every worker in that window. The snapshot is the only
+    thing passed between them, so a group that does not survive the hop
+    silently restores the over-commit the group exists to prevent.
+    """
+
+    def _agent_with_group(self, group):
+        payload = copy.deepcopy(CONFIG)
+        payload["agents"] = [
+            entry for entry in payload["agents"] if entry["name"] == "claude"
+        ]
+        payload["agents"][0]["window_group"] = group
+        return parse_config(payload)[0]
+
+    def test_a_measured_record_carries_the_declared_group(self):
+        agent = self._agent_with_group("claude-max-weekly")
+        runner = runner_with({"claude": "idle"}, {"claude": CLAUDE_PANE})
+        record = measure_agent(HerdrClient(runner=runner), agent)
+        self.assertEqual(record["window_group"], "claude-max-weekly")
+
+    def test_a_skipped_record_carries_it_too(self):
+        # A pool-mate teamlead declined to interrupt still shares the window;
+        # dropping the group here would unlink it for the rest of the round.
+        agent = self._agent_with_group("claude-max-weekly")
+        record = skipped_record(agent, "working", "working", "visible")
+        self.assertEqual(record["window_group"], "claude-max-weekly")
+        self.assertTrue(record["skipped"])
+
+    def test_an_agent_declaring_no_group_records_an_empty_one(self):
+        agent = self._agent_with_group("")
+        runner = runner_with({"claude": "idle"}, {"claude": CLAUDE_PANE})
+        record = measure_agent(HerdrClient(runner=runner), agent)
+        self.assertEqual(record["window_group"], "")
 
 
 if __name__ == "__main__":

@@ -158,15 +158,28 @@ It is read-only without exception: no file edit, no mutating git or `gh`
 command, no GitHub post, no subagent dispatch. It reads both positions and the
 governing rule, verifies the disputed facts against the tree itself rather
 than trusting either side's framing, and returns a report opening with three
-lines — `RULING: uphold A | uphold B | amend — <line>`, `ACTION:` naming the
-minimal step, `UNVERIFIED:` naming anything it could not check — followed by
-its numbered reasons.
+lines — `RULING: uphold A | uphold B | amend — <line> | blocked — <question>`,
+`ACTION:` naming the minimal step, `UNVERIFIED:` naming anything it could not
+check — followed by its numbered reasons.
+
+`blocked` is the judge declining to rule on a dispute it cannot settle from
+the tree and the rule text alone. The round stops there and the named question
+goes to the operator. The lead does not dispatch a second judge and does not
+rule in its place.
 
 The ruling binds the round the moment the lead reads it. Only the operator
-overrides one; record the override and why in the round log. It is not
-load-balanced — its own config (`config.example-judge.json`) is dispatched
-directly, never through `measure`/`plan` on the roster, the same shape the
-operator already runs the critic seat on outside this repo.
+overrides one; record the override and why in the round log.
+
+The judge worker is declared in the main `config.json` and is measured and
+planned like every other seat, but its seat is pinned rather than ranked: the
+`judge` block names the agent, model and effort, the planner never chooses who
+judges, and the pinned worker never holds another seat.
+
+It runs on the same Claude subscription as the `claude` worker, so both
+declare the same `window_group` and the planner charges a seat's cost against
+every worker sharing that window. When that window is exhausted the round
+halts: there is no substitute judge, no fallback to another vendor's flagship,
+and no degraded ruling.
 
 ## What the Lead Never Does
 

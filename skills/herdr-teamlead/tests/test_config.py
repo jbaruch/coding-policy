@@ -11,6 +11,7 @@ _ROOT = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
 if _ROOT not in _sys.path:
     _sys.path.insert(0, _ROOT)
 
+import copy
 import json
 import os
 import shutil
@@ -22,8 +23,10 @@ from teamlead.config import (
     Agent,
     default_config_path,
     load_config,
+    load_judge,
     load_role_costs,
     parse_config,
+    parse_judge,
     parse_role_costs,
     select_agents,
 )
@@ -55,6 +58,19 @@ VALID = {
         },
     ],
 }
+
+
+def _example_config():
+    """The shipped example config, decoded."""
+    return json.loads((REPO_ROOT / "config.example.json").read_text(encoding="utf-8"))
+
+
+def _agent_payload(**overrides):
+    """A one-agent config, with `overrides` merged onto that agent."""
+    payload = copy.deepcopy(VALID)
+    payload["agents"] = [payload["agents"][0]]
+    payload["agents"][0].update(overrides)
+    return payload
 
 
 class ParseConfigTest(unittest.TestCase):
@@ -380,6 +396,71 @@ class AgentValueObjectTest(unittest.TestCase):
             Agent("a", "claude", "/usage", "m", "visible", "/clear"),
             Agent("a", "claude", "/usage", "m", "visible", "/clear"),
         )
+
+
+class ParseJudgeTest(unittest.TestCase):
+    """The pinned judge tier, read from the top-level `judge` block."""
+
+    def test_a_full_block_parses(self):
+        judge = parse_judge(
+            {"judge": {"agent": "judge", "model": "claude-fable-5-1", "effort": "max"}}
+        )
+        self.assertEqual(judge.agent, "judge")
+        self.assertEqual(judge.model, "claude-fable-5-1")
+        self.assertEqual(judge.effort, "max")
+
+    def test_an_absent_block_is_none(self):
+        self.assertIsNone(parse_judge({"schema_version": 1}))
+
+    def test_a_model_taking_no_effort_flag_omits_it(self):
+        # claude-haiku-4-5 accepts no --effort, so a tier must be able to
+        # name a model and no level without failing validation.
+        judge = parse_judge({"judge": {"agent": "judge", "model": "claude-haiku-4-5"}})
+        self.assertEqual(judge.effort, "")
+
+    def test_an_unknown_effort_is_refused(self):
+        with self.assertRaises(ConfigError) as caught:
+            parse_judge({"judge": {"agent": "j", "model": "m", "effort": "turbo"}})
+        self.assertIn("judge.effort", str(caught.exception))
+
+    def test_a_missing_agent_is_refused(self):
+        with self.assertRaises(ConfigError) as caught:
+            parse_judge({"judge": {"model": "m"}})
+        self.assertIn("judge.agent", str(caught.exception))
+
+    def test_a_non_object_block_is_refused(self):
+        with self.assertRaises(ConfigError) as caught:
+            parse_judge({"judge": ["judge"]})
+        self.assertIn("`judge` is a JSON list", str(caught.exception))
+
+    def test_the_shipped_example_pins_the_judge(self):
+        judge = parse_judge(_example_config())
+        self.assertEqual(judge.agent, "judge")
+        self.assertEqual(judge.effort, "max")
+
+
+class WindowGroupTest(unittest.TestCase):
+    """`window_group` links workers that draw on one usage window."""
+
+    def test_a_declared_group_is_carried_onto_the_agent(self):
+        agents = parse_config(_agent_payload(window_group="claude-max-weekly"))
+        self.assertEqual(agents[0].window_group, "claude-max-weekly")
+
+    def test_an_undeclared_group_is_empty(self):
+        agents = parse_config(_agent_payload())
+        self.assertEqual(agents[0].window_group, "")
+
+    def test_a_non_string_group_is_refused(self):
+        with self.assertRaises(ConfigError) as caught:
+            parse_config(_agent_payload(window_group=["pool"]))
+        self.assertIn("window_group", str(caught.exception))
+
+    def test_the_shipped_example_shares_one_window(self):
+        agents = parse_config(_example_config())
+        groups = {agent.name: agent.window_group for agent in agents}
+        self.assertTrue(groups["judge"])
+        self.assertEqual(groups["claude"], groups["judge"])
+        self.assertEqual(groups["codex"], "")
 
 
 if __name__ == "__main__":

@@ -381,25 +381,30 @@ Step 12.
 1. Compose the brief from `templates/brief-judge.md` through Step 5: the
    dispute, both positions with report paths, the governing rule, the tree.
 2. Read-only — skip Step 6. No plan step — pass the mapping inline.
-3. Dispatch from its own config, under Step 8's outcome contract exactly
-   (scoped to `judge` alone):
+3. Dispatch under Step 8's outcome contract exactly, scoped to `judge`
+   alone. The worker is the one the `judge` block pins, and it is measured
+   and planned from the same `config.json` as every other seat:
 
    ```bash
    .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/teamlead.sh apply \
-     --config <judge-config-path> \
      --assignments '{"judge":"judge"}' \
      --brief judge=<round>-judge.md \
      --common <path-to-COMMON.md> \
      --task <round>
    ```
-
-   `<judge-config-path>`: the operator's copy of `config.example-judge.json`.
 4. Wait with Step 9's `wait-report.sh judge <report-path>`.
 5. Its `RULING:` line binds the round. Only the operator overrides it.
+
+`RULING: blocked` — the judge declined to rule. Stop the round and put its
+named question to the operator; do not dispatch a second judge and do not
+rule in its place.
 
 `ACTION:` with no branch change — proceed to Step 12. `ACTION:` that changes
 the branch — implement it, return to Step 3, and hold at Step 10 until its
 four conditions hold again for the resulting tip.
+
+The judge worker's window is exhausted — halt the round and report it. There
+is no substitute judge.
 
 ## Step 12 — Release the Pull Request
 

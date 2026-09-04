@@ -505,5 +505,102 @@ class NoDuplicateAgentTest(unittest.TestCase):
         )
 
 
+def pooled_snapshot(groups, **headrooms):
+    """A snapshot whose agents declare shared usage windows.
+
+    `groups` maps an agent name to the `window_group` it declares; an agent
+    absent from it has a window of its own.
+    """
+    payload = snapshot(**headrooms)
+    for name, record in payload["agents"].items():
+        if name in groups:
+            record["window_group"] = groups[name]
+    return payload
+
+
+class SharedWindowTest(unittest.TestCase):
+    """Two workers on one subscription draw on one window.
+
+    The judge worker runs the same Claude account as `claude`, so a seat's
+    cost has to reduce what its pool-mates have left. Modelled as independent
+    headrooms, the planner reads one window as two and over-commits it.
+    """
+
+    def test_a_seat_charges_every_worker_sharing_its_window(self):
+        payload = pooled_snapshot(
+            {"claude": "pool", "judge": "pool"},
+            claude=75,
+            judge=75,
+            codex=70,
+            grok=60,
+        )
+        result = plan(
+            ["developer", "judge"], payload, warn=lambda message: None, judge_agent="judge"
+        )
+        # judge fills first (15.0, the heaviest seat) and spends the pool down
+        # to 60, which puts codex at 70 ahead of claude for the developer seat.
+        self.assertEqual(result["assignments"]["judge"], "judge")
+        self.assertEqual(result["assignments"]["developer"], "codex")
+
+    def test_unlinked_workers_keep_independent_headroom(self):
+        payload = snapshot(claude=75, judge=75, codex=70, grok=60)
+        result = plan(
+            ["developer", "judge"], payload, warn=lambda message: None, judge_agent="judge"
+        )
+        self.assertEqual(result["assignments"]["developer"], "claude")
+
+    def test_an_agent_declaring_no_group_is_never_charged(self):
+        payload = pooled_snapshot(
+            {"claude": "pool", "judge": "pool"}, claude=90, judge=90, codex=50, grok=40
+        )
+        result = plan(
+            ["developer", "tester", "judge"],
+            payload,
+            warn=lambda message: None,
+            judge_agent="judge",
+        )
+        # codex holds a window of its own, so the judge round never touches it.
+        self.assertEqual(result["assignments"]["tester"], "codex")
+
+
+class PinnedJudgeSeatTest(unittest.TestCase):
+    """The planner does not choose who judges."""
+
+    def test_the_judge_seat_goes_to_the_pinned_worker(self):
+        payload = snapshot(claude=99, judge=10, codex=80, grok=70)
+        result = plan(
+            ["developer", "judge"], payload, warn=lambda message: None, judge_agent="judge"
+        )
+        # Lowest headroom on the board still holds the seat: it is pinned.
+        self.assertEqual(result["assignments"]["judge"], "judge")
+
+    def test_the_pinned_worker_holds_no_other_seat(self):
+        payload = snapshot(claude=10, judge=99, codex=20, grok=30)
+        result = plan(ROLES, payload, warn=lambda message: None, judge_agent="judge")
+        self.assertNotIn("judge", result["assignments"].values())
+
+    def test_a_pinned_worker_absent_from_the_snapshot_is_refused(self):
+        payload = snapshot(claude=80, codex=70)
+        with self.assertRaises(PlanError) as caught:
+            plan(["judge"], payload, warn=lambda message: None, judge_agent="judge")
+        self.assertIn("pinned to worker 'judge'", str(caught.exception))
+
+    def test_no_pin_leaves_the_planner_ranking_as_before(self):
+        payload = snapshot(claude=90, codex=70, grok=60)
+        result = plan(ROLES, payload, warn=lambda message: None)
+        self.assertEqual(result["assignments"]["developer"], "claude")
+
+
+class JudgeCostTest(unittest.TestCase):
+    """The judge is weighed explicitly, never by the unweighed-role default."""
+
+    def test_the_judge_outweighs_every_other_seat(self):
+        from teamlead.planner import DEFAULT_ROLE_COST, DEFAULT_ROLE_COSTS
+
+        self.assertEqual(DEFAULT_ROLE_COSTS["judge"], 15.0)
+        self.assertGreater(DEFAULT_ROLE_COSTS["judge"], DEFAULT_ROLE_COSTS["developer"])
+        self.assertNotEqual(DEFAULT_ROLE_COSTS["judge"], DEFAULT_ROLE_COST)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -19,9 +19,17 @@ description: Running a multi-agent team — headroom-driven role rotation, one w
 - A fifth seat, `judge`, sits outside the three-role rotation on the most capable model available, never assigned developer, reviewer, or tester
 - The lead dispatches the judge only for one of four triggers: a contested reviewer or tester verdict, a lead override of a blocking finding, a fix loop that reached its fifth round, or a bot finding the team disagrees with
 - The judge is read-only: it never edits a repository file, never runs a mutating git or `gh` command, never posts to GitHub, never dispatches a subagent — its only output is its report file
-- The judge reads both positions and the governing rule, verifies the disputed facts against the tree, and returns `RULING: uphold A | uphold B | amend — <line>` with numbered reasons, an `ACTION:` naming the minimal step, and an `UNVERIFIED:` line
+- The judge reads both positions and the governing rule, verifies the disputed facts against the tree, and returns `RULING: uphold A | uphold B | amend — <line> | blocked — <question>` with numbered reasons, an `ACTION:` naming the minimal step, and an `UNVERIFIED:` line
 - The judge's ruling binds the round; only the operator overrides it
-- The judge is not load-balanced — it lives in its own balancer config, dispatched directly, never through `measure`/`plan`
+- `blocked` is the judge declining to rule; the round stops and the named question goes to the operator
+- The judge is declared in `config.json`, measured, and planned like every other seat
+- The judge worker and the `claude` worker authenticate as one Claude subscription and draw on one weekly window
+- `window_group` names the usage window an agent shares with other agents
+- A seat's cost reduces the projected headroom of every worker sharing its `window_group`
+- The `judge` block pins the seat's agent, model, and effort
+- The planner never ranks the judge seat, and never gives the pinned worker another seat
+- No exclusion bars the judge from a dispute involving its own model
+- Quota exhaustion on the judge worker halts the round — no substitution, no fallback to another vendor's flagship, no degraded ruling
 - The lead runs on the strongest generally-available model at high effort; the most capable model is reserved for the judge
 
 ## Writers and Checkouts

@@ -24,8 +24,19 @@ exemptions, and the guarded one-shot recovery of a stuck composer.
 dispatch. All are documented in
 `skills/herdr-teamlead/references/herdr.md`.
 
-The optional top-level `role_costs` key is the one config entry that is not
-per-agent: `{"<role>": <number>}`, what one round in that seat is expected to
+`window_group` names the usage window an agent shares with other agents: two
+workers authenticating as one subscription declare the same value, `measure`
+copies it onto each record, and `plan` charges a seat's cost against every
+worker in that window. An agent that declares none has a window to itself.
+
+Two top-level config keys are not per-agent. The optional `judge` key pins the
+judge seat: `{"agent": <name>, "model": <id>, "effort": <level>}`, where
+`effort` is one of `low`, `medium`, `high`, `xhigh`, `max`, or absent for a
+model that accepts no effort flag. The planner never ranks that seat and never
+gives the pinned worker another one.
+
+The optional `role_costs` key is the second:
+`{"<role>": <number>}`, what one round in that seat is expected to
 burn out of a worker's remaining headroom percentage. It overrides the
 planner's own weights one role at a time, and a role it omits keeps the
 default (`DEFAULT_ROLE_COSTS` in `skills/herdr-teamlead/teamlead/planner.py`).
