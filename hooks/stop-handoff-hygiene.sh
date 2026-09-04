@@ -133,26 +133,31 @@ main() {
   # (rules/agent-team-operation.md Writers and Checkouts). Blocking a worker's
   # stop over leftovers it is forbidden to remove would force it to either
   # disobey the rule or fail to hand off. The lead's own teardown runs at the
-  # end of its round; this hook stays out of a worker's way.
-  if is_herdr_worker; then
-    return 0
+  # end of its round.
+  #
+  # ONLY that cleanup is suppressed. The diagnostics gate and the dirty-tree
+  # report apply to a worker's own changed files, which are its to fix
+  # (rules/language-diagnostics.md Gate It Deterministically) -- skipping them
+  # here would let a worker hand off findings nobody else is going to see.
+  if ! is_herdr_worker; then
+    collect_gone_branches
+    collect_worktrees
+
+    # Partition gone branches: those checked out in a linked worktree are
+    # reported as orphaned worktrees (remove the worktree); the rest as
+    # leftover branches.
+    local b p i
+    for b in "${gone_branches[@]}"; do
+      in_list "$b" "${wt_branches[@]}" || leftover+=("$b")
+    done
+    for (( i = 0; i < ${#wt_paths[@]}; i++ )); do
+      b="${wt_branches[$i]}"; p="${wt_paths[$i]}"
+      if in_list "$b" "${gone_branches[@]}"; then orphaned+=("${p} (branch ${b})"); fi
+    done
+
+    build_branch_findings
   fi
 
-  collect_gone_branches
-  collect_worktrees
-
-  # Partition gone branches: those checked out in a linked worktree are reported
-  # as orphaned worktrees (remove the worktree); the rest as leftover branches.
-  local b p i
-  for b in "${gone_branches[@]}"; do
-    in_list "$b" "${wt_branches[@]}" || leftover+=("$b")
-  done
-  for (( i = 0; i < ${#wt_paths[@]}; i++ )); do
-    b="${wt_branches[$i]}"; p="${wt_paths[$i]}"
-    if in_list "$b" "${gone_branches[@]}"; then orphaned+=("${p} (branch ${b})"); fi
-  done
-
-  build_branch_findings
   run_changed_diagnostics
   check_dirty_tree
 

@@ -17,6 +17,7 @@
 set -uo pipefail
 
 die() { echo "fatal: $*" >&2; exit 2; }
+warn_cleanup() { echo "warn: could not remove $1" >&2; }
 
 PASS=0
 FAIL=0
@@ -66,21 +67,43 @@ main() {
     *) die "grep failed counting invocations in ${skill} (exit ${rc})" ;;
   esac
 
-  # 3. The HERDR_ENV gate precedes Step 1.
-  local gate_line step1_line
-  gate_line="$(first_match_line 'HERDR_ENV' "$skill")"
-  step1_line="$(first_match_line '^## Step 1 ' "$skill")"
-  if [[ -z "$gate_line" || -z "$step1_line" ]]; then
-    fail "could not locate the HERDR_ENV gate or the Step 1 heading"
-  elif (( gate_line < step1_line )); then pass
-  else fail "the HERDR_ENV gate (line ${gate_line}) comes after Step 1 (line ${step1_line})"; fi
+  # Checks 3 and 4 read the BODY only. Matching the whole file would find
+  # HERDR_ENV in the frontmatter `description`, so deleting the entire gate
+  # section would still pass -- an assertion that survives the removal of the
+  # thing it asserts is not a test (rules/testing-standards.md Assertions).
+  local body
+  body="$(awk 'BEGIN{n=0} /^---[[:space:]]*$/{n++; next} n>=2' "$skill")" \
+    || die "could not strip the frontmatter from ${skill}"
+  [[ -n "$body" ]] || die "${skill} has no body after its frontmatter"
 
-  # 4. The gate turns a standalone agent away. The prose is hard-wrapped, so
-  # the phrase is matched against a whitespace-flattened copy.
-  local flat
-  flat="$(tr '\n' ' ' < "$skill" | tr -s '[:space:]' ' ')" || die "could not read ${skill}"
+  local body_file="${TMPDIR:-/tmp}/skill-body.$$.md"
+  printf '%s\n' "$body" > "$body_file" || die "could not stage the skill body"
+
+  # 3. The standalone exit is stated in the body, before the first step.
+  local gate_line step1_line
+  gate_line="$(first_match_line 'HERDR_ENV' "$body_file")"
+  step1_line="$(first_match_line '^## Step 1 ' "$body_file")"
+  if [[ -z "$gate_line" ]]; then
+    fail "the body states no HERDR_ENV gate — the frontmatter alone does not gate execution"
+  elif [[ -z "$step1_line" ]]; then
+    fail "could not locate the Step 1 heading in the body"
+  elif (( gate_line < step1_line )); then pass
+  else fail "the HERDR_ENV gate (body line ${gate_line}) comes after Step 1 (body line ${step1_line})"; fi
+
+  # 4. That gate tells a standalone agent to stop, and says so before the
+  # first step rather than anywhere in the file.
+  local head flat
+  if [[ -n "$step1_line" ]]; then
+    head="$(head -n "$step1_line" "$body_file")" || die "could not read the body preamble"
+  else
+    head=""
+  fi
+  flat="$(printf '%s' "$head" | tr '\n' ' ' | tr -s '[:space:]' ' ' \
+    | tr '[:upper:]' '[:lower:]')" || die "could not flatten the preamble"
   if [[ "$flat" == *"this skill does not apply"* ]]; then pass
-  else fail "the gate does not tell a non-Herdr agent the skill does not apply"; fi
+  else fail "nothing before Step 1 tells a non-Herdr agent the skill does not apply"; fi
+
+  rm -f "$body_file" || warn_cleanup "$body_file"
 
   echo
   echo "results: ${PASS} pass, ${FAIL} fail"
