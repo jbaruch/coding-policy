@@ -445,7 +445,7 @@ Run:
 
 ```bash
 bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/start-judge-worker.sh \
-  <step-13-plan-file> <pane> [kind]
+  <step-13-plan-file> <pane> [claude|codex]
 ```
 
 It reads the tier from the plan's `judge` object, starts the worker on it,

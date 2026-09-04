@@ -35,7 +35,10 @@
 #                         the first matching line is read.
 #  18. Alternation    -> `^A|B` anchors only A; the whole expression must be
 #                         anchored, so B on a transcript row is not a banner.
-#  19. No set -u abort -> no case aborts on an unbound variable.
+#  19. Codex kind     -> codex gets `-m` and `-c model_reasoning_effort=`,
+#                         never Claude's `--model`/`--effort`.
+#  20. Unknown kind   -> refused (exit 2) rather than started untiered.
+#  21. No set -u abort -> no case aborts on an unbound variable.
 #
 # Run: bash skills/herdr-teamlead/tests/test_start_judge_worker.sh
 set -uo pipefail
@@ -59,7 +62,10 @@ fail() { FAIL=$((FAIL+1)); echo "  ✗ FAIL: $1" >&2; }
 # The fake herdr records its argv and replays a banner from $FAKE_BANNER.
 cat > "${TMP}/herdr" <<'FAKE' || die "could not write the fake herdr"
 #!/usr/bin/env bash
-set -uo pipefail
+# Full `-e`: this fake runs no aggregate checks, so the carve-out that lets a
+# harness drop it does not apply. A failed argv-log write must not be reported
+# as a successful herdr call.
+set -euo pipefail
 printf '%s\n' "$*" >> "${FAKE_ARGV_LOG}"
 case "${1:-} ${2:-}" in
   "agent start") exit "${FAKE_START_RC:-0}" ;;
@@ -79,10 +85,14 @@ write_plan() { # <path> <judge-json>
     || die "could not write the plan at $1"
 }
 
-run_sut() { # <plan> <pane> ; sets OUT/ERR/RC
+run_sut() { # <plan> <pane> [kind] ; sets OUT/ERR/RC
   export FAKE_ARGV_LOG="${TMP}/argv.log"
   : > "$FAKE_ARGV_LOG" || die "could not truncate the argv log"
-  OUT="$(bash "$SUT" "$1" "$2" 2>"${TMP}/err")"
+  if [[ -n "${3:-}" ]]; then
+    OUT="$(bash "$SUT" "$1" "$2" "$3" 2>"${TMP}/err")"
+  else
+    OUT="$(bash "$SUT" "$1" "$2" 2>"${TMP}/err")"
+  fi
   RC=$?
   ERR="$(cat "${TMP}/err")"
   return 0
@@ -255,6 +265,35 @@ check_no_abort "18"
 FAKE_BANNER='Codex · claude-fable-5-1 · effort max' run_sut "${TMP}/plan-alt.json" "w1:p1"
 if (( RC == 0 )); then pass; else fail "18b: an anchored alternative was refused (rc ${RC}) ${ERR}"; fi
 check_no_abort "18b"
+
+# 19. Codex spells the tier differently; Claude's flags would start it on its
+# default model with none of them applied.
+FAKE_BANNER='Codex · claude-fable-5-1 · effort max' run_sut "${TMP}/plan.json" "w1:p1" codex
+grep_rc=0
+start_line="$(grep "agent start" "$FAKE_ARGV_LOG")" || grep_rc=$?
+case "$grep_rc" in
+  0)
+    case "$start_line" in
+      *"-- -m claude-fable-5-1 -c model_reasoning_effort=max"*) pass ;;
+      *) fail "19: codex argv is wrong: ${start_line}" ;;
+    esac
+    ;;
+  1) fail "19: no \`agent start\` line for the codex kind" ;;
+  *) fail "19: could not read the argv log (grep exit ${grep_rc})" ;;
+esac
+check_no_abort "19"
+
+# 20. A kind with no known flag spelling is refused, never started untiered.
+run_sut "${TMP}/plan.json" "w1:p1" gemini
+if (( RC == 2 )); then pass; else fail "20: expected exit 2 for an unknown kind, got ${RC}"; fi
+grep_rc=0
+grep -q "agent start" "$FAKE_ARGV_LOG" || grep_rc=$?
+case "$grep_rc" in
+  0) fail "20: started a worker whose tier flags are unknown" ;;
+  1) pass ;;
+  *) fail "20: could not read the argv log (grep exit ${grep_rc})" ;;
+esac
+check_no_abort "20"
 
 echo
 echo "results: ${PASS} pass, ${FAIL} fail"

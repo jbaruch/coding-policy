@@ -24,7 +24,10 @@
 #   argv  : <plan-file> <pane> [kind]
 #           plan-file  a `teamlead plan` document carrying a `judge` object.
 #           pane       the herdr pane id to start the worker in.
-#           kind       herdr agent kind; defaults to claude.
+#           kind       herdr agent kind; claude or codex, default claude.
+#                      Each spells the tier differently and the argv is built
+#                      per kind; an unknown kind is refused rather than
+#                      started untiered.
 #   stdout: one JSON object on exit 0 only —
 #           {"agent":"<n>","model":"<m>","effort":"<e>"|null,
 #            "pane":"<p>","banner_verified":true}
@@ -89,12 +92,26 @@ main() {
   local agent model effort banner_pattern
   IFS=$'\x1f' read -r agent model effort banner_pattern <<<"$tier"
 
-  # Effort is omitted, never passed empty: a model that accepts no effort flag
-  # would take `--effort ''` as a flag with a missing value.
-  local -a flags=(--model "$model")
-  if [[ -n "$effort" ]]; then
-    flags+=(--effort "$effort")
-  fi
+  # Each harness spells the tier differently, and passing Claude's flags to
+  # Codex would start it on its default model with none of them applied --
+  # a dispatch that looks configured and is not. Effort is omitted rather than
+  # passed empty: a model that accepts no effort flag would read `--effort ''`
+  # as a flag with a missing value.
+  local -a flags=()
+  case "$kind" in
+    claude)
+      flags=(--model "$model")
+      [[ -n "$effort" ]] && flags+=(--effort "$effort")
+      ;;
+    codex)
+      flags=(-m "$model")
+      [[ -n "$effort" ]] && flags+=(-c "model_reasoning_effort=${effort}")
+      ;;
+    *)
+      warn "kind '${kind}' has no known tier flags — this script builds launch arguments for claude and codex; add its flag spelling here rather than starting it untiered"
+      return 2
+      ;;
+  esac
 
   # herdr's own diagnostic is captured rather than discarded: it names why the
   # start failed, and this script's message cannot reconstruct that.
