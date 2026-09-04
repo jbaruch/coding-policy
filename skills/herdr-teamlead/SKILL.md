@@ -484,10 +484,13 @@ report lands.
 
 The `RULING:` line binds the round. Only the operator overrides it.
 
-- **`uphold A` / `uphold B` / `amend`** — carry out the `ACTION:` line.
-  `ACTION:` with no branch change — proceed to Step 18. `ACTION:` that
-  changes the branch — implement it, return to Step 3, and hold at Step 10
-  until its four conditions hold again for the resulting tip.
+- **`uphold A` / `uphold B` / `amend`, `ACTION:` changing no branch content**
+  — record the ruling and proceed to Step 18.
+- **`uphold A` / `uphold B` / `amend`, `ACTION:` changing the branch** — the
+  lead never edits the branch itself. Compose a fresh developer brief through
+  Step 5 carrying the judge's `ACTION:` line verbatim as the task, dispatch it
+  from Step 8, and hold at Step 10 until its four conditions hold again for
+  the resulting tip.
 - **`blocked`** — the judge declined to rule. Stop the round and put its
   named question to the operator. Do not dispatch a second judge and do not
   rule in its place. Finish here.
