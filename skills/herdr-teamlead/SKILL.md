@@ -5,8 +5,8 @@ description: >
   (https://herdr.dev): measure each worker's subscription headroom, assign the
   developer / tester / reviewer roles to the workers that can afford them,
   clear each worker's context and send it a fresh role brief, wait for the
-  report files, gate the round, dispatch a non-rotating judge seat on a
-  disputed ruling, and hand the merge to the `release` skill. Use when the
+  report files, gate the round, dispatch a non-rotating judge on a dispute,
+  and hand the merge to the `release` skill. Use when the
   user wants to run a team round, dispatch a task to the agent team, assign
   roles to the Herdr agents, load-balance the agents by usage or headroom,
   brief the developer / reviewer / tester, or collect the workers' reports.
@@ -350,8 +350,8 @@ Classify each finding blocking or advisory per `rules/review-severity.md`.
 
 - **Any blocking finding** — run another round: return to Step 3 with fresh
   briefs naming the findings in full. Say what changed from the prior round. A
-  fifth return, a contested verdict, or a lead override of a blocking finding
-  is a Step 11 trigger first.
+  fifth return, a contested verdict, or a lead override is a Step 11 trigger
+  first.
 - **Advisory findings only** — record them in the round log and fold them into
   the next round that is already happening. Never spend a round on a lone
   advisory.
@@ -381,7 +381,8 @@ Step 12.
 1. Compose the brief from `templates/brief-judge.md` through Step 5: the
    dispute, both positions with report paths, the governing rule, the tree.
 2. Read-only — skip Step 6.
-3. Dispatch from its own config:
+3. Dispatch from its own config, under Step 8's outcome contract exactly
+   (scoped to `judge` alone):
 
    ```bash
    .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/teamlead.sh apply \
