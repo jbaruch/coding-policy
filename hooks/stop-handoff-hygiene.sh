@@ -58,6 +58,36 @@ in_list() { # <needle> <haystack...>
   return 1
 }
 
+# Is this session a Herdr WORKER rather than the lead?
+#
+# The team rules reserve the shared checkout and every worktree operation for
+# the lead: a worker "runs no git command against the shared checkout,
+# mutating or otherwise" and "never creates, moves, or removes a worktree"
+# (rules/agent-team-operation.md Writers and Checkouts). A hook that tells a
+# worker to fast-forward `main` or remove a worktree is instructing it to
+# break that rule -- which is exactly what happened in a live round, where the
+# worker reported the contradiction and then obeyed the hook.
+#
+# Herdr exports no lead/worker flag, so the role is derived from where the
+# session sits: the lead works in the shared checkout, every worker works in a
+# linked worktree. In a linked worktree `--git-dir` and `--git-common-dir`
+# resolve differently; in the main checkout they are the same.
+#
+# 0 = a Herdr worker (suppress lead-only advice), 1 = the lead, a standalone
+# agent, or anything this cannot determine. Fail open: a hook that goes silent
+# because a git command failed would be worse than one that speaks up.
+is_herdr_worker() {
+  [[ -n "${HERDR_ENV:-}" ]] || return 1
+
+  local git_dir common_dir rc=0
+  git_dir="$(git rev-parse --absolute-git-dir 2>/dev/null)" || rc=$?
+  (( rc == 0 )) || return 1
+  common_dir="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || rc=$?
+  (( rc == 0 )) || return 1
+
+  [[ "$git_dir" != "$common_dir" ]]
+}
+
 main() {
   local input active inside
   local -a gone_branches=() wt_paths=() wt_branches=() leftover=() orphaned=() changed=()
@@ -91,6 +121,15 @@ main() {
     return 0
   fi
   [[ "$inside" == "true" ]] || return 0
+
+  # Branch and worktree cleanup is the lead's, never a worker's
+  # (rules/agent-team-operation.md Writers and Checkouts). Blocking a worker's
+  # stop over leftovers it is forbidden to remove would force it to either
+  # disobey the rule or fail to hand off. The lead's own teardown runs at the
+  # end of its round; this hook stays out of a worker's way.
+  if is_herdr_worker; then
+    return 0
+  fi
 
   collect_gone_branches
   collect_worktrees

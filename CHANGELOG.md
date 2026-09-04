@@ -1,5 +1,12 @@
 # Changelog
 
+### Fixed
+
+- **Standalone and Herdr are named as two modes, and `HERDR_ENV` tells them apart.** `rules/agent-team-operation.md` is `alwaysApply: true`, so every agent in every consumer repo loaded the whole team machinery — roles, briefs, report files, worktree-per-writer, the judge seat — whether or not a Herdr session was around it. Solo agents on isolated tasks reached for `herdr-teamlead`, ran `roster.sh`, got `not running inside Herdr (HERDR_ENV='')`, and reasoned their way back out mid-task. The rule now opens with a Two Modes section stating that everything below governs a Herdr round only, and the skill's entry gate names both modes and turns a standalone agent away by reading rather than by running a script and interpreting its error.
+- **The hygiene hooks no longer tell a worker to do the lead's job.** `check-git-sync.sh` told any session to fast-forward the shared checkout and `stop-handoff-hygiene.sh` blocked any stop over an orphaned worktree — both reserved for the lead by Writers and Checkouts. In a live round a worker reported the contradiction and then obeyed the hook. Herdr exports no lead/worker flag, so the role is derived from where the session sits: the lead is in the shared checkout, a worker is in a linked worktree, and `--git-dir` differs from `--git-common-dir` only in the latter. A worker now gets the drift reported without the instruction, and its stop is never blocked over a worktree it may not remove. The lead's own session, in the main checkout, still gets both.
+- **Every script invocation in `SKILL.md` carries a `bash ` prefix.** All ten were bare paths. tessl packaging normalizes plugin files to 0644, so a bare invocation is a permission-denied on every consumer, and `chmod +x` here does not survive publish — `roster.sh` is 0644 in the repo itself. A consumer agent hit exactly this and worked it out by hand. `skills/herdr-teamlead/tests/test_skill_invocations.sh` now fails the build on a bare invocation, a missing `HERDR_ENV` gate, or a gate that no longer turns a standalone agent away, because the failure is invisible from a clone and appears only once installed.
+
+
 ## 0.3.181 — 2026-09-04
 
 ### herdr-teamlead: a fifth, non-rotating judge seat rules on disputed verdicts

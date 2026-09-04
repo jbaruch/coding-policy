@@ -5,6 +5,17 @@ description: Running a multi-agent team — headroom-driven role rotation, one w
 
 # Agent Team Operation
 
+## Two Modes
+
+- **Standalone** — one agent working a task on its own, with no Herdr session around it. `HERDR_ENV` is unset
+- **Herdr team round** — a lead dispatching work across separate Herdr worker panes. `HERDR_ENV` is set
+- Read `HERDR_ENV` to tell the modes apart
+- Never infer the mode from how large or careful the task is
+- **Every section below governs a Herdr team round only**
+- In standalone mode none of it applies — no roles, no rotation, no briefs, no report files, no worktree-per-writer, no judge seat
+- A standalone agent does the task directly, and never simulates the roles, the briefs, or the reports
+- Standalone work is still governed by every other rule in this plugin
+
 ## Roles and Rotation
 
 - A team round runs three roles: developer, reviewer/architect, tester
@@ -33,6 +44,7 @@ description: Running a multi-agent team — headroom-driven role rotation, one w
 - A read-only role that writes no repository content needs no worktree
 - A worker never creates, moves, or removes a worktree
 - A worker runs no git command against the shared checkout, mutating or otherwise
+- A hook or tool that instructs a worker to sync the shared checkout or remove a worktree is reporting, never directing — the worker names the drift in its report and does nothing about it
 - A worker's repository writes happen only in the worktree its brief names, under `~/.worktrees/`
 - A worker's report, plan, and patch artifacts go only under the reports directory its brief names
 - A worker writes nowhere else
