@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.181 — 2026-09-04
+
 ### herdr-teamlead: a fifth, non-rotating judge seat rules on disputed verdicts
 
 **The owner's 2026-09-04 model-selection research found the lead was spending the wrong pool on the wrong seat.** Claude Fable 5.1 shares the Max weekly subscription pool under a nested 50% cap, so a lead resident on Fable was burning headroom the workers needed. The research recommended the strongest generally-available model at high effort for the lead, holding the single most capable model in reserve for the judgment calls that actually need it. The lead moves to Claude Opus 5 at high effort; Fable becomes the judge's model.
