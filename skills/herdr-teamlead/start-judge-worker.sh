@@ -128,15 +128,21 @@ main() {
   # `xhigh`, so a banner reporting a DIFFERENT effort than the one requested
   # would otherwise verify. The same trap applies to model ids that extend one
   # another. Tokens are split on the separators these banners use.
+  # Anchor the WHOLE expression, not just its first branch. `^A|B` anchors
+  # only `A`, so a config passing the leading-caret check could still match
+  # `B` anywhere on a transcript row. Stripping the caret and wrapping the
+  # rest binds every alternative to the start of the line.
+  local anchored="^(${banner_pattern#^})"
+
   local line banner_seen=0 found_model=0 verified=0 grep_rc tok
   while IFS= read -r line; do
     grep_rc=0
-    grep -Eq -- "$banner_pattern" <<<"$line" || grep_rc=$?
+    grep -Eq -- "$anchored" <<<"$line" || grep_rc=$?
     case "$grep_rc" in
       0) ;;
       1) continue ;;
       *)
-        warn "banner pattern '${banner_pattern}' could not be evaluated (grep exit ${grep_rc}) — fix judge.banner_pattern and re-run this script"
+        warn "banner pattern '${anchored}' could not be evaluated (grep exit ${grep_rc}) — fix judge.banner_pattern and re-run this script"
         return 2
         ;;
     esac
@@ -161,7 +167,7 @@ main() {
 
   if (( verified == 0 )); then
     if (( banner_seen == 0 )); then
-      warn "pane ${pane} showed no line matching the banner pattern '${banner_pattern}' in its first ${JUDGE_BANNER_LINES} lines — the worker may not have started; read the pane, or fix judge.banner_pattern if the harness changed its banner"
+      warn "pane ${pane} showed no line matching the banner pattern '${anchored}' in its first ${JUDGE_BANNER_LINES} lines — the worker may not have started; read the pane, or fix judge.banner_pattern if the harness changed its banner"
     elif (( found_model == 1 )); then
       warn "pane ${pane}'s startup banner named model '${model}' but not effort '${effort}' — setting the model alone resets effort to that model's default, so the dispatch is invalid"
     else

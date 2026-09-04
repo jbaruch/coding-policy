@@ -33,13 +33,16 @@
 #  17. Transcript row  -> a prompt quoting the pattern AND both tier tokens
 #                         does not verify: the pattern is anchored and only
 #                         the first matching line is read.
-#  18. No set -u abort -> no case aborts on an unbound variable.
+#  18. Alternation    -> `^A|B` anchors only A; the whole expression must be
+#                         anchored, so B on a transcript row is not a banner.
+#  19. No set -u abort -> no case aborts on an unbound variable.
 #
 # Run: bash skills/herdr-teamlead/tests/test_start_judge_worker.sh
 set -uo pipefail
 
 die() { echo "fatal: $*" >&2; exit 2; }
 
+main() {
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)" || die "could not resolve the skill dir"
 SUT="${SCRIPT_DIR}/start-judge-worker.sh"
 [[ -r "$SUT" ]] || die "start-judge-worker.sh not found at $SUT"
@@ -241,6 +244,24 @@ if (( RC == 4 )); then pass; else fail "17: a transcript row verified the tier (
 if [[ -z "$OUT" ]]; then pass; else fail "17: emitted stdout for a transcript row: ${OUT}"; fi
 check_no_abort "17"
 
+# 18. `^Claude Code|Codex` anchors only the first branch. The second must not
+# match mid-line, or a transcript row becomes tier proof again.
+write_plan "${TMP}/plan-alt.json" '{"agent":"judge","model":"claude-fable-5-1","effort":"max","banner_pattern":"^Claude Code|Codex"}'
+FAKE_BANNER='> explain Codex claude-fable-5-1 max' run_sut "${TMP}/plan-alt.json" "w1:p1"
+if (( RC == 4 )); then pass; else fail "18: an unanchored alternative verified a transcript row (rc ${RC})"; fi
+check_no_abort "18"
+
+# 18b. The same pattern still verifies a real banner on its second branch.
+FAKE_BANNER='Codex · claude-fable-5-1 · effort max' run_sut "${TMP}/plan-alt.json" "w1:p1"
+if (( RC == 0 )); then pass; else fail "18b: an anchored alternative was refused (rc ${RC}) ${ERR}"; fi
+check_no_abort "18b"
+
 echo
 echo "results: ${PASS} pass, ${FAIL} fail"
 (( FAIL == 0 ))
+}
+
+# Entry-point guard (rules/file-hygiene.md Standalone Scripts).
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  main "$@"
+fi
