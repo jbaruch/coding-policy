@@ -35,7 +35,11 @@ from .herdr import BUSY_STATES, DEFAULT_MARKER_TIMEOUT_MS, READY_STATES, format_
 from .parsers import headroom_pct, parse_usage
 from .probe import resolve_status, stderr_warn
 
-MEASURE_SCHEMA_VERSION = 1
+#: Snapshot document version. 2 adds `window_group` to every agent record;
+#: a version-1 snapshot carries none, and readers treat its absence as "this
+#: agent has a window to itself" -- an additive change, so an old snapshot
+#: still plans rather than being migrated (rules/stateful-artifacts.md).
+MEASURE_SCHEMA_VERSION = 2
 
 #: Lines to pull when reading a usage report. Always passed: the read that
 #: works by hand names a line count explicitly, and relying on herdr's default

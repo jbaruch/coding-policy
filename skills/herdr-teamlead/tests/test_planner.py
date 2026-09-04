@@ -693,5 +693,28 @@ class DivergentWindowReadingTest(unittest.TestCase):
         self.assertEqual(result["assignments"]["judge"], "judge")
 
 
+class LegacySnapshotTest(unittest.TestCase):
+    """A version-1 snapshot carries no `window_group` and still plans.
+
+    The snapshot bump to 2 is additive: an older document's records simply
+    lack the field, which reads as "this agent has a window of its own". The
+    planner never migrates a snapshot -- it is a measurement, not a ledger.
+    """
+
+    def test_a_version_1_snapshot_plans_without_window_groups(self):
+        payload = snapshot(claude=90, codex=70, grok=60)
+        payload["schema_version"] = 1
+        result = plan(ROLES, payload, warn=lambda message: None)
+        self.assertEqual(result["assignments"]["developer"], "claude")
+
+    def test_a_version_1_snapshot_never_halts_the_judge(self):
+        payload = snapshot(judge=40, codex=70)
+        payload["schema_version"] = 1
+        result = plan(
+            ["judge"], payload, warn=lambda message: None, judge_agent="judge"
+        )
+        self.assertEqual(result["assignments"]["judge"], "judge")
+
+
 if __name__ == "__main__":
     unittest.main()
