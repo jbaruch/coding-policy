@@ -10,7 +10,8 @@
 # stderr: diagnostics. Exit 0: written or identical artifact already present;
 # exit 2: usage, invalid ref, or invalid output path; exit 1: tool/I/O failure.
 # Existing different files and symlinks are never overwritten. Git failures
-# leave no partial artifact. Source this file to load helpers without running.
+# leave no partial artifact. Sourcing defines the helpers and enables strict
+# shell options; only direct execution builds a package.
 set -euo pipefail
 
 review_package_warn() { printf 'review-package: %s\n' "$1" >&2; }

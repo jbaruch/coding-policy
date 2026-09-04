@@ -210,7 +210,7 @@ class ReviewPackageTests(unittest.TestCase):
         self.assertEqual(list(self.output.iterdir()), [])
         self.assertEqual(list(self.output.parent.iterdir()), [self.output])
 
-    def test_sourcing_script_has_no_side_effects(self):
+    def test_sourcing_does_not_build_or_print_a_package(self):
         result = subprocess.run(["bash", "-c", 'source "$1"', "test",
                                  str(SKILL / "review-package.sh")],
                                 cwd=self.root, env=self.env, text=True,
