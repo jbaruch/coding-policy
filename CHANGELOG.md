@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.186 — 2026-09-04
+
 ### Added
 
 - **Live context continuity gates retained fixes.** Assignment records carry the official Herdr integration's native session reference scoped to the pane. Retention compares it with the live API at readiness and again before sending; missing, changed, malformed, or non-native identity refuses the dispatch without resetting its counter. An unchanged pre-clear reference cannot prove a fresh conversation. Ledger validation and dispatch share the fix-round upper bound. This closes PR #338's state-verification finding and the adjacent persisted-counter advisory.
