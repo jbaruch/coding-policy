@@ -322,11 +322,11 @@ def plan(roles, snapshot, counts=None, exclude=None, role_costs=None, snapshot_r
             )
         for role in roles:
             if role == "judge":
-                excluded[role] = tuple(
-                    sorted(name for name in agents if name != judge_agent)
+                excluded[role] = sorted(
+                    name for name in agents if name != judge_agent
                 )
             elif judge_agent in agents and judge_agent not in excluded[role]:
-                excluded[role] = tuple(sorted(set(excluded[role]) | {judge_agent}))
+                excluded[role] = sorted(set(excluded[role]) | {judge_agent})
     for role in roles:
         if all(name in excluded[role] for name in agents):
             raise PlanError(

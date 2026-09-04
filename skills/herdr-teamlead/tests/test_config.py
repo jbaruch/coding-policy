@@ -405,6 +405,7 @@ class ParseJudgeTest(unittest.TestCase):
         judge = parse_judge(
             {"judge": {"agent": "judge", "model": "claude-fable-5-1", "effort": "max"}}
         )
+        assert judge is not None
         self.assertEqual(judge.agent, "judge")
         self.assertEqual(judge.model, "claude-fable-5-1")
         self.assertEqual(judge.effort, "max")
@@ -416,6 +417,7 @@ class ParseJudgeTest(unittest.TestCase):
         # claude-haiku-4-5 accepts no --effort, so a tier must be able to
         # name a model and no level without failing validation.
         judge = parse_judge({"judge": {"agent": "judge", "model": "claude-haiku-4-5"}})
+        assert judge is not None
         self.assertEqual(judge.effort, "")
 
     def test_an_unknown_effort_is_refused(self):
@@ -435,6 +437,7 @@ class ParseJudgeTest(unittest.TestCase):
 
     def test_the_shipped_example_pins_the_judge(self):
         judge = parse_judge(_example_config())
+        assert judge is not None
         self.assertEqual(judge.agent, "judge")
         self.assertEqual(judge.effort, "max")
 
