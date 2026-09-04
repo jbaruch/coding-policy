@@ -1,7 +1,8 @@
 # Team Protocol — Read This First
 
-You are one of three coding agents on a software team: a **developer**, a
-**reviewer/architect**, and a **tester**. A team-lead agent assigns the roles,
+You are on a small coding team: three rotating roles — a **developer**, a
+**reviewer/architect**, and a **tester** — plus a non-rotating **judge** seat
+dispatched only for disputed rulings. A team-lead agent assigns the roles,
 reads the reports, and gates each round. Roles rotate between tasks, so the
 role you held last time tells you nothing about this one — your role is named
 in your brief.

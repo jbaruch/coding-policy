@@ -1,5 +1,13 @@
 # Changelog
 
+### herdr-teamlead: a fifth, non-rotating judge seat rules on disputed verdicts
+
+**The owner's 2026-09-04 model-selection research found the lead was spending the wrong pool on the wrong seat.** Claude Fable 5.1 shares the Max weekly subscription pool under a nested 50% cap, so a lead resident on Fable was burning headroom the workers needed. The research recommended the strongest generally-available model at high effort for the lead, holding the single most capable model in reserve for the judgment calls that actually need it. The lead moves to Claude Opus 5 at high effort; Fable becomes the judge's model.
+
+**The judge is a fifth seat, dispatched only when the team cannot agree.** Four triggers: a contested reviewer or tester verdict, a lead override of a blocking finding, a fix loop that reached its fifth round, and a bot finding the team disagrees with. It reads both positions and the governing rule, verifies the disputed facts against the tree itself rather than taking either side's word for them, and returns `RULING: uphold A | uphold B | amend — <line>` with numbered reasons, an `ACTION:` naming the minimal fix, and an `UNVERIFIED:` line for anything it could not check. The ruling binds the round; only the operator overrides it. It never edits a file, never runs a mutating git or `gh` command, never posts to GitHub, never dispatches a subagent — its only output is its report.
+
+**It is not load-balanced — the same own-config shape the operator already runs the read-only critic seat on, outside this repo.** The judge lives in its own balancer config (`config.example-judge.json`), dispatched directly with `teamlead.sh apply --config`, never through `measure`/`plan` on the main roster. New `templates/brief-judge.md` gives it a read-only brief naming the dispute, both positions with their report paths, the governing rule, and the tree to inspect. `rules/agent-team-operation.md` gained a Judge Seat section naming the triggers, the read-only constraints, and the ruling contract. `SKILL.md` gained Step 11 for the dispatch, renumbering Release / Clean Up / Log the Round to Steps 12–14.
+
 ## 0.3.179 — 2026-09-03
 
 ### dependency-management: scope No Vendoring to the repository's own dependencies

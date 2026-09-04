@@ -134,6 +134,40 @@ COMMENT reviews with each finding labelled blocking or advisory per
 the gate: a blocking finding in an internal review sends the round back,
 whatever GitHub's merge box says.
 
+## The Judge
+
+A fifth seat, outside the three-role rotation, on the most capable model
+available. It never holds developer, reviewer, or tester. `rules/agent-team-operation.md`
+Judge Seat is the contract; this section is the operational detail for
+Step 11 of `skills/herdr-teamlead/SKILL.md`.
+
+Dispatch it on exactly one of four triggers:
+
+- A contested reviewer or tester verdict — one worker's finding, another
+  worker's (or the lead's) disagreement, neither side able to settle it by
+  re-reading the rule.
+- A lead override of a blocking finding — the lead about to waive a finding a
+  worker labelled blocking gets a second, independent read first.
+- A fix loop that reached its fifth round — five returns to Step 3 on the same
+  finding is a stuck loop, not a slow one; the judge breaks the tie before a
+  sixth.
+- A bot finding the team disagrees with — the policy reviewer or Copilot flags
+  something the developer and reviewer both think is wrong.
+
+It is read-only without exception: no file edit, no mutating git or `gh`
+command, no GitHub post, no subagent dispatch. It reads both positions and the
+governing rule, verifies the disputed facts against the tree itself rather
+than trusting either side's framing, and returns a report opening with three
+lines — `RULING: uphold A | uphold B | amend — <line>`, `ACTION:` naming the
+minimal step, `UNVERIFIED:` naming anything it could not check — followed by
+its numbered reasons.
+
+The ruling binds the round the moment the lead reads it. Only the operator
+overrides one; record the override and why in the round log. It is not
+load-balanced — its own config (`config.example-judge.json`) is dispatched
+directly, never through `measure`/`plan` on the roster, the same shape the
+operator already runs the critic seat on outside this repo.
+
 ## What the Lead Never Does
 
 - Edit the shared checkout. The lead reads it and dispatches; workers write.
@@ -146,3 +180,5 @@ whatever GitHub's merge box says.
 - Release on a Phase 1 report. A plan is not a verification.
 - Treat a single `idle` or `done` observation as completion.
 - Merge on a worker's behalf. The developer runs the release skill.
+- Act against a judge's ruling, or seat the judge on developer, reviewer, or
+  tester. Only the operator overrides a ruling.

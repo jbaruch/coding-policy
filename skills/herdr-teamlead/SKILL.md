@@ -5,21 +5,23 @@ description: >
   (https://herdr.dev): measure each worker's subscription headroom, assign the
   developer / tester / reviewer roles to the workers that can afford them,
   clear each worker's context and send it a fresh role brief, wait for the
-  report files, gate the round, and hand the merge to the `release` skill.
-  Use when the user wants to run a team round, dispatch a task to the agent
-  team, assign roles to the Herdr agents, load-balance the agents by usage or
-  headroom, brief the developer / reviewer / tester, or collect the workers'
-  reports. Requires HERDR_ENV=1.
+  report files, gate the round, dispatch a non-rotating judge on a dispute,
+  and hand the merge to the `release` skill. Use when the
+  user wants to run a team round, dispatch a task to the agent team, assign
+  roles to the Herdr agents, load-balance the agents by usage or headroom,
+  brief the developer / reviewer / tester, or collect the workers' reports.
+  Requires HERDR_ENV=1.
 ---
 
 # Herdr Team Lead Skill
 
 Process steps in order. Do not skip ahead.
 
-You are the lead of three coding agents running in Herdr panes: a developer, a
-reviewer/architect, and a tester. You assign the roles, write the briefs, read
-the reports, and gate the round. You never edit the shared checkout, and you
-never write code for a worker.
+You are the lead of three rotating coding agents running in Herdr panes: a
+developer, a reviewer/architect, and a tester — plus a non-rotating judge for
+disputes. You assign the roles, write the briefs, read the reports, and gate
+the round. You never edit the shared checkout, and you never write code for a
+worker.
 
 A round runs in two phases:
 
@@ -347,7 +349,9 @@ A `## BLOCKED` section can sit under a report that otherwise reads as finished.
 Classify each finding blocking or advisory per `rules/review-severity.md`.
 
 - **Any blocking finding** — run another round: return to Step 3 with fresh
-  briefs naming the findings in full. Say what changed from the prior round.
+  briefs naming the findings in full. Say what changed from the prior round. A
+  fifth return, a contested verdict, or a lead override is a Step 11 trigger
+  first.
 - **Advisory findings only** — record them in the round log and fold them into
   the next round that is already happening. Never spend a round on a lone
   advisory.
@@ -367,7 +371,37 @@ SHA does not either — re-run Phase 2 against the current tip.
 
 With all four met, proceed immediately to Step 11.
 
-## Step 11 — Release the Pull Request
+## Step 11 — Dispatch the Judge on a Dispute
+
+Optional — triggers and the ruling contract are in
+`skills/herdr-teamlead/references/round-flow.md` "The Judge" (a bot
+disagreement inside Step 12 returns here first). No trigger — proceed to
+Step 12.
+
+1. Compose the brief from `templates/brief-judge.md` through Step 5: the
+   dispute, both positions with report paths, the governing rule, the tree.
+2. Read-only — skip Step 6. No plan step — pass the mapping inline.
+3. Dispatch from its own config, under Step 8's outcome contract exactly
+   (scoped to `judge` alone):
+
+   ```bash
+   .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/teamlead.sh apply \
+     --config <judge-config-path> \
+     --assignments '{"judge":"judge"}' \
+     --brief judge=<round>-judge.md \
+     --common <path-to-COMMON.md> \
+     --task <round>
+   ```
+
+   `<judge-config-path>`: the operator's copy of `config.example-judge.json`.
+4. Wait with Step 9's `wait-report.sh judge <report-path>`.
+5. Its `RULING:` line binds the round. Only the operator overrides it.
+
+`ACTION:` with no branch change — proceed to Step 12. `ACTION:` that changes
+the branch — implement it, return to Step 3, and hold at Step 10 until its
+four conditions hold again for the resulting tip.
+
+## Step 12 — Release the Pull Request
 
 The release is one more assignment, never a prompt into the developer's
 existing context. Return to Step 5 with the role `release` for
@@ -375,14 +409,14 @@ the developer's agent (template `templates/brief-release.md`, the same
 `WORKTREE` and `BRANCH`, a fresh `REPORT`), run Step 6 (it reports
 `already-provisioned`), dispatch through Step 8 so the context is cleared and
 the brief is fresh, and wait on the report in Step 9. The worker merges. You
-do not. Proceed immediately to Step 12 after its report.
+do not. Proceed immediately to Step 13 after its report.
 
-## Step 12 — Clean Up the Worktree
+## Step 13 — Clean Up the Worktree
 
 Fast-forward the shared checkout, remove the worktree, and delete the branch
-per `rules/agent-worktree-isolation.md`. Proceed immediately to Step 13.
+per `rules/agent-worktree-isolation.md`. Proceed immediately to Step 14.
 
-## Step 13 — Log the Round
+## Step 14 — Log the Round
 
 Log the round: the assignments, the report paths, the findings, and the
 outcome. If the round produced no findings at all, log it and say so in one
