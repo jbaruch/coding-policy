@@ -43,7 +43,7 @@ main() (
     review_package_warn 'no readable Git repository — run from a checkout containing BASE and HEAD'
     return 1
   fi
-  local base head outfile directory filename package_tmp=''
+  local base head outfile directory filename package_dir='' package_tmp=''
   base="$(git rev-parse --verify --end-of-options "${1}^{commit}")" || {
     review_package_warn "invalid BASE '${1}' — fetch the recorded pre-round commit and pass its SHA"
     return 2
@@ -78,15 +78,19 @@ main() (
   fi
   directory="$(cd "$directory" && pwd -P)" || return 1
   outfile="$directory/$filename"
-  package_tmp="$(mktemp "$directory/.review-package.XXXXXX")" || {
+  package_dir="$(mktemp -d "$directory/.review-package.XXXXXX")" || {
     review_package_warn "cannot create a temporary artifact in ${directory} — check permissions"
     return 1
   }
+  package_tmp="$package_dir/$filename"
   # The EXIT trap invokes this local helper indirectly.
   # shellcheck disable=SC2329
   cleanup() {
     if [[ -n "$package_tmp" ]] && ! rm -f "$package_tmp"; then
       review_package_warn "could not remove temporary file ${package_tmp} — remove it after inspection"
+    fi
+    if [[ -n "$package_dir" ]] && ! rmdir "$package_dir"; then
+      review_package_warn "could not remove staging directory ${package_dir} — inspect and remove it by hand"
     fi
     return 0
   }
@@ -96,15 +100,24 @@ main() (
     return 1
   fi
   if [[ -e "$outfile" || -L "$outfile" ]]; then
-    if [[ ! -L "$outfile" && -f "$outfile" ]] && cmp -s "$package_tmp" "$outfile"; then
-      printf '%s\n' "$outfile"
-      return 0
+    if [[ ! -L "$outfile" && -f "$outfile" ]]; then
+      local compare_rc=0
+      cmp -s "$package_tmp" "$outfile" || compare_rc=$?
+      case "$compare_rc" in
+        0) printf '%s\n' "$outfile"; return 0 ;;
+        1) ;; # Expected comparison result: different content.
+        *)
+          review_package_warn "cannot compare ${outfile} (cmp exit ${compare_rc}) — check file permissions and the cmp installation, then re-run; existing artifact preserved"
+          return 1
+          ;;
+      esac
     fi
     review_package_warn "${outfile} already holds different content — keep it and choose a new range-specific OUTFILE"
     return 1
   fi
-  # A hard link publishes the completed file without a clobber race.
-  if ! ln "$package_tmp" "$outfile"; then
+  # Linking into the parent uses the staged basename. If that basename became
+  # a directory, ln refuses instead of treating it as a second destination.
+  if ! ln "$package_tmp" "$directory/"; then
     review_package_warn "cannot publish ${outfile} — check permissions or an artifact created concurrently, then re-run"
     return 1
   fi

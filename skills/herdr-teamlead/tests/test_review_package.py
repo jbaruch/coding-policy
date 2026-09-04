@@ -146,6 +146,24 @@ class ReviewPackageTests(unittest.TestCase):
                 self.assertEqual(result.stdout, "")
         self.assertEqual(self.source.read_bytes(), before)
 
+    def test_comparison_failure_is_not_reported_as_different_content(self):
+        self.output.parent.mkdir()
+        self.output.write_text("existing artifact\n", encoding="utf-8")
+        fakebin = self.root / "bin"
+        fakebin.mkdir()
+        fakecmp = fakebin / "cmp"
+        fakecmp.write_text('#!/usr/bin/env bash\nset -euo pipefail\nexit 2\n', encoding="utf-8")
+        fakecmp.chmod(0o755)
+        env = dict(self.env, PATH=f"{fakebin}:{self.env['PATH']}")
+        result = self.package(self.base, self.head, self.output, env=env)
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.stdout, "")
+        self.assertIn("cannot compare", result.stderr)
+        self.assertIn("cmp exit 2", result.stderr)
+        self.assertNotIn("different content", result.stderr)
+        self.assertEqual(self.output.read_text(), "existing artifact\n")
+        self.assertEqual(list(self.output.parent.iterdir()), [self.output])
+
     def test_binary_change_is_not_reduced_to_a_filename(self):
         (self.repo / "binary.dat").write_bytes(bytes(range(256)))
         head = self.commit("binary fixture")
@@ -171,6 +189,26 @@ class ReviewPackageTests(unittest.TestCase):
         self.assertEqual(result.stdout, "")
         self.assertIn("no artifact published", result.stderr)
         self.assertEqual(list(self.output.parent.iterdir()), [])
+
+    def test_concurrent_directory_cannot_be_reported_as_a_written_package(self):
+        executable = shutil.which("ln")
+        self.assertIsNotNone(executable)
+        fakebin = self.root / "bin"
+        fakebin.mkdir()
+        fakeln = fakebin / "ln"
+        fakeln.write_text(
+            '#!/usr/bin/env bash\nset -euo pipefail\n'
+            'mkdir "$PACKAGE_TEST_OUTPUT"\n'
+            'exec "$PACKAGE_TEST_REAL_LN" "$@"\n', encoding="utf-8")
+        fakeln.chmod(0o755)
+        env = dict(self.env, PATH=f"{fakebin}:{self.env['PATH']}",
+                   PACKAGE_TEST_REAL_LN=str(executable), PACKAGE_TEST_OUTPUT=str(self.output))
+        result = self.package(self.base, self.head, self.output, env=env)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual(result.stdout, "")
+        self.assertTrue(self.output.is_dir())
+        self.assertEqual(list(self.output.iterdir()), [])
+        self.assertEqual(list(self.output.parent.iterdir()), [self.output])
 
     def test_sourcing_script_has_no_side_effects(self):
         result = subprocess.run(["bash", "-c", 'source "$1"', "test",

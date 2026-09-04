@@ -8,6 +8,7 @@
 
 - **Stable task-label input (#338 follow-up).** Dispatch rejects leading/trailing whitespace without trimming or merging persisted task identities. Existing ledger history remains intact.
 - **Placeholder-free shared templates compose cleanly.** The package-gate tests exposed a no-match scan exiting silently before validation. Empty placeholder sets now remain valid; real scan failures produce a diagnostic and stop composition.
+- **Artifact failure paths remain explicit.** PR #339's policy review caught comparison errors reported as differing content; the script now distinguishes each `cmp` outcome. A deterministic race fixture also proves a concurrently created destination directory cannot receive a nested package or be reported as a completed file.
 
 ## 0.3.186 — 2026-09-04
 
