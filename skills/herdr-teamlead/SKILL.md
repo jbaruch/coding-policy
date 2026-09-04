@@ -420,23 +420,23 @@ those values. Proceed immediately to Step 14.
 
 ## Step 14 — Start the Judge Worker on Its Pinned Tier
 
-Neither harness sets reasoning effort from inside a session, so the tier is a
-launch flag and the switch is a worker start. Build the argv from the plan's
-`judge` object — never from a model typed by hand, which is what makes the
-config the single place a tier swap happens:
+Effort is a launch flag on both harnesses, so applying a tier is a worker
+start rather than a keystroke. Run:
 
 ```bash
-herdr agent start <judge.agent> --kind claude --pane <pane> -- \
-  --model <judge.model> --effort <judge.effort>
+bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/start-judge-worker.sh \
+  <step-13-plan-file> <pane> [kind]
 ```
 
-Omit `--effort` when the plan's `effort` is `null`: some models accept no
-effort flag.
+It reads the tier from the plan's `judge` object, starts the worker on it,
+and refuses unless the pane's startup banner echoes that tier. Its argument
+contract, exit codes and banner predicate are in the script header.
 
-Read the pane's startup banner and refuse the dispatch unless it echoes the
-model, and the effort when one was requested. A dispatch that cannot prove
-its tier is invalid — report the banner verbatim and finish here. On a
-verified banner, proceed immediately to Step 15.
+- **Exit 0** — the banner proved the tier. Its JSON names the agent, model
+  and effort. Proceed immediately to Step 15.
+- **Any non-zero** — report the script's diagnostic verbatim and finish here.
+  A worker whose tier is unproven does not get briefed, and no tier is set by
+  hand to work around it.
 
 ## Step 15 — Dispatch the Judge
 

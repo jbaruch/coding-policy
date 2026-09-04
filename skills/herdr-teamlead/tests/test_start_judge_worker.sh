@@ -1,0 +1,159 @@
+#!/usr/bin/env bash
+# Tests for start-judge-worker.sh.
+#
+# The script's whole job is proving the judge worker came up on the tier its
+# plan names. A start that "worked" but left the worker on a default model is
+# the failure it exists to catch, so most cases below are banner cases.
+#
+# `set -e` is dropped so every case runs and the suite reports an aggregate;
+# each setup command is checked explicitly and aborts with a fatal diagnostic
+# on failure (rules/error-handling.md aggregate-reporting carve-out).
+#
+# Covers:
+#   1. Happy path      -> started, banner echoes model + effort, exit 0, JSON.
+#   2. No effort       -> a model taking no effort flag omits --effort, exit 0.
+#   3. Model missing   -> banner without the model is exit 4, never dispatched.
+#   4. Effort missing  -> model echoed, effort not, is exit 4 (the silent reset).
+#   5. Start fails     -> exit 3, named as a start failure.
+#   6. Pane read fails -> exit 4: started, tier unproven.
+#   7. No judge object -> exit 2 with an actionable message.
+#   8. Empty model     -> exit 2, never a start with an empty --model.
+#   9. Usage           -> wrong argc is exit 2.
+#  10. Missing plan    -> unreadable plan file is exit 2.
+#  11. Launch argv     -> --model/--effort land after the `--` separator.
+#  12. No set -u abort -> no case aborts on an unbound variable.
+#
+# Run: bash skills/herdr-teamlead/tests/test_start_judge_worker.sh
+set -uo pipefail
+
+die() { echo "fatal: $*" >&2; exit 2; }
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)" || die "could not resolve the skill dir"
+SUT="${SCRIPT_DIR}/start-judge-worker.sh"
+[[ -r "$SUT" ]] || die "start-judge-worker.sh not found at $SUT"
+
+TMP="$(mktemp -d)" || die "could not create a temp dir"
+cleanup() { [[ -n "${TMP:-}" ]] && ! rm -rf "$TMP" && echo "warn: could not remove $TMP" >&2; return 0; }
+trap cleanup EXIT
+
+PASS=0
+FAIL=0
+pass() { PASS=$((PASS+1)); }
+fail() { FAIL=$((FAIL+1)); echo "  ✗ FAIL: $1" >&2; }
+
+# The fake herdr records its argv and replays a banner from $FAKE_BANNER.
+cat > "${TMP}/herdr" <<'FAKE' || die "could not write the fake herdr"
+#!/usr/bin/env bash
+set -uo pipefail
+printf '%s\n' "$*" >> "${FAKE_ARGV_LOG}"
+case "${1:-} ${2:-}" in
+  "agent start") exit "${FAKE_START_RC:-0}" ;;
+  "pane read")
+    printf '%s\n' "${FAKE_BANNER-Claude Code · claude-fable-5-1 · effort max}"
+    exit "${FAKE_READ_RC:-0}"
+    ;;
+esac
+exit 0
+FAKE
+chmod +x "${TMP}/herdr" || die "could not chmod the fake herdr"
+export PATH="${TMP}:${PATH}"
+export HERDR_BIN="${TMP}/herdr"
+
+write_plan() { # <path> <judge-json>
+  printf '{"schema_version":1,"assignments":{"judge":"judge"},"judge":%s}\n' "$2" > "$1" \
+    || die "could not write the plan at $1"
+}
+
+run_sut() { # <plan> <pane> ; sets OUT/ERR/RC
+  export FAKE_ARGV_LOG="${TMP}/argv.log"
+  : > "$FAKE_ARGV_LOG" || die "could not truncate the argv log"
+  OUT="$(bash "$SUT" "$1" "$2" 2>"${TMP}/err")"
+  RC=$?
+  ERR="$(cat "${TMP}/err")"
+  return 0
+}
+
+check_no_abort() { # <label>
+  case "$ERR" in
+    *"unbound variable"*) fail "$1: aborted on an unbound variable" ;;
+    *) pass ;;
+  esac
+}
+
+FULL='{"agent":"judge","model":"claude-fable-5-1","effort":"max"}'
+NOEFFORT='{"agent":"judge","model":"claude-haiku-4-5","effort":null}'
+
+# 1. Happy path.
+write_plan "${TMP}/plan.json" "$FULL"
+FAKE_BANNER='Claude Code · claude-fable-5-1 · effort max' run_sut "${TMP}/plan.json" "w1:p1"
+if (( RC == 0 )); then pass; else fail "1: expected exit 0, got ${RC} (${ERR})"; fi
+if printf '%s' "$OUT" | grep -q '"banner_verified": *true'; then pass; else fail "1: no banner_verified in ${OUT}"; fi
+if printf '%s' "$OUT" | grep -q '"effort": *"max"'; then pass; else fail "1: effort missing from ${OUT}"; fi
+check_no_abort "1"
+
+# 2. A model that takes no effort flag.
+write_plan "${TMP}/plan-noeffort.json" "$NOEFFORT"
+FAKE_BANNER='Claude Code · claude-haiku-4-5' run_sut "${TMP}/plan-noeffort.json" "w1:p1"
+if (( RC == 0 )); then pass; else fail "2: expected exit 0, got ${RC} (${ERR})"; fi
+if printf '%s' "$OUT" | grep -q '"effort": *null'; then pass; else fail "2: expected null effort in ${OUT}"; fi
+if grep -q -- "--effort" "$FAKE_ARGV_LOG"; then fail "2: passed --effort for a model with none"; else pass; fi
+check_no_abort "2"
+
+# 3. The banner does not name the model.
+FAKE_BANNER='Claude Code · claude-sonnet-5' run_sut "${TMP}/plan.json" "w1:p1"
+if (( RC == 4 )); then pass; else fail "3: expected exit 4, got ${RC}"; fi
+if [[ -z "$OUT" ]]; then pass; else fail "3: emitted stdout on an unproven tier: ${OUT}"; fi
+check_no_abort "3"
+
+# 4. Model echoed, effort not -- the silent-reset case.
+FAKE_BANNER='Claude Code · claude-fable-5-1' run_sut "${TMP}/plan.json" "w1:p1"
+if (( RC == 4 )); then pass; else fail "4: expected exit 4, got ${RC}"; fi
+case "$ERR" in *effort*) pass ;; *) fail "4: stderr does not name the effort: ${ERR}" ;; esac
+check_no_abort "4"
+
+# 5. The start itself fails.
+FAKE_START_RC=7 run_sut "${TMP}/plan.json" "w1:p1"
+if (( RC == 3 )); then pass; else fail "5: expected exit 3, got ${RC}"; fi
+check_no_abort "5"
+
+# 6. The pane cannot be read: started, tier unproven.
+FAKE_READ_RC=9 run_sut "${TMP}/plan.json" "w1:p1"
+if (( RC == 4 )); then pass; else fail "6: expected exit 4, got ${RC}"; fi
+check_no_abort "6"
+
+# 7. A plan with no judge object.
+printf '{"schema_version":1,"assignments":{"developer":"claude"}}\n' > "${TMP}/plan-nojudge.json" \
+  || die "could not write the judgeless plan"
+run_sut "${TMP}/plan-nojudge.json" "w1:p1"
+if (( RC == 2 )); then pass; else fail "7: expected exit 2, got ${RC}"; fi
+case "$ERR" in *judge*) pass ;; *) fail "7: stderr does not name the judge block: ${ERR}" ;; esac
+check_no_abort "7"
+
+# 8. An empty model never reaches the command line.
+write_plan "${TMP}/plan-nomodel.json" '{"agent":"judge","model":"","effort":"max"}'
+run_sut "${TMP}/plan-nomodel.json" "w1:p1"
+if (( RC == 2 )); then pass; else fail "8: expected exit 2, got ${RC}"; fi
+if grep -q "agent start" "$FAKE_ARGV_LOG"; then fail "8: started a worker with no model"; else pass; fi
+check_no_abort "8"
+
+# 9. Usage.
+OUT="$(bash "$SUT" 2>"${TMP}/err")"; RC=$?; ERR="$(cat "${TMP}/err")"
+if (( RC == 2 )); then pass; else fail "9: expected exit 2, got ${RC}"; fi
+case "$ERR" in *usage*) pass ;; *) fail "9: no usage line: ${ERR}" ;; esac
+
+# 10. An unreadable plan file.
+run_sut "${TMP}/does-not-exist.json" "w1:p1"
+if (( RC == 2 )); then pass; else fail "10: expected exit 2, got ${RC}"; fi
+check_no_abort "10"
+
+# 11. The launch flags land after the `--` separator herdr passes through.
+FAKE_BANNER='Claude Code · claude-fable-5-1 · effort max' run_sut "${TMP}/plan.json" "w1:p1"
+start_line="$(grep "agent start" "$FAKE_ARGV_LOG" || true)"
+case "$start_line" in
+  *"-- --model claude-fable-5-1 --effort max"*) pass ;;
+  *) fail "11: launch argv is wrong: ${start_line}" ;;
+esac
+
+echo
+echo "results: ${PASS} pass, ${FAIL} fail"
+(( FAIL == 0 ))

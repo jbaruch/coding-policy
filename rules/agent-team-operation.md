@@ -27,7 +27,8 @@ description: Running a multi-agent team — headroom-driven role rotation, one w
 - `window_group` names the usage window an agent shares with other agents
 - A seat's cost reduces the projected headroom of every worker sharing its `window_group`
 - The `judge` block names the seat's agent, and the model and effort its worker is launched with
-- The planner seats the judge on the named agent and echoes the tier in its plan; the model and effort are the worker's launch flags, applied by starting that worker before the dispatch
+- The planner seats the judge on the named agent and echoes the tier in its plan
+- The model and effort are the worker's launch flags, applied by starting that worker before the dispatch
 - A judge dispatch whose startup banner does not echo the requested model, and the effort when one was requested, is invalid
 - The planner never ranks the judge seat, and never gives the pinned worker another seat
 - No exclusion bars the judge from a dispute involving its own model
