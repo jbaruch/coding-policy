@@ -239,6 +239,35 @@ def _unfillable_message(role, barred, remaining, later_roles):
     return " ".join(part for part in parts if part)
 
 
+def _refuse_unaffordable_judge(judge_agent, agents, cost, warn):
+    """Halt the round when the pinned judge cannot afford it.
+
+    The judge seat has no substitute: it is pinned, and its worker shares a
+    window with `claude`. When that window cannot cover one ruling there is no
+    second-best seat to fall back to, so the planner refuses rather than
+    dispatching a round it cannot finish. An unknown headroom is not
+    exhaustion and does not refuse -- it is unmeasured, and the existing
+    unknown-headroom handling already names it in the rationale.
+    """
+    headroom = _headroom_of(judge_agent, agents.get(judge_agent), warn)
+    if headroom is None:
+        return
+    if headroom - cost < 0:
+        raise PlanError(
+            "Judge worker {!r} has {:g}% headroom and one ruling costs {:g}% - "
+            "the round halts. There is no substitute judge: wait for the "
+            "window to reset, or have the operator rule.".format(
+                judge_agent, headroom, cost
+            ),
+            {
+                "role": "judge",
+                "judge_agent": judge_agent,
+                "headroom_pct": headroom,
+                "cost": cost,
+            },
+        )
+
+
 def plan(roles, snapshot, counts=None, exclude=None, role_costs=None, snapshot_ref=None, warn=None, judge_agent=None):
     """Assign `roles` to the agents in `snapshot`, heaviest seat first.
 
@@ -324,6 +353,9 @@ def plan(roles, snapshot, counts=None, exclude=None, role_costs=None, snapshot_r
             if role == "judge":
                 excluded[role] = sorted(
                     name for name in agents if name != judge_agent
+                )
+                _refuse_unaffordable_judge(
+                    judge_agent, agents, _costs_for(["judge"], role_costs)["judge"], warn
                 )
             elif judge_agent in agents and judge_agent not in excluded[role]:
                 excluded[role] = sorted(set(excluded[role]) | {judge_agent})

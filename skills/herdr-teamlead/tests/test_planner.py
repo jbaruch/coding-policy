@@ -567,7 +567,7 @@ class PinnedJudgeSeatTest(unittest.TestCase):
     """The planner does not choose who judges."""
 
     def test_the_judge_seat_goes_to_the_pinned_worker(self):
-        payload = snapshot(claude=99, judge=10, codex=80, grok=70)
+        payload = snapshot(claude=99, judge=40, codex=80, grok=70)
         result = plan(
             ["developer", "judge"], payload, warn=lambda message: None, judge_agent="judge"
         )
@@ -600,6 +600,50 @@ class JudgeCostTest(unittest.TestCase):
         self.assertEqual(DEFAULT_ROLE_COSTS["judge"], 15.0)
         self.assertGreater(DEFAULT_ROLE_COSTS["judge"], DEFAULT_ROLE_COSTS["developer"])
         self.assertNotEqual(DEFAULT_ROLE_COSTS["judge"], DEFAULT_ROLE_COST)
+
+
+class JudgeWindowExhaustionTest(unittest.TestCase):
+    """A judge round the pinned window cannot cover halts, never degrades.
+
+    The seat has no substitute, so there is no second-best worker to fall
+    back to when the window runs out. The planner refuses rather than
+    dispatching a round it cannot finish.
+    """
+
+    def test_a_window_that_cannot_cover_a_ruling_is_refused(self):
+        payload = snapshot(claude=90, judge=10, codex=80)
+        with self.assertRaises(PlanError) as caught:
+            plan(["judge"], payload, warn=lambda message: None, judge_agent="judge")
+        message = str(caught.exception)
+        self.assertIn("10% headroom", message)
+        self.assertIn("no substitute judge", message)
+
+    def test_exactly_enough_headroom_is_allowed(self):
+        payload = snapshot(judge=15, codex=80)
+        result = plan(
+            ["judge"], payload, warn=lambda message: None, judge_agent="judge"
+        )
+        self.assertEqual(result["assignments"]["judge"], "judge")
+
+    def test_an_unmeasured_window_is_not_exhaustion(self):
+        # Unknown is unmeasured, not spent; the existing unknown-headroom
+        # handling names it in the rationale rather than halting the round.
+        payload = snapshot(judge=None, codex=80)
+        result = plan(
+            ["judge"], payload, warn=lambda message: None, judge_agent="judge"
+        )
+        self.assertEqual(result["assignments"]["judge"], "judge")
+
+    def test_an_operator_weight_moves_the_threshold(self):
+        payload = snapshot(judge=10, codex=80)
+        result = plan(
+            ["judge"],
+            payload,
+            warn=lambda message: None,
+            judge_agent="judge",
+            role_costs={"judge": 5},
+        )
+        self.assertEqual(result["assignments"]["judge"], "judge")
 
 
 if __name__ == "__main__":
