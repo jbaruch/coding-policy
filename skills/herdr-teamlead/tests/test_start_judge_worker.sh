@@ -26,7 +26,11 @@
 #  13. Non-banner line -> both values together on a row that does NOT match
 #                         the banner pattern is exit 4, not a verified tier.
 #  14. No pattern      -> a plan with no banner_pattern is exit 2.
-#  15. No set -u abort -> no case aborts on an unbound variable.
+#  15. Effort prefix   -> a banner reporting `xhigh` does NOT verify a request
+#                         for `high`; the comparison is whole-token.
+#  16. Model prefix    -> a longer model id containing the requested one does
+#                         not verify either.
+#  17. No set -u abort -> no case aborts on an unbound variable.
 #
 # Run: bash skills/herdr-teamlead/tests/test_start_judge_worker.sh
 set -uo pipefail
@@ -208,6 +212,24 @@ case "$grep_rc" in
   *) fail "14: could not read the argv log (grep exit ${grep_rc})" ;;
 esac
 check_no_abort "14"
+
+# 15. `high` is a substring of `xhigh`: a banner reporting a DIFFERENT effort
+# than the one requested must not verify.
+write_plan "${TMP}/plan-high.json" '{"agent":"judge","model":"claude-fable-5-1","effort":"high","banner_pattern":"Claude Code"}'
+FAKE_BANNER='Claude Code · claude-fable-5-1 · effort xhigh' run_sut "${TMP}/plan-high.json" "w1:p1"
+if (( RC == 4 )); then pass; else fail "15: xhigh verified a request for high (rc ${RC})"; fi
+check_no_abort "15"
+
+# 16. The same trap on model ids that extend one another.
+write_plan "${TMP}/plan-short.json" '{"agent":"judge","model":"claude-fable-5","effort":"max","banner_pattern":"Claude Code"}'
+FAKE_BANNER='Claude Code · claude-fable-5-1 · effort max' run_sut "${TMP}/plan-short.json" "w1:p1"
+if (( RC == 4 )); then pass; else fail "16: a longer model id verified a shorter request (rc ${RC})"; fi
+check_no_abort "16"
+
+# 15b. The exact effort still verifies.
+FAKE_BANNER='Claude Code · claude-fable-5-1 · effort high' run_sut "${TMP}/plan-high.json" "w1:p1"
+if (( RC == 0 )); then pass; else fail "15b: an exact effort match was refused (rc ${RC}) ${ERR}"; fi
+check_no_abort "15b"
 
 echo
 echo "results: ${PASS} pass, ${FAIL} fail"

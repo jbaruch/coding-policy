@@ -421,8 +421,7 @@ those values. Proceed immediately to Step 14.
 
 ## Step 14 — Start the Judge Worker on Its Pinned Tier
 
-Effort is a launch flag on both harnesses, so applying a tier is a worker
-start rather than a keystroke. Run:
+Run:
 
 ```bash
 bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/start-judge-worker.sh \
@@ -457,8 +456,9 @@ Step 16.
 
 ## Step 16 — Wait for the Ruling
 
-Wait with Step 9's `wait-report.sh judge <report-path>`. Proceed immediately
-to Step 17 once the report lands.
+Wait with Step 9's `wait-report.sh <agent> <report-path>`, where `<agent>` is
+the worker the Step 13 plan named. Proceed immediately to Step 17 once the
+report lands.
 
 ## Step 17 — Act on the Ruling
 

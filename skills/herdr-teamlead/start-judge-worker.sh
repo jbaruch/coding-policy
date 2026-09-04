@@ -122,13 +122,32 @@ main() {
   # started, and a model on one row plus an effort on another is two
   # coincidences, not a banner. So: find the banner line first, then read the
   # tier off THAT line.
-  local line banner_seen=0 found_model=0 verified=0
+  # Whole-token comparison, never a substring: `high` is a substring of
+  # `xhigh`, so a banner reporting a DIFFERENT effort than the one requested
+  # would otherwise verify. The same trap applies to model ids that extend one
+  # another. Tokens are split on the separators these banners use.
+  local line banner_seen=0 found_model=0 verified=0 grep_rc tok
   while IFS= read -r line; do
-    grep -Eq -- "$banner_pattern" <<<"$line" || continue
+    grep_rc=0
+    grep -Eq -- "$banner_pattern" <<<"$line" || grep_rc=$?
+    case "$grep_rc" in
+      0) ;;
+      1) continue ;;
+      *)
+        warn "banner pattern '${banner_pattern}' could not be evaluated (grep exit ${grep_rc}) — fix judge.banner_pattern and re-run this script"
+        return 2
+        ;;
+    esac
     banner_seen=1
-    [[ "$line" == *"$model"* ]] || continue
+
+    local has_model=0 has_effort=0
+    for tok in $(tr -c '[:alnum:]._-' ' ' <<<"$line"); do
+      [[ "$tok" == "$model" ]] && has_model=1
+      [[ -n "$effort" && "$tok" == "$effort" ]] && has_effort=1
+    done
+    (( has_model == 1 )) || continue
     found_model=1
-    if [[ -z "$effort" || "$line" == *"$effort"* ]]; then
+    if [[ -z "$effort" ]] || (( has_effort == 1 )); then
       verified=1
       break
     fi
