@@ -408,7 +408,7 @@ class ParseJudgeTest(unittest.TestCase):
                     "agent": "judge",
                     "model": "claude-fable-5-1",
                     "effort": "max",
-                    "banner_pattern": "Claude Code",
+                    "banner_pattern": "^Claude Code",
                 }
             }
         )
@@ -428,7 +428,7 @@ class ParseJudgeTest(unittest.TestCase):
                 "judge": {
                     "agent": "judge",
                     "model": "claude-haiku-4-5",
-                    "banner_pattern": "Claude Code",
+                    "banner_pattern": "^Claude Code",
                 }
             }
         )
@@ -443,7 +443,7 @@ class ParseJudgeTest(unittest.TestCase):
                         "agent": "j",
                         "model": "m",
                         "effort": "turbo",
-                        "banner_pattern": "x",
+                        "banner_pattern": "^x",
                     }
                 }
             )
@@ -451,7 +451,7 @@ class ParseJudgeTest(unittest.TestCase):
 
     def test_a_missing_agent_is_refused(self):
         with self.assertRaises(ConfigError) as caught:
-            parse_judge({"judge": {"model": "m", "banner_pattern": "x"}})
+            parse_judge({"judge": {"model": "m", "banner_pattern": "^x"}})
         self.assertIn("judge.agent", str(caught.exception))
 
     def test_a_non_object_block_is_refused(self):
@@ -498,17 +498,26 @@ class JudgeBannerPatternTest(unittest.TestCase):
             parse_judge({"judge": {"agent": "j", "model": "m"}})
         self.assertIn("banner_pattern", str(caught.exception))
 
+    def test_an_unanchored_pattern_is_refused(self):
+        # Unanchored, `Claude Code` matches a prompt row quoting the banner,
+        # which is not proof of how the worker started.
+        with self.assertRaises(ConfigError) as caught:
+            parse_judge(
+                {"judge": {"agent": "j", "model": "m", "banner_pattern": "Claude Code"}}
+            )
+        self.assertIn("not anchored", str(caught.exception))
+
     def test_an_invalid_regex_is_refused_at_parse_time(self):
         with self.assertRaises(ConfigError) as caught:
             parse_judge(
-                {"judge": {"agent": "j", "model": "m", "banner_pattern": "a["}}
+                {"judge": {"agent": "j", "model": "m", "banner_pattern": "^a["}}
             )
         self.assertIn("not a valid regex", str(caught.exception))
 
     def test_the_shipped_example_declares_one(self):
         judge = parse_judge(_example_config())
         assert judge is not None
-        self.assertEqual(judge.banner_pattern, "Claude Code")
+        self.assertEqual(judge.banner_pattern, "^Claude Code")
 
 
 if __name__ == "__main__":

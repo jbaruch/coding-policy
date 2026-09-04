@@ -46,7 +46,13 @@ import math
 from .diagnostics import stderr_warn
 from .errors import PlanError
 
-PLAN_SCHEMA_VERSION = 1
+#: Plan document version. 2 adds the optional `judge` object carrying the
+#: pinned seat's agent, model, effort and banner pattern. Additive: a version-1
+#: plan simply has no `judge` key, which is indistinguishable from a version-2
+#: plan that assigned no judge seat, so both readers take the same path.
+#: A plan is a round's instruction, not stored state -- it is produced and
+#: consumed inside one round and never migrated (rules/stateful-artifacts.md).
+PLAN_SCHEMA_VERSION = 2
 
 #: What one round in each seat is expected to burn, in points of the agent's
 #: remaining headroom percentage. The ORDER is what the planner acts on:

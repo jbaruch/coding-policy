@@ -10,7 +10,7 @@
     "agent": "judge",
     "model": "claude-fable-5-1",
     "effort": "max",
-    "banner_pattern": "Claude Code"
+    "banner_pattern": "^Claude Code"
   },
   "agents": [
     {

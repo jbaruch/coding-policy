@@ -30,7 +30,10 @@
 #                         for `high`; the comparison is whole-token.
 #  16. Model prefix    -> a longer model id containing the requested one does
 #                         not verify either.
-#  17. No set -u abort -> no case aborts on an unbound variable.
+#  17. Transcript row  -> a prompt quoting the pattern AND both tier tokens
+#                         does not verify: the pattern is anchored and only
+#                         the first matching line is read.
+#  18. No set -u abort -> no case aborts on an unbound variable.
 #
 # Run: bash skills/herdr-teamlead/tests/test_start_judge_worker.sh
 set -uo pipefail
@@ -89,8 +92,8 @@ check_no_abort() { # <label>
   esac
 }
 
-FULL='{"agent":"judge","model":"claude-fable-5-1","effort":"max","banner_pattern":"Claude Code"}'
-NOEFFORT='{"agent":"judge","model":"claude-haiku-4-5","effort":null,"banner_pattern":"Claude Code"}'
+FULL='{"agent":"judge","model":"claude-fable-5-1","effort":"max","banner_pattern":"^Claude Code"}'
+NOEFFORT='{"agent":"judge","model":"claude-haiku-4-5","effort":null,"banner_pattern":"^Claude Code"}'
 
 # 1. Happy path.
 write_plan "${TMP}/plan.json" "$FULL"
@@ -145,7 +148,7 @@ case "$ERR" in *judge*) pass ;; *) fail "7: stderr does not name the judge block
 check_no_abort "7"
 
 # 8. An empty model never reaches the command line.
-write_plan "${TMP}/plan-nomodel.json" '{"agent":"judge","model":"","effort":"max","banner_pattern":"Claude Code"}'
+write_plan "${TMP}/plan-nomodel.json" '{"agent":"judge","model":"","effort":"max","banner_pattern":"^Claude Code"}'
 run_sut "${TMP}/plan-nomodel.json" "w1:p1"
 if (( RC == 2 )); then pass; else fail "8: expected exit 2, got ${RC}"; fi
 grep_rc=0
@@ -215,13 +218,13 @@ check_no_abort "14"
 
 # 15. `high` is a substring of `xhigh`: a banner reporting a DIFFERENT effort
 # than the one requested must not verify.
-write_plan "${TMP}/plan-high.json" '{"agent":"judge","model":"claude-fable-5-1","effort":"high","banner_pattern":"Claude Code"}'
+write_plan "${TMP}/plan-high.json" '{"agent":"judge","model":"claude-fable-5-1","effort":"high","banner_pattern":"^Claude Code"}'
 FAKE_BANNER='Claude Code · claude-fable-5-1 · effort xhigh' run_sut "${TMP}/plan-high.json" "w1:p1"
 if (( RC == 4 )); then pass; else fail "15: xhigh verified a request for high (rc ${RC})"; fi
 check_no_abort "15"
 
 # 16. The same trap on model ids that extend one another.
-write_plan "${TMP}/plan-short.json" '{"agent":"judge","model":"claude-fable-5","effort":"max","banner_pattern":"Claude Code"}'
+write_plan "${TMP}/plan-short.json" '{"agent":"judge","model":"claude-fable-5","effort":"max","banner_pattern":"^Claude Code"}'
 FAKE_BANNER='Claude Code · claude-fable-5-1 · effort max' run_sut "${TMP}/plan-short.json" "w1:p1"
 if (( RC == 4 )); then pass; else fail "16: a longer model id verified a shorter request (rc ${RC})"; fi
 check_no_abort "16"
@@ -230,6 +233,13 @@ check_no_abort "16"
 FAKE_BANNER='Claude Code · claude-fable-5-1 · effort high' run_sut "${TMP}/plan-high.json" "w1:p1"
 if (( RC == 0 )); then pass; else fail "15b: an exact effort match was refused (rc ${RC}) ${ERR}"; fi
 check_no_abort "15b"
+
+# 17. A transcript row carrying the pattern text and both tier tokens must not
+# verify. This is the case an unanchored pattern let through.
+FAKE_BANNER='> explain Claude Code claude-fable-5-1 max' run_sut "${TMP}/plan.json" "w1:p1"
+if (( RC == 4 )); then pass; else fail "17: a transcript row verified the tier (rc ${RC})"; fi
+if [[ -z "$OUT" ]]; then pass; else fail "17: emitted stdout for a transcript row: ${OUT}"; fi
+check_no_abort "17"
 
 echo
 echo "results: ${PASS} pass, ${FAIL} fail"

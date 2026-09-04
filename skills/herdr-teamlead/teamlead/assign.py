@@ -81,7 +81,14 @@ def assignment_text(role, common_path, brief_path):
 
 
 def normalize_assignments(payload):
-    """Accept either `plan` output or a bare `{role: agent}` mapping."""
+    """Accept either `plan` output or a bare `{role: agent}` mapping.
+
+    Version-agnostic on purpose: this reads `assignments` alone, which every
+    plan version carries in the same shape. A version-1 plan has no `judge`
+    object; so does a version-2 plan whose round assigned no judge seat, and
+    both take the same path here (rules/stateful-artifacts.md Cross-Pipeline
+    Schema Bumps -- an additive bump a reader absorbs through absence).
+    """
     if isinstance(payload, dict) and isinstance(payload.get("assignments"), dict):
         payload = payload["assignments"]
     if not isinstance(payload, dict) or not payload:

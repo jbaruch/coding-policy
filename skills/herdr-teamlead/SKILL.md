@@ -379,9 +379,8 @@ disagreement inside Step 18 returns here first). No trigger — proceed to
 Step 18.
 
 Compose the brief from `templates/brief-judge.md` through Step 5: the
-dispute, both positions with report paths, the governing rule, the tree. The
-judge is read-only and writes no repository content, so it needs no worktree
-— skip Step 6. Proceed immediately to Step 12.
+dispute, both positions with report paths, the governing rule, the tree. Skip
+Step 6 for the read-only judge. Proceed immediately to Step 12.
 
 ## Step 12 — Re-measure the Shared Window
 

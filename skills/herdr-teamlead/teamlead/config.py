@@ -430,6 +430,20 @@ def parse_judge(payload, source="<memory>"):
             ),
             {"source": source, "banner_pattern": raw.get("banner_pattern")},
         )
+    # Anchored at line start, always. An unanchored pattern matches anywhere on
+    # a row, so a prompt like `> explain Claude Code claude-fable-5-1 max`
+    # satisfies both the pattern and the tier tokens and verifies a dispatch
+    # that never started on that tier. A banner is printed at the start of its
+    # line; a transcript row that quotes it is not.
+    if not banner_pattern.startswith("^"):
+        raise ConfigError(
+            "Config at {}: `judge.banner_pattern` {!r} is not anchored - start "
+            "it with `^` so it matches the banner at the start of its line "
+            "(e.g. \"^Claude Code\"). An unanchored pattern also matches a "
+            "prompt or transcript row quoting the model, which is not proof of "
+            "how the worker started.".format(source, banner_pattern),
+            {"source": source, "banner_pattern": banner_pattern},
+        )
     try:
         re.compile(banner_pattern)
     except re.error as exc:

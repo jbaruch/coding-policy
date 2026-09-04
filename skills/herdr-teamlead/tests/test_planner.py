@@ -132,7 +132,7 @@ class NullHeadroomTest(unittest.TestCase):
 
 class OutputShapeTest(unittest.TestCase):
     def test_carries_a_schema_version(self):
-        self.assertEqual(plan(["developer"], snapshot(grok=100.0))["schema_version"], 1)
+        self.assertEqual(plan(["developer"], snapshot(grok=100.0))["schema_version"], 2)
 
     def test_rationale_has_one_line_per_role_naming_the_field(self):
         result = plan(ROLES, snapshot(claude=92.0, codex=87.0, grok=100.0))
@@ -790,6 +790,25 @@ class JudgeTierEchoTest(unittest.TestCase):
         )
         self.assertEqual(result["judge"]["agent"], "judge")
         self.assertIsNone(result["judge"]["model"])
+
+
+class PlanSchemaVersionTest(unittest.TestCase):
+    """The judge object is an additive bump readers absorb through absence."""
+
+    def test_a_plan_with_no_judge_seat_carries_no_judge_key(self):
+        # Indistinguishable from a version-1 plan, on purpose: a reader takes
+        # the same path for both.
+        result = plan(ROLES, snapshot(claude=90, codex=70, grok=60), warn=lambda m: None)
+        self.assertEqual(result["schema_version"], 2)
+        self.assertNotIn("judge", result)
+
+    def test_the_assignments_shape_is_unchanged_by_the_bump(self):
+        # `apply` reads `assignments` alone, which every plan version carries
+        # identically; the bump must not disturb it.
+        result = plan(ROLES, snapshot(claude=90, codex=70, grok=60), warn=lambda m: None)
+        self.assertEqual(sorted(result["assignments"]), sorted(ROLES))
+        for agent in result["assignments"].values():
+            self.assertIsInstance(agent, str)
 
 
 if __name__ == "__main__":

@@ -11,7 +11,9 @@
 # The banner line is identified by the `banner_pattern` the judge config
 # declares, never guessed: each harness prints its own banner, and a
 # transcript row that happens to name the model is not proof of how the worker
-# was started.
+# was started. The pattern is anchored (`^...`, enforced at config parse) and
+# only the FIRST matching line is read, so a prompt row quoting the model
+# cannot stand in for the banner.
 #
 # The tier is read from the plan document rather than the command line: the
 # `judge` block in config.json is the single place a model swap happens, and
@@ -140,17 +142,21 @@ main() {
     esac
     banner_seen=1
 
+    # The FIRST line matching the pattern is the banner. A fresh session prints
+    # it before anything else can be on screen, so scanning past it for a
+    # "better" match is what would let a later transcript row stand in for it.
     local has_model=0 has_effort=0
     for tok in $(tr -c '[:alnum:]._-' ' ' <<<"$line"); do
       [[ "$tok" == "$model" ]] && has_model=1
       [[ -n "$effort" && "$tok" == "$effort" ]] && has_effort=1
     done
-    (( has_model == 1 )) || continue
-    found_model=1
-    if [[ -z "$effort" ]] || (( has_effort == 1 )); then
-      verified=1
-      break
+    if (( has_model == 1 )); then
+      found_model=1
+      if [[ -z "$effort" ]] || (( has_effort == 1 )); then
+        verified=1
+      fi
     fi
+    break
   done <<<"$banner"
 
   if (( verified == 0 )); then
