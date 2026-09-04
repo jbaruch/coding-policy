@@ -367,9 +367,22 @@ def plan(roles, snapshot, counts=None, exclude=None, role_costs=None, snapshot_r
     warn = warn or stderr_warn
     excluded = _normalize_exclusions(exclude, roles)
 
-    # The judge seat is pinned, never ranked: the planner does not choose who
-    # judges. Expressed as exclusions so eligibility, fillability and the
-    # rationale all read the same way they do for every other seat.
+    # The judge seat is pinned, never ranked. Without a `judge` block there is
+    # nothing to pin it to, and ranking an ordinary worker into the seat would
+    # produce a plan carrying no usable tier -- which fails later, at worker
+    # startup, a long way from the config that caused it.
+    if "judge" in roles and not judge_agent:
+        raise PlanError(
+            "Role 'judge' needs a `judge` block in config.json naming the "
+            "worker, model, effort and banner_pattern the seat is pinned to - "
+            "this config has none, and the planner never ranks an ordinary "
+            "worker into the judge seat. Add the block, or drop 'judge' from "
+            "--roles.",
+            {"role": "judge"},
+        )
+
+    # Expressed as exclusions so eligibility, fillability and the rationale all
+    # read the same way they do for every other seat.
     if judge_agent:
         if "judge" in roles and judge_agent not in agents:
             raise PlanError(

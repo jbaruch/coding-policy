@@ -769,6 +769,20 @@ class JudgeTierEchoTest(unittest.TestCase):
         )
         self.assertNotIn("judge", result)
 
+    def test_the_judge_role_without_a_config_block_is_refused(self):
+        # Ranking an ordinary worker into the seat would emit a plan with no
+        # usable tier, which fails later at worker startup -- a long way from
+        # the config that caused it.
+        payload = snapshot(claude=90, codex=70)
+        with self.assertRaises(PlanError) as caught:
+            plan(["judge"], payload, warn=lambda message: None)
+        self.assertIn("`judge` block", str(caught.exception))
+
+    def test_other_roles_are_unaffected_by_a_missing_judge_block(self):
+        payload = snapshot(claude=90, codex=70, grok=60)
+        result = plan(ROLES, payload, warn=lambda message: None)
+        self.assertEqual(result["assignments"]["developer"], "claude")
+
     def test_an_unconfigured_tier_still_names_the_agent(self):
         payload = snapshot(judge=50, codex=80)
         result = plan(
