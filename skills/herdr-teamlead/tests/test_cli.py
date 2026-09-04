@@ -609,12 +609,12 @@ class MeasureCommandTest(CliCase):
 class ApplyCommandTest(CliCase):
     CORRUPT_STATE = '{"schema_version": 2, "snapshots": [broken'
 
-    def _client(self, statuses, footers=None):
+    def _client(self, statuses, footers=None, sessions=None):
         footers = footers or {}
         runner = FakeRunner()
         panes = {"claude": "w2:p1", "codex": "w3:p1", "grok": "w4:p1"}
         for name, status in statuses.items():
-            runner.set("agent get " + name, agent_json(name, status, panes[name]))
+            runner.set("agent get " + name, agent_json(name, status, panes[name], (sessions or {}).get(name)))
             runner.set("agent prompt " + name, ok_json("agent_prompt"))
             runner.set("agent wait " + name, ok_json("agent_wait"))
             runner.set(
@@ -719,6 +719,7 @@ class ApplyCommandTest(CliCase):
                     "clear_reason": "automatic",
                     "task": None,
                     "fix_round": None,
+                    "context_session": None,
                 },
                 {
                     "schema_version": STATE_SCHEMA_VERSION,
@@ -730,6 +731,7 @@ class ApplyCommandTest(CliCase):
                     "clear_reason": "automatic",
                     "task": None,
                     "fix_round": None,
+                    "context_session": None,
                 },
             ],
         )
@@ -935,6 +937,8 @@ class ApplyCommandTest(CliCase):
         add_assignment(
             state, AT, role, "grok", status=status, task=task, fix_round=fix_round,
             cleared=True, clear_reason="automatic",
+            context_session={"pane_id": "w4:p1", "source": "herdr:grok", "agent": "grok",
+                             "kind": "id", "value": "task-session"},
         )
         save_state(self.state, state)
 
@@ -949,7 +953,7 @@ class ApplyCommandTest(CliCase):
     def test_retained_context_sends_one_prompt_and_persists_its_reason(self):
         self._seed_context()
         code, out, err = self.run_cli(
-            self._fix_args(1, "--retain-context"), client=self._client({"grok": "idle"})
+            self._fix_args(1, "--retain-context"), client=self._client({"grok": "idle"}, sessions={"grok": "task-session"})
         )
         self.assertEqual(code, 0, err)
         self.assertEqual(len(self.runner.writes()), 1)
@@ -1025,7 +1029,7 @@ class ApplyCommandTest(CliCase):
     def test_retention_round_three_succeeds_after_confirmed_round_two(self):
         self._seed_context(fix_round=2)
         code, out, err = self.run_cli(
-            self._fix_args(3, "--retain-context"), client=self._client({"grok": "idle"})
+            self._fix_args(3, "--retain-context"), client=self._client({"grok": "idle"}, sessions={"grok": "task-session"})
         )
         self.assertEqual(code, 0, err)
         self.assertEqual(len(self.runner.writes()), 1)
@@ -1112,6 +1116,69 @@ class ApplyCommandTest(CliCase):
         self.assertEqual(code, 1)
         self.assertIn("Cannot retain", err)
         self.assertEqual(self.runner.calls, [])
+
+    def test_retention_refuses_a_missing_or_changed_live_native_session(self):
+        for session in (None, "after-manual-clear", "restarted-worker"):
+            with self.subTest(session=session):
+                self.out, self.err = io.StringIO(), io.StringIO()
+                self._seed_context()
+                before = self.state.read_bytes()
+                code, _, err = self.run_cli(
+                    self._fix_args(1, "--retain-context"),
+                    client=self._client({"grok": "idle"}, sessions={"grok": session}),
+                )
+                self.assertEqual(code, 1)
+                self.assertIn("native session continuity", err)
+                self.assertEqual(self.runner.writes(), [])
+                self.assertEqual(self.state.read_bytes(), before)
+
+    def test_native_session_change_between_readiness_and_send_refuses_retention(self):
+        self._seed_context()
+        before = self.state.read_bytes()
+        client = self._client({"grok": "idle"})
+        self.runner.responses["agent get grok"] = ScriptedReads([
+            agent_json("grok", "idle", "w4:p1", "task-session"),
+            agent_json("grok", "idle", "w4:p1", "new-session"),
+        ])
+        code, _, err = self.run_cli(self._fix_args(1, "--retain-context"), client=client)
+        self.assertEqual(code, 1)
+        self.assertIn("native session continuity", err)
+        self.assertEqual(self.runner.writes(), [])
+        self.assertEqual(self.state.read_bytes(), before)
+
+    def test_initial_dispatch_captures_post_clear_identity_for_a_real_retained_fix(self):
+        client = self._client({"grok": "idle"})
+        self.runner.responses["agent get grok"] = ScriptedReads([
+            agent_json("grok", "idle", "w4:p1", "old-task"),
+            agent_json("grok", "idle", "w4:p1", "new-task"),
+        ])
+        args = self._fix_args(1)
+        position = args.index("--fix-round")
+        del args[position:position + 2]
+        code, out, err = self.run_cli(args, client=client)
+        self.assertEqual(code, 0, err)
+        self.assertEqual(json.loads(out)["applied"][0]["context_session"]["value"], "new-task")
+        self.out, self.err = io.StringIO(), io.StringIO()
+        code, out, err = self.run_cli(
+            self._fix_args(1, "--retain-context"),
+            client=self._client({"grok": "idle"}, sessions={"grok": "new-task"}),
+        )
+        self.assertEqual(code, 0, err)
+        self.assertEqual(len(self.runner.writes()), 1)
+        row = json.loads(self.state.read_text(encoding="utf-8"))["assignments"][-1]
+        self.assertEqual((row["fix_round"], row["clear_reason"]), (1, "retained"))
+        self.assertEqual(row["context_session"]["value"], "new-task")
+
+    def test_unchanged_pre_clear_session_is_not_saved_as_fresh_context(self):
+        args = self._fix_args(1)
+        position = args.index("--fix-round")
+        del args[position:position + 2]
+        code, out, err = self.run_cli(
+            args, client=self._client({"grok": "idle"}, sessions={"grok": "stale-reference"}),
+        )
+        self.assertEqual(code, 0)
+        self.assertIsNone(json.loads(out)["applied"][0]["context_session"])
+        self.assertIn("no verified post-clear", err)
 
     def test_missing_brief_flag_is_an_actionable_error(self):
         client = self._client({})

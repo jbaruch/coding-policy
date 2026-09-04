@@ -51,11 +51,11 @@ from .herdr import (
 )
 from .composer import COMPOSER_READ_LINES, COMPOSER_READ_SOURCE, checkable
 from .probe import PROBE_READ_LINES, PROBE_READ_SOURCE, resolve_status, stderr_warn
+from .state import MAX_FIX_ROUNDS
 
 # Version 2 adds context-reason and task/fix-round evidence to each hand-off.
 APPLY_SCHEMA_VERSION = 2
 
-MAX_FIX_ROUNDS = 5
 RETAIN_CONTEXT_ROUNDS = frozenset({1, 2, 3})
 
 #: States teamlead will type into. Anything else is refused, always.
@@ -272,9 +272,40 @@ def validate_retained_history(assignments, history, task, fix_round):
             "developer round for task {!r}. Report lost context; do not reset the "
             "task's fix counter.".format(name, task), {}
         )
+    return prior
 
 
-def build_steps(client, assignments, agents_by_name, paths, panes=None, no_clear=False, settle_timeout_ms=DEFAULT_SETTLE_TIMEOUT_MS, start_timeout_ms=DEFAULT_START_TIMEOUT_MS):
+def native_context_session(info, kind):
+    """Read the official integration's native session reference, never a label.
+
+    Herdr's agent.get contract exposes agent_session {source, agent, kind,
+    value}; the integration updates it on native SessionStart, including
+    clear/new. A worker name or pane alone is not a conversation identity.
+    https://herdr.dev/docs/socket-api/#agent-state-reporting
+    """
+    ref = info.get("agent_session")
+    pane = info.get("pane_id")
+    if not isinstance(ref, dict) or not isinstance(pane, str) or not pane:
+        return None
+    if (ref.get("source") != "herdr:" + kind or ref.get("agent") != kind
+            or ref.get("kind") not in ("id", "path")
+            or not isinstance(ref.get("value"), str) or not ref["value"].strip()):
+        return None
+    return {"pane_id": pane, **{key: ref[key] for key in ("source", "agent", "kind", "value")}}
+
+
+def verify_live_retention(prior, current, name):
+    """Refuse an absent or changed native session before any terminal write."""
+    if current is None or prior.get("context_session") != current:
+        raise HerdrError(
+            "Cannot retain {}: live native session continuity is unproven or changed. "
+            "Check `herdr integration status` and the worker's session; report lost "
+            "context without resetting the fix counter. No brief was sent.".format(name),
+            {"agent": name},
+        )
+
+
+def build_steps(client, assignments, agents_by_name, paths, panes=None, no_clear=False, settle_timeout_ms=DEFAULT_SETTLE_TIMEOUT_MS, start_timeout_ms=DEFAULT_START_TIMEOUT_MS, track_context=False):
     """Build the per-role command plan. Pure with respect to herdr: nothing runs.
 
     This is what `--dry-run` prints, and what the live path walks. `panes` maps
@@ -340,6 +371,8 @@ def build_steps(client, assignments, agents_by_name, paths, panes=None, no_clear
                     "first Enter (Codex's autocomplete popup eats it)",
                 )
             )
+        if track_context and role == "developer":
+            commands.append(client.argv_agent_get(name))
         commands.extend(composer_reads)
         # The assignment is real message text, so pasting it is correct.
         commands.append(client.argv_agent_prompt(name, text))
@@ -387,6 +420,7 @@ def check_all_ready(client, assignments, agents_by_name, warn=None):
             "herdr_state": herdr_status,
             "state_source": source,
             "pane_id": info.get("pane_id"),
+            "context_session": native_context_session(info, agents_by_name[name].kind),
         }
     busy = {
         name: record["state"]
@@ -416,8 +450,7 @@ def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle
     validate_agents(assignments, agents_by_name)
     validate_context_mode(assignments, no_clear, retain_context, task, fix_round)
     validate_fix_history(assignments, history, task, fix_round)
-    if retain_context:
-        validate_retained_history(assignments, history, task, fix_round)
+    prior = validate_retained_history(assignments, history, task, fix_round) if retain_context else None
     skip_clear = no_clear or retain_context
     clear_reason = "retained" if retain_context else "hand" if no_clear else "automatic"
     # Resolve the sink once. Every helper below defaults it too, but this
@@ -427,6 +460,9 @@ def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle
     # Status first: it is the refusal gate, and it is also where the pane ids
     # the clear command needs come from.
     statuses = check_all_ready(client, assignments, agents_by_name, warn=warn)
+    if prior is not None:
+        name = assignments["developer"]
+        verify_live_retention(prior, statuses[name]["context_session"], name)
     steps = build_steps(
         client,
         assignments,
@@ -436,6 +472,7 @@ def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle
         no_clear=skip_clear,
         settle_timeout_ms=settle_timeout_ms,
         start_timeout_ms=start_timeout_ms,
+        track_context=task is not None,
     )
 
     # One session per run. Recovery keys clear somebody's input line, and for
@@ -491,6 +528,17 @@ def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle
             # The clear's redraw races the next paste; a leftover `/` is what
             # made Claude Code read the assignment as a slash command.
             sleep(settle_sec)
+        context_session = None
+        if task is not None and step["role"] == "developer":
+            # Query again after the clear, or immediately before retaining.
+            # A pre-clear reference cannot stand in for the new conversation.
+            context_session = native_context_session(client.agent_get(name), agent.kind)
+            if prior is not None:
+                verify_live_retention(prior, context_session, name)
+            elif cleared and context_session == statuses[name]["context_session"]:
+                context_session = None
+            if context_session is None:
+                warn("{} has no verified post-clear native session reference; future retained fixes will be refused. Check `herdr integration status`.".format(name))
         # send_message re-checks the composer, pastes, and confirms the
         # message actually landed as a user message rather than as a command.
         landing = send_message(
@@ -518,6 +566,7 @@ def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle
             "clear_reason": clear_reason,
             "task": task,
             "fix_round": fix_round,
+            "context_session": context_session,
             "landed": landing["landed"],
             "started": landing["started"],
             "status": "applied"
@@ -551,7 +600,7 @@ def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle
 
         applied.append(record)
         if on_assigned is not None:
-            context = {key: record[key] for key in ("cleared", "clear_reason", "task", "fix_round")}
+            context = {key: record[key] for key in ("cleared", "clear_reason", "task", "fix_round", "context_session")}
             on_assigned(step["role"], name, at, record["status"], context)
 
     return {
@@ -584,5 +633,6 @@ def dry_run(client, assignments, agents_by_name, paths, no_clear=False, settle_t
             paths,
             no_clear=no_clear or retain_context,
             settle_timeout_ms=settle_timeout_ms,
+            track_context=task is not None,
         ),
     }

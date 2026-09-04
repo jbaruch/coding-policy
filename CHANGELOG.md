@@ -2,6 +2,8 @@
 
 ### Added
 
+- **Live context continuity gates retained fixes.** Assignment records carry the official Herdr integration's native session reference scoped to the pane. Retention compares it with the live API at readiness and again before sending; missing, changed, malformed, or non-native identity refuses the dispatch without resetting its counter. An unchanged pre-clear reference cannot prove a fresh conversation. Ledger validation and dispatch share the fix-round upper bound. This closes PR #338's state-verification finding and the adjacent persisted-counter advisory.
+
 - **Bounded Herdr fix loops (#322).** Same-developer fixes retain context through a distinct `--retain-context` path; later fixes require a fresh context, and an exhausted five-round loop goes to the judge without an automatic sixth attempt. Scoped re-checks resolve the prior findings, admit only new blockers, and defer new advisories; the final whole-branch review and verification remain broad. Reviewer and tester briefs prohibit subagent dispatch and require VCS evidence instead of trusting worker reports.
 - **Assignment context evidence, state schema 3.** `apply` persists `cleared`, `clear_reason`, `task`, and `fix_round`. Retention requires the worker's immediately preceding confirmed developer assignment for the same task and next fix number; hand clearing remains a separate reason. The owner migrates old rows without inventing missing evidence, preserves their role counts, and keeps snapshot schema 2 independent of the ledger bump.
 

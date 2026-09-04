@@ -16,7 +16,8 @@ Schema (schema_version 3)::
                                  | "unknown",
                        "cleared": <bool> | null,
                        "clear_reason": "automatic" | "hand" | "retained" | "unknown",
-                       "task": <str> | null, "fix_round": <int> | null}, ... ]
+                       "task": <str> | null, "fix_round": <int> | null,
+                       "context_session": <object> | null}, ... ]
     }
 
 `status` records whether the hand-off was confirmed: `applied` counts toward
@@ -61,6 +62,8 @@ from .errors import StateError
 #: Snapshots have their own version and migration chain below.
 STATE_SCHEMA_VERSION = 3
 
+#: Shared by state validation and dispatch: no usable ledger carries a sixth fix.
+MAX_FIX_ROUNDS = 5
 CLEAR_REASONS = frozenset({"automatic", "hand", "retained", "unknown"})
 
 #: An assignment row records what teamlead did, including what did not work.
@@ -156,7 +159,7 @@ def _migrate_record_2_to_3(record):
     """Preserve old history without inventing context or task evidence."""
     record.update(
         schema_version=3, cleared=None, clear_reason="unknown",
-        task=None, fix_round=None,
+        task=None, fix_round=None, context_session=None,
     )
     return record
 
@@ -289,9 +292,17 @@ def _validate(payload, path):
         fix_round = record.get("fix_round")
         if fix_round is not None and (
             isinstance(fix_round, bool) or not isinstance(fix_round, int)
-            or fix_round < 1
+            or not 1 <= fix_round <= MAX_FIX_ROUNDS
         ):
             raise _NoUsableState("an assignment row has an invalid fix-round number")
+        session = record.get("context_session")
+        if session is not None and (
+            not isinstance(session, dict)
+            or any(not isinstance(session.get(key), str) or not session[key].strip()
+                   for key in ("pane_id", "source", "agent", "kind", "value"))
+            or session.get("kind") not in ("id", "path")
+        ):
+            raise _NoUsableState("an assignment row has invalid native session evidence")
         migrated = migrated or row_migrated
         rows.append(record)
     payload["assignments"] = rows
@@ -447,7 +458,7 @@ def add_snapshot(state, snapshot):
 
 
 def add_assignment(state, at, role, agent, status=STATUS_APPLIED, *,
-                   cleared=None, clear_reason="unknown", task=None, fix_round=None):
+                   cleared=None, clear_reason="unknown", task=None, fix_round=None, context_session=None):
     """Append one role-to-agent assignment to the ledger.
 
     Every hand-off is recorded, including one that never started -- the ledger
@@ -469,6 +480,7 @@ def add_assignment(state, at, role, agent, status=STATUS_APPLIED, *,
             "clear_reason": clear_reason,
             "task": task,
             "fix_round": fix_round,
+            "context_session": context_session,
         }
     )
     return state

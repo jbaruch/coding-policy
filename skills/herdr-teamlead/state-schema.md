@@ -65,7 +65,8 @@ number is refused, naming the file and the role. `plan` is the only reader.
       "cleared": false,
       "clear_reason": "retained",
       "task": "owner/repo#322",
-      "fix_round": 1
+      "fix_round": 1,
+      "context_session": {"pane_id": "w4:p1", "source": "herdr:grok", "agent": "grok", "kind": "id", "value": "native-session-id"}
     }
   ]
 }
@@ -87,6 +88,7 @@ number is refused, naming the file and the role. `plan` is the only reader.
 | `assignments[].clear_reason` | string | `automatic` with cleared true, `hand` or `retained` with cleared false, or `unknown` with cleared null |
 | `assignments[].task` | string or null | Non-empty stable task identifier; null for older or unlabelled assignments |
 | `assignments[].fix_round` | positive integer or null | Task's fix number; null for initial development or non-fix work |
+| `assignments[].context_session` | object or null | Verified native session reference scoped to a pane: `pane_id`, `source`, `agent`, `kind`, `value`, all non-empty strings; kind is `id` or `path`. Null means continuity was not established |
 
 Every hand-off is recorded, one that never started included: the ledger is what
 the tool did, and a round that went out and died is the thing worth looking up
@@ -125,6 +127,14 @@ informational plan name and never feeds headroom.
   number even when the worker changes. An initial assignment cannot reset a
   task that already has confirmed fixes. `apply` uses the ledger's task and
   outcome evidence, never pane labels, for that check.
+- **Session continuity** — a labelled developer dispatch reads Herdr's native
+  session reference after clearing and before sending the brief. An unchanged
+  pre-clear reference is recorded as null, not as the new conversation. A
+  retained dispatch checks the recorded identity against the live source at
+  readiness and immediately before sending. Missing, changed, malformed, or
+  non-native identity is a refusal with no terminal writes. Other assignments
+  and unlabelled development record null. The official integration must report
+  native session changes; check its installation when continuity is unavailable.
 - **Absent state** — a first run has no file. Every reader treats that as no
   prior state and continues; `plan` still requires a snapshot, passed with
   `--snapshot` when the state file holds none.
@@ -141,7 +151,7 @@ Only the owner migrates, and it reads a version in one of three directions.
   gives the chain a step below `1`. The `1 → 2` step stamps `status: unknown`
   on every row written before the field existed. The `2 → 3` step preserves
   status and role history while adding `cleared: null`, `clear_reason: unknown`,
-  `task: null`, and `fix_round: null`. It cannot invent evidence of a retained
+  `task: null`, `fix_round: null`, and `context_session: null`. It cannot invent evidence of a retained
   session. Snapshot versions remain independent: version-2 snapshots remain
   version 2 inside a version-3 state document. Each row is migrated even in
   a document already at the current version.
@@ -151,7 +161,8 @@ Only the owner migrates, and it reads a version in one of three directions.
   the whole document unusable rather than being dropped, so the next write
   cannot lose it.
 - **Corrupt** — unparseable JSON, a non-object document, a non-array field, a
-  non-object row: no usable prior state, treated exactly like the newer case.
+  non-object row, invalid context evidence, or a fix counter outside the
+  dispatcher's shared bounds: no usable prior state, treated like the newer case.
   The file is never deleted, and the warning never instructs the operator to
   discard it. Losing a snapshot ring costs one re-measure; overwriting an
   unread file costs the ledger.

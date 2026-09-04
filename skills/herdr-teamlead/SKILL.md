@@ -276,7 +276,7 @@ bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/teamlead.sh appl
 ```
 
 Hands each worker its brief using the selected context mode. Emits one JSON
-object: per role a record carrying `cleared`, `clear_reason`, `task`,
+object: per role a record carrying `cleared`, `clear_reason`, `context_session`, `task`,
 `fix_round`, `landed`, `started`, and `status`.
 
 Keep the same `--task` identifier from initial development through all its
@@ -284,8 +284,12 @@ fixes. Omit `--fix-round` on the initial assignment; supply it on every fix.
 Dispatch a retained fix as a developer-only assignment with
 `--retain-context`. Other roles receive separate, cleared assignments.
 The utility refuses an invalid mode or an exhausted fix counter before any
-Herdr operation. Live fixes must advance the task's confirmed history;
-retention also requires the same worker's matching prior assignment.
+Herdr operation. Live fixes must advance the task's confirmed history.
+Retention also requires the same worker's matching prior assignment and live
+native session identity from Herdr's official integration. A missing or changed
+identity refuses retention before any terminal write. Check
+`herdr integration status` when the identity is unavailable; never infer
+continuity from the worker's name, readiness, or pane text.
 Missing or migrated history cannot authorize it. If context is unavailable,
 stop the retained path and report the loss; do not reset the fix counter.
 

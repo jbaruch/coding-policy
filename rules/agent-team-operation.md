@@ -61,7 +61,8 @@ description: Running a multi-agent team — headroom-driven role rotation, one w
 - Preconditions (all required):
   1. The worker remains the developer for the same task
   2. The assignment follows that worker's confirmed preceding developer round
-  3. The lead uses `--retain-context` with the task identifier and fix-round number
+  3. Live native session identity matches the preceding assignment's recorded identity
+  4. The lead uses `--retain-context` with the task identifier and fix-round number
 - Every other assignment clears context
 - `--no-clear` records a hand-cleared pane, never retained context
 - Fix rounds 4–5 use a freshly cleared worker

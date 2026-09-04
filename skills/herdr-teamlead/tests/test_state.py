@@ -178,7 +178,7 @@ class MigrationTest(unittest.TestCase):
                 self.assertEqual(migrated["snapshots"], [snapshot])
                 self.assertEqual(migrated["assignments"], [dict(
                     row, schema_version=STATE_SCHEMA_VERSION, cleared=None,
-                    clear_reason="unknown", task=None, fix_round=None,
+                    clear_reason="unknown", task=None, fix_round=None, context_session=None,
                 )])
                 self.assertEqual(role_counts(migrated), {"developer": {"grok": 1}})
                 self.assertEqual(self.on_disk(), migrated)
@@ -199,7 +199,8 @@ class MigrationTest(unittest.TestCase):
             {"cleared": True, "clear_reason": "retained"},
             {"cleared": None, "clear_reason": "hand"},
             {"clear_reason": []}, {"task": " "}, {"fix_round": True},
-            {"fix_round": 0}, {"fix_round": "1"},
+            {"fix_round": 0}, {"fix_round": 6}, {"fix_round": "1"},
+            {"context_session": {}}, {"context_session": "session"},
         ):
             with self.subTest(fields=fields):
                 state = empty_state()
@@ -309,6 +310,7 @@ class AssignmentRecordTest(unittest.TestCase):
                 "clear_reason": "unknown",
                 "task": None,
                 "fix_round": None,
+                "context_session": None,
             },
         )
 
