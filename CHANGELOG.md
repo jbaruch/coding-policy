@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.183 — 2026-09-04
+
 ### Fixed
 
 - **The judge seat is planned against the window it actually shares.** PR #330 shipped the judge outside the balancer: its own config file (`config.example-judge.json`), dispatched with `apply --config`, never through `measure`/`plan`. Its worker authenticates as the same Claude subscription as the `claude` worker, and Fable 5.1 has no weekly window of its own — it draws on that account's pool and may take up to 50% of it (Anthropic, "Claude Fable models on your plan", 2026-09-04). Modelled as two independent workers, the planner read one window as two and was free to seat `claude` on capacity a judge round had already spent. The judge worker now lives in the main `config.json`; a new per-agent `window_group` names a shared window, and a seat's cost reduces the projected headroom of every worker declaring the same one — including workers already holding a seat, since affordability reads the minimum across the whole window and a stale reading on an assigned worker made a spent pool look affordable through its pool-mate. Supersedes the "not load-balanced" design recorded in the 0.3.181 entry below.
