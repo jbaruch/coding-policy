@@ -65,6 +65,13 @@ to know goes in the report.
 
 ## Reporting
 
+- For a tiered dispatch, record the launch message's `model`, `effort`, and
+  `prompt_hash`, plus the observed CLI version, token usage, compaction count,
+  and quota windows before and after the round. Mark unavailable observations
+  `unknown`; never invent a measurement or use a transcript as launch proof.
+- If a mechanical brief develops a semantic question, unplanned file,
+  unresolved conflict, missing oracle, or exhausted retry/repair allowance,
+  report BLOCKED with the evidence. The lead selects a fresh judgment round.
 - Write a full Markdown report at the REPORT path your brief names: what you
   did, why, the decisions you made, open questions, every identifier a human
   needs (branch, PR number, commit SHAs, issue numbers), and a summary of the

@@ -114,7 +114,14 @@ validate_values() { # <values-json> <label>
 
 validate_review_package() { # <merged-values-json> <role>
   case "$2" in reviewer|tester) ;; *) return 0 ;; esac
-  local package
+  local package ref key
+  for key in REVIEW_BASE REVIEW_HEAD; do
+    ref="$(printf '%s' "$1" | jq -r --arg k "$key" '.[$k] // ""')" || return 2
+    if [[ ! "$ref" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]]; then
+      warn "${key} for role '${2}' must be a full lowercase commit SHA — resolve the recorded range with git rev-parse before composing"
+      return 2
+    fi
+  done
   package="$(printf '%s' "$1" | jq -r '.REVIEW_PACKAGE // ""')" || return 2
   if [[ "$package" != /* || "$package" == *[[:cntrl:]]* \
         || ! -f "$package" || ! -r "$package" || ! -s "$package" ]]; then

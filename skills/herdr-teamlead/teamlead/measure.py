@@ -35,6 +35,7 @@ from .herdr import BUSY_STATES, DEFAULT_MARKER_TIMEOUT_MS, READY_STATES, format_
 from .parsers import headroom_pct, parse_usage
 from .probe import resolve_status, stderr_warn
 from .state import SNAPSHOT_SCHEMA_VERSION
+from .billing import tier_billing
 
 #: Snapshot document version. 2 adds `window_group` to every agent record.
 #: `state.py` owns the file a snapshot is stored in, so it owns both the
@@ -299,7 +300,10 @@ def measure(client, agents, measured_at, marker_timeout_ms=DEFAULT_MARKER_TIMEOU
     return {
         "schema_version": MEASURE_SCHEMA_VERSION,
         "measured_at": measured_at,
-        "agents": records,
+        "agents": {
+            agent.name: {**records[agent.name], "tier_billing": tier_billing(agent.tiers)}
+            for agent in agents
+        },
         "failed_agents": failures,
     }
 

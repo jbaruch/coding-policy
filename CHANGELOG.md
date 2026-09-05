@@ -1,5 +1,16 @@
 # Changelog
 
+### Added
+
+- **Round-specific model and effort tiers (#324, completing #321).** Config schema 2 adds an operator-owned tier table and explicit launch options. Planning prices candidates through per-tier multipliers and excludes unqualified configurations; preview planning and dry-run expose commands without starting workers. Judgment stays on the pinned top models, mechanical work requires the full eligibility predicate, and risk or late fixes promote to the top tier. Claude, Codex, and Grok have launch adapters; Antigravity remains a future adapter rather than an inactive config promise. Reviewer/tester rechecks remain judgment despite the research table's lower-tier examples.
+- **Verified fresh-round relaunches.** Dispatch verifies the idle pane occupant and empty composer, terminates only the identified foreground worker, waits for its shell, and starts the requested model and effort together. Returned argv or the live process argv proves the pair before briefing. This reconciles the owner's #324 correction: Claude Code's banner does not expose effort, so banner-only proof could not satisfy the intended gate. The judge launcher and governing rule use the same contract. Retained fixes keep a verified compatible higher effort and preserve their cost evidence without restarting.
+- **Explicit evidence and migrations.** State/assignment schema 4 preserves schema-3 task, context-session, and fix-counter history while adding launch proof, accepted qualification, and input hashes. Snapshot schema 3 adds per-round billing attribution, including skipped workers. No isolated live billing measurement was available in the standalone implementation session: the example reports `unknown`, never treating Spark or Fable as free capacity. Synthetic tests demonstrate the evidence reader only; they are not provider billing observations or live model qualifications.
+- **Qualification before live tier use.** Paired blinded screens, promotion batteries, and current stable canaries must carry model, effort, CLI version, prompt hashes, token/compaction counts, and explicit quota observations. Missing evidence refuses dispatch. This implements the research's guard against cheapening judgment: the source survey reported Sonnet controllers shipping planted defects in 4/5 runs and Haiku reviewers catching 0/10 at the correct severity. The example ships with empty qualification arrays and requires real commissioning results before live tier dispatch; unchanged legacy non-tiered configs remain readable.
+
+### Fixed
+
+- **Accepted #339 follow-ups.** Review/test briefs reject empty or malformed full commit IDs before writing any round artifact. The padded legacy task diagnostic requires an explicit recovery decision without trimming identities or resetting counters. Detailed dispatch/wait recovery moves into references while the skill retains every go/no-go outcome.
+
 ## 0.3.187 — 2026-09-05
 
 ### Added

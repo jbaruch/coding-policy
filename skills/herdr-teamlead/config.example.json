@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "role_costs": {
     "developer": 12,
     "tester": 10,
@@ -9,8 +9,7 @@
   "judge": {
     "agent": "judge",
     "model": "claude-fable-5-1",
-    "effort": "max",
-    "banner_pattern": "^Claude Code"
+    "effort": "max"
   },
   "agents": [
     {
@@ -38,7 +37,87 @@
         "Churned for"
       ],
       "model_label": "claude-opus-5",
-      "window_group": "claude-max-weekly"
+      "window_group": "claude-max-weekly",
+      "tiers": {
+        "architect": {
+          "model": "opus-5",
+          "effort": "high",
+          "multiplier": 1.0,
+          "qualification": []
+        },
+        "reconciliation": {
+          "model": "opus-5",
+          "effort": "high",
+          "multiplier": 1.0,
+          "qualification": []
+        },
+        "test_plan": {
+          "model": "opus-5",
+          "effort": "high",
+          "multiplier": 1.0,
+          "qualification": []
+        },
+        "critic": {
+          "model": "opus-5",
+          "effort": "high",
+          "multiplier": 1.0,
+          "qualification": []
+        },
+        "review": {
+          "model": "opus-5",
+          "effort": "high",
+          "multiplier": 1.0,
+          "qualification": []
+        },
+        "hostile_verify": {
+          "model": "opus-5",
+          "effort": "xhigh",
+          "multiplier": 1.0,
+          "qualification": []
+        },
+        "recheck": {
+          "model": "opus-5",
+          "effort": "high",
+          "multiplier": 1.0,
+          "qualification": []
+        },
+        "release_adjudication": {
+          "model": "opus-5",
+          "effort": "high",
+          "multiplier": 1.0,
+          "qualification": []
+        },
+        "lead": {
+          "model": "opus-5",
+          "effort": "high",
+          "multiplier": 1.0,
+          "qualification": []
+        },
+        "build": {
+          "model": "sonnet-5",
+          "effort": "high",
+          "multiplier": 1.0,
+          "qualification": []
+        },
+        "fix": {
+          "model": "sonnet-5",
+          "effort": "high",
+          "multiplier": 1.0,
+          "qualification": []
+        },
+        "mechanical": {
+          "model": "claude-haiku-4-5",
+          "multiplier": 1.0,
+          "qualification": []
+        },
+        "release_mechanics": {
+          "model": "sonnet-5",
+          "effort": "medium",
+          "multiplier": 1.0,
+          "qualification": []
+        }
+      },
+      "launch_args": []
     },
     {
       "name": "codex",
@@ -59,7 +138,88 @@
         "\u203a Ask Codex to do anything"
       ],
       "working_markers": [],
-      "model_label": "gpt-5.6"
+      "model_label": "gpt-5.6",
+      "tiers": {
+        "architect": {
+          "model": "gpt-5.6-sol",
+          "effort": "high",
+          "multiplier": 1.0,
+          "qualification": []
+        },
+        "reconciliation": {
+          "model": "gpt-5.6-sol",
+          "effort": "high",
+          "multiplier": 1.0,
+          "qualification": []
+        },
+        "test_plan": {
+          "model": "gpt-5.6-sol",
+          "effort": "high",
+          "multiplier": 1.0,
+          "qualification": []
+        },
+        "critic": {
+          "model": "gpt-5.6-sol",
+          "effort": "high",
+          "multiplier": 1.0,
+          "qualification": []
+        },
+        "review": {
+          "model": "gpt-5.6-sol",
+          "effort": "high",
+          "multiplier": 1.0,
+          "qualification": []
+        },
+        "hostile_verify": {
+          "model": "gpt-5.6-sol",
+          "effort": "xhigh",
+          "multiplier": 1.0,
+          "qualification": []
+        },
+        "recheck": {
+          "model": "gpt-5.6-sol",
+          "effort": "high",
+          "multiplier": 1.0,
+          "qualification": []
+        },
+        "release_adjudication": {
+          "model": "gpt-5.6-sol",
+          "effort": "high",
+          "multiplier": 1.0,
+          "qualification": []
+        },
+        "lead": {
+          "model": "gpt-5.6-sol",
+          "effort": "high",
+          "multiplier": 1.0,
+          "qualification": []
+        },
+        "build": {
+          "model": "gpt-5.6-sol",
+          "effort": "high",
+          "multiplier": 1.0,
+          "qualification": []
+        },
+        "fix": {
+          "model": "gpt-5.6-sol",
+          "effort": "medium",
+          "multiplier": 1.0,
+          "qualification": []
+        },
+        "mechanical": {
+          "model": "gpt-5.3-codex-spark",
+          "effort": "low",
+          "multiplier": 1.0,
+          "qualification": []
+        },
+        "release_mechanics": {
+          "model": "gpt-5.3-codex-spark",
+          "effort": "low",
+          "multiplier": 1.0,
+          "qualification": []
+        }
+      },
+      "launch_args": []
     },
     {
       "name": "grok",
@@ -87,7 +247,88 @@
       "working_markers": [
         "Esc:cancel"
       ],
-      "model_label": "grok-4"
+      "model_label": "grok-4",
+      "tiers": {
+        "architect": {
+          "model": "grok-4.6",
+          "effort": "high",
+          "multiplier": 1.0,
+          "qualification": []
+        },
+        "reconciliation": {
+          "model": "grok-4.6",
+          "effort": "high",
+          "multiplier": 1.0,
+          "qualification": []
+        },
+        "test_plan": {
+          "model": "grok-4.6",
+          "effort": "high",
+          "multiplier": 1.0,
+          "qualification": []
+        },
+        "critic": {
+          "model": "grok-4.6",
+          "effort": "high",
+          "multiplier": 1.0,
+          "qualification": []
+        },
+        "review": {
+          "model": "grok-4.6",
+          "effort": "high",
+          "multiplier": 1.0,
+          "qualification": []
+        },
+        "hostile_verify": {
+          "model": "grok-4.6",
+          "effort": "high",
+          "multiplier": 1.0,
+          "qualification": []
+        },
+        "recheck": {
+          "model": "grok-4.6",
+          "effort": "high",
+          "multiplier": 1.0,
+          "qualification": []
+        },
+        "release_adjudication": {
+          "model": "grok-4.6",
+          "effort": "high",
+          "multiplier": 1.0,
+          "qualification": []
+        },
+        "lead": {
+          "model": "grok-4.6",
+          "effort": "high",
+          "multiplier": 1.0,
+          "qualification": []
+        },
+        "build": {
+          "model": "grok-4.6",
+          "effort": "high",
+          "multiplier": 1.0,
+          "qualification": []
+        },
+        "fix": {
+          "model": "grok-4.6",
+          "effort": "medium",
+          "multiplier": 1.0,
+          "qualification": []
+        },
+        "mechanical": {
+          "model": "grok-4.6",
+          "effort": "low",
+          "multiplier": 1.0,
+          "qualification": []
+        },
+        "release_mechanics": {
+          "model": "grok-4.6",
+          "effort": "low",
+          "multiplier": 1.0,
+          "qualification": []
+        }
+      },
+      "launch_args": []
     },
     {
       "name": "judge",

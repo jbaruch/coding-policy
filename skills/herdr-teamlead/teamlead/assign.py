@@ -33,6 +33,8 @@ builders live on the transport) and prints them without running anything.
 
 import os
 import time
+import hashlib
+from pathlib import Path
 
 from .composer import (
     COMPOSER_SETTLE_SEC,
@@ -52,9 +54,12 @@ from .herdr import (
 from .composer import COMPOSER_READ_LINES, COMPOSER_READ_SOURCE, checkable
 from .probe import PROBE_READ_LINES, PROBE_READ_SOURCE, resolve_status, stderr_warn
 from .state import MAX_FIX_ROUNDS
+from .launch import restart_worker, verify_running
+from .tiers import launch_flags
+from .qualification import require_qualification
 
-# Version 2 adds context-reason and task/fix-round evidence to each hand-off.
-APPLY_SCHEMA_VERSION = 2
+# Version 3 adds verified model-tier metadata to context and task/fix evidence.
+APPLY_SCHEMA_VERSION = 3
 
 RETAIN_CONTEXT_ROUNDS = frozenset({1, 2, 3})
 
@@ -82,6 +87,17 @@ def assignment_text(role, common_path, brief_path):
     return ASSIGNMENT_TEMPLATE.format(
         role=role.upper(), common=common_path, brief=brief_path
     )
+
+
+def tiered_prompt(text, tier, common, brief):
+    """Hash length-framed dispatch inputs, excluding this metadata footer."""
+    digest = hashlib.sha256()
+    for part in (text.encode("utf-8"), Path(common).read_bytes(), Path(brief).read_bytes()):
+        digest.update(len(part).to_bytes(8, "big"))
+        digest.update(part)
+    prompt_hash = digest.hexdigest()
+    return text + " Launch metadata: model={}, effort={}, prompt_hash={}. Include the tier metadata required by COMMON.md in your report.".format(
+        tier["model"], tier.get("effort") or "none", prompt_hash), prompt_hash
 
 
 def normalize_assignments(payload):
@@ -215,8 +231,9 @@ def validate_context_mode(assignments, no_clear, retain_context, task, fix_round
         raise UsageError("Pass a non-empty --task label, or omit it.", {})
     if isinstance(task, str) and task != task.strip():
         raise UsageError(
-            "Pass --task without leading or trailing whitespace; use the task's "
-            "existing exact identifier, never rename or merge its ledger history.", {}
+            "New --task labels must have no leading or trailing whitespace. "
+            "A padded legacy identity requires an explicit operator recovery decision; "
+            "do not retry the padded label, trim or merge history, or reset its fix count.", {}
         )
     if fix_round is not None and (
         isinstance(fix_round, bool) or not isinstance(fix_round, int)
@@ -310,7 +327,7 @@ def verify_live_retention(prior, current, name):
         )
 
 
-def build_steps(client, assignments, agents_by_name, paths, panes=None, no_clear=False, settle_timeout_ms=DEFAULT_SETTLE_TIMEOUT_MS, start_timeout_ms=DEFAULT_START_TIMEOUT_MS, track_context=False):
+def build_steps(client, assignments, agents_by_name, paths, panes=None, no_clear=False, settle_timeout_ms=DEFAULT_SETTLE_TIMEOUT_MS, start_timeout_ms=DEFAULT_START_TIMEOUT_MS, track_context=False, tiers=None):
     """Build the per-role command plan. Pure with respect to herdr: nothing runs.
 
     This is what `--dry-run` prints, and what the live path walks. `panes` maps
@@ -346,7 +363,18 @@ def build_steps(client, assignments, agents_by_name, paths, panes=None, no_clear
                 "pane footer before refusing",
             )
         ]
-        if not no_clear:
+        tier = (tiers or {}).get(role)
+        prompt_hash = None
+        if tier:
+            text, prompt_hash = tiered_prompt(text, tier, paths["common"], paths[role])
+            commands.extend(composer_reads)
+            commands.append(client.argv_pane_process_info(pane_id))
+            if not no_clear:
+                commands.append(["kill", "-TERM", "VERIFIED-IDLE-FOREGROUND-PID"])
+                commands.append(client.argv_pane_process_info(pane_id))
+                commands.append(client.argv_agent_start(name, agent.kind, pane_id,
+                    list(agent.launch_args) + launch_flags(agent.kind, tier)))
+        elif not no_clear:
             commands.extend(composer_reads)
             commands.extend(
                 client.argv_deliver_slash_command(
@@ -386,8 +414,7 @@ def build_steps(client, assignments, agents_by_name, paths, panes=None, no_clear
         commands.append(
             client.argv_agent_wait(name, until=("working",), timeout_ms=start_timeout_ms)
         )
-        steps.append(
-            {
+        step = {
                 "role": role,
                 "agent": name,
                 "kind": agent.kind,
@@ -395,13 +422,16 @@ def build_steps(client, assignments, agents_by_name, paths, panes=None, no_clear
                 "brief": paths[role],
                 "common": paths["common"],
                 "prompt": text,
+                "tier": tier,
                 "commands": [{"argv": argv, "shell": format_argv(argv)} for argv in commands],
                 "conditional_commands": [
                     {"argv": argv, "shell": format_argv(argv), "when": when}
                     for argv, when in conditional
                 ],
             }
-        )
+        if tier:
+            step["prompt_hash"] = prompt_hash
+        steps.append(step)
     return steps
 
 
@@ -443,7 +473,7 @@ def check_all_ready(client, assignments, agents_by_name, warn=None):
     return statuses
 
 
-def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle_timeout_ms=DEFAULT_SETTLE_TIMEOUT_MS, on_assigned=None, warn=None, sleep=time.sleep, settle_sec=COMPOSER_SETTLE_SEC, landing_attempts=LANDING_ATTEMPTS, start_timeout_ms=DEFAULT_START_TIMEOUT_MS, allow_recovery=False, task=None, retain_context=False, fix_round=None, history=None):
+def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle_timeout_ms=DEFAULT_SETTLE_TIMEOUT_MS, on_assigned=None, warn=None, sleep=time.sleep, settle_sec=COMPOSER_SETTLE_SEC, landing_attempts=LANDING_ATTEMPTS, start_timeout_ms=DEFAULT_START_TIMEOUT_MS, allow_recovery=False, task=None, retain_context=False, fix_round=None, history=None, tiers=None, qualifications=None):
     """Hand each agent its brief using the selected context mode.
 
     `on_assigned(role, agent, at, status, context)` is called after each hand-off so the
@@ -456,6 +486,23 @@ def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle
     validate_context_mode(assignments, no_clear, retain_context, task, fix_round)
     validate_fix_history(assignments, history, task, fix_round)
     prior = validate_retained_history(assignments, history, task, fix_round) if retain_context else None
+    tiers = dict(tiers or {})
+    if prior is not None and tiers.get("developer"):
+        previous_tier = prior.get("tier")
+        wanted = tiers["developer"]
+        effort_rank = {None: 0, "low": 1, "medium": 2, "high": 3, "xhigh": 4, "max": 5}
+        if (not isinstance(previous_tier, dict) or not previous_tier.get("verified")
+                or previous_tier.get("model") != wanted["model"]
+                or effort_rank.get(previous_tier.get("effort"), -1) < effort_rank.get(wanted.get("effort"), 0)):
+            raise UsageError("Retained context cannot switch model or raise effort. Recover the task through an explicit fresh-round decision without resetting its counter.", {})
+        tiers["developer"] = {**wanted, "effort": previous_tier.get("effort")}
+        if previous_tier.get("effort") != wanted.get("effort"):
+            for key, default in (("multiplier", 1.0), ("effective_multiplier", 1.0), ("billing_window", "unknown")):
+                tiers["developer"][key] = previous_tier.get(key, default)
+    for role, tier in tiers.items():
+        if role != "judge":
+            proof = require_qualification({**tier, "qualification": (qualifications or {}).get(role, [])}, role, at)
+            tiers[role] = {**tier, "qualification": proof}
     skip_clear = no_clear or retain_context
     clear_reason = "retained" if retain_context else "hand" if no_clear else "automatic"
     # Resolve the sink once. Every helper below defaults it too, but this
@@ -478,6 +525,7 @@ def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle
         settle_timeout_ms=settle_timeout_ms,
         start_timeout_ms=start_timeout_ms,
         track_context=task is not None,
+        tiers=tiers,
     )
 
     # One session per run. Recovery keys clear somebody's input line, and for
@@ -489,7 +537,15 @@ def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle
         name = step["agent"]
         agent = agents_by_name[name]
         cleared = False
-        if not skip_clear:
+        tier = tiers.get(step["role"])
+        tier_record = None
+        if tier:
+            proof = (verify_running(client, agent, step["pane_id"], tier) if skip_clear
+                     else restart_worker(client, agent, step["pane_id"], tier, sleep=sleep))
+            tier_record = {**tier, "launch_args": list(agent.launch_args), "verified": proof,
+                           "prompt_hash": step["prompt_hash"]}
+            cleared = not skip_clear
+        elif not skip_clear:
             pane_id = step["pane_id"]
             if agent.slash_delivery == SLASH_DELIVERY_TYPE and pane_id == PANE_ID_PLACEHOLDER:
                 raise UsageError(
@@ -572,6 +628,7 @@ def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle
             "task": task,
             "fix_round": fix_round,
             "context_session": context_session,
+            "tier": tier_record,
             "landed": landing["landed"],
             "started": landing["started"],
             "status": "applied"
@@ -605,7 +662,7 @@ def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle
 
         applied.append(record)
         if on_assigned is not None:
-            context = {key: record[key] for key in ("cleared", "clear_reason", "task", "fix_round", "context_session")}
+            context = {key: record[key] for key in ("cleared", "clear_reason", "task", "fix_round", "context_session", "tier")}
             on_assigned(step["role"], name, at, record["status"], context)
 
     return {
@@ -616,7 +673,7 @@ def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle
     }
 
 
-def dry_run(client, assignments, agents_by_name, paths, no_clear=False, settle_timeout_ms=DEFAULT_SETTLE_TIMEOUT_MS, retain_context=False, task=None, fix_round=None):
+def dry_run(client, assignments, agents_by_name, paths, no_clear=False, settle_timeout_ms=DEFAULT_SETTLE_TIMEOUT_MS, retain_context=False, task=None, fix_round=None, tiers=None):
     """Print the plan without contacting herdr at all.
 
     Deliberately makes zero herdr calls, including the status check: a dry run
@@ -639,5 +696,6 @@ def dry_run(client, assignments, agents_by_name, paths, no_clear=False, settle_t
             no_clear=no_clear or retain_context,
             settle_timeout_ms=settle_timeout_ms,
             track_context=task is not None,
+            tiers=tiers,
         ),
     }

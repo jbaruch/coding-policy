@@ -436,6 +436,35 @@ class HerdrClient:
 
     # -- operations ----------------------------------------------------------
 
+    def argv_agent_start(self, name, kind, pane_id, flags):
+        return [self.binary, "agent", "start", name, "--kind", kind, "--pane", pane_id, "--", *flags]
+
+    def agent_start(self, name, kind, pane_id, flags):
+        return self._run_json(self.argv_agent_start(name, kind, pane_id, flags))
+
+    def argv_pane_process_info(self, pane_id):
+        return [self.binary, "pane", "process-info", "--pane", pane_id]
+
+    def pane_process_info(self, pane_id):
+        result = self._run_json(self.argv_pane_process_info(pane_id))
+        info = result.get("process_info")
+        if not isinstance(info, dict) or info.get("pane_id") != pane_id:
+            raise HerdrError("Herdr returned no process information for the requested pane; update Herdr before dispatch.", {})
+        return info
+
+    def process_args(self, pid):
+        if isinstance(pid, bool) or not isinstance(pid, int) or pid <= 0:
+            raise HerdrError("No usable foreground PID; inspect the pane before dispatch.", {})
+        try:
+            return shlex.split(self._run(["ps", "-o", "args=", "-p", str(pid)]))
+        except ValueError:
+            raise HerdrError("Process arguments could not be parsed; start a fresh tiered worker.", {}) from None
+
+    def terminate_process(self, pid):
+        if isinstance(pid, bool) or not isinstance(pid, int) or pid <= 0:
+            raise HerdrError("No usable foreground PID; refusing to terminate an unknown process.", {})
+        self._run(["kill", "-TERM", str(pid)])
+
     def agent_get(self, name):
         """Return the agent record for `name` (pane_id, agent_status, ...)."""
         result = self._run_json(self.argv_agent_get(name))

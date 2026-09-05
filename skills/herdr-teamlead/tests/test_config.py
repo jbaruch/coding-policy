@@ -179,7 +179,7 @@ class ParseConfigTest(unittest.TestCase):
         self.assertEqual(by_name["grok"].dialog_next_tab_keys, ("tab",))
 
     def test_wrong_schema_version_is_rejected(self):
-        payload = dict(VALID, schema_version=2)
+        payload = dict(VALID, schema_version=3)
         with self.assertRaises(ConfigError) as caught:
             parse_config(payload)
         self.assertIn("schema_version", str(caught.exception))
@@ -490,34 +490,19 @@ class WindowGroupTest(unittest.TestCase):
         self.assertEqual(groups["codex"], "")
 
 
-class JudgeBannerPatternTest(unittest.TestCase):
-    """A tier is proved from the startup banner, so its shape is declared."""
+class JudgeArgvConfigTest(unittest.TestCase):
+    """Launch proof does not depend on an operator-supplied banner regex."""
 
-    def test_a_missing_pattern_is_refused(self):
-        with self.assertRaises(ConfigError) as caught:
-            parse_judge({"judge": {"agent": "j", "model": "m"}})
-        self.assertIn("banner_pattern", str(caught.exception))
-
-    def test_an_unanchored_pattern_is_refused(self):
-        # Unanchored, `Claude Code` matches a prompt row quoting the banner,
-        # which is not proof of how the worker started.
-        with self.assertRaises(ConfigError) as caught:
-            parse_judge(
-                {"judge": {"agent": "j", "model": "m", "banner_pattern": "Claude Code"}}
-            )
-        self.assertIn("not anchored", str(caught.exception))
-
-    def test_an_invalid_regex_is_refused_at_parse_time(self):
-        with self.assertRaises(ConfigError) as caught:
-            parse_judge(
-                {"judge": {"agent": "j", "model": "m", "banner_pattern": "^a["}}
-            )
-        self.assertIn("not a valid regex", str(caught.exception))
-
-    def test_the_shipped_example_declares_one(self):
-        judge = parse_judge(_example_config())
+    def test_a_missing_pattern_is_valid(self):
+        judge = parse_judge({"judge": {"agent": "j", "model": "opus-5", "effort": "high"}})
         assert judge is not None
-        self.assertEqual(judge.banner_pattern, "^Claude Code")
+        self.assertEqual(judge.model, "opus-5")
+
+    def test_legacy_patterns_never_change_the_tier(self):
+        for pattern in ("Claude Code", "^a[", "^Claude Code"):
+            judge = parse_judge({"judge": {"agent": "j", "model": "opus-5", "effort": "high", "banner_pattern": pattern}})
+            assert judge is not None
+            self.assertEqual((judge.model, judge.effort), ("opus-5", "high"))
 
 
 if __name__ == "__main__":

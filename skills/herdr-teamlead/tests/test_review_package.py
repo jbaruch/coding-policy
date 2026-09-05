@@ -225,7 +225,7 @@ class ReviewPackageTests(unittest.TestCase):
         (templates / "brief-developer.md").write_text("Develop {{ISSUE}}\n", encoding="utf-8")
         for role in ("reviewer", "tester"):
             (templates / f"brief-{role}.md").write_text(
-                "Review {{ISSUE}} with {{REVIEW_PACKAGE}}\n", encoding="utf-8")
+                "Review {{ISSUE}} with {{REVIEW_PACKAGE}} over {{REVIEW_BASE}}..{{REVIEW_HEAD}}\n", encoding="utf-8")
         empty = self.root / "empty.diff"
         empty.touch()
         missing = self.root / "missing.diff"
@@ -233,7 +233,9 @@ class ReviewPackageTests(unittest.TestCase):
         for role in ("reviewer", "tester"):
             for package in (None, str(missing), str(empty), str(self.repo), "relative.diff"):
                 with self.subTest(role=role, package=package):
-                    review_values = {} if package is None else {"REVIEW_PACKAGE": package}
+                    review_values = {"REVIEW_BASE": self.base, "REVIEW_HEAD": self.head}
+                    if package is not None:
+                        review_values["REVIEW_PACKAGE"] = package
                     values.write_text(json.dumps({"shared": {"ISSUE": "#323"},
                         "roles": {"developer": {}, role: review_values}}), encoding="utf-8")
                     outdir = self.root / "briefs"
@@ -248,7 +250,7 @@ class ReviewPackageTests(unittest.TestCase):
         result = self.package(self.base, self.head, self.output)
         self.assertEqual(result.returncode, 0, result.stderr)
         values.write_text(json.dumps({"shared": {"ISSUE": "#323"}, "roles": {
-            role: {"REVIEW_PACKAGE": result.stdout.strip()} for role in ("reviewer", "tester")
+            role: {"REVIEW_PACKAGE": result.stdout.strip(), "REVIEW_BASE": self.base, "REVIEW_HEAD": self.head} for role in ("reviewer", "tester")
         }}), encoding="utf-8")
         outdir = self.root / "briefs"
         result = subprocess.run(["bash", str(SKILL / "compose-briefs.sh"),
@@ -257,6 +259,30 @@ class ReviewPackageTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         for role in ("reviewer", "tester"):
             self.assertIn(str(self.output), (outdir / f"brief-{role}.md").read_text())
+
+
+    def test_malformed_review_range_refuses_before_writing_any_brief(self):
+        templates = self.root / "range-templates"
+        templates.mkdir()
+        (templates / "COMMON.md").write_text("Common\n", encoding="utf-8")
+        (templates / "brief-developer.md").write_text("Develop\n", encoding="utf-8")
+        for role in ("reviewer", "tester"):
+            (templates / f"brief-{role}.md").write_text(
+                "Review {{REVIEW_BASE}}..{{REVIEW_HEAD}} in {{REVIEW_PACKAGE}}\n", encoding="utf-8")
+        self.assertEqual(self.package(self.base, self.head, self.output).returncode, 0)
+        values = self.root / "invalid-range.json"
+        for role in ("reviewer", "tester"):
+            for key in ("REVIEW_BASE", "REVIEW_HEAD"):
+                for invalid in ("", "main", "abc123", " " + self.base, "G" * 40, 123):
+                    with self.subTest(role=role, key=key, value=invalid):
+                        fields = {"REVIEW_BASE": self.base, "REVIEW_HEAD": self.head, "REVIEW_PACKAGE": str(self.output), key: invalid}
+                        values.write_text(json.dumps({"shared": {}, "roles": {"developer": {}, role: fields}}))
+                        outdir = self.root / "invalid-briefs"
+                        result = subprocess.run(["bash", str(SKILL / "compose-briefs.sh"), str(templates), str(values), str(outdir)],
+                                                env=self.env, capture_output=True, text=True, check=False)
+                        self.assertEqual(result.returncode, 2, result.stderr)
+                        self.assertIn(key, result.stderr)
+                        self.assertFalse(outdir.exists())
 
 
 if __name__ == "__main__":

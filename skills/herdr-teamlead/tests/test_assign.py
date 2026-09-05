@@ -1221,6 +1221,7 @@ class ApplyTest(unittest.TestCase):
                     "task": None,
                     "fix_round": None,
                     "context_session": None,
+                    "tier": None,
                     "landed": True,
                     "started": True,
                     "status": "applied",

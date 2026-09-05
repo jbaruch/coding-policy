@@ -32,7 +32,17 @@
     "skills/herdr-teamlead/tests/test_review_package.py",
     "skills/herdr-teamlead/tests/test_state.py",
     "skills/herdr-standup/standup-render.py",
-    "skills/herdr-standup/tests/test_standup_render.py"
+    "skills/herdr-standup/tests/test_standup_render.py",
+    "skills/herdr-teamlead/teamlead/billing.py",
+    "skills/herdr-teamlead/tests/test_billing.py",
+    "skills/herdr-teamlead/teamlead/tiers.py",
+    "skills/herdr-teamlead/tests/test_tiers.py",
+    "skills/herdr-teamlead/teamlead/launch.py",
+    "skills/herdr-teamlead/tests/test_launch.py",
+    "skills/herdr-teamlead/teamlead/qualification.py",
+    "skills/herdr-teamlead/tests/test_qualification.py",
+    "skills/herdr-teamlead/tests/test_start_judge_worker.py",
+    "skills/herdr-teamlead/tests/test_tier_integration.py"
   ],
   "executionEnvironments": [
     {

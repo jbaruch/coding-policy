@@ -15,6 +15,7 @@ import json
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 from . import __version__
 from .assign import apply as apply_assignments
@@ -36,6 +37,9 @@ from .measure import (
     measure,
 )
 from .planner import plan as build_plan
+from .tiers import parse_launch_args, parse_tiers, select_tier
+from .qualification import require_qualification
+from .launch import start_worker
 from .state import (
     add_assignment,
     add_snapshot,
@@ -99,6 +103,12 @@ def build_parser():
     parser.add_argument("--version", action="version", version="teamlead " + __version__)
 
     sub = parser.add_subparsers(dest="command", metavar="COMMAND", required=True)
+
+    judge_parser = sub.add_parser("start-judge", parents=[common],
+                                  help="Start the plan's judge in a shell pane and verify its launch argv.")
+    judge_parser.add_argument("--assignments", required=True, metavar="PLAN")
+    judge_parser.add_argument("--pane", required=True)
+    judge_parser.add_argument("--kind", choices=("claude", "codex", "grok"), default="claude")
 
     measure_parser = sub.add_parser(
         "measure",
@@ -197,6 +207,14 @@ def build_parser():
         metavar="FILE",
         help="Snapshot to plan against (default: the newest one in the state file).",
     )
+    plan_parser.add_argument("--round", action="append", default=[], metavar="ROLE=ROUND",
+                             help="Choose a configured round type for a role; never a model override.")
+    plan_parser.add_argument("--round-context", metavar="FILE",
+                             help="JSON object keyed by role with mechanical/risk evidence for this round.")
+    plan_parser.add_argument("--fix-round", type=int, help="Task fix number; late fixes use the top tier.")
+    plan_parser.add_argument("--preview-tiers", action="store_true",
+                             help="Preview unqualified tiers. Live apply still requires complete qualification evidence.")
+    plan_parser.add_argument("--now", metavar="ISO-8601", help="Reference time for qualification expiry (default: current UTC time).")
 
     apply_parser = sub.add_parser(
         "apply",
@@ -353,7 +371,7 @@ def _parse_excludes(pairs):
     return excludes
 
 
-def _load_assignments(value):
+def _load_assignments(value, document=False):
     """`--assignments` takes inline JSON or a path to a JSON file."""
     text = value.strip()
     if not text.startswith("{"):
@@ -382,7 +400,66 @@ def _load_assignments(value):
             ),
             {},
         ) from None
-    return normalize_assignments(payload)
+    return payload if document else normalize_assignments(payload)
+
+
+def _round_inputs(args, roles):
+    """Read only round choices and evidence; models remain config-owned."""
+    contexts = {}
+    if args.round_context:
+        try:
+            contexts = json.loads(Path(args.round_context).read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise UsageError("Cannot read round context: {}; fix --round-context.".format(exc), {}) from None
+    if not isinstance(contexts, dict) or set(contexts) - set(roles):
+        raise UsageError("Round context must map only roles this plan assigns to evidence objects.", {})
+    rounds = {role: {"context": context} for role, context in contexts.items()}
+    for pair in args.round:
+        if "=" not in pair:
+            raise UsageError("Use --round ROLE=ROUND.", {})
+        role, round_type = pair.split("=", 1)
+        if role not in roles or "type" in rounds.get(role, {}):
+            raise UsageError("--round names an unknown or duplicate role; choose it once.", {})
+        rounds.setdefault(role, {})["type"] = round_type
+    return rounds
+
+
+def _candidate_tiers(roles, agents, rounds, fix_round=None, judge=None, qualified_at=None):
+    tiered = any(agent.tiers for agent in agents)
+    if not tiered and not (judge and "judge" in roles):
+        if rounds:
+            raise UsageError("Round selection requires configured tier tables.", {})
+        return None
+    candidates = {role: {} for role in roles}
+    for role in roles:
+        inputs = rounds.get(role, {})
+        for agent in agents:
+            if judge and agent.name == judge.agent:
+                if role == "judge":
+                    candidates[role][agent.name] = {"round": "judge", "kind": agent.kind,
+                        "model": judge.model, "effort": judge.effort or None,
+                        "billing_window": "unknown", "multiplier": 1.0, "effective_multiplier": 1.0}
+                continue
+            if role == "judge":
+                continue
+            if not agent.tiers:
+                if not tiered:
+                    candidates[role][agent.name] = None
+                continue
+            tier = select_tier(agent, role, inputs.get("type"), inputs.get("context"), fix_round)
+            if tier is None:
+                continue
+            if qualified_at is not None:
+                evidence = [record for entry in agent.tiers.values() for record in entry.get("qualification", [])]
+                try:
+                    require_qualification({**tier, "qualification": evidence}, role, qualified_at)
+                except UsageError:
+                    # This candidate is ineligible; another qualified worker may fill the seat.
+                    continue
+            candidates[role][agent.name] = {key: tier[key] for key in (
+                "round", "kind", "model", "effort", "multiplier", "billing_window", "effective_multiplier"
+            )}
+    return candidates
 
 
 def _load_state_for_write(path, warn):
@@ -440,6 +517,10 @@ def cmd_plan(args, client=None, warn=None, trace=None):
     excludes = _parse_excludes(args.excludes)
     role_costs = load_role_costs(_config_path(args))
     judge = load_judge(_config_path(args))
+    rounds = _round_inputs(args, roles)
+    agents = load_config(_config_path(args)) if _config_path(args).exists() else []
+    tier_candidates = _candidate_tiers(roles, agents, rounds, args.fix_round, judge,
+                                      None if args.preview_tiers else (args.now or now_iso()))
     state_path = _state_path(args)
     state = load_state(state_path, warn=warn)
 
@@ -488,12 +569,14 @@ def cmd_plan(args, client=None, warn=None, trace=None):
             judge_tier={
                 "model": judge.model,
                 "effort": judge.effort,
-                "banner_pattern": judge.banner_pattern,
+                "launch_args": next((list(agent.launch_args) for agent in agents if agent.name == judge.agent), []),
             }
             if judge
             else None,
             snapshot_ref={"source": source, "measured_at": snapshot.get("measured_at")},
             warn=warn,
+            tier_candidates=tier_candidates,
+            rounds=rounds,
         ),
         None,
     )
@@ -502,7 +585,30 @@ def cmd_plan(args, client=None, warn=None, trace=None):
 def cmd_apply(args, client=None, warn=None, trace=None):
     agents = load_config(_config_path(args))
     agents_by_name = {agent.name: agent for agent in agents}
-    assignments = _load_assignments(args.assignments)
+    document = _load_assignments(args.assignments, document=True)
+    assignments = normalize_assignments(document)
+    rounds = document.get("rounds", {}) if "assignments" in document else {}
+    if not isinstance(rounds, dict) or set(rounds) - set(assignments):
+        raise UsageError("Plan rounds must map only assigned roles to round inputs.", {})
+    for value in rounds.values():
+        if not isinstance(value, dict) or set(value) - {"type", "context"}:
+            raise UsageError("Plan round inputs allow only type and context; model overrides are forbidden.", {})
+    judge = load_judge(_config_path(args))
+    if "judge" in assignments and (judge is None or assignments["judge"] != judge.agent):
+        raise UsageError("Judge assignment must match the pinned judge in config.json.", {})
+    if judge and any(name == judge.agent and role != "judge" for role, name in assignments.items()):
+        raise UsageError("The pinned judge worker cannot hold another role.", {})
+    candidates = _candidate_tiers(list(assignments), agents, rounds, args.fix_round, judge)
+    tiers = {}
+    if candidates is not None:
+        for role, name in assignments.items():
+            if name not in candidates.get(role, {}):
+                raise UsageError("Assigned agent {} has no eligible tier for {}; replan from current config.".format(name, role), {})
+            if candidates[role][name] is not None:
+                tiers[role] = candidates[role][name]
+        saved_tiers = {role: tier for role, tier in document.get("tiers", {}).items() if tier is not None} if isinstance(document.get("tiers", {}), dict) else None
+        if "tiers" in document and saved_tiers != tiers:
+            raise UsageError("Plan tiers differ from current config or fix context; re-run plan before dispatch.", {})
     paths = resolve_paths(assignments, _parse_briefs(args.briefs), args.common)
     client = client if client is not None else _client(args, trace=trace)
 
@@ -518,6 +624,7 @@ def cmd_apply(args, client=None, warn=None, trace=None):
                 task=args.task,
                 fix_round=args.fix_round,
                 settle_timeout_ms=args.settle_timeout,
+                tiers=tiers,
             ),
             None,
         )
@@ -546,6 +653,10 @@ def cmd_apply(args, client=None, warn=None, trace=None):
         settle_sec=args.composer_settle,
         start_timeout_ms=args.start_timeout,
         allow_recovery=args.allow_recovery,
+        tiers=tiers,
+        qualifications={role: [record for entry in agents_by_name[name].tiers.values()
+                               for record in entry.get("qualification", [])]
+                        for role, name in assignments.items()},
     )
     not_started = [
         record["agent"]
@@ -567,11 +678,28 @@ def cmd_state(args, client=None, warn=None, trace=None):
     return load_state(_state_path(args), warn=warn), None
 
 
+def cmd_start_judge(args, client=None, warn=None, trace=None):
+    document = _load_assignments(args.assignments, document=True)
+    tier = document.get("judge") if isinstance(document, dict) else None
+    if not isinstance(tier, dict) or not isinstance(tier.get("agent"), str) or not tier["agent"].strip():
+        raise UsageError("Plan has no usable judge tier; run plan --roles judge.", {})
+    if normalize_assignments(document).get("judge") != tier["agent"]:
+        raise UsageError("Plan judge tier and assignment name different workers; replan.", {})
+    parsed = parse_tiers({"build": {"model": tier.get("model"), "effort": tier.get("effort")}}, args.kind)["build"]
+    agent = SimpleNamespace(name=tier["agent"], kind=args.kind,
+                            launch_args=parse_launch_args(tier.get("launch_args", []), args.kind))
+    client = client if client is not None else _client(args, trace=trace)
+    proof = start_worker(client, agent, args.pane, parsed)
+    return {"agent": agent.name, "model": parsed["model"], "effort": parsed["effort"],
+            "pane": args.pane, "argv_verified": True, "verified": proof}, None
+
+
 COMMANDS = {
     "measure": cmd_measure,
     "plan": cmd_plan,
     "apply": cmd_apply,
     "state": cmd_state,
+    "start-judge": cmd_start_judge,
 }
 
 
