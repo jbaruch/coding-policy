@@ -440,7 +440,7 @@ def _candidate_tiers(roles, agents, rounds, fix_round=None, judge=None, qualifie
         for agent in agents:
             if judge and agent.name == judge.agent:
                 if role == "judge":
-                    candidates[role][agent.name] = {"round": "judge", "kind": agent.kind,
+                    candidates[role][agent.name] = {"round": "judge", "tier_row": "judge", "kind": agent.kind,
                         "model": judge.model, "effort": judge.effort or None,
                         "billing_window": "unknown", "multiplier": 1.0, "effective_multiplier": 1.0}
                 continue
@@ -461,7 +461,7 @@ def _candidate_tiers(roles, agents, rounds, fix_round=None, judge=None, qualifie
                     # This candidate is ineligible; another qualified worker may fill the seat.
                     continue
             candidates[role][agent.name] = {key: tier[key] for key in (
-                "round", "kind", "model", "effort", "multiplier", "billing_window", "effective_multiplier"
+                "round", "tier_row", "kind", "model", "effort", "multiplier", "billing_window", "effective_multiplier"
             )}
     return candidates
 

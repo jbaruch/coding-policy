@@ -83,6 +83,8 @@ Default planning ranks only qualified candidates. `plan --preview-tiers` allows
 inspection before commissioning; it does not authorize live dispatch.
 
 Plan schema 3 carries `tiers` and `rounds` alongside `assignments`. Apply
+records the requested task phase as `round` and the selected config row as
+`tier_row`; escalation may select a stronger row and raise its effort. Apply
 recomputes the tier from current config and round inputs, refusing a stale or
 edited pair. `apply --dry-run` prints the requested tier and relaunch argv
 without contacting Herdr or writing state. It does not establish live

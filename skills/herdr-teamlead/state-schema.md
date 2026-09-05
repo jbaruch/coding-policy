@@ -47,7 +47,7 @@ The optional `role_costs` key is the second:
 `{"<role>": <number>}`, what one round in that seat is expected to
 burn out of a worker's remaining headroom percentage. It overrides the
 planner's own weights one role at a time, and a role it omits keeps the
-default (`DEFAULT_ROLE_COSTS` in `skills/herdr-teamlead/teamlead/planner.py`).
+default (see `skills/herdr-teamlead/references/round-setup.md`, Step 5).
 A missing map means no overrides; a value that is not a non-negative finite
 number is refused, naming the file and the role. `plan` is the only reader.
 
@@ -94,7 +94,7 @@ number is refused, naming the file and the role. `plan` is the only reader.
 | `assignments[].context_session` | object or null | Verified native session reference scoped to a pane: `pane_id`, `source`, `agent`, `kind`, `value`, all non-empty strings; kind is `id` or `path`. Null means continuity was not established |
 
 | `snapshots[].agents[].tier_billing` | object | Round → `{model, effort, window}` for configured tiers; unmeasured attribution is `unknown`. Empty for older snapshots |
-| `assignments[].tier` | object or null | Selected `round`, `kind`, `model`, `effort`, declared/effective multipliers, billing window, launch options, input `prompt_hash`, accepted qualification summary, and `verified` proof. Null for old or non-tiered dispatches |
+| `assignments[].tier` | object or null | Requested `round`, selected config `tier_row`, `kind`, `model`, `effort`, declared/effective multipliers, billing window, launch options, input `prompt_hash`, accepted qualification summary, and `verified` proof. Null for old or non-tiered dispatches |
 
 `verified` contains `model`, `effort`, `argv`, `source` (`launch_argv` or
 `process_argv`), and `pane_id`; process proof also contains `pid`. Loading
@@ -132,7 +132,7 @@ informational plan name and never feeds headroom.
   `os.replace`.
 - **Readers** — `plan` reads the newest snapshot plus the ledger (role history
   breaks a headroom tie), and the config's `role_costs` for its seat weights;
-  `state` prints the document. Neither writes. Live `apply` reads the most
+  `state` prints the document. Neither appends records; their shared loader performs owner migrations. Live `apply` reads the most
   recent assignment for the named worker before retaining context; Step 10
   documents the retained-dispatch contract. `apply --dry-run` reads no history
   and does not authorize retention.

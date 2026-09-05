@@ -219,10 +219,11 @@ def select_tier(agent, role, round_type=None, context=None, fix_round=None):
             if "review" not in agent.tiers:
                 raise UsageError("High-risk work needs the configured review tier.", {})
             tier = dict(agent.tiers["review"])
+            chosen_round = "review"
         if agent.kind in {"claude", "codex"} and tier["effort"] not in {"xhigh", "max"}:
             tier["effort"] = "xhigh"
     return {
-        **tier, "round": round_type, "kind": agent.kind,
+        **tier, "round": round_type, "tier_row": chosen_round, "kind": agent.kind,
         "billing_window": billing_window(tier), "effective_multiplier": effective_multiplier(tier),
     }
 

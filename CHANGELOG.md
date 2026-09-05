@@ -9,7 +9,7 @@
 
 ### Fixed
 
-- **Actionable briefing failures.** Unreadable common or role-brief files report the offending path and recovery instructions before dispatch, with no relaunch or terminal writes. Config-version diagnostics name both readable versions.
+- **Actionable briefing failures.** Unreadable common or role-brief files report the offending path and recovery instructions before dispatch, with no relaunch or terminal writes. JSON inputs report invalid UTF-8 with a recovery path; unreadable ledgers remain intact. Config-version diagnostics name both readable versions. Tier evidence distinguishes the requested round from the config row chosen after escalation.
 - **Accepted #339 follow-ups.** Review/test briefs reject empty or malformed full commit IDs before writing any round artifact. The padded legacy task diagnostic requires an explicit recovery decision without trimming identities or resetting counters. Detailed dispatch/wait recovery moves into references while the skill retains every go/no-go outcome.
 
 ## 0.3.187 — 2026-09-05

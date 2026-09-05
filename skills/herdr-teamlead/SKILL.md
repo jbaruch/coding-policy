@@ -89,7 +89,6 @@ and trace redaction are documented in:
 
 ```text
 skills/herdr-teamlead/references/round-setup.md
-skills/herdr-teamlead/teamlead/measure.py
 ```
 
 Proceed immediately to Step 5 once the required readings are available.
@@ -115,7 +114,7 @@ uncommissioned table; live dispatch still requires qualification. Weights,
 round inputs, promotion, and metering contracts:
 
 ```text
-skills/herdr-teamlead/teamlead/planner.py
+skills/herdr-teamlead/references/round-setup.md
 skills/herdr-teamlead/references/model-tiers.md
 ```
 
@@ -252,8 +251,7 @@ Recovery and executable refusal contracts:
 
 ```text
 skills/herdr-teamlead/references/dispatch-recovery.md
-skills/herdr-teamlead/teamlead/assign.py
-skills/herdr-teamlead/teamlead/launch.py
+skills/herdr-teamlead/references/model-tiers.md
 ```
 
 Proceed to Step 11 with the dispatched roles.

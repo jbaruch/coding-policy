@@ -70,6 +70,11 @@ class SelectionTest(unittest.TestCase):
         self.assertEqual(select_tier(worker, "developer")["model"], "sonnet-5")
         self.assertEqual(select_tier(worker, "developer", fix_round=4)["model"], "opus-5")
         self.assertEqual(select_tier(worker, "developer", context={"failed_gates": 2})["model"], "opus-5")
+        for context, fix_round, requested in (({}, None, "build"), ({"failed_gates": 2}, None, "build"),
+                                             ({}, 4, "fix"), ({"prior_high_miss": True}, None, "build")):
+            tier = select_tier(worker, "developer", context=context, fix_round=fix_round)
+            self.assertEqual(tier["round"], requested)
+            self.assertEqual(tier["tier_row"], "review" if context or fix_round else "build")
 
     def test_risk_and_hostile_verification_select_top_xhigh(self):
         for context in ({"risk_flags": ["network", "persistence"]}, {"input_bytes": 250001}, {"prior_high_miss": True}):

@@ -76,8 +76,8 @@ Add `--trace` (or `TEAMLEAD_TRACE=1`) when a live run does something the JSON
 does not explain: every herdr invocation, its exit status, and its output go to
 stderr, and stdout stays the machine-readable document. Traced fields are
 redacted for credential shapes and capped per field with a `[truncated N bytes]`
-marker; the shape list and the cap are constants in
-`skills/herdr-teamlead/teamlead/herdr.py`.
+marker. The tracing contract is in
+`skills/herdr-teamlead/references/herdr.md`, "Tracing a Live Run".
 
 Report a `failed_agents` entry to the user and measure that worker by hand
 before relying on its role. Proceed immediately to Step 5.
@@ -92,7 +92,7 @@ bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/teamlead.sh plan
 ```
 
 Pure computation over the newest snapshot plus the assignment ledger. Contacts
-no agent, writes nothing. Emits `{"assignments":{"<role>":"<agent>"},"rationale":[...],"snapshot_ref":{...}}`.
+no agent and appends no assignments. Loading older state may perform owner migrations. Emits `{"assignments":{"<role>":"<agent>"},"rationale":[...],"snapshot_ref":{...}}`.
 Exit 1 names the reason it could not plan.
 
 `--exclude` bars agents from one role and repeats, once per role. Phase 2 bars
