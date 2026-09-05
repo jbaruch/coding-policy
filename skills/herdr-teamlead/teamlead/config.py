@@ -158,9 +158,9 @@ def parse_config(payload, source="<memory>"):
     version = payload.get("schema_version")
     if isinstance(version, bool) or not isinstance(version, int) or version not in READABLE_CONFIG_VERSIONS:
         raise ConfigError(
-            "Config at {} has schema_version {!r}; this build reads version {}. "
+            "Config at {} has schema_version {!r}; this build reads versions {}. "
             "Update the file against config.example.json.".format(
-                source, version, CONFIG_SCHEMA_VERSION
+                source, version, ", ".join(str(item) for item in sorted(READABLE_CONFIG_VERSIONS))
             ),
             {"source": source, "found": version, "expected": CONFIG_SCHEMA_VERSION},
         )

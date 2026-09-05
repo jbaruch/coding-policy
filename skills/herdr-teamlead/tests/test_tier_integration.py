@@ -5,6 +5,7 @@ import json
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -91,6 +92,32 @@ class TierIntegrationTest(CliCase):
         self.assertEqual(rc, 1)
         self.assertIn("Plan tiers differ", error)
         self.assertEqual(runner.calls, [])
+
+    def test_unreadable_dispatch_input_names_recovery_and_sends_nothing(self):
+        original_read = Path.read_bytes
+        for unreadable in (self.common, self.briefs["developer"]):
+            with self.subTest(path=unreadable):
+                self.out.seek(0)
+                self.out.truncate()
+                self.err.seek(0)
+                self.err.truncate()
+                runner = FakeRunner().set("agent get claude", agent_json("claude", "idle", "w1:p2"))
+
+                def read_bytes(path):
+                    if path == unreadable:
+                        raise PermissionError(13, "Permission denied", str(path))
+                    return original_read(path)
+
+                with patch("teamlead.assign.Path.read_bytes", autospec=True, side_effect=read_bytes):
+                    rc, output, error = self.run_cli(self.apply_args(), client=HerdrClient("herdr", runner))
+                self.assertEqual(rc, 1)
+                self.assertEqual(output, "")
+                self.assertIn(str(unreadable), error)
+                self.assertIn("Restore readability", error)
+                self.assertNotIn("Traceback", error)
+                self.assertEqual(runner.writes(), [])
+                self.assertFalse(any(command.startswith(("agent start", "-TERM")) for command in runner.commands()))
+                self.assertFalse(self.state.exists())
 
     def test_fresh_dispatch_records_verified_tier_and_readable_state(self):
         runner = FakeRunner()

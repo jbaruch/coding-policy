@@ -92,7 +92,14 @@ def assignment_text(role, common_path, brief_path):
 def tiered_prompt(text, tier, common, brief):
     """Hash length-framed dispatch inputs, excluding this metadata footer."""
     digest = hashlib.sha256()
-    for part in (text.encode("utf-8"), Path(common).read_bytes(), Path(brief).read_bytes()):
+    parts = [text.encode("utf-8")]
+    for path in (common, brief):
+        try:
+            parts.append(Path(path).read_bytes())
+        except OSError as exc:
+            raise UsageError("Cannot read briefing file {}: {}. Restore readability or correct its --common/--brief path before dispatch.".format(
+                path, exc.strerror or str(exc)), {"path": str(path)}) from None
+    for part in parts:
         digest.update(len(part).to_bytes(8, "big"))
         digest.update(part)
     prompt_hash = digest.hexdigest()
