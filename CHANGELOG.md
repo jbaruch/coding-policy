@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.187 — 2026-09-05
+
 ### Added
 
 - **Range-pinned review packages (#323).** `review-package.sh BASE HEAD [OUTFILE]` collects the commit list, stat, and ten-context-line patch into one file under the round reports directory. It resolves refs once, preserves existing different artifacts, and publishes no partial package after a Git failure. Its path-only stdout has an explicit exception to the JSON script contract. Reviewer and tester briefs require a readable package before composition and identify its full range in their reports. Full reviews retain the original task base across multi-commit fixes; scoped re-checks use the prior reviewed tip.
