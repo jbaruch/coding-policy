@@ -41,8 +41,12 @@ The developer applies the patch. Your branch stays local.
 ## Mode C — Verification (after the developer pushes)
 
 Branch: `{{BRANCH}}`.
+Review package: `{{REVIEW_PACKAGE}}`.
+Expected range: `{{REVIEW_BASE}}..{{REVIEW_HEAD}}`.
 
-1. Fetch the pushed branch into `{{WORKTREE}}`.
+1. Read the package in full, then fetch the pushed branch into `{{WORKTREE}}`.
+   Confirm both endpoints match the expected range and HEAD matches that
+   checkout. A mismatch is BLOCKED; request a fresh package.
 2. Run every gate `CONTRIBUTING.md` names. Record the exact command and its
    summary output.
 3. Apply your acceptance patch and run it against the branch.
@@ -66,6 +70,7 @@ a scoped pass cannot replace it.
 Write `{{REPORT}}` covering:
 
 - Which mode and scope you ran, and the verified commit SHA.
+- The package path and its full BASE/HEAD commit IDs for Mode C.
 - The criterion-to-test map, or the verification result per criterion.
 - Every gate command and its output summary.
 - Every finding with its severity label.

@@ -40,13 +40,22 @@ mk_templates() { # <dir>
     || die "could not write COMMON.md"
   printf 'Dev on {{BRANCH}} in {{WORKTREE}} for {{ISSUE}}\nReport: {{REPORT}}\n' > "$1/brief-developer.md" \
     || die "could not write brief-developer.md"
-  printf 'Tester for {{ISSUE}}\nReport: {{REPORT}}\n' > "$1/brief-tester.md" \
+  printf 'Tester for {{ISSUE}}\nReport: {{REPORT}}\nPackage: {{REVIEW_PACKAGE}}\n' > "$1/brief-tester.md" \
     || die "could not write brief-tester.md"
 }
 
 run() { # <templates> <values-file> <outdir>
   RUN_SEQ=$((RUN_SEQ+1))
-  OUT="$(bash "$SCRIPT" "$1" "$2" "$3" 2>"$TMP/err.$RUN_SEQ")"
+  local values="$2"
+  # Generic rendering fixtures supply a valid package. The dedicated package
+  # suite exercises missing/invalid paths through the unwrapped production CLI.
+  if [[ "$1" == "$TPL" ]] && jq -e . "$values" >/dev/null 2>&1; then
+    values="$TMP/values.$RUN_SEQ.json"
+    jq --arg p "$TMP/package.diff" \
+      'if .roles | has("tester") then .roles.tester.REVIEW_PACKAGE = $p else . end' \
+      "$2" > "$values" || die "could not prepare rendering fixture"
+  fi
+  OUT="$(bash "$SCRIPT" "$1" "$values" "$3" 2>"$TMP/err.$RUN_SEQ")"
   RC=$?
   ERRTEXT="$(cat "$TMP/err.$RUN_SEQ")"
 }
@@ -57,6 +66,7 @@ main() {
   command -v jq >/dev/null 2>&1 || die "jq required for these tests"
   TMP="$(mktemp -d -t teamlead-compose-test.XXXXXX)" || die "mktemp failed"
   trap cleanup EXIT
+  printf 'Review fixture\n' > "$TMP/package.diff" || die "could not write package fixture"
   TPL="$TMP/templates"; mk_templates "$TPL"
   FAIL=0; PASS=0; RUN_SEQ=0
 
@@ -136,7 +146,7 @@ JSON
   if [[ $RC -eq 2 ]] && [[ ! -e "$o6/brief-developer.md" ]] && [[ ! -e "$o6/COMMON.md" ]]; then
     pass; else fail "atomicity: a failed round left files behind (RC=$RC)"; fi
 
-  # 6b. The PACKAGED templates compose from the values Step 6 documents — for
+  # 6b. The PACKAGED templates compose from the values Step 7 documents — for
   #     every shipped role, the release brief included. A template that grows
   #     a placeholder nobody documented fails here before it fails a worker.
   local v6b="$TMP/v6b.json" o6b="$TMP/out6b" PKG
@@ -153,6 +163,11 @@ JSON
   }
 }
 JSON
+  jq --arg p "$TMP/package.diff" \
+    '.roles.reviewer += {REVIEW_PACKAGE: $p, REVIEW_BASE: "base-sha", REVIEW_HEAD: "head-sha"}
+     | .roles.tester += {REVIEW_PACKAGE: $p, REVIEW_BASE: "base-sha", REVIEW_HEAD: "head-sha"}' \
+    "$v6b" > "$TMP/packaged-values.json" || die "could not add packaged review paths"
+  v6b="$TMP/packaged-values.json"
   run "$PKG" "$v6b" "$o6b"
   if [[ $RC -eq 0 ]] && grep -q 'cd /wt/dev && pwd' "$o6b/brief-release.md" \
      && grep -q 'Skill(skill: "release")' "$o6b/brief-release.md"; then

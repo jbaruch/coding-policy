@@ -64,19 +64,22 @@ review their own branch.
 4. **Plan** — `teamlead.sh plan --roles developer,tester,reviewer` assigns the
    roles, with `--exclude <role>=<agent>` for every seat a worker must not
    hold. It contacts nobody and writes nothing.
-5. **Compose** — `compose-briefs.sh` renders the templates from one values
+5. **Package** — Step 6 builds a range-specific VCS artifact for reviewer and
+   tester briefs. Keep the original task base for full reviews and the prior
+   reviewed tip for scoped re-checks; a new tip gets a new package.
+6. **Compose** — `compose-briefs.sh` renders the templates from one values
    file, refusing to write anything when a placeholder is unfilled or a
    supplied key matches no template. The lead decides the values; the script
    decides nothing.
-6. **Provision** — `provision-worktree.sh` creates every worktree the briefs
+7. **Provision** — `provision-worktree.sh` creates every worktree the briefs
    name, from the shared checkout. A worker never runs `git` there, so its
    checkout has to exist before the brief arrives.
-7. **Dispatch** — `teamlead.sh apply` uses Step 9's explicit context mode,
+8. **Dispatch** — `teamlead.sh apply` uses Step 10's explicit context mode,
    then sends the assignment prompt. Only a same-role fix may retain context.
    It re-reads live status and refuses to type into a busy worker.
-8. **Wait** — `wait-report.sh <agent> <report-path>` per worker, in the order
+9. **Wait** — `wait-report.sh <agent> <report-path>` per worker, in the order
    the round needs them.
-9. **Gate** — the lead reads every report in full and decides: another round,
+10. **Gate** — the lead reads every report in full and decides: another round,
    or the release hand-off.
 
 ## Reading a Report
@@ -84,7 +87,7 @@ review their own branch.
 A report is the worker's only channel to the lead. Read all of it, every time —
 a `## BLOCKED` section can sit under a report that otherwise reads as finished.
 
-- **Blocking findings present** — take Step 11's bounded fix path under
+- **Blocking findings present** — take Step 12's bounded fix path under
   `rules/agent-team-operation.md` Fix Loops. Keep a stable task identifier and
   advance its fix counter; changing worker or scope never restarts it.
   Name the findings and prior report in each brief. Re-check the findings
@@ -141,7 +144,7 @@ whatever GitHub's merge box says.
 A fifth seat, outside the three-role rotation, on the most capable model
 available. It never holds developer, reviewer, or tester. `rules/agent-team-operation.md`
 Judge Seat is the contract; this section is the operational detail for
-Steps 12–18 of `skills/herdr-teamlead/SKILL.md`.
+Steps 13–19 of `skills/herdr-teamlead/SKILL.md`.
 
 Dispatch it on exactly one of four triggers:
 
@@ -151,7 +154,7 @@ Dispatch it on exactly one of four triggers:
 - A lead override of a blocking finding — the lead about to waive a finding a
   worker labelled blocking gets a second, independent read first.
 - A fix loop exhausted its cap without approval — the judge rules before
-  any further action. If the ruling requires more implementation, Step 18
+  any further action. If the ruling requires more implementation, Step 19
   reports BLOCKED to the operator rather than dispatching another fix.
 - A bot finding the team disagrees with — the policy reviewer or Copilot flags
   something the developer and reviewer both think is wrong.

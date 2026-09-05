@@ -45,6 +45,13 @@ Scripts follow the baseline in `rules/file-hygiene.md` (exit codes, stderr, idem
 - **Self-error-handling**: exit non-zero on failure, write a diagnostic message to stderr
 - **Single-purpose**: one script does one thing — compose scripts, don't build monoliths
 
+- Narrow exception for `skills/herdr-teamlead/review-package.sh` artifact-path stdout.
+- Preconditions (all required):
+  1. Success emits only the absolute path of the completed review package and a newline
+  2. Failure emits no path, exits non-zero, and writes an actionable diagnostic to stderr
+  3. The package contains the resolved commit range, commit list, diff stat, and patch
+- Every other skill script retains the JSON-producing requirement
+
 ## Precheck Gating
 
 - For scheduled or recurring tasks where most runs are no-ops, have the script produce a last-line JSON payload such as `{"wake_agent": false, "data": {}}`; `wake_agent` is a boolean and `data` is an object

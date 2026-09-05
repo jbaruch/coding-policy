@@ -1026,6 +1026,34 @@ class ApplyCommandTest(CliCase):
     def test_context_flags_are_mutually_exclusive(self):
         self._rejects(self._fix_args(1, "--retain-context", "--no-clear"))
 
+    def test_task_padding_is_rejected_without_rewriting_existing_history(self):
+        self._seed_context(task="repo#322 ")
+        before = self.state.read_bytes()
+        for task in (" repo#322", "repo#322 ", "\trepo#322", "repo#322\n", "repo#322\u00a0"):
+            for dry_run in (False, True):
+                with self.subTest(task=task, dry_run=dry_run):
+                    self.out, self.err = io.StringIO(), io.StringIO()
+                    args = self._fix_args(1, "--retain-context")
+                    args[args.index("--task") + 1] = task
+                    if dry_run:
+                        args.append("--dry-run")
+                    code, _, err = self.run_cli(args, client=self._client({}))
+                    self.assertEqual(code, 1)
+                    self.assertIn("leading or trailing whitespace", err)
+                    self.assertEqual(self.runner.calls, [])
+                    self.assertEqual(self.state.read_bytes(), before)
+
+    def test_existing_task_with_internal_spaces_is_not_renamed(self):
+        task = "repo task 322"
+        self._seed_context(task=task)
+        args = self._fix_args(1, "--retain-context")
+        args[args.index("--task") + 1] = task
+        code, out, err = self.run_cli(
+            args, client=self._client({"grok": "idle"}, sessions={"grok": "task-session"})
+        )
+        self.assertEqual(code, 0, err)
+        self.assertEqual(json.loads(out)["applied"][0]["task"], task)
+
     def test_retention_round_three_succeeds_after_confirmed_round_two(self):
         self._seed_context(fix_round=2)
         code, out, err = self.run_cli(
