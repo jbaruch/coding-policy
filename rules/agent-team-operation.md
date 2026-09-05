@@ -43,14 +43,27 @@ description: Running a multi-agent team — headroom-driven role rotation, one w
 - The `judge` block names the seat's agent, and the model and effort its worker is launched with
 - The planner seats the judge on the named agent and echoes the tier in its plan
 - The model and effort are the worker's launch flags, applied by starting that worker before the dispatch
-- The `judge` block declares the worker's startup-banner pattern
-- A tier is proved from the banner line alone, never from transcript text naming the model
-- A judge dispatch is invalid unless the startup-banner line echoes the requested model, and the effort when one was requested
+- Prove the requested model and effort from returned launch argv or the live foreground process argv
+- A banner, transcript, or remembered ledger row alone never proves the live tier
+- Refuse the judge dispatch when its launch arguments do not prove the requested pair
 - The planner never ranks the judge seat
 - The pinned judge worker never holds another seat
 - No exclusion bars the judge from a dispute involving its own model
 - A judge round the pinned worker's window cannot cover halts the round — no substitution, no fallback to another vendor's flagship, no degraded ruling
 - The lead runs on the strongest generally-available model at high effort; the most capable model is reserved for the judge
+
+## Round Tiers
+
+- A worker's `tiers` table maps round types to model, effort, and cost data
+- Judgment rounds use the pinned top model; no per-round override lowers it
+- Apply mechanical eligibility and risk escalation through `skills/herdr-teamlead/teamlead/tiers.py`
+- A tier switch requires a worker relaunch at a cleared-round boundary
+- Retained fixes never change model or raise effort; preserve a verified compatible higher effort
+- Before relaunch, verify the idle worker, empty composer, pane occupant, and foreground PID
+- Before a new tier's live dispatch, require its paired validation battery and current canary
+- Record model, effort, launch argv, verified pair, and evidence source in the assignment ledger
+- Unmeasured tier billing windows remain `unknown`; no model name establishes free capacity
+- Metering and qualification contracts are in `skills/herdr-teamlead/references/model-tiers.md`
 
 ## Fix Loops
 

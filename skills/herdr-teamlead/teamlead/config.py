@@ -8,13 +8,14 @@ with an actionable message instead of silently inventing agents.
 import json
 import math
 import os
-import re
 from pathlib import Path
 
 from .errors import ConfigError
 from .herdr import SLASH_DELIVERIES, SLASH_DELIVERY_PASTE
+from .tiers import parse_launch_args, parse_tiers
 
-CONFIG_SCHEMA_VERSION = 1
+CONFIG_SCHEMA_VERSION = 2
+READABLE_CONFIG_VERSIONS = frozenset({1, 2})
 
 REQUIRED_AGENT_FIELDS = ("name", "kind", "usage_prompt", "usage_marker", "usage_read_source", "clear_prompt")
 
@@ -55,9 +56,11 @@ class Agent:
         "slash_enter_count",
         "model_label",
         "window_group",
+        "tiers",
+        "launch_args",
     )
 
-    def __init__(self, name, kind, usage_prompt, usage_marker, usage_read_source, clear_prompt, close_keys=(), idle_markers=(), working_markers=(), dialog_next_tab_keys=(), recover_keys=(), composer_placeholders=(), slash_delivery=DEFAULT_SLASH_DELIVERY, composer_glyph="", composer_ignore_dim=DEFAULT_COMPOSER_IGNORE_DIM, slash_enter_count=DEFAULT_SLASH_ENTER_COUNT, model_label="", window_group=""):
+    def __init__(self, name, kind, usage_prompt, usage_marker, usage_read_source, clear_prompt, close_keys=(), idle_markers=(), working_markers=(), dialog_next_tab_keys=(), recover_keys=(), composer_placeholders=(), slash_delivery=DEFAULT_SLASH_DELIVERY, composer_glyph="", composer_ignore_dim=DEFAULT_COMPOSER_IGNORE_DIM, slash_enter_count=DEFAULT_SLASH_ENTER_COUNT, model_label="", window_group="", tiers=None, launch_args=()):
         self.name = name
         self.kind = kind
         self.usage_prompt = usage_prompt
@@ -85,6 +88,8 @@ class Agent:
         # label carries the role alone.
         self.model_label = model_label
         self.window_group = window_group
+        self.tiers = tiers or {}
+        self.launch_args = tuple(launch_args)
         # "paste" (agent prompt) or "type" (pane send-text plus Enter).
         self.slash_delivery = slash_delivery
         # The prompt glyph that marks the composer row, so teamlead can see
@@ -114,6 +119,10 @@ class Agent:
         record["composer_glyph"] = self.composer_glyph
         record["composer_ignore_dim"] = self.composer_ignore_dim
         record["slash_enter_count"] = self.slash_enter_count
+        if self.tiers:
+            record["tiers"] = self.tiers
+        if self.launch_args:
+            record["launch_args"] = list(self.launch_args)
         return record
 
 
@@ -147,11 +156,11 @@ def parse_config(payload, source="<memory>"):
         )
 
     version = payload.get("schema_version")
-    if version != CONFIG_SCHEMA_VERSION:
+    if isinstance(version, bool) or not isinstance(version, int) or version not in READABLE_CONFIG_VERSIONS:
         raise ConfigError(
-            "Config at {} has schema_version {!r}; this build reads version {}. "
+            "Config at {} has schema_version {!r}; this build reads versions {}. "
             "Update the file against config.example.json.".format(
-                source, version, CONFIG_SCHEMA_VERSION
+                source, version, ", ".join(str(item) for item in sorted(READABLE_CONFIG_VERSIONS))
             ),
             {"source": source, "found": version, "expected": CONFIG_SCHEMA_VERSION},
         )
@@ -193,6 +202,8 @@ def parse_config(payload, source="<memory>"):
                 {"source": source, "index": index, "usage_read_source": read_source},
             )
         name = entry["name"]
+        if "tiers" in entry and version < 2:
+            raise ConfigError("Tier tables need config schema_version 2; upgrade the operator-owned config.", {"source": source})
         if name in seen:
             raise ConfigError(
                 "Config at {}: agent name {!r} appears twice - herdr agent "
@@ -293,6 +304,8 @@ def parse_config(payload, source="<memory>"):
                 composer_ignore_dim=ignore_dim,
                 model_label=model_label,
                 window_group=window_group,
+                tiers=parse_tiers(entry.get("tiers"), entry["kind"]),
+                launch_args=parse_launch_args(entry.get("launch_args", []), entry["kind"]),
                 slash_enter_count=enters,
                 **lists
             )
@@ -323,6 +336,9 @@ def _read_config(path):
             "config.json file itself.".format(path),
             {"path": str(path)},
         ) from None
+    except (OSError, UnicodeDecodeError) as exc:
+        raise ConfigError("Cannot read config {}: {}. Supply a readable UTF-8 JSON file with --config.".format(path, exc),
+                          {"path": str(path)}) from None
 
     try:
         return json.loads(text)
@@ -351,13 +367,12 @@ VALID_JUDGE_EFFORTS = frozenset({"low", "medium", "high", "xhigh", "max"})
 class Judge:
     """The pinned judge tier. A plain value object, never mutated after load."""
 
-    __slots__ = ("agent", "model", "effort", "banner_pattern")
+    __slots__ = ("agent", "model", "effort")
 
-    def __init__(self, agent, model, effort="", banner_pattern=""):
+    def __init__(self, agent, model, effort=""):
         self.agent = agent
         self.model = model
         self.effort = effort
-        self.banner_pattern = banner_pattern
 
 
 def parse_judge(payload, source="<memory>"):
@@ -415,49 +430,11 @@ def parse_judge(payload, source="<memory>"):
             ),
             {"source": source, "effort": effort},
         )
-    # The tier check has to tell a startup banner from ordinary transcript
-    # text: a row that happens to mention the model and the effort is not
-    # proof the worker came up on them. Each harness prints its own banner, so
-    # the operator declares the pattern rather than the script guessing it.
-    banner_pattern = raw.get("banner_pattern", "")
-    if not isinstance(banner_pattern, str) or not banner_pattern:
-        raise ConfigError(
-            "Config at {}: `judge.banner_pattern` is {!r}; give an extended "
-            "regex matching the worker's startup banner line (e.g. "
-            "\"Claude Code\"), so a tier is proved from the banner and not "
-            "from transcript text that happens to name the model.".format(
-                source, raw.get("banner_pattern")
-            ),
-            {"source": source, "banner_pattern": raw.get("banner_pattern")},
-        )
-    # Anchored at line start, always. An unanchored pattern matches anywhere on
-    # a row, so a prompt like `> explain Claude Code claude-fable-5-1 max`
-    # satisfies both the pattern and the tier tokens and verifies a dispatch
-    # that never started on that tier. A banner is printed at the start of its
-    # line; a transcript row that quotes it is not.
-    if not banner_pattern.startswith("^"):
-        raise ConfigError(
-            "Config at {}: `judge.banner_pattern` {!r} is not anchored - start "
-            "it with `^` so it matches the banner at the start of its line "
-            "(e.g. \"^Claude Code\"). An unanchored pattern also matches a "
-            "prompt or transcript row quoting the model, which is not proof of "
-            "how the worker started.".format(source, banner_pattern),
-            {"source": source, "banner_pattern": banner_pattern},
-        )
-    try:
-        re.compile(banner_pattern)
-    except re.error as exc:
-        raise ConfigError(
-            "Config at {}: `judge.banner_pattern` {!r} is not a valid regex "
-            "({}) - fix the pattern or simplify it to a literal the banner "
-            "contains.".format(source, banner_pattern, exc),
-            {"source": source, "banner_pattern": banner_pattern},
-        )
+    # Legacy banner_pattern is ignored: a screen cannot prove launch flags.
     return Judge(
         agent=raw["agent"],
         model=raw["model"],
         effort=effort,
-        banner_pattern=banner_pattern,
     )
 
 

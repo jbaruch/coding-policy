@@ -5,19 +5,20 @@ looked like when it was measured; it never substitutes for reading the agent's
 live status before writing to it. `plan` may run off a stale snapshot on
 purpose (planning has no side effects); `apply` always re-checks live status.
 
-Schema (schema_version 3)::
+Schema (schema_version 4)::
 
     {
-      "schema_version": 3,
+      "schema_version": 4,
       "snapshots":  [ <measure output>, ... ],   # newest last, capped at 20
-      "assignments":[ {"schema_version": 3, "at": <ISO-8601>,
+      "assignments":[ {"schema_version": 4, "at": <ISO-8601>,
                        "role": <str>, "agent": <str>,
                        "status": "applied" | "sent_but_not_started"
                                  | "unknown",
                        "cleared": <bool> | null,
                        "clear_reason": "automatic" | "hand" | "retained" | "unknown",
                        "task": <str> | null, "fix_round": <int> | null,
-                       "context_session": <object> | null}, ... ]
+                       "context_session": <object> | null,
+                       "tier": <object> | null}, ... ]
     }
 
 `status` records whether the hand-off was confirmed: `applied` counts toward
@@ -26,6 +27,7 @@ UNCOUNTED_STATUSES), and `unknown` marks a version-1 row migrated without the
 information. Version 1 documents and rows carry no `status`; the 1 -> 2
 migration below stamps them `unknown`.
 
+Version 4 adds verified model-tier evidence without discarding context history.
 Version 3 records context handling, the task and the fix-round number.
 Version-2 history cannot prove those facts: migration stamps null values and
 an unknown reason. Snapshot versions evolve independently of ledger versions.
@@ -56,11 +58,12 @@ import tempfile
 from pathlib import Path
 
 from .diagnostics import stderr_warn as _warn
-from .errors import StateError
+from .errors import ConfigError, HerdrError, StateError, UsageError
+from .tiers import parse_launch_args, parse_tiers, verify_argv
 
 #: The version this build writes for the document and assignment rows.
 #: Snapshots have their own version and migration chain below.
-STATE_SCHEMA_VERSION = 3
+STATE_SCHEMA_VERSION = 4
 
 #: Shared by state validation and dispatch: no usable ledger carries a sixth fix.
 MAX_FIX_ROUNDS = 5
@@ -170,6 +173,27 @@ def _migrate_document_2_to_3(payload):
     return payload
 
 
+def _migrate_record_3_to_4(record):
+    """Preserve retained-context history; old rows prove no model tier."""
+    record["schema_version"] = 4
+    record["tier"] = None
+    return record
+
+
+def _migrate_document_3_to_4(payload):
+    payload["schema_version"] = 4
+    return payload
+
+
+def _migrate_snapshot_2_to_3(snapshot):
+    """An older snapshot has no measured per-tier billing attribution."""
+    snapshot["schema_version"] = 3
+    for record in snapshot.get("agents", {}).values():
+        if isinstance(record, dict):
+            record["tier_billing"] = {}
+    return snapshot
+
+
 #: Document migrations, keyed by the version being upgraded FROM. Each value is
 #: (version_produced, upgrade_callable). `_apply_migrations` walks the chain
 #: until it reaches STATE_SCHEMA_VERSION, so a future 1->2 is one entry.
@@ -197,17 +221,19 @@ def _migrate_snapshot_1_to_2(snapshot):
 #: on its own release train.
 SNAPSHOT_MIGRATIONS = {
     1: (2, _migrate_snapshot_1_to_2),
+    2: (3, _migrate_snapshot_2_to_3),
 }
 
 #: The snapshot version this build owns. Kept beside the migration table so
 #: the two move together; `measure.MEASURE_SCHEMA_VERSION` writes it.
-SNAPSHOT_SCHEMA_VERSION = 2
+SNAPSHOT_SCHEMA_VERSION = 3
 
 
 MIGRATIONS = {
     UNVERSIONED: (1, _migrate_document_0_to_1),
     1: (2, _migrate_document_1_to_2),
     2: (3, _migrate_document_2_to_3),
+    3: (4, _migrate_document_3_to_4),
 }
 
 #: The same table for one assignment record, walked the same way.
@@ -215,6 +241,7 @@ RECORD_MIGRATIONS = {
     UNVERSIONED: (1, _migrate_record_0_to_1),
     1: (2, _migrate_record_1_to_2),
     2: (3, _migrate_record_2_to_3),
+    3: (4, _migrate_record_3_to_4),
 }
 
 
@@ -296,6 +323,22 @@ def _validate(payload, path):
         ):
             raise _NoUsableState("an assignment row has an invalid fix-round number")
         session = record.get("context_session")
+        tier = record.get("tier")
+        if tier is not None:
+            proof = tier.get("verified") if isinstance(tier, dict) else None
+            if (not isinstance(proof, dict) or not isinstance(tier.get("kind"), str)
+                    or not isinstance(tier.get("model"), str)
+                    or not isinstance(proof.get("source"), str)
+                    or proof.get("source") not in {"launch_argv", "process_argv"}
+                    or proof.get("model") != tier["model"] or proof.get("effort") != tier.get("effort")
+                    or not isinstance(proof.get("pane_id"), str) or not proof["pane_id"]):
+                raise _NoUsableState("an assignment row has invalid tier evidence")
+            try:
+                parse_tiers({"build": {"model": tier["model"], "effort": tier.get("effort")}}, tier["kind"])
+                launch_args = parse_launch_args(tier.get("launch_args", []), tier["kind"])
+                verify_argv(tier["kind"], tier, proof.get("argv"), launch_args)
+            except (ConfigError, HerdrError, UsageError):
+                raise _NoUsableState("an assignment row's launch arguments do not prove its tier") from None
         if session is not None and (
             not isinstance(session, dict)
             or any(not isinstance(session.get(key), str) or not session[key].strip()
@@ -373,6 +416,12 @@ def load_state_checked(path, warn=None):
             "file itself.".format(path),
             {"path": str(path)},
         ) from None
+    except UnicodeDecodeError:
+        warn("state file {} is not UTF-8 JSON; the file is left untouched. Restore a readable UTF-8 backup or use a separate --state file.".format(path))
+        return empty_state(), False
+    except OSError as exc:
+        raise StateError("Cannot read state {}: {}. Restore readability or use a separate --state file; preserve the original ledger.".format(path, exc),
+                         {"path": str(path)}) from None
 
     try:
         payload = json.loads(text)
@@ -458,7 +507,7 @@ def add_snapshot(state, snapshot):
 
 
 def add_assignment(state, at, role, agent, status=STATUS_APPLIED, *,
-                   cleared=None, clear_reason="unknown", task=None, fix_round=None, context_session=None):
+                   cleared=None, clear_reason="unknown", task=None, fix_round=None, context_session=None, tier=None):
     """Append one role-to-agent assignment to the ledger.
 
     Every hand-off is recorded, including one that never started -- the ledger
@@ -481,6 +530,7 @@ def add_assignment(state, at, role, agent, status=STATUS_APPLIED, *,
             "task": task,
             "fix_round": fix_round,
             "context_session": context_session,
+            "tier": tier,
         }
     )
     return state

@@ -47,12 +47,12 @@ from .diagnostics import stderr_warn
 from .errors import PlanError
 
 #: Plan document version. 2 adds the optional `judge` object carrying the
-#: pinned seat's agent, model, effort and banner pattern. Additive: a version-1
+#: pinned seat's agent, model and effort. Version 3 adds round-tier data. Additive: a version-1
 #: plan simply has no `judge` key, which is indistinguishable from a version-2
 #: plan that assigned no judge seat, so both readers take the same path.
 #: A plan is a round's instruction, not stored state -- it is produced and
 #: consumed inside one round and never migrated (rules/stateful-artifacts.md).
-PLAN_SCHEMA_VERSION = 2
+PLAN_SCHEMA_VERSION = 3
 
 #: What one round in each seat is expected to burn, in points of the agent's
 #: remaining headroom percentage. The ORDER is what the planner acts on:
@@ -69,6 +69,10 @@ DEFAULT_ROLE_COSTS = {
     # Weighed explicitly: an unweighed role inherits DEFAULT_ROLE_COST below,
     # which would price the most expensive seat under `developer` by accident.
     "judge": 15.0,
+    "architect": 10.0,
+    "critic": 5.0,
+    "release": 8.0,
+    "lead": 12.0,
 }
 
 #: Weight for a role nobody has weighed -- a folded seat, or a role a later
@@ -305,7 +309,7 @@ def _refuse_unaffordable_judge(judge_agent, headrooms, cost, groups):
         )
 
 
-def plan(roles, snapshot, counts=None, exclude=None, role_costs=None, snapshot_ref=None, warn=None, judge_agent=None, judge_tier=None):
+def plan(roles, snapshot, counts=None, exclude=None, role_costs=None, snapshot_ref=None, warn=None, judge_agent=None, judge_tier=None, tier_candidates=None, rounds=None):
     """Assign `roles` to the agents in `snapshot`, heaviest seat first.
 
     `counts` is `{role: {agent: times_held}}` from the state ledger; omit it
@@ -384,7 +388,7 @@ def plan(roles, snapshot, counts=None, exclude=None, role_costs=None, snapshot_r
     if "judge" in roles and not judge_agent:
         raise PlanError(
             "Role 'judge' needs a `judge` block in config.json naming the "
-            "worker, model, effort and banner_pattern the seat is pinned to - "
+            "worker, model and effort the seat is pinned to - "
             "this config has none, and the planner never ranks an ordinary "
             "worker into the judge seat. Add the block, or drop 'judge' from "
             "--roles.",
@@ -420,6 +424,20 @@ def plan(roles, snapshot, counts=None, exclude=None, role_costs=None, snapshot_r
                 {"role": role, "excluded": list(excluded[role]), "agents": sorted(agents)},
             )
     costs = _costs_for(roles, role_costs)
+    if tier_candidates is not None:
+        for role in roles:
+            if role not in DEFAULT_ROLE_COSTS and role not in (role_costs or {}):
+                raise PlanError("Tiered role {!r} needs an explicit cost; no fallback weight is used.".format(role), {})
+            for name in agents:
+                if name not in tier_candidates.get(role, {}):
+                    excluded[role] = sorted(set(excluded[role]) | {name})
+            if all(name in excluded[role] for name in agents):
+                raise PlanError("No qualified tier is eligible for {!r}. Record its paired validation and current canary, check exclusions, or use --preview-tiers to inspect launches without dispatch.".format(role), {})
+
+    def candidate_cost(role, name):
+        tier = (tier_candidates or {}).get(role, {}).get(name) or {}
+        return costs[role] * tier.get("effective_multiplier", 1.0)
+
     headrooms = {
         name: _headroom_of(name, record, warn) for name, record in agents.items()
     }
@@ -431,17 +449,20 @@ def plan(roles, snapshot, counts=None, exclude=None, role_costs=None, snapshot_r
 
     # Heaviest seat first. An equal-cost pair keeps the caller's --roles order,
     # so a role set nobody has weighed plans exactly as it did before weights.
-    fill_order = sorted(roles, key=lambda role: (-costs[role], roles.index(role)))
+    fill_order = sorted(roles, key=lambda role: (
+        -max((candidate_cost(role, name) for name in agents if name not in excluded[role]), default=costs[role]),
+        roles.index(role),
+    ))
 
     for index, role in enumerate(fill_order):
-        cost = costs[role]
+        cost = candidate_cost(role, judge_agent) if role == "judge" else costs[role]
         barred = excluded[role]
         if role == "judge" and judge_agent:
             _refuse_unaffordable_judge(judge_agent, headrooms, cost, groups)
         later_roles = fill_order[index + 1:]
         ranked = sorted(
             (name for name in remaining if name not in barred),
-            key=lambda name: _sort_key(name, headrooms[name], cost, role, counts, floor),
+            key=lambda name: _sort_key(name, headrooms[name], candidate_cost(role, name), role, counts, floor),
         )
         # The ordering above says who SHOULD hold the seat; the matching says
         # who still can without stranding a later role. First candidate that
@@ -466,6 +487,7 @@ def plan(roles, snapshot, counts=None, exclude=None, role_costs=None, snapshot_r
             )
         remaining.discard(chosen)
         picks[role] = chosen
+        cost = candidate_cost(role, chosen)
         rationale.append(
             _explain(role, chosen, ranked, headrooms, counts, cost, floor, barred)
         )
@@ -524,8 +546,15 @@ def plan(roles, snapshot, counts=None, exclude=None, role_costs=None, snapshot_r
             "agent": judge_agent,
             "model": tier.get("model") or None,
             "effort": tier.get("effort") or None,
-            "banner_pattern": tier.get("banner_pattern") or None,
         }
+        if tier.get("launch_args"):
+            document["judge"]["launch_args"] = tier["launch_args"]
+
+    if tier_candidates is not None:
+        document["tiers"] = {
+            role: tier_candidates[role][picks[role]] for role in roles
+        }
+        document["rounds"] = rounds or {}
 
     return document
 

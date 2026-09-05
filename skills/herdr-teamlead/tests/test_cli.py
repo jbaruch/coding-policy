@@ -720,6 +720,7 @@ class ApplyCommandTest(CliCase):
                     "task": None,
                     "fix_round": None,
                     "context_session": None,
+                    "tier": None,
                 },
                 {
                     "schema_version": STATE_SCHEMA_VERSION,
@@ -732,6 +733,7 @@ class ApplyCommandTest(CliCase):
                     "task": None,
                     "fix_round": None,
                     "context_session": None,
+                    "tier": None,
                 },
             ],
         )

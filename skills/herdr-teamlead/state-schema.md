@@ -11,8 +11,9 @@ owner: it writes every record and is the only thing that may change their shape.
 | `$XDG_STATE_HOME/teamlead/state.json` (default `~/.local/state/teamlead/state.json`, override `--state FILE`) | `skills/herdr-teamlead/teamlead/state.py` | Headroom snapshots plus the append-only role-assignment ledger |
 | `$XDG_CONFIG_HOME/teamlead/config.json` (default `~/.config/teamlead/config.json`, override `--config FILE`) | the operator | Per-agent usage / clear commands; teamlead reads it and never writes it |
 
-`skills/herdr-teamlead/config.example.json` is the ship-ready config to copy into
-place. A missing config is refused with the exact `cp` command to run. The
+`skills/herdr-teamlead/config.example.json` is an example to adapt and commission before live tier use. Config schema 2
+adds per-agent `tiers` and `launch_args`; schema 1 remains readable without tiers.
+See `skills/herdr-teamlead/references/model-tiers.md` for qualification and billing evidence. A missing config is refused with the exact `cp` command to run. The
 optional `idle_markers` / `working_markers` per-agent keys carry the footer
 signatures the stale-state probe reads; an agent with neither is never probed.
 `slash_delivery` picks how that worker's slash commands go out, `paste` or
@@ -26,26 +27,27 @@ dispatch. All are documented in
 
 `window_group` names the usage window an agent shares with other agents: two
 workers authenticating as one subscription declare the same value, `measure`
-copies it onto each record (snapshot `schema_version` 2), and `plan` charges a seat's cost against every
+copies it onto each record (snapshot `schema_version` 3), and `plan` charges a seat's cost against every
 worker in that window. An agent that declares none has a window to itself.
 
-Two top-level config keys are not per-agent. The optional `judge` key pins the
-judge seat and declares its worker's startup-banner pattern (anchored at line
-start, `^...`). `plan` echoes it into its document as a `judge` object at plan
-`schema_version` 2; the bump is additive, and a plan with no judge seat simply
-has no such key, which every reader treats the same as a version-1 plan, and `plan` echoes it back as the document's `judge` object when the
-seat is planned, so the worker's launch argv is built from the config rather
-than by hand: `{"agent": <name>, "model": <id>, "effort": <level>}`, where
-`effort` is optional, absent for a model that accepts no effort flag; the
-accepted values are `VALID_JUDGE_EFFORTS` in
-`skills/herdr-teamlead/teamlead/config.py`. The planner never ranks that seat and never
-gives the pinned worker another one.
+The optional top-level `judge` key pins the judge agent, model, and effort.
+Plan schema 3 echoes them in a `judge` object; a plan without that seat omits
+it. Model and effort become explicit launch flags. Legacy `banner_pattern`
+values are ignored: proof comes from launch or live process argv. The planner
+never ranks the judge seat or gives its pinned worker another role.
+
+Plan schema 3 also carries `tiers` keyed by role and `rounds` with the lead's
+round type and context inputs. Default planning excludes unqualified tiers;
+`--preview-tiers` inspects candidates before qualification. Live apply always
+checks current qualification. Legacy non-tiered assignments have no tier
+metadata. The operator's tier table, supported flags, qualification schema,
+and billing evidence are documented in `references/model-tiers.md`.
 
 The optional `role_costs` key is the second:
 `{"<role>": <number>}`, what one round in that seat is expected to
 burn out of a worker's remaining headroom percentage. It overrides the
 planner's own weights one role at a time, and a role it omits keeps the
-default (`DEFAULT_ROLE_COSTS` in `skills/herdr-teamlead/teamlead/planner.py`).
+default (see `skills/herdr-teamlead/references/round-setup.md`, Step 5).
 A missing map means no overrides; a value that is not a non-negative finite
 number is refused, naming the file and the role. `plan` is the only reader.
 
@@ -53,11 +55,11 @@ number is refused, naming the file and the role. `plan` is the only reader.
 
 ```json
 {
-  "schema_version": 3,
+  "schema_version": 4,
   "snapshots": ["<measure output>, oldest first, ring capped at 20"],
   "assignments": [
     {
-      "schema_version": 3,
+      "schema_version": 4,
       "at": "2026-09-01T21:00:00+00:00",
       "role": "developer",
       "agent": "grok",
@@ -66,7 +68,8 @@ number is refused, naming the file and the role. `plan` is the only reader.
       "clear_reason": "retained",
       "task": "owner/repo#322",
       "fix_round": 1,
-      "context_session": {"pane_id": "w4:p1", "source": "herdr:grok", "agent": "grok", "kind": "id", "value": "native-session-id"}
+      "context_session": {"pane_id": "w4:p1", "source": "herdr:grok", "agent": "grok", "kind": "id", "value": "native-session-id"},
+      "tier": null
     }
   ]
 }
@@ -74,10 +77,10 @@ number is refused, naming the file and the role. `plan` is the only reader.
 
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
-| `schema_version` | integer | Currently `3`. Bumped on any shape change |
+| `schema_version` | integer | Currently `4`. Bumped on any shape change |
 | `snapshots` | array | Whole `measure` documents, oldest first; the ring holds the last 20 |
 | `assignments` | array | Append-only ledger of who held which role |
-| `snapshots[].schema_version` | integer | Currently `2`. Version 2 added `window_group` to every agent record; a version-1 snapshot is migrated on read and rewritten, its agents stamped with an empty `window_group` |
+| `snapshots[].schema_version` | integer | Currently `3`. Version 2 added `window_group`; version 3 adds per-round `tier_billing`. Older snapshots migrate on read, preserving headroom and shared-window membership |
 | `snapshots[].agents[].window_group` | string | The usage window this agent shares with others; empty means a window of its own. Present on every agent record, including skipped and failed ones — pool membership is config, not a measurement result |
 | `assignments[].schema_version` | integer | The row's own version, stamped on write |
 | `assignments[].at` | string | ISO-8601 timestamp, from `--now` or the CLI's clock |
@@ -89,6 +92,16 @@ number is refused, naming the file and the role. `plan` is the only reader.
 | `assignments[].task` | string or null | Non-empty stable task identifier; null for older or unlabelled assignments |
 | `assignments[].fix_round` | positive integer or null | Task's fix number; null for initial development or non-fix work |
 | `assignments[].context_session` | object or null | Verified native session reference scoped to a pane: `pane_id`, `source`, `agent`, `kind`, `value`, all non-empty strings; kind is `id` or `path`. Null means continuity was not established |
+
+| `snapshots[].agents[].tier_billing` | object | Round → `{model, effort, window}` for configured tiers; unmeasured attribution is `unknown`. Empty for older snapshots |
+| `assignments[].tier` | object or null | Requested `round`, selected config `tier_row`, `kind`, `model`, `effort`, declared/effective multipliers, billing window, launch options, input `prompt_hash`, accepted qualification summary, and `verified` proof. Null for old or non-tiered dispatches |
+
+`verified` contains `model`, `effort`, `argv`, `source` (`launch_argv` or
+`process_argv`), and `pane_id`; process proof also contains `pid`. Loading
+state rechecks that the argument vector proves the recorded pair. Stored
+proof never replaces checking the live process before retained dispatch.
+`prompt_hash` hashes the original assignment message, common file, and brief
+as length-framed byte strings; the generated metadata footer is excluded.
 
 Every hand-off is recorded, one that never started included: the ledger is what
 the tool did, and a round that went out and died is the thing worth looking up
@@ -119,7 +132,7 @@ informational plan name and never feeds headroom.
   `os.replace`.
 - **Readers** — `plan` reads the newest snapshot plus the ledger (role history
   breaks a headroom tie), and the config's `role_costs` for its seat weights;
-  `state` prints the document. Neither writes. Live `apply` reads the most
+  `state` prints the document. Neither appends records; their shared loader performs owner migrations. Live `apply` reads the most
   recent assignment for the named worker before retaining context; Step 10
   documents the retained-dispatch contract. `apply --dry-run` reads no history
   and does not authorize retention.
@@ -152,8 +165,9 @@ Only the owner migrates, and it reads a version in one of three directions.
   on every row written before the field existed. The `2 → 3` step preserves
   status and role history while adding `cleared: null`, `clear_reason: unknown`,
   `task: null`, `fix_round: null`, and `context_session: null`. It cannot invent evidence of a retained
-  session. Snapshot versions remain independent: version-2 snapshots remain
-  version 2 inside a version-3 state document. Each row is migrated even in
+  session. The `3 → 4` step adds `tier: null` and preserves all task, fix,
+  status, and native-session evidence. Snapshot `2 → 3` independently adds
+  empty `tier_billing` maps, preserving window groups and readings. Each row is migrated even in
   a document already at the current version.
 - **Newer** — this build is the lagging reader, not the migrator. The caller
   gets an empty document in memory, the file on disk is left exactly as found,
@@ -161,7 +175,7 @@ Only the owner migrates, and it reads a version in one of three directions.
   the whole document unusable rather than being dropped, so the next write
   cannot lose it.
 - **Corrupt** — unparseable JSON, a non-object document, a non-array field, a
-  non-object row, invalid context evidence, or a fix counter outside the
+  non-object row, invalid context or tier evidence, or a fix counter outside the
   dispatcher's shared bounds: no usable prior state, treated like the newer case.
   The file is never deleted, and the warning never instructs the operator to
   discard it. Losing a snapshot ring costs one re-measure; overwriting an

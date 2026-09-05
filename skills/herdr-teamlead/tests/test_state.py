@@ -175,10 +175,10 @@ class MigrationTest(unittest.TestCase):
                             "assignments": [row]})
                 migrated = self.load()
                 self.assertEqual(migrated["schema_version"], STATE_SCHEMA_VERSION)
-                self.assertEqual(migrated["snapshots"], [snapshot])
+                self.assertEqual(migrated["snapshots"], [{"schema_version": 3, "agents": {"grok": {"window_group": "pool", "tier_billing": {}}}}])
                 self.assertEqual(migrated["assignments"], [dict(
                     row, schema_version=STATE_SCHEMA_VERSION, cleared=None,
-                    clear_reason="unknown", task=None, fix_round=None, context_session=None,
+                    clear_reason="unknown", task=None, fix_round=None, context_session=None, tier=None,
                 )])
                 self.assertEqual(role_counts(migrated), {"developer": {"grok": 1}})
                 self.assertEqual(self.on_disk(), migrated)
@@ -311,6 +311,7 @@ class AssignmentRecordTest(unittest.TestCase):
                 "task": None,
                 "fix_round": None,
                 "context_session": None,
+                "tier": None,
             },
         )
 
@@ -572,7 +573,7 @@ class SnapshotMigrationTest(unittest.TestCase):
         path.write_text(json.dumps(self._state_with_v1_snapshot()), encoding="utf-8")
         state = load_state(path, warn=lambda message: None)
         snapshot = state["snapshots"][0]
-        self.assertEqual(snapshot["schema_version"], 2)
+        self.assertEqual(snapshot["schema_version"], 3)
         self.assertEqual(snapshot["agents"]["claude"]["window_group"], "")
 
     def test_the_upgrade_is_written_back(self):
@@ -580,7 +581,7 @@ class SnapshotMigrationTest(unittest.TestCase):
         path.write_text(json.dumps(self._state_with_v1_snapshot()), encoding="utf-8")
         load_state(path, warn=lambda message: None)
         on_disk = json.loads(path.read_text(encoding="utf-8"))
-        self.assertEqual(on_disk["snapshots"][0]["schema_version"], 2)
+        self.assertEqual(on_disk["snapshots"][0]["schema_version"], 3)
         self.assertEqual(
             on_disk["snapshots"][0]["agents"]["claude"]["window_group"], ""
         )

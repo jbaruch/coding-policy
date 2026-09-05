@@ -1,68 +1,42 @@
 ---
 name: herdr-teamlead
 description: >
-  Run one task round as the team lead of three coding agents inside Herdr
-  (https://herdr.dev): measure each worker's subscription headroom, assign the
-  developer / tester / reviewer roles to the workers that can afford them,
-  manage each worker's context and send it a self-contained role brief, wait for the
-  report files, gate the round, dispatch a non-rotating judge on a dispute,
-  and hand the merge to the `release` skill. Use ONLY when the
-  user wants to run a round across the three Herdr worker panes: dispatch a
-  task to the agent team, assign roles to the Herdr agents, load-balance the
-  agents by usage or headroom, brief the developer / reviewer / tester, or
-  collect the workers' reports. Requires HERDR_ENV to be set; without it this
-  skill does not apply. Never use it for a single agent working a task on its
-  own, however careful that work needs to be — an isolated edit, fix, review
-  or investigation is not a team round.
+  Run a team round across three Herdr worker panes: assign developer, reviewer,
+  and tester by subscription headroom and qualified model tiers, compose briefs,
+  provision worktrees, dispatch workers, collect reports, gate release, and ask
+  a pinned judge to resolve disputes. Use for requests to dispatch the Herdr
+  team, balance worker usage, or collect team reports. Requires HERDR_ENV;
+  standalone edits, reviews, and investigations do not use this skill.
 ---
 
 # Herdr Team Lead Skill
 
 Process steps in order. Do not skip ahead.
 
-You are the lead of three rotating coding agents running in Herdr panes: a
-developer, a reviewer/architect, and a tester — plus a non-rotating judge for
-disputes. You assign the roles, write the briefs, read the reports, and gate
-the round. You never edit the shared checkout, and you never write code for a
-worker.
+Lead three rotating workers and a pinned judge. Assign roles, compose briefs,
+read reports, and gate the round. Never edit the shared checkout or implement
+for a worker. Optional Phase 1 produces a design/test plan and implementation;
+mandatory Phase 2 reviews and verifies the pushed tip before release.
 
-A round runs in two phases:
-
-- **Phase 1, pre-development** — optional. The architect writes a design note,
-  the tester writes a test plan, the developer implements and pushes.
-- **Phase 2, post-push verification** — mandatory. The reviewer reviews the
-  pushed branch, the tester verifies it. Both report against the current branch
-  tip, and the release hand-off reads those reports alone.
-
-Herdr command surface, worker quirks, and the usage-parsing details:
+Open detailed contracts as needed:
 
 ```text
 skills/herdr-teamlead/references/herdr.md
-```
-
-Role weights, report reading, and the pre-PR review sequence:
-
-```text
 skills/herdr-teamlead/references/round-flow.md
+skills/herdr-teamlead/references/round-setup.md
+skills/herdr-teamlead/state-schema.md
 ```
 
 ## Step 1 — Determine the Mode
 
-There are two modes, and `HERDR_ENV` is what tells them apart. Read it before
-running anything.
+Read `HERDR_ENV` before running any script.
 
-**Standalone — `HERDR_ENV` unset or empty.** No Herdr session is around you.
-This skill does not apply. Say so in one line and do the task yourself: no
-roster, no briefs, no worktree provisioning, no report files, and no
-pretending to be three agents in turn. Do not run the scripts below to
-confirm what the variable already told you. Finish here.
-
-**Herdr team round — `HERDR_ENV` set.** You are the lead of three worker
-panes. Proceed to Step 2.
-
-Even in Herdr mode, a task with nothing to hand to three workers is not a
-round: a single edit, a question, a lookup, a review of work already done.
-Those are yours to do directly.
+- **Unset or empty** — this skill does not apply. Say so and do the task
+  directly, without roster calls, briefs, provisioning, reports, or simulated
+  worker roles. Finish here.
+- **Set, with a team task** — proceed immediately to Step 2.
+- **Set, with a single edit, question, lookup, or existing-code review** — do
+  it directly. Finish here.
 
 ## Step 2 — Verify Herdr and the Roster
 
@@ -70,20 +44,15 @@ Those are yours to do directly.
 bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/roster.sh
 ```
 
-Takes no arguments. Emits `{"caller":{"pane_id":...},"agents":[{"name","kind","pane_id","state"}]}`,
-listing every named live agent other than your own pane.
+Emits caller pane and named live agents with kind, pane, and state.
 
-- **Exit 0 with a populated `agents`** — proceed to Step 3.
-- **Exit 0 with `agents: []`** — nobody is named. Report the unnamed panes from
-  `herdr agent list` and the `herdr agent rename <pane-id> <name>` command that
-  fixes it, then finish here.
-- **Exit 1** — the precondition failed (outside Herdr, or `herdr` absent).
-  Report the message verbatim and finish here.
-- **Exit 2** — herdr failed. Report the message verbatim and finish here.
+- **Exit 0, agents present** — proceed to Step 3.
+- **Exit 0, empty roster** — report unnamed panes from `herdr agent list` and
+  the correcting `herdr agent rename <pane-id> <name>` command. Finish here.
+- **Exit 1 or 2** — report the diagnostic verbatim and finish here.
 
-Fewer named workers than roles is a decision, not a detail: either name another
-agent or fold two roles onto one worker in that worker's brief, and say which
-you did.
+If workers cannot cover the roles, name another worker or deliberately combine
+roles within one brief. Record that decision; never duplicate a dispatch target.
 
 ## Step 3 — Verify Authority for the Repo
 
@@ -91,25 +60,18 @@ you did.
 bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/verify-authority.sh <owner/repo>
 ```
 
-Emits `{"repo","viewer_login","owner_login","owner_type","viewer_permission","namespace_owner","authorized"}`.
-`authorized` reflects namespace ownership alone; write permission never sets it
-(`rules/external-repo-contributions.md` Default Deny).
+Emits repo, viewer/owner identities, permission, namespace ownership, and
+`authorized`. Authorization reflects namespace ownership alone.
 
-- **`authorized: true`** — record the authority line for the briefs:
-  `owner of <owner/repo>`. Set `EXTERNAL_PERMISSION` to `none`. Proceed to
-  Step 4.
-- **`authorized: false`** — the operator does not own this repo. Ask the
-  operator for permission naming the repo AND each action type, then record
-  their exact words in `EXTERNAL_PERMISSION` and set the authority line to
-  `not owner; permitted this round: <their words>`. Without that answer, the
-  round is read-only: compose briefs that forbid every external write, or stop.
-  Never compose a brief that claims authority the operator did not give.
-- **Exit 1** — a precondition failed: usage, `gh` or `jq` absent, or `gh` not
-  logged in. Report the message verbatim, finish here.
-- **Exit 2** — GitHub could not answer. An unanswerable question is not a
-  permission. Report it and finish here.
+- **`authorized: true`** — set `AUTHORITY_STATEMENT` to `owner of <owner/repo>`
+  and `EXTERNAL_PERMISSION` to `none`. Proceed to Step 4.
+- **`authorized: false`** — use explicit operator permission naming this repo
+  and each write action. Record their words in `EXTERNAL_PERMISSION` and set
+  authority to `not owner; permitted this round: <their words>`. Without that
+  permission, proceed read-only or finish here.
+- **Exit 1 or 2** — report the diagnostic verbatim and finish here.
 
-Proceed immediately to Step 4.
+Proceed immediately to Step 4 with the recorded authority.
 
 ## Step 4 — Measure Headroom
 
@@ -117,96 +79,72 @@ Proceed immediately to Step 4.
 bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/teamlead.sh measure
 ```
 
-Sends each configured worker its own usage command and parses the reply. Emits
-one snapshot document — per agent: `kind`, `state`, `herdr_state`,
-`state_source`, `windows`, `credits`, `plan`, `headroom_pct`, `skipped` — and
-appends it to the state file (`skills/herdr-teamlead/state-schema.md`). A worker that
-is `working` or `blocked` is reported as skipped with null windows, never
-interrupted. A `working` verdict is confirmed against the pane before it counts:
-`state_source` names which signal decided, `herdr` or `probe`, and `herdr_state`
-carries what herdr claimed. Exit 1 means at least one agent could not be
-measured; the snapshot still prints and names it in `failed_agents`.
+Emits and saves a snapshot with per-agent headroom, windows, state evidence,
+`tier_billing`, and `failed_agents`. Busy workers are skipped. Unmeasured tier
+billing stays `unknown`. Report each failed measurement and obtain that
+worker's reading before relying on its seat.
 
-The usage marker is confirmed in the text that gets parsed, never in a wait
-alone. `--marker-poll-attempts` and `--marker-poll-interval` bound the
-confirming poll; `--marker-timeout` and `--lines` size the pane read. Attempt
-counts and intervals default to the script's own constants; see
-`skills/herdr-teamlead/teamlead/measure.py`.
+Use `--trace` for unexplained transport behavior. Usage parsing, polling knobs,
+and trace redaction are documented in:
 
-Add `--trace` (or `TEAMLEAD_TRACE=1`) when a live run does something the JSON
-does not explain: every herdr invocation, its exit status, and its output go to
-stderr, and stdout stays the machine-readable document. Traced fields are
-redacted for credential shapes and capped per field with a `[truncated N bytes]`
-marker; the shape list and the cap are constants in
-`skills/herdr-teamlead/teamlead/herdr.py`.
+```text
+skills/herdr-teamlead/references/round-setup.md
+```
 
-Report a `failed_agents` entry to the user and measure that worker by hand
-before relying on its role. Proceed immediately to Step 5.
+Proceed immediately to Step 5 once the required readings are available.
 
 ## Step 5 — Plan the Roles
 
 ```bash
 bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/teamlead.sh plan \
   --roles developer,tester,reviewer \
-  [--exclude <role>=<agent>[,<agent>...]]...
+  [--exclude <role>=<agent>[,<agent>...]]... \
+  [--round <role>=<round-type>] [--round-context <evidence.json>] [--fix-round <N>]
 ```
 
-Pure computation over the newest snapshot plus the assignment ledger. Contacts
-no agent, writes nothing. Emits `{"assignments":{"<role>":"<agent>"},"rationale":[...],"snapshot_ref":{...}}`.
-Exit 1 names the reason it could not plan.
+Emits assignments, rationale, snapshot reference, and configured round tiers;
+contacts no worker. Exit 1 refuses the plan: resolve its diagnostic before
+continuing. Phase 2 excludes the branch author from reviewer and tester.
+For retained fixes, plan developer alone and exclude all other workers; plan
+verification separately. Supply the same fix number to plan and apply.
 
-`--exclude` bars agents from one role and repeats, once per role. Phase 2 bars
-the author of the branch from `reviewer` and `tester` (`rules/agent-team-operation.md`
-Review Before PR). Exit 1 covers an exclusion naming a role outside `--roles`,
-and an exclusion set no assignment satisfies.
+The operator's table controls model, effort, and launch options. Default
+planning excludes unqualified tiers. `--preview-tiers` inspects an
+uncommissioned table; live dispatch still requires qualification. Weights,
+round inputs, promotion, and metering contracts:
 
-For a retained fix, plan `--roles developer` and exclude every other rotating
-worker from that role. Use the task's existing developer, not a new headroom
-winner. Plan the reviewer and tester separately for post-push verification.
+```text
+skills/herdr-teamlead/references/round-setup.md
+skills/herdr-teamlead/references/model-tiers.md
+```
 
-`--roles` keys the output document. `role_costs` in config.json re-weighs a
-seat per install. The weights, fill order, and tie-breaks are the planner's
-contract; see `skills/herdr-teamlead/teamlead/planner.py` — the `plan`
-docstring and `DEFAULT_ROLE_COSTS`.
-
-Save the output to a file for dispatch. Relay the `rationale` lines to the user
-as the round's role announcement: they name the weight behind each seat, the
-exclusions applied, and any worker whose headroom reading is stale. Proceed
-immediately to Step 6.
+Save the plan and announce its rationale. Proceed immediately to Step 6.
 
 ## Step 6 — Build the Review Package
 
-For reviewer or tester briefs, run from a checkout containing the recorded
-commits:
+For reviewer/tester briefs, run from a checkout holding the recorded commits:
 
 ```bash
 bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/review-package.sh \
   <recorded-base-sha> <pushed-head-sha> <round-reports-dir>/review-<base7>..<head7>.diff
 ```
 
-Record the pre-round tip before the first development dispatch. Preserve that
-SHA as the task's base through every fix. A full review uses that base and the
-current pushed tip; a scoped re-check uses the preceding reviewed tip as its
-base. Never infer the base from `HEAD~1`. Set `REVIEW_BASE` and `REVIEW_HEAD`
-to those full SHAs. Rebuild for each changed range, including the final full
-review after scoped fixes.
+Record the task base before initial development and preserve it through fixes.
+Full reviews use that base and the current pushed tip; scoped rechecks use the
+previous reviewed tip. Never infer the base from `HEAD~1`. Set `REVIEW_BASE`
+and `REVIEW_HEAD` to full SHAs and rebuild whenever the range changes.
+Pre-development packages use the recorded base at both endpoints and never
+prove an implementation. Other roles need no package; proceed to Step 7.
 
-Before development, use the recorded base for both endpoints. That empty-range
-package is planning input, never evidence of a verified implementation.
-Developer-only, release, and judge briefs need no package; proceed to Step 7.
-
-Success prints only the absolute artifact path, not JSON. The file contains
-the resolved range, commit list, stat, and patch. Set `TEAMLEAD_REPORTS_DIR`
-to use the default range-specific filename instead of passing OUTFILE.
-Exit 2 names invalid input; exit 1 names a tool or output failure. On either,
-fix the named cause and repeat; never compose verification briefs without a
-completed package. Existing different content is preserved.
-
-Proceed immediately to Step 7 with the printed path as `REVIEW_PACKAGE`.
+Success prints the absolute artifact path containing range, commits, stat, and
+patch. Set it as `REVIEW_PACKAGE`. Any non-zero exit requires fixing the named
+input/tool/output failure and retrying; never compose verification briefs
+without a completed package. Existing different content is preserved.
+Proceed immediately to Step 7.
 
 ## Step 7 — Compose the Briefs
 
-Write a values file for the round, then compose:
+Write `{"shared": {...}, "roles": {"<role>": {...}}}` and run:
 
 ```bash
 bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/compose-briefs.sh \
@@ -214,90 +152,50 @@ bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/compose-briefs.s
   <values.json> <round-reports-dir>
 ```
 
-The values file is `{"shared": {...}, "roles": {"<role>": {...}}}`; a role's
-own value beats the shared one. Emits
-`{"common":"<path>","briefs":{"<role>":"<path>"}}`. Exit 2 means validation
-failed and nothing was written — an absent or unreadable review package,
-an unfilled placeholder, a supplied key no template uses, a value that is not
-text, or a `REPORT` longer than the
-script's limit (the worker's `REPORT: <path>` line must fit one pane row for
-Step 11 to confirm it; use a short reports directory). Exit 3 means the placeholder scan
-itself failed, so whether the briefs are clean is unknown: re-run, never
-dispatch on it. The placeholder set and both validation directions are the
-script's contract; see the header of
-`skills/herdr-teamlead/compose-briefs.sh`.
+Emits the common file and role-brief paths. Non-zero means invalid input or a
+tool/write failure: fix the diagnostic and retry; never dispatch failed
+composition. The script validates placeholders, supplied keys, report paths,
+and reviewer/tester package paths and full commit IDs before writing.
 
-What you decide, and it is the whole of your job here:
+Supply shared checkout, Step 3's authority/permission, and each role's issue,
+branch, worktree, report paths, phase, and mode. Reviewer/tester inputs also
+carry Step 6's package and range. Placeholder details and phase/mode table:
 
-- `SHARED_CHECKOUT` — the checkout the workers read.
-- `AUTHORITY_STATEMENT` and `EXTERNAL_PERMISSION` — verbatim from Step 3. Never
-  a claim you composed yourself.
-- Per role: `ISSUE`, `BRANCH`, `WORKTREE`, `REPORT`, `REPORTS_DIR`, and the
-  phase and mode that role runs this round.
-- For reviewer and tester: `REVIEW_PACKAGE`, `REVIEW_BASE`, and `REVIEW_HEAD`
-  from Step 6. Missing, empty, or non-file package paths refuse composition
-  before any brief is written.
+```text
+skills/herdr-teamlead/references/round-setup.md
+```
 
-| Phase | Role | Mode | Output |
-| ----- | ---- | ---- | ------ |
-| 1 | reviewer | A | design note on the issue |
-| 1 | tester | A or B | test plan, or acceptance tests as a patch |
-| 1 | developer | — | implementation, pushed branch, no PR |
-| 2 | reviewer | B | COMMENT review of the pushed branch |
-| 2 | tester | C | gates plus acceptance tests against the pushed branch |
-| 3 | release | — | PR opened, bot rounds answered, merged, branch deleted |
-
-Phase 2 briefs name the branch AND the commit SHA the worker must report
-against. A report against an older tip does not gate anything.
-
-Name the issue, file, finding, and report path in full in every brief.
-Context retention is limited to the same-role fix rounds in
-`rules/agent-team-operation.md` Fix Loops. Fresh-worker fix briefs include
-the prior attempt count and the ownership handoff that section requires.
-Reviewer and tester verification briefs name `full` or `scoped` review,
-the prior findings, and the follow-up issue for new advisories. The final
-release-gating verification is `full`. Proceed immediately to Step 8.
+Briefs identify every issue, finding, file, and prior report in full. Phase 2
+names the pushed SHA. Fixes carry prior attempt count and required ownership
+handoff. Verification names `full` or `scoped`, prior findings, and the
+follow-up for new advisories. Final release verification is `full`.
+Proceed immediately to Step 8.
 
 ## Step 8 — Provision the Worktrees
 
-One call per worker that writes anything:
+Run once per writing worker and every worktree named in a brief:
 
 ```bash
 bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/provision-worktree.sh \
   <shared-checkout> <branch> <worktree-path> [base-ref]
 ```
 
-Emits `{"path","branch","base_ref","state"}`, where `state` is `created`,
-`attached`, or `already-provisioned`. Exit 1 is a precondition (an invalid
-branch name, a path outside the worktree root); exit 2 means git refused, or
-the path holds something else. Branch-name and path rules are the script's
-contract; see the header of
-`skills/herdr-teamlead/provision-worktree.sh`.
+Emits path, branch, base, and `created|attached|already-provisioned`. On any
+non-zero exit, fix the diagnostic and retry. Never dispatch a missing
+worktree. Read-only Phase 1 reviewers need none. Clean up after merge per
+`rules/agent-worktree-isolation.md`. Proceed immediately to Step 9.
 
-The lead provisions every worktree a brief names, so a worker never runs git
-against the shared checkout (`rules/agent-team-operation.md` Writers and
-Checkouts). A read-only Phase 1 reviewer needs none. Remove them per
-`rules/agent-worktree-isolation.md` Cleanup once the branch lands.
+## Step 9 — Label the Layout
 
-On any non-zero exit, fix the input it names and re-run this step; do not
-dispatch a brief whose worktree does not exist. Proceed immediately to Step 9.
-
-## Step 9 — Label the Layout (optional, once per team)
+Optional, once per team; skip an already named sidebar.
 
 ```bash
 bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/label-workspaces.sh \
   <lead-label> [<agent>=<workspace-id>]...
 ```
 
-Names the lead's workspace, each worker's workspace after its agent, and each
-worker's pane after its kind. With no pairs, the workspaces come from the
-roster. Emits `{"lead":{...},"agents":[...]}` with a per-target
-`renamed|unchanged|failed`. Exit 3 means at least one rename failed and the
-JSON says which. A label failure never stops a round.
-
-Run this once per team, not once per round: a name already in place is
-reported `unchanged` and nothing is sent. Skip it on a team whose sidebar is
-already named. Proceed immediately to Step 10.
+Emits per-target `renamed|unchanged|failed`; exit 3 names partial failures.
+Report label failures and continue. Proceed immediately to Step 10.
 
 ## Step 10 — Dispatch the Briefs
 
@@ -311,12 +209,14 @@ bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/teamlead.sh appl
 
 Hands each worker its brief using the selected context mode. Emits one JSON
 object: per role a record carrying `cleared`, `clear_reason`, `context_session`, `task`,
-`fix_round`, `landed`, `started`, and `status`.
+`fix_round`, `tier`, `landed`, `started`, and `status`. The tier record carries
+the requested pair, verified argv, and evidence source.
 
 Keep the same `--task` identifier from initial development through all its
 fixes. Omit `--fix-round` on the initial assignment; supply it on every fix.
 Leading or trailing whitespace in a task label is refused; existing ledger
-identities are never trimmed or merged.
+identities are never trimmed or merged. A padded legacy identity requires an
+explicit operator recovery decision; retrying the padded label cannot succeed.
 Dispatch a retained fix as a developer-only assignment with
 `--retain-context`. Other roles receive separate, cleared assignments.
 The utility refuses an invalid mode or an exhausted fix counter before any
@@ -326,56 +226,35 @@ native session identity from Herdr's official integration. A missing or changed
 identity refuses retention before any terminal write. Check
 `herdr integration status` when the identity is unavailable; never infer
 continuity from the worker's name, readiness, or pane text.
-Missing or migrated history cannot authorize it. If context is unavailable,
+Missing or migrated history cannot authorize it. A retained worker keeps a
+verified compatible model and effort; retention never relaunches a worker.
+Tiered live dispatch also requires the recorded validation battery and current
+canary. A missing qualification refuses before any worker operation. If context is unavailable,
 stop the retained path and report the loss; do not reset the fix counter.
 
-Each outcome names where the round goes next. Only a dispatched worker can
-produce a report, so Step 11 waits on exactly the roles that landed here.
+Only dispatched workers can produce reports. Wait on the roles that landed.
 
-- **Exit 0** — every role was dispatched. Proceed to Step 11.
-- **Non-zero with a busy target** — the whole round was refused before any
-  keystroke went out. Nothing was dispatched, so there is nothing to wait for:
-  wait for that worker to reach idle and re-run this step, or re-run it with a
-  plan that omits the busy worker. Do not go to Step 11.
-- **Non-zero with `"status": "sent_but_not_started"`** — the message was sent
-  and no turn began for that role. Read that worker's pane; do not re-dispatch
-  on top of it. Go to Step 11 for the roles whose records say `started`, and
-  treat this role as producing no report this round.
-- **A worker failed on its clear command** — its assignment was never sent, and
-  the round is short that role. Go to Step 11 for the rest; re-dispatch this one
-  by re-running this step for that role alone once its pane is clear.
-- **A refusal saying the screen did not change** — the clear was unconfirmed;
-  no brief was sent to that worker. Read the pane and clear it by hand.
-  Re-run with `--no-clear` once the pane shows a fresh session. Fresh fix
-  rounds that require an automatic clear must re-run without that flag.
-  `--no-clear` records `cleared: false, clear_reason: hand`;
-  `--retain-context` records `cleared: false, clear_reason: retained`.
-  Never retain the previous task's context or retain across a role change.
-- **A refusal naming an unaccounted composer** — the worker's input line holds
-  text the lead did not send. Nothing was dispatched for that role. Read the
-  pane and clear it by hand, or re-run this step with `--allow-recovery` once
-  you know whose text it is. Codex sends no recovery key at all: its clear key
-  exits an idle Codex.
-- **A refusal the message does not cover** — report it verbatim and finish
-  here. A dispatch nobody understands is not a round to wait on.
-- `--dry-run` prints the context choice and commands without Herdr calls or
-  state writes. It validates the mode, not retained history or live readiness.
-  It dispatches nothing; finish here after reading it.
-- Each confirmed hand-off relabels that worker's pane with the work it took.
-  `--task <label>` puts the round's task in the label. A hand-off that never
-  started is left unlabelled.
+- **Exit 0** — proceed to Step 11.
+- **Busy target** — no dispatch occurred. Wait for readiness or replan; stay
+  at this step.
+- **Sent but not started** — inspect the pane; never re-dispatch on top of the
+  message. Proceed to Step 11 for the roles that started.
+- **Clear, composer, tier, qualification, or continuity refusal** — no brief
+  reached that role. Follow the named recovery before retrying it; wait only
+  for other roles whose records show a dispatch.
+- **Unknown refusal** — report it verbatim and finish here.
+- **`--dry-run`** — inspect the context choice, requested tier, and relaunch
+  argv. It contacts no worker, writes no ledger, and proves no live tier or
+  qualification. Finish here.
 
-The delivery mechanics behind those outcomes — composer confirmation, recovery
-keys, ghost text, the rejection strings, the settle knobs — are in:
+Recovery and executable refusal contracts:
 
 ```text
-skills/herdr-teamlead/references/herdr.md
+skills/herdr-teamlead/references/dispatch-recovery.md
+skills/herdr-teamlead/references/model-tiers.md
 ```
 
-The prompt text, the refusal predicate, and every constant are the utility's
-own contract; see `skills/herdr-teamlead/teamlead/assign.py`.
-
-Proceed to Step 11 with the roles that were dispatched.
+Proceed to Step 11 with the dispatched roles.
 
 ## Step 11 — Wait for the Reports
 
@@ -391,37 +270,23 @@ stderr. Exit 4 adds `reason`. Completion requires both the report file on disk a
 marker in the worker's pane. A single `idle` or `done` observation is not
 completion. Poll interval and give-up budget are the script's own constants.
 
-- **Exit 0** — the report is there. Continue to the next worker, then Step 12.
-- **Exit 1** — the budget ran out. Read the pane with
-  `herdr agent read <name> --source visible`. If the worker is still working,
-  re-run this step for it: the script's own budget applies again, never a
-  number chosen here. Otherwise go to Step 12 recording that it produced no
-  report.
-- **Exit 2** — a tool failure. Report the message verbatim and finish here; the
-  round has no reliable view of any worker.
-- **Exit 4** — the report file exists and the worker reads `idle` or `done` on
-  consecutive polls, but the pane never showed the marker whole. This is not
-  delivery. Read the live state with
-  `herdr agent get <name>` and take the first continuation that applies:
-  - The command fails — report its message verbatim and finish here, as for
-    exit 2.
-  - The state is `blocked` or `working` — re-run this step for that worker
-    once. Exits 0–3 from that re-run take their branches above. A second
-    exit 4 is terminal: record the worker as producing no report and
-    continue to the next worker.
-  - The state is `idle` or `done` — record the worker as producing no report
-    and continue to the next worker. Never re-dispatch on top of it. The
-    cause is a report path too long for one pane row; Step 7's compose gate
-    refuses those, so this outcome means a brief bypassed it.
-- **Exit 3** — the worker is blocked at an approval or question dialog,
-  confirmed across two reads and the pane. Read the dialog with
-  `herdr pane read <pane-id> --source visible`, relay its text to the operator
-  verbatim, and stop the round for that worker. You never answer it: the
-  operator does. Resume only once `herdr agent get <name>` reports a state
-  other than `blocked`, then re-run this step for that worker.
+- **Exit 0** — read the completed report; continue to the next worker, then Step 12.
+- **Exit 1** — inspect the named worker. Re-run this wait if it is working;
+  otherwise record the missing report and continue to the next worker.
+- **Exit 2** — report the tool failure and finish here.
+- **Exit 3** — relay the blocked worker's dialog to the operator and stop its
+  round. Resume the wait only after the live state leaves `blocked`.
+- **Exit 4** — the file lacks its confirmed delivery marker. Follow the live
+  state check in the recovery reference; never re-dispatch on top of it.
 
-Proceed to Step 12 once every dispatched worker has been waited on, or once you
-have recorded which of them produced no report.
+Detailed recovery for each outcome:
+
+```text
+skills/herdr-teamlead/references/dispatch-recovery.md
+```
+
+Proceed to Step 12 once each dispatched worker has a completed or recorded
+missing report.
 
 ## Step 12 — Gate the Round
 
@@ -509,14 +374,14 @@ Run:
 
 ```bash
 bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/start-judge-worker.sh \
-  <step-15-plan-file> <pane> [claude|codex]
+  <step-15-plan-file> <pane> [claude|codex|grok]
 ```
 
 It reads the tier from the plan's `judge` object, starts the worker on it,
-and refuses unless the pane's startup banner echoes that tier. Its argument
-contract, exit codes and banner predicate are in the script header.
+and verifies the returned launch argv. Its input, output, and failure
+contracts are in the script header. Pane text never proves the tier.
 
-- **Exit 0** — the banner proved the tier. Its JSON names the agent, model
+- **Exit 0** — the launch argv proved the tier. Its JSON names the agent, model
   and effort. Proceed immediately to Step 17.
 - **Any non-zero** — report the script's diagnostic verbatim and finish here.
   A worker whose tier is unproven does not get briefed, and no tier is set by
@@ -532,11 +397,12 @@ bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/teamlead.sh appl
   --assignments <plan-file> \
   --brief judge=<round>-judge.md \
   --common <path-to-COMMON.md> \
-  --task <round>
+  --task <round> --no-clear
 ```
 
-Step 10's outcomes govern this dispatch unchanged. Proceed immediately to
-Step 18.
+Step 10's outcomes govern this dispatch. `--no-clear` preserves the worker
+started in Step 16; apply verifies its live process arguments before sending
+the brief. Proceed immediately to Step 18.
 
 ## Step 18 — Wait for the Ruling
 

@@ -40,7 +40,7 @@ mk_templates() { # <dir>
     || die "could not write COMMON.md"
   printf 'Dev on {{BRANCH}} in {{WORKTREE}} for {{ISSUE}}\nReport: {{REPORT}}\n' > "$1/brief-developer.md" \
     || die "could not write brief-developer.md"
-  printf 'Tester for {{ISSUE}}\nReport: {{REPORT}}\nPackage: {{REVIEW_PACKAGE}}\n' > "$1/brief-tester.md" \
+  printf 'Tester for {{ISSUE}}\nReport: {{REPORT}}\nPackage: {{REVIEW_PACKAGE}}\nRange: {{REVIEW_BASE}}..{{REVIEW_HEAD}}\n' > "$1/brief-tester.md" \
     || die "could not write brief-tester.md"
 }
 
@@ -52,7 +52,7 @@ run() { # <templates> <values-file> <outdir>
   if [[ "$1" == "$TPL" ]] && jq -e . "$values" >/dev/null 2>&1; then
     values="$TMP/values.$RUN_SEQ.json"
     jq --arg p "$TMP/package.diff" \
-      'if .roles | has("tester") then .roles.tester.REVIEW_PACKAGE = $p else . end' \
+      'if .roles | has("tester") then .roles.tester += {REVIEW_PACKAGE: $p, REVIEW_BASE: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", REVIEW_HEAD: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"} else . end' \
       "$2" > "$values" || die "could not prepare rendering fixture"
   fi
   OUT="$(bash "$SCRIPT" "$1" "$values" "$3" 2>"$TMP/err.$RUN_SEQ")"
@@ -164,8 +164,8 @@ JSON
 }
 JSON
   jq --arg p "$TMP/package.diff" \
-    '.roles.reviewer += {REVIEW_PACKAGE: $p, REVIEW_BASE: "base-sha", REVIEW_HEAD: "head-sha"}
-     | .roles.tester += {REVIEW_PACKAGE: $p, REVIEW_BASE: "base-sha", REVIEW_HEAD: "head-sha"}' \
+    '.roles.reviewer += {REVIEW_PACKAGE: $p, REVIEW_BASE: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", REVIEW_HEAD: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}
+     | .roles.tester += {REVIEW_PACKAGE: $p, REVIEW_BASE: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", REVIEW_HEAD: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}' \
     "$v6b" > "$TMP/packaged-values.json" || die "could not add packaged review paths"
   v6b="$TMP/packaged-values.json"
   run "$PKG" "$v6b" "$o6b"
