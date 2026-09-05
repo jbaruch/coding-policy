@@ -64,6 +64,37 @@ class TierIntegrationTest(CliCase):
         self.assertEqual(rc, 1)
         self.assertIn("--preview-tiers", error)
 
+    def test_invalid_utf8_json_inputs_report_the_path_without_worker_calls(self):
+        invalid = self.tmp / "invalid.json"
+        invalid.write_bytes(b"\xff\xfe")
+        cases = [
+            ["plan", *self.base(), "--roles", "developer", "--snapshot", str(self.snapshot), "--round-context", str(invalid), "--now", AT],
+            ["plan", *self.base(), "--roles", "developer", "--snapshot", str(invalid), "--now", AT],
+            ["apply", *self.base(), "--assignments", str(invalid), "--common", str(self.common)],
+            ["plan", *self.base(), "--config", str(invalid), "--roles", "developer", "--snapshot", str(self.snapshot), "--now", AT],
+        ]
+        for args in cases:
+            with self.subTest(args=args):
+                self.out.seek(0)
+                self.out.truncate()
+                self.err.seek(0)
+                self.err.truncate()
+                runner = FakeRunner()
+                rc, output, error = self.run_cli(args, client=HerdrClient("herdr", runner))
+                self.assertEqual(rc, 1)
+                self.assertEqual(output, "")
+                self.assertIn(str(invalid), error)
+                self.assertIn("UTF-8 JSON", error)
+                self.assertNotIn("Traceback", error)
+                self.assertEqual(runner.calls, [])
+                self.assertEqual(invalid.read_bytes(), b"\xff\xfe")
+        warnings = []
+        state, usable = load_state_checked(invalid, warn=warnings.append)
+        self.assertFalse(usable)
+        self.assertEqual(state, empty_state())
+        self.assertIn("UTF-8 JSON", warnings[0])
+        self.assertEqual(invalid.read_bytes(), b"\xff\xfe")
+
     def test_preview_plan_can_inspect_an_unqualified_table(self):
         self.settings["agents"][0]["tiers"]["build"]["qualification"] = []
         self.write_config()

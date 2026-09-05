@@ -416,6 +416,12 @@ def load_state_checked(path, warn=None):
             "file itself.".format(path),
             {"path": str(path)},
         ) from None
+    except UnicodeDecodeError:
+        warn("state file {} is not UTF-8 JSON; the file is left untouched. Restore a readable UTF-8 backup or use a separate --state file.".format(path))
+        return empty_state(), False
+    except OSError as exc:
+        raise StateError("Cannot read state {}: {}. Restore readability or use a separate --state file; preserve the original ledger.".format(path, exc),
+                         {"path": str(path)}) from None
 
     try:
         payload = json.loads(text)

@@ -336,6 +336,9 @@ def _read_config(path):
             "config.json file itself.".format(path),
             {"path": str(path)},
         ) from None
+    except (OSError, UnicodeDecodeError) as exc:
+        raise ConfigError("Cannot read config {}: {}. Supply a readable UTF-8 JSON file with --config.".format(path, exc),
+                          {"path": str(path)}) from None
 
     try:
         return json.loads(text)

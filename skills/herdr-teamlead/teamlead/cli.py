@@ -390,6 +390,9 @@ def _load_assignments(value, document=False):
                 "file.".format(path),
                 {"path": str(path)},
             ) from None
+        except (OSError, UnicodeDecodeError) as exc:
+            raise UsageError("Cannot read assignments file {}: {}. Supply a readable UTF-8 JSON file with --assignments.".format(path, exc),
+                             {"path": str(path)}) from None
     try:
         payload = json.loads(text)
     except json.JSONDecodeError as exc:
@@ -409,8 +412,9 @@ def _round_inputs(args, roles):
     if args.round_context:
         try:
             contexts = json.loads(Path(args.round_context).read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
-            raise UsageError("Cannot read round context: {}; fix --round-context.".format(exc), {}) from None
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise UsageError("Cannot read round context {}: {}. Supply a readable UTF-8 JSON file with --round-context.".format(
+                args.round_context, exc), {"path": str(args.round_context)}) from None
     if not isinstance(contexts, dict) or set(contexts) - set(roles):
         raise UsageError("Round context must map only roles this plan assigns to evidence objects.", {})
     rounds = {role: {"context": context} for role, context in contexts.items()}
@@ -541,6 +545,9 @@ def cmd_plan(args, client=None, warn=None, trace=None):
                 ),
                 {"path": str(snapshot_path)},
             ) from None
+        except (OSError, UnicodeDecodeError) as exc:
+            raise PlanError("Cannot read snapshot {}: {}. Supply a readable UTF-8 JSON file with --snapshot.".format(snapshot_path, exc),
+                            {"path": str(snapshot_path)}) from None
         source = str(snapshot_path)
     else:
         snapshot = latest_snapshot(state)
