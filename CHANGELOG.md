@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.189 — 2026-09-05
+
 ### Added
 
 - **Round-specific model and effort tiers (#324, completing #321).** Config schema 2 adds an operator-owned tier table and explicit launch options. Planning prices candidates through per-tier multipliers and excludes unqualified configurations; preview planning and dry-run expose commands without starting workers. Judgment stays on the pinned top models, mechanical work requires the full eligibility predicate, and risk or late fixes promote to the top tier. Claude, Codex, and Grok have launch adapters; Antigravity remains a future adapter rather than an inactive config promise. Reviewer/tester rechecks remain judgment despite the research table's lower-tier examples.
