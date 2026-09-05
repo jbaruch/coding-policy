@@ -83,4 +83,3 @@ Proceed to Step 11 with the roles that were dispatched.
 
 Proceed to Step 12 once every dispatched worker has been waited on, or once you
 have recorded which of them produced no report.
-

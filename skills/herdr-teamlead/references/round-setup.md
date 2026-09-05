@@ -250,4 +250,3 @@ JSON says which. A label failure never stops a round.
 Run this once per team, not once per round: a name already in place is
 reported `unchanged` and nothing is sent. Skip it on a team whose sidebar is
 already named. Proceed immediately to Step 10.
-

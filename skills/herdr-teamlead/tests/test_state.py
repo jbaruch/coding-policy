@@ -311,7 +311,7 @@ class AssignmentRecordTest(unittest.TestCase):
                 "task": None,
                 "fix_round": None,
                 "context_session": None,
-                    "tier": None,
+                "tier": None,
             },
         )
 
