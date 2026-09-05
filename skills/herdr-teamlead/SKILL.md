@@ -18,6 +18,12 @@ read reports, and gate the round. Never edit the shared checkout or implement
 for a worker. Optional Phase 1 produces a design/test plan and implementation;
 mandatory Phase 2 reviews and verifies the pushed tip before release.
 
+The plugin root is `.tessl/plugins/jbaruch/coding-policy` under a project-local
+install and `$HOME/.tessl/plugins/jbaruch/coding-policy` under a global one. The
+`CP=` line opening each command block resolves it, project-local first; it is
+part of the command, never decoration. Every `skills/...` path named below is
+relative to that root.
+
 Open detailed contracts as needed:
 
 ```text
@@ -41,7 +47,8 @@ Read `HERDR_ENV` before running any script.
 ## Step 2 — Verify Herdr and the Roster
 
 ```bash
-bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/roster.sh
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
+bash "$CP/skills/herdr-teamlead/roster.sh"
 ```
 
 Emits caller pane and named live agents with kind, pane, and state.
@@ -57,7 +64,8 @@ roles within one brief. Record that decision; never duplicate a dispatch target.
 ## Step 3 — Verify Authority for the Repo
 
 ```bash
-bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/verify-authority.sh <owner/repo>
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
+bash "$CP/skills/herdr-teamlead/verify-authority.sh" <owner/repo>
 ```
 
 Emits repo, viewer/owner identities, permission, namespace ownership, and
@@ -76,7 +84,8 @@ Proceed immediately to Step 4 with the recorded authority.
 ## Step 4 — Measure Headroom
 
 ```bash
-bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/teamlead.sh measure
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
+bash "$CP/skills/herdr-teamlead/teamlead.sh" measure
 ```
 
 Emits and saves a snapshot with per-agent headroom, windows, state evidence,
@@ -96,7 +105,8 @@ Proceed immediately to Step 5 once the required readings are available.
 ## Step 5 — Plan the Roles
 
 ```bash
-bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/teamlead.sh plan \
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
+bash "$CP/skills/herdr-teamlead/teamlead.sh" plan \
   --roles developer,tester,reviewer \
   [--exclude <role>=<agent>[,<agent>...]]... \
   [--round <role>=<round-type>] [--round-context <evidence.json>] [--fix-round <N>]
@@ -125,7 +135,8 @@ Save the plan and announce its rationale. Proceed immediately to Step 6.
 For reviewer/tester briefs, run from a checkout holding the recorded commits:
 
 ```bash
-bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/review-package.sh \
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
+bash "$CP/skills/herdr-teamlead/review-package.sh" \
   <recorded-base-sha> <pushed-head-sha> <round-reports-dir>/review-<base7>..<head7>.diff
 ```
 
@@ -147,8 +158,9 @@ Proceed immediately to Step 7.
 Write `{"shared": {...}, "roles": {"<role>": {...}}}` and run:
 
 ```bash
-bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/compose-briefs.sh \
-  .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/templates \
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
+bash "$CP/skills/herdr-teamlead/compose-briefs.sh" \
+  "$CP/skills/herdr-teamlead/templates" \
   <values.json> <round-reports-dir>
 ```
 
@@ -176,7 +188,8 @@ Proceed immediately to Step 8.
 Run once per writing worker and every worktree named in a brief:
 
 ```bash
-bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/provision-worktree.sh \
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
+bash "$CP/skills/herdr-teamlead/provision-worktree.sh" \
   <shared-checkout> <branch> <worktree-path> [base-ref]
 ```
 
@@ -190,7 +203,8 @@ worktree. Read-only Phase 1 reviewers need none. Clean up after merge per
 Optional, once per team; skip an already named sidebar.
 
 ```bash
-bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/label-workspaces.sh \
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
+bash "$CP/skills/herdr-teamlead/label-workspaces.sh" \
   <lead-label> [<agent>=<workspace-id>]...
 ```
 
@@ -200,7 +214,8 @@ Report label failures and continue. Proceed immediately to Step 10.
 ## Step 10 — Dispatch the Briefs
 
 ```bash
-bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/teamlead.sh apply \
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
+bash "$CP/skills/herdr-teamlead/teamlead.sh" apply \
   --assignments <plan-file> \
   --brief developer=<path> --brief tester=<path> --brief reviewer=<path> \
   --common <path-to-COMMON.md> --task <task-id> \
@@ -261,7 +276,8 @@ Proceed to Step 11 with the dispatched roles.
 One call per dispatched worker, in the order the round needs them:
 
 ```bash
-bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/wait-report.sh <agent-name> <report-path>
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
+bash "$CP/skills/herdr-teamlead/wait-report.sh" <agent-name> <report-path>
 ```
 
 Emits `{"agent","state","report_path","found","elapsed_seconds"}` on every
@@ -351,7 +367,8 @@ names the worker the `judge` block pins, and refuses the round when that
 window cannot cover a ruling:
 
 ```bash
-bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/teamlead.sh plan \
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
+bash "$CP/skills/herdr-teamlead/teamlead.sh" plan \
   --roles judge --snapshot <step-14-measure-output>
 ```
 
@@ -373,7 +390,8 @@ those values. Proceed immediately to Step 16.
 Run:
 
 ```bash
-bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/start-judge-worker.sh \
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
+bash "$CP/skills/herdr-teamlead/start-judge-worker.sh" \
   <step-15-plan-file> <pane> [claude|codex|grok]
 ```
 
@@ -393,7 +411,8 @@ Dispatch under Step 10's outcome contract exactly, passing the plan file from
 Step 15 rather than a hand-written mapping:
 
 ```bash
-bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/teamlead.sh apply \
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
+bash "$CP/skills/herdr-teamlead/teamlead.sh" apply \
   --assignments <plan-file> \
   --brief judge=<round>-judge.md \
   --common <path-to-COMMON.md> \

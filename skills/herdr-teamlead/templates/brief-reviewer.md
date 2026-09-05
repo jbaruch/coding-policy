@@ -41,7 +41,7 @@ Expected range: `{{REVIEW_BASE}}..{{REVIEW_HEAD}}`.
    pushed branch tip. A mismatch is BLOCKED; request a fresh package.
    Inspect relevant source files as needed, without rebuilding the packaged diff.
 2. Check it against the issue, against the design note, and against the rules
-   linked from `{{SHARED_CHECKOUT}}/.tessl/RULES.md`.
+   linked from the rule index COMMON.md names.
 3. Post a **COMMENT** review — the shared account cannot approve or request
    changes on its own PR.
 4. Label every finding:
