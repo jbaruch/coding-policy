@@ -19,10 +19,17 @@ A standup is not a round of work: nothing is dispatched, no context is cleared,
 and no worker is interrupted. A worker that is mid-task keeps working and its
 row comes from what you already know.
 
+The plugin root is `.tessl/plugins/jbaruch/coding-policy` under a project-local
+install and `$HOME/.tessl/plugins/jbaruch/coding-policy` under a global one. The
+`CP=` line opening each command block resolves it, project-local first; it is
+part of the command, never decoration. Every `skills/...` path named below is
+relative to that root.
+
 ## Step 1 — Roster the Team
 
 ```bash
-.tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/roster.sh
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
+bash "$CP/skills/herdr-teamlead/roster.sh"
 ```
 
 Emits `{"caller":{...},"agents":[{"name","kind","pane_id","state"}]}` for every
@@ -44,7 +51,8 @@ Proceed immediately to Step 2.
 One call per idle or done worker:
 
 ```bash
-.tessl/plugins/jbaruch/coding-policy/skills/herdr-standup/standup-ask.sh \
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
+bash "$CP/skills/herdr-standup/standup-ask.sh" \
   <agent-name> <absolute-report-path>
 ```
 
@@ -63,7 +71,8 @@ Proceed immediately to Step 3.
 Wait for each worker asked in Step 2:
 
 ```bash
-.tessl/plugins/jbaruch/coding-policy/skills/herdr-standup/standup-wait.sh \
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
+bash "$CP/skills/herdr-standup/standup-wait.sh" \
   <agent-name> <absolute-report-path>
 ```
 
@@ -114,7 +123,8 @@ If every worker answered, skip the file. Proceed immediately to Step 5.
 ## Step 5 — Render the Standup
 
 ```bash
-python3 .tessl/plugins/jbaruch/coding-policy/skills/herdr-standup/standup-render.py \
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
+python3 "$CP/skills/herdr-standup/standup-render.py" \
   --reports <round-reports-dir> \
   --now <ISO-8601> \
   --team "<label>" \

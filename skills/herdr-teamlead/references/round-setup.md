@@ -6,7 +6,8 @@ The skill retains the execution order and continuation gates.
 ## Step 2 — Verify Herdr and the Roster
 
 ```bash
-bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/roster.sh
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
+bash "$CP/skills/herdr-teamlead/roster.sh"
 ```
 
 Takes no arguments. Emits `{"caller":{"pane_id":...},"agents":[{"name","kind","pane_id","state"}]}`,
@@ -27,7 +28,8 @@ you did.
 ## Step 3 — Verify Authority for the Repo
 
 ```bash
-bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/verify-authority.sh <owner/repo>
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
+bash "$CP/skills/herdr-teamlead/verify-authority.sh" <owner/repo>
 ```
 
 Emits `{"repo","viewer_login","owner_login","owner_type","viewer_permission","namespace_owner","authorized"}`.
@@ -53,7 +55,8 @@ Proceed immediately to Step 4.
 ## Step 4 — Measure Headroom
 
 ```bash
-bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/teamlead.sh measure
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
+bash "$CP/skills/herdr-teamlead/teamlead.sh" measure
 ```
 
 Sends each configured worker its own usage command and parses the reply. Emits
@@ -85,7 +88,8 @@ before relying on its role. Proceed immediately to Step 5.
 ## Step 5 — Plan the Roles
 
 ```bash
-bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/teamlead.sh plan \
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
+bash "$CP/skills/herdr-teamlead/teamlead.sh" plan \
   --roles developer,tester,reviewer \
   [--exclude <role>=<agent>[,<agent>...]]... \
   [--round <role>=<round-type>] [--round-context <evidence.json>] [--fix-round <N>]
@@ -132,7 +136,8 @@ For reviewer or tester briefs, run from a checkout containing the recorded
 commits:
 
 ```bash
-bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/review-package.sh \
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
+bash "$CP/skills/herdr-teamlead/review-package.sh" \
   <recorded-base-sha> <pushed-head-sha> <round-reports-dir>/review-<base7>..<head7>.diff
 ```
 
@@ -161,8 +166,9 @@ Proceed immediately to Step 7 with the printed path as `REVIEW_PACKAGE`.
 Write a values file for the round, then compose:
 
 ```bash
-bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/compose-briefs.sh \
-  .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/templates \
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
+bash "$CP/skills/herdr-teamlead/compose-briefs.sh" \
+  "$CP/skills/herdr-teamlead/templates" \
   <values.json> <round-reports-dir>
 ```
 
@@ -215,7 +221,8 @@ release-gating verification is `full`. Proceed immediately to Step 8.
 One call per worker that writes anything:
 
 ```bash
-bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/provision-worktree.sh \
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
+bash "$CP/skills/herdr-teamlead/provision-worktree.sh" \
   <shared-checkout> <branch> <worktree-path> [base-ref]
 ```
 
@@ -237,7 +244,8 @@ dispatch a brief whose worktree does not exist. Proceed immediately to Step 9.
 ## Step 9 — Label the Layout (optional, once per team)
 
 ```bash
-bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/label-workspaces.sh \
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
+bash "$CP/skills/herdr-teamlead/label-workspaces.sh" \
   <lead-label> [<agent>=<workspace-id>]...
 ```
 
