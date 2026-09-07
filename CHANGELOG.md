@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.196 — 2026-09-07
+
 ### Fixed
 
 - **Verified hand-cleared release recovery (#354).** An owner command records the archived fresh-session and empty-composer evidence for an applied release `--no-clear` row, records the idle worker's later native observation separately, and permits the next correctly counted fresh developer fix. A subsequent changed or missing native ID cannot invalidate the original archived clear. The old row and original developer proof remain unchanged. Required release clearing uses the existing task authorization; live readiness, automatic fresh developer clearing and all verification gates remain.
