@@ -1,7 +1,5 @@
 # Changelog
 
-## Unreleased
-
 ### Fixed
 
 - **Native session recovery and release handoffs (#342, #344).** Fresh developer dispatch can correlate a native session ID that appears only after its first prompt. Missing or conflicting evidence preserves the confirmed assignment with null continuity proof. Owner-authorized recovery records later observations separately. A required cleared release handoff can start the next counted developer correction in a fresh session without another context-change permission request; release workers stop for source changes, and the corrected tip returns through full independent verification.
