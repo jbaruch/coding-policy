@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.195 — 2026-09-07
+
 ### Fixed
 
 - **Project Python diagnostics at handoff (#351).** The hook selects the active environment, `.venv`, then `venv`, passes that interpreter to Pyright, and prefers its local engine. Nested worktree calls use the repository root; paths with spaces and stock macOS Bash are supported. Missing engines and actual diagnostics, including missing imports, remain blocking.
