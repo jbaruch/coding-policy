@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.194 — 2026-09-07
+
 ### Fixed
 
 - **Bounded bootstrap contract for PR #341.** `script-delegation` now permits only these Herdr examples' local/global installed-plugin lookup before a quoted interpreter invocation. All subsequent logic remains in shipped scripts. The invocation guard validates every covered block, rejects literal install paths and inline evaluation, and executes 0644 install fixtures. Integration preserves the contributor's original commit and the later recovery/authority releases; standup also handles the shared watcher's new unavailable-report outcome.
