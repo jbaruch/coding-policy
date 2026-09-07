@@ -403,8 +403,8 @@ brief, so the brief does not land in the clearing dialog.
 ## Worker Runtime Quirks
 
 - **Grok does not follow includes.** It reads `AGENTS.md` and Claude's settings
-  but does NOT follow the `@.tessl/RULES.md` include, so a Grok worker's brief
-  must tell it to read `.tessl/RULES.md` and every rule file linked from it.
+  but does NOT follow rule includes. The brief must name the resolved
+  `POLICY_INDEX` and tell the worker to read it and every linked rule file.
 - **Same plugin, every worker.** All workers run from the shared checkout with
   the same tessl plugin installed, so the same hooks and skills load at session
   start and the same policy governs every role.

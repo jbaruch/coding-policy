@@ -19,10 +19,15 @@ A standup is not a round of work: nothing is dispatched, no context is cleared,
 and no worker is interrupted. A worker that is mid-task keeps working and its
 row comes from what you already know.
 
+Each command block resolves `CP` to the project-local plugin, falling back to
+`$HOME/.tessl/plugins/jbaruch/coding-policy`. Run the resolver in every call.
+Prose `skills/...` paths are relative to that plugin root.
+
 ## Step 1 — Roster the Team
 
 ```bash
-.tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/roster.sh
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
+bash "$CP/skills/herdr-teamlead/roster.sh"
 ```
 
 Emits `{"caller":{...},"agents":[{"name","kind","pane_id","state"}]}` for every
@@ -44,7 +49,8 @@ Proceed immediately to Step 2.
 One call per idle or done worker:
 
 ```bash
-.tessl/plugins/jbaruch/coding-policy/skills/herdr-standup/standup-ask.sh \
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
+bash "$CP/skills/herdr-standup/standup-ask.sh" \
   <agent-name> <absolute-report-path>
 ```
 
@@ -63,7 +69,8 @@ Proceed immediately to Step 3.
 Wait for each worker asked in Step 2:
 
 ```bash
-.tessl/plugins/jbaruch/coding-policy/skills/herdr-standup/standup-wait.sh \
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
+bash "$CP/skills/herdr-standup/standup-wait.sh" \
   <agent-name> <absolute-report-path>
 ```
 
@@ -72,6 +79,9 @@ budget is the script's constant, never a number chosen here; see the header of
 `skills/herdr-standup/standup-wait.sh`. Exit 1 means the worker did not answer
 inside it. It is not chased twice. Move it to Step 4's list with what you know.
 Exit 3 means a dialog is up — relay it and leave that worker to the operator.
+Exit 5 means the report is unavailable after a confirmed provider refusal.
+Record it as missing in Step 4 and notify the operator; never automatically
+retry, rephrase, switch models/providers, or synthesize an answer.
 Exit 4 means the answer file exists but the pane did not show the marker
 whole. That is not an answer. Read the live state with
 `herdr agent get <agent-name>` and take the
@@ -79,7 +89,7 @@ first continuation that applies:
 
 - The command fails — report its message verbatim and finish here.
 - The state is `blocked` or `working` — re-run the wait for that worker once.
-  Exits 0–3 from that re-run take their branches above. A second exit 4 is
+  Other exits take their documented branches. A second exit 4 is
   terminal: move the worker to Step 4's list with what you know.
 - The state is `idle` or `done` — move the worker to Step 4's list with what
   you know. `standup-ask.sh` refuses a report path too long for one pane row,
@@ -114,7 +124,8 @@ If every worker answered, skip the file. Proceed immediately to Step 5.
 ## Step 5 — Render the Standup
 
 ```bash
-python3 .tessl/plugins/jbaruch/coding-policy/skills/herdr-standup/standup-render.py \
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
+python3 "$CP/skills/herdr-standup/standup-render.py" \
   --reports <round-reports-dir> \
   --now <ISO-8601> \
   --team "<label>" \

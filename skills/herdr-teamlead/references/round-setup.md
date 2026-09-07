@@ -6,7 +6,8 @@ The skill retains the execution order and continuation gates.
 ## Step 2 — Verify Herdr and the Roster
 
 ```bash
-bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/roster.sh
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
+bash "$CP/skills/herdr-teamlead/roster.sh"
 ```
 
 Takes no arguments. Emits `{"caller":{"pane_id":...},"agents":[{"name","kind","pane_id","state"}]}`,
@@ -27,7 +28,8 @@ you did.
 ## Step 3 — Verify Authority for the Repo
 
 ```bash
-bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/verify-authority.sh <owner/repo>
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
+bash "$CP/skills/herdr-teamlead/verify-authority.sh" <owner/repo>
 ```
 
 Emits `{"repo","viewer_login","owner_login","owner_type","viewer_permission","namespace_owner","authorized"}`.
@@ -70,7 +72,8 @@ Proceed immediately to Step 4.
 ## Step 4 — Measure Headroom
 
 ```bash
-bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/teamlead.sh measure
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
+bash "$CP/skills/herdr-teamlead/teamlead.sh" measure
 ```
 
 Sends each configured worker its own usage command and parses the reply. Emits
@@ -102,7 +105,8 @@ before relying on its role. Proceed immediately to Step 5.
 ## Step 5 — Plan the Roles
 
 ```bash
-bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/teamlead.sh plan \
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
+bash "$CP/skills/herdr-teamlead/teamlead.sh" plan \
   --roles developer,tester,reviewer \
   [--exclude <role>=<agent>[,<agent>...]]... \
   [--round <role>=<round-type>] [--round-context <evidence.json>] [--fix-round <N>]
@@ -152,7 +156,8 @@ For reviewer or tester briefs, run from a checkout containing the recorded
 commits:
 
 ```bash
-bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/review-package.sh \
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
+bash "$CP/skills/herdr-teamlead/review-package.sh" \
   <recorded-base-sha> <pushed-head-sha> <round-reports-dir>/review-<base7>..<head7>.diff
 ```
 
@@ -178,18 +183,31 @@ Proceed immediately to Step 7 with the printed path as `REVIEW_PACKAGE`.
 
 ## Step 7 — Compose the Briefs
 
-Write a values file for the round, then compose:
+Resolve the policy artifacts before writing the values file:
 
 ```bash
-bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/compose-briefs.sh \
-  .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/templates \
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
+bash "$CP/skills/herdr-teamlead/resolve-policy-paths.sh" <absolute-shared-checkout>
+```
+
+Exit 0 emits `POLICY_INDEX` and `RELEASE_SKILL`; copy both into `shared`.
+On non-zero, report the diagnostic and repair the named input before composing.
+Lookup precedence and optional global-root input belong to the resolver's
+header contract. Never delegate path selection to a worker.
+
+Write the remaining values, then compose:
+
+```bash
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
+bash "$CP/skills/herdr-teamlead/compose-briefs.sh" \
+  "$CP/skills/herdr-teamlead/templates" \
   <values.json> <round-reports-dir>
 ```
 
 The values file is `{"shared": {...}, "roles": {"<role>": {...}}}`; a role's
 own value beats the shared one. Emits
 `{"common":"<path>","briefs":{"<role>":"<path>"}}`. Exit 2 means validation
-failed and nothing was written — an absent or unreadable review package,
+failed and nothing was written — an absent or unreadable policy artifact or review package,
 an unfilled placeholder, a supplied key no template uses, a value that is not
 text, a relative, multiline, existing or duplicated `REPORT` destination,
 a report overlapping a generated brief, or a `REPORT` longer than the
@@ -203,6 +221,7 @@ script's contract; see the header of
 What you decide, and it is the whole of your job here:
 
 - `SHARED_CHECKOUT` — the checkout the workers read.
+- `POLICY_INDEX` and `RELEASE_SKILL` — the resolver's absolute artifact paths.
 - `AUTHORITY_STATEMENT`, `TASK_AUTHORIZATION`, `AUTHORIZED_ACTIONS`, and
   `EXTERNAL_PERMISSION` — Step 3's verified ownership, actual operator source,
   bounded task actions, and any additional non-owner permission.
@@ -237,7 +256,8 @@ release-gating verification is `full`. Proceed immediately to Step 8.
 One call per worker that writes anything:
 
 ```bash
-bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/provision-worktree.sh \
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
+bash "$CP/skills/herdr-teamlead/provision-worktree.sh" \
   <shared-checkout> <branch> <worktree-path> [base-ref]
 ```
 
@@ -259,7 +279,8 @@ dispatch a brief whose worktree does not exist. Proceed immediately to Step 9.
 ## Step 9 — Label the Layout (optional, once per team)
 
 ```bash
-bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/label-workspaces.sh \
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
+bash "$CP/skills/herdr-teamlead/label-workspaces.sh" \
   <lead-label> [<agent>=<workspace-id>]...
 ```
 

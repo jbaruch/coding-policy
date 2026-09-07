@@ -57,12 +57,12 @@ to know goes in the report.
 
 ## Policy
 
-- The rule index is `{{SHARED_CHECKOUT}}/.tessl/RULES.md`; it links every rule
-  file. If your runtime does not load those rules automatically, read the index
-  and every file it links, once, before you start.
+- The resolved rule index is `{{POLICY_INDEX}}`; it links every rule file. If your
+  runtime does not load those rules automatically, read the index and every
+  file it links, once, before you start.
 - The release skill is at
-  `{{SHARED_CHECKOUT}}/.tessl/plugins/jbaruch/coding-policy/skills/release/SKILL.md`,
-  and its scripts sit beside it in that directory.
+  `{{RELEASE_SKILL}}`, and its
+  scripts sit beside it in that directory.
 - The repo's own gates are in `CONTRIBUTING.md`. Run them; a green gate is the
   bar, not your impression of the change.
 - Never suppress an error. No `|| true`, no `2>/dev/null` standing in for a

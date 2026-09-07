@@ -55,8 +55,9 @@ Proceed to Step 11 with the roles that were dispatched.
 
 ## Owner-managed recovery
 
-Use `bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/teamlead.sh`
-for the commands below, with the same `--state FILE` throughout. Every owner
+Resolve the plugin root for each call as in the skill's command blocks, then
+use `bash "$CP/skills/herdr-teamlead/teamlead.sh"` for the commands below,
+with the same `--state FILE` throughout. Every owner
 mutation takes `--record FILE` containing a JSON object and optional `--now`.
 Success prints the recorded object on stdout, exit 0. Exit 1 prints an
 actionable JSON error on stderr; resolve that cause before proceeding. Do not

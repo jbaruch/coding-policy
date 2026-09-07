@@ -18,7 +18,11 @@ read reports, and gate the round. Never edit the shared checkout or implement
 for a worker. Optional Phase 1 produces a design/test plan and implementation;
 mandatory Phase 2 reviews and verifies the pushed tip before release.
 
-Open detailed contracts as needed:
+Each command block resolves `CP` to the project-local plugin, falling back to
+`$HOME/.tessl/plugins/jbaruch/coding-policy`. Run the resolver in every call.
+Prose `skills/...` paths are relative to that plugin root.
+
+Detailed contracts:
 
 ```text
 skills/herdr-teamlead/references/herdr.md
@@ -41,23 +45,25 @@ Read `HERDR_ENV` before running any script.
 ## Step 2 — Verify Herdr and the Roster
 
 ```bash
-bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/roster.sh
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
+bash "$CP/skills/herdr-teamlead/roster.sh"
 ```
 
-Emits caller pane and named live agents with kind, pane, and state.
+Emits the caller and live workers with kind, pane, and state.
 
 - **Exit 0, agents present** — proceed to Step 3.
 - **Exit 0, empty roster** — report unnamed panes from `herdr agent list` and
   the correcting `herdr agent rename <pane-id> <name>` command. Finish here.
 - **Exit 1 or 2** — report the diagnostic verbatim and finish here.
 
-If workers cannot cover the roles, name another worker or deliberately combine
-roles within one brief. Record that decision; never duplicate a dispatch target.
+If roles lack workers, name one or record combined roles in a single brief.
+Never duplicate dispatch targets.
 
 ## Step 3 — Verify Authority for the Repo
 
 ```bash
-bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/verify-authority.sh <owner/repo>
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
+bash "$CP/skills/herdr-teamlead/verify-authority.sh" <owner/repo>
 ```
 
 Emits ownership evidence; `authorized` reflects namespace ownership alone.
@@ -77,16 +83,15 @@ Proceed immediately to Step 4.
 ## Step 4 — Measure Headroom
 
 ```bash
-bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/teamlead.sh measure
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
+bash "$CP/skills/herdr-teamlead/teamlead.sh" measure
 ```
 
-Emits and saves a snapshot with per-agent headroom, windows, state evidence,
-`tier_billing`, and `failed_agents`. Busy workers are skipped. Unmeasured tier
-billing stays `unknown`. Report each failed measurement and obtain that
-worker's reading before relying on its seat.
+Emits and saves headroom, windows, state, `tier_billing`, and `failed_agents`.
+Busy workers are skipped. Unmeasured billing stays `unknown`. Report failed
+measurements and obtain their readings before relying on those seats.
 
-Use `--trace` for unexplained transport behavior. Usage parsing, polling knobs,
-and trace redaction are documented in:
+Usage and `--trace` contracts:
 
 ```text
 skills/herdr-teamlead/references/round-setup.md
@@ -97,7 +102,8 @@ Proceed immediately to Step 5 once the required readings are available.
 ## Step 5 — Plan the Roles
 
 ```bash
-bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/teamlead.sh plan \
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
+bash "$CP/skills/herdr-teamlead/teamlead.sh" plan \
   --roles developer,tester,reviewer \
   [--exclude <role>=<agent>[,<agent>...]]... \
   [--round <role>=<round-type>] [--round-context <evidence.json>] \
@@ -113,22 +119,22 @@ Use the same recorded task, approval, and work bounds for both commands.
 Register the original task and base through the owner commands documented in
 `skills/herdr-teamlead/references/dispatch-recovery.md` before recovery work.
 
-The operator config controls tiers and qualification. `--preview-tiers`
-inspects unqualified candidates without authorizing dispatch. Detailed contracts:
+The operator controls tiers and qualification. `--preview-tiers` never
+authorizes dispatch.
 
 ```text
-skills/herdr-teamlead/references/round-setup.md
 skills/herdr-teamlead/references/model-tiers.md
 ```
 
-Save the plan and announce its rationale. Proceed immediately to Step 6.
+Save the plan with its rationale. Proceed immediately to Step 6.
 
 ## Step 6 — Build the Review Package
 
 For reviewer/tester briefs, run from a checkout holding the recorded commits:
 
 ```bash
-bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/review-package.sh \
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
+bash "$CP/skills/herdr-teamlead/review-package.sh" \
   <recorded-base-sha> <pushed-head-sha> <round-reports-dir>/review-<base7>..<head7>.diff
 ```
 
@@ -147,11 +153,13 @@ Proceed immediately to Step 7.
 
 ## Step 7 — Compose the Briefs
 
-Write `{"shared": {...}, "roles": {"<role>": {...}}}` and run:
+Resolve policy paths through the Step 7 reference first. Write its outputs in
+`shared` within `{"shared": {...}, "roles": {"<role>": {...}}}` and run:
 
 ```bash
-bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/compose-briefs.sh \
-  .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/templates \
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
+bash "$CP/skills/herdr-teamlead/compose-briefs.sh" \
+  "$CP/skills/herdr-teamlead/templates" \
   <values.json> <round-reports-dir>
 ```
 
@@ -181,7 +189,8 @@ Proceed immediately to Step 8.
 Run once per writing worker and every worktree named in a brief:
 
 ```bash
-bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/provision-worktree.sh \
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
+bash "$CP/skills/herdr-teamlead/provision-worktree.sh" \
   <shared-checkout> <branch> <worktree-path> [base-ref]
 ```
 
@@ -195,7 +204,8 @@ worktree. Read-only Phase 1 reviewers need none. Clean up after merge per
 Optional, once per team; skip an already named sidebar.
 
 ```bash
-bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/label-workspaces.sh \
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
+bash "$CP/skills/herdr-teamlead/label-workspaces.sh" \
   <lead-label> [<agent>=<workspace-id>]...
 ```
 
@@ -205,7 +215,8 @@ Report label failures and continue. Proceed immediately to Step 10.
 ## Step 10 — Dispatch the Briefs
 
 ```bash
-bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/teamlead.sh apply \
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
+bash "$CP/skills/herdr-teamlead/teamlead.sh" apply \
   --assignments <plan-file> \
   --brief developer=<path> --brief tester=<path> --brief reviewer=<path> \
   --common <path-to-COMMON.md> --task <task-id> \
@@ -261,7 +272,8 @@ Proceed to Step 11 with the dispatched roles.
 One call per dispatched worker, in the order the round needs them:
 
 ```bash
-bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/wait-report.sh <agent-name> <report-path>
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
+bash "$CP/skills/herdr-teamlead/wait-report.sh" <agent-name> <report-path>
 ```
 
 Emits `{"agent","state","report_path","found","elapsed_seconds"}`; exit 2
@@ -282,7 +294,7 @@ The script owns timing.
   Keep review/release gates unsatisfied. Never automatically retry, rephrase,
   switch providers/models, or synthesize a report.
 
-Detailed recovery for each outcome:
+Outcome recovery:
 
 ```text
 skills/herdr-teamlead/references/dispatch-recovery.md
@@ -339,24 +351,17 @@ Step 8 for the read-only judge. Proceed immediately to Step 14.
 
 ## Step 14 — Re-measure the Shared Window
 
-Step 4's snapshot is a hint, not authority (`rules/stateful-artifacts.md`).
-The judge's affordability is decided from a fresh reading, never from it.
-
-Re-run Step 4's `measure`. That step's outcomes govern this run unchanged. A
-`measure` that cannot read the judge worker's window is a stale-state failure,
-resolved there before a ruling is planned.
-
-Hand the fresh snapshot to Step 15 and plan nothing here. Proceed immediately
-to Step 15.
+Re-run Step 4's `measure` under its outcome contract. Resolve any unreadable
+judge window before planning. Pass the fresh snapshot to Step 15; never reuse
+the earlier reading as affordability proof. Proceed immediately to Step 15.
 
 ## Step 15 — Plan the Judge Seat
 
-Run Step 5's `plan` with `--roles judge`, against the Step 14 snapshot. It
-names the worker the `judge` block pins, and refuses the round when that
-window cannot cover a ruling:
+Plan the pinned judge against Step 14's fresh snapshot:
 
 ```bash
-bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/teamlead.sh plan \
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
+bash "$CP/skills/herdr-teamlead/teamlead.sh" plan \
   --roles judge --snapshot <step-14-measure-output>
 ```
 
@@ -367,14 +372,13 @@ bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/teamlead.sh plan
 - **Any other non-zero** — report the diagnostic and finish here. Never
   hand-write an assignment to bypass the refusal.
 
-Proceed immediately to Step 16 with the plan's configured `judge` tier.
-
 ## Step 16 — Start the Judge Worker on Its Pinned Tier
 
 Run:
 
 ```bash
-bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/start-judge-worker.sh \
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
+bash "$CP/skills/herdr-teamlead/start-judge-worker.sh" \
   <step-15-plan-file> <pane> [claude|codex|grok]
 ```
 
@@ -388,11 +392,11 @@ proves the tier; the script header owns the detailed contract.
 
 ## Step 17 — Dispatch the Judge
 
-Dispatch under Step 10's outcome contract exactly, passing the plan file from
-Step 15 rather than a hand-written mapping:
+Use Step 15's plan under Step 10's dispatch contract:
 
 ```bash
-bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/teamlead.sh apply \
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
+bash "$CP/skills/herdr-teamlead/teamlead.sh" apply \
   --assignments <plan-file> \
   --brief judge=<round>-judge.md \
   --common <path-to-COMMON.md> \
