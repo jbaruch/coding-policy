@@ -40,6 +40,8 @@ INSTALL_FIXTURE=""
 cleanup() {
   if [[ -n "$INSTALL_FIXTURE" ]] && ! rm -rf "$INSTALL_FIXTURE"; then
     warn_cleanup "$INSTALL_FIXTURE"
+  else
+    INSTALL_FIXTURE=""
   fi
   return 0
 }
@@ -219,8 +221,35 @@ check_install_shapes() { # <skill-file>
       fail "bootstrap guard accepted a nonconforming command block"
     fi
   done
-  rm -rf "$fixture" || warn_cleanup "$fixture"
-  INSTALL_FIXTURE=""
+  cleanup
+  [[ -z "$INSTALL_FIXTURE" ]] || die "install fixture cleanup failed; the exit trap will retry"
+}
+
+check_cleanup_retry() {
+  local fixture
+  fixture="$(mktemp -d)" || die "cannot create cleanup fixture"
+  INSTALL_FIXTURE="$fixture"
+  # A failed explicit removal leaves the path available for the exit trap.
+  if bash -c '
+    source "$1"
+    INSTALL_FIXTURE="$2"
+    cleanup_calls=0
+    rm() {
+      cleanup_calls=$((cleanup_calls+1))
+      if (( cleanup_calls == 1 )); then return 1; fi
+      command rm "$@"
+    }
+    cleanup
+    [[ "$INSTALL_FIXTURE" == "$2" && -d "$2" ]] || exit 1
+    cleanup
+    [[ -z "$INSTALL_FIXTURE" && ! -e "$2" ]]
+  ' bash "${BASH_SOURCE[0]}" "$fixture"; then
+    pass
+  else
+    fail "failed cleanup must retain the path and retry removal"
+  fi
+  cleanup
+  [[ -z "$INSTALL_FIXTURE" ]] || die "cleanup retry fixture remains; the exit trap will retry"
 }
 
 main() {
@@ -236,6 +265,7 @@ main() {
   done
 
   check_invocations round-setup "$skills_root/herdr-teamlead/references/round-setup.md"
+  check_cleanup_retry
 
   skill="${skills_root}/${MODE_GATE_SKILL}/SKILL.md"
   check_mode_gate "$MODE_GATE_SKILL" "$skill"
