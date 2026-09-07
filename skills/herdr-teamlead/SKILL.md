@@ -60,18 +60,19 @@ roles within one brief. Record that decision; never duplicate a dispatch target.
 bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/verify-authority.sh <owner/repo>
 ```
 
-Emits repo, viewer/owner identities, permission, namespace ownership, and
-`authorized`. Authorization reflects namespace ownership alone.
+Emits ownership evidence; `authorized` reflects namespace ownership alone.
 
-- **`authorized: true`** — set `AUTHORITY_STATEMENT` to `owner of <owner/repo>`
-  and `EXTERNAL_PERMISSION` to `none`. Proceed to Step 4.
-- **`authorized: false`** — use explicit operator permission naming this repo
-  and each write action. Record their words in `EXTERNAL_PERMISSION` and set
-  authority to `not owner; permitted this round: <their words>`. Without that
-  permission, proceed read-only or finish here.
+- **`authorized: true`** — record `owner of <owner/repo>` in
+  `AUTHORITY_STATEMENT`; set additional `EXTERNAL_PERMISSION` to `none`.
+- **`authorized: false`** — record `not owner of <owner/repo>`. Reuse explicit
+  operator permission for this repo and each write action in
+  `EXTERNAL_PERMISSION`; absent permission, proceed read-only or finish here.
 - **Exit 1 or 2** — report the diagnostic verbatim and finish here.
 
-Proceed immediately to Step 4 with the recorded authority.
+Record the task's existing source and words in `TASK_AUTHORIZATION`,
+and permitted actions and repo in `AUTHORIZED_ACTIONS`. Read-only uses `none`.
+Ownership never expands task scope. Examples: `references/round-setup.md`.
+Proceed immediately to Step 4.
 
 ## Step 4 — Measure Headroom
 

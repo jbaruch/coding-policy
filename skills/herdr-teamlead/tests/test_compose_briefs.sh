@@ -154,7 +154,9 @@ JSON
   cat > "$v6b" <<'JSON' || die "could not write $v6b"
 {
   "shared": {"SHARED_CHECKOUT": "/repo", "AUTHORITY_STATEMENT": "owner of jbaruch/x",
-             "EXTERNAL_PERMISSION": "none", "ISSUE": "#7", "BRANCH": "feat/x"},
+             "EXTERNAL_PERMISSION": "none", "TASK_AUTHORIZATION": "Operator request: ship issue #7 in jbaruch/x",
+             "AUTHORIZED_ACTIONS": "jbaruch/x: implement, push, create PR, request reviews, reply to review threads, merge, publish, clean up the released branch",
+             "ISSUE": "#7", "BRANCH": "feat/x"},
   "roles": {
     "developer": {"WORKTREE": "/wt/dev", "REPORTS_DIR": "/r", "REPORT": "/r/dev.md"},
     "reviewer": {"REPORT": "/r/review.md"},
@@ -172,6 +174,46 @@ JSON
   if [[ $RC -eq 0 ]] && grep -q 'cd /wt/dev && pwd' "$o6b/brief-release.md" \
      && grep -q 'Skill(skill: "release")' "$o6b/brief-release.md"; then
     pass; else fail "packaged templates: expected exit 0 and a filled release brief, got RC=$RC ERR=$ERRTEXT"; fi
+
+  # The actual packaged artifacts must distinguish the owner's shipping
+  # authorization from additional permission needed in a non-owned repo.
+  if [[ $RC -eq 0 ]] \
+     && grep -Fq 'Verified repo ownership: **owner of jbaruch/x**' "$o6b/COMMON.md" \
+     && grep -Fq 'Operator request: ship issue #7 in jbaruch/x' "$o6b/COMMON.md" \
+     && grep -Fq 'jbaruch/x: implement, push, create PR, request reviews, reply to review threads, merge, publish, clean up the released branch' "$o6b/COMMON.md" \
+     && grep -Fq 'An owned repository requires no additional non-owner permission;' "$o6b/COMMON.md" \
+     && grep -Fq 'its authorized task actions still bind you.' "$o6b/COMMON.md"; then
+    pass; else fail "owner release must retain its actual task authorization with no additional non-owner permission"; fi
+
+  local ownership authority_values authority_output
+  for ownership in 'owner of jbaruch/x' 'not owner of jbaruch/x'; do
+    authority_values="$TMP/authority-${ownership%% *}.json"
+    authority_output="$TMP/authority-${ownership%% *}"
+    jq --arg ownership "$ownership" \
+      '.shared.AUTHORITY_STATEMENT = $ownership
+       | .shared.TASK_AUTHORIZATION = "Operator request: inspect issue #7; do not change the repository"
+       | .shared.AUTHORIZED_ACTIONS = "none" | .shared.EXTERNAL_PERMISSION = "none"' \
+      "$v6b" > "$authority_values" || die "could not build read-only authority fixture"
+    run "$PKG" "$authority_values" "$authority_output"
+    if [[ $RC -eq 0 ]] \
+       && grep -Fq "Verified repo ownership: **$ownership**" "$authority_output/COMMON.md" \
+       && grep -Fq 'Authorized task actions and target repo this round: **none**' "$authority_output/COMMON.md" \
+       && grep -Fq 'make no repository changes or GitHub writes' "$authority_output/COMMON.md" \
+       && grep -Fq 'In a non-owned repository, every write also requires' "$authority_output/COMMON.md" \
+       && grep -Fq 'This role grants no additional permission.' "$authority_output/brief-release.md" \
+       && grep -Fq 'report BLOCKED' "$authority_output/brief-release.md"; then
+      pass; else fail "read-only $ownership must deny writes even in an accidentally selected release role: RC=$RC ERR=$ERRTEXT"; fi
+  done
+
+  # A lead using the old values cannot silently omit task authorization.
+  local missing_authority
+  for missing_authority in TASK_AUTHORIZATION AUTHORIZED_ACTIONS; do
+    jq --arg key "$missing_authority" 'del(.shared[$key])' "$v6b" > "$TMP/authority-missing.json" \
+      || die "could not build missing authority fixture"
+    run "$PKG" "$TMP/authority-missing.json" "$TMP/missing-$missing_authority"
+    if [[ $RC -eq 2 && -z "$OUT" && ! -e "$TMP/missing-$missing_authority" && "$ERRTEXT" == *"$missing_authority"* ]]; then
+      pass; else fail "missing $missing_authority must refuse before emitting any brief"; fi
+  done
 
   # 6c. A REPORT path that would wrap the worker's marker line is refused
   #     before any file is written: the wait confirms the complete marker on
