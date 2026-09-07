@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.193 — 2026-09-07
+
 ### Fixed
 
 - **Task authority in owner briefs (#347).** Generated briefs now carry verified ownership, the operator's actual task authorization, bounded permitted actions, and any additional permission for a non-owned repository separately. An authorized owner release no longer conflicts with `EXTERNAL_PERMISSION: none`. Read-only tasks remain read-only regardless of ownership, and non-owned repositories still require explicit permission for each repo/action. A release role cannot grant itself missing authority; composition refuses omitted task-authorization fields before writing briefs.
