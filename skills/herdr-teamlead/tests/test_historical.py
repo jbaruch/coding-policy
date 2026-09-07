@@ -351,7 +351,7 @@ class HistoricalCommandsTest(fixture.CliCase):
                  ({**data, "composer_quote": "Invented empty composer proof"}, "idle", "release-session"),
                  ({**data, "verified_fresh_conversation": False}, "idle", "release-session"),
                  ({**data, "fresh_session": {"kind": "id", "value": "old-developer"}}, "idle", "old-developer"),
-                 (data, "working", "release-session"), (data, "idle", "different-session"),
+                 (data, "working", "release-session"),
                  ({**data, "assignment_index": 1}, "idle", "release-session")]
         for changed, status, session in cases:
             with self.subTest(changed=changed, status=status):
@@ -359,6 +359,24 @@ class HistoricalCommandsTest(fixture.CliCase):
                 self.assertEqual(code, 1)
                 self.assertEqual(self.runner.writes(), [])
                 self.assertEqual(self.state.read_bytes(), before)
+
+    def test_archived_release_clear_survives_a_later_changed_or_missing_session(self):
+        for session in ("later-worker-session", None):
+            with self.subTest(session=session):
+                original = self.seed(1, release=True)
+                code, out, err = self.owner("record-release-clear", self.clearance(),
+                    self._client({"grok": "idle"}, sessions={"grok": session}))
+                self.assertEqual(code, 0, err)
+                observation = json.loads(out)["observed_session"]
+                self.assertEqual(observation["value"] if observation else None, session)
+                self.assertEqual(self.saved()["assignments"], original)
+                self.assertEqual(self.runner.writes(), [])
+                code, out, err = self.invoke(self.apply_args("developer", 2), self.fresh_client(session, "fix-after-session-loss"))
+                self.assertEqual(code, 0, err)
+                result = json.loads(out)["applied"][0]
+                self.assertEqual(result["context_transition"]["reason"], "verified_hand_release_handoff")
+                self.assertEqual(result["context_session"]["value"], "fix-after-session-loss")
+                self.assertEqual(self.saved()["assignments"][:-1], original)
 
     def test_corrupt_or_future_import_records_never_overwrite_history(self):
         self.seed()
@@ -380,6 +398,22 @@ class HistoricalCommandsTest(fixture.CliCase):
                 self.assertEqual(code, 1, err)
                 self.assertEqual(self.state.read_bytes(), before)
                 self.assertEqual(self.runner.calls, [])
+
+    def test_verified_clear_without_an_archived_native_id_preserves_missing_proof(self):
+        original = self.seed(1, release=True)
+        self.clear_file.write_text("Verified fresh conversation and empty composer before release.\n")
+        data = {**self.clearance(), "fresh_session": None, "fresh_quote": "Verified fresh conversation"}
+        code, out, err = self.owner("record-release-clear", data,
+            self._client({"grok": "idle"}, sessions={"grok": "observed-only-later"}))
+        self.assertEqual(code, 0, err)
+        record = json.loads(out)
+        self.assertIsNone(record["input"]["fresh_session"])
+        self.assertEqual(record["observed_session"]["value"], "observed-only-later")
+        self.assertEqual(self.saved()["assignments"], original)
+        code, out, err = self.invoke(self.apply_args("developer", 2), self.fresh_client("observed-only-later", "fresh-fix-2"))
+        self.assertEqual(code, 0, err)
+        self.assertEqual(json.loads(out)["applied"][0]["context_session"]["value"], "fresh-fix-2")
+        self.assertIsNone(self.saved()["recovery"]["hand_clearances"][0]["input"]["fresh_session"])
 
     def test_clear_timeout_then_release_no_clear_and_external_fix_complete_the_workflow(self):
         self.seed(1)

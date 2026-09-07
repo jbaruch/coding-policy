@@ -236,12 +236,13 @@ def validate_work(store, assignments, task, fix_round, plan_id=None, work=None, 
         raise UsageError("Name the concrete blocking findings this correction addresses.", {})
     if any(not any(fnmatchcase(path, allowed) for allowed in plan["allowed_paths"]) for path in work["paths"]):
         raise UsageError("Correction paths exceed the approved scope; pause implementation for the changed decision.", {})
-    if implementation and fix_round != confirmed_fix(assignments, task) + 1:
+    count = confirmed_fix(assignments, task)
+    if implementation and fix_round != count + 1:
         raise UsageError("Use this task's actual next fix number; approval never resets, skips, or reuses a completed attempt.", {})
     previous = next((row for row in reversed(store["dispatches"]) if row["task"] == task
                      and row["role"] == "developer" and row["status"] == "applied"), None)
     historical = next((row for row in reversed(store["historical_attempts"]) if row["task"] == task
-                       and row["fix_round"] == confirmed_fix(assignments, task)), None)
+                       and row["fix_round"] == count), None)
     if implementation and historical and historical["fix_round"] >= plan["first_fix"]:
         report = historical["reviews"][-1] if historical["reviews"] else None
         if not report or report["input"]["verdict"] != "blocking":

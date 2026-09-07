@@ -217,14 +217,16 @@ def _release_input(data, assignments):
         raise UsageError("Release clear must follow the same worker's confirmed developer attempt.", {})
     if data["verified_empty_composer"] is not True or data["verified_fresh_conversation"] is not True:
         raise UsageError("Record the verified fresh conversation and empty composer before release; --no-clear alone is not proof.", {})
-    fields(data["fresh_session"], "kind value", "Cleared native session")
-    if data["fresh_session"]["kind"] not in ("id", "path"):
-        raise UsageError("Fresh session kind must be id or path from native evidence.", {})
-    ledger.text(data["fresh_session"]["value"], "fresh native session")
+    fresh = data["fresh_session"]
+    if fresh is not None:
+        fields(fresh, "kind value", "Cleared native session")
+        if fresh["kind"] not in ("id", "path"):
+            raise UsageError("Fresh session kind must be id or path from native evidence.", {})
+        ledger.text(fresh["value"], "fresh native session")
     if not timestamp(assignments[previous]["at"], "developer time") <= timestamp(data["cleared_at"], "cleared_at") <= timestamp(row["at"], "release time"):
         raise UsageError("The verified clear must fall between the preceding developer and release assignments.", {})
     original = assignments[previous].get("context_session")
-    if original and all(original.get(key) == data["fresh_session"][key] for key in ("kind", "value")):
+    if original and fresh and all(original.get(key) == fresh[key] for key in ("kind", "value")):
         raise UsageError("The reported release session is the old developer session; collect actual fresh-conversation evidence.", {})
     return previous
 
@@ -235,7 +237,7 @@ def record_release_clear(store, assignments, data, at, observed_session):
     if timestamp(at, "record time") < timestamp(assignments[data["assignment_index"]]["at"], "release time"):
         raise UsageError("A release clear cannot be recorded before its successful release assignment.", {})
     evidence, body = ledger.receipt(data["evidence"])
-    if data["fresh_session"]["value"] not in body:
+    if data["fresh_session"] is not None and data["fresh_session"]["value"] not in body:
         raise UsageError("The archived clear evidence must name the verified fresh native session.", {})
     if any(data[key] not in body for key in ("fresh_quote", "composer_quote")):
         raise UsageError("Quote the original archived fresh-conversation and empty-composer observations before recording this clear.", {})
@@ -247,8 +249,8 @@ def record_release_clear(store, assignments, data, at, observed_session):
         raise UsageError("That release no longer follows this task's latest developer; use the current history.", {})
     if any(row["assignment_index"] == data["assignment_index"] for row in store["hand_clearances"]):
         raise UsageError("This release clear is already recorded; reuse its original identity.", {})
-    if not observed_session or any(observed_session.get(key) != data["fresh_session"][key] for key in ("kind", "value")):
-        raise UsageError("The idle worker's native session does not match the archived release-clear evidence; restore or verify its actual context before recording.", {})
+    # This observation occurs after release; it cannot prove or disprove the
+    # archived clear. The next developer dispatch verifies its own live clear.
     record = {"schema_version": ledger.RECOVERY_SCHEMA_VERSION, "at": at, "id": data["id"], "task": data["task"],
               "assignment_index": data["assignment_index"], "previous_developer": previous,
               "input": data, "receipts": receipts, "observed_session": observed_session,
@@ -329,9 +331,14 @@ def validate_history(store, assignments):
         ledger.task_record(store, row["task"])
         if (row["id"] != row["input"]["id"] or row["task"] != row["input"]["task"]
                 or row["assignment_index"] != row["input"]["assignment_index"] or row["previous_developer"] != previous
-                or row["assignment_index"] in releases or not isinstance(row["observed_session"], dict)
-                or any(row["observed_session"].get(key) != row["input"]["fresh_session"][key] for key in ("kind", "value"))):
+                or row["assignment_index"] in releases):
             raise UsageError("Recorded release-clear evidence is inconsistent; preserve the original hand-clear row.", {})
+        observed = row["observed_session"]
+        if observed is not None and (not isinstance(observed, dict)
+                or any(not isinstance(observed.get(key), str) or not observed[key].strip()
+                       for key in ("pane_id", "source", "agent", "kind", "value"))
+                or observed["kind"] not in ("id", "path")):
+            raise UsageError("The later native-session observation is malformed; restore the owner-written record without changing the archived clear proof.", {})
         releases.add(row["assignment_index"])
         if not isinstance(row["receipts"], dict) or set(row["receipts"]) != {"clear"} or row["basis"] != "verified_required_release_clear":
             raise UsageError("Release clear lacks its preserved evidence and provenance.", {})

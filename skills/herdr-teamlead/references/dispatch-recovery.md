@@ -145,8 +145,8 @@ release has finished.
 ## Verified release hand-clear
 
 After an automatic clear times out, inspect the actual conversation and empty
-composer before resuming release with `--no-clear`. Preserve the observed native
-session and the clear evidence before sending the release brief. A hand-clear row
+composer before resuming release with `--no-clear`. Preserve the clear evidence
+and any observed native identity before sending the release brief. A hand-clear row
 alone never proves freshness. For a subsequent source correction, register the
 original task metadata and run `record-release-clear` with these fields:
 
@@ -155,21 +155,24 @@ original task metadata and run `record-release-clear` with these fields:
 - `cleared_at`: the original timezone-qualified clear observation time, between
   the preceding developer and release assignments.
 - `fresh_session`: `{"kind": "id", "value": "<actual native ID>"}` or kind `path`
-  for an observed native session path.
+  for an observed native session path. Use `null` when the original clear
+  observation established the fresh conversation but exposed no native identity;
+  never backfill it from a later observation.
 - `verified_empty_composer` and `verified_fresh_conversation`: both `true` only
   after reading the archived clear evidence; never infer them from `--no-clear`.
 - `fresh_quote` and `composer_quote`: verbatim archived observations proving
   those facts in their original context. The command checks the quoted bytes;
   the owner verifies their meaning before recording them.
-- `evidence`: absolute UTF-8 artifact path containing the actual fresh session;
+- `evidence`: absolute UTF-8 artifact path containing the original fresh-conversation
+  and empty-composer observations;
   `reason`: the concrete required-clear recovery circumstances.
 
-The owner binds the artifact bytes, verifies the live idle/done worker still
-names that session, and records this later observation separately. It refuses
+The owner binds the artifact bytes, requires a live idle/done worker,
+and records the later native-session observation separately. It refuses
 the preceding developer's native identity, another task or worker, stale
-assignment indices, incomplete proof, and conflicting identities. If the live
-session has moved on, preserve the evidence and report the mismatch; never
-substitute a later observation for the original clear proof. The old release
+assignment indices, incomplete proof, and conflicting identities. A later
+changed or missing native identity neither replaces nor invalidates the archived
+proof. Never substitute that later observation for the original clear. The old release
 row stays `cleared: false, clear_reason: hand`.
 
 After recording, dispatch the actual next developer fix without `--retain-context`
