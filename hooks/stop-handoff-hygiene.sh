@@ -32,6 +32,11 @@
 #     blocking (the gate can't clear findings without it) — install and re-check.
 #     Inlined here rather than delegated to scripts/run-diagnostics.sh, which the
 #     Tessl packer does not ship (only rules/, skills/, hooks/ surfaces publish).
+#     Python uses the first executable interpreter in VIRTUAL_ENV, the repo's
+#     .venv, then venv, and passes it as --pythonpath. Prefer that environment's
+#     pyright when installed; otherwise use PATH. With no environment, retain
+#     Pyright's own configuration/default interpreter resolution. Import errors
+#     remain blocking; an environment correction never suppresses diagnostics.
 # Report-only (never blocks on its own): a dirty working tree — often intentional
 #   work-in-progress, surfaced to the user but not trapped.
 #
@@ -147,12 +152,12 @@ main() {
     # reported as orphaned worktrees (remove the worktree); the rest as
     # leftover branches.
     local b p i
-    for b in "${gone_branches[@]}"; do
-      in_list "$b" "${wt_branches[@]}" || leftover+=("$b")
+    for b in ${gone_branches[@]+"${gone_branches[@]}"}; do
+      in_list "$b" ${wt_branches[@]+"${wt_branches[@]}"} || leftover+=("$b")
     done
     for (( i = 0; i < ${#wt_paths[@]}; i++ )); do
       b="${wt_branches[$i]}"; p="${wt_paths[$i]}"
-      if in_list "$b" "${gone_branches[@]}"; then orphaned+=("${p} (branch ${b})"); fi
+      if in_list "$b" ${gone_branches[@]+"${gone_branches[@]}"}; then orphaned+=("${p} (branch ${b})"); fi
     done
 
     build_branch_findings
@@ -248,6 +253,15 @@ build_branch_findings() {
 # block. A required engine being absent is also blocking (rules/language-
 # diagnostics.md Install, Don't Skip — the gate cannot clear findings without it).
 run_changed_diagnostics() {
+  local repo_root
+  if ! repo_root="$(git rev-parse --show-toplevel)"; then
+    warn "cannot locate the worktree root — restore repository access and re-run the diagnostics gate"
+    return 0
+  fi
+  if ! cd "$repo_root"; then
+    warn "cannot enter ${repo_root} — restore worktree access and re-run the diagnostics gate"
+    return 0
+  fi
   collect_changed_lintable
   (( ${#changed[@]} > 0 )) || return 0
 
@@ -271,9 +285,30 @@ run_changed_diagnostics() {
   fi
 
   if (( ${#py_files[@]} > 0 )); then
-    if command -v pyright >/dev/null 2>&1; then
-      if ! out="$(pyright "${py_files[@]}" 2>&1)"; then
-        blocking+=("pyright findings in changed Python files — fix before handoff:"$'\n'"${out}")
+    local py_interp="" pyright_bin="" env_dir candidate
+    local -a py_args=()
+    for env_dir in "${VIRTUAL_ENV:-}" "$repo_root/.venv" "$repo_root/venv"; do
+      [[ -n "$env_dir" ]] || continue
+      for candidate in "$env_dir/bin/python" "$env_dir/Scripts/python.exe"; do
+        if [[ -f "$candidate" && -x "$candidate" ]]; then
+          py_interp="$candidate"
+          break
+        fi
+      done
+      [[ -z "$py_interp" ]] || break
+    done
+    if [[ -n "$py_interp" ]]; then
+      py_args=(--pythonpath "$py_interp")
+      for candidate in "${py_interp%/*}/pyright" "${py_interp%/*}/pyright.exe"; do
+        if [[ -f "$candidate" && -x "$candidate" ]]; then pyright_bin="$candidate"; break; fi
+      done
+    fi
+    if [[ -z "$pyright_bin" ]]; then
+      pyright_bin="$(command -v pyright)" || pyright_bin=""
+    fi
+    if [[ -n "$pyright_bin" ]]; then
+      if ! out="$("$pyright_bin" ${py_args[@]+"${py_args[@]}"} "${py_files[@]}" 2>&1)"; then
+        blocking+=("pyright findings in changed Python files — check the project environment and fix before handoff (engine: ${pyright_bin}; interpreter: ${py_interp:-Pyright default/config}):"$'\n'"${out}")
       fi
     else
       blocking+=("pyright is not installed but changed .py files need checking — install pyright to clear the pre-handoff diagnostics gate (rules/language-diagnostics.md).")

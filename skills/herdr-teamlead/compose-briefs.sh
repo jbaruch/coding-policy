@@ -243,6 +243,12 @@ main() {
   out_bodies+=("$common_body")
 
   while IFS= read -r role; do
+    local policy_override
+    policy_override="$(printf '%s' "$values" | jq -r --arg r "$role" '.roles[$r] | has("POLICY_INDEX") or has("RELEASE_SKILL")')" || return 2
+    if [[ "$policy_override" == true ]]; then
+      warn "policy artifact paths for role '${role}' belong only in .shared — remove per-role POLICY_INDEX and RELEASE_SKILL keys"
+      return 2
+    fi
     merged="$(jq -c -n --argjson a "$shared" --argjson b "$(printf '%s' "$values" | jq -c --arg r "$role" '.roles[$r]')" '$a * $b')"
     validate_values "$merged" "the values for role '${role}'" || return 2
     # Validate in JSON before command substitution can strip trailing newlines

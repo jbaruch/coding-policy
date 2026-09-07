@@ -225,6 +225,22 @@ JSON
       pass; else fail "unreadable $missing_policy must refuse before emitting any brief"; fi
   done
 
+  # Policy artifacts are shared inputs; role overrides cannot bypass their
+  # validation, even when the override is readable or the shared key is absent.
+  local override_case override_value
+  for missing_policy in POLICY_INDEX RELEASE_SKILL; do
+    for override_case in invalid readable role-only; do
+      override_value="/absent/role-policy.md"
+      if [[ "$override_case" == readable ]]; then override_value="$TMP/package.diff"; fi
+      jq --arg key "$missing_policy" --arg value "$override_value" --arg shape "$override_case" \
+        '.roles.tester[$key] = $value | if $shape == "role-only" then del(.shared[$key]) else . end' \
+        "$v6b" > "$TMP/policy-override.json" || die "could not build role policy override"
+      run "$PKG" "$TMP/policy-override.json" "$TMP/override-$missing_policy-$override_case"
+      if [[ $RC -eq 2 && -z "$OUT" && ! -e "$TMP/override-$missing_policy-$override_case" && "$ERRTEXT" == *"$missing_policy"* ]]; then
+        pass; else fail "$override_case role $missing_policy must refuse before emitting any brief: $ERRTEXT"; fi
+    done
+  done
+
   # 6c. A REPORT path that would wrap the worker's marker line is refused
   #     before any file is written: the wait confirms the complete marker on
   #     one visible row, and a wrap anywhere in it cannot be confirmed.
