@@ -16,6 +16,7 @@ from .errors import UsageError
 
 
 RECOVERY_SCHEMA_VERSION = 1
+RECOVERY_STORE_VERSION = 2
 DEFAULT_FIX_LIMIT = 5
 PENDING_STATUSES = frozenset({"reserved", "sending", "sent_but_not_started"})
 DISPATCH_STATUSES = PENDING_STATUSES | {"applied", "not_sent"}
@@ -23,8 +24,19 @@ SHA_RE = re.compile(r"[0-9a-f]{40}(?:[0-9a-f]{24})?\Z")
 
 
 def empty_recovery():
-    return {"schema_version": RECOVERY_SCHEMA_VERSION, "tasks": {}, "checkpoints": [],
-            "plans": [], "dispatches": [], "context_permissions": [], "events": []}
+    return {"schema_version": RECOVERY_STORE_VERSION, "tasks": {}, "checkpoints": [],
+            "plans": [], "dispatches": [], "context_permissions": [], "events": [],
+            "hand_clearances": [], "historical_attempts": []}
+
+
+def migrate_store(store):
+    """Upgrade only the enclosing recovery document; old record shapes persist."""
+    if isinstance(store, dict) and type(store.get("schema_version")) is int and store["schema_version"] == 1:
+        if "hand_clearances" in store or "historical_attempts" in store:
+            raise UsageError("Version 1 recovery contains unowned historical records; preserve it for owner recovery.", {})
+        store.update(schema_version=RECOVERY_STORE_VERSION, hand_clearances=[], historical_attempts=[])
+        return True
+    return False
 
 
 def text(value, label):
@@ -224,11 +236,21 @@ def validate_work(store, assignments, task, fix_round, plan_id=None, work=None, 
         raise UsageError("Name the concrete blocking findings this correction addresses.", {})
     if any(not any(fnmatchcase(path, allowed) for allowed in plan["allowed_paths"]) for path in work["paths"]):
         raise UsageError("Correction paths exceed the approved scope; pause implementation for the changed decision.", {})
-    if implementation and fix_round != confirmed_fix(assignments, task) + 1:
+    count = confirmed_fix(assignments, task)
+    if implementation and fix_round != count + 1:
         raise UsageError("Use this task's actual next fix number; approval never resets, skips, or reuses a completed attempt.", {})
     previous = next((row for row in reversed(store["dispatches"]) if row["task"] == task
                      and row["role"] == "developer" and row["status"] == "applied"), None)
-    if implementation and previous and previous.get("fix_round", 0) and previous["fix_round"] >= plan["first_fix"]:
+    historical = next((row for row in reversed(store["historical_attempts"]) if row["task"] == task
+                       and row["fix_round"] == count), None)
+    if implementation and historical and historical["fix_round"] >= plan["first_fix"]:
+        report = historical["reviews"][-1] if historical["reviews"] else None
+        if not report or report["input"]["verdict"] != "blocking":
+            raise UsageError("Record the imported correction's actual blocking review with record-historical-review before spending the next approved attempt.", {})
+        evidence, _body = receipt(report["input"]["report"])
+        if evidence != report["evidence"]:
+            raise UsageError("The imported correction's review artifact changed; record its actual current review before continuing.", {})
+    if implementation and not historical and previous and previous.get("fix_round", 0) and previous["fix_round"] >= plan["first_fix"]:
         report = previous.get("report")
         if not report or report.get("verdict") != "blocking":
             raise UsageError("Collect and record the preceding correction's actual blocking review before spending the next approved attempt.", {})
@@ -381,6 +403,16 @@ def fresh_transition(store, assignments, task, fix_round):
                      and assignments[i].get("status") == "applied" and assignments[i].get("cleared") is True), None)
     if released is not None:
         return {"reason": "release_handoff", "previous_developer": index, "release_assignment": released}
+    hand = next((row for row in reversed(store["hand_clearances"]) if row["task"] == task
+                 and row["previous_developer"] == index), None)
+    if hand:
+        return {"reason": "verified_hand_release_handoff", "previous_developer": index,
+                "release_assignment": hand["assignment_index"], "clearance": hand["id"]}
+    historical = next((row for row in reversed(store["historical_attempts"]) if row["task"] == task
+                       and row["assignment_index"] == index), None)
+    if historical:
+        return {"reason": "historical_correction_handoff", "previous_developer": index,
+                "historical_attempt": historical["id"], "continuity": "unproven"}
     permission = next((row for row in reversed(store["context_permissions"]) if row["task"] == task
                        and row["assignment_index"] == index and row["next_fix"] == fix_round), None)
     if permission:
@@ -396,7 +428,7 @@ def require_recovery_ready(live_info):
 
 def recovery_agent(store, assignments, command, data):
     """Resolve the preserved worker identity before collecting live evidence."""
-    if command == "recover-context":
+    if command in {"recover-context", "record-release-clear"}:
         index = data.get("assignment_index")
         if type(index) is not int or not 0 <= index < len(assignments):
             raise UsageError("Use the original assignment_index from teamlead state; do not guess a worker identity.", {})
@@ -431,12 +463,12 @@ def validate_store(store, assignments):
     Reading validates recorded relationships, never fetches historical reports
     or treats an old pane observation as a live readiness check.
     """
-    if not isinstance(store, dict) or type(store.get("schema_version")) is not int or store["schema_version"] != RECOVERY_SCHEMA_VERSION:
+    if not isinstance(store, dict) or type(store.get("schema_version")) is not int or store["schema_version"] != RECOVERY_STORE_VERSION:
         raise UsageError("Unsupported recovery schema; update the owner skill before using this ledger.", {})
     try:
         if not isinstance(store["tasks"], dict):
             raise UsageError("Recovery tasks must be an object; restore the owner-written ledger.", {})
-        for name in ("checkpoints", "plans", "dispatches", "context_permissions", "events"):
+        for name in ("checkpoints", "plans", "dispatches", "context_permissions", "events", "hand_clearances", "historical_attempts"):
             if not isinstance(store[name], list):
                 raise UsageError("Recovery {} must be an array; restore the owner-written ledger.".format(name), {})
             identifiers = []
@@ -534,7 +566,7 @@ def validate_store(store, assignments):
                 index in [dispatch.get("assignment_index"), *dispatch.get("prior_assignment_indices", [])]
                 and all(dispatch[key] == row.get(key) for key in ("task", "role", "agent", "fix_round"))
                 for dispatch in store["dispatches"]
-            ):
+            ) and not any(item["assignment_index"] == index for item in store["historical_attempts"]):
                 raise UsageError("An extra correction lacks its owner-managed authorization and dispatch record.", {})
         for row in store["context_permissions"]:
             task_record(store, row["task"])
@@ -548,6 +580,9 @@ def validate_store(store, assignments):
         for sequence, row in enumerate(store["events"], 1):
             if row["sequence"] != sequence or not isinstance(row["details"], dict):
                 raise UsageError("Recovery event history is malformed; preserve it for owner recovery.", {})
+        # Imported records use these shared validators without a module-level cycle.
+        from .historical import validate_history
+        validate_history(store, assignments)
     except (KeyError, TypeError, ValueError) as exc:
         raise UsageError("Recovery ledger has missing or malformed fields ({}); restore its owner-written state without discarding history.".format(exc), {}) from None
     return store

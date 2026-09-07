@@ -76,6 +76,9 @@ instruction into permission to exceed an exhausted correction budget.
 | `record-report` | `dispatch`, full `head_revision`, `verdict` (`blocking` or `approved`), `review_mode` (`full` or `scoped`), independent `reviewer`, absolute `report`, `changed_paths` | Read the report in full and verify the VCS diff first. The command binds its bytes and stated head to the dispatch; it does not establish the tester, CI, external-review, or release gates. |
 | `recover-context` | `task`, original `assignment_index`, `reason`, `authorization`, absolute `evidence` | For the latest confirmed developer row with null native-session proof. Records a live observation separately and permits the next fresh handoff. The original null stays null. |
 | `reconcile` | `dispatch`, `outcome` (`applied` or `not_sent`), `reason`, `authorization`, absolute `evidence` | Resolve an interrupted send from actual evidence and an idle/done live worker. `applied` appends recovered assignment evidence without fabricating contemporaneous session proof; `not_sent` permits a transport retry. |
+| `record-release-clear` | Fields under Verified release hand-clear below | Record existing required-clear evidence for a successful release `--no-clear` row. No new context-change permission is required. |
+| `import-correction` | Fields under Historical manual corrections below | Import an already authorized, completed manual attempt without sending input or granting future attempts. |
+| `record-historical-review` | unique `id`, `historical_attempt`, full `head_revision`, `verdict`, `review_mode`, independent `reviewer`, absolute `report` | Append an actual review receipt for an imported correction. Full review is required for approval; other verification gates remain separate. |
 
 `allowed_paths` contains repository-relative paths or globs. Preserve the
 original task and base across every approval. Read and verify the source diff
@@ -138,6 +141,113 @@ while its checkpoint awaits approval; an audit worker may still be active.
 `judge_checkpoint_required` requires the next exhausted-budget checkpoint.
 Neither an active worker nor a dispatch receipt proves that implementation or
 release has finished.
+
+## Verified release hand-clear
+
+After an automatic clear times out, inspect the actual conversation and empty
+composer before resuming release with `--no-clear`. Preserve the clear evidence
+and any observed native identity before sending the release brief. A hand-clear row
+alone never proves freshness. For a subsequent source correction, register the
+original task metadata and run `record-release-clear` with these fields:
+
+- `id`: stable unique recovery identity; `task`: the original task.
+- `assignment_index`: the preserved successful release row from `teamlead state`.
+- `cleared_at`: the original timezone-qualified clear observation time, between
+  the preceding developer and release assignments.
+- `fresh_session`: `{"kind": "id", "value": "<actual native ID>"}` or kind `path`
+  for an observed native session path. Use `null` when the original clear
+  observation established the fresh conversation but exposed no native identity;
+  never backfill it from a later observation.
+- `verified_empty_composer` and `verified_fresh_conversation`: both `true` only
+  after reading the archived clear evidence; never infer them from `--no-clear`.
+- `fresh_quote` and `composer_quote`: verbatim archived observations proving
+  those facts in their original context. The command checks the quoted bytes;
+  the owner verifies their meaning before recording them.
+- `evidence`: absolute UTF-8 artifact path containing the original fresh-conversation
+  and empty-composer observations;
+  `reason`: the concrete required-clear recovery circumstances.
+
+The owner binds the artifact bytes, requires a live idle/done worker,
+and records the later native-session observation separately. It refuses
+the preceding developer's native identity, another task or worker, stale
+assignment indices, incomplete proof, and conflicting identities. A later
+changed or missing native identity neither replaces nor invalidates the archived
+proof. Never substitute that later observation for the original clear. The old release
+row stays `cleared: false, clear_reason: hand`.
+
+After recording, dispatch the actual next developer fix without `--retain-context`
+or `--no-clear`. The dispatcher performs its normal live readiness and automatic
+fresh-session checks. This required workflow clear uses existing task authority;
+do not request another context-change permission. Include all prior reports,
+current findings, original base and cumulative count in the fresh brief.
+
+## Historical manual corrections
+
+Use `import-correction` only for completed operator-authorized corrections that
+predate owner dispatch reservations. Read the original task brief, exact
+operator decision and bounded plan, archived clear/send/start evidence,
+completion report, and actual Git diff first. Register the original task/base.
+Never fabricate a reservation, edit old assignments, rerun the completed attempt,
+or import an uncertain transport outcome.
+
+The JSON record contains:
+
+- `id`, `task`, `agent`, original full `base_revision`, approved `scope`, and
+  `allowed_paths` for the completed correction.
+- The actual cumulative `fix_round`, `authorization` source and exact quote,
+  and positive `authorized_first_fix` / `authorized_last_fix` from that decision.
+  Verify its task, scope and budget in full; neither the command nor a keyword
+  match decides the meaning of an operator's approval.
+- `occurred_at`: the original timezone-qualified completion time; `checkout`:
+  an absolute local checkout containing the actual commits.
+- Full `previous_head` before the correction and resulting `head_revision`.
+  Verify that the former is the actual pre-attempt head from the archived audit.
+- Absolute `authorization_evidence`, `transport_evidence`, and completion
+  `report` paths. Authorization and transport evidence may each be a non-empty
+  array of distinct original artifact paths when the audit is split across files;
+  preserve those files and their bytes instead of synthesizing a combined report.
+  The authorization artifacts contain
+  the actual quote, task and approved scope; the completion report names its
+  full resulting head. Restore missing original evidence before importing.
+- `transport`: `sent: true`, `started: true`, `clear: fresh` or `retained`, plus
+  non-empty `sent_quote`, `started_quote`, and `clear_quote` copied verbatim
+  from the archived transport artifact. Read each quote in its original context
+  and verify it proves the stated event for this task/worker/attempt. The command
+  checks that the quoted bytes are present; it does not interpret prose.
+  These are owner attestations after inspection, never facts inferred from a
+  worker being idle now. Old archives need no new dispatch ID or report-marker
+  format; completion is bound to the original report bytes and resulting commit.
+
+The command checks local Git ancestry from the registered base through the
+pre-attempt and resulting heads to the checkout's current HEAD, reads the diff,
+and checks changed paths against both task and correction bounds. It records
+byte receipts and one clearly linked historical assignment with null native
+continuity proof. No Herdr call, repository write, dispatch reservation, review
+approval, or correction allowance is created. Old assignment rows stay intact.
+
+Import missing attempts in order. An identical identity/input/byte replay is
+idempotent; a different identity for the same attempt, relabeled completed
+report/transport evidence, changed evidence, skipped
+count, conflicting head chain, pending dispatch, or out-of-scope diff refuses.
+All planning, status, next-fix validation and budget checks consume the imported
+count. Five canonical fixes plus imported fix6 means six consumed attempts;
+fix7 still requires its applicable judge checkpoint and bounded approval.
+
+If an existing bounded owner plan still covers the next correction, reuse that
+approval. Record the imported attempt's actual blocking review through
+`record-historical-review` before spending another attempt within that plan.
+The command binds the independent report to the imported head and preserves
+every review receipt. Its identity/input/byte replay is idempotent; changed
+bytes require a new review identity. The next correction rechecks the latest
+blocking report's bytes. An approval or missing report cannot justify a fix.
+
+An imported attempt carries no retained-session proof. Its next otherwise
+authorized correction can use the normal fresh handoff with reason
+`historical_correction_handoff`, preserving the same task/base/count and all
+live clear/tier/readiness checks. Include the imported audit receipt, completion
+report and current blocking findings in that brief. The import grants no extra
+attempt and satisfies no independent reviewer, tester, external-review or CI
+gate. Full verification of every changed tip remains required before release.
 
 Owner commands serialize access with a live OS lock. A competing command
 refuses before dispatch; wait for the process holding the transaction. The

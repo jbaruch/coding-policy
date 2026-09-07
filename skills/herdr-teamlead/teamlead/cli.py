@@ -21,7 +21,7 @@ from types import SimpleNamespace
 from . import __version__
 from .assign import apply as apply_assignments
 from .assign import APPLY_SCHEMA_VERSION, dry_run, native_context_session, normalize_assignments, resolve_paths, validate_fix_history
-from . import recovery
+from . import historical, recovery
 from .config import default_config_path, load_config, load_judge, load_role_costs, select_agents
 from .errors import PlanError, StateError, TeamLeadError, UsageError
 from .herdr import (
@@ -316,7 +316,7 @@ def build_parser():
         command_parser.add_argument("--work", metavar="FILE", help="Correction base, scope, paths and blocking findings as JSON.")
     apply_parser.add_argument("--dispatch-id", help="Stable dispatch identity; retries read its recorded outcome.")
 
-    for command in ("task", "checkpoint", "authorize-corrections", "recover-context", "record-report", "reconcile"):
+    for command in ("task", "checkpoint", "authorize-corrections", "recover-context", "record-report", "reconcile", "record-release-clear", "import-correction", "record-historical-review"):
         record_parser = sub.add_parser(command, parents=[common], help="Record owner-managed {} evidence.".format(command))
         record_parser.add_argument("--record", required=True, metavar="FILE", help="Structured evidence JSON; see dispatch-recovery.md.")
         record_parser.add_argument("--now", metavar="ISO8601")
@@ -793,6 +793,12 @@ def cmd_recovery(args, client=None, warn=None, trace=None):
         result = recovery.authorize_plan(store, history, data, at)
     elif args.command == "record-report":
         result = recovery.record_report(store, data, at)
+    elif args.command == "import-correction":
+        result = historical.import_attempt(store, history, data, at)
+        if result["assignment_index"] == len(history):
+            add_assignment(state, data["occurred_at"], "developer", data["agent"], task=data["task"], fix_round=data["fix_round"])
+    elif args.command == "record-historical-review":
+        result = historical.record_review(store, data, at)
     else:
         agents = {agent.name: agent for agent in load_config(_config_path(args))}
         name = recovery.recovery_agent(store, history, args.command, data)
@@ -803,6 +809,8 @@ def cmd_recovery(args, client=None, warn=None, trace=None):
         recovery.require_recovery_ready(live)
         if args.command == "recover-context":
             result = recovery.authorize_context(store, history, data, at, native_context_session(live, agents[name].kind))
+        elif args.command == "record-release-clear":
+            result = historical.record_release_clear(store, history, data, at, native_context_session(live, agents[name].kind))
         else:
             result = recovery.reconcile(store, history, data, at, live)
             if result["status"] == "applied" and (result.get("result") or {}).get("status") != "applied":
@@ -842,7 +850,7 @@ COMMANDS = {
     "apply": cmd_apply,
     "state": cmd_state,
     "status": cmd_status,
-    **{command: cmd_recovery for command in ("task", "checkpoint", "authorize-corrections", "recover-context", "record-report", "reconcile")},
+    **{command: cmd_recovery for command in ("task", "checkpoint", "authorize-corrections", "recover-context", "record-report", "reconcile", "record-release-clear", "import-correction", "record-historical-review")},
     "start-judge": cmd_start_judge,
 }
 
