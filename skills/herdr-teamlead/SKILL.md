@@ -13,16 +13,13 @@ description: >
 
 Process steps in order. Do not skip ahead.
 
-Lead three rotating workers and a pinned judge. Assign roles, compose briefs,
-read reports, and gate the round. Never edit the shared checkout or implement
-for a worker. Optional Phase 1 produces a design/test plan and implementation;
-mandatory Phase 2 reviews and verifies the pushed tip before release.
+Follow `rules/agent-team-operation.md` for round constraints.
 
 Each command block resolves `CP` to the project-local plugin, falling back to
 `$HOME/.tessl/plugins/jbaruch/coding-policy`. Run the resolver in every call.
 Prose `skills/...` paths are relative to that plugin root.
 
-Detailed contracts:
+References:
 
 ```text
 skills/herdr-teamlead/references/herdr.md
@@ -273,7 +270,7 @@ Proceed to Step 11 with the dispatched roles.
 
 ## Step 11 — Wait for the Reports
 
-One call per dispatched worker, in the order the round needs them:
+Run for each dispatched worker in the required order:
 
 ```bash
 CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
@@ -326,7 +323,7 @@ Classify each finding blocking or advisory per `rules/review-severity.md`.
   the next round that is already happening. Never spend a round on a lone
   advisory.
 
-The release hand-off has one condition, and all four parts are required:
+Release requires all four:
 
 1. The developer's report names the branch and the commit SHA it pushed.
 2. A broad reviewer **Mode B** report reviews that same SHA and carries no
