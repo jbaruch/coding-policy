@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.190 — 2026-09-07
+
 ### Fixed
 
 - **Report delivery identity (#346).** The watcher requires the complete expected absolute report path on one unquoted, unfenced pane row. A previous report with the same basename, a filename elsewhere in the window, and wrapped fragments cannot confirm delivery. Brief composition rejects existing or shared report destinations and directs each attempt to a fresh path. Missing or ambiguous markers remain non-success outcomes with the existing review and release gates unsatisfied.
