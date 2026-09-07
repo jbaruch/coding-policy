@@ -30,7 +30,7 @@ description: Running a multi-agent team — headroom-driven role rotation, one w
 ## Judge Seat
 
 - A fifth seat, `judge`, sits outside the three-role rotation on the most capable model available, never assigned developer, reviewer, or tester
-- The lead dispatches the judge only for one of four triggers: a contested reviewer or tester verdict, a lead override of a blocking finding, a fix loop that reached its fifth round, or a bot finding the team disagrees with
+- The lead dispatches the judge only for one of four triggers: a contested reviewer or tester verdict, a lead override of a blocking finding, an exhausted correction allowance with blocking work remaining, or a bot finding the team disagrees with
 - The judge is read-only: it never edits a repository file, never runs a mutating git or `gh` command, never posts to GitHub, never dispatches a subagent — its only output is its report file
 - The judge reads both positions and the governing rule, verifies the disputed facts against the tree, and returns `RULING: uphold A | uphold B | amend — <line> | blocked — <question>` with numbered reasons, an `ACTION:` naming the minimal step, and an `UNVERIFIED:` line
 - The judge's ruling binds the round; only the operator overrides it
@@ -68,8 +68,8 @@ description: Running a multi-agent team — headroom-driven role rotation, one w
 ## Fix Loops
 
 - Count fix rounds per task after its initial implementation
-- Cap each task's fix loop at five rounds
-- Fix rounds 1–3 retain the same developer's context
+- Default each task's fix allowance to five rounds
+- Fix rounds 1–3 retain the same developer's context when the retention preconditions hold
 - Narrow exception for retaining context on a same-role fix round.
 - Preconditions (all required):
   1. The worker remains the developer for the same task
@@ -78,16 +78,39 @@ description: Running a multi-agent team — headroom-driven role rotation, one w
   4. The lead uses `--retain-context` with the task identifier and fix-round number
 - Every other assignment clears context
 - `--no-clear` records a hand-cleared pane, never retained context
-- Fix rounds 4–5 use a freshly cleared worker
+- Fix rounds 4 and later use a freshly cleared worker
+- Narrow exception for fresh early corrections after a release clear or authorized context recovery.
+- Preconditions (all required):
+  1. The owner ledger preserves the original task, base, preceding developer assignment, and actual next fix number
+  2. The preceding developer's confirmed release assignment cleared its context, or an explicit operator recovery decision covers the preserved missing-session assignment
+  3. The next fix remains within the task's existing allowance and scope
+  4. The lead dispatches a fresh developer brief through the normal readiness, clear, tier, and qualification checks
+- Every other early fix requires the retained-context preconditions
+- A required release clear needs no separate context-change permission
+- Never edit repository content while holding the release role
 - Each fresh-worker brief includes the task, prior report, and open findings
 - Frame the handoff as "a prior developer attempted this N times; you own it now"
-- At the cap without approval, dispatch the judge before any further action
-- Never dispatch a sixth fix round
-- Surface a ruling that requires further implementation after the cap as BLOCKED to the operator
+- At an exhausted allowance with remaining blocking work, dispatch the judge before proposing further implementation
+- Narrow exception for an operator-approved bounded correction plan.
+- Preconditions (all required):
+  1. The pinned judge completed its ruling after the latest developer attempt
+  2. A checkpoint names the concrete remaining defect, previous changes, observed progress, and changed approach
+  3. The operator explicitly approves the task, scope, permitted paths, and additional attempt budget
+  4. The owner utility records the checkpoint and approval under the original task and base
+- Every other exhausted loop remains blocked; never dispatch an automatic sixth fix
+- Reuse that approval across attempts within its bounds
+- Ask again only when the approved budget is exhausted, scope changes, or the operator changes the decision
+- Record an explicit superseding decision without rewriting the prior approval
+- Preserve cumulative counts across clears, worker changes, retries, and interrupted dispatch
+- Reconcile an unknown send outcome before retrying; never charge or send the same attempt twice
+- Record `waiting_for_operator` when implementation awaits the bounded decision
+- An active audit worker never establishes implementation progress
 - Scope fix re-checks to each prior finding: RESOLVED, OPEN, or DECLINED with a reason
 - Restrict NEW findings in a scoped re-check to blocking severity
 - Record new advisories in the round's follow-up issue without extending the fix loop
 - Run a broad whole-branch review before release
+- Every corrected tip requires full independent reviewer and tester reports before release resumes
+- All external review and CI requirements remain in force
 - Every reviewer and tester brief forbids dispatching subagents
 - Prove delegated work from the VCS diff, never the worker's self-report
 

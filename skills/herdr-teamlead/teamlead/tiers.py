@@ -189,8 +189,10 @@ def select_tier(agent, role, round_type=None, context=None, fix_round=None):
         raise UsageError("Round-context proof and escape fields must be JSON booleans.", {})
     for key in ("files", "input_bytes", "tool_retries", "repair_rounds", "failed_gates"):
         _nonnegative_int(context, key)
-    if fix_round is not None and (type(fix_round) is not int or not 1 <= fix_round <= 5):
-        raise UsageError("Fix round must be an integer from 1 through 5; preserve the task counter.", {})
+    # The owner checks the task's recorded allowance before tier selection.
+    # Selection preserves the true cumulative number for authorized recovery.
+    if fix_round is not None and (type(fix_round) is not int or fix_round < 1):
+        raise UsageError("Fix round must be a positive integer; preserve the task counter.", {})
     round_type = round_type or ("fix" if role == "developer" and fix_round else DEFAULT_ROUNDS.get(role))
     if not isinstance(round_type, str) or round_type not in ROLE_ROUNDS.get(role, frozenset()):
         raise UsageError("Round {!r} cannot perform role {!r}; choose its documented round type.".format(round_type, role), {})

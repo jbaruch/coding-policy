@@ -24,10 +24,10 @@ lead created it. You do not.
 ## Before You Open the PR
 
 Read, in `{{REPORTS_DIR}}`, the reviewer's and the tester's reports against the
-pushed tip. Fix every item they mark blocking first: focused commits, the
-gates `CONTRIBUTING.md` names, push. Fold an advisory in only if you are
-committing anyway; otherwise list it under "Deferred advisories" in the PR
-body with the follow-up issue you filed.
+pushed tip. Both must cover the full branch and satisfy the lead's release
+gate. Missing, older, scoped-only, or blocking reports require a `## BLOCKED`
+report to the lead; stop this assignment before opening or merging the PR.
+List deferred advisories with their existing follow-up references.
 
 ## Release
 
@@ -36,6 +36,14 @@ title, body template, review polling, thread replies, and merge procedure are
 that skill's contract; do not improvise around it. The PR body's contribution
 declaration names the tools that did the work. Never paste a report file into
 the PR.
+
+You do not edit repository content in the release role. If any release step,
+CI failure, or external review requires a source change, report the current
+tip, findings, review URLs, and completed release actions under `## BLOCKED`,
+then stop. The lead dispatches the next counted developer fix in a fresh
+session and obtains full independent verification before release resumes.
+Reuse the task's approved correction bounds; a normal release clear needs no
+new context-change permission. Do not reset the count or waive any release gate.
 
 ## Report
 

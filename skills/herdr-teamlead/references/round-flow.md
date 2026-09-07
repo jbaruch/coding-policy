@@ -153,9 +153,11 @@ Dispatch it on exactly one of four triggers:
   re-reading the rule.
 - A lead override of a blocking finding — the lead about to waive a finding a
   worker labelled blocking gets a second, independent read first.
-- A fix loop exhausted its cap without approval — the judge rules before
-  any further action. If the ruling requires more implementation, Step 19
-  reports BLOCKED to the operator rather than dispatching another fix.
+- A fix loop exhausted its allowance with blocking work remaining — the judge
+  rules before another correction proposal. Step 19 records the checkpoint
+  and waits for an explicit bounded plan. An approved plan covers multiple
+  attempts within its recorded bounds; fresh release handoffs do not ask for
+  context-change permission. See `references/dispatch-recovery.md`.
 - A bot finding the team disagrees with — the policy reviewer or Copilot flags
   something the developer and reviewer both think is wrong.
 

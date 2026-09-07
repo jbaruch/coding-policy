@@ -5,12 +5,12 @@ looked like when it was measured; it never substitutes for reading the agent's
 live status before writing to it. `plan` may run off a stale snapshot on
 purpose (planning has no side effects); `apply` always re-checks live status.
 
-Schema (schema_version 4)::
+Schema (schema_version 5)::
 
     {
-      "schema_version": 4,
+      "schema_version": 5,
       "snapshots":  [ <measure output>, ... ],   # newest last, capped at 20
-      "assignments":[ {"schema_version": 4, "at": <ISO-8601>,
+      "assignments":[ {"schema_version": 5, "at": <ISO-8601>,
                        "role": <str>, "agent": <str>,
                        "status": "applied" | "sent_but_not_started"
                                  | "unknown",
@@ -18,7 +18,8 @@ Schema (schema_version 4)::
                        "clear_reason": "automatic" | "hand" | "retained" | "unknown",
                        "task": <str> | null, "fix_round": <int> | null,
                        "context_session": <object> | null,
-                       "tier": <object> | null}, ... ]
+                       "tier": <object> | null}, ... ],
+      "recovery": <owner-managed task, approval, dispatch and evidence ledger>
     }
 
 `status` records whether the hand-off was confirmed: `applied` counts toward
@@ -27,7 +28,8 @@ UNCOUNTED_STATUSES), and `unknown` marks a version-1 row migrated without the
 information. Version 1 documents and rows carry no `status`; the 1 -> 2
 migration below stamps them `unknown`.
 
-Version 4 adds verified model-tier evidence without discarding context history.
+Version 5 adds recovery history without inventing original authorization or
+session proof. Version 4 adds verified model-tier evidence.
 Version 3 records context handling, the task and the fix-round number.
 Version-2 history cannot prove those facts: migration stamps null values and
 an unknown reason. Snapshot versions evolve independently of ledger versions.
@@ -55,18 +57,21 @@ Reading follows one rule per direction:
 import json
 import os
 import tempfile
+import fcntl
+from contextlib import contextmanager
 from pathlib import Path
 
 from .diagnostics import stderr_warn as _warn
 from .errors import ConfigError, HerdrError, StateError, UsageError
 from .tiers import parse_launch_args, parse_tiers, verify_argv
+from .recovery import DEFAULT_FIX_LIMIT, empty_recovery, validate_store
 
 #: The version this build writes for the document and assignment rows.
 #: Snapshots have their own version and migration chain below.
-STATE_SCHEMA_VERSION = 4
+STATE_SCHEMA_VERSION = 5
 
-#: Shared by state validation and dispatch: no usable ledger carries a sixth fix.
-MAX_FIX_ROUNDS = 5
+#: Default checkpoint, not a global permission to exceed an approved budget.
+MAX_FIX_ROUNDS = DEFAULT_FIX_LIMIT
 CLEAR_REASONS = frozenset({"automatic", "hand", "retained", "unknown"})
 
 #: An assignment row records what teamlead did, including what did not work.
@@ -105,7 +110,28 @@ def default_state_path():
 
 def empty_state():
     """A fresh, valid state document."""
-    return {"schema_version": STATE_SCHEMA_VERSION, "snapshots": [], "assignments": []}
+    return {"schema_version": STATE_SCHEMA_VERSION, "snapshots": [], "assignments": [], "recovery": empty_recovery()}
+
+
+@contextmanager
+def state_lock(path):
+    """Serialize owner transactions using a live OS lock, never a stale file flag."""
+    lock_path = Path(str(path) + ".lock")
+    try:
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        handle = lock_path.open("a", encoding="utf-8")
+    except OSError as exc:
+        raise StateError("Cannot open state lock {}: {}. Restore directory access before changing task history.".format(lock_path, exc), {}) from None
+    try:
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise StateError("Another teamlead command owns this state transaction. Wait for that process; do not delete the lock or start a second dispatch.", {}) from None
+        except OSError as exc:
+            raise StateError("Cannot lock state {}: {}. Use a filesystem supporting process locks before dispatch.".format(path, exc), {}) from None
+        yield
+    finally:
+        handle.close()
 
 
 class _NoUsableState(Exception):
@@ -185,6 +211,19 @@ def _migrate_document_3_to_4(payload):
     return payload
 
 
+def _migrate_record_4_to_5(record):
+    """Original session, role and attempt evidence is never retroactively repaired."""
+    record["schema_version"] = 5
+    return record
+
+
+def _migrate_document_4_to_5(payload):
+    """Old history authorizes no extra attempts and invents no base or scope."""
+    payload["schema_version"] = 5
+    payload["recovery"] = empty_recovery()
+    return payload
+
+
 def _migrate_snapshot_2_to_3(snapshot):
     """An older snapshot has no measured per-tier billing attribution."""
     snapshot["schema_version"] = 3
@@ -234,6 +273,7 @@ MIGRATIONS = {
     1: (2, _migrate_document_1_to_2),
     2: (3, _migrate_document_2_to_3),
     3: (4, _migrate_document_3_to_4),
+    4: (5, _migrate_document_4_to_5),
 }
 
 #: The same table for one assignment record, walked the same way.
@@ -242,6 +282,7 @@ RECORD_MIGRATIONS = {
     1: (2, _migrate_record_1_to_2),
     2: (3, _migrate_record_2_to_3),
     3: (4, _migrate_record_3_to_4),
+    4: (5, _migrate_record_4_to_5),
 }
 
 
@@ -319,7 +360,7 @@ def _validate(payload, path):
         fix_round = record.get("fix_round")
         if fix_round is not None and (
             isinstance(fix_round, bool) or not isinstance(fix_round, int)
-            or not 1 <= fix_round <= MAX_FIX_ROUNDS
+            or fix_round < 1
         ):
             raise _NoUsableState("an assignment row has an invalid fix-round number")
         session = record.get("context_session")
@@ -372,6 +413,10 @@ def _validate(payload, path):
         migrated = migrated or snap_migrated
         snapshots.append(snapshot)
     payload["snapshots"] = snapshots
+    try:
+        validate_store(payload.setdefault("recovery", empty_recovery()), rows)
+    except UsageError as exc:
+        raise _NoUsableState(str(exc)) from None
     return payload, migrated
 
 
@@ -381,7 +426,7 @@ def load_state(path, warn=None):
     return state
 
 
-def load_state_checked(path, warn=None):
+def load_state_checked(path, warn=None, *, persist_migration=True):
     """Read the state file, migrating an older one and rewriting it.
 
     Returns `(state, usable)`. `usable` is False when a file EXISTS and could
@@ -443,6 +488,8 @@ def load_state_checked(path, warn=None):
         )
         return empty_state(), False
 
+    if migrated and not persist_migration:
+        raise StateError("This read-only preview needs an owner migration. Run `teamlead state` with the same --state path, then retry the preview; the original file is unchanged.", {"path": str(path)})
     if migrated:
         try:
             save_state(path, state)

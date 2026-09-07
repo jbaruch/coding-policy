@@ -132,7 +132,7 @@ class NullHeadroomTest(unittest.TestCase):
 
 class OutputShapeTest(unittest.TestCase):
     def test_carries_a_schema_version(self):
-        self.assertEqual(plan(["developer"], snapshot(grok=100.0))["schema_version"], 3)
+        self.assertEqual(plan(["developer"], snapshot(grok=100.0))["schema_version"], 4)
 
     def test_rationale_has_one_line_per_role_naming_the_field(self):
         result = plan(ROLES, snapshot(claude=92.0, codex=87.0, grok=100.0))
@@ -797,7 +797,7 @@ class PlanSchemaVersionTest(unittest.TestCase):
         # Indistinguishable from a version-1 plan, on purpose: a reader takes
         # the same path for both.
         result = plan(ROLES, snapshot(claude=90, codex=70, grok=60), warn=lambda m: None)
-        self.assertEqual(result["schema_version"], 3)
+        self.assertEqual(result["schema_version"], 4)
         self.assertNotIn("judge", result)
 
     def test_the_assignments_shape_is_unchanged_by_the_bump(self):

@@ -1229,6 +1229,7 @@ class ApplyTest(unittest.TestCase):
                     "common": "/w/COMMON.md",
                     "at": AT,
                     "pane_label": "developer",
+                    "context_transition": None,
                 }
             ],
         )

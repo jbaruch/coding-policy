@@ -40,7 +40,9 @@ class EmptyStateTest(unittest.TestCase):
     def test_shape(self):
         self.assertEqual(
             empty_state(),
-            {"schema_version": STATE_SCHEMA_VERSION, "snapshots": [], "assignments": []},
+            {"schema_version": STATE_SCHEMA_VERSION, "snapshots": [], "assignments": [],
+             "recovery": {"schema_version": 1, "tasks": {}, "checkpoints": [], "plans": [],
+                          "dispatches": [], "context_permissions": [], "events": []}},
         )
 
 

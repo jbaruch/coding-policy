@@ -111,7 +111,10 @@ docstring and `DEFAULT_ROLE_COSTS`.
 
 Tiered configs select each candidate from its per-agent `tiers` table. A
 round choice never overrides a model. Supply the fix number when planning
-fixes; pass that same number at dispatch. Keep the configured operator launch
+fixes; pass that same number at dispatch. Register the original task/base with
+`teamlead task` and use the same `--task` on plan and apply. Authorized extra
+fixes also share `--correction-plan` and `--work`; their owner-managed bounds
+are documented in `references/dispatch-recovery.md`. Keep the configured operator launch
 options across worker restarts. The config, round-input, billing-evidence,
 and qualification contracts are in:
 
