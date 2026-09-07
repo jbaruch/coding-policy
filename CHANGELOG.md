@@ -1,5 +1,9 @@
 # Changelog
 
+### Changed
+
+- **Historical import policy structure (#359).** The count, preservation and authority constraints now occupy separate numbered preconditions. All remain required for historical imports; the permitted recovery behavior is unchanged.
+
 ## 0.3.196 — 2026-09-07
 
 ### Fixed

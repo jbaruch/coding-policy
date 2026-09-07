@@ -86,7 +86,9 @@ description: Running a multi-agent team — headroom-driven role rotation, one w
   3. The next fix remains within the task's existing allowance and scope
   4. The lead dispatches a fresh developer brief through the normal readiness, clear, tier, and qualification checks
   5. For a historical import, the owner verifies original task/scope/budget authorization, archived transport and report bytes, and the actual VCS base, head and diff
-  6. For a historical import, the owner appends the actual count with null native-session proof, preserves prior rows, and grants no future allowance or review approval
+  6. For a historical import, the owner appends the actual count with null native-session proof
+  7. For a historical import, the owner preserves prior rows
+  8. For a historical import, the owner grants no future allowance or review approval
 - Every other early fix requires the retained-context preconditions
 - A required release clear or verified historical-import handoff needs no separate context-change permission
 - Never edit repository content while holding the release role
