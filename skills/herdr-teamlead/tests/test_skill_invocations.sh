@@ -25,7 +25,7 @@
 # Run: bash skills/herdr-teamlead/tests/test_skill_invocations.sh
 set -uo pipefail
 
-# Every skill whose SKILL.md invokes a plugin script. herdr-standup shipped
+# Herdr skills whose SKILL.md invokes a plugin script. herdr-standup shipped
 # bare invocations while this suite resolved its target through its own
 # directory, so it only ever read herdr-teamlead's SKILL.md.
 SKILLS=(herdr-teamlead herdr-standup)
@@ -36,6 +36,13 @@ MODE_GATE_SKILL=herdr-teamlead
 
 die() { echo "fatal: $*" >&2; exit 2; }
 warn_cleanup() { echo "warn: could not remove $1" >&2; }
+INSTALL_FIXTURE=""
+cleanup() {
+  if [[ -n "$INSTALL_FIXTURE" ]] && ! rm -rf "$INSTALL_FIXTURE"; then
+    warn_cleanup "$INSTALL_FIXTURE"
+  fi
+  return 0
+}
 
 PASS=0
 FAIL=0
@@ -150,15 +157,56 @@ check_mode_gate() { # <skill-name> <skill-file>
   rm -f "$body_file" || warn_cleanup "$body_file"
 }
 
+# Execute a documented block's resolver and invocation against packaged-mode
+# fixtures. Substitute a task-owned fixture root for the HOME token without
+# changing the process's HOME or touching the user's installed plugin.
+check_install_shapes() { # <skill-file>
+  local fixture resolver invocation code output rc shape local_root global_root
+  fixture="$(mktemp -d)" || die "cannot create install-shape fixture"
+  INSTALL_FIXTURE="$fixture"
+  resolver="$(awk '/^CP=/{print; exit}' "$1")" || die "cannot read documented resolver"
+  invocation="$(awk '/^bash .*roster[.]sh/{print; exit}' "$1")" || die "cannot read roster invocation"
+  [[ -n "$resolver" && -n "$invocation" ]] || die "missing executable roster example"
+  resolver="${resolver//\$HOME/\$INVOCATION_FIXTURE_GLOBAL}"
+  code="$resolver"$'\n'"$invocation"
+  local_root="$fixture/project with spaces/.tessl/plugins/jbaruch/coding-policy"
+  global_root="$fixture/global with spaces/.tessl/plugins/jbaruch/coding-policy"
+  mkdir -p "$local_root/skills/herdr-teamlead" "$global_root/skills/herdr-teamlead" \
+    || die "cannot create installed plugin fixtures"
+  printf 'printf "local\\n"\n' > "$local_root/skills/herdr-teamlead/roster.sh" || die "cannot write local fixture"
+  printf 'printf "global\\n"\n' > "$global_root/skills/herdr-teamlead/roster.sh" || die "cannot write global fixture"
+  chmod 0644 "$local_root/skills/herdr-teamlead/roster.sh" "$global_root/skills/herdr-teamlead/roster.sh" \
+    || die "cannot set published file modes"
+  for shape in local global missing; do
+    rc=0
+    output="$(cd "$fixture/project with spaces" && INVOCATION_FIXTURE_GLOBAL="$fixture/global with spaces" bash -c "$code" 2>&1)" || rc=$?
+    if [[ "$shape" == missing ]]; then
+      if (( rc != 0 )); then pass; else fail "missing installs must fail visibly"; fi
+    elif (( rc == 0 )) && [[ "$output" == "$shape" ]]; then pass
+    else fail "$shape install invocation: rc=$rc output=$output"; fi
+    if [[ "$shape" == local ]]; then
+      mv "$local_root" "$fixture/local-unused" || die "cannot stage global-only install"
+    elif [[ "$shape" == global ]]; then
+      mv "$global_root" "$fixture/global-unused" || die "cannot stage missing install"
+    fi
+  done
+  rm -rf "$fixture" || warn_cleanup "$fixture"
+  INSTALL_FIXTURE=""
+}
+
 main() {
   local skills_root skill name
+  trap cleanup EXIT
   skills_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)" || die "could not resolve the skills dir"
 
   for name in "${SKILLS[@]}"; do
     skill="${skills_root}/${name}/SKILL.md"
     [[ -r "$skill" ]] || die "SKILL.md not found at ${skill}"
     check_invocations "$name" "$skill"
+    check_install_shapes "$skill"
   done
+
+  check_invocations round-setup "$skills_root/herdr-teamlead/references/round-setup.md"
 
   skill="${skills_root}/${MODE_GATE_SKILL}/SKILL.md"
   check_mode_gate "$MODE_GATE_SKILL" "$skill"

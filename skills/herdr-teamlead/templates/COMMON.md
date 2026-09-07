@@ -57,8 +57,10 @@ to know goes in the report.
 
 ## Policy
 
-- The tessl root is `{{SHARED_CHECKOUT}}/.tessl` under a project-local install
-  and `$HOME/.tessl` under a global one. Use whichever of the two exists.
+- Resolve each policy artifact under `{{SHARED_CHECKOUT}}/.tessl` first,
+  then `$HOME/.tessl`. Use the first root containing that artifact. If neither
+  has a readable copy, report BLOCKED before starting the assignment.
+- Use that artifact's selected root as `<tessl-root>` below.
 - The rule index is `<tessl-root>/RULES.md`; it links every rule file. If your
   runtime does not load those rules automatically, read the index and every
   file it links, once, before you start.

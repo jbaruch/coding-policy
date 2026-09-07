@@ -18,11 +18,9 @@ read reports, and gate the round. Never edit the shared checkout or implement
 for a worker. Optional Phase 1 produces a design/test plan and implementation;
 mandatory Phase 2 reviews and verifies the pushed tip before release.
 
-The plugin root is `.tessl/plugins/jbaruch/coding-policy` under a project-local
-install and `$HOME/.tessl/plugins/jbaruch/coding-policy` under a global one. The
-`CP=` line opening each command block resolves it, project-local first; it is
-part of the command, never decoration. Every `skills/...` path named below is
-relative to that root.
+Each command block resolves `CP` to the project-local plugin, falling back to
+`$HOME/.tessl/plugins/jbaruch/coding-policy`. Run the resolver in every call.
+Prose `skills/...` paths are relative to that plugin root.
 
 Open detailed contracts as needed:
 
@@ -94,12 +92,8 @@ Emits and saves a snapshot with per-agent headroom, windows, state evidence,
 billing stays `unknown`. Report each failed measurement and obtain that
 worker's reading before relying on its seat.
 
-Use `--trace` for unexplained transport behavior. Usage parsing, polling knobs,
-and trace redaction are documented in:
-
-```text
-skills/herdr-teamlead/references/round-setup.md
-```
+Use `--trace` for transport diagnosis; see `references/round-setup.md` for
+usage and trace contracts.
 
 Proceed immediately to Step 5 once the required readings are available.
 
@@ -123,13 +117,8 @@ Use the same recorded task, approval, and work bounds for both commands.
 Register the original task and base through the owner commands documented in
 `skills/herdr-teamlead/references/dispatch-recovery.md` before recovery work.
 
-The operator config controls tiers and qualification. `--preview-tiers`
-inspects unqualified candidates without authorizing dispatch. Detailed contracts:
-
-```text
-skills/herdr-teamlead/references/round-setup.md
-skills/herdr-teamlead/references/model-tiers.md
-```
+The operator controls tiers and qualification. `--preview-tiers` never
+authorizes dispatch. Details: `references/model-tiers.md`.
 
 Save the plan and announce its rationale. Proceed immediately to Step 6.
 
@@ -298,11 +287,7 @@ The script owns timing.
   Keep review/release gates unsatisfied. Never automatically retry, rephrase,
   switch providers/models, or synthesize a report.
 
-Detailed recovery for each outcome:
-
-```text
-skills/herdr-teamlead/references/dispatch-recovery.md
-```
+Outcome recovery: `references/dispatch-recovery.md`.
 
 Proceed to Step 12 once each dispatched worker has a completed or recorded
 missing report.
@@ -355,21 +340,13 @@ Step 8 for the read-only judge. Proceed immediately to Step 14.
 
 ## Step 14 — Re-measure the Shared Window
 
-Step 4's snapshot is a hint, not authority (`rules/stateful-artifacts.md`).
-The judge's affordability is decided from a fresh reading, never from it.
-
-Re-run Step 4's `measure`. That step's outcomes govern this run unchanged. A
-`measure` that cannot read the judge worker's window is a stale-state failure,
-resolved there before a ruling is planned.
-
-Hand the fresh snapshot to Step 15 and plan nothing here. Proceed immediately
-to Step 15.
+Re-run Step 4's `measure` under its outcome contract. Resolve any unreadable
+judge window before planning. Pass the fresh snapshot to Step 15; never reuse
+the earlier reading as affordability proof. Proceed immediately to Step 15.
 
 ## Step 15 — Plan the Judge Seat
 
-Run Step 5's `plan` with `--roles judge`, against the Step 14 snapshot. It
-names the worker the `judge` block pins, and refuses the round when that
-window cannot cover a ruling:
+Plan the pinned judge against Step 14's fresh snapshot:
 
 ```bash
 CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
@@ -383,8 +360,6 @@ bash "$CP/skills/herdr-teamlead/teamlead.sh" plan \
   fallback to another model, and no degraded ruling.
 - **Any other non-zero** — report the diagnostic and finish here. Never
   hand-write an assignment to bypass the refusal.
-
-Proceed immediately to Step 16 with the plan's configured `judge` tier.
 
 ## Step 16 — Start the Judge Worker on Its Pinned Tier
 
@@ -406,8 +381,7 @@ proves the tier; the script header owns the detailed contract.
 
 ## Step 17 — Dispatch the Judge
 
-Dispatch under Step 10's outcome contract exactly, passing the plan file from
-Step 15 rather than a hand-written mapping:
+Use Step 15's plan under Step 10's dispatch contract:
 
 ```bash
 CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
