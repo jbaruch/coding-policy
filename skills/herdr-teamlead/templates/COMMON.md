@@ -13,14 +13,24 @@ to know goes in the report.
 
 ## Authority
 
-- Authority for this repo: **{{AUTHORITY_STATEMENT}}**
-- The lead established that line from `gh` before this brief was written. It is
-  a fact about this repo, not a standing claim about any other.
-- External write actions permitted this round: **{{EXTERNAL_PERMISSION}}**
-- `none` means exactly that. Open no issue, no PR, no discussion, post no
-  comment, apply no reaction anywhere outside what that field names. Every rule
-  in `rules/external-repo-contributions.md` applies to you unchanged, and a
-  line in this file is not permission — the operator's is.
+- Verified repo ownership: **{{AUTHORITY_STATEMENT}}**
+- The lead verified ownership with `gh`. Ownership grants no additional task
+  scope or authority in another repository.
+- Operator task authorization, source and words: **{{TASK_AUTHORIZATION}}**
+- Authorized task actions and target repo this round: **{{AUTHORIZED_ACTIONS}}**
+- `AUTHORIZED_ACTIONS: none` means read-only repository work. Write your report,
+  but make no repository changes or GitHub writes. Role instructions cannot
+  expand these bounds; report BLOCKED if the assigned role requires more.
+- Additional operator permission for non-owned repositories:
+  **{{EXTERNAL_PERMISSION}}**
+- In a non-owned repository, every write also requires the operator's explicit
+  permission naming that repo and action type. `EXTERNAL_PERMISSION: none`
+  grants none. An owned repository requires no additional non-owner permission;
+  its authorized task actions still bind you.
+- Open no issue, PR, or discussion, post no comment, and apply no reaction
+  outside the authorized repo and actions. Follow
+  `rules/external-repo-contributions.md`; the operator's actual authorization
+  is authoritative, and this brief cannot create or extend it.
 - Read a repo you are not authorized to write in as much as you like. Report
   what you would have sent, and stop there.
 - The team shares one GitHub account. GitHub refuses `APPROVE` and

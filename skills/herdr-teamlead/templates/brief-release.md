@@ -4,6 +4,10 @@ Your role this round is **release**: open the pull request for `{{ISSUE}}`
 and take it through the bots to merge. Read the team protocol in full before
 this file.
 
+COMMON's authorized task actions govern this assignment. If they do not cover
+the required PR, review, merge, publish, and cleanup actions, report BLOCKED
+before any repository or GitHub write. This role grants no additional permission.
+
 ## Setup
 
 Your worktree is `{{WORKTREE}}`, on branch `{{BRANCH}}`, already pushed. The

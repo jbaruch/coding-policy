@@ -6,6 +6,12 @@
 - **Both skills resolve the plugin root instead of assuming the cwd holds it.** All 27 command blocks across `herdr-standup/SKILL.md`, `herdr-teamlead/SKILL.md` and `references/round-setup.md` addressed scripts through the literal `.tessl/plugins/jbaruch/coding-policy/...`, which resolves from a project-local install and from no directory at all under a global one. Each block now opens with `CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"` and invokes through `"$CP/..."`. Project-local keeps winning, so nothing regresses for a consumer who has one. The resolver repeats per block rather than being hoisted to the top of the skill: an agent runs each block as its own tool call and no shell state survives between them. A dispatcher wrapper on `PATH` would have been one line shorter per block and was rejected — it cannot ship inside the plugin, so the skill would point at an artifact the next `tessl update` orphans. A new lint check fails any block that uses `$CP` without resolving it first.
 - **Worker briefs resolve the tessl root the same way.** `templates/COMMON.md` handed every dispatched worker `{{SHARED_CHECKOUT}}/.tessl/RULES.md` and `{{SHARED_CHECKOUT}}/.tessl/plugins/jbaruch/coding-policy/skills/release/SKILL.md`. Under a globally-installed lead neither path exists, so a worker's policy read and its release-skill lookup both dead-ended — the rule index the brief is required to name, and the skill Review Before PR sends the developer to. The template now names both roots and tells the worker to use whichever exists; `templates/brief-reviewer.md` defers to it rather than repeating the project-local path, and the Grok note in `references/herdr.md` follows.
 
+## 0.3.193 — 2026-09-07
+
+### Fixed
+
+- **Task authority in owner briefs (#347).** Generated briefs now carry verified ownership, the operator's actual task authorization, bounded permitted actions, and any additional permission for a non-owned repository separately. An authorized owner release no longer conflicts with `EXTERNAL_PERMISSION: none`. Read-only tasks remain read-only regardless of ownership, and non-owned repositories still require explicit permission for each repo/action. A release role cannot grant itself missing authority; composition refuses omitted task-authorization fields before writing briefs.
+
 ## 0.3.192 — 2026-09-07
 
 ### Fixed
