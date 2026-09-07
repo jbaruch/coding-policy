@@ -69,7 +69,7 @@ description: Running a multi-agent team — headroom-driven role rotation, one w
 
 - Count fix rounds per task after its initial implementation
 - Default each task's fix allowance to five rounds
-- Reserve the developer through early-fix verification before assigning it another task or role
+- Reserve the developer through initial and early-fix verification before assigning it another task or role
 - Fix rounds 1–3 retain the same developer's context when the retention preconditions hold
 - Narrow exception for retaining context on a same-role fix round.
 - Preconditions (all required):

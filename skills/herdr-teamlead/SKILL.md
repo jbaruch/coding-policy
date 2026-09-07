@@ -114,7 +114,7 @@ Emits assignments, rationale, snapshot reference, and configured round tiers;
 contacts no worker. Exit 1 refuses the plan: resolve its diagnostic before
 continuing. Phase 2 excludes the branch author from reviewer and tester.
 For retained fixes, plan developer alone and exclude all other workers; plan
-verification separately. Reserve the developer until early-fix verification
+verification separately. Reserve the developer until initial and early-fix verification
 resolves before reusing it for another task or role. Supply the same fix number to plan and apply.
 Use the same recorded task, approval, and work bounds for both commands.
 Register the original task and base through the owner commands documented in

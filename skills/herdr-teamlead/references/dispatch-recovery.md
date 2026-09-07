@@ -146,7 +146,7 @@ release has finished.
 
 ## Verified role-clear recovery
 
-Keep the developer reserved until early-fix verification resolves. If the lead
+Keep the developer reserved until initial and early-fix verification resolves. If the lead
 already reused that worker for another role and normal apply cleared it, retain
 the original developer proof. Use `recover-role-clear` with:
 
