@@ -159,7 +159,7 @@ lock file can remain after exit; do not delete it to bypass an active lock.
   - The command fails — report its message verbatim and finish here, as for
     exit 2.
   - The state is `blocked` or `working` — re-run this step for that worker
-    once. Exits 0–3 from that re-run take their branches above. A second
+    once. Other exits from that re-run take their documented branches. A second
     exit 4 is terminal: record the worker as producing no report and
     continue to the next worker.
   - The state is `idle` or `done` — record the worker as producing no report
@@ -173,6 +173,19 @@ lock file can remain after exit; do not delete it to bypass an active lock.
   verbatim, and stop the round for that worker. You never answer it: the
   operator does. Resume only once `herdr agent get <name>` reports a state
   other than `blocked`, then re-run this step for that worker.
+- **Exit 5** — `reason: terminal_provider_refusal` identifies an unavailable
+  attempt, with `found: false`. Record the missing report and tell the operator;
+  every review/release gate remains unsatisfied. Do not automatically retry,
+  rephrase, switch providers/models, reconstruct withheld output, or synthesize
+  a report. Continue waiting on other dispatched workers; the operator decides
+  how to handle the unavailable role under the existing rules.
+
+`wait-report.sh` owns refusal confirmation; see its header and
+`confirmed_provider_refusal`. Missing terminal evidence keeps the ordinary
+wait. Herdr 0.8.2's bundled API schema has no dedicated provider-refusal
+outcome; the watcher uses its documented pane/state surfaces. Synthetic
+fixtures verify decisions, not live provider behavior or production elapsed
+time.
 
 Proceed to Step 12 once every dispatched worker has been waited on, or once you
 have recorded which of them produced no report.

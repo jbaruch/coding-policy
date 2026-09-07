@@ -1,5 +1,9 @@
 # Changelog
 
+### Fixed
+
+- **Terminal report unavailability (#345).** A confirmed provider refusal now returns a distinct non-success outcome with a reason, without waiting for the generic report budget. Confirmation requires an unchanged notice and empty composer, repeated idle/done observations, and stable live-bottom terminal metadata. Quoted or stale notices, scrolling, active input, and changing state cannot confirm it. Existing report delivery, missing-marker, dialog, and tool-failure outcomes remain separate. The lead records the unavailable attempt with all gates unsatisfied; no automatic retry, rephrasing, provider/model switch, or report synthesis follows.
+
 ## 0.3.191 — 2026-09-07
 
 ### Fixed
