@@ -22,7 +22,7 @@ Each command block resolves `CP` to the project-local plugin, falling back to
 `$HOME/.tessl/plugins/jbaruch/coding-policy`. Run the resolver in every call.
 Prose `skills/...` paths are relative to that plugin root.
 
-Open detailed contracts as needed:
+Detailed contracts:
 
 ```text
 skills/herdr-teamlead/references/herdr.md
@@ -49,7 +49,7 @@ CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
 bash "$CP/skills/herdr-teamlead/roster.sh"
 ```
 
-Emits caller pane and named live agents with kind, pane, and state.
+Emits the caller and live workers with kind, pane, and state.
 
 - **Exit 0, agents present** — proceed to Step 3.
 - **Exit 0, empty roster** — report unnamed panes from `herdr agent list` and
@@ -92,8 +92,11 @@ Emits and saves a snapshot with per-agent headroom, windows, state evidence,
 billing stays `unknown`. Report each failed measurement and obtain that
 worker's reading before relying on its seat.
 
-Use `--trace` for transport diagnosis; see `references/round-setup.md` for
-usage and trace contracts.
+Usage and `--trace` contracts:
+
+```text
+skills/herdr-teamlead/references/round-setup.md
+```
 
 Proceed immediately to Step 5 once the required readings are available.
 
@@ -118,9 +121,13 @@ Register the original task and base through the owner commands documented in
 `skills/herdr-teamlead/references/dispatch-recovery.md` before recovery work.
 
 The operator controls tiers and qualification. `--preview-tiers` never
-authorizes dispatch. Details: `references/model-tiers.md`.
+authorizes dispatch.
 
-Save the plan and announce its rationale. Proceed immediately to Step 6.
+```text
+skills/herdr-teamlead/references/model-tiers.md
+```
+
+Save the plan with its rationale. Proceed immediately to Step 6.
 
 ## Step 6 — Build the Review Package
 
@@ -287,7 +294,11 @@ The script owns timing.
   Keep review/release gates unsatisfied. Never automatically retry, rephrase,
   switch providers/models, or synthesize a report.
 
-Outcome recovery: `references/dispatch-recovery.md`.
+Outcome recovery:
+
+```text
+skills/herdr-teamlead/references/dispatch-recovery.md
+```
 
 Proceed to Step 12 once each dispatched worker has a completed or recorded
 missing report.

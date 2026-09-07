@@ -69,7 +69,7 @@ check_invocations() { # <skill-name> <skill-file>
   # 1. No bare invocation of a plugin script, in either shape — the literal
   # mount path, or a resolved `$CP` with no interpreter in front of it.
   local bare rc=0
-  bare="$(grep -nE '^[[:space:]]*"?([$]CP|\.tessl/plugins)/\S+\.sh' "$skill")" || rc=$?
+  bare="$(grep -nE '^[[:space:]]*("?[$]CP/[^[:space:]]+\.(sh|py)|((bash|python3)[[:space:]]+)?"?([$]HOME/)?\.tessl/plugins/[^[:space:]]+\.(sh|py))' "$skill")" || rc=$?
   case "$rc" in
     1) pass ;;
     0)
@@ -83,7 +83,7 @@ check_invocations() { # <skill-name> <skill-file>
   # drops every invocation cannot pass check 1 vacuously.
   local invocations
   rc=0
-  invocations="$(grep -cE '^[[:space:]]*bash "[$]CP/\S+\.sh"' "$skill")" || rc=$?
+  invocations="$(grep -cE '^[[:space:]]*bash "[$]CP/[^[:space:]]+\.sh"' "$skill")" || rc=$?
   case "$rc" in
     0) if (( invocations > 0 )); then pass; else fail "${name}: no bash-prefixed invocations found"; fi ;;
     1) fail "${name}: no bash-prefixed invocations found — the convention regressed" ;;
@@ -95,11 +95,24 @@ check_invocations() { # <skill-name> <skill-file>
   # agent runs each block as its own tool call, in a fresh shell.
   local unresolved
   rc=0
-  unresolved="$(awk '
-    /^[[:space:]]*```/ { inblock = !inblock; resolved = 0; next }
-    !inblock { next }
-    /^[[:space:]]*CP=/ { resolved = 1; next }
-    index($0, "$CP") && !resolved { print FNR ": " $0 }
+  # The bootstrap exception permits this exact directory choice only. Check
+  # every shell block, including its interpreter and continuation shape.
+  # shellcheck disable=SC2016 # Match the documented shell source literally.
+  local bootstrap='CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"'
+  unresolved="$(awk -v bootstrap="$bootstrap" '
+    /^```bash/ { inblock = 1; row = 0; next }
+    /^```/ { if (inblock && row < 2) print FNR ": incomplete bootstrap block"; inblock = 0; next }
+    !inblock || /^[[:space:]]*$/ { next }
+    {
+      row++
+      if (row == 1 && $0 != bootstrap) print FNR ": unsupported bootstrap: " $0
+      if (row == 2 && $0 !~ /^(bash|python3) "\$CP\/skills\/[^[:space:]]+\.(sh|py)"([[:space:]]|$)/)
+        print FNR ": expected quoted co-shipped script invocation: " $0
+      if (row > 2 && $0 !~ /^[[:space:]]+(-|<|\[|"\$CP\/)/)
+        print FNR ": expected script arguments only: " $0
+      if (row > 1 && (index($0, "$(") || index($0, "`") || index($0, ";") || index($0, "&&") || index($0, "||")))
+        print FNR ": inline evaluation is forbidden: " $0
+    }
   ' "$skill")" || rc=$?
   if (( rc != 0 )); then
     die "awk failed scanning ${skill} for unresolved \$CP uses (exit ${rc})"
@@ -161,12 +174,13 @@ check_mode_gate() { # <skill-name> <skill-file>
 # fixtures. Substitute a task-owned fixture root for the HOME token without
 # changing the process's HOME or touching the user's installed plugin.
 check_install_shapes() { # <skill-file>
-  local fixture resolver invocation code output rc shape local_root global_root
+  local fixture resolver original_resolver invocation code output rc shape local_root global_root
   fixture="$(mktemp -d)" || die "cannot create install-shape fixture"
   INSTALL_FIXTURE="$fixture"
   resolver="$(awk '/^CP=/{print; exit}' "$1")" || die "cannot read documented resolver"
   invocation="$(awk '/^bash .*roster[.]sh/{print; exit}' "$1")" || die "cannot read roster invocation"
   [[ -n "$resolver" && -n "$invocation" ]] || die "missing executable roster example"
+  original_resolver="$resolver"
   resolver="${resolver//\$HOME/\$INVOCATION_FIXTURE_GLOBAL}"
   code="$resolver"$'\n'"$invocation"
   local_root="$fixture/project with spaces/.tessl/plugins/jbaruch/coding-policy"
@@ -188,6 +202,21 @@ check_install_shapes() { # <skill-file>
       mv "$local_root" "$fixture/local-unused" || die "cannot stage global-only install"
     elif [[ "$shape" == global ]]; then
       mv "$global_root" "$fixture/global-unused" || die "cannot stage missing install"
+    fi
+  done
+  local bad_block
+  for bad_block in \
+    $'CP=.tessl/plugins/jbaruch/coding-policy\nbash "$CP/skills/herdr-teamlead/roster.sh"' \
+    $'bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/roster.sh' \
+    $'"$HOME/.tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/roster.sh"' \
+    "$original_resolver"$'\n'"$invocation"$'\n  eval unsafe'; do
+    # shellcheck disable=SC2016 # Backticks delimit Markdown, not shell commands.
+    printf '```bash\n%s\n```\n' "$bad_block" > "$fixture/invalid.md" || die "cannot write invalid bootstrap fixture"
+    if bash -c 'source "$1"; check_invocations invalid "$2"; (( FAIL > 0 ))' \
+      bash "${BASH_SOURCE[0]}" "$fixture/invalid.md" > "$fixture/guard.log" 2>&1; then
+      pass
+    else
+      fail "bootstrap guard accepted a nonconforming command block"
     fi
   done
   rm -rf "$fixture" || warn_cleanup "$fixture"
