@@ -34,20 +34,37 @@ Emits `{"repo","viewer_login","owner_login","owner_type","viewer_permission","na
 `authorized` reflects namespace ownership alone; write permission never sets it
 (`rules/external-repo-contributions.md` Default Deny).
 
-- **`authorized: true`** — record the authority line for the briefs:
-  `owner of <owner/repo>`. Set `EXTERNAL_PERMISSION` to `none`. Proceed to
-  Step 4.
-- **`authorized: false`** — the operator does not own this repo. Ask the
-  operator for permission naming the repo AND each action type, then record
-  their exact words in `EXTERNAL_PERMISSION` and set the authority line to
-  `not owner; permitted this round: <their words>`. Without that answer, the
-  round is read-only: compose briefs that forbid every external write, or stop.
-  Never compose a brief that claims authority the operator did not give.
+- **`authorized: true`** — set `AUTHORITY_STATEMENT` to
+  `owner of <owner/repo>` and additional `EXTERNAL_PERMISSION` to `none`.
+- **`authorized: false`** — set `AUTHORITY_STATEMENT` to
+  `not owner of <owner/repo>`. Record existing explicit operator permission
+  naming the repo and each action type in `EXTERNAL_PERMISSION`. If none
+  covers the required write, prepare a preview and ask only for that missing
+  permission under `rules/external-repo-contributions.md`, or proceed read-only.
+  Without permission, set `EXTERNAL_PERMISSION` and `AUTHORIZED_ACTIONS` to
+  `none`. Never infer permission from a role assignment.
 - **Exit 1** — a precondition failed: usage, `gh` or `jq` absent, or `gh` not
   logged in. Report the message verbatim, finish here.
 - **Exit 2** — GitHub could not answer. An unanswerable question is not a
   permission. Report it and finish here.
 
+For either result, `TASK_AUTHORIZATION` records the actual operator source and
+words. `AUTHORIZED_ACTIONS` names the target repo and the actions permitted for
+this round within that task. Use `none` for read-only repository work. Existing
+authorization persists; do not ask again for covered actions. Ownership alone
+does not authorize release or convert an inspection task into implementation.
+
+For an owner who requested shipping `example/project`, a release round can
+carry `owner of example/project`, the actual shipping instruction in
+`TASK_AUTHORIZATION`, and `example/project: create PR, request reviews, reply
+to review threads, merge, publish, and clean up the released branch` in
+`AUTHORIZED_ACTIONS`. `EXTERNAL_PERMISSION: none` then means no additional
+non-owner permission is needed. Include only actions covered by the actual task.
+
+For an inspection-only task, owner or non-owner, `AUTHORIZED_ACTIONS: none`
+keeps the repository read-only. An unapproved non-owner assignment also uses
+`EXTERNAL_PERMISSION: none`; the lead selects read-only work or stops. A role
+requiring writes must report BLOCKED under COMMON's bounds before any write.
 Proceed immediately to Step 4.
 
 ## Step 4 — Measure Headroom
@@ -186,8 +203,9 @@ script's contract; see the header of
 What you decide, and it is the whole of your job here:
 
 - `SHARED_CHECKOUT` — the checkout the workers read.
-- `AUTHORITY_STATEMENT` and `EXTERNAL_PERMISSION` — verbatim from Step 3. Never
-  a claim you composed yourself.
+- `AUTHORITY_STATEMENT`, `TASK_AUTHORIZATION`, `AUTHORIZED_ACTIONS`, and
+  `EXTERNAL_PERMISSION` — Step 3's verified ownership, actual operator source,
+  bounded task actions, and any additional non-owner permission.
 - Per role: `ISSUE`, `BRANCH`, `WORKTREE`, `REPORT`, `REPORTS_DIR`, and the
   phase and mode that role runs this round.
 - For reviewer and tester: `REVIEW_PACKAGE`, `REVIEW_BASE`, and `REVIEW_HEAD`
