@@ -72,8 +72,9 @@ Proceed to Step 11 with the roles that were dispatched.
     continue to the next worker.
   - The state is `idle` or `done` — record the worker as producing no report
     and continue to the next worker. Never re-dispatch on top of it. The
-    cause is a report path too long for one pane row; Step 7's compose gate
-    refuses those, so this outcome means a brief bypassed it.
+    marker may be wrapped, quoted, absent, or identify another attempt. Do
+    not join rows or use a matching filename as proof. Step 7 requires a fresh
+    report destination and bounds its length; narrow panes can still wrap it.
 - **Exit 3** — the worker is blocked at an approval or question dialog,
   confirmed across two reads and the pane. Read the dialog with
   `herdr pane read <pane-id> --source visible`, relay its text to the operator

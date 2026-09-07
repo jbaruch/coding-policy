@@ -27,8 +27,7 @@
 #  13. No set -u abort -> every case's stderr is checked for "unbound
 #                         variable", including the success path, which emits
 #                         its JSON and exits 0 before the abort would fire.
-#  14. Soft-wrapped     -> the prefix and the basename on different rows still
-#                         complete: the long line wraps in `--source visible`.
+#  14. Soft-wrapped     -> rows are never joined or matched independently.
 #  14b. Wrap in basename-> a row break inside the basename is exit 4, never found.
 #  15. Decoy REPORT     -> another report's line does NOT complete this wait,
 #                         including one whose basename ENDS with this one's.
@@ -91,7 +90,7 @@ case "${1:-} ${2:-}" in
     exit 0
     ;;
   "pane read")
-    printf '%s\n' "${FAKE_PANE_TEXT-REPORT: /tmp/report.md}"
+    printf '%s\n' "${FAKE_PANE_TEXT-REPORT: ${FAKE_REPORT_PATH:?fake herdr: report path unset}}"
     exit "${FAKE_PANE_READ_RC:-0}"
     ;;
   "pane wait-output")
@@ -165,6 +164,7 @@ main() {
   mk_fake_herdr "$FAKE"
 
   local report="$TMP/report.md" missing="$TMP/never-written.md"
+  export FAKE_REPORT_PATH="$report"
   printf '# report\n' > "$report" || die "could not write $report"
 
   FAIL=0; PASS=0; RUN_SEQ=0
@@ -288,10 +288,8 @@ main() {
   if [[ $RC -eq 0 && ! -s "$TMP/e13" ]] && printf '%s' "$OUT" | jq -e '.found == true' >/dev/null 2>&1; then
     pass; else fail "clean success: expected exit 0 with empty stderr, got RC=$RC ERR=$(cat "$TMP/e13")"; fi
 
-  # 14. The real pane shape this has to read: Claude Code and Grok soft-wrap
-  #     the long REPORT line, so the prefix lands on one row and the path
-  #     continues on the next. A full-path literal would never match; the
-  #     basename on the wrapped row is what confirms it.
+  # 14. A path split across rows has no provable identity. Even an intact
+  #     basename must not certify the current file from a different directory.
   RUN_SEQ=$((RUN_SEQ+1))
   local wrapped
   base="$(basename "$report")"
@@ -301,8 +299,8 @@ ${base}"
     TEAMLEAD_WAIT_INTERVAL_SEC=0 TEAMLEAD_WAIT_BUDGET_SEC=0 TEAMLEAD_BLOCKED_CONFIRM_SEC=0 \
     FAKE_MARKER=found FAKE_STATUS=idle FAKE_PANE_TEXT="$wrapped" \
     bash "$SCRIPT" worker "$report" </dev/null 2>"$TMP/e14")"; RC=$?
-  if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | jq -e '.found == true' >/dev/null 2>&1; then
-    pass; else fail "wrapped marker: expected found true, got RC=$RC OUT=$OUT ERR=$(cat "$TMP/e14")"; fi
+  if [[ $RC -eq 1 ]] && printf '%s' "$OUT" | jq -e '.found == false' >/dev/null 2>&1; then
+    pass; else fail "wrapped marker: expected found false, got RC=$RC OUT=$OUT ERR=$(cat "$TMP/e14")"; fi
   assert_no_unbound "$(cat "$TMP/e14")" "wrapped marker"
 
   # 14b. The wrap a per-row check cannot see: the row break lands INSIDE the
@@ -408,6 +406,45 @@ ${base}"
     bash "$SCRIPT" worker "$report" </dev/null 2>"$TMP/e20")"; RC=$?
   if [[ $RC -ne 0 ]] && printf '%s' "$OUT" | jq -e '.found == false' >/dev/null 2>&1; then
     pass; else fail "metachar decoy: expected found false, got RC=$RC OUT=$OUT"; fi
+
+  # 20b. Exact identity and row context matter even with the current file
+  #      present. Exercise the public watcher, not just its matching helper.
+  local decoy
+  for decoy in \
+    "REPORT: /example/previous/${base}" \
+    "REPORT: ${report}.old" \
+    "REPORT: /example/previous/${base}"$'\n'"Current file: ${report}" \
+    "REPORT: ${TMP}/"$'\n'"${base}" \
+    "> REPORT: ${report}" \
+    "- REPORT: ${report}" \
+    "    REPORT: ${report}" \
+    "Previous marker was REPORT: ${report}" \
+    '`REPORT: '"${report}"'`' \
+    $'```text\n'"REPORT: ${report}"$'\n```' \
+    $'~~~\n'"REPORT: ${report}"$'\n~~~' \
+    $'````\n```\n'"REPORT: ${report}"$'\n````' \
+    $'```\n```not-a-close\n'"REPORT: ${report}"$'\n```'; do
+    run "$report" FAKE_MARKER=found FAKE_STATUS=done FAKE_PANE_TEXT="$decoy"
+    if [[ $RC -eq 1 ]] && printf '%s' "$OUT" | jq -e '.found == false' >/dev/null 2>&1; then
+      pass; else fail "unconfirmed identity/context: RC=$RC OUT=$OUT pane=$decoy"; fi
+  done
+
+  # A quoted old marker does not suppress a separate current completion line.
+  run "$report" FAKE_MARKER=found FAKE_STATUS=working \
+    FAKE_PANE_TEXT=$'```\nREPORT: /example/previous/report.md\n```\n'"  REPORT: ${report}"
+  if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | jq -e '.found == true' >/dev/null 2>&1; then
+    pass; else fail "independent current marker: RC=$RC OUT=$OUT"; fi
+
+  # Path metacharacters stay literal, with no regex or word-splitting changes.
+  local special="$TMP/report [1]+.md"
+  printf '# report\n' > "$special" || die "could not write literal path fixture"
+  run "$special" FAKE_MARKER=found
+  if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | jq -e '.found == true' >/dev/null 2>&1; then
+    pass; else fail "literal current path: RC=$RC OUT=$OUT"; fi
+
+  run "$report"$'\nREPORT: /example/previous/report.md' FAKE_MARKER=found
+  if [[ $RC -eq 2 && -z "$OUT" ]]; then
+    pass; else fail "multiline report path must be refused: RC=$RC OUT=$OUT"; fi
 
   # 21. The file is there, the worker reads idle twice, and the marker is never
   #     seen at all (wait-output times out): exit 4 with a reason, well inside
