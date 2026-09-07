@@ -54,14 +54,19 @@ from .herdr import (
 from .composer import COMPOSER_READ_LINES, COMPOSER_READ_SOURCE, checkable
 from .probe import PROBE_READ_LINES, PROBE_READ_SOURCE, resolve_status, stderr_warn
 from .state import MAX_FIX_ROUNDS
+from .recovery import empty_recovery, fresh_transition, task_record, validate_work
 from .launch import restart_worker, verify_running
 from .tiers import launch_flags
 from .qualification import require_qualification
 
 # Version 3 adds verified model-tier metadata to context and task/fix evidence.
-APPLY_SCHEMA_VERSION = 3
+APPLY_SCHEMA_VERSION = 4
 
 RETAIN_CONTEXT_ROUNDS = frozenset({1, 2, 3})
+
+# Some native clients publish SessionStart only after their first prompt. The
+# post-dispatch handshake polls the official integration, never pane labels.
+SESSION_CORRELATION_READS = 3
 
 #: States teamlead will type into. Anything else is refused, always.
 SETTLE_STATES = ("idle", "done")
@@ -230,7 +235,7 @@ def validate_agents(assignments, agents_by_name):
             )
 
 
-def validate_context_mode(assignments, no_clear, retain_context, task, fix_round):
+def validate_context_mode(assignments, no_clear, retain_context, task, fix_round, *, recovery=None, history=None, plan_id=None, work=None):
     """Validate the explicit context choice before any herdr operation."""
     if no_clear and retain_context:
         raise UsageError("Choose --no-clear or --retain-context, never both.", {})
@@ -244,13 +249,16 @@ def validate_context_mode(assignments, no_clear, retain_context, task, fix_round
         )
     if fix_round is not None and (
         isinstance(fix_round, bool) or not isinstance(fix_round, int)
-        or not 1 <= fix_round <= MAX_FIX_ROUNDS
+        or fix_round < 1
     ):
         raise UsageError(
             "Fix rounds must be 1–{}; after the cap, dispatch the judge.".format(MAX_FIX_ROUNDS), {}
         )
     if fix_round is not None and (not isinstance(task, str) or not task.strip()):
         raise UsageError("Pass --task with --fix-round to identify the task.", {})
+    store = recovery if recovery is not None else empty_recovery()
+    validate_work(store, history or [], task, fix_round, plan_id, work, implementation="developer" in assignments)
+    transition = fresh_transition(store, history or [], task, fix_round)
     if retain_context and (
         set(assignments) != {"developer"} or fix_round not in RETAIN_CONTEXT_ROUNDS
     ):
@@ -258,9 +266,14 @@ def validate_context_mode(assignments, no_clear, retain_context, task, fix_round
             "--retain-context requires one developer assignment and --fix-round 1, 2 or 3.", {}
         )
     if "developer" in assignments and fix_round in RETAIN_CONTEXT_ROUNDS and not retain_context:
-        raise UsageError("Early developer fix rounds require --retain-context.", {})
+        if transition is None:
+            raise UsageError("Early developer fix rounds require --retain-context or a recorded release/context recovery handoff. Inspect teamlead state and follow dispatch-recovery.md without resetting the task.", {})
+        task_record(store, task)
+        if no_clear:
+            raise UsageError("A replacement developer session requires an automatic clear; omit --no-clear.", {})
     if no_clear and fix_round is not None and fix_round not in RETAIN_CONTEXT_ROUNDS:
         raise UsageError("Fresh fix rounds require an automatic clear; omit --no-clear.", {})
+    return transition if not retain_context and "developer" in assignments else None
 
 
 def validate_fix_history(assignments, history, task, fix_round):
@@ -271,8 +284,8 @@ def validate_fix_history(assignments, history, task, fix_round):
              and row.get("role") == "developer" and row.get("status") == "applied"]
     completed = max((row.get("fix_round") or 0 for row in prior), default=0)
     if fix_round is None:
-        if completed:
-            raise UsageError("Task {!r} already has fixes; do not reset its counter.".format(task), {})
+        if prior:
+            raise UsageError("Task {!r} already has a developer assignment; do not reset its counter. Use its next fix or replay the original dispatch identity.".format(task), {})
         return
     if not prior or fix_round != completed + 1:
         raise UsageError(
@@ -332,6 +345,39 @@ def verify_live_retention(prior, current, name):
             "context without resetting the fix counter. No brief was sent.".format(name),
             {"agent": name},
         )
+
+
+def correlate_dispatch_session(client, agent, pane_id, previous, before_prompt, *,
+                               cleared, warn, sleep, settle_sec):
+    """Bind a confirmed first prompt to the native session it started.
+
+    A pre-clear identity is stale even when it arrives again after dispatch.
+    A different identity from the one observed immediately before the prompt
+    cannot prove continuity either. Failure here does not undo a sent prompt.
+    """
+    for attempt in range(SESSION_CORRELATION_READS):
+        try:
+            current = native_context_session(client.agent_get(agent.name), agent.kind)
+        except HerdrError as exc:
+            warn("{} was dispatched but its native session could not be correlated: {}. "
+                 "Wait for its report; do not send the assignment again.".format(agent.name, exc))
+            return None
+        if current is not None and current["pane_id"] != pane_id:
+            warn("{} changed panes after dispatch; session binding is unavailable. "
+                 "Wait for its report and recover the recorded assignment before retaining.".format(agent.name))
+            return None
+        if current is not None and (not cleared or current != previous):
+            if before_prompt is not None and current != before_prompt:
+                warn("{} changed native sessions across the dispatch; continuity is unproven. "
+                     "Wait for its report and use the recorded recovery path; do not resend.".format(agent.name))
+                return None
+            return current
+        if attempt + 1 < SESSION_CORRELATION_READS:
+            sleep(settle_sec)
+    warn("{} has no verified post-clear native session reference after dispatch. "
+         "The sent assignment remains recorded; wait for its report, check `herdr integration status`, "
+         "and recover that assignment before retaining context. Do not resend it.".format(agent.name))
+    return None
 
 
 def build_steps(client, assignments, agents_by_name, paths, panes=None, no_clear=False, settle_timeout_ms=DEFAULT_SETTLE_TIMEOUT_MS, start_timeout_ms=DEFAULT_START_TIMEOUT_MS, track_context=False, tiers=None):
@@ -480,7 +526,7 @@ def check_all_ready(client, assignments, agents_by_name, warn=None):
     return statuses
 
 
-def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle_timeout_ms=DEFAULT_SETTLE_TIMEOUT_MS, on_assigned=None, warn=None, sleep=time.sleep, settle_sec=COMPOSER_SETTLE_SEC, landing_attempts=LANDING_ATTEMPTS, start_timeout_ms=DEFAULT_START_TIMEOUT_MS, allow_recovery=False, task=None, retain_context=False, fix_round=None, history=None, tiers=None, qualifications=None):
+def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle_timeout_ms=DEFAULT_SETTLE_TIMEOUT_MS, on_assigned=None, warn=None, sleep=time.sleep, settle_sec=COMPOSER_SETTLE_SEC, landing_attempts=LANDING_ATTEMPTS, start_timeout_ms=DEFAULT_START_TIMEOUT_MS, allow_recovery=False, task=None, retain_context=False, fix_round=None, history=None, tiers=None, qualifications=None, recovery=None, plan_id=None, work=None, on_prepare=None, on_before_send=None, on_result=None):
     """Hand each agent its brief using the selected context mode.
 
     `on_assigned(role, agent, at, status, context)` is called after each hand-off so the
@@ -490,7 +536,8 @@ def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle
     and must not count as experience of the role.
     """
     validate_agents(assignments, agents_by_name)
-    validate_context_mode(assignments, no_clear, retain_context, task, fix_round)
+    transition = validate_context_mode(assignments, no_clear, retain_context, task, fix_round,
+                                       recovery=recovery, history=history, plan_id=plan_id, work=work)
     validate_fix_history(assignments, history, task, fix_round)
     prior = validate_retained_history(assignments, history, task, fix_round) if retain_context else None
     tiers = dict(tiers or {})
@@ -543,6 +590,8 @@ def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle
     for step in steps:
         name = step["agent"]
         agent = agents_by_name[name]
+        if on_prepare is not None:
+            on_prepare(step, statuses[name])
         cleared = False
         tier = tiers.get(step["role"])
         tier_record = None
@@ -605,10 +654,12 @@ def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle
                 verify_live_retention(prior, context_session, name)
             elif cleared and context_session == statuses[name]["context_session"]:
                 context_session = None
-            if context_session is None:
-                warn("{} has no verified post-clear native session reference; future retained fixes will be refused. Check `herdr integration status`.".format(name))
         # send_message re-checks the composer, pastes, and confirms the
         # message actually landed as a user message rather than as a command.
+        if on_before_send is not None:
+            on_before_send(step, {"cleared": cleared, "clear_reason": clear_reason,
+                                  "context_session": context_session, "tier": tier_record,
+                                  "transition": transition if step["role"] == "developer" else None})
         landing = send_message(
             client,
             agent,
@@ -622,6 +673,11 @@ def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle
             attempts=landing_attempts,
             start_timeout_ms=start_timeout_ms,
         )
+        if task is not None and step["role"] == "developer" and prior is None:
+            context_session = (correlate_dispatch_session(
+                client, agent, step["pane_id"], statuses[name]["context_session"], context_session,
+                cleared=cleared, warn=warn, sleep=sleep, settle_sec=settle_sec,
+            ) if landing["landed"] or landing["started"] else None)
         checked = statuses.get(name, {})
         record = {
             "role": step["role"],
@@ -644,7 +700,15 @@ def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle
             "brief": step["brief"],
             "common": step["common"],
             "at": at,
+            "context_transition": transition if step["role"] == "developer" else None,
         }
+        # Persist the dispatch outcome before optional UI work. A broken pipe
+        # during pane relabeling must never erase a confirmed handoff.
+        if on_assigned is not None:
+            context = {key: record[key] for key in ("cleared", "clear_reason", "task", "fix_round", "context_session", "tier")}
+            on_assigned(step["role"], name, at, record["status"], context)
+        if on_result is not None:
+            on_result(record)
         # A sidebar of w1 w2 w3 tells the operator nothing. Label the pane with
         # who is doing what, but only once the hand-off is CONFIRMED: a label
         # claiming a role nobody started is worse than no label. Cosmetic, so a
@@ -668,9 +732,6 @@ def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle
             record["pane_label"] = None
 
         applied.append(record)
-        if on_assigned is not None:
-            context = {key: record[key] for key in ("cleared", "clear_reason", "task", "fix_round", "context_session", "tier")}
-            on_assigned(step["role"], name, at, record["status"], context)
 
     return {
         "schema_version": APPLY_SCHEMA_VERSION,
@@ -680,14 +741,15 @@ def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle
     }
 
 
-def dry_run(client, assignments, agents_by_name, paths, no_clear=False, settle_timeout_ms=DEFAULT_SETTLE_TIMEOUT_MS, retain_context=False, task=None, fix_round=None, tiers=None):
+def dry_run(client, assignments, agents_by_name, paths, no_clear=False, settle_timeout_ms=DEFAULT_SETTLE_TIMEOUT_MS, retain_context=False, task=None, fix_round=None, tiers=None, recovery=None, history=None, plan_id=None, work=None):
     """Print the plan without contacting herdr at all.
 
     Deliberately makes zero herdr calls, including the status check: a dry run
     against busy agents must show the plan rather than refuse it. The live
     `apply` re-checks status for real before sending anything.
     """
-    validate_context_mode(assignments, no_clear, retain_context, task, fix_round)
+    transition = validate_context_mode(assignments, no_clear, retain_context, task, fix_round,
+                                       recovery=recovery, history=history, plan_id=plan_id, work=work)
     return {
         "schema_version": APPLY_SCHEMA_VERSION,
         "dry_run": True,
@@ -695,6 +757,7 @@ def dry_run(client, assignments, agents_by_name, paths, no_clear=False, settle_t
         "clear_reason": "retained" if retain_context else "hand" if no_clear else "automatic",
         "task": task,
         "fix_round": fix_round,
+        "context_transition": transition,
         "steps": build_steps(
             client,
             assignments,

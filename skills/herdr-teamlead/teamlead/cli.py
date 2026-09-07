@@ -13,13 +13,15 @@ I/O contract:
 import argparse
 import json
 import sys
+from contextlib import nullcontext
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
 from . import __version__
 from .assign import apply as apply_assignments
-from .assign import dry_run, normalize_assignments, resolve_paths
+from .assign import APPLY_SCHEMA_VERSION, dry_run, native_context_session, normalize_assignments, resolve_paths, validate_fix_history
+from . import recovery
 from .config import default_config_path, load_config, load_judge, load_role_costs, select_agents
 from .errors import PlanError, StateError, TeamLeadError, UsageError
 from .herdr import (
@@ -49,6 +51,7 @@ from .state import (
     load_state_checked,
     role_counts,
     save_state,
+    state_lock,
 )
 
 EPILOG = (
@@ -212,6 +215,7 @@ def build_parser():
     plan_parser.add_argument("--round-context", metavar="FILE",
                              help="JSON object keyed by role with mechanical/risk evidence for this round.")
     plan_parser.add_argument("--fix-round", type=int, help="Task fix number; late fixes use the top tier.")
+    plan_parser.add_argument("--task", help="Original task identity; preserve it through every correction.")
     plan_parser.add_argument("--preview-tiers", action="store_true",
                              help="Preview unqualified tiers. Live apply still requires complete qualification evidence.")
     plan_parser.add_argument("--now", metavar="ISO-8601", help="Reference time for qualification expiry (default: current UTC time).")
@@ -306,6 +310,17 @@ def build_parser():
         metavar="MS",
         help="How long to wait for an agent to settle after clearing (default: %(default)s).",
     )
+
+    for command_parser in (plan_parser, apply_parser):
+        command_parser.add_argument("--correction-plan", help="Recorded bounded approval for extra corrections.")
+        command_parser.add_argument("--work", metavar="FILE", help="Correction base, scope, paths and blocking findings as JSON.")
+    apply_parser.add_argument("--dispatch-id", help="Stable dispatch identity; retries read its recorded outcome.")
+
+    for command in ("task", "checkpoint", "authorize-corrections", "recover-context", "record-report", "reconcile"):
+        record_parser = sub.add_parser(command, parents=[common], help="Record owner-managed {} evidence.".format(command))
+        record_parser.add_argument("--record", required=True, metavar="FILE", help="Structured evidence JSON; see dispatch-recovery.md.")
+        record_parser.add_argument("--now", metavar="ISO8601")
+    sub.add_parser("status", parents=[common], help="Show implementation budgets and paused work separately from active audit workers.")
 
     sub.add_parser(
         "state",
@@ -466,7 +481,7 @@ def _candidate_tiers(roles, agents, rounds, fix_round=None, judge=None, qualifie
     return candidates
 
 
-def _load_state_for_write(path, warn):
+def _load_state_for_write(path, warn, *, persist_migration=True):
     """Read state a caller intends to write back, or refuse.
 
     `load_state_checked` leaves an unreadable file exactly as found and hands
@@ -475,7 +490,7 @@ def _load_state_for_write(path, warn):
     ledger with it -- so a write path refuses instead, and says how to keep
     both.
     """
-    state, usable = load_state_checked(path, warn=warn)
+    state, usable = load_state_checked(path, warn=warn, persist_migration=persist_migration)
     if not usable:
         raise StateError(
             "State file {} could not be read (see the warning above), and "
@@ -485,6 +500,16 @@ def _load_state_for_write(path, warn):
             {"path": str(path)},
         )
     return state
+
+
+def _read_record(path):
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise UsageError("Cannot read record {}: {}. Supply readable UTF-8 JSON with the documented fields.".format(path, exc), {}) from None
+    if not isinstance(data, dict):
+        raise UsageError("A record must be a JSON object; use the documented field names.", {})
+    return data
 
 
 def cmd_measure(args, client=None, warn=None, trace=None):
@@ -523,10 +548,15 @@ def cmd_plan(args, client=None, warn=None, trace=None):
     judge = load_judge(_config_path(args))
     rounds = _round_inputs(args, roles)
     agents = load_config(_config_path(args)) if _config_path(args).exists() else []
-    tier_candidates = _candidate_tiers(roles, agents, rounds, args.fix_round, judge,
-                                      None if args.preview_tiers else (args.now or now_iso()))
     state_path = _state_path(args)
     state = load_state(state_path, warn=warn)
+    work = _read_record(args.work) if args.work else None
+    recovery.validate_work(state["recovery"], state["assignments"], args.task, args.fix_round,
+                           args.correction_plan, work, implementation="developer" in roles)
+    if args.task:
+        validate_fix_history({role: None for role in roles}, state["assignments"], args.task, args.fix_round)
+    tier_candidates = _candidate_tiers(roles, agents, rounds, args.fix_round, judge,
+                                      None if args.preview_tiers else (args.now or now_iso()))
 
     if args.snapshot:
         snapshot_path = Path(args.snapshot)
@@ -565,8 +595,7 @@ def cmd_plan(args, client=None, warn=None, trace=None):
             {"source": source},
         )
 
-    return (
-        build_plan(
+    result = build_plan(
             roles,
             snapshot,
             role_counts(state),
@@ -584,9 +613,10 @@ def cmd_plan(args, client=None, warn=None, trace=None):
             warn=warn,
             tier_candidates=tier_candidates,
             rounds=rounds,
-        ),
-        None,
-    )
+        )
+    result["task_context"] = ({"task": args.task, "fix_round": args.fix_round,
+                               "plan": args.correction_plan, "work": work} if args.task else None)
+    return result, None
 
 
 def cmd_apply(args, client=None, warn=None, trace=None):
@@ -605,6 +635,38 @@ def cmd_apply(args, client=None, warn=None, trace=None):
         raise UsageError("Judge assignment must match the pinned judge in config.json.", {})
     if judge and any(name == judge.agent and role != "judge" for role, name in assignments.items()):
         raise UsageError("The pinned judge worker cannot hold another role.", {})
+    state_path = _state_path(args)
+    state = _load_state_for_write(state_path, warn, persist_migration=not args.dry_run)
+    store = state["recovery"]
+    at = args.now or now_iso()
+    work = _read_record(args.work) if args.work else None
+    task_context = {"task": args.task, "fix_round": args.fix_round, "plan": args.correction_plan, "work": work}
+    if document.get("task_context") is not None and document["task_context"] != task_context:
+        raise UsageError("Saved plan and apply name different task, count or correction bounds; replan from the current ledger.", {})
+    paths = resolve_paths(assignments, _parse_briefs(args.briefs), args.common)
+    replayed = []
+    dispatches = {}
+    # Check retry identities before next-attempt validation: a completed retry
+    # returns its original outcome and never consumes a second attempt.
+    if args.task and not args.dry_run:
+        for role, name in assignments.items():
+            identifier, fingerprint = recovery.dispatch_identity(
+                args.task, role, name, args.fix_round, paths, args.dispatch_id,
+                options={**task_context, "rounds": rounds, "retain_context": args.retain_context, "no_clear": args.no_clear})
+            prior = recovery.prior_dispatch(store, identifier, fingerprint)
+            if prior and prior["status"] == "applied":
+                replayed.append({**prior["result"], "dispatch_id": identifier, "replayed": True})
+            else:
+                dispatches[role] = {"id": identifier, "fingerprint": fingerprint, "role": role, "agent": name,
+                                    "task": args.task, "fix_round": args.fix_round,
+                                    "plan": args.correction_plan, "work": work}
+        if len(replayed) == len(assignments):
+            return {"schema_version": APPLY_SCHEMA_VERSION, "dry_run": False, "applied_at": at, "applied": replayed}, None
+        assignments = {role: name for role, name in assignments.items() if role in dispatches}
+    elif args.dispatch_id and not args.task:
+        raise UsageError("--dispatch-id requires --task; preserve the task's identity for retry accounting.", {})
+    recovery.validate_work(store, state["assignments"], args.task, args.fix_round,
+                           args.correction_plan, work, implementation="developer" in assignments)
     candidates = _candidate_tiers(list(assignments), agents, rounds, args.fix_round, judge)
     tiers = {}
     if candidates is not None:
@@ -613,10 +675,9 @@ def cmd_apply(args, client=None, warn=None, trace=None):
                 raise UsageError("Assigned agent {} has no eligible tier for {}; replan from current config.".format(name, role), {})
             if candidates[role][name] is not None:
                 tiers[role] = candidates[role][name]
-        saved_tiers = {role: tier for role, tier in document.get("tiers", {}).items() if tier is not None} if isinstance(document.get("tiers", {}), dict) else None
+        saved_tiers = {role: tier for role, tier in document.get("tiers", {}).items() if tier is not None and role in assignments} if isinstance(document.get("tiers", {}), dict) else None
         if "tiers" in document and saved_tiers != tiers:
             raise UsageError("Plan tiers differ from current config or fix context; re-run plan before dispatch.", {})
-    paths = resolve_paths(assignments, _parse_briefs(args.briefs), args.common)
     client = client if client is not None else _client(args, trace=trace)
 
     if args.dry_run:
@@ -632,39 +693,66 @@ def cmd_apply(args, client=None, warn=None, trace=None):
                 fix_round=args.fix_round,
                 settle_timeout_ms=args.settle_timeout,
                 tiers=tiers,
+                recovery=store, history=state["assignments"], plan_id=args.correction_plan, work=work,
             ),
             None,
         )
 
-    state_path = _state_path(args)
-    state = _load_state_for_write(state_path, warn)
+    prepared = []
 
-    def record(role, agent, at, status, context):
-        add_assignment(state, at, role, agent, status=status, **context)
+    def prepare(step, observed):
+        if not args.task:
+            return
+        record = {**dispatches[step["role"]], "observed_before": observed,
+                  "brief": step["brief"], "common": step["common"]}
+        recovery.reserve(store, record, at)
+        save_state(state_path, state)
+        prepared.append(record["id"])
+
+    def before_send(step, context):
+        if args.task:
+            recovery.mark_sending(store, dispatches[step["role"]]["id"], at, context)
+            save_state(state_path, state)
+
+    def record(result):
+        context = {key: result[key] for key in ("cleared", "clear_reason", "task", "fix_round", "context_session", "tier")}
+        add_assignment(state, at, result["role"], result["agent"], status=result["status"], **context)
+        if args.task:
+            result["dispatch_id"] = dispatches[result["role"]]["id"]
+            recovery.finish_dispatch(store, result["dispatch_id"], dict(result), len(state["assignments"]) - 1, at)
         save_state(state_path, state)
 
-    result = apply_assignments(
-        client,
-        assignments,
-        agents_by_name,
-        paths,
-        args.now or now_iso(),
-        no_clear=args.no_clear,
-        retain_context=args.retain_context,
-        fix_round=args.fix_round,
-        history=state["assignments"],
-        settle_timeout_ms=args.settle_timeout,
-        on_assigned=record,
-        warn=warn,
-        task=args.task,
-        settle_sec=args.composer_settle,
-        start_timeout_ms=args.start_timeout,
-        allow_recovery=args.allow_recovery,
-        tiers=tiers,
-        qualifications={role: [record for entry in agents_by_name[name].tiers.values()
-                               for record in entry.get("qualification", [])]
-                        for role, name in assignments.items()},
-    )
+    try:
+        result = apply_assignments(
+            client,
+            assignments,
+            agents_by_name,
+            paths,
+            at,
+            no_clear=args.no_clear,
+            retain_context=args.retain_context,
+            fix_round=args.fix_round,
+            history=state["assignments"],
+            settle_timeout_ms=args.settle_timeout,
+            on_prepare=prepare, on_before_send=before_send, on_result=record,
+            recovery=store, plan_id=args.correction_plan, work=work,
+            warn=warn,
+            task=args.task,
+            settle_sec=args.composer_settle,
+            start_timeout_ms=args.start_timeout,
+            allow_recovery=args.allow_recovery,
+            tiers=tiers,
+            qualifications={role: [record for entry in agents_by_name[name].tiers.values()
+                                   for record in entry.get("qualification", [])]
+                            for role, name in assignments.items()},
+        )
+    except TeamLeadError as exc:
+        for identifier in prepared:
+            recovery.abort_pre_send(store, identifier, at, str(exc))
+        if prepared:
+            save_state(state_path, state)
+        raise
+    result["applied"] = replayed + result["applied"]
     not_started = [
         record["agent"]
         for record in result["applied"]
@@ -683,6 +771,53 @@ def cmd_apply(args, client=None, warn=None, trace=None):
 
 def cmd_state(args, client=None, warn=None, trace=None):
     return load_state(_state_path(args), warn=warn), None
+
+
+def cmd_status(args, client=None, warn=None, trace=None):
+    state = load_state(_state_path(args), warn=warn)
+    return {"schema_version": recovery.RECOVERY_SCHEMA_VERSION,
+            "tasks": recovery.task_statuses(state["recovery"], state["assignments"])}, None
+
+
+def cmd_recovery(args, client=None, warn=None, trace=None):
+    state_path = _state_path(args)
+    state = _load_state_for_write(state_path, warn)
+    store, history = state["recovery"], state["assignments"]
+    data, at = _read_record(args.record), args.now or now_iso()
+    if args.command == "task":
+        result = recovery.register_task(store, data, at)
+    elif args.command == "checkpoint":
+        judge = load_judge(_config_path(args))
+        result = recovery.checkpoint(store, history, data, at, judge.agent if judge else None)
+    elif args.command == "authorize-corrections":
+        result = recovery.authorize_plan(store, history, data, at)
+    elif args.command == "record-report":
+        result = recovery.record_report(store, data, at)
+    else:
+        agents = {agent.name: agent for agent in load_config(_config_path(args))}
+        name = recovery.recovery_agent(store, history, args.command, data)
+        if name not in agents:
+            raise UsageError("The recorded worker is absent from config; restore its original identity before recovering.", {})
+        client = client if client is not None else _client(args, trace=trace)
+        live = client.agent_get(name)
+        recovery.require_recovery_ready(live)
+        if args.command == "recover-context":
+            result = recovery.authorize_context(store, history, data, at, native_context_session(live, agents[name].kind))
+        else:
+            result = recovery.reconcile(store, history, data, at, live)
+            if result["status"] == "applied" and (result.get("result") or {}).get("status") != "applied":
+                context = result.get("context_before_send", {})
+                recovered = {"role": result["role"], "agent": name, "task": result["task"],
+                             "fix_round": result["fix_round"], "status": "applied", "at": at,
+                             "cleared": context.get("cleared"), "clear_reason": context.get("clear_reason", "unknown"),
+                             "context_session": None, "tier": context.get("tier"),
+                             "recovered": True, "dispatch_id": result["id"]}
+                add_assignment(state, at, recovered["role"], name, status="applied", **{
+                    key: recovered[key] for key in ("cleared", "clear_reason", "task", "fix_round", "context_session", "tier")})
+                recovery.finish_dispatch(store, result["id"], recovered, len(history) - 1, at)
+    recovery.validate_store(store, history)
+    save_state(state_path, state)
+    return result, None
 
 
 def cmd_start_judge(args, client=None, warn=None, trace=None):
@@ -706,6 +841,8 @@ COMMANDS = {
     "plan": cmd_plan,
     "apply": cmd_apply,
     "state": cmd_state,
+    "status": cmd_status,
+    **{command: cmd_recovery for command in ("task", "checkpoint", "authorize-corrections", "recover-context", "record-report", "reconcile")},
     "start-judge": cmd_start_judge,
 }
 
@@ -724,7 +861,11 @@ def main(argv=None, stdout=None, stderr=None, client=None):
         stderr.write(DIAGNOSTIC_PREFIX + message + "\n")
 
     try:
-        payload, failure = COMMANDS[args.command](args, client=client, warn=warn, trace=trace)
+        # Readers may migrate state, so they share the same transaction lock.
+        # A dry run and worker launch never acquire or write ledger state.
+        lock = nullcontext() if args.command == "start-judge" or getattr(args, "dry_run", False) else state_lock(_state_path(args))
+        with lock:
+            payload, failure = COMMANDS[args.command](args, client=client, warn=warn, trace=trace)
     except TeamLeadError as exc:
         json.dump(exc.to_dict(), stderr, indent=2)
         stderr.write("\n")

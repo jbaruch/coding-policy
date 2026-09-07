@@ -18,8 +18,8 @@
 #   exit  : 0 every file written with no placeholder left,
 #           1 precondition unmet (usage, missing dir/file/template, no jq),
 #           2 validation failed — an unfilled placeholder, a supplied key no
-#             template uses, a value that is not text, or a REPORT longer
-#             than TEAMLEAD_REPORT_PATH_MAX_COLS, or a reviewer/tester
+#             template uses, a value that is not text, an invalid/reused REPORT
+#             path, a REPORT longer than TEAMLEAD_REPORT_PATH_MAX_COLS, or a reviewer/tester
 #             REVIEW_PACKAGE that is not an absolute readable non-empty file.
 #             Nothing is written on a
 #             validation failure,
@@ -37,9 +37,9 @@ set -euo pipefail
 # A placeholder is upper-case, digits, and underscores between double braces.
 PLACEHOLDER_RE='\{\{[A-Z0-9_]+\}\}'
 # Longest REPORT value a brief may carry. The worker's final message ends with
-# `REPORT: <path>`, and the wait confirms it by finding the report's basename
-# whole on a visible row. A TUI wraps that line at its own content width and
-# a wrap inside the name cannot be told from a newline, so the only sound fix
+# `REPORT: <path>`, and the wait confirms the complete literal on one visible
+# row. A TUI wraps that line at its own content width and
+# a wrap cannot be told from a newline, so the only sound fix
 # is a path that fits one row on every pane this fleet runs: the widest marker
 # line is the prefix plus indentation plus this many characters.
 TEAMLEAD_REPORT_PATH_MAX_COLS="${TEAMLEAD_REPORT_PATH_MAX_COLS:-100}"
@@ -210,7 +210,7 @@ main() {
   # Compose into memory first: a validation failure must leave no half-written
   # round behind, and no output directory either (`rules/file-hygiene.md`
   # Idempotency); the directory is created only once every check has passed.
-  local -a out_paths=() out_bodies=()
+  local -a out_paths=() out_bodies=() report_paths=()
   local merged rendered leftovers supplied known common_known unused key report
   local common_body scan_rc=0
   validate_values "$shared" "the shared values" || return 2
@@ -227,7 +227,29 @@ main() {
   while IFS= read -r role; do
     merged="$(jq -c -n --argjson a "$shared" --argjson b "$(printf '%s' "$values" | jq -c --arg r "$role" '.roles[$r]')" '$a * $b')"
     validate_values "$merged" "the values for role '${role}'" || return 2
+    # Validate in JSON before command substitution can strip trailing newlines
+    # or discard a NUL byte from the path.
+    if ! printf '%s' "$merged" | jq -e '.REPORT | if type == "string" then explode | all(. >= 32 and . != 127) else false end' >/dev/null; then
+      warn "REPORT for role '${role}' must be a string without control characters — choose a fresh absolute file path on one line"
+      return 2
+    fi
     report="$(printf '%s' "$merged" | jq -r '.REPORT // ""')"
+    if [[ "$report" != /* || "$report" == *[[:cntrl:]]* || "$report" == */ ]]; then
+      warn "REPORT for role '${role}' must be an absolute file path on one line — choose a fresh path for this attempt"
+      return 2
+    fi
+    if [[ -e "$report" || -L "$report" ]]; then
+      warn "REPORT for role '${role}' already exists at ${report} — preserve it and choose a fresh path for this attempt"
+      return 2
+    fi
+    local prior_report
+    for prior_report in ${report_paths[@]+"${report_paths[@]}"}; do
+      if [[ "$report" == "$prior_report" ]]; then
+        warn "REPORT for role '${role}' duplicates another role's destination — give each assignment a distinct report path"
+        return 2
+      fi
+    done
+    report_paths+=("$report")
     if (( ${#report} > TEAMLEAD_REPORT_PATH_MAX_COLS )); then
       warn "REPORT for role '${role}' is ${#report} characters; the limit is ${TEAMLEAD_REPORT_PATH_MAX_COLS} so the worker's \`REPORT: <path>\` line fits one pane row and the wait can confirm it — use a shorter reports directory (e.g. one under \$HOME/.local/state) and re-run"
       return 2
@@ -264,6 +286,16 @@ main() {
     out_paths+=("${outdir}/brief-${role}.md")
     out_bodies+=("$rendered")
   done <<< "$roles"
+
+  local output_path
+  for report in "${report_paths[@]}"; do
+    for output_path in "${out_paths[@]}"; do
+      if [[ "$report" == "$output_path" ]]; then
+        warn "REPORT overlaps a generated brief at ${report} — choose a separate report destination"
+        return 2
+      fi
+    done
+  done
 
   if ! mkdir -p "$outdir"; then
     warn "cannot create the output dir ${outdir} — check permissions"

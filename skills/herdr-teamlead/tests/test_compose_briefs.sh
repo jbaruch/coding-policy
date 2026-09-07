@@ -174,8 +174,8 @@ JSON
     pass; else fail "packaged templates: expected exit 0 and a filled release brief, got RC=$RC ERR=$ERRTEXT"; fi
 
   # 6c. A REPORT path that would wrap the worker's marker line is refused
-  #     before any file is written: the wait confirms the report's basename on
-  #     one visible row, and a wrap inside the name cannot be confirmed.
+  #     before any file is written: the wait confirms the complete marker on
+  #     one visible row, and a wrap anywhere in it cannot be confirmed.
   local v6c="$TMP/v6c.json" o6c="$TMP/out6c" long_report
   long_report="/very/long/reports/directory/that/keeps/going/and/going/round-3/reports/developer-report-for-issue-12.md"
   cat > "$v6c" <<JSON || die "could not write $v6c"
@@ -281,6 +281,33 @@ JSON
   run "$TPL" "$v14" "$o14"
   if [[ $RC -eq 0 ]] && grep -q "Tester for 42" "$o14/brief-tester.md"; then
     pass; else fail "number value: expected it to render, got RC=$RC ERR=$ERRTEXT"; fi
+
+  # 15. A new attempt cannot reuse a prior report, or point two roles at one
+  #     destination. Refusal preserves the old file and writes no new briefs.
+  local old_report="$TMP/old-report.md" invalid_report v15="$TMP/v15.json"
+  printf 'Prior attempt\n' > "$old_report" || die "could not write prior report"
+  for invalid_report in "$old_report" "relative/report.md" "/r/report.md"$'\nextra' "/r/report.md"$'\n' "/r/"; do
+    jq --arg p "$invalid_report" '.roles.developer.REPORT = $p' "$v1" > "$v15" \
+      || die "could not build invalid report fixture"
+    run "$TPL" "$v15" "$TMP/out15"
+    if [[ $RC -eq 2 && -z "$OUT" && ! -e "$TMP/out15" ]] \
+       && grep -q 'Prior attempt' "$old_report"; then
+      pass; else fail "invalid/reused report: RC=$RC OUT=$OUT ERR=$ERRTEXT path=$invalid_report"; fi
+  done
+  jq '.roles.tester.REPORT = .roles.developer.REPORT' "$v1" > "$v15" \
+    || die "could not build duplicate report fixture"
+  run "$TPL" "$v15" "$TMP/out15"
+  if [[ $RC -eq 2 && -z "$OUT" && ! -e "$TMP/out15" ]] \
+     && printf '%s' "$ERRTEXT" | grep -q 'distinct report path'; then
+    pass; else fail "shared report destination: RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
+
+  # A generated briefing artifact cannot stand in for a worker's report.
+  jq --arg p "$TMP/out15/brief-developer.md" '.roles.developer.REPORT = $p' "$v1" > "$v15" \
+    || die "could not build overlapping report fixture"
+  TEAMLEAD_REPORT_PATH_MAX_COLS=500 run "$TPL" "$v15" "$TMP/out15"
+  if [[ $RC -eq 2 && -z "$OUT" && ! -e "$TMP/out15" ]] \
+     && printf '%s' "$ERRTEXT" | grep -q 'overlaps a generated brief'; then
+    pass; else fail "report/brief overlap: RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
 
   echo "─────────────────────────────────────────────" >&2
   if [[ $FAIL -gt 0 ]]; then echo "FAILED: ${FAIL} failed, ${PASS} passed" >&2; exit 1; fi

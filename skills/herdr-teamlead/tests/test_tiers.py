@@ -69,6 +69,8 @@ class SelectionTest(unittest.TestCase):
         worker = agent()
         self.assertEqual(select_tier(worker, "developer")["model"], "sonnet-5")
         self.assertEqual(select_tier(worker, "developer", fix_round=4)["model"], "opus-5")
+        for number in (6, 7):
+            self.assertEqual(select_tier(worker, "developer", fix_round=number)["model"], "opus-5")
         self.assertEqual(select_tier(worker, "developer", context={"failed_gates": 2})["model"], "opus-5")
         for context, fix_round, requested in (({}, None, "build"), ({"failed_gates": 2}, None, "build"),
                                              ({}, 4, "fix"), ({"prior_high_miss": True}, None, "build")):

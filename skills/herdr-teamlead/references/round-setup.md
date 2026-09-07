@@ -115,7 +115,10 @@ docstring and `DEFAULT_ROLE_COSTS`.
 
 Tiered configs select each candidate from its per-agent `tiers` table. A
 round choice never overrides a model. Supply the fix number when planning
-fixes; pass that same number at dispatch. Keep the configured operator launch
+fixes; pass that same number at dispatch. Register the original task/base with
+`teamlead task` and use the same `--task` on plan and apply. Authorized extra
+fixes also share `--correction-plan` and `--work`; their owner-managed bounds
+are documented in `references/dispatch-recovery.md`. Keep the configured operator launch
 options across worker restarts. The config, round-input, billing-evidence,
 and qualification contracts are in:
 
@@ -177,7 +180,8 @@ own value beats the shared one. Emits
 `{"common":"<path>","briefs":{"<role>":"<path>"}}`. Exit 2 means validation
 failed and nothing was written — an absent or unreadable review package,
 an unfilled placeholder, a supplied key no template uses, a value that is not
-text, or a `REPORT` longer than the
+text, a relative, multiline, existing or duplicated `REPORT` destination,
+a report overlapping a generated brief, or a `REPORT` longer than the
 script's limit (the worker's `REPORT: <path>` line must fit one pane row for
 Step 11 to confirm it; use a short reports directory). Exit 3 means the placeholder scan
 itself failed, so whether the briefs are clean is unknown: re-run, never

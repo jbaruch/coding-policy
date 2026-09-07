@@ -229,7 +229,7 @@ class StateCommandTest(CliCase):
         code, out, err = self.run_cli(self.base() + ["state"])
         self.assertEqual(code, 0)
         self.assertEqual(
-            json.loads(out), {"schema_version": STATE_SCHEMA_VERSION, "snapshots": [], "assignments": []}
+            json.loads(out), empty_state()
         )
         self.assertEqual(err, "")
 
@@ -1174,7 +1174,9 @@ class ApplyCommandTest(CliCase):
         self.assertEqual(code, 1)
         self.assertIn("native session continuity", err)
         self.assertEqual(self.runner.writes(), [])
-        self.assertEqual(self.state.read_bytes(), before)
+        after = json.loads(self.state.read_text())
+        self.assertEqual(after["assignments"], json.loads(before)["assignments"])
+        self.assertEqual(after["recovery"]["dispatches"][-1]["status"], "not_sent")
 
     def test_initial_dispatch_captures_post_clear_identity_for_a_real_retained_fix(self):
         client = self._client({"grok": "idle"})
@@ -1209,6 +1211,62 @@ class ApplyCommandTest(CliCase):
         self.assertEqual(code, 0)
         self.assertIsNone(json.loads(out)["applied"][0]["context_session"])
         self.assertIn("no verified post-clear", err)
+
+    def test_identity_appearing_after_first_prompt_supports_the_next_retained_fix(self):
+        client = self._client({"grok": "idle"})
+        self.runner.responses["agent get grok"] = ScriptedReads([
+            agent_json("grok", "idle", "w4:p1", "previous-task"),
+            agent_json("grok", "idle", "w4:p1"),
+            agent_json("grok", "working", "w4:p1"),
+            agent_json("grok", "working", "w4:p1", "delayed-native-id"),
+        ])
+        args = self._fix_args(1)
+        position = args.index("--fix-round")
+        del args[position:position + 2]
+        code, out, err = self.run_cli(args, client=client)
+        self.assertEqual(code, 0, err)
+        row = json.loads(self.state.read_text())["assignments"][-1]
+        self.assertEqual(row["context_session"]["value"], "delayed-native-id")
+        self.assertEqual(row["status"], "applied")
+        self.assertEqual(sum(command.startswith("agent prompt grok 'New assignment")
+                             for command in self.runner.commands()), 1)
+        self.out, self.err = io.StringIO(), io.StringIO()
+        code, out, err = self.run_cli(self._fix_args(1, "--retain-context"),
+                                    client=self._client({"grok": "idle"}, sessions={"grok": "delayed-native-id"}))
+        self.assertEqual(code, 0, err)
+        self.assertEqual(json.loads(out)["applied"][0]["fix_round"], 1)
+        self.assertEqual(len(self.runner.writes()), 1)
+
+    def test_unprovable_post_dispatch_identity_preserves_the_sent_assignment(self):
+        malformed = json.loads(agent_json("grok", "working", "w4:p1", "new-session"))
+        malformed["result"]["agent"]["agent_session"]["source"] = "pane-label"
+        for before, after in (
+            (None, agent_json("grok", "working", "w4:p1")),
+            (None, agent_json("grok", "working", "w4:p1", "old-session")),
+            (None, json.dumps(malformed)),
+            (None, agent_json("grok", "working", "different-pane", "new-session")),
+            ("first-session", agent_json("grok", "working", "w4:p1", "replacement-session")),
+        ):
+            with self.subTest(before=before, after=after):
+                save_state(self.state, empty_state())
+                self.out, self.err = io.StringIO(), io.StringIO()
+                client = self._client({"grok": "idle"})
+                self.runner.responses["agent get grok"] = ScriptedReads([
+                    agent_json("grok", "idle", "w4:p1", "old-session"),
+                    agent_json("grok", "idle", "w4:p1", before), after,
+                ])
+                args = self._fix_args(1)
+                position = args.index("--fix-round")
+                del args[position:position + 2]
+                code, out, err = self.run_cli(args, client=client)
+                self.assertEqual(code, 0, err)
+                records = json.loads(self.state.read_text())["assignments"]
+                self.assertEqual(len(records), 1)
+                self.assertEqual(records[0]["status"], "applied")
+                self.assertIsNone(records[0]["context_session"])
+                self.assertTrue(err)
+                self.assertEqual(sum(command.startswith("agent prompt grok 'New assignment")
+                                     for command in self.runner.commands()), 1)
 
     def test_missing_brief_flag_is_an_actionable_error(self):
         client = self._client({})

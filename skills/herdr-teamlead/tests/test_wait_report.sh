@@ -27,8 +27,7 @@
 #  13. No set -u abort -> every case's stderr is checked for "unbound
 #                         variable", including the success path, which emits
 #                         its JSON and exits 0 before the abort would fire.
-#  14. Soft-wrapped     -> the prefix and the basename on different rows still
-#                         complete: the long line wraps in `--source visible`.
+#  14. Soft-wrapped     -> rows are never joined or matched independently.
 #  14b. Wrap in basename-> a row break inside the basename is exit 4, never found.
 #  15. Decoy REPORT     -> another report's line does NOT complete this wait,
 #                         including one whose basename ENDS with this one's.
@@ -62,6 +61,9 @@ mk_fake_herdr() { # <path>
   cat > "$1" <<'FAKE' || die "could not write the fake herdr at $1"
 #!/usr/bin/env bash
 set -uo pipefail
+if [[ -n "${FAKE_CALLS:-}" ]]; then
+  printf '%s\n' "$*" >> "$FAKE_CALLS" || exit 2
+fi
 case "${1:-} ${2:-}" in
   "agent get")
     if [[ -n "${FAKE_GET_ERR:-}" ]]; then
@@ -79,19 +81,59 @@ case "${1:-} ${2:-}" in
     fi
     status="${FAKE_STATUS:-idle}"
     # A status that changes after the first read, for the flicker cases.
-    if [[ -n "${FAKE_STATUS_AFTER:-}" && -n "${FAKE_GET_COUNTER:-}" ]]; then
+    pane="${FAKE_PANE:-w2:p1}"
+    if [[ -n "${FAKE_GET_COUNTER:-}" ]]; then
       n=0
       [[ -r "$FAKE_GET_COUNTER" ]] && read -r n < "$FAKE_GET_COUNTER"
       n=$((n + 1))
       printf '%s\n' "$n" > "$FAKE_GET_COUNTER"
-      (( n >= 2 )) && status="$FAKE_STATUS_AFTER"
+      if (( n >= 2 )); then
+        status="${FAKE_STATUS_AFTER:-$status}"
+        pane="${FAKE_PANE_AFTER:-$pane}"
+      fi
     fi
     printf '{"id":"cli:agent:get","result":{"type":"agent_info","agent":{"agent":"claude","agent_status":"%s","pane_id":"%s","name":"%s"}}}\n' \
-      "$status" "${FAKE_PANE:-w2:p1}" "${3:-worker}"
+      "$status" "$pane" "${3:-worker}"
     exit 0
     ;;
+  "pane get")
+    if [[ -n "${FAKE_CONTEXT_ERR:-}" ]]; then
+      printf '{"error":{"code":"pane_not_found"}}\n' >&2
+      exit 1
+    fi
+    if [[ -n "${FAKE_CONTEXT_BAD:-}" ]]; then printf '{}\n'; exit 0; fi
+    terminal="${FAKE_TERMINAL:-terminal-1}"
+    revision="${FAKE_REVISION:-1}"
+    offset="${FAKE_SCROLL:-0}"
+    if [[ -n "${FAKE_CONTEXT_COUNTER:-}" ]]; then
+      n=0
+      [[ -r "$FAKE_CONTEXT_COUNTER" ]] && read -r n < "$FAKE_CONTEXT_COUNTER"
+      n=$((n + 1))
+      printf '%s\n' "$n" > "$FAKE_CONTEXT_COUNTER" || exit 2
+      if (( n >= 2 )); then
+        terminal="${FAKE_TERMINAL_AFTER:-$terminal}"
+        revision="${FAKE_REVISION_AFTER:-$revision}"
+        offset="${FAKE_SCROLL_AFTER:-$offset}"
+      fi
+    fi
+    jq -n --arg pane "${3:?}" --arg terminal "$terminal" --argjson revision "$revision" --argjson offset "$offset" \
+      '{result:{pane:{pane_id:$pane, terminal_id:$terminal, revision:$revision,
+        agent_status:"idle", scroll:{offset_from_bottom:$offset}}}}'
+    exit $?
+    ;;
   "pane read")
-    printf '%s\n' "${FAKE_PANE_TEXT-REPORT: /tmp/report.md}"
+    text="${FAKE_PANE_TEXT-REPORT: ${FAKE_REPORT_PATH:?fake herdr: report path unset}}"
+    if [[ -n "${FAKE_READ_COUNTER:-}" ]]; then
+      n=0
+      [[ -r "$FAKE_READ_COUNTER" ]] && read -r n < "$FAKE_READ_COUNTER"
+      n=$((n + 1))
+      printf '%s\n' "$n" > "$FAKE_READ_COUNTER" || exit 2
+      if (( n >= 2 )) && [[ -n "${FAKE_PANE_TEXT_AFTER:-}" ]]; then text="$FAKE_PANE_TEXT_AFTER"; fi
+      if (( n >= 2 )) && [[ -n "${FAKE_APPEARING_REPORT:-}" ]]; then
+        printf 'Completed report\n' > "$FAKE_APPEARING_REPORT" || exit 2
+      fi
+    fi
+    printf '%s\n' "$text"
     exit "${FAKE_PANE_READ_RC:-0}"
     ;;
   "pane wait-output")
@@ -134,6 +176,7 @@ run() {
   local err="$TMP/stderr.$RUN_SEQ"
   OUT="$(env HERDR_ENV=1 HERDR_BIN="$FAKE" \
     TEAMLEAD_WAIT_INTERVAL_SEC=0 TEAMLEAD_WAIT_BUDGET_SEC=0 TEAMLEAD_BLOCKED_CONFIRM_SEC=0 \
+    TEAMLEAD_REFUSAL_CONFIRM_SEC=0 \
     FAKE_PANE_TEXT="REPORT: ${report}" \
     "$@" bash "$SCRIPT" worker "$report" </dev/null 2>"$err")"
   RC=$?
@@ -165,6 +208,7 @@ main() {
   mk_fake_herdr "$FAKE"
 
   local report="$TMP/report.md" missing="$TMP/never-written.md"
+  export FAKE_REPORT_PATH="$report"
   printf '# report\n' > "$report" || die "could not write $report"
 
   FAIL=0; PASS=0; RUN_SEQ=0
@@ -288,10 +332,8 @@ main() {
   if [[ $RC -eq 0 && ! -s "$TMP/e13" ]] && printf '%s' "$OUT" | jq -e '.found == true' >/dev/null 2>&1; then
     pass; else fail "clean success: expected exit 0 with empty stderr, got RC=$RC ERR=$(cat "$TMP/e13")"; fi
 
-  # 14. The real pane shape this has to read: Claude Code and Grok soft-wrap
-  #     the long REPORT line, so the prefix lands on one row and the path
-  #     continues on the next. A full-path literal would never match; the
-  #     basename on the wrapped row is what confirms it.
+  # 14. A path split across rows has no provable identity. Even an intact
+  #     basename must not certify the current file from a different directory.
   RUN_SEQ=$((RUN_SEQ+1))
   local wrapped
   base="$(basename "$report")"
@@ -301,8 +343,8 @@ ${base}"
     TEAMLEAD_WAIT_INTERVAL_SEC=0 TEAMLEAD_WAIT_BUDGET_SEC=0 TEAMLEAD_BLOCKED_CONFIRM_SEC=0 \
     FAKE_MARKER=found FAKE_STATUS=idle FAKE_PANE_TEXT="$wrapped" \
     bash "$SCRIPT" worker "$report" </dev/null 2>"$TMP/e14")"; RC=$?
-  if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | jq -e '.found == true' >/dev/null 2>&1; then
-    pass; else fail "wrapped marker: expected found true, got RC=$RC OUT=$OUT ERR=$(cat "$TMP/e14")"; fi
+  if [[ $RC -eq 1 ]] && printf '%s' "$OUT" | jq -e '.found == false' >/dev/null 2>&1; then
+    pass; else fail "wrapped marker: expected found false, got RC=$RC OUT=$OUT ERR=$(cat "$TMP/e14")"; fi
   assert_no_unbound "$(cat "$TMP/e14")" "wrapped marker"
 
   # 14b. The wrap a per-row check cannot see: the row break lands INSIDE the
@@ -409,6 +451,45 @@ ${base}"
   if [[ $RC -ne 0 ]] && printf '%s' "$OUT" | jq -e '.found == false' >/dev/null 2>&1; then
     pass; else fail "metachar decoy: expected found false, got RC=$RC OUT=$OUT"; fi
 
+  # 20b. Exact identity and row context matter even with the current file
+  #      present. Exercise the public watcher, not just its matching helper.
+  local decoy
+  for decoy in \
+    "REPORT: /example/previous/${base}" \
+    "REPORT: ${report}.old" \
+    "REPORT: /example/previous/${base}"$'\n'"Current file: ${report}" \
+    "REPORT: ${TMP}/"$'\n'"${base}" \
+    "> REPORT: ${report}" \
+    "- REPORT: ${report}" \
+    "    REPORT: ${report}" \
+    "Previous marker was REPORT: ${report}" \
+    '`REPORT: '"${report}"'`' \
+    $'```text\n'"REPORT: ${report}"$'\n```' \
+    $'~~~\n'"REPORT: ${report}"$'\n~~~' \
+    $'````\n```\n'"REPORT: ${report}"$'\n````' \
+    $'```\n```not-a-close\n'"REPORT: ${report}"$'\n```'; do
+    run "$report" FAKE_MARKER=found FAKE_STATUS=done FAKE_PANE_TEXT="$decoy"
+    if [[ $RC -eq 1 ]] && printf '%s' "$OUT" | jq -e '.found == false' >/dev/null 2>&1; then
+      pass; else fail "unconfirmed identity/context: RC=$RC OUT=$OUT pane=$decoy"; fi
+  done
+
+  # A quoted old marker does not suppress a separate current completion line.
+  run "$report" FAKE_MARKER=found FAKE_STATUS=working \
+    FAKE_PANE_TEXT=$'```\nREPORT: /example/previous/report.md\n```\n'"  REPORT: ${report}"
+  if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | jq -e '.found == true' >/dev/null 2>&1; then
+    pass; else fail "independent current marker: RC=$RC OUT=$OUT"; fi
+
+  # Path metacharacters stay literal, with no regex or word-splitting changes.
+  local special="$TMP/report [1]+.md"
+  printf '# report\n' > "$special" || die "could not write literal path fixture"
+  run "$special" FAKE_MARKER=found
+  if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | jq -e '.found == true' >/dev/null 2>&1; then
+    pass; else fail "literal current path: RC=$RC OUT=$OUT"; fi
+
+  run "$report"$'\nREPORT: /example/previous/report.md' FAKE_MARKER=found
+  if [[ $RC -eq 2 && -z "$OUT" ]]; then
+    pass; else fail "multiline report path must be refused: RC=$RC OUT=$OUT"; fi
+
   # 21. The file is there, the worker reads idle twice, and the marker is never
   #     seen at all (wait-output times out): exit 4 with a reason, well inside
   #     the budget, instead of an hour of silence.
@@ -461,6 +542,107 @@ ${base}"
     bash "$SCRIPT" worker "$report" </dev/null 2>"$TMP/e21f")"; RC=$?
   if [[ $RC -eq 2 && -z "$OUT" ]] && grep -q "TEAMLEAD_WAIT_BUDGET_SEC must be a non-negative integer" "$TMP/e21f"; then
     pass; else fail "bad budget override: expected exit 2 naming it, got RC=$RC OUT=$OUT ERR=$(cat "$TMP/e21f")"; fi
+
+  # 22. Confirmed native refusal is a distinct unavailable attempt, not a
+  # dialog or an approval. The zero budget exercises precedence, not elapsed
+  # production time; counters prove the independent live-state/UI reads.
+  local refusal=$'This content can\'t be shown\n\n› Ask Codex to do anything'
+  local calls="$TMP/refusal-calls" gets="$TMP/refusal-gets" reads="$TMP/refusal-reads"
+  run "$missing" FAKE_MARKER=timeout FAKE_STATUS=idle FAKE_PANE_TEXT="$refusal" \
+    FAKE_CALLS="$calls" FAKE_GET_COUNTER="$gets" FAKE_READ_COUNTER="$reads"
+  if [[ $RC -eq 5 ]] && printf '%s' "$OUT" | jq -e '.found == false and .state == "idle" and .reason == "terminal_provider_refusal"' >/dev/null; then
+    pass; else fail "terminal refusal: RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
+  if [[ "$(cat "$gets")" == 2 && "$(cat "$reads")" == 2 ]]; then
+    pass; else fail "terminal refusal needs independent confirmation reads"; fi
+  local write_rc=0
+  grep -Eq 'agent (prompt|start|send)|pane (send|run)' "$calls" || write_rc=$?
+  if (( write_rc == 1 )); then pass; else fail "diagnosis must never send input or switch a worker"; fi
+
+  # Native empty composer variants remain explicit and conservative.
+  local composer_row
+  for composer_row in $'❯\n  ? for shortcuts' $'│ ❯           │\n  Shift+Tab:mode  │  Ctrl+.:shortcuts'; do
+    run "$missing" FAKE_MARKER=timeout FAKE_STATUS=done FAKE_PANE_TEXT=$'This content can\'t be shown\n'"$composer_row"
+    if [[ $RC -eq 5 ]] && printf '%s' "$OUT" | jq -e '.found == false and .state == "done"' >/dev/null; then
+      pass; else fail "empty native composer refusal: RC=$RC OUT=$OUT"; fi
+  done
+
+  # Quoted/code examples, stale notices, occupied input and working footers
+  # do not diagnose the current attempt as a terminal provider refusal.
+  local notice_decoy
+  for notice_decoy in \
+    $'> This content can\'t be shown\n›' \
+    $'```\nThis content can\'t be shown\n```\n›' \
+    $'    This content can\'t be shown\n›' \
+    $'This content can\'t be shown\nNew assignment from the team lead\n›' \
+    $'This content can\'t be shown\nA later response completed normally\n›' \
+    $'This content can\'t be shown\n› pending input' \
+    $'This content can\'t be shown\n│ ❯       │\nShift+Tab:mode  │  Esc:cancel  │  Ctrl+.:shortcuts'; do
+    run "$missing" FAKE_MARKER=timeout FAKE_STATUS=idle FAKE_PANE_TEXT="$notice_decoy"
+    if [[ $RC -eq 1 ]] && printf '%s' "$OUT" | jq -e '.found == false and (has("reason") | not)' >/dev/null; then
+      pass; else fail "stale/quoted/nonterminal notice: RC=$RC OUT=$OUT pane=$notice_decoy"; fi
+  done
+  run "$missing" FAKE_MARKER=timeout FAKE_STATUS=working FAKE_PANE_TEXT="$refusal"
+  if [[ $RC -eq 1 ]]; then pass; else fail "working worker with old notice: RC=$RC OUT=$OUT"; fi
+
+  run "$missing" FAKE_MARKER=timeout FAKE_STATUS=idle FAKE_STATUS_AFTER=working \
+    FAKE_GET_COUNTER="$TMP/refusal-flicker" FAKE_PANE_TEXT="$refusal"
+  if [[ $RC -eq 1 ]] && printf '%s' "$OUT" | jq -e '.state == "working" and .found == false' >/dev/null; then
+    pass; else fail "idle flicker must preserve the later working observation: RC=$RC OUT=$OUT"; fi
+
+  run "$missing" FAKE_MARKER=timeout FAKE_STATUS=idle FAKE_PANE_AFTER=w9:p9 \
+    FAKE_GET_COUNTER="$TMP/refusal-pane-change" FAKE_PANE_TEXT="$refusal"
+  if [[ $RC -eq 1 ]]; then pass; else fail "changed pane cannot confirm the old terminal notice"; fi
+
+  run "$missing" FAKE_MARKER=timeout FAKE_STATUS=idle FAKE_PANE_TEXT="$refusal" \
+    FAKE_READ_COUNTER="$TMP/refusal-output-change" FAKE_PANE_TEXT_AFTER=$'New activity\n'"$refusal"
+  if [[ $RC -eq 1 ]]; then pass; else fail "changing output cannot confirm a current terminal notice"; fi
+
+  run "$report" FAKE_MARKER=timeout FAKE_STATUS=idle FAKE_PANE_TEXT="$refusal" TEAMLEAD_UNCONFIRMED_IDLE_READS=1
+  if [[ $RC -eq 4 ]] && printf '%s' "$OUT" | jq -e '.found == false' >/dev/null; then
+    pass; else fail "unconfirmed report file must keep its existing outcome: RC=$RC OUT=$OUT"; fi
+  run "$report" FAKE_MARKER=found FAKE_STATUS=done FAKE_PANE_TEXT="REPORT: ${report}"$'\n'"$refusal"
+  if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | jq -e '.found == true' >/dev/null; then
+    pass; else fail "genuine file and marker still establish delivery: RC=$RC OUT=$OUT"; fi
+
+  run "$missing" FAKE_MARKER=timeout FAKE_STATUS=idle FAKE_PANE_READ_RC=1
+  if [[ $RC -eq 2 && -z "$OUT" ]]; then pass; else fail "refusal probe tool failure must remain an error"; fi
+  run "$missing" FAKE_MARKER=timeout TEAMLEAD_REFUSAL_CONFIRM_SEC=soon
+  if [[ $RC -eq 2 && -z "$OUT" && "$ERRTEXT" == *TEAMLEAD_REFUSAL_CONFIRM_SEC* ]]; then
+    pass; else fail "invalid refusal confirmation setting must have an actionable error"; fi
+
+  # Scrolled history or absent metadata never proves the current UI ended.
+  local offset
+  for offset in 1 null; do
+    run "$missing" FAKE_MARKER=timeout FAKE_STATUS=idle FAKE_PANE_TEXT="$refusal" FAKE_SCROLL="$offset"
+    if [[ $RC -eq 1 ]]; then pass; else fail "historical/unknown scroll position must keep waiting: RC=$RC"; fi
+  done
+  local changed_context
+  for changed_context in FAKE_TERMINAL_AFTER=terminal-2 FAKE_REVISION_AFTER=2 FAKE_SCROLL_AFTER=1; do
+    run "$missing" FAKE_MARKER=timeout FAKE_STATUS=idle FAKE_PANE_TEXT="$refusal" \
+      FAKE_CONTEXT_COUNTER="$TMP/context-$changed_context" "$changed_context"
+    if [[ $RC -eq 1 ]]; then pass; else fail "changed terminal context cannot confirm refusal: $changed_context RC=$RC"; fi
+  done
+  local context_error
+  for context_error in FAKE_CONTEXT_ERR=1 FAKE_CONTEXT_BAD=1; do
+    run "$missing" FAKE_MARKER=timeout FAKE_STATUS=idle FAKE_PANE_TEXT="$refusal" "$context_error"
+    if [[ $RC -eq 2 && -z "$OUT" ]]; then pass; else fail "unreadable terminal context must be a tool error: $context_error"; fi
+  done
+
+  # A report arriving during confirmation cancels refusal; the next poll
+  # still requires its actual file plus complete marker before delivery.
+  local arriving="$TMP/arriving-report.md"
+  run "$arriving" FAKE_MARKER=late FAKE_COUNTER="$TMP/arriving-marker" \
+    FAKE_STATUS=idle FAKE_PANE_TEXT="$refusal" FAKE_READ_COUNTER="$TMP/arriving-reads" \
+    FAKE_PANE_TEXT_AFTER="REPORT: $arriving" FAKE_APPEARING_REPORT="$arriving" TEAMLEAD_WAIT_BUDGET_SEC=600
+  if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | jq -e '.found == true' >/dev/null; then
+    pass; else fail "delivery during confirmation must cancel refusal: RC=$RC OUT=$OUT"; fi
+
+  mkdir "$TMP/sleep-failure" || die "cannot create sleep failure fixture"
+  printf '#!/bin/sh\nexit 1\n' > "$TMP/sleep-failure/sleep" || die "cannot write sleep failure fixture"
+  chmod +x "$TMP/sleep-failure/sleep" || die "cannot enable sleep failure fixture"
+  run "$missing" FAKE_MARKER=timeout FAKE_STATUS=idle FAKE_PANE_TEXT="$refusal" PATH="$TMP/sleep-failure:$PATH"
+  if [[ $RC -eq 2 && -z "$OUT" && "$ERRTEXT" == *'confirmation wait failed'* ]]; then
+    pass; else fail "failed confirmation delay must remain a tool error"; fi
 
   echo "─────────────────────────────────────────────" >&2
   if [[ $FAIL -gt 0 ]]; then echo "FAILED: ${FAIL} failed, ${PASS} passed" >&2; exit 1; fi

@@ -6,6 +6,25 @@
 - **Both skills resolve the plugin root instead of assuming the cwd holds it.** All 27 command blocks across `herdr-standup/SKILL.md`, `herdr-teamlead/SKILL.md` and `references/round-setup.md` addressed scripts through the literal `.tessl/plugins/jbaruch/coding-policy/...`, which resolves from a project-local install and from no directory at all under a global one. Each block now opens with `CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"` and invokes through `"$CP/..."`. Project-local keeps winning, so nothing regresses for a consumer who has one. The resolver repeats per block rather than being hoisted to the top of the skill: an agent runs each block as its own tool call and no shell state survives between them. A dispatcher wrapper on `PATH` would have been one line shorter per block and was rejected — it cannot ship inside the plugin, so the skill would point at an artifact the next `tessl update` orphans. A new lint check fails any block that uses `$CP` without resolving it first.
 - **Worker briefs resolve the tessl root the same way.** `templates/COMMON.md` handed every dispatched worker `{{SHARED_CHECKOUT}}/.tessl/RULES.md` and `{{SHARED_CHECKOUT}}/.tessl/plugins/jbaruch/coding-policy/skills/release/SKILL.md`. Under a globally-installed lead neither path exists, so a worker's policy read and its release-skill lookup both dead-ended — the rule index the brief is required to name, and the skill Review Before PR sends the developer to. The template now names both roots and tells the worker to use whichever exists; `templates/brief-reviewer.md` defers to it rather than repeating the project-local path, and the Grok note in `references/herdr.md` follows.
 
+## 0.3.192 — 2026-09-07
+
+### Fixed
+
+- **Terminal report unavailability (#345).** A confirmed provider refusal now returns a distinct non-success outcome with a reason, without waiting for the generic report budget. Confirmation requires an unchanged notice and empty composer, repeated idle/done observations, and stable live-bottom terminal metadata. Quoted or stale notices, scrolling, active input, and changing state cannot confirm it. Existing report delivery, missing-marker, dialog, and tool-failure outcomes remain separate. The lead records the unavailable attempt with all gates unsatisfied; no automatic retry, rephrasing, provider/model switch, or report synthesis follows.
+
+## 0.3.191 — 2026-09-07
+
+### Fixed
+
+- **Native session recovery and release handoffs (#342, #344).** Fresh developer dispatch can correlate a native session ID that appears only after its first prompt. Missing or conflicting evidence preserves the confirmed assignment with null continuity proof. Owner-authorized recovery records later observations separately. A required cleared release handoff can start the next counted developer correction in a fresh session without another context-change permission request; release workers stop for source changes, and the corrected tip returns through full independent verification.
+- **Bounded correction approvals and durable attempts (#343).** The default five-fix checkpoint and pinned judge remain. An explicit task/scope/budget approval covers multiple further attempts, with actual blocking review evidence between them. Planning and dispatch use the same owner ledger, preserve the original base and cumulative count, and reject exhausted or changed bounds. Reservations survive interrupted sends; completed retries return their recorded result without sending or consuming again. State/assignment schema 5 preserves old history, while plan/apply schema 4 carries the new context. Implementation waiting for an operator decision remains distinct from an active audit worker.
+
+## 0.3.190 — 2026-09-07
+
+### Fixed
+
+- **Report delivery identity (#346).** The watcher requires the complete expected absolute report path on one unquoted, unfenced pane row. A previous report with the same basename, a filename elsewhere in the window, and wrapped fragments cannot confirm delivery. Brief composition rejects existing or shared report destinations and directs each attempt to a fresh path. Missing or ambiguous markers remain non-success outcomes with the existing review and release gates unsatisfied.
+
 ## 0.3.189 — 2026-09-05
 
 ### Added

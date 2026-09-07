@@ -8,7 +8,7 @@ owner: it writes every record and is the only thing that may change their shape.
 
 | Path | Owner | Purpose |
 | ---- | ----- | ------- |
-| `$XDG_STATE_HOME/teamlead/state.json` (default `~/.local/state/teamlead/state.json`, override `--state FILE`) | `skills/herdr-teamlead/teamlead/state.py` | Headroom snapshots plus the append-only role-assignment ledger |
+| `$XDG_STATE_HOME/teamlead/state.json` (default `~/.local/state/teamlead/state.json`, override `--state FILE`) | `skills/herdr-teamlead/teamlead/state.py` and its `recovery.py` helper, within the same owner skill | Snapshots, append-only assignments, and audited task recovery |
 | `$XDG_CONFIG_HOME/teamlead/config.json` (default `~/.config/teamlead/config.json`, override `--config FILE`) | the operator | Per-agent usage / clear commands; teamlead reads it and never writes it |
 
 `skills/herdr-teamlead/config.example.json` is an example to adapt and commission before live tier use. Config schema 2
@@ -31,17 +31,24 @@ copies it onto each record (snapshot `schema_version` 3), and `plan` charges a s
 worker in that window. An agent that declares none has a window to itself.
 
 The optional top-level `judge` key pins the judge agent, model, and effort.
-Plan schema 3 echoes them in a `judge` object; a plan without that seat omits
+Plan schema 4 echoes them in a `judge` object; a plan without that seat omits
 it. Model and effort become explicit launch flags. Legacy `banner_pattern`
 values are ignored: proof comes from launch or live process argv. The planner
 never ranks the judge seat or gives its pinned worker another role.
 
-Plan schema 3 also carries `tiers` keyed by role and `rounds` with the lead's
+Plan schema 4 also carries `tiers` keyed by role and `rounds` with the lead's
 round type and context inputs. Default planning excludes unqualified tiers;
 `--preview-tiers` inspects candidates before qualification. Live apply always
 checks current qualification. Legacy non-tiered assignments have no tier
 metadata. The operator's tier table, supported flags, qualification schema,
 and billing evidence are documented in `references/model-tiers.md`.
+`task_context` is null for an unlabelled plan, otherwise an object containing
+`task`, cumulative `fix_round`, correction `plan` identity or null, and `work`
+bounds or null. Apply refuses different task context. Earlier plan shapes and
+plain role mappings remain accepted; live apply still checks current history,
+allowance, tiers, qualification, and readiness. Apply output schema 4 adds
+`context_transition`, persistent `dispatch_id` for labelled assignments, and
+`replayed: true` when returning an existing completed result.
 
 The optional `role_costs` key is the second:
 `{"<role>": <number>}`, what one round in that seat is expected to
@@ -55,11 +62,11 @@ number is refused, naming the file and the role. `plan` is the only reader.
 
 ```json
 {
-  "schema_version": 4,
+  "schema_version": 5,
   "snapshots": ["<measure output>, oldest first, ring capped at 20"],
   "assignments": [
     {
-      "schema_version": 4,
+      "schema_version": 5,
       "at": "2026-09-01T21:00:00+00:00",
       "role": "developer",
       "agent": "grok",
@@ -71,13 +78,22 @@ number is refused, naming the file and the role. `plan` is the only reader.
       "context_session": {"pane_id": "w4:p1", "source": "herdr:grok", "agent": "grok", "kind": "id", "value": "native-session-id"},
       "tier": null
     }
-  ]
+  ],
+  "recovery": {
+    "schema_version": 1,
+    "tasks": {},
+    "checkpoints": [],
+    "plans": [],
+    "dispatches": [],
+    "context_permissions": [],
+    "events": []
+  }
 }
 ```
 
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
-| `schema_version` | integer | Currently `4`. Bumped on any shape change |
+| `schema_version` | integer | Currently `5`. Bumped on any shape change |
 | `snapshots` | array | Whole `measure` documents, oldest first; the ring holds the last 20 |
 | `assignments` | array | Append-only ledger of who held which role |
 | `snapshots[].schema_version` | integer | Currently `3`. Version 2 added `window_group`; version 3 adds per-round `tier_billing`. Older snapshots migrate on read, preserving headroom and shared-window membership |
@@ -116,6 +132,48 @@ outlives the document it arrived in, and a version on the row is what makes a
 later migration auditable row by row. Each snapshot is a whole `measure`
 document and arrives already stamped.
 
+## Recovery records
+
+The recovery document and each nested record use their own `schema_version: 1`.
+Every record carries `at` and `task`. Authorizations contain the actual operator
+message `source` and `quote`; evidence receipts contain absolute `path` and
+`sha256` of the bytes read by the owner. Receipts are audit evidence, not a
+replacement for live readiness, source review, or release gates.
+
+| Collection | Record fields and relationships |
+| --- | --- |
+| `tasks` | Keyed by original task identity; `task`, immutable full `base_revision`, `scope`, `allowed_paths`, `authorization`. Migration invents none of them. |
+| `checkpoints` | Unique `id`, `fix_round`, original `base_revision`, concrete `defect`, `previous_attempts`, `progress`, `change_in_approach`, `judge_agent`, `judge_report`, `judge_evidence`. Requires a completed pinned-judge assignment after the preceding developer attempt. |
+| `plans` | Unique `id`, `checkpoint`, original `base_revision`, `scope`, `allowed_paths`, `additional_fixes`, derived `first_fix`/`last_fix`, `authorization`; optional `supersedes` references a preserved prior approval. |
+| `dispatches` | Unique `id`, byte/input `fingerprint`, `role`, `agent`, cumulative `fix_round`, `plan` or null, `work` or null, `status`, `result`, `report`, and `assignment_index` once an outcome is recorded. CLI records `brief`, `common`, `observed_before`, and `context_before_send`; reconciled retries preserve `prior_assignment_indices`. |
+| `context_permissions` | Original `assignment_index`, `next_fix`, `reason`, `authorization`, `evidence`, `evidence_receipt`, later `observed_session`, and `basis: operator_authorized_fresh_handoff`. The original null session is never replaced. |
+| `events` | Append-only `sequence`, `kind`, and structured `details` preserving approvals, waiting states, reservations, send transitions, results, transport retries, superseded review receipts, and recovery decisions. |
+
+Dispatch statuses are `reserved`, `sending`, `sent_but_not_started`, `applied`,
+and `not_sent`. The first three hold an unresolved slot. Only confirmed
+developer assignments advance the task's fix count; a pending slot blocks a
+second implementation/release dispatch for that task or worker. `applied`
+results must match their referenced assignment. Extra fixes require a matching
+plan and work bounds, including when a reader validates historical state.
+
+`work` contains `base_revision`, `scope`, repository-relative `paths`, and
+blocking `findings`. A review receipt contains `dispatch`, `head_revision`,
+`verdict`, `review_mode`, independent `reviewer`, `report`, `changed_paths`, and
+`evidence`. The lead verifies the actual VCS diff before recording these fields;
+the command reads the report, checks its stated head, and records its digest.
+The next approved correction rechecks the preceding blocking report's bytes.
+An approval receipt requires full review; tester and external gates remain
+separate requirements in the skill.
+
+`context_before_send` records clear handling, native session observation,
+tier proof, and any fresh `transition`. A confirmed result's
+`context_transition` names `release_handoff` with prior developer/release
+indices, or `authorized_context_recovery` with the original assignment and
+permission reference. `reconciliation` records its own version/timestamp,
+original `input`, `evidence_receipt`, and later `observed_state`/`observed_session`.
+An applied recovery appends a new assignment with null contemporaneous session
+proof and marks its result `recovered: true`; it preserves the original row.
+
 Each snapshot is one `measure` document: `schema_version`, `measured_at`, an
 `agents` object keyed by agent name (`kind`, `state`, `herdr_state`,
 `state_source`, `pane_id`, `windows`, `credits`, `plan`, `headroom_pct`,
@@ -126,28 +184,38 @@ informational plan name and never feeds headroom.
 
 ## Writer / Reader Contract
 
-- **Writer** — `measure` appends a snapshot; `apply` appends one ledger entry
-  per successful hand-off, so an interrupted round still records exactly what
-  was sent. Writes are atomic: temp file in the same directory, `fsync`,
+- **Writer** — `measure` appends a snapshot; labelled `apply` reserves before
+  clear/relaunch, persists sending before terminal input, and appends the
+  confirmed or unconfirmed outcome before cosmetic labels. Owner commands
+  manage task/approval/recovery records; all mutations preserve audit events.
+  Writes are atomic: temp file in the same directory, `fsync`,
   `os.replace`.
 - **Readers** — `plan` reads the newest snapshot plus the ledger (role history
   breaks a headroom tie), and the config's `role_costs` for its seat weights;
   `state` prints the document. Neither appends records; their shared loader performs owner migrations. Live `apply` reads the most
   recent assignment for the named worker before retaining context; Step 10
-  documents the retained-dispatch contract. `apply --dry-run` reads no history
-  and does not authorize retention.
+  documents the retained-dispatch contract. `status` derives budgets and paused
+  implementation separately from active audit work. `apply --dry-run` reads
+  current recovery bounds without writes; an older ledger requires an owner
+  `state` command first. Dry-run never proves live continuity or qualification.
 - **Fix history** — live developer fixes advance the task's confirmed fix
   number even when the worker changes. An initial assignment cannot reset a
-  task that already has confirmed fixes. `apply` uses the ledger's task and
+  task that already has a confirmed developer assignment. `apply` uses the ledger's task and
   outcome evidence, never pane labels, for that check.
-- **Session continuity** — a labelled developer dispatch reads Herdr's native
-  session reference after clearing and before sending the brief. An unchanged
-  pre-clear reference is recorded as null, not as the new conversation. A
+- **Session continuity** — a fresh labelled developer dispatch reads Herdr's
+  native reference after clearing and correlates it after confirmed first-prompt
+  delivery, including delayed IDs. Unproven correlation is null without losing
+  the confirmed dispatch. An unchanged pre-clear reference cannot prove a new conversation. A
   retained dispatch checks the recorded identity against the live source at
   readiness and immediately before sending. Missing, changed, malformed, or
   non-native identity is a refusal with no terminal writes. Other assignments
   and unlabelled development record null. The official integration must report
   native session changes; check its installation when continuity is unavailable.
+- **Serialization** — CLI owner transactions use a live OS lock at the state
+  path plus `.lock`, including readers that may migrate. Contention refuses
+  before dispatch. The file's presence alone means nothing; an OS process
+  holding its lock establishes ownership. Dry-run and worker launch write no
+  ledger or lock file.
 - **Absent state** — a first run has no file. Every reader treats that as no
   prior state and continues; `plan` still requires a snapshot, passed with
   `--snapshot` when the state file holds none.
@@ -166,7 +234,9 @@ Only the owner migrates, and it reads a version in one of three directions.
   status and role history while adding `cleared: null`, `clear_reason: unknown`,
   `task: null`, `fix_round: null`, and `context_session: null`. It cannot invent evidence of a retained
   session. The `3 → 4` step adds `tier: null` and preserves all task, fix,
-  status, and native-session evidence. Snapshot `2 → 3` independently adds
+  status, and native-session evidence. The `4 → 5` step adds an empty recovery
+  document and stamps preserved assignment rows; it never infers the original
+  task base, authorization, or missing native identity. Snapshot `2 → 3` independently adds
   empty `tier_billing` maps, preserving window groups and readings. Each row is migrated even in
   a document already at the current version.
 - **Newer** — this build is the lagging reader, not the migrator. The caller
@@ -175,8 +245,9 @@ Only the owner migrates, and it reads a version in one of three directions.
   the whole document unusable rather than being dropped, so the next write
   cannot lose it.
 - **Corrupt** — unparseable JSON, a non-object document, a non-array field, a
-  non-object row, invalid context or tier evidence, or a fix counter outside the
-  dispatcher's shared bounds: no usable prior state, treated like the newer case.
+  non-object row, invalid context or tier evidence, inconsistent recovery
+  relationships, or an extra fix without its recorded allowance: no usable
+  prior state, treated like the newer case.
   The file is never deleted, and the warning never instructs the operator to
   discard it. Losing a snapshot ring costs one re-measure; overwriting an
   unread file costs the ledger.

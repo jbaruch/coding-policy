@@ -3,7 +3,8 @@
 #
 # Completion is TWO signals, never one: the report FILE exists on disk AND the
 # worker's pane shows the `REPORT: ` marker line its brief ends with, carrying
-# THIS report's basename. Herdr's
+# THIS report's exact absolute path on one unquoted, unfenced row. Each attempt
+# uses a fresh report path, checked at brief composition. Herdr's
 # lifecycle state alone does not decide it — a Claude Code pane reports `done`
 # between tool calls while the turn is still running, and a Grok pane reports
 # `working` while idle at startup, so a single idle/done observation would end
@@ -18,7 +19,7 @@
 #           leaves stdout empty (its diagnostic is on stderr) —
 #           {"agent":"<n>","state":"<s>","report_path":"<p>",
 #            "found":<bool>,"elapsed_seconds":<int>}
-#           plus "reason":"<why>" on exit 4 only.
+#           plus "reason":"<why>" on exits 4 and 5.
 #   stderr: diagnostics and per-attempt progress.
 #   exit  : 0 report found (`found` true),
 #           1 budget exhausted (`found` false, `state` last observed),
@@ -33,6 +34,13 @@
 #             pane wrapped cannot be told from a newline. The skill re-runs
 #             for a blocked or working worker and records no report for an
 #             idle one; compose-briefs.sh prevents the wrap up front.
+#           5 this attempt's report is unavailable after a terminal provider
+#             refusal: two idle/done observations in the same pane, with an
+#             unchanged terminal notice directly above an empty composer at
+#             the live bottom of the same terminal session, and
+#             no report file (`found` false, `reason` terminal_provider_refusal).
+#             Report the unavailable attempt; never retry, rephrase, switch
+#             providers/models, or synthesize the missing report automatically.
 #   env   : HERDR_ENV must be 1. HERDR_BIN overrides the herdr binary.
 #           Poll interval, give-up budget, and the pane-probe parameters are
 #           the named constants below (rules/ci-safety.md Always Watch CI —
@@ -94,6 +102,9 @@ TEAMLEAD_PROBE_LINES="${TEAMLEAD_PROBE_LINES:-40}"
 # where a permission prompt resolves itself before anything can see it; the
 # script reported a dialog that was never on screen, with elapsed_seconds 0.
 TEAMLEAD_BLOCKED_CONFIRM_SEC="${TEAMLEAD_BLOCKED_CONFIRM_SEC:-5}"
+# A terminal provider notice must survive a separate live-state and viewport
+# read. This confirmation is separate from human-dialog handling.
+TEAMLEAD_REFUSAL_CONFIRM_SEC="${TEAMLEAD_REFUSAL_CONFIRM_SEC:-5}"
 
 # Literal rows that mean a dialog really is waiting for a human, matched
 # case-insensitively against the visible pane. One per line, any kind's markers
@@ -114,13 +125,9 @@ Allow
 # Matched with `--match`, never `--regex`: it is a literal, and a regex engine
 # would only add a second opinion about what its space means.
 #
-# The prefix ALONE is not proof. A pane can still show the previous round's
-# line, or another worker's, so a hit is confirmed against the report file's
-# BASENAME in the same window. The full path cannot be the matched literal:
-# Claude Code and Grok soft-wrap a long `REPORT: /Users/.../round-3/dev.md`
-# across two rows in `--source visible`, and a match runs within a row, so a
-# full-path literal never matches on exactly the panes this has to read. A
-# basename is short enough to survive the wrap.
+# The prefix ALONE is not proof. A hit only triggers a confirming read. That
+# read must contain the complete expected marker on one row; names elsewhere
+# in the window, quoted examples and wrapped fragments are not delivery.
 REPORT_MARKER='REPORT: '
 
 HERDR_BIN="${HERDR_BIN:-herdr}"
@@ -133,7 +140,8 @@ ERRFILE=""
 # (rules/error-handling.md: fail visibly, never half-way).
 AGENT=""
 REPORT_PATH=""
-REPORT_BASENAME=""
+REFUSAL_STATE=""
+REFUSAL_PANE=""
 
 warn() { printf 'wait-report: %s\n' "$1" >&2; }
 
@@ -146,7 +154,7 @@ cleanup() {
 
 emit() { # <state> <found-bool> <elapsed-seconds> [reason]
   # `reason` appears only when set: the object stays the documented shape on
-  # every outcome, with one extra field on the exit-4 path.
+  # every outcome, with one extra field for an unavailable delivery.
   jq -n --arg a "$AGENT" --arg s "$1" --arg p "$REPORT_PATH" \
         --argjson f "$2" --argjson e "$3" --arg r "${4:-}" \
     '{agent: $a, state: $s, report_path: $p, found: $f, elapsed_seconds: $e}
@@ -181,12 +189,12 @@ agent_info() { # <agent-name>
 #
 # Two steps, and both must hold. `pane wait-output` waits on the prefix, which
 # is event-driven and cheap; a hit is then confirmed by reading the same window
-# and requiring the report's basename in it, so the previous round's line or
+# and requiring the report's exact marker in it, so the previous round's line or
 # another worker's cannot complete this wait. A no-match is exit 1 with an
 # {"error":{"code":"timeout"}} payload on stderr; every other error code is a
 # real failure and must not read as "the worker is still working"
 # (rules/error-handling.md — distinguish an expected non-result from a fault).
-marker_seen() { # <pane-id> <report-basename>
+marker_seen() { # <pane-id> <absolute-report-path>
   local rc=0 code text
   # Argument order follows herdr's own usage line -- `pane wait-output
   # [OPTIONS] <--match|--regex> <PANE_ID>` -- and the builder in
@@ -215,17 +223,9 @@ marker_seen() { # <pane-id> <report-basename>
     warn "\`${HERDR_BIN} pane read $1\` failed (exit ${rc}): $(tr '\n' ' ' < "$ERRFILE") — the marker was seen but could not be confirmed"
     return 2
   fi
-  # Both halves in the same window, in either row: the line soft-wraps, so the
-  # basename may sit on the row after the prefix. A wrap that lands INSIDE the
-  # basename is not confirmed here, on purpose: the TUIs draw their own
-  # transcript rows (`--source recent-unwrapped` returns the same two rows), so
-  # no pane metadata recovers the logical line, and every text-only join --
-  # adjacency, blank-row paragraphs, filled-to-width rows -- can be satisfied
-  # by an unrelated row spelling the rest of the name. That case reaches the
-  # exit-4 path below and is never delivery; compose-briefs.sh keeps it from
-  # arising by refusing a report path that would wrap.
-  [[ "$text" == *"$REPORT_MARKER"* ]] || return 1
-  basename_on_screen "$text" "$2" || return 1
+  # Visible rows cannot prove that a newline was a soft wrap. Never join them
+  # or independently match the prefix and a filename somewhere in the pane.
+  report_marker_on_screen "$text" "$2" || return 1
   return 0
 }
 
@@ -255,16 +255,155 @@ dialog_on_screen() { # <pane-id>
   return 1
 }
 
-# Is <basename> present in <pane-text> as a whole path component?
-#
-# A plain substring test is not enough: `reviewer-report.md` contains
-# `report.md`, so another worker's line would complete this worker's wait. The
-# name must start at a path boundary -- start of text, whitespace, or `/` --
-# and end at one, so only the component itself matches. The name is matched
-# literally (quoted inside the pattern), since a basename carries `.` and other
-# characters a regex would otherwise read as syntax.
-basename_on_screen() { # <pane-text> <basename>
-  [[ "$1" =~ (^|[[:space:]]|/)"$2"($|[[:space:]]) ]]
+# Accept only a complete bare marker with up to three spaces of indentation.
+# Quoted, bulleted, indented-code and fenced examples never announce delivery.
+# An unmatched fence keeps following rows unconfirmed; a shorter fence or one
+# with trailing content cannot close it.
+report_marker_on_screen() { # <pane-text> <absolute-report-path>
+  local row trimmed fence="" fence_length=0 found=1 run tail
+  local fence_pattern='^(`{3,}|~{3,})'
+  while IFS= read -r row; do
+    [[ "$row" != '    '* && "$row" != *$'\t'* ]] || continue
+    trimmed="${row#"${row%%[![:blank:]]*}"}"
+    if [[ "$trimmed" =~ $fence_pattern ]]; then
+      run="${BASH_REMATCH[1]}"
+      tail="${trimmed#"$run"}"
+      if [[ -z "$fence" ]]; then
+        fence="${run:0:1}"
+        fence_length=${#run}
+      elif [[ "${run:0:1}" == "$fence" && -z "${tail//[[:blank:]]/}" ]] \
+           && (( ${#run} >= fence_length )); then
+        fence=""
+      fi
+      continue
+    fi
+    [[ -z "$fence" ]] || continue
+    if [[ "$trimmed" == "${REPORT_MARKER}${2}" ]]; then found=0; fi
+  done <<< "$1"
+  return "$found"
+}
+
+# A bare provider notice must be the last content before an empty native
+# composer. Quoted/fenced examples, occupied composers, later messages, and
+# working footers cannot establish a terminal refusal. Unknown UI shapes keep
+# the ordinary wait; this parser never guesses at a provider's hidden output.
+terminal_refusal_on_screen() { # <visible-pane-text>
+  local row trimmed run tail content fence="" fence_length=0 notice=0 composer=0
+  local fence_pattern='^(`{3,}|~{3,})'
+  local border_pattern='^[─━╭╮╰╯┌┐└┘│[:blank:]]+$'
+  while IFS= read -r row; do
+    trimmed="${row#"${row%%[![:blank:]]*}"}"
+    trimmed="${trimmed%"${trimmed##*[![:blank:]]}"}"
+    [[ -n "$trimmed" ]] || continue
+    if [[ "$row" == '    '* || "$row" == *$'\t'* ]]; then
+      notice=0; composer=0
+      continue
+    fi
+    if [[ "$trimmed" =~ $fence_pattern ]]; then
+      run="${BASH_REMATCH[1]}"; tail="${trimmed#"$run"}"
+      if [[ -z "$fence" ]]; then
+        fence="${run:0:1}"; fence_length=${#run}
+      elif [[ "${run:0:1}" == "$fence" && -z "${tail//[[:blank:]]/}" ]] && (( ${#run} >= fence_length )); then
+        fence=""
+      fi
+      notice=0; composer=0
+      continue
+    fi
+    [[ -z "$fence" ]] || continue
+    case "$trimmed" in
+      "This content can't be shown"|"This content can't be shown.")
+        notice=1; composer=0
+        continue
+        ;;
+      '›'|'❯'|'› Ask Codex to do anything')
+        composer=$notice
+        continue
+        ;;
+      '│ ❯'*'│')
+        content="${trimmed#'│ ❯'}"; content="${content%'│'}"
+        if [[ -z "${content//[[:blank:]]/}" ]]; then
+          composer=$notice
+          continue
+        fi
+        ;;
+      '? for shortcuts'|'Shift+Tab:mode  │  Ctrl+.:shortcuts')
+        if (( composer == 1 )); then continue; fi
+        ;;
+    esac
+    if [[ "$trimmed" =~ $border_pattern ]]; then continue; fi
+    notice=0; composer=0
+  done <<< "$1"
+  (( notice == 1 && composer == 1 ))
+}
+
+read_refusal_view() { # <pane-id>
+  local text rc=0
+  text="$("$HERDR_BIN" pane read "$1" --source visible --lines "$TEAMLEAD_PROBE_LINES" 2>"$ERRFILE")" || rc=$?
+  if (( rc != 0 )); then
+    warn "cannot inspect ${1} for a terminal provider notice (exit ${rc}): $(tr '\n' ' ' < "$ERRFILE") — restore the pane connection before deciding this attempt's outcome"
+    return 2
+  fi
+  printf '%s\n' "$text"
+}
+
+# 0 = pinned live terminal context, 1 = absent/nonterminal evidence, 2 = tool
+# failure. Scroll position prevents a historical composer from qualifying;
+# terminal/session identity and revision reject replacement or intervening UI
+# activity. Missing metrics on older integrations keep the ordinary wait.
+refusal_context() { # <pane-id>
+  local raw parsed rc=0
+  raw="$("$HERDR_BIN" pane get "$1" 2>"$ERRFILE")" || rc=$?
+  if (( rc != 0 )); then
+    warn "cannot verify the live terminal for ${1} (exit ${rc}): $(tr '\n' ' ' < "$ERRFILE") — restore the pane connection before deciding this attempt's outcome"
+    return 2
+  fi
+  parsed="$(printf '%s' "$raw" | jq -c --arg pane "$1" '
+    if (.result.pane | type) != "object" then error("missing result.pane")
+    else .result.pane |
+      if .pane_id == $pane and (.terminal_id | type) == "string" and .terminal_id != ""
+        and (.revision | type) == "number" and .revision >= 0
+        and .scroll.offset_from_bottom == 0
+        and (.agent_status == "idle" or .agent_status == "done")
+      then {terminal_id, agent_session, revision}
+      else null end
+    end' 2>"$ERRFILE")" || rc=$?
+  if (( rc != 0 )); then
+    warn "cannot parse the live terminal for ${1}: $(tr '\n' ' ' < "$ERRFILE") — check the Herdr pane get response before deciding this attempt's outcome"
+    return 2
+  fi
+  [[ "$parsed" != null ]] || return 1
+  printf '%s\n' "$parsed"
+}
+
+# 0 = confirmed terminal refusal, 1 = no terminal evidence, 2 = tool failure.
+# Compare complete visible snapshots so new prompt/output activity invalidates
+# an old notice even when its literal text remains somewhere on screen.
+confirmed_provider_refusal() { # <pane-id>
+  local before after context_before context_after info state pane rc=0
+  REFUSAL_STATE=""; REFUSAL_PANE=""
+  before="$(read_refusal_view "$1")" || return 2
+  terminal_refusal_on_screen "$before" || return 1
+  context_before="$(refusal_context "$1")" || return $?
+  if ! sleep "$TEAMLEAD_REFUSAL_CONFIRM_SEC"; then
+    warn "terminal-refusal confirmation wait failed — restore the sleep utility before deciding this attempt's outcome"
+    return 2
+  fi
+  info="$(agent_info "$AGENT")" || return 2
+  state="${info%% *}"; pane="${info##* }"
+  REFUSAL_STATE="$state"; REFUSAL_PANE="$pane"
+  if [[ -z "$pane" || "$pane" == "unknown" ]]; then
+    warn "${AGENT} lost its pane during refusal confirmation — restore its live pane before deciding the report outcome"
+    return 2
+  fi
+  if [[ "$pane" != "$1" || ( "$state" != "idle" && "$state" != "done" ) ]]; then return 1; fi
+  after="$(read_refusal_view "$pane")" || return 2
+  context_after="$(refusal_context "$pane")" || return $?
+  [[ "$context_before" == "$context_after" ]] || return 1
+  if [[ "$before" != "$after" || -f "$REPORT_PATH" ]]; then return 1; fi
+  terminal_refusal_on_screen "$after" || rc=$?
+  if (( rc != 0 )); then return 1; fi
+  REFUSAL_STATE="$state"
+  return 0
 }
 
 main() {
@@ -274,7 +413,6 @@ main() {
   fi
   AGENT="$1"
   REPORT_PATH="$2"
-  REPORT_BASENAME="${REPORT_PATH##*/}"
 
   # The contract says absolute, and the -f test below resolves a relative path
   # against whatever cwd the caller happens to be in -- a different directory
@@ -284,11 +422,16 @@ main() {
     warn "report path '${REPORT_PATH}' is relative — pass the absolute path the brief gave the worker (e.g. \"\$PWD/${REPORT_PATH#./}\")"
     return 2
   fi
+  if [[ "$REPORT_PATH" == *[[:cntrl:]]* || "$REPORT_PATH" == */ ]]; then
+    warn "report path must name a file on one line — pass the exact absolute REPORT value from the brief"
+    return 2
+  fi
 
   validate_positive_int TEAMLEAD_UNCONFIRMED_IDLE_READS "$TEAMLEAD_UNCONFIRMED_IDLE_READS" || return 2
   validate_nonneg_int TEAMLEAD_WAIT_INTERVAL_SEC "$TEAMLEAD_WAIT_INTERVAL_SEC" || return 2
   validate_nonneg_int TEAMLEAD_WAIT_BUDGET_SEC "$TEAMLEAD_WAIT_BUDGET_SEC" || return 2
   validate_nonneg_int TEAMLEAD_BLOCKED_CONFIRM_SEC "$TEAMLEAD_BLOCKED_CONFIRM_SEC" || return 2
+  validate_nonneg_int TEAMLEAD_REFUSAL_CONFIRM_SEC "$TEAMLEAD_REFUSAL_CONFIRM_SEC" || return 2
   validate_positive_int TEAMLEAD_PROBE_TIMEOUT_MS "$TEAMLEAD_PROBE_TIMEOUT_MS" || return 2
   validate_positive_int TEAMLEAD_PROBE_LINES "$TEAMLEAD_PROBE_LINES" || return 2
   # Normalize to decimal once: a validated `08` would otherwise be reparsed as
@@ -297,6 +440,7 @@ main() {
   TEAMLEAD_WAIT_INTERVAL_SEC=$(( 10#$TEAMLEAD_WAIT_INTERVAL_SEC ))
   TEAMLEAD_WAIT_BUDGET_SEC=$(( 10#$TEAMLEAD_WAIT_BUDGET_SEC ))
   TEAMLEAD_BLOCKED_CONFIRM_SEC=$(( 10#$TEAMLEAD_BLOCKED_CONFIRM_SEC ))
+  TEAMLEAD_REFUSAL_CONFIRM_SEC=$(( 10#$TEAMLEAD_REFUSAL_CONFIRM_SEC ))
   TEAMLEAD_PROBE_TIMEOUT_MS=$(( 10#$TEAMLEAD_PROBE_TIMEOUT_MS ))
   TEAMLEAD_PROBE_LINES=$(( 10#$TEAMLEAD_PROBE_LINES ))
 
@@ -367,7 +511,7 @@ main() {
     fi
 
     rc=0
-    marker_seen "$pane" "$REPORT_BASENAME" || rc=$?
+    marker_seen "$pane" "$REPORT_PATH" || rc=$?
     if (( rc == 2 )); then return 2; fi
     marker=$(( rc == 0 ? 1 : 0 ))
 
@@ -375,6 +519,19 @@ main() {
       now="$(date +%s)"
       emit "$state" true "$(( now - start ))"
       return 0
+    fi
+
+    if [[ ! -f "$REPORT_PATH" && ( "$state" == "idle" || "$state" == "done" ) ]]; then
+      rc=0
+      confirmed_provider_refusal "$pane" || rc=$?
+      if (( rc == 2 )); then return 2; fi
+      state="${REFUSAL_STATE:-$state}"; pane="${REFUSAL_PANE:-$pane}"
+      if (( rc == 0 )); then
+        now="$(date +%s)"
+        emit "$REFUSAL_STATE" false "$(( now - start ))" "terminal_provider_refusal"
+        warn "${AGENT}: report unavailable after a confirmed terminal provider refusal — record this attempt as unavailable and tell the operator; keep review/release gates unsatisfied, with no automatic retry, rephrasing, model/provider switch, or synthesized report"
+        return 5
+      fi
     fi
 
     now="$(date +%s)"
@@ -388,7 +545,7 @@ main() {
       unconfirmed_idle=$(( unconfirmed_idle + 1 ))
       if (( unconfirmed_idle >= TEAMLEAD_UNCONFIRMED_IDLE_READS )); then
         emit "$state" false "$elapsed" "report file present, worker ${state} on ${unconfirmed_idle} consecutive reads, marker unconfirmed"
-        warn "${AGENT}: the report file exists and the worker reads ${state}, but \`${REPORT_MARKER}\` with \`${REPORT_BASENAME}\` is still unconfirmed after ${unconfirmed_idle} consecutive reads — not a delivered report: re-run this wait once if the worker is blocked or working, record no report if it is idle or done; a report path that fits one pane row prevents this"
+        warn "${AGENT}: the report file exists and the worker reads ${state}, but \`${REPORT_MARKER}${REPORT_PATH}\` is still unconfirmed after ${unconfirmed_idle} consecutive reads — not a delivered report: re-run this wait once if the worker is blocked or working, record no report if it is idle or done; require this attempt's unquoted marker on one pane row"
         return 4
       fi
     else
