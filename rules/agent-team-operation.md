@@ -79,14 +79,16 @@ description: Running a multi-agent team — headroom-driven role rotation, one w
 - Every other assignment clears context
 - `--no-clear` records a hand-cleared pane, never retained context
 - Fix rounds 4 and later use a freshly cleared worker
-- Narrow exception for fresh early corrections after a release clear or authorized context recovery.
+- Narrow exception for a recorded fresh early correction.
 - Preconditions (all required):
   1. The owner ledger preserves the original task, base, preceding developer assignment, and actual next fix number
-  2. The preceding developer's confirmed release assignment cleared its context, or an explicit operator recovery decision covers the preserved missing-session assignment
+  2. The recorded cause is a confirmed release clear, an explicit operator recovery decision for the preserved missing-session assignment, or a verified historical import of a completed operator-authorized manual correction
   3. The next fix remains within the task's existing allowance and scope
   4. The lead dispatches a fresh developer brief through the normal readiness, clear, tier, and qualification checks
+  5. For a historical import, the owner verifies original task/scope/budget authorization, archived transport and report bytes, and the actual VCS base, head and diff
+  6. For a historical import, the owner appends the actual count with null native-session proof, preserves prior rows, and grants no future allowance or review approval
 - Every other early fix requires the retained-context preconditions
-- A required release clear needs no separate context-change permission
+- A required release clear or verified historical-import handoff needs no separate context-change permission
 - Never edit repository content while holding the release role
 - Each fresh-worker brief includes the task, prior report, and open findings
 - Frame the handoff as "a prior developer attempted this N times; you own it now"
