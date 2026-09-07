@@ -166,7 +166,8 @@ JSON
 }
 JSON
   jq --arg p "$TMP/package.diff" \
-    '.roles.reviewer += {REVIEW_PACKAGE: $p, REVIEW_BASE: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", REVIEW_HEAD: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}
+    '.shared += {POLICY_INDEX: $p, RELEASE_SKILL: $p}
+     | .roles.reviewer += {REVIEW_PACKAGE: $p, REVIEW_BASE: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", REVIEW_HEAD: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}
      | .roles.tester += {REVIEW_PACKAGE: $p, REVIEW_BASE: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", REVIEW_HEAD: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}' \
     "$v6b" > "$TMP/packaged-values.json" || die "could not add packaged review paths"
   v6b="$TMP/packaged-values.json"
@@ -213,6 +214,15 @@ JSON
     run "$PKG" "$TMP/authority-missing.json" "$TMP/missing-$missing_authority"
     if [[ $RC -eq 2 && -z "$OUT" && ! -e "$TMP/missing-$missing_authority" && "$ERRTEXT" == *"$missing_authority"* ]]; then
       pass; else fail "missing $missing_authority must refuse before emitting any brief"; fi
+  done
+
+  local missing_policy
+  for missing_policy in POLICY_INDEX RELEASE_SKILL; do
+    jq --arg key "$missing_policy" '.shared[$key] = "/absent/policy-artifact.md"' "$v6b" > "$TMP/policy-missing.json" \
+      || die "could not build absent policy fixture"
+    run "$PKG" "$TMP/policy-missing.json" "$TMP/missing-$missing_policy"
+    if [[ $RC -eq 2 && -z "$OUT" && ! -e "$TMP/missing-$missing_policy" && "$ERRTEXT" == *"$missing_policy"* ]]; then
+      pass; else fail "unreadable $missing_policy must refuse before emitting any brief"; fi
   done
 
   # 6c. A REPORT path that would wrap the worker's marker line is refused

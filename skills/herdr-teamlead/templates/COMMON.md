@@ -57,15 +57,11 @@ to know goes in the report.
 
 ## Policy
 
-- Resolve each policy artifact under `{{SHARED_CHECKOUT}}/.tessl` first,
-  then `$HOME/.tessl`. Use the first root containing that artifact. If neither
-  has a readable copy, report BLOCKED before starting the assignment.
-- Use that artifact's selected root as `<tessl-root>` below.
-- The rule index is `<tessl-root>/RULES.md`; it links every rule file. If your
+- The resolved rule index is `{{POLICY_INDEX}}`; it links every rule file. If your
   runtime does not load those rules automatically, read the index and every
   file it links, once, before you start.
 - The release skill is at
-  `<tessl-root>/plugins/jbaruch/coding-policy/skills/release/SKILL.md`, and its
+  `{{RELEASE_SKILL}}`, and its
   scripts sit beside it in that directory.
 - The repo's own gates are in `CONTRIBUTING.md`. Run them; a green gate is the
   bar, not your impression of the change.

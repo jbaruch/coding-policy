@@ -20,7 +20,8 @@
 #           2 validation failed — an unfilled placeholder, a supplied key no
 #             template uses, a value that is not text, an invalid/reused REPORT
 #             path, a REPORT longer than TEAMLEAD_REPORT_PATH_MAX_COLS, or a reviewer/tester
-#             REVIEW_PACKAGE that is not an absolute readable non-empty file.
+#             REVIEW_PACKAGE that is not an absolute readable non-empty file,
+#             or an unreadable POLICY_INDEX / RELEASE_SKILL artifact.
 #             Nothing is written on a
 #             validation failure,
 #           3 a tool this depends on failed (the placeholder scan itself). The
@@ -214,6 +215,23 @@ main() {
   local merged rendered leftovers supplied known common_known unused key report
   local common_body scan_rc=0
   validate_values "$shared" "the shared values" || return 2
+  # Resolver-produced policy paths are explicit brief inputs. Custom templates
+  # need not carry them; any supplied artifact must remain readable at compose.
+  local policy_key policy_path policy_present
+  for policy_key in POLICY_INDEX RELEASE_SKILL; do
+    policy_present="$(printf '%s' "$shared" | jq -r --arg k "$policy_key" 'has($k)')" || return 2
+    if [[ "$policy_present" == true ]]; then
+      if ! printf '%s' "$shared" | jq -e --arg k "$policy_key" '.[$k] | if type == "string" then explode | all(. >= 32 and . != 127) else false end' >/dev/null; then
+        warn "${policy_key} must be a file path without control characters — use resolve-policy-paths.sh output"
+        return 2
+      fi
+      policy_path="$(printf '%s' "$shared" | jq -r --arg k "$policy_key" '.[$k]')" || return 2
+      if [[ "$policy_path" != /* || "$policy_path" == *[[:cntrl:]]* || ! -f "$policy_path" || ! -r "$policy_path" || ! -s "$policy_path" ]]; then
+        warn "${policy_key} must name an absolute readable non-empty file — run resolve-policy-paths.sh and supply its output before composing"
+        return 2
+      fi
+    fi
+  done
   common_body="$(substitute "$common_tpl" "$shared")"
   leftovers="$(leftover_placeholders "$common_body")" || scan_rc=$?
   if (( scan_rc != 0 )); then return 3; fi

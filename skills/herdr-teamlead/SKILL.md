@@ -56,8 +56,8 @@ Emits the caller and live workers with kind, pane, and state.
   the correcting `herdr agent rename <pane-id> <name>` command. Finish here.
 - **Exit 1 or 2** — report the diagnostic verbatim and finish here.
 
-If workers cannot cover the roles, name another worker or deliberately combine
-roles within one brief. Record that decision; never duplicate a dispatch target.
+If roles lack workers, name one or record combined roles in a single brief.
+Never duplicate dispatch targets.
 
 ## Step 3 — Verify Authority for the Repo
 
@@ -87,10 +87,9 @@ CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
 bash "$CP/skills/herdr-teamlead/teamlead.sh" measure
 ```
 
-Emits and saves a snapshot with per-agent headroom, windows, state evidence,
-`tier_billing`, and `failed_agents`. Busy workers are skipped. Unmeasured tier
-billing stays `unknown`. Report each failed measurement and obtain that
-worker's reading before relying on its seat.
+Emits and saves headroom, windows, state, `tier_billing`, and `failed_agents`.
+Busy workers are skipped. Unmeasured billing stays `unknown`. Report failed
+measurements and obtain their readings before relying on those seats.
 
 Usage and `--trace` contracts:
 
@@ -154,7 +153,8 @@ Proceed immediately to Step 7.
 
 ## Step 7 — Compose the Briefs
 
-Write `{"shared": {...}, "roles": {"<role>": {...}}}` and run:
+Resolve policy paths through the Step 7 reference first. Write its outputs in
+`shared` within `{"shared": {...}, "roles": {"<role>": {...}}}` and run:
 
 ```bash
 CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"

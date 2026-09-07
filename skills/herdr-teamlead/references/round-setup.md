@@ -183,7 +183,19 @@ Proceed immediately to Step 7 with the printed path as `REVIEW_PACKAGE`.
 
 ## Step 7 — Compose the Briefs
 
-Write a values file for the round, then compose:
+Resolve the policy artifacts before writing the values file:
+
+```bash
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
+bash "$CP/skills/herdr-teamlead/resolve-policy-paths.sh" <absolute-shared-checkout>
+```
+
+Exit 0 emits `POLICY_INDEX` and `RELEASE_SKILL`; copy both into `shared`.
+On non-zero, report the diagnostic and repair the named input before composing.
+Lookup precedence and optional global-root input belong to the resolver's
+header contract. Never delegate path selection to a worker.
+
+Write the remaining values, then compose:
 
 ```bash
 CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
@@ -195,7 +207,7 @@ bash "$CP/skills/herdr-teamlead/compose-briefs.sh" \
 The values file is `{"shared": {...}, "roles": {"<role>": {...}}}`; a role's
 own value beats the shared one. Emits
 `{"common":"<path>","briefs":{"<role>":"<path>"}}`. Exit 2 means validation
-failed and nothing was written — an absent or unreadable review package,
+failed and nothing was written — an absent or unreadable policy artifact or review package,
 an unfilled placeholder, a supplied key no template uses, a value that is not
 text, a relative, multiline, existing or duplicated `REPORT` destination,
 a report overlapping a generated brief, or a `REPORT` longer than the
@@ -209,6 +221,7 @@ script's contract; see the header of
 What you decide, and it is the whole of your job here:
 
 - `SHARED_CHECKOUT` — the checkout the workers read.
+- `POLICY_INDEX` and `RELEASE_SKILL` — the resolver's absolute artifact paths.
 - `AUTHORITY_STATEMENT`, `TASK_AUTHORIZATION`, `AUTHORIZED_ACTIONS`, and
   `EXTERNAL_PERMISSION` — Step 3's verified ownership, actual operator source,
   bounded task actions, and any additional non-owner permission.

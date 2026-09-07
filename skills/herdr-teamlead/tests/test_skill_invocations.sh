@@ -2,7 +2,7 @@
 # Guard the SKILL.md conventions a consumer agent depends on.
 #
 # Invocation conventions, checked against EVERY skill in SKILLS below:
-# 1. Every script invocation carries a `bash ` prefix. tessl packaging
+# 1. Every script invocation carries an explicit `bash` or `python3` interpreter. tessl packaging
 #    normalizes plugin files to 0644, so a bare path is a permission-denied on
 #    every consumer, and `chmod +x` in this repo does not survive publish.
 #    Deterministic because the failure is invisible here: the scripts run fine
