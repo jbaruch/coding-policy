@@ -281,8 +281,10 @@ report_marker_on_screen() { # <pane-text> <absolute-report-path>
   local container_pattern='^(>|[-+*•][[:blank:]]|[0-9]{1,9}[.)][[:blank:]])'
   while IFS= read -r row; do
     trimmed="${row#"${row%%[![:blank:]]*}"}"
-    if [[ -z "$trimmed" ]]; then container=0; fi
-    if [[ "$row" != '    '* && "$trimmed" =~ $container_pattern ]]; then container=1; fi
+    if [[ -z "$fence" && ! "$trimmed" =~ $fence_pattern ]]; then
+      if [[ -z "$trimmed" ]]; then container=0; fi
+      if [[ "$row" != '    '* && "$trimmed" =~ $container_pattern ]]; then container=1; fi
+    fi
     [[ "$row" != '    '* && "$row" != *$'\t'* ]] || continue
     if [[ "$trimmed" =~ $fence_pattern ]]; then
       run="${BASH_REMATCH[1]}"
@@ -290,6 +292,7 @@ report_marker_on_screen() { # <pane-text> <absolute-report-path>
       if [[ -z "$fence" ]]; then
         fence="${run:0:1}"
         fence_length=${#run}
+        container=0
       elif [[ "${run:0:1}" == "$fence" && -z "${tail//[[:blank:]]/}" ]] \
            && (( ${#run} >= fence_length )); then
         fence=""

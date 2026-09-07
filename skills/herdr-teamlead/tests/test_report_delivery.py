@@ -90,6 +90,8 @@ class NativeDeliveryTests(unittest.TestCase):
                     self.assertFalse(delivery.bare_final(delivery.source_final(encode(factory(text)), kind, SESSION), str(self.report)))
         self.assertTrue(delivery.bare_final("```\nold example\n```\n" + self.marker, str(self.report)))
         self.assertTrue(delivery.bare_final("- earlier list\n\n" + self.marker, str(self.report)))
+        for fenced in ("- removed", "> quoted example", "1. numbered example"):
+            self.assertTrue(delivery.bare_final("```\n" + fenced + "\n```\n" + self.marker, str(self.report)))
 
     def test_latest_completion_and_identity_are_required(self):
         rows = codex_rows(self.marker)
@@ -187,7 +189,48 @@ class NativeDeliveryTests(unittest.TestCase):
         with patch.object(delivery, "source_path", return_value=self.source), patch.object(client, "pane_read", side_effect=append_turn):
             self.assertFalse(delivery.probe(client, "worker", PANE, str(self.report), self.visible, 40)["found"])
 
-    def test_public_watcher_uses_real_native_source_fixtures(self):
+    def test_public_probe_reports_first_read_and_reread_failures(self):
+        source_bytes = encode(codex_rows(self.marker)).encode("utf-8")
+        errors = (PermissionError(13, "Permission denied", str(self.source)),
+                  OSError(5, "Input/output error", str(self.source)),
+                  UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte"))
+        args = ["probe-report", "--agent", "worker", "--pane", PANE, "--report", str(self.report), "--lines", "40"]
+        for read_number in (1, 2):
+            for error in errors:
+                outcomes = [source_bytes] * (read_number - 1) + [error]
+                output, diagnostic = io.StringIO(), io.StringIO()
+                with self.subTest(read_number=read_number, error=type(error).__name__), \
+                        patch.object(delivery, "source_path", return_value=self.source), \
+                        patch.object(Path, "read_bytes", side_effect=outcomes), patch.object(sys, "stdin", io.StringIO(self.visible)):
+                    code = cli.main(args, stdout=output, stderr=diagnostic, client=self.fake_client())
+                    self.assertEqual(code, 1)
+                    self.assertEqual(output.getvalue(), "")
+                    message = json.loads(diagnostic.getvalue())["message"]
+                    self.assertIn(str(self.source), message)
+                    self.assertIn(str(error), message)
+                    self.assertIn("Restore readable UTF-8 transcript bytes and file permissions", message)
+
+    def test_absent_native_source_stays_unconfirmed_on_either_read(self):
+        source_bytes = encode(codex_rows(self.marker)).encode("utf-8")
+        for outcomes in ([FileNotFoundError()], [source_bytes, FileNotFoundError()]):
+            with patch.object(delivery, "source_path", return_value=self.source), patch.object(Path, "read_bytes", side_effect=outcomes):
+                result = delivery.probe(self.fake_client(), "worker", PANE, str(self.report), self.visible, 40)
+                self.assertFalse(result["found"])
+                self.assertEqual(result["reason"], "native_source_unavailable")
+        with patch.object(delivery, "source_path", side_effect=FileNotFoundError()):
+            self.assertFalse(delivery.probe(self.fake_client(), "worker", PANE, str(self.report), self.visible, 40)["found"])
+
+    def test_native_directory_permission_error_is_not_a_missing_source(self):
+        root = self.tmp / "sessions"
+        error = PermissionError(13, "Permission denied", str(root))
+        with patch.object(delivery, "source_root", return_value=root), patch("os.scandir", side_effect=error):
+            with self.assertRaises(UsageError) as caught:
+                delivery.probe(self.fake_client(), "worker", PANE, str(self.report), self.visible, 40)
+        self.assertIn(str(root), str(caught.exception))
+        self.assertIn("Permission denied", str(caught.exception))
+        self.assertIn("Restore readable session directories and search permissions", str(caught.exception))
+
+    def watcher_fixture(self):
         fake = self.tmp / "herdr"
         config = self.tmp / "fake.json"
         fake.write_text("#!/usr/bin/env python3\nimport json, os, sys\nfrom pathlib import Path\n"
@@ -195,13 +238,45 @@ class NativeDeliveryTests(unittest.TestCase):
                         "    command=sys.argv[1:3]\n"
                         "    if command==['agent','get']: print(json.dumps({'result':{'agent':d['pane']}}))\n"
                         "    elif command==['pane','get']: print(json.dumps({'result':{'pane':d['pane']}}))\n"
-                        "    elif command==['pane','read']: print(d['visible'])\n"
+                        "    elif command==['pane','read']:\n"
+                        "        if d.get('break_source'):\n"
+                        "            counter=Path(os.environ['FAKE_CONFIG']+'.reads')\n"
+                        "            count=int(counter.read_text())+1 if counter.exists() else 1\n"
+                        "            counter.write_text(str(count))\n"
+                        "            if count==2:\n"
+                        "                source=Path(d['break_source'])\n"
+                        "                source.unlink()\n"
+                        "                source.mkdir()\n"
+                        "        print(d['visible'])\n"
                         "    elif command==['pane','wait-output']: print('{}')\n"
                         "    else: sys.exit(2)\n"
                         "if __name__=='__main__': main()\n")
         fake.chmod(0o755)
         env = {**os.environ, "HERDR_ENV": "1", "HERDR_BIN": str(fake), "FAKE_CONFIG": str(config),
                "HOME": str(self.tmp), "CODEX_HOME": str(self.tmp / ".codex"), "TEAMLEAD_WAIT_BUDGET_SEC": "0"}
+        return env, config
+
+    def test_public_watcher_propagates_unreadable_source_as_tool_failure(self):
+        env, config = self.watcher_fixture()
+        source = self.tmp / (".codex/sessions/2026/09/01/rollout-fixed-" + SESSION + ".jsonl")
+        source.parent.mkdir(parents=True)
+        for failure in ("decode", "reread"):
+            source.write_bytes(b"\xff" if failure == "decode" else encode(codex_rows(self.marker)).encode("utf-8"))
+            pane = {"pane": self.pane, "visible": self.visible}
+            if failure == "reread":
+                pane["break_source"] = str(source)
+            config.write_text(json.dumps(pane))
+            result = subprocess.run(["bash", str(ROOT / "wait-report.sh"), "worker", str(self.report)],
+                                    env=env, capture_output=True, text=True, check=False)
+            with self.subTest(failure=failure):
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertEqual(result.stdout, "")
+                self.assertIn(str(source), result.stderr)
+                self.assertIn("invalid start byte" if failure == "decode" else "Is a directory", result.stderr)
+                self.assertIn("Restore readable UTF-8 transcript bytes and file permissions", result.stderr)
+
+    def test_public_watcher_uses_real_native_source_fixtures(self):
+        env, config = self.watcher_fixture()
         for kind, factory, relative in (("codex", codex_rows, ".codex/sessions/2026/09/01/rollout-fixed-" + SESSION + ".jsonl"),
                                         ("grok", grok_rows, ".grok/sessions/project/" + SESSION + "/updates.jsonl")):
             source = self.tmp / relative
@@ -209,6 +284,8 @@ class NativeDeliveryTests(unittest.TestCase):
             source.write_text(encode(factory(self.marker)))
             prefix = "• " if kind == "codex" else "     "
             for source_text, visible, expected in ((self.marker, prefix + self.marker, True),
+                    ("```\n- removed\n```\n" + self.marker, prefix + self.marker, True),
+                    ("```\n> quoted example\n```\n" + self.marker, prefix + self.marker, True),
                     ("- " + self.marker, prefix + self.marker, False), ("    " + self.marker, prefix + self.marker, False),
                     ("```\n" + self.marker, prefix + self.marker, False),
                     ("> quoted example\n" + self.marker, prefix + self.marker, False),

@@ -15,6 +15,7 @@ import hashlib
 import json
 import os
 import re
+from fnmatch import fnmatchcase
 from pathlib import Path
 
 from . import recovery as ledger
@@ -38,18 +39,20 @@ def bare_final(text, report):
         return False
     fence, length, container = "", 0, False
     for row in rows[:-1]:
+        match = FENCE.match(row)
+        if match:
+            run, tail = match.groups()
+            if not fence:
+                fence, length, container = run[0], len(run), False
+            elif run[0] == fence and len(run) >= length and not tail.strip():
+                fence = ""
+            continue
+        if fence:
+            continue
         if not row.strip():
             container = False
         elif CONTAINER.match(row):
             container = True
-        match = FENCE.match(row)
-        if not match:
-            continue
-        run, tail = match.groups()
-        if not fence:
-            fence, length = run[0], len(run)
-        elif run[0] == fence and len(run) >= length and not tail.strip():
-            fence = ""
     # Unmarked rows can be lazy paragraph continuations inside a list/quote.
     # A blank row ends that ambiguity for an unindented final marker.
     return not fence and not container
@@ -191,16 +194,44 @@ def native_identity(info):
     return {key: ref[key] for key in ("source", "agent", "kind", "value")}
 
 
-def source_path(identity):
-    """Resolve only the official session ID, never a pane label or newest file."""
-    session, kind = identity["value"], identity["agent"]
+def source_root(kind):
     if kind == "codex":
-        root = Path(os.environ.get("CODEX_HOME", str(Path.home() / ".codex"))) / "sessions"
-        matches = list(root.glob("*/*/*/rollout-*-" + session + ".jsonl"))
-    else:
-        root = Path.home() / ".grok" / "sessions"
-        matches = list(root.glob("*/" + session + "/updates.jsonl"))
+        return Path(os.environ.get("CODEX_HOME", str(Path.home() / ".codex"))) / "sessions"
+    return Path.home() / ".grok" / "sessions"
+
+
+def source_path(identity):
+    """Resolve the official ID without glob's suppression of directory errors."""
+    session, kind = identity["value"], identity["agent"]
+    root, matches = source_root(kind), []
+    depth_limit = 3 if kind == "codex" else 2
+
+    def fail(error):
+        raise error
+
+    for directory, directories, files in os.walk(root, onerror=fail):
+        path = Path(directory)
+        depth = len(path.relative_to(root).parts)
+        if depth == depth_limit:
+            directories[:] = []
+            if kind == "codex":
+                matches.extend(path / name for name in files if fnmatchcase(name, "rollout-*-" + session + ".jsonl"))
+            elif path.name == session and "updates.jsonl" in files:
+                matches.append(path / "updates.jsonl")
+        elif kind == "grok" and depth == 1:
+            directories[:] = [name for name in directories if name == session]
     return matches[0] if len(matches) == 1 else None
+
+
+def read_native_source(path):
+    """Missing files are expected; unreadable or invalid source is a failure."""
+    try:
+        content = path.read_bytes()
+        return content, content.decode("utf-8")
+    except FileNotFoundError:
+        return None
+    except (OSError, UnicodeDecodeError) as exc:
+        raise UsageError("Cannot read native transcript {}: {}. Restore readable UTF-8 transcript bytes and file permissions before retrying report verification.".format(path, exc), {}) from None
 
 
 def pane_identity(pane, expected, identity):
@@ -225,15 +256,16 @@ def probe(client, agent, pane_id, report, visible, lines):
         return result
     try:
         path = source_path(identity)
-    except OSError:
+    except FileNotFoundError:
         return {**result, "reason": "native_source_unavailable"}
+    except OSError as exc:
+        raise UsageError("Cannot locate native transcript under {}: {}. Restore readable session directories and search permissions before retrying report verification.".format(source_root(identity["agent"]), exc), {}) from None
     if path is None:
         return {**result, "reason": "native_source_unavailable"}
-    try:
-        source_bytes = path.read_bytes()
-        body = source_bytes.decode("utf-8")
-    except (OSError, UnicodeDecodeError):
+    source = read_native_source(path)
+    if source is None:
         return {**result, "reason": "native_source_unavailable"}
+    source_bytes, body = source
     final = source_final(body, identity["agent"], identity["value"])
     if not bare_final(final, report) or not Path(report).is_file():
         return result
@@ -243,11 +275,11 @@ def probe(client, agent, pane_id, report, visible, lines):
     if (after_visible != visible or after != before or native_identity(after_info) != identity
             or after_info.get("pane_id") != pane_id or after_info.get("agent_status") not in ("idle", "done")):
         return result
-    try:
-        if path.read_bytes() != source_bytes or not Path(report).is_file():
-            return result
-    except OSError:
+    verified_source = read_native_source(path)
+    if verified_source is None:
         return {**result, "reason": "native_source_unavailable"}
+    if verified_source[0] != source_bytes or not Path(report).is_file():
+        return result
     return {"found": True, "basis": "native_final_source", "native_session": identity,
             "source": {"path": str(path), "sha256": hashlib.sha256(source_bytes).hexdigest()}}
 
