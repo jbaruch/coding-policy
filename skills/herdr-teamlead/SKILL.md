@@ -282,7 +282,8 @@ bash "$CP/skills/herdr-teamlead/wait-report.sh" <agent-name> <report-path>
 
 Emits `{"agent","state","report_path","found","elapsed_seconds"}`; exit 2
 emits only stderr. Exits 4–5 add `reason`. Delivery requires the file and its
-complete, unquoted `REPORT: <absolute-path>` marker on one pane row. Names,
+complete, unquoted `REPORT: <absolute-path>` marker on one pane row. Known native
+decoration requires completed source-message proof. Names,
 quoted examples, wrapped fragments, or lifecycle state alone never confirm it.
 The script owns timing.
 

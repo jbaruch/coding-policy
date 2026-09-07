@@ -477,6 +477,18 @@ class HerdrClient:
             )
         return agent
 
+    def pane_get(self, pane_id):
+        """Return native terminal identity and viewport metadata for a pane."""
+        result = self._run_json([self.binary, "pane", "get", pane_id])
+        pane = result.get("pane")
+        if not isinstance(pane, dict):
+            raise HerdrError("herdr pane get returned no pane record; restore the pane connection.", {"pane": pane_id})
+        return pane
+
+    def pane_read(self, pane_id, lines):
+        """Read visible rows even while the agent status changes."""
+        return self._run([self.binary, "pane", "read", pane_id, "--source", "visible", "--lines", str(lines)])
+
     def agent_list(self):
         """Return every live agent record."""
         result = self._run_json(self.argv_agent_list())

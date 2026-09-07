@@ -51,7 +51,9 @@
     "skills/herdr-teamlead/teamlead/qualification.py",
     "skills/herdr-teamlead/tests/test_qualification.py",
     "skills/herdr-teamlead/tests/test_start_judge_worker.py",
-    "skills/herdr-teamlead/tests/test_tier_integration.py"
+    "skills/herdr-teamlead/tests/test_tier_integration.py",
+    "skills/herdr-teamlead/teamlead/report_delivery.py",
+    "skills/herdr-teamlead/tests/test_report_delivery.py"
   ],
   "executionEnvironments": [
     {

@@ -3,8 +3,10 @@
 #
 # Completion is TWO signals, never one: the report FILE exists on disk AND the
 # worker's pane shows the `REPORT: ` marker line its brief ends with, carrying
-# THIS report's exact absolute path on one unquoted, unfenced row. Each attempt
-# uses a fresh report path, checked at brief composition. Herdr's
+# THIS report's exact absolute path on one unquoted, unfenced row. Known native
+# decoration requires completed source-message proof; the source and display
+# contracts live in teamlead/report_delivery.py. Each attempt uses a fresh
+# report path, checked at brief composition. Herdr's
 # lifecycle state alone does not decide it — a Claude Code pane reports `done`
 # between tool calls while the turn is still running, and a Grok pane reports
 # `working` while idle at startup, so a single idle/done observation would end
@@ -32,8 +34,9 @@
 #             on consecutive polls, yet the marker could not be confirmed
 #             (`found` false, `reason` set) — never delivery: a marker the
 #             pane wrapped cannot be told from a newline. The skill re-runs
-#             for a blocked or working worker and records no report for an
-#             idle one; compose-briefs.sh prevents the wrap up front.
+#             for a blocked or working worker. Owner recover-report can append
+#             source-evidenced delivery for a completed affected dispatch;
+#             otherwise it records no report. Old receipts stay unchanged.
 #           5 this attempt's report is unavailable after a terminal provider
 #             refusal: two idle/done observations in the same pane, with an
 #             unchanged terminal notice directly above an empty composer at
@@ -225,8 +228,21 @@ marker_seen() { # <pane-id> <absolute-report-path>
   fi
   # Visible rows cannot prove that a newline was a soft wrap. Never join them
   # or independently match the prefix and a filename somewhere in the pane.
-  report_marker_on_screen "$text" "$2" || return 1
-  return 0
+  if report_marker_on_screen "$text" "$2"; then return 0; fi
+  # UI decoration is accepted only when the completed native source proves
+  # the authored final row was bare. The helper owns source/UI allowlists.
+  local result skill_dir
+  skill_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  rc=0
+  result="$(printf '%s' "$text" | bash "$skill_dir/teamlead.sh" probe-report \
+    --herdr-bin "$HERDR_BIN" --agent "$AGENT" --pane "$1" --report "$2" \
+    --lines "$TEAMLEAD_PROBE_LINES")" || rc=$?
+  if (( rc != 0 )); then
+    warn "native report-source verification failed — restore the named evidence/tool before deciding delivery"
+    return 2
+  fi
+  if [[ "$(printf '%s' "$result" | jq -r '.found')" == true ]]; then return 0; fi
+  return 1
 }
 
 # Does the visible pane show a dialog waiting on a human?
@@ -260,11 +276,14 @@ dialog_on_screen() { # <pane-id>
 # An unmatched fence keeps following rows unconfirmed; a shorter fence or one
 # with trailing content cannot close it.
 report_marker_on_screen() { # <pane-text> <absolute-report-path>
-  local row trimmed fence="" fence_length=0 found=1 run tail
+  local row trimmed fence="" fence_length=0 found=1 run tail container=0
   local fence_pattern='^(`{3,}|~{3,})'
+  local container_pattern='^(>|[-+*•][[:blank:]]|[0-9]{1,9}[.)][[:blank:]])'
   while IFS= read -r row; do
-    [[ "$row" != '    '* && "$row" != *$'\t'* ]] || continue
     trimmed="${row#"${row%%[![:blank:]]*}"}"
+    if [[ -z "$trimmed" ]]; then container=0; fi
+    if [[ "$row" != '    '* && "$trimmed" =~ $container_pattern ]]; then container=1; fi
+    [[ "$row" != '    '* && "$row" != *$'\t'* ]] || continue
     if [[ "$trimmed" =~ $fence_pattern ]]; then
       run="${BASH_REMATCH[1]}"
       tail="${trimmed#"$run"}"
@@ -277,7 +296,7 @@ report_marker_on_screen() { # <pane-text> <absolute-report-path>
       fi
       continue
     fi
-    [[ -z "$fence" ]] || continue
+    [[ -z "$fence" && "$container" == 0 ]] || continue
     if [[ "$trimmed" == "${REPORT_MARKER}${2}" ]]; then found=0; fi
   done <<< "$1"
   return "$found"
@@ -545,7 +564,7 @@ main() {
       unconfirmed_idle=$(( unconfirmed_idle + 1 ))
       if (( unconfirmed_idle >= TEAMLEAD_UNCONFIRMED_IDLE_READS )); then
         emit "$state" false "$elapsed" "report file present, worker ${state} on ${unconfirmed_idle} consecutive reads, marker unconfirmed"
-        warn "${AGENT}: the report file exists and the worker reads ${state}, but \`${REPORT_MARKER}${REPORT_PATH}\` is still unconfirmed after ${unconfirmed_idle} consecutive reads — not a delivered report: re-run this wait once if the worker is blocked or working, record no report if it is idle or done; require this attempt's unquoted marker on one pane row"
+        warn "${AGENT}: the report file exists and the worker reads ${state}, but \`${REPORT_MARKER}${REPORT_PATH}\` is still unconfirmed after ${unconfirmed_idle} consecutive reads — re-run this wait once if the worker is blocked or working; for a completed native-decoration failure preserve this receipt and use owner recover-report with archived evidence, otherwise record no report"
         return 4
       fi
     else

@@ -461,6 +461,10 @@ ${base}"
     "REPORT: ${TMP}/"$'\n'"${base}" \
     "> REPORT: ${report}" \
     "- REPORT: ${report}" \
+    $'> quoted example\n'"REPORT: ${report}" \
+    $'- authored example\n'"REPORT: ${report}" \
+    $'-\tauthored example\n'"REPORT: ${report}" \
+    $'1.\tauthored example\n'"REPORT: ${report}" \
     "    REPORT: ${report}" \
     "Previous marker was REPORT: ${report}" \
     '`REPORT: '"${report}"'`' \

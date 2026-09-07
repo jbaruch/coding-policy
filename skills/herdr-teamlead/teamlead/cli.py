@@ -21,7 +21,7 @@ from types import SimpleNamespace
 from . import __version__
 from .assign import apply as apply_assignments
 from .assign import APPLY_SCHEMA_VERSION, dry_run, native_context_session, normalize_assignments, resolve_paths, validate_fix_history
-from . import historical, recovery, role_clear
+from . import historical, recovery, report_delivery, role_clear
 from .config import default_config_path, load_config, load_judge, load_role_costs, select_agents
 from .errors import PlanError, StateError, TeamLeadError, UsageError
 from .herdr import (
@@ -316,7 +316,13 @@ def build_parser():
         command_parser.add_argument("--work", metavar="FILE", help="Correction base, scope, paths and blocking findings as JSON.")
     apply_parser.add_argument("--dispatch-id", help="Stable dispatch identity; retries read its recorded outcome.")
 
-    for command in ("task", "checkpoint", "authorize-corrections", "recover-context", "recover-role-clear", "record-report", "reconcile", "record-release-clear", "import-correction", "record-historical-review"):
+    report_parser = sub.add_parser("probe-report", parents=[common], help="Confirm native UI decoration using completed source and visible rows on stdin.")
+    report_parser.add_argument("--agent", required=True)
+    report_parser.add_argument("--pane", required=True)
+    report_parser.add_argument("--report", required=True)
+    report_parser.add_argument("--lines", type=int, required=True)
+
+    for command in ("task", "checkpoint", "authorize-corrections", "recover-context", "recover-role-clear", "record-report", "reconcile", "record-release-clear", "import-correction", "record-historical-review", "recover-report"):
         record_parser = sub.add_parser(command, parents=[common], help="Record owner-managed {} evidence.".format(command))
         record_parser.add_argument("--record", required=True, metavar="FILE", help="Structured evidence JSON; see dispatch-recovery.md.")
         record_parser.add_argument("--now", metavar="ISO8601")
@@ -793,6 +799,8 @@ def cmd_recovery(args, client=None, warn=None, trace=None):
         result = recovery.authorize_plan(store, history, data, at)
     elif args.command == "record-report":
         result = recovery.record_report(store, data, at)
+    elif args.command == "recover-report":
+        result = report_delivery.recover(store, history, data, at)
     elif args.command == "import-correction":
         result = historical.import_attempt(store, history, data, at)
         if result["assignment_index"] == len(history):
@@ -846,14 +854,22 @@ def cmd_start_judge(args, client=None, warn=None, trace=None):
             "pane": args.pane, "argv_verified": True, "verified": proof}, None
 
 
+def cmd_probe_report(args, client=None, warn=None, trace=None):
+    if not Path(args.report).is_absolute() or any(ord(char) < 32 for char in args.report) or args.lines < 1:
+        raise UsageError("Report probing needs an absolute one-row report path and positive --lines.", {})
+    client = client if client is not None else _client(args, trace=trace)
+    return report_delivery.probe(client, args.agent, args.pane, args.report, sys.stdin.read().rstrip("\n"), args.lines), None
+
+
 COMMANDS = {
     "measure": cmd_measure,
     "plan": cmd_plan,
     "apply": cmd_apply,
     "state": cmd_state,
     "status": cmd_status,
-    **{command: cmd_recovery for command in ("task", "checkpoint", "authorize-corrections", "recover-context", "recover-role-clear", "record-report", "reconcile", "record-release-clear", "import-correction", "record-historical-review")},
+    **{command: cmd_recovery for command in ("task", "checkpoint", "authorize-corrections", "recover-context", "recover-role-clear", "record-report", "reconcile", "record-release-clear", "import-correction", "record-historical-review", "recover-report")},
     "start-judge": cmd_start_judge,
+    "probe-report": cmd_probe_report,
 }
 
 
@@ -873,7 +889,7 @@ def main(argv=None, stdout=None, stderr=None, client=None):
     try:
         # Readers may migrate state, so they share the same transaction lock.
         # A dry run and worker launch never acquire or write ledger state.
-        lock = nullcontext() if args.command == "start-judge" or getattr(args, "dry_run", False) else state_lock(_state_path(args))
+        lock = nullcontext() if args.command in {"start-judge", "probe-report"} or getattr(args, "dry_run", False) else state_lock(_state_path(args))
         with lock:
             payload, failure = COMMANDS[args.command](args, client=client, warn=warn, trace=trace)
     except TeamLeadError as exc:

@@ -80,6 +80,7 @@ instruction into permission to exceed an exhausted correction budget.
 | `record-release-clear` | Fields under Verified release hand-clear below | Record existing required-clear evidence for a successful release `--no-clear` row. No new context-change permission is required. |
 | `import-correction` | Fields under Historical manual corrections below | Import an already authorized, completed manual attempt without sending input or granting future attempts. |
 | `record-historical-review` | unique `id`, `historical_attempt`, full `head_revision`, `verdict`, `review_mode`, independent `reviewer`, absolute `report` | Append an actual review receipt for an imported correction. Full review is required for approval; other verification gates remain separate. |
+| `recover-report` | unique `id`, original `dispatch`, absolute `report`, `wait_receipt`, `pane`, `visible`, `source` | Append evidence of a completed delivery missed by the old watcher; see Completed native report recovery. No worker input or review approval. |
 
 `allowed_paths` contains repository-relative paths or globs. Preserve the
 original task and base across every approval. Read and verify the source diff
@@ -325,8 +326,10 @@ lock file can remain after exit; do not delete it to bypass an active lock.
     once. Other exits from that re-run take their documented branches. A second
     exit 4 is terminal: record the worker as producing no report and
     continue to the next worker.
-  - The state is `idle` or `done` — record the worker as producing no report
-    and continue to the next worker. Never re-dispatch on top of it. The
+  - The state is `idle` or `done` — preserve the negative receipt. For a native
+    display failure with original source evidence, follow Completed native
+    report recovery below. Otherwise record no report and continue to the next
+    worker. Never re-dispatch on top of it. The
     marker may be wrapped, quoted, absent, or identify another attempt. Do
     not join rows or use a matching filename as proof. Step 7 requires a fresh
     report destination and bounds its length; narrow panes can still wrap it.
@@ -352,3 +355,54 @@ time.
 
 Proceed to Step 12 once every dispatched worker has been waited on, or once you
 have recorded which of them produced no report.
+
+## Completed native report recovery
+
+The watcher calls `teamlead probe-report` for native display evidence. Its
+inputs are `--agent`, `--pane`, an absolute `--report`, positive `--lines`, and
+the observed visible text on stdin. It reads native source and Herdr without
+writing state or worker input. Success emits `found` and either confirmed
+source evidence or an unconfirmed `reason`; tool failure exits non-zero.
+The native-source and display predicates belong to
+`skills/herdr-teamlead/teamlead/report_delivery.py`.
+
+For an already completed affected dispatch, preserve its original negative
+wait JSON, report bytes, native source transcript, visible pane text, and the
+original `herdr pane get` JSON. Read these original artifacts and the saved
+dispatch's common/role briefs. Use the existing task authority to record
+delivery; this recovery requests no new work or allowance.
+
+Run `teamlead recover-report --record FILE --state FILE` through the owner
+launcher above. The record names a unique `id`, the preserved `dispatch` ID,
+and absolute artifact paths in `report`, `wait_receipt`, `pane`, `visible`, and
+`source`. `source` is the original native transcript, not an agent-written
+summary or a reconstructed message. The command verifies the archived native
+user message against the original dispatch prompt and binds all evidence bytes
+in a separate receipt. A nondeveloper's historical null session remains null.
+Original dispatches, assignments, negative wait receipts and reports remain
+unchanged; a later role/session does not require rerunning completed work.
+
+Exit 0 emits the append-only delivery receipt. Identical replay returns that
+receipt; conflicting bytes or identity fail. Read the report in full and
+continue the existing round gate. This receipt establishes delivery only;
+it grants no review approval, retained context or extra implementation attempt.
+An error preserves the negative outcome; restore the named original evidence
+or record the report as unavailable. Never fabricate missing source evidence.
+
+## Native display validation
+
+Use fresh isolated Herdr sessions for each installed native CLI. Ask each
+worker to write a unique short report file and make its entire final response
+the bare `REPORT: <absolute-path>` line. Capture the native transcript,
+`agent get`, `pane get`, and `pane read --source visible` after completion.
+Run `wait-report.sh` with that worker and report. Pass requires exit 0 and
+`found: true`, the exact marker on one rendered row, bare final source, and
+the current report file. Keep original negative and positive receipts as
+separate artifacts when comparing watcher versions.
+
+Verified on 2026-09-07 with Herdr 0.8.2, Codex CLI 0.153.2 and Grok CLI 1.0.13
+using Grok 4.6: both fresh workers wrote their reports and completed. The old
+watcher exited 4 for both. The patched watcher accepted the same untouched
+sessions and files with exit 0. Automated source/display fixtures cover
+missing, changed, wrapped, quoted, authored-list and indented-code markers,
+incomplete/replaced sessions and source changes during verification.

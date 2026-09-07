@@ -596,6 +596,8 @@ def validate_store(store, assignments):
         validate_history(store, assignments)
         from .role_clear import validate_history as validate_role_clear_history
         validate_role_clear_history(store, assignments)
+        from .report_delivery import validate_recoveries
+        validate_recoveries(store, assignments)
     except (KeyError, TypeError, ValueError) as exc:
         raise UsageError("Recovery ledger has missing or malformed fields ({}); restore its owner-written state without discarding history.".format(exc), {}) from None
     return store
