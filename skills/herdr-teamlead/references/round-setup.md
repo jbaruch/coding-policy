@@ -171,7 +171,8 @@ own value beats the shared one. Emits
 `{"common":"<path>","briefs":{"<role>":"<path>"}}`. Exit 2 means validation
 failed and nothing was written — an absent or unreadable review package,
 an unfilled placeholder, a supplied key no template uses, a value that is not
-text, or a `REPORT` longer than the
+text, a relative, multiline, existing or duplicated `REPORT` destination,
+a report overlapping a generated brief, or a `REPORT` longer than the
 script's limit (the worker's `REPORT: <path>` line must fit one pane row for
 Step 11 to confirm it; use a short reports directory). Exit 3 means the placeholder scan
 itself failed, so whether the briefs are clean is unknown: re-run, never

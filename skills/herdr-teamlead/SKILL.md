@@ -156,6 +156,8 @@ Emits the common file and role-brief paths. Non-zero means invalid input or a
 tool/write failure: fix the diagnostic and retry; never dispatch failed
 composition. The script validates placeholders, supplied keys, report paths,
 and reviewer/tester package paths and full commit IDs before writing.
+Give every assignment a fresh absolute report path; never reuse a prior
+attempt's path or share one between roles.
 
 Supply shared checkout, Step 3's authority/permission, and each role's issue,
 branch, worktree, report paths, phase, and mode. Reviewer/tester inputs also
@@ -266,8 +268,10 @@ bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/wait-report.sh <
 
 Emits `{"agent","state","report_path","found","elapsed_seconds"}` on every
 outcome except exit 2, which leaves stdout empty and puts its diagnostic on
-stderr. Exit 4 adds `reason`. Completion requires both the report file on disk and the `REPORT: `
-marker in the worker's pane. A single `idle` or `done` observation is not
+stderr. Exit 4 adds `reason`. Completion requires both the report file on disk
+and its complete, unquoted `REPORT: <absolute-path>` marker on one pane row.
+A filename alone, quoted example, or wrapped fragment never confirms delivery.
+A single `idle` or `done` observation is not
 completion. Poll interval and give-up budget are the script's own constants.
 
 - **Exit 0** — read the completed report; continue to the next worker, then Step 12.

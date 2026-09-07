@@ -3,7 +3,8 @@
 #
 # Completion is TWO signals, never one: the report FILE exists on disk AND the
 # worker's pane shows the `REPORT: ` marker line its brief ends with, carrying
-# THIS report's basename. Herdr's
+# THIS report's exact absolute path on one unquoted, unfenced row. Each attempt
+# uses a fresh report path, checked at brief composition. Herdr's
 # lifecycle state alone does not decide it — a Claude Code pane reports `done`
 # between tool calls while the turn is still running, and a Grok pane reports
 # `working` while idle at startup, so a single idle/done observation would end
@@ -114,13 +115,9 @@ Allow
 # Matched with `--match`, never `--regex`: it is a literal, and a regex engine
 # would only add a second opinion about what its space means.
 #
-# The prefix ALONE is not proof. A pane can still show the previous round's
-# line, or another worker's, so a hit is confirmed against the report file's
-# BASENAME in the same window. The full path cannot be the matched literal:
-# Claude Code and Grok soft-wrap a long `REPORT: /Users/.../round-3/dev.md`
-# across two rows in `--source visible`, and a match runs within a row, so a
-# full-path literal never matches on exactly the panes this has to read. A
-# basename is short enough to survive the wrap.
+# The prefix ALONE is not proof. A hit only triggers a confirming read. That
+# read must contain the complete expected marker on one row; names elsewhere
+# in the window, quoted examples and wrapped fragments are not delivery.
 REPORT_MARKER='REPORT: '
 
 HERDR_BIN="${HERDR_BIN:-herdr}"
@@ -133,7 +130,6 @@ ERRFILE=""
 # (rules/error-handling.md: fail visibly, never half-way).
 AGENT=""
 REPORT_PATH=""
-REPORT_BASENAME=""
 
 warn() { printf 'wait-report: %s\n' "$1" >&2; }
 
@@ -181,12 +177,12 @@ agent_info() { # <agent-name>
 #
 # Two steps, and both must hold. `pane wait-output` waits on the prefix, which
 # is event-driven and cheap; a hit is then confirmed by reading the same window
-# and requiring the report's basename in it, so the previous round's line or
+# and requiring the report's exact marker in it, so the previous round's line or
 # another worker's cannot complete this wait. A no-match is exit 1 with an
 # {"error":{"code":"timeout"}} payload on stderr; every other error code is a
 # real failure and must not read as "the worker is still working"
 # (rules/error-handling.md — distinguish an expected non-result from a fault).
-marker_seen() { # <pane-id> <report-basename>
+marker_seen() { # <pane-id> <absolute-report-path>
   local rc=0 code text
   # Argument order follows herdr's own usage line -- `pane wait-output
   # [OPTIONS] <--match|--regex> <PANE_ID>` -- and the builder in
@@ -215,17 +211,9 @@ marker_seen() { # <pane-id> <report-basename>
     warn "\`${HERDR_BIN} pane read $1\` failed (exit ${rc}): $(tr '\n' ' ' < "$ERRFILE") — the marker was seen but could not be confirmed"
     return 2
   fi
-  # Both halves in the same window, in either row: the line soft-wraps, so the
-  # basename may sit on the row after the prefix. A wrap that lands INSIDE the
-  # basename is not confirmed here, on purpose: the TUIs draw their own
-  # transcript rows (`--source recent-unwrapped` returns the same two rows), so
-  # no pane metadata recovers the logical line, and every text-only join --
-  # adjacency, blank-row paragraphs, filled-to-width rows -- can be satisfied
-  # by an unrelated row spelling the rest of the name. That case reaches the
-  # exit-4 path below and is never delivery; compose-briefs.sh keeps it from
-  # arising by refusing a report path that would wrap.
-  [[ "$text" == *"$REPORT_MARKER"* ]] || return 1
-  basename_on_screen "$text" "$2" || return 1
+  # Visible rows cannot prove that a newline was a soft wrap. Never join them
+  # or independently match the prefix and a filename somewhere in the pane.
+  report_marker_on_screen "$text" "$2" || return 1
   return 0
 }
 
@@ -255,16 +243,32 @@ dialog_on_screen() { # <pane-id>
   return 1
 }
 
-# Is <basename> present in <pane-text> as a whole path component?
-#
-# A plain substring test is not enough: `reviewer-report.md` contains
-# `report.md`, so another worker's line would complete this worker's wait. The
-# name must start at a path boundary -- start of text, whitespace, or `/` --
-# and end at one, so only the component itself matches. The name is matched
-# literally (quoted inside the pattern), since a basename carries `.` and other
-# characters a regex would otherwise read as syntax.
-basename_on_screen() { # <pane-text> <basename>
-  [[ "$1" =~ (^|[[:space:]]|/)"$2"($|[[:space:]]) ]]
+# Accept only a complete bare marker with up to three spaces of indentation.
+# Quoted, bulleted, indented-code and fenced examples never announce delivery.
+# An unmatched fence keeps following rows unconfirmed; a shorter fence or one
+# with trailing content cannot close it.
+report_marker_on_screen() { # <pane-text> <absolute-report-path>
+  local row trimmed fence="" fence_length=0 found=1 run tail
+  local fence_pattern='^(`{3,}|~{3,})'
+  while IFS= read -r row; do
+    [[ "$row" != '    '* && "$row" != *$'\t'* ]] || continue
+    trimmed="${row#"${row%%[![:blank:]]*}"}"
+    if [[ "$trimmed" =~ $fence_pattern ]]; then
+      run="${BASH_REMATCH[1]}"
+      tail="${trimmed#"$run"}"
+      if [[ -z "$fence" ]]; then
+        fence="${run:0:1}"
+        fence_length=${#run}
+      elif [[ "${run:0:1}" == "$fence" && -z "${tail//[[:blank:]]/}" ]] \
+           && (( ${#run} >= fence_length )); then
+        fence=""
+      fi
+      continue
+    fi
+    [[ -z "$fence" ]] || continue
+    if [[ "$trimmed" == "${REPORT_MARKER}${2}" ]]; then found=0; fi
+  done <<< "$1"
+  return "$found"
 }
 
 main() {
@@ -274,7 +278,6 @@ main() {
   fi
   AGENT="$1"
   REPORT_PATH="$2"
-  REPORT_BASENAME="${REPORT_PATH##*/}"
 
   # The contract says absolute, and the -f test below resolves a relative path
   # against whatever cwd the caller happens to be in -- a different directory
@@ -282,6 +285,10 @@ main() {
   # present.
   if [[ "$REPORT_PATH" != /* ]]; then
     warn "report path '${REPORT_PATH}' is relative — pass the absolute path the brief gave the worker (e.g. \"\$PWD/${REPORT_PATH#./}\")"
+    return 2
+  fi
+  if [[ "$REPORT_PATH" == *[[:cntrl:]]* || "$REPORT_PATH" == */ ]]; then
+    warn "report path must name a file on one line — pass the exact absolute REPORT value from the brief"
     return 2
   fi
 
@@ -367,7 +374,7 @@ main() {
     fi
 
     rc=0
-    marker_seen "$pane" "$REPORT_BASENAME" || rc=$?
+    marker_seen "$pane" "$REPORT_PATH" || rc=$?
     if (( rc == 2 )); then return 2; fi
     marker=$(( rc == 0 ? 1 : 0 ))
 
@@ -388,7 +395,7 @@ main() {
       unconfirmed_idle=$(( unconfirmed_idle + 1 ))
       if (( unconfirmed_idle >= TEAMLEAD_UNCONFIRMED_IDLE_READS )); then
         emit "$state" false "$elapsed" "report file present, worker ${state} on ${unconfirmed_idle} consecutive reads, marker unconfirmed"
-        warn "${AGENT}: the report file exists and the worker reads ${state}, but \`${REPORT_MARKER}\` with \`${REPORT_BASENAME}\` is still unconfirmed after ${unconfirmed_idle} consecutive reads — not a delivered report: re-run this wait once if the worker is blocked or working, record no report if it is idle or done; a report path that fits one pane row prevents this"
+        warn "${AGENT}: the report file exists and the worker reads ${state}, but \`${REPORT_MARKER}${REPORT_PATH}\` is still unconfirmed after ${unconfirmed_idle} consecutive reads — not a delivered report: re-run this wait once if the worker is blocked or working, record no report if it is idle or done; require this attempt's unquoted marker on one pane row"
         return 4
       fi
     else

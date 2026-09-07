@@ -82,7 +82,9 @@ to know goes in the report.
   REPORT: <path>
   ```
 
-  Nothing after it. The lead watches for that line.
+  Emit that line as plain text, outside quotes, lists, and code fences. Use
+  the complete absolute path from your brief, on one line. Nothing after it.
+  Never quote another attempt's completion marker in your final message.
 - Never ask the lead a question and wait. Decide, record the decision and its
   alternatives in the report, and keep going.
 - If you are genuinely blocked — you cannot proceed without a decision that is
