@@ -1,5 +1,10 @@
 # Changelog
 
+### Fixed
+
+- **Native session recovery and release handoffs (#342, #344).** Fresh developer dispatch can correlate a native session ID that appears only after its first prompt. Missing or conflicting evidence preserves the confirmed assignment with null continuity proof. Owner-authorized recovery records later observations separately. A required cleared release handoff can start the next counted developer correction in a fresh session without another context-change permission request; release workers stop for source changes, and the corrected tip returns through full independent verification.
+- **Bounded correction approvals and durable attempts (#343).** The default five-fix checkpoint and pinned judge remain. An explicit task/scope/budget approval covers multiple further attempts, with actual blocking review evidence between them. Planning and dispatch use the same owner ledger, preserve the original base and cumulative count, and reject exhausted or changed bounds. Reservations survive interrupted sends; completed retries return their recorded result without sending or consuming again. State/assignment schema 5 preserves old history, while plan/apply schema 4 carries the new context. Implementation waiting for an operator decision remains distinct from an active audit worker.
+
 ## 0.3.190 — 2026-09-07
 
 ### Fixed

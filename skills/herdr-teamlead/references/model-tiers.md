@@ -82,13 +82,19 @@ unrelated fallback weight.
 Default planning ranks only qualified candidates. `plan --preview-tiers` allows
 inspection before commissioning; it does not authorize live dispatch.
 
-Plan schema 3 carries `tiers` and `rounds` alongside `assignments`. Apply
+Plan schema 4 carries `tiers`, `rounds`, and the task's `task_context` alongside `assignments`. Apply
 records the requested task phase as `round` and the selected config row as
 `tier_row`; escalation may select a stronger row and raise its effort. Apply
 recomputes the tier from current config and round inputs, refusing a stale or
 edited pair. `apply --dry-run` prints the requested tier and relaunch argv
 without contacting Herdr or writing state. It does not establish live
 qualification, readiness, process identity, or session continuity.
+
+The owner validates correction allowance before selecting tiers. A bounded
+approval does not lower a late correction's tier or reset its cumulative
+number. A fresh developer handoff after a required release clear uses the
+normal relaunch and qualification checks; verified retained fixes keep their
+existing compatible model and effort.
 
 Fresh tiered dispatch verifies the worker is idle in the expected pane and
 its composer is empty, identifies its foreground process, terminates that
@@ -207,5 +213,5 @@ not qualify a new rotating tier.
 The operator owns qualification and billing inputs inside config.json; these
 readers never write or migrate that file. Their evidence records use schema
 1. The state owner records the accepted qualification summary and launch
-proof in schema-4 assignment rows; see `state-schema.md` for migration and
+proof in schema-5 assignment rows; see `state-schema.md` for migration and
 reader behavior.

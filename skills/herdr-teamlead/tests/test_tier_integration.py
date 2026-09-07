@@ -175,7 +175,7 @@ class TierIntegrationTest(CliCase):
         self.assertIn(applied["tier"]["prompt_hash"], runner.pasted_prompts()[0])
         stored, usable = load_state_checked(self.state)
         self.assertTrue(usable)
-        self.assertEqual(stored["schema_version"], 4)
+        self.assertEqual(stored["schema_version"], 5)
         self.assertEqual(stored["assignments"][0]["tier"], applied["tier"])
         self.assertEqual(role_counts(stored), {"developer": {"claude": 1}})
 
@@ -187,7 +187,7 @@ class TierIntegrationTest(CliCase):
             "agents": {"claude": {"window_group": "shared"}}}], "assignments": [row]}))
         migrated, usable = load_state_checked(self.state)
         self.assertTrue(usable)
-        self.assertEqual(migrated["assignments"][0], {**row, "schema_version": 4, "tier": None})
+        self.assertEqual(migrated["assignments"][0], {**row, "schema_version": 5, "tier": None})
         self.assertEqual(migrated["snapshots"][0]["agents"]["claude"], {"window_group": "shared", "tier_billing": {}})
         self.assertEqual(role_counts(migrated), {"developer": {"claude": 1}})
 
