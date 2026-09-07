@@ -19,7 +19,7 @@
 #           leaves stdout empty (its diagnostic is on stderr) —
 #           {"agent":"<n>","state":"<s>","report_path":"<p>",
 #            "found":<bool>,"elapsed_seconds":<int>}
-#           plus "reason":"<why>" on exit 4 only.
+#           plus "reason":"<why>" on exits 4 and 5.
 #   stderr: diagnostics and per-attempt progress.
 #   exit  : 0 report found (`found` true),
 #           1 budget exhausted (`found` false, `state` last observed),
@@ -34,6 +34,13 @@
 #             pane wrapped cannot be told from a newline. The skill re-runs
 #             for a blocked or working worker and records no report for an
 #             idle one; compose-briefs.sh prevents the wrap up front.
+#           5 this attempt's report is unavailable after a terminal provider
+#             refusal: two idle/done observations in the same pane, with an
+#             unchanged terminal notice directly above an empty composer at
+#             the live bottom of the same terminal session, and
+#             no report file (`found` false, `reason` terminal_provider_refusal).
+#             Report the unavailable attempt; never retry, rephrase, switch
+#             providers/models, or synthesize the missing report automatically.
 #   env   : HERDR_ENV must be 1. HERDR_BIN overrides the herdr binary.
 #           Poll interval, give-up budget, and the pane-probe parameters are
 #           the named constants below (rules/ci-safety.md Always Watch CI —
@@ -95,6 +102,9 @@ TEAMLEAD_PROBE_LINES="${TEAMLEAD_PROBE_LINES:-40}"
 # where a permission prompt resolves itself before anything can see it; the
 # script reported a dialog that was never on screen, with elapsed_seconds 0.
 TEAMLEAD_BLOCKED_CONFIRM_SEC="${TEAMLEAD_BLOCKED_CONFIRM_SEC:-5}"
+# A terminal provider notice must survive a separate live-state and viewport
+# read. This confirmation is separate from human-dialog handling.
+TEAMLEAD_REFUSAL_CONFIRM_SEC="${TEAMLEAD_REFUSAL_CONFIRM_SEC:-5}"
 
 # Literal rows that mean a dialog really is waiting for a human, matched
 # case-insensitively against the visible pane. One per line, any kind's markers
@@ -130,6 +140,8 @@ ERRFILE=""
 # (rules/error-handling.md: fail visibly, never half-way).
 AGENT=""
 REPORT_PATH=""
+REFUSAL_STATE=""
+REFUSAL_PANE=""
 
 warn() { printf 'wait-report: %s\n' "$1" >&2; }
 
@@ -142,7 +154,7 @@ cleanup() {
 
 emit() { # <state> <found-bool> <elapsed-seconds> [reason]
   # `reason` appears only when set: the object stays the documented shape on
-  # every outcome, with one extra field on the exit-4 path.
+  # every outcome, with one extra field for an unavailable delivery.
   jq -n --arg a "$AGENT" --arg s "$1" --arg p "$REPORT_PATH" \
         --argjson f "$2" --argjson e "$3" --arg r "${4:-}" \
     '{agent: $a, state: $s, report_path: $p, found: $f, elapsed_seconds: $e}
@@ -271,6 +283,129 @@ report_marker_on_screen() { # <pane-text> <absolute-report-path>
   return "$found"
 }
 
+# A bare provider notice must be the last content before an empty native
+# composer. Quoted/fenced examples, occupied composers, later messages, and
+# working footers cannot establish a terminal refusal. Unknown UI shapes keep
+# the ordinary wait; this parser never guesses at a provider's hidden output.
+terminal_refusal_on_screen() { # <visible-pane-text>
+  local row trimmed run tail content fence="" fence_length=0 notice=0 composer=0
+  local fence_pattern='^(`{3,}|~{3,})'
+  local border_pattern='^[─━╭╮╰╯┌┐└┘│[:blank:]]+$'
+  while IFS= read -r row; do
+    trimmed="${row#"${row%%[![:blank:]]*}"}"
+    trimmed="${trimmed%"${trimmed##*[![:blank:]]}"}"
+    [[ -n "$trimmed" ]] || continue
+    if [[ "$row" == '    '* || "$row" == *$'\t'* ]]; then
+      notice=0; composer=0
+      continue
+    fi
+    if [[ "$trimmed" =~ $fence_pattern ]]; then
+      run="${BASH_REMATCH[1]}"; tail="${trimmed#"$run"}"
+      if [[ -z "$fence" ]]; then
+        fence="${run:0:1}"; fence_length=${#run}
+      elif [[ "${run:0:1}" == "$fence" && -z "${tail//[[:blank:]]/}" ]] && (( ${#run} >= fence_length )); then
+        fence=""
+      fi
+      notice=0; composer=0
+      continue
+    fi
+    [[ -z "$fence" ]] || continue
+    case "$trimmed" in
+      "This content can't be shown"|"This content can't be shown.")
+        notice=1; composer=0
+        continue
+        ;;
+      '›'|'❯'|'› Ask Codex to do anything')
+        composer=$notice
+        continue
+        ;;
+      '│ ❯'*'│')
+        content="${trimmed#'│ ❯'}"; content="${content%'│'}"
+        if [[ -z "${content//[[:blank:]]/}" ]]; then
+          composer=$notice
+          continue
+        fi
+        ;;
+      '? for shortcuts'|'Shift+Tab:mode  │  Ctrl+.:shortcuts')
+        if (( composer == 1 )); then continue; fi
+        ;;
+    esac
+    if [[ "$trimmed" =~ $border_pattern ]]; then continue; fi
+    notice=0; composer=0
+  done <<< "$1"
+  (( notice == 1 && composer == 1 ))
+}
+
+read_refusal_view() { # <pane-id>
+  local text rc=0
+  text="$("$HERDR_BIN" pane read "$1" --source visible --lines "$TEAMLEAD_PROBE_LINES" 2>"$ERRFILE")" || rc=$?
+  if (( rc != 0 )); then
+    warn "cannot inspect ${1} for a terminal provider notice (exit ${rc}): $(tr '\n' ' ' < "$ERRFILE") — restore the pane connection before deciding this attempt's outcome"
+    return 2
+  fi
+  printf '%s\n' "$text"
+}
+
+# 0 = pinned live terminal context, 1 = absent/nonterminal evidence, 2 = tool
+# failure. Scroll position prevents a historical composer from qualifying;
+# terminal/session identity and revision reject replacement or intervening UI
+# activity. Missing metrics on older integrations keep the ordinary wait.
+refusal_context() { # <pane-id>
+  local raw parsed rc=0
+  raw="$("$HERDR_BIN" pane get "$1" 2>"$ERRFILE")" || rc=$?
+  if (( rc != 0 )); then
+    warn "cannot verify the live terminal for ${1} (exit ${rc}): $(tr '\n' ' ' < "$ERRFILE") — restore the pane connection before deciding this attempt's outcome"
+    return 2
+  fi
+  parsed="$(printf '%s' "$raw" | jq -c --arg pane "$1" '
+    if (.result.pane | type) != "object" then error("missing result.pane")
+    else .result.pane |
+      if .pane_id == $pane and (.terminal_id | type) == "string" and .terminal_id != ""
+        and (.revision | type) == "number" and .revision >= 0
+        and .scroll.offset_from_bottom == 0
+        and (.agent_status == "idle" or .agent_status == "done")
+      then {terminal_id, agent_session, revision}
+      else null end
+    end' 2>"$ERRFILE")" || rc=$?
+  if (( rc != 0 )); then
+    warn "cannot parse the live terminal for ${1}: $(tr '\n' ' ' < "$ERRFILE") — check the Herdr pane get response before deciding this attempt's outcome"
+    return 2
+  fi
+  [[ "$parsed" != null ]] || return 1
+  printf '%s\n' "$parsed"
+}
+
+# 0 = confirmed terminal refusal, 1 = no terminal evidence, 2 = tool failure.
+# Compare complete visible snapshots so new prompt/output activity invalidates
+# an old notice even when its literal text remains somewhere on screen.
+confirmed_provider_refusal() { # <pane-id>
+  local before after context_before context_after info state pane rc=0
+  REFUSAL_STATE=""; REFUSAL_PANE=""
+  before="$(read_refusal_view "$1")" || return 2
+  terminal_refusal_on_screen "$before" || return 1
+  context_before="$(refusal_context "$1")" || return $?
+  if ! sleep "$TEAMLEAD_REFUSAL_CONFIRM_SEC"; then
+    warn "terminal-refusal confirmation wait failed — restore the sleep utility before deciding this attempt's outcome"
+    return 2
+  fi
+  info="$(agent_info "$AGENT")" || return 2
+  state="${info%% *}"; pane="${info##* }"
+  REFUSAL_STATE="$state"; REFUSAL_PANE="$pane"
+  if [[ -z "$pane" || "$pane" == "unknown" ]]; then
+    warn "${AGENT} lost its pane during refusal confirmation — restore its live pane before deciding the report outcome"
+    return 2
+  fi
+  if [[ "$pane" != "$1" || ( "$state" != "idle" && "$state" != "done" ) ]]; then return 1; fi
+  after="$(read_refusal_view "$pane")" || return 2
+  context_after="$(refusal_context "$pane")" || return $?
+  [[ "$context_before" == "$context_after" ]] || return 1
+  if [[ "$before" != "$after" || -f "$REPORT_PATH" ]]; then return 1; fi
+  terminal_refusal_on_screen "$after" || rc=$?
+  if (( rc != 0 )); then return 1; fi
+  REFUSAL_STATE="$state"
+  return 0
+}
+
 main() {
   if (( $# != 2 )); then
     warn "usage: wait-report.sh <agent-name> <report-path>"
@@ -296,6 +431,7 @@ main() {
   validate_nonneg_int TEAMLEAD_WAIT_INTERVAL_SEC "$TEAMLEAD_WAIT_INTERVAL_SEC" || return 2
   validate_nonneg_int TEAMLEAD_WAIT_BUDGET_SEC "$TEAMLEAD_WAIT_BUDGET_SEC" || return 2
   validate_nonneg_int TEAMLEAD_BLOCKED_CONFIRM_SEC "$TEAMLEAD_BLOCKED_CONFIRM_SEC" || return 2
+  validate_nonneg_int TEAMLEAD_REFUSAL_CONFIRM_SEC "$TEAMLEAD_REFUSAL_CONFIRM_SEC" || return 2
   validate_positive_int TEAMLEAD_PROBE_TIMEOUT_MS "$TEAMLEAD_PROBE_TIMEOUT_MS" || return 2
   validate_positive_int TEAMLEAD_PROBE_LINES "$TEAMLEAD_PROBE_LINES" || return 2
   # Normalize to decimal once: a validated `08` would otherwise be reparsed as
@@ -304,6 +440,7 @@ main() {
   TEAMLEAD_WAIT_INTERVAL_SEC=$(( 10#$TEAMLEAD_WAIT_INTERVAL_SEC ))
   TEAMLEAD_WAIT_BUDGET_SEC=$(( 10#$TEAMLEAD_WAIT_BUDGET_SEC ))
   TEAMLEAD_BLOCKED_CONFIRM_SEC=$(( 10#$TEAMLEAD_BLOCKED_CONFIRM_SEC ))
+  TEAMLEAD_REFUSAL_CONFIRM_SEC=$(( 10#$TEAMLEAD_REFUSAL_CONFIRM_SEC ))
   TEAMLEAD_PROBE_TIMEOUT_MS=$(( 10#$TEAMLEAD_PROBE_TIMEOUT_MS ))
   TEAMLEAD_PROBE_LINES=$(( 10#$TEAMLEAD_PROBE_LINES ))
 
@@ -382,6 +519,19 @@ main() {
       now="$(date +%s)"
       emit "$state" true "$(( now - start ))"
       return 0
+    fi
+
+    if [[ ! -f "$REPORT_PATH" && ( "$state" == "idle" || "$state" == "done" ) ]]; then
+      rc=0
+      confirmed_provider_refusal "$pane" || rc=$?
+      if (( rc == 2 )); then return 2; fi
+      state="${REFUSAL_STATE:-$state}"; pane="${REFUSAL_PANE:-$pane}"
+      if (( rc == 0 )); then
+        now="$(date +%s)"
+        emit "$REFUSAL_STATE" false "$(( now - start ))" "terminal_provider_refusal"
+        warn "${AGENT}: report unavailable after a confirmed terminal provider refusal — record this attempt as unavailable and tell the operator; keep review/release gates unsatisfied, with no automatic retry, rephrasing, model/provider switch, or synthesized report"
+        return 5
+      fi
     fi
 
     now="$(date +%s)"

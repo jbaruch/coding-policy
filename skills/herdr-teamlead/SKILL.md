@@ -263,13 +263,11 @@ One call per dispatched worker, in the order the round needs them:
 bash .tessl/plugins/jbaruch/coding-policy/skills/herdr-teamlead/wait-report.sh <agent-name> <report-path>
 ```
 
-Emits `{"agent","state","report_path","found","elapsed_seconds"}` on every
-outcome except exit 2, which leaves stdout empty and puts its diagnostic on
-stderr. Exit 4 adds `reason`. Completion requires both the report file on disk
-and its complete, unquoted `REPORT: <absolute-path>` marker on one pane row.
-A filename alone, quoted example, or wrapped fragment never confirms delivery.
-A single `idle` or `done` observation is not
-completion. Poll interval and give-up budget are the script's own constants.
+Emits `{"agent","state","report_path","found","elapsed_seconds"}`; exit 2
+emits only stderr. Exits 4–5 add `reason`. Delivery requires the file and its
+complete, unquoted `REPORT: <absolute-path>` marker on one pane row. Names,
+quoted examples, wrapped fragments, or lifecycle state alone never confirm it.
+The script owns timing.
 
 - **Exit 0** — read the completed report; continue to the next worker, then Step 12.
 - **Exit 1** — inspect the named worker. Re-run this wait if it is working;
@@ -279,6 +277,9 @@ completion. Poll interval and give-up budget are the script's own constants.
   round. Resume the wait only after the live state leaves `blocked`.
 - **Exit 4** — the file lacks its confirmed delivery marker. Follow the live
   state check in the recovery reference; never re-dispatch on top of it.
+- **Exit 5** — record the report as unavailable and notify the operator.
+  Keep review/release gates unsatisfied. Never automatically retry, rephrase,
+  switch providers/models, or synthesize a report.
 
 Detailed recovery for each outcome:
 
