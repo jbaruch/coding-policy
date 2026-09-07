@@ -61,7 +61,7 @@ from .tiers import launch_flags
 from .qualification import require_qualification
 
 # Version 3 adds verified model-tier metadata to context and task/fix evidence.
-APPLY_SCHEMA_VERSION = 5
+APPLY_SCHEMA_VERSION = 6
 
 RETAIN_CONTEXT_ROUNDS = frozenset({1, 2, 3})
 
@@ -268,7 +268,7 @@ def validate_context_mode(assignments, no_clear, retain_context, task, fix_round
         )
     if "developer" in assignments and fix_round in RETAIN_CONTEXT_ROUNDS and not retain_context:
         if transition is None:
-            raise UsageError("Early developer fix rounds require --retain-context or a recorded release/context recovery handoff. Inspect teamlead state and follow dispatch-recovery.md without resetting the task.", {})
+            raise UsageError("Early developer fixes require --retain-context or a recorded fresh handoff. Use recover-role-clear for a verified automatic role clear, or follow dispatch-recovery.md for other causes; never reset the task.", {})
         task_record(store, task)
         if no_clear:
             raise UsageError("A replacement developer session requires an automatic clear; omit --no-clear.", {})

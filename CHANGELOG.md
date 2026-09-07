@@ -1,5 +1,9 @@
 # Changelog
 
+### Added
+
+- **Verified developer role-clear recovery (#363).** `recover-role-clear` binds the preserved developer and actual automatic clearing dispatch to their original evidence, task/base, next correction and existing scope/allowance. It reuses registered authorization or records only a missing explicit clear decision, preserves known native-session proof, and enables one normal fresh dispatch without resetting or expanding the budget. Plan/apply recheck work and artifacts; readiness, clearing, tier qualification and full corrected-tip verification remain required. Guidance reserves developers through early verification. Recovery schema 3 adds audit arrays without changing prior records; apply schema 6 names the role-clear handoff.
+
 ### Fixed
 
 - **Historical import assignment chronology (#362).** Retained fixes follow actual assignment event times, preserving original audit rows and indices when an older correction is imported after the live session. Missing, timezone-free, or tied latest event times refuse without guessing; later task/role changes and native-session mismatches still block retention. Recovery handoffs, historical predecessors and exhausted-budget judge checks use the same chronology. Owner-command integration covers older/newer imports, same-task counts, independent review dispatches, one retained prompt with no clear, and idempotent retry.

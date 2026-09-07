@@ -46,10 +46,10 @@ and billing evidence are documented in `references/model-tiers.md`.
 `task`, cumulative `fix_round`, correction `plan` identity or null, and `work`
 bounds or null. Apply refuses different task context. Earlier plan shapes and
 plain role mappings remain accepted; live apply still checks current history,
-allowance, tiers, qualification, and readiness. Apply output schema 5 includes
+allowance, tiers, qualification, and readiness. Apply output schema 6 includes
 `context_transition`, persistent `dispatch_id` for labelled assignments, and
 `replayed: true` when returning an existing completed result.
-Version 5 adds verified hand-release and historical-correction transition
+Version 6 adds the verified role-clear transition. Version 5 adds verified hand-release and historical-correction transition
 variants; version 4 introduced the original recovery fields.
 
 The optional `role_costs` key is the second:
@@ -82,7 +82,7 @@ number is refused, naming the file and the role. `plan` is the only reader.
     }
   ],
   "recovery": {
-    "schema_version": 2,
+    "schema_version": 3,
     "tasks": {},
     "checkpoints": [],
     "plans": [],
@@ -90,7 +90,9 @@ number is refused, naming the file and the role. `plan` is the only reader.
     "context_permissions": [],
     "events": [],
     "hand_clearances": [],
-    "historical_attempts": []
+    "historical_attempts": [],
+    "role_clearances": [],
+    "delivery_recoveries": []
   }
 }
 ```
@@ -138,9 +140,10 @@ document and arrives already stamped.
 
 ## Recovery records
 
-The recovery document uses `schema_version: 2`; individual records retain their
-independent `schema_version: 1`. The owner migrates a version-1 recovery document
-by adding empty `hand_clearances` and `historical_attempts` arrays. Existing
+The recovery document uses `schema_version: 3`; individual records retain their
+independent `schema_version: 1`. The owner adds empty `role_clearances` and
+`delivery_recoveries` arrays when migrating versions 1 or 2. Version 1 also
+gains empty `hand_clearances` and `historical_attempts` arrays. Existing
 record shapes, contents, assignment rows and evidence remain unchanged. State
 and assignment schema 5 and snapshot schema 3 remain unchanged. A version-4
 state migrates through its existing owner chain before either recovery command.
@@ -158,6 +161,7 @@ replacement for live readiness, source review, or release gates.
 | `context_permissions` | Original `assignment_index`, `next_fix`, `reason`, `authorization`, `evidence`, `evidence_receipt`, later `observed_session`, and `basis: operator_authorized_fresh_handoff`. The original null session is never replaced. |
 | `events` | Append-only `sequence`, `kind`, and structured `details` preserving approvals, waiting states, reservations, send transitions, results, transport retries, superseded review receipts, and recovery decisions. |
 | `hand_clearances` | Unique `id`, original release `assignment_index`, `previous_developer`, complete owner `input`, clear byte `receipts`, later `observed_session` or null, and `basis: verified_required_release_clear`. Both indices retain their original rows. The later observation never substitutes for historical proof; changed or missing current IDs do not invalidate archived clear evidence. |
+| `role_clearances` | Unique `id`, original `task`/`base_revision`, developer `assignment_index`, actual `clearing_assignment_index` and `clearing_dispatch`, `next_fix`, complete owner `input`, clear/authorization byte `receipts`, reused or explicit `clear_authority`, later `observed_session`, `basis: verified_authorized_role_clear`, and `grants_future_attempts: false`. The input fixes the same work and correction plan used for dispatch. Original known native proof and every earlier row remain unchanged. |
 | `historical_attempts` | Unique `id`, actual `fix_round`, `previous_developer`, appended `assignment_index`, original owner `input`, authorization/transport/report byte `receipts`, inspected `vcs` checkout/head/diff evidence, `basis: completed_authorized_manual_correction`, null `native_session_proof`, `grants_future_attempts: false`, and append-only `reviews`. |
 
 Dispatch statuses are `reserved`, `sending`, `sent_but_not_started`, `applied`,
@@ -195,7 +199,9 @@ indices, or `authorized_context_recovery` with the original assignment and
 permission reference. `verified_hand_release_handoff` names the original
 developer/release indices and `clearance` identity. `historical_correction_handoff`
 names the imported developer index, `historical_attempt` identity and
-`continuity: unproven`. Neither changes native-session proof or grants an attempt.
+`continuity: unproven`. `verified_role_clear_handoff` names the original
+developer, `clearing_assignment` index and `clearance` identity. None changes
+native-session proof or grants an attempt.
 `reconciliation` records its own version/timestamp,
 original `input`, `evidence_receipt`, and later `observed_state`/`observed_session`.
 An applied recovery appends a new assignment with null contemporaneous session

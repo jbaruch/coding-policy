@@ -75,6 +75,7 @@ instruction into permission to exceed an exhausted correction budget.
 | `authorize-corrections` | unique `id`, `task`, `checkpoint`, `scope`, `allowed_paths`, positive `additional_fixes`, `authorization`; optional `supersedes` | Store an explicit bounded approval once. Continue while it covers the next attempt; do not ask again within those bounds. A changed decision names the active plan in `supersedes`. |
 | `record-report` | `dispatch`, full `head_revision`, `verdict` (`blocking` or `approved`), `review_mode` (`full` or `scoped`), independent `reviewer`, absolute `report`, `changed_paths` | Read the report in full and verify the VCS diff first. The command binds its bytes and stated head to the dispatch; it does not establish the tester, CI, external-review, or release gates. |
 | `recover-context` | `task`, original `assignment_index`, `reason`, `authorization`, absolute `evidence` | For the latest confirmed developer row with null native-session proof. Records a live observation separately and permits the next fresh handoff. The original null stays null. |
+| `recover-role-clear` | Fields under Verified role-clear recovery below | Record a fresh handoff after another authorized role automatically cleared the developer. Preserve known original proof and reuse existing correction bounds. |
 | `reconcile` | `dispatch`, `outcome` (`applied` or `not_sent`), `reason`, `authorization`, absolute `evidence` | Resolve an interrupted send from actual evidence and an idle/done live worker. `applied` appends recovered assignment evidence without fabricating contemporaneous session proof; `not_sent` permits a transport retry. |
 | `record-release-clear` | Fields under Verified release hand-clear below | Record existing required-clear evidence for a successful release `--no-clear` row. No new context-change permission is required. |
 | `import-correction` | Fields under Historical manual corrections below | Import an already authorized, completed manual attempt without sending input or granting future attempts. |
@@ -141,6 +142,50 @@ while its checkpoint awaits approval; an audit worker may still be active.
 `judge_checkpoint_required` requires the next exhausted-budget checkpoint.
 Neither an active worker nor a dispatch receipt proves that implementation or
 release has finished.
+
+## Verified role-clear recovery
+
+Keep the developer reserved until early-fix verification resolves. If the lead
+already reused that worker for another role and normal apply cleared it, retain
+the original developer proof. Use `recover-role-clear` with:
+
+- `id`: a stable unique recovery identity; `task` and `base_revision`: the
+  registered original task and full base SHA.
+- `assignment_index`: the preceding confirmed developer assignment;
+  `clearing_assignment_index`: the same worker's actual successful automatic
+  clearing assignment in another role, from `teamlead state`.
+- `next_fix`: the actual next cumulative correction number;
+  `correction_plan`: the existing bounded plan ID for an extra correction, or
+  `null` within the original allowance.
+- `work`: `base_revision`, exact authorized `scope`, repository-relative `paths`,
+  and the non-empty array of current blocking `findings`. This is also the
+  complete content of the `--work FILE` used for plan and apply.
+- `clearing_authorization`: `{"task": "<clearing task>"}` to reuse its registered
+  authorization. If it is missing, use `{"authorization": {"source": "<operator
+  message>", "quote": "<actual words>"}, "evidence": "<absolute artifact path>"}`.
+  Preserve the actual decision naming the clearing task and role. The owner
+  verifies that its meaning covers the clear; silence grants nothing.
+- `evidence`: the absolute path to the original JSON output of the clearing
+  `apply`, either its full envelope or individual dispatch result; `reason`:
+  the actual scheduling mistake and recovery circumstances.
+
+The command reads the idle/done worker and appends one receipt binding the
+original assignments, authorization, work and archived output. Its validation
+contract is in `skills/herdr-teamlead/teamlead/role_clear.py`. The later native
+observation stays separate from original proof; nondeveloper assignments may
+have null native evidence even after their confirmed automatic clear. Recovery
+never replaces those fields, increases allowance, or sends a brief. Missing or
+conflicting evidence, stale attempts, unresolved dispatches, changed task/base,
+unauthorized paths and exhausted bounds refuse without modifying history.
+
+Continue with the same task, next fix, correction plan and `--work FILE` in
+plan and normal apply. Omit `--retain-context` and `--no-clear`. Apply rechecks
+receipts and the recorded work, performs live readiness, automatic clear, tier
+and qualification checks, then counts its one confirmed developer dispatch.
+An identical completed retry returns the recorded result without sending again.
+Carry the earlier reports, blocking findings, original base and cumulative count
+in the fresh brief. Full independent review and testing of the corrected tip,
+external review and CI remain required before release resumes.
 
 ## Verified release hand-clear
 

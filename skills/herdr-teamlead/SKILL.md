@@ -114,7 +114,8 @@ Emits assignments, rationale, snapshot reference, and configured round tiers;
 contacts no worker. Exit 1 refuses the plan: resolve its diagnostic before
 continuing. Phase 2 excludes the branch author from reviewer and tester.
 For retained fixes, plan developer alone and exclude all other workers; plan
-verification separately. Supply the same fix number to plan and apply.
+verification separately. Reserve the developer until early-fix verification
+resolves before reusing it for another task or role. Supply the same fix number to plan and apply.
 Use the same recorded task, approval, and work bounds for both commands.
 Register the original task and base through the owner commands documented in
 `skills/herdr-teamlead/references/dispatch-recovery.md` before recovery work.
@@ -240,6 +241,9 @@ After a recorded release clear, dispatch the next developer correction fresh
 within the same task and allowance. No context-change permission is required.
 Carry the release report, findings, original base, and cumulative count into
 the brief. Step 12's full verification remains required before release.
+
+After another role clears the developer, use `recover-role-clear` under the
+recovery reference. Pass its same `--work` to plan and fresh apply.
 
 Reuse an approved bounded correction plan while its scope and budget hold.
 An unknown dispatch outcome pauses implementation for evidence-based recovery.

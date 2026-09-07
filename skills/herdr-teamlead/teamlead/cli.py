@@ -21,7 +21,7 @@ from types import SimpleNamespace
 from . import __version__
 from .assign import apply as apply_assignments
 from .assign import APPLY_SCHEMA_VERSION, dry_run, native_context_session, normalize_assignments, resolve_paths, validate_fix_history
-from . import historical, recovery
+from . import historical, recovery, role_clear
 from .config import default_config_path, load_config, load_judge, load_role_costs, select_agents
 from .errors import PlanError, StateError, TeamLeadError, UsageError
 from .herdr import (
@@ -316,7 +316,7 @@ def build_parser():
         command_parser.add_argument("--work", metavar="FILE", help="Correction base, scope, paths and blocking findings as JSON.")
     apply_parser.add_argument("--dispatch-id", help="Stable dispatch identity; retries read its recorded outcome.")
 
-    for command in ("task", "checkpoint", "authorize-corrections", "recover-context", "record-report", "reconcile", "record-release-clear", "import-correction", "record-historical-review"):
+    for command in ("task", "checkpoint", "authorize-corrections", "recover-context", "recover-role-clear", "record-report", "reconcile", "record-release-clear", "import-correction", "record-historical-review"):
         record_parser = sub.add_parser(command, parents=[common], help="Record owner-managed {} evidence.".format(command))
         record_parser.add_argument("--record", required=True, metavar="FILE", help="Structured evidence JSON; see dispatch-recovery.md.")
         record_parser.add_argument("--now", metavar="ISO8601")
@@ -809,6 +809,8 @@ def cmd_recovery(args, client=None, warn=None, trace=None):
         recovery.require_recovery_ready(live)
         if args.command == "recover-context":
             result = recovery.authorize_context(store, history, data, at, native_context_session(live, agents[name].kind))
+        elif args.command == "recover-role-clear":
+            result = role_clear.record_role_clear(store, history, data, at, native_context_session(live, agents[name].kind))
         elif args.command == "record-release-clear":
             result = historical.record_release_clear(store, history, data, at, native_context_session(live, agents[name].kind))
         else:
@@ -850,7 +852,7 @@ COMMANDS = {
     "apply": cmd_apply,
     "state": cmd_state,
     "status": cmd_status,
-    **{command: cmd_recovery for command in ("task", "checkpoint", "authorize-corrections", "recover-context", "record-report", "reconcile", "record-release-clear", "import-correction", "record-historical-review")},
+    **{command: cmd_recovery for command in ("task", "checkpoint", "authorize-corrections", "recover-context", "recover-role-clear", "record-report", "reconcile", "record-release-clear", "import-correction", "record-historical-review")},
     "start-judge": cmd_start_judge,
 }
 

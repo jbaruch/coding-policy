@@ -18,6 +18,8 @@
     "skills/herdr-teamlead/teamlead/planner.py",
     "skills/herdr-teamlead/teamlead/probe.py",
     "skills/herdr-teamlead/teamlead/recovery.py",
+    "skills/herdr-teamlead/teamlead/role_clear.py",
+    "skills/herdr-teamlead/tests/test_role_clear.py",
     "skills/herdr-teamlead/teamlead/state.py",
     "skills/herdr-teamlead/tests/__init__.py",
     "skills/herdr-teamlead/tests/fakes.py",

@@ -69,6 +69,7 @@ description: Running a multi-agent team — headroom-driven role rotation, one w
 
 - Count fix rounds per task after its initial implementation
 - Default each task's fix allowance to five rounds
+- Reserve the developer through early-fix verification before assigning it another task or role
 - Fix rounds 1–3 retain the same developer's context when the retention preconditions hold
 - Narrow exception for retaining context on a same-role fix round.
 - Preconditions (all required):
@@ -82,15 +83,19 @@ description: Running a multi-agent team — headroom-driven role rotation, one w
 - Narrow exception for a recorded fresh early correction.
 - Preconditions (all required):
   1. The owner ledger preserves the original task, base, preceding developer assignment, and actual next fix number
-  2. The recorded cause is a confirmed release clear, an explicit operator recovery decision for the preserved missing-session assignment, or a verified historical import of a completed operator-authorized manual correction
+  2. The recorded cause is a confirmed release clear, an explicit operator recovery decision for the preserved missing-session assignment, a verified historical import of a completed operator-authorized manual correction, or an owner-verified automatic clear into another authorized role
   3. The next fix remains within the task's existing allowance and scope
   4. The lead dispatches a fresh developer brief through the normal readiness, clear, tier, and qualification checks
   5. For a historical import, the owner verifies original task/scope/budget authorization, archived transport and report bytes, and the actual VCS base, head and diff
   6. For a historical import, the owner appends the actual count with null native-session proof
   7. For a historical import, the owner preserves prior rows
   8. For a historical import, the owner grants no future allowance or review approval
+  9. For a role clear, the owner binds the actual clearing assignment and archived dispatch evidence to the preceding developer
+  10. For a role clear, the owner preserves known native proof and all earlier rows
+  11. For a role clear, the owner reuses existing task and clear authorization or records the missing explicit decision
 - Every other early fix requires the retained-context preconditions
 - A required release clear or verified historical-import handoff needs no separate context-change permission
+- An authorized verified role clear needs no additional context-change permission within the existing correction scope and allowance
 - Never edit repository content while holding the release role
 - Each fresh-worker brief includes the task, prior report, and open findings
 - Frame the handoff as "a prior developer attempted this N times; you own it now"

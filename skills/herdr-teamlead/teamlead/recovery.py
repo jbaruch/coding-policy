@@ -17,7 +17,7 @@ from .chronology import assignment_after, latest_assignment
 
 
 RECOVERY_SCHEMA_VERSION = 1
-RECOVERY_STORE_VERSION = 2
+RECOVERY_STORE_VERSION = 3
 DEFAULT_FIX_LIMIT = 5
 PENDING_STATUSES = frozenset({"reserved", "sending", "sent_but_not_started"})
 DISPATCH_STATUSES = PENDING_STATUSES | {"applied", "not_sent"}
@@ -27,17 +27,24 @@ SHA_RE = re.compile(r"[0-9a-f]{40}(?:[0-9a-f]{24})?\Z")
 def empty_recovery():
     return {"schema_version": RECOVERY_STORE_VERSION, "tasks": {}, "checkpoints": [],
             "plans": [], "dispatches": [], "context_permissions": [], "events": [],
-            "hand_clearances": [], "historical_attempts": []}
+            "hand_clearances": [], "historical_attempts": [], "role_clearances": [], "delivery_recoveries": []}
 
 
 def migrate_store(store):
     """Upgrade only the enclosing recovery document; old record shapes persist."""
-    if isinstance(store, dict) and type(store.get("schema_version")) is int and store["schema_version"] == 1:
-        if "hand_clearances" in store or "historical_attempts" in store:
-            raise UsageError("Version 1 recovery contains unowned historical records; preserve it for owner recovery.", {})
-        store.update(schema_version=RECOVERY_STORE_VERSION, hand_clearances=[], historical_attempts=[])
-        return True
-    return False
+    if not isinstance(store, dict) or type(store.get("schema_version")) is not int:
+        return False
+    version = store["schema_version"]
+    if version not in {1, 2}:
+        return False
+    added = ["role_clearances", "delivery_recoveries"]
+    if version == 1:
+        added.extend(["hand_clearances", "historical_attempts"])
+    if any(name in store for name in added):
+        raise UsageError("Older recovery contains unowned newer records; preserve it for owner recovery.", {})
+    store.update({name: [] for name in added})
+    store["schema_version"] = RECOVERY_STORE_VERSION
+    return True
 
 
 def text(value, label):
@@ -215,6 +222,9 @@ def validate_work(store, assignments, task, fix_round, plan_id=None, work=None, 
             raise UsageError("A correction approval requires the actual cumulative fix number; do not reset it to initial development.", {})
         return None
     positive(fix_round, "fix_round")
+    if implementation:
+        from .role_clear import validate_requested
+        validate_requested(store, assignments, task, fix_round, plan_id, work)
     if fix_round <= DEFAULT_FIX_LIMIT:
         if plan_id:
             raise UsageError("An extra-correction plan cannot relabel an ordinary fix; preserve the cumulative number.", {})
@@ -410,6 +420,10 @@ def fresh_transition(store, assignments, task, fix_round):
     if historical:
         return {"reason": "historical_correction_handoff", "previous_developer": index,
                 "historical_attempt": historical["id"], "continuity": "unproven"}
+    from .role_clear import transition
+    recovered = transition(store, assignments, task, fix_round, index)
+    if recovered:
+        return recovered
     permission = next((row for row in reversed(store["context_permissions"]) if row["task"] == task
                        and row["assignment_index"] == index and row["next_fix"] == fix_round), None)
     if permission:
@@ -425,7 +439,7 @@ def require_recovery_ready(live_info):
 
 def recovery_agent(store, assignments, command, data):
     """Resolve the preserved worker identity before collecting live evidence."""
-    if command in {"recover-context", "record-release-clear"}:
+    if command in {"recover-context", "record-release-clear", "recover-role-clear"}:
         index = data.get("assignment_index")
         if type(index) is not int or not 0 <= index < len(assignments):
             raise UsageError("Use the original assignment_index from teamlead state; do not guess a worker identity.", {})
@@ -465,7 +479,7 @@ def validate_store(store, assignments):
     try:
         if not isinstance(store["tasks"], dict):
             raise UsageError("Recovery tasks must be an object; restore the owner-written ledger.", {})
-        for name in ("checkpoints", "plans", "dispatches", "context_permissions", "events", "hand_clearances", "historical_attempts"):
+        for name in ("checkpoints", "plans", "dispatches", "context_permissions", "events", "hand_clearances", "historical_attempts", "role_clearances", "delivery_recoveries"):
             if not isinstance(store[name], list):
                 raise UsageError("Recovery {} must be an array; restore the owner-written ledger.".format(name), {})
             identifiers = []
@@ -580,6 +594,8 @@ def validate_store(store, assignments):
         # Imported records use these shared validators without a module-level cycle.
         from .historical import validate_history
         validate_history(store, assignments)
+        from .role_clear import validate_history as validate_role_clear_history
+        validate_role_clear_history(store, assignments)
     except (KeyError, TypeError, ValueError) as exc:
         raise UsageError("Recovery ledger has missing or malformed fields ({}); restore its owner-written state without discarding history.".format(exc), {}) from None
     return store

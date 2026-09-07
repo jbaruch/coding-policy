@@ -611,12 +611,14 @@ class HistoricalCommandsTest(fixture.CliCase):
         original["recovery"]["schema_version"] = 1
         del original["recovery"]["hand_clearances"]
         del original["recovery"]["historical_attempts"]
+        del original["recovery"]["role_clearances"]
+        del original["recovery"]["delivery_recoveries"]
         self.state.write_text(json.dumps(original))
         code, _, err = self.invoke(["state"])
         self.assertEqual(code, 0, err)
         result = self.saved()
         self.assertEqual(result["assignments"], original["assignments"])
-        expected = {**original["recovery"], "schema_version": 2, "hand_clearances": [], "historical_attempts": []}
+        expected = {**original["recovery"], "schema_version": 3, "hand_clearances": [], "historical_attempts": [], "role_clearances": [], "delivery_recoveries": []}
         self.assertEqual(result["recovery"], expected)
 
 
