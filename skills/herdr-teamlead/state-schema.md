@@ -46,9 +46,11 @@ and billing evidence are documented in `references/model-tiers.md`.
 `task`, cumulative `fix_round`, correction `plan` identity or null, and `work`
 bounds or null. Apply refuses different task context. Earlier plan shapes and
 plain role mappings remain accepted; live apply still checks current history,
-allowance, tiers, qualification, and readiness. Apply output schema 4 adds
+allowance, tiers, qualification, and readiness. Apply output schema 5 includes
 `context_transition`, persistent `dispatch_id` for labelled assignments, and
 `replayed: true` when returning an existing completed result.
+Version 5 adds verified hand-release and historical-correction transition
+variants; version 4 introduced the original recovery fields.
 
 The optional `role_costs` key is the second:
 `{"<role>": <number>}`, what one round in that seat is expected to
@@ -80,13 +82,15 @@ number is refused, naming the file and the role. `plan` is the only reader.
     }
   ],
   "recovery": {
-    "schema_version": 1,
+    "schema_version": 2,
     "tasks": {},
     "checkpoints": [],
     "plans": [],
     "dispatches": [],
     "context_permissions": [],
-    "events": []
+    "events": [],
+    "hand_clearances": [],
+    "historical_attempts": []
   }
 }
 ```
@@ -134,7 +138,12 @@ document and arrives already stamped.
 
 ## Recovery records
 
-The recovery document and each nested record use their own `schema_version: 1`.
+The recovery document uses `schema_version: 2`; individual records retain their
+independent `schema_version: 1`. The owner migrates a version-1 recovery document
+by adding empty `hand_clearances` and `historical_attempts` arrays. Existing
+record shapes, contents, assignment rows and evidence remain unchanged. State
+and assignment schema 5 and snapshot schema 3 remain unchanged. A version-4
+state migrates through its existing owner chain before either recovery command.
 Every record carries `at` and `task`. Authorizations contain the actual operator
 message `source` and `quote`; evidence receipts contain absolute `path` and
 `sha256` of the bytes read by the owner. Receipts are audit evidence, not a
@@ -148,6 +157,8 @@ replacement for live readiness, source review, or release gates.
 | `dispatches` | Unique `id`, byte/input `fingerprint`, `role`, `agent`, cumulative `fix_round`, `plan` or null, `work` or null, `status`, `result`, `report`, and `assignment_index` once an outcome is recorded. CLI records `brief`, `common`, `observed_before`, and `context_before_send`; reconciled retries preserve `prior_assignment_indices`. |
 | `context_permissions` | Original `assignment_index`, `next_fix`, `reason`, `authorization`, `evidence`, `evidence_receipt`, later `observed_session`, and `basis: operator_authorized_fresh_handoff`. The original null session is never replaced. |
 | `events` | Append-only `sequence`, `kind`, and structured `details` preserving approvals, waiting states, reservations, send transitions, results, transport retries, superseded review receipts, and recovery decisions. |
+| `hand_clearances` | Unique `id`, original release `assignment_index`, `previous_developer`, complete owner `input`, clear byte `receipts`, later `observed_session`, and `basis: verified_required_release_clear`. Both indices retain their original rows. |
+| `historical_attempts` | Unique `id`, actual `fix_round`, `previous_developer`, appended `assignment_index`, original owner `input`, authorization/transport/report byte `receipts`, inspected `vcs` checkout/head/diff evidence, `basis: completed_authorized_manual_correction`, null `native_session_proof`, `grants_future_attempts: false`, and append-only `reviews`. |
 
 Dispatch statuses are `reserved`, `sending`, `sent_but_not_started`, `applied`,
 and `not_sent`. The first three hold an unresolved slot. Only confirmed
@@ -155,6 +166,18 @@ developer assignments advance the task's fix count; a pending slot blocks a
 second implementation/release dispatch for that task or worker. `applied`
 results must match their referenced assignment. Extra fixes require a matching
 plan and work bounds, including when a reader validates historical state.
+A completed legacy manual correction instead requires its linked historical
+import and original bounded authorization; that record grants no future fixes.
+Its appended assignment uses the original completion time, `role: developer`,
+`status: applied`, actual task/agent/count, `cleared: null`,
+`clear_reason: unknown`, null session and tier. It is historical work recorded
+now, not a contemporaneous owner dispatch. All assignment count readers consume
+that same row; they never add the import record a second time.
+Each historical review is a version-1 record with `at`, `task`, unique `id`,
+original `input` (attempt/head/verdict/mode/reviewer/report), and byte `evidence`.
+It grants no attempt; an existing remaining plan requires its latest blocking
+receipt before another correction. A full approval cannot stand in for a
+blocking finding, and scoped review cannot approve a release.
 
 `work` contains `base_revision`, `scope`, repository-relative `paths`, and
 blocking `findings`. A review receipt contains `dispatch`, `head_revision`,
@@ -169,7 +192,11 @@ separate requirements in the skill.
 tier proof, and any fresh `transition`. A confirmed result's
 `context_transition` names `release_handoff` with prior developer/release
 indices, or `authorized_context_recovery` with the original assignment and
-permission reference. `reconciliation` records its own version/timestamp,
+permission reference. `verified_hand_release_handoff` names the original
+developer/release indices and `clearance` identity. `historical_correction_handoff`
+names the imported developer index, `historical_attempt` identity and
+`continuity: unproven`. Neither changes native-session proof or grants an attempt.
+`reconciliation` records its own version/timestamp,
 original `input`, `evidence_receipt`, and later `observed_state`/`observed_session`.
 An applied recovery appends a new assignment with null contemporaneous session
 proof and marks its result `recovered: true`; it preserves the original row.

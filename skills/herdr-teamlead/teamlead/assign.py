@@ -60,7 +60,7 @@ from .tiers import launch_flags
 from .qualification import require_qualification
 
 # Version 3 adds verified model-tier metadata to context and task/fix evidence.
-APPLY_SCHEMA_VERSION = 4
+APPLY_SCHEMA_VERSION = 5
 
 RETAIN_CONTEXT_ROUNDS = frozenset({1, 2, 3})
 

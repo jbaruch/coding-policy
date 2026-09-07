@@ -64,7 +64,7 @@ from pathlib import Path
 from .diagnostics import stderr_warn as _warn
 from .errors import ConfigError, HerdrError, StateError, UsageError
 from .tiers import parse_launch_args, parse_tiers, verify_argv
-from .recovery import DEFAULT_FIX_LIMIT, empty_recovery, validate_store
+from .recovery import DEFAULT_FIX_LIMIT, empty_recovery, migrate_store, validate_store
 
 #: The version this build writes for the document and assignment rows.
 #: Snapshots have their own version and migration chain below.
@@ -414,7 +414,9 @@ def _validate(payload, path):
         snapshots.append(snapshot)
     payload["snapshots"] = snapshots
     try:
-        validate_store(payload.setdefault("recovery", empty_recovery()), rows)
+        store = payload.setdefault("recovery", empty_recovery())
+        migrated = migrate_store(store) or migrated
+        validate_store(store, rows)
     except UsageError as exc:
         raise _NoUsableState(str(exc)) from None
     return payload, migrated
