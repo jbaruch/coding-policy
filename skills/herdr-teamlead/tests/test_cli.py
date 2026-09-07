@@ -1139,7 +1139,7 @@ class ApplyCommandTest(CliCase):
         state = empty_state()
         add_assignment(state, AT, "developer", "grok", task="repo#322",
                        cleared=True, clear_reason="automatic")
-        add_assignment(state, AT, "tester", "grok", task="another-task",
+        add_assignment(state, "2026-02-03T10:00:01+00:00", "tester", "grok", task="another-task",
                        cleared=True, clear_reason="automatic")
         save_state(self.state, state)
         code, _, err = self.run_cli(self._fix_args(1, "--retain-context"), client=self._client({}))

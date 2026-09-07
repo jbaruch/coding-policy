@@ -225,6 +225,11 @@ informational plan name and never feeds headroom.
   implementation separately from active audit work. `apply --dry-run` reads
   current recovery bounds without writes; an older ledger requires an owner
   `state` command first. Dry-run never proves live continuity or qualification.
+- **Assignment chronology** — assignment `at` records the event time; import receipt
+  `at` records when the owner appended its evidence. Reads preserve original row
+  indices and never reorder the audit. Chronological lookup returns the original
+  row/index or refuses unknown ordering; its contract is in
+  `skills/herdr-teamlead/teamlead/chronology.py` (`latest_assignment`).
 - **Fix history** — live developer fixes advance the task's confirmed fix
   number even when the worker changes. An initial assignment cannot reset a
   task that already has a confirmed developer assignment. `apply` uses the ledger's task and

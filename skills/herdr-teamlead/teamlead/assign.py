@@ -53,6 +53,7 @@ from .herdr import (
 )
 from .composer import COMPOSER_READ_LINES, COMPOSER_READ_SOURCE, checkable
 from .probe import PROBE_READ_LINES, PROBE_READ_SOURCE, resolve_status, stderr_warn
+from .chronology import latest_assignment
 from .state import MAX_FIX_ROUNDS
 from .recovery import empty_recovery, fresh_transition, task_record, validate_work
 from .launch import restart_worker, verify_running
@@ -301,9 +302,8 @@ def validate_retained_history(assignments, history, task, fix_round):
     check_all_ready and composer checks still run before sending the brief.
     """
     name = assignments["developer"]
-    prior = next(
-        (row for row in reversed(history or []) if row.get("agent") == name), None
-    )
+    latest = latest_assignment(history or [], agent=name)
+    prior = latest[1] if latest is not None else None
     if prior is None or (
         prior.get("role") != "developer" or prior.get("task") != task
         or prior.get("status") != "applied"

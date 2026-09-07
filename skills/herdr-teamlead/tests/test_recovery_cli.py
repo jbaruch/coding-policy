@@ -10,6 +10,7 @@ if ROOT not in sys.path:
 import io
 import json
 import unittest
+from datetime import datetime, timedelta
 from unittest.mock import patch
 
 from teamlead.state import add_assignment, empty_state, save_state, state_lock
@@ -55,8 +56,11 @@ class RecoveryCommandTests(fixture.CliCase):
         return json.loads(self.state.read_text())
 
     def apply_args(self, role="developer", fix=None, *extra):
+        # Each dispatch is a distinct fixed-clock event, including release.
+        count = len(self.saved()["assignments"]) if self.state.exists() else 0
+        at = (datetime.fromisoformat(AT) + timedelta(seconds=count)).isoformat()
         result = ["apply", "--assignments", json.dumps({role: "grok"}), "--common", str(self.common),
-                  "--brief", role + "=" + str(self.briefs[role]), "--task", TASK, "--now", AT,
+                  "--brief", role + "=" + str(self.briefs[role]), "--task", TASK, "--now", at,
                   "--composer-settle", "0", *extra]
         return result + (["--fix-round", str(fix)] if fix else [])
 
@@ -71,7 +75,7 @@ class RecoveryCommandTests(fixture.CliCase):
     def seed_cap(self):
         state = empty_state()
         for fix in (None, 1, 2, 3, 4, 5):
-            add_assignment(state, AT, "developer", "grok", task=TASK, fix_round=fix)
+            add_assignment(state, "2026-02-03T09:00:0{}+00:00".format(fix or 0), "developer", "grok", task=TASK, fix_round=fix)
         add_assignment(state, AT, "judge", "claude", task=TASK)
         save_state(self.state, state)
         self.register()

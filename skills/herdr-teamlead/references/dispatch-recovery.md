@@ -241,6 +241,13 @@ every review receipt. Its identity/input/byte replay is idempotent; changed
 bytes require a new review identity. The next correction rechecks the latest
 blocking report's bytes. An approval or missing report cannot justify a fix.
 
+An older other-task import preserves an otherwise proven live developer session.
+Retained apply still checks the preceding task/count and current native identity;
+unknown event ordering refuses before terminal input. Inspect the original event
+evidence on a chronology refusal; never reorder or rewrite the assignment audit.
+The assignment chronology contract is documented in
+`skills/herdr-teamlead/state-schema.md`.
+
 An imported attempt carries no retained-session proof. Its next otherwise
 authorized correction can use the normal fresh handoff with reason
 `historical_correction_handoff`, preserving the same task/base/count and all

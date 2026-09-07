@@ -1,5 +1,9 @@
 # Changelog
 
+### Fixed
+
+- **Historical import assignment chronology (#362).** Retained fixes follow actual assignment event times, preserving original audit rows and indices when an older correction is imported after the live session. Missing, timezone-free, or tied latest event times refuse without guessing; later task/role changes and native-session mismatches still block retention. Recovery handoffs, historical predecessors and exhausted-budget judge checks use the same chronology. Owner-command integration covers older/newer imports, same-task counts, independent review dispatches, one retained prompt with no clear, and idempotent retry.
+
 ## 0.3.197 — 2026-09-07
 
 ### Changed

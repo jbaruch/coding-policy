@@ -13,6 +13,7 @@ from fnmatch import fnmatchcase
 from pathlib import Path, PurePosixPath
 
 from .errors import UsageError
+from .chronology import assignment_after, latest_assignment
 
 
 RECOVERY_SCHEMA_VERSION = 1
@@ -151,11 +152,9 @@ def checkpoint(store, assignments, data, at, judge_agent):
         raise UsageError("The normal correction budget is not exhausted; continue within it.", {})
     if any(row["task"] == data["task"] and row["status"] in PENDING_STATUSES for row in store["dispatches"]):
         raise UsageError("A dispatch outcome is still unknown; reconcile it before proposing another correction budget.", {})
-    last_dev = max((index for index, row in enumerate(assignments) if row.get("task") == data["task"]
-                    and row.get("role") == "developer" and row.get("status") == "applied"), default=-1)
-    if not judge_agent or not any(row.get("task") == data["task"] and row.get("role") == "judge"
-                                 and row.get("agent") == judge_agent and row.get("status") == "applied"
-                                 for row in assignments[last_dev + 1:]):
+    developer = latest_assignment(assignments, task=data["task"], role="developer", status="applied")
+    judge = latest_assignment(assignments, task=data["task"], role="judge", agent=judge_agent, status="applied")
+    if not judge_agent or developer is None or judge is None or not assignment_after(assignments, judge[0], developer[0]):
         raise UsageError("Dispatch the configured pinned judge after the latest developer attempt before recording this checkpoint.", {})
     evidence, body = receipt(data["judge_report"])
     if not re.search(r"^RULING: (?:uphold A|uphold B|amend)(?:\s|$)", body, re.MULTILINE) or not re.search(r"^ACTION: \S", body, re.MULTILINE):
@@ -239,9 +238,11 @@ def validate_work(store, assignments, task, fix_round, plan_id=None, work=None, 
     count = confirmed_fix(assignments, task)
     if implementation and fix_round != count + 1:
         raise UsageError("Use this task's actual next fix number; approval never resets, skips, or reuses a completed attempt.", {})
-    previous = next((row for row in reversed(store["dispatches"]) if row["task"] == task
-                     and row["role"] == "developer" and row["status"] == "applied"), None)
-    historical = next((row for row in reversed(store["historical_attempts"]) if row["task"] == task
+    # Count identities are unique; receipt append time cannot select an attempt.
+    previous = next((row for row in store["dispatches"] if row["task"] == task
+                     and row["role"] == "developer" and row["status"] == "applied"
+                     and (row.get("fix_round") or 0) == count), None)
+    historical = next((row for row in store["historical_attempts"] if row["task"] == task
                        and row["fix_round"] == count), None)
     if implementation and historical and historical["fix_round"] >= plan["first_fix"]:
         report = historical["reviews"][-1] if historical["reviews"] else None
@@ -376,9 +377,8 @@ def authorize_context(store, assignments, data, at, observed_session):
     row = assignments[index]
     if row.get("task") != data["task"] or row.get("role") != "developer" or row.get("status") != "applied" or row.get("context_session") is not None:
         raise UsageError("This recovery covers a confirmed developer assignment whose original native-session proof is null.", {})
-    latest = next((i for i in range(len(assignments) - 1, -1, -1) if assignments[i].get("task") == data["task"]
-                   and assignments[i].get("role") == "developer" and assignments[i].get("status") == "applied"), None)
-    if latest != index:
+    latest = latest_assignment(assignments, task=data["task"], role="developer", status="applied")
+    if latest is None or latest[0] != index:
         raise UsageError("That assignment is no longer this task's preceding developer attempt; use the current history.", {})
     evidence, _body = receipt(data["evidence"])
     record = {"schema_version": RECOVERY_SCHEMA_VERSION, "at": at, **data,
@@ -393,16 +393,13 @@ def fresh_transition(store, assignments, task, fix_round):
     """A workflow-cleared release is sufficient cause for the next fresh fix."""
     if task is None or fix_round is None:
         return None
-    index = next((i for i in range(len(assignments) - 1, -1, -1) if assignments[i].get("task") == task
-                  and assignments[i].get("role") == "developer" and assignments[i].get("status") == "applied"), None)
-    if index is None or (assignments[index].get("fix_round") or 0) + 1 != fix_round:
+    latest = latest_assignment(assignments, task=task, role="developer", status="applied")
+    if latest is None or (latest[1].get("fix_round") or 0) + 1 != fix_round:
         return None
-    developer = assignments[index]
-    released = next((i for i in range(len(assignments) - 1, index, -1) if assignments[i].get("task") == task
-                     and assignments[i].get("role") == "release" and assignments[i].get("agent") == developer.get("agent")
-                     and assignments[i].get("status") == "applied" and assignments[i].get("cleared") is True), None)
-    if released is not None:
-        return {"reason": "release_handoff", "previous_developer": index, "release_assignment": released}
+    index, developer = latest
+    released = latest_assignment(assignments, task=task, role="release", agent=developer.get("agent"), status="applied")
+    if released is not None and released[1].get("cleared") is True and assignment_after(assignments, released[0], index):
+        return {"reason": "release_handoff", "previous_developer": index, "release_assignment": released[0]}
     hand = next((row for row in reversed(store["hand_clearances"]) if row["task"] == task
                  and row["previous_developer"] == index), None)
     if hand:

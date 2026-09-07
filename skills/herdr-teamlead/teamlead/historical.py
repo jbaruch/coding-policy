@@ -7,23 +7,12 @@ Live session observations remain separate from contemporaneous evidence.
 """
 
 import subprocess
-from datetime import datetime
 from pathlib import Path
 from fnmatch import fnmatchcase
 
 from .errors import UsageError
+from .chronology import latest_assignment, timestamp
 from . import recovery as ledger
-
-
-def timestamp(value, label):
-    ledger.text(value, label)
-    try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
-        raise UsageError("{} must be an ISO-8601 timestamp with timezone; use the original evidence time.".format(label), {}) from None
-    if parsed.tzinfo is None:
-        raise UsageError("{} needs an explicit timezone; preserve the original event time.".format(label), {})
-    return parsed
 
 
 def fields(data, required, label):
@@ -32,9 +21,9 @@ def fields(data, required, label):
 
 
 def prior_developer(assignments, task, stop=None):
-    return next((i for i in range(len(assignments[:stop]) - 1, -1, -1)
-                 if assignments[i].get("task") == task and assignments[i].get("role") == "developer"
-                 and assignments[i].get("status") == "applied"), None)
+    """Use the then-recorded prefix only when validating an import receipt."""
+    latest = latest_assignment(assignments[:stop], task=task, role="developer", status="applied")
+    return latest[0] if latest is not None else None
 
 
 def replay(store, collection, data, receipts):
@@ -150,8 +139,8 @@ def import_attempt(store, assignments, data, at):
     previous = prior_developer(assignments, data["task"])
     if previous is None or data["fix_round"] != ledger.confirmed_fix(assignments, data["task"]) + 1:
         raise UsageError("Import only the actual next missing completed correction after its canonical developer history; do not skip or reuse a count.", {})
-    if timestamp(data["occurred_at"], "occurred_at") < timestamp(assignments[previous]["at"], "preceding developer time"):
-        raise UsageError("The imported correction predates its preceding developer attempt; resolve the chronology.", {})
+    if timestamp(data["occurred_at"], "occurred_at") <= timestamp(assignments[previous]["at"], "preceding developer time"):
+        raise UsageError("The imported correction does not provably follow its preceding developer attempt; resolve the chronology.", {})
     if any(row["status"] in ledger.PENDING_STATUSES and (row["task"] == data["task"] or row["agent"] == data["agent"])
            for row in store["dispatches"]):
         raise UsageError("Reconcile the pending dispatch before importing overlapping historical work; do not count it twice.", {})
@@ -212,7 +201,8 @@ def _release_input(data, assignments):
     if (row.get("task") != data["task"] or row.get("role") != "release" or row.get("status") != "applied"
             or row.get("cleared") is not False or row.get("clear_reason") != "hand"):
         raise UsageError("Clear evidence must refer to this task's applied release --no-clear row; never relabel a different handoff.", {})
-    previous = prior_developer(assignments, data["task"], index)
+    preceding = latest_assignment(assignments, task=data["task"], role="developer", status="applied", before=index)
+    previous = preceding[0] if preceding is not None else None
     if previous is None or assignments[previous]["agent"] != row["agent"]:
         raise UsageError("Release clear must follow the same worker's confirmed developer attempt.", {})
     if data["verified_empty_composer"] is not True or data["verified_fresh_conversation"] is not True:
