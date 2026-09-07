@@ -69,7 +69,7 @@ class HistoricalCommandsTest(fixture.CliCase):
         state = empty_state()
         add_assignment(state, BEFORE, "developer", "grok", task=TASK)
         for number in range(1, fixes + 1):
-            add_assignment(state, BEFORE, "developer", "grok", task=TASK, fix_round=number,
+            add_assignment(state, "2026-02-03T08:00:0{}+00:00".format(number), "developer", "grok", task=TASK, fix_round=number,
                            context_session={"pane_id": "w4:p1", "source": "herdr:grok", "agent": "grok",
                                             "kind": "id", "value": "old-developer"})
         if release:
@@ -109,6 +109,170 @@ class HistoricalCommandsTest(fixture.CliCase):
                 "verified_empty_composer": True, "verified_fresh_conversation": True,
                 "fresh_quote": "Verified fresh conversation release-session", "composer_quote": "empty composer before release",
                 "evidence": str(self.clear_file), "reason": "Required automatic clear timed out during native startup"}
+
+    def current_developer(self):
+        """Start current task A through owner commands before importing task B."""
+        self.seed()
+        current = "current-session-task"
+        code, _, err = self.owner("task", {"task": current, "base_revision": self.base_revision,
+            "scope": SCOPE, "allowed_paths": ["src/*"], "authorization": AUTH})
+        self.assertEqual(code, 0, err)
+        for number in (None, 1, 2):
+            self.briefs["developer"].write_text("Current task correction {}.\n".format(number or 0))
+            args = self.apply_args("developer", number, "--now", "2026-02-03T09:3{}:00+00:00".format(number or 0))
+            args[args.index("--task") + 1] = current
+            if number is not None:
+                args.append("--retain-context")
+            client = self.fresh_client("previous-session", "current-developer") if number is None else self._client(
+                {"grok": "idle"}, sessions={"grok": "current-developer"})
+            code, _, err = self.invoke(args, client)
+            self.assertEqual(code, 0, err)
+        return current
+
+    def retained_plan(self, task, number=3):
+        code, out, err = self.invoke(["plan", "--roles", "developer", "--snapshot", str(self.snapshot),
+            "--exclude", "developer=claude,codex", "--task", task, "--fix-round", str(number), "--now", AT])
+        self.assertEqual(code, 0, err)
+        self.assertEqual(json.loads(out)["assignments"], {"developer": "grok"})
+        plan = self.tmp / "retained-plan.json"
+        plan.write_text(out)
+        self.briefs["developer"].write_text("Address independent findings in counted correction {}.\n".format(number))
+        args = self.apply_args("developer", number, "--retain-context")
+        args[args.index("--task") + 1] = task
+        args[args.index("--assignments") + 1] = str(plan)
+        return args
+
+    def test_older_other_task_import_preserves_live_retained_dispatch_and_replay(self):
+        current = self.current_developer()
+        before_import = copy.deepcopy(self.saved()["assignments"])
+        code, _, err = self.owner("import-correction", self.attempt(), self._client({}))
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.runner.calls, [])
+        self.assertEqual(self.saved()["assignments"][:-1], before_import)
+        imported_index = len(before_import)
+        self.assertEqual(self.saved()["recovery"]["historical_attempts"][0]["assignment_index"], imported_index)
+        # Independent verification takes other workers through normal apply.
+        for role, worker in (("reviewer", "claude"), ("tester", "codex")):
+            args = self.apply_args(role, None, "--now", "2026-02-03T09:40:00+00:00")
+            args[args.index("--task") + 1] = current
+            args[args.index("--assignments") + 1] = json.dumps({role: worker})
+            code, _, err = self.invoke(args, self._client({worker: "idle"}))
+            self.assertEqual(code, 0, err)
+        preserved = copy.deepcopy(self.saved()["assignments"])
+        args = self.retained_plan(current)
+        code, out, err = self.invoke(args, self._client({"grok": "idle"}, sessions={"grok": "current-developer"}))
+        self.assertEqual(code, 0, err)
+        result = json.loads(out)["applied"][0]
+        self.assertEqual((result["fix_round"], result["clear_reason"], result["context_session"]["value"]),
+                         (3, "retained", "current-developer"))
+        self.assertEqual(len(self.runner.writes()), 1)
+        self.assertTrue(self.runner.writes()[0].startswith("agent prompt grok "))
+        self.assertEqual(self.saved()["assignments"][:-1], preserved)
+        self.assertEqual(self.saved()["assignments"][imported_index], preserved[imported_index])
+        self.assertEqual([row["fix_round"] for row in self.saved()["assignments"]
+                          if row["task"] == current and row["role"] == "developer"], [None, 1, 2, 3])
+        saved = self.state.read_bytes()
+        code, out, err = self.invoke(args, self._client({}))
+        self.assertEqual(code, 0, err)
+        self.assertTrue(json.loads(out)["applied"][0]["replayed"])
+        self.assertEqual(self.runner.calls, [])
+        self.assertEqual(self.state.read_bytes(), saved)
+
+    def test_newer_or_tied_other_task_import_refuses_retention_without_writes(self):
+        for occurred_at, message in (("2026-02-03T09:33:00+00:00", "Cannot retain"),
+                                     ("2026-02-03T10:32:00+01:00", "chronology is uncertain")):
+            with self.subTest(occurred_at=occurred_at):
+                current = self.current_developer()
+                code, _, err = self.owner("import-correction", {**self.attempt(), "occurred_at": occurred_at}, self._client({}))
+                self.assertEqual(code, 0, err)
+                self.assertEqual(self.runner.calls, [])
+                args = self.retained_plan(current)
+                saved = self.state.read_bytes()
+                code, _, err = self.invoke(args, self._client({"grok": "idle"}, sessions={"grok": "current-developer"}))
+                self.assertEqual(code, 1)
+                self.assertIn(message, err)
+                self.assertEqual(self.runner.writes(), [])
+                self.assertEqual(self.state.read_bytes(), saved)
+
+    def test_older_import_keeps_live_identity_and_readiness_checks(self):
+        for status, session in (("idle", "different-native-session"), ("idle", None), ("blocked", "current-developer")):
+            with self.subTest(status=status, session=session):
+                current = self.current_developer()
+                code, _, err = self.owner("import-correction", self.attempt(), self._client({}))
+                self.assertEqual(code, 0, err)
+                args = self.retained_plan(current)
+                saved = self.state.read_bytes()
+                code, _, _ = self.invoke(args, self._client({"grok": status}, sessions={"grok": session}))
+                self.assertEqual(code, 1)
+                self.assertEqual(self.runner.writes(), [])
+                self.assertEqual(self.state.read_bytes(), saved)
+
+    def test_same_task_import_preserves_actual_next_count_and_refuses_older_event(self):
+        current = self.current_developer()
+        self.auth_file.write_text(current + "\n" + SCOPE + "\n" + AUTH["quote"] + "\nApproved attempt bounds: 3 through 3.\n")
+        data = {**self.attempt(3), "task": current}
+        saved = self.state.read_bytes()
+        code, _, err = self.owner("import-correction", data, self._client({}))
+        self.assertEqual(code, 1)
+        self.assertIn("chronology", err)
+        self.assertEqual(self.state.read_bytes(), saved)
+        code, _, err = self.owner("import-correction", {**data, "occurred_at": "2026-02-03T09:33:00+00:00"}, self._client({}))
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.runner.calls, [])
+        saved = self.state.read_bytes()
+        code, _, err = self.invoke(["plan", "--roles", "developer", "--snapshot", str(self.snapshot),
+            "--task", current, "--fix-round", "3", "--now", AT])
+        self.assertEqual(code, 1)
+        self.assertIn("next fix number 4", err)
+        for number in (3, 4):
+            args = self.apply_args("developer", number, "--retain-context")
+            args[args.index("--task") + 1] = current
+            code, _, err = self.invoke(args, self._client({"grok": "idle"}, sessions={"grok": "current-developer"}))
+            self.assertEqual(code, 1)
+            self.assertEqual(self.runner.writes(), [])
+            self.assertEqual(self.state.read_bytes(), saved)
+        self.assertEqual([row["fix_round"] for row in self.saved()["assignments"]
+                          if row["task"] == current and row["role"] == "developer"], [None, 1, 2, 3])
+
+    def test_historical_developer_before_earlier_appended_release_allows_fresh_handoff(self):
+        self.seed()
+        state = self.saved()
+        add_assignment(state, "2026-02-03T09:30:00+00:00", "release", "grok", task=TASK,
+                       cleared=True, clear_reason="automatic")
+        save_state(self.state, state)
+        code, _, err = self.owner("import-correction", self.attempt(), self._client({}))
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.runner.calls, [])
+        preserved = copy.deepcopy(self.saved()["assignments"])
+        code, out, err = self.invoke(self.apply_args("developer", 2), self.fresh_client("release", "fix-2"))
+        self.assertEqual(code, 0, err)
+        transition = json.loads(out)["applied"][0]["context_transition"]
+        self.assertEqual(transition, {"reason": "release_handoff", "previous_developer": 2, "release_assignment": 1})
+        self.assertEqual(self.saved()["assignments"][:-1], preserved)
+
+    def test_checkpoint_compares_judge_event_to_later_appended_developer(self):
+        for occurred_at, expected in ((CLEARED, 0), ("2026-02-03T09:01:00+00:00", 1)):
+            with self.subTest(occurred_at=occurred_at):
+                self.seed(4)
+                state = self.saved()
+                add_assignment(state, COMPLETED, "judge", "claude", task=TASK)
+                save_state(self.state, state)
+                config = json.loads(self.config.read_text())
+                config["judge"] = {"agent": "claude", "model": "claude-opus-4-6", "effort": "high"}
+                self.config.write_text(json.dumps(config))
+                code, _, err = self.owner("import-correction", {**self.attempt(5), "occurred_at": occurred_at})
+                self.assertEqual(code, 0, err)
+                preserved = copy.deepcopy(self.saved()["assignments"])
+                judge = self.tmp / "judge-chronology.md"
+                judge.write_text("RULING: amend — resolve F1\nACTION: Correct the remaining boundary case\n")
+                code, _, err = self.owner("checkpoint", {"id": "chronological-checkpoint", "task": TASK,
+                    "defect": "F1 remains blocking", "previous_attempts": "Five completed fixes",
+                    "progress": "Other findings resolved", "change_in_approach": "Correct the boundary case",
+                    "judge_report": str(judge)})
+                self.assertEqual(code, expected, err)
+                if expected:
+                    self.assertIn("pinned judge after the latest developer", err)
+                self.assertEqual(self.saved()["assignments"], preserved)
 
     def test_migrated_manual_fix_import_is_idempotent_and_next_fix_is_two(self):
         original = self.seed()
@@ -447,12 +611,14 @@ class HistoricalCommandsTest(fixture.CliCase):
         original["recovery"]["schema_version"] = 1
         del original["recovery"]["hand_clearances"]
         del original["recovery"]["historical_attempts"]
+        del original["recovery"]["role_clearances"]
+        del original["recovery"]["delivery_recoveries"]
         self.state.write_text(json.dumps(original))
         code, _, err = self.invoke(["state"])
         self.assertEqual(code, 0, err)
         result = self.saved()
         self.assertEqual(result["assignments"], original["assignments"])
-        expected = {**original["recovery"], "schema_version": 2, "hand_clearances": [], "historical_attempts": []}
+        expected = {**original["recovery"], "schema_version": 3, "hand_clearances": [], "historical_attempts": [], "role_clearances": [], "delivery_recoveries": []}
         self.assertEqual(result["recovery"], expected)
 
 

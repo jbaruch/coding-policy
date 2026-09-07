@@ -75,10 +75,12 @@ instruction into permission to exceed an exhausted correction budget.
 | `authorize-corrections` | unique `id`, `task`, `checkpoint`, `scope`, `allowed_paths`, positive `additional_fixes`, `authorization`; optional `supersedes` | Store an explicit bounded approval once. Continue while it covers the next attempt; do not ask again within those bounds. A changed decision names the active plan in `supersedes`. |
 | `record-report` | `dispatch`, full `head_revision`, `verdict` (`blocking` or `approved`), `review_mode` (`full` or `scoped`), independent `reviewer`, absolute `report`, `changed_paths` | Read the report in full and verify the VCS diff first. The command binds its bytes and stated head to the dispatch; it does not establish the tester, CI, external-review, or release gates. |
 | `recover-context` | `task`, original `assignment_index`, `reason`, `authorization`, absolute `evidence` | For the latest confirmed developer row with null native-session proof. Records a live observation separately and permits the next fresh handoff. The original null stays null. |
+| `recover-role-clear` | Fields under Verified role-clear recovery below | Record a fresh handoff after another authorized role automatically cleared the developer. Preserve known original proof and reuse existing correction bounds. |
 | `reconcile` | `dispatch`, `outcome` (`applied` or `not_sent`), `reason`, `authorization`, absolute `evidence` | Resolve an interrupted send from actual evidence and an idle/done live worker. `applied` appends recovered assignment evidence without fabricating contemporaneous session proof; `not_sent` permits a transport retry. |
 | `record-release-clear` | Fields under Verified release hand-clear below | Record existing required-clear evidence for a successful release `--no-clear` row. No new context-change permission is required. |
 | `import-correction` | Fields under Historical manual corrections below | Import an already authorized, completed manual attempt without sending input or granting future attempts. |
 | `record-historical-review` | unique `id`, `historical_attempt`, full `head_revision`, `verdict`, `review_mode`, independent `reviewer`, absolute `report` | Append an actual review receipt for an imported correction. Full review is required for approval; other verification gates remain separate. |
+| `recover-report` | unique `id`, original `dispatch`, absolute `report`, `wait_receipt`, `pane`, `visible`, `source` | Append evidence of a completed delivery missed by the old watcher; see Completed native report recovery. No worker input or review approval. |
 
 `allowed_paths` contains repository-relative paths or globs. Preserve the
 original task and base across every approval. Read and verify the source diff
@@ -141,6 +143,50 @@ while its checkpoint awaits approval; an audit worker may still be active.
 `judge_checkpoint_required` requires the next exhausted-budget checkpoint.
 Neither an active worker nor a dispatch receipt proves that implementation or
 release has finished.
+
+## Verified role-clear recovery
+
+Keep the developer reserved until initial and early-fix verification resolves. If the lead
+already reused that worker for another role and normal apply cleared it, retain
+the original developer proof. Use `recover-role-clear` with:
+
+- `id`: a stable unique recovery identity; `task` and `base_revision`: the
+  registered original task and full base SHA.
+- `assignment_index`: the preceding confirmed developer assignment;
+  `clearing_assignment_index`: the same worker's actual successful automatic
+  clearing assignment in another role, from `teamlead state`.
+- `next_fix`: the actual next cumulative correction number;
+  `correction_plan`: the existing bounded plan ID for an extra correction, or
+  `null` within the original allowance.
+- `work`: `base_revision`, exact authorized `scope`, repository-relative `paths`,
+  and the non-empty array of current blocking `findings`. This is also the
+  complete content of the `--work FILE` used for plan and apply.
+- `clearing_authorization`: `{"task": "<clearing task>"}` to reuse its registered
+  authorization. If it is missing, use `{"authorization": {"source": "<operator
+  message>", "quote": "<actual words>"}, "evidence": "<absolute artifact path>"}`.
+  Preserve the actual decision naming the clearing task and role. The owner
+  verifies that its meaning covers the clear; silence grants nothing.
+- `evidence`: the absolute path to the original JSON output of the clearing
+  `apply`, either its full envelope or individual dispatch result; `reason`:
+  the actual scheduling mistake and recovery circumstances.
+
+The command reads the idle/done worker and appends one receipt binding the
+original assignments, authorization, work and archived output. Its validation
+contract is in `skills/herdr-teamlead/teamlead/role_clear.py`. The later native
+observation stays separate from original proof; nondeveloper assignments may
+have null native evidence even after their confirmed automatic clear. Recovery
+never replaces those fields, increases allowance, or sends a brief. Missing or
+conflicting evidence, stale attempts, unresolved dispatches, changed task/base,
+unauthorized paths and exhausted bounds refuse without modifying history.
+
+Continue with the same task, next fix, correction plan and `--work FILE` in
+plan and normal apply. Omit `--retain-context` and `--no-clear`. Apply rechecks
+receipts and the recorded work, performs live readiness, automatic clear, tier
+and qualification checks, then counts its one confirmed developer dispatch.
+An identical completed retry returns the recorded result without sending again.
+Carry the earlier reports, blocking findings, original base and cumulative count
+in the fresh brief. Full independent review and testing of the corrected tip,
+external review and CI remain required before release resumes.
 
 ## Verified release hand-clear
 
@@ -241,6 +287,13 @@ every review receipt. Its identity/input/byte replay is idempotent; changed
 bytes require a new review identity. The next correction rechecks the latest
 blocking report's bytes. An approval or missing report cannot justify a fix.
 
+An older other-task import preserves an otherwise proven live developer session.
+Retained apply still checks the preceding task/count and current native identity;
+unknown event ordering refuses before terminal input. Inspect the original event
+evidence on a chronology refusal; never reorder or rewrite the assignment audit.
+The assignment chronology contract is documented in
+`skills/herdr-teamlead/state-schema.md`.
+
 An imported attempt carries no retained-session proof. Its next otherwise
 authorized correction can use the normal fresh handoff with reason
 `historical_correction_handoff`, preserving the same task/base/count and all
@@ -273,8 +326,10 @@ lock file can remain after exit; do not delete it to bypass an active lock.
     once. Other exits from that re-run take their documented branches. A second
     exit 4 is terminal: record the worker as producing no report and
     continue to the next worker.
-  - The state is `idle` or `done` — record the worker as producing no report
-    and continue to the next worker. Never re-dispatch on top of it. The
+  - The state is `idle` or `done` — preserve the negative receipt. For a native
+    display failure with original source evidence, follow Completed native
+    report recovery below. Otherwise record no report and continue to the next
+    worker. Never re-dispatch on top of it. The
     marker may be wrapped, quoted, absent, or identify another attempt. Do
     not join rows or use a matching filename as proof. Step 7 requires a fresh
     report destination and bounds its length; narrow panes can still wrap it.
@@ -300,3 +355,54 @@ time.
 
 Proceed to Step 12 once every dispatched worker has been waited on, or once you
 have recorded which of them produced no report.
+
+## Completed native report recovery
+
+The watcher calls `teamlead probe-report` for native display evidence. Its
+inputs are `--agent`, `--pane`, an absolute `--report`, positive `--lines`, and
+the observed visible text on stdin. It reads native source and Herdr without
+writing state or worker input. Success emits `found` and either confirmed
+source evidence or an unconfirmed `reason`; tool failure exits non-zero.
+The native-source and display predicates belong to
+`skills/herdr-teamlead/teamlead/report_delivery.py`.
+
+For an already completed affected dispatch, preserve its original negative
+wait JSON, report bytes, native source transcript, visible pane text, and the
+original `herdr pane get` JSON. Read these original artifacts and the saved
+dispatch's common/role briefs. Use the existing task authority to record
+delivery; this recovery requests no new work or allowance.
+
+Run `teamlead recover-report --record FILE --state FILE` through the owner
+launcher above. The record names a unique `id`, the preserved `dispatch` ID,
+and absolute artifact paths in `report`, `wait_receipt`, `pane`, `visible`, and
+`source`. `source` is the original native transcript, not an agent-written
+summary or a reconstructed message. The command verifies the archived native
+user message against the original dispatch prompt and binds all evidence bytes
+in a separate receipt. A nondeveloper's historical null session remains null.
+Original dispatches, assignments, negative wait receipts and reports remain
+unchanged; a later role/session does not require rerunning completed work.
+
+Exit 0 emits the append-only delivery receipt. Identical replay returns that
+receipt; conflicting bytes or identity fail. Read the report in full and
+continue the existing round gate. This receipt establishes delivery only;
+it grants no review approval, retained context or extra implementation attempt.
+An error preserves the negative outcome; restore the named original evidence
+or record the report as unavailable. Never fabricate missing source evidence.
+
+## Native display validation
+
+Use fresh isolated Herdr sessions for each installed native CLI. Ask each
+worker to write a unique short report file and make its entire final response
+the bare `REPORT: <absolute-path>` line. Capture the native transcript,
+`agent get`, `pane get`, and `pane read --source visible` after completion.
+Run `wait-report.sh` with that worker and report. Pass requires exit 0 and
+`found: true`, the exact marker on one rendered row, bare final source, and
+the current report file. Keep original negative and positive receipts as
+separate artifacts when comparing watcher versions.
+
+Verified on 2026-09-07 with Herdr 0.8.2, Codex CLI 0.153.2 and Grok CLI 1.0.13
+using Grok 4.6: both fresh workers wrote their reports and completed. The old
+watcher exited 4 for both. The patched watcher accepted the same untouched
+sessions and files with exit 0. Automated source/display fixtures cover
+missing, changed, wrapped, quoted, authored-list and indented-code markers,
+incomplete/replaced sessions and source changes during verification.

@@ -13,16 +13,13 @@ description: >
 
 Process steps in order. Do not skip ahead.
 
-Lead three rotating workers and a pinned judge. Assign roles, compose briefs,
-read reports, and gate the round. Never edit the shared checkout or implement
-for a worker. Optional Phase 1 produces a design/test plan and implementation;
-mandatory Phase 2 reviews and verifies the pushed tip before release.
+Follow `rules/agent-team-operation.md` for round constraints.
 
 Each command block resolves `CP` to the project-local plugin, falling back to
 `$HOME/.tessl/plugins/jbaruch/coding-policy`. Run the resolver in every call.
 Prose `skills/...` paths are relative to that plugin root.
 
-Detailed contracts:
+References:
 
 ```text
 skills/herdr-teamlead/references/herdr.md
@@ -114,7 +111,8 @@ Emits assignments, rationale, snapshot reference, and configured round tiers;
 contacts no worker. Exit 1 refuses the plan: resolve its diagnostic before
 continuing. Phase 2 excludes the branch author from reviewer and tester.
 For retained fixes, plan developer alone and exclude all other workers; plan
-verification separately. Supply the same fix number to plan and apply.
+verification separately. Reserve the developer until initial and early-fix verification
+resolves before reusing it for another task or role. Supply the same fix number to plan and apply.
 Use the same recorded task, approval, and work bounds for both commands.
 Register the original task and base through the owner commands documented in
 `skills/herdr-teamlead/references/dispatch-recovery.md` before recovery work.
@@ -241,6 +239,9 @@ within the same task and allowance. No context-change permission is required.
 Carry the release report, findings, original base, and cumulative count into
 the brief. Step 12's full verification remains required before release.
 
+After another role clears the developer, use `recover-role-clear` under the
+recovery reference. Pass its same `--work` to plan and fresh apply.
+
 Reuse an approved bounded correction plan while its scope and budget hold.
 An unknown dispatch outcome pauses implementation for evidence-based recovery.
 An identical completed retry returns its recorded result without sending again.
@@ -269,7 +270,7 @@ Proceed to Step 11 with the dispatched roles.
 
 ## Step 11 — Wait for the Reports
 
-One call per dispatched worker, in the order the round needs them:
+Run for each dispatched worker in the required order:
 
 ```bash
 CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
@@ -278,7 +279,8 @@ bash "$CP/skills/herdr-teamlead/wait-report.sh" <agent-name> <report-path>
 
 Emits `{"agent","state","report_path","found","elapsed_seconds"}`; exit 2
 emits only stderr. Exits 4–5 add `reason`. Delivery requires the file and its
-complete, unquoted `REPORT: <absolute-path>` marker on one pane row. Names,
+complete, unquoted `REPORT: <absolute-path>` marker on one pane row. Known native
+decoration requires completed source-message proof. Names,
 quoted examples, wrapped fragments, or lifecycle state alone never confirm it.
 The script owns timing.
 
@@ -321,7 +323,7 @@ Classify each finding blocking or advisory per `rules/review-severity.md`.
   the next round that is already happening. Never spend a round on a lone
   advisory.
 
-The release hand-off has one condition, and all four parts are required:
+Release requires all four:
 
 1. The developer's report names the branch and the commit SHA it pushed.
 2. A broad reviewer **Mode B** report reviews that same SHA and carries no

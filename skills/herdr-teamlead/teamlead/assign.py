@@ -53,6 +53,7 @@ from .herdr import (
 )
 from .composer import COMPOSER_READ_LINES, COMPOSER_READ_SOURCE, checkable
 from .probe import PROBE_READ_LINES, PROBE_READ_SOURCE, resolve_status, stderr_warn
+from .chronology import latest_assignment
 from .state import MAX_FIX_ROUNDS
 from .recovery import empty_recovery, fresh_transition, task_record, validate_work
 from .launch import restart_worker, verify_running
@@ -60,7 +61,7 @@ from .tiers import launch_flags
 from .qualification import require_qualification
 
 # Version 3 adds verified model-tier metadata to context and task/fix evidence.
-APPLY_SCHEMA_VERSION = 5
+APPLY_SCHEMA_VERSION = 6
 
 RETAIN_CONTEXT_ROUNDS = frozenset({1, 2, 3})
 
@@ -267,7 +268,7 @@ def validate_context_mode(assignments, no_clear, retain_context, task, fix_round
         )
     if "developer" in assignments and fix_round in RETAIN_CONTEXT_ROUNDS and not retain_context:
         if transition is None:
-            raise UsageError("Early developer fix rounds require --retain-context or a recorded release/context recovery handoff. Inspect teamlead state and follow dispatch-recovery.md without resetting the task.", {})
+            raise UsageError("Early developer fixes require --retain-context or a recorded fresh handoff. Use recover-role-clear for a verified automatic role clear, or follow dispatch-recovery.md for other causes; never reset the task.", {})
         task_record(store, task)
         if no_clear:
             raise UsageError("A replacement developer session requires an automatic clear; omit --no-clear.", {})
@@ -301,9 +302,8 @@ def validate_retained_history(assignments, history, task, fix_round):
     check_all_ready and composer checks still run before sending the brief.
     """
     name = assignments["developer"]
-    prior = next(
-        (row for row in reversed(history or []) if row.get("agent") == name), None
-    )
+    latest = latest_assignment(history or [], agent=name)
+    prior = latest[1] if latest is not None else None
     if prior is None or (
         prior.get("role") != "developer" or prior.get("task") != task
         or prior.get("status") != "applied"

@@ -1,5 +1,15 @@
 # Changelog
 
+### Added
+
+- **Verified developer role-clear recovery (#363).** `recover-role-clear` binds the preserved developer and actual automatic clearing dispatch to their original evidence, task/base, next correction and existing scope/allowance. It reuses registered authorization or records only a missing explicit clear decision, preserves known native-session proof, and enables one normal fresh dispatch without resetting or expanding the budget. Plan/apply recheck work and artifacts; readiness, clearing, tier qualification and full corrected-tip verification remain required. Guidance reserves developers through early verification. Recovery schema 3 adds audit arrays without changing prior records; apply schema 6 names the role-clear handoff.
+
+### Fixed
+
+- **Historical import assignment chronology (#362).** Retained fixes follow actual assignment event times, preserving original audit rows and indices when an older correction is imported after the live session. Missing, timezone-free, or tied latest event times refuse without guessing; later task/role changes and native-session mismatches still block retention. Recovery handoffs, historical predecessors and exhausted-budget judge checks use the same chronology. Owner-command integration covers older/newer imports, same-task counts, independent review dispatches, one retained prompt with no clear, and idempotent retry.
+
+- **Native report delivery and completed-attempt recovery (#361).** The watcher accepts native presentation only when the same session's completed final source proves the exact bare report marker. This covers Codex's display bullet and Grok's five-space indentation with its optional native timestamp. Quoted, authored-list, indented-code, fenced, wrapped, stale and unavailable output stays unconfirmed. Owner `recover-report` appends delivery evidence for previously completed dispatches, including judge/reviewer/tester rows with null historical session proof, while preserving original dispatches, assignments, negative wait receipts and report bytes. It grants no continuity, approval or extra attempt. Fresh Codex 0.153.2 and Grok 1.0.13/Grok 4.6 sessions on Herdr 0.8.2 both reproduced exit 4 before the fix and passed with the same untouched reports and sessions afterwards.
+
 ## 0.3.197 — 2026-09-07
 
 ### Changed

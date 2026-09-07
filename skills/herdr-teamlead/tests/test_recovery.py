@@ -47,7 +47,7 @@ class RecoveryTests(unittest.TestCase):
 
     def seed_checkpoint(self):
         for fix in (None, 1, 2, 3, 4, 5):
-            add_assignment(self.state, AT, "developer", "worker", task=TASK, fix_round=fix)
+            add_assignment(self.state, "2026-02-03T09:00:0{}+00:00".format(fix or 0), "developer", "worker", task=TASK, fix_round=fix)
         add_assignment(self.state, AT, "judge", "judge", task=TASK)
         return checkpoint(self.store, self.history, {
             "id": "checkpoint-5", "task": TASK, "defect": "F1 remains open", "previous_attempts": "Five attempts changed parsing and quoting",
@@ -68,7 +68,7 @@ class RecoveryTests(unittest.TestCase):
         record = self.reservation(number)
         reserve(self.store, record, AT)
         mark_sending(self.store, record["id"], AT, {"cleared": True})
-        add_assignment(self.state, AT, "developer", "worker", task=TASK, fix_round=number)
+        add_assignment(self.state, "2026-02-03T11:00:0{}+00:00".format(number), "developer", "worker", task=TASK, fix_round=number)
         finish_dispatch(self.store, record["id"], {"status": "applied", **{
             key: record[key] for key in ("task", "role", "agent", "fix_round")}}, len(self.history) - 1, AT)
 
@@ -113,7 +113,7 @@ class RecoveryTests(unittest.TestCase):
 
     def test_checkpoint_needs_the_pinned_judge_after_latest_development(self):
         for fix in (None, 1, 2, 3, 4, 5):
-            add_assignment(self.state, AT, "developer", "worker", task=TASK, fix_round=fix)
+            add_assignment(self.state, "2026-02-03T09:00:0{}+00:00".format(fix or 0), "developer", "worker", task=TASK, fix_round=fix)
         with self.assertRaisesRegex(UsageError, "pinned judge"):
             checkpoint(self.store, self.history, {"id": "cp", "task": TASK, "defect": "F1", "previous_attempts": "Five fixes",
                 "progress": "Still blocked", "change_in_approach": "Reassess", "judge_report": str(self.judge_report)}, AT, "judge")
@@ -158,7 +158,7 @@ class RecoveryTests(unittest.TestCase):
         transition = fresh_transition(self.store, self.history, TASK, 1)
         assert transition is not None
         self.assertEqual(transition["reason"], "authorized_context_recovery")
-        add_assignment(self.state, AT, "release", "worker", task=TASK, cleared=True, clear_reason="automatic")
+        add_assignment(self.state, "2026-02-03T10:00:01+00:00", "release", "worker", task=TASK, cleared=True, clear_reason="automatic")
         transition = fresh_transition(self.store, self.history, TASK, 1)
         assert transition is not None
         self.assertEqual(transition["release_assignment"], 1)

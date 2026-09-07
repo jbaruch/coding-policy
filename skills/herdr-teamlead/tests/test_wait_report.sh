@@ -461,6 +461,10 @@ ${base}"
     "REPORT: ${TMP}/"$'\n'"${base}" \
     "> REPORT: ${report}" \
     "- REPORT: ${report}" \
+    $'> quoted example\n'"REPORT: ${report}" \
+    $'- authored example\n'"REPORT: ${report}" \
+    $'-\tauthored example\n'"REPORT: ${report}" \
+    $'1.\tauthored example\n'"REPORT: ${report}" \
     "    REPORT: ${report}" \
     "Previous marker was REPORT: ${report}" \
     '`REPORT: '"${report}"'`' \
@@ -478,6 +482,16 @@ ${base}"
     FAKE_PANE_TEXT=$'```\nREPORT: /example/previous/report.md\n```\n'"  REPORT: ${report}"
   if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | jq -e '.found == true' >/dev/null 2>&1; then
     pass; else fail "independent current marker: RC=$RC OUT=$OUT"; fi
+
+  # Authored list/quote examples inside a closed fence cannot turn the later
+  # delivery row into a lazy continuation of that example.
+  local fenced_example
+  for fenced_example in '- removed' '> quoted example' '1. numbered example'; do
+    run "$report" FAKE_MARKER=found FAKE_STATUS=working \
+      FAKE_PANE_TEXT=$'```\n'"$fenced_example"$'\n```\n'"REPORT: ${report}"
+    if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | jq -e '.found == true' >/dev/null 2>&1; then
+      pass; else fail "marker after fenced example: RC=$RC OUT=$OUT example=$fenced_example"; fi
+  done
 
   # Path metacharacters stay literal, with no regex or word-splitting changes.
   local special="$TMP/report [1]+.md"

@@ -13,10 +13,11 @@ from fnmatch import fnmatchcase
 from pathlib import Path, PurePosixPath
 
 from .errors import UsageError
+from .chronology import assignment_after, latest_assignment
 
 
 RECOVERY_SCHEMA_VERSION = 1
-RECOVERY_STORE_VERSION = 2
+RECOVERY_STORE_VERSION = 3
 DEFAULT_FIX_LIMIT = 5
 PENDING_STATUSES = frozenset({"reserved", "sending", "sent_but_not_started"})
 DISPATCH_STATUSES = PENDING_STATUSES | {"applied", "not_sent"}
@@ -26,17 +27,24 @@ SHA_RE = re.compile(r"[0-9a-f]{40}(?:[0-9a-f]{24})?\Z")
 def empty_recovery():
     return {"schema_version": RECOVERY_STORE_VERSION, "tasks": {}, "checkpoints": [],
             "plans": [], "dispatches": [], "context_permissions": [], "events": [],
-            "hand_clearances": [], "historical_attempts": []}
+            "hand_clearances": [], "historical_attempts": [], "role_clearances": [], "delivery_recoveries": []}
 
 
 def migrate_store(store):
     """Upgrade only the enclosing recovery document; old record shapes persist."""
-    if isinstance(store, dict) and type(store.get("schema_version")) is int and store["schema_version"] == 1:
-        if "hand_clearances" in store or "historical_attempts" in store:
-            raise UsageError("Version 1 recovery contains unowned historical records; preserve it for owner recovery.", {})
-        store.update(schema_version=RECOVERY_STORE_VERSION, hand_clearances=[], historical_attempts=[])
-        return True
-    return False
+    if not isinstance(store, dict) or type(store.get("schema_version")) is not int:
+        return False
+    version = store["schema_version"]
+    if version not in {1, 2}:
+        return False
+    added = ["role_clearances", "delivery_recoveries"]
+    if version == 1:
+        added.extend(["hand_clearances", "historical_attempts"])
+    if any(name in store for name in added):
+        raise UsageError("Older recovery contains unowned newer records; preserve it for owner recovery.", {})
+    store.update({name: [] for name in added})
+    store["schema_version"] = RECOVERY_STORE_VERSION
+    return True
 
 
 def text(value, label):
@@ -151,11 +159,9 @@ def checkpoint(store, assignments, data, at, judge_agent):
         raise UsageError("The normal correction budget is not exhausted; continue within it.", {})
     if any(row["task"] == data["task"] and row["status"] in PENDING_STATUSES for row in store["dispatches"]):
         raise UsageError("A dispatch outcome is still unknown; reconcile it before proposing another correction budget.", {})
-    last_dev = max((index for index, row in enumerate(assignments) if row.get("task") == data["task"]
-                    and row.get("role") == "developer" and row.get("status") == "applied"), default=-1)
-    if not judge_agent or not any(row.get("task") == data["task"] and row.get("role") == "judge"
-                                 and row.get("agent") == judge_agent and row.get("status") == "applied"
-                                 for row in assignments[last_dev + 1:]):
+    developer = latest_assignment(assignments, task=data["task"], role="developer", status="applied")
+    judge = latest_assignment(assignments, task=data["task"], role="judge", agent=judge_agent, status="applied")
+    if not judge_agent or developer is None or judge is None or not assignment_after(assignments, judge[0], developer[0]):
         raise UsageError("Dispatch the configured pinned judge after the latest developer attempt before recording this checkpoint.", {})
     evidence, body = receipt(data["judge_report"])
     if not re.search(r"^RULING: (?:uphold A|uphold B|amend)(?:\s|$)", body, re.MULTILINE) or not re.search(r"^ACTION: \S", body, re.MULTILINE):
@@ -216,6 +222,9 @@ def validate_work(store, assignments, task, fix_round, plan_id=None, work=None, 
             raise UsageError("A correction approval requires the actual cumulative fix number; do not reset it to initial development.", {})
         return None
     positive(fix_round, "fix_round")
+    if implementation:
+        from .role_clear import validate_requested
+        validate_requested(store, assignments, task, fix_round, plan_id, work)
     if fix_round <= DEFAULT_FIX_LIMIT:
         if plan_id:
             raise UsageError("An extra-correction plan cannot relabel an ordinary fix; preserve the cumulative number.", {})
@@ -239,9 +248,11 @@ def validate_work(store, assignments, task, fix_round, plan_id=None, work=None, 
     count = confirmed_fix(assignments, task)
     if implementation and fix_round != count + 1:
         raise UsageError("Use this task's actual next fix number; approval never resets, skips, or reuses a completed attempt.", {})
-    previous = next((row for row in reversed(store["dispatches"]) if row["task"] == task
-                     and row["role"] == "developer" and row["status"] == "applied"), None)
-    historical = next((row for row in reversed(store["historical_attempts"]) if row["task"] == task
+    # Count identities are unique; receipt append time cannot select an attempt.
+    previous = next((row for row in store["dispatches"] if row["task"] == task
+                     and row["role"] == "developer" and row["status"] == "applied"
+                     and (row.get("fix_round") or 0) == count), None)
+    historical = next((row for row in store["historical_attempts"] if row["task"] == task
                        and row["fix_round"] == count), None)
     if implementation and historical and historical["fix_round"] >= plan["first_fix"]:
         report = historical["reviews"][-1] if historical["reviews"] else None
@@ -376,9 +387,8 @@ def authorize_context(store, assignments, data, at, observed_session):
     row = assignments[index]
     if row.get("task") != data["task"] or row.get("role") != "developer" or row.get("status") != "applied" or row.get("context_session") is not None:
         raise UsageError("This recovery covers a confirmed developer assignment whose original native-session proof is null.", {})
-    latest = next((i for i in range(len(assignments) - 1, -1, -1) if assignments[i].get("task") == data["task"]
-                   and assignments[i].get("role") == "developer" and assignments[i].get("status") == "applied"), None)
-    if latest != index:
+    latest = latest_assignment(assignments, task=data["task"], role="developer", status="applied")
+    if latest is None or latest[0] != index:
         raise UsageError("That assignment is no longer this task's preceding developer attempt; use the current history.", {})
     evidence, _body = receipt(data["evidence"])
     record = {"schema_version": RECOVERY_SCHEMA_VERSION, "at": at, **data,
@@ -393,16 +403,13 @@ def fresh_transition(store, assignments, task, fix_round):
     """A workflow-cleared release is sufficient cause for the next fresh fix."""
     if task is None or fix_round is None:
         return None
-    index = next((i for i in range(len(assignments) - 1, -1, -1) if assignments[i].get("task") == task
-                  and assignments[i].get("role") == "developer" and assignments[i].get("status") == "applied"), None)
-    if index is None or (assignments[index].get("fix_round") or 0) + 1 != fix_round:
+    latest = latest_assignment(assignments, task=task, role="developer", status="applied")
+    if latest is None or (latest[1].get("fix_round") or 0) + 1 != fix_round:
         return None
-    developer = assignments[index]
-    released = next((i for i in range(len(assignments) - 1, index, -1) if assignments[i].get("task") == task
-                     and assignments[i].get("role") == "release" and assignments[i].get("agent") == developer.get("agent")
-                     and assignments[i].get("status") == "applied" and assignments[i].get("cleared") is True), None)
-    if released is not None:
-        return {"reason": "release_handoff", "previous_developer": index, "release_assignment": released}
+    index, developer = latest
+    released = latest_assignment(assignments, task=task, role="release", agent=developer.get("agent"), status="applied")
+    if released is not None and released[1].get("cleared") is True and assignment_after(assignments, released[0], index):
+        return {"reason": "release_handoff", "previous_developer": index, "release_assignment": released[0]}
     hand = next((row for row in reversed(store["hand_clearances"]) if row["task"] == task
                  and row["previous_developer"] == index), None)
     if hand:
@@ -413,6 +420,10 @@ def fresh_transition(store, assignments, task, fix_round):
     if historical:
         return {"reason": "historical_correction_handoff", "previous_developer": index,
                 "historical_attempt": historical["id"], "continuity": "unproven"}
+    from .role_clear import transition
+    recovered = transition(store, assignments, task, fix_round, index)
+    if recovered:
+        return recovered
     permission = next((row for row in reversed(store["context_permissions"]) if row["task"] == task
                        and row["assignment_index"] == index and row["next_fix"] == fix_round), None)
     if permission:
@@ -428,7 +439,7 @@ def require_recovery_ready(live_info):
 
 def recovery_agent(store, assignments, command, data):
     """Resolve the preserved worker identity before collecting live evidence."""
-    if command in {"recover-context", "record-release-clear"}:
+    if command in {"recover-context", "record-release-clear", "recover-role-clear"}:
         index = data.get("assignment_index")
         if type(index) is not int or not 0 <= index < len(assignments):
             raise UsageError("Use the original assignment_index from teamlead state; do not guess a worker identity.", {})
@@ -468,7 +479,7 @@ def validate_store(store, assignments):
     try:
         if not isinstance(store["tasks"], dict):
             raise UsageError("Recovery tasks must be an object; restore the owner-written ledger.", {})
-        for name in ("checkpoints", "plans", "dispatches", "context_permissions", "events", "hand_clearances", "historical_attempts"):
+        for name in ("checkpoints", "plans", "dispatches", "context_permissions", "events", "hand_clearances", "historical_attempts", "role_clearances", "delivery_recoveries"):
             if not isinstance(store[name], list):
                 raise UsageError("Recovery {} must be an array; restore the owner-written ledger.".format(name), {})
             identifiers = []
@@ -583,6 +594,10 @@ def validate_store(store, assignments):
         # Imported records use these shared validators without a module-level cycle.
         from .historical import validate_history
         validate_history(store, assignments)
+        from .role_clear import validate_history as validate_role_clear_history
+        validate_role_clear_history(store, assignments)
+        from .report_delivery import validate_recoveries
+        validate_recoveries(store, assignments)
     except (KeyError, TypeError, ValueError) as exc:
         raise UsageError("Recovery ledger has missing or malformed fields ({}); restore its owner-written state without discarding history.".format(exc), {}) from None
     return store
