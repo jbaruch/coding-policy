@@ -83,6 +83,10 @@
   ledger byte-identical, while the untouched original still records delivery. Codex
   and Grok contracts are unchanged.
 
+## 0.3.199 — 2026-09-08
+
+### Fixed
+
 - **Stale Grok identity after `/new` (#365).** Grok `/new` keeps native continuity unproven when no pre-clear ID was observed, preventing a late stale Herdr ID from becoming proof. Missing pre-clear evidence makes stale-ID recovery unavailable; guidance directs the lead to record an unconfirmed report as unavailable, notify the operator and keep review/release gates unsatisfied. Known changed IDs and verified process restarts retain their existing behavior. Completed report recovery can bind one original native turn and its distinct source identity to the preserved automatic clear, original plan and dispatch fingerprint, visible full marker and current report bytes. Herdr observations and prior rows remain unchanged; the receipt grants no retention, review approval or correction allowance. Recovery schema 4 accepts separate schema-2 delivery evidence while retaining existing receipts. Malformed delivery assignment indices follow the invalid-ledger warning/refusal path without tracebacks or rewriting history. Missing plans, changed briefing bytes, ambiguous identities/turns, failed or incomplete turns and authored or wrapped markers refuse. Grok’s native viewport scrollbar, with or without its clock, is accepted only with bare completed source. An isolated Grok 1.0.13/Grok 4.6 process on Herdr 0.8.2 reproduced the unchanged ID across `/new`; recovery accepted the same untouched report, and both retained original affected deliveries passed private evidence validation.
 
 ## 0.3.198 — 2026-09-07
