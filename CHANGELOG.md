@@ -35,13 +35,31 @@
   message and rejected that ordinary session outright; a `user` row now ends a turn
   only after a message that already completed. Fixtures alone had not predicted it.
 
+  Internal review then found three ways malformed or interrupted evidence still got
+  through, all fixed here. A row that declares itself a `user` or `assistant` turn
+  is now held to the turn contract even when it carries none of a turn's fields:
+  appending a bare `{"type": "assistant", "sessionId": …}` used to read as
+  bookkeeping, leaving an earlier answer standing as the latest completed one. A
+  message's blocks must now agree about how that message ended, so a sibling block
+  saying `end_turn` can no longer vouch for one that refused or ran out of tokens —
+  with the exception the real format demands: a block written before the message
+  settled carries `stop_reason: null`, and null contradicts nothing. And a `user`
+  row that is not tool output now ends the pending message, so a human prompt
+  arriving between a thinking block and a text block is a new turn rather than an
+  interleaved tool result — even when that prompt repeats the assignment and would
+  otherwise satisfy prompt binding on its own.
+
   Verified 2026-09-08 on Herdr 0.8.2 and Claude Code 2.1.263: the old watcher exited
   4 on the fresh session, the patched watcher accepted the same untouched session
   and file with exit 0 and basis `native_final_source`, and `recover-report` on an
   isolated ledger copy accepted the earlier completed dispatch's preserved negative
   receipt, archived transcript, pane JSON and visible row byte for byte, appending a
   receipt that still grants no review approval, retained context or extra attempt.
-  Codex and Grok contracts are unchanged.
+  Eight controls built from that same archived transcript — bare declared turns,
+  bookkeeping speaking as a turn, three contradictory stop reasons and an
+  intervening typed prompt — now refuse through the public command with the isolated
+  ledger byte-identical, while the untouched original still records delivery. Codex
+  and Grok contracts are unchanged.
 
 ## 0.3.198 — 2026-09-07
 
