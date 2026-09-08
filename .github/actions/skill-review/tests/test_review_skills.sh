@@ -385,14 +385,30 @@ printf 'name: acme/widget\nsource: github\n' > "$WS_FIXTURE/mixed/agent-plugin.y
 assert_eq "$(resolve_in "$WS_FIXTURE/mixed")" "mixedws" \
   "mixed distribution: another channel's manifest does not disable workspace resolution"
 
-MOCK_MODE="success"; DRIVE_WORKSPACE="mixedws" drive fail alpha
+# Drive the gate FROM the fixture tree with no preset workspace, so
+# resolve_workspace reads that tree's manifest and the run is end-to-end: a
+# hardcoded DRIVE_WORKSPACE would assert the review call while proving nothing
+# about the mixed tree, and would pass with the fixture deleted. run_reviews
+# runs in this shell (UNREVIEWED has to survive), so the cd is made and undone
+# here rather than in a subshell.
+SUITE_CWD="$PWD"
+drive_in() {
+  local dir="$1"; shift
+  cd "$dir" || { echo "fatal: could not enter fixture $dir" >&2; exit 2; }
+  DRIVE_WORKSPACE="" MANIFEST=".tessl-plugin/plugin.json" LEGACY_MANIFEST="tile.json" \
+    drive "$@"
+  cd "$SUITE_CWD" || { echo "fatal: could not return to $SUITE_CWD" >&2; exit 2; }
+}
+
+MOCK_MODE="success"; drive_in "$WS_FIXTURE/mixed" fail alpha
 assert_rc 0 "mixed distribution: a changed skill is still reviewed"
 assert_eq "$MOCK_CALLS" "1" "mixed distribution: the skill is reviewed exactly once"
+assert_contains "$MOCK_ARGS" "--workspace mixedws" "mixed distribution: the workspace comes from the mixed tree's own manifest"
 assert_contains "$MOCK_ARGS" "--threshold 85" "mixed distribution: the threshold still reaches tessl"
 
 # A genuine below-threshold score on that same mixed tree still blocks, under
 # the tolerant mode — the score failure is not reclassified as a skip.
-MOCK_MODE="threshold"; DRIVE_WORKSPACE="mixedws" drive skip alpha
+MOCK_MODE="threshold"; drive_in "$WS_FIXTURE/mixed" skip alpha
 assert_rc 1 "mixed distribution: a below-threshold score still blocks"
 assert_unreviewed "" "mixed distribution: a score failure is not a credit skip"
 
@@ -405,6 +421,14 @@ resolve_in "$WS_FIXTURE/other-channel" > "$FIXTURE/ws.out" 2>&1
 assert_rc_value $? 2 "other channel only: no Tessl manifest is a setup error, not a pass"
 assert_contains "$(cat "$FIXTURE/ws.out")" ".tessl-plugin/plugin.json" \
   "other channel only: the diagnostic names the manifest it looked for"
+
+# drive_in leaves WORKSPACE empty and the manifest vars pointing at a fixture
+# tree; the cases below were written against a preset workspace. Restore both
+# explicitly rather than letting them inherit this block's resolution state.
+export WORKSPACE="testws"
+DRIVE_WORKSPACE="testws"
+MANIFEST="$WS_FIXTURE/none/absent.json"
+LEGACY_MANIFEST="$WS_FIXTURE/none/absent-legacy.json"
 
 # --- input validation: an unknown mode is a setup error, not a silent fail ---
 
