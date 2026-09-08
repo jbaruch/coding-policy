@@ -11,18 +11,22 @@ description: Plugin structure, rule/skill format, review pipeline, surface sync,
 - Governs plugin context artifacts in every distribution — rule files, `SKILL.md` files, the README rules and skills tables, `CHANGELOG.md`
 - Distributed through Tessl: the artifact reaches consumers via `tessl install`, evidenced by a Tessl plugin manifest (`.tessl-plugin/plugin.json` or legacy `tile.json`) or a publish path calling `tessl plugin publish` or `tesslio/patch-version-publish`
 - Tessl-bound sections — Plugin Structure, Mandatory Review, Credit-Outage Review Carve-Out, Disagreeing With the Reviewer — bind an artifact distributed through Tessl
-- Distribution-independent sections — Rules Are Prose, Rule Format, Surface Sync, Consistency Check, Post-Edit Rule Audit — bind every plugin artifact, whatever publishes it
-- CHANGELOG Hygiene's publish-on-merge, stamp-step and `tesslio/patch-version-publish` bullets are Tessl-bound; its consolidation and duplication bullets are not
+- Distribution-independent sections — Artifact Layout, Rules Are Prose, Rule Format, Surface Sync, Consistency Check, Post-Edit Rule Audit — bind every plugin artifact, whatever publishes it
+- CHANGELOG Hygiene's publish-on-merge, stamp-step and `tesslio/patch-version-publish` bullets are Tessl-bound
+- CHANGELOG Hygiene's consolidation and duplication bullets are distribution-independent
 - An artifact published through another channel — a GitHub-tag-published ACR package — owes the distribution-independent sections plus `rules/skill-authoring.md`, `rules/testing-standards.md` and `rules/language-diagnostics.md` in full
 - It owes `rules/ci-safety.md` too, reading that rule's registry-advance and moderation conjuncts against its own channel's published-artifact evidence — see `rules/ci-safety.md` Always Watch CI
+
+## Artifact Layout
+
+- Skills live in `skills/<name>/SKILL.md`, rules live in `rules/<name>.md`
+- Standard directories: `rules/`, `skills/<name>/`
+- The plugin's `README.md` is the project's `README.md` — same file. Extend the existing README with rules table, skills table, and installation instructions
 
 ## Plugin Structure
 
 - Every Tessl plugin has a `.tessl-plugin/plugin.json` manifest with `name`, `version`, and `description` — full schema in `rules/skill-authoring.md`
-- The plugin's `README.md` is the project's `README.md` — same file. Extend the existing README with rules table, skills table, and installation instructions
 - Include a Tessl registry badge at the top of README: `[![tessl](https://img.shields.io/endpoint?url=https%3A%2F%2Fapi.tessl.io%2Fv1%2Fbadges%2F<workspace>%2F<plugin>)](https://tessl.io/registry/<workspace>/<plugin>)`
-- Skills live in `skills/<name>/SKILL.md`, rules live in `rules/<name>.md`
-- Standard directories: `rules/`, `skills/<name>/`
 - Use `.tesslignore` to exclude build artifacts and CI files from the published plugin
 - Validate structure with `tessl plugin lint` before every publish
 - `CHANGELOG.md` and similar repo files show as orphaned in `tessl plugin lint` — lint only tracks manifest-declared paths
