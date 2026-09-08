@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.200 — 2026-09-08
+
 ### Fixed
 
 - **Completed Claude Code reports read from their own native source (#366).** The
