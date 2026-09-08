@@ -54,14 +54,26 @@
   the artifact. `skill-authoring`'s manifest reference says which manifest it
   describes, and `script-delegation` no longer labels JSON output, self-error
   handling and single-purpose scripts "Tessl-specific" when its own `applyTo`
-  carries no such condition. `ci-safety`'s release contract now names itself
-  the Tessl form of the publish-confirmation duty: a package on another channel
-  reads the registry-advance and moderation conjuncts against that channel's
-  own published-artifact evidence, and every other clause binds unchanged — the
-  run is still resolved and watched to a terminal state, its `conclusion` still
-  gates, and an unconfirmed publish is still never reported as a release. No
-  conjunct is dropped and no resolver changes; issue #371's tag resolver stays
-  separate.
+  carries no such condition. `skill-authoring` also says which of its own
+  provisions are Tessl-bound: the two that name a `.tessl/plugins/…` mount path
+  reach a plugin installed at one, and the rest is distribution-independent.
+
+  `ci-safety`'s publish-confirmation duty is now keyed on the **publication**,
+  not on the package. A package that publishes through more than one channel
+  owes the duty once per publication, each confirmed against the channel that
+  carried it. The release contract is named the Tessl form and its mechanics are
+  enumerated — registry-baseline capture, the registry-advance and moderation
+  conjuncts, the moderation wait and `verify-moderation-cleared.sh` — so nothing
+  carries them to a package with no Tessl registry. Every Tessl publication
+  keeps that contract whole, mixed distribution included: a tag or release on
+  another channel never substitutes for the registry advance or the moderation
+  clear, and a confirmed Tessl publish says nothing about another channel's
+  release. What stays channel-independent is stated outright rather than left to
+  an "every other clause" catch-all — resolve the run for that publication,
+  watch it to a terminal state, require a successful `conclusion`, verify the
+  version actually published, and never report a release confirmed while its
+  publish is unconfirmed. No conjunct is dropped and no resolver changes; issue
+  #371's tag resolver stays separate.
 
   The `skill-review` action needed no change: it already hard-fails with a
   setup error when no Tessl manifest resolves, which is the correct behaviour
