@@ -56,7 +56,11 @@ Proceed immediately to Step 3.
 
 ## Step 3 — Reason About Versioning
 
-Decide the bump per semver. Patch is the default and is auto-bumped by the publish workflow's `smart-publish` step — only update the manifest version for minor or major.
+Decide the bump per semver, then apply it the way the channels named in Step 7 require:
+
+- **Tessl** — patch is the default and is auto-bumped by the publish workflow's `smart-publish` step; update the manifest version only for minor or major
+- **GitHub tag/asset** — nothing auto-bumps here. Write every bump, patch included, into the package manifest in this PR (`agent-plugin.yaml` for an ACR package), and cut Step 7's release tag at that same version
+- **Both** — set the version explicitly in the manifest in this PR instead of relying on the auto-bump, and tag that same version. The two channels publish one version
 
 ## Step 4 — Policy Review Fires Automatically
 
@@ -194,18 +198,20 @@ After merge — per `rules/ci-safety.md`'s Always Watch CI duty extended through
 
 - **Every publication, whatever channel carries it:** resolve that publication's own run, watch it to a terminal state, and require its `conclusion` to be `success`. Bind the resolution to the workflow, the exact commit, the `push` event and the ref that fired it, never to "latest on main". The lookup polls until the run is listed, past the publish workflow's enqueue latency:
 
-  ```bash
-  # Merge to main — the publish workflow fires on the merge commit.
-  merge_sha=$(gh pr view <N> --json mergeCommit --jq '.mergeCommit.oid')
-  run_id=$(skills/release/resolve-publish-run.sh <owner> <repo> "$merge_sha" "<publish-workflow-name>" | jq -r '.database_id')
+  Each channel keeps its own run id in its own variable. A mixed publication runs both blocks and holds both ids at once; each confirmation below reads the id for its own channel.
 
-  # Tag release — the publish workflow fires on the pushed tag, whose run
-  # carries the tag name as its `headBranch`. Pass the tag as the fifth
+  ```bash
+  # Tessl — the publish workflow fires on the merge commit.
+  merge_sha=$(gh pr view <N> --json mergeCommit --jq '.mergeCommit.oid')
+  tessl_run_id=$(skills/release/resolve-publish-run.sh <owner> <repo> "$merge_sha" "<tessl-publish-workflow>" | jq -r '.database_id')
+  gh run watch "$tessl_run_id"
+
+  # GitHub tag/asset — the publish workflow fires on the pushed tag, whose
+  # run carries the tag name as its `headBranch`. Pass the tag as the fifth
   # argument and the commit the tag points at as the third.
   tag_sha=$(git rev-list -n 1 "<tag>")
-  run_id=$(skills/release/resolve-publish-run.sh <owner> <repo> "$tag_sha" "<publish-workflow-name>" "<tag>" | jq -r '.database_id')
-
-  gh run watch "$run_id"
+  tag_run_id=$(skills/release/resolve-publish-run.sh <owner> <repo> "$tag_sha" "<tag-publish-workflow>" "<tag>" | jq -r '.database_id')
+  gh run watch "$tag_run_id"
   ```
 
   No `--exit-status` on the watch: each channel's confirmation reads the run conclusion explicitly — `verify-publish-landed.sh` for Tessl, `verify-github-release.sh` for a tag publication — and letting `--exit-status` propagate a non-zero exit would short-circuit `set -e` wrappers before they run.
@@ -217,7 +223,7 @@ After merge — per `rules/ci-safety.md`'s Always Watch CI duty extended through
   # Gate on the exit code — only a clean conjunction (rc 0) may proceed to
   # the moderation step. A non-zero rc (publish did not land, or a tool
   # error) stops the release here; do not fall through to moderation.
-  landed=$(skills/release/verify-publish-landed.sh <workspace> <plugin> "$PRE" "$run_id") \
+  landed=$(skills/release/verify-publish-landed.sh <workspace> <plugin> "$PRE" "$tessl_run_id") \
     || { echo "Publish not confirmed — $(jq -r '.reason // "see stderr"' <<<"$landed")" >&2; exit 1; }
   CURRENT=$(jq -r '.current' <<<"$landed")
   ```
@@ -234,9 +240,10 @@ After merge — per `rules/ci-safety.md`'s Always Watch CI duty extended through
 
   ```bash
   # Gate on the exit code, the same way the Tessl path gates on
-  # verify-publish-landed.sh. Pass the run id resolved above: the run's
-  # conclusion is this check's first conjunct.
-  skills/release/verify-github-release.sh <owner> <repo> "<tag>" "$run_id"
+  # verify-publish-landed.sh. Pass THIS channel's run id: its conclusion
+  # is this check's first conjunct, and a mixed publication must not
+  # confirm the tag release against the Tessl run.
+  skills/release/verify-github-release.sh <owner> <repo> "<tag>" "$tag_run_id"
   ```
 
   Exit 0 = both conjuncts hold. Exit 1 = a definitive no (the run concluded something other than `success`, or the release is absent, draft, empty, or carries an asset still uploading) — an unconfirmed release; surface it and do not report success. Exit 2 = indeterminate (run still in flight, gh absent or unreachable); an indeterminate answer is never a landing. Which conjuncts it reads is the script's decision contract — see `skills/release/verify-github-release.sh` header, not restated here (`rules/script-as-black-box.md`)

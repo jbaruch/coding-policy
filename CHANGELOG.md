@@ -87,7 +87,13 @@
   distribution included. A tag publication pushes its tag, resolves that tag's
   own run, and confirms its own release and assets, running none of the Tessl
   helpers; a package on both channels owes both confirmations independently.
-  `SCRIPTING.md`'s wrapper contract carries the same split.
+  `SCRIPTING.md`'s wrapper contract carries the same split. Step 3's versioning
+  became channel-aware alongside it: the `smart-publish` auto-bump is a Tessl
+  mechanic, a tag-only package writes every bump into its own manifest and tags
+  that version, and a package on both channels sets the version explicitly so
+  one version serves both. Each channel also holds its own resolved run id, so
+  a mixed release never confirms one channel's publication against the other's
+  run.
 
   That correction pulled in **#371's tag resolver**, which the release-skill
   split needs. `resolve-publish-run.sh` hard-coded `--branch main`, so a
