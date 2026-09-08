@@ -56,6 +56,18 @@ class Transcript:
         self.rows.append(row)
         return row
 
+    def bare_turn(self, kind):
+        """A row that declares itself a turn and carries none of a turn's
+        fields — no uuid, no parent link, no message."""
+        self.rows.append({"type": kind, "sessionId": self.session})
+        return self
+
+    def disguised_turn(self, role="user", kind="ai-title"):
+        """Bookkeeping that chains cleanly but speaks as the worker or the
+        operator — a turn wearing a bookkeeping type."""
+        self._link({"type": kind, "message": {"role": role, "content": "Do something else."}})
+        return self
+
     def bookkeeping(self, kind="ai-title"):
         self.rows.append({"type": kind, "sessionId": self.session, "aiTitle": "Round work"})
         return self
@@ -85,7 +97,8 @@ class Transcript:
         self._link({"type": "attachment", "attachment": {"type": "diagnostics"}})
         return self
 
-    def assistant(self, blocks, stop_reason="end_turn", message_id="msg_final", first_index=0, step=1):
+    def assistant(self, blocks, stop_reason: "str | None" = "end_turn",
+                  message_id="msg_final", first_index=0, step=1):
         for offset, block in enumerate(blocks):
             self._link({"type": "assistant", "apiBlockIndex": first_index + offset * step,
                         "requestId": "req_" + message_id,
@@ -123,6 +136,42 @@ def dispatched(final, prompt="Write the fresh report", **kwargs):
             .prompt("<command-name>/clear</command-name>", typed=False)
             .prompt(prompt).working().bookkeeping()
             .answer(final).system("stop_hook_summary").system())
+
+
+THINKING = {"type": "thinking", "thinking": "The report is written."}
+
+
+def interrupted(marker, prompt):
+    """Malformed and interrupted transcripts, in Claude Code's real row shape.
+
+    Each one differs from a genuine completed round in exactly one way, and
+    each was accepted before the turn, completion-metadata and user-boundary
+    guards landed.
+    """
+    text = {"type": "text", "text": marker}
+
+    def split(first_reason):
+        """One message whose two block rows disagree about how it ended."""
+        return (Transcript().prompt(prompt).working()
+                .assistant([THINKING], first_reason, "msg_final")
+                .assistant([text], "end_turn", "msg_final", first_index=1))
+
+    return {
+        # R1 — a declared turn with no uuid, parent link or message.
+        "missing-turn-fields-assistant": dispatched(marker, prompt=prompt).bare_turn("assistant"),
+        "missing-turn-fields-user": dispatched(marker, prompt=prompt).bare_turn("user"),
+        "bookkeeping-carrying-a-turn": dispatched(marker, prompt=prompt).disguised_turn(),
+        # R2 — a sibling block vouching for a message that refused or ran out.
+        "inconsistent-stop-refusal": split("refusal"),
+        "inconsistent-stop-max-tokens": split("max_tokens"),
+        "inconsistent-stop-tool-use": split("tool_use"),
+        # R3 — a human turn between the blocks of the message that answers it.
+        # The prompt repeats the assignment, so prompt binding alone lets it by.
+        "typed-user-between-final-blocks": (Transcript().prompt(prompt).working()
+                                            .assistant([THINKING], None, "msg_final")
+                                            .prompt(prompt)
+                                            .assistant([text], "end_turn", "msg_final", first_index=1)),
+    }
 
 
 class ClaudeSourceTests(unittest.TestCase):
@@ -165,6 +214,22 @@ class ClaudeSourceTests(unittest.TestCase):
         transcript = Transcript().prompt("Write the fresh report").parallel_tools().answer(self.marker)
         self.assertEqual(self.final(transcript), self.marker)
         self.assertIsNone(self.final(Transcript().prompt("Write the fresh report").parallel_tools()))
+
+    def test_malformed_and_interrupted_sources_stay_unconfirmed(self):
+        for name, transcript in interrupted(self.marker, "Write the fresh report").items():
+            with self.subTest(case=name):
+                self.assertIsNone(self.final(transcript))
+
+    def test_an_unsettled_block_is_not_contradictory_metadata(self):
+        """Claude writes `stop_reason: null` on a block that has not settled;
+        the message's own later block supplies the outcome."""
+        settled = (Transcript().prompt("Write the fresh report").working()
+                   .assistant([THINKING], None, "msg_final")
+                   .assistant([{"type": "text", "text": self.marker}], "end_turn", "msg_final", first_index=1))
+        self.assertEqual(self.final(settled), self.marker)
+        unsettled = (Transcript().prompt("Write the fresh report")
+                     .assistant([{"type": "text", "text": self.marker}], None))
+        self.assertIsNone(self.final(unsettled))
 
     def test_incomplete_and_replaced_turns_stay_unconfirmed(self):
         cases = {
@@ -310,16 +375,24 @@ class ClaudeSourceTests(unittest.TestCase):
 
         return Client()
 
-    def test_probe_confirms_a_completed_claude_pane(self):
-        self.source.write_text(dispatched(self.marker).body())
+    def probe(self, transcript):
+        self.source.write_text(transcript.body())
         with patch.object(delivery, "source_path", return_value=self.source):
-            result = delivery.probe(self.fake_client(), "claude-review", PANE, str(self.report), self.visible, 40)
-            self.assertEqual(result, {"found": True, "basis": "native_final_source",
-                                      "native_session": identity(), "source": result.get("source")})
-            self.assertEqual(result["source"]["path"], str(self.source))
-            self.source.write_text(dispatched("- " + self.marker).body())
-            self.assertFalse(delivery.probe(self.fake_client(), "claude-review", PANE,
-                                            str(self.report), self.visible, 40)["found"])
+            return delivery.probe(self.fake_client(), "claude-review", PANE,
+                                  str(self.report), self.visible, 40)
+
+    def test_probe_confirms_a_completed_claude_pane(self):
+        result = self.probe(dispatched(self.marker))
+        self.assertEqual(result, {"found": True, "basis": "native_final_source",
+                                  "native_session": identity(), "source": result.get("source")})
+        self.assertEqual(result["source"]["path"], str(self.source))
+        self.assertFalse(self.probe(dispatched("- " + self.marker))["found"])
+
+    def test_probe_refuses_malformed_and_interrupted_evidence(self):
+        for name, transcript in interrupted(self.marker, "Write the fresh report").items():
+            with self.subTest(case=name):
+                result = self.probe(transcript)
+                self.assertEqual(result, {"found": False, "reason": "native_marker_unconfirmed"})
 
     def test_public_watcher_reads_the_real_claude_layout(self):
         fake = self.tmp / "herdr"
@@ -414,6 +487,19 @@ class ClaudeRecoveryTests(unittest.TestCase):
         delivery.validate_recoveries(document["recovery"], document["assignments"])
         self.assertEqual(delivery.recover(document["recovery"], document["assignments"], data, AT), record)
         self.assertEqual(len(document["recovery"]["delivery_recoveries"]), 1)
+
+    def test_owner_recovery_refuses_malformed_and_interrupted_evidence(self):
+        """The same reproductions, through the command that writes the ledger."""
+        for name in interrupted(self.marker, "unused"):
+            document, data = self.fixture()
+            source = interrupted(self.marker, self.prompt(document))[name]
+            Path(data["source"]).write_text(source.body())
+            before = copy.deepcopy(document)
+            with self.subTest(case=name):
+                with self.assertRaises(UsageError):
+                    delivery.recover(document["recovery"], document["assignments"], data, AT)
+                self.assertEqual(document, before)
+                self.assertEqual(document["recovery"]["delivery_recoveries"], [])
 
     def test_owner_recovery_refuses_unproven_claude_evidence(self):
         variations = {
