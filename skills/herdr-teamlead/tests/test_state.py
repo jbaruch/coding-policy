@@ -41,7 +41,7 @@ class EmptyStateTest(unittest.TestCase):
         self.assertEqual(
             empty_state(),
             {"schema_version": STATE_SCHEMA_VERSION, "snapshots": [], "assignments": [],
-             "recovery": {"schema_version": 3, "tasks": {}, "checkpoints": [], "plans": [],
+             "recovery": {"schema_version": 4, "tasks": {}, "checkpoints": [], "plans": [],
                           "dispatches": [], "context_permissions": [], "events": [],
                           "hand_clearances": [], "historical_attempts": [], "role_clearances": [], "delivery_recoveries": []}},
         )

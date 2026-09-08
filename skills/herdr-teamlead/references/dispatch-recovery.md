@@ -369,11 +369,25 @@ contract — its per-block JSONL rows, the `parentUuid` chain, both parallel
 tool-call orderings, and where its transcripts live — sits beside it in
 `skills/herdr-teamlead/teamlead/claude_native.py`.
 
+A Grok `/new` keeps continuity null when Herdr repeats the pre-clear ID or no
+pre-clear ID was observed. Wait normally; an unconfirmed native marker is not
+permission to send the assignment again. The watcher never scans for a newer
+transcript. Stale-ID recovery below requires the recorded pre-clear ID. If no
+pre-clear ID was observed, stale-ID recovery is unavailable and refuses
+with `grok_clear_identity_unproven`. If delivery remains unconfirmed, record the
+report as unavailable and notify the operator of the missing pre-clear evidence.
+Keep review/release gates unsatisfied; do not resend the assignment or reconstruct
+missing evidence.
+
 For an already completed affected dispatch, preserve its original negative
 wait JSON, report bytes, native source transcript, visible pane text, and the
 original `herdr pane get` JSON. Read these original artifacts and the saved
 dispatch's common/role briefs. Use the existing task authority to record
 delivery; this recovery requests no new work or allowance.
+
+Even a refused owner operation can persist the recovery schema 3 → 4 migration.
+Use isolated ledger copies for validation until the installed owner supports
+schema 4.
 
 Run `teamlead recover-report --record FILE --state FILE` through the owner
 launcher above. The record names a unique `id`, the preserved `dispatch` ID,
@@ -384,6 +398,23 @@ user message against the original dispatch prompt and binds all evidence bytes
 in a separate receipt. A nondeveloper's historical null session remains null.
 Original dispatches, assignments, negative wait receipts and reports remain
 unchanged; a later role/session does not require rerunning completed work.
+
+For the known Grok `/new` identity contradiction, add `plan` naming the original
+saved plan JSON to the recovery input. Preserve all other original input paths.
+The command checks the original dispatch fingerprint against the plan and current
+briefing bytes. The strict source adapter and named refusal contracts are
+`grok_clear_identity`, `validate_stale_binding`, and `stale_grok_source` in
+`skills/herdr-teamlead/teamlead/report_delivery.py`. Unknown dispatch options,
+missing original plans, reused prompt paths, contradictory sources and changed
+brief bytes refuse.
+Do not build a replacement transcript, choose the newest filename, or rewrite
+Herdr's archived pane JSON to make identities agree.
+
+The new receipt keeps the archived `native_session` observation and adds a separate
+`source_session`; neither proves live continuity. Source selection is explicit:
+inspect the original native updates for this dispatch, then name that artifact.
+Multiple session identities or multiple turns remain unconfirmed. Preserve all
+candidate artifacts when the source is ambiguous; do not select one by recency.
 
 Exit 0 emits the append-only delivery receipt. Identical replay returns that
 receipt; conflicting bytes or identity fail. Read the report in full and
@@ -428,3 +459,15 @@ before it and the chain branches. Both orderings come from the same pinned CLI
 and both must parse. Give a Claude worker a SHORT report path: a long one wraps
 in the pane, and a wrapped marker cannot be told from a newline, so the watcher
 refuses it by design.
+
+For a stale-Grok regression, complete a short turn in an isolated Grok process,
+then let normal `teamlead apply` send `/new` and a fresh report-only brief. Save
+that plan, apply output and original native updates. Verify Herdr still reports
+the first turn's ID while the completed source identifies a different session.
+The watcher must remain unconfirmed against the stale ID. Recover against an
+isolated copy of the owner state with the saved `plan` and original artifacts;
+pass requires a separate source identity, unchanged original rows and bytes,
+null continuity and no review approval. A fresh process whose first identity
+already matches its transcript does not exercise this regression. Keep config,
+caches and transcripts report-local (`GROK_HOME` selects native source storage).
+Never input to, clear or restart an active team worker for this validation.

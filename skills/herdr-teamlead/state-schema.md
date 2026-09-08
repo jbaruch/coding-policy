@@ -82,7 +82,7 @@ number is refused, naming the file and the role. `plan` is the only reader.
     }
   ],
   "recovery": {
-    "schema_version": 3,
+    "schema_version": 4,
     "tasks": {},
     "checkpoints": [],
     "plans": [],
@@ -140,8 +140,8 @@ document and arrives already stamped.
 
 ## Recovery records
 
-The recovery document uses `schema_version: 3`; individual records retain their
-independent `schema_version: 1`. The owner adds empty `role_clearances` and
+The recovery document uses `schema_version: 4`; individual records retain their
+independent versions (1, or 2 for stale-Grok delivery). The owner adds empty `role_clearances` and
 `delivery_recoveries` arrays when migrating versions 1 or 2. Version 1 also
 gains empty `hand_clearances` and `historical_attempts` arrays. Existing
 record shapes, contents, assignment rows and evidence remain unchanged. State
@@ -164,6 +164,15 @@ replacement for live readiness, source review, or release gates.
 | `role_clearances` | Unique `id`, original `task`/`base_revision`, developer `assignment_index`, actual `clearing_assignment_index` and `clearing_dispatch`, `next_fix`, complete owner `input`, clear/authorization byte `receipts`, reused or explicit `clear_authority`, later `observed_session`, `basis: verified_authorized_role_clear`, and `grants_future_attempts: false`. The input fixes the same work and correction plan used for dispatch. Original known native proof and every earlier row remain unchanged. |
 | `historical_attempts` | Unique `id`, actual `fix_round`, `previous_developer`, appended `assignment_index`, original owner `input`, authorization/transport/report byte `receipts`, inspected `vcs` checkout/head/diff evidence, `basis: completed_authorized_manual_correction`, null `native_session_proof`, `grants_future_attempts: false`, and append-only `reviews`. |
 | `delivery_recoveries` | Unique `id`, original `dispatch` and `assignment_index`, owner `input`, byte `receipts` for report/negative wait/pane/visible/native source/common/brief, archived `native_session`, `found: true`, `basis: archived_native_final_source`, null `native_session_proof`, and `grants_review_approval: false`. Original null session evidence is preserved; the archived user prompt binds its delivery to the saved dispatch. |
+
+Version 4 admits delivery record schema 2 alongside unchanged schema-1 receipts.
+The new record uses `basis: archived_grok_clear_source`, preserves `native_session`
+as Herdr's archived observation, and adds `source_session` with `agent: grok`,
+`kind: id`, and the native updates' `value`. Its `input` and `receipts` also bind
+the original `plan`. All continuity and approval fields retain their prior meaning.
+Migration from version 3 changes only the enclosing version, never an old record.
+The source identity is delivery evidence only, never a Herdr observation or
+retained-context proof. Version-3 readers refuse version 4 without migration.
 
 Dispatch statuses are `reserved`, `sending`, `sent_but_not_started`, `applied`,
 and `not_sent`. The first three hold an unresolved slot. Only confirmed
@@ -243,7 +252,10 @@ informational plan name and never feeds headroom.
   outcome evidence, never pane labels, for that check.
 - **Session continuity** — a fresh labelled developer dispatch reads Herdr's
   native reference after clearing and correlates it after confirmed first-prompt
-  delivery, including delayed IDs. Unproven correlation is null without losing
+  delivery, including delayed IDs. A Grok `/new` without an observed pre-clear ID
+  keeps null continuity; a later Herdr ID alone cannot establish its freshness.
+  The recovery reference names the delivery continuation.
+  Unproven correlation is null without losing
   the confirmed dispatch. An unchanged pre-clear reference cannot prove a new conversation. A
   retained dispatch checks the recorded identity against the live source at
   readiness and immediately before sending. Missing, changed, malformed, or

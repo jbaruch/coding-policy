@@ -348,13 +348,21 @@ def verify_live_retention(prior, current, name):
 
 
 def correlate_dispatch_session(client, agent, pane_id, previous, before_prompt, *,
-                               cleared, warn, sleep, settle_sec):
+                               cleared, warn, sleep, settle_sec, grok_new=False):
     """Bind a confirmed first prompt to the native session it started.
 
     A pre-clear identity is stale even when it arrives again after dispatch.
     A different identity from the one observed immediately before the prompt
     cannot prove continuity either. Failure here does not undo a sent prompt.
     """
+    if grok_new and previous is None:
+        warn("{} was dispatched after a Grok clear without a recorded pre-clear native ID. "
+             "Continuity remains unproven and stale-ID recovery is unavailable. Wait for its report; "
+             "if delivery remains unconfirmed, record the report as unavailable and notify the operator "
+             "of the missing pre-clear evidence. Keep review/release gates unsatisfied; "
+             "do not resend or reconstruct evidence."
+             .format(agent.name))
+        return None
     for attempt in range(SESSION_CORRELATION_READS):
         try:
             current = native_context_session(client.agent_get(agent.name), agent.kind)
@@ -654,6 +662,11 @@ def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle
                 verify_live_retention(prior, context_session, name)
             elif cleared and context_session == statuses[name]["context_session"]:
                 context_session = None
+        grok_new = agent.kind == "grok" and cleared and not tier
+        if grok_new and statuses[name]["context_session"] is None:
+            # A /new redraw does not repair Herdr's stale native ID (#365).
+            # Preserve null proof even if the old ID was absent before clear.
+            context_session = None
         # send_message re-checks the composer, pastes, and confirms the
         # message actually landed as a user message rather than as a command.
         if on_before_send is not None:
@@ -676,8 +689,14 @@ def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle
         if task is not None and step["role"] == "developer" and prior is None:
             context_session = (correlate_dispatch_session(
                 client, agent, step["pane_id"], statuses[name]["context_session"], context_session,
-                cleared=cleared, warn=warn, sleep=sleep, settle_sec=settle_sec,
+                cleared=cleared, warn=warn, sleep=sleep, settle_sec=settle_sec, grok_new=grok_new,
             ) if landing["landed"] or landing["started"] else None)
+        if grok_new and step["role"] != "developer":
+            warn("{} received a fresh Grok assignment. Wait for its report; if delivery is unconfirmed, "
+                 "stale-ID recovery through recover-report requires the recorded pre-clear native ID, original plan and native updates. "
+                 "Without that ID, stale-ID recovery is unavailable: record the report as unavailable "
+                 "and notify the operator of the missing pre-clear evidence. Keep review/release gates "
+                 "unsatisfied; never rerun completed work.".format(name))
         checked = statuses.get(name, {})
         record = {
             "role": step["role"],
