@@ -110,6 +110,16 @@ class Transcript:
         return self.assistant([{"type": "tool_use", "id": tool_id, "name": "Bash", "input": {}}],
                               "tool_use", message_id, first_index=index)
 
+    def tool_calls(self, tool_ids, message_id, index):
+        """One block row carrying several `tool_use` blocks — the shape that
+        makes a single multi-result answer legitimate."""
+        self._link({"type": "assistant", "apiBlockIndex": index, "requestId": "req_" + message_id,
+                    "message": {"model": "claude-opus-5", "id": message_id, "type": "message",
+                                "role": "assistant", "stop_reason": "tool_use",
+                                "content": [{"type": "tool_use", "id": tool_id, "name": "Bash", "input": {}}
+                                            for tool_id in tool_ids]}})
+        return self
+
     def assistant(self, blocks, stop_reason: "str | None" = "end_turn",
                   message_id="msg_final", first_index=0, step=1):
         for offset, block in enumerate(blocks):
@@ -200,6 +210,11 @@ def interrupted(marker, prompt):
         "inconsistent-stop-refusal": split("refusal"),
         "inconsistent-stop-max-tokens": split("max_tokens"),
         "inconsistent-stop-tool-use": split("tool_use"),
+        # R4 — one row answering the same pending call twice, which used to
+        # ride along on that id's requester and consume the call once.
+        "duplicate-answer-in-one-row": queued(
+            lambda first, second, _: ((("toolu_c", "toolu_c"), first), ("toolu_d", second)),
+            prompt=prompt).answer(marker),
         # R3 — a human turn between the blocks of the message that answers it.
         # The prompt repeats the assignment, so prompt binding alone lets it by.
         "typed-user-between-final-blocks": (Transcript().prompt(prompt).working()
@@ -307,6 +322,34 @@ class ClaudeSourceTests(unittest.TestCase):
         interrupted_group.prompt("Stop and do something else")
         interrupted_group.tool_result("toolu_e", parent=group_block, attachment=False)
         self.assertIsNone(self.final(interrupted_group.answer(self.marker)))
+
+    def test_one_row_never_answers_the_same_call_twice(self):
+        """A call is answered once, in one row as much as across two."""
+        interleaved = Transcript().prompt("Write the fresh report")
+        interleaved.tool_call("toolu_h", "msg_repeat", 0)
+        requester = interleaved.head
+        interleaved.tool_result(("toolu_h", "toolu_h"), parent=requester, attachment=False)
+        self.assertIsNone(self.final(interleaved.answer(self.marker)))
+        for answered in (("toolu_c", "toolu_c"), ("toolu_c", "toolu_d", "toolu_c")):
+            with self.subTest(answered=answered):
+                doubled = queued(lambda first, second, _: ((answered, first),))
+                self.assertIsNone(self.final(doubled.answer(self.marker)))
+
+    def test_a_result_block_without_its_call_id_answers_nothing(self):
+        for identity in (None, "", 42):
+            with self.subTest(tool_use_id=identity):
+                nameless = queued(lambda first, second, _: (("toolu_c", first),))
+                nameless.rows[-1]["message"]["content"][0]["tool_use_id"] = identity
+                self.assertIsNone(self.final(nameless.answer(self.marker)))
+
+    def test_one_block_row_may_be_answered_by_one_multi_result_row(self):
+        """Distinct ids from a single block row are a legitimate answer; the
+        duplicate guard bans repeats, not every multi-result row."""
+        shared = Transcript().prompt("Write the fresh report")
+        shared.assistant([{"type": "text", "text": "Two calls, one block row."}], "tool_use", "msg_shared")
+        shared.tool_calls(("toolu_f", "toolu_g"), "msg_shared", 1)
+        shared.tool_result(("toolu_f", "toolu_g"), parent=shared.head, attachment=False)
+        self.assertEqual(self.final(shared.answer(self.marker)), self.marker)
 
     def test_one_row_answering_two_blocks_has_no_single_parent(self):
         for block in (2, 3):

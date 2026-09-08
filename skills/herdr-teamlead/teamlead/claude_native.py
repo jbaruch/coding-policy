@@ -25,14 +25,15 @@ which one appears depends on when the results are flushed:
   result to the block row that REQUESTED it, so the first result's parent is
   not the row before it and the chain branches.
 
-So a result names its requester in BOTH orderings -- verified on every one of
-the 177 tool results across six preserved sessions -- and that is the rule:
-a `tool_result` row links to the block row whose `tool_use` id it answers, in
-the message being assembled, once. Every other row links to the row before it.
-A broken parent chain, a parent naming an abandoned branch or a row that merely
-occurred earlier, a mismatched or repeated tool result, a subagent row on the
-main chain, a foreign session id, contradictory completion metadata, or an
-unreadable shape stays unconfirmed.
+So a result names its requester in BOTH orderings -- verified on every tool
+result across the preserved sessions -- and that is the rule: a `tool_result`
+row links to the block row whose `tool_use` id it answers, in the message being
+assembled, and each call is answered exactly once, including within a single
+row. Every other row links to the row before it. A broken parent chain, a
+parent naming an abandoned branch or a row that merely occurred earlier, a
+mismatched or repeated tool result, a subagent row on the main chain, a foreign
+session id, contradictory completion metadata, or an unreadable shape stays
+unconfirmed.
 """
 
 import os
@@ -70,11 +71,18 @@ def tool_output(body):
 
 
 def tool_answers(body):
-    """The `tool_use` ids a user row answers, or None if it answers none."""
+    """The `tool_use` ids a user row answers, or None if it answers none.
+
+    A call is answered once. A row naming the same id twice does not answer two
+    calls, so its claim is unreadable -- and reading it as one answer would let
+    the repeat ride along on the first id's requester.
+    """
     if not tool_output(body):
         return None
     answered = [block.get("tool_use_id") for block in body["content"]]
-    return answered if all(isinstance(identity, str) and identity for identity in answered) else None
+    if not all(isinstance(identity, str) and identity for identity in answered):
+        return None
+    return answered if len(set(answered)) == len(answered) else None
 
 
 def requested_by(body, pending):
