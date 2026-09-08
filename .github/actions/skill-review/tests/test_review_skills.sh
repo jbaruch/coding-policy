@@ -422,9 +422,14 @@ assert_rc_value $? 2 "other channel only: no Tessl manifest is a setup error, no
 assert_contains "$(cat "$FIXTURE/ws.out")" ".tessl-plugin/plugin.json" \
   "other channel only: the diagnostic names the manifest it looked for"
 
-# drive_in leaves WORKSPACE empty and the manifest vars pointing at a fixture
-# tree; the cases below were written against a preset workspace. Restore both
-# explicitly rather than letting them inherit this block's resolution state.
+# Only WORKSPACE leaks out of drive_in: drive() exports it unqualified, so the
+# empty value persists and the cases below — written against a preset workspace
+# — would otherwise inherit it. Restore it. The MANIFEST/LEGACY_MANIFEST
+# prefixes do NOT leak: bash discards assignments prefixed to a FUNCTION call
+# once the function returns (checked on 3.2.57 and 5.3.15). They are pinned
+# here anyway so the later cases name their manifest inputs instead of
+# inheriting the sourced script's relative defaults; nothing below reads them,
+# because a non-empty WORKSPACE short-circuits resolve_workspace.
 export WORKSPACE="testws"
 DRIVE_WORKSPACE="testws"
 # `export`ed like the other config vars: the sourced functions read them, which
