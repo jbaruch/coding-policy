@@ -66,9 +66,9 @@ def decorated_row(visible, kind, report):
     for row in visible.splitlines():
         if row in expected:
             return row
-        # Grok right-aligns a native clock and optional viewport scrollbar.
-        # The source proof still requires the bare path, with no clock text.
-        if kind == "grok" and re.fullmatch(re.escape("     REPORT: " + report) + r" {2,}(?:1[0-2]|[1-9]):[0-5][0-9] [AP]M(?: {2,}█)?", row):
+        # Grok can omit the right-aligned clock when only the scrollbar fits.
+        # The source proof still requires the bare path, with no decoration.
+        if kind == "grok" and re.fullmatch(re.escape("     REPORT: " + report) + r" {2,}(?:(?:1[0-2]|[1-9]):[0-5][0-9] [AP]M(?: {2,}█)?|█)", row):
             return row
     return None
 
@@ -486,13 +486,14 @@ def validate_recoveries(store, assignments):
     for row in store["delivery_recoveries"]:
         dispatch = ledger._item(store["dispatches"], row["dispatch"], "dispatch")
         index = row["assignment_index"]
+        if type(index) is not int or not 0 <= index < len(assignments) or index != dispatch["assignment_index"]:
+            raise UsageError("Delivery recovery has no matching assignment row; restore the owner-written ledger without changing history.", {})
         stale = row["schema_version"] == 2
         expected_inputs = STALE_RECOVERY_INPUTS if stale else RECOVERY_INPUTS
         expected_artifacts = RECOVERY_ARTIFACTS | {"plan"} if stale else RECOVERY_ARTIFACTS
         if stale:
             validate_stale_binding(dispatch, assignments[index], row["native_session"], row["source_session"])
-        if (dispatch["status"] != "applied" or index != dispatch["assignment_index"]
-                or row["task"] != dispatch["task"] or row["found"] is not True
+        if (dispatch["status"] != "applied" or row["task"] != dispatch["task"] or row["found"] is not True
                 or row["grants_review_approval"] is not False or row["basis"] != ("archived_grok_clear_source" if stale else "archived_native_final_source")
                 or row["native_session_proof"] is not None
                 or native_identity({"agent_session": row["native_session"]}) is None

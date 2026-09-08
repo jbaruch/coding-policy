@@ -6,6 +6,7 @@ import json
 import os
 from unittest.mock import patch
 from pathlib import Path
+import subprocess
 import sys
 import unittest
 
@@ -93,6 +94,88 @@ class StaleGrokDeliveryTests(unittest.TestCase):
         Path(self.data['report']).write_text('changed report bytes')
         self.assertEqual(cli.main(args, stdout=io.StringIO(), stderr=io.StringIO()), 1)
         self.assertEqual(ledger_path.read_bytes(), saved)
+
+    def test_public_owner_validates_delivery_indices_before_dereferencing(self):
+        self.recover()
+        legacy = native_fixture.NativeDeliveryTests()
+        legacy.setUp()
+        self.addCleanup(legacy.doCleanups)
+        old_document, old_data = legacy.recovery_fixture()
+        delivery.recover(old_document['recovery'], old_document['assignments'], old_data, AT)
+        ledger, request = self.case.tmp / 'index-state.json', self.case.tmp / 'index-request.json'
+        for document, data in ((old_document, old_data), (self.document, self.data)):
+            state.add_assignment(document, AT, 'tester', 'another-worker')
+            schema = document['recovery']['delivery_recoveries'][0]['schema_version']
+            request.write_text(json.dumps(data))
+            for index in (0, len(document['assignments']), -1, None, '0', 0.0, False, True, 1):
+                candidate = copy.deepcopy(document)
+                candidate['recovery']['delivery_recoveries'][0]['assignment_index'] = index
+                state.save_state(ledger, candidate)
+                before = ledger.read_bytes()
+                valid = type(index) is int and index == 0
+                for command in ('state', 'recover-report'):
+                    args = ['bash', str(ROOT / 'teamlead.sh'), command, '--state', str(ledger)]
+                    if command == 'recover-report':
+                        args += ['--record', str(request), '--now', AT]
+                    result = subprocess.run(args, capture_output=True, text=True, check=False)
+                    with self.subTest(schema=schema, index=index, index_type=type(index), command=command):
+                        self.assertNotIn('Traceback', result.stderr)
+                        self.assertEqual(ledger.read_bytes(), before)
+                        self.assertEqual(result.returncode, 0 if valid or command == 'state' else 1, result.stderr)
+                        if valid:
+                            self.assertEqual(result.stderr, '')
+                            expected = candidate if command == 'state' else candidate['recovery']['delivery_recoveries'][0]
+                            self.assertEqual(json.loads(result.stdout), expected)
+                        else:
+                            self.assertIn('restore the owner-written ledger', result.stderr)
+                            self.assertIn('file is left untouched', result.stderr)
+                            if command == 'state':
+                                self.assertEqual(json.loads(result.stdout), state.empty_state())
+                            else:
+                                self.assertEqual(result.stdout, '')
+                                self.assertIn('"error": "state_error"', result.stderr)
+
+    def test_public_owner_scrollbar_only_requires_complete_bare_source_and_row(self):
+        marker = self.case.marker
+        row = '     ' + marker + '             █'
+        cases = [(marker, '     ' + marker + suffix, True)
+                 for suffix in ('', '    1:55 AM', '    1:55 AM   █', '             █')]
+        cases += [(marker, visible, False) for visible in (
+            row + '█', row + ' extra', '     ' + marker + ' █', '     ' + marker + '█',
+            '     ' + marker + '\t\t█', '> ' + row, '- ' + row, '• ' + marker + '   █',
+            row[1:], ' ' + row, '```' + row + '```', '     REPORT: \n' + str(self.case.report) + '   █')]
+        cases += [(final, row, False) for final in (
+            '- ' + marker, '> ' + marker, '```\n' + marker, '    ' + marker,
+            '     ' + marker, marker + '   █', marker + '\nmore output')]
+        ledger, request = self.case.tmp / 'scrollbar-state.json', self.case.tmp / 'scrollbar-request.json'
+        request.write_text(json.dumps(self.data))
+        for final, visible, expected in cases:
+            rows = copy.deepcopy(self.rows)
+            rows[3]['params']['update']['content']['text'] = final
+            Path(self.data['source']).write_text(encode(rows))
+            Path(self.data['visible']).write_text(visible)
+            state.save_state(ledger, self.document)
+            before = ledger.read_bytes()
+            result = subprocess.run(['bash', str(ROOT / 'teamlead.sh'), 'recover-report',
+                '--state', str(ledger), '--record', str(request), '--now', AT],
+                capture_output=True, text=True, check=False)
+            with self.subTest(final=final, visible=visible):
+                self.assertEqual(result.returncode, 0 if expected else 1, result.stderr)
+                self.assertNotIn('Traceback', result.stderr)
+                if expected:
+                    receipt = json.loads(result.stdout)
+                    self.assertTrue(receipt['found'])
+                    self.assertEqual(receipt['native_session'], self.observed)
+                    self.assertEqual(receipt['source_session']['value'], SESSION)
+                    self.assertIsNone(receipt['native_session_proof'])
+                    self.assertFalse(receipt['grants_review_approval'])
+                    saved = json.loads(ledger.read_text())
+                    self.assertEqual(saved['assignments'], self.document['assignments'])
+                    self.assertEqual(saved['recovery']['dispatches'], self.document['recovery']['dispatches'])
+                else:
+                    self.assertEqual(result.stdout, '')
+                    self.assertIn('bare final marker', result.stderr)
+                    self.assertEqual(ledger.read_bytes(), before)
 
     def test_dispatch_brief_common_and_plan_must_match_original_fingerprint(self):
         for key in ('brief', 'common', 'plan'):
