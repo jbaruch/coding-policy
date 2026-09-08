@@ -25,13 +25,18 @@
   manifest, badge, `tessl plugin lint`, `tessl review run`, the credit-outage
   carve-out and the reviewer-disagreement loop bind an artifact distributed
   through Tessl — evidenced by a Tessl plugin manifest or a publish path
-  calling `tessl plugin publish` or `tesslio/patch-version-publish`. Rules Are
-  Prose, Rule Format, Surface Sync, Consistency Check and Post-Edit Rule Audit
-  bind every plugin artifact whatever publishes it, so a package on another
-  channel loses no discipline it had. The `applyTo` action clause says both
-  halves rather than narrowing to Tessl outright: narrowing the whole rule
-  would have dropped the distribution-independent sections for exactly the
-  packages this fixes, which is the lower quality bar #374 rules out.
+  calling `tessl plugin publish` or `tesslio/patch-version-publish`. A new
+  `Artifact Layout` section carries the directory and README-is-the-project-
+  README conventions, which never depended on the channel, and it joins Rules
+  Are Prose, Rule Format, Surface Sync, Consistency Check and Post-Edit Rule
+  Audit in binding every plugin artifact whatever publishes it — so a package
+  on another channel loses no discipline it had. Consistency Check's
+  documentation-table check follows the plugin's own manifest, named concretely
+  for a Tessl plugin, the way Surface Sync already did. The `applyTo` action
+  clause says both halves rather than narrowing to Tessl outright: narrowing
+  the whole rule would have dropped the distribution-independent sections for
+  exactly the packages this fixes, which is the lower quality bar #374 rules
+  out.
 
   Mandatory Review keeps the gate where it belongs. Mixed distribution still
   reviews every changed skill before its Tessl publish; deleting the Tessl
@@ -42,21 +47,33 @@
   external policy and Copilot review — the command is the only thing that does
   not follow it.
 
-  Two references were audited alongside. `context-writing-style`'s Scope bound
-  prose discipline to "rules declared in `.tessl-plugin/plugin.json`", which
-  would have dropped the discipline for rules declared in another channel's
-  manifest; it now follows the artifact. `skill-authoring`'s manifest reference
-  now says which manifest it describes. `ci-safety`'s release contract and the
-  release skill's registry/moderation conjunction were read and left alone —
-  they are publication machinery for a Tessl release, not a gate reimposed on
-  another channel, and issue #371's tag resolver is separate.
+  The references that would have re-imposed the same demand were audited
+  alongside. `context-writing-style`'s Scope bound prose discipline to "rules
+  declared in `.tessl-plugin/plugin.json`", which would have dropped the
+  discipline for rules declared in another channel's manifest; it now follows
+  the artifact. `skill-authoring`'s manifest reference says which manifest it
+  describes, and `script-delegation` no longer labels JSON output, self-error
+  handling and single-purpose scripts "Tessl-specific" when its own `applyTo`
+  carries no such condition. `ci-safety`'s release contract now names itself
+  the Tessl form of the publish-confirmation duty: a package on another channel
+  reads the registry-advance and moderation conjuncts against that channel's
+  own published-artifact evidence, and every other clause binds unchanged — the
+  run is still resolved and watched to a terminal state, its `conclusion` still
+  gates, and an unconfirmed publish is still never reported as a release. No
+  conjunct is dropped and no resolver changes; issue #371's tag resolver stays
+  separate.
 
   The `skill-review` action needed no change: it already hard-fails with a
   setup error when no Tessl manifest resolves, which is the correct behaviour
   and not an exemption. Its suite now asserts the distribution boundary that
-  was untested — a tree carrying both an `agent-plugin.yaml` and a Tessl
-  manifest still resolves its workspace, still reviews its changed skill at
-  threshold 85, and still blocks on a below-threshold score.
+  was untested. The cases run from a fixture tree carrying both an
+  `agent-plugin.yaml` and a Tessl manifest, with no workspace preset, so the
+  value reaching `tessl review run` is derived from that tree's own manifest:
+  the changed skill is still reviewed once at threshold 85, a below-threshold
+  score there still blocks without being recorded as a credit skip, and a tree
+  holding only the other channel's manifest stops at a setup error naming what
+  it looked for. Removing the fixture's Tessl manifest reds six of those
+  assertions, and a mutation that exempts on `agent-plugin.yaml` reds four.
 
 ## 0.3.200 — 2026-09-08
 
