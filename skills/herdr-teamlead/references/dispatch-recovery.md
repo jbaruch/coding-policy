@@ -365,8 +365,8 @@ writing state or worker input. Success emits `found` and either confirmed
 source evidence or an unconfirmed `reason`; tool failure exits non-zero.
 The native-source and display predicates belong to
 `skills/herdr-teamlead/teamlead/report_delivery.py`. Claude Code's own source
-contract — its per-block JSONL rows, the `parentUuid` chain, and where its
-transcripts live — sits beside it in
+contract — its per-block JSONL rows, the `parentUuid` chain, both parallel
+tool-call orderings, and where its transcripts live — sits beside it in
 `skills/herdr-teamlead/teamlead/claude_native.py`.
 
 For an already completed affected dispatch, preserve its original negative
@@ -416,6 +416,15 @@ worker wrote its report and rendered `⏺ REPORT: <path>` on one row. The old
 watcher exited 4 with `marker unconfirmed`; the patched watcher accepted the
 same untouched session and file with exit 0 and basis `native_final_source`.
 The same code recovered an earlier completed Claude dispatch from its preserved
-negative receipt and archived transcript, on an isolated copy of the ledger, and
-that live run is what exposed the interleaved tool-result rows a fixture alone
-had not predicted.
+negative receipt and archived transcript, on an isolated copy of the ledger.
+
+Four fresh sessions across that day's rounds settled the parallel tool-call
+shape, which took two live rounds to see whole. Claude Code writes a
+`tool_result` row linked to the `tool_use` BLOCK ROW that requested it. When
+the results are flushed one at a time the rows still read linearly
+(`tool_use`, its result, the next `tool_use`, its result); when both calls are
+written before either result lands, the first result's parent is not the row
+before it and the chain branches. Both orderings come from the same pinned CLI
+and both must parse. Give a Claude worker a SHORT report path: a long one wraps
+in the pane, and a wrapped marker cannot be told from a newline, so the watcher
+refuses it by design.

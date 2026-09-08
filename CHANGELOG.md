@@ -28,12 +28,29 @@
   the display allowlist; rows are still never joined, and a decorated row alone was
   never proof.
 
-  The live validation earned its keep. A fresh isolated Herdr workspace on Claude
-  Code 2.1.263 produced a transcript with parallel tool calls, where Claude Code
-  writes the first tool's `user` result row BETWEEN two `tool_use` block rows of the
-  same assistant message. The first cut treated any `user` row as the end of a
-  message and rejected that ordinary session outright; a `user` row now ends a turn
-  only after a message that already completed. Fixtures alone had not predicted it.
+  The live validation earned its keep, twice, and the parallel tool-call shape took
+  both rounds to see whole. Claude Code links a `tool_result` row to the `tool_use`
+  BLOCK ROW that requested it. The first fresh session showed the results flushed
+  one at a time, so the rows still read linearly — `tool_use`, its result, the next
+  `tool_use`, its result — and the fix was to stop treating that intervening `user`
+  row as the end of the message. A later round's fresh session wrote both `tool_use`
+  blocks before either result landed, so the first result's parent was not the row
+  before it and the chain branched; the strict `parentUuid` walk rejected an
+  entirely ordinary completed session, reproducing the very exit 4 this issue exists
+  to remove. Both orderings come from the same pinned CLI, and which one appears
+  depends only on when the results are flushed.
+
+  So the parent rule now follows the format rather than the common case: a
+  `tool_result` row links to the block row whose `tool_use` id it answers, in the
+  message under assembly, once — which holds for all 177 tool results across the six
+  preserved sessions, in both orderings. Every other row still links to the row
+  before it. A parent naming an abandoned branch or a row that merely occurred
+  earlier, an id from a superseded message or a closed turn, a repeated answer, and
+  a single row answering two different block rows are all refused, with the ledger
+  untouched. Fixtures alone predicted neither ordering, which is why the reference
+  now documents both — and why it tells you to give a Claude worker a short report
+  path, since a long one wraps in the pane and a wrapped marker is refused by
+  design.
 
   Internal review then found three ways malformed or interrupted evidence still got
   through, all fixed here. A row that declares itself a `user` or `assistant` turn
