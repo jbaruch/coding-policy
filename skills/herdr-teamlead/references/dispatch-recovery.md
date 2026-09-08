@@ -456,9 +456,12 @@ the results are flushed one at a time the rows still read linearly
 (`tool_use`, its result, the next `tool_use`, its result); when both calls are
 written before either result lands, the first result's parent is not the row
 before it and the chain branches. Both orderings come from the same pinned CLI
-and both must parse. Give a Claude worker a SHORT report path: a long one wraps
-in the pane, and a wrapped marker cannot be told from a newline, so the watcher
-refuses it by design.
+and both must parse. A result names the call it answers, and a call is answered
+once — including within a single row, where two blocks naming the same
+`tool_use_id` used to ride along on that call's requester. Distinct ids issued
+by one block row are still a legitimate multi-result answer. Give a Claude
+worker a SHORT report path: a long one wraps in the pane, and a wrapped marker
+cannot be told from a newline, so the watcher refuses it by design.
 
 For a stale-Grok regression, complete a short turn in an isolated Grok process,
 then let normal `teamlead apply` send `/new` and a fresh report-only brief. Save

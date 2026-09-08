@@ -47,7 +47,12 @@
   before it. A parent naming an abandoned branch or a row that merely occurred
   earlier, an id from a superseded message or a closed turn, a repeated answer, and
   a single row answering two different block rows are all refused, with the ledger
-  untouched. Fixtures alone predicted neither ordering, which is why the reference
+  untouched. A call is answered exactly once, and independent verification found
+  that "once" had a hole in it: two blocks in the SAME row naming the same
+  `tool_use_id` collapsed to one requester and consumed the pending call once, so a
+  duplicated answer established delivery. Duplicate ids in a row now make its claim
+  unreadable before any requester is checked or any call consumed — while distinct
+  ids issued by one block row stay a legitimate multi-result answer. Fixtures alone predicted neither ordering, which is why the reference
   now documents both — and why it tells you to give a Claude worker a short report
   path, since a long one wraps in the pane and a wrapped marker is refused by
   design.
