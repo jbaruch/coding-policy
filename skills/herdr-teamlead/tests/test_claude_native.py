@@ -47,9 +47,13 @@ class Transcript:
     def __init__(self, session=SESSION):
         self.session, self.rows, self.head, self.serial = session, [], None, 0
 
-    def _link(self, row):
+    def _link(self, row, parent=None):
+        """Append a row, linked to the previous one unless a parent is named.
+
+        Only a queued tool result names its own parent; see `queued`.
+        """
         self.serial += 1
-        row.update({"parentUuid": self.head, "isSidechain": False,
+        row.update({"parentUuid": self.head if parent is None else parent, "isSidechain": False,
                     "uuid": "uuid-{:04d}".format(self.serial), "sessionId": self.session,
                     "cwd": CWD, "version": VERSION})
         self.head = row["uuid"]
@@ -91,11 +95,20 @@ class Transcript:
         self._link(row)
         return self
 
-    def tool_result(self):
+    def tool_result(self, tool_ids: "str | tuple[str, ...]" = "toolu_1", parent=None, attachment=True):
+        if isinstance(tool_ids, str):
+            tool_ids = (tool_ids,)
         self._link({"type": "user", "promptId": "prompt-1", "message": {"role": "user", "content": [
-            {"type": "tool_result", "content": "ok", "tool_use_id": "toolu_1"}]}})
-        self._link({"type": "attachment", "attachment": {"type": "diagnostics"}})
+            {"type": "tool_result", "content": "ok", "tool_use_id": tool_id} for tool_id in tool_ids]}},
+            parent=parent)
+        if attachment:
+            self._link({"type": "attachment", "attachment": {"type": "diagnostics"}})
         return self
+
+    def tool_call(self, tool_id, message_id, index):
+        """One `tool_use` block row; its uuid is the transcript's new head."""
+        return self.assistant([{"type": "tool_use", "id": tool_id, "name": "Bash", "input": {}}],
+                              "tool_use", message_id, first_index=index)
 
     def assistant(self, blocks, stop_reason: "str | None" = "end_turn",
                   message_id="msg_final", first_index=0, step=1):
@@ -110,15 +123,13 @@ class Transcript:
         return self.assistant([{"type": "text", "text": text}], stop_reason, message_id)
 
     def parallel_tools(self, message_id="msg_parallel"):
-        """Two tool calls in one message: the first result lands between the
-        message's own block rows, the way Claude Code writes them."""
+        """Interleaved ordering: each result lands between the message's own
+        block rows, so every row still links to the one before it."""
         self.assistant([{"type": "text", "text": "Checking two things."}], "tool_use", message_id)
-        self.assistant([{"type": "tool_use", "id": "toolu_a", "name": "Bash", "input": {}}],
-                       "tool_use", message_id, first_index=1)
-        self.tool_result()
-        self.assistant([{"type": "tool_use", "id": "toolu_b", "name": "Bash", "input": {}}],
-                       "tool_use", message_id, first_index=2)
-        return self.tool_result()
+        self.tool_call("toolu_a", message_id, 1)
+        self.tool_result("toolu_a")
+        self.tool_call("toolu_b", message_id, 2)
+        return self.tool_result("toolu_b")
 
     def working(self, message_id="msg_tool"):
         return self.assistant([{"type": "thinking", "thinking": "Checking the tree."}], "tool_use", message_id)\
@@ -139,6 +150,30 @@ def dispatched(final, prompt="Write the fresh report", **kwargs):
 
 
 THINKING = {"type": "thinking", "thinking": "The report is written."}
+
+
+def paired(first, second, transcript):
+    """Each queued result answered by the block row that requested it."""
+    return (("toolu_c", first), ("toolu_d", second))
+
+
+def queued(answers=paired, message_id="msg_queued", prompt="Write the fresh report"):
+    """The queued parallel ordering: both `tool_use` block rows, then both
+    results, each linking to the block row that requested it.
+
+    `answers` receives the two block rows' uuids and the transcript, and
+    returns the `(tool_use_id, parentUuid)` pairs to write — the branch every
+    negative case bends.
+    """
+    transcript = Transcript().prompt(prompt)
+    transcript.assistant([{"type": "text", "text": "Two things at once."}], "tool_use", message_id)
+    transcript.tool_call("toolu_c", message_id, 1)
+    first = transcript.head
+    transcript.tool_call("toolu_d", message_id, 2)
+    second = transcript.head
+    for tool_id, parent in answers(first, second, transcript):
+        transcript.tool_result(tool_id, parent=parent, attachment=False)
+    return transcript
 
 
 def interrupted(marker, prompt):
@@ -210,10 +245,75 @@ class ClaudeSourceTests(unittest.TestCase):
                                   {"type": "text", "text": self.marker}]))
         self.assertEqual(self.final(transcript), self.marker)
 
-    def test_interleaved_tool_results_never_split_one_message(self):
-        transcript = Transcript().prompt("Write the fresh report").parallel_tools().answer(self.marker)
-        self.assertEqual(self.final(transcript), self.marker)
+    def test_both_real_parallel_tool_orderings_parse(self):
+        """Interleaved and queued come from the same pinned CLI; which one
+        appears depends on when the results are flushed."""
+        interleaved = Transcript().prompt("Write the fresh report").parallel_tools().answer(self.marker)
+        self.assertEqual(self.final(interleaved), self.marker)
+        self.assertEqual(self.final(queued().answer(self.marker)), self.marker)
+        reversed_results = queued(lambda first, second, _: (("toolu_d", second), ("toolu_c", first)))
+        self.assertEqual(self.final(reversed_results.answer(self.marker)), self.marker)
+        both = queued().parallel_tools("msg_interleaved").answer(self.marker)
+        self.assertEqual(self.final(both), self.marker)
+        # Neither ordering completes anything on its own.
         self.assertIsNone(self.final(Transcript().prompt("Write the fresh report").parallel_tools()))
+        self.assertIsNone(self.final(queued()))
+
+    def test_only_the_requesting_block_row_may_be_a_result_s_parent(self):
+        cases = {
+            "unknown-parent": lambda first, second, _: (("toolu_c", "uuid-9999"),),
+            "mismatched-tool-id": lambda first, second, _: (("toolu_zz", first),),
+            "repeated-result": lambda first, second, _: (("toolu_c", first), ("toolu_c", first)),
+            "answered-by-the-other-block": lambda first, second, _: (("toolu_c", second),),
+            "parent-is-the-prompt-row": lambda first, second, t: (("toolu_c", t.rows[0]["uuid"]),),
+        }
+        for name, answers in cases.items():
+            with self.subTest(case=name):
+                self.assertIsNone(self.final(queued(answers).answer(self.marker)))
+
+    def test_a_branch_belongs_to_the_message_that_opened_it(self):
+        """A result reaches its own message's block row and no further, and an
+        ordinary row never gets the tool result's branch."""
+        stale = Transcript().prompt("Write the fresh report")
+        stale.tool_call("toolu_e", "msg_earlier", 0)
+        earlier_block = stale.head
+        stale.tool_result("toolu_e", parent=earlier_block, attachment=False)
+        stale.assistant([{"type": "text", "text": "Two things at once."}], "tool_use", "msg_queued")
+        stale.tool_call("toolu_c", "msg_queued", 1)
+        stale.tool_call("toolu_d", "msg_queued", 2)
+        stale.tool_result("toolu_e", parent=earlier_block, attachment=False)
+        self.assertIsNone(self.final(stale.answer(self.marker)))
+        late = queued()
+        late.answer(self.marker, "tool_use", "msg_next")
+        late.tool_result("toolu_c", parent=late.rows[2]["uuid"], attachment=False)
+        self.assertIsNone(self.final(late.answer(self.marker)))
+        branched_assistant = queued()
+        target = branched_assistant.rows[2]["uuid"]
+        branched_assistant.answer(self.marker)
+        branched_assistant.rows[-1]["parentUuid"] = target
+        self.assertIsNone(self.final(branched_assistant))
+
+    def test_an_abandoned_call_is_not_answerable_later(self):
+        """A new message, and a new turn, each close the group behind them."""
+        superseded = Transcript().prompt("Write the fresh report")
+        superseded.tool_call("toolu_e", "msg_abandoned", 0)
+        abandoned_block = superseded.head
+        superseded.assistant([{"type": "text", "text": "Never mind."}], "tool_use", "msg_next")
+        superseded.tool_result("toolu_e", parent=abandoned_block, attachment=False)
+        self.assertIsNone(self.final(superseded.answer(self.marker)))
+        interrupted_group = Transcript().prompt("Write the fresh report")
+        interrupted_group.tool_call("toolu_e", "msg_group", 0)
+        group_block = interrupted_group.head
+        interrupted_group.prompt("Stop and do something else")
+        interrupted_group.tool_result("toolu_e", parent=group_block, attachment=False)
+        self.assertIsNone(self.final(interrupted_group.answer(self.marker)))
+
+    def test_one_row_answering_two_blocks_has_no_single_parent(self):
+        for block in (2, 3):
+            with self.subTest(parent_row=block):
+                both = queued(lambda first, second, _: ())
+                both.tool_result(("toolu_c", "toolu_d"), parent=both.rows[block]["uuid"], attachment=False)
+                self.assertIsNone(self.final(both.answer(self.marker)))
 
     def test_malformed_and_interrupted_sources_stay_unconfirmed(self):
         for name, transcript in interrupted(self.marker, "Write the fresh report").items():
