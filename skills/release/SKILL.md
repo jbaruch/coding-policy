@@ -129,7 +129,13 @@ skills/release/dismiss-stale-reviews.sh <owner> <repo> <pr-number>
 
 Run it once Step 5's poll shows every bot's latest verdict clean. It emits a JSON summary of what it dismissed and what it left active, exits non-zero on API failure, and is idempotent on re-run. Which reviews it dismisses and which it leaves is the script's decision contract — see `skills/release/dismiss-stale-reviews.sh` header, not restated here (`rules/script-as-black-box.md`).
 
-Before merging, capture the registry baseline so the post-merge check has something to compare against:
+**Name this repo's publication channels before merging.** The confirmation a release owes is keyed on the publication, never on the package — a package that publishes through more than one channel owes the duty once per publication, each confirmed against the channel that carried it (`rules/ci-safety.md` Always Watch CI). Read the repo's publish workflow and its manifest, and name every channel it publishes on:
+
+- **Tessl** — a Tessl plugin manifest (`.tessl-plugin/plugin.json`, legacy `tile.json`), or a publish path calling `tessl plugin publish` or `tesslio/patch-version-publish`
+- **GitHub tag/asset** — a publish workflow triggered on a tag push (`on: push: tags:`) that creates a release carrying the package's assets, an ACR package published by `acr publish`
+- **Both** — every step below marked Tessl AND every step marked tag/asset, each read from its own channel. A green GitHub release confirms nothing about a pending Tessl moderation, and a cleared Tessl publish confirms nothing about an absent GitHub asset
+
+**Tessl only:** capture the registry baseline before merging, so the post-merge check has something to compare against. A publication on another channel skips this — no registry to advance:
 
 ```bash
 PRE=$(skills/release/capture-registry-baseline.sh <workspace> <plugin> | jq -r .version)
@@ -180,18 +186,32 @@ Order in (B) is mandatory: `git branch -d` refuses to delete a branch that is ch
 After merge — per `rules/ci-safety.md`'s Always Watch CI duty extended through release:
 
 - Verify the merge landed on main (`git pull --ff-only` succeeds; `git log -1 --oneline` shows the merge commit)
-- Watch the publish workflow to a terminal state. Bind to the merge commit SHA + the `push` event, never to "latest on main". The publish workflow may take several seconds to be enqueued after merge, so the run-id lookup polls until the run is listed (2s interval, 30s budget):
+- **GitHub tag/asset publication:** its publish workflow fires on the tag, never on the merge, so push the release tag from the fast-forwarded `main` before resolving anything. The version follows Step 3:
 
   ```bash
+  git tag <tag> && git push origin <tag>
+  ```
+
+- **Every publication, whatever channel carries it:** resolve that publication's own run, watch it to a terminal state, and require its `conclusion` to be `success`. Bind the resolution to the workflow, the exact commit, the `push` event and the ref that fired it, never to "latest on main". The publish workflow may take several seconds to be enqueued, so the lookup polls until the run is listed:
+
+  ```bash
+  # Merge to main — the publish workflow fires on the merge commit.
   merge_sha=$(gh pr view <N> --json mergeCommit --jq '.mergeCommit.oid')
   run_id=$(skills/release/resolve-publish-run.sh <owner> <repo> "$merge_sha" "<publish-workflow-name>" | jq -r '.database_id')
+
+  # Tag release — the publish workflow fires on the pushed tag, whose run
+  # carries the tag name as its `headBranch`. Pass the tag as the fifth
+  # argument and the commit the tag points at as the third.
+  tag_sha=$(git rev-list -n 1 "<tag>")
+  run_id=$(skills/release/resolve-publish-run.sh <owner> <repo> "$tag_sha" "<publish-workflow-name>" "<tag>" | jq -r '.database_id')
+
   gh run watch "$run_id"
   ```
 
-  No `--exit-status` on the watch: the publish-landed conjunction below reads the run conclusion explicitly, so letting `--exit-status` propagate a non-zero exit would short-circuit `set -e` wrappers before the conjunction runs.
+  No `--exit-status` on the watch: the confirmations below read the run conclusion explicitly, so letting `--exit-status` propagate a non-zero exit would short-circuit `set -e` wrappers before they run.
 
-  `gh pr view` returns the specific merge commit for this PR, unaffected by parallel merges. The resolver filters on `headSha == $merge_sha` AND `event == push` so manual `workflow_dispatch` runs sharing the SHA are excluded; it also retries on enqueue latency so the immediate post-merge `gh run list` doesn't race the publish workflow's enqueue and surface as "no run found". Output is `{"database_id": N}` per `rules/script-delegation.md` — extract with `jq -r '.database_id'`. The watch is a timing precondition for the conjunction below, not the gate
-- Confirm the publish landed via the conjunction check — conjuncts 1 and 2 (resolved run's `conclusion == success` AND registry's `Latest Version > PRE`). Capture the emitted `current` version for the moderation check that follows:
+  `gh pr view` returns the specific merge commit for this PR, unaffected by parallel merges. The four facts the resolver binds, its enqueue-latency retry, and its refusal to pick between two runs matching all four are the script's decision contract — see `skills/release/resolve-publish-run.sh` header, not restated here (`rules/script-as-black-box.md`). Output is `{"database_id": N}` per `rules/script-delegation.md` — extract with `jq -r '.database_id'`. The watch is a timing precondition for the confirmations below, not the gate
+- **Tessl publication:** confirm the publish landed via the conjunction check — conjuncts 1 and 2 (resolved run's `conclusion == success` AND registry's `Latest Version > PRE`). Capture the emitted `current` version for the moderation check that follows:
 
   ```bash
   # Gate on the exit code — only a clean conjunction (rc 0) may proceed to
@@ -203,14 +223,21 @@ After merge — per `rules/ci-safety.md`'s Always Watch CI duty extended through
   ```
 
   Output is exit-code-dependent: rc 0/1 emits the JSON envelope `{"ok": bool, "reason": "...", "run_conclusion": "...", "pre": "...", "current": "..."}` on stdout (parse it for the finding); rc 2 emits the stderr diagnostic (tool-state errors: run still in flight, gh/tessl unreachable). Exception: the missing-jq guard at rc 2 emits a minimal JSON envelope on stdout (the script can't use jq to format JSON when jq itself is absent) so wrappers that always parse stdout still see a parseable failure. Do not compare against a specific expected version. See `rules/ci-safety.md` for full release-contract semantics and failed-publish recovery
-- Once conjuncts 1 and 2 hold, confirm moderation cleared — conjunct 3. A freshly published version can be install-blocked until its moderation state reaches `pass`; poll with exponential backoff (the script owns the backoff constants and the cleared/blocked decision):
+- **Tessl publication:** once conjuncts 1 and 2 hold, confirm moderation cleared — conjunct 3. A freshly published version can be install-blocked until its moderation state reaches `pass`; poll with exponential backoff (the script owns the backoff constants and the cleared/blocked decision):
 
   ```bash
   skills/release/verify-moderation-cleared.sh <workspace> <plugin> "$CURRENT"
   ```
 
-  Exit 0 = moderation cleared. Exit 1 = blocked or still-pending at budget exhaustion — an unconfirmed release; surface it and do not report success. Exit 2 = tool-state error (tessl unreachable, jq missing). Never report the release confirmed until this clears. See `rules/ci-safety.md` for the full three-conjunct contract
-- Report the outcome: merged PR URL, version published, registry + moderation confirmation
+  Exit 0 = moderation cleared. Exit 1 = blocked or still-pending at budget exhaustion — an unconfirmed release; surface it and do not report success. Exit 2 = tool-state error (tessl unreachable, jq missing). Never report the release confirmed until this clears. See `rules/ci-safety.md` for the full three-conjunct contract. Every Tessl publication keeps this whole contract, mixed distribution included
+- **GitHub tag/asset publication:** confirm the release the run was supposed to create. Run none of the three Tessl helpers above for it — a package with no Tessl registry has no baseline to advance and no moderation state to clear:
+
+  ```bash
+  skills/release/verify-github-release.sh <owner> <repo> "<tag>"
+  ```
+
+  Exit 0 = the release exists at that exact tag, is published, and every asset is retrievable. Exit 1 = a definitive no (absent, draft, empty, or an asset still uploading) — an unconfirmed release; surface it and do not report success. Exit 2 = indeterminate (gh absent or unreachable); an indeterminate answer is never a landing. Which conjuncts it reads is the script's decision contract — see `skills/release/verify-github-release.sh` header, not restated here (`rules/script-as-black-box.md`)
+- Report the outcome: merged PR URL, the version published, and each publication's own confirmation — registry advance plus moderation clear for a Tessl publication, the published release and its retrievable assets for a tag publication, both for a package on both channels
 
 When this step is wrapped in a reusable script (e.g., `merge-and-cleanup.sh` that other devs run unattended), see `skills/release/SCRIPTING.md` for the gates the script must enforce.
 
