@@ -1,10 +1,12 @@
 """Prove native display decoration from the completed assistant source.
 
-The display allowlist is deliberately tiny: Codex's bullet and Grok's five
-spaces. Neither is accepted without the same session's latest completed final
-message ending in a bare marker. Rows are never joined. Source formats were
-verified on Codex 0.153.2 and Grok 1.0.13 (Grok 4.6), with Herdr 0.8.2.
-Unknown integrations, source formats and incomplete turns stay unconfirmed.
+The display allowlist is deliberately tiny: Codex's bullet, Grok's five spaces
+and Claude Code's record glyph. None is accepted without the same session's
+latest completed final message ending in a bare marker. Rows are never joined.
+Source formats were verified on Codex 0.153.2, Grok 1.0.13 (Grok 4.6) and
+Claude Code 2.1.263, with Herdr 0.8.2. Each kind's source contract lives with
+its own reader; Claude's is teamlead/claude_native.py. Unknown integrations,
+source formats and incomplete turns stay unconfirmed.
 
 Live probes read only the session reported by Herdr. Owner recovery reads
 archived evidence, adds a separate receipt, and changes no assignment, dispatch,
@@ -18,11 +20,12 @@ import re
 from fnmatch import fnmatchcase
 from pathlib import Path
 
+from . import claude_native
 from . import recovery as ledger
 from .errors import UsageError
 
 
-DISPLAY_PREFIXES = {"codex": ("• ",), "grok": ("     ",)}
+DISPLAY_PREFIXES = {"codex": ("• ",), "grok": ("     ",), "claude": ("\u23fa ",)}
 SESSION_ID = re.compile(r"[A-Za-z0-9_-]+\Z")
 FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
 CONTAINER = re.compile(r"^ {0,3}(?:>|[-+*•][ \t]|[0-9]{1,9}[.)][ \t])")
@@ -148,15 +151,17 @@ def source_final(body, kind, session):
     rows = _rows(body)
     if rows is None:
         return None
-    parser = {"codex": codex_final, "grok": grok_final}.get(kind)
+    parser = {"codex": codex_final, "grok": grok_final, "claude": claude_native.final_message}.get(kind)
     return parser(rows, session) if parser else None
 
 
-def source_prompt(body, kind):
+def source_prompt(body, kind, session):
     """Read the actual latest user message; quoted assistant instructions fail."""
     rows = _rows(body)
     if rows is None:
         return None
+    if kind == "claude":
+        return claude_native.prompt_text(rows, session)
     prompt, in_chunks = None, False
     for row in rows:
         if kind == "codex":
@@ -197,6 +202,8 @@ def native_identity(info):
 def source_root(kind):
     if kind == "codex":
         return Path(os.environ.get("CODEX_HOME", str(Path.home() / ".codex"))) / "sessions"
+    if kind == "claude":
+        return claude_native.sessions_root()
     return Path.home() / ".grok" / "sessions"
 
 
@@ -204,7 +211,7 @@ def source_path(identity):
     """Resolve the official ID without glob's suppression of directory errors."""
     session, kind = identity["value"], identity["agent"]
     root, matches = source_root(kind), []
-    depth_limit = 3 if kind == "codex" else 2
+    depth_limit = {"codex": 3, "claude": claude_native.SESSION_DEPTH}.get(kind, 2)
 
     def fail(error):
         raise error
@@ -216,6 +223,10 @@ def source_path(identity):
             directories[:] = []
             if kind == "codex":
                 matches.extend(path / name for name in files if fnmatchcase(name, "rollout-*-" + session + ".jsonl"))
+            elif kind == "claude":
+                name = claude_native.transcript_name(session)
+                if name in files:
+                    matches.append(path / name)
             elif path.name == session and "updates.jsonl" in files:
                 matches.append(path / "updates.jsonl")
         elif kind == "grok" and depth == 1:
@@ -337,7 +348,7 @@ def recover(store, assignments, data, at):
     if (identity is None or original_identity is not None and identity != original_identity
             or not isinstance(pane, dict) or not pane_identity(pane, dispatch["result"].get("pane_id"), identity)
             or not decorated_row(bodies["visible"], identity["agent"], data["report"])
-            or source_prompt(bodies["source"], identity["agent"]) != prompt
+            or source_prompt(bodies["source"], identity["agent"], identity["value"]) != prompt
             or not bare_final(source_final(bodies["source"], identity["agent"], identity["value"]), data["report"])):
         raise UsageError("Archived pane and completed native source do not prove this report's bare final marker; preserve the negative receipt.", {})
     prior = next((row for row in store["delivery_recoveries"] if row["id"] == data["id"]), None)

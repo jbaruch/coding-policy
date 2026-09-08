@@ -53,7 +53,9 @@
     "skills/herdr-teamlead/tests/test_start_judge_worker.py",
     "skills/herdr-teamlead/tests/test_tier_integration.py",
     "skills/herdr-teamlead/teamlead/report_delivery.py",
-    "skills/herdr-teamlead/tests/test_report_delivery.py"
+    "skills/herdr-teamlead/tests/test_report_delivery.py",
+    "skills/herdr-teamlead/teamlead/claude_native.py",
+    "skills/herdr-teamlead/tests/test_claude_native.py"
   ],
   "executionEnvironments": [
     {
