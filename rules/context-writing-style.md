@@ -8,7 +8,7 @@ description: Prose discipline for rules, skills, and READMEs — what to cut, wh
 
 ## Scope
 
-- Applies to auto-loaded artifacts: rules declared in `.tessl-plugin/plugin.json`, `SKILL.md` on skill invocation, READMEs on plugin fetch
+- Applies to auto-loaded artifacts: rules declared in the plugin manifest, `SKILL.md` on skill invocation, READMEs on plugin fetch
 - Out of scope: every file the agent loads only after electing to open it — `skills/<name>/references/**`, lookup tables, worked examples, any file reached through a pointer
 - The test is load-time, not directory. A file the agent receives without choosing it is in scope. A file it opens after reading a reference is not, whatever directory holds it
 - `rules/skill-authoring.md` Keep Skills Compact names reference files as the destination for detail moved off the loaded surface
