@@ -111,7 +111,7 @@ After modifying rules, audit for cross-rule alignment:
 - Skills (or their scripts) carry the executable form per `rules/script-delegation.md`
 - New rules don't contradict existing ones
 - Skills follow the conventions their own rules prescribe
-- Documentation tables match `.tessl-plugin/plugin.json` entries
+- Documentation tables match the plugin manifest's entries, `.tessl-plugin/plugin.json` for a Tessl plugin
 
 ## Post-Edit Rule Audit
 
