@@ -267,7 +267,12 @@ run "empty tag argument exits 2" test_empty_tag
 # fires before mktemp, so an empty PATH is survivable here.
 test_missing_gh() {
   local stderr rc=0
-  stderr=$( unset -f gh; PATH=""; main "$OWNER" "$REPO" "$TAG" 2>&1 >/dev/null ) || rc=$?
+  stderr=$(
+    unset -f gh
+    # shellcheck disable=SC2123  # emptying the search path is the point: `command -v gh` must find neither the mock function nor a binary
+    PATH=""
+    main "$OWNER" "$REPO" "$TAG" 2>&1 >/dev/null
+  ) || rc=$?
   assert_eq "exit code" "2" "$rc" || return 1
   [[ "$stderr" == *"cli.github.com"* ]] || { echo "    FAIL: stderr should carry an install hint, got: ${stderr}" >&2; return 1; }
 }
