@@ -49,7 +49,7 @@ description: Deterministic operations → script, reasoning → LLM, the regex t
 
 ## Script Requirements
 
-Scripts follow the baseline in `rules/file-hygiene.md` (exit codes, stderr, idempotency) plus these Tessl-specific requirements:
+Scripts follow the baseline in `rules/file-hygiene.md` (exit codes, stderr, idempotency) plus these requirements:
 
 - **JSON-producing**: output structured data, not prose
 - **Self-error-handling**: exit non-zero on failure, write a diagnostic message to stderr
