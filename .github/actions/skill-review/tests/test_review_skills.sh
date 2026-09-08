@@ -427,8 +427,10 @@ assert_contains "$(cat "$FIXTURE/ws.out")" ".tessl-plugin/plugin.json" \
 # explicitly rather than letting them inherit this block's resolution state.
 export WORKSPACE="testws"
 DRIVE_WORKSPACE="testws"
-MANIFEST="$WS_FIXTURE/none/absent.json"
-LEGACY_MANIFEST="$WS_FIXTURE/none/absent-legacy.json"
+# `export`ed like the other config vars: the sourced functions read them, which
+# is invisible to shellcheck otherwise (SC2034).
+export MANIFEST="$WS_FIXTURE/none/absent.json"
+export LEGACY_MANIFEST="$WS_FIXTURE/none/absent-legacy.json"
 
 # --- input validation: an unknown mode is a setup error, not a silent fail ---
 
