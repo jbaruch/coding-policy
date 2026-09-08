@@ -1,5 +1,63 @@
 # Changelog
 
+### Fixed
+
+- **The Tessl review gate now follows Tessl distribution, not every plugin
+  artifact (#374).** `context-artifacts` carried a Tessl-specific body under a
+  generic `applyTo` action clause — "when authoring or modifying plugin
+  artifacts", globbing `skills/**` — and then said flatly that every skill
+  change must pass `tessl review run --threshold 85` before publish. Under
+  `rule-frontmatter`'s "`description:` is a rule summary, not a scoping
+  mechanism", the Tessl-only description could not narrow that. So when
+  `jbaruch/good-oss-citizen` migrated off Tessl on an explicit owner
+  instruction ("clean up from tessl. Migrating is migrating") to root
+  `agent-plugin.yaml`, ACR packaging and immutable GitHub publication, the
+  central fleet reviewer read the rule literally and twice ordered the removed
+  Tessl review workflow restored — review 5142427647 on `1a1335c`, then review
+  5146749599 on `728d7a7` from run 34275543758, after that package's
+  independent reviewer and tester had both passed it. The pinned judge upheld
+  the operator's scope for that specific dispute and explicitly declined to
+  rewrite policy, establish a blanket ACR exemption, equate ACR test output
+  with a Tessl score, or waive external review; it recorded the wording defect
+  as a follow-up for this repo instead.
+
+  A `Scope` section now splits the rule by what actually varies. The Tessl
+  manifest, badge, `tessl plugin lint`, `tessl review run`, the credit-outage
+  carve-out and the reviewer-disagreement loop bind an artifact distributed
+  through Tessl — evidenced by a Tessl plugin manifest or a publish path
+  calling `tessl plugin publish` or `tesslio/patch-version-publish`. Rules Are
+  Prose, Rule Format, Surface Sync, Consistency Check and Post-Edit Rule Audit
+  bind every plugin artifact whatever publishes it, so a package on another
+  channel loses no discipline it had. The `applyTo` action clause says both
+  halves rather than narrowing to Tessl outright: narrowing the whole rule
+  would have dropped the distribution-independent sections for exactly the
+  packages this fixes, which is the lower quality bar #374 rules out.
+
+  Mandatory Review keeps the gate where it belongs. Mixed distribution still
+  reviews every changed skill before its Tessl publish; deleting the Tessl
+  manifest or adding another channel's manifest exempts nothing while the
+  content still publishes through Tessl; below-threshold scores still block and
+  the credit-outage exception stays exactly as narrow as it was. A skill on no
+  Tessl path owes `skill-authoring` in full, its repo's CI gates, and its
+  external policy and Copilot review — the command is the only thing that does
+  not follow it.
+
+  Two references were audited alongside. `context-writing-style`'s Scope bound
+  prose discipline to "rules declared in `.tessl-plugin/plugin.json`", which
+  would have dropped the discipline for rules declared in another channel's
+  manifest; it now follows the artifact. `skill-authoring`'s manifest reference
+  now says which manifest it describes. `ci-safety`'s release contract and the
+  release skill's registry/moderation conjunction were read and left alone —
+  they are publication machinery for a Tessl release, not a gate reimposed on
+  another channel, and issue #371's tag resolver is separate.
+
+  The `skill-review` action needed no change: it already hard-fails with a
+  setup error when no Tessl manifest resolves, which is the correct behaviour
+  and not an exemption. Its suite now asserts the distribution boundary that
+  was untested — a tree carrying both an `agent-plugin.yaml` and a Tessl
+  manifest still resolves its workspace, still reviews its changed skill at
+  threshold 85, and still blocks on a below-threshold score.
+
 ## 0.3.200 — 2026-09-08
 
 ### Fixed
