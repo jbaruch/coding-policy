@@ -95,8 +95,15 @@ alwaysApply: true
 - The release contract below is the Tessl form: its registry-baseline capture, its registry-advance and moderation conjuncts, its moderation wait and `skills/release/verify-moderation-cleared.sh` confirm a Tessl publication and nothing else
 - Every Tessl publication keeps that contract whole, mixed distribution included — a tag, release or artifact on another channel never substitutes for the Tessl registry advance or the moderation clear
 - A publication through another channel substitutes that channel's own published-artifact evidence for those Tessl mechanics: the immutable release or tag exists, and the artifact is retrievable at the version the run attempted
+- A GitHub tag/asset publication reads that evidence through `skills/release/verify-github-release.sh`
 - A Tessl publish confirmed on the registry says nothing about another channel's release, which needs its own evidence
-- Channel-independent, whatever publishes the package: resolve the run for that publication, watch it to a terminal state, require its `conclusion` to be `success`, verify the version actually published, and never report a release confirmed while its publish is unconfirmed
+- Channel-independent, whatever publishes the package:
+  - Resolve the run for that publication, bound to its workflow, its exact commit, the `push` event and the ref that fired it
+  - Watch that resolved run to a terminal state
+  - Require its `conclusion` to be `success`
+  - Verify the version actually published on the channel that carried it
+  - Never report a release confirmed while its publish is unconfirmed
+- Two runs matching all four binding facts are an ambiguity to resolve, never a winner to pick — see `skills/release/resolve-publish-run.sh` header
 - Release contract:
   1. Before merge: capture the registry's `Latest Version` as baseline
   2. After merge: resolve the publish run by merge-commit `headSha` + `push` event filter
