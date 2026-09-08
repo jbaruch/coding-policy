@@ -366,6 +366,11 @@ source evidence or an unconfirmed `reason`; tool failure exits non-zero.
 The native-source and display predicates belong to
 `skills/herdr-teamlead/teamlead/report_delivery.py`.
 
+A Grok `/new` keeps continuity null when Herdr repeats the pre-clear ID or no
+pre-clear ID was observed. Use the completed-delivery recovery below when needed.
+Wait normally; an unconfirmed native marker is not permission to
+send the assignment again. The watcher never scans for a newer transcript.
+
 For an already completed affected dispatch, preserve its original negative
 wait JSON, report bytes, native source transcript, visible pane text, and the
 original `herdr pane get` JSON. Read these original artifacts and the saved
@@ -381,6 +386,23 @@ user message against the original dispatch prompt and binds all evidence bytes
 in a separate receipt. A nondeveloper's historical null session remains null.
 Original dispatches, assignments, negative wait receipts and reports remain
 unchanged; a later role/session does not require rerunning completed work.
+
+For the known Grok `/new` identity contradiction, add `plan` naming the original
+saved plan JSON to the recovery input. Preserve all other original input paths.
+The command checks the original dispatch fingerprint against the plan and current
+briefing bytes. The strict source adapter and named refusal contracts are
+`grok_clear_identity`, `validate_stale_binding`, and `stale_grok_source` in
+`skills/herdr-teamlead/teamlead/report_delivery.py`. Unknown dispatch options,
+missing original plans, reused prompt paths, contradictory sources and changed
+brief bytes refuse.
+Do not build a replacement transcript, choose the newest filename, or rewrite
+Herdr's archived pane JSON to make identities agree.
+
+The new receipt keeps the archived `native_session` observation and adds a separate
+`source_session`; neither proves live continuity. Source selection is explicit:
+inspect the original native updates for this dispatch, then name that artifact.
+Multiple session identities or multiple turns remain unconfirmed. Preserve all
+candidate artifacts when the source is ambiguous; do not select one by recency.
 
 Exit 0 emits the append-only delivery receipt. Identical replay returns that
 receipt; conflicting bytes or identity fail. Read the report in full and
@@ -406,3 +428,15 @@ watcher exited 4 for both. The patched watcher accepted the same untouched
 sessions and files with exit 0. Automated source/display fixtures cover
 missing, changed, wrapped, quoted, authored-list and indented-code markers,
 incomplete/replaced sessions and source changes during verification.
+
+For a stale-Grok regression, complete a short turn in an isolated Grok process,
+then let normal `teamlead apply` send `/new` and a fresh report-only brief. Save
+that plan, apply output and original native updates. Verify Herdr still reports
+the first turn's ID while the completed source identifies a different session.
+The watcher must remain unconfirmed against the stale ID. Recover against an
+isolated copy of the owner state with the saved `plan` and original artifacts;
+pass requires a separate source identity, unchanged original rows and bytes,
+null continuity and no review approval. A fresh process whose first identity
+already matches its transcript does not exercise this regression. Keep config,
+caches and transcripts report-local (`GROK_HOME` selects native source storage).
+Never input to, clear or restart an active team worker for this validation.

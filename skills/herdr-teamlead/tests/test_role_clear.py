@@ -294,7 +294,7 @@ class RoleClearTests(fixture.fixture.CliCase):
         code, _, err = self.invoke(["state"])
         self.assertEqual(code, 0, err)
         expected = copy.deepcopy(state)
-        expected["recovery"].update(schema_version=3, role_clearances=[], delivery_recoveries=[])
+        expected["recovery"].update(schema_version=4, role_clearances=[], delivery_recoveries=[])
         self.assertEqual(self.saved(), expected)
 
 

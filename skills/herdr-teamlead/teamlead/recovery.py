@@ -17,7 +17,7 @@ from .chronology import assignment_after, latest_assignment
 
 
 RECOVERY_SCHEMA_VERSION = 1
-RECOVERY_STORE_VERSION = 3
+RECOVERY_STORE_VERSION = 4
 DEFAULT_FIX_LIMIT = 5
 PENDING_STATUSES = frozenset({"reserved", "sending", "sent_but_not_started"})
 DISPATCH_STATUSES = PENDING_STATUSES | {"applied", "not_sent"}
@@ -35,9 +35,14 @@ def migrate_store(store):
     if not isinstance(store, dict) or type(store.get("schema_version")) is not int:
         return False
     version = store["schema_version"]
-    if version not in {1, 2}:
+    if version not in {1, 2, 3}:
         return False
-    added = ["role_clearances", "delivery_recoveries"]
+    if version == 3:
+        deliveries = store.get("delivery_recoveries")
+        if (not isinstance(deliveries, list) or any(not isinstance(row, dict) or row.get("schema_version") != 1
+                                                   for row in deliveries)):
+            raise UsageError("Older recovery contains unowned newer delivery records; preserve it for owner recovery.", {})
+    added = ["role_clearances", "delivery_recoveries"] if version < 3 else []
     if version == 1:
         added.extend(["hand_clearances", "historical_attempts"])
     if any(name in store for name in added):
@@ -484,7 +489,8 @@ def validate_store(store, assignments):
                 raise UsageError("Recovery {} must be an array; restore the owner-written ledger.".format(name), {})
             identifiers = []
             for row in store[name]:
-                if not isinstance(row, dict) or type(row.get("schema_version")) is not int or row["schema_version"] != RECOVERY_SCHEMA_VERSION:
+                versions = {1, 2} if name == "delivery_recoveries" else {RECOVERY_SCHEMA_VERSION}
+                if not isinstance(row, dict) or type(row.get("schema_version")) is not int or row["schema_version"] not in versions:
                     raise UsageError("A recovery record has an unsupported schema; update its owner.", {})
                 text(row["at"], "record timestamp")
                 text(row["task"], "record task")
