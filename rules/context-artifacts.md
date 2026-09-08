@@ -13,7 +13,8 @@ description: Plugin structure, rule/skill format, review pipeline, surface sync,
 - Tessl-bound sections — Plugin Structure, Mandatory Review, Credit-Outage Review Carve-Out, Disagreeing With the Reviewer — bind an artifact distributed through Tessl
 - Distribution-independent sections — Rules Are Prose, Rule Format, Surface Sync, Consistency Check, Post-Edit Rule Audit — bind every plugin artifact, whatever publishes it
 - CHANGELOG Hygiene's publish-on-merge, stamp-step and `tesslio/patch-version-publish` bullets are Tessl-bound; its consolidation and duplication bullets are not
-- An artifact published through another channel — a GitHub-tag-published ACR package — owes the distribution-independent sections plus `rules/skill-authoring.md`, `rules/testing-standards.md`, `rules/language-diagnostics.md` and `rules/ci-safety.md` in full
+- An artifact published through another channel — a GitHub-tag-published ACR package — owes the distribution-independent sections plus `rules/skill-authoring.md`, `rules/testing-standards.md` and `rules/language-diagnostics.md` in full
+- It owes `rules/ci-safety.md` too, reading that rule's registry-advance and moderation conjuncts against its own channel's published-artifact evidence — see `rules/ci-safety.md` Always Watch CI
 
 ## Plugin Structure
 

@@ -91,6 +91,9 @@ alwaysApply: true
 - Identify the run that gates the outcome and bind the watch to its `conclusion`
 - A failed PR check that no event re-triggers stays red until an explicit `gh run rerun --failed` once its cause is fixed
 - For plugin/package releases, the duty extends past merge — confirm the resolved run's conclusion, the registry advance, and the moderation clear; no single signal is authoritative
+- The release contract below is the Tessl form of that duty — conjuncts 2 and 3 read the Tessl registry and its moderation state
+- A package published through another channel substitutes that channel's own published-artifact evidence for those two conjuncts: the immutable release or tag exists, and the artifact is retrievable at the version the run attempted
+- Every other clause binds unchanged, whatever publishes the package — resolve the run, watch it to a terminal state, gate on its `conclusion`, and never report a release confirmed while the publish is unconfirmed
 - Release contract:
   1. Before merge: capture the registry's `Latest Version` as baseline
   2. After merge: resolve the publish run by merge-commit `headSha` + `push` event filter
