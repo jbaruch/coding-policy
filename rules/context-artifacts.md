@@ -15,7 +15,8 @@ description: Plugin structure, rule/skill format, review pipeline, surface sync,
 - CHANGELOG Hygiene's publish-on-merge, stamp-step and `tesslio/patch-version-publish` bullets are Tessl-bound
 - CHANGELOG Hygiene's consolidation and duplication bullets are distribution-independent
 - An artifact published through another channel — a GitHub-tag-published ACR package — owes the distribution-independent sections plus `rules/skill-authoring.md`, `rules/testing-standards.md` and `rules/language-diagnostics.md` in full
-- It owes `rules/ci-safety.md` too, reading that rule's registry-advance and moderation conjuncts against its own channel's published-artifact evidence — see `rules/ci-safety.md` Always Watch CI
+- It owes `rules/ci-safety.md` too, confirming each publication against the channel that carried it — see `rules/ci-safety.md` Always Watch CI
+- A Tessl publication keeps ci-safety's registry-advance and moderation requirements whole, mixed distribution included; another channel's release evidence never substitutes for them
 
 ## Artifact Layout
 
