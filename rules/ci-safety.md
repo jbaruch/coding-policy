@@ -90,10 +90,13 @@ alwaysApply: true
 - A run started out of band (a `workflow_dispatch` reseed, a manual job) may not surface in the PR's `statusCheckRollup`
 - Identify the run that gates the outcome and bind the watch to its `conclusion`
 - A failed PR check that no event re-triggers stays red until an explicit `gh run rerun --failed` once its cause is fixed
-- For plugin/package releases, the duty extends past merge — confirm the resolved run's conclusion and the channel's own published-artifact evidence; no single signal is authoritative
-- The release contract below is the Tessl form of that duty — conjuncts 2 and 3 read the Tessl registry and its moderation state
-- A package published through another channel substitutes that channel's own published-artifact evidence for those two conjuncts: the immutable release or tag exists, and the artifact is retrievable at the version the run attempted
-- Every other clause binds unchanged, whatever publishes the package — resolve the run, watch it to a terminal state, gate on its `conclusion`, and never report a release confirmed while the publish is unconfirmed
+- For plugin/package releases, the duty extends past merge — confirm the resolved run's conclusion and the publication's own published-artifact evidence; no single signal is authoritative
+- The duty is keyed on the publication, never on the package — a package that publishes through more than one channel owes it once per publication, each confirmed against the channel that carried it
+- The release contract below is the Tessl form: its registry-baseline capture, its registry-advance and moderation conjuncts, its moderation wait and `skills/release/verify-moderation-cleared.sh` confirm a Tessl publication and nothing else
+- Every Tessl publication keeps that contract whole, mixed distribution included — a tag, release or artifact on another channel never substitutes for the Tessl registry advance or the moderation clear
+- A publication through another channel substitutes that channel's own published-artifact evidence for those Tessl mechanics: the immutable release or tag exists, and the artifact is retrievable at the version the run attempted
+- A Tessl publish confirmed on the registry says nothing about another channel's release, which needs its own evidence
+- Channel-independent, whatever publishes the package: resolve the run for that publication, watch it to a terminal state, require its `conclusion` to be `success`, verify the version actually published, and never report a release confirmed while its publish is unconfirmed
 - Release contract:
   1. Before merge: capture the registry's `Latest Version` as baseline
   2. After merge: resolve the publish run by merge-commit `headSha` + `push` event filter
