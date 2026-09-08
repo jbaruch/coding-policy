@@ -6,8 +6,9 @@ message ending in a bare marker. Rows are never joined. Source formats were
 verified on Codex 0.153.2 and Grok 1.0.13 (Grok 4.6), with Herdr 0.8.2.
 Unknown integrations, source formats and incomplete turns stay unconfirmed.
 
-Live probes read only the session reported by Herdr. Owner recovery reads
-archived evidence, adds a separate receipt, and changes no assignment, dispatch,
+Live probes read only the session reported by Herdr. Owner recovery can prove
+one Grok /new turn against the original dispatch fingerprint while retaining
+Herdr's contradictory observation. It reads archived evidence, adds a separate receipt, and changes no assignment, dispatch,
 negative wait receipt, correction allowance or review verdict.
 """
 
@@ -27,6 +28,7 @@ SESSION_ID = re.compile(r"[A-Za-z0-9_-]+\Z")
 FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
 CONTAINER = re.compile(r"^ {0,3}(?:>|[-+*•][ \t]|[0-9]{1,9}[.)][ \t])")
 RECOVERY_INPUTS = {"id", "dispatch", "report", "wait_receipt", "pane", "visible", "source"}
+STALE_RECOVERY_INPUTS = RECOVERY_INPUTS | {"plan"}
 RECOVERY_ARTIFACTS = {"report", "wait_receipt", "pane", "visible", "source", "brief", "common"}
 
 
@@ -64,9 +66,9 @@ def decorated_row(visible, kind, report):
     for row in visible.splitlines():
         if row in expected:
             return row
-        # Grok right-aligns a native clock after the message on wide panes.
-        # The source proof still requires the bare path, with no clock text.
-        if kind == "grok" and re.fullmatch(re.escape("     REPORT: " + report) + r" {2,}(?:1[0-2]|[1-9]):[0-5][0-9] [AP]M", row):
+        # Grok can omit the right-aligned clock when only the scrollbar fits.
+        # The source proof still requires the bare path, with no decoration.
+        if kind == "grok" and re.fullmatch(re.escape("     REPORT: " + report) + r" {2,}(?:(?:1[0-2]|[1-9]):[0-5][0-9] [AP]M(?: {2,}█)?|█)", row):
             return row
     return None
 
@@ -197,7 +199,7 @@ def native_identity(info):
 def source_root(kind):
     if kind == "codex":
         return Path(os.environ.get("CODEX_HOME", str(Path.home() / ".codex"))) / "sessions"
-    return Path.home() / ".grok" / "sessions"
+    return Path(os.environ.get("GROK_HOME", str(Path.home() / ".grok"))) / "sessions"
 
 
 def source_path(identity):
@@ -294,10 +296,111 @@ def _json(body, label):
     return value
 
 
+def validate_stale_binding(dispatch, assignment, observed, source):
+    """Only the known automatic-clear contradiction may use a separate ID."""
+    before = dispatch.get("observed_before", {})
+    context = dispatch.get("context_before_send", {})
+    result = dispatch.get("result", {})
+    if not all(isinstance(row, dict) for row in (before, context, result, assignment)):
+        raise UsageError("grok_clear_identity_unproven: restore the owner-written clear and dispatch observations.", {})
+    original = native_identity({"agent_session": before.get("context_session")})
+    if (not isinstance(observed, dict) or native_identity({"agent_session": observed}) != observed
+            or observed.get("agent") != "grok"
+            or original != observed or before.get("pane_id") != result.get("pane_id")
+            or before.get("context_session", {}).get("pane_id") != result.get("pane_id")
+            or not isinstance(source, dict) or set(source) != {"agent", "kind", "value"}
+            or source.get("agent") != "grok" or source.get("kind") != "id"
+            or not isinstance(source.get("value"), str) or not SESSION_ID.fullmatch(source["value"])
+            or source["value"] == observed["value"]
+            or any(row.get("cleared") is not True or row.get("clear_reason") != "automatic"
+                   or row.get("context_session") is not None for row in (assignment, context, result))):
+        raise UsageError("grok_clear_identity_unproven: preserve the original automatic clear, null continuity and stale Herdr observation; do not replace known session proof.", {})
+
+
+def grok_clear_identity(body, prompt):
+    """Prove one fresh native session and one dispatched turn from its contents.
+
+    An explicit archived updates file is the input, never newest-file selection.
+    Repeated prompts, multiple identities, failed turns or later turns make the
+    source ambiguous even when one assistant message names the requested file.
+    """
+    rows = _rows(body)
+    if rows is None:
+        return None
+    identity, submitted, user_groups, previous, completions = None, None, 0, None, 0
+    for index, row in enumerate(rows):
+        params = row.get("params")
+        if not isinstance(params, dict) or row.get("method") not in ("session/update", "_x.ai/session/update"):
+            return None
+        session, update, meta = params.get("sessionId"), params.get("update"), params.get("_meta", {})
+        if (not isinstance(session, str) or not SESSION_ID.fullmatch(session)
+                or not isinstance(update, dict) or not isinstance(meta, dict)):
+            return None
+        if identity is None:
+            identity = session
+        if identity != session:
+            return None
+        kind = update.get("sessionUpdate")
+        event = update.get("event_name") if kind == "hook_execution" else None
+        if index == 0 and event != "session_start":
+            return None
+        if event == "session_start" and index != 0:
+            return None
+        if event == "user_prompt_submit":
+            if submitted is not None or user_groups:
+                return None
+            submitted = update.get("prompt_id")
+            if not isinstance(submitted, str) or not submitted:
+                return None
+        if kind == "user_message_chunk":
+            if not submitted:
+                return None
+            user_groups += previous != kind
+            if user_groups != 1:
+                return None
+        if kind in ("agent_message_chunk", "agent_thought_chunk"):
+            if user_groups != 1 or meta.get("promptId") != submitted:
+                return None
+        if kind in ("turn_failed", "turn_cancelled", "error"):
+            return None
+        if kind == "turn_completed":
+            completions += 1
+            if index != len(rows) - 1 or update.get("prompt_id") != submitted or update.get("stop_reason") != "end_turn":
+                return None
+        previous = kind
+    if completions != 1 or user_groups != 1 or source_prompt(body, "grok") != prompt:
+        return None
+    return {"agent": "grok", "kind": "id", "value": identity}
+
+
+def stale_grok_source(dispatch, assignment, observed, body, prompt, plan_body):
+    source = grok_clear_identity(body, prompt)
+    if source is None:
+        raise UsageError("grok_source_ambiguous: require one original fresh native session and its single completed dispatched turn; preserve the negative receipt.", {})
+    validate_stale_binding(dispatch, assignment, observed, source)
+    plan = _json(plan_body, "original plan")
+    assignments = plan.get("assignments", plan)
+    rounds = plan.get("rounds", {}) if "assignments" in plan else {}
+    if (not isinstance(assignments, dict) or assignments.get(dispatch["role"]) != dispatch["agent"]
+            or not isinstance(rounds, dict)):
+        raise UsageError("grok_dispatch_unbound: restore the original plan assigning this worker and role.", {})
+    options = {"task": dispatch["task"], "fix_round": dispatch["fix_round"],
+               "plan": dispatch.get("plan"), "work": dispatch.get("work"), "rounds": rounds,
+               "retain_context": False, "no_clear": False}
+    task_context = {key: options[key] for key in ("task", "fix_round", "plan", "work")}
+    if plan.get("task_context") is not None and plan["task_context"] != task_context:
+        raise UsageError("grok_dispatch_unbound: original plan names different task or correction bounds; restore its dispatch inputs.", {})
+    _, fingerprint = ledger.dispatch_identity(dispatch["task"], dispatch["role"], dispatch["agent"],
+        dispatch["fix_round"], {"common": dispatch["common"], dispatch["role"]: dispatch["brief"]}, options=options)
+    if fingerprint != dispatch["fingerprint"]:
+        raise UsageError("grok_dispatch_unbound: original plan, dispatch options or briefing bytes differ from the preserved fingerprint; restore the originals.", {})
+    return source
+
+
 def recover(store, assignments, data, at):
     """Append delivery proof for an applied dispatch whose old wait was negative."""
-    if not isinstance(data, dict) or set(data) != RECOVERY_INPUTS:
-        raise UsageError("recover-report requires id, dispatch, report, wait_receipt, pane, visible and source; preserve the original evidence.", {})
+    if not isinstance(data, dict) or set(data) not in (RECOVERY_INPUTS, STALE_RECOVERY_INPUTS):
+        raise UsageError("recover-report requires id, dispatch, report, wait_receipt, pane, visible and source, with optional plan for stale Grok identity recovery; preserve the original evidence.", {})
     ledger.text(data["id"], "recovery id")
     dispatch = ledger._item(store["dispatches"], data["dispatch"], "dispatch")
     if dispatch["status"] != "applied":
@@ -334,15 +437,30 @@ def recover(store, assignments, data, at):
             or negative.get("report_path") != data["report"] or negative.get("state") not in ("idle", "done")
             or "marker unconfirmed" not in str(negative.get("reason", ""))):
         raise UsageError("Recovery requires this completed dispatch's original negative marker-unconfirmed wait receipt; refusals are not delivery.", {})
+    source_session = None
+    if identity is not None and identity["agent"] == "grok" and "plan" in data:
+        competing = [row for row in store["dispatches"] if row["id"] != dispatch["id"]
+                     and row["status"] != "not_sent" and all(row.get(key) == dispatch.get(key)
+                         for key in ("role", "common", "brief"))]
+        if competing:
+            raise UsageError("grok_dispatch_ambiguous: another dispatch used the same original prompt paths; preserve both outcomes instead of choosing a transcript.", {})
+        receipts["plan"], plan_body = ledger.receipt(data["plan"])
+        source_session = stale_grok_source(dispatch, assignment, identity, bodies["source"], prompt, plan_body)
+    elif "plan" in data:
+        if identity is None:
+            raise UsageError("Archived pane JSON has no supported native session identity; restore the original pane get evidence.", {})
+        raise UsageError("Stale-ID recovery requires an original Grok automatic clear; preserve the original evidence.", {})
+    final_session = source_session["value"] if source_session else identity["value"] if identity else None
     if (identity is None or original_identity is not None and identity != original_identity
             or not isinstance(pane, dict) or not pane_identity(pane, dispatch["result"].get("pane_id"), identity)
             or not decorated_row(bodies["visible"], identity["agent"], data["report"])
             or source_prompt(bodies["source"], identity["agent"]) != prompt
-            or not bare_final(source_final(bodies["source"], identity["agent"], identity["value"]), data["report"])):
+            or not bare_final(source_final(bodies["source"], identity["agent"], final_session), data["report"])):
         raise UsageError("Archived pane and completed native source do not prove this report's bare final marker; preserve the negative receipt.", {})
     prior = next((row for row in store["delivery_recoveries"] if row["id"] == data["id"]), None)
     if prior:
-        if prior["input"] != data or prior["receipts"] != receipts:
+        if (prior["input"] != data or prior["receipts"] != receipts or prior["native_session"] != identity
+                or source_session is not None and prior.get("source_session") != source_session):
             raise UsageError("Recovery identity names different evidence; preserve the original receipt and resolve the conflict.", {})
         return prior
     if any(row["dispatch"] == data["dispatch"] for row in store["delivery_recoveries"]):
@@ -352,6 +470,12 @@ def recover(store, assignments, data, at):
               "receipts": receipts, "native_session": identity, "found": True,
               "basis": "archived_native_final_source", "native_session_proof": None,
               "grants_review_approval": False}
+    if source_session is not None:
+        for saved in receipts.values():
+            current, _body = ledger.receipt(saved["path"])
+            if current != saved:
+                raise UsageError("grok_evidence_changed: archive stable original evidence before retrying recovery.", {})
+        record.update(schema_version=2, source_session=source_session, basis="archived_grok_clear_source")
     store["delivery_recoveries"].append(record)
     ledger._event(store, at, "report_delivery_recovered", dispatch["task"], {"recovery": data["id"], "dispatch": data["dispatch"]})
     return record
@@ -362,23 +486,29 @@ def validate_recoveries(store, assignments):
     for row in store["delivery_recoveries"]:
         dispatch = ledger._item(store["dispatches"], row["dispatch"], "dispatch")
         index = row["assignment_index"]
-        if (dispatch["status"] != "applied" or index != dispatch["assignment_index"]
-                or row["task"] != dispatch["task"] or row["found"] is not True
-                or row["grants_review_approval"] is not False or row["basis"] != "archived_native_final_source"
+        if type(index) is not int or not 0 <= index < len(assignments) or index != dispatch["assignment_index"]:
+            raise UsageError("Delivery recovery has no matching assignment row; restore the owner-written ledger without changing history.", {})
+        stale = row["schema_version"] == 2
+        expected_inputs = STALE_RECOVERY_INPUTS if stale else RECOVERY_INPUTS
+        expected_artifacts = RECOVERY_ARTIFACTS | {"plan"} if stale else RECOVERY_ARTIFACTS
+        if stale:
+            validate_stale_binding(dispatch, assignments[index], row["native_session"], row["source_session"])
+        if (dispatch["status"] != "applied" or row["task"] != dispatch["task"] or row["found"] is not True
+                or row["grants_review_approval"] is not False or row["basis"] != ("archived_grok_clear_source" if stale else "archived_native_final_source")
                 or row["native_session_proof"] is not None
                 or native_identity({"agent_session": row["native_session"]}) is None
                 or assignments[index].get("context_session") is not None and
                 row["native_session"] != native_identity({"agent_session": assignments[index]["context_session"]})):
             raise UsageError("Delivery recovery differs from its preserved dispatch; restore the owner-written ledger.", {})
-        if (not isinstance(row["input"], dict) or set(row["input"]) != RECOVERY_INPUTS
+        if (not isinstance(row["input"], dict) or set(row["input"]) != expected_inputs
                 or row["input"]["id"] != row["id"] or row["input"]["dispatch"] != row["dispatch"]
-                or not isinstance(row["receipts"], dict) or set(row["receipts"]) != RECOVERY_ARTIFACTS
+                or not isinstance(row["receipts"], dict) or set(row["receipts"]) != expected_artifacts
                 or row["dispatch"] in dispatches):
             raise UsageError("Delivery recovery must preserve its unique dispatch and complete evidence receipts.", {})
         dispatches.add(row["dispatch"])
         for receipt in row["receipts"].values():
             ledger.validate_receipt(receipt)
-        for key in RECOVERY_ARTIFACTS:
+        for key in expected_artifacts:
             path = dispatch.get(key) if key in ("common", "brief") else row["input"][key]
             if row["receipts"][key]["path"] != path:
                 raise UsageError("Delivery recovery artifact paths differ from their original inputs; restore its owner-written record.", {})

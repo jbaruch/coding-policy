@@ -539,7 +539,14 @@ class HistoricalCommandsTest(fixture.CliCase):
                 self.assertEqual(code, 0, err)
                 result = json.loads(out)["applied"][0]
                 self.assertEqual(result["context_transition"]["reason"], "verified_hand_release_handoff")
-                self.assertEqual(result["context_session"]["value"], "fix-after-session-loss")
+                self.assertEqual(result["fix_round"], 2)
+                if session is None:
+                    # Grok can report a stale ID after /new when its pre-clear
+                    # identity was missing. The handoff still counts, not proof.
+                    self.assertIsNone(result["context_session"])
+                    self.assertIn("stale-ID recovery is unavailable", err)
+                else:
+                    self.assertEqual(result["context_session"]["value"], "fix-after-session-loss")
                 self.assertEqual(self.saved()["assignments"][:-1], original)
 
     def test_corrupt_or_future_import_records_never_overwrite_history(self):
@@ -618,7 +625,7 @@ class HistoricalCommandsTest(fixture.CliCase):
         self.assertEqual(code, 0, err)
         result = self.saved()
         self.assertEqual(result["assignments"], original["assignments"])
-        expected = {**original["recovery"], "schema_version": 3, "hand_clearances": [], "historical_attempts": [], "role_clearances": [], "delivery_recoveries": []}
+        expected = {**original["recovery"], "schema_version": 4, "hand_clearances": [], "historical_attempts": [], "role_clearances": [], "delivery_recoveries": []}
         self.assertEqual(result["recovery"], expected)
 
 
