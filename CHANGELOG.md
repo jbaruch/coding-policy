@@ -72,8 +72,55 @@
   an "every other clause" catch-all — resolve the run for that publication,
   watch it to a terminal state, require a successful `conclusion`, verify the
   version actually published, and never report a release confirmed while its
-  publish is unconfirmed. No conjunct is dropped and no resolver changes; issue
-  #371's tag resolver stays separate.
+  publish is unconfirmed. No conjunct is dropped.
+
+  Policy review 5147838037 then blocked PR #376 on the artifact the new rule
+  contradicts: `skills/release/SKILL.md` Step 7 captured a Tessl registry
+  baseline unconditionally and confirmed a release on the registry advance plus
+  the moderation clear alone, so a package published by pushing a tag was told
+  to satisfy a registry it does not have, and a package on both channels could
+  report a green GitHub release while its Tessl moderation was still pending.
+  Step 7 now names the channels before merging. Resolving the run, watching it
+  to terminal state and requiring a successful conclusion stay
+  channel-independent. The baseline capture, the advance conjunct and the
+  moderation wait are marked Tessl and keep the whole contract, mixed
+  distribution included. A tag publication pushes its tag, resolves that tag's
+  own run, and confirms its own release and assets, running none of the Tessl
+  helpers; a package on both channels owes both confirmations independently.
+  `SCRIPTING.md`'s wrapper contract carries the same split.
+
+  That correction pulled in **#371's tag resolver**, which the release-skill
+  split needs. `resolve-publish-run.sh` hard-coded `--branch main`, so a
+  tag-triggered release — whose run carries the tag name as its `headBranch` —
+  was unfindable even with a matching commit and event, as observed shipping
+  ACR v0.1.4 (run 34188269042, `headBranch=v0.1.4`). An optional fifth `ref`
+  argument now defaults to `main`, leaving the four-argument merge-to-main form
+  unchanged. Selection binds workflow, ref, commit and `push` event together,
+  excluding an unrelated branch or tag at the same commit and a manual dispatch
+  on the requested ref, and an empty ref argument is rejected rather than
+  silently resolving main's run. The filter emits every match instead of the
+  first: two runs matching all four facts — a deleted and re-pushed tag — is an
+  ambiguity refused with a diagnostic naming the candidates, never a silently
+  chosen winner. The suite's `gh` mock became a transport mock, each queued
+  response naming a fixture holding a raw `gh run list --json` array that the
+  mock puts through gh's own two stages, `--branch` narrowing then the caller's
+  `--jq`, so the script's selection predicate is what the fixtures exercise:
+  main push, matching tag, unrelated same-commit refs, manual dispatch, delayed
+  enqueue, ambiguity, and the client-side ref predicate on an unnarrowed
+  listing (17 cases).
+
+  New `skills/release/verify-github-release.sh` is the other channel's
+  published-artifact evidence. A green run conclusion survives an upload that
+  never completed, a draft left unpublished, and a release created at another
+  tag, so the helper reads the release itself: it exists at the exact tag, is
+  not a draft, and every asset reports GitHub's `uploaded` state. A 404 is a
+  definitive no; an auth or network failure stays indeterminate at exit 2, so a
+  caller that cannot tell never claims the artifact landed — the same
+  fail-closed discrimination `registry-has-version.sh` makes. Field extraction
+  runs inside gh's own `--jq`, so the script carries no system-jq dependency.
+  `tests/test_verify_github_release.sh` covers published, absent, draft,
+  empty-asset, still-uploading, tag-mismatch, auth-failure, unparseable-payload,
+  argument-validation and missing-gh paths (11 cases).
 
   The `skill-review` action needed no change: it already hard-fails with a
   setup error when no Tessl manifest resolves, which is the correct behaviour
