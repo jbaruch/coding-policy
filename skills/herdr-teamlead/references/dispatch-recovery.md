@@ -367,9 +367,14 @@ The native-source and display predicates belong to
 `skills/herdr-teamlead/teamlead/report_delivery.py`.
 
 A Grok `/new` keeps continuity null when Herdr repeats the pre-clear ID or no
-pre-clear ID was observed. Use the completed-delivery recovery below when needed.
-Wait normally; an unconfirmed native marker is not permission to
-send the assignment again. The watcher never scans for a newer transcript.
+pre-clear ID was observed. Wait normally; an unconfirmed native marker is not
+permission to send the assignment again. The watcher never scans for a newer
+transcript. Stale-ID recovery below requires the recorded pre-clear ID. If no
+pre-clear ID was observed, stale-ID recovery is unavailable and refuses
+with `grok_clear_identity_unproven`. If delivery remains unconfirmed, record the
+report as unavailable and notify the operator of the missing pre-clear evidence.
+Keep review/release gates unsatisfied; do not resend the assignment or reconstruct
+missing evidence.
 
 For an already completed affected dispatch, preserve its original negative
 wait JSON, report bytes, native source transcript, visible pane text, and the

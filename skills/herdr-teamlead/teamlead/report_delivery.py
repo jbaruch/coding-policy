@@ -296,7 +296,6 @@ def _json(body, label):
     return value
 
 
-
 def validate_stale_binding(dispatch, assignment, observed, source):
     """Only the known automatic-clear contradiction may use a separate ID."""
     before = dispatch.get("observed_before", {})
@@ -401,7 +400,7 @@ def stale_grok_source(dispatch, assignment, observed, body, prompt, plan_body):
 def recover(store, assignments, data, at):
     """Append delivery proof for an applied dispatch whose old wait was negative."""
     if not isinstance(data, dict) or set(data) not in (RECOVERY_INPUTS, STALE_RECOVERY_INPUTS):
-        raise UsageError("recover-report requires id, dispatch, report, wait_receipt, pane, visible and source; preserve the original evidence.", {})
+        raise UsageError("recover-report requires id, dispatch, report, wait_receipt, pane, visible and source, with optional plan for stale Grok identity recovery; preserve the original evidence.", {})
     ledger.text(data["id"], "recovery id")
     dispatch = ledger._item(store["dispatches"], data["dispatch"], "dispatch")
     if dispatch["status"] != "applied":
@@ -448,6 +447,8 @@ def recover(store, assignments, data, at):
         receipts["plan"], plan_body = ledger.receipt(data["plan"])
         source_session = stale_grok_source(dispatch, assignment, identity, bodies["source"], prompt, plan_body)
     elif "plan" in data:
+        if identity is None:
+            raise UsageError("Archived pane JSON has no supported native session identity; restore the original pane get evidence.", {})
         raise UsageError("Stale-ID recovery requires an original Grok automatic clear; preserve the original evidence.", {})
     final_session = source_session["value"] if source_session else identity["value"] if identity else None
     if (identity is None or original_identity is not None and identity != original_identity

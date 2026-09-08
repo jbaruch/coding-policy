@@ -39,8 +39,9 @@ def migrate_store(store):
         return False
     if version == 3:
         deliveries = store.get("delivery_recoveries")
-        if (not isinstance(deliveries, list) or any(not isinstance(row, dict) or row.get("schema_version") != 1
-                                                   for row in deliveries)):
+        if not isinstance(deliveries, list):
+            raise UsageError("Older recovery requires a delivery_recoveries array; restore the original owner-written store.", {})
+        if any(not isinstance(row, dict) or row.get("schema_version") != 1 for row in deliveries):
             raise UsageError("Older recovery contains unowned newer delivery records; preserve it for owner recovery.", {})
     added = ["role_clearances", "delivery_recoveries"] if version < 3 else []
     if version == 1:

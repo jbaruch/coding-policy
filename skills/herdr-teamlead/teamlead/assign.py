@@ -356,9 +356,11 @@ def correlate_dispatch_session(client, agent, pane_id, previous, before_prompt, 
     cannot prove continuity either. Failure here does not undo a sent prompt.
     """
     if grok_new and previous is None:
-        warn("{} was dispatched after a Grok clear; Herdr may retain the old native ID. "
-             "Continuity remains unproven. Wait for its report and use recover-report "
-             "with the original plan and native updates if delivery is unconfirmed; do not resend."
+        warn("{} was dispatched after a Grok clear without a recorded pre-clear native ID. "
+             "Continuity remains unproven and stale-ID recovery is unavailable. Wait for its report; "
+             "if delivery remains unconfirmed, record the report as unavailable and notify the operator "
+             "of the missing pre-clear evidence. Keep review/release gates unsatisfied; "
+             "do not resend or reconstruct evidence."
              .format(agent.name))
         return None
     for attempt in range(SESSION_CORRELATION_READS):
@@ -690,9 +692,11 @@ def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle
                 cleared=cleared, warn=warn, sleep=sleep, settle_sec=settle_sec, grok_new=grok_new,
             ) if landing["landed"] or landing["started"] else None)
         if grok_new and step["role"] != "developer":
-            warn("{} received a fresh Grok assignment. Preserve its original plan and native "
-                 "updates for recover-report if Herdr's stale ID leaves delivery unconfirmed; "
-                 "never rerun completed work.".format(name))
+            warn("{} received a fresh Grok assignment. Wait for its report; if delivery is unconfirmed, "
+                 "stale-ID recovery through recover-report requires the recorded pre-clear native ID, original plan and native updates. "
+                 "Without that ID, stale-ID recovery is unavailable: record the report as unavailable "
+                 "and notify the operator of the missing pre-clear evidence. Keep review/release gates "
+                 "unsatisfied; never rerun completed work.".format(name))
         checked = statuses.get(name, {})
         record = {
             "role": step["role"],

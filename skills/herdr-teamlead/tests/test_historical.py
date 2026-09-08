@@ -544,7 +544,7 @@ class HistoricalCommandsTest(fixture.CliCase):
                     # Grok can report a stale ID after /new when its pre-clear
                     # identity was missing. The handoff still counts, not proof.
                     self.assertIsNone(result["context_session"])
-                    self.assertIn("recover-report", err)
+                    self.assertIn("stale-ID recovery is unavailable", err)
                 else:
                     self.assertEqual(result["context_session"]["value"], "fix-after-session-loss")
                 self.assertEqual(self.saved()["assignments"][:-1], original)

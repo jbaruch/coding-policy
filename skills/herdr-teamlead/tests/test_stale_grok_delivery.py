@@ -163,11 +163,14 @@ class StaleGrokDeliveryTests(unittest.TestCase):
         for target, key, value in ((self.assignment, 'context_session', {'pane_id': PANE, **self.observed}),
                 (self.dispatch['context_before_send'], 'cleared', False),
                 (self.dispatch['result'], 'clear_reason', 'hand'),
-                (self.dispatch['observed_before'], 'pane_id', 'another-pane')):
+                (self.dispatch['observed_before'], 'pane_id', 'another-pane'),
+                (self.dispatch['observed_before'], 'context_session', None)):
             original = target[key]
             target[key] = value
+            before = copy.deepcopy(self.document)
             with self.subTest(key=key), self.assertRaisesRegex(UsageError, 'grok_clear_identity_unproven'):
                 self.recover()
+            self.assertEqual(self.document, before)
             target[key] = original
         negative = json.loads(Path(self.data['wait_receipt']).read_text())
         negative['reason'] = 'terminal_provider_refusal'
@@ -249,7 +252,9 @@ class StaleGrokDeliveryTests(unittest.TestCase):
         self.assertEqual(row['status'], 'applied')
         self.assertTrue(row['cleared'])
         self.assertIsNone(row['context_session'])
-        self.assertTrue(any('recover-report' in message for message in warnings))
+        self.assertTrue(any('stale-ID recovery is unavailable' in message
+                            and 'record the report as unavailable and notify the operator' in message
+                            and 'Keep review/release gates unsatisfied' in message for message in warnings))
         self.assertEqual(sum(call[1:3] == ['agent', 'prompt'] for call in runner.calls), 1)
 
 
