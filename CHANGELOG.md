@@ -118,9 +118,19 @@
   caller that cannot tell never claims the artifact landed — the same
   fail-closed discrimination `registry-has-version.sh` makes. Field extraction
   runs inside gh's own `--jq`, so the script carries no system-jq dependency.
-  `tests/test_verify_github_release.sh` covers published, absent, draft,
-  empty-asset, still-uploading, tag-mismatch, auth-failure, unparseable-payload,
-  argument-validation and missing-gh paths (11 cases).
+  It takes the resolved run id and reads two conjuncts, the tag/asset
+  counterpart of `verify-publish-landed.sh`'s pair: the run's `conclusion` is
+  `success`, AND the release is retrievable. Conjunct 1 alone passes a run that
+  uploaded assets and then failed a later step; conjunct 2 alone passes a green
+  run that never created the release. A run still in flight reads as
+  indeterminate, never as a failed publish. Every interpolated value goes
+  through a `json_escape` that a quote- or backslash-bearing tag round-trips
+  through jq, and every definitive no writes an actionable stderr diagnostic
+  beside its stdout envelope. `tests/test_verify_github_release.sh` covers
+  successful, failed-conclusion, in-flight, unreadable-run, absent, draft,
+  empty-asset, still-uploading, tag-mismatch, auth-failure,
+  unparseable-payload, argument-validation, stderr-diagnostic,
+  quote-bearing-tag and missing-gh paths (17 cases).
 
   The `skill-review` action needed no change: it already hard-fails with a
   setup error when no Tessl manifest resolves, which is the correct behaviour

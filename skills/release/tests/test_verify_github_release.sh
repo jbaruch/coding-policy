@@ -2,27 +2,37 @@
 # Outcome-based tests for verify-github-release.sh.
 #
 # Covers the answers the script promises:
-#   1. Published release, every asset uploaded — rc 0, ok true, the
-#      asset count and URL carried through.
-#   2. No release at the tag (HTTP 404) — rc 1, ok false, a reason
+#   1. Successful run + published release, every asset uploaded — rc 0,
+#      ok true, the asset count, URL and run conclusion carried through.
+#   2. Failed run conclusion — rc 1, ok false, naming the conclusion.
+#      Conjunct 1 is not satisfiable by the release alone.
+#   3. Run still in flight (`null` conclusion) — rc 2, empty stdout. A
+#      pre-terminal run is never reported as a failed publish.
+#   4. No release at the tag (HTTP 404) — rc 1, ok false, a reason
 #      naming the tag. A definitive no, never an error.
-#   3. Draft release — rc 1, ok false. A green publish run that left a
-#      draft behind is not a landed publication.
-#   4. Zero assets — rc 1, ok false. An empty release never passes
-#      vacuously.
-#   5. An asset still uploading — rc 1, ok false, naming the counts.
-#   6. Tag mismatch — the payload reports a different tag; rc 1.
-#   7. Auth or network failure — rc 2, empty stdout. Indeterminate is
-#      never reported as absent (fail closed).
-#   8. Unparseable payload — rc 2, empty stdout.
-#   9. Argument validation — wrong count and empty arguments exit 2.
-#  10. Missing gh — exit 2 with an install hint.
+#   5. Draft release — rc 1. A green run that left a draft behind is not
+#      a landed publication.
+#   6. Zero assets — rc 1. An empty release never passes vacuously.
+#   7. An asset still uploading — rc 1, naming the counts.
+#   8. Tag mismatch — the payload reports a different tag; rc 1.
+#   9. Every definitive no writes an actionable stderr diagnostic
+#      alongside its stdout envelope.
+#  10. A tag carrying a double quote and a backslash emits VALID JSON
+#      that round-trips through jq.
+#  11. Auth or network failure on either call — rc 2, empty stdout.
+#      Indeterminate is never reported as absent (fail closed).
+#  12. Unparseable payload — rc 2, empty stdout.
+#  13. Argument validation — wrong count, empty arguments and a
+#      non-positive-integer run id exit 2.
+#  14. Missing gh — exit 2 with an install hint.
 #
 # Approach: source the script (the main() guard prevents auto-run when
-# sourced) and override `gh` as a transport mock. Each case writes a
-# fixture holding a raw `GET /repos/{o}/{r}/releases/tags/{tag}` body,
-# and the mock runs the caller's own `--jq` filter over it with jq, the
-# way gh does. The script's conjunction is what the fixtures exercise.
+# sourced) and override `gh` as a transport mock covering both calls the
+# script makes — `gh run view` for the conclusion and `gh api` for the
+# release. Each case writes a fixture holding a raw
+# `GET /repos/{o}/{r}/releases/tags/{tag}` body, and the mock runs the
+# caller's own `--jq` filter over it with jq, the way gh does. The
+# script's conjunction is what the fixtures exercise.
 #
 # Run: bash skills/release/tests/test_verify_github_release.sh
 # Exit 0 on all-pass; non-zero with a per-test diagnostic on failure.
@@ -44,6 +54,7 @@ PASS_COUNT=0
 OWNER=jbaruch
 REPO=good-oss-citizen
 TAG=v0.1.4
+RUN_ID=34188269042
 
 TMPDIR_TEST=$(mktemp -d -t verify-gh-release-test.XXXXXX)
 cleanup_tmp() {
@@ -57,6 +68,7 @@ cleanup_tmp() {
 trap cleanup_tmp EXIT
 export MOCK_BODY_FILE="$TMPDIR_TEST/body.json"
 export MOCK_MODE_FILE="$TMPDIR_TEST/mode"
+export MOCK_RUN_FILE="$TMPDIR_TEST/run-mode"
 
 assert_eq() {
   local label="$1" expected="$2" actual="$3"
@@ -78,11 +90,23 @@ run() {
   fi
 }
 
-# Mock `gh` — transport stand-in for `gh api <path> --jq '<filter>'`.
-# MODE selects the transport outcome: `ok` serves the fixture body
-# through the caller's own filter, `404` and `auth` reproduce gh's
-# non-zero exit and its stderr text for those failures.
+# Mock `gh` — transport stand-in for both calls the script makes.
+# `gh run view ... --jq .conclusion` returns whatever MOCK_RUN_FILE
+# holds (`ERROR` reproduces a non-zero exit with gh's stderr shape).
+# `gh api <path> --jq '<filter>'` is driven by MOCK_MODE_FILE: `ok`
+# serves the fixture body through the caller's own filter, `404` and
+# `auth` reproduce gh's non-zero exit and its stderr text.
 gh() {
+  if [[ "$1" == "run" && "$2" == "view" ]]; then
+    local run_mode
+    run_mode=$(cat "$MOCK_RUN_FILE")
+    if [[ "$run_mode" == "ERROR" ]]; then
+      echo "gh: HTTP 401: Bad credentials" >&2
+      return 1
+    fi
+    echo "$run_mode"
+    return 0
+  fi
   [[ "$1" == "api" ]] || { echo "mock gh: unexpected invocation: $*" >&2; return 99; }
   local mode
   mode=$(cat "$MOCK_MODE_FILE")
@@ -106,10 +130,11 @@ gh() {
 }
 
 set_mode() { echo "$1" > "$MOCK_MODE_FILE"; }
-set_body() { cat > "$MOCK_BODY_FILE"; set_mode ok; }
+set_run() { echo "$1" > "$MOCK_RUN_FILE"; }
+# Default every case to a successful run so a release-side fixture
+# exercises conjunct 2; cases about conjunct 1 override it.
+set_body() { cat > "$MOCK_BODY_FILE"; set_mode ok; set_run success; }
 
-# `.ok // empty` cannot be used: jq's `//` treats `false` as absent, so
-# a correct `"ok":false` would read as no field at all.
 ok_of() { echo "$1" | jq -r 'if has("ok") then (.ok|tostring) else empty end'; }
 reason_of() { echo "$1" | jq -r 'if has("reason") then .reason else empty end'; }
 
@@ -127,19 +152,74 @@ test_published_release() {
 }
 JSON
   local out rc=0
-  out=$(main "$OWNER" "$REPO" "$TAG" 2>/dev/null) || rc=$?
+  out=$(main "$OWNER" "$REPO" "$TAG" "$RUN_ID" 2>/dev/null) || rc=$?
   assert_eq "exit code" "0" "$rc" || return 1
   assert_eq "ok" "true" "$(ok_of "$out")" || return 1
   assert_eq "asset count" "2" "$(echo "$out" | jq -r '.assets')" || return 1
   assert_eq "url" "https://github.com/${OWNER}/${REPO}/releases/tag/${TAG}" "$(echo "$out" | jq -r '.url')" || return 1
+  assert_eq "run conclusion" "success" "$(echo "$out" | jq -r '.run_conclusion')" || return 1
 }
 run "published release with uploaded assets confirms the publication" test_published_release
 
-# --- Test 2: no release at the tag -------------------------------------------
+# --- Test 2: failed run conclusion -------------------------------------------
+test_failed_run_conclusion() {
+  set_body <<JSON
+{
+  "tag_name": "${TAG}",
+  "draft": false,
+  "html_url": "https://github.com/${OWNER}/${REPO}/releases/tag/${TAG}",
+  "assets": [{"name": "pkg.tar.gz", "state": "uploaded"}]
+}
+JSON
+  set_run failure
+  local out rc=0
+  out=$(main "$OWNER" "$REPO" "$TAG" "$RUN_ID" 2>/dev/null) || rc=$?
+  assert_eq "exit code" "1" "$rc" || return 1
+  assert_eq "ok" "false" "$(ok_of "$out")" || return 1
+  assert_eq "run conclusion" "failure" "$(echo "$out" | jq -r '.run_conclusion')" || return 1
+  [[ "$(reason_of "$out")" == *"concluded failure"* ]] || { echo "    FAIL: reason should name the conclusion, got: $(reason_of "$out")" >&2; return 1; }
+}
+run "a retrievable release does not excuse a failed publish run" test_failed_run_conclusion
+
+# --- Test 3: run still in flight ---------------------------------------------
+test_run_in_flight() {
+  set_body <<JSON
+{
+  "tag_name": "${TAG}",
+  "draft": false,
+  "html_url": "https://github.com/${OWNER}/${REPO}/releases/tag/${TAG}",
+  "assets": [{"name": "pkg.tar.gz", "state": "uploaded"}]
+}
+JSON
+  set_run null
+  local out stderr rc=0
+  out=$(main "$OWNER" "$REPO" "$TAG" "$RUN_ID" 2>"$TMPDIR_TEST/err") || rc=$?
+  stderr=$(cat "$TMPDIR_TEST/err")
+  assert_eq "exit code" "2" "$rc" || return 1
+  assert_eq "stdout must stay empty" "" "$out" || return 1
+  [[ "$stderr" == *"gh run watch"* ]] || { echo "    FAIL: stderr should point at the watch, got: ${stderr}" >&2; return 1; }
+}
+run "a run still in flight is indeterminate, not a failed publish" test_run_in_flight
+
+# --- Test 4: run lookup failure ----------------------------------------------
+test_run_lookup_failure() {
+  set_body <<JSON
+{"tag_name": "${TAG}", "draft": false, "html_url": "u", "assets": []}
+JSON
+  set_run ERROR
+  local out rc=0
+  out=$(main "$OWNER" "$REPO" "$TAG" "$RUN_ID" 2>/dev/null) || rc=$?
+  assert_eq "exit code" "2" "$rc" || return 1
+  assert_eq "stdout must stay empty" "" "$out" || return 1
+}
+run "an unreadable run is indeterminate" test_run_lookup_failure
+
+# --- Test 5: no release at the tag -------------------------------------------
 test_missing_release() {
   set_mode 404
+  set_run success
   local out rc=0
-  out=$(main "$OWNER" "$REPO" "$TAG" 2>/dev/null) || rc=$?
+  out=$(main "$OWNER" "$REPO" "$TAG" "$RUN_ID" 2>/dev/null) || rc=$?
   assert_eq "exit code" "1" "$rc" || return 1
   assert_eq "ok" "false" "$(ok_of "$out")" || return 1
   [[ "$(reason_of "$out")" == *"$TAG"* ]] || { echo "    FAIL: reason should name the tag, got: $(reason_of "$out")" >&2; return 1; }
@@ -157,7 +237,7 @@ test_draft_release() {
 }
 JSON
   local out rc=0
-  out=$(main "$OWNER" "$REPO" "$TAG" 2>/dev/null) || rc=$?
+  out=$(main "$OWNER" "$REPO" "$TAG" "$RUN_ID" 2>/dev/null) || rc=$?
   assert_eq "exit code" "1" "$rc" || return 1
   assert_eq "ok" "false" "$(ok_of "$out")" || return 1
   [[ "$(reason_of "$out")" == *"draft"* ]] || { echo "    FAIL: reason should name the draft state, got: $(reason_of "$out")" >&2; return 1; }
@@ -175,7 +255,7 @@ test_no_assets() {
 }
 JSON
   local out rc=0
-  out=$(main "$OWNER" "$REPO" "$TAG" 2>/dev/null) || rc=$?
+  out=$(main "$OWNER" "$REPO" "$TAG" "$RUN_ID" 2>/dev/null) || rc=$?
   assert_eq "exit code" "1" "$rc" || return 1
   assert_eq "ok" "false" "$(ok_of "$out")" || return 1
   [[ "$(reason_of "$out")" == *"no assets"* ]] || { echo "    FAIL: reason should name the empty asset list, got: $(reason_of "$out")" >&2; return 1; }
@@ -196,7 +276,7 @@ test_asset_not_uploaded() {
 }
 JSON
   local out rc=0
-  out=$(main "$OWNER" "$REPO" "$TAG" 2>/dev/null) || rc=$?
+  out=$(main "$OWNER" "$REPO" "$TAG" "$RUN_ID" 2>/dev/null) || rc=$?
   assert_eq "exit code" "1" "$rc" || return 1
   assert_eq "ok" "false" "$(ok_of "$out")" || return 1
   [[ "$(reason_of "$out")" == *"1 of 2"* ]] || { echo "    FAIL: reason should name the counts, got: $(reason_of "$out")" >&2; return 1; }
@@ -214,7 +294,7 @@ test_tag_mismatch() {
 }
 JSON
   local out rc=0
-  out=$(main "$OWNER" "$REPO" "$TAG" 2>/dev/null) || rc=$?
+  out=$(main "$OWNER" "$REPO" "$TAG" "$RUN_ID" 2>/dev/null) || rc=$?
   assert_eq "exit code" "1" "$rc" || return 1
   [[ "$(reason_of "$out")" == *"v0.1.5"* ]] || { echo "    FAIL: reason should name the tag actually returned, got: $(reason_of "$out")" >&2; return 1; }
 }
@@ -223,8 +303,9 @@ run "a release reporting another tag is refused" test_tag_mismatch
 # --- Test 7: auth failure is indeterminate -----------------------------------
 test_auth_failure_indeterminate() {
   set_mode auth
+  set_run success
   local out stderr rc=0
-  out=$(main "$OWNER" "$REPO" "$TAG" 2>"$TMPDIR_TEST/err") || rc=$?
+  out=$(main "$OWNER" "$REPO" "$TAG" "$RUN_ID" 2>"$TMPDIR_TEST/err") || rc=$?
   stderr=$(cat "$TMPDIR_TEST/err")
   assert_eq "exit code" "2" "$rc" || return 1
   assert_eq "stdout must stay empty" "" "$out" || return 1
@@ -238,7 +319,7 @@ test_unparseable_payload() {
 {"unexpected": "shape"}
 JSON
   local out rc=0
-  out=$(main "$OWNER" "$REPO" "$TAG" 2>/dev/null) || rc=$?
+  out=$(main "$OWNER" "$REPO" "$TAG" "$RUN_ID" 2>/dev/null) || rc=$?
   assert_eq "exit code" "2" "$rc" || return 1
   assert_eq "stdout must stay empty" "" "$out" || return 1
 }
@@ -255,11 +336,80 @@ run "wrong argument count exits 2 with usage" test_wrong_arg_count
 
 test_empty_tag() {
   local stderr rc=0
-  stderr=$(main "$OWNER" "$REPO" "" 2>&1 >/dev/null) || rc=$?
+  stderr=$(main "$OWNER" "$REPO" "" "$RUN_ID" 2>&1 >/dev/null) || rc=$?
   assert_eq "exit code" "2" "$rc" || return 1
   [[ "$stderr" == *"non-empty"* ]] || { echo "    FAIL: stderr should name the empty argument, got: ${stderr}" >&2; return 1; }
 }
 run "empty tag argument exits 2" test_empty_tag
+
+test_bad_run_id() {
+  local stderr rc=0
+  stderr=$(main "$OWNER" "$REPO" "$TAG" 0 2>&1 >/dev/null) || rc=$?
+  assert_eq "exit code" "2" "$rc" || return 1
+  [[ "$stderr" == *"positive integer"* ]] || { echo "    FAIL: stderr should reject the run id, got: ${stderr}" >&2; return 1; }
+}
+run "a run id of 0 exits 2" test_bad_run_id
+
+# --- Every definitive no writes an actionable stderr diagnostic --------------
+# Script Requirements calls for self-error-handling on stderr; the
+# structured stdout envelope does not discharge it.
+test_denials_carry_stderr_diagnostics() {
+  local case_name rc stderr
+  for case_name in failed-run absent draft empty partial mismatch; do
+    case "$case_name" in
+      failed-run)
+        set_body <<JSON
+{"tag_name": "${TAG}", "draft": false, "html_url": "u", "assets": [{"name": "p", "state": "uploaded"}]}
+JSON
+        set_run failure ;;
+      absent)   set_mode 404; set_run success ;;
+      draft)
+        set_body <<JSON
+{"tag_name": "${TAG}", "draft": true, "html_url": "u", "assets": [{"name": "p", "state": "uploaded"}]}
+JSON
+        ;;
+      empty)
+        set_body <<JSON
+{"tag_name": "${TAG}", "draft": false, "html_url": "u", "assets": []}
+JSON
+        ;;
+      partial)
+        set_body <<JSON
+{"tag_name": "${TAG}", "draft": false, "html_url": "u", "assets": [{"name": "p", "state": "uploaded"}, {"name": "q", "state": "starter"}]}
+JSON
+        ;;
+      mismatch)
+        set_body <<JSON
+{"tag_name": "v9.9.9", "draft": false, "html_url": "u", "assets": [{"name": "p", "state": "uploaded"}]}
+JSON
+        ;;
+    esac
+    rc=0
+    # Subshell: `main` is sourced, so its `exit 1` would end the harness.
+    ( main "$OWNER" "$REPO" "$TAG" "$RUN_ID" >/dev/null 2>"$TMPDIR_TEST/err" ) || rc=$?
+    stderr=$(cat "$TMPDIR_TEST/err")
+    assert_eq "${case_name} exit code" "1" "$rc" || return 1
+    [[ -n "$stderr" ]] || { echo "    FAIL: ${case_name} wrote no stderr diagnostic" >&2; return 1; }
+    [[ "$stderr" == *"verify-github-release.sh:"* ]] || { echo "    FAIL: ${case_name} diagnostic is unattributed, got: ${stderr}" >&2; return 1; }
+  done
+}
+run "every definitive no writes an actionable stderr diagnostic" test_denials_carry_stderr_diagnostics
+
+# --- A quote-bearing tag still emits valid JSON ------------------------------
+# Git ref names permit a double quote, so raw interpolation would emit a
+# broken envelope and silently defeat any wrapper that parses stdout.
+test_quote_bearing_tag_emits_valid_json() {
+  local weird='v1.0-"quoted"-\slash'
+  set_body <<JSON
+{"tag_name": "${TAG}", "draft": false, "html_url": "u", "assets": [{"name": "p", "state": "uploaded"}]}
+JSON
+  local out rc=0
+  out=$(main "$OWNER" "$REPO" "$weird" "$RUN_ID" 2>/dev/null) || rc=$?
+  assert_eq "exit code" "1" "$rc" || return 1
+  echo "$out" | jq -e . >/dev/null || { echo "    FAIL: envelope is not valid JSON: ${out}" >&2; return 1; }
+  assert_eq "tag round-trips" "$weird" "$(echo "$out" | jq -r '.tag')" || return 1
+}
+run "a tag carrying a quote and a backslash emits valid JSON" test_quote_bearing_tag_emits_valid_json
 
 # --- Test 10: missing gh ------------------------------------------------------
 # Runs in a subshell with the mock removed and PATH emptied, so
@@ -271,7 +421,7 @@ test_missing_gh() {
     unset -f gh
     # shellcheck disable=SC2123  # emptying the search path is the point: `command -v gh` must find neither the mock function nor a binary
     PATH=""
-    main "$OWNER" "$REPO" "$TAG" 2>&1 >/dev/null
+    main "$OWNER" "$REPO" "$TAG" "$RUN_ID" 2>&1 >/dev/null
   ) || rc=$?
   assert_eq "exit code" "2" "$rc" || return 1
   [[ "$stderr" == *"cli.github.com"* ]] || { echo "    FAIL: stderr should carry an install hint, got: ${stderr}" >&2; return 1; }
