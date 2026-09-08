@@ -1,5 +1,100 @@
 # Changelog
 
+### Fixed
+
+- **Completed Claude Code reports read from their own native source (#366).** The
+  display and native-source adapters covered Codex and Grok and omitted Claude, so
+  a Claude worker that finished normally — report written, entire final message the
+  bare `REPORT: <path>` marker, rendered by Claude as `⏺ REPORT: <path>` on one row
+  — came back from `wait-report.sh` as exit 4 `marker unconfirmed`, and owner
+  `recover-report` refused the unchanged evidence with "The original native-session
+  proof uses an unsupported shape". Neither refusal was wrong about anything except
+  the missing adapter: the session id matched, the final assistant message carried
+  `stop_reason: end_turn`, and the report file was on disk. This is distinct from
+  #365, where the native id itself is stale.
+
+  `teamlead/claude_native.py` now reads Claude Code's transcript
+  (`<config>/projects/<slug>/<session-id>.jsonl`, `CLAUDE_CONFIG_DIR` respected) on
+  its own terms. Claude writes one row per API content block, so a message is the
+  run of rows sharing `message.id` ordered by `apiBlockIndex`, and every turn row
+  links to the one before it through `parentUuid`. A final answer is the last
+  main-chain assistant message: `end_turn`, built from text and thinking blocks
+  alone, with no user turn after it. Bookkeeping rows (`system`, `attachment`,
+  `mode`, `ai-title`, `last-prompt`) carry no task and neither complete nor reset a
+  turn. Subagent rows are skipped as sidechain traffic, a broken parent chain reads
+  as a rewound or replaced turn, and the archived user prompt counts only when
+  Claude recorded it as a human-typed prompt — which is what binds recovery to the
+  dispatched assignment rather than to text an assistant quoted back. `⏺ ` joins
+  the display allowlist; rows are still never joined, and a decorated row alone was
+  never proof.
+
+  The live validation earned its keep, twice, and the parallel tool-call shape took
+  both rounds to see whole. Claude Code links a `tool_result` row to the `tool_use`
+  BLOCK ROW that requested it. The first fresh session showed the results flushed
+  one at a time, so the rows still read linearly — `tool_use`, its result, the next
+  `tool_use`, its result — and the fix was to stop treating that intervening `user`
+  row as the end of the message. A later round's fresh session wrote both `tool_use`
+  blocks before either result landed, so the first result's parent was not the row
+  before it and the chain branched; the strict `parentUuid` walk rejected an
+  entirely ordinary completed session, reproducing the very exit 4 this issue exists
+  to remove. Both orderings come from the same pinned CLI, and which one appears
+  depends only on when the results are flushed.
+
+  So the parent rule now follows the format rather than the common case: a
+  `tool_result` row links to the block row whose `tool_use` id it answers, in the
+  message under assembly, once — which holds for all 177 tool results across the six
+  preserved sessions, in both orderings. Every other row still links to the row
+  before it. A parent naming an abandoned branch or a row that merely occurred
+  earlier, an id from a superseded message or a closed turn, a repeated answer, and
+  a single row answering two different block rows are all refused, with the ledger
+  untouched. A call is answered exactly once, and independent verification found
+  that "once" had a hole in it: two blocks in the SAME row naming the same
+  `tool_use_id` collapsed to one requester and consumed the pending call once, so a
+  duplicated answer established delivery. Duplicate ids in a row now make its claim
+  unreadable before any requester is checked or any call consumed — while distinct
+  ids issued by one block row stay a legitimate multi-result answer. Fixtures alone predicted neither ordering, which is why the reference
+  now documents both — and why it tells you to give a Claude worker a short report
+  path, since a long one wraps in the pane and a wrapped marker is refused by
+  design.
+
+  Internal review then found three ways malformed or interrupted evidence still got
+  through, all fixed here. A row that declares itself a `user` or `assistant` turn
+  is now held to the turn contract even when it carries none of a turn's fields:
+  appending a bare `{"type": "assistant", "sessionId": …}` used to read as
+  bookkeeping, leaving an earlier answer standing as the latest completed one. A
+  message's blocks must now agree about how that message ended, so a sibling block
+  saying `end_turn` can no longer vouch for one that refused or ran out of tokens —
+  with the exception the real format demands: a block written before the message
+  settled carries `stop_reason: null`, and null contradicts nothing. And a `user`
+  row that is not tool output now ends the pending message, so a human prompt
+  arriving between a thinking block and a text block is a new turn rather than an
+  interleaved tool result — even when that prompt repeats the assignment and would
+  otherwise satisfy prompt binding on its own.
+
+  A later review round found a fourth, and it was the loudest: an assistant
+  message whose `content` was not a list of blocks. The reader iterated it
+  before checking its shape, so a JSON number raised `TypeError` straight out of
+  `probe-report` and `recover-report`, and `wait-report.sh` reported a broken
+  tool — the path that ends the round — instead of an unconfirmed report. The
+  quiet half was worse: a string or an object iterated as characters or keys, no
+  crash, no final answer, and the archived prompt still readable, so a source
+  that could not be read went on answering what had been typed. An assistant
+  message's content is now a list of blocks or the source is unreadable, and an
+  unreadable source is unconfirmed at every boundary: no crash, no final, no
+  prompt, ledger byte-identical.
+
+  Verified 2026-09-08 on Herdr 0.8.2 and Claude Code 2.1.263: the old watcher exited
+  4 on the fresh session, the patched watcher accepted the same untouched session
+  and file with exit 0 and basis `native_final_source`, and `recover-report` on an
+  isolated ledger copy accepted the earlier completed dispatch's preserved negative
+  receipt, archived transcript, pane JSON and visible row byte for byte, appending a
+  receipt that still grants no review approval, retained context or extra attempt.
+  Eight controls built from that same archived transcript — bare declared turns,
+  bookkeeping speaking as a turn, three contradictory stop reasons and an
+  intervening typed prompt — now refuse through the public command with the isolated
+  ledger byte-identical, while the untouched original still records delivery. Codex
+  and Grok contracts are unchanged.
+
 ## 0.3.199 — 2026-09-08
 
 ### Fixed

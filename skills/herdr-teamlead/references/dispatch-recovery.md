@@ -364,7 +364,10 @@ the observed visible text on stdin. It reads native source and Herdr without
 writing state or worker input. Success emits `found` and either confirmed
 source evidence or an unconfirmed `reason`; tool failure exits non-zero.
 The native-source and display predicates belong to
-`skills/herdr-teamlead/teamlead/report_delivery.py`.
+`skills/herdr-teamlead/teamlead/report_delivery.py`. Claude Code's own source
+contract — its per-block JSONL rows, the `parentUuid` chain, both parallel
+tool-call orderings, and where its transcripts live — sits beside it in
+`skills/herdr-teamlead/teamlead/claude_native.py`.
 
 A Grok `/new` keeps continuity null when Herdr repeats the pre-clear ID or no
 pre-clear ID was observed. Wait normally; an unconfirmed native marker is not
@@ -437,6 +440,28 @@ watcher exited 4 for both. The patched watcher accepted the same untouched
 sessions and files with exit 0. Automated source/display fixtures cover
 missing, changed, wrapped, quoted, authored-list and indented-code markers,
 incomplete/replaced sessions and source changes during verification.
+
+Verified again on 2026-09-08 with Herdr 0.8.2 and Claude Code 2.1.263, in a
+throwaway workspace whose worker shared no name or pane with a live round. The
+worker wrote its report and rendered `⏺ REPORT: <path>` on one row. The old
+watcher exited 4 with `marker unconfirmed`; the patched watcher accepted the
+same untouched session and file with exit 0 and basis `native_final_source`.
+The same code recovered an earlier completed Claude dispatch from its preserved
+negative receipt and archived transcript, on an isolated copy of the ledger.
+
+Four fresh sessions across that day's rounds settled the parallel tool-call
+shape, which took two live rounds to see whole. Claude Code writes a
+`tool_result` row linked to the `tool_use` BLOCK ROW that requested it. When
+the results are flushed one at a time the rows still read linearly
+(`tool_use`, its result, the next `tool_use`, its result); when both calls are
+written before either result lands, the first result's parent is not the row
+before it and the chain branches. Both orderings come from the same pinned CLI
+and both must parse. A result names the call it answers, and a call is answered
+once — including within a single row, where two blocks naming the same
+`tool_use_id` used to ride along on that call's requester. Distinct ids issued
+by one block row are still a legitimate multi-result answer. Give a Claude
+worker a SHORT report path: a long one wraps in the pane, and a wrapped marker
+cannot be told from a newline, so the watcher refuses it by design.
 
 For a stale-Grok regression, complete a short turn in an isolated Grok process,
 then let normal `teamlead apply` send `/new` and a fresh report-only brief. Save
