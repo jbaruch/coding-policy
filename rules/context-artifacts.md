@@ -13,7 +13,7 @@ description: Plugin structure, rule/skill format, review pipeline, surface sync,
 - Tessl-bound sections — Plugin Structure, Mandatory Review, Credit-Outage Review Carve-Out, Disagreeing With the Reviewer — bind an artifact distributed through Tessl
 - Distribution-independent sections — Artifact Layout, Rules Are Prose, Rule Format, Surface Sync, Consistency Check, Post-Edit Rule Audit — bind every plugin artifact, whatever publishes it
 - CHANGELOG Hygiene's publish-on-merge, stamp-step and `tesslio/patch-version-publish` bullets are Tessl-bound
-- CHANGELOG Hygiene's consolidation and duplication bullets are distribution-independent
+- Every other CHANGELOG Hygiene bullet is distribution-independent
 - An artifact published through another channel — a GitHub-tag-published ACR package — owes the distribution-independent sections plus `rules/skill-authoring.md`, `rules/testing-standards.md` and `rules/language-diagnostics.md` in full
 - It owes `rules/ci-safety.md` too, confirming each publication against the channel that carried it — see `rules/ci-safety.md` Always Watch CI
 - A Tessl publication keeps ci-safety's registry-advance and moderation requirements whole, mixed distribution included; another channel's release evidence never substitutes for them
@@ -49,7 +49,8 @@ description: Plugin structure, rule/skill format, review pipeline, surface sync,
 - Every skill change in a Tessl-distributed plugin must pass `tessl review run --threshold 85` before publish
 - Below-threshold scores block the pipeline
 - Mixed distribution keeps the gate — a plugin that also ships through another channel still reviews every changed skill before its Tessl publish
-- Deleting the Tessl manifest exempts nothing while the content still publishes through Tessl; adding another channel's manifest exempts nothing either
+- Deleting the Tessl manifest exempts nothing while the content still publishes through Tessl
+- Adding another channel's manifest exempts nothing either
 - A skill distributed through no Tessl path owes `rules/skill-authoring.md` in full, its repo's CI gates, and its external policy and Copilot review — never this command
 - Wire into CI as a changed-skills loop, not static per-skill steps. The loop iterates over `git diff --name-only <prev-sha>..HEAD -- 'skills/'`. Reference: `.github/actions/skill-review/action.yml` (consumers `uses: jbaruch/coding-policy/.github/actions/skill-review@<ref>`)
 - Fallback: review every skill when the diff base is absent (manual `workflow_dispatch`, initial push, all-zeros sentinel SHA); hard-fail when the base is set but unreachable
