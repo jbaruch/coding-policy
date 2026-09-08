@@ -1,5 +1,48 @@
 # Changelog
 
+### Fixed
+
+- **Completed Claude Code reports read from their own native source (#366).** The
+  display and native-source adapters covered Codex and Grok and omitted Claude, so
+  a Claude worker that finished normally — report written, entire final message the
+  bare `REPORT: <path>` marker, rendered by Claude as `⏺ REPORT: <path>` on one row
+  — came back from `wait-report.sh` as exit 4 `marker unconfirmed`, and owner
+  `recover-report` refused the unchanged evidence with "The original native-session
+  proof uses an unsupported shape". Neither refusal was wrong about anything except
+  the missing adapter: the session id matched, the final assistant message carried
+  `stop_reason: end_turn`, and the report file was on disk. This is distinct from
+  #365, where the native id itself is stale.
+
+  `teamlead/claude_native.py` now reads Claude Code's transcript
+  (`<config>/projects/<slug>/<session-id>.jsonl`, `CLAUDE_CONFIG_DIR` respected) on
+  its own terms. Claude writes one row per API content block, so a message is the
+  run of rows sharing `message.id` ordered by `apiBlockIndex`, and every turn row
+  links to the one before it through `parentUuid`. A final answer is the last
+  main-chain assistant message: `end_turn`, built from text and thinking blocks
+  alone, with no user turn after it. Bookkeeping rows (`system`, `attachment`,
+  `mode`, `ai-title`, `last-prompt`) carry no task and neither complete nor reset a
+  turn. Subagent rows are skipped as sidechain traffic, a broken parent chain reads
+  as a rewound or replaced turn, and the archived user prompt counts only when
+  Claude recorded it as a human-typed prompt — which is what binds recovery to the
+  dispatched assignment rather than to text an assistant quoted back. `⏺ ` joins
+  the display allowlist; rows are still never joined, and a decorated row alone was
+  never proof.
+
+  The live validation earned its keep. A fresh isolated Herdr workspace on Claude
+  Code 2.1.263 produced a transcript with parallel tool calls, where Claude Code
+  writes the first tool's `user` result row BETWEEN two `tool_use` block rows of the
+  same assistant message. The first cut treated any `user` row as the end of a
+  message and rejected that ordinary session outright; a `user` row now ends a turn
+  only after a message that already completed. Fixtures alone had not predicted it.
+
+  Verified 2026-09-08 on Herdr 0.8.2 and Claude Code 2.1.263: the old watcher exited
+  4 on the fresh session, the patched watcher accepted the same untouched session
+  and file with exit 0 and basis `native_final_source`, and `recover-report` on an
+  isolated ledger copy accepted the earlier completed dispatch's preserved negative
+  receipt, archived transcript, pane JSON and visible row byte for byte, appending a
+  receipt that still grants no review approval, retained context or extra attempt.
+  Codex and Grok contracts are unchanged.
+
 ## 0.3.198 — 2026-09-07
 
 ### Added

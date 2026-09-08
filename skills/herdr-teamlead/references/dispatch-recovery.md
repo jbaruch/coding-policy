@@ -364,7 +364,10 @@ the observed visible text on stdin. It reads native source and Herdr without
 writing state or worker input. Success emits `found` and either confirmed
 source evidence or an unconfirmed `reason`; tool failure exits non-zero.
 The native-source and display predicates belong to
-`skills/herdr-teamlead/teamlead/report_delivery.py`.
+`skills/herdr-teamlead/teamlead/report_delivery.py`. Claude Code's own source
+contract — its per-block JSONL rows, the `parentUuid` chain, and where its
+transcripts live — sits beside it in
+`skills/herdr-teamlead/teamlead/claude_native.py`.
 
 For an already completed affected dispatch, preserve its original negative
 wait JSON, report bytes, native source transcript, visible pane text, and the
@@ -406,3 +409,13 @@ watcher exited 4 for both. The patched watcher accepted the same untouched
 sessions and files with exit 0. Automated source/display fixtures cover
 missing, changed, wrapped, quoted, authored-list and indented-code markers,
 incomplete/replaced sessions and source changes during verification.
+
+Verified again on 2026-09-08 with Herdr 0.8.2 and Claude Code 2.1.263, in a
+throwaway workspace whose worker shared no name or pane with a live round. The
+worker wrote its report and rendered `⏺ REPORT: <path>` on one row. The old
+watcher exited 4 with `marker unconfirmed`; the patched watcher accepted the
+same untouched session and file with exit 0 and basis `native_final_source`.
+The same code recovered an earlier completed Claude dispatch from its preserved
+negative receipt and archived transcript, on an isolated copy of the ledger, and
+that live run is what exposed the interleaved tool-result rows a fixture alone
+had not predicted.
