@@ -224,6 +224,27 @@ def interrupted(marker, prompt):
     }
 
 
+def unreadable_content(marker, prompt):
+    """A completed round whose final message's content is not a list of blocks.
+
+    Claude Code writes every assistant message's content as a list of blocks.
+    Any other JSON value there is an unreadable shape, and reading it as blocks
+    is worse than useless: a truthy scalar raises, while a string or an object
+    walks characters or keys that are not blocks, so a tool call the message
+    made could hide behind either. Each case differs from a genuine completed
+    round in exactly one way.
+    """
+    values = {"number": 42, "float": 1.5, "true": True, "false": False, "null": None,
+              "string": marker, "empty-string": "", "empty-object": {},
+              "object": {"type": "text", "text": marker}}
+    cases = {}
+    for name, content in values.items():
+        transcript = dispatched(marker, prompt=prompt)
+        transcript.rows[-3]["message"]["content"] = content
+        cases["content-" + name] = transcript
+    return cases
+
+
 class ClaudeSourceTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -362,6 +383,22 @@ class ClaudeSourceTests(unittest.TestCase):
         for name, transcript in interrupted(self.marker, "Write the fresh report").items():
             with self.subTest(case=name):
                 self.assertIsNone(self.final(transcript))
+
+    def test_a_final_message_s_content_is_a_list_of_blocks_or_nothing(self):
+        """An unreadable content shape supplies neither a final nor a prompt.
+
+        The prompt half matters on its own: the typed assignment sits in an
+        earlier row, so a source whose final message cannot be read must not
+        keep answering questions about what was asked.
+        """
+        assignment = assignment_text("developer", "/round/COMMON.md", "/round/brief-developer.md")
+        genuine = dispatched(self.marker, prompt=assignment)
+        self.assertEqual(self.final(genuine), self.marker)
+        self.assertEqual(delivery.source_prompt(genuine.body(), "claude", SESSION), assignment)
+        for name, transcript in unreadable_content(self.marker, assignment).items():
+            with self.subTest(case=name):
+                self.assertIsNone(self.final(transcript))
+                self.assertIsNone(delivery.source_prompt(transcript.body(), "claude", SESSION))
 
     def test_an_unsettled_block_is_not_contradictory_metadata(self):
         """Claude writes `stop_reason: null` on a block that has not settled;
@@ -532,12 +569,15 @@ class ClaudeSourceTests(unittest.TestCase):
         self.assertFalse(self.probe(dispatched("- " + self.marker))["found"])
 
     def test_probe_refuses_malformed_and_interrupted_evidence(self):
-        for name, transcript in interrupted(self.marker, "Write the fresh report").items():
+        cases = {**interrupted(self.marker, "Write the fresh report"),
+                 **unreadable_content(self.marker, "Write the fresh report")}
+        for name, transcript in cases.items():
             with self.subTest(case=name):
                 result = self.probe(transcript)
                 self.assertEqual(result, {"found": False, "reason": "native_marker_unconfirmed"})
 
-    def test_public_watcher_reads_the_real_claude_layout(self):
+    def watcher(self):
+        """The real `wait-report.sh` over a fake `herdr` and a real transcript."""
         fake = self.tmp / "herdr"
         config = self.tmp / "fake.json"
         fake.write_text("#!/usr/bin/env python3\nimport json, os, sys\nfrom pathlib import Path\n"
@@ -551,10 +591,18 @@ class ClaudeSourceTests(unittest.TestCase):
                         "if __name__=='__main__': main()\n")
         fake.chmod(0o755)
         source = self.tmp / ".claude" / "projects" / PROJECT / (SESSION + ".jsonl")
-        source.parent.mkdir(parents=True)
+        source.parent.mkdir(parents=True, exist_ok=True)
         env = {**os.environ, "HERDR_ENV": "1", "HERDR_BIN": str(fake), "FAKE_CONFIG": str(config),
                "HOME": str(self.tmp), "TEAMLEAD_WAIT_BUDGET_SEC": "0"}
         env.pop("CLAUDE_CONFIG_DIR", None)
+        return source, config, env
+
+    def wait_report(self, env):
+        return subprocess.run(["bash", str(ROOT / "wait-report.sh"), "claude-review", str(self.report)],
+                              env=env, capture_output=True, text=True, check=False)
+
+    def test_public_watcher_reads_the_real_claude_layout(self):
+        source, config, env = self.watcher()
         for text, visible, expected in ((self.marker, self.visible, True),
                                         ("```\n- removed\n```\n" + self.marker, self.visible, True),
                                         ("- " + self.marker, self.visible, False),
@@ -565,11 +613,25 @@ class ClaudeSourceTests(unittest.TestCase):
                                         (self.marker, self.visible + ".old", False)):
             source.write_text(dispatched(text).body())
             config.write_text(json.dumps({"pane": self.pane, "visible": visible}))
-            result = subprocess.run(["bash", str(ROOT / "wait-report.sh"), "claude-review", str(self.report)],
-                                    env=env, capture_output=True, text=True, check=False)
+            result = self.wait_report(env)
             with self.subTest(source=text, visible=visible):
                 self.assertEqual(result.returncode, 0 if expected else 1, result.stderr)
                 self.assertEqual(json.loads(result.stdout)["found"], expected)
+
+    def test_public_watcher_reads_unreadable_content_as_unconfirmed_delivery(self):
+        """Exit 1 says the marker is unconfirmed; exit 2 says the tool broke.
+
+        The skill routes the two differently, so an unreadable source has to
+        land on the delivery path and not on the tool-failure one.
+        """
+        source, config, env = self.watcher()
+        config.write_text(json.dumps({"pane": self.pane, "visible": self.visible}))
+        for name, transcript in unreadable_content(self.marker, "Write the fresh report").items():
+            source.write_text(transcript.body())
+            result = self.wait_report(env)
+            with self.subTest(case=name):
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertEqual(json.loads(result.stdout)["found"], False)
 
 
 class ClaudeRecoveryTests(unittest.TestCase):
@@ -633,9 +695,11 @@ class ClaudeRecoveryTests(unittest.TestCase):
 
     def test_owner_recovery_refuses_malformed_and_interrupted_evidence(self):
         """The same reproductions, through the command that writes the ledger."""
-        for name in interrupted(self.marker, "unused"):
+        for name in {**interrupted(self.marker, "unused"),
+                     **unreadable_content(self.marker, "unused")}:
             document, data = self.fixture()
-            source = interrupted(self.marker, self.prompt(document))[name]
+            source = {**interrupted(self.marker, self.prompt(document)),
+                      **unreadable_content(self.marker, self.prompt(document))}[name]
             Path(data["source"]).write_text(source.body())
             before = copy.deepcopy(document)
             with self.subTest(case=name):

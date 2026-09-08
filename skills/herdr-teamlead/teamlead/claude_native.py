@@ -144,11 +144,18 @@ def main_chain(rows, session):
         elif parent != head:
             return None
         if kind == "assistant":
+            content = body.get("content")
+            # An assistant message's content is a list of blocks. Anything else
+            # is an unreadable shape: a truthy scalar raises when iterated, and
+            # a string or a mapping walks characters or keys that are not
+            # blocks, so a tool call could hide behind either.
+            if not isinstance(content, list):
+                return None
             # Tool calls belong to the message that made them, so a result can
             # never reach back past the message under assembly.
             if body.get("id") != message:
                 message, pending = body.get("id"), {}
-            for block in body.get("content") or ():
+            for block in content:
                 if (isinstance(block, dict) and block.get("type") == "tool_use"
                         and isinstance(block.get("id"), str) and block["id"]):
                     pending[block["id"]] = row["uuid"]

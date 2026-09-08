@@ -71,6 +71,18 @@
   interleaved tool result — even when that prompt repeats the assignment and would
   otherwise satisfy prompt binding on its own.
 
+  A later review round found a fourth, and it was the loudest: an assistant
+  message whose `content` was not a list of blocks. The reader iterated it
+  before checking its shape, so a JSON number raised `TypeError` straight out of
+  `probe-report` and `recover-report`, and `wait-report.sh` reported a broken
+  tool — the path that ends the round — instead of an unconfirmed report. The
+  quiet half was worse: a string or an object iterated as characters or keys, no
+  crash, no final answer, and the archived prompt still readable, so a source
+  that could not be read went on answering what had been typed. An assistant
+  message's content is now a list of blocks or the source is unreadable, and an
+  unreadable source is unconfirmed at every boundary: no crash, no final, no
+  prompt, ledger byte-identical.
+
   Verified 2026-09-08 on Herdr 0.8.2 and Claude Code 2.1.263: the old watcher exited
   4 on the fresh session, the patched watcher accepted the same untouched session
   and file with exit 0 and basis `native_final_source`, and `recover-report` on an
