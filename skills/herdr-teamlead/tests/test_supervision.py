@@ -459,6 +459,21 @@ class SupervisionTest(unittest.TestCase):
         self.assertEqual(unrelated.returncode, 0, unrelated.stderr)
         self.assertEqual(unrelated.stdout, "")
 
+    def test_wrapper_reports_python_startup_failure_without_native_exit_gate(self):
+        binaries = self.root / "binaries"
+        binaries.mkdir()
+        python = binaries / "python3"
+        python.write_text("#!/usr/bin/env bash\necho 'fixture: Python import failed' >&2\nexit 7\n")
+        python.chmod(0o755)
+        script = Path(_ROOT).parent.parent / "hooks/herdr-supervision-stop.sh"
+        environment = {**os.environ, **self.environ, "PATH": str(binaries) + os.pathsep + os.environ["PATH"]}
+        result = subprocess.run(["bash", str(script)], input=json.dumps(self.payload), env=environment,
+                                capture_output=True, text=True, check=False)
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, "")
+        self.assertIn("Python hook failed (exit 7)", result.stderr)
+        self.assertIn("restore the hook installation", result.stderr)
+
     def test_published_manifest_hooks_run_from_paths_with_spaces_at_mode_0644(self):
         self.member()
         native_root = self.root / "xdg" / "teamlead" / "supervision-bindings"

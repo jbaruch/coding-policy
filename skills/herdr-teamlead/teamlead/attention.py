@@ -5,6 +5,7 @@ import json
 import re
 from datetime import timezone
 from pathlib import Path
+from typing import NoReturn
 
 from .chronology import timestamp
 from .errors import StateError, UsageError
@@ -25,7 +26,7 @@ def storage_path(path):
     return Path(str(canonical_state(path)) + ".attention.json")
 
 
-def _fail(message):
+def _fail(message) -> NoReturn:
     raise UsageError(message, {})
 
 

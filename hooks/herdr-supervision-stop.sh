@@ -10,8 +10,13 @@ main() {
     echo 'herdr-supervision-stop: python3 is missing — restore Python to enable the native supervision gate' >&2
     return 0
   fi
+  local rc=0
   PYTHONPATH="${plugin_root}/skills/herdr-teamlead${PYTHONPATH:+:${PYTHONPATH}}" \
-    python3 -m teamlead.supervision_hook
+    python3 -m teamlead.supervision_hook || rc=$?
+  if (( rc != 0 )); then
+    echo "herdr-supervision-stop: Python hook failed (exit ${rc}) before completing its contract — restore the hook installation; native gating requires its structured JSON result" >&2
+  fi
+  return 0
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then

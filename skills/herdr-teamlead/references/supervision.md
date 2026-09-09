@@ -122,7 +122,11 @@ resolution is never a substitute for the task's acceptance and release gates.
 Native Claude and Codex Stop hooks gate only the exact bound lead identity,
 Herdr environment, pane, and working directory. Workers and unrelated sessions
 receive no supervision gate. The hook performs read-only local checks and
-never contacts or interrupts workers.
+never contacts or interrupts workers. Gating uses structured JSON, never shell
+exit status. A missing interpreter or failed module startup emits an installation
+diagnostic without inventing a binding; restore the installation before relying
+on the backstop. Once the evaluator identifies a bound lead, unreadable state or
+evaluation failures block that lead through the structured result.
 
 Active enrollments or unhandled events block a blind stop, even when a
 foreground watcher is currently alive. That foreground process cannot promise
