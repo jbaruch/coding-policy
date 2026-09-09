@@ -369,6 +369,65 @@ class CliTest(RestorationCase):
         self.assertEqual(json.loads(err.getvalue())["error"], "herdr_error")
         self.assertNoStart()
 
+    def test_non_object_lookup_results_return_actionable_json_without_side_effects(self):
+        owner = self.tmp / "owner.json"
+        owner_bytes = b'{"preserved": "synthetic owner history"}\n'
+        owner.write_bytes(owner_bytes)
+        args = ["restore-session", "--state", str(owner), *self.argv(*TOKENS)[1:]]
+        for operation in ("pane process-info", "agent get"):
+            for value in (None, [], "unexpected", 7, False):
+                with self.subTest(operation=operation, value=value):
+                    self.runner = ScriptedRunner()
+                    self.client = HerdrClient(binary="herdr", runner=self.runner)
+                    self.ready().runner.script(operation, ok(json.dumps({"result": value})))
+                    out, err = io.StringIO(), io.StringIO()
+                    with patch("teamlead.cli.time.sleep", side_effect=self.sleep):
+                        code = cli.main(args, stdout=out, stderr=err, client=self.client)
+                    self.assertEqual((code, out.getvalue()), (1, ""))
+                    failure = json.loads(err.getvalue())
+                    self.assertEqual(failure["error"], "herdr_error")
+                    self.assertIn(operation, failure["message"])
+                    self.assertIn("result", failure["message"])
+                    self.assertIn("object", failure["message"])
+                    self.assertIn("inspect", failure["message"].lower())
+                    self.assertIn("before retrying", failure["message"])
+                    self.assertIn(operation, failure["details"]["command"])
+                    self.assertNoStart()
+                    self.assertEqual(self.runner.count(operation), 1)
+                    self.assertEqual(self.sleeps, [])
+                    self.assertEqual(owner.read_bytes(), owner_bytes)
+                    self.assertEqual(list(self.tmp.iterdir()), [owner])
+
+    def test_valid_lookup_objects_wait_for_name_release_then_start_once(self):
+        self.ready().runner.script("agent get", reserved(), RELEASED)
+        out, err = io.StringIO(), io.StringIO()
+        with patch("teamlead.cli.time.sleep", side_effect=self.sleep):
+            code = cli.main(self.argv(*TOKENS), stdout=out, stderr=err, client=self.client)
+        self.assertEqual((code, err.getvalue()), (0, ""))
+        payload = json.loads(out.getvalue())
+        self.assertEqual(payload["release"], {"attempts": 2, "shell_pid": SHELL})
+        self.assertEqual(payload["start"], {"attempts": 1, "name_taken_retries": 0})
+        self.assertEqual(payload["argv"], [KIND] + TOKENS)
+        self.assertEqual(len(self.runner.starts()), 1)
+        self.assertEqual(self.sleeps, [RELEASE_POLL_INTERVAL_SEC])
+        self.assertEqual(list(self.tmp.iterdir()), [])
+
+    def test_unknown_start_results_keep_uncertainty_guidance_and_never_retry(self):
+        for value in (None, [], "unexpected", 7, False, {}):
+            with self.subTest(value=value):
+                self.runner = ScriptedRunner()
+                self.client = HerdrClient(binary="herdr", runner=self.runner)
+                self.ready().runner.script("agent start", ok(json.dumps({"result": value})), started())
+                out, err = io.StringIO(), io.StringIO()
+                code = cli.main(self.argv(*TOKENS), stdout=out, stderr=err, client=self.client)
+                self.assertEqual((code, out.getvalue()), (1, ""))
+                failure = json.loads(err.getvalue())
+                self.assertEqual(failure["error"], "herdr_error")
+                self.assertIn("a process may now be running", failure["message"])
+                self.assertIn("start was not retried", failure["message"])
+                self.assertEqual(len(self.runner.starts()), 1)
+                self.assertEqual(list(self.tmp.iterdir()), [])
+
     def test_refused_argv_never_reaches_herdr(self):
         out, err = io.StringIO(), io.StringIO()
         code = cli.main(self.argv("resume", SESSION), stdout=out, stderr=err, client=self.client)

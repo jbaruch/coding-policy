@@ -2,6 +2,13 @@
 
 ### Fixed
 
+- **Malformed restoration lookups return actionable JSON errors (#389).**
+  `pane process-info` and `agent get` now require an object in the Herdr
+  response's `result` field before reading their records. Null, list, string,
+  number, and boolean results report the failed command and recovery guidance
+  through the normal `HerdrError` boundary, with no worker start or owner-state
+  write. Public CLI regressions cover both lookups, valid name release, and
+  unchanged refusal without retry when a start response is malformed.
 - **Supervised Grok reports recover with their report binding (#387).** A
   bound round's `apply` stores each new dispatch fingerprint wrapped with the
   role's exact `--report` path, while `recover-report` rebuilt only the bare
