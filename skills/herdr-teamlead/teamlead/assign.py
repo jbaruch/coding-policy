@@ -540,7 +540,7 @@ def check_all_ready(client, assignments, agents_by_name, warn=None):
     return statuses
 
 
-def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle_timeout_ms=DEFAULT_SETTLE_TIMEOUT_MS, on_assigned=None, warn=None, sleep=time.sleep, settle_sec=COMPOSER_SETTLE_SEC, landing_attempts=LANDING_ATTEMPTS, start_timeout_ms=DEFAULT_START_TIMEOUT_MS, allow_recovery=False, task=None, retain_context=False, fix_round=None, history=None, tiers=None, qualifications=None, recovery=None, plan_id=None, work=None, on_prepare=None, on_before_send=None, on_result=None):
+def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle_timeout_ms=DEFAULT_SETTLE_TIMEOUT_MS, on_assigned=None, warn=None, sleep=time.sleep, settle_sec=COMPOSER_SETTLE_SEC, landing_attempts=LANDING_ATTEMPTS, start_timeout_ms=DEFAULT_START_TIMEOUT_MS, allow_recovery=False, task=None, retain_context=False, fix_round=None, history=None, tiers=None, qualifications=None, recovery=None, plan_id=None, work=None, on_prepare=None, on_before_send=None, on_result=None, retrospective_guard=None):
     """Hand each agent its brief using the selected context mode.
 
     `on_assigned(role, agent, at, status, context)` is called after each hand-off so the
@@ -604,6 +604,9 @@ def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle
         if not step["tier"]:
             verify_running_permissions(client, agents_by_name[step["agent"]], step["pane_id"])
 
+    if retrospective_guard is not None:
+        retrospective_guard.preflight(steps, statuses)
+
     # One session per run. Recovery keys clear somebody's input line, and for
     # Codex the key that does it exits the process when the line is empty, so
     # teamlead only clears text it can account for.
@@ -612,25 +615,38 @@ def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle
     for step in steps:
         name = step["agent"]
         agent = agents_by_name[name]
+        if retrospective_guard is not None:
+            retrospective_guard.before(step)
         if on_prepare is not None:
             on_prepare(step, statuses[name])
         cleared = False
         tier = tiers.get(step["role"])
         tier_record = None
-        before_input = None if tier else partial(verify_running_permissions, client, agent, step["pane_id"])
-        if before_input is not None:
+        def before_input():
+            if tier:
+                verify_running(client, agent, step["pane_id"], tier)
+            else:
+                verify_running_permissions(client, agent, step["pane_id"])
+            if retrospective_guard is not None:
+                retrospective_guard.before(step)
+
+        if not tier:
             # Earlier roles and their callbacks may replace a later worker.
             # Composer operations also recheck immediately before each input.
             before_input()
         if tier:
             proof = (verify_running(client, agent, step["pane_id"], tier) if skip_clear
-                     else restart_worker(client, agent, step["pane_id"], tier, sleep=sleep))
+                     else restart_worker(client, agent, step["pane_id"], tier, sleep=sleep,
+                                         before_transition=partial(retrospective_guard.before, step) if retrospective_guard else None,
+                                         before_start=partial(retrospective_guard.before_launch, step) if retrospective_guard else None))
             tier_record = {**tier, "launch_args": worker_launch_args(agent.kind, agent.launch_args), "verified": proof,
                            "prompt_hash": step["prompt_hash"]}
             # A fresh launch or retained-tier proof can become stale while the
             # composer is read. Verify the selected live tier before input.
-            before_input = partial(verify_running, client, agent, step["pane_id"], tier)
             cleared = not skip_clear
+            if cleared and retrospective_guard is not None:
+                live_proof = verify_running(client, agent, step["pane_id"], tier)
+                retrospective_guard.after_transition(step, launch_proof=live_proof)
         elif not skip_clear:
             pane_id = step["pane_id"]
             outcome = send_command(
@@ -643,6 +659,7 @@ def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle
                 warn=warn,
                 settle_sec=settle_sec,
                 before_input=before_input,
+                after_submit=partial(retrospective_guard.after_transition, step) if retrospective_guard else None,
             )
             client.agent_wait(name, until=SETTLE_STATES, timeout_ms=settle_timeout_ms)
             # `cleared` means the command was consumed AND the screen changed:
@@ -667,6 +684,8 @@ def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle
             # The clear's redraw races the next paste; a leftover `/` is what
             # made Claude Code read the assignment as a slash command.
             sleep(settle_sec)
+            if retrospective_guard is not None:
+                retrospective_guard.after_transition(step)
         context_session = None
         if task is not None and step["role"] == "developer":
             # Query again after the clear, or immediately before retaining.

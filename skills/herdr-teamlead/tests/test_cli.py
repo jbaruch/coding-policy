@@ -22,6 +22,7 @@ import json
 import shutil
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 from teamlead.cli import build_parser, main
@@ -109,6 +110,11 @@ class CliCase(unittest.TestCase):
     """Shared temp workspace: config, state, briefs, snapshot."""
 
     def setUp(self):
+        # These fixtures isolate the existing CLI/dispatch contracts. Real
+        # retrospective gates and storage are exercised in test_retrospective_runtime.
+        retro = patch("teamlead.cli.retrospective_runtime.Guard")
+        retro.start()
+        self.addCleanup(retro.stop)
         self.tmp = Path(tempfile.mkdtemp(prefix="teamlead-cli-test-"))
         self.addCleanup(shutil.rmtree, self.tmp)
         self.config = self.tmp / "config.json"

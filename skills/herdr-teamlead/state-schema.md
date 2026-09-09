@@ -3,7 +3,8 @@
 Schemas for the cross-invocation artifacts owned by `herdr-teamlead`, per
 `rules/stateful-artifacts.md`. The Python utility alone writes and migrates
 `state.json`. The lead maintains the separate Markdown task ledger; the utility
-does not parse or update that document.
+does not parse or update that document. The lead drafts retrospective synthesis;
+the utility alone records the saved notes and their separate index.
 
 ## Artifacts
 
@@ -12,10 +13,14 @@ does not parse or update that document.
 | `$XDG_STATE_HOME/teamlead/state.json` (default `~/.local/state/teamlead/state.json`, override `--state FILE`) | `skills/herdr-teamlead/teamlead/state.py` and its `recovery.py` helper, within the same owner skill | Snapshots, append-only assignments, and audited task recovery |
 | `$XDG_CONFIG_HOME/teamlead/config.json` (default `~/.config/teamlead/config.json`, override `--config FILE`) | the operator | Per-agent usage / clear commands; teamlead reads it and never writes it |
 | `<task-reports-dir>/TASK-LEDGER.md` | `herdr-teamlead`, written by the lead | Evidence-backed assignment acceptance and task completion across rounds |
+| `<canonical-state-path>.retrospectives/` | `herdr-teamlead`, through its retrospective utility | Immutable retrospective notes, versioned index, and transition coverage |
 
 The JSON formats and utility contracts below apply to `state.json` and config.
 The Markdown ledger has its own contract in Task Ledger below; adding it changes
 none of the existing JSON record shapes or versions.
+The retrospective sidecar also leaves `state.json` and assignment versions
+unchanged. Its canonical state path is the expanded, resolved path selected by
+`--state` or the existing default; separate state files have separate histories.
 
 `skills/herdr-teamlead/config.example.json` is an example to adapt and commission before live tier use. Config schema 2
 adds per-agent `tiers` and `launch_args`; schema 1 remains readable without tiers.
@@ -124,6 +129,97 @@ Execution guidance and the blank event template:
 
 ```text
 skills/herdr-teamlead/references/task-ledger.md
+```
+
+## Retrospective Artifacts
+
+Resolve the selected state path with `Path(...).expanduser().resolve()` and append
+the literal `.retrospectives`. This directory survives task worktree and report
+staging cleanup. Its owner is `herdr-teamlead`; only
+`skills/herdr-teamlead/teamlead/retrospective.py` and the owner's dispatch helpers
+write it. The lead supplies Markdown synthesis and source metadata through
+`retro-record`, never edits its index or installed notes directly.
+
+| File | Contract |
+| --- | --- |
+| `index.json` | Schema 1 object with canonical `state_path`, nullable `baseline_at`, append-only `records`, and recorded `transitions` |
+| `<id>.md` | Immutable UTF-8 completed note with schema 1 metadata and the lead's substantive synthesis |
+| `pending.json` | Schema 1 transaction journal with `previous_index` digest and proposed `record`; removed after the index commit |
+| `index.json.lock` | Utility lock; writers acquire it after the dispatch-state lock |
+
+Each completed `records` entry carries these fields:
+
+| Field | Meaning |
+| --- | --- |
+| `schema_version`, `id` | Version 1; unique lowercase identifier using letters, digits, underscores, or hyphens |
+| `completed_at` | Timezone-qualified completion time normalized to UTC |
+| `period_start`, `period_end` | Covered interval, ordered, reaching the check receipt's `checked_at`, and ending no later than completion |
+| `triggers` | `daily`, `transition`, or both |
+| `tasks` | Distinct covered task identifiers, including outgoing and proposed tasks in the checked coverage |
+| `participants`, `unavailable` | Workers whose saved input was considered; unavailable worker-to-reason map, accounting for every checked worker with no overlap |
+| `sources` | Receipts for inspected evidence files, each with canonical absolute `path`, SHA-256 `sha256`, and byte `size` |
+| `note` | Receipt for the installed immutable Markdown bytes |
+| `coverage` | Versioned worker-specific receipts binding outgoing work and the proposed transition |
+| `input_digest` | Canonical metadata digest used to detect changed retries |
+
+The saved note begins with a JSON metadata object between `---` delimiters:
+`schema_version`, `id`, `completed_at`, `period_start`, `period_end`, `triggers`,
+`tasks`, `participants`, `unavailable`, `sources`, and `coverage`. The lead's
+Markdown follows it. Recording retries retain the original completion time.
+
+Coverage binds the worker's latest original assignment identity, available
+dispatch identity, live native/session/process evidence, report digest or stated
+unavailability, and proposed role/model/effort/context and input paths. A recorded
+transition links that coverage to the utility's completed boundary and replacement
+identity. Later changes to another worker's assignment do not invalidate it.
+The owner rechecks relevant source bytes and live identity before applying coverage;
+an old note or Herdr completion label alone proves no present transition authority.
+The source's nullable `dispatch_evidence` contains the original dispatch row's
+`sha256` digest and nullable `report` receipt for its recorded implementation
+review. That review is distinct from the worker's own report. A changed dispatch
+record or review file invalidates its worker's coverage.
+An unreadable known review may have a null current `report` only with the source's
+explicit `unavailable` reason; its archived dispatch metadata remains bound by
+`sha256`. Restored readable bytes invalidate that recorded missing condition.
+
+Each `transitions` entry has `schema_version: 1`, unique content-derived `id`,
+UTC `at`, `agent`, the original `descriptor` coverage, and the verified `incoming`
+observation. The descriptor must match saved retrospective coverage or prove an
+exempt first start. The transition receipt bridges only the utility's own recorded
+boundary to that incoming worker; it does not cover later outgoing work.
+
+The cadence uses the latest completed retrospective, or the established first-work
+baseline when no retrospective exists. Failed checks and incomplete notes never
+advance it. Existing work with no usable history is due immediately. Coverage for
+a proposed transition is independent of the daily due decision.
+
+- **Writer** — the utility validates recording metadata and required nonempty
+  synthesis sections, reads source bytes, and atomically installs the completed
+  note before committing the index. The lead judges the content's substance.
+  Writes serialize under the sidecar lock. Identical retries preserve the existing
+  record and its completion time; conflicting IDs or pending transactions fail
+  with a diagnostic. A journal preserves interrupted recording for reconciliation.
+- **Readers** — `retro-list` and `retro-show` accept schema 1 and verify installed
+  note digests. They read without Herdr, config, dispatch-state migration, or
+  writes. `retro-list --since` includes records completed at or after its cutoff;
+  `retro-show` selects the latest completion unless an ID is supplied. Historical
+  evidence sources may be unavailable after cleanup; the saved note remains
+  retrievable. Applying its transition coverage still revalidates source evidence.
+- **Missing, corrupt, or unsupported** — a missing history means no prior
+  retrospective. It never proves an existing worker is new or authorizes a send.
+  Preserve orphan notes, pending transactions, corrupted files, and newer formats;
+  report the diagnostic and restore original bytes or update the owner. Never
+  overwrite them with an empty index or manufacture completion coverage.
+- **Migration** — version 1 is the first format. Only `herdr-teamlead` may migrate
+  documented older formats, preserving notes and historical records. Future shape
+  changes bump the document and affected record versions. An unsupported reader
+  has no usable prior state and must not launch, clear, retry, or reset counters
+  from that fallback.
+
+Execution, source collection, note structure, and command inputs:
+
+```text
+skills/herdr-teamlead/references/retrospectives.md
 ```
 
 ## State Record Format

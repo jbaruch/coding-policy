@@ -553,7 +553,7 @@ class HerdrClient:
         """
         return self._run_optional_json(self.argv_pane_send_keys(pane_id, keys))
 
-    def send_slash_command(self, pane_id, text, enter_count=1, before_input=None):
+    def send_slash_command(self, pane_id, text, enter_count=1, before_input=None, after_submit=None):
         """Deliver a slash command the way a human types it.
 
         `agent prompt` delivers text through the pane's live bracketed-paste
@@ -576,9 +576,11 @@ class HerdrClient:
             if before_input is not None:
                 before_input()
             key_results.append(self.pane_send_keys(pane_id, [SUBMIT_KEY]))
+            if after_submit is not None:
+                after_submit()
         return {"send_text": text_result, "send_keys": key_results[-1]}
 
-    def deliver_slash_command(self, delivery, agent_name, pane_id, text, enter_count=1, before_input=None):
+    def deliver_slash_command(self, delivery, agent_name, pane_id, text, enter_count=1, before_input=None, after_submit=None):
         """Send a slash command by whichever mechanism this agent needs.
 
         The choice is per-agent because the TUIs disagree: pasting is read as
@@ -588,9 +590,12 @@ class HerdrClient:
         if delivery == SLASH_DELIVERY_PASTE:
             if before_input is not None:
                 before_input()
-            return {"paste": self.agent_prompt(agent_name, text)}
+            result = {"paste": self.agent_prompt(agent_name, text)}
+            if after_submit is not None:
+                after_submit()
+            return result
         if delivery == SLASH_DELIVERY_TYPE:
-            return self.send_slash_command(pane_id, text, enter_count=enter_count, before_input=before_input)
+            return self.send_slash_command(pane_id, text, enter_count=enter_count, before_input=before_input, after_submit=after_submit)
         raise HerdrError(
             "Unknown slash_delivery {!r} for agent {!r} - use {}.".format(
                 delivery, agent_name, " or ".join(repr(v) for v in SLASH_DELIVERIES)

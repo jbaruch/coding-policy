@@ -90,6 +90,10 @@ to know goes in the report.
   did, why, the decisions you made, open questions, every identifier a human
   needs (branch, PR number, commit SHAs, issue numbers), and a summary of the
   gate output.
+- Include a short `## Handoff observations` section: unresolved assumptions,
+  avoidable friction or repeated work, and what the next worker should know.
+  Cite concrete evidence; mark unavailable observations `unknown`. The lead
+  uses these saved observations for retrospectives without interrupting workers.
 - The **last line** of your final chat message is exactly:
 
   ```
