@@ -178,6 +178,9 @@ The source's nullable `dispatch_evidence` contains the original dispatch row's
 `sha256` digest and nullable `report` receipt for its recorded implementation
 review. That review is distinct from the worker's own report. A changed dispatch
 record or review file invalidates its worker's coverage.
+An unreadable known review may have a null current `report` only with the source's
+explicit `unavailable` reason; its archived dispatch metadata remains bound by
+`sha256`. Restored readable bytes invalidate that recorded missing condition.
 
 Each `transitions` entry has `schema_version: 1`, unique content-derived `id`,
 UTC `at`, `agent`, the original `descriptor` coverage, and the verified `incoming`

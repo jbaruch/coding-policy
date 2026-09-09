@@ -41,6 +41,10 @@ input is unavailable, with reasons. A busy or blocked worker receives no
 retrospective prompt, recovery key, or context clear. Daily synthesis can proceed
 with unavailable participation recorded. Missing reports, costs, usage, or outcome
 proof remain `unknown`; they do not become inferred measurements or passes.
+If a known review file is no longer readable, record that reason explicitly in
+the request and synthesize from the remaining ledger or saved notes. The utility
+preserves its archived receipt metadata and records unavailable current bytes;
+restoring the file changes the evidence and requires refreshed transition coverage.
 
 ## Write the retrospective
 
