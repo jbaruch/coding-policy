@@ -35,6 +35,13 @@ def mechanical_context():
             "input_bytes": 64000}
 
 
+#: Synthetic session identifiers for resumed-process proof (#382); no real session.
+SESSION = "00000000-0000-0000-0000-000000000000"
+OTHER_SESSION = "11111111-1111-4111-8111-111111111111"
+YOLO = {"claude": "--dangerously-skip-permissions", "codex": "--dangerously-bypass-approvals-and-sandbox",
+        "grok": "--always-approve"}
+
+
 class TierConfigTest(unittest.TestCase):
     def test_claude_all_five_efforts_and_haiku_omission(self):
         for effort in ("low", "medium", "high", "xhigh", "max"):
@@ -147,6 +154,88 @@ class ArgvTest(unittest.TestCase):
         ):
             with self.subTest(kind=kind, argv=argv), self.assertRaisesRegex(HerdrError, "before dispatch"):
                 verify_worker_permissions(kind, argv)
+
+    def test_resumed_live_permission_proof_accepts_one_explicit_session_with_yolo(self):
+        for kind, argv in (
+            # The issue's own reproduction: a resumed Codex worker with the explicit YOLO flag.
+            ("codex", ["codex", "resume", SESSION, "--dangerously-bypass-approvals-and-sandbox"]),
+            ("codex", ["/opt/homebrew/bin/codex", "resume", "--dangerously-bypass-approvals-and-sandbox", SESSION, "--no-alt-screen"]),
+            ("codex", ["codex", "resume", SESSION, "-a", "never", "-s", "danger-full-access", "-c", "model_reasoning_effort=high"]),
+            ("claude", ["claude", "--resume", SESSION, "--dangerously-skip-permissions"]),
+            ("claude", ["claude", "--dangerously-skip-permissions", "-r", SESSION.upper(), "--model", "opus-5", "--effort", "high"]),
+            ("claude", ["claude", "--permission-mode", "bypassPermissions", "--resume", SESSION]),
+            ("grok", ["grok", "-r", SESSION, "--always-approve", "--no-subagents"]),
+            ("grok", ["grok", "--resume", SESSION, "--permission-mode", "bypassPermissions", "--reasoning-effort", "high"]),
+        ):
+            with self.subTest(kind=kind, argv=argv):
+                self.assertIsNone(verify_worker_permissions(kind, argv))
+
+    def test_resumed_proof_still_requires_yolo_and_refuses_restrictive_modes(self):
+        for kind, argv, pattern in (
+            ("codex", ["codex", "resume", SESSION], "do not prove YOLO"),
+            ("codex", ["codex", "resume", SESSION, "-a", "never"], "do not prove YOLO"),
+            ("codex", ["codex", "resume", SESSION, "--full-auto"], "restrictive permission"),
+            ("codex", ["codex", "resume", SESSION, "--dangerously-bypass-approvals-and-sandbox", "-s", "read-only"], "restrictive permission"),
+            ("codex", ["codex", "resume", SESSION, "--dangerously-bypass-approvals-and-sandbox", "-c", 'approval_policy="on-request"'], "config override"),
+            ("claude", ["claude", "--resume", SESSION, "--permission-mode", "plan"], "restrictive permission"),
+            ("claude", ["claude", "--resume", SESSION, "--dangerously-skip-permissions", "--permission-mode", "acceptEdits"], "restrictive permission"),
+            ("claude", ["claude", "--resume", SESSION, "--model", "opus-5"], "do not prove YOLO"),
+            ("grok", ["grok", "--resume", SESSION], "do not prove YOLO"),
+            ("grok", ["grok", "--resume", SESSION, "--always-approve", "--always-approve"], "invalid permission/UI"),
+        ):
+            with self.subTest(kind=kind, argv=argv), self.assertRaisesRegex(HerdrError, pattern) as caught:
+                verify_worker_permissions(kind, argv)
+            # The diagnostic names both recoveries: a fresh worker, or the same-session restoration.
+            self.assertIn("dispatch-recovery.md", str(caught.exception))
+            self.assertIn("before dispatch", str(caught.exception))
+
+    def test_ambiguous_or_identity_changing_resume_forms_are_refused(self):
+        for kind, extra in (
+            ("claude", ["--resume"]), ("claude", ["--resume", "--model", "opus-5"]),
+            ("claude", ["--continue"]), ("claude", ["-c"]),
+            ("claude", ["--resume", SESSION, "--fork-session"]), ("claude", ["--session-id", SESSION]),
+            ("claude", ["--resume", "search term"]), ("claude", ["--resume", SESSION.replace("-", "")]),
+            ("claude", ["--resume", SESSION, "--resume", SESSION]), ("claude", ["-r", SESSION, "--resume", OTHER_SESSION]),
+            ("claude", ["--resume=" + SESSION]), ("claude", ["--from-pr", "12"]), ("claude", ["--teleport", SESSION]),
+            ("codex", ["resume"]), ("codex", ["resume", "--last"]), ("codex", ["resume", "--all", SESSION]),
+            ("codex", ["resume", "--include-non-interactive", SESSION]), ("codex", ["resume", "my-session-name"]),
+            ("codex", ["resume", SESSION, "fix the bug"]), ("codex", ["resume", SESSION, OTHER_SESSION]),
+            ("codex", [SESSION]),
+            ("grok", ["--resume"]), ("grok", ["--continue"]), ("grok", ["-c"]),
+            ("grok", ["--resume", "Session Title"]), ("grok", ["--resume", SESSION, "--fork-session"]),
+            ("grok", ["-s", SESSION]), ("grok", ["--session-id", SESSION]),
+            ("grok", ["--resume", SESSION, "--restore-code"]), ("grok", ["--resume", SESSION, "--worktree", "feat"]),
+        ):
+            argv = [kind] + extra + [YOLO[kind]]
+            with self.subTest(kind=kind, argv=argv), self.assertRaisesRegex(HerdrError, "before dispatch"):
+                verify_worker_permissions(kind, argv)
+        for kind, argv in (
+            ("codex", ["codex", "--dangerously-bypass-approvals-and-sandbox", "resume", SESSION]),
+            ("codex", ["sh", "-c", "codex resume " + SESSION + " --dangerously-bypass-approvals-and-sandbox"]),
+            ("codex", ["wrapper", "codex", "resume", SESSION, "--dangerously-bypass-approvals-and-sandbox"]),
+        ):
+            with self.subTest(kind=kind, argv=argv), self.assertRaisesRegex(HerdrError, "before dispatch"):
+                verify_worker_permissions(kind, argv)
+
+    def test_ambiguous_resume_diagnostics_name_the_explicit_session_requirement(self):
+        for kind, argv in (
+            ("codex", ["codex", "resume", "--last", "--dangerously-bypass-approvals-and-sandbox"]),
+            ("codex", ["codex", "resume", "--dangerously-bypass-approvals-and-sandbox"]),
+            ("claude", ["claude", "--continue", "--dangerously-skip-permissions"]),
+            ("claude", ["claude", "--resume", "--dangerously-skip-permissions"]),
+            ("grok", ["grok", "--resume", "Session Title", "--always-approve"]),
+        ):
+            with self.subTest(kind=kind, argv=argv), self.assertRaisesRegex(HerdrError, "explicit session UUID"):
+                verify_worker_permissions(kind, argv)
+
+    def test_launch_args_and_tier_proof_keep_refusing_resume_forms(self):
+        for kind, options in (("claude", ["--resume", SESSION]), ("codex", ["resume", SESSION]), ("grok", ["-r", SESSION])):
+            with self.subTest(kind=kind), self.assertRaisesRegex(ConfigError, "resume"):
+                worker_launch_args(kind, options)
+        tier = select_tier(agent(), "reviewer")
+        with self.assertRaises(HerdrError):
+            verify_argv("claude", tier, ["claude", "--dangerously-skip-permissions", "--resume", SESSION, "--model", "opus-5", "--effort", "high"],
+                        ["--dangerously-skip-permissions"])
 
     def test_worker_defaults_and_ui_options_use_yolo_for_each_cli(self):
         for kind, options, expected in (
