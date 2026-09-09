@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.204 — 2026-09-09
+
 ### Added
 
 - **Lead continuity, attention, and fleet supervision.** [Firstmate](https://github.com/kunchenguid/firstmate/tree/40c50ea8843c5b6a5351db8352675537252b653e)'s layered
