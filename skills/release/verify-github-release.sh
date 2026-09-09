@@ -104,6 +104,21 @@ json_escape() {
   printf '%s' "$value"
 }
 
+# Encode a tag as one URL path component. Git permits URL delimiters and
+# percent signs in refs; sending those raw can request a different tag.
+# Byte-wise encoding keeps UTF-8 intact without a runtime jq dependency.
+url_encode_tag() {
+  local LC_ALL=C value="$1" encoded="" char hex i
+  for (( i=0; i<${#value}; i++ )); do
+    char="${value:i:1}"
+    case "$char" in
+      [a-zA-Z0-9.~_-]) encoded+="$char" ;;
+      *) printf -v hex '%%%02X' "'$char"; encoded+="$hex" ;;
+    esac
+  done
+  printf '%s' "$encoded"
+}
+
 # One definitive no: the actionable stderr diagnostic first, then the
 # structured envelope on stdout, then exit 1. Both surfaces carry the
 # finding — a wrapper parsing stdout and an operator reading stderr each
@@ -168,9 +183,10 @@ main() {
   fi
 
   # Conjunct 2 — the release the run was supposed to create.
-  local row
+  local row encoded_tag
+  encoded_tag=$(url_encode_tag "$tag") || return $?
   rc=0
-  row=$(gh api "repos/${owner}/${repo}/releases/tags/${tag}" \
+  row=$(gh api "repos/${owner}/${repo}/releases/tags/${encoded_tag}" \
     --jq '[.tag_name, (.draft|tostring), ([.assets[]|select(.state == "uploaded")]|length|tostring), (.assets|length|tostring), .html_url] | @tsv' \
     2>"$VGR_ERR_FILE") || rc=$?
 

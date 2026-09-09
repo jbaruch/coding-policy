@@ -128,6 +128,10 @@ gh() {
     return 0
   fi
   [[ "$1" == "api" ]] || { echo "mock gh: unexpected invocation: $*" >&2; return 99; }
+  if [[ -n "${MOCK_EXPECTED_ENDPOINT:-}" && "$2" != "$MOCK_EXPECTED_ENDPOINT" ]]; then
+    echo "mock gh: wrong release endpoint: $2; expected $MOCK_EXPECTED_ENDPOINT" >&2
+    return 99
+  fi
   local mode
   mode=$(cat "$MOCK_MODE_FILE")
   case "$mode" in
@@ -430,6 +434,23 @@ JSON
   assert_eq "tag round-trips" "$weird" "$(echo "$out" | jq -r '.tag')" || return 1
 }
 run "a tag carrying a quote and a backslash emits valid JSON" test_quote_bearing_tag_emits_valid_json
+
+# Tags travel as one URL path component; '#' must not become a fragment
+# and percent escapes must not change which tag the API looks up.
+test_encoded_tag_endpoint() {
+  local tag='release/v1.0"quoted"#%2F-é' out rc=0
+  git check-ref-format "refs/tags/$tag" || return 1
+  # Dynamic scope confines this expectation to this test's invocation.
+  local MOCK_EXPECTED_ENDPOINT="repos/${OWNER}/${REPO}/releases/tags/release%2Fv1.0%22quoted%22%23%252F-%C3%A9"
+  jq -n --arg tag "$tag" '{tag_name: $tag, draft: false, html_url: "https://example.test/release", assets: [{name: "pkg.tar.gz", state: "uploaded"}]}' > "$MOCK_BODY_FILE" || return 1
+  set_mode ok
+  set_run success
+  out=$(invoke_main "$OWNER" "$REPO" "$tag" "$RUN_ID" 2>"$TMPDIR_TEST/err") || rc=$?
+  assert_eq "encoded tag exit code" "0" "$rc" || { cat "$TMPDIR_TEST/err" >&2; return 1; }
+  assert_eq "encoded tag confirms" "true" "$(ok_of "$out")" || return 1
+  assert_eq "encoded tag round-trips" "$tag" "$(echo "$out" | jq -r '.tag')" || return 1
+}
+run "release API lookup preserves reserved and UTF-8 tag bytes" test_encoded_tag_endpoint
 
 # --- An unescapable value is indeterminate, never a half-built envelope ------
 # json_escape runs inside a command substitution, so a status the caller
