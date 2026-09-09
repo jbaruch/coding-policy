@@ -117,7 +117,9 @@
           "qualification": []
         }
       },
-      "launch_args": []
+      "launch_args": [
+        "--dangerously-skip-permissions"
+      ]
     },
     {
       "name": "codex",
@@ -219,7 +221,9 @@
           "qualification": []
         }
       },
-      "launch_args": []
+      "launch_args": [
+        "--dangerously-bypass-approvals-and-sandbox"
+      ]
     },
     {
       "name": "grok",
@@ -328,7 +332,9 @@
           "qualification": []
         }
       },
-      "launch_args": []
+      "launch_args": [
+        "--always-approve"
+      ]
     },
     {
       "name": "judge",
@@ -355,7 +361,10 @@
         "Churned for"
       ],
       "model_label": "Fable 5.1",
-      "window_group": "claude-max-weekly"
+      "window_group": "claude-max-weekly",
+      "launch_args": [
+        "--dangerously-skip-permissions"
+      ]
     }
   ]
 }

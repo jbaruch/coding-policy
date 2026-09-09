@@ -64,8 +64,18 @@ TIER_FIELDS = frozenset({"model", "effort", "multiplier", "billing_evidence", "q
 MODEL_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/-]*\Z")
 LAUNCH_SWITCHES = {
     "claude": frozenset({"--dangerously-skip-permissions"}),
-    "codex": frozenset({"--full-auto", "--no-alt-screen"}),
+    "codex": frozenset({"--full-auto", "--no-alt-screen", "--dangerously-bypass-approvals-and-sandbox"}),
     "grok": frozenset({"--always-approve", "--no-subagents", "--no-alt-screen"}),
+}
+YOLO_FLAGS = {
+    "claude": "--dangerously-skip-permissions",
+    "codex": "--dangerously-bypass-approvals-and-sandbox",
+    "grok": "--always-approve",
+}
+YOLO_OPTION_VALUES = {
+    "--permission-mode": "bypassPermissions",
+    "-a": "never", "--ask-for-approval": "never",
+    "-s": "danger-full-access", "--sandbox": "danger-full-access",
 }
 LAUNCH_OPTIONS = {
     "claude": {"--permission-mode": {"default", "acceptEdits", "auto", "dontAsk", "bypassPermissions", "plan"}},
@@ -100,6 +110,86 @@ def parse_launch_args(args, kind):
         else:
             _error("Unsupported launch option {!r}; model, effort, resume and prompt overrides are forbidden.".format(flag))
     return list(args)
+
+
+def worker_launch_args(kind, args=()):
+    """Require YOLO for new/live workers while preserving supported UI flags.
+
+    Installed CLI --help verifies YOLO_FLAGS. The lead's classifier screens
+    assignments; launch mode never grants work beyond their authorized scope.
+    Restrictive operator options fail before a worker is stopped. Compatible
+    aliases normalize to one flag, preventing contradictory CLI precedence.
+    Archive readers keep parse_launch_args/verify_argv's historical contract.
+    """
+    if kind not in YOLO_FLAGS:
+        raise ConfigError("No YOLO launch adapter for {!r}; configure a supported worker kind before starting it.".format(kind), {})
+    parsed = parse_launch_args(list(args), kind)
+    options = []
+    offset = 0
+    while offset < len(parsed):
+        flag = parsed[offset]
+        if flag == "--full-auto" or (
+            flag in YOLO_OPTION_VALUES and parsed[offset + 1] != YOLO_OPTION_VALUES[flag]
+        ):
+            raise ConfigError("launch_args option {!r} conflicts with required YOLO mode; remove restrictive permission/sandbox options from config.json and use {}.".format(flag, YOLO_FLAGS[kind]), {})
+        if flag in YOLO_OPTION_VALUES:
+            offset += 2
+        else:
+            if flag != YOLO_FLAGS[kind]:
+                options.append(flag)
+            offset += 1
+    return [YOLO_FLAGS[kind]] + options
+
+
+def verify_worker_permissions(kind, argv):
+    """Prove a legacy worker's YOLO argv without inventing model-tier data.
+
+    Accept only the launch adapter's permission/UI options and model/effort
+    arguments. Unknown configuration, wrappers, resumes and prompt operands
+    cannot establish permission proof. Codex config overrides are restricted
+    to its documented reasoning-effort key so approval overrides cannot hide.
+    """
+    recovery = "Inspect its foreground argv and start a fresh worker with the documented YOLO flags before dispatch."
+    if (kind not in YOLO_FLAGS or not isinstance(argv, list) or not argv
+            or any(not isinstance(arg, str) for arg in argv) or PurePath(argv[0]).name != kind):
+        raise HerdrError("Worker has no usable YOLO process proof. " + recovery, {})
+    model_options = {"claude": {"--model", "--effort"}, "codex": {"-m", "--model", "-c", "--config"},
+                     "grok": {"-m", "--model", "--reasoning-effort", "--effort"}}[kind]
+    permissions = []
+    pairs = {}
+    offset = 1
+    while offset < len(argv):
+        flag = argv[offset]
+        if flag in LAUNCH_SWITCHES[kind]:
+            permissions.append(flag)
+            offset += 1
+        elif flag in LAUNCH_OPTIONS[kind] or flag in model_options:
+            if offset + 1 >= len(argv) or not argv[offset + 1] or argv[offset + 1].startswith("-"):
+                raise HerdrError("Worker has incomplete launch arguments. " + recovery, {})
+            value = argv[offset + 1]
+            if flag in LAUNCH_OPTIONS[kind]:
+                permissions.extend((flag, value))
+                pairs[flag] = value
+            elif kind == "codex" and flag in {"-c", "--config"} and not re.fullmatch(
+                r'model_reasoning_effort=(?:[a-z]+|"[a-z]+")', value
+            ):
+                raise HerdrError("Worker config override cannot establish YOLO permission proof. " + recovery, {})
+            offset += 2
+        else:
+            raise HerdrError("Worker has unsupported launch arguments for YOLO proof. " + recovery, {})
+    try:
+        parse_launch_args(permissions, kind)
+    except ConfigError as exc:
+        raise HerdrError("Worker has invalid permission/UI launch options: {} {}".format(exc.message, recovery), {}) from None
+    try:
+        worker_launch_args(kind, permissions)
+    except ConfigError:
+        raise HerdrError("Worker has restrictive permission options. " + recovery, {}) from None
+    equivalent = (pairs.get("--permission-mode") == "bypassPermissions" if kind != "codex" else
+                  (pairs.get("-a") == "never" or pairs.get("--ask-for-approval") == "never")
+                  and (pairs.get("-s") == "danger-full-access" or pairs.get("--sandbox") == "danger-full-access"))
+    if YOLO_FLAGS[kind] not in permissions and not equivalent:
+        raise HerdrError("Worker launch arguments do not prove YOLO mode. " + recovery, {})
 
 
 def parse_tiers(raw, kind):
@@ -254,5 +344,5 @@ effort tokens do not establish proof.
     if not isinstance(argv, list) or not argv or any(not isinstance(arg, str) for arg in argv):
         raise HerdrError("Worker launch returned no argv array; read the process before dispatch.", {})
     if PurePath(argv[0]).name != kind or argv[1:] != list(launch_args) + launch_flags(kind, tier):
-        raise HerdrError("Worker launch argv did not match the requested model and effort; no brief may be sent.", {"kind": kind})
+        raise HerdrError("Worker launch argv did not match the requested model, effort and launch options; start a fresh worker with the required arguments before dispatch. No brief may be sent.", {"kind": kind})
     return {"model": tier["model"], "effort": tier.get("effort"), "argv": list(argv), "source": "launch_argv"}

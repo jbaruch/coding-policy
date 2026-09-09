@@ -35,6 +35,7 @@ import os
 import time
 import hashlib
 from pathlib import Path
+from functools import partial
 
 from .composer import (
     COMPOSER_SETTLE_SEC,
@@ -56,8 +57,8 @@ from .probe import PROBE_READ_LINES, PROBE_READ_SOURCE, resolve_status, stderr_w
 from .chronology import latest_assignment
 from .state import MAX_FIX_ROUNDS
 from .recovery import empty_recovery, fresh_transition, task_record, validate_work
-from .launch import restart_worker, verify_running
-from .tiers import launch_flags
+from .launch import restart_worker, verify_running, verify_running_permissions
+from .tiers import launch_flags, worker_launch_args
 from .qualification import require_qualification
 
 # Version 3 adds verified model-tier metadata to context and task/fix evidence.
@@ -400,6 +401,7 @@ def build_steps(client, assignments, agents_by_name, paths, panes=None, no_clear
     steps = []
     for role, name in assignments.items():
         agent = agents_by_name[name]
+        launch_args = worker_launch_args(agent.kind, agent.launch_args)
         pane_id = panes.get(name) or PANE_ID_PLACEHOLDER
         text = assignment_text(role, paths["common"], paths[role])
         composer_reads = (
@@ -434,18 +436,21 @@ def build_steps(client, assignments, agents_by_name, paths, panes=None, no_clear
                 commands.append(["kill", "-TERM", "VERIFIED-IDLE-FOREGROUND-PID"])
                 commands.append(client.argv_pane_process_info(pane_id))
                 commands.append(client.argv_agent_start(name, agent.kind, pane_id,
-                    list(agent.launch_args) + launch_flags(agent.kind, tier)))
-        elif not no_clear:
+                    launch_args + launch_flags(agent.kind, tier)))
+        else:
+            # Initial all-target preflight, then this role's own boundary.
+            commands.append(client.argv_pane_process_info(pane_id))
+            commands.append(client.argv_pane_process_info(pane_id))
+            conditional.append((client.argv_pane_process_info(pane_id),
+                                "immediately before each recovery keystroke or extra Enter"))
+        if not tier and not no_clear:
             commands.extend(composer_reads)
-            commands.extend(
-                client.argv_deliver_slash_command(
-                    agent.slash_delivery,
-                    name,
-                    pane_id,
-                    agent.clear_prompt,
-                    enter_count=agent.slash_enter_count,
-                )
-            )
+            for command in client.argv_deliver_slash_command(
+                agent.slash_delivery, name, pane_id, agent.clear_prompt,
+                enter_count=agent.slash_enter_count,
+            ):
+                commands.append(client.argv_pane_process_info(pane_id))
+                commands.append(command)
             commands.extend(composer_reads)
             commands.append(
                 client.argv_agent_wait(name, until=SETTLE_STATES, timeout_ms=settle_timeout_ms)
@@ -469,6 +474,7 @@ def build_steps(client, assignments, agents_by_name, paths, panes=None, no_clear
             commands.append(client.argv_agent_get(name))
         commands.extend(composer_reads)
         # The assignment is real message text, so pasting it is correct.
+        commands.append(client.argv_pane_process_info(pane_id))
         commands.append(client.argv_agent_prompt(name, text))
         # Sending is not starting: confirm it landed as a user message.
         commands.extend(composer_reads)
@@ -534,7 +540,7 @@ def check_all_ready(client, assignments, agents_by_name, warn=None):
     return statuses
 
 
-def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle_timeout_ms=DEFAULT_SETTLE_TIMEOUT_MS, on_assigned=None, warn=None, sleep=time.sleep, settle_sec=COMPOSER_SETTLE_SEC, landing_attempts=LANDING_ATTEMPTS, start_timeout_ms=DEFAULT_START_TIMEOUT_MS, allow_recovery=False, task=None, retain_context=False, fix_round=None, history=None, tiers=None, qualifications=None, recovery=None, plan_id=None, work=None, on_prepare=None, on_before_send=None, on_result=None):
+def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle_timeout_ms=DEFAULT_SETTLE_TIMEOUT_MS, on_assigned=None, warn=None, sleep=time.sleep, settle_sec=COMPOSER_SETTLE_SEC, landing_attempts=LANDING_ATTEMPTS, start_timeout_ms=DEFAULT_START_TIMEOUT_MS, allow_recovery=False, task=None, retain_context=False, fix_round=None, history=None, tiers=None, qualifications=None, recovery=None, plan_id=None, work=None, on_prepare=None, on_before_send=None, on_result=None, retrospective_guard=None):
     """Hand each agent its brief using the selected context mode.
 
     `on_assigned(role, agent, at, status, context)` is called after each hand-off so the
@@ -589,6 +595,17 @@ def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle
         track_context=task is not None,
         tiers=tiers,
     )
+    # Prove every pre-existing legacy worker before any role receives input.
+    # The team lead starts these workers manually; apply never guesses a tier
+    # or silently restarts a retained session to repair its permission mode.
+    for step in steps:
+        if step["pane_id"] == PANE_ID_PLACEHOLDER:
+            raise UsageError("Herdr reported no pane for {!r}; inspect `herdr agent list` before dispatch so live YOLO arguments can be verified.".format(step["agent"]), {})
+        if not step["tier"]:
+            verify_running_permissions(client, agents_by_name[step["agent"]], step["pane_id"])
+
+    if retrospective_guard is not None:
+        retrospective_guard.preflight(steps, statuses)
 
     # One session per run. Recovery keys clear somebody's input line, and for
     # Codex the key that does it exits the process when the line is empty, so
@@ -598,28 +615,40 @@ def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle
     for step in steps:
         name = step["agent"]
         agent = agents_by_name[name]
+        if retrospective_guard is not None:
+            retrospective_guard.before(step)
         if on_prepare is not None:
             on_prepare(step, statuses[name])
         cleared = False
         tier = tiers.get(step["role"])
         tier_record = None
+        def before_input():
+            if tier:
+                verify_running(client, agent, step["pane_id"], tier)
+            else:
+                verify_running_permissions(client, agent, step["pane_id"])
+            if retrospective_guard is not None:
+                retrospective_guard.before(step)
+
+        if not tier:
+            # Earlier roles and their callbacks may replace a later worker.
+            # Composer operations also recheck immediately before each input.
+            before_input()
         if tier:
             proof = (verify_running(client, agent, step["pane_id"], tier) if skip_clear
-                     else restart_worker(client, agent, step["pane_id"], tier, sleep=sleep))
-            tier_record = {**tier, "launch_args": list(agent.launch_args), "verified": proof,
+                     else restart_worker(client, agent, step["pane_id"], tier, sleep=sleep,
+                                         before_transition=partial(retrospective_guard.before, step) if retrospective_guard else None,
+                                         before_start=partial(retrospective_guard.before_launch, step) if retrospective_guard else None))
+            tier_record = {**tier, "launch_args": worker_launch_args(agent.kind, agent.launch_args), "verified": proof,
                            "prompt_hash": step["prompt_hash"]}
+            # A fresh launch or retained-tier proof can become stale while the
+            # composer is read. Verify the selected live tier before input.
             cleared = not skip_clear
+            if cleared and retrospective_guard is not None:
+                live_proof = verify_running(client, agent, step["pane_id"], tier)
+                retrospective_guard.after_transition(step, launch_proof=live_proof)
         elif not skip_clear:
             pane_id = step["pane_id"]
-            if agent.slash_delivery == SLASH_DELIVERY_TYPE and pane_id == PANE_ID_PLACEHOLDER:
-                raise UsageError(
-                    "herdr reported no pane for agent {!r}, so its {} command "
-                    "cannot be typed - confirm the agent is live with "
-                    "`herdr agent list`, or pass --no-clear.".format(
-                        name, agent.clear_prompt
-                    ),
-                    {"agent": name},
-                )
             outcome = send_command(
                 client,
                 agent,
@@ -629,6 +658,8 @@ def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle
                 sleep=sleep,
                 warn=warn,
                 settle_sec=settle_sec,
+                before_input=before_input,
+                after_submit=partial(retrospective_guard.after_transition, step) if retrospective_guard else None,
             )
             client.agent_wait(name, until=SETTLE_STATES, timeout_ms=settle_timeout_ms)
             # `cleared` means the command was consumed AND the screen changed:
@@ -653,6 +684,8 @@ def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle
             # The clear's redraw races the next paste; a leftover `/` is what
             # made Claude Code read the assignment as a slash command.
             sleep(settle_sec)
+            if retrospective_guard is not None:
+                retrospective_guard.after_transition(step)
         context_session = None
         if task is not None and step["role"] == "developer":
             # Query again after the clear, or immediately before retaining.
@@ -685,6 +718,7 @@ def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle
             settle_sec=settle_sec,
             attempts=landing_attempts,
             start_timeout_ms=start_timeout_ms,
+            before_input=before_input,
         )
         if task is not None and step["role"] == "developer" and prior is None:
             context_session = (correlate_dispatch_session(

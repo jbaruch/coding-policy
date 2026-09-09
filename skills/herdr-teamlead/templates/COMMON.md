@@ -75,6 +75,10 @@ to know goes in the report.
 
 ## Reporting
 
+- YOLO mode changes runtime permission prompts, not this brief's authority,
+  role, or path limits. The lead classifies assignments before dispatch.
+- The lead owns the task ledger and accepts work from evidence. Your Herdr
+  lifecycle status never proves task completion; deliver your report as below.
 - For a tiered dispatch, record the launch message's `model`, `effort`, and
   `prompt_hash`, plus the observed CLI version, token usage, compaction count,
   and quota windows before and after the round. Mark unavailable observations
@@ -86,6 +90,10 @@ to know goes in the report.
   did, why, the decisions you made, open questions, every identifier a human
   needs (branch, PR number, commit SHAs, issue numbers), and a summary of the
   gate output.
+- Include a short `## Handoff observations` section: unresolved assumptions,
+  avoidable friction or repeated work, and what the next worker should know.
+  Cite concrete evidence; mark unavailable observations `unknown`. The lead
+  uses these saved observations for retrospectives without interrupting workers.
 - The **last line** of your final chat message is exactly:
 
   ```

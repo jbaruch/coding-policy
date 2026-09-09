@@ -16,11 +16,13 @@ if _ROOT not in _sys.path:
     _sys.path.insert(0, _ROOT)
 
 import inspect
+import json
 import os
 import shutil
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from teamlead.assign import (
     pane_label,
@@ -255,12 +257,17 @@ class BuildStepsTest(unittest.TestCase):
             [command["shell"] for command in steps[0]["commands"]],
             [
                 "herdr agent get grok",
+                "herdr pane process-info --pane w4:p1",
+                "herdr pane process-info --pane w4:p1",
                 "herdr agent read grok --source visible --lines 20 --format ansi",
+                "herdr pane process-info --pane w4:p1",
                 "herdr pane send-text w4:p1 /new",
+                "herdr pane process-info --pane w4:p1",
                 "herdr pane send-keys w4:p1 enter",
                 "herdr agent read grok --source visible --lines 20 --format ansi",
                 "herdr agent wait grok --until idle --until done --timeout 60000",
                 "herdr agent read grok --source visible --lines 20 --format ansi",
+                "herdr pane process-info --pane w4:p1",
                 "herdr agent prompt grok 'New assignment from the team lead. Your role "
                 "for this task is DEVELOPER. Read /w/COMMON.md in full, then read "
                 "/w/dev.md in full, and execute that brief exactly. Finish with the "
@@ -348,19 +355,19 @@ class BuildStepsTest(unittest.TestCase):
             self.client, {"developer": "grok"}, BY_NAME, self.paths, no_clear=True
         )
         shells = [command["shell"] for command in steps[0]["commands"]]
-        # get, the composer check that still gates the assignment, the message,
+        # get, permission proof, the composer check, the message,
         # then the two checks that it landed -- --no-clear skips the clear, not
         # the verification.
-        self.assertEqual(len(shells), 5)
+        self.assertEqual(len(shells), 8)
         self.assertEqual(shells[0], "herdr agent get grok")
-        self.assertEqual(
-            shells[1], "herdr agent read grok --source visible --lines 20 --format ansi"
-        )
-        self.assertIn("DEVELOPER", shells[2])
         self.assertEqual(
             shells[3], "herdr agent read grok --source visible --lines 20 --format ansi"
         )
-        self.assertEqual(shells[4], "herdr agent wait grok --until working --timeout 15000")
+        self.assertIn("DEVELOPER", shells[5])
+        self.assertEqual(
+            shells[6], "herdr agent read grok --source visible --lines 20 --format ansi"
+        )
+        self.assertEqual(shells[7], "herdr agent wait grok --until working --timeout 15000")
         self.assertEqual([s for s in shells if "/new" in s], [])
 
     def test_unknown_agent_name_is_refused(self):
@@ -619,7 +626,7 @@ class SlashCommandDeliveryTest(unittest.TestCase):
     def test_every_typed_command_is_followed_by_enter(self):
         runner = runner_with({"grok": "idle"})
         apply(HerdrClient(runner=runner), {"developer": "grok"}, BY_NAME, self.paths, AT)
-        commands = runner.commands()
+        commands = runner.writes()
         index = commands.index("pane send-text w4:p1 /new")
         self.assertEqual(commands[index + 1], "pane send-keys w4:p1 enter")
 
@@ -632,7 +639,7 @@ class SlashCommandDeliveryTest(unittest.TestCase):
         result = apply(
             HerdrClient(runner=runner), {"developer": "grok"}, BY_NAME, self.paths, AT
         )
-        commands = runner.commands()
+        commands = runner.writes()
         self.assertEqual(
             commands[commands.index("pane send-text w4:p1 /new") + 1],
             "pane send-keys w4:p1 enter",
@@ -659,7 +666,7 @@ class SlashCommandDeliveryTest(unittest.TestCase):
         )
         with self.assertRaises(UsageError) as caught:
             apply(HerdrClient(runner=runner), {"developer": "grok"}, BY_NAME, self.paths, AT)
-        self.assertIn("--no-clear", str(caught.exception))
+        self.assertIn("herdr agent list", str(caught.exception))
         self.assertEqual(runner.writes(), [])
 
 
@@ -1135,6 +1142,93 @@ class DuplicateAgentTest(unittest.TestCase):
 
 
 class ApplyTest(unittest.TestCase):
+    @staticmethod
+    def replace_worker_without_yolo(runner, name):
+        runner.set("pane process-info --pane " + PANES[name], json.dumps({"result": {"process_info": {
+            "pane_id": PANES[name], "foreground_processes": [{"name": name, "pid": 999, "argv": [name]}]}}}))
+
+    def test_later_worker_changed_after_first_result_receives_no_clear_or_prompt(self):
+        runner = runner_with({"grok": "idle", "claude": "idle"})
+        results = []
+
+        def preserve_result_and_replace_later_worker(record):
+            results.append(record.copy())
+            self.replace_worker_without_yolo(runner, "claude")
+
+        with self.assertRaisesRegex(HerdrError, "do not prove YOLO"):
+            apply(HerdrClient(runner=runner), {"developer": "grok", "tester": "claude"}, BY_NAME, self.paths, AT,
+                  on_result=preserve_result_and_replace_later_worker)
+        self.assertEqual([(row["agent"], row["status"]) for row in results], [("grok", "applied")])
+        self.assertTrue(results[0]["landed"])
+        self.assertTrue(results[0]["started"])
+        self.assertFalse(any("claude" in command or PANES["claude"] in command for command in runner.writes()))
+
+    def test_worker_changed_after_clear_receives_no_assignment(self):
+        runner = runner_with({"grok": "idle"})
+        results = []
+        with self.assertRaisesRegex(HerdrError, "do not prove YOLO"):
+            apply(HerdrClient(runner=runner), {"developer": "grok"}, BY_NAME, self.paths, AT,
+                  on_before_send=lambda *_: self.replace_worker_without_yolo(runner, "grok"), on_result=results.append)
+        self.assertEqual(runner.writes(), ["pane send-text w4:p1 /new", "pane send-keys w4:p1 enter"])
+        self.assertEqual(results, [])
+
+    def test_worker_changed_during_composer_read_receives_no_recovery_or_clear(self):
+        runner = runner_with({"grok": "idle"})
+        client = HerdrClient(runner=runner)
+
+        def read_replaced_worker(*_args, **_kwargs):
+            self.replace_worker_without_yolo(runner, "grok")
+            return composer_screen("grok", held="old operator text")
+
+        with patch.object(client, "agent_read", side_effect=read_replaced_worker), self.assertRaisesRegex(HerdrError, "do not prove YOLO"):
+            apply(client, {"developer": "grok"}, BY_NAME, self.paths, AT, allow_recovery=True, warn=lambda _: None)
+        self.assertEqual(runner.writes(), [])
+
+    def test_worker_replaced_after_slash_text_receives_no_enter(self):
+        runner = runner_with({"grok": "idle"})
+        client = HerdrClient(runner=runner)
+        original_send_text = client.pane_send_text
+
+        def type_then_replace(pane, text):
+            result = original_send_text(pane, text)
+            self.replace_worker_without_yolo(runner, "grok")
+            return result
+
+        with patch.object(client, "pane_send_text", side_effect=type_then_replace), self.assertRaisesRegex(HerdrError, "do not prove YOLO"):
+            apply(client, {"developer": "grok"}, BY_NAME, self.paths, AT)
+        self.assertEqual(runner.writes(), ["pane send-text w4:p1 /new"])
+
+    def test_legacy_worker_permissions_are_proved_for_all_targets_before_any_input(self):
+        runner = runner_with({"grok": "idle", "claude": "idle"})
+        runner.set("pane process-info --pane " + PANES["claude"], json.dumps({"result": {"process_info": {
+            "pane_id": PANES["claude"], "foreground_processes": [{"name": "claude", "pid": 200, "argv": ["claude"]}]}}}))
+        with self.assertRaisesRegex(HerdrError, "do not prove YOLO"):
+            apply(HerdrClient(runner=runner), {"developer": "grok", "tester": "claude"}, BY_NAME, self.paths, AT)
+        self.assertEqual(runner.writes(), [])
+        self.assertIn("pane process-info --pane " + PANES["grok"], runner.commands())
+
+    def test_legacy_no_clear_refuses_wrong_permissions_without_restarting(self):
+        runner = runner_with({"grok": "idle"})
+        runner.set("pane process-info", json.dumps({"result": {"process_info": {
+            "pane_id": PANES["grok"], "foreground_processes": [{"name": "grok", "pid": 200,
+                "argv": ["grok", "--permission-mode", "plan"]}]}}}))
+        with self.assertRaisesRegex(HerdrError, "restrictive permission"):
+            apply(HerdrClient(runner=runner), {"developer": "grok"}, BY_NAME, self.paths, AT, no_clear=True)
+        self.assertEqual(runner.writes(), [])
+        self.assertFalse(any(command.startswith(("agent start", "-TERM")) for command in runner.commands()))
+
+    def test_legacy_unknown_or_unreadable_process_refuses_before_clear_or_send(self):
+        for failure in ("missing", "unknown", "unreadable"):
+            runner = runner_with({"grok": "idle"})
+            process = {"pane_id": PANES["grok"], "foreground_processes": []}
+            if failure == "unknown":
+                process["foreground_processes"] = [{"name": "zsh", "pid": 200, "argv": ["zsh"]}]
+            runner.set("pane process-info", json.dumps({"result": {"process_info": process}}),
+                       returncode=7 if failure == "unreadable" else 0, stderr="process information unavailable")
+            with self.subTest(failure=failure), self.assertRaises(HerdrError):
+                apply(HerdrClient(runner=runner), {"developer": "grok"}, BY_NAME, self.paths, AT)
+            self.assertEqual(runner.writes(), [])
+
     def setUp(self):
         self.paths = {
             "common": "/w/COMMON.md",
@@ -1149,12 +1243,17 @@ class ApplyTest(unittest.TestCase):
             runner.commands(),
             [
                 "agent get grok",
+                "pane process-info --pane w4:p1",
+                "pane process-info --pane w4:p1",
                 "agent read grok --source visible --lines 20 --format ansi",
+                "pane process-info --pane w4:p1",
                 "pane send-text w4:p1 /new",
+                "pane process-info --pane w4:p1",
                 "pane send-keys w4:p1 enter",
                 "agent read grok --source visible --lines 20 --format ansi",
                 "agent wait grok --until idle --until done --timeout 60000",
                 "agent read grok --source visible --lines 20 --format ansi",
+                "pane process-info --pane w4:p1",
                 "agent prompt grok 'New assignment from the team lead. Your role for "
                 "this task is DEVELOPER. Read /w/COMMON.md in full, then read /w/dev.md "
                 "in full, and execute that brief exactly. Finish with the REPORT line it "
@@ -1189,7 +1288,11 @@ class ApplyTest(unittest.TestCase):
             [
                 "agent get grok",
                 "agent get claude",
+                "pane process-info --pane w4:p1",
+                "pane process-info --pane w2:p1",
+                "pane process-info --pane w4:p1",
                 "agent read grok --source visible --lines 20 --format ansi",
+                "pane process-info --pane w4:p1",
             ],
         )
 

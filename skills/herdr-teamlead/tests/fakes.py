@@ -30,6 +30,7 @@ class FakeRunner:
         self.responses = dict(responses or {})
         self.raises = raises or {}
         self.calls = []
+        self.observed_agents = {}
 
     def set(self, prefix, stdout="", returncode=0, stderr=""):
         self.responses[prefix] = FakeCompleted(returncode, stdout, stderr)
@@ -46,6 +47,17 @@ class FakeRunner:
             if joined.startswith(prefix) and (best is None or len(prefix) > len(best)):
                 best = prefix
         if best is None:
+            # Existing dispatch fixtures describe native workers via agent get.
+            # Supply their normal YOLO foreground argv unless a test scripts
+            # process-info explicitly to exercise missing or restrictive proof.
+            if argv[1:4] == ["pane", "process-info", "--pane"] and argv[4] in self.observed_agents:
+                agent = self.observed_agents[argv[4]]
+                flags = {"claude": "--dangerously-skip-permissions", "codex": "--dangerously-bypass-approvals-and-sandbox",
+                         "grok": "--always-approve"}
+                kind = agent["agent"]
+                if kind in flags:
+                    return FakeCompleted(stdout=json.dumps({"result": {"process_info": {"pane_id": argv[4],
+                        "foreground_processes": [{"name": kind, "pid": 200, "argv": [kind, flags[kind]]}]}}}))
             raise AssertionError(
                 "FakeRunner has no scripted response for: {}\nscripted: {}".format(
                     joined, sorted(self.responses)
@@ -53,7 +65,14 @@ class FakeRunner:
             )
         response = self.responses[best]
         if isinstance(response, ScriptedReads):
-            return response.next_completed()
+            response = response.next_completed()
+        if argv[1:3] == ["agent", "get"] and response.returncode == 0:
+            try:
+                agent = json.loads(response.stdout).get("result", {}).get("agent", {})
+            except json.JSONDecodeError:
+                agent = {}
+            if isinstance(agent, dict) and agent.get("pane_id"):
+                self.observed_agents[agent["pane_id"]] = agent
         return response
 
     def commands(self):

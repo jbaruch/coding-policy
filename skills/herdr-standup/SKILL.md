@@ -118,6 +118,10 @@ file for the renderer:
 `grok (busy: refactor)`. Every field is optional. Take the content from the
 round log or the assignment ledger — never from a pane read, and never from a
 guess about what a worker is probably doing.
+Use the lead's schema-1 task ledger under
+`skills/herdr-teamlead/state-schema.md` for accepted completion. Read it without
+writing or migrating it. Missing or unsupported records mean unknown completion;
+dispatch status alone establishes none. Worker `DONE` answers remain self-reports.
 
 If every worker answered, skip the file. Proceed immediately to Step 5.
 
@@ -153,7 +157,10 @@ Print `block` from the saved output verbatim (`jq -r .block <file>`), exactly
 as the renderer emitted it. Do not reformat it, summarize it, or replace it
 with prose.
 
-Name `markdown_path` underneath, in one line. Add your own reading of
+Name `markdown_path` underneath, in one line. Add a provenance line identifying
+worker-reported rows and rows whose completion was verified from the task ledger.
+Label unavailable acceptance evidence as unknown; dispatch records prove none.
+Add your own reading of
 the standup only if a row carries something the operator should act on today —
 a blocker naming another worker, or a plan that contradicts the round in
 flight. Otherwise the table speaks for itself. Finish here.

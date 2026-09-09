@@ -155,11 +155,57 @@ description: Running a multi-agent team — headroom-driven role rotation, one w
 
 ## Dispatch Safety
 
+- Classify each assignment against the operator's task authorization and permitted actions before dispatch
 - Never send input to a `working` or `blocked` agent
 - Never clear a working agent's context
 - Wait on the report marker plus the report file, never on a single idle or done observation
 - Confirm a `blocked` verdict across two reads and the pane before acting on it
 - A blocked worker is surfaced to the operator, never answered on the operator's behalf beyond its brief
+
+## Worker Launch Mode
+
+- Start every team worker in YOLO mode, including reviewer, tester, release, and judge
+- Apply the same mode on every relaunch
+- Verify the worker's permission flags from launch or live foreground-process argv before dispatch
+- Preserve the assignment classifier and the brief's authority, role, and path limits
+- YOLO mode grants no additional task authority
+- Permission flags and their validation live in `skills/herdr-teamlead/teamlead/tiers.py`
+
+## Task Ledger
+
+- Herdr lifecycle and completion statuses are unreliable observations, never task-completion evidence
+- Maintain the lead-owned task ledger outside Herdr throughout the task
+- Record each dispatch outcome and each assessed worker outcome before continuing the round
+- Distinguish report delivery, accepted assignment work, and completion of the whole task
+- Bind acceptance to the actual report and the required artifact, VCS, and gate evidence
+- Reconcile recalled ledger entries against their sources on resume
+- Never restart accepted work solely on a stale Herdr status
+- The ledger's path, schema, ownership, and recovery contract are in `skills/herdr-teamlead/state-schema.md`
+
+## Retrospectives
+
+- The lead completes a retrospective at least every 24 hours during active team work
+- Check the cadence on active resume, before planning or dispatch, and between report waits
+- Complete a retrospective before clearing or relaunching an existing worker, or changing its seat, model, or effort
+- Bind transition coverage to the outgoing work and session, source evidence, and proposed assignment
+- Cover simultaneous transitions in one retrospective
+- Reuse coverage only while the covered evidence and proposed transition remain unchanged
+- Narrow exception for a worker's first launch without outgoing work.
+- Preconditions (all required):
+  1. The owner has no preceding assignment for that worker
+  2. Live process evidence proves the target pane holds only its shell
+  3. No outgoing worker context or work needs a handoff
+- Every other worker transition requires retrospective coverage
+- Unknown worker history alone never proves a first launch
+- Collect observations from saved reports and read-only evidence
+- Never interrupt a working or blocked worker to collect retrospective input
+- Record verified outcomes, lessons, evidence gaps, and concrete improvements with owners and success criteria
+- Revisit prior improvement actions
+- A status snapshot or dispatch log alone never completes a retrospective
+- Persist completed notes outside task worktrees and preserve them during cleanup
+- Retrieve saved notes on request with their date, coverage, and path
+- Retrospectives grant no task authority, correction allowance, acceptance, or gate waiver
+- Execution, persistence, and retrieval contracts are in `skills/herdr-teamlead/references/retrospectives.md`
 
 ## Review Before PR
 

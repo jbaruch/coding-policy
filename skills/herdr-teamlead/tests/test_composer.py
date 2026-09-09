@@ -323,6 +323,17 @@ class SendCommandTest(unittest.TestCase):
             len([c for c in runner.commands() if c == "pane send-keys w3:p1 enter"]), 2
         )
 
+    def test_live_guard_refuses_an_extra_enter_after_the_initial_delivery(self):
+        runner = self._runner([CODEX_EMPTY, CODEX_HELD])
+
+        def guard():
+            if len(runner.writes()) >= 2:
+                raise HerdrError("Foreground worker changed; inspect the pane before sending more input.", {})
+
+        with self.assertRaisesRegex(HerdrError, "Foreground worker changed"):
+            self._send(runner, before_input=guard)
+        self.assertEqual(runner.writes(), ["pane send-text w3:p1 /new", "pane send-keys w3:p1 enter"])
+
     def test_a_command_that_will_not_submit_is_refused(self):
         runner = self._runner([CODEX_EMPTY, CODEX_HELD])
         with self.assertRaises(HerdrError) as caught:

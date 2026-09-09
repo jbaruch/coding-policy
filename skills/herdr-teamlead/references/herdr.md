@@ -81,8 +81,8 @@ Claude Code and Codex need no restart for them
 
 A screen-derived state flickers by construction: it is whatever the pane looked
 like at the moment of the read. The report file plus the `REPORT: ` marker is
-therefore the primary completion signal by design, not a workaround for a
-broken lifecycle.
+the report-delivery signal. The lead assesses the actual work and records
+acceptance separately in `references/task-ledger.md`.
 
 Observed in the 2026-09-01 round:
 
@@ -93,8 +93,8 @@ Observed in the 2026-09-01 round:
   It runs in Full Access, where a permission prompt resolves itself before
   anything can observe it.
 
-A single `idle` or `done` observation is therefore never completion. Completion
-is the conjunction: the report file exists on disk AND the worker's final
+No Herdr status establishes task completion, even across repeated reads. Report
+delivery is the conjunction: the report file exists on disk AND the worker's final
 message ends with the literal last line `REPORT: <path>`. The reliable wait
 primitive is
 
@@ -408,14 +408,10 @@ brief, so the brief does not land in the clearing dialog.
 - **Same plugin, every worker.** All workers run from the shared checkout with
   the same tessl plugin installed, so the same hooks and skills load at session
   start and the same policy governs every role.
-- **A restarted Codex comes up asking permission.** `herdr agent start <name>
-  --kind codex` launches it in its default approval mode, where it blocks on
-  every edit and command — the round then stalls on a worker that looks
-  `blocked` because it genuinely is. Pass its approval flags after `--` when
-  the operator wants a hands-off worker: `codex --help` names the current set
-  (`-a, --ask-for-approval <on-request|never>`, `--full-auto`, and
-  `-s, --sandbox <read-only|workspace-write|danger-full-access>` at the time of
-  writing). Read that help rather than trusting this list; the flags change.
+- **Bare worker starts can enable permission prompts.** Follow the YOLO
+  launch contract in `references/model-tiers.md` for every start and restart.
+  Read the installed CLI's help when upgrading an adapter; a runtime's default
+  mode or an old pane banner never proves the required launch flags.
 - **One GitHub account.** The workers usually share the operator's GitHub
   account, and GitHub refuses `APPROVE` / `REQUEST_CHANGES` on that account's
   own PR. Internal reviews are therefore COMMENT reviews, and the lead enforces

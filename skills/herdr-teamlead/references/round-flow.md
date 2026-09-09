@@ -82,6 +82,11 @@ review their own branch.
 10. **Gate** — the lead reads every report in full and decides: another round,
    or the release hand-off.
 
+The lead appends decisions throughout this flow to the persistent task ledger,
+including before pauses and handoffs. `references/task-ledger.md` separates
+dispatch and report observations from assignment acceptance and task completion.
+All references to the round log here mean that ledger.
+
 ## Reading a Report
 
 A report is the worker's only channel to the lead. Read all of it, every time —
@@ -104,6 +109,43 @@ a `## BLOCKED` section can sit under a report that otherwise reads as finished.
 - **`wait-report.sh` exit 1** — the budget ran out. Read the pane before
   re-dispatching; a worker that is still working needs more budget, not a
   second copy of the same brief.
+
+## Release Gate
+
+Step 12 requires all four:
+
+1. The developer's report names the branch and the commit SHA it pushed.
+2. A broad reviewer **Mode B** report reviews that same SHA and carries no
+   blocking finding.
+3. A broad tester **Mode C** report verifies that same SHA, with the repo's
+   gates run and every acceptance criterion met.
+4. Nothing has been pushed to the branch after those two reports.
+
+A Phase 1 design note or test plan does not satisfy 2 or 3. A report against an
+older SHA does not either: re-run Phase 2 against the current tip. After scoped
+re-checks close the findings, re-run Phase 2 with `full` briefs before handing off
+to release. Scoped reports alone never satisfy this gate.
+
+## Blocking Gate
+
+At Step 12, read this task's confirmed fix history, name the next fix number,
+and return to Step 4 with self-contained briefs carrying the findings and prior
+reports. Preserve the developer for retained fixes; use a fresh context for the
+fresh-worker stage. Never reset the counter during re-planning. At an exhausted
+allowance, a contested verdict, or a lead override, go to Step 13 first. Use the
+recorded bounded plan for authorized extra attempts; collect each preceding
+attempt's actual blocking review before continuing.
+
+## Branch-Changing Ruling
+
+At Step 19, the lead never edits the branch itself. At an exhausted allowance,
+record the checkpoint and concrete correction proposal through the owner commands
+in `skills/herdr-teamlead/references/dispatch-recovery.md`. Report implementation
+as `waiting_for_operator` while the bounded decision is pending; finish the skill
+until it arrives. Record an explicit approval once and continue within it.
+Otherwise return to Step 12 carrying `ACTION:` verbatim as required work. Count
+that implementation as the next fix, under the same task identifier, and gate the
+resulting tip again before release.
 
 ## Why Phase 2 Runs Before the PR
 
@@ -198,7 +240,7 @@ and no degraded ruling.
 - Brief a write action on a repo the operator does not own without their
   explicit per-repo, per-action permission recorded in the brief.
 - Release on a Phase 1 report. A plan is not a verification.
-- Treat a single `idle` or `done` observation as completion.
+- Treat Herdr status as assignment acceptance or task completion.
 - Merge on a worker's behalf. The developer runs the release skill.
 - Act against a judge's ruling, or seat the judge on developer, reviewer, or
   tester. Only the operator overrides a ruling.

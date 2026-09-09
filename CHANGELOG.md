@@ -124,6 +124,56 @@
   it looked for. Removing the fixture's Tessl manifest reds six of those
   assertions, and a mutation that exempts on `agent-plugin.yaml` reds four.
 
+## 0.3.202 — 2026-09-09
+
+### Added
+
+- **Retrospectives that survive the team session.** The lead now reviews active
+  team work at least once per 24 hours and before clearing, relaunching, or
+  switching an existing worker's seat, model, or effort. The review compares
+  intended and verified outcomes, identifies useful checks and avoidable
+  friction, evaluates the observed fit of seats and models, and assigns concrete
+  improvements. Missing reports or measurements stay explicit gaps. Worker
+  reports include handoff observations; collecting feedback never interrupts
+  a working or blocked worker.
+
+  A status dump is not a retrospective. The lead writes the synthesis, and the
+  owner utility saves immutable notes and a versioned index beside the canonical
+  dispatch state. Daily cadence and transition coverage are separate checks:
+  a daily note cannot cover later work it never reviewed. One note can cover
+  a batch of outgoing assignments, with each worker bound independently to its
+  evidence and proposed transition. Saved notes remain available after cleanup,
+  including when Herdr is no longer running, with dates, task coverage, and paths.
+
+### Fixed
+
+- **Accurate worker-launch diagnostics (#378).** Malformed or duplicate launch
+  options now retain their specific validation error. The worker-permission
+  diagnostic labels genuinely restrictive options separately.
+
+## 0.3.201 — 2026-09-09
+
+### Changed
+
+- **YOLO workers and durable task decisions.** Every Herdr team member starts
+  and restarts in the runtime's YOLO mode, including reviewer, tester, release,
+  and judge. The lead classifies each assignment against the operator's task
+  authority before dispatch; permission prompts in a worker are not a second
+  assignment review. Launch verification preserves that mode without changing
+  the brief's role, path, or authority limits, and restrictive launch options
+  are refused before a worker is terminated.
+
+  Herdr's completion labels are observations, including repeated `idle` or
+  `done` readings. The lead now keeps a stable `TASK-LEDGER.md` beside the task's
+  reports, records dispatch and report outcomes as they occur, and distinguishes
+  delivered reports, accepted assignment work, and verified task completion.
+  Acceptance names the actual report, artifact revision, and required gates;
+  resumed work revalidates those sources instead of restarting on a stale pane
+  label. This Markdown decision log has a documented schema and lead ownership;
+  the existing JSON dispatch/recovery ledger retains its shape and authority.
+  Standup reads accepted completion from the task ledger and keeps worker claims
+  distinct. Cleanup preserves the ledger for future handoffs.
+
 ## 0.3.200 — 2026-09-08
 
 ### Fixed
