@@ -85,7 +85,7 @@ class AttentionTest(unittest.TestCase):
         for _ in range(3):
             result = catch_up(self.path, AFTER, since=LATER)
             self.assertEqual(result["attention"]["total"], 1)
-            self.assertIn("previously presented; still open", result["attention_markdown"])
+            self.assertIn("Still awaiting your answer.", result["attention_markdown"])
         self.assertEqual(self.saved(), before)
         self.assertIsNone(attention.show(self.path, "q1")["entry"]["resolution"])
 
@@ -201,6 +201,40 @@ class AttentionTest(unittest.TestCase):
         self.record({**obligation(kind="review"), "sources": [source("artifact", "/reports/My Report.md")]})
         result = catch_up(self.path, LATER)
         self.assertIn("[artifact](</reports/My Report.md>)", result["attention_markdown"])
+
+    def test_reader_sees_decision_before_bookkeeping(self):
+        data = {**obligation(), "sources": [source(), source("artifact", "/reports/design.md"),
+                                               source("task_ledger", "/reports/TASK-LEDGER.md")]}
+        self.record(data)
+        result = catch_up(self.path, LATER)
+        rendered = result["attention_markdown"]
+        self.assertIn("## Choose the migration boundary", rendered)
+        self.assertIn(data["context"], rendered)
+        self.assertIn(data["consequence"], rendered)
+        self.assertIn("**Needed:** " + data["resolution_condition"], rendered)
+        self.assertIn("Recommendation: " + data["recommendation"], rendered)
+        self.assertNotIn("`q1`", rendered)
+        self.assertNotIn("priority 50", rendered)
+        self.assertNotIn("not yet recorded as presented", rendered)
+        self.assertNotIn("conversation/1/message/3", rendered)
+        self.assertNotIn("Saved sources", result["markdown"])
+        self.assertNotIn("grants no task acceptance", result["markdown"])
+        self.assertEqual(result["attention"]["items"][0]["id"], "q1")
+        self.assertEqual(result["attention"]["items"][0]["priority"], 50)
+        self.assertEqual(result["attention"]["items"][0]["sources"], data["sources"])
+        self.assertIn("[artifact](</reports/design.md>)", rendered)
+
+    def test_progress_freshness_is_readable_without_repeating_storage_paths(self):
+        ledger = source("task_ledger", "/reports/TASK-LEDGER.md")
+        for index, assessment in enumerate(("verified", "reported", "unknown")):
+            attention.write(self.path, "progress", {"id": "p" + str(index), "task": "owner/repo#5",
+                            "summary": "Progress snapshot " + str(index), "assessment": assessment, "sources": [ledger]}, AT)
+        result = catch_up(self.path, LATER)
+        self.assertIn("Verified when recorded · 2026-09-01T10:00:00+00:00", result["markdown"])
+        self.assertIn("Reported; acceptance unverified", result["markdown"])
+        self.assertIn("Acceptance unknown", result["markdown"])
+        self.assertNotIn(result["attention_path"], result["markdown"])
+        self.assertIn("retrospective_index", result)
 
     def test_task_filter_and_closed_history(self):
         self.record()

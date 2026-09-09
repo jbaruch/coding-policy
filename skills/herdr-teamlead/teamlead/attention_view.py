@@ -28,57 +28,73 @@ def _source_link(source):
     return "{}: {}".format(label, _short(ref, 2000))
 
 
+def _useful_links(sources):
+    rank = {"artifact": 0, "task_ledger": 1, "retrospective": 2, "other": 3, "user_message": 4}
+    links = []
+    for source in sorted(sources, key=lambda row: rank[row["kind"]]):
+        ref = source["ref"]
+        if ref.startswith(("https://", "http://", "/")) and not any(char in ref for char in "\n\r"):
+            link = _source_link(source)
+            if link not in links:
+                links.append(link)
+    return " · ".join(links[:3])
+
+
+def _pagination(page, label):
+    if not page["omitted"]:
+        return []
+    next_page = "Continue with --offset {}.".format(page["next_offset"]) if page["next_offset"] is not None else "Read earlier pages with --offset 0."
+    return ["", "**{} {} are outside this page.** {}".format(page["omitted"], label, next_page)]
+
+
 def _render(result):
     lines = ["# Needs your attention", ""]
     queue = result["attention"]
     if not queue["total"]:
-        lines.append("No actionable obligations are recorded in this queue.")
+        lines.append("Nothing currently needs your attention in the saved queue.")
     for row in queue["items"]:
-        seen = "previously presented; still open" if row["last_presented_at"] else "not yet recorded as presented"
-        lines.extend(["- **{}** (`{}`, {}, priority {}; {})".format(_short(row["title"], 300), row["id"], row["kind"], row["priority"], seen),
-                      "  {}".format(_short(row["context"])),
-                      "  Consequence: {}".format(_short(row["consequence"])),
-                      "  Resolves when: {}".format(_short(row["resolution_condition"]))])
-        if row["task"]:
-            lines.append("  Task: {}".format(_short(row["task"])))
+        lines.extend(["## {}".format(_short(row["title"], 300)), "",
+                      _short(row["context"]), "", _short(row["consequence"]), ""])
         if row["options"]:
-            lines.append("  Choices: {}".format("; ".join(_short(value, 200) for value in row["options"])))
+            lines.extend(["Choices: {}".format("; ".join(_short(value, 200) for value in row["options"])), ""])
         if row["recommendation"]:
-            lines.append("  Recommendation: {}".format(_short(row["recommendation"])))
-        lines.append("  Sources: {}".format("; ".join(_source_link(source) for source in row["sources"])))
+            lines.extend(["Recommendation: {}".format(_short(row["recommendation"])), ""])
+        lines.extend(["**Needed:** {}".format(_short(row["resolution_condition"])), ""])
+        links = _useful_links(row["sources"])
+        if links:
+            lines.extend([links, ""])
         if row["resurfaced"]:
-            lines.append("  Deferral expired at {}.".format(row["deferred_until"]))
-    if queue["omitted"]:
-        lines.append("\n**{} actionable obligations are outside this page.** {}".format(queue["omitted"],
-                     "Continue with --offset {}.".format(queue["next_offset"]) if queue["next_offset"] is not None else "Read earlier pages with --offset 0."))
-    result["attention_markdown"] = "\n".join(lines) + "\n" if queue["total"] else ""
-    lines.extend(["", "## Deferred", ""])
+            lines.extend(["_Back for attention after {}._".format(row["deferred_until"]), ""])
+        elif row["last_presented_at"]:
+            cue = {"question": "Still awaiting your answer.", "decision": "Still awaiting your decision.",
+                   "review": "Still awaiting your review."}.get(row["kind"], "Still open from the earlier update.")
+            lines.extend(["_{}_".format(cue), ""])
+    lines.extend(_pagination(queue, "actionable obligations"))
+    result["attention_markdown"] = "\n".join(lines).rstrip() + "\n" if queue["total"] else ""
     deferred = result["deferred"]
-    for row in deferred["items"]:
-        lines.append("- `{}`: {} — resurfaces {}.".format(row["id"], _short(row["title"], 300), row["deferred_until"]))
-    if not deferred["total"]:
-        lines.append("No future deferrals recorded.")
-    if deferred["omitted"]:
-        lines.append("{} deferred entries are outside this page; use the deferred pagination fields.".format(deferred["omitted"]))
+    if deferred["total"]:
+        lines.extend(["", "## Coming back later", ""])
+        for row in deferred["items"]:
+            lines.append("- {} — {}.".format(_short(row["title"], 300), row["deferred_until"]))
+        lines.extend(_pagination(deferred, "deferred items"))
     lines.extend(["", "## Known progress", ""])
+    assessments = {"verified": "Verified when recorded", "reported": "Reported; acceptance unverified", "unknown": "Acceptance unknown"}
     for row in result["progress"]["items"]:
-        lines.append("- {} [{} as recorded at {}]: {}".format(_short(row["task"]), row["assessment"], row["at"], _short(row["summary"])))
+        lines.extend(["**{}:** {}".format(_short(row["task"]), _short(row["summary"])), "",
+                      "{} · {}".format(assessments[row["assessment"]], row["at"]), ""])
+        links = _useful_links(row["sources"])
+        if links:
+            lines.extend([links, ""])
     if not result["progress"]["total"]:
-        lines.append("No lead-recorded progress matches this view; completion is unknown.")
-    if result["progress"]["omitted"]:
-        lines.append("{} progress records are outside this page; use the progress pagination fields.".format(result["progress"]["omitted"]))
-    if result["closed"] is not None:
-        lines.extend(["", "## Recorded resolutions", ""])
+        lines.append("No saved progress matches this view; completion is unknown.")
+    lines.extend(_pagination(result["progress"], "progress records"))
+    if result["closed"] is not None and result["closed"]["total"]:
+        lines.extend(["", "## Resolved", ""])
         for row in result["closed"]["items"]:
-            lines.append("- `{}`: {} — {} at {}.".format(row["id"], _short(row["title"], 300), row["status"], row["updated_at"]))
-        if result["closed"]["omitted"]:
-            lines.append("{} closed entries are outside this page; use the closed pagination fields.".format(result["closed"]["omitted"]))
-    lines.extend(["", "## Saved sources", "", "Queue: `{}`".format(result["attention_path"]),
-                  "Retrospective index: `{}`".format(result["retrospective_index"])])
-    for source in result["sources"]:
-        lines.append("- {}: {}".format(source["kind"], _short(source["ref"], 2000)))
-    lines.extend(["", "Saved records are last-known evidence. A progress assessment of verified means verified when recorded; revalidate the task ledger and its sources before treating work as currently accepted. This view contacts no worker and grants no task acceptance or authority."])
-    return "\n".join(lines) + "\n"
+            outcome = row["resolution"]["summary"] if row["resolution"] is not None else "Replaced by a later obligation."
+            lines.append("- **{}:** {} ({})".format(_short(row["title"], 300), _short(outcome), row["updated_at"]))
+        lines.extend(_pagination(result["closed"], "closed items"))
+    return "\n".join(lines).rstrip() + "\n"
 
 
 def catch_up(path, at, *, task=None, limit=10, offset=0, since=None, include_closed=False):
