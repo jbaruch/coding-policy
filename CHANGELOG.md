@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.206 — 2026-09-09
+
 ### Added
 
 - **An on-demand specialist bench for Herdr teams.** Responsibilities, specialties
