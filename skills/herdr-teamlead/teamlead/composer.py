@@ -555,7 +555,7 @@ def _left_idle(client, agent, timeout_ms, warn):
     return True
 
 
-def send_command(client, agent, pane_id, command, session=None, sleep=time.sleep, warn=None, settle_sec=COMPOSER_SETTLE_SEC, screen_attempts=SCREEN_CHANGE_ATTEMPTS, max_extra_enters=MAX_EXTRA_ENTERS, before_input=None):
+def send_command(client, agent, pane_id, command, session=None, sleep=time.sleep, warn=None, settle_sec=COMPOSER_SETTLE_SEC, screen_attempts=SCREEN_CHANGE_ATTEMPTS, max_extra_enters=MAX_EXTRA_ENTERS, before_input=None, after_submit=None):
     """Send a slash command and confirm the composer consumed it.
 
     Returns::
@@ -600,6 +600,7 @@ def send_command(client, agent, pane_id, command, session=None, sleep=time.sleep
         command,
         enter_count=agent.slash_enter_count,
         before_input=before_input,
+        after_submit=after_submit,
     )
     sleep(settle_sec)
     text, ansi = read_pane(client, agent, warn=warn)
@@ -619,6 +620,8 @@ def send_command(client, agent, pane_id, command, session=None, sleep=time.sleep
         if before_input is not None:
             before_input()
         client.pane_send_keys(pane_id, ["enter"])
+        if after_submit is not None:
+            after_submit()
         sleep(settle_sec)
         text, ansi = read_pane(client, agent, warn=warn)
 

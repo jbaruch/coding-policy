@@ -52,9 +52,11 @@ def verify_running_permissions(client, agent, pane):
     verify_worker_permissions(agent.kind, process["argv"])
 
 
-def start_worker(client, agent, pane, tier):
+def start_worker(client, agent, pane, tier, before_start=None):
     launch_args = worker_launch_args(agent.kind, agent.launch_args)
     flags = launch_args + launch_flags(agent.kind, tier)
+    if before_start is not None:
+        before_start()
     result = client.agent_start(agent.name, agent.kind, pane, flags)
     info = result.get("agent") if isinstance(result, dict) else None
     if not isinstance(info, dict) or (
@@ -66,7 +68,7 @@ def start_worker(client, agent, pane, tier):
     return {**proof, "pane_id": pane}
 
 
-def restart_worker(client, agent, pane, tier, sleep=time.sleep):
+def restart_worker(client, agent, pane, tier, sleep=time.sleep, before_transition=None, before_start=None):
     worker_launch_args(agent.kind, agent.launch_args)
     if not isinstance(pane, str) or not pane or not agent.composer_glyph:
         raise HerdrError("Tier relaunch needs a live pane and configured composer glyph; fix the agent config.", {})
@@ -85,6 +87,8 @@ def restart_worker(client, agent, pane, tier, sleep=time.sleep):
         raise AgentBusyError("Worker changed during relaunch checks; no process was terminated.", {})
     if foreground_agent(client, pane, agent.kind).get("pid") != process.get("pid"):
         raise HerdrError("Foreground PID changed during relaunch checks; inspect the pane.", {})
+    if before_transition is not None:
+        before_transition()
     client.terminate_process(process.get("pid"))
     for attempt in range(SHELL_POLL_ATTEMPTS):
         current = client.pane_process_info(pane)
@@ -93,7 +97,7 @@ def restart_worker(client, agent, pane, tier, sleep=time.sleep):
         if (isinstance(shell, int) and not isinstance(shell, bool) and shell > 0
                 and isinstance(foreground, list) and len(foreground) == 1
                 and isinstance(foreground[0], dict) and foreground[0].get("pid") == shell):
-            return start_worker(client, agent, pane, tier)
+            return start_worker(client, agent, pane, tier, before_start=before_start)
         if attempt + 1 < SHELL_POLL_ATTEMPTS:
             sleep(SHELL_POLL_INTERVAL)
     raise HerdrError("Worker termination did not return the pane to its shell; inspect it before retrying. No start or brief was sent.", {})

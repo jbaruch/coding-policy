@@ -23,9 +23,25 @@ class JudgeLauncherTest(unittest.TestCase):
 import json, os, sys
 from pathlib import Path
 args = sys.argv[1:]
-Path(os.environ["FAKE_LOG"]).write_text(json.dumps(args))
+launch_file = Path(os.environ["FAKE_LOG"])
 if os.environ.get("FAKE_FAIL"):
     sys.exit(7)
+if args[:2] == ["pane", "process-info"]:
+    pane = args[args.index("--pane") + 1]
+    if launch_file.exists():
+        started = json.loads(launch_file.read_text())
+        kind = started[started.index("--kind") + 1]
+        process = {"name": kind, "pid": 200, "argv": [kind] + started[started.index("--") + 1:]}
+    else:
+        process = {"name": "zsh", "pid": 100, "argv": ["zsh"]}
+    print(json.dumps({"result": {"process_info": {"pane_id": pane, "shell_pid": 100, "foreground_processes": [process]}}}))
+    sys.exit(0)
+if args[:2] == ["agent", "get"]:
+    started = json.loads(launch_file.read_text())
+    print(json.dumps({"result": {"agent": {"name": started[2], "agent": started[started.index("--kind") + 1],
+        "pane_id": started[started.index("--pane") + 1], "agent_status": "idle"}}}))
+    sys.exit(0)
+launch_file.write_text(json.dumps(args))
 kind = args[args.index("--kind") + 1]
 pane = args[args.index("--pane") + 1]
 argv = [kind] + args[args.index("--") + 1:]
@@ -37,9 +53,12 @@ print(json.dumps({"result": {"agent": {"name": args[2], "agent": kind,
         self.fake.chmod(0o755)
 
     def run_launcher(self, model="claude-fable-5-1", effort: str | None = "max", kind="claude", launch_args=None, **env):
+        self.log.unlink(missing_ok=True)
+        launch_state = self.root / ("state-" + str(len(list(self.root.glob("state-*.retrospectives")))) + ".json")
         self.plan.write_text(json.dumps({"schema_version": 3, "assignments": {"judge": "judge"},
             "judge": {"agent": "judge", "model": model, "effort": effort, "launch_args": launch_args or []}}), encoding="utf-8")
-        return subprocess.run(["bash", str(SUT), str(self.plan), "w1:p2", kind],
+        return subprocess.run(["bash", str(SUT), str(self.plan), "w1:p2", kind,
+                               "--state", str(launch_state), "--now", "2026-09-09T10:00:00+00:00", "--task", "judge-fixture"],
             env={**os.environ, "HERDR_BIN": str(self.fake), "FAKE_LOG": str(self.log), **env},
             capture_output=True, text=True, check=False)
 

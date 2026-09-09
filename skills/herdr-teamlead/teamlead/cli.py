@@ -21,7 +21,7 @@ from types import SimpleNamespace
 from . import __version__
 from .assign import apply as apply_assignments
 from .assign import APPLY_SCHEMA_VERSION, dry_run, native_context_session, normalize_assignments, resolve_paths, validate_fix_history
-from . import historical, recovery, report_delivery, role_clear
+from . import historical, recovery, report_delivery, role_clear, retrospective, retrospective_runtime
 from .config import default_config_path, load_config, load_judge, load_role_costs, select_agents
 from .errors import PlanError, StateError, TeamLeadError, UsageError
 from .herdr import (
@@ -41,7 +41,7 @@ from .measure import (
 from .planner import plan as build_plan
 from .tiers import parse_launch_args, parse_tiers, select_tier
 from .qualification import require_qualification
-from .launch import start_worker
+from .launch import start_worker, verify_running
 from .state import (
     add_assignment,
     add_snapshot,
@@ -112,6 +112,19 @@ def build_parser():
     judge_parser.add_argument("--assignments", required=True, metavar="PLAN")
     judge_parser.add_argument("--pane", required=True)
     judge_parser.add_argument("--kind", choices=("claude", "codex", "grok"), default="claude")
+    judge_parser.add_argument("--task")
+    judge_parser.add_argument("--now", metavar="ISO")
+
+    for command in ("retro-check", "retro-record"):
+        retro_parser = sub.add_parser(command, parents=[common], help="Check or record a lead-authored retrospective.")
+        retro_parser.add_argument("--record", required=True, metavar="FILE")
+        retro_parser.add_argument("--now", metavar="ISO")
+    retro_list = sub.add_parser("retro-list", parents=[common], help="List saved retrospective notes without contacting Herdr.")
+    retro_list.add_argument("--task")
+    retro_list.add_argument("--since", metavar="ISO")
+    retro_show = sub.add_parser("retro-show", parents=[common], help="Read a saved retrospective without contacting Herdr.")
+    retro_show.add_argument("--task")
+    retro_show.add_argument("--id", default="latest")
 
     measure_parser = sub.add_parser(
         "measure",
@@ -344,7 +357,7 @@ def _config_path(args):
 
 def _state_path(args):
     value = getattr(args, "state", None)
-    return Path(value) if value else default_state_path()
+    return retrospective.canonical_state(Path(value) if value else default_state_path())
 
 
 def _client(args, trace=None):
@@ -748,6 +761,8 @@ def cmd_apply(args, client=None, warn=None, trace=None):
             start_timeout_ms=args.start_timeout,
             allow_recovery=args.allow_recovery,
             tiers=tiers,
+            retrospective_guard=retrospective_runtime.Guard(state_path, state, client, agents_by_name, at,
+                                                          task=args.task, retain=args.retain_context, no_clear=args.no_clear),
             qualifications={role: [record for entry in agents_by_name[name].tiers.values()
                                    for record in entry.get("qualification", [])]
                             for role, name in assignments.items()},
@@ -846,12 +861,76 @@ def cmd_start_judge(args, client=None, warn=None, trace=None):
     if normalize_assignments(document).get("judge") != tier["agent"]:
         raise UsageError("Plan judge tier and assignment name different workers; replan.", {})
     parsed = parse_tiers({"build": {"model": tier.get("model"), "effort": tier.get("effort")}}, args.kind)["build"]
-    agent = SimpleNamespace(name=tier["agent"], kind=args.kind,
+    agent = SimpleNamespace(name=tier["agent"], kind=args.kind, idle_markers=(), working_markers=(),
                             launch_args=parse_launch_args(tier.get("launch_args", []), args.kind))
     client = client if client is not None else _client(args, trace=trace)
-    proof = start_worker(client, agent, args.pane, parsed)
+    state_path = _state_path(args)
+    state = retrospective_runtime.read_history(state_path)
+    planned_task = (document.get("task_context") or {}).get("task")
+    if args.task is not None and planned_task is not None and args.task != planned_task:
+        raise UsageError("Judge --task differs from its plan; use the original task identity.", {})
+    item = retrospective_runtime.request({"transitions": [{"agent": agent.name, "role": "judge",
+        "model": parsed["model"], "effort": parsed["effort"], "context": "start", "task": args.task or planned_task,
+        "pane": args.pane}]})["transitions"][0]
+    guard = retrospective_runtime.Guard(state_path, state, client, {agent.name: agent}, args.now or now_iso())
+    proof = start_worker(client, agent, args.pane, parsed, before_start=lambda: guard.before_start(item))
+    guard.after_transition({"agent": agent.name}, launch_proof=verify_running(client, agent, args.pane, parsed))
     return {"agent": agent.name, "model": parsed["model"], "effort": parsed["effort"],
             "pane": args.pane, "argv_verified": True, "verified": proof}, None
+
+
+def cmd_retrospective(args, client=None, warn=None, trace=None):
+    path = _state_path(args)
+    if args.command == "retro-list":
+        return retrospective.list_notes(path, task=args.task, since=args.since), None
+    if args.command == "retro-show":
+        return retrospective.show(path, args.id, task=args.task), None
+    at = args.now or now_iso()
+    data = _read_record(args.record)
+    saved = None
+    if args.command == "retro-record":
+        if not isinstance(data, dict) or not isinstance(data.get("check"), str) or not Path(data["check"]).is_absolute():
+            raise UsageError("retro-record requires an absolute check receipt path in its metadata.", {})
+        saved = _read_record(data["check"])
+        if (not isinstance(saved, dict) or saved.get("schema_version") != retrospective.SCHEMA_VERSION
+                or saved.get("state_path") != str(retrospective.canonical_state(path))):
+            raise UsageError("Retrospective check receipt belongs to another state or schema; rerun retro-check for this --state.", {})
+        retrospective.validate_coverage(saved.get("coverage"))
+        value = saved.get("request")
+    else:
+        value = data
+    normalized = retrospective_runtime.request(value)
+    state = retrospective_runtime.read_history(path)
+    agents = {}
+    if normalized["transitions"]:
+        agents = {agent.name: agent for agent in load_config(_config_path(args))}
+        client = client if client is not None else _client(args, trace=trace)
+    result = retrospective_runtime.check(path, state, client, agents, normalized, at, allow_pending=saved is not None)
+    if saved is None:
+        return result, None
+    if saved["coverage"] != result["coverage"]:
+        raise UsageError("Retrospective worker, report, assignment or target changed since its check; refresh only the affected coverage and the lead's synthesis before recording.", {})
+    checked_at = retrospective.utc(saved.get("checked_at"))
+    if checked_at > retrospective.utc(at) or retrospective.utc(data.get("period_end")) < checked_at:
+        raise UsageError("Retrospective period must include its evidence checkpoint and cannot come from the future; refresh the note's actual interval.", {})
+    covered_names = {row["agent"] for row in result["coverage"]}
+    participants, unavailable = data.get("participants"), data.get("unavailable")
+    if (not isinstance(participants, list) or any(not isinstance(name, str) for name in participants)
+            or not isinstance(unavailable, dict) or not covered_names <= set(participants) | set(unavailable)):
+        raise UsageError("Retrospective metadata must account for each checked worker as participating or explicitly unavailable.", {})
+    for row in result["coverage"]:
+        if not row["first_start"] and row["source"]["report"] is None and not row["source"]["unavailable"]:
+            raise UsageError("Outgoing worker {} needs a report path or explicit unavailable reason in the check request; status alone is not retrospective evidence.".format(row["agent"]), {})
+    tasks = data.get("tasks")
+    actual_tasks = {task for row in result["coverage"] for task in (row["source"]["task"], row["target"]["task"]) if task is not None}
+    if not isinstance(tasks, list) or any(not isinstance(task, str) for task in tasks) or not actual_tasks <= set(tasks):
+        raise UsageError("Retrospective tasks must include its outgoing and proposed task identities.", {})
+    triggers = data.get("triggers", [])
+    if not isinstance(triggers, list):
+        raise UsageError("Retrospective triggers must list daily and/or transition.", {})
+    if (result["cadence"]["due"] and "daily" not in triggers) or (any(row["transition_required"] for row in result["coverage"]) and "transition" not in triggers):
+        raise UsageError("Retrospective triggers must include every due daily/transition checkpoint represented by this note.", {})
+    return retrospective.record(path, data, result["coverage"], at), None
 
 
 def cmd_probe_report(args, client=None, warn=None, trace=None):
@@ -870,6 +949,7 @@ COMMANDS = {
     **{command: cmd_recovery for command in ("task", "checkpoint", "authorize-corrections", "recover-context", "recover-role-clear", "record-report", "reconcile", "record-release-clear", "import-correction", "record-historical-review", "recover-report")},
     "start-judge": cmd_start_judge,
     "probe-report": cmd_probe_report,
+    **{command: cmd_retrospective for command in ("retro-check", "retro-record", "retro-list", "retro-show")},
 }
 
 
@@ -889,9 +969,12 @@ def main(argv=None, stdout=None, stderr=None, client=None):
     try:
         # Readers may migrate state, so they share the same transaction lock.
         # A dry run and worker launch never acquire or write ledger state.
-        lock = nullcontext() if args.command in {"start-judge", "probe-report"} or getattr(args, "dry_run", False) else state_lock(_state_path(args))
+        readonly = args.command in {"probe-report", "retro-check", "retro-list", "retro-show"} or getattr(args, "dry_run", False)
+        lock = nullcontext() if readonly else state_lock(retrospective.canonical_state(_state_path(args)))
         with lock:
-            payload, failure = COMMANDS[args.command](args, client=client, warn=warn, trace=trace)
+            retro_lock = retrospective.lock(_state_path(args)) if not readonly and args.command in {"apply", "start-judge", "retro-record"} else nullcontext()
+            with retro_lock:
+                payload, failure = COMMANDS[args.command](args, client=client, warn=warn, trace=trace)
     except TeamLeadError as exc:
         json.dump(exc.to_dict(), stderr, indent=2)
         stderr.write("\n")
