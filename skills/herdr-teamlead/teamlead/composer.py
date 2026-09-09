@@ -429,13 +429,14 @@ def _stuck_composer_error(agent, pane_id, composer, reason):
     )
 
 
-def ensure_ready(client, agent, pane_id=None, session=None, sleep=time.sleep, warn=None, settle_sec=COMPOSER_SETTLE_SEC, text=None, ansi=True):
+def ensure_ready(client, agent, pane_id=None, session=None, sleep=time.sleep, warn=None, settle_sec=COMPOSER_SETTLE_SEC, text=None, ansi=True, before_input=None):
     """Return pane text once the composer is empty.
 
     Recovery keys are sent only when every condition in `recovery_allowed`
     holds, and then EXACTLY once. Anything else refuses and names the pane:
     a keystroke into a composer teamlead cannot account for is how an idle
-    Codex got killed.
+    Codex got killed. `before_input` revalidates the caller's live guard before
+    recovery keys, after the composer read that could have observed a switch.
     """
     warn = warn or stderr_warn
     session = session if session is not None else DispatchSession()
@@ -455,6 +456,8 @@ def ensure_ready(client, agent, pane_id=None, session=None, sleep=time.sleep, wa
             agent.name, composer.content, " ".join(agent.recover_keys)
         )
     )
+    if before_input is not None:
+        before_input()
     client.agent_send_keys(agent.name, agent.recover_keys)
     sleep(settle_sec)
     text, ansi = read_pane(client, agent, warn=warn)
@@ -470,7 +473,7 @@ def ensure_ready(client, agent, pane_id=None, session=None, sleep=time.sleep, wa
     return text
 
 
-def send_message(client, agent, text, landing_needle, pane_id=None, session=None, sleep=time.sleep, warn=None, settle_sec=COMPOSER_SETTLE_SEC, attempts=LANDING_ATTEMPTS, start_timeout_ms=DEFAULT_START_TIMEOUT_MS):
+def send_message(client, agent, text, landing_needle, pane_id=None, session=None, sleep=time.sleep, warn=None, settle_sec=COMPOSER_SETTLE_SEC, attempts=LANDING_ATTEMPTS, start_timeout_ms=DEFAULT_START_TIMEOUT_MS, before_input=None):
     """Paste a real message and confirm the agent actually took it.
 
     Sending is not starting. Live, an assignment pasted onto a leftover `/`
@@ -483,7 +486,8 @@ def send_message(client, agent, text, landing_needle, pane_id=None, session=None
 
     Returns `{"landed": bool, "started": bool}`. Raises HerdrError when the
     runtime swallowed the message as a command -- that one is not a slow
-    start, it is a wrong send.
+    start, it is a wrong send. `before_input` runs before recovery and prompt
+    input, including after the last composer read.
     """
     warn = warn or stderr_warn
     session = session if session is not None else DispatchSession()
@@ -495,7 +499,10 @@ def send_message(client, agent, text, landing_needle, pane_id=None, session=None
         sleep=sleep,
         warn=warn,
         settle_sec=settle_sec,
+        before_input=before_input,
     )
+    if before_input is not None:
+        before_input()
     client.agent_prompt(agent.name, text)
 
     landed = False
@@ -548,7 +555,7 @@ def _left_idle(client, agent, timeout_ms, warn):
     return True
 
 
-def send_command(client, agent, pane_id, command, session=None, sleep=time.sleep, warn=None, settle_sec=COMPOSER_SETTLE_SEC, screen_attempts=SCREEN_CHANGE_ATTEMPTS, max_extra_enters=MAX_EXTRA_ENTERS):
+def send_command(client, agent, pane_id, command, session=None, sleep=time.sleep, warn=None, settle_sec=COMPOSER_SETTLE_SEC, screen_attempts=SCREEN_CHANGE_ATTEMPTS, max_extra_enters=MAX_EXTRA_ENTERS, before_input=None):
     """Send a slash command and confirm the composer consumed it.
 
     Returns::
@@ -562,6 +569,7 @@ def send_command(client, agent, pane_id, command, session=None, sleep=time.sleep
 
     Raises HerdrError when the command is still sitting in the composer after
     a second Enter. The caller must not send anything further to that agent.
+    `before_input` guards recovery, command delivery and each extra Enter.
     """
     warn = warn or stderr_warn
     session = session if session is not None else DispatchSession()
@@ -578,11 +586,14 @@ def send_command(client, agent, pane_id, command, session=None, sleep=time.sleep
             settle_sec=settle_sec,
             text=before,
             ansi=ansi,
+            before_input=before_input,
         )
     before_signature = screen_signature(before, agent.composer_glyph)
 
     # Remembered before it is sent, so a command that fails to submit is one
     # teamlead can account for -- and therefore one it may clear later.
+    if before_input is not None:
+        before_input()
     session.remember(command)
     client.deliver_slash_command(
         agent.slash_delivery,
@@ -606,6 +617,8 @@ def send_command(client, agent, pane_id, command, session=None, sleep=time.sleep
                 agent.name, command, extra_enters, max_extra_enters
             )
         )
+        if before_input is not None:
+            before_input()
         client.pane_send_keys(pane_id, ["enter"])
         sleep(settle_sec)
         text, ansi = read_pane(client, agent, warn=warn)

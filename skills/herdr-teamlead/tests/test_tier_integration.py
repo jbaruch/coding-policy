@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from teamlead.herdr import HerdrClient
 from teamlead.planner import plan
 from teamlead.state import add_assignment, empty_state, load_state_checked, role_counts
-from tests.fakes import FakeRunner, ScriptedReads, agent_json, composer_reads, ok_json
+from tests.fakes import FakeRunner, ScriptedReads, agent_json, composer_reads, composer_screen, ok_json
 from tests.test_cli import CliCase, CONFIG
 from tests.test_qualification import AT, qualified_tier
 
@@ -158,10 +158,11 @@ class TierIntegrationTest(CliCase):
         process = {"pane_id": "w1:p2", "shell_pid": 100,
                    "foreground_processes": [{"name": "claude", "pid": 200, "argv": ["claude"]}]}
         shell = {**process, "foreground_processes": [{"name": "bash", "pid": 100}]}
-        runner.responses["pane process-info"] = ScriptedReads([
-            json.dumps({"result": {"process_info": item}}) for item in (process, process, shell)])
-        runner.set("-TERM 200")
         argv = ["claude", "--dangerously-skip-permissions", "--model", "sonnet-5", "--effort", "high"]
+        started = {**process, "foreground_processes": [{"name": "claude", "pid": 300, "argv": argv}]}
+        runner.responses["pane process-info"] = ScriptedReads([
+            json.dumps({"result": {"process_info": item}}) for item in (process, process, shell, started)])
+        runner.set("-TERM 200")
         runner.set("agent start", json.dumps({"result": {"agent": info, "argv": argv}}))
         runner.responses["agent read"] = composer_reads("claude", ("ready", "ready", "> New assignment from the team lead."))
         runner.set("agent prompt", ok_json())
@@ -178,6 +179,25 @@ class TierIntegrationTest(CliCase):
         self.assertEqual(stored["schema_version"], 5)
         self.assertEqual(stored["assignments"][0]["tier"], applied["tier"])
         self.assertEqual(role_counts(stored), {"developer": {"claude": 1}})
+
+    def test_tiered_worker_changed_during_composer_read_receives_no_prompt(self):
+        runner = FakeRunner().set("agent get claude", agent_json("claude", "idle", "w1:p2"))
+        process = {"pane_id": "w1:p2", "foreground_processes": [{"name": "claude", "pid": 200,
+            "argv": ["claude", "--dangerously-skip-permissions", "--model", "sonnet-5", "--effort", "high"]}]}
+        runner.set("pane process-info", json.dumps({"result": {"process_info": process}}))
+        client = HerdrClient("herdr", runner)
+
+        def read_replaced_worker(*_args, **_kwargs):
+            process["foreground_processes"] = [{"name": "claude", "pid": 999, "argv": ["claude"]}]
+            runner.set("pane process-info", json.dumps({"result": {"process_info": process}}))
+            return composer_screen("claude")
+
+        with patch.object(client, "agent_read", side_effect=read_replaced_worker):
+            rc, output, error = self.run_cli(self.apply_args() + ["--no-clear"], client=client)
+        self.assertEqual(rc, 1)
+        self.assertEqual(output, "")
+        self.assertIn("launch options", error)
+        self.assertEqual(runner.writes(), [])
 
     def test_schema_three_migration_preserves_task_session_and_fix_counter(self):
         session = {"pane_id": "w1:p2", "source": "herdr:claude", "agent": "claude", "kind": "id", "value": "s1"}

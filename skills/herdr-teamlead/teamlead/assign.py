@@ -35,6 +35,7 @@ import os
 import time
 import hashlib
 from pathlib import Path
+from functools import partial
 
 from .composer import (
     COMPOSER_SETTLE_SEC,
@@ -437,9 +438,14 @@ def build_steps(client, assignments, agents_by_name, paths, panes=None, no_clear
                 commands.append(client.argv_agent_start(name, agent.kind, pane_id,
                     launch_args + launch_flags(agent.kind, tier)))
         else:
+            # Initial all-target preflight, then this role's own boundary.
             commands.append(client.argv_pane_process_info(pane_id))
+            commands.append(client.argv_pane_process_info(pane_id))
+            conditional.append((client.argv_pane_process_info(pane_id),
+                                "immediately before each recovery keystroke or extra Enter"))
         if not tier and not no_clear:
             commands.extend(composer_reads)
+            commands.append(client.argv_pane_process_info(pane_id))
             commands.extend(
                 client.argv_deliver_slash_command(
                     agent.slash_delivery,
@@ -472,6 +478,7 @@ def build_steps(client, assignments, agents_by_name, paths, panes=None, no_clear
             commands.append(client.argv_agent_get(name))
         commands.extend(composer_reads)
         # The assignment is real message text, so pasting it is correct.
+        commands.append(client.argv_pane_process_info(pane_id))
         commands.append(client.argv_agent_prompt(name, text))
         # Sending is not starting: confirm it landed as a user message.
         commands.extend(composer_reads)
@@ -614,11 +621,19 @@ def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle
         cleared = False
         tier = tiers.get(step["role"])
         tier_record = None
+        before_input = None if tier else partial(verify_running_permissions, client, agent, step["pane_id"])
+        if before_input is not None:
+            # Earlier roles and their callbacks may replace a later worker.
+            # Composer operations also recheck immediately before each input.
+            before_input()
         if tier:
             proof = (verify_running(client, agent, step["pane_id"], tier) if skip_clear
                      else restart_worker(client, agent, step["pane_id"], tier, sleep=sleep))
             tier_record = {**tier, "launch_args": worker_launch_args(agent.kind, agent.launch_args), "verified": proof,
                            "prompt_hash": step["prompt_hash"]}
+            # A fresh launch or retained-tier proof can become stale while the
+            # composer is read. Verify the selected live tier before input.
+            before_input = partial(verify_running, client, agent, step["pane_id"], tier)
             cleared = not skip_clear
         elif not skip_clear:
             pane_id = step["pane_id"]
@@ -631,6 +646,7 @@ def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle
                 sleep=sleep,
                 warn=warn,
                 settle_sec=settle_sec,
+                before_input=before_input,
             )
             client.agent_wait(name, until=SETTLE_STATES, timeout_ms=settle_timeout_ms)
             # `cleared` means the command was consumed AND the screen changed:
@@ -687,6 +703,7 @@ def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle
             settle_sec=settle_sec,
             attempts=landing_attempts,
             start_timeout_ms=start_timeout_ms,
+            before_input=before_input,
         )
         if task is not None and step["role"] == "developer" and prior is None:
             context_session = (correlate_dispatch_session(
