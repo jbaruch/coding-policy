@@ -132,7 +132,7 @@ class NullHeadroomTest(unittest.TestCase):
 
 class OutputShapeTest(unittest.TestCase):
     def test_carries_a_schema_version(self):
-        self.assertEqual(plan(["developer"], snapshot(grok=100.0))["schema_version"], 4)
+        self.assertEqual(plan(["developer"], snapshot(grok=100.0))["schema_version"], 5)
 
     def test_rationale_has_one_line_per_role_naming_the_field(self):
         result = plan(ROLES, snapshot(claude=92.0, codex=87.0, grok=100.0))
@@ -797,7 +797,7 @@ class PlanSchemaVersionTest(unittest.TestCase):
         # Indistinguishable from a version-1 plan, on purpose: a reader takes
         # the same path for both.
         result = plan(ROLES, snapshot(claude=90, codex=70, grok=60), warn=lambda m: None)
-        self.assertEqual(result["schema_version"], 4)
+        self.assertEqual(result["schema_version"], 5)
         self.assertNotIn("judge", result)
 
     def test_the_assignments_shape_is_unchanged_by_the_bump(self):
@@ -904,6 +904,57 @@ class AssignedWorkerStillChargedTest(unittest.TestCase):
         # Both fit: 100 - 20 - 15 = 65 left on the window.
         self.assertEqual(result["assignments"]["developer"], "claude")
         self.assertEqual(result["assignments"]["judge"], "judge")
+
+
+class SpecialistOrderingTest(unittest.TestCase):
+    def test_affordable_familiar_worker_precedes_more_headroom(self):
+        requirements = {"advisor": {"specialty": "ux"}}
+        result = plan(["advisor"], snapshot(familiar=40, spare=90),
+                      familiarity={"advisor": {"familiar": 1}}, requirements=requirements)
+        self.assertEqual(result["assignments"], {"advisor": "familiar"})
+        self.assertEqual(result["requirements"], requirements)
+        self.assertIn("familiarity", " ".join(result["rationale"]))
+
+    def test_exhausted_or_unknown_familiar_worker_never_beats_usable_capacity(self):
+        for headroom in (None, 0, 7):
+            with self.subTest(headroom=headroom):
+                result = plan(["advisor"], snapshot(familiar=headroom, spare=30),
+                              familiarity={"advisor": {"familiar": 1}}, requirements={"advisor": {}})
+                self.assertEqual(result["assignments"]["advisor"], "spare")
+
+    def test_equal_familiarity_uses_existing_headroom_optimization(self):
+        result = plan(["advisor"], snapshot(alpha=40, zeta=90),
+                      familiarity={"advisor": {"alpha": 1, "zeta": 1}}, requirements={"advisor": {}})
+        self.assertEqual(result["assignments"]["advisor"], "zeta")
+
+    def test_familiarity_never_overrides_exclusion_or_strands_another_role(self):
+        result = plan(["advisor", "tester"], snapshot(familiar=80, spare=50),
+                      role_costs={"advisor": 20}, exclude={"tester": ["spare"]},
+                      familiarity={"advisor": {"familiar": 1}}, requirements={"advisor": {}})
+        self.assertEqual(result["assignments"], {"advisor": "spare", "tester": "familiar"})
+        result = plan(["advisor"], snapshot(familiar=80, spare=50), exclude={"advisor": ["familiar"]},
+                      familiarity={"advisor": {"familiar": 1}}, requirements={"advisor": {}})
+        self.assertEqual(result["assignments"], {"advisor": "spare"})
+
+    def test_unrequested_legacy_roles_keep_headroom_order(self):
+        result = plan(["developer"], snapshot(familiar=40, spare=90),
+                      familiarity={"developer": {"familiar": 1}})
+        self.assertEqual(result["assignments"], {"developer": "spare"})
+        self.assertNotIn("requirements", result)
+
+    def test_shared_pool_burn_can_remove_familiar_affordability(self):
+        payload = snapshot(familiar=25, developer=25, spare=30)
+        for name in ("familiar", "developer"):
+            payload["agents"][name]["window_group"] = "shared"
+        result = plan(["developer", "advisor"], payload, role_costs={"developer": 20},
+                      exclude={"developer": ["familiar", "spare"]},
+                      familiarity={"advisor": {"familiar": 1}}, requirements={"advisor": {}})
+        self.assertEqual(result["assignments"], {"developer": "developer", "advisor": "spare"})
+
+    def test_pinned_judge_cannot_become_a_familiar_specialist(self):
+        result = plan(["advisor"], snapshot(judge=90, worker=40), judge_agent="judge",
+                      familiarity={"advisor": {"judge": 1}}, requirements={"advisor": {}})
+        self.assertEqual(result["assignments"], {"advisor": "worker"})
 
 
 if __name__ == "__main__":
