@@ -94,6 +94,10 @@ to know goes in the report.
   avoidable friction or repeated work, and what the next worker should know.
   Cite concrete evidence; mark unavailable observations `unknown`. The lead
   uses these saved observations for retrospectives without interrupting workers.
+- Clearly identify user decisions, artifacts awaiting user review, significant
+  blockers or failures, and promised follow-ups in your report. Include enough
+  context and evidence for the lead to persist each outstanding obligation.
+  The lead owns the attention queue; workers never write or close its records.
 - The **last line** of your final chat message is exactly:
 
   ```

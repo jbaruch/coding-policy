@@ -1,6 +1,6 @@
 {
   "name": "jbaruch/coding-policy",
-  "version": "0.3.203",
+  "version": "0.3.204",
   "description": "General-purpose coding policy for Baruch's AI agents",
   "private": false,
   "skills": [
@@ -86,6 +86,13 @@
               "args": [
                 "${TESSL_PLUGIN_DIR}/hooks/stop-handoff-hygiene.sh"
               ]
+            },
+            {
+              "type": "command",
+              "command": "bash",
+              "args": [
+                "${TESSL_PLUGIN_DIR}/hooks/herdr-supervision-stop.sh"
+              ]
             }
           ]
         }
@@ -98,6 +105,10 @@
             {
               "type": "command",
               "command": "bash \"${TESSL_PLUGIN_DIR}/hooks/stop-handoff-hygiene.sh\""
+            },
+            {
+              "type": "command",
+              "command": "bash \"${TESSL_PLUGIN_DIR}/hooks/herdr-supervision-stop.sh\""
             }
           ]
         }

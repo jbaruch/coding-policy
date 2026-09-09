@@ -5,7 +5,7 @@ this file.
 
 ## Task
 
-Implement `{{ISSUE}}`.
+Complete `{{ISSUE}}` within the task authorization in COMMON.md.
 
 ## Setup
 
@@ -24,7 +24,7 @@ from the fresh remote default. The lead created it. You do not.
    `fetch`, not a read. It is another agent's checkout. Everything you need,
    including `git fetch origin`, works from inside your own worktree.
 
-## Before You Write Code
+## Prepare the Assignment
 
 Read, in this order:
 
@@ -36,6 +36,18 @@ Read, in this order:
 
 If the design note and the tester's plan disagree, follow the design note and
 record the conflict in your report.
+
+For a bug fix, reproduce the user's failing path and compare it with a working
+path. Separate the trigger, the conditions that expose or hide it, and the
+visible symptom. Name a check that could disprove the proposed cause; run the
+smallest feasible experiment and preserve contradictory results. Report any
+reproduction or causal evidence gap. Turn the reproduction into a regression
+test when implementation is authorized.
+
+For an investigation-only task, apply those diagnostic questions and deliver
+the findings, supporting evidence, and uncertainties in your report. Perform
+only the investigation actions the brief authorizes. Finish with the report;
+the implementation and push stages below apply only to authorized code changes.
 
 ## Implement
 
@@ -70,6 +82,8 @@ Write `{{REPORT}}` covering:
 - Gate output — the command you ran and its summary line.
 - Anything you chose not to do, and why.
 - Open questions for the reviewer.
+- For a bug, the reproduction, working comparison, causal explanation,
+  counterfactual result, and remaining uncertainty.
 
 Final chat message ends with exactly:
 

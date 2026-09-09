@@ -36,6 +36,46 @@
   validator as the one owner of the refused resume forms, and the explicit
   exclusion of a pane already at its shell.
 
+## 0.3.204 — 2026-09-09
+
+### Added
+
+- **Lead continuity, attention, and fleet supervision.** [Firstmate](https://github.com/kunchenguid/firstmate/tree/40c50ea8843c5b6a5351db8352675537252b653e)'s layered
+  memory, catch-up, scope judgment, causal diagnosis, and watch-discipline
+  patterns informed five additions to the Herdr lead. Scoped working lessons
+  link to evidence and immutable retrospective notes; lead stows preserve
+  conversation-only knowledge, unresolved work, and an ordered resume reading
+  list. Offline readback preserves the recorded narrative when sources are
+  missing and flags it for revalidation.
+
+  A persistent attention queue retains questions, decisions, review requests,
+  blockers, failures, and promised updates through compaction or unrelated
+  messages. Displaying an item never resolves it. Catch-up and standup put
+  actionable attention before routine progress, with explicit deferred-item
+  resurfacing and answer/outcome evidence. Informational notifications can
+  resolve on delivery without inventing an acknowledgement chore.
+
+  Briefs separate accepted behavior from implementation proposals and require
+  causal evidence for bug work. Necessary corrections remain within existing
+  task authority; new guarantees are identified for a concrete decision.
+  Investigation-only assignments end with findings instead of an inferred
+  implementation or release. Existing judge, correction-budget, and release
+  gates remain in force.
+
+  Every bound dispatch enrolls before worker input. The fleet watcher observes
+  all assignments, persists events until explicit bounded acknowledgement, and
+  schedules pending rechecks. A single-pass report checkpoint preserves native
+  delivery proof and refusal handling. Exact native-session Stop hooks prevent
+  the lead from ending with unattended obligations; a pause or handoff records
+  a disposition for every active assignment. Herdr status and event handling
+  never substitute for the task ledger's verified acceptance. New versioned
+  stores survive worktree cleanup and refuse corrupt or unsupported history.
+
+### Fixed
+
+- **Atomic retrospective persistence policy (#381).** Separate saving completed
+  notes from preserving them during cleanup.
+
 ## 0.3.203 — 2026-09-09
 
 ### Fixed
