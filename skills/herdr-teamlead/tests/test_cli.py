@@ -727,6 +727,8 @@ class ApplyCommandTest(CliCase):
                     "fix_round": None,
                     "context_session": None,
                     "tier": None,
+                    "requirements": None,
+                    "reviewer_scope": None,
                 },
                 {
                     "schema_version": STATE_SCHEMA_VERSION,
@@ -740,6 +742,8 @@ class ApplyCommandTest(CliCase):
                     "fix_round": None,
                     "context_session": None,
                     "tier": None,
+                    "requirements": None,
+                    "reviewer_scope": None,
                 },
             ],
         )
