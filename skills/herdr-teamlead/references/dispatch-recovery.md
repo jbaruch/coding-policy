@@ -563,9 +563,9 @@ original `herdr pane get` JSON. Read these original artifacts and the saved
 dispatch's common/role briefs. Use the existing task authority to record
 delivery; this recovery requests no new work or allowance.
 
-Even a refused owner operation can persist the recovery schema 3 → 4 migration.
+Even a refused owner operation can persist an owner schema migration.
 Use isolated ledger copies for validation until the installed owner supports
-schema 4.
+the versions documented in `skills/herdr-teamlead/state-schema.md`.
 
 Run `teamlead recover-report --record FILE --state FILE` through the owner
 launcher above. The record names a unique `id`, the preserved `dispatch` ID,
