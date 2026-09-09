@@ -86,7 +86,7 @@ class StaleGrokDeliveryTests(unittest.TestCase):
         out, err = io.StringIO(), io.StringIO()
         self.assertEqual(cli.main(args, stdout=out, stderr=err, client=HerdrClient(runner=runner)), 0, err.getvalue())
         saved = ledger_path.read_bytes()
-        self.assertEqual(json.loads(saved)['recovery']['schema_version'], 4)
+        self.assertEqual(json.loads(saved)['recovery']['schema_version'], 5)
         self.assertEqual(cli.main(args, stdout=io.StringIO(), stderr=io.StringIO()), 0)
         self.assertEqual(ledger_path.read_bytes(), saved)
         self.assertEqual(runner.calls, [])
@@ -288,7 +288,7 @@ class StaleGrokDeliveryTests(unittest.TestCase):
         document['recovery']['schema_version'] = 3
         before = copy.deepcopy(document)
         self.assertTrue(recovery.migrate_store(document['recovery']))
-        self.assertEqual(document['recovery'], {**before['recovery'], 'schema_version': 4})
+        self.assertEqual(document['recovery'], {**before['recovery'], 'schema_version': 5})
         self.assertEqual(document['recovery']['delivery_recoveries'], [original_receipt])
         record = self.recover()
         self.document['recovery']['schema_version'] = 3

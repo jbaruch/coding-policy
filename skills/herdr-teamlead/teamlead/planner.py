@@ -39,6 +39,12 @@ Ordering within one role, in full:
 `assignments` comes back keyed in the caller's `--roles` order; `rationale`
 reads in the order the seats were filled, heaviest first, because the field a
 pick chose from only makes sense in that order.
+
+For a requirement-bearing assignment, composition.py supplies capability and
+contribution exclusions before this ranking. An affordable candidate with a
+confirmed matching task/engagement dispatch ranks before other affordable
+candidates, then the existing headroom ordering decides. Legacy assignments
+without requirements retain the ordering above.
 """
 
 import math
@@ -50,9 +56,10 @@ from .errors import PlanError
 #: pinned seat's agent, model and effort. Version 3 adds round-tier data. Additive: a version-1
 #: plan simply has no `judge` key, which is indistinguishable from a version-2
 #: plan that assigned no judge seat, so both readers take the same path.
+#: Version 5 adds normalized specialist requirements when requested.
 #: A plan is a round's instruction, not stored state -- it is produced and
 #: consumed inside one round and never migrated (rules/stateful-artifacts.md).
-PLAN_SCHEMA_VERSION = 4
+PLAN_SCHEMA_VERSION = 5
 
 #: What one round in each seat is expected to burn, in points of the agent's
 #: remaining headroom percentage. The ORDER is what the planner acts on:
@@ -73,6 +80,8 @@ DEFAULT_ROLE_COSTS = {
     "critic": 5.0,
     "release": 8.0,
     "lead": 12.0,
+    "advisor": 8.0,
+    "investigator": 10.0,
 }
 
 #: Weight for a role nobody has weighed -- a folded seat, or a role a later
@@ -81,8 +90,15 @@ DEFAULT_ROLE_COSTS = {
 DEFAULT_ROLE_COST = 8.0
 
 
-def _sort_key(name, headroom, cost, role, counts, floor):
+def _sort_key(name, headroom, cost, role, counts, floor, familiarity=None):
     """Rank one candidate for one role. Lower sorts first."""
+    if familiarity is not None:
+        affordable = headroom is not None and float(headroom) - cost >= 0
+        # Continuity is useful only inside an affordable, eligible field. It
+        # never elevates an exhausted or unmeasured worker over usable capacity.
+        affinity = familiarity.get(role, {}).get(name, 0) if affordable else 0
+        return (0 if affordable else 1, -affinity,
+                *_sort_key(name, headroom, cost, role, counts, floor))
     if headroom is None:
         return (1, 0.0, 0.0, 0, name)
     projected = float(headroom) - cost
@@ -232,7 +248,7 @@ def _fillable(roles, agents, excluded):
     return True
 
 
-def _unfillable_message(role, barred, remaining, later_roles):
+def _unfillable_message(role, barred, remaining, later_roles, constrained=False):
     """Why one seat could not be filled, and what to change."""
     parts = [
         "Cannot fill role {!r} without leaving a later role with no eligible "
@@ -244,7 +260,8 @@ def _unfillable_message(role, barred, remaining, later_roles):
         "Roles left to fill after it: {}.".format(", ".join(later_roles))
         if later_roles
         else "",
-        "Drop an exclusion, measure another agent, or assign fewer roles.",
+        "Measure another eligible worker or assign fewer simultaneous roles; preserve capability and independence requirements."
+        if constrained else "Drop an exclusion, measure another agent, or assign fewer roles.",
     ]
     return " ".join(part for part in parts if part)
 
@@ -309,7 +326,7 @@ def _refuse_unaffordable_judge(judge_agent, headrooms, cost, groups):
         )
 
 
-def plan(roles, snapshot, counts=None, exclude=None, role_costs=None, snapshot_ref=None, warn=None, judge_agent=None, judge_tier=None, tier_candidates=None, rounds=None):
+def plan(roles, snapshot, counts=None, exclude=None, role_costs=None, snapshot_ref=None, warn=None, judge_agent=None, judge_tier=None, tier_candidates=None, rounds=None, familiarity=None, requirements=None, selection_rationale=None):
     """Assign `roles` to the agents in `snapshot`, heaviest seat first.
 
     `counts` is `{role: {agent: times_held}}` from the state ledger; omit it
@@ -415,6 +432,13 @@ def plan(roles, snapshot, counts=None, exclude=None, role_costs=None, snapshot_r
                 excluded[role] = sorted(set(excluded[role]) | {judge_agent})
     for role in roles:
         if all(name in excluded[role] for name in agents):
+            if selection_rationale:
+                raise PlanError(
+                    "No agent is eligible for role {!r}. Measure another eligible worker or correct verified capability declarations; preserve independence requirements. {}".format(
+                        role, " ".join(selection_rationale)),
+                    {"role": role, "excluded": list(excluded[role]), "agents": sorted(agents),
+                     "eligibility": list(selection_rationale)},
+                )
             raise PlanError(
                 "No agent is eligible for role {!r} - --exclude bars {}, and "
                 "those are every agent in the snapshot ({}). Drop an exclusion, "
@@ -462,7 +486,8 @@ def plan(roles, snapshot, counts=None, exclude=None, role_costs=None, snapshot_r
         later_roles = fill_order[index + 1:]
         ranked = sorted(
             (name for name in remaining if name not in barred),
-            key=lambda name: _sort_key(name, headrooms[name], candidate_cost(role, name), role, counts, floor),
+            key=lambda name: _sort_key(name, headrooms[name], candidate_cost(role, name), role, counts, floor,
+                                      familiarity if role in (requirements or {}) else None),
         )
         # The ordering above says who SHOULD hold the seat; the matching says
         # who still can without stranding a later role. First candidate that
@@ -477,12 +502,13 @@ def plan(roles, snapshot, counts=None, exclude=None, role_costs=None, snapshot_r
         )
         if chosen is None:
             raise PlanError(
-                _unfillable_message(role, barred, remaining, later_roles),
+                _unfillable_message(role, barred, remaining, later_roles, bool(selection_rationale)),
                 {
                     "role": role,
                     "excluded": list(barred),
                     "assigned": dict(picks),
                     "unassigned": sorted(remaining),
+                    **({"eligibility": list(selection_rationale)} if selection_rationale else {}),
                 },
             )
         remaining.discard(chosen)
@@ -491,6 +517,8 @@ def plan(roles, snapshot, counts=None, exclude=None, role_costs=None, snapshot_r
         rationale.append(
             _explain(role, chosen, ranked, headrooms, counts, cost, floor, barred)
         )
+        if role in (requirements or {}) and (familiarity or {}).get(role, {}).get(chosen):
+            rationale.append("{} -> {} has a prior confirmed dispatch for the same task and engagement; familiarity ranks before headroom only when this projected seat is affordable.".format(role, chosen))
         headroom = headrooms[chosen]
         if headroom is not None:
             projected = headroom - cost
@@ -512,6 +540,7 @@ def plan(roles, snapshot, counts=None, exclude=None, role_costs=None, snapshot_r
                     headrooms[name] -= cost
 
     rationale.extend(_notes(excluded, agents, warn))
+    rationale.extend(selection_rationale or [])
 
     # The loop removes each pick from `remaining`, so a repeat is impossible
     # by construction. Asserted anyway: `apply` briefs one pane per role, and
@@ -555,6 +584,9 @@ def plan(roles, snapshot, counts=None, exclude=None, role_costs=None, snapshot_r
             role: tier_candidates[role][picks[role]] for role in roles
         }
         document["rounds"] = rounds or {}
+
+    if requirements:
+        document["requirements"] = requirements
 
     return document
 

@@ -74,7 +74,15 @@
     "skills/herdr-teamlead/tests/test_supervision_cli.py",
     "skills/herdr-teamlead/tests/test_supervision_diagnostics.py",
     "skills/herdr-teamlead/teamlead/restoration.py",
-    "skills/herdr-teamlead/tests/test_restoration.py"
+    "skills/herdr-teamlead/tests/test_restoration.py",
+    "skills/herdr-teamlead/teamlead/composition.py",
+    "skills/herdr-teamlead/teamlead/engagement.py",
+    "skills/herdr-teamlead/tests/test_composition.py",
+    "skills/herdr-teamlead/tests/test_engagement.py",
+    "skills/herdr-teamlead/tests/test_specialist_retention.py",
+    "skills/herdr-teamlead/tests/test_specialist_recovery.py",
+    "skills/herdr-teamlead/tests/test_specialist_cli.py",
+    "skills/herdr-teamlead/tests/test_specialist_delivery.py"
   ],
   "executionEnvironments": [
     {

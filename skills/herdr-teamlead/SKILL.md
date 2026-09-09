@@ -1,7 +1,7 @@
 ---
 name: herdr-teamlead
 description: >
-  Run Herdr rounds with headroom-driven roles, qualified tiers, fresh briefs,
+  Run Herdr rounds with on-demand specialists, qualified tiers, bounded briefs,
   report verification, and release gates. Use for requests to dispatch the Herdr
   team, balance worker usage, collect reports, run or retrieve retrospectives,
   catch up on outstanding user attention, curate team lessons, or save and resume
@@ -20,9 +20,8 @@ or handoff covering every active assignment. Keep user attention visible under
 
 Follow `rules/agent-team-operation.md` for round constraints.
 
-Each command block resolves `CP` to the project-local plugin, falling back to
-`$HOME/.tessl/plugins/jbaruch/coding-policy`. Run the resolver in every call.
-Prose `skills/...` paths are relative to that plugin root.
+Each command resolves `CP` to the local or home plugin. Repeat its resolver in
+every call. Prose `skills/...` paths are relative to that root.
 
 References:
 
@@ -36,6 +35,7 @@ skills/herdr-teamlead/references/working-memory.md
 skills/herdr-teamlead/references/attention.md
 skills/herdr-teamlead/references/supervision.md
 skills/herdr-teamlead/references/assignment-reasoning.md
+skills/herdr-teamlead/references/specialists.md
 skills/herdr-teamlead/state-schema.md
 ```
 
@@ -97,8 +97,8 @@ Emits the caller and live workers with kind, pane, and state.
   the correcting `herdr agent rename <pane-id> <name>` command. Finish here.
 - **Exit 1 or 2** — report the diagnostic verbatim and finish here.
 
-If roles lack workers, name one or record combined roles in a single brief.
-Never duplicate dispatch targets.
+Record staffing gaps under `references/round-setup.md`. Leave unused specialist
+profiles unlaunched. Never duplicate targets or fold verification onto a contributor.
 Start workers in YOLO mode under `references/model-tiers.md`; preserve it on
 relaunch. Verify live permission flags before dispatch, including existing workers.
 
@@ -114,13 +114,10 @@ Record the emitted namespace ownership evidence using Step 3 of
 operator permission; absent permission, remain read-only or finish here.
 On non-zero, report the diagnostic and finish here.
 
-Record the task's existing source and words in `TASK_AUTHORIZATION`,
-and permitted actions and repo in `AUTHORIZED_ACTIONS`. Read-only uses `none`.
-Ownership never expands task scope. Examples: `references/round-setup.md`.
-Create or resume the stable task ledger under `references/task-ledger.md`.
-Record its absolute path with the task authorization before the first dispatch.
-Apply the round-setup reference's accepted-behavior, resume, and supervision
-binding requirements before continuing.
+Record task authorization and permitted actions under the round-setup reference.
+Create or resume the stable ledger under `references/task-ledger.md`; record its
+absolute path before dispatch. Apply the round-setup accepted-behavior, resume
+and supervision binding requirements.
 Proceed immediately to Step 4.
 
 ## Step 4 — Measure Headroom
@@ -148,10 +145,14 @@ Proceed immediately to Step 5 once the required readings are available.
 
 ## Step 5 — Plan the Roles
 
+Choose the responsibilities needed next under `references/specialists.md`.
+Supply its requirements file for specialized work. Keep the developer reserved
+through early fixes; schedule consultation and verification as the task needs them.
+
 ```bash
 CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
 bash "$CP/skills/herdr-teamlead/teamlead.sh" plan \
-  --roles developer,tester,reviewer \
+  --roles <role[,role...]> [--requirements <requirements.json>] \
   [--exclude <role>=<agent>[,<agent>...]]... \
   [--round <role>=<round-type>] [--round-context <evidence.json>] \
   --task <task-id> [--fix-round <N>] [--correction-plan <id> --work <work.json>]
@@ -159,9 +160,9 @@ bash "$CP/skills/herdr-teamlead/teamlead.sh" plan \
 
 Emits the role plan without worker contact. On exit 1, resolve the diagnostic
 before continuing. Apply the Step 5 constraints in `references/round-setup.md`:
-exclude the author from verification, reserve the developer through early fixes,
+exclude contributors from verification, reserve the developer through early fixes,
 preserve task identity and fix count, and reuse recorded correction bounds.
-Operator-controlled tier and qualification contracts:
+Tier and qualification contracts:
 
 ```text
 skills/herdr-teamlead/references/model-tiers.md
@@ -203,14 +204,8 @@ Emits common and role-brief paths. On non-zero, fix the diagnostic before
 dispatch. Validates composition inputs and review evidence before writing.
 Use a fresh absolute report path per role and attempt.
 
-Populate the shared and role-specific values under this reference's Step 7
-contract, including the authority and review evidence from earlier steps:
-
-```text
-skills/herdr-teamlead/references/round-setup.md
-```
-
-Apply the Step 7 reference's brief-completeness requirements.
+Follow `references/round-setup.md` Step 7 for shared and role-specific values,
+authority, review evidence and brief completeness.
 Proceed immediately to Step 8.
 
 ## Step 8 — Provision the Worktrees
@@ -225,7 +220,7 @@ bash "$CP/skills/herdr-teamlead/provision-worktree.sh" \
 
 Emits path, branch, base, and `created|attached|already-provisioned`. On any
 non-zero exit, fix the diagnostic and retry. Never dispatch a missing
-worktree. Read-only Phase 1 reviewers need none. Clean up after merge per
+worktree. Read-only consultations need none. Clean up after merge per
 `rules/agent-worktree-isolation.md`. Proceed immediately to Step 9.
 
 ## Step 9 — Label the Layout
@@ -250,37 +245,36 @@ dispatch. Apply rechecks coverage before worker input. Dry runs prove no coverag
 CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
 bash "$CP/skills/herdr-teamlead/teamlead.sh" apply \
   --assignments <plan-file> \
-  --brief developer=<path> --brief tester=<path> --brief reviewer=<path> \
-  --report developer=<report> --report tester=<report> --report reviewer=<report> \
+  --brief <role>=<path> [--brief <role>=<path>]... \
+  --report <role>=<report> [--report <role>=<report>]... \
   --common <path-to-COMMON.md> --task <task-id> \
-  [--fix-round <N>] [--retain-context | --no-clear] \
+  [--fix-round <N>] [--retain-context | --retain-specialist | --no-clear] \
   [--correction-plan <id> --work <work.json>] [--dispatch-id <stable-id>]
 ```
 
-Emits per-role JSON with clear/session evidence, task, fix number, verified
-tier, and delivery status. Labelled dispatches carry `dispatch_id` and any
-`context_transition`; fields are documented in `skills/herdr-teamlead/state-schema.md`.
-Supply each role's exact fresh absolute report path from its brief. Apply enrolls
-the assignment before worker input; unknown sends remain observation obligations.
+Emits dispatch JSON under `state-schema.md`. Supply each role's fresh absolute
+report path from its brief. Apply enrolls before input; unknown sends remain
+observation obligations.
 Classify every brief against Step 3's authorization before sending it.
 Append the dispatch outcome to the task ledger; `applied` proves dispatch only.
 
 Apply the recovery reference's Dispatch context requirements before sending.
 Preserve task identity and cumulative fix count. Retained fixes dispatch
-developer alone; other roles clear separately. Reconcile unknown outcomes
+developer alone. Warm consultations use the recovery reference's
+`--retain-specialist` path. Reconcile unknown outcomes
 before retrying. Reuse existing correction authorization within its bounds.
 
 Follow the Dispatch Results contract in `references/round-flow.md` for busy,
 uncertain, failed, and dry-run outcomes. Preserve all already enrolled work.
 
-Read the context, recovery, and executable refusal contracts:
+Dispatch references:
 
 ```text
 skills/herdr-teamlead/references/dispatch-recovery.md
 skills/herdr-teamlead/references/model-tiers.md
 ```
 
-Proceed to Step 11 with the dispatched roles.
+Proceed to Step 11.
 
 ## Step 11 — Observe the Fleet
 
@@ -311,6 +305,9 @@ skills/herdr-teamlead/references/supervision.md
 skills/herdr-teamlead/references/dispatch-recovery.md
 ```
 
+Save a consultation's successful delivery receipt and record `assess-specialist`
+under `references/specialists.md` before retiring its enrollment.
+
 Record each outcome in the task ledger and user-facing obligations in the
 attention queue. Acknowledge only handled event IDs through the saved snapshot;
 schedule pending rechecks. Resolve enrollment only after recording its assessed
@@ -331,6 +328,9 @@ separately; a worker finishing its brief never completes the whole task.
 Assess correction scope and bug evidence under `references/assignment-reasoning.md`.
 Persist user-facing obligations under `references/attention.md` before presenting
 them; record an actual answer or resolution separately from showing the item.
+
+After accepting a consultation, return to Step 4 for the next needed
+responsibility. For an investigation-only task, use the knowledge gate below.
 
 For an investigation-only task, assess every assigned report against the requested
 knowledge deliverable. Resolve blocking findings through the same bounded and

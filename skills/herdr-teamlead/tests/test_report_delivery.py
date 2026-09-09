@@ -308,7 +308,8 @@ class NativeDeliveryTests(unittest.TestCase):
         brief.write_text("Judge the original dispute.\n" + self.marker + "\n")
         common = self.tmp / "common.md"
         common.write_text("Shared round requirements.\n")
-        assignment = document["assignments"][0]
+        assignment = {key: value for key, value in document["assignments"][0].items()
+                      if key not in {"requirements", "reviewer_scope"}}
         dispatch = {"schema_version": 1, "id": "dispatch-361", "at": AT, "fingerprint": "fingerprint-361",
                     "task": "task-361", "role": "judge", "agent": "worker", "fix_round": None, "status": "applied",
                     "assignment_index": 0, "brief": str(brief), "common": str(common),
@@ -369,7 +370,7 @@ class NativeDeliveryTests(unittest.TestCase):
         original = case.saved()
         self.assertIsNone(original["assignments"][-1]["context_session"])
         self.assertNotIn("schema_version", applied)
-        self.assertEqual(original["recovery"]["dispatches"][-1]["result"]["schema_version"], 1)
+        self.assertEqual(original["recovery"]["dispatches"][-1]["result"]["schema_version"], 2)
         prompt = next(call[4] for call in case.runner.calls if call[1:3] == ["agent", "prompt"])
         rows = grok_rows(self.marker)
         rows[0]["params"]["update"]["content"]["text"] = prompt
@@ -431,7 +432,7 @@ class NativeDeliveryTests(unittest.TestCase):
         del store["role_clearances"]
         original = copy.deepcopy(store)
         self.assertTrue(recovery.migrate_store(store))
-        self.assertEqual(store, {**original, "schema_version": 4, "role_clearances": [], "delivery_recoveries": []})
+        self.assertEqual(store, {**original, "schema_version": 5, "role_clearances": [], "delivery_recoveries": []})
         self.assertFalse(recovery.migrate_store(store))
 
 

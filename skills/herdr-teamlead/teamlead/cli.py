@@ -22,7 +22,7 @@ from types import SimpleNamespace
 from . import __version__
 from .assign import apply as apply_assignments
 from .assign import APPLY_SCHEMA_VERSION, dry_run, native_context_session, normalize_assignments, resolve_paths, validate_fix_history
-from . import attention, historical, memory, recovery, report_delivery, restoration, role_clear, retrospective, retrospective_runtime, supervision, supervision_runtime
+from . import attention, composition, engagement, historical, memory, recovery, report_delivery, restoration, role_clear, retrospective, retrospective_runtime, supervision, supervision_runtime
 from .config import default_config_path, load_config, load_judge, load_role_costs, select_agents
 from .errors import PlanError, StateError, TeamLeadError, UsageError
 from .herdr import (
@@ -40,7 +40,7 @@ from .measure import (
     measure,
 )
 from .planner import plan as build_plan
-from .tiers import parse_launch_args, parse_tiers, select_tier
+from .tiers import MissingTierError, parse_launch_args, parse_tiers, select_tier
 from .qualification import require_qualification
 from .launch import start_worker, verify_running
 from .state import (
@@ -234,6 +234,8 @@ def build_parser():
                              help="JSON object keyed by role with mechanical/risk evidence for this round.")
     plan_parser.add_argument("--fix-round", type=int, help="Task fix number; late fixes use the top tier.")
     plan_parser.add_argument("--task", help="Original task identity; preserve it through every correction.")
+    plan_parser.add_argument("--requirements", metavar="FILE",
+                             help="Versioned per-role specialty, capabilities, independence and engagement requirements.")
     plan_parser.add_argument("--preview-tiers", action="store_true",
                              help="Preview unqualified tiers. Live apply still requires complete qualification evidence.")
     plan_parser.add_argument("--now", metavar="ISO-8601", help="Reference time for qualification expiry (default: current UTC time).")
@@ -290,6 +292,10 @@ def build_parser():
         "--retain-context", action="store_true",
         help="Keep the same developer's context for fix rounds 1–3; requires --task and --fix-round.",
     )
+    context_flags.add_argument(
+        "--retain-specialist", action="store_true",
+        help="Follow up on an assessed consultation in its verified unchanged task, engagement and session.",
+    )
     apply_parser.add_argument(
         "--fix-round", type=int, metavar="N",
         help="Fix-round number for this task; the dispatcher validates the cap.",
@@ -344,7 +350,7 @@ def build_parser():
     report_parser.add_argument("--report", required=True)
     report_parser.add_argument("--lines", type=int, required=True)
 
-    for command in ("task", "checkpoint", "authorize-corrections", "recover-context", "recover-role-clear", "record-report", "reconcile", "record-release-clear", "import-correction", "record-historical-review", "recover-report"):
+    for command in ("task", "checkpoint", "authorize-corrections", "recover-context", "recover-role-clear", "record-report", "reconcile", "record-release-clear", "import-correction", "record-historical-review", "recover-report", "assess-specialist"):
         record_parser = sub.add_parser(command, parents=[common], help="Record owner-managed {} evidence.".format(command))
         record_parser.add_argument("--record", required=True, metavar="FILE", help="Structured evidence JSON; see dispatch-recovery.md.")
         record_parser.add_argument("--now", metavar="ISO8601")
@@ -519,7 +525,7 @@ def _round_inputs(args, roles):
     return rounds
 
 
-def _candidate_tiers(roles, agents, rounds, fix_round=None, judge=None, qualified_at=None):
+def _candidate_tiers(roles, agents, rounds, fix_round=None, judge=None, qualified_at=None, excludes=None):
     tiered = any(agent.tiers for agent in agents)
     if not tiered and not (judge and "judge" in roles):
         if rounds:
@@ -529,6 +535,8 @@ def _candidate_tiers(roles, agents, rounds, fix_round=None, judge=None, qualifie
     for role in roles:
         inputs = rounds.get(role, {})
         for agent in agents:
+            if agent.name in (excludes or {}).get(role, []):
+                continue
             if judge and agent.name == judge.agent:
                 if role == "judge":
                     candidates[role][agent.name] = {"round": "judge", "tier_row": "judge", "kind": agent.kind,
@@ -541,7 +549,11 @@ def _candidate_tiers(roles, agents, rounds, fix_round=None, judge=None, qualifie
                 if not tiered:
                     candidates[role][agent.name] = None
                 continue
-            tier = select_tier(agent, role, inputs.get("type"), inputs.get("context"), fix_round)
+            try:
+                tier = select_tier(agent, role, inputs.get("type"), inputs.get("context"), fix_round)
+            except MissingTierError:
+                # A valid round can lack a configured row on one candidate.
+                continue
             if tier is None:
                 continue
             if qualified_at is not None:
@@ -626,14 +638,12 @@ def cmd_plan(args, client=None, warn=None, trace=None):
     agents = load_config(_config_path(args)) if _config_path(args).exists() else []
     state_path = _state_path(args)
     state = load_state(state_path, warn=warn)
+    requirements = composition.parse_requirements(_read_record(args.requirements) if args.requirements else None, roles, args.task)
     work = _read_record(args.work) if args.work else None
     recovery.validate_work(state["recovery"], state["assignments"], args.task, args.fix_round,
                            args.correction_plan, work, implementation="developer" in roles)
     if args.task:
         validate_fix_history({role: None for role in roles}, state["assignments"], args.task, args.fix_round)
-    tier_candidates = _candidate_tiers(roles, agents, rounds, args.fix_round, judge,
-                                      None if args.preview_tiers else (args.now or now_iso()))
-
     if args.snapshot:
         snapshot_path = Path(args.snapshot)
         try:
@@ -671,6 +681,16 @@ def cmd_plan(args, client=None, warn=None, trace=None):
             {"source": source},
         )
 
+    constraints = composition.selection_constraints(
+        roles, agents, requirements, state["assignments"], args.task,
+        dispatches=state["recovery"]["dispatches"], assessments=state["specialist_assessments"],
+        candidate_names=snapshot.get("agents", {}).keys() if isinstance(snapshot.get("agents"), dict) else (),
+    )
+    for role, names in constraints["exclude"].items():
+        excludes[role] = sorted(set(excludes.get(role, [])) | set(names))
+    tier_candidates = _candidate_tiers(roles, agents, rounds, args.fix_round, judge,
+                                      None if args.preview_tiers else (args.now or now_iso()), excludes=excludes)
+
     result = build_plan(
             roles,
             snapshot,
@@ -689,6 +709,9 @@ def cmd_plan(args, client=None, warn=None, trace=None):
             warn=warn,
             tier_candidates=tier_candidates,
             rounds=rounds,
+            requirements=requirements,
+            familiarity=constraints["familiarity"],
+            selection_rationale=constraints["rationale"],
         )
     result["task_context"] = ({"task": args.task, "fix_round": args.fix_round,
                                "plan": args.correction_plan, "work": work} if args.task else None)
@@ -700,6 +723,10 @@ def cmd_apply(args, client=None, warn=None, trace=None):
     agents_by_name = {agent.name: agent for agent in agents}
     document = _load_assignments(args.assignments, document=True)
     assignments = normalize_assignments(document)
+    requirements = composition.parse_requirements(
+        {"schema_version": 1, "assignments": document["requirements"]} if "requirements" in document else None,
+        list(assignments), args.task, allow_historical_architect=True,
+    )
     rounds = document.get("rounds", {}) if "assignments" in document else {}
     if not isinstance(rounds, dict) or set(rounds) - set(assignments):
         raise UsageError("Plan rounds must map only assigned roles to round inputs.", {})
@@ -722,6 +749,8 @@ def cmd_apply(args, client=None, warn=None, trace=None):
     paths = resolve_paths(assignments, _parse_briefs(args.briefs), args.common)
     reports = _parse_reports(args.reports, assignments)
     supervised = supervision.dispatch_binding(state_path) is not None
+    if requirements and not args.dry_run and not supervised:
+        raise UsageError("Bind the lead with supervision-bind before dispatching specialist requirements; every specialist needs durable observation ownership.", {})
     if supervised and (not args.task or set(reports) != set(assignments)):
         raise UsageError("Bound team rounds require --task and one --report ROLE=ABS_PATH for every assigned role before any worker input.", {})
     replayed = []
@@ -730,9 +759,14 @@ def cmd_apply(args, client=None, warn=None, trace=None):
     # returns its original outcome and never consumes a second attempt.
     if args.task and not args.dry_run:
         for role, name in assignments.items():
+            options = {**task_context, "rounds": rounds, "retain_context": args.retain_context, "no_clear": args.no_clear}
+            if requirements:
+                options["requirements"] = requirements
+            if args.retain_specialist:
+                options["retain_specialist"] = True
             identifier, fingerprint = recovery.dispatch_identity(
                 args.task, role, name, args.fix_round, paths, args.dispatch_id,
-                options={**task_context, "rounds": rounds, "retain_context": args.retain_context, "no_clear": args.no_clear})
+                options=options)
             if supervised:
                 # Keep legacy retry IDs, while new bound dispatch fingerprints
                 # also bind the explicit report path. Existing legacy receipts
@@ -752,14 +786,27 @@ def cmd_apply(args, client=None, warn=None, trace=None):
                 dispatches[role] = {"id": identifier, "fingerprint": fingerprint, "role": role, "agent": name,
                                     "task": args.task, "fix_round": args.fix_round,
                                     "plan": args.correction_plan, "work": work}
+                if role in requirements:
+                    dispatches[role]["requirements"] = requirements[role]
+                if role == "reviewer":
+                    dispatches[role]["reviewer_scope"] = "design" if rounds.get(role, {}).get("type") in {"architect", "reconciliation"} else "verification"
         if len(replayed) == len(assignments):
             return {"schema_version": APPLY_SCHEMA_VERSION, "dry_run": False, "applied_at": at, "applied": replayed}, None
         assignments = {role: name for role, name in assignments.items() if role in dispatches}
+        requirements = {role: value for role, value in requirements.items() if role in assignments}
     elif args.dispatch_id and not args.task:
         raise UsageError("--dispatch-id requires --task; preserve the task's identity for retry accounting.", {})
     recovery.validate_work(store, state["assignments"], args.task, args.fix_round,
                            args.correction_plan, work, implementation="developer" in assignments)
-    candidates = _candidate_tiers(list(assignments), agents, rounds, args.fix_round, judge)
+    constraints = composition.selection_constraints(
+        list(assignments), agents, {role: value for role, value in requirements.items() if role in assignments},
+        state["assignments"], args.task, dispatches=store["dispatches"],
+        assessments=state["specialist_assessments"], candidate_names=assignments.values(),
+    )
+    for role, name in assignments.items():
+        if name in constraints["exclude"].get(role, []):
+            raise UsageError("Assigned worker {} is ineligible for {} under current capabilities or contribution history; replan an independent capable worker.".format(name, role), {})
+    candidates = _candidate_tiers(list(assignments), agents, rounds, args.fix_round, judge, excludes=constraints["exclude"])
     tiers = {}
     if candidates is not None:
         for role, name in assignments.items():
@@ -771,6 +818,9 @@ def cmd_apply(args, client=None, warn=None, trace=None):
         if "tiers" in document and saved_tiers != tiers:
             raise UsageError("Plan tiers differ from current config or fix context; re-run plan before dispatch.", {})
     client = client if client is not None else _client(args, trace=trace)
+
+    if args.retain_specialist:
+        engagement.require_followup(state, state_path, assignments)
 
     if args.dry_run:
         return (
@@ -786,6 +836,7 @@ def cmd_apply(args, client=None, warn=None, trace=None):
                 settle_timeout_ms=args.settle_timeout,
                 tiers=tiers,
                 recovery=store, history=state["assignments"], plan_id=args.correction_plan, work=work,
+                retain_specialist=args.retain_specialist, requirements=requirements,
             ),
             None,
         )
@@ -823,7 +874,11 @@ def cmd_apply(args, client=None, warn=None, trace=None):
             save_state(state_path, state)
 
     def record(result):
+        if result["role"] == "reviewer":
+            result["reviewer_scope"] = "design" if rounds.get("reviewer", {}).get("type") in {"architect", "reconciliation"} else "verification"
         context = {key: result[key] for key in ("cleared", "clear_reason", "task", "fix_round", "context_session", "tier")}
+        context["requirements"] = result.get("requirements")
+        context["reviewer_scope"] = result.get("reviewer_scope")
         add_assignment(state, at, result["role"], result["agent"], status=result["status"], **context)
         if args.task:
             result["dispatch_id"] = dispatches[result["role"]]["id"]
@@ -852,12 +907,13 @@ def cmd_apply(args, client=None, warn=None, trace=None):
             recovery=store, plan_id=args.correction_plan, work=work,
             warn=warn,
             task=args.task,
+            retain_specialist=args.retain_specialist, requirements=requirements,
             settle_sec=args.composer_settle,
             start_timeout_ms=args.start_timeout,
             allow_recovery=args.allow_recovery,
             tiers=tiers,
             retrospective_guard=retrospective_runtime.Guard(state_path, state, client, agents_by_name, at,
-                                                          task=args.task, retain=args.retain_context, no_clear=args.no_clear),
+                                                          task=args.task, retain=args.retain_context or args.retain_specialist, no_clear=args.no_clear),
             qualifications={role: [record for entry in agents_by_name[name].tiers.values()
                                    for record in entry.get("qualification", [])]
                             for role, name in assignments.items()},
@@ -895,6 +951,19 @@ def cmd_status(args, client=None, warn=None, trace=None):
             "tasks": recovery.task_statuses(state["recovery"], state["assignments"])}, None
 
 
+def _require_independent_report(state, task, reviewer):
+    """Apply the same contribution evidence to live and imported reviews."""
+    if not isinstance(reviewer, str):
+        return  # The owning receipt validator reports malformed input.
+    constraints = composition.selection_constraints(
+        ["reviewer"], [], {}, state["assignments"], task,
+        dispatches=state["recovery"]["dispatches"],
+        assessments=state["specialist_assessments"], candidate_names=[reviewer],
+    )
+    if reviewer in constraints["exclude"]["reviewer"]:
+        raise UsageError("This reviewer contributed to the task; collect an independent report before recording approval.", {})
+
+
 def cmd_recovery(args, client=None, warn=None, trace=None):
     state_path = _state_path(args)
     state = _load_state_for_write(state_path, warn)
@@ -908,14 +977,24 @@ def cmd_recovery(args, client=None, warn=None, trace=None):
     elif args.command == "authorize-corrections":
         result = recovery.authorize_plan(store, history, data, at)
     elif args.command == "record-report":
+        if isinstance(data, dict):
+            dispatch = next((item for item in store["dispatches"] if item["id"] == data.get("dispatch")), None)
+            if dispatch is not None:
+                _require_independent_report(state, dispatch["task"], data.get("reviewer"))
         result = recovery.record_report(store, data, at)
     elif args.command == "recover-report":
         result = report_delivery.recover(store, history, data, at)
+    elif args.command == "assess-specialist":
+        result = engagement.record_assessment(state, state_path, data, at)
     elif args.command == "import-correction":
         result = historical.import_attempt(store, history, data, at)
         if result["assignment_index"] == len(history):
             add_assignment(state, data["occurred_at"], "developer", data["agent"], task=data["task"], fix_round=data["fix_round"])
     elif args.command == "record-historical-review":
+        if isinstance(data, dict):
+            attempt = next((item for item in store["historical_attempts"] if item["id"] == data.get("historical_attempt")), None)
+            if attempt is not None:
+                _require_independent_report(state, attempt["task"], data.get("reviewer"))
         result = historical.record_review(store, data, at)
     else:
         agents = {agent.name: agent for agent in load_config(_config_path(args))}
@@ -940,10 +1019,20 @@ def cmd_recovery(args, client=None, warn=None, trace=None):
                              "cleared": context.get("cleared"), "clear_reason": context.get("clear_reason", "unknown"),
                              "context_session": None, "tier": context.get("tier"),
                              "recovered": True, "dispatch_id": result["id"]}
-                add_assignment(state, at, recovered["role"], name, status="applied", **{
-                    key: recovered[key] for key in ("cleared", "clear_reason", "task", "fix_round", "context_session", "tier")})
+                if result.get("requirements") is not None:
+                    recovered["requirements"] = result["requirements"]
+                if result.get("reviewer_scope") is not None:
+                    recovered["reviewer_scope"] = result["reviewer_scope"]
+                add_assignment(
+                    state, at, recovered["role"], name, status="applied",
+                    cleared=recovered["cleared"], clear_reason=recovered["clear_reason"],
+                    task=recovered["task"], fix_round=recovered["fix_round"],
+                    context_session=recovered["context_session"], tier=recovered["tier"],
+                    requirements=recovered.get("requirements"), reviewer_scope=recovered.get("reviewer_scope"),
+                )
                 recovery.finish_dispatch(store, result["id"], recovered, len(history) - 1, at)
     recovery.validate_store(store, history)
+    engagement.validate_assessments(state)
     save_state(state_path, state)
     return result, None
 
@@ -1062,7 +1151,7 @@ COMMANDS = {
     "apply": cmd_apply,
     "state": cmd_state,
     "status": cmd_status,
-    **{command: cmd_recovery for command in ("task", "checkpoint", "authorize-corrections", "recover-context", "recover-role-clear", "record-report", "reconcile", "record-release-clear", "import-correction", "record-historical-review", "recover-report")},
+    **{command: cmd_recovery for command in ("task", "checkpoint", "authorize-corrections", "recover-context", "recover-role-clear", "record-report", "reconcile", "record-release-clear", "import-correction", "record-historical-review", "recover-report", "assess-specialist")},
     "start-judge": cmd_start_judge,
     "probe-report": cmd_probe_report,
     **{command: cmd_retrospective for command in ("retro-check", "retro-record", "retro-list", "retro-show")},

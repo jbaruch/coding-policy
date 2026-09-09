@@ -9,6 +9,7 @@ whose outcome is unknown holds its attempt number until explicit recovery.
 import hashlib
 import json
 import re
+from copy import deepcopy
 from fnmatch import fnmatchcase
 from pathlib import Path, PurePosixPath
 
@@ -17,7 +18,9 @@ from .chronology import assignment_after, latest_assignment
 
 
 RECOVERY_SCHEMA_VERSION = 1
-RECOVERY_STORE_VERSION = 4
+RECOVERY_STORE_VERSION = 5
+SPECIALIST_DISPATCH_VERSION = 2
+DISPATCH_METADATA_FIELDS = frozenset({"requirements", "reviewer_scope"})
 DEFAULT_FIX_LIMIT = 5
 PENDING_STATUSES = frozenset({"reserved", "sending", "sent_but_not_started"})
 DISPATCH_STATUSES = PENDING_STATUSES | {"applied", "not_sent"}
@@ -35,8 +38,20 @@ def migrate_store(store):
     if not isinstance(store, dict) or type(store.get("schema_version")) is not int:
         return False
     version = store["schema_version"]
-    if version not in {1, 2, 3}:
+    if version not in {1, 2, 3, 4}:
         return False
+    dispatches = store.get("dispatches")
+    if not isinstance(dispatches, list):
+        raise UsageError("Older recovery requires a dispatches array; restore the original owner-written store.", {})
+    for row in dispatches:
+        if (not isinstance(row, dict) or type(row.get("schema_version")) is not int
+                or row["schema_version"] != RECOVERY_SCHEMA_VERSION or DISPATCH_METADATA_FIELDS.intersection(row)):
+            raise UsageError("Older recovery contains unowned newer dispatch metadata; preserve it for owner recovery.", {})
+        result = row.get("result")
+        if result is not None and (not isinstance(result, dict)
+                or type(result.get("schema_version")) is not int
+                or result["schema_version"] != RECOVERY_SCHEMA_VERSION or DISPATCH_METADATA_FIELDS.intersection(result)):
+            raise UsageError("Older recovery contains unowned newer dispatch results; preserve it for owner recovery.", {})
     if version == 3:
         deliveries = store.get("delivery_recoveries")
         if not isinstance(deliveries, list):
@@ -305,7 +320,41 @@ def prior_dispatch(store, identifier, fingerprint):
     return prior
 
 
+def _dispatch_version(record):
+    """Composition metadata is explicit v2 evidence, never a legacy default."""
+    if not DISPATCH_METADATA_FIELDS.intersection(record):
+        return RECOVERY_SCHEMA_VERSION
+    if "requirements" in record:
+        from .composition import normalize_requirement
+        requirement = record["requirements"]
+        if normalize_requirement(requirement, record.get("role")) != requirement:
+            raise UsageError("Dispatch requirements must be canonical owner-normalized values; replan without editing saved engagement metadata.", {})
+    if "reviewer_scope" in record and (record.get("role") != "reviewer"
+            or not isinstance(record["reviewer_scope"], str) or record["reviewer_scope"] not in {"verification", "design"}):
+        raise UsageError("New reviewer_scope must name verification or design on a reviewer dispatch; preserve unknown scope only in legacy assignment history.", {})
+    return SPECIALIST_DISPATCH_VERSION
+
+
+def _dispatch_metadata(record):
+    return {key: deepcopy(record[key]) for key in DISPATCH_METADATA_FIELDS if key in record}
+
+
+def _validate_dispatch_metadata(record):
+    version = _dispatch_version(record)
+    if type(record.get("schema_version")) is not int or record["schema_version"] != version:
+        raise UsageError("Dispatch schema does not match its composition metadata; preserve the original record for owner recovery.", {})
+    result = record.get("result")
+    if result is not None:
+        if (not isinstance(result, dict) or type(result.get("schema_version")) is not int
+                or result["schema_version"] != version or _dispatch_version(result) != version
+                or _dispatch_metadata(result) != _dispatch_metadata(record)):
+            raise UsageError("Saved dispatch result has different composition metadata or schema; restore the original dispatch evidence before retrying.", {})
+
+
 def reserve(store, record, at):
+    version = _dispatch_version(record)
+    if version == SPECIALIST_DISPATCH_VERSION and store.get("schema_version") != RECOVERY_STORE_VERSION:
+        raise UsageError("Composition dispatch metadata needs the owner-migrated recovery store; load the current state before reserving this assignment.", {})
     pending = [row for row in store["dispatches"] if row["status"] in PENDING_STATUSES
                and (row["agent"] == record["agent"] or row["task"] == record["task"]
                     and row["role"] in {"developer", "release"} and record["role"] in {"developer", "release"})]
@@ -315,13 +364,17 @@ def reserve(store, record, at):
     if prior:
         if prior["status"] != "not_sent" or prior["fingerprint"] != record["fingerprint"]:
             raise UsageError("Dispatch already exists; inspect its recorded result instead of sending again.", {})
+        if prior["schema_version"] != version or _dispatch_metadata(prior) != _dispatch_metadata(record):
+            raise UsageError("Retry changes the original composition metadata; restore the recorded dispatch inputs instead of reusing its identity.", {})
         _event(store, at, "dispatch_transport_retry", record["task"], {"dispatch": prior["id"], "previous": dict(prior)})
         prior.update(status="reserved", report=None, result=None)
         prior.pop("reconciliation", None)
         item = prior
     else:
-        item = {"schema_version": RECOVERY_SCHEMA_VERSION, "at": at, **record,
+        item = {"at": at, **record, "schema_version": version,
                 "status": "reserved", "result": None, "report": None}
+        if version == SPECIALIST_DISPATCH_VERSION:
+            item.update(_dispatch_metadata(record))
         store["dispatches"].append(item)
     _event(store, at, "dispatch_reserved", record["task"], {"dispatch": record["id"], "fix_round": record["fix_round"]})
     return item
@@ -336,9 +389,15 @@ def mark_sending(store, identifier, at, context):
 
 def finish_dispatch(store, identifier, result, assignment_index, at):
     record = _item(store["dispatches"], identifier, "dispatch")
+    version = _dispatch_version(result)
+    if record["schema_version"] != version or _dispatch_metadata(record) != _dispatch_metadata(result):
+        raise UsageError("Dispatch result changes its reserved composition metadata; preserve the send outcome and recover the original engagement and reviewer scope.", {})
     if "assignment_index" in record and record["assignment_index"] != assignment_index:
         record.setdefault("prior_assignment_indices", []).append(record["assignment_index"])
-    record.update(status=result["status"], result={"schema_version": RECOVERY_SCHEMA_VERSION, **result}, assignment_index=assignment_index)
+    saved_result = {**result, "schema_version": version}
+    if version == SPECIALIST_DISPATCH_VERSION:
+        saved_result.update(_dispatch_metadata(result))
+    record.update(status=result["status"], result=saved_result, assignment_index=assignment_index)
     _event(store, at, "dispatch_recorded", record["task"], {"dispatch": identifier, "status": result["status"], "assignment_index": assignment_index})
 
 
@@ -490,7 +549,7 @@ def validate_store(store, assignments):
                 raise UsageError("Recovery {} must be an array; restore the owner-written ledger.".format(name), {})
             identifiers = []
             for row in store[name]:
-                versions = {1, 2} if name == "delivery_recoveries" else {RECOVERY_SCHEMA_VERSION}
+                versions = {1, 2} if name in {"delivery_recoveries", "dispatches"} else {RECOVERY_SCHEMA_VERSION}
                 if not isinstance(row, dict) or type(row.get("schema_version")) is not int or row["schema_version"] not in versions:
                     raise UsageError("A recovery record has an unsupported schema; update its owner.", {})
                 text(row["at"], "record timestamp")
@@ -531,6 +590,7 @@ def validate_store(store, assignments):
         pending_workers = set()
         pending_tasks = set()
         for row in store["dispatches"]:
+            _validate_dispatch_metadata(row)
             for key in ("id", "fingerprint", "role", "agent"):
                 text(row[key], key)
             if row["status"] not in DISPATCH_STATUSES:
@@ -558,7 +618,9 @@ def validate_store(store, assignments):
                 assignment = assignments[index]
                 if any(assignment.get(key) != row[key] for key in ("task", "role", "agent", "fix_round")) or assignment.get("status") != "applied":
                     raise UsageError("Dispatch outcome disagrees with its assignment row.", {})
-                if not isinstance(row["result"], dict) or type(row["result"].get("schema_version")) is not int or row["result"]["schema_version"] != RECOVERY_SCHEMA_VERSION or any(row["result"].get(key) != row[key] for key in ("task", "role", "agent", "fix_round", "status")):
+                if row["schema_version"] == SPECIALIST_DISPATCH_VERSION and any(assignment.get(key) != row.get(key) for key in DISPATCH_METADATA_FIELDS):
+                    raise UsageError("Dispatch and assignment composition metadata disagree; restore their original shared engagement and reviewer scope before continuing.", {})
+                if not isinstance(row["result"], dict) or any(row["result"].get(key) != row[key] for key in ("task", "role", "agent", "fix_round", "status")):
                     raise UsageError("The saved dispatch result does not match its confirmed outcome; recover it before retrying.", {})
                 if row["role"] == "developer":
                     slot = (row["task"], fix)

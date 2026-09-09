@@ -281,7 +281,7 @@ class RoleClearTests(fixture.fixture.CliCase):
         self.config.write_text(json.dumps(config))
         code, _, err = self.invoke(self.apply_args("developer", 3, "--work", str(self.work)), self._client({}))
         self.assertEqual(code, 1)
-        self.assertIn("has no 'fix' tier", err)
+        self.assertIn("has no eligible tier for developer", err)
         self.assertEqual(self.runner.calls, [])
 
     def test_schema_two_migration_preserves_history_and_adds_empty_recovery_arrays(self):
@@ -294,7 +294,7 @@ class RoleClearTests(fixture.fixture.CliCase):
         code, _, err = self.invoke(["state"])
         self.assertEqual(code, 0, err)
         expected = copy.deepcopy(state)
-        expected["recovery"].update(schema_version=4, role_clearances=[], delivery_recoveries=[])
+        expected["recovery"].update(schema_version=5, role_clearances=[], delivery_recoveries=[])
         self.assertEqual(self.saved(), expected)
 
 

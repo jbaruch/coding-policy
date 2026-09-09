@@ -78,14 +78,18 @@ class HistoricalCommandsTest(fixture.CliCase):
         # the public owner command without altering any historical evidence.
         state["schema_version"] = 4
         state.pop("recovery")
+        state.pop("specialist_assessments")
         for row in state["assignments"]:
             row["schema_version"] = 4
+            row.pop("requirements")
+            row.pop("reviewer_scope")
         self.state.write_text(json.dumps(state))
         original = copy.deepcopy(state["assignments"])
         code, _, err = self.invoke(["state"])
         self.assertEqual(code, 0, err)
         for expected, actual in zip(original, self.saved()["assignments"]):
-            expected["schema_version"] = actual["schema_version"]
+            expected.update(schema_version=actual["schema_version"], requirements=None,
+                            reviewer_scope="unknown" if expected["role"] == "reviewer" else None)
             self.assertEqual(actual, expected)
         code, _, err = self.owner("task", {"task": TASK, "base_revision": self.base_revision,
             "scope": SCOPE, "allowed_paths": ["src/*"], "authorization": AUTH})
@@ -625,7 +629,7 @@ class HistoricalCommandsTest(fixture.CliCase):
         self.assertEqual(code, 0, err)
         result = self.saved()
         self.assertEqual(result["assignments"], original["assignments"])
-        expected = {**original["recovery"], "schema_version": 4, "hand_clearances": [], "historical_attempts": [], "role_clearances": [], "delivery_recoveries": []}
+        expected = {**original["recovery"], "schema_version": 5, "hand_clearances": [], "historical_attempts": [], "role_clearances": [], "delivery_recoveries": []}
         self.assertEqual(result["recovery"], expected)
 
 

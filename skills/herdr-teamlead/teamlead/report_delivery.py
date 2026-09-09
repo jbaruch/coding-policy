@@ -24,6 +24,7 @@ from pathlib import Path
 from . import claude_native
 from . import recovery as ledger
 from . import supervision
+from .composition import parse_requirements
 from .errors import UsageError
 
 
@@ -404,6 +405,14 @@ def stale_grok_source(dispatch, assignment, observed, body, prompt, plan_body, *
     options = {"task": dispatch["task"], "fix_round": dispatch["fix_round"],
                "plan": dispatch.get("plan"), "work": dispatch.get("work"), "rounds": rounds,
                "retain_context": False, "no_clear": False}
+    requirements = parse_requirements(
+        {"schema_version": 1, "assignments": plan["requirements"]} if "requirements" in plan else None,
+        list(assignments), dispatch["task"], allow_historical_architect=True,
+    )
+    if requirements.get(dispatch["role"]) != dispatch.get("requirements"):
+        raise UsageError("grok_dispatch_unbound: restore the original specialist requirements recorded for this dispatch.", {})
+    if requirements:
+        options["requirements"] = requirements
     task_context = {key: options[key] for key in ("task", "fix_round", "plan", "work")}
     if plan.get("task_context") is not None and plan["task_context"] != task_context:
         raise UsageError("grok_dispatch_unbound: original plan names different task or correction bounds; restore its dispatch inputs.", {})
