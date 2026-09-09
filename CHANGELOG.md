@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.201 — 2026-09-09
+
 ### Changed
 
 - **YOLO workers and durable task decisions.** Every Herdr team member starts
