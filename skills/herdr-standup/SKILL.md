@@ -153,6 +153,24 @@ Proceed immediately to Step 6.
 
 ## Step 6 — Relay the Block
 
+Read saved attention using the team's recorded state override or default:
+
+```bash
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
+bash "$CP/skills/herdr-teamlead/teamlead.sh" catch-up [--state <state-file>]
+```
+
+Present nonempty `attention_markdown` before the table. Follow `attention` page
+counts and `next_offset` before claiming every pending item was shown. The
+read never resolves an item, updates a presentation marker, or contacts workers.
+On non-zero, report that saved attention is unavailable and its diagnostic;
+continue with the independently gathered standup. If there are no pending items,
+proceed silently. Its lifecycle contract is:
+
+```text
+skills/herdr-teamlead/references/attention.md
+```
+
 Print `block` from the saved output verbatim (`jq -r .block <file>`), exactly
 as the renderer emitted it. Do not reformat it, summarize it, or replace it
 with prose.

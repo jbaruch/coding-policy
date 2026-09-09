@@ -26,7 +26,9 @@ fold two roles onto one worker deliberately, in that worker's brief.
 
 ## Two Phases
 
-A task runs through the round twice, and only the second pass gates anything.
+An implementation task runs through the round twice, and only the second pass
+gates release. Investigation-only tasks use Step 12's knowledge-deliverable
+gate; they do not require a pushed branch or release reports.
 
 **Phase 1 — pre-development (optional).** The architect posts a design note on
 the issue (reviewer Mode A). The tester writes a plan mapping each acceptance
@@ -77,8 +79,9 @@ review their own branch.
 8. **Dispatch** — `teamlead.sh apply` uses Step 10's explicit context mode,
    then sends the assignment prompt. Only a same-role fix may retain context.
    It re-reads live status and refuses to type into a busy worker.
-9. **Wait** — `wait-report.sh <agent> <report-path>` per worker, in the order
-   the round needs them.
+9. **Observe** — `supervision-watch` observes every enrolled worker. Verify
+   candidates with `wait-report.sh --once`, ledger outcomes, and acknowledge
+   handled events under `references/supervision.md`.
 10. **Gate** — the lead reads every report in full and decides: another round,
    or the release hand-off.
 
@@ -106,13 +109,17 @@ a `## BLOCKED` section can sit under a report that otherwise reads as finished.
   dialog is input, and input to a blocked agent is exactly what Dispatch
   Safety forbids. The operator answers; the wait resumes once
   `herdr agent get <name>` reports a state other than `blocked`.
-- **`wait-report.sh` exit 1** — the budget ran out. Read the pane before
-  re-dispatching; a worker that is still working needs more budget, not a
-  second copy of the same brief.
+- **`wait-report.sh --once` exit 1** — delivery remains pending. Record the
+  checkpoint, acknowledge its event with a scheduled pending recheck, and resume
+  the fleet watcher. Never send a second copy of the brief on a status hint.
+- Persist blocked dialogs, missing reports, and required operator decisions in
+  the attention queue before presenting them. Keep observing unrelated work.
+  A pause or handoff must cover the entire active fleet under the supervision
+  reference; a single worker's blocker does not release those obligations.
 
 ## Release Gate
 
-Step 12 requires all four:
+For an authorized implementation release, Step 12 requires all four:
 
 1. The developer's report names the branch and the commit SHA it pushed.
 2. A broad reviewer **Mode B** report reviews that same SHA and carries no
@@ -128,7 +135,10 @@ to release. Scoped reports alone never satisfy this gate.
 
 ## Blocking Gate
 
-At Step 12, read this task's confirmed fix history, name the next fix number,
+At Step 12, apply `skills/herdr-teamlead/references/assignment-reasoning.md` to
+the findings and their proposed corrections. Preserve required judge rulings
+and operator decisions; scope classification never waives a blocking finding.
+Read this task's confirmed fix history, name the next fix number,
 and return to Step 4 with self-contained briefs carrying the findings and prior
 reports. Preserve the developer for retained fixes; use a fresh context for the
 fresh-worker stage. Never reset the counter during re-planning. At an exhausted
@@ -244,3 +254,47 @@ and no degraded ruling.
 - Merge on a worker's behalf. The developer runs the release skill.
 - Act against a judge's ruling, or seat the judge on developer, reviewer, or
   tester. Only the operator overrides a ruling.
+
+## Dispatch Results
+
+Step 10 of `skills/herdr-teamlead/SKILL.md` follows these outcomes. Before a
+finish, apply the whole-fleet pause/handoff contract in `references/supervision.md`.
+
+- **Exit 0** — proceed to Step 11.
+- **Busy target** — no dispatch occurred. Wait for readiness or replan; stay
+  at this step.
+- **Sent but not started** — inspect the pane; never re-dispatch on top of the
+  message. Proceed to Step 11 for the roles that started.
+- **Retrospective, clear, composer, tier, qualification, or continuity refusal** — follow the
+  diagnostic and recorded dispatch outcome. Reconcile uncertainty before retrying;
+  wait for roles whose records confirm dispatch.
+- **Unknown refusal** — report it verbatim and finish here.
+- **`--dry-run`** — inspect the context choice, requested tier, and relaunch
+  argv. It contacts no worker, writes no ledger, and proves no live tier or
+  qualification. Finish here.
+
+
+## Ruling Outcomes
+
+Step 19 follows these branches. Before a finish, preserve any user question and
+apply the whole-fleet pause/handoff contract in `references/supervision.md`.
+
+The `RULING:` line binds the round. Only the operator overrides it.
+
+For an investigation-only task, a non-blocked ruling returns to Step 12's
+knowledge-deliverable gate with the ruling and any required authorized research.
+Apply the existing correction allowance and judge rules to remaining findings.
+Do not enter implementation Phase 2 or Step 20 without implementation/release
+authorization. A blocked ruling follows the operator-question path below.
+
+- **`uphold A` / `uphold B` / `amend`, `ACTION:` changing no branch content**
+  — record the ruling. Proceed to Step 20 only with Step 12's broad reports
+  against the current tip. Otherwise re-run Phase 2 with full briefs carrying
+  the ruling. Do not re-dispatch the judge for the same settled dispute.
+- **`uphold A` / `uphold B` / `amend`, `ACTION:` changing the branch** — apply
+  the round-flow reference's Branch-Changing Ruling contract. Finish here while
+  its required operator decision is pending; otherwise return to Step 12 with
+  `ACTION:` as the next counted fix.
+- **`blocked`** — the judge declined to rule. Stop the round and put its
+  named question to the operator. Do not dispatch a second judge and do not
+  rule in its place. Finish here.

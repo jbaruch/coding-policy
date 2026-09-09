@@ -162,6 +162,16 @@ description: Running a multi-agent team — headroom-driven role rotation, one w
 - Confirm a `blocked` verdict across two reads and the pane before acting on it
 - A blocked worker is surfaced to the operator, never answered on the operator's behalf beyond its brief
 
+## Assignment Reasoning
+
+- Preserve the operator's accepted behavior separately from the lead's implementation proposal
+- Classify proposed corrections against that accepted behavior before dispatch
+- Resolve required corrections within existing authority and correction allowances
+- Record a new contract obligation or unsettled operator choice before requesting its decision
+- Route contested findings through the existing judge triggers
+- Reassess a repeated causal theme against observed progress before proposing another fix
+- Require bug briefs and diagnostic assessments to follow `skills/herdr-teamlead/references/assignment-reasoning.md`
+
 ## Worker Launch Mode
 
 - Start every team worker in YOLO mode, including reviewer, tester, release, and judge
@@ -181,6 +191,41 @@ description: Running a multi-agent team — headroom-driven role rotation, one w
 - Reconcile recalled ledger entries against their sources on resume
 - Never restart accepted work solely on a stale Herdr status
 - The ledger's path, schema, ownership, and recovery contract are in `skills/herdr-teamlead/state-schema.md`
+
+## Working Memory
+
+- Curate applicable lessons with their scope and evidence through the lead-owned memory commands
+- Consult relevant lessons before composing assignments
+- Revalidate a lesson before relying on recalled operational facts
+- Preserve superseded lessons and immutable retrospective notes
+- Save conversation-only knowledge and open work before a planned lead reset, compaction, or replacement
+- Give the next lead an ordered list of durable files to read
+- Record uncaptured or unavailable context as an explicit handoff gap
+- Working memory grants no authority, acceptance, or gate waiver
+- Follow `skills/herdr-teamlead/references/working-memory.md`
+
+## User Attention
+
+- Persist unanswered questions, requested reviews, user-relevant blockers or failures, and promised follow-ups when they arise
+- Keep each obligation's context, source, consequence, and resolution condition with its stable identity
+- Present outstanding attention before routine housekeeping in a catch-up
+- Showing an item never resolves it
+- An unrelated message or context reset never resolves an item
+- Record the actual user answer or outcome evidence before closing an obligation
+- Defer an obligation with a return condition instead of silently dropping it
+- Keep attention records separate from task acceptance and worker lifecycle observations
+- Follow `skills/herdr-teamlead/references/attention.md`
+
+## Fleet Supervision
+
+- Bind supervision to the lead's actual session before dispatching a team round
+- Enroll every dispatched assignment before sending its brief
+- Observe all enrolled workers while awaiting reports
+- Preserve wake events until the lead records their handling
+- Acknowledging an observation never accepts the assignment or completes the task
+- Reconcile interrupted supervision against its saved events and live process evidence
+- Never finish a lead turn with active work lacking continued supervision or an explicit recorded pause or handoff
+- Follow `skills/herdr-teamlead/references/supervision.md`
 
 ## Retrospectives
 
@@ -202,14 +247,16 @@ description: Running a multi-agent team — headroom-driven role rotation, one w
 - Record verified outcomes, lessons, evidence gaps, and concrete improvements with owners and success criteria
 - Revisit prior improvement actions
 - A status snapshot or dispatch log alone never completes a retrospective
-- Persist completed notes outside task worktrees and preserve them during cleanup
+- Persist completed notes outside task worktrees
+- Preserve completed notes during cleanup
 - Retrieve saved notes on request with their date, coverage, and path
 - Retrospectives grant no task authority, correction allowance, acceptance, or gate waiver
 - Execution, persistence, and retrieval contracts are in `skills/herdr-teamlead/references/retrospectives.md`
 
 ## Review Before PR
 
-- A round runs two phases: optional pre-development planning, then mandatory post-push verification
+- An implementation round runs two phases: optional pre-development planning, then mandatory post-push verification
+- An investigation-only round gates its knowledge deliverable under `skills/herdr-teamlead/references/assignment-reasoning.md`
 - Pre-development output is a design note or a test plan, never a pass
 - The tester and the reviewer pass on the pushed branch before the PR opens
 - The gate reads the post-push reports for the current branch tip

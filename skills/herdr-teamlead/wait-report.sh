@@ -13,7 +13,11 @@
 # the wait on a worker that has produced nothing.
 #
 # Contract:
-#   argv  : <agent-name> <report-path>
+#   argv  : [--once] <agent-name> <report-path>
+#           --once checks current evidence without waiting for future work.
+#                  Existing blocked/refusal confirmations still run. A present
+#                  unconfirmed report gets the normal consecutive-read check.
+#                  With --once, exit 1 means a pending checkpoint.
 #           agent-name  a live Herdr agent name (or the pane id hosting it).
 #           report-path absolute path the brief told that worker to write; a
 #                       relative path is refused (exit 2).
@@ -24,7 +28,8 @@
 #           plus "reason":"<why>" on exits 4 and 5.
 #   stderr: diagnostics and per-attempt progress.
 #   exit  : 0 report found (`found` true),
-#           1 budget exhausted (`found` false, `state` last observed),
+#           1 pending checkpoint with --once; otherwise wait budget exhausted
+#             (`found` false, `state` last observed),
 #           2 usage error, precondition unmet, or a herdr/tool failure,
 #           3 the worker is blocked at an approval or question dialog,
 #             confirmed by two reads and the pane
@@ -132,6 +137,11 @@ Allow
 # read must contain the complete expected marker on one row; names elsewhere
 # in the window, quoted examples and wrapped fragments are not delivery.
 REPORT_MARKER='REPORT: '
+
+# Fleet checkpoints do not block on the prefix wait or the long round budget.
+# Positive milliseconds keep Herdr's timeout contract intact.
+CHECK_PROBE_TIMEOUT_MS=1
+CHECK_CONFIRM_SEC=1
 
 HERDR_BIN="${HERDR_BIN:-herdr}"
 
@@ -429,8 +439,10 @@ confirmed_provider_refusal() { # <pane-id>
 }
 
 main() {
+  local once=0
+  if [[ "${1:-}" == "--once" ]]; then once=1; shift; fi
   if (( $# != 2 )); then
-    warn "usage: wait-report.sh <agent-name> <report-path>"
+    warn "usage: wait-report.sh [--once] <agent-name> <report-path>"
     return 2
   fi
   AGENT="$1"
@@ -465,6 +477,7 @@ main() {
   TEAMLEAD_REFUSAL_CONFIRM_SEC=$(( 10#$TEAMLEAD_REFUSAL_CONFIRM_SEC ))
   TEAMLEAD_PROBE_TIMEOUT_MS=$(( 10#$TEAMLEAD_PROBE_TIMEOUT_MS ))
   TEAMLEAD_PROBE_LINES=$(( 10#$TEAMLEAD_PROBE_LINES ))
+  if (( once )); then TEAMLEAD_PROBE_TIMEOUT_MS=$CHECK_PROBE_TIMEOUT_MS; fi
 
   if [[ "${HERDR_ENV:-}" != "1" ]]; then
     warn "not running inside Herdr (HERDR_ENV='${HERDR_ENV:-}') — run the team round from a pane Herdr manages"
@@ -517,6 +530,10 @@ main() {
       rc=0
       info="$(agent_info "$AGENT")" || rc=$?
       if (( rc != 0 )); then return 2; fi
+      if [[ "${info##* }" != "$pane" ]]; then
+        warn "${AGENT} changed panes during dialog confirmation — reconcile its live identity before deciding the report outcome"
+        return 2
+      fi
       state="${info%% *}"
       if [[ "$state" == "blocked" ]]; then
         rc=0
@@ -572,6 +589,14 @@ main() {
       fi
     else
       unconfirmed_idle=0
+    fi
+    if (( once )); then
+      if (( unconfirmed_idle > 0 )); then
+        sleep "$CHECK_CONFIRM_SEC"
+        continue
+      fi
+      emit "$state" false "$elapsed" "checkpoint_pending"
+      return 1
     fi
     if (( elapsed >= TEAMLEAD_WAIT_BUDGET_SEC )); then
       emit "$state" false "$elapsed"

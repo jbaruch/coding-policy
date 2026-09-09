@@ -26,6 +26,11 @@ operation, a value at the boundary. Say for each what SHOULD happen.
 Write the plan to `{{REPORTS_DIR}}` so the developer reads it before writing
 code, and name the path in your report.
 
+For a bug, cover the user's reproduction, a known-working comparison, and a
+small experiment that could disprove the proposed cause. Distinguish the trigger,
+conditions that hide or expose the fault, and the visible symptom. Record an
+unavailable reproduction or experiment as a limitation, never equivalent evidence.
+
 ## Mode B — Executable Acceptance Tests
 
 Your worktree at `{{WORKTREE}}` already exists; the lead created it. Write the
@@ -54,6 +59,11 @@ Expected range: `{{REVIEW_BASE}}..{{REVIEW_HEAD}}`.
 
 A failing gate is a **blocking** finding. A gap in coverage the issue asked for
 is a blocking finding. A test-naming preference is advisory.
+
+For a bug fix, verify the reproduction fails before and passes after the change
+where feasible. Retain contradictory evidence and state what any substitute
+check cannot prove. Identify requested new guarantees separately from unmet
+accepted criteria so the lead can assess their scope.
 
 When the lead names a **scoped re-check**, verify each prior finding against
 the current tip and report `RESOLVED`, `OPEN`, or `DECLINED — <reason>`.

@@ -172,13 +172,15 @@ FAKE
 # run <report-path> [extra env...] -> OUT, ERRTEXT, RC
 run() {
   local report="$1"; shift
+  local -a options=()
+  if [[ "${CHECK_ONCE:-0}" == 1 ]]; then options=(--once); fi
   RUN_SEQ=$((RUN_SEQ+1))
   local err="$TMP/stderr.$RUN_SEQ"
   OUT="$(env HERDR_ENV=1 HERDR_BIN="$FAKE" \
     TEAMLEAD_WAIT_INTERVAL_SEC=0 TEAMLEAD_WAIT_BUDGET_SEC=0 TEAMLEAD_BLOCKED_CONFIRM_SEC=0 \
     TEAMLEAD_REFUSAL_CONFIRM_SEC=0 \
     FAKE_PANE_TEXT="REPORT: ${report}" \
-    "$@" bash "$SCRIPT" worker "$report" </dev/null 2>"$err")"
+    "$@" bash "$SCRIPT" ${options[@]+"${options[@]}"} worker "$report" </dev/null 2>"$err")"
   RC=$?
   ERRTEXT="$(cat "$err")"
   assert_no_unbound "$ERRTEXT" "run #${RUN_SEQ}"
@@ -657,6 +659,40 @@ ${base}"
   run "$missing" FAKE_MARKER=timeout FAKE_STATUS=idle FAKE_PANE_TEXT="$refusal" PATH="$TMP/sleep-failure:$PATH"
   if [[ $RC -eq 2 && -z "$OUT" && "$ERRTEXT" == *'confirmation wait failed'* ]]; then
     pass; else fail "failed confirmation delay must remain a tool error"; fi
+
+  # A fleet checkpoint returns pending after one observation even when the
+  # ordinary long wait budget would allow more polls. Its prefix probe is
+  # bounded by the checkpoint contract, not the long wait override.
+  CHECK_ONCE=1
+  run "$missing" FAKE_MARKER=timeout FAKE_STATUS=working \
+    FAKE_GET_COUNTER="$TMP/once-pending-count" FAKE_CALLS="$TMP/once-calls" \
+    TEAMLEAD_WAIT_BUDGET_SEC=600 TEAMLEAD_PROBE_TIMEOUT_MS=9999
+  if [[ $RC -eq 1 && "$(cat "$TMP/once-pending-count")" == 1 ]] && \
+    printf '%s' "$OUT" | jq -e '.found == false and .reason == "checkpoint_pending"' >/dev/null; then
+    pass; else fail "checkpoint must return pending without waiting for future output: RC=$RC OUT=$OUT"; fi
+  if grep -F -- '--timeout 1 ' "$TMP/once-calls" >/dev/null; then
+    pass; else fail "checkpoint must use the bounded prefix probe"; fi
+
+  run "$report" FAKE_MARKER=found FAKE_STATUS=working
+  if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | jq -e '.found == true' >/dev/null; then
+    pass; else fail "checkpoint preserves file-plus-marker delivery independently of Herdr status"; fi
+  run "$missing" FAKE_MARKER=timeout FAKE_STATUS=blocked FAKE_PANE_TEXT='Allow this action?'
+  if [[ $RC -eq 3 ]]; then pass; else fail "checkpoint still confirms a user dialog"; fi
+  run "$missing" FAKE_MARKER=timeout FAKE_STATUS=blocked FAKE_PANE_TEXT='Allow this action?' \
+    FAKE_PANE_AFTER=w9:p9 FAKE_GET_COUNTER="$TMP/once-dialog-moved"
+  if [[ $RC -eq 2 && -z "$OUT" ]]; then
+    pass; else fail "a moved worker cannot confirm the old pane's dialog"; fi
+  run "$missing" FAKE_MARKER=timeout FAKE_STATUS=idle FAKE_PANE_TEXT="$refusal"
+  if [[ $RC -eq 5 ]]; then pass; else fail "checkpoint still confirms terminal provider refusal"; fi
+
+  mkdir "$TMP/no-delay" || die "cannot create checkpoint sleep fixture"
+  printf '#!/bin/sh\nexit 0\n' > "$TMP/no-delay/sleep" || die "cannot write checkpoint sleep fixture"
+  chmod +x "$TMP/no-delay/sleep" || die "cannot enable checkpoint sleep fixture"
+  run "$report" FAKE_MARKER=timeout FAKE_STATUS=idle FAKE_GET_COUNTER="$TMP/once-idle-count" \
+    PATH="$TMP/no-delay:$PATH" TEAMLEAD_WAIT_BUDGET_SEC=600
+  if [[ $RC -eq 4 && "$(cat "$TMP/once-idle-count")" == 2 ]]; then
+    pass; else fail "checkpoint must retain consecutive confirmation for missing delivery markers"; fi
+  CHECK_ONCE=0
 
   echo "─────────────────────────────────────────────" >&2
   if [[ $FAIL -gt 0 ]]; then echo "FAILED: ${FAIL} failed, ${PASS} passed" >&2; exit 1; fi
