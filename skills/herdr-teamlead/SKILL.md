@@ -367,7 +367,7 @@ Plan the pinned judge against Step 14's fresh snapshot:
 ```bash
 CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
 bash "$CP/skills/herdr-teamlead/teamlead.sh" plan \
-  --roles judge --snapshot <step-14-measure-output>
+  --roles judge --snapshot <step-14-measure-output> --task <task-id>
 ```
 
 - **Exit 0** — the plan file names the judge worker. Proceed to Step 16.
@@ -384,7 +384,7 @@ Complete the retrospective reference's checks for the planned start. Run:
 ```bash
 CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
 bash "$CP/skills/herdr-teamlead/start-judge-worker.sh" \
-  <step-15-plan-file> <pane> [claude|codex|grok] [--state <state-file>]
+  <step-15-plan-file> <pane> [claude|codex|grok] --task <task-id> [--state <state-file>]
 ```
 
 Starts the plan's pinned judge and verifies launch argv. Pane text never
@@ -405,7 +405,7 @@ bash "$CP/skills/herdr-teamlead/teamlead.sh" apply \
   --assignments <plan-file> \
   --brief judge=<round>-judge.md \
   --common <path-to-COMMON.md> \
-  --task <round> --no-clear
+  --task <task-id> --no-clear
 ```
 
 Step 10's outcomes govern this dispatch. `--no-clear` preserves the worker

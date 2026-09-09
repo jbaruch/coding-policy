@@ -162,6 +162,11 @@ Each completed `records` entry carries these fields:
 | `coverage` | Versioned worker-specific receipts binding outgoing work and the proposed transition |
 | `input_digest` | Canonical metadata digest used to detect changed retries |
 
+The saved note begins with a JSON metadata object between `---` delimiters:
+`schema_version`, `id`, `completed_at`, `period_start`, `period_end`, `triggers`,
+`tasks`, `participants`, `unavailable`, `sources`, and `coverage`. The lead's
+Markdown follows it. Recording retries retain the original completion time.
+
 Coverage binds the worker's latest original assignment identity, available
 dispatch identity, live native/session/process evidence, report digest or stated
 unavailability, and proposed role/model/effort/context and input paths. A recorded
@@ -169,6 +174,10 @@ transition links that coverage to the utility's completed boundary and replaceme
 identity. Later changes to another worker's assignment do not invalidate it.
 The owner rechecks relevant source bytes and live identity before applying coverage;
 an old note or Herdr completion label alone proves no present transition authority.
+The source's nullable `dispatch_evidence` contains the original dispatch row's
+`sha256` digest and nullable `report` receipt for its recorded implementation
+review. That review is distinct from the worker's own report. A changed dispatch
+record or review file invalidates its worker's coverage.
 
 Each `transitions` entry has `schema_version: 1`, unique content-derived `id`,
 UTC `at`, `agent`, the original `descriptor` coverage, and the verified `incoming`
