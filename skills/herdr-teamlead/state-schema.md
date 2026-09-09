@@ -170,6 +170,12 @@ identity. Later changes to another worker's assignment do not invalidate it.
 The owner rechecks relevant source bytes and live identity before applying coverage;
 an old note or Herdr completion label alone proves no present transition authority.
 
+Each `transitions` entry has `schema_version: 1`, unique content-derived `id`,
+UTC `at`, `agent`, the original `descriptor` coverage, and the verified `incoming`
+observation. The descriptor must match saved retrospective coverage or prove an
+exempt first start. The transition receipt bridges only the utility's own recorded
+boundary to that incoming worker; it does not cover later outgoing work.
+
 The cadence uses the latest completed retrospective, or the established first-work
 baseline when no retrospective exists. Failed checks and incomplete notes never
 advance it. Existing work with no usable history is due immediately. Coverage for

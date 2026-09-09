@@ -190,8 +190,13 @@ description: Running a multi-agent team — headroom-driven role rotation, one w
 - Bind transition coverage to the outgoing work and session, source evidence, and proposed assignment
 - Cover simultaneous transitions in one retrospective
 - Reuse coverage only while the covered evidence and proposed transition remain unchanged
-- A proven first-ever worker with no outgoing work needs no transition retrospective
-- Unknown worker history never proves a first launch
+- Narrow exception for a worker's first launch without outgoing work.
+- Preconditions (all required):
+  1. The owner has no preceding assignment for that worker
+  2. Live process evidence proves the target pane holds only its shell
+  3. No outgoing worker context or work needs a handoff
+- Every other worker transition requires retrospective coverage
+- Unknown worker history alone never proves a first launch
 - Collect observations from saved reports and read-only evidence
 - Never interrupt a working or blocked worker to collect retrospective input
 - Record verified outcomes, lessons, evidence gaps, and concrete improvements with owners and success criteria

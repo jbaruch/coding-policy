@@ -44,6 +44,10 @@ proof remain `unknown`; they do not become inferred measurements or passes.
 
 ## Write the retrospective
 
+Use a title and five nonempty H2 sections named `Outcomes`, `Quality`,
+`Coordination`, `Seats and models`, and `Improvements`. The utility adds the saved
+note's schema metadata; the lead supplies the synthesis under these headings.
+
 Address these five questions with evidence and the lead's reasoning:
 
 1. **Outcomes:** What did the team intend to achieve, what is verified, and what
@@ -117,6 +121,8 @@ the exact output envelope; the state schema documents persisted fields.
    `period_start` and `period_end`, `triggers` (`daily`, `transition`, or both),
    covered `tasks`, `participants`, `unavailable` worker-to-reason map, absolute
    evidence `sources`, `completed: true`, and absolute saved `check` receipt.
+   Daily notes cite a ledger, previous note, or other evidence source. An empty
+   source list is usable only when transition coverage supplies concrete evidence.
    Completion asserts the lead has reviewed the substance; the boolean alone
    never establishes it.
 5. Run `retro-record --record <metadata.json>`. The utility revalidates evidence,
