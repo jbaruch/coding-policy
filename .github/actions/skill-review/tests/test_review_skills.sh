@@ -370,6 +370,73 @@ DRIVE_WORKSPACE="" MANIFEST="$WS_FIXTURE/none/absent.json" \
 assert_rc 2 "workspace: unresolvable is exit 2, not a review failure"
 assert_eq "$MOCK_CALLS" "0" "workspace: tessl is never invoked without a workspace"
 
+# --- distribution boundary (context-artifacts Scope + Mandatory Review, #374) ---
+#
+# The gate follows Tessl DISTRIBUTION, never the absence of a second manifest.
+# A fleet review twice ordered an explicitly Tessl-free package to restore this
+# action; the rule now scopes the command to Tessl-distributed plugins and says
+# in the same breath that another channel's manifest buys no exemption. These
+# cases assert that second half against the resolver and run_reviews, not
+# against the rule's own wording.
+
+mkdir -p "$WS_FIXTURE/mixed/.tessl-plugin"
+echo '{"name":"mixedws/widget"}' > "$WS_FIXTURE/mixed/.tessl-plugin/plugin.json"
+printf 'name: acme/widget\nsource: github\n' > "$WS_FIXTURE/mixed/agent-plugin.yaml"
+assert_eq "$(resolve_in "$WS_FIXTURE/mixed")" "mixedws" \
+  "mixed distribution: another channel's manifest does not disable workspace resolution"
+
+# Drive the gate FROM the fixture tree with no preset workspace, so
+# resolve_workspace reads that tree's manifest and the run is end-to-end: a
+# hardcoded DRIVE_WORKSPACE would assert the review call while proving nothing
+# about the mixed tree, and would pass with the fixture deleted. run_reviews
+# runs in this shell (UNREVIEWED has to survive), so the cd is made and undone
+# here rather than in a subshell.
+SUITE_CWD="$PWD"
+drive_in() {
+  local dir="$1"; shift
+  cd "$dir" || { echo "fatal: could not enter fixture $dir" >&2; exit 2; }
+  DRIVE_WORKSPACE="" MANIFEST=".tessl-plugin/plugin.json" LEGACY_MANIFEST="tile.json" \
+    drive "$@"
+  cd "$SUITE_CWD" || { echo "fatal: could not return to $SUITE_CWD" >&2; exit 2; }
+}
+
+MOCK_MODE="success"; drive_in "$WS_FIXTURE/mixed" fail alpha
+assert_rc 0 "mixed distribution: a changed skill is still reviewed"
+assert_eq "$MOCK_CALLS" "1" "mixed distribution: the skill is reviewed exactly once"
+assert_contains "$MOCK_ARGS" "--workspace mixedws" "mixed distribution: the workspace comes from the mixed tree's own manifest"
+assert_contains "$MOCK_ARGS" "--threshold 85" "mixed distribution: the threshold still reaches tessl"
+
+# A genuine below-threshold score on that same mixed tree still blocks, under
+# the tolerant mode — the score failure is not reclassified as a skip.
+MOCK_MODE="threshold"; drive_in "$WS_FIXTURE/mixed" skip alpha
+assert_rc 1 "mixed distribution: a below-threshold score still blocks"
+assert_unreviewed "" "mixed distribution: a score failure is not a credit skip"
+
+# Only the other channel's manifest: there is no Tessl workspace to review
+# against. The action stops as a setup error with a diagnostic naming what it
+# looked for — never a silent pass that would read as an exemption.
+mkdir -p "$WS_FIXTURE/other-channel"
+printf 'name: acme/widget\nsource: github\n' > "$WS_FIXTURE/other-channel/agent-plugin.yaml"
+resolve_in "$WS_FIXTURE/other-channel" > "$FIXTURE/ws.out" 2>&1
+assert_rc_value $? 2 "other channel only: no Tessl manifest is a setup error, not a pass"
+assert_contains "$(cat "$FIXTURE/ws.out")" ".tessl-plugin/plugin.json" \
+  "other channel only: the diagnostic names the manifest it looked for"
+
+# Only WORKSPACE leaks out of drive_in: drive() exports it unqualified, so the
+# empty value persists and the cases below — written against a preset workspace
+# — would otherwise inherit it. Restore it. The MANIFEST/LEGACY_MANIFEST
+# prefixes do NOT leak: bash discards assignments prefixed to a FUNCTION call
+# once the function returns (checked on 3.2.57 and 5.3.15). They are pinned
+# here anyway so the later cases name their manifest inputs instead of
+# inheriting the sourced script's relative defaults; nothing below reads them,
+# because a non-empty WORKSPACE short-circuits resolve_workspace.
+export WORKSPACE="testws"
+DRIVE_WORKSPACE="testws"
+# `export`ed like the other config vars: the sourced functions read them, which
+# is invisible to shellcheck otherwise (SC2034).
+export MANIFEST="$WS_FIXTURE/none/absent.json"
+export LEGACY_MANIFEST="$WS_FIXTURE/none/absent-legacy.json"
+
 # --- input validation: an unknown mode is a setup error, not a silent fail ---
 
 MOCK_MODE="success"; drive bogus alpha

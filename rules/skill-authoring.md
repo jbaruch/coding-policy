@@ -72,7 +72,11 @@ description: SKILL.md structure, frontmatter, execution-mode preamble, flat step
 
 ## plugin.json Manifest Reference
 
-The manifest lives at `.tessl-plugin/plugin.json`.
+The Tessl plugin manifest lives at `.tessl-plugin/plugin.json`. A plugin distributed
+through another channel declares the same surfaces in that channel's manifest. The
+rest of this rule is distribution-independent, save the two provisions that name a
+Tessl mount path — the Typed Calls recovery carve-out's precondition 3 and Script
+References' plugin-mount form — which reach a plugin installed at such a path.
 
 Required fields:
 - `name` — `<workspace>/<plugin-name>` format

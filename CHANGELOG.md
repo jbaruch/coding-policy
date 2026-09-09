@@ -26,6 +26,132 @@
   installed help of Claude Code 2.1.266, Codex CLI 0.153.2, and Grok Build
   1.0.24; the live restoration itself was not exercised in this change.
 
+## 0.3.203 — 2026-09-09
+
+### Fixed
+
+- **Release confirmation follows each publication channel (#371, #374).**
+  `ci-safety`, `skills/release/SKILL.md` and `SCRIPTING.md` select the publication's own
+  confirmation path. Every Tessl publication, including mixed distribution,
+  keeps its registry baseline, successful-run and registry-advance conjunction,
+  and moderation clear. GitHub tag/asset publications require their own
+  successful run and published release with uploaded assets. Mixed releases
+  keep separate run ids and owe both confirmations; neither channel substitutes
+  for the other.
+
+  Step 3 assigns versions per channel. A tag-only package writes every bump
+  into its manifest and tags that version. A mixed package sets the same version
+  in every channel's manifest and verifies that its actual Tessl publisher
+  preserves the choice. The reusable workflow supports `publish-mode: as-is`,
+  passed to the smart-publish action's `mode: as-is`; that path publishes the
+  manifest verbatim without a bump or commit-back. Other publishers need their
+  own supported mechanism. These versioning choices change no review or
+  publication gate. The registry-baseline label now reads “Tessl publication”
+  consistently with the other Tessl steps.
+
+  `resolve-publish-run.sh` accepts an optional fifth ref argument, defaulting
+  to `main`. The original main-only lookup missed ACR v0.1.4's tag run
+  34188269042, whose `headBranch` was `v0.1.4`. Selection binds the workflow,
+  commit, push event and literal ref; quoted query arguments stay data. Delayed
+  enqueue is retried, empty refs are rejected, and multiple matches are refused
+  with candidate ids. Deterministic transport fixtures cover those outcomes,
+  unrelated same-commit runs, quoted and query-shaped refs, and the CLI with no
+  system `jq` on `PATH`.
+
+  `verify-github-release.sh` requires the resolved run's successful conclusion
+  and a published, nonempty release at the exact tag with every asset uploaded.
+  A 404 is a definitive no; auth failures, unreadable data and in-flight runs
+  remain indeterminate. Checked JSON escaping preserves literal tag and URL
+  values and propagates errors without a partial envelope. Every definitive
+  no also carries an actionable stderr diagnostic.
+
+  The release API path encodes the tag as one URL component. Its reserved-byte
+  and UTF-8 fixture exposed Bash 3.2 sign-extension: byte 0xC3 became
+  `%FFFFFFFFFFFFFFC3` instead of `%C3`, requesting the wrong endpoint for an
+  existing release. Normalizing each ordinal to 0..255 preserves the complete
+  UTF-8 sequence on Bash 3.2 and 5. Conversion failures now stop the lookup as
+  indeterminate with no envelope; a fault-injection test checks both conversion
+  stages. The existing endpoint fixture remains the encoding regression test.
+
+  Policy review 5148294337 found that the release test harness replaced the
+  helper's cleanup trap. Each invocation now owns that trap, and the harness
+  checks for leftover files after successful, definitive-no and indeterminate
+  results. The dynamic-source SC1090 suppression now states its reason, as
+  requested by policy review 5148578175.
+
+  The watch omits `--exit-status` so a `set -e` wrapper reaches the appropriate
+  confirmation helper, which reports the failed conjunct. Policy review
+  5147838037 prompted this channel split after Step 7's unconditional Tessl
+  instructions contradicted the corrected distribution scope below.
+
+- **The Tessl review gate now follows Tessl distribution, not every plugin
+  artifact (#374).** `context-artifacts` carried a Tessl-specific body under a
+  generic `applyTo` action clause — "when authoring or modifying plugin
+  artifacts", globbing `skills/**` — and then said flatly that every skill
+  change must pass `tessl review run --threshold 85` before publish. Under
+  `rule-frontmatter`'s "`description:` is a rule summary, not a scoping
+  mechanism", the Tessl-only description could not narrow that. So when
+  `jbaruch/good-oss-citizen` migrated off Tessl on an explicit owner
+  instruction ("clean up from tessl. Migrating is migrating") to root
+  `agent-plugin.yaml`, ACR packaging and immutable GitHub publication, the
+  central fleet reviewer read the rule literally and twice ordered the removed
+  Tessl review workflow restored — review 5142427647 on `1a1335c`, then review
+  5146749599 on `728d7a7` from run 34275543758, after that package's
+  independent reviewer and tester had both passed it. The pinned judge upheld
+  the operator's scope for that specific dispute and explicitly declined to
+  rewrite policy, establish a blanket ACR exemption, equate ACR test output
+  with a Tessl score, or waive external review; it recorded the wording defect
+  as a follow-up for this repo instead.
+
+  A `Scope` section now splits the rule by what actually varies. The Tessl
+  manifest, badge, `tessl plugin lint`, `tessl review run`, the credit-outage
+  carve-out and the reviewer-disagreement loop bind an artifact distributed
+  through Tessl — evidenced by a Tessl plugin manifest or a publish path
+  calling `tessl plugin publish` or `tesslio/patch-version-publish`. A new
+  `Artifact Layout` section carries the directory and README-is-the-project-
+  README conventions, which never depended on the channel, and it joins Rules
+  Are Prose, Rule Format, Surface Sync, Consistency Check and Post-Edit Rule
+  Audit in binding every plugin artifact whatever publishes it — so a package
+  on another channel loses no discipline it had. Consistency Check's
+  documentation-table check follows the plugin's own manifest, named concretely
+  for a Tessl plugin, the way Surface Sync already did. The `applyTo` action
+  clause says both halves rather than narrowing to Tessl outright: narrowing
+  the whole rule would have dropped the distribution-independent sections for
+  exactly the packages this fixes, which is the lower quality bar #374 rules
+  out.
+
+  Mandatory Review keeps the gate where it belongs. Mixed distribution still
+  reviews every changed skill before its Tessl publish; deleting the Tessl
+  manifest or adding another channel's manifest exempts nothing while the
+  content still publishes through Tessl; below-threshold scores still block and
+  the credit-outage exception stays exactly as narrow as it was. A skill on no
+  Tessl path owes `skill-authoring` in full, its repo's CI gates, and its
+  external policy and Copilot review — the command is the only thing that does
+  not follow it.
+
+  The references that would have re-imposed the same demand were audited
+  alongside. `context-writing-style`'s Scope bound prose discipline to "rules
+  declared in `.tessl-plugin/plugin.json`", which would have dropped the
+  discipline for rules declared in another channel's manifest; it now follows
+  the artifact. `skill-authoring`'s manifest reference says which manifest it
+  describes, and `script-delegation` no longer labels JSON output, self-error
+  handling and single-purpose scripts "Tessl-specific" when its own `applyTo`
+  carries no such condition. `skill-authoring` also says which of its own
+  provisions are Tessl-bound: the two that name a `.tessl/plugins/…` mount path
+  reach a plugin installed at one, and the rest is distribution-independent.
+
+  The `skill-review` action needed no change: it already hard-fails with a
+  setup error when no Tessl manifest resolves, which is the correct behaviour
+  and not an exemption. Its suite now asserts the distribution boundary that
+  was untested. The cases run from a fixture tree carrying both an
+  `agent-plugin.yaml` and a Tessl manifest, with no workspace preset, so the
+  value reaching `tessl review run` is derived from that tree's own manifest:
+  the changed skill is still reviewed once at threshold 85, a below-threshold
+  score there still blocks without being recorded as a credit skip, and a tree
+  holding only the other channel's manifest stops at a setup error naming what
+  it looked for. Removing the fixture's Tessl manifest reds six of those
+  assertions, and a mutation that exempts on `agent-plugin.yaml` reds four.
+
 ## 0.3.202 — 2026-09-09
 
 ### Added
