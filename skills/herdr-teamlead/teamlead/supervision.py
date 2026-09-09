@@ -420,10 +420,30 @@ def binding_path(who, root=None):
     return directory / (digest(who) + ".json")
 
 
+def dispatch_binding(state_path, *, root=None):
+    """Read-only dispatch guard: missing historical owner is never legacy mode.
+
+    Scan all saved lead identities, not only the caller's current identity: a
+    context/model change cannot make its earlier obligations disappear. An
+    existing empty owner marks an interrupted first bind and is not dispatchable.
+    Only a missing owner with no prior discovery may use legacy compatibility.
+    """
+    data = load(state_path)
+    if data["binding"] is not None:
+        return data["binding"]
+    if store_path(state_path).exists():
+        raise StateError("Supervision owner initialization is incomplete. Finish supervision-bind for this state before dispatching worker input.", {})
+    directory = canonical(root) if root is not None else default_state_path().parent / "supervision-bindings"
+    _refuse_lost_owner(state_path, directory)
+    return None
+
+
 def _refuse_lost_owner(state_path, directory):
     """Discovery proves prior ownership even after a lead identity changes."""
     try:
-        paths = list(directory.glob("*.json"))
+        paths = [path for path in directory.iterdir() if path.suffix == ".json"]
+    except FileNotFoundError:
+        paths = []
     except OSError as exc:
         raise StateError("Cannot inspect supervision discovery records: {}. Restore directory access before initializing an owner document.".format(exc), {}) from None
     for path in paths:

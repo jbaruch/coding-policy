@@ -720,7 +720,7 @@ def cmd_apply(args, client=None, warn=None, trace=None):
         raise UsageError("Saved plan and apply name different task, count or correction bounds; replan from the current ledger.", {})
     paths = resolve_paths(assignments, _parse_briefs(args.briefs), args.common)
     reports = _parse_reports(args.reports, assignments)
-    supervised = supervision.load(state_path)["binding"] is not None
+    supervised = supervision.dispatch_binding(state_path) is not None
     if supervised and (not args.task or set(reports) != set(assignments)):
         raise UsageError("Bound team rounds require --task and one --report ROLE=ABS_PATH for every assigned role before any worker input.", {})
     replayed = []

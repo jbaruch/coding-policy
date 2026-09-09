@@ -8,6 +8,7 @@ if _ROOT not in _sys.path:
 
 import io
 import json
+import os
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -28,7 +29,10 @@ class SupervisionCliTest(fixture.CliCase):
     def setUp(self):
         super().setUp()
         self.runner = FakeRunner()
-        self.bindings = self.tmp / "bindings"
+        environment = patch.dict(os.environ, {"XDG_STATE_HOME": str(self.tmp / "xdg")})
+        environment.start()
+        self.addCleanup(environment.stop)
+        self.bindings = supervision.default_state_path().parent / "supervision-bindings"
         self.identity = supervision.identity("lead-native", str(self.tmp), "fixture", pane_id="lead-pane")
         supervision.bind(self.state, self.identity, AT, root=self.bindings)
         self.reports = {role: str(self.tmp / (role + "-report.md")) for role in self.briefs}
@@ -229,18 +233,77 @@ class SupervisionCliTest(fixture.CliCase):
         self.assertEqual(self.runner.calls, [])
 
     def test_legacy_applied_retry_after_binding_repairs_without_resend(self):
-        original = self.saved()
-        supervision.transaction(self.state, lambda data: data.update(binding=None))
+        # Model a real old installation: this distinct state has never had a
+        # supervision owner or discovery record. Never clear a live binding.
+        self.state = self.tmp / "never-bound-legacy-state.json"
         arguments = self.apply_arguments(reports={})
         code, _, err = self.invoke(arguments, self._client({"grok": "idle"}))
         self.assertEqual(code, 0, err)
-        supervision.transaction(self.state, lambda data: data.update(binding=original["binding"]))
+        binding = self.tmp / "legacy-native-binding.json"
+        binding.write_text(json.dumps(supervision.identity("legacy-native", str(self.tmp), "fixture", pane_id="lead-pane")))
+        code, _, err = self.invoke(["supervision-bind", "--record", str(binding), "--now", AT])
+        self.assertEqual(code, 0, err)
         client = self._client({})
         code, out, err = self.invoke(self.apply_arguments(), client)
         self.assertEqual(code, 0, err)
         self.assertTrue(json.loads(out)["applied"][0]["replayed"])
         self.assertEqual(self.runner.calls, [])
         self.assertEqual(len(self.saved()["members"]), 1)
+
+    def test_missing_bound_owner_refuses_legacy_fallback_before_any_worker_read(self):
+        discovery = supervision.binding_path(self.identity)
+        original = discovery.read_bytes()
+        supervision.store_path(self.state).unlink()
+        client = self._client({"grok": "idle"})
+        code, _, err = self.invoke(self.apply_arguments(reports={}), client)
+        self.assertEqual(code, 1)
+        self.assertIn("missing supervision owner", err)
+        self.assertEqual(self.runner.calls, [])
+        self.assertFalse(supervision.store_path(self.state).exists())
+        self.assertFalse(self.state.exists())
+        self.assertEqual(discovery.read_bytes(), original)
+
+    def test_new_native_lead_cannot_bypass_missing_earlier_owner(self):
+        discovery = supervision.binding_path(self.identity)
+        original = discovery.read_bytes()
+        supervision.store_path(self.state).unlink()
+        client = self._client({"grok": "idle"})
+        with patch.dict(os.environ, {"HERDR_ENV": "new-session", "HERDR_PANE_ID": "new-lead-pane", "CODEX_THREAD_ID": "replacement-native"}):
+            code, _, err = self.invoke(self.apply_arguments(), client)
+        self.assertEqual(code, 1)
+        self.assertIn("missing supervision owner", err)
+        self.assertEqual(self.runner.calls, [])
+        self.assertEqual(discovery.read_bytes(), original)
+
+    def test_interrupted_first_bind_requires_completion_before_dispatch(self):
+        self.state = self.tmp / "interrupted-first-bind.json"
+        who = supervision.identity("initializing-native", str(self.tmp), "fixture", pane_id="lead-pane")
+        record = self.tmp / "initializing-binding.json"
+        record.write_text(json.dumps(who))
+        original_save = supervision.save_state
+        def fail_final_owner(path, value):
+            if Path(path) == supervision.store_path(self.state) and value["binding"] is not None:
+                raise StateError("Simulated interrupted binding commit; resume initialization.", {})
+            return original_save(path, value)
+        with patch.object(supervision, "save_state", side_effect=fail_final_owner):
+            code, _, err = self.invoke(["supervision-bind", "--record", str(record), "--now", AT])
+        self.assertEqual(code, 1, err)
+        self.assertIsNone(self.saved()["binding"])
+        owner_before = supervision.store_path(self.state).read_bytes()
+        discovery = supervision.binding_path(who)
+        discovery_before = discovery.read_bytes()
+        client = self._client({"grok": "idle"})
+        code, _, err = self.invoke(self.apply_arguments(), client)
+        self.assertEqual(code, 1)
+        self.assertIn("initialization is incomplete", err)
+        self.assertEqual(self.runner.calls, [])
+        self.assertEqual(supervision.store_path(self.state).read_bytes(), owner_before)
+        self.assertEqual(discovery.read_bytes(), discovery_before)
+        code, _, err = self.invoke(["supervision-bind", "--record", str(record), "--now", AT])
+        self.assertEqual(code, 0, err)
+        code, _, err = self.invoke(self.apply_arguments(), self._client({"grok": "idle"}))
+        self.assertEqual(code, 0, err)
+        self.assertTrue(self.saved()["members"][0]["active"])
 
     def test_no_clear_retains_verified_native_proof_for_all_roles(self):
         native_sessions = {"grok": "grok-native", "claude": "claude-native"}
