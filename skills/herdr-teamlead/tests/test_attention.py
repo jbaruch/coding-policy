@@ -132,6 +132,21 @@ class AttentionTest(unittest.TestCase):
                         self.update("resolve", name=kind, event_id=kind + proof, evidence=evidence(proof), at=DUE)
             self.assertEqual(attention.show(self.path, kind)["entry"]["status"], "open")
 
+    def test_verified_recovery_closes_blocker_without_answering_a_pending_decision(self):
+        blocker = {**obligation("recovery", kind="blocker"), "resolution_condition": "Verify that the unavailable build service is usable again."}
+        self.record(blocker)
+        self.record(obligation("choice", kind="decision"))
+        self.update("present", name="recovery", event_id="show-recovery", evidence=evidence("delivery", "Reported the service outage."))
+        self.assertEqual(attention.show(self.path, "recovery")["entry"]["status"], "open")
+        outcome = evidence("verified_outcome", "The independent health check and successful build verify service recovery; validation is saved in the linked ledger.")
+        self.update("resolve", name="recovery", revision=2, event_id="recovery-verified", evidence=outcome, at=DUE)
+        self.assertEqual(attention.show(self.path, "recovery")["entry"]["resolution"], outcome)
+        with self.assertRaises(UsageError):
+            self.update("resolve", name="choice", event_id="recovery-is-not-an-answer", evidence=outcome, at=DUE)
+        pending = catch_up(self.path, DUE)["attention"]["items"]
+        self.assertEqual([row["id"] for row in pending], ["choice"])
+        self.assertIsNone(pending[0]["resolution"])
+
     def test_deferral_resurfaces_at_due_time_without_writing(self):
         self.record()
         self.update("defer", until=DUE, evidence=evidence("source", "Lead will revisit at the recorded checkpoint."))

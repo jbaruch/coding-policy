@@ -169,7 +169,7 @@ def _apply(event, entries, progress):
         entry["last_presented_at"] = at
     elif action == "resolve":
         allowed = {"question": {"user_answer"}, "decision": {"user_answer"}, "review": {"review_outcome"},
-                   "blocker": {"user_answer", "acknowledgement"}, "failure": {"user_answer", "acknowledgement", "delivery", "verified_outcome"},
+                   "blocker": {"user_answer", "acknowledgement", "verified_outcome"}, "failure": {"user_answer", "acknowledgement", "delivery", "verified_outcome"},
                    "followup": {"delivery"}, "update": {"delivery"}}
         if data["evidence"]["kind"] not in allowed[entry["kind"]]:
             _fail("{} requires {} evidence to resolve; presentation or an unrelated user message leaves it open.".format(entry["kind"], " or ".join(sorted(allowed[entry["kind"]]))))
