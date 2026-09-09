@@ -143,8 +143,33 @@ class EligibilityTest(unittest.TestCase):
                                                 [assignment(role="reviewer", requirements=None, tier=tier)], "onboarding")
             self.assertEqual(constraints["exclude"]["tester"], ["prior"])
         constraints = selection_constraints(["tester"], [worker("prior")], {},
-                                            [assignment(role="reviewer", requirements=None, tier={"round": "review"})], "onboarding")
+                                            [assignment(role="reviewer", requirements=None, tier={"round": "review"},
+                                                        reviewer_scope="verification")], "onboarding")
         self.assertEqual(constraints["exclude"]["tester"], [])
+
+    def test_new_untiered_verification_remains_eligible_for_followup(self):
+        history = [assignment(role="reviewer", requirements=None, tier=None, reviewer_scope="verification")]
+        constraints = selection_constraints(["reviewer", "tester"], [worker("prior")], {}, history, "onboarding")
+        self.assertEqual(constraints["exclude"], {"reviewer": [], "tester": []})
+
+    def test_migration_or_requirements_never_invent_verification_provenance(self):
+        for scope in (None, "unknown", "design"):
+            for tier in (None, {"round": "review"}):
+                with self.subTest(scope=scope, tier=tier):
+                    history = [assignment(role="reviewer", schema_version=6, reviewer_scope=scope,
+                                          requirements=requirement(independent=True), tier=tier)]
+                    constraints = selection_constraints(["reviewer"], [worker("prior")], {}, history, "onboarding")
+                    self.assertEqual(constraints["exclude"]["reviewer"], ["prior"])
+
+    def test_authored_tier_overrides_a_verification_label_until_assessed(self):
+        for round_type in ("architect", "reconciliation"):
+            with self.subTest(round_type=round_type):
+                history = [assignment(role="reviewer", reviewer_scope="verification", tier={"round": round_type})]
+                constraints = selection_constraints(["reviewer"], [worker("prior")], {}, history, "onboarding")
+                self.assertEqual(constraints["exclude"]["reviewer"], ["prior"])
+                assessment = {"assignment_index": 0, "task": "onboarding", "agent": "prior", "contribution": "none"}
+                constraints = selection_constraints(["reviewer"], [worker("prior")], {}, history, "onboarding", assessments=[assessment])
+                self.assertEqual(constraints["exclude"]["reviewer"], [])
 
     def test_assessed_no_contribution_overrides_only_its_non_developer_dispatch(self):
         assessment = {"assignment_index": 0, "task": "onboarding", "agent": "prior", "contribution": "none"}

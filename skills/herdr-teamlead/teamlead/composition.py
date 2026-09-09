@@ -77,7 +77,7 @@ def _contributor(row, assessment=None):
         tier = row["result"].get("tier")
     return (row.get("role") in CONTRIBUTOR_ROLES
             or isinstance(tier, dict) and tier.get("round") in CONTRIBUTOR_ROUNDS
-            or row.get("role") == "reviewer" and tier is None and row.get("requirements") is None)
+            or row.get("role") == "reviewer" and row.get("reviewer_scope") != "verification")
 
 
 def selection_constraints(roles, agents, requirements, history, task, dispatches=(), assessments=(), candidate_names=None):
