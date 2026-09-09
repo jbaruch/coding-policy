@@ -16,6 +16,7 @@ if _ROOT not in _sys.path:
     _sys.path.insert(0, _ROOT)
 
 import inspect
+import json
 import os
 import shutil
 import tempfile
@@ -255,6 +256,7 @@ class BuildStepsTest(unittest.TestCase):
             [command["shell"] for command in steps[0]["commands"]],
             [
                 "herdr agent get grok",
+                "herdr pane process-info --pane w4:p1",
                 "herdr agent read grok --source visible --lines 20 --format ansi",
                 "herdr pane send-text w4:p1 /new",
                 "herdr pane send-keys w4:p1 enter",
@@ -348,19 +350,19 @@ class BuildStepsTest(unittest.TestCase):
             self.client, {"developer": "grok"}, BY_NAME, self.paths, no_clear=True
         )
         shells = [command["shell"] for command in steps[0]["commands"]]
-        # get, the composer check that still gates the assignment, the message,
+        # get, permission proof, the composer check, the message,
         # then the two checks that it landed -- --no-clear skips the clear, not
         # the verification.
-        self.assertEqual(len(shells), 5)
+        self.assertEqual(len(shells), 6)
         self.assertEqual(shells[0], "herdr agent get grok")
         self.assertEqual(
-            shells[1], "herdr agent read grok --source visible --lines 20 --format ansi"
+            shells[2], "herdr agent read grok --source visible --lines 20 --format ansi"
         )
-        self.assertIn("DEVELOPER", shells[2])
+        self.assertIn("DEVELOPER", shells[3])
         self.assertEqual(
-            shells[3], "herdr agent read grok --source visible --lines 20 --format ansi"
+            shells[4], "herdr agent read grok --source visible --lines 20 --format ansi"
         )
-        self.assertEqual(shells[4], "herdr agent wait grok --until working --timeout 15000")
+        self.assertEqual(shells[5], "herdr agent wait grok --until working --timeout 15000")
         self.assertEqual([s for s in shells if "/new" in s], [])
 
     def test_unknown_agent_name_is_refused(self):
@@ -659,7 +661,7 @@ class SlashCommandDeliveryTest(unittest.TestCase):
         )
         with self.assertRaises(UsageError) as caught:
             apply(HerdrClient(runner=runner), {"developer": "grok"}, BY_NAME, self.paths, AT)
-        self.assertIn("--no-clear", str(caught.exception))
+        self.assertIn("herdr agent list", str(caught.exception))
         self.assertEqual(runner.writes(), [])
 
 
@@ -1135,6 +1137,37 @@ class DuplicateAgentTest(unittest.TestCase):
 
 
 class ApplyTest(unittest.TestCase):
+    def test_legacy_worker_permissions_are_proved_for_all_targets_before_any_input(self):
+        runner = runner_with({"grok": "idle", "claude": "idle"})
+        runner.set("pane process-info --pane " + PANES["claude"], json.dumps({"result": {"process_info": {
+            "pane_id": PANES["claude"], "foreground_processes": [{"name": "claude", "pid": 200, "argv": ["claude"]}]}}}))
+        with self.assertRaisesRegex(HerdrError, "do not prove YOLO"):
+            apply(HerdrClient(runner=runner), {"developer": "grok", "tester": "claude"}, BY_NAME, self.paths, AT)
+        self.assertEqual(runner.writes(), [])
+        self.assertIn("pane process-info --pane " + PANES["grok"], runner.commands())
+
+    def test_legacy_no_clear_refuses_wrong_permissions_without_restarting(self):
+        runner = runner_with({"grok": "idle"})
+        runner.set("pane process-info", json.dumps({"result": {"process_info": {
+            "pane_id": PANES["grok"], "foreground_processes": [{"name": "grok", "pid": 200,
+                "argv": ["grok", "--permission-mode", "plan"]}]}}}))
+        with self.assertRaisesRegex(HerdrError, "restrictive permission"):
+            apply(HerdrClient(runner=runner), {"developer": "grok"}, BY_NAME, self.paths, AT, no_clear=True)
+        self.assertEqual(runner.writes(), [])
+        self.assertFalse(any(command.startswith(("agent start", "-TERM")) for command in runner.commands()))
+
+    def test_legacy_unknown_or_unreadable_process_refuses_before_clear_or_send(self):
+        for failure in ("missing", "unknown", "unreadable"):
+            runner = runner_with({"grok": "idle"})
+            process = {"pane_id": PANES["grok"], "foreground_processes": []}
+            if failure == "unknown":
+                process["foreground_processes"] = [{"name": "zsh", "pid": 200, "argv": ["zsh"]}]
+            runner.set("pane process-info", json.dumps({"result": {"process_info": process}}),
+                       returncode=7 if failure == "unreadable" else 0, stderr="process information unavailable")
+            with self.subTest(failure=failure), self.assertRaises(HerdrError):
+                apply(HerdrClient(runner=runner), {"developer": "grok"}, BY_NAME, self.paths, AT)
+            self.assertEqual(runner.writes(), [])
+
     def setUp(self):
         self.paths = {
             "common": "/w/COMMON.md",
@@ -1149,6 +1182,7 @@ class ApplyTest(unittest.TestCase):
             runner.commands(),
             [
                 "agent get grok",
+                "pane process-info --pane w4:p1",
                 "agent read grok --source visible --lines 20 --format ansi",
                 "pane send-text w4:p1 /new",
                 "pane send-keys w4:p1 enter",
@@ -1189,6 +1223,8 @@ class ApplyTest(unittest.TestCase):
             [
                 "agent get grok",
                 "agent get claude",
+                "pane process-info --pane w4:p1",
+                "pane process-info --pane w2:p1",
                 "agent read grok --source visible --lines 20 --format ansi",
             ],
         )

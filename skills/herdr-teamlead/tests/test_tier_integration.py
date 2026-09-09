@@ -111,7 +111,7 @@ class TierIntegrationTest(CliCase):
         self.assertEqual(rc, 0, error)
         step = json.loads(output)["steps"][0]
         launch = next(command["argv"] for command in step["commands"] if command["argv"][1:3] == ["agent", "start"])
-        self.assertEqual(launch[-5:], ["--", "--model", "sonnet-5", "--effort", "high"])
+        self.assertEqual(launch[-6:], ["--", "--dangerously-skip-permissions", "--model", "sonnet-5", "--effort", "high"])
         self.assertEqual(len(step["prompt_hash"]), 64)
         self.assertEqual(runner.calls, [])
         self.assertFalse(self.state.exists())
@@ -161,7 +161,7 @@ class TierIntegrationTest(CliCase):
         runner.responses["pane process-info"] = ScriptedReads([
             json.dumps({"result": {"process_info": item}}) for item in (process, process, shell)])
         runner.set("-TERM 200")
-        argv = ["claude", "--model", "sonnet-5", "--effort", "high"]
+        argv = ["claude", "--dangerously-skip-permissions", "--model", "sonnet-5", "--effort", "high"]
         runner.set("agent start", json.dumps({"result": {"agent": info, "argv": argv}}))
         runner.responses["agent read"] = composer_reads("claude", ("ready", "ready", "> New assignment from the team lead."))
         runner.set("agent prompt", ok_json())
@@ -191,12 +191,28 @@ class TierIntegrationTest(CliCase):
         self.assertEqual(migrated["snapshots"][0]["agents"]["claude"], {"window_group": "shared", "tier_billing": {}})
         self.assertEqual(role_counts(migrated), {"developer": {"claude": 1}})
 
+    def test_historical_permission_modes_stay_readable_without_becoming_live_proof(self):
+        for options in ([], ["--permission-mode", "acceptEdits"]):
+            with self.subTest(options=options):
+                state = empty_state()
+                argv = ["claude"] + options + ["--model", "sonnet-5", "--effort", "high"]
+                add_assignment(state, AT, "developer", "claude", tier={
+                    "kind": "claude", "model": "sonnet-5", "effort": "high", "launch_args": options,
+                    "verified": {"source": "launch_argv", "model": "sonnet-5", "effort": "high", "pane_id": "w1:p2", "argv": argv}})
+                original = json.dumps(state)
+                self.state.write_text(original)
+                stored, usable = load_state_checked(self.state)
+                self.assertTrue(usable)
+                self.assertEqual(stored, state)
+                self.assertEqual(self.state.read_text(), original)
+
     def test_retained_fix_preserves_verified_higher_effort_without_restart(self):
         self.settings["agents"][0]["tiers"]["fix"] = {"model": "sonnet-5", "effort": "medium", "multiplier": 1}
         self.write_config()
         session = {"pane_id": "w1:p2", "source": "herdr:claude", "agent": "claude", "kind": "id", "value": "s1"}
-        argv = ["claude", "--model", "sonnet-5", "--effort", "high"]
+        argv = ["claude", "--dangerously-skip-permissions", "--model", "sonnet-5", "--effort", "high"]
         tier = {"kind": "claude", "model": "sonnet-5", "effort": "high", "effective_multiplier": 2,
+                "launch_args": ["--dangerously-skip-permissions"],
                 "verified": {"model": "sonnet-5", "effort": "high", "source": "launch_argv", "pane_id": "w1:p2", "argv": argv}}
         self.state.write_text(json.dumps({"schema_version": 4, "snapshots": [], "assignments": [{
             "schema_version": 4, "at": AT, "role": "developer", "agent": "claude", "status": "applied",

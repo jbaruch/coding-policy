@@ -56,8 +56,8 @@ from .probe import PROBE_READ_LINES, PROBE_READ_SOURCE, resolve_status, stderr_w
 from .chronology import latest_assignment
 from .state import MAX_FIX_ROUNDS
 from .recovery import empty_recovery, fresh_transition, task_record, validate_work
-from .launch import restart_worker, verify_running
-from .tiers import launch_flags
+from .launch import restart_worker, verify_running, verify_running_permissions
+from .tiers import launch_flags, worker_launch_args
 from .qualification import require_qualification
 
 # Version 3 adds verified model-tier metadata to context and task/fix evidence.
@@ -400,6 +400,7 @@ def build_steps(client, assignments, agents_by_name, paths, panes=None, no_clear
     steps = []
     for role, name in assignments.items():
         agent = agents_by_name[name]
+        launch_args = worker_launch_args(agent.kind, agent.launch_args)
         pane_id = panes.get(name) or PANE_ID_PLACEHOLDER
         text = assignment_text(role, paths["common"], paths[role])
         composer_reads = (
@@ -434,8 +435,10 @@ def build_steps(client, assignments, agents_by_name, paths, panes=None, no_clear
                 commands.append(["kill", "-TERM", "VERIFIED-IDLE-FOREGROUND-PID"])
                 commands.append(client.argv_pane_process_info(pane_id))
                 commands.append(client.argv_agent_start(name, agent.kind, pane_id,
-                    list(agent.launch_args) + launch_flags(agent.kind, tier)))
-        elif not no_clear:
+                    launch_args + launch_flags(agent.kind, tier)))
+        else:
+            commands.append(client.argv_pane_process_info(pane_id))
+        if not tier and not no_clear:
             commands.extend(composer_reads)
             commands.extend(
                 client.argv_deliver_slash_command(
@@ -589,6 +592,14 @@ def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle
         track_context=task is not None,
         tiers=tiers,
     )
+    # Prove every pre-existing legacy worker before any role receives input.
+    # The team lead starts these workers manually; apply never guesses a tier
+    # or silently restarts a retained session to repair its permission mode.
+    for step in steps:
+        if step["pane_id"] == PANE_ID_PLACEHOLDER:
+            raise UsageError("Herdr reported no pane for {!r}; inspect `herdr agent list` before dispatch so live YOLO arguments can be verified.".format(step["agent"]), {})
+        if not step["tier"]:
+            verify_running_permissions(client, agents_by_name[step["agent"]], step["pane_id"])
 
     # One session per run. Recovery keys clear somebody's input line, and for
     # Codex the key that does it exits the process when the line is empty, so
@@ -606,20 +617,11 @@ def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle
         if tier:
             proof = (verify_running(client, agent, step["pane_id"], tier) if skip_clear
                      else restart_worker(client, agent, step["pane_id"], tier, sleep=sleep))
-            tier_record = {**tier, "launch_args": list(agent.launch_args), "verified": proof,
+            tier_record = {**tier, "launch_args": worker_launch_args(agent.kind, agent.launch_args), "verified": proof,
                            "prompt_hash": step["prompt_hash"]}
             cleared = not skip_clear
         elif not skip_clear:
             pane_id = step["pane_id"]
-            if agent.slash_delivery == SLASH_DELIVERY_TYPE and pane_id == PANE_ID_PLACEHOLDER:
-                raise UsageError(
-                    "herdr reported no pane for agent {!r}, so its {} command "
-                    "cannot be typed - confirm the agent is live with "
-                    "`herdr agent list`, or pass --no-clear.".format(
-                        name, agent.clear_prompt
-                    ),
-                    {"agent": name},
-                )
             outcome = send_command(
                 client,
                 agent,
