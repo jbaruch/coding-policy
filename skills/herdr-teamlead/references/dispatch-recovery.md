@@ -203,27 +203,50 @@ refuse it.
    and `herdr agent read <name> --source visible` showing the empty composer.
    Any other reading stops the restoration. Never inspect, stop, or start
    another worker's process.
-2. Stop only that PID with `kill -TERM <pid>`. Re-read `herdr pane
-   process-info` until the pane holds only its shell, and `herdr agent get
-   <name>` until it reports `agent_not_found`: Herdr keeps the old name
-   reserved briefly after the process exits. A pane that does not return to its
-   shell stops the restoration; inspect it by hand.
-3. Restart the same session with the runtime's documented resume form, the
-   explicit YOLO flag, and the unchanged model and effort options, every one a
-   separate token after `--`:
+2. Stop only that PID with `kill -TERM <pid>`, then run the shipped helper.
+   It owns the wait for the pane to hold only its shell and for Herdr to
+   release the old name (Herdr keeps it reserved briefly after the process
+   exits), and the same-name restart:
 
    ```bash
-   herdr agent start <name> --kind claude --pane <pane> -- --resume <uuid> --dangerously-skip-permissions
-   herdr agent start <name> --kind codex --pane <pane> -- resume <uuid> --dangerously-bypass-approvals-and-sandbox
-   herdr agent start <name> --kind grok --pane <pane> -- --resume <uuid> --always-approve
+   teamlead restore-session --agent <name> --kind <kind> --pane <pane> \
+     --shell-pid <shell_pid> --stopped-pid <pid> -- <resume argv...>
+   ```
+
+   Inputs: the archived name, kind, pane, `shell_pid`, and stopped foreground
+   `pid` from step 1; after `--`, the runtime's documented resume form, the
+   explicit YOLO flag, and the unchanged model and effort options, every one
+   a separate token:
+
+   ```text
+   claude: --resume <uuid> --dangerously-skip-permissions
+   codex:  resume <uuid> --dangerously-bypass-approvals-and-sandbox
+   grok:   --resume <uuid> --always-approve
    ```
 
    `<uuid>` is the archived `agent_session` value, never a substitute or a
    most-recent selector. The accepted and refused resume tokens are the
-   validator's contract named in `references/model-tiers.md`. On
-   `agent_name_taken`, wait and retry the same name; never rename, the ledger
-   binds the agent name.
-4. Reverify before any brief. `herdr pane process-info` shows one `<kind>`
+   validator's contract named in `references/model-tiers.md`; the helper runs
+   that validator before any Herdr call and refuses what it refuses.
+
+   Output: exit 0 and one JSON object on stdout — `agent`, `kind`, `pane_id`,
+   the started `argv` Herdr echoed (required to equal the requested tokens),
+   `release` (`attempts`, `shell_pid`), `start` (`attempts`,
+   `name_taken_retries`), and the `started` agent record. Exit 1 and a JSON
+   error on stderr, with no brief sent, when the pane never returns to its
+   shell, the name stays reserved, the shell PID differs from the archived
+   one, a foreign process holds the pane, the name is bound to another pane,
+   Herdr data is malformed, the started identity or argv differs, or a start
+   fails for any reason other than `agent_name_taken`. A start is retried only
+   after `agent_name_taken`, and only once the pane and name re-prove
+   released; a start whose outcome is unknown is never retried. The helper
+   never renames, chooses another pane or session, changes model or effort,
+   sends a brief, or writes owner state; the ledger binds the agent name. The
+   polling limits, the retry allowance, and the release predicates are the
+   constants and docstring at the top of
+   `skills/herdr-teamlead/teamlead/restoration.py`. Any refusal ends the
+   restoration: inspect the pane by hand.
+3. Reverify before any brief. `herdr pane process-info` shows one `<kind>`
    process whose argv is the form above. Herdr reports no `agent_session` for
    the restarted process until its first turn. Read the runtime's own status
    view in the pane first (Codex `/status` names the session and reports Full
@@ -240,7 +263,7 @@ refuse it.
    original rows, and recover through `recover-context` or a recorded fresh
    handoff without resetting the counter. Never report an agent session by
    hand, edit owner state, or prime a different task.
-5. Dispatch normally with `apply --retain-context --task <task> --fix-round
+4. Dispatch normally with `apply --retain-context --task <task> --fix-round
    <N>`. It verifies the resumed argv (`verify_worker_permissions`), the
    ledger's preceding confirmed round, retrospective cadence, and live native
    continuity before any input, then records `cleared: false, clear_reason:
@@ -254,7 +277,9 @@ returns the started argv. One live restoration is proven with Codex: the
 exact UUID with explicit YOLO and unchanged model and effort resumed the same
 session, the status view and argv confirmed it, the single readiness turn
 produced the original identity, and the normal retained apply then dispatched
-the correction. Archive each live run's evidence beside the task ledger.
+the correction. That run drove the `agent start` form by hand; the helper's
+waits and retries are proven by deterministic transport tests, not yet by a
+live run. Archive each live run's evidence beside the task ledger.
 
 ## Verified role-clear recovery
 

@@ -35,6 +35,30 @@
   original identity, the identity match required before any brief, the
   validator as the one owner of the refused resume forms, and the explicit
   exclusion of a pane already at its shell.
+- **Restoration waits and retries are a shipped helper (#382).** The
+  same-session restoration told the lead to re-read `herdr pane process-info`
+  and `herdr agent get` by hand until the pane held only its shell and the old
+  name was released, and to retry `herdr agent start` on `agent_name_taken`;
+  the policy reviewer flagged that hand-rolled fixed-logic polling under
+  `rules/script-delegation.md`. `teamlead restore-session` now owns it. Given
+  the archived name, kind, pane, shell PID, stopped PID, and the resume argv
+  after `--`, it refuses the argv through `verify_worker_permissions` before
+  any Herdr call, re-reads the pane and the name a bounded number of times
+  until both prove released on the same read, starts the same name once,
+  retries only after `agent_name_taken` and only once the pane and name
+  re-prove released, and requires the started record and echoed argv to equal
+  the request exactly. A shell PID other than the archived one, a foreground
+  process that is neither the shell nor the stopped one, a name bound to
+  another pane, malformed Herdr data, the exhausted wait, a started identity
+  or argv mismatch, and every other start failure end the restoration with an
+  actionable error and no second start, since a start whose outcome is
+  unknown may already be running. `references/dispatch-recovery.md` invokes
+  the helper's input, output, and exit contract and keeps the composer,
+  identity, task, tier, retrospective, and readiness judgments with the lead.
+  The polling and retry constants are the top of `teamlead/restoration.py`;
+  `herdr.error_code` reads Herdr's own error code from a failed command. The
+  tiered relaunch (`launch.restart_worker`) and the judge flow are unchanged,
+  so #379 stays open.
 
 ## 0.3.204 — 2026-09-09
 
