@@ -17,7 +17,7 @@
 #           --once checks current evidence without waiting for future work.
 #                  Existing blocked/refusal confirmations still run. A present
 #                  unconfirmed report gets the normal consecutive-read check.
-#                  Exit 1 means pending, not an elapsed worker deadline.
+#                  With --once, exit 1 means a pending checkpoint.
 #           agent-name  a live Herdr agent name (or the pane id hosting it).
 #           report-path absolute path the brief told that worker to write; a
 #                       relative path is refused (exit 2).
@@ -28,7 +28,8 @@
 #           plus "reason":"<why>" on exits 4 and 5.
 #   stderr: diagnostics and per-attempt progress.
 #   exit  : 0 report found (`found` true),
-#           1 budget exhausted (`found` false, `state` last observed),
+#           1 pending checkpoint with --once; otherwise wait budget exhausted
+#             (`found` false, `state` last observed),
 #           2 usage error, precondition unmet, or a herdr/tool failure,
 #           3 the worker is blocked at an approval or question dialog,
 #             confirmed by two reads and the pane
