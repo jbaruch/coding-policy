@@ -176,15 +176,26 @@ native session instead of clearing it or starting a fresh worker. The
 restoration keeps the task, native session ID, fix count, and ledger rows
 unchanged; it grants no attempt, review approval, or tier change.
 
-Preconditions, all required: the worker reads `idle` or `done`; its
-`agent_session` from `herdr agent get <name>` equals the `context_session`
+Preconditions, all required: the worker is live and reads `idle` or `done`;
+its `agent_session` from `herdr agent get <name>` equals the `context_session`
 value of its preceding confirmed developer row in `teamlead state`, with
 `kind: id`; its composer is empty; the operator's YOLO requirement is recorded
 in the task ledger; the worker is non-tiered. A tiered retained fix verifies
 exact launch argv (`verify_argv`) and accepts no resume form; use the
-fresh-dispatch boundary for it. Stopping the process is a relaunch of a worker
-with outgoing work, so complete retrospective transition coverage first under
-`references/retrospectives.md`.
+fresh-dispatch boundary for it. A pane that already holds only its shell has
+no live identity to archive and is outside this procedure: do not resume the
+ledger's UUID into an empty pane under it; recover through `recover-context`
+or a recorded fresh handoff without resetting the counter.
+
+Stopping the process is a relaunch of a worker with outgoing work. Before it,
+run `retro-check` with one transition for this agent — `context: "start"`,
+`role: "developer"`, the same `task`, null `model` and `effort` for a
+non-tiered worker, its `pane`, and its outgoing `report` — and record the
+completed note with `triggers` including `transition` under
+`references/retrospectives.md`. That is the only retrospective the restoration
+carries: the later `apply --retain-context` targets the same role, task, and
+tier, so it demands no new transition coverage; only the daily cadence can
+refuse it.
 
 1. Inspect and archive under the task's evidence directory: `herdr agent get
    <name>` (state, `pane_id`, `agent_session`), `herdr pane process-info --pane
@@ -193,10 +204,12 @@ with outgoing work, so complete retrospective transition coverage first under
    Any other reading stops the restoration. Never inspect, stop, or start
    another worker's process.
 2. Stop only that PID with `kill -TERM <pid>`. Re-read `herdr pane
-   process-info` until the pane holds only its shell. A pane that does not
-   return to its shell stops the restoration; inspect it by hand.
+   process-info` until the pane holds only its shell, and `herdr agent get
+   <name>` until it reports `agent_not_found`: Herdr keeps the old name
+   reserved briefly after the process exits. A pane that does not return to its
+   shell stops the restoration; inspect it by hand.
 3. Restart the same session with the runtime's documented resume form, the
-   explicit YOLO flag, and the unchanged model/effort options, every one a
+   explicit YOLO flag, and the unchanged model and effort options, every one a
    separate token after `--`:
 
    ```bash
@@ -206,30 +219,42 @@ with outgoing work, so complete retrospective transition coverage first under
    ```
 
    `<uuid>` is the archived `agent_session` value, never a substitute or a
-   most-recent selector. No `--continue`, `--last`, `--fork-session`,
-   `--session-id`, picker, title, `--restore-code`, `--flag=value` spelling,
-   or prompt operand; for Codex, `resume` directly follows the executable.
-4. Reverify before any brief: `herdr agent get <name>` reports the same pane
-   and the same `agent_session` value, and `herdr pane process-info` shows one
-   `<kind>` process whose argv is the form above. A changed or missing
+   most-recent selector. The accepted and refused resume tokens are the
+   validator's contract named in `references/model-tiers.md`. On
+   `agent_name_taken`, wait and retry the same name; never rename, the ledger
+   binds the agent name.
+4. Reverify before any brief. `herdr pane process-info` shows one `<kind>`
+   process whose argv is the form above. Herdr reports no `agent_session` for
+   the restarted process until its first turn. Read the runtime's own status
+   view in the pane first (Codex `/status` names the session and reports Full
+   Access); it must show the archived session and the YOLO permission mode.
+   Then send exactly one readiness diagnostic through `herdr agent prompt
+   <name>`: a read-only prompt in the same session that forbids tools, file
+   edits, and any continuation of the task, and asks for one fixed word, such
+   as "Runtime readiness diagnostic only, in this existing session. Do not run
+   tools, edit files, or continue implementation. Reply exactly READY." It is
+   not a dispatch and records nothing. Wait for the turn to finish, then
+   `herdr agent get <name>` must report the same pane and an `agent_session`
+   whose `value` equals the archived one. A missing, different, or malformed
    identity ends the restoration: report the concrete limitation, keep the
    original rows, and recover through `recover-context` or a recorded fresh
-   handoff without resetting the counter.
+   handoff without resetting the counter. Never report an agent session by
+   hand, edit owner state, or prime a different task.
 5. Dispatch normally with `apply --retain-context --task <task> --fix-round
    <N>`. It verifies the resumed argv (`verify_worker_permissions`), the
-   ledger's preceding confirmed round, retrospective coverage, and live native
+   ledger's preceding confirmed round, retrospective cadence, and live native
    continuity before any input, then records `cleared: false, clear_reason:
-   retained` with the unchanged session. A retrospective refusal means the
-   restored process changed the transition evidence: run `retro-check` with the
-   emitted request, record the synthesis, and retry the same dispatch. Never
-   edit state.json, an assignment row, or the session value by hand.
+   retained` with the unchanged session. Never edit state.json, an assignment
+   row, or the session value by hand.
 
 The resume grammar is verified against the installed help of Claude Code
 2.1.266, Codex CLI 0.153.2, and Grok Build 1.0.24; recheck it when a CLI
-upgrades. Herdr 0.8.2 passes the tokens after `--` to the executable, the same
-contract every verified launch relies on. The live restoration itself was not
-exercised by the change that documented it; archive the first live run's
-evidence beside the task ledger.
+upgrades. Herdr 0.8.2 passes the tokens after `--` to the executable and
+returns the started argv. One live restoration is proven with Codex: the
+exact UUID with explicit YOLO and unchanged model and effort resumed the same
+session, the status view and argv confirmed it, the single readiness turn
+produced the original identity, and the normal retained apply then dispatched
+the correction. Archive each live run's evidence beside the task ledger.
 
 ## Verified role-clear recovery
 

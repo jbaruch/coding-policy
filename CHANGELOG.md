@@ -24,7 +24,17 @@
   through `herdr agent start ... --`, and reverifies identity before the
   normal `apply --retain-context`. The grammar was verified against the
   installed help of Claude Code 2.1.266, Codex CLI 0.153.2, and Grok Build
-  1.0.24; the live restoration itself was not exercised in this change.
+  1.0.24. One live Codex restoration then proved the boundary: the exact UUID
+  with explicit YOLO and unchanged model and effort resumed the same session,
+  but Herdr reported no session metadata for the restarted process until its
+  first turn. The reference therefore carries the pre-relaunch
+  `context: start` retrospective (a retained apply of the same role, task and
+  tier demands no further transition coverage), the wait for both the shell
+  and the released agent name, the runtime status and live argv checks, the
+  single no-tools readiness turn after which the integration emitted the
+  original identity, the identity match required before any brief, the
+  validator as the one owner of the refused resume forms, and the explicit
+  exclusion of a pane already at its shell.
 
 ## 0.3.203 — 2026-09-09
 
