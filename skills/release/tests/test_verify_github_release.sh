@@ -45,7 +45,7 @@ SCRIPT="$(cd "$(dirname "$0")/.." && pwd)/verify-github-release.sh"
 [[ -x "$SCRIPT" ]] || { echo "fatal: verify-github-release.sh not executable at $SCRIPT" >&2; exit 2; }
 command -v jq >/dev/null || { echo "fatal: jq is required — the transport mock filters fixtures with it" >&2; exit 2; }
 
-# shellcheck disable=SC1090
+# shellcheck disable=SC1090  # ShellCheck cannot resolve the dynamically constructed source path.
 source "$SCRIPT" || true
 set +e
 
@@ -451,6 +451,37 @@ test_encoded_tag_endpoint() {
   assert_eq "encoded tag round-trips" "$tag" "$(echo "$out" | jq -r '.tag')" || return 1
 }
 run "release API lookup preserves reserved and UTF-8 tag bytes" test_encoded_tag_endpoint
+
+# A failed printf conversion must stop the lookup without emitting a verdict.
+# Exercise both conversion stages through main, including when errexit is
+# disabled by the caller's checked command substitution.
+test_encoding_failure_is_indeterminate() {
+  local format out stderr rc
+  set_body <<JSON
+{"tag_name": "release/v1", "draft": false, "html_url": "u", "assets": [{"name": "p", "state": "uploaded"}]}
+JSON
+  for format in '%d' '%%%02X'; do
+    rc=0
+    out=$(
+      printf() {
+        if [[ "${1:-}" == '-v' && "${3:-}" == "$format" ]]; then
+          return 1
+        fi
+        # shellcheck disable=SC2059  # Forward the caller's printf format unchanged outside the injected failure.
+        builtin printf "$@"
+      }
+      invoke_main "$OWNER" "$REPO" 'release/v1' "$RUN_ID" 2>"$TMPDIR_TEST/err"
+    ) || rc=$?
+    stderr=$(cat "$TMPDIR_TEST/err")
+    assert_eq "encoding failure exit code ($format)" "2" "$rc" || return 1
+    assert_eq "encoding failure emits no envelope ($format)" "" "$out" || return 1
+    [[ "$stderr" == *"could not encode tag"* && "$stderr" == *"Bash"* ]] || {
+      echo "    FAIL: encoding failure needs a Bash recovery hint, got: ${stderr}" >&2
+      return 1
+    }
+  done
+}
+run "failed tag encoding is indeterminate with no envelope" test_encoding_failure_is_indeterminate
 
 # --- An unescapable value is indeterminate, never a half-built envelope ------
 # json_escape runs inside a command substitution, so a status the caller

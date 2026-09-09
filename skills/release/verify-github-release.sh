@@ -108,12 +108,20 @@ json_escape() {
 # percent signs in refs; sending those raw can request a different tag.
 # Byte-wise encoding keeps UTF-8 intact without a runtime jq dependency.
 url_encode_tag() {
-  local LC_ALL=C value="$1" encoded="" char hex i
+  local LC_ALL=C value="$1" encoded="" char byte hex i
   for (( i=0; i<${#value}; i++ )); do
     char="${value:i:1}"
     case "$char" in
       [a-zA-Z0-9.~_-]) encoded+="$char" ;;
-      *) printf -v hex '%%%02X' "'$char"; encoded+="$hex" ;;
+      *)
+        # Bash 3.2 sign-extends high bytes; normalize the ordinal to 0..255.
+        if ! printf -v byte '%d' "'$char" ||
+           ! printf -v hex '%%%02X' "$(( byte & 0xFF ))"; then
+          echo "error: could not encode tag — check Bash printf support and re-run this check" >&2
+          return 2
+        fi
+        encoded+="$hex"
+        ;;
     esac
   done
   printf '%s' "$encoded"
