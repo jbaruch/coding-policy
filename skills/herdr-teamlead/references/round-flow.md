@@ -3,26 +3,32 @@
 The shape of one task round, and what the lead does between the steps of
 `skills/herdr-teamlead/SKILL.md`. Read this when a round deviates from the happy path.
 
-## The Three Roles
+## Compose the Active Team
 
-| Role | Seat weight | Writes code | Output |
-| ---- | ----------- | ----------- | ------ |
-| developer | heaviest | yes, in its own worktree | pushed branch + report |
-| tester | middle | test code only, delivered as a patch file | plan or patch + report |
-| reviewer / architect | lightest | never | design note or COMMENT review + report |
+| Responsibility | Repository writes | Output |
+| --- | --- | --- |
+| developer | authorized source work in its own worktree | pushed branch and report |
+| tester | test code as a report-directory patch | test plan, patch or verification report |
+| reviewer | none | independent COMMENT review and report |
+| advisor, investigator, architect | none | bounded recommendation, diagnosis or design report |
+| release | release operations only | verified release report |
+| judge | none | binding dispute ruling |
 
-Roles rotate between tasks. The rotation is decided by measured headroom
-through `teamlead.sh plan`, never by the lead's impression of who looks fresh.
-`plan` breaks a headroom tie on who has held the role fewest times, so nobody
-owns `developer` forever.
+Activate the responsibilities the next task decision needs. Add specialty
+requirements through `references/specialists.md`; a profile on the bench needs
+no worker or monitoring loop. One worker holds one assignment in a dispatch.
+Compatible expertise may share a responsibility. Consultations with the same
+canonical responsibility use separate dispatches, each with its own engagement.
 
-Step 5 in `skills/herdr-teamlead/SKILL.md` identifies the source for the
-default weights and assignment algorithm. Re-weigh from measurements: run
-`measure` before and after a round and read what the seat actually cost.
+The owner planner applies capability and contribution eligibility before
+affordable task familiarity and measured headroom. Step 5 in the skill names
+the executable contract. Use measured costs to improve calibration; preserve
+the pinned judge and the developer's early-fix reservation.
 
-Fewer live workers than roles is an error, not a silent drop — a role nobody
-holds is work nobody is doing. Either name another agent into the roster or
-fold two roles onto one worker deliberately, in that worker's brief.
+If no eligible worker fits, record the gap and staff or sequence the work.
+Never silently drop a required responsibility or let a contributor independently
+verify its own work. Specialist advice does not replace required reviewer and
+tester passes.
 
 ## Two Phases
 
@@ -30,8 +36,9 @@ An implementation task runs through the round twice, and only the second pass
 gates release. Investigation-only tasks use Step 12's knowledge-deliverable
 gate; they do not require a pushed branch or release reports.
 
-**Phase 1 — pre-development (optional).** The architect posts a design note on
-the issue (reviewer Mode A). The tester writes a plan mapping each acceptance
+**Phase 1 — pre-development (optional).** An architect or advisor supplies the
+needed design or interaction report. An investigator may first resolve a causal
+question. Assess each consultation before using its outcome. The tester maps each acceptance
 criterion to a test, or delivers those tests as a patch (tester Mode A or B).
 The developer implements against both, runs the repo's gates, pushes the
 branch, and stops without opening a PR.
@@ -47,11 +54,18 @@ the current tip by SHA.
 The release hand-off reads Phase 2 reports and nothing else. A design note is
 not a review of the code that got written, and a test plan is not a test run.
 
-Phase 2 plans with the author barred from the seats that judge its work:
-`plan --exclude reviewer=<author> --exclude tester=<author>`. The author keeps
-whatever seat is left to it — a bar that would strand another role is refused,
-naming the role and the exclusions, rather than quietly seating somebody to
-review their own branch.
+Phase 2 excludes actual design and implementation contributors from reviewer
+and tester. The owner applies recorded contribution history; use `--exclude`
+for relevant contributions outside it. Assess uncertain prior consultations
+under `references/specialists.md`. The reviewer responsibility is verification
+only; it no longer carries pre-development Mode A. Historical reviewer
+responsibility remains unknown until its actual contribution is established.
+
+Consultations can enter later when a new question could change implementation
+or verification. Scope any resulting correction through the accepted behavior
+and existing correction allowance; a specialist recommendation grants no new
+implementation authority. A completed consultation returns to the next needed
+assignment, or closes an investigation-only knowledge deliverable through Step 12.
 
 ## One Round, End to End
 
@@ -63,9 +77,9 @@ review their own branch.
 3. **Measure** — `teamlead.sh measure` reads each worker's own usage numbers.
    A worker that is `working` or `blocked` is skipped with null windows rather
    than interrupted.
-4. **Plan** — `teamlead.sh plan --roles developer,tester,reviewer` assigns the
-   roles, with `--exclude <role>=<agent>` for every seat a worker must not
-   hold. It contacts nobody and writes nothing.
+4. **Plan** — `teamlead.sh plan` assigns the requested responsibilities with
+   specialty requirements and explicit contribution exclusions where needed.
+   It contacts nobody; owner state migration may save an older ledger.
 5. **Package** — Step 6 builds a range-specific VCS artifact for reviewer and
    tester briefs. Keep the original task base for full reviews and the prior
    reviewed tip for scoped re-checks; a new tip gets a new package.
@@ -77,13 +91,20 @@ review their own branch.
    name, from the shared checkout. A worker never runs `git` there, so its
    checkout has to exist before the brief arrives.
 8. **Dispatch** — `teamlead.sh apply` uses Step 10's explicit context mode,
-   then sends the assignment prompt. Only a same-role fix may retain context.
+   then sends the assignment prompt. The recovery reference governs developer
+   fix retention and the separate assessed specialist continuation path.
    It re-reads live status and refuses to type into a busy worker.
 9. **Observe** — `supervision-watch` observes every enrolled worker. Verify
    candidates with `wait-report.sh --once`, ledger outcomes, and acknowledge
    handled events under `references/supervision.md`.
 10. **Gate** — the lead reads every report in full and decides: another round,
    or the release hand-off.
+
+Before relying on consultation output, save the report delivery receipt and run
+`assess-specialist` under `references/specialists.md`. Record the accepted outcome
+in the task ledger and resolve its supervision obligations separately. Keep
+useful sessions available for likely follow-up, while preserving scoped lessons
+outside the session. No idle specialist counts as active work.
 
 The lead appends decisions throughout this flow to the persistent task ledger,
 including before pauses and handoffs. `references/task-ledger.md` separates
@@ -132,6 +153,13 @@ A Phase 1 design note or test plan does not satisfy 2 or 3. A report against an
 older SHA does not either: re-run Phase 2 against the current tip. After scoped
 re-checks close the findings, re-run Phase 2 with `full` briefs before handing off
 to release. Scoped reports alone never satisfy this gate.
+
+Reassess both passes against current contribution history before releasing. A
+later discovery that a verifier shaped the task's design or implementation
+invalidates its independence, even when the reviewed SHA is unchanged. Preserve
+the historical receipt, append the new gate decision and its evidence to the
+task ledger, and obtain a fresh independent report. Never rewrite the prior
+review or treat an old approval as authority over newer contribution evidence.
 
 ## Blocking Gate
 
@@ -193,8 +221,8 @@ whatever GitHub's merge box says.
 
 ## The Judge
 
-A fifth seat, outside the three-role rotation, on the most capable model
-available. It never holds developer, reviewer, or tester. `rules/agent-team-operation.md`
+A reserved seat outside ordinary staffing, on the most capable model
+available. It holds no other responsibility. `rules/agent-team-operation.md`
 Judge Seat is the contract; this section is the operational detail for
 Steps 13–19 of `skills/herdr-teamlead/SKILL.md`.
 

@@ -5,7 +5,7 @@
 Keep the same `--task` identifier from initial development through all its
 fixes. Omit `--fix-round` on the initial assignment; supply it on every fix.
 Never trim or merge legacy identities. Retained fixes dispatch developer alone
-with `--retain-context`; other roles get separate cleared assignments. Retention
+with `--retain-context`; other roles use their own dispatch context. Developer retention
 requires matching confirmed history, live native-session continuity, and a
 compatible verified tier. Missing evidence requires owner recovery, preserving
 the original record and counter. Tiered dispatch requires current qualification.
@@ -21,6 +21,46 @@ owner-managed recovery contract below. Pass its same `--work` to plan and fresh 
 Reuse an approved bounded correction plan while its scope and budget hold.
 An unknown dispatch outcome pauses implementation for evidence-based recovery.
 An identical completed retry returns its recorded result without sending again.
+
+## Warm specialist follow-up
+
+Use `--retain-specialist` for a bounded follow-up to an assessed advisor,
+investigator or architect consultation. First complete the assessment and
+observation lifecycle in `references/specialists.md`. Keep the previous report
+and successful delivery receipt as immutable source files. A session kept idle
+on the bench is optional continuity, never a reason to skip the owner checks.
+
+Plan that one responsibility with the same task, normalized requirements and
+worker. Compose a new self-contained brief with the follow-up question, the
+previous report and a fresh report destination. Then use the saved plan:
+
+```bash
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
+bash "$CP/skills/herdr-teamlead/teamlead.sh" apply \
+  --assignments <followup-plan.json> --task <task-id> \
+  --brief <consultation-role>=<new-brief> --report <consultation-role>=<new-report> \
+  --common <common-path> --retain-specialist [--dispatch-id <stable-id>]
+```
+
+`teamlead/engagement.py` owns assessment-source and retired-enrollment validation;
+`teamlead/assign.py` owns retained responsibility, engagement, session and exact
+tier proof. `teamlead/composition.py` rechecks capability and contribution
+eligibility before unsent work. Follow their diagnostics before retrying.
+This mode carries no developer correction parameters and cannot replace the
+developer's retained-fix path. A dry run checks recorded prerequisites but proves
+no live session, current qualification or permission flags.
+
+Live apply still enforces the retrospective cadence, YOLO launch proof, readiness,
+composer and qualification gates. Its successful result records retained context
+and the original requirements; it proves dispatch only. Use normal report
+observation and a new assessment for the follow-up.
+
+If the role, engagement or tier changes, or continuity cannot be proved, use a
+fresh consultation after the required retrospective and a durable knowledge
+handoff. Do not reset the task or rewrite the old assignment to retain a pane.
+Changing work into implementation always returns to developer planning and its
+existing allowance. Unknown sends require the normal reconciliation path before
+any follow-up or fresh resend.
 
 ## Dispatch outcomes
 
@@ -103,6 +143,7 @@ instruction into permission to exceed an exhausted correction budget.
 | `import-correction` | Fields under Historical manual corrections below | Import an already authorized, completed manual attempt without sending input or granting future attempts. |
 | `record-historical-review` | unique `id`, `historical_attempt`, full `head_revision`, `verdict`, `review_mode`, independent `reviewer`, absolute `report` | Append an actual review receipt for an imported correction. Full review is required for approval; other verification gates remain separate. |
 | `recover-report` | unique `id`, original `dispatch`, absolute `report`, `wait_receipt`, `pane`, `visible`, `source` | Append evidence of a completed delivery missed by the old watcher; see Completed native report recovery. No worker input or review approval. |
+| `assess-specialist` | `id`, actual `dispatch`, absolute `report` and successful `delivery` receipt, lead `outcome`, `contribution`, `summary` | Record delivered consultation or verifier work under `references/specialists.md`; no task completion or enrollment retirement. |
 
 `allowed_paths` contains repository-relative paths or globs. Preserve the
 original task and base across every approval. Read and verify the source diff

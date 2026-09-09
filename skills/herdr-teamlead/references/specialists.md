@@ -87,12 +87,22 @@ independence. `engagement` identifies the bounded consultation across its
 follow-ups, not a new task or correction budget. Give each distinct engagement
 its own identity and preserve the parent task identity.
 
+The input parser in `teamlead/composition.py` owns the accepted keys and names.
+Reviewer and tester requirements use `independent: true`. New advisor and
+investigator assignments require a requirements file; supply it for every new
+architect consultation too. Legacy architect records remain readable but establish
+no specialist continuity. No extra model flags or invented role aliases belong
+in a requirements file.
+
 Include requirements for specialist consultations and for a developer, reviewer
 or tester whose assignment needs that expertise. The planner emits the
 requirements with its assignment; dispatch rechecks them from that saved plan.
 Use that plan through the normal apply contract. On a refusal, resolve the
 reported capability, independence or evidence gap before replanning. Do not
 hand-edit the plan to substitute a worker or bypass its requirements.
+Live specialized dispatch requires the lead's existing supervision binding and
+one enrolled report path per responsibility. Use the same state selection across
+plan, apply, assessment, observation and follow-up.
 
 ## Compose a bounded consultation
 
@@ -159,7 +169,12 @@ the supervision member, the worker's report path, and the saved delivery path:
 `outcome` and `summary` record the lead's actual assessment and rationale.
 `contribution` is `none`, `design` or `implementation`; classify the substantive
 work rather than its current role. The delivery file must be the successful
-`wait-report.sh` JSON receipt for that worker and report, with `found: true`.
+`wait-report.sh` JSON receipt for that worker and report, with `found: true`, or
+the unchanged owner `recover-report` result for that exact dispatch and report.
+For native delivery missed by the watcher, complete recovery under
+`references/dispatch-recovery.md` first and save its actual output. The assessment
+owner checks recovered output against the saved recovery record; an edited or
+invented receipt does not establish delivery.
 Use an actual dispatch identity and matching report path; never invent history
 for a report that has not been reconciled with its assignment.
 
@@ -168,6 +183,10 @@ delivery receipts in the existing owner state. It binds the saved bytes to the
 assignment; it cannot infer semantic truth from report prose. Handle any
 non-zero diagnostic before continuing. Keep the referenced evidence files for
 future verification.
+An exact retry with the same assessment id returns its original record. A new
+assessment uses a new id and preserves the old evidence. The command also accepts
+confirmed reviewer or tester dispatches when their contribution needs assessment;
+developer work remains on the normal developer receipt and correction path.
 
 Record the assessed outcome and evidence in the task ledger. Handle pending
 supervision events and retire the preceding enrollment through
@@ -198,6 +217,14 @@ verified no contributing work; a design or implementation contribution remains
 part of the task history across role, model and session changes. Obtain a
 different qualified worker for the independent gate when the subject includes
 that contribution.
+
+New reviewer assignments carry an explicit verification scope. Migrated reviewer
+history retains unknown scope, and architecture work remains a possible
+contribution until assessed against actual output. The owner never infers
+independence from a newer schema stamp. External authors and work without usable
+task provenance still need the lead's explicit exclusions. Follow
+`teamlead/composition.py` for the executable contribution rules rather than
+reclassifying history from a worker's current label.
 
 Keep a useful worker idle after its report when follow-up is likely and capacity
 permits. An idle session is optional continuity, not durable memory or authority
