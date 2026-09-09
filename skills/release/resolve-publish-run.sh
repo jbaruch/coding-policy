@@ -81,6 +81,13 @@ main() {
   fi
   local elapsed=0 matches match_count
 
+  # Git refs permit quotes. Encode both interpolated arguments as jq
+  # string contents so their bytes cannot alter the selection predicate.
+  # Backslashes must be escaped first, including for malformed SHA input.
+  local jq_sha="${head_sha//\\/\\\\}" jq_ref="${ref//\\/\\\\}"
+  jq_sha="${jq_sha//\"/\\\"}"
+  jq_ref="${jq_ref//\"/\\\"}"
+
   # Loop bound is `<= BUDGET_SEC` (not strictly less) so a run that
   # becomes visible exactly at the budget boundary is still caught.
   # A strict `<` bound would skip the final poll at t == BUDGET_SEC.
@@ -94,7 +101,7 @@ main() {
       --workflow "$workflow" \
       --limit "$RUN_LIST_LIMIT" \
       --json databaseId,headSha,event,headBranch \
-      --jq '.[] | select(.headSha == "'"$head_sha"'") | select(.event == "push") | select(.headBranch == "'"$ref"'") | .databaseId')
+      --jq '.[] | select(.headSha == "'"$jq_sha"'") | select(.event == "push") | select(.headBranch == "'"$jq_ref"'") | .databaseId')
     if [[ -n "$matches" ]]; then
       match_count=$(printf '%s\n' "$matches" | wc -l | tr -d ' ')
       if (( match_count > 1 )); then

@@ -191,10 +191,11 @@ gh() {
   echo "call" >> "$MOCK_GH_CALLS_FILE"
   echo "$*" >> "$MOCK_GH_ARGS_FILE"
 
-  local branch="" filter="" prev="" arg
+  local branch="" workflow="" filter="" prev="" arg
   for arg in "$@"; do
     case "$prev" in
       --branch) branch="$arg" ;;
+      --workflow) workflow="$arg" ;;
       --jq) filter="$arg" ;;
     esac
     prev="$arg"
@@ -211,10 +212,9 @@ gh() {
   # MOCK_GH_IGNORE_BRANCH=1 serves the unnarrowed listing instead, so a
   # test can exercise the script's own client-side ref predicate rather
   # than the transport's.
-  if [[ "${MOCK_GH_IGNORE_BRANCH:-0}" == "1" ]]; then
-    payload=$(jq -c '.' "$FIXTURE_DIR/$fixture") || return 99
-  else
-    payload=$(jq -c --arg b "$branch" '[ .[] | select(.headBranch == $b) ]' "$FIXTURE_DIR/$fixture") || return 99
+  payload=$(jq -c --arg w "$workflow" --arg expected "$WORKFLOW" '[.[] | select((.workflowName // $expected) == $w)]' "$FIXTURE_DIR/$fixture") || return 99
+  if [[ "${MOCK_GH_IGNORE_BRANCH:-0}" != "1" ]]; then
+    payload=$(jq -c --arg b "$branch" '[ .[] | select(.headBranch == $b) ]' <<<"$payload") || return 99
   fi
   jq -r "$filter" <<<"$payload"
 }
@@ -283,6 +283,69 @@ test_explicit_tag_ref() {
   gh_args | grep -q -- "--branch ${TAG}" || { echo "    FAIL: should request --branch ${TAG}, got: $(gh_args)" >&2; return 1; }
 }
 run "explicit tag ref resolves the tag's push run" test_explicit_tag_ref
+
+# Quoted refs are valid Git names, and query-looking characters remain
+# literal data. Run the actual helper filter against raw transport bodies.
+test_quoted_ref_binding() {
+  local ref output rc mode
+  for ref in 'v1.0"quoted' 'v")|select(.event=="workflow_dispatch")#'; do
+    git check-ref-format "refs/tags/$ref" || return 1
+    jq -n --arg ref "$ref" --arg sha "$SHA_RELEASE" '[
+      {databaseId: 34188269042, headSha: $sha, event: "push", headBranch: $ref},
+      {databaseId: 34188300000, headSha: $sha, event: "workflow_dispatch", headBranch: $ref},
+      {databaseId: 34188100000, headSha: $sha, event: "push", headBranch: "main"},
+      {databaseId: 34188400000, headSha: $sha, event: "push", headBranch: "v1.0quoted"},
+      {databaseId: 34188500000, headSha: "other-commit", event: "push", headBranch: $ref},
+      {databaseId: 34188600000, headSha: $sha, event: "push", headBranch: $ref, workflowName: "unrelated.yml"}
+    ]' > "$FIXTURE_DIR/quoted-ref.json" || return 1
+    for mode in 0 1; do
+      reset_mocks
+      export MOCK_GH_IGNORE_BRANCH="$mode"
+      queue_fixtures quoted-ref.json
+      rc=0
+      output=$(main jbaruch coding-policy "$SHA_RELEASE" "$WORKFLOW" "$ref" 2>"$TMPDIR_TEST/err") || rc=$?
+      assert_eq "quoted-ref exit code" "0" "$rc" || { cat "$TMPDIR_TEST/err" >&2; return 1; }
+      assert_eq "only the exact quoted-ref push resolves" "34188269042" "$(database_id_of "$output")" || return 1
+    done
+    # Neither stripping a quote nor executing the query-shaped tag may
+    # select a run when that exact ref has no push at the requested SHA.
+    jq '[.[] | select(.databaseId != 34188269042)]' "$FIXTURE_DIR/quoted-ref.json" > "$FIXTURE_DIR/quoted-ref-absent.json" || return 1
+    reset_mocks
+    export MOCK_GH_IGNORE_BRANCH=1
+    queue_fixtures quoted-ref-absent.json quoted-ref-absent.json quoted-ref-absent.json quoted-ref-absent.json
+    rc=0
+    output=$(main jbaruch coding-policy "$SHA_RELEASE" "$WORKFLOW" "$ref" 2>"$TMPDIR_TEST/err") || rc=$?
+    assert_eq "missing quoted-ref run exits 1" "1" "$rc" || return 1
+    assert_eq "missing quoted-ref run emits no id" "" "$output" || return 1
+  done
+}
+run "quoted and query-shaped refs retain exact commit/event/ref binding" test_quoted_ref_binding
+
+# The transport can use jq internally while the real CLI entry point has
+# no jq binary on PATH, just as gh supplies its own query engine.
+test_cli_quoted_ref_without_system_jq() {
+  local bin="$TMPDIR_TEST/no-jq" ref='v1.0"quoted' output rc=0 tool
+  mkdir "$bin" || return 1
+  for tool in wc tr; do
+    ln -s "$(command -v "$tool")" "$bin/$tool" || return 1
+  done
+  cat > "$bin/gh" <<'MOCK'
+#!/bin/bash
+set -euo pipefail
+filter=""
+while (( $# )); do
+  if [[ "$1" == --jq ]]; then filter="$2"; shift; fi
+  shift
+done
+"$MOCK_REAL_JQ" -r "$filter" "$FIXTURE_DIR/quoted-cli.json"
+MOCK
+  chmod +x "$bin/gh" || return 1
+  jq -n --arg ref "$ref" --arg sha "$SHA_RELEASE" '[{databaseId: 34188269042, headSha: $sha, event: "push", headBranch: $ref}]' > "$FIXTURE_DIR/quoted-cli.json" || return 1
+  output=$(PATH="$bin" MOCK_REAL_JQ="$(command -v jq)" "$BASH" "$SCRIPT" jbaruch coding-policy "$SHA_RELEASE" "$WORKFLOW" "$ref" 2>"$TMPDIR_TEST/err") || rc=$?
+  assert_eq "CLI exit code without system jq" "0" "$rc" || { cat "$TMPDIR_TEST/err" >&2; return 1; }
+  assert_eq "CLI quoted ref resolves" "34188269042" "$(database_id_of "$output")" || return 1
+}
+run "CLI resolves a quoted ref with no system jq on PATH" test_cli_quoted_ref_without_system_jq
 
 # --- Test 3: unrelated refs at the same commit are excluded -------------------
 test_unrelated_same_sha_refs_excluded() {
