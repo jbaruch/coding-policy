@@ -131,7 +131,9 @@
   run that never created the release. A run still in flight reads as
   indeterminate, never as a failed publish. Every interpolated value goes
   through a `json_escape` that a quote- or backslash-bearing tag round-trips
-  through jq, and every definitive no writes an actionable stderr diagnostic
+  through jq — it returns rather than exits, since it runs in a command
+  substitution, and every caller propagates its status instead of printing an
+  envelope built from an empty string — and every definitive no writes an actionable stderr diagnostic
   beside its stdout envelope. `tests/test_verify_github_release.sh` covers
   successful, failed-conclusion, in-flight, unreadable-run, absent, draft,
   empty-asset, still-uploading, tag-mismatch, auth-failure,

@@ -18,7 +18,8 @@
 #   9. Every definitive no writes an actionable stderr diagnostic
 #      alongside its stdout envelope.
 #  10. A tag carrying a double quote and a backslash emits VALID JSON
-#      that round-trips through jq.
+#      that round-trips through jq, and a value json_escape refuses
+#      exits 2 with stdout untouched on both the deny and the ok path.
 #  11. Auth or network failure on either call — rc 2, empty stdout.
 #      Indeterminate is never reported as absent (fail closed).
 #  12. Unparseable payload — rc 2, empty stdout.
@@ -410,6 +411,38 @@ JSON
   assert_eq "tag round-trips" "$weird" "$(echo "$out" | jq -r '.tag')" || return 1
 }
 run "a tag carrying a quote and a backslash emits valid JSON" test_quote_bearing_tag_emits_valid_json
+
+# --- An unescapable value is indeterminate, never a half-built envelope ------
+# json_escape runs inside a command substitution, so a status the caller
+# drops would leave the envelope built from an empty string and reported
+# as a definitive no (rules/error-handling.md Shell Error Handling).
+test_control_character_tag_is_indeterminate() {
+  local weird
+  weird=$(printf 'v1.0\tbad')
+  set_body <<JSON
+{"tag_name": "${TAG}", "draft": false, "html_url": "u", "assets": [{"name": "p", "state": "uploaded"}]}
+JSON
+  local out rc=0
+  out=$(main "$OWNER" "$REPO" "$weird" "$RUN_ID" 2>/dev/null) || rc=$?
+  assert_eq "exit code" "2" "$rc" || return 1
+  assert_eq "stdout must stay empty" "" "$out" || return 1
+}
+run "a control character in the tag exits 2 with no envelope" test_control_character_tag_is_indeterminate
+
+# The success path escapes through the same helper and owes the same
+# propagation; a run whose conclusion carries a control character must
+# not emit a truncated ok:true envelope.
+test_control_character_conclusion_is_indeterminate() {
+  set_body <<JSON
+{"tag_name": "${TAG}", "draft": false, "html_url": "u", "assets": [{"name": "p", "state": "uploaded"}]}
+JSON
+  set_run "$(printf 'suc\tcess')"
+  local out rc=0
+  out=$(main "$OWNER" "$REPO" "$TAG" "$RUN_ID" 2>/dev/null) || rc=$?
+  assert_eq "exit code" "2" "$rc" || return 1
+  assert_eq "stdout must stay empty" "" "$out" || return 1
+}
+run "an unescapable run conclusion exits 2 with no envelope" test_control_character_conclusion_is_indeterminate
 
 # --- Test 10: missing gh ------------------------------------------------------
 # Runs in a subshell with the mock removed and PATH emptied, so

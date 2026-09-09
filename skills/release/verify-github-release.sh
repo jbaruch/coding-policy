@@ -87,11 +87,17 @@ trap cleanup_vgr_err_file EXIT
 # Escape one string for embedding in a JSON string literal. A control
 # character has no place in any value this script emits, and encoding it
 # would need \uXXXX, so it is refused rather than silently mangled.
+#
+# It RETURNS 2 rather than exiting: callers run it in a command
+# substitution, where an `exit` would end only that subshell and leave
+# the caller printing an envelope built from an empty string. Every
+# caller checks the status and propagates it (rules/error-handling.md
+# Shell Error Handling — a discarded exit status is suppression).
 json_escape() {
   local value="$1"
   if [[ "$value" == *[[:cntrl:]]* ]]; then
     echo "error: value contains a control character and cannot be emitted as JSON: '${value}' — pass a tag and repository free of control characters" >&2
-    exit 2
+    return 2
   fi
   value="${value//\\/\\\\}"
   value="${value//\"/\\\"}"
@@ -101,12 +107,20 @@ json_escape() {
 # One definitive no: the actionable stderr diagnostic first, then the
 # structured envelope on stdout, then exit 1. Both surfaces carry the
 # finding — a wrapper parsing stdout and an operator reading stderr each
-# get an answer.
+# get an answer. An escaping failure preempts both and exits 2 with
+# stdout untouched, the contract's indeterminate answer.
 deny() {
   local reason="$1" tag="$2" assets="$3" conclusion="$4" hint="$5"
   echo "verify-github-release.sh: ${reason} — ${hint}" >&2
+  local esc_reason esc_tag esc_conclusion rc=0
+  esc_reason=$(json_escape "$reason") || rc=$?
+  (( rc == 0 )) || exit "$rc"
+  esc_tag=$(json_escape "$tag") || rc=$?
+  (( rc == 0 )) || exit "$rc"
+  esc_conclusion=$(json_escape "$conclusion") || rc=$?
+  (( rc == 0 )) || exit "$rc"
   printf '{"ok":false,"reason":"%s","tag":"%s","assets":%s,"run_conclusion":"%s"}\n' \
-    "$(json_escape "$reason")" "$(json_escape "$tag")" "$assets" "$(json_escape "$conclusion")"
+    "$esc_reason" "$esc_tag" "$assets" "$esc_conclusion"
   exit 1
 }
 
@@ -199,8 +213,12 @@ main() {
       "re-check shortly if an upload is still finishing, otherwise re-run the publish workflow"
   fi
 
+  local esc_tag esc_url esc_conclusion
+  esc_tag=$(json_escape "$tag") || return $?
+  esc_url=$(json_escape "$url") || return $?
+  esc_conclusion=$(json_escape "$conclusion") || return $?
   printf '{"ok":true,"tag":"%s","assets":%s,"url":"%s","run_conclusion":"%s"}\n' \
-    "$(json_escape "$tag")" "$total" "$(json_escape "$url")" "$(json_escape "$conclusion")"
+    "$esc_tag" "$total" "$esc_url" "$esc_conclusion"
   return 0
 }
 
