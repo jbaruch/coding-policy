@@ -2,6 +2,28 @@
 
 ### Fixed
 
+- **Supervised Grok reports recover with their report binding (#387).** A
+  bound round's `apply` stores each new dispatch fingerprint wrapped with the
+  role's exact `--report` path, while `recover-report` rebuilt only the bare
+  legacy fingerprint from the original plan, options and briefing bytes and
+  compared it directly. The first supervised stale-ID recovery therefore
+  refused a genuinely completed Grok tester turn with `grok_dispatch_unbound`
+  although the plan, briefs, report, pane and 482-row native transcript were
+  intact and had already passed the source and clear checks. The two formats
+  now have one owner, `supervision.report_bound_fingerprint`, which `apply`
+  writes and `stale_grok_source` reproduces from the report path the record
+  names; a legacy dispatch still matches its bare fingerprint. Every other
+  refusal is unchanged: a changed plan, task or correction bounds, brief or
+  common bytes, a different report path, a second wrapping, an ambiguous or
+  failed native source and a contradicted automatic clear still refuse, and
+  the receipt still grants delivery only. The regression runs a real bound
+  `apply` with its report map through the CLI, recovers that dispatch's
+  completed stale-ID evidence on the same ledger, repeats every stale-Grok
+  proof and refusal under the bound fingerprint, and shows that complete
+  evidence for a second assigned report path refuses on the binding alone.
+  Verified on an isolated copy of the live owner state against the archived
+  original transcript: 0.3.204 refuses, the fix records the delivery, and the
+  real owner state was not written.
 - **Resumed YOLO workers keep their context (#382).** `verify_worker_permissions`
   refused every resume operand, so a retained developer restored with
   `codex resume <uuid> --dangerously-bypass-approvals-and-sandbox` (or the

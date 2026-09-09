@@ -739,7 +739,7 @@ def cmd_apply(args, client=None, warn=None, trace=None):
                 # cannot retroactively prove a report input they never stored.
                 old = next((row for row in store["dispatches"] if row["id"] == identifier), None)
                 if old is None or old["fingerprint"] != fingerprint:
-                    fingerprint = supervision.digest({"dispatch": fingerprint, "report": reports[role]})
+                    fingerprint = supervision.report_bound_fingerprint(fingerprint, reports[role])
             prior = recovery.prior_dispatch(store, identifier, fingerprint)
             if supervised:
                 saved_result = prior["result"] if prior and prior["status"] == "applied" else {}

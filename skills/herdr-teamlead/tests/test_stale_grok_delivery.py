@@ -14,10 +14,11 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from teamlead import cli, recovery, report_delivery as delivery, state
+from teamlead import cli, recovery, report_delivery as delivery, state, supervision
 from teamlead.assign import assignment_text
 from tests import test_assign as dispatch_fixture
 from tests import test_report_delivery as native_fixture
+from tests import test_supervision_cli as supervised_fixture
 from teamlead.errors import UsageError
 from tests.test_report_delivery import AT, PANE, SESSION, encode, grok_row, grok_rows, identity
 from teamlead.herdr import HerdrClient
@@ -339,6 +340,159 @@ class StaleGrokDeliveryTests(unittest.TestCase):
                             and 'record the report as unavailable and notify the operator' in message
                             and 'Keep review/release gates unsatisfied' in message for message in warnings))
         self.assertEqual(sum(call[1:3] == ['agent', 'prompt'] for call in runner.calls), 1)
+
+
+class SupervisedStaleGrokDeliveryTests(StaleGrokDeliveryTests):
+    """Every stale-Grok proof and refusal again under a bound round's fingerprint (#387).
+
+    A bound round's apply stores each new dispatch fingerprint wrapped with the
+    role's exact report path. Recovery must reproduce that binding from the
+    report the record names, and nothing else may.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.legacy_fingerprint = self.dispatch['fingerprint']
+        self.dispatch['fingerprint'] = supervision.report_bound_fingerprint(self.legacy_fingerprint, self.data['report'])
+
+    def legacy_identity(self):
+        return recovery.dispatch_identity(
+            self.dispatch['task'], 'judge', 'worker', None,
+            {'common': self.dispatch['common'], 'judge': self.dispatch['brief']},
+            options={'task': self.dispatch['task'], 'fix_round': None, 'plan': None,
+                     'work': None, 'rounds': {}, 'retain_context': False, 'no_clear': False})[1]
+
+    def test_bound_fingerprint_differs_from_legacy_and_recovers_the_bound_report(self):
+        self.assertNotEqual(self.dispatch['fingerprint'], self.legacy_fingerprint)
+        record = self.recover()
+        self.assertEqual(record['schema_version'], 2)
+        self.assertEqual(record['basis'], 'archived_grok_clear_source')
+        self.assertEqual(record['source_session'], {'agent': 'grok', 'kind': 'id', 'value': SESSION})
+        self.assertEqual(record['native_session'], self.observed)
+        self.assertIsNone(record['native_session_proof'])
+        self.assertFalse(record['grants_review_approval'])
+        recovery.validate_store(self.document['recovery'], self.document['assignments'])
+        self.assertEqual(self.recover(), record)
+
+    def test_only_the_dispatched_report_path_reproduces_the_binding(self):
+        body, plan_body = Path(self.data['source']).read_text(), Path(self.data['plan']).read_text()
+        source = delivery.stale_grok_source(self.dispatch, self.assignment, self.observed, body, self.prompt,
+                                            plan_body, report=self.data['report'])
+        self.assertEqual(source['value'], SESSION)
+        for wrong in (str(self.case.tmp / 'other-report.md'), self.data['report'] + '/',
+                      str(Path(self.data['report']).parent), ''):
+            with self.subTest(report=wrong), self.assertRaisesRegex(UsageError, 'grok_dispatch_unbound'):
+                delivery.stale_grok_source(self.dispatch, self.assignment, self.observed, body, self.prompt,
+                                           plan_body, report=wrong)
+        for forged in (self.legacy_fingerprint + '0',
+                       supervision.report_bound_fingerprint(self.legacy_fingerprint, str(self.case.tmp / 'other-report.md')),
+                       supervision.report_bound_fingerprint(self.dispatch['fingerprint'], self.data['report']),
+                       supervision.digest(self.legacy_fingerprint),
+                       supervision.digest({'dispatch': self.legacy_fingerprint, 'report': self.data['report'], 'role': 'judge'})):
+            self.dispatch['fingerprint'] = forged
+            before = copy.deepcopy(self.document)
+            with self.subTest(fingerprint=forged), self.assertRaisesRegex(UsageError, 'grok_dispatch_unbound'):
+                self.recover()
+            self.assertEqual(self.document, before)
+
+    def test_a_report_delivered_to_another_assigned_path_refuses_on_the_binding_alone(self):
+        # The brief assigns two report paths; the dispatch was bound to the
+        # first. Complete evidence for the second passes every other check and
+        # still refuses, so the binding is the one distinguishing input.
+        other = self.case.tmp / 'other-report.md'
+        other.write_bytes(self.case.report.read_bytes())
+        brief = Path(self.dispatch['brief'])
+        brief.write_text(brief.read_text() + 'REPORT: ' + str(other) + '\n')
+        self.dispatch['fingerprint'] = supervision.report_bound_fingerprint(self.legacy_identity(), self.data['report'])
+        self.prompt = assignment_text('judge', self.dispatch['common'], self.dispatch['brief'])
+        self.rows[2]['params']['update']['content']['text'] = self.prompt
+        Path(self.data['source']).write_text(encode(self.rows))
+        trial = copy.deepcopy(self.document)
+        self.assertTrue(delivery.recover(trial['recovery'], trial['assignments'], self.data, AT)['found'])
+        marker = 'REPORT: ' + str(other)
+        rows = copy.deepcopy(self.rows)
+        rows[3]['params']['update']['content']['text'] = marker
+        Path(self.data['source']).write_text(encode(rows))
+        Path(self.data['visible']).write_text('     ' + marker)
+        negative = json.loads(Path(self.data['wait_receipt']).read_text())
+        negative['report_path'] = str(other)
+        Path(self.data['wait_receipt']).write_text(json.dumps(negative))
+        self.data['report'] = str(other)
+        before = copy.deepcopy(self.document)
+        with self.assertRaisesRegex(UsageError, 'grok_dispatch_unbound'):
+            self.recover()
+        self.assertEqual(self.document, before)
+
+    def test_bound_apply_dispatch_recovers_its_completed_stale_id_report(self):
+        # A real bound round: apply through the CLI with its report map, a
+        # Grok automatic clear whose Herdr ID stays stale, then owner recovery
+        # of the completed turn from archived originals on the same ledger.
+        case = supervised_fixture.SupervisionCliTest()
+        case.setUp()
+        self.addCleanup(case.doCleanups)
+        report = case.reports['tester']
+        marker = 'REPORT: ' + report
+        case.briefs['tester'].write_text('# tester\nVerify the pushed tip.\n' + marker + '\n')
+        stale = {**identity('grok'), 'value': 'stale-before-new'}
+        client = case._client({'grok': 'idle'}, sessions={'grok': stale['value']})
+        code, out, err = case.invoke(case.apply_arguments({'tester': 'grok'}), client)
+        self.assertEqual(code, 0, err)
+        applied = json.loads(out)['applied'][0]
+        self.assertEqual((applied['cleared'], applied['clear_reason'], applied['context_session']), (True, 'automatic', None))
+        original = json.loads(case.state.read_text())
+        dispatch = next(row for row in original['recovery']['dispatches'] if row['id'] == applied['dispatch_id'])
+        _, legacy = recovery.dispatch_identity(
+            supervised_fixture.TASK, 'tester', 'grok', None, {'common': dispatch['common'], 'tester': dispatch['brief']},
+            options={'task': supervised_fixture.TASK, 'fix_round': None, 'plan': None, 'work': None,
+                     'rounds': {}, 'retain_context': False, 'no_clear': False})
+        self.assertNotEqual(dispatch['fingerprint'], legacy)
+        self.assertEqual(dispatch['fingerprint'], supervision.report_bound_fingerprint(legacy, report))
+        prompt = next(call[4] for call in case.runner.calls if call[1:3] == ['agent', 'prompt'])
+        rows = [grok_row({'sessionUpdate': 'hook_execution', 'event_name': 'session_start'}),
+                grok_row({'sessionUpdate': 'hook_execution', 'event_name': 'user_prompt_submit', 'prompt_id': 'prompt-1'})]
+        rows += grok_rows(marker)
+        rows[2]['params']['update']['content']['text'] = prompt
+        Path(report).write_text('Tester report bytes.\n')
+        pane = {'pane_id': applied['pane_id'], 'agent_status': 'done', 'agent_session': stale,
+                'terminal_id': 'terminal-1', 'revision': 1, 'scroll': {'offset_from_bottom': 0}}
+        artifacts = {'source': encode(rows), 'pane': json.dumps({'result': {'pane': pane}}), 'visible': '     ' + marker,
+                     'wait_receipt': json.dumps({'agent': 'grok', 'report_path': report, 'state': 'done', 'found': False,
+                                                 'reason': 'report file present, worker done on 2 consecutive reads, marker unconfirmed'}),
+                     'plan': json.dumps({'tester': 'grok'})}
+        data = {'id': 'bound-apply-recovery', 'dispatch': applied['dispatch_id'], 'report': report}
+        for key, value in artifacts.items():
+            path = case.tmp / ('bound-' + key + '.txt')
+            path.write_text(value)
+            data[key] = str(path)
+        record = case.tmp / 'recover.json'
+        record.write_text(json.dumps(data))
+        calls_before = list(case.runner.calls)
+        arguments = ['recover-report', '--record', str(record), '--now', supervised_fixture.AT]
+        code, out, err = case.invoke(arguments, client)
+        self.assertEqual(code, 0, err)
+        receipt = json.loads(out)
+        self.assertEqual((receipt['schema_version'], receipt['basis']), (2, 'archived_grok_clear_source'))
+        self.assertEqual(receipt['native_session'], stale)
+        self.assertEqual(receipt['source_session'], {'agent': 'grok', 'kind': 'id', 'value': SESSION})
+        self.assertIsNone(receipt['native_session_proof'])
+        self.assertFalse(receipt['grants_review_approval'])
+        recovered = json.loads(case.state.read_text())
+        self.assertEqual(recovered['assignments'], original['assignments'])
+        self.assertEqual(recovered['recovery']['dispatches'], original['recovery']['dispatches'])
+        self.assertEqual(recovered['recovery']['delivery_recoveries'], [receipt])
+        self.assertEqual(case.runner.calls, calls_before)
+        saved = case.state.read_bytes()
+        code, out, err = case.invoke(arguments, client)
+        self.assertEqual((code, json.loads(out)), (0, receipt), err)
+        self.assertEqual(case.state.read_bytes(), saved)
+        other = case.tmp / 'other-report.md'
+        other.write_bytes(Path(report).read_bytes())
+        record.write_text(json.dumps({**data, 'id': 'bound-apply-other-report', 'report': str(other)}))
+        code, out, err = case.invoke(arguments, client)
+        self.assertEqual((code, out), (1, ''))
+        self.assertIn('does not assign this report path', err)
+        self.assertEqual(case.state.read_bytes(), saved)
+        self.assertEqual(case.runner.calls, calls_before)
 
 
 if __name__ == '__main__':

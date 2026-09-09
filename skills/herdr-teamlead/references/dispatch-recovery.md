@@ -538,8 +538,10 @@ unchanged; a later role/session does not require rerunning completed work.
 
 For the known Grok `/new` identity contradiction, add `plan` naming the original
 saved plan JSON to the recovery input. Preserve all other original input paths.
-The command checks the original dispatch fingerprint against the plan and current
-briefing bytes. The strict source adapter and named refusal contracts are
+The command checks the original dispatch fingerprint against the plan, the
+current briefing bytes and, for a dispatch from a bound round, the exact
+`--report` path the record names. The strict source adapter and named refusal
+contracts are
 `grok_clear_identity`, `validate_stale_binding`, and `stale_grok_source` in
 `skills/herdr-teamlead/teamlead/report_delivery.py`. Unknown dispatch options,
 missing original plans, reused prompt paths, contradictory sources and changed
