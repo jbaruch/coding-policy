@@ -1,6 +1,6 @@
 ---
 alwaysApply: true
-description: Running a multi-agent team — headroom-driven role rotation, one writer per worktree, report files as the only channel, dispatch safety, internal review before the PR
+description: Running a multi-agent team — task-based specialist composition, capability and contribution checks, durable reports, dispatch safety, internal review before the PR
 ---
 
 # Agent Team Operation
@@ -17,19 +17,43 @@ description: Running a multi-agent team — headroom-driven role rotation, one w
 - A standalone agent never simulates the roles, the briefs, or the reports
 - Standalone work is still governed by every other rule in this plugin
 
-## Roles and Rotation
+## Team Composition
 
-- A team round runs three roles: developer, reviewer/architect, tester
-- Roles rotate between tasks
-- Rotation follows measured subscription headroom through the `herdr-teamlead` skill's script, never an impression of who looks fresh
+- The lead selects the responsibilities needed at each stage of the task
+- Preserve developer, reviewer, tester and release responsibilities for implementation delivery
+- Activate specialist consultations only for a bounded question or deliverable the task needs
+- Separate responsibility, specialty and execution worker in each specialist assignment
+- Ground capability declarations in available skills, tools and observed work
+- Apply capability and contribution eligibility before task familiarity and measured subscription headroom through the owner planner
 - Headroom is the minimum remaining window per worker, never the average
-- Each assignment clears the worker's context, except the retained fix rounds under Fix Loops
+- Each assignment clears context except the retained rounds under Fix Loops or Specialist Consultations
 - Every assignment sends a self-contained role brief
-- Fewer live workers than roles is a decision to record, never a silently dropped role
+- Fewer eligible workers than required responsibilities is a staffing decision to record
+- Never fold independent verification onto a contributor to satisfy that staffing decision
+
+## Specialist Consultations
+
+- Advisor, investigator and architect assignments are read-only on repository content
+- Route implementation through the developer role under the original task and correction allowance
+- Give every consultation an explicit engagement identity and specialty requirements
+- An available profile reserves no worker and creates no active assignment
+- Preserve useful specialist sessions for likely follow-up work
+- Persist specialist lessons through the existing scoped memory owner
+- Record delivered report evidence and the lead's contribution assessment before relying on a consultation outcome
+- Narrow exception for retaining an assessed consultation's context.
+- Preconditions (all required):
+  1. The lead requests `--retain-specialist` for one advisor, investigator or architect assignment
+  2. The worker's latest assignment has the same task, responsibility and engagement requirements
+  3. Live pane, native session and verified model tier match the preceding assignment
+  4. The prior report and delivery receipts match their saved lead assessment
+  5. The prior supervision enrollment is resolved with no pending observations
+  6. No correction count, correction plan or implementation work is carried through this mode
+- Every other consultation clears context under the normal retrospective and dispatch gates
+- Follow `skills/herdr-teamlead/references/specialists.md` for profiles and assessment workflow
 
 ## Judge Seat
 
-- A fifth seat, `judge`, sits outside the three-role rotation on the most capable model available, never assigned developer, reviewer, or tester
+- The reserved `judge` seat runs on the most capable model available and holds no other responsibility
 - The lead dispatches the judge only for one of four triggers: a contested reviewer or tester verdict, a lead override of a blocking finding, an exhausted correction allowance with blocking work remaining, or a bot finding the team disagrees with
 - The judge is read-only: it never edits a repository file, never runs a mutating git or `gh` command, never posts to GitHub, never dispatches a subagent — its only output is its report file
 - The judge reads both positions and the governing rule, verifies the disputed facts against the tree, and returns `RULING: uphold A | uphold B | amend — <line> | blocked — <question>` with numbered reasons, an `ACTION:` naming the minimal step, and an `UNVERIFIED:` line
@@ -77,7 +101,7 @@ description: Running a multi-agent team — headroom-driven role rotation, one w
   2. The assignment follows that worker's confirmed preceding developer round
   3. Live native session identity matches the preceding assignment's recorded identity
   4. The lead uses `--retain-context` with the task identifier and fix-round number
-- Every other assignment clears context
+- Every other developer assignment clears context
 - `--no-clear` records a hand-cleared pane, never retained context
 - Fix rounds 4 and later use a freshly cleared worker
 - Narrow exception for a recorded fresh early correction.
@@ -245,6 +269,7 @@ description: Running a multi-agent team — headroom-driven role rotation, one w
 - Collect observations from saved reports and read-only evidence
 - Never interrupt a working or blocked worker to collect retrospective input
 - Record verified outcomes, lessons, evidence gaps, and concrete improvements with owners and success criteria
+- Evaluate specialist selection, consultation timing, useful decisions, avoidable effort and lost handoff knowledge
 - Revisit prior improvement actions
 - A status snapshot or dispatch log alone never completes a retrospective
 - Persist completed notes outside task worktrees
@@ -261,6 +286,10 @@ description: Running a multi-agent team — headroom-driven role rotation, one w
 - The tester and the reviewer pass on the pushed branch before the PR opens
 - The gate reads the post-push reports for the current branch tip
 - A pre-development report never satisfies the gate
+- Exclude actual design and implementation contributors from independent verification of that task
+- A role, model or session change never erases contribution history
+- Treat unassessed possible contributions as unresolved independence evidence
+- Record legacy reviewer responsibilities as unknown until evidence establishes their contribution
 - The developer pushes the branch and stops
 - A shared GitHub account posts internal reviews as COMMENT reviews
 - The lead enforces the blocking findings a COMMENT review carries

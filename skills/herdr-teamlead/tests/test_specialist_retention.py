@@ -40,10 +40,10 @@ class SpecialistRetentionTest(unittest.TestCase):
         self.proof = {"source": "process_argv", "pane_id": PANES["claude"], "pid": 200,
                       "model": "sonnet-5", "effort": "high", "argv": self.argv}
         self.native = native_context_session(json.loads(agent_json("claude", "idle", PANES["claude"], "consultation"))["result"]["agent"], "claude")
-        self.previous = {"schema_version": 5, "at": OLD, "role": "advisor", "agent": "claude", "task": "task-1",
+        self.previous = {"schema_version": 6, "at": OLD, "role": "advisor", "agent": "claude", "task": "task-1",
                          "status": "applied", "cleared": True, "clear_reason": "automatic", "fix_round": None,
                          "context_session": self.native, "tier": {**self.tier, "verified": self.proof},
-                         "requirements": copy.deepcopy(self.requirement)}
+                         "requirements": copy.deepcopy(self.requirement), "reviewer_scope": None}
         self.history = [self.previous]
         self.reset_client()
 
@@ -79,6 +79,15 @@ class SpecialistRetentionTest(unittest.TestCase):
         self.assertEqual(len(self.runner.writes()), 1)
         self.assertTrue(self.runner.writes()[0].startswith("agent prompt claude"))
         self.assertFalse(any(command.startswith(("agent start", "-TERM")) for command in self.runner.commands()))
+
+    def test_direct_dispatch_refuses_noncanonical_requirements_before_input(self):
+        for change in ({"required_capabilities": []}, {"specialty": "UX"},
+                       {"engagement": "onboarding\nreset"}, {"required_capabilities": ["ux", "ux"]}):
+            requirement = {**self.requirement, **change}
+            self.previous["requirements"] = requirement
+            with self.subTest(change=change), self.assertRaises(UsageError):
+                self.dispatch(requirements={"advisor": requirement})
+            self.assert_no_input()
 
     def test_each_consultation_responsibility_can_retain(self):
         for role in ("investigator", "architect"):

@@ -1,11 +1,11 @@
 # Team Protocol — Read This First
 
-You are on a small coding team: three rotating roles — a **developer**, a
-**reviewer/architect**, and a **tester** — plus a non-rotating **judge** seat
-dispatched only for disputed rulings. A team-lead agent assigns the roles,
-reads the reports, and gates each round. Roles rotate between tasks, so the
-role you held last time tells you nothing about this one — your role is named
-in your brief.
+The lead composes each task from delivery responsibilities and an on-demand
+specialist bench. Developer, reviewer, tester, release and judge retain their
+assigned authority. Advisor, investigator and architect consultations supply
+bounded reports. Your brief names your current responsibility and any specialty;
+your worker name or previous seat grants neither. The lead reads reports and
+gates the work.
 
 You cannot message the lead. Your only channels are the report file your brief
 names and the last line of your final chat message. Anything you want the lead
@@ -63,8 +63,8 @@ to know goes in the report.
 - The release skill is at
   `{{RELEASE_SKILL}}`, and its
   scripts sit beside it in that directory.
-- The repo's own gates are in `CONTRIBUTING.md`. Run them; a green gate is the
-  bar, not your impression of the change.
+- Read the repo's contributor instructions and configured checks to identify
+  its gates. Run the checks required for your assignment and report their results.
 - Never suppress an error. No `|| true`, no `2>/dev/null` standing in for a
   handler, no empty catch.
 - Every shipped module gets deterministic, outcome-based tests. No wall-clock
@@ -113,4 +113,7 @@ to know goes in the report.
   not yours to make — write a `## BLOCKED` section explaining what you need,
   then stop and finish with the REPORT line.
 - Never start work outside your brief.
+- Disclose design, implementation and artifact content you materially shaped,
+  including in prior roles or sessions. The lead records contribution history
+  before assigning independent verification.
 - Never merge anything unless your brief says to.

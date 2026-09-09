@@ -252,6 +252,13 @@ class EngagementTest(unittest.TestCase):
         _loaded, usable = load_state_checked(path)
         self.assertTrue(usable)
 
+    def test_recovered_delivery_cannot_assess_changed_report_bytes(self):
+        state, path, data, _recovered = self.recovered_delivery_fixture()
+        Path(data["report"]).write_text("A later report never covered by that delivery")
+        with self.assertRaises(UsageError):
+            engagement.record_assessment(state, path, data, delivery_fixture.AT)
+        self.assertEqual(state["specialist_assessments"], [])
+
     def test_altered_or_unowned_recovered_delivery_cannot_be_assessed(self):
         state, path, data, recovered = self.recovered_delivery_fixture()
         for change in ({"id": "forged"}, {"dispatch": "different-dispatch"}, {"found": False},

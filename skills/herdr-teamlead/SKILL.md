@@ -1,7 +1,7 @@
 ---
 name: herdr-teamlead
 description: >
-  Run Herdr rounds with headroom-driven roles, qualified tiers, fresh briefs,
+  Run Herdr rounds with on-demand specialists, qualified tiers, bounded briefs,
   report verification, and release gates. Use for requests to dispatch the Herdr
   team, balance worker usage, collect reports, run or retrieve retrospectives,
   catch up on outstanding user attention, curate team lessons, or save and resume
@@ -36,6 +36,7 @@ skills/herdr-teamlead/references/working-memory.md
 skills/herdr-teamlead/references/attention.md
 skills/herdr-teamlead/references/supervision.md
 skills/herdr-teamlead/references/assignment-reasoning.md
+skills/herdr-teamlead/references/specialists.md
 skills/herdr-teamlead/state-schema.md
 ```
 

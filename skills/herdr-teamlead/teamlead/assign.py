@@ -60,6 +60,7 @@ from .recovery import empty_recovery, fresh_transition, task_record, validate_wo
 from .launch import restart_worker, verify_running, verify_running_permissions
 from .tiers import launch_flags, worker_launch_args
 from .qualification import require_qualification
+from .composition import normalize_requirement
 
 # Version 3 adds verified model-tier metadata to context and task/fix evidence.
 APPLY_SCHEMA_VERSION = 7
@@ -253,12 +254,7 @@ def validate_context_mode(assignments, no_clear, retain_context, task, fix_round
             raise UsageError("Pass the original --task with --retain-specialist; a warm session cannot establish its task identity.", {})
         role = next(iter(assignments))
         requirement = (requirements or {}).get(role)
-        if (not isinstance(requirement, dict)
-                or set(requirement) != {"specialty", "required_capabilities", "independent", "engagement"}
-                or any(not isinstance(requirement[key], str) or not requirement[key].strip() for key in ("specialty", "engagement"))
-                or type(requirement["independent"]) is not bool
-                or not isinstance(requirement["required_capabilities"], list)
-                or any(not isinstance(item, str) or not item.strip() for item in requirement["required_capabilities"])):
+        if normalize_requirement(requirement, role) != requirement:
             raise UsageError("Retained consultation requires its normalized specialty, required_capabilities, independent and engagement requirements; restore the original engagement before dispatch.", {})
     if task is not None and (not isinstance(task, str) or not task.strip()):
         raise UsageError("Pass a non-empty --task label, or omit it.", {})

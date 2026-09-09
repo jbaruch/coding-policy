@@ -1,5 +1,34 @@
 # Changelog
 
+### Added
+
+- **An on-demand specialist bench for Herdr teams.** Responsibilities, specialties
+  and workers are separate staffing choices. Seven profiles cover UX/product,
+  accessibility, investigation, architecture, security, performance/reliability
+  and documentation. The lead loads only the relevant profiles and activates
+  bounded consultations when their answers can change the work. Consultations
+  use advisor, investigator or architect responsibilities; implementation still
+  uses developer, and the reviewer template now performs verification only.
+- **Evidence-backed specialist staffing and follow-ups.** Configuration v3 adds
+  explicit worker capabilities; plan v5 carries task-bound assignment requirements.
+  Planning filters capability and actual contribution before preferring useful
+  task familiarity and measured headroom. Apply rechecks eligibility before an
+  unsent handoff. Missing tier rows exclude only that candidate. Saved lead
+  assessments bind reports to delivery receipts and record actual contribution.
+  A worker that shaped the design cannot later supply independent approval by
+  changing its role, session or model. Unassessed consultations and legacy
+  reviewer history remain possible contributions until assessed.
+- **Warm consultations with durable accountability.** `--retain-specialist`
+  continues a sole assessed consultation under the same task, engagement, native
+  session and verified model tier after its earlier supervision enrollment is
+  resolved. Other transitions keep fresh briefing and retrospective coverage.
+  State and assignment v6 preserve requirements, reviewer participation and
+  append-only assessments. Recovery v5 admits version-2 composition-bearing
+  dispatches/results while preserving old receipt shapes and retry identities.
+  Corrupt or future history cannot be rewritten as empty state. Working lessons
+  keep reusable specialty knowledge, and retrospectives assess staffing timing,
+  value, effort and handoff quality.
+
 ## 0.3.205 — 2026-09-09
 
 ### Fixed
