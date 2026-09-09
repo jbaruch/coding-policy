@@ -178,6 +178,10 @@ def verify_worker_permissions(kind, argv):
         else:
             raise HerdrError("Worker has unsupported launch arguments for YOLO proof. " + recovery, {})
     try:
+        parse_launch_args(permissions, kind)
+    except ConfigError as exc:
+        raise HerdrError("Worker has invalid permission/UI launch options: {} {}".format(exc.message, recovery), {}) from None
+    try:
         worker_launch_args(kind, permissions)
     except ConfigError:
         raise HerdrError("Worker has restrictive permission options. " + recovery, {}) from None

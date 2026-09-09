@@ -110,6 +110,15 @@ class SelectionTest(unittest.TestCase):
 
 
 class ArgvTest(unittest.TestCase):
+    def test_invalid_live_options_are_distinct_from_restrictive_modes(self):
+        for argv in (["grok", "--always-approve", "--always-approve"],
+                     ["grok", "--permission-mode", "unknown"]):
+            with self.subTest(argv=argv), self.assertRaisesRegex(HerdrError, "invalid permission/UI") as caught:
+                verify_worker_permissions("grok", argv)
+            self.assertNotIn("restrictive permission", str(caught.exception))
+        with self.assertRaisesRegex(HerdrError, "restrictive permission"):
+            verify_worker_permissions("grok", ["grok", "--permission-mode", "plan"])
+
     def test_legacy_live_permission_proof_accepts_canonical_and_equivalent_modes(self):
         for kind, argv in (
             ("claude", ["claude", "--dangerously-skip-permissions", "--model", "opus-5"]),

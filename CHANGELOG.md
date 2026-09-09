@@ -19,6 +19,12 @@
   evidence and proposed transition. Saved notes remain available after cleanup,
   including when Herdr is no longer running, with dates, task coverage, and paths.
 
+### Fixed
+
+- **Accurate worker-launch diagnostics (#378).** Malformed or duplicate launch
+  options now retain their specific validation error. The worker-permission
+  diagnostic labels genuinely restrictive options separately.
+
 ## 0.3.201 — 2026-09-09
 
 ### Changed
