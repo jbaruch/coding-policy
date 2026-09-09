@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.203 — 2026-09-09
+
 ### Fixed
 
 - **Release confirmation follows each publication channel (#371, #374).**
