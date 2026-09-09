@@ -12,7 +12,7 @@ from .tiers import ROLE_ROUNDS
 
 
 REQUIREMENTS_SCHEMA_VERSION = 1
-CONSULTATION_ROLES = frozenset({"advisor", "investigator"})
+CONSULTATION_ROLES = frozenset({"advisor", "investigator", "architect"})
 CONTRIBUTOR_ROLES = frozenset({"developer", "architect", "advisor", "investigator"})
 CONTRIBUTOR_ROUNDS = frozenset({"architect", "reconciliation", "test_plan"})
 POSSIBLE_CONTRIBUTION = frozenset({"applied", "unknown", "sending", "sent_but_not_started"})
@@ -43,8 +43,12 @@ def normalize_requirement(record, role):
             "independent": record["independent"], "engagement": engagement}
 
 
-def parse_requirements(payload, roles, task):
-    """Read the optional v1 CLI envelope; new consultation roles always need it."""
+def parse_requirements(payload, roles, task, *, allow_historical_architect=False):
+    """New consultations need requirements; old architect receipts stay readable.
+
+    The historical option is only for reading archived delivery evidence and
+    reconstructing completed retry identities. Unsent work uses the default.
+    """
     roles = list(roles)
     if payload is None:
         assignments = {}
@@ -58,6 +62,8 @@ def parse_requirements(payload, roles, task):
         if not assignments or set(assignments) - set(roles):
             raise UsageError("Requirements must name at least one role and only roles this plan assigns; correct the role keys.", {})
     missing = CONSULTATION_ROLES.intersection(roles) - set(assignments)
+    if allow_historical_architect:
+        missing -= {"architect"}
     if missing:
         raise UsageError("Roles {} require explicit specialist requirements; supply their specialty, capabilities, independence and engagement with --requirements.".format(", ".join(sorted(missing))), {"roles": sorted(missing)})
     if assignments and (not isinstance(task, str) or not task.strip()):

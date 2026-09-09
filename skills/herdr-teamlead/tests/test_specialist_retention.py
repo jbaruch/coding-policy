@@ -211,13 +211,12 @@ class SpecialistRetentionTest(unittest.TestCase):
         self.assertEqual(result["status"], "applied")
         self.assertIsNone(result["context_session"])
 
-    def test_legacy_architect_without_requirements_keeps_legacy_context_shape(self):
-        result = apply(self.client, {"architect": "claude"}, BY_NAME,
-            {"common": self.paths["common"], "architect": self.paths["advisor"]}, AT,
-            task="task-1", sleep=lambda _: None, settle_sec=0)["applied"][0]
-        self.assertTrue(result["cleared"])
-        self.assertIsNone(result["context_session"])
-        self.assertNotIn("requirements", result)
+    def test_new_architect_dispatch_cannot_omit_requirements_outside_cli(self):
+        with self.assertRaisesRegex(UsageError, "require explicit specialist requirements"):
+            apply(self.client, {"architect": "claude"}, BY_NAME,
+                {"common": self.paths["common"], "architect": self.paths["advisor"]}, AT,
+                task="task-1", sleep=lambda _: None, settle_sec=0)
+        self.assert_no_input()
 
     def test_native_identity_published_after_initial_prompt_is_captured(self):
         self.runner.responses["agent get claude"] = ScriptedReads([

@@ -94,6 +94,50 @@ class SpecialistCliTest(fixture.CliCase):
         self.assertIn("supervision-bind", err)
         self.assertEqual(self.runner.calls, [])
 
+    def test_new_architect_plan_and_dispatch_require_engagement_before_worker_contact(self):
+        self.briefs["architect"] = self.briefs["advisor"]
+        document = {"assignments": {"architect": "claude"}}
+        commands = [
+            ["plan", "--roles", "architect", "--task", "task-1", "--snapshot", str(self.snapshot), "--now", AT],
+            self.apply_args(document), self.apply_args(document) + ["--dry-run"],
+        ]
+        for args in commands:
+            with self.subTest(command=args[0]):
+                code, _, err = self.invoke(args, self._client({}))
+                self.assertEqual(code, 1)
+                self.assertIn("require explicit specialist requirements", err)
+                self.assertEqual(self.runner.calls, [])
+                self.assertFalse(self.state.exists())
+
+    def test_completed_historical_architect_retry_preserves_original_receipt(self):
+        self.briefs["architect"] = self.briefs["advisor"]
+        paths = {"common": str(self.common), "architect": str(self.briefs["architect"])}
+        identifier, fingerprint = recovery.dispatch_identity(
+            "task-1", "architect", "claude", None, paths, "legacy",
+            options={"task": "task-1", "fix_round": None, "plan": None, "work": None,
+                     "rounds": {}, "retain_context": False, "no_clear": False})
+        state = empty_state()
+        recovery.reserve(state["recovery"], {"id": identifier, "fingerprint": fingerprint,
+            "role": "architect", "agent": "claude", "task": "task-1", "fix_round": None,
+            "plan": None, "work": None, "brief": paths["architect"], "common": paths["common"]}, AT)
+        add_assignment(state, AT, "architect", "claude", task="task-1", cleared=True, clear_reason="automatic")
+        result = {key: value for key, value in state["assignments"][0].items()
+                  if key not in {"schema_version", "requirements", "reviewer_scope"}}
+        recovery.finish_dispatch(state["recovery"], identifier, result, 0, AT)
+        save_state(self.state, state)
+        before = self.state.read_bytes()
+        document = {"assignments": {"architect": "claude"}}
+        code, out, err = self.invoke(self.apply_args(document, identifier="legacy"), self._client({}))
+        self.assertEqual(code, 0, err)
+        self.assertTrue(json.loads(out)["applied"][0]["replayed"])
+        self.assertEqual(self.state.read_bytes(), before)
+        self.assertEqual(self.runner.calls, [])
+        code, _, err = self.invoke(self.apply_args(document, identifier="fresh"), self._client({}))
+        self.assertEqual(code, 1)
+        self.assertIn("require explicit specialist requirements", err)
+        self.assertEqual(self.state.read_bytes(), before)
+        self.assertEqual(self.runner.calls, [])
+
     def test_new_consultation_enrolls_and_persists_requirements_before_prompt(self):
         self.bind()
         client = self._client({"claude": "idle"}, sessions={"claude": "outgoing"})

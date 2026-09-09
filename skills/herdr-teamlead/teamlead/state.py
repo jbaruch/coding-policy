@@ -372,8 +372,11 @@ def _validate(payload, path):
         record, row_migrated = _apply_migrations(record, RECORD_MIGRATIONS, "an assignment row")
         if "requirements" not in record:
             raise _NoUsableState("an assignment row is missing specialist requirements provenance")
-        if "reviewer_scope" not in record or ((not isinstance(record["reviewer_scope"], str) or record["reviewer_scope"] not in {"verification", "design", "unknown"})
-                if record.get("role") == "reviewer" else record["reviewer_scope"] is not None):
+        scope = record.get("reviewer_scope")
+        reviewer = record.get("role") == "reviewer"
+        if ("reviewer_scope" not in record
+                or reviewer and (not isinstance(scope, str) or scope not in {"verification", "design", "unknown"})
+                or not reviewer and scope is not None):
             raise _NoUsableState("an assignment row has invalid reviewer responsibility provenance")
         if record["requirements"] is not None:
             try:

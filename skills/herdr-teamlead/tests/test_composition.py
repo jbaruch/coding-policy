@@ -30,7 +30,8 @@ def assignment(name="prior", role="advisor", status="applied", **extra):
 
 class RequirementTest(unittest.TestCase):
     def test_legacy_roles_need_no_requirements(self):
-        self.assertEqual(parse_requirements(None, ["developer", "reviewer", "tester", "architect"], None), {})
+        self.assertEqual(parse_requirements(None, ["developer", "reviewer", "tester"], None), {})
+        self.assertEqual(parse_requirements(None, ["architect"], None, allow_historical_architect=True), {})
 
     def test_normalized_shape_preserves_responsibility_and_engagement(self):
         data = {"schema_version": 1, "assignments": {"advisor": requirement()}}
@@ -41,7 +42,7 @@ class RequirementTest(unittest.TestCase):
         self.assertEqual(data, saved)
 
     def test_consultations_require_explicit_task_and_requirements(self):
-        for role in ("advisor", "investigator"):
+        for role in ("advisor", "investigator", "architect"):
             with self.subTest(role=role), self.assertRaisesRegex(UsageError, "require explicit"):
                 parse_requirements(None, [role], "onboarding")
         with self.assertRaisesRegex(UsageError, "--task"):

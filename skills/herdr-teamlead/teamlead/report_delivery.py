@@ -407,7 +407,7 @@ def stale_grok_source(dispatch, assignment, observed, body, prompt, plan_body, *
                "retain_context": False, "no_clear": False}
     requirements = parse_requirements(
         {"schema_version": 1, "assignments": plan["requirements"]} if "requirements" in plan else None,
-        list(assignments), dispatch["task"],
+        list(assignments), dispatch["task"], allow_historical_architect=True,
     )
     if requirements.get(dispatch["role"]) != dispatch.get("requirements"):
         raise UsageError("grok_dispatch_unbound: restore the original specialist requirements recorded for this dispatch.", {})

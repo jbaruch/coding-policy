@@ -725,7 +725,7 @@ def cmd_apply(args, client=None, warn=None, trace=None):
     assignments = normalize_assignments(document)
     requirements = composition.parse_requirements(
         {"schema_version": 1, "assignments": document["requirements"]} if "requirements" in document else None,
-        list(assignments), args.task,
+        list(assignments), args.task, allow_historical_architect=True,
     )
     rounds = document.get("rounds", {}) if "assignments" in document else {}
     if not isinstance(rounds, dict) or set(rounds) - set(assignments):
@@ -793,6 +793,7 @@ def cmd_apply(args, client=None, warn=None, trace=None):
         if len(replayed) == len(assignments):
             return {"schema_version": APPLY_SCHEMA_VERSION, "dry_run": False, "applied_at": at, "applied": replayed}, None
         assignments = {role: name for role, name in assignments.items() if role in dispatches}
+        requirements = {role: value for role, value in requirements.items() if role in assignments}
     elif args.dispatch_id and not args.task:
         raise UsageError("--dispatch-id requires --task; preserve the task's identity for retry accounting.", {})
     recovery.validate_work(store, state["assignments"], args.task, args.fix_round,

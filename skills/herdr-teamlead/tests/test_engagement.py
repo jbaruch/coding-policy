@@ -187,6 +187,24 @@ class EngagementTest(unittest.TestCase):
         with self.assertRaises(UsageError):
             engagement.validate_assessments(self.state)
 
+    def test_missing_or_invalid_reviewer_scope_preserves_history_without_crashing(self):
+        for role in ("reviewer", "advisor", "developer"):
+            for missing, value in ((True, None), (False, []), (False, {}), (False, False), (False, "invalid")):
+                state = empty_state()
+                add_assignment(state, AT, role, "worker", task="task-1")
+                if missing:
+                    state["assignments"][0].pop("reviewer_scope")
+                else:
+                    state["assignments"][0]["reviewer_scope"] = value
+                self.path.write_text(json.dumps(state))
+                before = self.path.read_bytes()
+                warnings = []
+                with self.subTest(role=role, missing=missing, value=value):
+                    _loaded, usable = load_state_checked(self.path, warn=warnings.append)
+                    self.assertFalse(usable)
+                    self.assertTrue(any("reviewer" in item for item in warnings))
+                    self.assertEqual(self.path.read_bytes(), before)
+
     def test_schema_five_migration_preserves_unknown_specialty_and_reviewer_provenance(self):
         old = empty_state()
         add_assignment(old, AT, "reviewer", "worker", task="old-task")

@@ -34,9 +34,10 @@ Plan that one responsibility with the same task, normalized requirements and
 worker. Compose a new self-contained brief with the follow-up question, the
 previous report and a fresh report destination. Then use the saved plan:
 
-```bash
-CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
-bash "$CP/skills/herdr-teamlead/teamlead.sh" apply \
+Use the installed invocation in SKILL.md Step 10 with this argument synopsis:
+
+```text
+apply \
   --assignments <followup-plan.json> --task <task-id> \
   --brief <consultation-role>=<new-brief> --report <consultation-role>=<new-report> \
   --common <common-path> --retain-specialist [--dispatch-id <stable-id>]
@@ -44,8 +45,8 @@ bash "$CP/skills/herdr-teamlead/teamlead.sh" apply \
 
 `teamlead/engagement.py` owns assessment-source and retired-enrollment validation;
 `teamlead/assign.py` owns retained responsibility, engagement, session and exact
-tier proof. `teamlead/composition.py` rechecks capability and contribution
-eligibility before unsent work. Follow their diagnostics before retrying.
+tier proof. Staffing follows `references/round-setup.md` Step 5.
+Follow the owner diagnostics before retrying.
 This mode carries no developer correction parameters and cannot replace the
 developer's retained-fix path. A dry run checks recorded prerequisites but proves
 no live session, current qualification or permission flags.

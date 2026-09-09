@@ -222,9 +222,9 @@ New reviewer assignments carry an explicit verification scope. Migrated reviewer
 history retains unknown scope, and architecture work remains a possible
 contribution until assessed against actual output. The owner never infers
 independence from a newer schema stamp. External authors and work without usable
-task provenance still need the lead's explicit exclusions. Follow
-`teamlead/composition.py` for the executable contribution rules rather than
-reclassifying history from a worker's current label.
+task provenance still need the lead's explicit exclusions. Follow the planning
+contract in `references/round-setup.md` Step 5 rather than reclassifying history
+from a worker's current label.
 
 Keep a useful worker idle after its report when follow-up is likely and capacity
 permits. An idle session is optional continuity, not durable memory or authority

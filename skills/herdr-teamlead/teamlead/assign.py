@@ -60,7 +60,7 @@ from .recovery import empty_recovery, fresh_transition, task_record, validate_wo
 from .launch import restart_worker, verify_running, verify_running_permissions
 from .tiers import launch_flags, worker_launch_args
 from .qualification import require_qualification
-from .composition import normalize_requirement
+from .composition import normalize_requirement, parse_requirements
 
 # Version 3 adds verified model-tier metadata to context and task/fix evidence.
 APPLY_SCHEMA_VERSION = 7
@@ -241,6 +241,10 @@ def validate_agents(assignments, agents_by_name):
 
 def validate_context_mode(assignments, no_clear, retain_context, task, fix_round, *, recovery=None, history=None, plan_id=None, work=None, retain_specialist=False, requirements=None):
     """Validate the explicit context choice before any herdr operation."""
+    parse_requirements(
+        {"schema_version": 1, "assignments": requirements} if requirements else None,
+        list(assignments), task,
+    )
     if no_clear and retain_context:
         raise UsageError("Choose --no-clear or --retain-context, never both.", {})
     if retain_specialist:
