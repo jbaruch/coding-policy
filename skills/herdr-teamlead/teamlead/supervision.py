@@ -58,6 +58,8 @@ def read_json(path):
             raise StateError("Supervision record {} contains null instead of an owner record. Preserve it and restore a supported backup.".format(path), {})
         return value
     except FileNotFoundError:
+        if Path(path).is_symlink():
+            raise StateError("Supervision record {} is a dangling link. Restore its original target; do not replace saved history with fresh state.".format(path), {}) from None
         return None
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise StateError("Cannot read supervision record {}: {}. Restore its original readable bytes; do not overwrite it.".format(path, exc), {}) from None
@@ -99,6 +101,8 @@ def load(state_path):
                 raise ValueError("invalid {} rows".format(key))
         if data.get("binding") is not None and (not isinstance(data["binding"], dict) or data["binding"].get("schema_version") != 1):
             raise ValueError("invalid binding")
+        if data["binding"] is None and any(data[key] for key in ("members", "events", "acknowledgements", "holds", "watchers")):
+            raise ValueError("unbound owner contains active history")
         if data["binding"] is not None:
             saved_binding = data["binding"]
             who = saved_binding["identity"]
@@ -143,6 +147,9 @@ def load(state_path):
                 raise ValueError("invalid acknowledgement")
             acknowledged.add(row["event"])
             text(row["outcome"], "acknowledgement outcome")
+            if (not isinstance(row["input_digest"], str) or len(row["input_digest"]) != 64
+                    or any(char not in "0123456789abcdef" for char in row["input_digest"])):
+                raise ValueError("invalid acknowledgement input identity")
             timestamp(row["at"])
             if type(row["pending"]) is not bool or row["pending"] != (row["recheck_at"] is not None):
                 raise ValueError("invalid pending recheck")
@@ -193,6 +200,8 @@ def transaction(state_path, mutate):
     path = store_path(state_path)
     with state_lock(path):
         data = load(state_path)
+        if data["binding"] is None:
+            raise StateError("Supervision owner state is missing or unbound. Run supervision-bind for first use; restore a previously bound owner document before resuming its obligations.", {})
         result = mutate(data)
         save_state(path, data)
         return result
@@ -266,11 +275,10 @@ def acknowledge(state_path, record, at):
         if not isinstance(row, dict) or not {"event", "outcome", "evidence"}.issubset(row) or set(row) - {"event", "outcome", "evidence", "pending", "recheck_at"}:
             raise UsageError("Each acknowledgement requires event, outcome, and evidence paths.", {})
         prepared.append({"schema_version": 1, "at": at, "event": text(row["event"], "event"),
-                         "outcome": text(row["outcome"], "outcome"), "evidence": evidence(row["evidence"]), "recheck_at": row.get("recheck_at"), "pending": row.get("pending", row.get("recheck_at") is not None)})
+                         "input_digest": digest(row), "outcome": text(row["outcome"], "outcome"),
+                         "evidence": row["evidence"], "recheck_at": row.get("recheck_at"), "pending": row.get("pending", row.get("recheck_at") is not None)})
         if type(prepared[-1]["pending"]) is not bool or row.get("recheck_at") is not None and not prepared[-1]["pending"]:
             raise UsageError("pending must be a boolean; a scheduled recheck cannot declare pending false.", {})
-        if row.get("recheck_at") is not None and timestamp(row["recheck_at"]) < timestamp(at):
-            raise UsageError("A pending observation recheck_at must not precede its acknowledgement time.", {})
     if len({row["event"] for row in prepared}) != len(prepared):
         raise UsageError("Acknowledge each event only once in a request.", {})
     def mutate(data):
@@ -283,9 +291,12 @@ def acknowledge(state_path, record, at):
                 raise UsageError("Acknowledgement includes an event outside its drained snapshot; drain again before handling later events.", {})
             prior = next((item for item in data["acknowledgements"] if item["event"] == row["event"]), None)
             if prior:
-                if any(prior[key] != row[key] for key in ("outcome", "evidence", "pending")) or row["recheck_at"] is not None and prior["recheck_at"] != row["recheck_at"]:
+                if prior["input_digest"] != row["input_digest"]:
                     raise UsageError("Event already has a different handled outcome; preserve its acknowledgement.", {})
             else:
+                if row["recheck_at"] is not None and timestamp(row["recheck_at"]) < timestamp(at):
+                    raise UsageError("A pending observation recheck_at must not precede its acknowledgement time.", {})
+                row["evidence"] = evidence(row["evidence"])
                 if row["pending"] and row["recheck_at"] is None:
                     row["recheck_at"] = (timestamp(at) + timedelta(seconds=DEFAULT_RECHECK_SECONDS)).isoformat()
                 data["acknowledgements"].append(row)
@@ -409,18 +420,35 @@ def binding_path(who, root=None):
     return directory / (digest(who) + ".json")
 
 
+def _refuse_lost_owner(state_path, directory):
+    """Discovery proves prior ownership even after a lead identity changes."""
+    try:
+        paths = list(directory.glob("*.json"))
+    except OSError as exc:
+        raise StateError("Cannot inspect supervision discovery records: {}. Restore directory access before initializing an owner document.".format(exc), {}) from None
+    for path in paths:
+        prior = read_json(path)
+        if isinstance(prior, dict) and prior.get("state_path") == str(canonical(state_path)):
+            raise StateError("A saved lead discovery record already names the missing supervision owner {}. Restore its owner document before rebinding; do not discard unresolved assignments.".format(store_path(state_path)), {})
+
+
 def bind(state_path, who, at, *, root=None):
     if not isinstance(who, dict) or set(who) != {"kind", "value", "cwd", "herdr_env", "pane_id"}:
         raise UsageError("Binding requires the lead's exact native kind/value, cwd, HERDR_ENV, and pane_id.", {})
     who = identity(who["value"], who["cwd"], who["herdr_env"], kind=who["kind"], pane_id=who["pane_id"])
     timestamp(at)
     path = binding_path(who, root)
-    # Discovery first, owner second. A persisted higher-generation discovery
+    # An empty unbound first-use owner exists before discovery. No transaction
+    # can enroll work until binding commits, so this state is safe to retry.
+    # Discovery precedes bound owner. A higher-generation discovery
     # record makes an interrupted handoff block the new lead, while older
     # sessions can stop once the owner has committed a newer binding.
     with state_lock(store_path(state_path)):
         data = load(state_path)
         old = data["binding"]
+        first_use = old is None and not store_path(state_path).exists()
+        if first_use:
+            _refuse_lost_owner(state_path, path.parent)
         row = old if old is not None and old["identity"] == who else {
             "schema_version": 1, "at": at, "identity": who, "state_path": str(canonical(state_path)),
             "generation": 1 if old is None else old["generation"] + 1}
@@ -429,6 +457,8 @@ def bind(state_path, who, at, *, root=None):
             if previous is not None and (not isinstance(previous, dict) or previous.get("schema_version") != 1
                     or previous.get("identity") != who or previous.get("state_path") != row["state_path"]):
                 raise StateError("Lead identity already has a conflicting or unreadable state binding. Preserve it and explicitly reconcile the original state path.", {})
+            if first_use:
+                save_state(store_path(state_path), data)
             save_state(path, row)
             data["binding"] = row
             save_state(store_path(state_path), data)
