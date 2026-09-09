@@ -62,6 +62,14 @@ this round within that task. Use `none` for read-only repository work. Existing
 authorization persists; do not ask again for covered actions. Ownership alone
 does not authorize release or convert an inspection task into implementation.
 
+Apply `skills/herdr-teamlead/references/assignment-reasoning.md` to the task's
+accepted behavior. Bind the lead's live session under
+`skills/herdr-teamlead/references/supervision.md` before dispatch. On a resumed
+round, read the latest lead handoff and its required files under
+`skills/herdr-teamlead/references/working-memory.md`. Reconcile the attention
+queue under `skills/herdr-teamlead/references/attention.md`; an unanswered item
+survives both a new session and a change of task.
+
 For an owner who requested shipping `example/project`, a release round can
 carry `owner of example/project`, the actual shipping instruction in
 `TASK_AUTHORIZATION`, and `example/project: create PR, request reviews, reply
@@ -188,6 +196,13 @@ completed package. Existing different content is preserved.
 Proceed immediately to Step 7 with the printed path as `REVIEW_PACKAGE`.
 
 ## Step 7 — Compose the Briefs
+
+Consult the applicable working-memory lessons and verify any operational fact
+the assignment relies on. Include concise relevant lessons with source pointers
+in the role's task text; do not copy the whole memory store into every brief.
+Apply `skills/herdr-teamlead/references/assignment-reasoning.md` when the task is
+a bug or the brief carries review corrections. Name the accepted behavior and
+the evidence questions that the worker must answer.
 
 Resolve the policy artifacts before writing the values file:
 

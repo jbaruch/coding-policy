@@ -277,6 +277,7 @@ def show(path, at, name="latest"):
 def register_commands(sub, common):
     for command in sorted(COMMANDS):
         parser = sub.add_parser(command, parents=[common], help="Read or curate persistent lead working memory offline.")
+        parser.add_argument("--now", metavar="ISO", help="Injected observation or recording time (default: current UTC).")
         if command in {"memory-record", "memory-stow"}:
             parser.add_argument("--record", required=True, metavar="FILE", help="Lead-authored JSON record; see references/working-memory.md.")
         elif command == "memory-list":

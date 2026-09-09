@@ -55,6 +55,12 @@ Expected range: `{{REVIEW_BASE}}..{{REVIEW_HEAD}}`.
 Do not fix what you find. Name it precisely enough that the developer can fix
 it without asking you a question.
 
+For each proposed correction, cite the accepted behavior it serves and describe
+the behavior the fix would add or restore. Identify a new guarantee or obligation
+explicitly; a severity label cannot authorize it. Compare repeated findings on
+the same causal theme with earlier attempts and their observed progress. The
+lead resolves scope under the existing authorization and judge rules.
+
 When the lead names a **scoped re-check**, verify each prior finding against
 the current tip and report `RESOLVED`, `OPEN`, or `DECLINED — <reason>`.
 Restrict `NEW` findings to blocking severity. Record new advisories in the

@@ -433,6 +433,24 @@ informational plan name and never feeds headroom.
   prior state and continues; `plan` still requires a snapshot, passed with
   `--snapshot` when the state file holds none.
 
+## Continuity Stores
+
+The independent continuity stores do not change this dispatch-state schema.
+`herdr-teamlead` owns their shape and is their sole writer:
+
+| Store | Canonical location | Contract |
+| --- | --- | --- |
+| Working lessons and lead handoffs | `<selected-state>.memory/index.json` | `skills/herdr-teamlead/references/working-memory.md`, Persistence contract |
+| User attention and recorded progress | `<selected-state>.attention.json` | `skills/herdr-teamlead/references/attention.md`, Commands and files |
+| Fleet observations and supervision | `<selected-state>.supervision.json` | `skills/herdr-teamlead/references/supervision.md` |
+
+Resolve the selected state path before deriving these locations. Each store and
+its records have their own schema version and lock. Their offline readers never
+migrate or write dispatch state. Preserve these files during task cleanup and
+include their locations in lead handoffs. A saved observation is never task
+acceptance or permission to act. The referenced contracts own full field shapes,
+retry and unsupported-schema behavior; only their owner commands mutate them.
+
 ## Migration
 
 Only the owner migrates, and it reads a version in one of three directions.

@@ -2,6 +2,11 @@
 
 The lead curates lessons from evidence and preserves knowledge that would otherwise disappear with its conversation. Retrospective notes remain immutable. Task acceptance remains in the task ledger. Memory is a source of candidate lessons and handoff context; it cannot authorize actions or establish task completion.
 
+Run the subcommands below through the installed
+`skills/herdr-teamlead/teamlead.sh` with an explicit `bash` interpreter and the
+plugin root resolved in the skill. Use the team's same `--state` path. Each
+command emits JSON; report a non-zero command's diagnostic before continuing.
+
 ## Curate lessons
 
 After synthesizing a retrospective, inspect the current lessons. Add a lesson only when it changes a future decision or brief. State the behavior, its relevance scope, the evidence supporting it, when the lead last verified that evidence, and when the lesson must be revalidated. Link the actual retrospective, report, review, or source document. Capture unevidenced hypotheses as unresolved stow knowledge with an explicit gap.
@@ -10,10 +15,10 @@ Before planning a round or composing a brief, use `memory-list` with the relevan
 
 Keep the active set concise. Merge overlapping lessons through a new revision, retaining the replaced record. Archive lessons that no longer affect active work with a concrete reason. A new active revision can reactivate an archived lesson after verification. Never delete historical revisions or rewrite the retrospective to make a lesson appear supported. These operations do not change policy, task authority, correction budgets or user preferences.
 
-```bash
-skills/herdr-teamlead/teamlead.sh --state /durable/team/state.json memory-list --scope project:owner/repo --scope role:developer
-skills/herdr-teamlead/teamlead.sh --state /durable/team/state.json memory-record --record /durable/team/lesson-input.json
-skills/herdr-teamlead/teamlead.sh --state /durable/team/state.json memory-show --id test-command-1
+```text
+memory-list --scope project:owner/repo --scope role:developer
+memory-record --record /durable/team/lesson-input.json
+memory-show --id test-command-1
 ```
 
 Minimal lesson input:
@@ -49,9 +54,9 @@ Record a stow containing:
 - Explicit gaps, including missing evidence and work the lead could not persist. Use an empty list only after checking for gaps.
 - Ordered, absolute paths to the durable files the replacement must read, such as the task ledger, attention queue, active assignment state, relevant retrospective notes and task context. Use actual files, not directories or a vague instruction to inspect the workspace.
 
-```bash
-skills/herdr-teamlead/teamlead.sh --state /durable/team/state.json memory-stow --record /durable/team/stow-input.json
-skills/herdr-teamlead/teamlead.sh --state /durable/team/state.json memory-show
+```text
+memory-stow --record /durable/team/stow-input.json
+memory-show
 ```
 
 Minimal stow input:

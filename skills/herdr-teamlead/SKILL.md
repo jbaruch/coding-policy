@@ -5,9 +5,10 @@ description: >
   and tester by subscription headroom and qualified model tiers, compose briefs,
   provision worktrees, dispatch workers, collect reports, gate release, and ask
   a pinned judge to resolve disputes. Use for requests to dispatch the Herdr
-  team, balance worker usage, collect team reports, run a team retrospective,
-  or retrieve saved retrospective notes. Live rounds require HERDR_ENV;
-  saved-note retrieval works without it. Other standalone tasks skip this skill.
+  team, balance worker usage, collect reports, run or retrieve retrospectives,
+  catch up on outstanding user attention, curate team lessons, or save and resume
+  lead handoffs. Live rounds require HERDR_ENV; saved memory and attention work
+  offline. Other standalone tasks skip this skill.
 ---
 
 # Herdr Team Lead Skill
@@ -28,10 +29,33 @@ skills/herdr-teamlead/references/round-flow.md
 skills/herdr-teamlead/references/round-setup.md
 skills/herdr-teamlead/references/task-ledger.md
 skills/herdr-teamlead/references/retrospectives.md
+skills/herdr-teamlead/references/working-memory.md
+skills/herdr-teamlead/references/attention.md
+skills/herdr-teamlead/references/supervision.md
+skills/herdr-teamlead/references/assignment-reasoning.md
 skills/herdr-teamlead/state-schema.md
 ```
 
 ## Step 1 — Determine the Mode
+
+For catch-up or saved attention, follow `references/attention.md`. For lesson
+curation, saved lead context, or a lead handoff, follow `references/working-memory.md`.
+Use the recorded state override or default; these commands need no live Herdr.
+Finish here after the requested operation. They grant no new task authority.
+
+```bash
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
+bash "$CP/skills/herdr-teamlead/teamlead.sh" catch-up [--state <state-file>]
+```
+
+```bash
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
+bash "$CP/skills/herdr-teamlead/teamlead.sh" memory-show [--state <state-file>] [--id <stow-id>]
+```
+
+Read all attention pages before claiming completeness. Use the referenced owner
+commands for recording, resolution, lessons, and a new stow. Non-zero requires
+reporting its diagnostic; never fabricate missing history.
 
 For saved retrospective requests, use the recorded state override or default.
 Read saved notes; report their date, coverage, conclusions, and path. Finish here.
@@ -96,6 +120,8 @@ and permitted actions and repo in `AUTHORIZED_ACTIONS`. Read-only uses `none`.
 Ownership never expands task scope. Examples: `references/round-setup.md`.
 Create or resume the stable task ledger under `references/task-ledger.md`.
 Record its absolute path with the task authorization before the first dispatch.
+Apply the round-setup reference's accepted-behavior, resume, and supervision
+binding requirements before continuing.
 Proceed immediately to Step 4.
 
 ## Step 4 — Measure Headroom
@@ -326,6 +352,15 @@ Classify each finding blocking or advisory per `rules/review-severity.md`.
 Record assignment acceptance or outstanding work in the task ledger against
 the inspected report and artifact evidence. Record the task's gate decision
 separately; a worker finishing its brief never completes the whole task.
+Assess correction scope and bug evidence under `references/assignment-reasoning.md`.
+Persist user-facing obligations under `references/attention.md` before presenting
+them; record an actual answer or resolution separately from showing the item.
+
+For an investigation-only task, assess every assigned report against the requested
+knowledge deliverable. Resolve blocking findings through the same bounded and
+judge paths below. Once its criteria hold, present the findings and preserve open
+user decisions; proceed to Step 21 if a task worktree needs cleanup, otherwise
+Step 22. No implementation or release is inferred from the diagnostic result.
 
 - **Any blocking finding** — apply the round-flow reference's Blocking Gate
   contract and `rules/agent-team-operation.md` Fix Loops. Return to Step 4 for
@@ -456,8 +491,11 @@ per `rules/agent-worktree-isolation.md`. Proceed immediately to Step 22.
 Finalize the task ledger with the round outcome and remaining obligations.
 Mark the task completed only after its acceptance criteria and required
 release and cleanup obligations are verified. Preserve the ledger for resume
-and standup. Preserve retrospective notes and link them from the ledger. Report
-the ledger path, retrospective directory, and outcome. Finish here.
+and standup. Preserve retrospective notes and link them from the ledger. Save
+current progress through the attention owner and stow the lead's handoff under
+the working-memory reference. Reconcile supervision before ending the turn.
+Report outstanding attention first, followed by the outcome and saved paths.
+Finish here.
 
 For the daily standup, use
 `Skill(skill: "herdr-standup")`.

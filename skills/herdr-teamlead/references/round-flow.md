@@ -128,7 +128,10 @@ to release. Scoped reports alone never satisfy this gate.
 
 ## Blocking Gate
 
-At Step 12, read this task's confirmed fix history, name the next fix number,
+At Step 12, apply `skills/herdr-teamlead/references/assignment-reasoning.md` to
+the findings and their proposed corrections. Preserve required judge rulings
+and operator decisions; scope classification never waives a blocking finding.
+Read this task's confirmed fix history, name the next fix number,
 and return to Step 4 with self-contained briefs carrying the findings and prior
 reports. Preserve the developer for retained fixes; use a fresh context for the
 fresh-worker stage. Never reset the counter during re-planning. At an exhausted

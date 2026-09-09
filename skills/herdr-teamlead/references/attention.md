@@ -6,7 +6,7 @@ Before a catch-up, resumption, standup, or lead handoff, read this queue. Presen
 
 ## Commands and files
 
-Run through `skills/herdr-teamlead/teamlead.sh`; installed skills use their configured plugin path. Each command returns JSON. The `markdown` and `attention_markdown` fields are ready to present. Commands accept the selected `--state` path and operate without config, Herdr, worker messages, or a readable dispatch-state document.
+Run through the installed `skills/herdr-teamlead/teamlead.sh` with an explicit `bash` interpreter and the plugin root resolved in the skill. Each command returns JSON; report a non-zero command's diagnostic before continuing. The `markdown` and `attention_markdown` fields are ready to present. Commands accept the selected `--state` path and operate without config, Herdr, worker messages, or a readable dispatch-state document.
 
 | Command | Input | Output |
 | --- | --- | --- |

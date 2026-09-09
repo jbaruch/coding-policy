@@ -82,6 +82,14 @@ more correction attempts, waive a release gate, or authorize an uncertain resend
 Carry an in-scope improvement into already authorized work. Record proposals that
 need separate work with their owner and next decision point.
 
+After saving the note, curate lessons that should inform later tasks through
+`skills/herdr-teamlead/references/working-memory.md`. Link each lesson to this
+note and retain its applicability and revalidation conditions. Route task-specific
+facts to the task ledger and project-wide changes through the normal authorized
+work flow. Save user decisions, review requests, and promised follow-ups through
+`skills/herdr-teamlead/references/attention.md`. These records supplement the
+completed note; they never rewrite it or silently change policy.
+
 ## Persistence and retrieval
 
 Use the same canonical `--state` path across the team's invocations. The utility
