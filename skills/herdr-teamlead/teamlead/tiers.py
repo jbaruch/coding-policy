@@ -84,6 +84,21 @@ LAUNCH_OPTIONS = {
               "--sandbox": {"read-only", "workspace-write", "danger-full-access"}},
     "grok": {"--permission-mode": {"default", "acceptEdits", "auto", "dontAsk", "bypassPermissions", "plan"}},
 }
+# Resumed-process proof (#382), verified against the installed CLI help:
+# Claude Code 2.1.266 `-r, --resume [value]`; Grok 1.0.24 `-r, --resume
+# [<SESSION_ID_OR_TITLE>]`; Codex 0.153.2 `codex resume [OPTIONS] [SESSION_ID]
+# [PROMPT]`. Only one explicit session UUID, as a separate token, identifies
+# the resumed conversation. Pickers, most-recent selectors, titles or names,
+# forks, new --session-id conversations and prompt operands are refused.
+# launch_args never accept a resume form; this grammar reads live argv only.
+RESUME_OPTIONS = {"claude": frozenset({"-r", "--resume"}), "codex": frozenset(), "grok": frozenset({"-r", "--resume"})}
+RESUME_SUBCOMMANDS = {"codex": "resume"}
+RESUME_REFUSALS = {
+    "claude": frozenset({"-c", "--continue", "--fork-session", "--session-id", "--from-pr", "--teleport"}),
+    "codex": frozenset({"--last", "--all", "--include-non-interactive"}),
+    "grok": frozenset({"-c", "--continue", "--fork-session", "-s", "--session-id", "--restore-code", "-w", "--worktree"}),
+}
+SESSION_UUID = re.compile(r"[0-9A-Fa-f]{8}-(?:[0-9A-Fa-f]{4}-){3}[0-9A-Fa-f]{12}\Z")
 
 
 def _error(message):
@@ -141,26 +156,52 @@ def worker_launch_args(kind, args=()):
     return [YOLO_FLAGS[kind]] + options
 
 
+def _resume_session(current, value, recovery):
+    """Exactly one explicit session UUID; every other selector is ambiguous."""
+    if current is not None:
+        raise HerdrError("Worker resume arguments carry a second session or a prompt operand; resume with exactly one explicit session UUID and no prompt. " + recovery, {})
+    if not isinstance(value, str) or not SESSION_UUID.fullmatch(value):
+        raise HerdrError("Worker resume arguments name no single explicit session UUID; a picker, most-recent, title, name or search selector is ambiguous. " + recovery, {})
+    return value
+
+
 def verify_worker_permissions(kind, argv):
     """Prove a legacy worker's YOLO argv without inventing model-tier data.
 
-    Accept only the launch adapter's permission/UI options and model/effort
-    arguments. Unknown configuration, wrappers, resumes and prompt operands
-    cannot establish permission proof. Codex config overrides are restricted
-    to its documented reasoning-effort key so approval overrides cannot hide.
+    Accept only the launch adapter's permission/UI options, model/effort
+    arguments, and the documented resume form naming one explicit session
+    UUID (RESUME_OPTIONS, RESUME_SUBCOMMANDS). Unknown configuration,
+    wrappers, ambiguous or identity-changing resume selectors
+    (RESUME_REFUSALS) and prompt operands cannot establish permission proof.
+    Codex config overrides are restricted to its documented reasoning-effort
+    key so approval overrides cannot hide.
     """
-    recovery = "Inspect its foreground argv and start a fresh worker with the documented YOLO flags before dispatch."
+    recovery = ("Inspect its foreground argv, then start a fresh worker with the documented YOLO flags "
+                "or restore a retained developer's own native session under references/dispatch-recovery.md before dispatch.")
     if (kind not in YOLO_FLAGS or not isinstance(argv, list) or not argv
             or any(not isinstance(arg, str) for arg in argv) or PurePath(argv[0]).name != kind):
         raise HerdrError("Worker has no usable YOLO process proof. " + recovery, {})
     model_options = {"claude": {"--model", "--effort"}, "codex": {"-m", "--model", "-c", "--config"},
                      "grok": {"-m", "--model", "--reasoning-effort", "--effort"}}[kind]
+    subcommand = RESUME_SUBCOMMANDS.get(kind)
+    resuming = subcommand is not None and argv[1:2] == [subcommand]
+    session = None
     permissions = []
     pairs = {}
-    offset = 1
+    offset = 2 if resuming else 1
     while offset < len(argv):
         flag = argv[offset]
-        if flag in LAUNCH_SWITCHES[kind]:
+        if flag in RESUME_REFUSALS[kind]:
+            raise HerdrError("Worker resume argument {!r} selects no single explicit session or changes its identity; resume with one explicit session UUID. {}".format(flag, recovery), {})
+        if flag in RESUME_OPTIONS[kind]:
+            session = _resume_session(session, argv[offset + 1] if offset + 1 < len(argv) else None, recovery)
+            offset += 2
+        elif subcommand is not None and flag == subcommand:
+            raise HerdrError("Worker resume subcommand must directly follow the executable; options before it are not a documented resume form. " + recovery, {})
+        elif resuming and not flag.startswith("-"):
+            session = _resume_session(session, flag, recovery)
+            offset += 1
+        elif flag in LAUNCH_SWITCHES[kind]:
             permissions.append(flag)
             offset += 1
         elif flag in LAUNCH_OPTIONS[kind] or flag in model_options:
@@ -177,6 +218,8 @@ def verify_worker_permissions(kind, argv):
             offset += 2
         else:
             raise HerdrError("Worker has unsupported launch arguments for YOLO proof. " + recovery, {})
+    if resuming and session is None:
+        _resume_session(None, None, recovery)
     try:
         parse_launch_args(permissions, kind)
     except ConfigError as exc:

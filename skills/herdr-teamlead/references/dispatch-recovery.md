@@ -166,6 +166,121 @@ while its checkpoint awaits approval; an audit worker may still be active.
 Neither an active worker nor a dispatch receipt proves that implementation or
 release has finished.
 
+## Same-session YOLO restoration
+
+A retained developer whose foreground process no longer proves YOLO mode — a
+terminal restart, a bare relaunch, a restrictive launch — cannot receive its
+early fix: `apply --retain-context` refuses before any input. When the operator
+has expressly required YOLO for every worker, restore that developer's own
+native session instead of clearing it or starting a fresh worker. The
+restoration keeps the task, native session ID, fix count, and ledger rows
+unchanged; it grants no attempt, review approval, or tier change.
+
+Preconditions, all required: the worker is live and reads `idle` or `done`;
+its `agent_session` from `herdr agent get <name>` equals the `context_session`
+value of its preceding confirmed developer row in `teamlead state`, with
+`kind: id`; its composer is empty; the operator's YOLO requirement is recorded
+in the task ledger; the worker is non-tiered. A tiered retained fix verifies
+exact launch argv (`verify_argv`) and accepts no resume form; use the
+fresh-dispatch boundary for it. A pane that already holds only its shell has
+no live identity to archive and is outside this procedure: do not resume the
+ledger's UUID into an empty pane under it; recover through `recover-context`
+or a recorded fresh handoff without resetting the counter.
+
+Stopping the process is a relaunch of a worker with outgoing work. Before it,
+run `retro-check` with one transition for this agent — `context: "start"`,
+`role: "developer"`, the same `task`, null `model` and `effort` for a
+non-tiered worker, its `pane`, and its outgoing `report` — and record the
+completed note with `triggers` including `transition` under
+`references/retrospectives.md`. That is the only retrospective the restoration
+carries: the later `apply --retain-context` targets the same role, task, and
+tier, so it demands no new transition coverage; only the daily cadence can
+refuse it.
+
+1. Inspect and archive under the task's evidence directory: `herdr agent get
+   <name>` (state, `pane_id`, `agent_session`), `herdr pane process-info --pane
+   <pane>` (exactly one foreground `<kind>` process with its `pid` and `argv`),
+   and `herdr agent read <name> --source visible` showing the empty composer.
+   Any other reading stops the restoration. Never inspect, stop, or start
+   another worker's process.
+2. Stop only that PID with `kill -TERM <pid>`, then run the shipped helper.
+   It owns the wait for the pane to hold only its shell and for Herdr to
+   release the old name (Herdr keeps it reserved briefly after the process
+   exits), and the same-name restart:
+
+   ```bash
+   teamlead restore-session --agent <name> --kind <kind> --pane <pane> \
+     --shell-pid <shell_pid> --stopped-pid <pid> -- <resume argv...>
+   ```
+
+   Inputs: the archived name, kind, pane, `shell_pid`, and stopped foreground
+   `pid` from step 1; after `--`, the runtime's documented resume form, the
+   explicit YOLO flag, and the unchanged model and effort options, every one
+   a separate token:
+
+   ```text
+   claude: --resume <uuid> --dangerously-skip-permissions
+   codex:  resume <uuid> --dangerously-bypass-approvals-and-sandbox
+   grok:   --resume <uuid> --always-approve
+   ```
+
+   `<uuid>` is the archived `agent_session` value, never a substitute or a
+   most-recent selector. The accepted and refused resume tokens are the
+   validator's contract named in `references/model-tiers.md`; the helper runs
+   that validator before any Herdr call and refuses what it refuses.
+
+   Output: exit 0 and one JSON object on stdout — `agent`, `kind`, `pane_id`,
+   the started `argv` Herdr echoed (required to equal the requested tokens),
+   `release` (`attempts`, `shell_pid`), `start` (`attempts`,
+   `name_taken_retries`), and the `started` agent record. Exit 1 and a JSON
+   error on stderr, with no brief sent, when the pane never returns to its
+   shell, the name stays reserved, the shell PID differs from the archived
+   one, a foreign process holds the pane, the name is bound to another pane,
+   Herdr data is malformed, the started identity or argv differs, or a start
+   fails for any reason other than `agent_name_taken`. A start is retried only
+   after `agent_name_taken`, and only once the pane and name re-prove
+   released; a start whose outcome is unknown is never retried. The helper
+   never renames, chooses another pane or session, changes model or effort,
+   sends a brief, or writes owner state; the ledger binds the agent name. The
+   polling limits, the retry allowance, and the release predicates are the
+   constants and docstring at the top of
+   `skills/herdr-teamlead/teamlead/restoration.py`. Any refusal ends the
+   restoration: inspect the pane by hand.
+3. Reverify before any brief. `herdr pane process-info` shows one `<kind>`
+   process whose argv is the form above. Herdr reports no `agent_session` for
+   the restarted process until its first turn. Read the runtime's own status
+   view in the pane first (Codex `/status` names the session and reports Full
+   Access); it must show the archived session and the YOLO permission mode.
+   Then send exactly one readiness diagnostic through `herdr agent prompt
+   <name>`: a read-only prompt in the same session that forbids tools, file
+   edits, and any continuation of the task, and asks for one fixed word, such
+   as "Runtime readiness diagnostic only, in this existing session. Do not run
+   tools, edit files, or continue implementation. Reply exactly READY." It is
+   not a dispatch and records nothing. Wait for the turn to finish, then
+   `herdr agent get <name>` must report the same pane and an `agent_session`
+   whose `value` equals the archived one. A missing, different, or malformed
+   identity ends the restoration: report the concrete limitation, keep the
+   original rows, and recover through `recover-context` or a recorded fresh
+   handoff without resetting the counter. Never report an agent session by
+   hand, edit owner state, or prime a different task.
+4. Dispatch normally with `apply --retain-context --task <task> --fix-round
+   <N>`. It verifies the resumed argv (`verify_worker_permissions`), the
+   ledger's preceding confirmed round, retrospective cadence, and live native
+   continuity before any input, then records `cleared: false, clear_reason:
+   retained` with the unchanged session. Never edit state.json, an assignment
+   row, or the session value by hand.
+
+The resume grammar is verified against the installed help of Claude Code
+2.1.266, Codex CLI 0.153.2, and Grok Build 1.0.24; recheck it when a CLI
+upgrades. Herdr 0.8.2 passes the tokens after `--` to the executable and
+returns the started argv. One live restoration is proven with Codex: the
+exact UUID with explicit YOLO and unchanged model and effort resumed the same
+session, the status view and argv confirmed it, the single readiness turn
+produced the original identity, and the normal retained apply then dispatched
+the correction. That run drove the `agent start` form by hand; the helper's
+waits and retries are proven by deterministic transport tests, not yet by a
+live run. Archive each live run's evidence beside the task ledger.
+
 ## Verified role-clear recovery
 
 Keep the developer reserved until initial and early-fix verification resolves. If the lead
@@ -423,8 +538,10 @@ unchanged; a later role/session does not require rerunning completed work.
 
 For the known Grok `/new` identity contradiction, add `plan` naming the original
 saved plan JSON to the recovery input. Preserve all other original input paths.
-The command checks the original dispatch fingerprint against the plan and current
-briefing bytes. The strict source adapter and named refusal contracts are
+The command checks the original dispatch fingerprint against the plan, the
+current briefing bytes and, for a dispatch from a bound round, the exact
+`--report` path the record names. The strict source adapter and named refusal
+contracts are
 `grok_clear_identity`, `validate_stale_binding`, and `stale_grok_source` in
 `skills/herdr-teamlead/teamlead/report_delivery.py`. Unknown dispatch options,
 missing original plans, reused prompt paths, contradictory sources and changed

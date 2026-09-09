@@ -23,6 +23,7 @@ from pathlib import Path
 
 from . import claude_native
 from . import recovery as ledger
+from . import supervision
 from .errors import UsageError
 
 
@@ -389,7 +390,7 @@ def grok_clear_identity(body, prompt):
     return {"agent": "grok", "kind": "id", "value": identity}
 
 
-def stale_grok_source(dispatch, assignment, observed, body, prompt, plan_body):
+def stale_grok_source(dispatch, assignment, observed, body, prompt, plan_body, *, report):
     source = grok_clear_identity(body, prompt)
     if source is None:
         raise UsageError("grok_source_ambiguous: require one original fresh native session and its single completed dispatched turn; preserve the negative receipt.", {})
@@ -408,8 +409,11 @@ def stale_grok_source(dispatch, assignment, observed, body, prompt, plan_body):
         raise UsageError("grok_dispatch_unbound: original plan names different task or correction bounds; restore its dispatch inputs.", {})
     _, fingerprint = ledger.dispatch_identity(dispatch["task"], dispatch["role"], dispatch["agent"],
         dispatch["fix_round"], {"common": dispatch["common"], dispatch["role"]: dispatch["brief"]}, options=options)
-    if fingerprint != dispatch["fingerprint"]:
-        raise UsageError("grok_dispatch_unbound: original plan, dispatch options or briefing bytes differ from the preserved fingerprint; restore the originals.", {})
+    # A legacy dispatch preserved the bare fingerprint; a bound round's dispatch
+    # preserved it wrapped with the exact report path it was dispatched with.
+    # The requested report must reproduce that binding; no other path can.
+    if dispatch["fingerprint"] not in (fingerprint, supervision.report_bound_fingerprint(fingerprint, report)):
+        raise UsageError("grok_dispatch_unbound: original plan, dispatch options, report path or briefing bytes differ from the preserved fingerprint; restore the originals.", {})
     return source
 
 
@@ -461,7 +465,8 @@ def recover(store, assignments, data, at):
         if competing:
             raise UsageError("grok_dispatch_ambiguous: another dispatch used the same original prompt paths; preserve both outcomes instead of choosing a transcript.", {})
         receipts["plan"], plan_body = ledger.receipt(data["plan"])
-        source_session = stale_grok_source(dispatch, assignment, identity, bodies["source"], prompt, plan_body)
+        source_session = stale_grok_source(dispatch, assignment, identity, bodies["source"], prompt, plan_body,
+                                           report=data["report"])
     elif "plan" in data:
         if identity is None:
             raise UsageError("Archived pane JSON has no supported native session identity; restore the original pane get evidence.", {})

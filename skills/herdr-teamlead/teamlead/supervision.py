@@ -51,6 +51,16 @@ def digest(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
+def report_bound_fingerprint(fingerprint, report):
+    """A bound round's dispatch fingerprint: the legacy digest wrapped with the exact report path.
+
+    `apply` stores this form for every new dispatch of a bound round, and
+    owner recovery must reproduce it from the same report path; any other path
+    or a second wrapping yields a different value.
+    """
+    return digest({"dispatch": fingerprint, "report": report})
+
+
 def read_json(path):
     try:
         value = json.loads(Path(path).read_text(encoding="utf-8"))

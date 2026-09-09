@@ -55,8 +55,17 @@ table to change the model or effort.
 For initial manual starts through Herdr, pass the runtime's YOLO options after
 `--`. Verify the resulting launch or foreground-process argv before sending a
 brief. Existing workers, including non-tiered workers, require that same proof.
-Do not clear or restart a retained worker to repair a permission mismatch; use
-the normal fresh-dispatch boundary once the current assignment is resolved.
+A non-tiered existing process also proves permission in the documented resume
+form: the runtime's resume option or subcommand naming one explicit session
+UUID as a separate token, plus its explicit YOLO flags. The accepted and
+refused resume tokens are `RESUME_OPTIONS`, `RESUME_SUBCOMMANDS`,
+`RESUME_REFUSALS`, and `SESSION_UUID` in the same module; pickers, most-recent
+selectors, titles, forks, new session IDs, and prompt operands refuse. Tiered
+proof (`verify_argv`) stays exact and accepts no resume form.
+Do not clear a retained worker to repair a permission mismatch. Use the normal
+fresh-dispatch boundary once the current assignment is resolved, or the
+same-session restoration in `references/dispatch-recovery.md` when the
+operator expressly requires YOLO for that retained developer.
 
 Recheck model availability and CLI flag spellings when upgrading a worker's
 CLI or changing a model pin. Refresh the qualification for every changed

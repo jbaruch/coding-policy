@@ -72,7 +72,9 @@
     "skills/herdr-teamlead/tests/test_supervision.py",
     "skills/herdr-teamlead/tests/test_supervision_replay.py",
     "skills/herdr-teamlead/tests/test_supervision_cli.py",
-    "skills/herdr-teamlead/tests/test_supervision_diagnostics.py"
+    "skills/herdr-teamlead/tests/test_supervision_diagnostics.py",
+    "skills/herdr-teamlead/teamlead/restoration.py",
+    "skills/herdr-teamlead/tests/test_restoration.py"
   ],
   "executionEnvironments": [
     {

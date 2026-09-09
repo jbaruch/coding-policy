@@ -940,15 +940,19 @@ class ApplyCommandTest(CliCase):
         self.assertFalse(row["cleared"])
         self.assertEqual(row["clear_reason"], "hand")
 
-    def _seed_context(self, *, task="repo#322", role="developer", status="applied", fix_round=None):
+    def _seed_context(self, *, task="repo#322", role="developer", status="applied", fix_round=None, session="task-session"):
         state = empty_state()
         add_assignment(
             state, AT, role, "grok", status=status, task=task, fix_round=fix_round,
             cleared=True, clear_reason="automatic",
             context_session={"pane_id": "w4:p1", "source": "herdr:grok", "agent": "grok",
-                             "kind": "id", "value": "task-session"},
+                             "kind": "id", "value": session},
         )
         save_state(self.state, state)
+
+    def _foreground(self, pane_id, argv):
+        return json.dumps({"result": {"process_info": {"pane_id": pane_id,
+            "foreground_processes": [{"name": argv[0], "pid": 200, "argv": argv}]}}})
 
     def _fix_args(self, round_number=1, *extra):
         return self.base() + [
@@ -970,6 +974,46 @@ class ApplyCommandTest(CliCase):
         self.assertEqual(row["clear_reason"], "retained")
         self.assertEqual((row["task"], row["fix_round"]), ("repo#322", 1))
         self.assertEqual(json.loads(out)["applied"][0]["clear_reason"], "retained")
+
+    def test_retained_fix_accepts_a_resumed_yolo_developer_and_keeps_its_identity(self):
+        # coding-policy#382: the developer was restored with the documented resume form
+        # and its explicit YOLO flag. The retained fix verifies that process instead of
+        # demanding a fresh worker; task, native session and the fix count are unchanged.
+        session = "3b1a2c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d"
+        self._seed_context(session=session)
+        client = self._client({"grok": "idle"}, sessions={"grok": session})
+        self.runner.set("pane process-info --pane w4:p1",
+                        self._foreground("w4:p1", ["grok", "--resume", session, "--always-approve", "--no-subagents"]))
+        code, out, err = self.run_cli(self._fix_args(1, "--retain-context"), client=client)
+        self.assertEqual(code, 0, err)
+        record = json.loads(out)["applied"][0]
+        self.assertEqual((record["task"], record["fix_round"], record["cleared"], record["clear_reason"]),
+                         ("repo#322", 1, False, "retained"))
+        self.assertEqual(record["context_session"]["value"], session)
+        self.assertEqual(len(self.runner.writes()), 1)
+        self.assertFalse(any(command.startswith(("agent start", "-TERM")) or "/new" in command
+                             for command in self.runner.commands()))
+        rows = json.loads(self.state.read_text(encoding="utf-8"))["assignments"]
+        self.assertEqual([(row["task"], row["fix_round"]) for row in rows], [("repo#322", None), ("repo#322", 1)])
+        self.assertEqual(rows[-1]["context_session"]["value"], session)
+
+    def test_retained_fix_refuses_an_ambiguous_resume_before_any_input(self):
+        session = "3b1a2c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d"
+        for argv in (["grok", "--continue", "--always-approve"],
+                     ["grok", "--resume", "--always-approve"],
+                     ["grok", "--resume", session]):
+            with self.subTest(argv=argv):
+                self.out, self.err = io.StringIO(), io.StringIO()
+                self._seed_context(session=session)
+                before = self.state.read_bytes()
+                client = self._client({"grok": "idle"}, sessions={"grok": session})
+                self.runner.set("pane process-info --pane w4:p1", self._foreground("w4:p1", argv))
+                code, out, err = self.run_cli(self._fix_args(1, "--retain-context"), client=client)
+                self.assertEqual(code, 1)
+                self.assertEqual(out, "")
+                self.assertIn("before dispatch", err)
+                self.assertEqual(self.runner.writes(), [])
+                self.assertEqual(self.state.read_bytes(), before)
 
     def test_retention_rejects_wrong_task_role_status_or_round_before_herdr(self):
         for task, role, status, fix_round in (

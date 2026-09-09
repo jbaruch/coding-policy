@@ -205,6 +205,29 @@ def format_argv(argv):
     return shlex.join(argv)
 
 
+def error_code(exc):
+    """Herdr's own error code from a failed command, or None.
+
+    `_run` keeps the failed command's stderr in the HerdrError details, and a
+    server error is JSON there (`{"error": {"code": ..., "message": ...}}`).
+    A caller that must branch on one code -- `agent_not_found` proving a name
+    was released -- reads it here instead of matching on prose. Anything that
+    is not that shape is None: a syntax error, a wedged binary, or a non-JSON
+    stderr carries no code to branch on.
+    """
+    details = getattr(exc, "details", None)
+    stderr = details.get("stderr") if isinstance(details, dict) else None
+    if not isinstance(stderr, str) or not stderr.startswith("{"):
+        return None
+    try:
+        payload = json.loads(stderr)
+    except json.JSONDecodeError:
+        return None
+    error = payload.get("error") if isinstance(payload, dict) else None
+    code = error.get("code") if isinstance(error, dict) else None
+    return code if isinstance(code, str) and code else None
+
+
 class HerdrClient:
     """A thin, injectable wrapper over the `herdr` CLI."""
 
@@ -434,6 +457,18 @@ class HerdrClient:
             )
         return payload["result"]
 
+    def _run_json_object(self, argv):
+        """Require an object only for lookups that consume named result fields."""
+        result = self._run_json(argv)
+        if not isinstance(result, dict):
+            raise HerdrError(
+                "herdr returned a non-object `result` for `{}`; expected a JSON "
+                "object. Inspect this read's response and update Herdr before "
+                "retrying.".format(format_argv(argv)),
+                {"command": format_argv(argv), "result_type": type(result).__name__},
+            )
+        return result
+
     # -- operations ----------------------------------------------------------
 
     def argv_agent_start(self, name, kind, pane_id, flags):
@@ -446,7 +481,7 @@ class HerdrClient:
         return [self.binary, "pane", "process-info", "--pane", pane_id]
 
     def pane_process_info(self, pane_id):
-        result = self._run_json(self.argv_pane_process_info(pane_id))
+        result = self._run_json_object(self.argv_pane_process_info(pane_id))
         info = result.get("process_info")
         if not isinstance(info, dict) or info.get("pane_id") != pane_id:
             raise HerdrError("Herdr returned no process information for the requested pane; update Herdr before dispatch.", {})
@@ -467,7 +502,7 @@ class HerdrClient:
 
     def agent_get(self, name):
         """Return the agent record for `name` (pane_id, agent_status, ...)."""
-        result = self._run_json(self.argv_agent_get(name))
+        result = self._run_json_object(self.argv_agent_get(name))
         agent = result.get("agent")
         if not isinstance(agent, dict):
             raise HerdrError(

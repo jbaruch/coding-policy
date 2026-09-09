@@ -22,7 +22,7 @@ from types import SimpleNamespace
 from . import __version__
 from .assign import apply as apply_assignments
 from .assign import APPLY_SCHEMA_VERSION, dry_run, native_context_session, normalize_assignments, resolve_paths, validate_fix_history
-from . import attention, historical, memory, recovery, report_delivery, role_clear, retrospective, retrospective_runtime, supervision, supervision_runtime
+from . import attention, historical, memory, recovery, report_delivery, restoration, role_clear, retrospective, retrospective_runtime, supervision, supervision_runtime
 from .config import default_config_path, load_config, load_judge, load_role_costs, select_agents
 from .errors import PlanError, StateError, TeamLeadError, UsageError
 from .herdr import (
@@ -129,6 +129,7 @@ def build_parser():
     memory.register_commands(sub, common)
     attention.register_commands(sub, common)
     supervision_runtime.register_commands(sub, common)
+    restoration.register_commands(sub, common)
 
     measure_parser = sub.add_parser(
         "measure",
@@ -738,7 +739,7 @@ def cmd_apply(args, client=None, warn=None, trace=None):
                 # cannot retroactively prove a report input they never stored.
                 old = next((row for row in store["dispatches"] if row["id"] == identifier), None)
                 if old is None or old["fingerprint"] != fingerprint:
-                    fingerprint = supervision.digest({"dispatch": fingerprint, "report": reports[role]})
+                    fingerprint = supervision.report_bound_fingerprint(fingerprint, reports[role])
             prior = recovery.prior_dispatch(store, identifier, fingerprint)
             if supervised:
                 saved_result = prior["result"] if prior and prior["status"] == "applied" else {}
@@ -1050,6 +1051,11 @@ def cmd_supervision(args, client=None, warn=None, trace=None):
                                            client=client, clock=now_iso, sleeper=time.sleep), None
 
 
+def cmd_restoration(args, client=None, warn=None, trace=None):
+    client = client if client is not None else _client(args, trace=trace)
+    return restoration.run_command(args, client, sleep=time.sleep), None
+
+
 COMMANDS = {
     "measure": cmd_measure,
     "plan": cmd_plan,
@@ -1063,6 +1069,7 @@ COMMANDS = {
     **{command: cmd_memory for command in memory.COMMANDS},
     **{command: cmd_attention for command in attention.COMMANDS},
     **{command: cmd_supervision for command in SUPERVISION_COMMANDS},
+    **{command: cmd_restoration for command in restoration.COMMANDS},
 }
 
 
@@ -1083,7 +1090,7 @@ def main(argv=None, stdout=None, stderr=None, client=None):
         # Commands that may migrate or write state share its canonical lock.
         # Dry runs, probes, and retrospective reads remain read-only.
         readonly = args.command in {"probe-report", "retro-check", "retro-list", "retro-show"} or getattr(args, "dry_run", False)
-        separate_owner = args.command in memory.COMMANDS | attention.COMMANDS | SUPERVISION_COMMANDS
+        separate_owner = args.command in memory.COMMANDS | attention.COMMANDS | SUPERVISION_COMMANDS | restoration.COMMANDS
         lock = nullcontext() if readonly or separate_owner else state_lock(retrospective.canonical_state(_state_path(args)))
         with lock:
             retro_lock = retrospective.lock(_state_path(args)) if not readonly and args.command in {"apply", "start-judge", "retro-record"} else nullcontext()
