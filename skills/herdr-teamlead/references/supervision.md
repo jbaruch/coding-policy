@@ -57,7 +57,9 @@ restart after a turn ends.
 The JSON result contains `reason`, `watcher`, `through`, and `events`. Existing
 unacknowledged events replay before more worker reads. Each sweep observes all
 active enrollments concurrently and stores changed observations. One worker's
-failure does not conceal another worker's result. A quiet budget checkpoint
+failure does not conceal another worker's result. Failure events preserve a
+bounded, sanitized diagnostic, the failed operation, and recovery guidance.
+A failed visible-output read preserves any report evidence already observed. A quiet budget checkpoint
 returns without declaring any work complete; continue the fleet loop while
 obligations remain. Polling bounds, read timeouts, and heartbeat constants live
 in `skills/herdr-teamlead/teamlead/supervision_runtime.py`.
@@ -73,7 +75,9 @@ promised follow-ups in the attention queue before continuing housekeeping.
 current hold, and watcher health. Health verifies the live process identity and
 heartbeat; a reused PID is not the recorded watcher. A live process with a stale
 heartbeat requires inspection of its existing execution handle, not a duplicate
-watcher. After the process is proved absent or replaced, the next watch records
+watcher. A failed process probe is unverified liveness, never proof of absence;
+restore process visibility before replacing the watcher. After the process is
+proved absent or replaced, the next watch records
 a durable loss event. Handle it before resuming observation.
 
 ## Handle and acknowledge

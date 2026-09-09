@@ -71,7 +71,8 @@
     "skills/herdr-teamlead/teamlead/supervision_hook.py",
     "skills/herdr-teamlead/tests/test_supervision.py",
     "skills/herdr-teamlead/tests/test_supervision_replay.py",
-    "skills/herdr-teamlead/tests/test_supervision_cli.py"
+    "skills/herdr-teamlead/tests/test_supervision_cli.py",
+    "skills/herdr-teamlead/tests/test_supervision_diagnostics.py"
   ],
   "executionEnvironments": [
     {
