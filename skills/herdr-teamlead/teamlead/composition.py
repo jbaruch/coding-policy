@@ -14,7 +14,7 @@ from .tiers import ROLE_ROUNDS
 REQUIREMENTS_SCHEMA_VERSION = 1
 CONSULTATION_ROLES = frozenset({"advisor", "investigator"})
 CONTRIBUTOR_ROLES = frozenset({"developer", "architect", "advisor", "investigator"})
-CONTRIBUTOR_ROUNDS = frozenset({"architect", "reconciliation"})
+CONTRIBUTOR_ROUNDS = frozenset({"architect", "reconciliation", "test_plan"})
 POSSIBLE_CONTRIBUTION = frozenset({"applied", "unknown", "sending", "sent_but_not_started"})
 REQUIREMENT_FIELDS = frozenset({"specialty", "required_capabilities", "independent", "engagement"})
 

@@ -40,6 +40,9 @@ gate; they do not require a pushed branch or release reports.
 needed design or interaction report. An investigator may first resolve a causal
 question. Assess each consultation before using its outcome. The tester maps each acceptance
 criterion to a test, or delivers those tests as a patch (tester Mode A or B).
+Plan that work with `--round tester=test_plan` and record its actual contribution
+through `assess-specialist` before selecting Phase 2 verifiers. A test patch
+author is an implementation contributor, even while holding the tester role.
 The developer implements against both, runs the repo's gates, pushes the
 branch, and stops without opening a PR.
 

@@ -152,6 +152,14 @@ class EligibilityTest(unittest.TestCase):
         constraints = selection_constraints(["reviewer", "tester"], [worker("prior")], {}, history, "onboarding")
         self.assertEqual(constraints["exclude"], {"reviewer": [], "tester": []})
 
+    def test_predevelopment_tester_requires_contribution_assessment(self):
+        history = [assignment(role="tester", tier={"round": "test_plan"})]
+        constraints = selection_constraints(["reviewer", "tester"], [worker("prior")], {}, history, "onboarding")
+        self.assertEqual(constraints["exclude"], {"reviewer": ["prior"], "tester": ["prior"]})
+        assessment = {"assignment_index": 0, "task": "onboarding", "agent": "prior", "contribution": "none"}
+        constraints = selection_constraints(["reviewer", "tester"], [worker("prior")], {}, history, "onboarding", assessments=[assessment])
+        self.assertEqual(constraints["exclude"], {"reviewer": [], "tester": []})
+
     def test_migration_or_requirements_never_invent_verification_provenance(self):
         for scope in (None, "unknown", "design"):
             for tier in (None, {"round": "review"}):
