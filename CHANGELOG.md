@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.205 — 2026-09-09
+
 ### Fixed
 
 - **Malformed restoration lookups return actionable JSON errors (#389).**
