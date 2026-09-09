@@ -54,6 +54,46 @@ on the same flow. Split the work when the evidence, tools or independence
 requirements differ. The bench is extensible: describe another specialty when
 the task needs one, with its capability evidence and concrete deliverable.
 
+## Record assignment requirements
+
+Worker configuration schema v3 carries a `capabilities` list for each worker.
+Keep these declarations aligned with the tools, skills and evidence inspected
+above. A capability label is a staffing input, not a credential or authorization.
+Follow `skills/herdr-teamlead/state-schema.md` for configuration and persisted
+assignment shapes.
+
+Pass a requirements file to `plan --requirements <absolute-file>`. The file
+names the expertise needed for each specialized assignment and the stable
+engagement that a later consultation may continue. For example:
+
+```json
+{
+  "schema_version": 1,
+  "assignments": {
+    "advisor": {
+      "specialty": "ux-product",
+      "required_capabilities": ["ux"],
+      "independent": false,
+      "engagement": "onboarding-ux"
+    }
+  }
+}
+```
+
+Use the planned role as the assignment key. `required_capabilities` names the
+worker capabilities the deliverable needs. `independent` states whether the
+assignment requires an independent worker; the reviewer and tester gates retain
+independence. `engagement` identifies the bounded consultation across its
+follow-ups, not a new task or correction budget. Give each distinct engagement
+its own identity and preserve the parent task identity.
+
+Include requirements for specialist consultations and for a developer, reviewer
+or tester whose assignment needs that expertise. The planner emits the
+requirements with its assignment; dispatch rechecks them from that saved plan.
+Use that plan through the normal apply contract. On a refusal, resolve the
+reported capability, independence or evidence gap before replanning. Do not
+hand-edit the plan to substitute a worker or bypass its requirements.
+
 ## Compose a bounded consultation
 
 State the question the specialist must settle, why its answer matters now, the
@@ -86,6 +126,61 @@ dispatch. A specialty adds no independent permission, correction attempt or
 release waiver. Stop a consultation once its assigned deliverable is ready or
 its genuine block is recorded; idle bench membership creates no monitoring job.
 
+## Assess specialist work
+
+Confirm delivery through the normal report checkpoint and save its successful
+JSON output. Read the actual report in full. Inspect the requested artifact and
+source evidence, then assess the assignment outcome and what the worker
+contributed. A worker's contribution claim is an input to that judgment, not
+the judgment itself.
+
+Run the installed `skills/herdr-teamlead/teamlead.sh` with explicit `bash` and
+the plugin root resolved by the skill. This synopsis names its owner command:
+
+```text
+assess-specialist --record /durable/team/assessment.json [--state <state-file>] [--now <ISO-time>]
+```
+
+The input supplies the actual per-assignment dispatch id from apply output or
+the supervision member, the worker's report path, and the saved delivery path:
+
+```json
+{
+  "id": "onboarding-ux-assessment-1",
+  "dispatch": "onboarding-ux-dispatch-1",
+  "report": "/durable/team/reports/ux-1.md",
+  "delivery": "/durable/team/reports/ux-1-delivery.json",
+  "outcome": "The requested interaction proposal is complete; implementation remains open.",
+  "contribution": "design",
+  "summary": "The report proposes the chosen recovery flow and supplies acceptance criteria."
+}
+```
+
+`outcome` and `summary` record the lead's actual assessment and rationale.
+`contribution` is `none`, `design` or `implementation`; classify the substantive
+work rather than its current role. The delivery file must be the successful
+`wait-report.sh` JSON receipt for that worker and report, with `found: true`.
+Use an actual dispatch identity and matching report path; never invent history
+for a report that has not been reconciled with its assignment.
+
+The command emits JSON and preserves an immutable assessment with report and
+delivery receipts in the existing owner state. It binds the saved bytes to the
+assignment; it cannot infer semantic truth from report prose. Handle any
+non-zero diagnostic before continuing. Keep the referenced evidence files for
+future verification.
+
+Record the assessed outcome and evidence in the task ledger. Handle pending
+supervision events and retire the preceding enrollment through
+`skills/herdr-teamlead/references/supervision.md`. Assessment, event
+acknowledgement and enrollment retirement are distinct operations. None of them
+accepts the whole task or replaces its verification and release gates.
+
+Before requesting a retained specialist follow-up, save the assessment and
+finish those observation obligations. Preserve the assessed report and delivery
+bytes; changed or missing source evidence requires reconciliation. Follow the
+dispatch recovery contract for the continuation command and its refusal
+conditions.
+
 ## Preserve contribution history and knowledge
 
 Track actual contributions across session clears, worker changes and model
@@ -96,6 +191,13 @@ solution must disclose that contribution. Decide independence against the
 subject being verified, never against the worker's current title or a fresh
 context. Obtain another qualified worker for independent assessment of a
 contributor's work. Keep the ordinary reviewer and tester gates intact.
+
+An unassessed consultation is unresolved contribution history. Assess it before
+relying on that worker's independence. A `none` assessment records that the lead
+verified no contributing work; a design or implementation contribution remains
+part of the task history across role, model and session changes. Obtain a
+different qualified worker for the independent gate when the subject includes
+that contribution.
 
 Keep a useful worker idle after its report when follow-up is likely and capacity
 permits. An idle session is optional continuity, not durable memory or authority
