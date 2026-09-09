@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.202 — 2026-09-09
+
 ### Added
 
 - **Retrospectives that survive the team session.** The lead now reviews active
