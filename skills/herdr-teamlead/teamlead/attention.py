@@ -96,8 +96,8 @@ def _evidence(value):
     _fields(value, {"schema_version", "kind", "ref", "summary"})
     if type(value["schema_version"]) is not int or value["schema_version"] != SCHEMA_VERSION:
         _fail("Resolution evidence schema_version must be 1; preserve unsupported evidence.")
-    if not isinstance(value["kind"], str) or value["kind"] not in {"user_answer", "review_outcome", "delivery", "acknowledgement", "source"}:
-        _fail("Evidence kind must be user_answer, review_outcome, delivery, acknowledgement or source.")
+    if not isinstance(value["kind"], str) or value["kind"] not in {"user_answer", "review_outcome", "delivery", "acknowledgement", "verified_outcome", "source"}:
+        _fail("Evidence kind must be user_answer, review_outcome, delivery, acknowledgement, verified_outcome or source.")
     _text(value["ref"], "Evidence reference", limit=2000)
     _text(value["summary"], "Evidence summary")
 
@@ -169,7 +169,7 @@ def _apply(event, entries, progress):
         entry["last_presented_at"] = at
     elif action == "resolve":
         allowed = {"question": {"user_answer"}, "decision": {"user_answer"}, "review": {"review_outcome"},
-                   "blocker": {"user_answer", "acknowledgement"}, "failure": {"user_answer", "acknowledgement"},
+                   "blocker": {"user_answer", "acknowledgement"}, "failure": {"user_answer", "acknowledgement", "delivery", "verified_outcome"},
                    "followup": {"delivery"}, "update": {"delivery"}}
         if data["evidence"]["kind"] not in allowed[entry["kind"]]:
             _fail("{} requires {} evidence to resolve; presentation or an unrelated user message leaves it open.".format(entry["kind"], " or ".join(sorted(allowed[entry["kind"]]))))

@@ -105,6 +105,33 @@ class AttentionTest(unittest.TestCase):
                 self.assertEqual(entry["resolution"]["kind"], proof)
         self.assertEqual(catch_up(self.path, AFTER)["attention"]["total"], 0)
 
+    def test_informational_failure_can_resolve_after_delivery_without_user_chore(self):
+        data = {**obligation(kind="failure"), "resolution_condition": "Notify the user that the optional export failed."}
+        self.record(data)
+        delivered = evidence("delivery", "User update reported that the optional export failed; no decision or action is needed.")
+        self.update("present", evidence=delivered)
+        self.assertEqual(catch_up(self.path, LATER)["attention"]["total"], 1)
+        self.update("resolve", revision=2, event_id="delivery-complete", evidence=delivered, at=DUE)
+        result = attention.show(self.path, "q1")
+        self.assertEqual(result["entry"]["status"], "resolved")
+        self.assertEqual(result["entry"]["resolution"]["kind"], "delivery")
+        self.assertEqual(len(result["history"]), 3)
+        self.assertEqual(catch_up(self.path, DUE)["attention"]["total"], 0)
+
+    def test_failure_can_resolve_from_verified_outcome_but_questions_stay_typed(self):
+        data = {**obligation(kind="failure"), "resolution_condition": "Confirm the failed export recovered and its artifact is usable."}
+        self.record(data)
+        outcome = evidence("verified_outcome", "The successful retry produced the expected artifact; the linked ledger records validation.")
+        self.update("resolve", evidence=outcome)
+        self.assertEqual(attention.show(self.path, "q1")["entry"]["resolution"], outcome)
+        for kind in ("question", "decision", "review"):
+            self.record(obligation(kind, kind), at=LATER)
+            for proof in ("delivery", "verified_outcome"):
+                with self.subTest(kind=kind, proof=proof):
+                    with self.assertRaises(UsageError):
+                        self.update("resolve", name=kind, event_id=kind + proof, evidence=evidence(proof), at=DUE)
+            self.assertEqual(attention.show(self.path, kind)["entry"]["status"], "open")
+
     def test_deferral_resurfaces_at_due_time_without_writing(self):
         self.record()
         self.update("defer", until=DUE, evidence=evidence("source", "Lead will revisit at the recorded checkpoint."))
