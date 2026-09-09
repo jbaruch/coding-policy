@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Start and verify the judge tier recorded by teamlead plan.
 # Contract: <plan-file> <pane> [claude|codex|grok] [--state FILE] [--task TASK] [--now ISO].
+# Requires an empty shell pane; use apply for an existing worker's relaunch.
 # stdout: JSON {agent, model, effort, pane, argv_verified, verified} on success.
 # Exit 0: launch arguments proved the tier; 1: input/transport/proof failure;
 # 2: command-line usage error. No banner or transcript text establishes proof.

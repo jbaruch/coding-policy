@@ -967,8 +967,8 @@ def main(argv=None, stdout=None, stderr=None, client=None):
         stderr.write(DIAGNOSTIC_PREFIX + message + "\n")
 
     try:
-        # Readers may migrate state, so they share the same transaction lock.
-        # A dry run and worker launch never acquire or write ledger state.
+        # Commands that may migrate or write state share its canonical lock.
+        # Dry runs, probes, and retrospective reads remain read-only.
         readonly = args.command in {"probe-report", "retro-check", "retro-list", "retro-show"} or getattr(args, "dry_run", False)
         lock = nullcontext() if readonly else state_lock(retrospective.canonical_state(_state_path(args)))
         with lock:

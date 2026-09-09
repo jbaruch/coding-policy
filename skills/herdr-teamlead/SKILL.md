@@ -100,9 +100,9 @@ Proceed immediately to Step 4.
 
 ## Step 4 — Measure Headroom
 
-On active resume and before planning, complete any due retrospective under
-`references/retrospectives.md`. An explicit retrospective request completes that
-workflow and finishes here. Normal team work continues below.
+Run `references/retrospectives.md` on resume, before planning, or for an explicit
+retrospective request. For an explicit request, complete a new retrospective and
+finish here; otherwise continue below.
 
 ```bash
 CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
@@ -379,7 +379,8 @@ bash "$CP/skills/herdr-teamlead/teamlead.sh" plan \
 
 ## Step 16 — Start the Judge Worker on Its Pinned Tier
 
-Complete the retrospective reference's checks for the planned start. Run:
+For an existing judge worker, proceed to Step 17 with a clearing dispatch.
+For an empty shell pane, complete retrospective checks for the start and run:
 
 ```bash
 CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
@@ -387,11 +388,9 @@ bash "$CP/skills/herdr-teamlead/start-judge-worker.sh" \
   <step-15-plan-file> <pane> [claude|codex|grok] --task <task-id> [--state <state-file>]
 ```
 
-Starts the plan's pinned judge and verifies launch argv. Pane text never
-proves the tier; the script header owns the detailed contract.
+Starts the pinned judge and verifies launch argv. The header owns the contract.
 
-- **Exit 0** — the launch argv proved the tier. Its JSON names the agent, model
-  and effort. Proceed immediately to Step 17.
+- **Exit 0** — proceed immediately to Step 17 with `--no-clear`.
 - **Any non-zero** — report the diagnostic and finish here without briefing
   the worker or overriding its tier.
 
@@ -405,12 +404,12 @@ bash "$CP/skills/herdr-teamlead/teamlead.sh" apply \
   --assignments <plan-file> \
   --brief judge=<round>-judge.md \
   --common <path-to-COMMON.md> \
-  --task <task-id> --no-clear
+  --task <task-id> [--no-clear]
 ```
 
-Step 10's outcomes govern this dispatch. `--no-clear` preserves the worker
-started in Step 16; apply verifies its live process arguments before sending
-the brief. Proceed immediately to Step 18.
+Step 10's outcomes govern. Use `--no-clear` only for the worker just started in
+Step 16; an existing judge receives the default cleared relaunch with retrospective
+coverage. Apply verifies the live tier before input. Proceed immediately to Step 18.
 
 ## Step 18 — Wait for the Ruling
 
