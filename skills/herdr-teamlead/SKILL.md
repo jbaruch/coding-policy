@@ -173,9 +173,8 @@ and reviewer/tester package paths and full commit IDs before writing.
 Give every assignment a fresh absolute report path; never reuse a prior
 attempt's path or share one between roles.
 
-Supply shared checkout, Step 3's authority/permission, and each role's issue,
-branch, worktree, report paths, phase, and mode. Reviewer/tester inputs also
-carry Step 6's package and range. Placeholder details and phase/mode table:
+Populate the shared and role-specific values under this reference's Step 7
+contract, including the authority and review evidence from earlier steps:
 
 ```text
 skills/herdr-teamlead/references/round-setup.md
