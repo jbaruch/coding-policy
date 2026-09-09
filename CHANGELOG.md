@@ -2,22 +2,59 @@
 
 ### Fixed
 
-- **Release helpers preserve literal tag names (#371, #374).** The run
-  resolver escapes quoted query arguments without changing the exact workflow,
-  commit, push-event or ref binding, and the GitHub release lookup encodes the
-  tag as a URL path component. Quoted and query-shaped refs, reserved URL bytes
-  and UTF-8 tags have deterministic transport fixtures; the resolver also runs
-  through its CLI with no system `jq` on `PATH`.
+- **Release confirmation follows each publication channel (#371, #374).**
+  `ci-safety`, `skills/release/SKILL.md` and `SCRIPTING.md` select the publication's own
+  confirmation path. Every Tessl publication, including mixed distribution,
+  keeps its registry baseline, successful-run and registry-advance conjunction,
+  and moderation clear. GitHub tag/asset publications require their own
+  successful run and published release with uploaded assets. Mixed releases
+  keep separate run ids and owe both confirmations; neither channel substitutes
+  for the other.
 
-  Policy review 5148294337 found that the GitHub-release test harness replaced
-  the helper's cleanup trap. Each invocation now owns its cleanup trap and the
-  harness checks that no script-created file remains after each case, covering
-  successful confirmations, definitive failures and indeterminate results.
+  Step 3 assigns versions per channel. A tag-only package writes every bump
+  into its manifest and tags that version. A mixed package sets the same version
+  in every channel's manifest and verifies that its actual Tessl publisher
+  preserves the choice. The reusable workflow supports `publish-mode: as-is`,
+  passed to the smart-publish action's `mode: as-is`; that path publishes the
+  manifest verbatim without a bump or commit-back. Other publishers need their
+  own supported mechanism. These versioning choices change no review or
+  publication gate. The registry-baseline label now reads “Tessl publication”
+  consistently with the other Tessl steps.
 
-  The watch instruction keeps the channel-specific confirmation helpers and
-  moves its rationale here: propagating `gh run watch --exit-status` under
-  `set -e` would stop the wrapper before those helpers could report why the
-  publication was not confirmed.
+  `resolve-publish-run.sh` accepts an optional fifth ref argument, defaulting
+  to `main`. The original main-only lookup missed ACR v0.1.4's tag run
+  34188269042, whose `headBranch` was `v0.1.4`. Selection binds the workflow,
+  commit, push event and literal ref; quoted query arguments stay data. Delayed
+  enqueue is retried, empty refs are rejected, and multiple matches are refused
+  with candidate ids. Deterministic transport fixtures cover those outcomes,
+  unrelated same-commit runs, quoted and query-shaped refs, and the CLI with no
+  system `jq` on `PATH`.
+
+  `verify-github-release.sh` requires the resolved run's successful conclusion
+  and a published, nonempty release at the exact tag with every asset uploaded.
+  A 404 is a definitive no; auth failures, unreadable data and in-flight runs
+  remain indeterminate. Checked JSON escaping preserves literal tag and URL
+  values and propagates errors without a partial envelope. Every definitive
+  no also carries an actionable stderr diagnostic.
+
+  The release API path encodes the tag as one URL component. Its reserved-byte
+  and UTF-8 fixture exposed Bash 3.2 sign-extension: byte 0xC3 became
+  `%FFFFFFFFFFFFFFC3` instead of `%C3`, requesting the wrong endpoint for an
+  existing release. Normalizing each ordinal to 0..255 preserves the complete
+  UTF-8 sequence on Bash 3.2 and 5. Conversion failures now stop the lookup as
+  indeterminate with no envelope; a fault-injection test checks both conversion
+  stages. The existing endpoint fixture remains the encoding regression test.
+
+  Policy review 5148294337 found that the release test harness replaced the
+  helper's cleanup trap. Each invocation now owns that trap, and the harness
+  checks for leftover files after successful, definitive-no and indeterminate
+  results. The dynamic-source SC1090 suppression now states its reason, as
+  requested by policy review 5148578175.
+
+  The watch omits `--exit-status` so a `set -e` wrapper reaches the appropriate
+  confirmation helper, which reports the failed conjunct. Policy review
+  5147838037 prompted this channel split after Step 7's unconditional Tessl
+  instructions contradicted the corrected distribution scope below.
 
 - **The Tessl review gate now follows Tessl distribution, not every plugin
   artifact (#374).** `context-artifacts` carried a Tessl-specific body under a
@@ -74,88 +111,6 @@
   carries no such condition. `skill-authoring` also says which of its own
   provisions are Tessl-bound: the two that name a `.tessl/plugins/…` mount path
   reach a plugin installed at one, and the rest is distribution-independent.
-
-  `ci-safety`'s publish-confirmation duty is now keyed on the **publication**,
-  not on the package. A package that publishes through more than one channel
-  owes the duty once per publication, each confirmed against the channel that
-  carried it. The release contract is named the Tessl form and its mechanics are
-  enumerated — registry-baseline capture, the registry-advance and moderation
-  conjuncts, the moderation wait and `verify-moderation-cleared.sh` — so nothing
-  carries them to a package with no Tessl registry. Every Tessl publication
-  keeps that contract whole, mixed distribution included: a tag or release on
-  another channel never substitutes for the registry advance or the moderation
-  clear, and a confirmed Tessl publish says nothing about another channel's
-  release. What stays channel-independent is stated outright rather than left to
-  an "every other clause" catch-all — resolve the run for that publication,
-  watch it to a terminal state, require a successful `conclusion`, verify the
-  version actually published, and never report a release confirmed while its
-  publish is unconfirmed. No conjunct is dropped.
-
-  Policy review 5147838037 then blocked PR #376 on the artifact the new rule
-  contradicts: `skills/release/SKILL.md` Step 7 captured a Tessl registry
-  baseline unconditionally and confirmed a release on the registry advance plus
-  the moderation clear alone, so a package published by pushing a tag was told
-  to satisfy a registry it does not have, and a package on both channels could
-  report a green GitHub release while its Tessl moderation was still pending.
-  Step 7 now names the channels before merging. Resolving the run, watching it
-  to terminal state and requiring a successful conclusion stay
-  channel-independent. The baseline capture, the advance conjunct and the
-  moderation wait are marked Tessl and keep the whole contract, mixed
-  distribution included. A tag publication pushes its tag, resolves that tag's
-  own run, and confirms its own release and assets, running none of the Tessl
-  helpers; a package on both channels owes both confirmations independently.
-  `SCRIPTING.md`'s wrapper contract carries the same split. Step 3's versioning
-  became channel-aware alongside it: the `smart-publish` auto-bump is a Tessl
-  mechanic, a tag-only package writes every bump into its own manifest and tags
-  that version, and a package on both channels sets the version explicitly so
-  one version serves both. Each channel also holds its own resolved run id, so
-  a mixed release never confirms one channel's publication against the other's
-  run.
-
-  That correction pulled in **#371's tag resolver**, which the release-skill
-  split needs. `resolve-publish-run.sh` hard-coded `--branch main`, so a
-  tag-triggered release — whose run carries the tag name as its `headBranch` —
-  was unfindable even with a matching commit and event, as observed shipping
-  ACR v0.1.4 (run 34188269042, `headBranch=v0.1.4`). An optional fifth `ref`
-  argument now defaults to `main`, leaving the four-argument merge-to-main form
-  unchanged. Selection binds workflow, ref, commit and `push` event together,
-  excluding an unrelated branch or tag at the same commit and a manual dispatch
-  on the requested ref, and an empty ref argument is rejected rather than
-  silently resolving main's run. The filter emits every match instead of the
-  first: two runs matching all four facts — a deleted and re-pushed tag — is an
-  ambiguity refused with a diagnostic naming the candidates, never a silently
-  chosen winner. The suite's `gh` mock became a transport mock, each queued
-  response naming a fixture holding a raw `gh run list --json` array that the
-  mock puts through gh's own two stages, `--branch` narrowing then the caller's
-  `--jq`, so the script's selection predicate is what the fixtures exercise:
-  main push, matching tag, unrelated same-commit refs, manual dispatch, delayed
-  enqueue, ambiguity, and the client-side ref predicate on an unnarrowed
-  listing (17 cases).
-
-  New `skills/release/verify-github-release.sh` is the other channel's
-  published-artifact evidence. A green run conclusion survives an upload that
-  never completed, a draft left unpublished, and a release created at another
-  tag, so the helper reads the release itself: it exists at the exact tag, is
-  not a draft, and every asset reports GitHub's `uploaded` state. A 404 is a
-  definitive no; an auth or network failure stays indeterminate at exit 2, so a
-  caller that cannot tell never claims the artifact landed — the same
-  fail-closed discrimination `registry-has-version.sh` makes. Field extraction
-  runs inside gh's own `--jq`, so the script carries no system-jq dependency.
-  It takes the resolved run id and reads two conjuncts, the tag/asset
-  counterpart of `verify-publish-landed.sh`'s pair: the run's `conclusion` is
-  `success`, AND the release is retrievable. Conjunct 1 alone passes a run that
-  uploaded assets and then failed a later step; conjunct 2 alone passes a green
-  run that never created the release. A run still in flight reads as
-  indeterminate, never as a failed publish. Every interpolated value goes
-  through a `json_escape` that a quote- or backslash-bearing tag round-trips
-  through jq — it returns rather than exits, since it runs in a command
-  substitution, and every caller propagates its status instead of printing an
-  envelope built from an empty string — and every definitive no writes an actionable stderr diagnostic
-  beside its stdout envelope. `tests/test_verify_github_release.sh` covers
-  successful, failed-conclusion, in-flight, unreadable-run, absent, draft,
-  empty-asset, still-uploading, tag-mismatch, auth-failure,
-  unparseable-payload, argument-validation, stderr-diagnostic,
-  quote-bearing-tag and missing-gh paths (17 cases).
 
   The `skill-review` action needed no change: it already hard-fails with a
   setup error when no Tessl manifest resolves, which is the correct behaviour

@@ -60,7 +60,7 @@ Decide the bump per semver, then apply it the way the channels named in Step 7 r
 
 - **Tessl** — patch is the default and is auto-bumped by the publish workflow's `smart-publish` step; update the manifest version only for minor or major
 - **GitHub tag/asset** — nothing auto-bumps here. Write every bump, patch included, into the package manifest in this PR (`agent-plugin.yaml` for an ACR package), and cut Step 7's release tag at that same version
-- **Both** — set the version explicitly in the manifest in this PR instead of relying on the auto-bump, and tag that same version. The two channels publish one version
+- **Both** — set one version explicitly in every channel's manifest in this PR and tag that version. Verify that the actual Tessl publishing workflow preserves it without auto-bumping: use `publish-mode: as-is` with `.github/workflows/publish-plugin.yml`, or `mode: as-is` when calling `.github/actions/smart-publish` directly. For another publisher, inspect its supported mechanism before proceeding. Keep the required skill review, registry confirmation and moderation checks enabled
 
 ## Step 4 — Policy Review Fires Automatically
 
@@ -139,7 +139,7 @@ Run it once Step 5's poll shows every bot's latest verdict clean. It emits a JSO
 - **GitHub tag/asset** — a publish workflow triggered on a tag push (`on: push: tags:`) that creates a release carrying the package's assets, an ACR package published by `acr publish`
 - **Both** — every step below marked Tessl AND every step marked tag/asset, each read from its own channel. A green GitHub release confirms nothing about a pending Tessl moderation, and a cleared Tessl publish confirms nothing about an absent GitHub asset
 
-**Tessl only:** capture the registry baseline before merging. A publication on another channel skips this step:
+**Tessl publication:** capture the registry baseline before merging. A publication on another channel skips this step:
 
 ```bash
 PRE=$(skills/release/capture-registry-baseline.sh <workspace> <plugin> | jq -r .version)
