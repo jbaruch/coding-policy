@@ -5,7 +5,7 @@
 `config.example.json` is the operator-owned tier table. Config schema 2 adds
 per-agent `tiers` and `launch_args`; schema 1 remains readable without tiers.
 The utility never rewrites the operator's config. Copy the example into a new
-file, preserve local agent names and permission choices, then validate it with
+file, preserve local agent names and UI options, then validate it with
 `teamlead.sh plan --preview-tiers` before replacing a working configuration.
 
 Each `tiers` entry maps a round type to:
@@ -38,10 +38,25 @@ governs scoped rechecks too. This resolves the research table's conflicting
 lower-tier recheck examples. The separate pinned judge remains outside the
 rotating workers' tier tables and shares its configured usage window.
 
-`launch_args` carries explicit operator permission and UI options across a
-restart. It defaults to empty and never adds broader permissions by itself.
-Tier flags, resume options, command strings, and prompt operands are refused
-there. Change the tier table to change the model or effort.
+Every team worker starts in YOLO mode, including the pinned judge and release
+worker. The lead's assignment classifier checks each brief against the task's
+authorization and permitted actions before dispatch. Worker permission prompts
+are not a second assignment gate; the brief's role, path, and authority limits
+still apply in YOLO mode.
+
+`launch_args` preserves supported UI options across restarts. The launcher
+supplies each runtime's YOLO flags and refuses conflicting permission options
+before stopping a worker. The permission contract is in
+`skills/herdr-teamlead/teamlead/tiers.py` (`YOLO_FLAGS`, `worker_launch_args`,
+and `verify_worker_permissions`). Tier flags, resume options, command
+strings, and prompt operands remain forbidden in `launch_args`; change the tier
+table to change the model or effort.
+
+For initial manual starts through Herdr, pass the runtime's YOLO options after
+`--`. Verify the resulting launch or foreground-process argv before sending a
+brief. Existing workers, including non-tiered workers, require that same proof.
+Do not clear or restart a retained worker to repair a permission mismatch; use
+the normal fresh-dispatch boundary once the current assignment is resolved.
 
 Recheck model availability and CLI flag spellings when upgrading a worker's
 CLI or changing a model pin. Refresh the qualification for every changed
@@ -105,7 +120,7 @@ inspect the named pane before retrying. No command is sent to a working or
 blocked worker.
 
 `--no-clear` and `--retain-context` verify the running foreground process
-arguments instead of restarting it. If the process record lacks argv, the
+arguments, including YOLO mode, instead of restarting it. If the process record lacks argv, the
 transport reads `ps` for that same foreground PID. Older Herdr builds that
 cannot supply the structured process record fail closed. A retained fix also
 needs the existing task/fix history and live native session identity; it keeps

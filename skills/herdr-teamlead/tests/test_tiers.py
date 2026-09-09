@@ -9,7 +9,7 @@ from types import SimpleNamespace
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from teamlead.errors import ConfigError, HerdrError, UsageError
-from teamlead.tiers import launch_flags, mechanical_allowed, parse_tiers, select_tier as _select_tier, verify_argv
+from teamlead.tiers import launch_flags, mechanical_allowed, parse_tiers, select_tier as _select_tier, verify_argv, verify_worker_permissions, worker_launch_args
 
 
 def select_tier(*args, **kwargs):
@@ -110,6 +110,70 @@ class SelectionTest(unittest.TestCase):
 
 
 class ArgvTest(unittest.TestCase):
+    def test_legacy_live_permission_proof_accepts_canonical_and_equivalent_modes(self):
+        for kind, argv in (
+            ("claude", ["claude", "--dangerously-skip-permissions", "--model", "opus-5"]),
+            ("claude", ["claude", "--permission-mode", "bypassPermissions"]),
+            ("codex", ["codex", "--dangerously-bypass-approvals-and-sandbox", "-c", "model_reasoning_effort=high"]),
+            ("codex", ["codex", "-a", "never", "-s", "danger-full-access", "--no-alt-screen"]),
+            ("grok", ["grok", "--always-approve", "--no-subagents", "--reasoning-effort", "high"]),
+        ):
+            with self.subTest(kind=kind, argv=argv):
+                self.assertIsNone(verify_worker_permissions(kind, argv))
+
+    def test_legacy_live_permission_proof_rejects_missing_overrides_and_lookalikes(self):
+        for kind, argv in (
+            ("claude", ["claude", "--model", "opus-5"]),
+            ("claude", ["claude", "--model", "--dangerously-skip-permissions"]),
+            ("claude", ["claude", "--dangerously-skip-permissions", "--permission-mode", "plan"]),
+            ("claude", ["claude", "--permission-mode"]),
+            ("codex", ["codex", "-a", "never"]),
+            ("codex", ["codex", "-s", "danger-full-access"]),
+            ("codex", ["codex", "--dangerously-bypass-approvals-and-sandbox", "-c", 'approval_policy="on-request"']),
+            ("grok", ["grok", "--always-approve", "--resume", "session"]),
+            ("grok", ["grok", "--always-approve", "--permission-mode", "default"]),
+            ("grok", ["wrapper", "grok", "--always-approve"]),
+            ("grok", "grok --always-approve"), ("grok", ["grok", 1]),
+            ("unknown", []),
+        ):
+            with self.subTest(kind=kind, argv=argv), self.assertRaisesRegex(HerdrError, "before dispatch"):
+                verify_worker_permissions(kind, argv)
+
+    def test_worker_defaults_and_ui_options_use_yolo_for_each_cli(self):
+        for kind, options, expected in (
+            ("claude", [], ["--dangerously-skip-permissions"]),
+            ("codex", ["--no-alt-screen"], ["--dangerously-bypass-approvals-and-sandbox", "--no-alt-screen"]),
+            ("grok", ["--no-subagents", "--no-alt-screen"], ["--always-approve", "--no-subagents", "--no-alt-screen"]),
+        ):
+            with self.subTest(kind=kind):
+                self.assertEqual(worker_launch_args(kind, options), expected)
+                self.assertEqual(worker_launch_args(kind, expected), expected)
+
+    def test_permission_aliases_normalize_without_duplicate_flags(self):
+        cases = (("claude", ["--permission-mode", "bypassPermissions"], "--dangerously-skip-permissions"),
+                 ("codex", ["-a", "never", "--sandbox", "danger-full-access"], "--dangerously-bypass-approvals-and-sandbox"),
+                 ("grok", ["--permission-mode", "bypassPermissions", "--always-approve"], "--always-approve"))
+        for kind, options, expected in cases:
+            with self.subTest(kind=kind):
+                self.assertEqual(worker_launch_args(kind, options), [expected])
+
+    def test_restrictive_options_cannot_override_yolo(self):
+        cases = (("claude", ["--permission-mode", "default"]),
+                 ("claude", ["--dangerously-skip-permissions", "--permission-mode", "plan"]),
+                 ("codex", ["--full-auto"]), ("codex", ["-a", "on-request"]),
+                 ("codex", ["--sandbox", "workspace-write"]),
+                 ("codex", ["--dangerously-bypass-approvals-and-sandbox", "-s", "read-only"]),
+                 ("grok", ["--permission-mode", "acceptEdits"]))
+        for kind, options in cases:
+            with self.subTest(kind=kind, options=options), self.assertRaisesRegex(ConfigError, "required YOLO mode"):
+                worker_launch_args(kind, options)
+
+    def test_unknown_kind_and_unsupported_arguments_fail(self):
+        for kind, options in (("unsupported", []), ("codex", ["--model", "other"]),
+                              ("claude", ["--permission-mode"]), ("grok", ["--always-approve", "--always-approve"])):
+            with self.subTest(kind=kind), self.assertRaises(ConfigError):
+                worker_launch_args(kind, options)
+
     def test_each_installed_cli_has_exact_flags(self):
         for kind in ("claude", "codex", "grok"):
             tier = select_tier(agent(kind), "reviewer")

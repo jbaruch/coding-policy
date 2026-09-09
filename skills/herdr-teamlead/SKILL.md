@@ -25,6 +25,7 @@ References:
 skills/herdr-teamlead/references/herdr.md
 skills/herdr-teamlead/references/round-flow.md
 skills/herdr-teamlead/references/round-setup.md
+skills/herdr-teamlead/references/task-ledger.md
 skills/herdr-teamlead/state-schema.md
 ```
 
@@ -55,6 +56,8 @@ Emits the caller and live workers with kind, pane, and state.
 
 If roles lack workers, name one or record combined roles in a single brief.
 Never duplicate dispatch targets.
+Start workers in YOLO mode under `references/model-tiers.md`; preserve it on
+relaunch. Verify live permission flags before dispatch, including existing workers.
 
 ## Step 3 — Verify Authority for the Repo
 
@@ -75,6 +78,8 @@ Emits ownership evidence; `authorized` reflects namespace ownership alone.
 Record the task's existing source and words in `TASK_AUTHORIZATION`,
 and permitted actions and repo in `AUTHORIZED_ACTIONS`. Read-only uses `none`.
 Ownership never expands task scope. Examples: `references/round-setup.md`.
+Create or resume the stable task ledger under `references/task-ledger.md`.
+Record its absolute path with the task authorization before the first dispatch.
 Proceed immediately to Step 4.
 
 ## Step 4 — Measure Headroom
@@ -168,18 +173,14 @@ and reviewer/tester package paths and full commit IDs before writing.
 Give every assignment a fresh absolute report path; never reuse a prior
 attempt's path or share one between roles.
 
-Supply shared checkout, Step 3's authority/permission, and each role's issue,
-branch, worktree, report paths, phase, and mode. Reviewer/tester inputs also
-carry Step 6's package and range. Placeholder details and phase/mode table:
+Populate the shared and role-specific values under this reference's Step 7
+contract, including the authority and review evidence from earlier steps:
 
 ```text
 skills/herdr-teamlead/references/round-setup.md
 ```
 
-Briefs identify every issue, finding, file, and prior report in full. Phase 2
-names the pushed SHA. Fixes carry prior attempt count and required ownership
-handoff. Verification names `full` or `scoped`, prior findings, and the
-follow-up for new advisories. Final release verification is `full`.
+Apply the Step 7 reference's brief-completeness requirements.
 Proceed immediately to Step 8.
 
 ## Step 8 — Provision the Worktrees
@@ -225,26 +226,13 @@ bash "$CP/skills/herdr-teamlead/teamlead.sh" apply \
 Emits per-role JSON with clear/session evidence, task, fix number, verified
 tier, and delivery status. Labelled dispatches carry `dispatch_id` and any
 `context_transition`; fields are documented in `skills/herdr-teamlead/state-schema.md`.
+Classify every brief against Step 3's authorization before sending it.
+Append the dispatch outcome to the task ledger; `applied` proves dispatch only.
 
-Keep the same `--task` identifier from initial development through all its
-fixes. Omit `--fix-round` on the initial assignment; supply it on every fix.
-Never trim or merge legacy identities. Retained fixes dispatch developer alone
-with `--retain-context`; other roles get separate cleared assignments. Retention
-requires matching confirmed history, live native-session continuity, and a
-compatible verified tier. Missing evidence requires owner recovery, preserving
-the original record and counter. Tiered dispatch requires current qualification.
-
-After a recorded release clear, dispatch the next developer correction fresh
-within the same task and allowance. No context-change permission is required.
-Carry the release report, findings, original base, and cumulative count into
-the brief. Step 12's full verification remains required before release.
-
-After another role clears the developer, use `recover-role-clear` under the
-recovery reference. Pass its same `--work` to plan and fresh apply.
-
-Reuse an approved bounded correction plan while its scope and budget hold.
-An unknown dispatch outcome pauses implementation for evidence-based recovery.
-An identical completed retry returns its recorded result without sending again.
+Apply the recovery reference's Dispatch context requirements before sending.
+Preserve task identity and cumulative fix count. Retained fixes dispatch
+developer alone; other roles clear separately. Reconcile unknown outcomes
+before retrying. Reuse existing correction authorization within its bounds.
 
 - **Exit 0** — proceed to Step 11.
 - **Busy target** — no dispatch occurred. Wait for readiness or replan; stay
@@ -259,7 +247,7 @@ An identical completed retry returns its recorded result without sending again.
   argv. It contacts no worker, writes no ledger, and proves no live tier or
   qualification. Finish here.
 
-Recovery and executable refusal contracts:
+Read the context, recovery, and executable refusal contracts:
 
 ```text
 skills/herdr-teamlead/references/dispatch-recovery.md
@@ -282,11 +270,14 @@ emits only stderr. Exits 4–5 add `reason`. Delivery requires the file and its
 complete, unquoted `REPORT: <absolute-path>` marker on one pane row. Known native
 decoration requires completed source-message proof. Names,
 quoted examples, wrapped fragments, or lifecycle state alone never confirm it.
-The script owns timing.
+The script owns timing. Append every wait outcome to the task ledger before
+moving to another worker; keep Herdr state separate from the lead's assessment.
 
-- **Exit 0** — read the completed report; continue to the next worker, then Step 12.
-- **Exit 1** — inspect the named worker. Re-run this wait if it is working;
-  otherwise record the missing report and continue to the next worker.
+- **Exit 0** — read the report and record delivery; continue to the next worker,
+  then Step 12. Delivery alone does not accept the work.
+- **Exit 1** — inspect the named worker's live pane and native evidence. Re-run
+  this wait for confirmed ongoing work; otherwise record the missing report
+  and continue to the next worker. A Herdr label alone decides neither outcome.
 - **Exit 2** — report the tool failure and finish here.
 - **Exit 3** — relay the blocked worker's dialog to the operator and stop its
   round. Resume the wait only after the live state leaves `blocked`.
@@ -310,6 +301,9 @@ missing report.
 Read every report file in full, including a report whose worker exited cleanly.
 A `## BLOCKED` section can sit under a report that otherwise reads as finished.
 Classify each finding blocking or advisory per `rules/review-severity.md`.
+Record assignment acceptance or outstanding work in the task ledger against
+the inspected report and artifact evidence. Record the task's gate decision
+separately; a worker finishing its brief never completes the whole task.
 
 - **Any blocking finding** — follow `rules/agent-team-operation.md` Fix Loops.
   Read this task's confirmed fix history, name the next fix number, and return
@@ -447,7 +441,8 @@ the developer's agent (template `templates/brief-release.md`, the same
 the brief is fresh, and wait on the report in Step 11. A source-changing
 release finding returns to Step 12 for the next counted developer assignment.
 The worker merges after all gates pass. Proceed immediately to Step 21 only
-after its report confirms the release.
+after verifying its reported release against the live VCS and release gates.
+Record that evidence in the task ledger.
 
 ## Step 21 — Clean Up the Worktree
 
@@ -456,9 +451,10 @@ per `rules/agent-worktree-isolation.md`. Proceed immediately to Step 22.
 
 ## Step 22 — Log the Round
 
-Log the round: the assignments, the report paths, the findings, and the
-outcome. If the round produced no findings at all, log it and say so in one
-line rather than reproducing the reports. Finish here.
+Finalize the task ledger with the round outcome and remaining obligations.
+Mark the task completed only after its acceptance criteria and required
+release and cleanup obligations are verified. Preserve the ledger for resume
+and standup. Report its absolute path and the outcome. Finish here.
 
 For the daily standup, use
 `Skill(skill: "herdr-standup")`.

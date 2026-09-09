@@ -1,5 +1,26 @@
 # Changelog
 
+### Changed
+
+- **YOLO workers and durable task decisions.** Every Herdr team member starts
+  and restarts in the runtime's YOLO mode, including reviewer, tester, release,
+  and judge. The lead classifies each assignment against the operator's task
+  authority before dispatch; permission prompts in a worker are not a second
+  assignment review. Launch verification preserves that mode without changing
+  the brief's role, path, or authority limits, and restrictive launch options
+  are refused before a worker is terminated.
+
+  Herdr's completion labels are observations, including repeated `idle` or
+  `done` readings. The lead now keeps a stable `TASK-LEDGER.md` beside the task's
+  reports, records dispatch and report outcomes as they occur, and distinguishes
+  delivered reports, accepted assignment work, and verified task completion.
+  Acceptance names the actual report, artifact revision, and required gates;
+  resumed work revalidates those sources instead of restarting on a stale pane
+  label. This Markdown decision log has a documented schema and lead ownership;
+  the existing JSON dispatch/recovery ledger retains its shape and authority.
+  Standup reads accepted completion from the task ledger and keeps worker claims
+  distinct. Cleanup preserves the ledger for future handoffs.
+
 ## 0.3.200 — 2026-09-08
 
 ### Fixed

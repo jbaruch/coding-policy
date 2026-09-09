@@ -36,9 +36,9 @@ print(json.dumps({"result": {"agent": {"name": args[2], "agent": kind,
 ''', encoding="utf-8")
         self.fake.chmod(0o755)
 
-    def run_launcher(self, model="claude-fable-5-1", effort: str | None = "max", kind="claude", **env):
+    def run_launcher(self, model="claude-fable-5-1", effort: str | None = "max", kind="claude", launch_args=None, **env):
         self.plan.write_text(json.dumps({"schema_version": 3, "assignments": {"judge": "judge"},
-            "judge": {"agent": "judge", "model": model, "effort": effort}}), encoding="utf-8")
+            "judge": {"agent": "judge", "model": model, "effort": effort, "launch_args": launch_args or []}}), encoding="utf-8")
         return subprocess.run(["bash", str(SUT), str(self.plan), "w1:p2", kind],
             env={**os.environ, "HERDR_BIN": str(self.fake), "FAKE_LOG": str(self.log), **env},
             capture_output=True, text=True, check=False)
@@ -48,8 +48,8 @@ print(json.dumps({"result": {"agent": {"name": args[2], "agent": kind,
         self.assertEqual(result.returncode, 0, result.stderr)
         proof = json.loads(result.stdout)
         self.assertTrue(proof["argv_verified"])
-        self.assertEqual(proof["verified"]["argv"], ["claude", "--model", "claude-fable-5-1", "--effort", "max"])
-        self.assertEqual(json.loads(self.log.read_text())[7:], ["--", "--model", "claude-fable-5-1", "--effort", "max"])
+        self.assertEqual(proof["verified"]["argv"], ["claude", "--dangerously-skip-permissions", "--model", "claude-fable-5-1", "--effort", "max"])
+        self.assertEqual(json.loads(self.log.read_text())[7:], ["--", "--dangerously-skip-permissions", "--model", "claude-fable-5-1", "--effort", "max"])
 
     def test_no_effort_model_and_each_supported_cli(self):
         for model, effort, kind in (("claude-haiku-4-5", None, "claude"),
@@ -58,6 +58,19 @@ print(json.dumps({"result": {"agent": {"name": args[2], "agent": kind,
                 result = self.run_launcher(model, effort, kind)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(json.loads(result.stdout)["effort"], effort)
+                expected = {"claude": "--dangerously-skip-permissions", "codex": "--dangerously-bypass-approvals-and-sandbox", "grok": "--always-approve"}[kind]
+                self.assertIn(expected, json.loads(result.stdout)["verified"]["argv"])
+
+    def test_judge_restrictive_launch_options_refuse_before_transport(self):
+        result = self.run_launcher(launch_args=["--permission-mode", "plan"])
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("required YOLO mode", result.stderr)
+        self.assertFalse(self.log.exists())
+
+    def test_judge_losing_only_yolo_flag_is_unproven(self):
+        result = self.run_launcher(FAKE_ARGV=json.dumps(["claude", "--model", "claude-fable-5-1", "--effort", "max"]))
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("launch options", result.stderr)
 
     def test_missing_different_duplicate_and_transcript_arguments_refuse(self):
         for argv in (["claude", "--model", "claude-fable-5-1"],

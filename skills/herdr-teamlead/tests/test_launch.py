@@ -8,7 +8,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from teamlead.config import Agent
-from teamlead.errors import AgentBusyError, HerdrError
+from teamlead.errors import AgentBusyError, ConfigError, HerdrError
 from teamlead.launch import restart_worker, start_worker, verify_running
 
 
@@ -45,7 +45,7 @@ class Client:
 
     def process_args(self, pid):
         self.calls.append(("ps", pid))
-        return ["claude", "--model", "opus-5", "--effort", "high"]
+        return ["claude", "--dangerously-skip-permissions", "--model", "opus-5", "--effort", "high"]
 
 
 def worker():
@@ -60,7 +60,7 @@ class LaunchTest(unittest.TestCase):
         client = Client()
         proof = restart_worker(client, worker(), "w1:p2", TIER, sleep=lambda _: None)
         self.assertIn(("terminate", 200), client.calls)
-        self.assertEqual(proof["argv"], ["claude", "--model", "opus-5", "--effort", "high"])
+        self.assertEqual(proof["argv"], ["claude", "--dangerously-skip-permissions", "--model", "opus-5", "--effort", "high"])
         self.assertEqual(proof["source"], "launch_argv")
 
     def test_busy_or_changed_pane_never_terminates(self):
@@ -99,7 +99,7 @@ class LaunchTest(unittest.TestCase):
 
     def test_existing_worker_uses_live_arguments_without_relaunch(self):
         client = Client()
-        client.process["argv"] = ["claude", "--model", "opus-5", "--effort", "high"]
+        client.process["argv"] = ["claude", "--dangerously-skip-permissions", "--model", "opus-5", "--effort", "high"]
         proof = verify_running(client, worker(), "w1:p2", TIER)
         self.assertEqual(proof["source"], "process_argv")
         self.assertEqual(client.calls, [])
@@ -111,12 +111,32 @@ class LaunchTest(unittest.TestCase):
         self.assertEqual(proof["pid"], 200)
         self.assertEqual(client.calls, [("ps", 200)])
 
-    def test_operator_launch_options_survive_restart(self):
+    def test_permission_alias_normalizes_to_one_yolo_flag(self):
         client = Client()
         agent = worker()
-        agent.launch_args = ("--permission-mode", "acceptEdits")
+        agent.launch_args = ("--permission-mode", "bypassPermissions")
         proof = start_worker(client, agent, "w1:p2", TIER)
-        self.assertEqual(proof["argv"][1:3], ["--permission-mode", "acceptEdits"])
+        self.assertEqual(proof["argv"], ["claude", "--dangerously-skip-permissions", "--model", "opus-5", "--effort", "high"])
+
+    def test_restrictive_options_refuse_before_termination_or_start(self):
+        for action in (start_worker, restart_worker):
+            client = Client()
+            agent = worker()
+            agent.launch_args = ("--permission-mode", "acceptEdits")
+            with self.subTest(action=action.__name__), self.assertRaisesRegex(ConfigError, "remove restrictive.*config.json"):
+                action(client, agent, "w1:p2", TIER)
+            self.assertEqual(client.calls, [])
+            self.assertFalse(client.terminated)
+
+    def test_missing_yolo_flag_refuses_start_and_live_proof(self):
+        for action in (start_worker, verify_running):
+            client = Client()
+            argv = ["claude", "--model", "opus-5", "--effort", "high"]
+            client.reply_argv = argv
+            client.process["argv"] = argv
+            with self.subTest(action=action.__name__), self.assertRaisesRegex(HerdrError, "launch options"):
+                action(client, worker(), "w1:p2", TIER)
+            self.assertFalse(client.terminated)
 
 
 if __name__ == "__main__":
