@@ -57,7 +57,7 @@ REPO=good-oss-citizen
 TAG=v0.1.4
 RUN_ID=34188269042
 
-TMPDIR_TEST=$(mktemp -d -t verify-gh-release-test.XXXXXX)
+TMPDIR_TEST=$(mktemp -d "${TMPDIR:-/tmp}/verify-gh-release-test.XXXXXX") || { echo "fatal: could not create the test temporary directory" >&2; exit 2; }
 cleanup_tmp() {
   if [[ -n "${TMPDIR_TEST:-}" ]]; then
     if ! rm -rf "$TMPDIR_TEST"; then
@@ -71,6 +71,25 @@ export MOCK_BODY_FILE="$TMPDIR_TEST/body.json"
 export MOCK_MODE_FILE="$TMPDIR_TEST/mode"
 export MOCK_RUN_FILE="$TMPDIR_TEST/run-mode"
 
+# Own every file the helper creates, including on a failed assertion.
+# Explicit -p also works on macOS versions whose mktemp -t ignores TMPDIR.
+mkdir "$TMPDIR_TEST/script-tmp" || exit 2
+mktemp() { command mktemp -p "$TMPDIR_TEST/script-tmp" "$@"; }
+
+# The harness owns its EXIT trap; each invocation must install the
+# helper's trap in the subshell that owns VGR_ERR_FILE. Preserve main's
+# return/exit status so the existing success and failure checks still gate.
+invoke_main() (
+  trap cleanup_vgr_err_file EXIT
+  main "$@"
+)
+
+assert_no_script_temps() {
+  local remaining
+  remaining=$(find "$TMPDIR_TEST/script-tmp" -mindepth 1 -print) || return 1
+  assert_eq "helper temporary files after invocation" "" "$remaining"
+}
+
 assert_eq() {
   local label="$1" expected="$2" actual="$3"
   if [[ "$expected" == "$actual" ]]; then
@@ -82,7 +101,7 @@ assert_eq() {
 
 run() {
   local name="$1"; shift
-  if "$@"; then
+  if "$@" && assert_no_script_temps; then
     PASS_COUNT=$((PASS_COUNT + 1))
     echo "  pass: $name"
   else
@@ -153,7 +172,7 @@ test_published_release() {
 }
 JSON
   local out rc=0
-  out=$(main "$OWNER" "$REPO" "$TAG" "$RUN_ID" 2>/dev/null) || rc=$?
+  out=$(invoke_main "$OWNER" "$REPO" "$TAG" "$RUN_ID" 2>/dev/null) || rc=$?
   assert_eq "exit code" "0" "$rc" || return 1
   assert_eq "ok" "true" "$(ok_of "$out")" || return 1
   assert_eq "asset count" "2" "$(echo "$out" | jq -r '.assets')" || return 1
@@ -174,7 +193,7 @@ test_failed_run_conclusion() {
 JSON
   set_run failure
   local out rc=0
-  out=$(main "$OWNER" "$REPO" "$TAG" "$RUN_ID" 2>/dev/null) || rc=$?
+  out=$(invoke_main "$OWNER" "$REPO" "$TAG" "$RUN_ID" 2>/dev/null) || rc=$?
   assert_eq "exit code" "1" "$rc" || return 1
   assert_eq "ok" "false" "$(ok_of "$out")" || return 1
   assert_eq "run conclusion" "failure" "$(echo "$out" | jq -r '.run_conclusion')" || return 1
@@ -194,7 +213,7 @@ test_run_in_flight() {
 JSON
   set_run null
   local out stderr rc=0
-  out=$(main "$OWNER" "$REPO" "$TAG" "$RUN_ID" 2>"$TMPDIR_TEST/err") || rc=$?
+  out=$(invoke_main "$OWNER" "$REPO" "$TAG" "$RUN_ID" 2>"$TMPDIR_TEST/err") || rc=$?
   stderr=$(cat "$TMPDIR_TEST/err")
   assert_eq "exit code" "2" "$rc" || return 1
   assert_eq "stdout must stay empty" "" "$out" || return 1
@@ -209,7 +228,7 @@ test_run_lookup_failure() {
 JSON
   set_run ERROR
   local out rc=0
-  out=$(main "$OWNER" "$REPO" "$TAG" "$RUN_ID" 2>/dev/null) || rc=$?
+  out=$(invoke_main "$OWNER" "$REPO" "$TAG" "$RUN_ID" 2>/dev/null) || rc=$?
   assert_eq "exit code" "2" "$rc" || return 1
   assert_eq "stdout must stay empty" "" "$out" || return 1
 }
@@ -220,7 +239,7 @@ test_missing_release() {
   set_mode 404
   set_run success
   local out rc=0
-  out=$(main "$OWNER" "$REPO" "$TAG" "$RUN_ID" 2>/dev/null) || rc=$?
+  out=$(invoke_main "$OWNER" "$REPO" "$TAG" "$RUN_ID" 2>/dev/null) || rc=$?
   assert_eq "exit code" "1" "$rc" || return 1
   assert_eq "ok" "false" "$(ok_of "$out")" || return 1
   [[ "$(reason_of "$out")" == *"$TAG"* ]] || { echo "    FAIL: reason should name the tag, got: $(reason_of "$out")" >&2; return 1; }
@@ -238,7 +257,7 @@ test_draft_release() {
 }
 JSON
   local out rc=0
-  out=$(main "$OWNER" "$REPO" "$TAG" "$RUN_ID" 2>/dev/null) || rc=$?
+  out=$(invoke_main "$OWNER" "$REPO" "$TAG" "$RUN_ID" 2>/dev/null) || rc=$?
   assert_eq "exit code" "1" "$rc" || return 1
   assert_eq "ok" "false" "$(ok_of "$out")" || return 1
   [[ "$(reason_of "$out")" == *"draft"* ]] || { echo "    FAIL: reason should name the draft state, got: $(reason_of "$out")" >&2; return 1; }
@@ -256,7 +275,7 @@ test_no_assets() {
 }
 JSON
   local out rc=0
-  out=$(main "$OWNER" "$REPO" "$TAG" "$RUN_ID" 2>/dev/null) || rc=$?
+  out=$(invoke_main "$OWNER" "$REPO" "$TAG" "$RUN_ID" 2>/dev/null) || rc=$?
   assert_eq "exit code" "1" "$rc" || return 1
   assert_eq "ok" "false" "$(ok_of "$out")" || return 1
   [[ "$(reason_of "$out")" == *"no assets"* ]] || { echo "    FAIL: reason should name the empty asset list, got: $(reason_of "$out")" >&2; return 1; }
@@ -277,7 +296,7 @@ test_asset_not_uploaded() {
 }
 JSON
   local out rc=0
-  out=$(main "$OWNER" "$REPO" "$TAG" "$RUN_ID" 2>/dev/null) || rc=$?
+  out=$(invoke_main "$OWNER" "$REPO" "$TAG" "$RUN_ID" 2>/dev/null) || rc=$?
   assert_eq "exit code" "1" "$rc" || return 1
   assert_eq "ok" "false" "$(ok_of "$out")" || return 1
   [[ "$(reason_of "$out")" == *"1 of 2"* ]] || { echo "    FAIL: reason should name the counts, got: $(reason_of "$out")" >&2; return 1; }
@@ -295,7 +314,7 @@ test_tag_mismatch() {
 }
 JSON
   local out rc=0
-  out=$(main "$OWNER" "$REPO" "$TAG" "$RUN_ID" 2>/dev/null) || rc=$?
+  out=$(invoke_main "$OWNER" "$REPO" "$TAG" "$RUN_ID" 2>/dev/null) || rc=$?
   assert_eq "exit code" "1" "$rc" || return 1
   [[ "$(reason_of "$out")" == *"v0.1.5"* ]] || { echo "    FAIL: reason should name the tag actually returned, got: $(reason_of "$out")" >&2; return 1; }
 }
@@ -306,7 +325,7 @@ test_auth_failure_indeterminate() {
   set_mode auth
   set_run success
   local out stderr rc=0
-  out=$(main "$OWNER" "$REPO" "$TAG" "$RUN_ID" 2>"$TMPDIR_TEST/err") || rc=$?
+  out=$(invoke_main "$OWNER" "$REPO" "$TAG" "$RUN_ID" 2>"$TMPDIR_TEST/err") || rc=$?
   stderr=$(cat "$TMPDIR_TEST/err")
   assert_eq "exit code" "2" "$rc" || return 1
   assert_eq "stdout must stay empty" "" "$out" || return 1
@@ -320,7 +339,7 @@ test_unparseable_payload() {
 {"unexpected": "shape"}
 JSON
   local out rc=0
-  out=$(main "$OWNER" "$REPO" "$TAG" "$RUN_ID" 2>/dev/null) || rc=$?
+  out=$(invoke_main "$OWNER" "$REPO" "$TAG" "$RUN_ID" 2>/dev/null) || rc=$?
   assert_eq "exit code" "2" "$rc" || return 1
   assert_eq "stdout must stay empty" "" "$out" || return 1
 }
@@ -329,7 +348,7 @@ run "unparseable release payload is indeterminate" test_unparseable_payload
 # --- Test 9: argument validation ---------------------------------------------
 test_wrong_arg_count() {
   local stderr rc=0
-  stderr=$(main "$OWNER" "$REPO" 2>&1 >/dev/null) || rc=$?
+  stderr=$(invoke_main "$OWNER" "$REPO" 2>&1 >/dev/null) || rc=$?
   assert_eq "exit code" "2" "$rc" || return 1
   [[ "$stderr" == *"usage:"* ]] || { echo "    FAIL: stderr missing usage line, got: ${stderr}" >&2; return 1; }
 }
@@ -337,7 +356,7 @@ run "wrong argument count exits 2 with usage" test_wrong_arg_count
 
 test_empty_tag() {
   local stderr rc=0
-  stderr=$(main "$OWNER" "$REPO" "" "$RUN_ID" 2>&1 >/dev/null) || rc=$?
+  stderr=$(invoke_main "$OWNER" "$REPO" "" "$RUN_ID" 2>&1 >/dev/null) || rc=$?
   assert_eq "exit code" "2" "$rc" || return 1
   [[ "$stderr" == *"non-empty"* ]] || { echo "    FAIL: stderr should name the empty argument, got: ${stderr}" >&2; return 1; }
 }
@@ -345,7 +364,7 @@ run "empty tag argument exits 2" test_empty_tag
 
 test_bad_run_id() {
   local stderr rc=0
-  stderr=$(main "$OWNER" "$REPO" "$TAG" 0 2>&1 >/dev/null) || rc=$?
+  stderr=$(invoke_main "$OWNER" "$REPO" "$TAG" 0 2>&1 >/dev/null) || rc=$?
   assert_eq "exit code" "2" "$rc" || return 1
   [[ "$stderr" == *"positive integer"* ]] || { echo "    FAIL: stderr should reject the run id, got: ${stderr}" >&2; return 1; }
 }
@@ -387,7 +406,7 @@ JSON
     esac
     rc=0
     # Subshell: `main` is sourced, so its `exit 1` would end the harness.
-    ( main "$OWNER" "$REPO" "$TAG" "$RUN_ID" >/dev/null 2>"$TMPDIR_TEST/err" ) || rc=$?
+    ( invoke_main "$OWNER" "$REPO" "$TAG" "$RUN_ID" >/dev/null 2>"$TMPDIR_TEST/err" ) || rc=$?
     stderr=$(cat "$TMPDIR_TEST/err")
     assert_eq "${case_name} exit code" "1" "$rc" || return 1
     [[ -n "$stderr" ]] || { echo "    FAIL: ${case_name} wrote no stderr diagnostic" >&2; return 1; }
@@ -405,7 +424,7 @@ test_quote_bearing_tag_emits_valid_json() {
 {"tag_name": "${TAG}", "draft": false, "html_url": "u", "assets": [{"name": "p", "state": "uploaded"}]}
 JSON
   local out rc=0
-  out=$(main "$OWNER" "$REPO" "$weird" "$RUN_ID" 2>/dev/null) || rc=$?
+  out=$(invoke_main "$OWNER" "$REPO" "$weird" "$RUN_ID" 2>/dev/null) || rc=$?
   assert_eq "exit code" "1" "$rc" || return 1
   echo "$out" | jq -e . >/dev/null || { echo "    FAIL: envelope is not valid JSON: ${out}" >&2; return 1; }
   assert_eq "tag round-trips" "$weird" "$(echo "$out" | jq -r '.tag')" || return 1
@@ -423,7 +442,7 @@ test_control_character_tag_is_indeterminate() {
 {"tag_name": "${TAG}", "draft": false, "html_url": "u", "assets": [{"name": "p", "state": "uploaded"}]}
 JSON
   local out rc=0
-  out=$(main "$OWNER" "$REPO" "$weird" "$RUN_ID" 2>/dev/null) || rc=$?
+  out=$(invoke_main "$OWNER" "$REPO" "$weird" "$RUN_ID" 2>/dev/null) || rc=$?
   assert_eq "exit code" "2" "$rc" || return 1
   assert_eq "stdout must stay empty" "" "$out" || return 1
 }
@@ -438,7 +457,7 @@ test_control_character_conclusion_is_indeterminate() {
 JSON
   set_run "$(printf 'suc\tcess')"
   local out rc=0
-  out=$(main "$OWNER" "$REPO" "$TAG" "$RUN_ID" 2>/dev/null) || rc=$?
+  out=$(invoke_main "$OWNER" "$REPO" "$TAG" "$RUN_ID" 2>/dev/null) || rc=$?
   assert_eq "exit code" "2" "$rc" || return 1
   assert_eq "stdout must stay empty" "" "$out" || return 1
 }
@@ -454,7 +473,7 @@ test_missing_gh() {
     unset -f gh
     # shellcheck disable=SC2123  # emptying the search path is the point: `command -v gh` must find neither the mock function nor a binary
     PATH=""
-    main "$OWNER" "$REPO" "$TAG" "$RUN_ID" 2>&1 >/dev/null
+    invoke_main "$OWNER" "$REPO" "$TAG" "$RUN_ID" 2>&1 >/dev/null
   ) || rc=$?
   assert_eq "exit code" "2" "$rc" || return 1
   [[ "$stderr" == *"cli.github.com"* ]] || { echo "    FAIL: stderr should carry an install hint, got: ${stderr}" >&2; return 1; }
