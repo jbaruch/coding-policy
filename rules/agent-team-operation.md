@@ -182,6 +182,26 @@ description: Running a multi-agent team — headroom-driven role rotation, one w
 - Never restart accepted work solely on a stale Herdr status
 - The ledger's path, schema, ownership, and recovery contract are in `skills/herdr-teamlead/state-schema.md`
 
+## Retrospectives
+
+- The lead completes a retrospective at least every 24 hours during active team work
+- Check the cadence on active resume, before planning or dispatch, and between report waits
+- Complete a retrospective before clearing or relaunching an existing worker, or changing its seat, model, or effort
+- Bind transition coverage to the outgoing work and session, source evidence, and proposed assignment
+- Cover simultaneous transitions in one retrospective
+- Reuse coverage only while the covered evidence and proposed transition remain unchanged
+- A proven first-ever worker with no outgoing work needs no transition retrospective
+- Unknown worker history never proves a first launch
+- Collect observations from saved reports and read-only evidence
+- Never interrupt a working or blocked worker to collect retrospective input
+- Record verified outcomes, lessons, evidence gaps, and concrete improvements with owners and success criteria
+- Revisit prior improvement actions
+- A status snapshot or dispatch log alone never completes a retrospective
+- Persist completed notes outside task worktrees and preserve them during cleanup
+- Retrieve saved notes on request with their date, coverage, and path
+- Retrospectives grant no task authority, correction allowance, acceptance, or gate waiver
+- Execution, persistence, and retrieval contracts are in `skills/herdr-teamlead/references/retrospectives.md`
+
 ## Review Before PR
 
 - A round runs two phases: optional pre-development planning, then mandatory post-push verification

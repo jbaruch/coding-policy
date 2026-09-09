@@ -1,5 +1,24 @@
 # Changelog
 
+### Added
+
+- **Retrospectives that survive the team session.** The lead now reviews active
+  team work at least once per 24 hours and before clearing, relaunching, or
+  switching an existing worker's seat, model, or effort. The review compares
+  intended and verified outcomes, identifies useful checks and avoidable
+  friction, evaluates the observed fit of seats and models, and assigns concrete
+  improvements. Missing reports or measurements stay explicit gaps. Worker
+  reports include handoff observations; collecting feedback never interrupts
+  a working or blocked worker.
+
+  A status dump is not a retrospective. The lead writes the synthesis, and the
+  owner utility saves immutable notes and a versioned index beside the canonical
+  dispatch state. Daily cadence and transition coverage are separate checks:
+  a daily note cannot cover later work it never reviewed. One note can cover
+  a batch of outgoing assignments, with each worker bound independently to its
+  evidence and proposed transition. Saved notes remain available after cleanup,
+  including when Herdr is no longer running, with dates, task coverage, and paths.
+
 ## 0.3.201 — 2026-09-09
 
 ### Changed
