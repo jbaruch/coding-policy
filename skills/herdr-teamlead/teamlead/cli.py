@@ -13,6 +13,7 @@ I/O contract:
 import argparse
 import json
 import sys
+import time
 from contextlib import nullcontext
 from datetime import datetime, timezone
 from pathlib import Path
@@ -21,7 +22,7 @@ from types import SimpleNamespace
 from . import __version__
 from .assign import apply as apply_assignments
 from .assign import APPLY_SCHEMA_VERSION, dry_run, native_context_session, normalize_assignments, resolve_paths, validate_fix_history
-from . import attention, historical, memory, recovery, report_delivery, role_clear, retrospective, retrospective_runtime
+from . import attention, historical, memory, recovery, report_delivery, role_clear, retrospective, retrospective_runtime, supervision, supervision_runtime
 from .config import default_config_path, load_config, load_judge, load_role_costs, select_agents
 from .errors import PlanError, StateError, TeamLeadError, UsageError
 from .herdr import (
@@ -127,6 +128,7 @@ def build_parser():
     retro_show.add_argument("--id", default="latest")
     memory.register_commands(sub, common)
     attention.register_commands(sub, common)
+    supervision_runtime.register_commands(sub, common)
 
     measure_parser = sub.add_parser(
         "measure",
@@ -259,6 +261,10 @@ def build_parser():
         help="Brief for one role; repeat once per role.",
     )
     apply_parser.add_argument(
+        "--report", action="append", default=[], dest="reports", metavar="ROLE=ABS_PATH",
+        help="Expected report path per assignment; every bound supervision role requires one.",
+    )
+    apply_parser.add_argument(
         "--common",
         required=True,
         metavar="PATH",
@@ -290,7 +296,7 @@ def build_parser():
     apply_parser.add_argument(
         "--task",
         metavar="LABEL",
-        help="Task label for the pane titles, e.g. 12 or #12 (default: none).",
+        help="Original task identity for dispatch recovery, supervision, and pane titles.",
     )
     apply_parser.add_argument(
         "--now",
@@ -382,6 +388,54 @@ def _parse_briefs(pairs):
             )
         briefs[role] = path
     return briefs
+
+
+def _parse_reports(pairs, assignments):
+    """Validate the complete report map before any clear, launch, or send."""
+    reports = {}
+    for pair in pairs:
+        role, separator, path = pair.partition("=")
+        if (not separator or role not in assignments or role in reports or not path
+                or not Path(path).is_absolute() or path.endswith("/")
+                or any(ord(char) < 32 for char in path)):
+            raise UsageError("--report requires one ROLE=ABS_PATH for each assigned role; no duplicates, unknown roles, relative paths, or directory paths.", {})
+        if any(Path(existing).resolve() == Path(path).resolve() for existing in reports.values()):
+            raise UsageError("Each dispatched role needs a distinct report file; shared report paths would overwrite worker evidence.", {})
+        if Path(path).is_dir():
+            raise UsageError("The expected --report path names a directory; use the absolute report file path from the brief.", {})
+        reports[role] = path
+    return reports
+
+
+def _supervision_enrollment(state_path, identifier, task, role, name, report, at, *,
+                            pane_id=None, native=None, replay=False, persist=False):
+    """Preserve enrollment evidence; prepare a new row before worker input."""
+    data = supervision.load(state_path)
+    expected = {"id": identifier, "agent": name, "task": task, "report": report,
+                "pane_id": pane_id, "native_session": None}
+    prior = next((row for row in data["members"] if row["id"] == identifier), None)
+    if prior:
+        if any(prior["assignment"][key] != expected[key] for key in ("id", "agent", "task", "report")):
+            raise UsageError("This dispatch enrollment names different task/report evidence; preserve its original report path and reconcile before retrying.", {"role": role})
+        if not replay and not prior["active"]:
+            raise UsageError("This enrollment was resolved. Use a new explicit --dispatch-id for a new authorized transport attempt; never reactivate accepted work.", {"role": role})
+        expected = prior["assignment"]
+        current = supervision.expected_assignment(prior)
+        if persist and pane_id is not None and current["pane_id"] is not None and current["pane_id"] != pane_id:
+            raise UsageError("This dispatch now points at a different pane. Reconcile the original enrollment before a new authorized dispatch.", {"agent": name})
+        if (persist and native is not None and current["native_session"] is not None
+                and {key: value for key, value in current["native_session"].items() if key != "pane_id"}
+                != {key: value for key, value in native.items() if key != "pane_id"}):
+            raise UsageError("This dispatch has different native session evidence. Preserve the enrollment and reconcile the context before continuing.", {"agent": name})
+    elif any(row["active"] and row["assignment"]["agent"] == name for row in data["members"]):
+        raise UsageError("This worker has another active enrollment. Reconcile and resolve its existing assignment before dispatching another one.", {"agent": name})
+    if persist:
+        member = supervision.enroll(state_path, expected, at)
+        if member["active"] and native is not None:
+            known = supervision.expected_assignment(member)
+            if known["native_session"] is None:
+                supervision.refine(state_path, identifier, known["pane_id"] or pane_id, native, at)
+    return expected
 
 
 def _parse_excludes(pairs):
@@ -665,6 +719,10 @@ def cmd_apply(args, client=None, warn=None, trace=None):
     if document.get("task_context") is not None and document["task_context"] != task_context:
         raise UsageError("Saved plan and apply name different task, count or correction bounds; replan from the current ledger.", {})
     paths = resolve_paths(assignments, _parse_briefs(args.briefs), args.common)
+    reports = _parse_reports(args.reports, assignments)
+    supervised = supervision.load(state_path)["binding"] is not None
+    if supervised and (not args.task or set(reports) != set(assignments)):
+        raise UsageError("Bound team rounds require --task and one --report ROLE=ABS_PATH for every assigned role before any worker input.", {})
     replayed = []
     dispatches = {}
     # Check retry identities before next-attempt validation: a completed retry
@@ -674,7 +732,19 @@ def cmd_apply(args, client=None, warn=None, trace=None):
             identifier, fingerprint = recovery.dispatch_identity(
                 args.task, role, name, args.fix_round, paths, args.dispatch_id,
                 options={**task_context, "rounds": rounds, "retain_context": args.retain_context, "no_clear": args.no_clear})
+            if supervised:
+                # Keep legacy retry IDs, while new bound dispatch fingerprints
+                # also bind the explicit report path. Existing legacy receipts
+                # cannot retroactively prove a report input they never stored.
+                old = next((row for row in store["dispatches"] if row["id"] == identifier), None)
+                if old is None or old["fingerprint"] != fingerprint:
+                    fingerprint = supervision.digest({"dispatch": fingerprint, "report": reports[role]})
             prior = recovery.prior_dispatch(store, identifier, fingerprint)
+            if supervised:
+                saved_result = prior["result"] if prior and prior["status"] == "applied" else {}
+                _supervision_enrollment(state_path, identifier, args.task, role, name, reports[role], at,
+                    pane_id=saved_result.get("pane_id"), native=saved_result.get("context_session"),
+                    replay=bool(saved_result), persist=bool(saved_result))
             if prior and prior["status"] == "applied":
                 replayed.append({**prior["result"], "dispatch_id": identifier, "replayed": True})
             else:
@@ -726,12 +796,28 @@ def cmd_apply(args, client=None, warn=None, trace=None):
             return
         record = {**dispatches[step["role"]], "observed_before": observed,
                   "brief": step["brief"], "common": step["common"]}
+        if supervised:
+            _supervision_enrollment(state_path, record["id"], args.task, step["role"], step["agent"], reports[step["role"]], at,
+                                    pane_id=step["pane_id"], persist=True)
         recovery.reserve(store, record, at)
         save_state(state_path, state)
         prepared.append(record["id"])
 
+    def observed_native(role, name, context):
+        native = context.get("context_session")
+        if native is None and role != "developer":
+            native = native_context_session(client.agent_get(name), agents_by_name[name].kind)
+            prior = next(row for row in store["dispatches"] if row["id"] == dispatches[role]["id"])
+            if context.get("cleared") and native == prior["observed_before"].get("context_session"):
+                native = None
+        return native
+
     def before_send(step, context):
         if args.task:
+            if supervised:
+                native = observed_native(step["role"], step["agent"], context)
+                _supervision_enrollment(state_path, dispatches[step["role"]]["id"], args.task, step["role"], step["agent"], reports[step["role"]], at,
+                                        pane_id=step["pane_id"], native=native, persist=True)
             recovery.mark_sending(store, dispatches[step["role"]]["id"], at, context)
             save_state(state_path, state)
 
@@ -742,6 +828,12 @@ def cmd_apply(args, client=None, warn=None, trace=None):
             result["dispatch_id"] = dispatches[result["role"]]["id"]
             recovery.finish_dispatch(store, result["dispatch_id"], dict(result), len(state["assignments"]) - 1, at)
         save_state(state_path, state)
+        # Commit the real transport outcome before optional identity refinement;
+        # a failed sidecar write must never make a confirmed send replayable.
+        if supervised and result["status"] == "applied":
+            native = observed_native(result["role"], result["agent"], result)
+            _supervision_enrollment(state_path, result["dispatch_id"], args.task, result["role"], result["agent"], reports[result["role"]], at,
+                                    pane_id=result["pane_id"], native=native, persist=True)
 
     try:
         result = apply_assignments(
@@ -950,6 +1042,14 @@ def cmd_attention(args, client=None, warn=None, trace=None):
     return attention.run_command(args, _state_path(args), args.now or now_iso()), None
 
 
+SUPERVISION_COMMANDS = frozenset("supervision-" + action for action in ("bind", "enroll", "ack", "resolve", "hold", "resume", "drain", "status", "watch"))
+
+
+def cmd_supervision(args, client=None, warn=None, trace=None):
+    return supervision_runtime.run_command(args, _state_path(args), args.now or now_iso(),
+                                           client=client, clock=now_iso, sleeper=time.sleep), None
+
+
 COMMANDS = {
     "measure": cmd_measure,
     "plan": cmd_plan,
@@ -962,6 +1062,7 @@ COMMANDS = {
     **{command: cmd_retrospective for command in ("retro-check", "retro-record", "retro-list", "retro-show")},
     **{command: cmd_memory for command in memory.COMMANDS},
     **{command: cmd_attention for command in attention.COMMANDS},
+    **{command: cmd_supervision for command in SUPERVISION_COMMANDS},
 }
 
 
@@ -982,7 +1083,7 @@ def main(argv=None, stdout=None, stderr=None, client=None):
         # Commands that may migrate or write state share its canonical lock.
         # Dry runs, probes, and retrospective reads remain read-only.
         readonly = args.command in {"probe-report", "retro-check", "retro-list", "retro-show"} or getattr(args, "dry_run", False)
-        separate_owner = args.command in memory.COMMANDS | attention.COMMANDS
+        separate_owner = args.command in memory.COMMANDS | attention.COMMANDS | SUPERVISION_COMMANDS
         lock = nullcontext() if readonly or separate_owner else state_lock(retrospective.canonical_state(_state_path(args)))
         with lock:
             retro_lock = retrospective.lock(_state_path(args)) if not readonly and args.command in {"apply", "start-judge", "retro-record"} else nullcontext()
