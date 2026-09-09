@@ -13,6 +13,7 @@ import re
 import tempfile
 from datetime import timedelta, timezone
 from pathlib import Path
+from typing import NoReturn
 
 from .chronology import timestamp
 from .errors import StateError, UsageError
@@ -74,8 +75,7 @@ def receipt(path):
 
 
 def current_receipt(record):
-    if not isinstance(record, dict) or set(record) != {"path", "sha256", "size"}:
-        raise StateError("Malformed retrospective file receipt; restore its original metadata without rewriting history.", {})
+    validate_receipt(record)
     return receipt(record["path"]) == record
 
 
@@ -91,14 +91,41 @@ def empty(path):
             "baseline_at": None, "records": [], "transitions": []}
 
 
-def _malformed(label):
+def _malformed(label) -> NoReturn:
     raise StateError("Malformed retrospective {}; preserve its bytes and restore the original artifact.".format(label), {})
+
+
+def _nonempty(value):
+    return isinstance(value, str) and bool(value.strip())
+
+
+def _version(value):
+    return type(value) is int and value == SCHEMA_VERSION
+
+
+def _hash(value):
+    return isinstance(value, str) and re.fullmatch(r"[0-9a-f]{64}", value) is not None
+
+
+def _names(value):
+    return isinstance(value, list) and all(_nonempty(item) for item in value) and len(set(value)) == len(value)
+
+
+def _unavailable(value):
+    return isinstance(value, dict) and all(_nonempty(key) and _nonempty(reason) for key, reason in value.items())
+
+
+def _saved_time(value):
+    try:
+        return timestamp(utc(value), "Saved retrospective time")
+    except UsageError:
+        _malformed("timestamp")
 
 
 def validate_receipt(value):
     if (not isinstance(value, dict) or set(value) != {"path", "sha256", "size"}
             or not isinstance(value["path"], str) or not Path(value["path"]).is_absolute()
-            or not isinstance(value["sha256"], str) or not re.fullmatch(r"[0-9a-f]{64}", value["sha256"])
+            or not _hash(value["sha256"])
             or type(value["size"]) is not int or value["size"] < 0):
         _malformed("file receipt")
 
@@ -106,47 +133,78 @@ def validate_receipt(value):
 def validate_coverage(value):
     if not isinstance(value, list):
         _malformed("coverage")
+    agents = set()
     for row in value:
-        if (not isinstance(row, dict) or row.get("schema_version") != SCHEMA_VERSION
-                or not isinstance(row.get("agent"), str) or not row["agent"]
+        if (not isinstance(row, dict) or set(row) != {"schema_version", "agent", "source", "target", "first_start", "transition_required"}
+                or not _version(row.get("schema_version")) or not _nonempty(row.get("agent"))
                 or type(row.get("first_start")) is not bool or type(row.get("transition_required")) is not bool
                 or not isinstance(row.get("source"), dict) or not isinstance(row.get("target"), dict)):
             _malformed("coverage descriptor")
+        if row["agent"] in agents:
+            _malformed("duplicate worker coverage")
+        agents.add(row["agent"])
         source, target = row["source"], row["target"]
-        if set(source) != {"assignment_index", "assignment_digest", "dispatch_id", "task", "role", "tier", "observation", "report", "unavailable"}:
+        if set(source) != {"assignment_index", "assignment_digest", "dispatch_id", "dispatch_evidence", "task", "role", "tier", "observation", "report", "unavailable"}:
             _malformed("coverage source")
         validate_observation(source["observation"])
+        offset = source["assignment_index"]
+        if ((offset is None and source["assignment_digest"] is not None)
+                or (offset is not None and (type(offset) is not int or offset < 0 or not _hash(source["assignment_digest"])))
+                or any(source[key] is not None and not _nonempty(source[key]) for key in ("dispatch_id", "task", "role", "unavailable"))
+                or (source["tier"] is not None and not isinstance(source["tier"], dict))):
+            _malformed("coverage assignment identity")
         if source["report"] is not None:
             validate_receipt(source["report"])
-        if set(target) != {"role", "model", "effort", "context", "task", "brief", "common"} or target["context"] not in {"start", "clear", "retain"}:
+        evidence = source["dispatch_evidence"]
+        if evidence is not None:
+            if (not isinstance(evidence, dict) or set(evidence) != {"sha256", "report"}
+                    or not _hash(evidence["sha256"]) or source["dispatch_id"] is None):
+                _malformed("dispatch evidence")
+            if evidence["report"] is not None:
+                validate_receipt(evidence["report"])
+        if (set(target) != {"role", "model", "effort", "context", "task", "brief", "common"}
+                or not _nonempty(target["role"]) or not isinstance(target["context"], str)
+                or target["context"] not in {"start", "clear", "retain"}
+                or any(target[key] is not None and not _nonempty(target[key]) for key in ("model", "effort", "task"))
+                or (target["brief"] is None) != (target["common"] is None)):
             _malformed("coverage target")
         for key in ("brief", "common"):
             if target[key] is not None:
                 validate_receipt(target[key])
+        if row["first_start"] and (row["transition_required"] or target["context"] != "start"
+                or not source["observation"]["shell"]
+                or any(source[key] is not None for key in ("assignment_index", "assignment_digest", "dispatch_id", "dispatch_evidence", "task", "role", "tier", "report"))):
+            _malformed("first-start proof")
 
 
 def validate_observation(value):
     if (not isinstance(value, dict) or set(value) != {"pane_id", "native", "process", "readiness", "shell"}
-            or not isinstance(value["pane_id"], str) or not isinstance(value["process"], dict)
+            or not _nonempty(value["pane_id"]) or not isinstance(value["process"], dict)
             or set(value["process"]) != {"pid", "argv"}
             or type(value["process"]["pid"]) is not int or value["process"]["pid"] <= 0
             or not isinstance(value["process"]["argv"], list)
             or not value["process"]["argv"] or any(not isinstance(arg, str) for arg in value["process"]["argv"])
-            or not isinstance(value["readiness"], str) or type(value["shell"]) is not bool):
+            or not _nonempty(value["readiness"]) or type(value["shell"]) is not bool
+            or (value["native"] is not None and not isinstance(value["native"], dict))):
         _malformed("worker observation")
+    if value["shell"] and (value["readiness"] != "shell" or value["native"] is not None):
+        _malformed("shell observation")
 
 
 def validate_record(row):
     required = {"schema_version", "id", "completed_at", "period_start", "period_end", "triggers", "tasks", "participants", "unavailable", "sources", "note", "coverage", "input_digest"}
-    if not isinstance(row, dict) or set(row) != required or row["schema_version"] != SCHEMA_VERSION:
+    if not isinstance(row, dict) or set(row) != required or not _version(row["schema_version"]):
         _malformed("record schema")
-    identifier(row["id"])
-    for key in ("completed_at", "period_start", "period_end"):
-        utc(row[key])
+    if not isinstance(row["id"], str) or not IDENTIFIER.fullmatch(row["id"]):
+        _malformed("record identifier")
+    completed, start, end = [_saved_time(row[key]) for key in ("completed_at", "period_start", "period_end")]
+    if not start <= end <= completed:
+        _malformed("record period")
     for key in ("triggers", "tasks", "participants"):
-        if not isinstance(row[key], list) or any(not isinstance(item, str) or not item for item in row[key]):
+        if not _names(row[key]):
             _malformed("record " + key)
-    if not row["triggers"] or not set(row["triggers"]) <= TRIGGERS or not isinstance(row["unavailable"], dict):
+    if (not row["triggers"] or not set(row["triggers"]) <= TRIGGERS or not _unavailable(row["unavailable"])
+            or set(row["participants"]) & set(row["unavailable"])):
         _malformed("record metadata")
     if not isinstance(row["sources"], list):
         _malformed("record sources")
@@ -154,8 +212,28 @@ def validate_record(row):
         validate_receipt(source)
     validate_receipt(row["note"])
     validate_coverage(row["coverage"])
-    if not isinstance(row["input_digest"], str) or not re.fullmatch(r"[0-9a-f]{64}", row["input_digest"]):
+    if not row["sources"] and not row["coverage"]:
+        _malformed("record evidence")
+    if not _hash(row["input_digest"]):
         _malformed("record identity")
+
+
+def _metadata(row):
+    return {key: row[key] for key in ("schema_version", "id", "completed_at", "period_start", "period_end", "triggers", "tasks", "participants", "unavailable", "sources", "coverage")}
+
+
+def _read_note(row):
+    data = file_bytes(row["note"]["path"])
+    if len(data) != row["note"]["size"] or hashlib.sha256(data).hexdigest() != row["note"]["sha256"]:
+        raise StateError("Saved retrospective note {} changed; restore its immutable bytes before using its coverage.".format(row["id"]), {})
+    try:
+        markdown = data.decode("utf-8")
+        header, _body = markdown.removeprefix("---\n").split("\n---\n", 1)
+        if not markdown.startswith("---\n") or json.loads(header) != _metadata(row):
+            _malformed("note metadata")
+    except (UnicodeDecodeError, ValueError):
+        _malformed("note metadata")
+    return markdown
 
 
 def load(path, *, allow_pending=False):
@@ -163,17 +241,21 @@ def load(path, *, allow_pending=False):
     index = root / "index.json"
     if not index.exists():
         if root.exists():
-            leftovers = [item.name for item in root.iterdir() if item.name != "index.json.lock"]
+            try:
+                leftovers = [item.name for item in root.iterdir() if item.name != "index.json.lock"]
+            except OSError as exc:
+                raise StateError("Cannot inspect retrospective directory {}: {}. Restore access without removing saved artifacts.".format(root, exc), {}) from None
             if leftovers and not (allow_pending and (root / "pending.json").is_file()):
                 raise StateError("Retrospective index is missing beside saved artifacts; preserve them and resume its pending transaction or restore the index backup.", {})
         return empty(path)
     result = _json(index)
-    if (not isinstance(result, dict) or result.get("schema_version") != SCHEMA_VERSION
+    if (not isinstance(result, dict) or set(result) != {"schema_version", "state_path", "baseline_at", "records", "transitions"}
+            or not _version(result.get("schema_version"))
             or result.get("state_path") != str(canonical_state(path))
             or not isinstance(result.get("records"), list) or not isinstance(result.get("transitions"), list)):
         raise StateError("Retrospective index has an unsupported schema or state identity; preserve its bytes and update the owner or restore its backup.", {})
     if result.get("baseline_at") is not None:
-        utc(result["baseline_at"])
+        _saved_time(result["baseline_at"])
     ids = set()
     for record in result["records"]:
         validate_record(record)
@@ -181,22 +263,32 @@ def load(path, *, allow_pending=False):
         if name in ids:
             raise StateError("Retrospective ids are duplicated; restore the original index before writing.", {})
         ids.add(name)
-        utc(record.get("completed_at"))
-        if record.get("note", {}).get("path") != str(root / (name + ".md")) or not current_receipt(record["note"]):
-            raise StateError("Saved retrospective note {} changed or is missing; restore its immutable bytes before using its coverage.".format(name), {})
+        if record["note"]["path"] != str(root / (name + ".md")):
+            _malformed("note location")
+        _read_note(record)
+    transition_ids = set()
     for row in result["transitions"]:
         if (not isinstance(row, dict) or set(row) != {"schema_version", "id", "at", "agent", "descriptor", "incoming"}
-                or row["schema_version"] != SCHEMA_VERSION):
+                or not _version(row["schema_version"])):
             _malformed("transition schema")
-        utc(row["at"])
+        _saved_time(row["at"])
         validate_coverage([row["descriptor"]])
         validate_observation(row["incoming"])
         descriptor = row["descriptor"]
         if row["agent"] != descriptor["agent"] or row["id"] != digest({key: value for key, value in row.items() if key not in {"at", "id"}}):
             _malformed("transition identity")
+        if row["id"] in transition_ids:
+            _malformed("duplicate transition")
+        transition_ids.add(row["id"])
         if not descriptor["first_start"] and not any(descriptor in record["coverage"] for record in result["records"]):
             _malformed("transition coverage provenance")
     return result
+
+
+def require_no_pending(path):
+    """Refuse sidecar changes until the recording owner reconciles its journal."""
+    if (directory(path) / "pending.json").exists():
+        raise StateError("A retrospective recording transaction is pending. Retry its original retro-record command to reconcile it before dispatching or changing retrospective state.", {})
 
 
 def cadence(index, at, *, existing_work=False):
@@ -217,6 +309,7 @@ def cadence(index, at, *, existing_work=False):
 
 def establish_baseline(path, index, at):
     if index["baseline_at"] is None and not index["records"]:
+        require_no_pending(path)
         index["baseline_at"] = utc(at)
         save_state(directory(path) / "index.json", index)
 
@@ -226,8 +319,9 @@ def _install_note(path, data):
         if file_bytes(path) != data:
             raise StateError("Retrospective note id already has different bytes; preserve it and choose a new id.", {})
         return
-    fd, temporary = tempfile.mkstemp(prefix="note-", suffix=".tmp", dir=str(path.parent))
+    temporary = None
     try:
+        fd, temporary = tempfile.mkstemp(prefix="note-", suffix=".tmp", dir=str(path.parent))
         with os.fdopen(fd, "wb") as handle:
             handle.write(data)
             handle.flush()
@@ -240,11 +334,43 @@ def _install_note(path, data):
     except OSError as exc:
         raise StateError("Cannot install retrospective note {}: {}. Restore directory access and retry the same record.".format(path, exc), {}) from None
     finally:
-        Path(temporary).unlink()
+        if temporary is not None:
+            _unlink(Path(temporary))
+
+
+def _unlink(path):
+    try:
+        path.unlink()
+    except OSError as exc:
+        raise StateError("Cannot remove retrospective transaction file {}: {}. Restore directory access and retry the same record to reconcile it.".format(path, exc), {}) from None
+
+
+def _pending(root, index):
+    path = root / "pending.json"
+    if not path.exists():
+        return None
+    pending = _json(path)
+    if (not isinstance(pending, dict) or set(pending) != {"schema_version", "previous_index", "record"}
+            or not _version(pending["schema_version"]) or not _hash(pending["previous_index"])):
+        _malformed("pending transaction")
+    validate_record(pending["record"])
+    row = pending["record"]
+    if row["note"]["path"] != str(root / (row["id"] + ".md")):
+        _malformed("pending note location")
+    committed = next((entry for entry in index["records"] if entry["id"] == row["id"]), None)
+    if committed:
+        if committed != row:
+            _malformed("conflicting committed transaction")
+        previous = {**index, "records": [entry for entry in index["records"] if entry["id"] != row["id"]]}
+        if pending["previous_index"] != digest(previous):
+            _malformed("committed transaction ancestry")
+    elif pending["previous_index"] != digest(index):
+        _malformed("pending transaction ancestry")
+    return pending
 
 
 def record(path, data, coverage, at):
-    """Commit a validated live coverage snapshot and lead-authored Markdown."""
+    """Commit validated coverage and Markdown; the caller holds lock(path)."""
     required = {"id", "note", "period_start", "period_end", "triggers", "tasks", "participants", "unavailable", "sources", "completed", "check"}
     if not isinstance(data, dict) or set(data) != required or data.get("completed") is not True:
         raise UsageError("Retrospective record requires id, note, period_start/end, triggers, tasks, participants, unavailable, sources, completed: true, and check.", {})
@@ -254,26 +380,27 @@ def record(path, data, coverage, at):
     if not timestamp(start, "Period start") <= timestamp(end, "Period end") <= timestamp(at, "Completion"):
         raise UsageError("Retrospective period must end no later than completion and begin no later than its end.", {})
     for key in ("tasks", "participants"):
-        if not isinstance(data[key], list) or any(not isinstance(item, str) or not item.strip() for item in data[key]) or len(set(data[key])) != len(data[key]):
+        if not _names(data[key]):
             raise UsageError("Retrospective {} must be a list of distinct non-empty names.".format(key), {})
-    if (not isinstance(data["triggers"], list) or not data["triggers"]
-            or any(not isinstance(item, str) for item in data["triggers"])
+    if (not _names(data["triggers"]) or not data["triggers"]
             or not set(data["triggers"]) <= TRIGGERS):
         raise UsageError("Retrospective triggers must name daily and/or transition.", {})
-    if not isinstance(data["unavailable"], dict) or any(not isinstance(key, str) or not isinstance(value, str) or not value.strip() for key, value in data["unavailable"].items()):
+    if not _unavailable(data["unavailable"]):
         raise UsageError("Retrospective unavailable must map worker names to explicit reasons.", {})
     if set(data["participants"]) & set(data["unavailable"]):
         raise UsageError("A retrospective worker cannot both participate and be unavailable; record what actually happened.", {})
     if not isinstance(data["sources"], list):
         raise UsageError("Retrospective sources must list absolute evidence-file paths.", {})
-    receipt(data["note"])
+    for key in ("note", "check"):
+        if not isinstance(data[key], str) or not Path(data[key]).is_absolute():
+            raise UsageError("Retrospective {} must be an absolute file path.".format(key), {})
     note_data = file_bytes(data["note"])
     try:
         note_text = note_data.decode("utf-8")
     except UnicodeDecodeError:
         raise UsageError("Retrospective note must be UTF-8 Markdown; save the lead's substantive synthesis and retry.", {}) from None
     for section in SECTIONS:
-        match = re.search(r"^#{1,6} " + re.escape(section) + r"[ \t]*$\n(.*?)(?=^#{1,6} |\Z)", note_text, re.M | re.S)
+        match = re.search(r"^#{1,6} " + re.escape(section) + r"[ \t]*\r?$\n(.*?)(?=^#{1,6} |\Z)", note_text, re.M | re.S)
         body = re.sub(r"<!--.*?-->", "", match[1], flags=re.S).strip() if match else ""
         if not body or body.lower() in {"todo", "tbd", "n/a", "..."}:
             raise UsageError("Retrospective note needs a nonempty {} section with the lead's synthesis; headings or template placeholders do not complete it.".format(section), {})
@@ -281,49 +408,43 @@ def record(path, data, coverage, at):
     sources = [receipt(source) for source in data["sources"]]
     if not sources and not coverage:
         raise UsageError("A quiet retrospective needs an actual ledger or prior note source; provide evidence for the interval.", {})
-    metadata = {"schema_version": SCHEMA_VERSION, "id": name, "period_start": start, "period_end": end,
-                "triggers": data["triggers"], "tasks": data["tasks"], "participants": data["participants"],
-                "unavailable": data["unavailable"], "sources": sources, "coverage": coverage}
-    note_data = ("---\n" + json.dumps(metadata, indent=2, sort_keys=True) + "\n---\n\n" + note_text).encode("utf-8")
     root = directory(path)
-    note = {"path": str(root / (name + ".md")), "sha256": hashlib.sha256(note_data).hexdigest(), "size": len(note_data)}
-    item = {"schema_version": SCHEMA_VERSION, "id": name, "completed_at": at,
-            "period_start": start, "period_end": end, "triggers": data["triggers"], "tasks": data["tasks"],
-            "participants": data["participants"], "unavailable": data["unavailable"], "sources": sources,
-            "note": note, "coverage": coverage, "input_digest": digest(data)}
     index = load(path, allow_pending=True)
-    pending_path = root / "pending.json"
-    if pending_path.exists():
-        pending = _json(pending_path)
-        if not isinstance(pending, dict) or set(pending) != {"schema_version", "previous_index", "record"} or pending["schema_version"] != SCHEMA_VERSION:
-            _malformed("pending transaction")
-        validate_record(pending["record"])
-        committed = next((row for row in index["records"] if row["id"] == pending["record"]["id"]), None)
-        if committed:
-            if committed != pending["record"]:
-                _malformed("conflicting committed transaction")
-            pending_path.unlink()
+    cadence(index, at)
+    pending = _pending(root, index)
     prior = next((row for row in index["records"] if row["id"] == name), None)
+    original = prior or (pending["record"] if pending and pending["record"]["id"] == name else None)
+    completed_at = original["completed_at"] if original else at
+    if timestamp(completed_at, "Original completion") > timestamp(at, "Record retry"):
+        raise UsageError("Retrospective retry precedes its original completion; use the current UTC checkpoint.", {})
+    metadata = {"schema_version": SCHEMA_VERSION, "id": name, "completed_at": completed_at,
+                "period_start": start, "period_end": end, "triggers": data["triggers"], "tasks": data["tasks"],
+                "participants": data["participants"], "unavailable": data["unavailable"], "sources": sources, "coverage": coverage}
+    note_data = ("---\n" + json.dumps(metadata, indent=2, sort_keys=True) + "\n---\n\n" + note_text).encode("utf-8")
+    note = {"path": str(root / (name + ".md")), "sha256": hashlib.sha256(note_data).hexdigest(), "size": len(note_data)}
+    item = {**metadata, "note": note, "input_digest": digest(data)}
+    validate_record(item)
+    pending_path = root / "pending.json"
+    if pending and pending["record"] in index["records"]:
+        _unlink(pending_path)
+        pending = None
     if prior:
-        if (prior["input_digest"] != item["input_digest"] or prior["note"] != note
-                or prior["sources"] != sources or prior["coverage"] != coverage):
+        if prior != item:
             raise UsageError("Retrospective id already records different metadata; preserve it and use a new id.", {})
         return {**prior, "replayed": True}
-    pending_path = root / "pending.json"
     transaction = {"schema_version": SCHEMA_VERSION, "previous_index": digest(index), "record": item}
-    if pending_path.exists():
-        pending = _json(pending_path)
-        if (pending.get("schema_version") != SCHEMA_VERSION or pending.get("previous_index") != digest(index)
-                or pending.get("record", {}).get("input_digest") != item["input_digest"]
-                or pending.get("record", {}).get("note") != note):
+    if pending:
+        if pending != transaction:
             raise StateError("A different retrospective transaction is pending; resume its original record before starting another.", {})
-        item = pending["record"]
     else:
+        installed = root / (name + ".md")
+        if installed.exists() and file_bytes(installed) != note_data:
+            raise StateError("Retrospective note id already has different bytes; preserve it and choose a new id.", {})
         save_state(pending_path, transaction)
     _install_note(root / (name + ".md"), note_data)
     index["records"].append(item)
     save_state(root / "index.json", index)
-    pending_path.unlink()
+    _unlink(pending_path)
     return {**item, "replayed": False}
 
 
@@ -340,4 +461,4 @@ def show(path, name="latest", *, task=None):
     record = (max(records, key=lambda row: timestamp(row["completed_at"], "Retrospective completion")) if records else None) if name == "latest" else next((row for row in records if row["id"] == name), None)
     if record is None:
         raise UsageError("No saved retrospective matches; use retro-list with the same --state path to inspect available notes.", {})
-    return {"schema_version": SCHEMA_VERSION, "record": record, "markdown": file_bytes(record["note"]["path"]).decode("utf-8")}
+    return {"schema_version": SCHEMA_VERSION, "record": record, "markdown": _read_note(record)}
