@@ -70,6 +70,7 @@ class ContinuityCliTests(unittest.TestCase):
                   "revalidate_when": "The report is replaced.", "reason": "Observed during review."}
         code, payload, errors = self.invoke("memory-record", "--record", self.record_input("lesson.json", lesson))
         self.assertEqual(code, 0, errors)
+        assert payload is not None, "successful write must return its receipt"
         self.assertFalse(payload["replayed"])
         stow = {"id": "handoff-1", "capture": "Review is pending and evidence is in the task ledger.",
                 "unresolved_work": ["Read the task ledger before proceeding."], "gaps": [],
@@ -81,6 +82,7 @@ class ContinuityCliTests(unittest.TestCase):
         code, shown, errors = self.invoke("memory-show", "--id", "handoff-1", now=LATER)
         self.assertEqual(code, 0, errors)
         self.assertIn("Review is pending", json.dumps(shown))
+        assert shown is not None, "successful read must return the saved capture"
         self.assertFalse(shown["record"]["reset_ready"])
         self.assertEqual(saved, memory.location(self.state).read_bytes())
         self.assertFalse(self.state.exists())
@@ -96,6 +98,7 @@ class ContinuityCliTests(unittest.TestCase):
         saved = attention.storage_path(self.state).read_bytes()
         code, view, errors = self.invoke("catch-up", now=LATER)
         self.assertEqual(code, 0, errors)
+        assert view is not None, "successful catch-up must return its view"
         self.assertEqual(view["attention"]["total"], 1)
         self.assertEqual(view["attention"]["items"][0]["status"], "open")
         self.assertEqual(saved, attention.storage_path(self.state).read_bytes())
@@ -106,6 +109,7 @@ class ContinuityCliTests(unittest.TestCase):
         self.assertEqual(code, 0, errors)
         code, view, errors = self.invoke("catch-up", "--include-closed", now=LATER)
         self.assertEqual(code, 0, errors)
+        assert view is not None, "successful catch-up must return its view"
         self.assertEqual(view["attention"]["total"], 0)
         self.assertEqual(view["closed"]["total"], 1)
         self.assertFalse(self.state.exists())

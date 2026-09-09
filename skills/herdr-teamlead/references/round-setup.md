@@ -137,7 +137,9 @@ and an exclusion set no assignment satisfies.
 
 For a retained fix, plan `--roles developer` and exclude every other rotating
 worker from that role. Use the task's existing developer, not a new headroom
-winner. Plan the reviewer and tester separately for post-push verification.
+winner. Reserve that developer through initial and early-fix verification before
+reusing it for another task or role. Plan the reviewer and tester separately for
+post-push verification.
 
 `--roles` keys the output document. `role_costs` in config.json re-weighs a
 seat per install. The weights, fill order, and tie-breaks are the planner's

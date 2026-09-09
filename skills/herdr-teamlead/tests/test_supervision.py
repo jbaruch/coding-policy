@@ -11,6 +11,8 @@ import copy
 import json
 import os
 import subprocess
+import shlex
+import shutil
 import tempfile
 import unittest
 from datetime import timedelta
@@ -456,6 +458,33 @@ class SupervisionTest(unittest.TestCase):
         unrelated = subprocess.run(["bash", str(script)], input=json.dumps({**self.payload, "session_id": "worker"}), env=environment, capture_output=True, text=True, check=False)
         self.assertEqual(unrelated.returncode, 0, unrelated.stderr)
         self.assertEqual(unrelated.stdout, "")
+
+    def test_published_manifest_hooks_run_from_paths_with_spaces_at_mode_0644(self):
+        self.member()
+        native_root = self.root / "xdg" / "teamlead" / "supervision-bindings"
+        store.bind(self.path, self.who, AT, root=native_root)
+        repo = Path(_ROOT).parent.parent
+        plugin = self.root / "installed plugin"
+        shutil.copytree(Path(_ROOT) / "teamlead", plugin / "skills/herdr-teamlead/teamlead",
+                        ignore=shutil.ignore_patterns("__pycache__"))
+        (plugin / "hooks").mkdir()
+        script = plugin / "hooks/herdr-supervision-stop.sh"
+        shutil.copyfile(repo / "hooks/herdr-supervision-stop.sh", script)
+        script.chmod(0o644)
+        manifest = json.loads((repo / ".tessl-plugin/plugin.json").read_text())
+        environment = {**os.environ, **self.environ, "XDG_STATE_HOME": str(self.root / "xdg")}
+        for agent in ("claude-code", "codex"):
+            with self.subTest(agent=agent):
+                entries = [item for group in manifest["nativeHooks"][agent]["Stop"]
+                           for item in group["hooks"] if "herdr-supervision-stop.sh" in json.dumps(item)]
+                self.assertEqual(len(entries), 1)
+                entry = entries[0]
+                expand = lambda value: value.replace("${TESSL_PLUGIN_DIR}", str(plugin))
+                argv = shlex.split(expand(entry["command"])) + [expand(arg) for arg in entry.get("args", [])]
+                result = subprocess.run(argv, input=json.dumps(self.payload), env=environment,
+                                        capture_output=True, text=True, check=False)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(json.loads(result.stdout)["decision"], "block")
 
 
 if __name__ == "__main__":

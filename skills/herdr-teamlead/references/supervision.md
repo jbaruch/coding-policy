@@ -7,7 +7,11 @@ the report-delivery contract and task ledger.
 
 ## Bind and enroll
 
-Run `teamlead.sh supervision-bind --state <owner-state>` from the lead's own
+Run the installed `skills/herdr-teamlead/teamlead.sh` with explicit `bash` and
+the plugin root resolved by the skill. The examples below name subcommands and
+arguments; nonzero exits require handling the diagnostic.
+
+Run `supervision-bind --state <owner-state>` from the lead's own
 Herdr pane. It discovers `HERDR_PANE_ID` through a read-only pane lookup and
 binds that pane's native Claude or Codex session identity. It refuses missing or
 unsupported native proof. Do not bind from a worker pane or substitute a guessed
@@ -19,7 +23,9 @@ native Stop hook. `--record <file>` accepts an explicitly verified binding with
 `id` or `path`. The normal flow uses automatic discovery.
 
 Enroll every dispatched assignment, including reviewer, tester, judge, and
-release. The dispatch integration records enrollment before sending input, so
+release. Supply `apply --report <role>=<absolute-report-path>` for every role
+alongside `--task`; use the exact fresh path from that role's brief. A bound
+lead's apply refuses incomplete mappings before worker input. The dispatch integration records enrollment before sending input, so
 an interrupted or unknown send remains visible. Manual/imported assignments use
 `supervision-enroll --record <file>` with the following contract:
 
@@ -149,6 +155,10 @@ The lead judges whether the saved authority and handoff are real. The utility
 checks coverage and evidence receipts, not the meaning of the prose. A hold
 changes no task state, worker state, acceptance, or user-question resolution.
 New assignments or events invalidate its covered boundary.
+
+If the lead changes its native working directory, rebind from that directory
+before continuing supervision; the prior exact-directory binding does not gate
+that new identity. Keep the same owner-state path.
 
 On active resume, run `supervision-bind` for the current native lead, then
 `supervision-resume`, `supervision-status`, and `supervision-drain`. Reconcile

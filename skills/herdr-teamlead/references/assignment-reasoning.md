@@ -20,6 +20,12 @@ State investigation-only intent explicitly in the role's task text and select
 the developer template's investigation branch. Its deliverable is a report;
 implementation, push, PR and release instructions do not apply to that branch.
 
+Gate investigation reports against the requested knowledge and evidence, including
+required independent checks. The implementation phases in Review Before PR apply
+only to authorized code changes. Preserve blocking-finding, correction-allowance,
+and judge rules for the investigation. A judge ruling returns the investigation
+to its knowledge-deliverable gate; it never supplies code-release authority.
+
 ## Assess a Finding's Scope
 
 Read the full finding and identify the behavior that implementing it would commit

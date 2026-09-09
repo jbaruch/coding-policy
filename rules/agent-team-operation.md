@@ -255,7 +255,8 @@ description: Running a multi-agent team — headroom-driven role rotation, one w
 
 ## Review Before PR
 
-- A round runs two phases: optional pre-development planning, then mandatory post-push verification
+- An implementation round runs two phases: optional pre-development planning, then mandatory post-push verification
+- An investigation-only round gates its knowledge deliverable under `skills/herdr-teamlead/references/assignment-reasoning.md`
 - Pre-development output is a design note or a test plan, never a pass
 - The tester and the reviewer pass on the pushed branch before the PR opens
 - The gate reads the post-push reports for the current branch tip

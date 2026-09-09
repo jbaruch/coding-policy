@@ -86,6 +86,13 @@
               "args": [
                 "${TESSL_PLUGIN_DIR}/hooks/stop-handoff-hygiene.sh"
               ]
+            },
+            {
+              "type": "command",
+              "command": "bash",
+              "args": [
+                "${TESSL_PLUGIN_DIR}/hooks/herdr-supervision-stop.sh"
+              ]
             }
           ]
         }
@@ -98,6 +105,10 @@
             {
               "type": "command",
               "command": "bash \"${TESSL_PLUGIN_DIR}/hooks/stop-handoff-hygiene.sh\""
+            },
+            {
+              "type": "command",
+              "command": "bash \"${TESSL_PLUGIN_DIR}/hooks/herdr-supervision-stop.sh\""
             }
           ]
         }

@@ -1,10 +1,8 @@
 ---
 name: herdr-teamlead
 description: >
-  Run a team round across three Herdr worker panes: assign developer, reviewer,
-  and tester by subscription headroom and qualified model tiers, compose briefs,
-  provision worktrees, dispatch workers, collect reports, gate release, and ask
-  a pinned judge to resolve disputes. Use for requests to dispatch the Herdr
+  Run Herdr rounds with headroom-driven roles, qualified tiers, fresh briefs,
+  report verification, and release gates. Use for requests to dispatch the Herdr
   team, balance worker usage, collect reports, run or retrieve retrospectives,
   catch up on outstanding user attention, curate team lessons, or save and resume
   lead handoffs. Live rounds require HERDR_ENV; saved memory and attention work
@@ -14,6 +12,11 @@ description: >
 # Herdr Team Lead Skill
 
 Process steps in order. Do not skip ahead.
+
+Before any finish with enrolled work, reconcile the whole fleet under
+`references/supervision.md`. Continue observation or persist an authorized pause
+or handoff covering every active assignment. Keep user attention visible under
+`references/attention.md`.
 
 Follow `rules/agent-team-operation.md` for round constraints.
 
@@ -106,14 +109,10 @@ CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
 bash "$CP/skills/herdr-teamlead/verify-authority.sh" <owner/repo>
 ```
 
-Emits ownership evidence; `authorized` reflects namespace ownership alone.
-
-- **`authorized: true`** — record `owner of <owner/repo>` in
-  `AUTHORITY_STATEMENT`; set additional `EXTERNAL_PERMISSION` to `none`.
-- **`authorized: false`** — record `not owner of <owner/repo>`. Reuse explicit
-  operator permission for this repo and each write action in
-  `EXTERNAL_PERMISSION`; absent permission, proceed read-only or finish here.
-- **Exit 1 or 2** — report the diagnostic verbatim and finish here.
+Record the emitted namespace ownership evidence using Step 3 of
+`references/round-setup.md`. For a non-owned repo, reuse explicit per-action
+operator permission; absent permission, remain read-only or finish here.
+On non-zero, report the diagnostic and finish here.
 
 Record the task's existing source and words in `TASK_AUTHORIZATION`,
 and permitted actions and repo in `AUTHORIZED_ACTIONS`. Read-only uses `none`.
@@ -158,24 +157,19 @@ bash "$CP/skills/herdr-teamlead/teamlead.sh" plan \
   --task <task-id> [--fix-round <N>] [--correction-plan <id> --work <work.json>]
 ```
 
-Emits assignments, rationale, snapshot reference, and configured round tiers;
-contacts no worker. Exit 1 refuses the plan: resolve its diagnostic before
-continuing. Phase 2 excludes the branch author from reviewer and tester.
-For retained fixes, plan developer alone and exclude all other workers; plan
-verification separately. Reserve the developer until initial and early-fix verification
-resolves before reusing it for another task or role. Supply the same fix number to plan and apply.
-Use the same recorded task, approval, and work bounds for both commands.
-Register the original task and base through the owner commands documented in
-`skills/herdr-teamlead/references/dispatch-recovery.md` before recovery work.
-
-The operator controls tiers and qualification. `--preview-tiers` never
-authorizes dispatch.
+Emits the role plan without worker contact. On exit 1, resolve the diagnostic
+before continuing. Apply the Step 5 constraints in `references/round-setup.md`:
+exclude the author from verification, reserve the developer through early fixes,
+preserve task identity and fix count, and reuse recorded correction bounds.
+Operator-controlled tier and qualification contracts:
 
 ```text
 skills/herdr-teamlead/references/model-tiers.md
+skills/herdr-teamlead/references/dispatch-recovery.md
 ```
 
-Save the plan with its rationale. Proceed immediately to Step 6.
+`--preview-tiers` authorizes no dispatch. Save the plan and rationale.
+Proceed immediately to Step 6.
 
 ## Step 6 — Build the Review Package
 
@@ -187,17 +181,10 @@ bash "$CP/skills/herdr-teamlead/review-package.sh" \
   <recorded-base-sha> <pushed-head-sha> <round-reports-dir>/review-<base7>..<head7>.diff
 ```
 
-Record the task base before initial development and preserve it through fixes.
-Full reviews use that base and the current pushed tip; scoped rechecks use the
-previous reviewed tip. Never infer the base from `HEAD~1`. Set `REVIEW_BASE`
-and `REVIEW_HEAD` to full SHAs and rebuild whenever the range changes.
-Pre-development packages use the recorded base at both endpoints and never
-prove an implementation. Other roles need no package; proceed to Step 7.
-
-Success prints the absolute artifact path containing range, commits, stat, and
-patch. Set it as `REVIEW_PACKAGE`. Any non-zero exit requires fixing the named
-input/tool/output failure and retrying; never compose verification briefs
-without a completed package. Existing different content is preserved.
+Apply the Step 6 base, range, and rebuild requirements in
+`references/round-setup.md`. Success prints the absolute review-package path;
+set it as `REVIEW_PACKAGE`. On non-zero, fix the diagnostic and retry before
+composing verification briefs. Other roles need no package.
 Proceed immediately to Step 7.
 
 ## Step 7 — Compose the Briefs
@@ -264,6 +251,7 @@ CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
 bash "$CP/skills/herdr-teamlead/teamlead.sh" apply \
   --assignments <plan-file> \
   --brief developer=<path> --brief tester=<path> --brief reviewer=<path> \
+  --report developer=<report> --report tester=<report> --report reviewer=<report> \
   --common <path-to-COMMON.md> --task <task-id> \
   [--fix-round <N>] [--retain-context | --no-clear] \
   [--correction-plan <id> --work <work.json>] [--dispatch-id <stable-id>]
@@ -272,6 +260,8 @@ bash "$CP/skills/herdr-teamlead/teamlead.sh" apply \
 Emits per-role JSON with clear/session evidence, task, fix number, verified
 tier, and delivery status. Labelled dispatches carry `dispatch_id` and any
 `context_transition`; fields are documented in `skills/herdr-teamlead/state-schema.md`.
+Supply each role's exact fresh absolute report path from its brief. Apply enrolls
+the assignment before worker input; unknown sends remain observation obligations.
 Classify every brief against Step 3's authorization before sending it.
 Append the dispatch outcome to the task ledger; `applied` proves dispatch only.
 
@@ -280,18 +270,8 @@ Preserve task identity and cumulative fix count. Retained fixes dispatch
 developer alone; other roles clear separately. Reconcile unknown outcomes
 before retrying. Reuse existing correction authorization within its bounds.
 
-- **Exit 0** — proceed to Step 11.
-- **Busy target** — no dispatch occurred. Wait for readiness or replan; stay
-  at this step.
-- **Sent but not started** — inspect the pane; never re-dispatch on top of the
-  message. Proceed to Step 11 for the roles that started.
-- **Retrospective, clear, composer, tier, qualification, or continuity refusal** — follow the
-  diagnostic and recorded dispatch outcome. Reconcile uncertainty before retrying;
-  wait for roles whose records confirm dispatch.
-- **Unknown refusal** — report it verbatim and finish here.
-- **`--dry-run`** — inspect the context choice, requested tier, and relaunch
-  argv. It contacts no worker, writes no ledger, and proves no live tier or
-  qualification. Finish here.
+Follow the Dispatch Results contract in `references/round-flow.md` for busy,
+uncertain, failed, and dry-run outcomes. Preserve all already enrolled work.
 
 Read the context, recovery, and executable refusal contracts:
 
@@ -302,47 +282,43 @@ skills/herdr-teamlead/references/model-tiers.md
 
 Proceed to Step 11 with the dispatched roles.
 
-## Step 11 — Wait for the Reports
+## Step 11 — Observe the Fleet
 
-Run for each dispatched worker in the required order:
+Run the bounded foreground watcher for all enrolled assignments:
 
 ```bash
 CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
-bash "$CP/skills/herdr-teamlead/wait-report.sh" <agent-name> <report-path>
+bash "$CP/skills/herdr-teamlead/teamlead.sh" supervision-watch [--state <state-file>]
 ```
 
-Emits `{"agent","state","report_path","found","elapsed_seconds"}`; exit 2
-emits only stderr. Exits 4–5 add `reason`. Delivery requires the file and its
-complete, unquoted `REPORT: <absolute-path>` marker on one pane row. Known native
-decoration requires completed source-message proof. Names,
-quoted examples, wrapped fragments, or lifecycle state alone never confirm it.
-The script owns timing. Append every wait outcome to the task ledger before
-moving to another worker; keep Herdr state separate from the lead's assessment.
-Between waits, complete a due retrospective from saved evidence without
-interrupting workers, then resume the pending wait.
+Retain and await its real execution handle. The JSON result gives `reason`,
+`through`, and durable `events`; a quiet deadline completes only that checkpoint.
+For each event or pending recheck, verify report delivery:
 
-- **Exit 0** — read the report and record delivery; continue to the next worker,
-  then Step 12. Delivery alone does not accept the work.
-- **Exit 1** — inspect the named worker's live pane and native evidence. Re-run
-  this wait for confirmed ongoing work; otherwise record the missing report
-  and continue to the next worker. A Herdr label alone decides neither outcome.
-- **Exit 2** — report the tool failure and finish here.
-- **Exit 3** — relay the blocked worker's dialog to the operator and stop its
-  round. Resume the wait only after the live state leaves `blocked`.
-- **Exit 4** — the file lacks its confirmed delivery marker. Follow the live
-  state check in the recovery reference; never re-dispatch on top of it.
-- **Exit 5** — record the report as unavailable and notify the operator.
-  Keep review/release gates unsatisfied. Never automatically retry, rephrase,
-  switch providers/models, or synthesize a report.
+```bash
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
+bash "$CP/skills/herdr-teamlead/wait-report.sh" --once <agent-name> <report-path>
+```
 
-Outcome recovery:
+The checkpoint emits delivery JSON; exit 2 emits only stderr. Exit 0 confirms
+delivery, 1 remains pending, 3 confirms blocked, 4 lacks confirmed delivery, and
+5 proves terminal refusal. Read delivered reports in full. Preserve the
+blocked/refusal and native-recovery paths in the following references; never
+re-dispatch over uncertainty or automatically retry a provider refusal.
 
 ```text
+skills/herdr-teamlead/references/supervision.md
 skills/herdr-teamlead/references/dispatch-recovery.md
 ```
 
-Proceed to Step 12 once each dispatched worker has a completed or recorded
-missing report.
+Record each outcome in the task ledger and user-facing obligations in the
+attention queue. Acknowledge only handled event IDs through the saved snapshot;
+schedule pending rechecks. Resolve enrollment only after recording its assessed
+outcome, separately from assignment acceptance and task completion. Complete due
+retrospectives between checkpoints without interrupting workers. Resume the fleet
+watch while any observation obligation remains; one blocked worker never hides
+another worker's report. Proceed to Step 12 when the required reports are delivered
+or their unavailability and recovery are recorded.
 
 ## Step 12 — Gate the Round
 
@@ -405,12 +381,9 @@ bash "$CP/skills/herdr-teamlead/teamlead.sh" plan \
   --roles judge --snapshot <step-14-measure-output> --task <task-id>
 ```
 
-- **Exit 0** — the plan file names the judge worker. Proceed to Step 16.
-- **Non-zero naming the judge's headroom** — the window cannot cover a
-  ruling. Report it and finish here. There is no substitute judge, no
-  fallback to another model, and no degraded ruling.
-- **Any other non-zero** — report the diagnostic and finish here. Never
-  hand-write an assignment to bypass the refusal.
+Exit 0 names the judge worker; proceed immediately to Step 16. On non-zero,
+report the diagnostic and finish here. Never substitute a judge, lower its tier,
+or hand-write an assignment to bypass the refusal.
 
 ## Step 16 — Start the Judge Worker on Its Pinned Tier
 
@@ -437,7 +410,7 @@ Use Step 15's plan under Step 10's dispatch contract:
 CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
 bash "$CP/skills/herdr-teamlead/teamlead.sh" apply \
   --assignments <plan-file> \
-  --brief judge=<round>-judge.md \
+  --brief judge=<round>-judge.md --report judge=<absolute-report-path> \
   --common <path-to-COMMON.md> \
   --task <task-id> [--no-clear]
 ```
@@ -448,25 +421,18 @@ coverage. Apply verifies the live tier before input. Proceed immediately to Step
 
 ## Step 18 — Wait for the Ruling
 
-Wait with Step 11's `wait-report.sh <agent> <report-path>`, where `<agent>` is
-the worker the Step 15 plan named. Proceed immediately to Step 19 once the
-report lands.
+Run Step 11's fleet observation loop, including the judge named by Step 15.
+Proceed immediately to Step 19 once its report lands; keep other enrollments
+under observation.
 
 ## Step 19 — Act on the Ruling
 
-The `RULING:` line binds the round. Only the operator overrides it.
-
-- **`uphold A` / `uphold B` / `amend`, `ACTION:` changing no branch content**
-  — record the ruling. Proceed to Step 20 only with Step 12's broad reports
-  against the current tip. Otherwise re-run Phase 2 with full briefs carrying
-  the ruling. Do not re-dispatch the judge for the same settled dispute.
-- **`uphold A` / `uphold B` / `amend`, `ACTION:` changing the branch** — apply
-  the round-flow reference's Branch-Changing Ruling contract. Finish here while
-  its required operator decision is pending; otherwise return to Step 12 with
-  `ACTION:` as the next counted fix.
-- **`blocked`** — the judge declined to rule. Stop the round and put its
-  named question to the operator. Do not dispatch a second judge and do not
-  rule in its place. Finish here.
+Apply the Ruling Outcomes contract in `references/round-flow.md`. Investigation
+rulings return to Step 12's knowledge gate. Implementation rulings route
+unchanged-branch rulings to verified release or renewed verification,
+branch-changing rulings to the counted correction path, and a blocked ruling
+to its saved operator question. Only the operator overrides a ruling.
+Continue immediately to the step named by that outcome.
 
 ## Step 20 — Release the Pull Request
 

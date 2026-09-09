@@ -451,6 +451,69 @@ include their locations in lead handoffs. A saved observation is never task
 acceptance or permission to act. The referenced contracts own full field shapes,
 retry and unsupported-schema behavior; only their owner commands mutate them.
 
+### Supervision schema 1
+
+`teamlead/supervision.py` owns `<canonical selected state>.supervision.json`.
+The document has `schema_version: 1`, canonical `state_path`, nullable `binding`,
+and arrays `members`, `events`, `acknowledgements`, `holds`, and `watchers`.
+Each array entry, binding, refinement, resolution, disposition, and evidence
+receipt carries `schema_version: 1`. Timestamps are timezone-aware ISO strings.
+Readers reject unsupported versions or corrupt records without migrating or
+replacing them. A missing never-bound store is empty; loss of a bound owner's
+store requires recovery of its history before rebinding or writing.
+
+- `binding`: `{schema_version, at, generation, identity, state_path}`.
+  `generation` is a positive, increasing integer for native lead changes.
+  `identity` contains `kind: id|path`, native `value`, canonical `cwd`,
+  `herdr_env`, and `pane_id`. Path identities use an absolute native transcript
+  path. The same binding is also saved at the discovery path documented in the
+  supervision reference. First use saves an empty unbound owner before discovery;
+  mutations require the binding to commit. Discovery is written before owner
+  binding; an ahead
+  generation blocks an incomplete handoff. An older native session stops being
+  the lead once the owner's newer generation commits.
+- `members`: `{schema_version, id, at, assignment, active, observed, resolution,
+  refinements}`. `assignment` contains `{id, agent, task, report, pane_id,
+  native_session}`; `id` equals the stable dispatch ID, `report` is absolute,
+  and unknown pane/native identity is null. `observed` is the latest map of
+  opaque observation keys to JSON values; it grants no acceptance.
+  `refinements` append `{schema_version, at, pane_id, native_session}` and fill
+  missing expectations only. `resolution` is null while `active: true`;
+  otherwise it is `{schema_version, at, outcome, evidence}`. Only the lead's
+  explicit resolve command retires an enrollment.
+- `events`: `{schema_version, id, seq, at, member, kind, data}`. Sequences are
+  contiguous positive integers and IDs are `event-<seq>`. `member` is an
+  enrollment ID or null for fleet events. `kind` names the observation or
+  scheduled recheck; `data` preserves its JSON payload. Events append only.
+- `acknowledgements`: `{schema_version, at, event, outcome, evidence, pending,
+  recheck_at, input_digest}`. Each event has at most one acknowledgement.
+  `pending: false` requires null `recheck_at`; pending outcomes have an explicit
+  or script-default future recheck timestamp. `input_digest` binds the original
+  per-event command input, excluding snapshot `through`, so an exact retry
+  preserves the receipt and schedule
+  after evidence changes or the deadline passes. Snapshot `through` bounds
+  which event IDs a command can acknowledge; later events remain pending.
+- `holds`: `{schema_version, id, at, kind, resume_condition, evidence,
+  dispositions, resumed_at, through, members}`. `kind` is `waiting_for_user` or
+  `handoff`; `resumed_at` is null until explicitly resumed. `through` captures
+  the handled event boundary and `members` hashes the active assignments.
+  `dispositions` contains `{schema_version, member, outcome, evidence}` for
+  every active enrollment. New events or assignments invalidate that coverage.
+- `watchers`: `{schema_version, id, at, heartbeat, deadline, process, status,
+  reason, ended_at}`. `process` contains positive `pid` and an `identity` digest
+  of its observed start time and argv. `status` is `running|stopped`; `reason`
+  and `ended_at` are null until the watch stops. Health also checks a fresh
+  heartbeat and bounded deadline. A PID alone proves no live watcher.
+- `evidence` arrays contain readable file receipts:
+  `{schema_version: 1, path, sha256, size}` with canonical absolute `path`,
+  lowercase 64-character SHA-256, and nonnegative byte `size`. They preserve
+  observed bytes, never infer that a prose claim is true or an action authorized.
+
+The native Stop reader performs local read-only checks for the exact bound lead.
+It never migrates state, acknowledges events, clears attention, or marks task
+completion. Its normal no-binding result applies only to a session never bound
+as lead; missing or unreadable bound-owner history cannot release obligations.
+
 ## Migration
 
 Only the owner migrates, and it reads a version in one of three directions.
