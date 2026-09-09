@@ -125,6 +125,11 @@ the exact output envelope; the state schema documents persisted fields.
    `period_start` and `period_end`, `triggers` (`daily`, `transition`, or both),
    covered `tasks`, `participants`, `unavailable` worker-to-reason map, absolute
    evidence `sources`, `completed: true`, and absolute saved `check` receipt.
+   End the covered period at or after the receipt's `checked_at`, no later than
+   completion. Include both outgoing and proposed task IDs from its coverage.
+   Account for every checked worker as participating or unavailable, with no
+   overlap. Include every applicable trigger: `daily` when cadence is due and
+   `transition` when any checked worker requires transition coverage.
    Daily notes cite a ledger, previous note, or other evidence source. An empty
    source list is usable only when transition coverage supplies concrete evidence.
    Completion asserts the lead has reviewed the substance; the boolean alone

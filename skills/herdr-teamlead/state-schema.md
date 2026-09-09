@@ -153,10 +153,10 @@ Each completed `records` entry carries these fields:
 | --- | --- |
 | `schema_version`, `id` | Version 1; unique lowercase identifier using letters, digits, underscores, or hyphens |
 | `completed_at` | Timezone-qualified completion time normalized to UTC |
-| `period_start`, `period_end` | Covered interval, ordered and ending no later than completion |
+| `period_start`, `period_end` | Covered interval, ordered, reaching the check receipt's `checked_at`, and ending no later than completion |
 | `triggers` | `daily`, `transition`, or both |
-| `tasks` | Distinct covered task identifiers |
-| `participants`, `unavailable` | Workers whose saved input was considered; unavailable worker-to-reason map, with no overlap |
+| `tasks` | Distinct covered task identifiers, including outgoing and proposed tasks in the checked coverage |
+| `participants`, `unavailable` | Workers whose saved input was considered; unavailable worker-to-reason map, accounting for every checked worker with no overlap |
 | `sources` | Receipts for inspected evidence files, each with canonical absolute `path`, SHA-256 `sha256`, and byte `size` |
 | `note` | Receipt for the installed immutable Markdown bytes |
 | `coverage` | Versioned worker-specific receipts binding outgoing work and the proposed transition |
