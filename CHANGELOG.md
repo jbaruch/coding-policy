@@ -1,5 +1,31 @@
 # Changelog
 
+### Fixed
+
+- **Resumed YOLO workers keep their context (#382).** `verify_worker_permissions`
+  refused every resume operand, so a retained developer restored with
+  `codex resume <uuid> --dangerously-bypass-approvals-and-sandbox` (or the
+  Claude Code / Grok `--resume <uuid>` equivalents) could not receive its early
+  fix, and the diagnostic recommended the fresh worker that early-fix policy
+  forbids. Live process proof now accepts the documented resume form — the
+  runtime's resume option or subcommand naming exactly one explicit session
+  UUID as a separate token — together with the explicit YOLO flags. Pickers,
+  `--continue` / `--last`, titles and names, `--fork-session`, new
+  `--session-id` conversations, `--restore-code`, prompt operands, duplicate
+  selectors, the `--flag=value` spelling, root options before `codex resume`,
+  and wrappers still refuse; restrictive permission options and unknown config
+  overrides refuse exactly as before. `launch_args` and tiered exact-argv
+  proof (`verify_argv`) accept no resume form, so canonical new-worker
+  behavior is unchanged and a tiered retained fix still needs the
+  fresh-dispatch boundary. The refusal diagnostic names both recoveries: a
+  fresh worker, or the same-session restoration now documented in
+  `references/dispatch-recovery.md`, which stops only the idle retained
+  developer's own process, restarts its archived native session with YOLO
+  through `herdr agent start ... --`, and reverifies identity before the
+  normal `apply --retain-context`. The grammar was verified against the
+  installed help of Claude Code 2.1.266, Codex CLI 0.153.2, and Grok Build
+  1.0.24; the live restoration itself was not exercised in this change.
+
 ## 0.3.202 — 2026-09-09
 
 ### Added

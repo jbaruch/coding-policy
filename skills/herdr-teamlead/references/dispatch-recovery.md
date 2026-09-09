@@ -166,6 +166,71 @@ while its checkpoint awaits approval; an audit worker may still be active.
 Neither an active worker nor a dispatch receipt proves that implementation or
 release has finished.
 
+## Same-session YOLO restoration
+
+A retained developer whose foreground process no longer proves YOLO mode — a
+terminal restart, a bare relaunch, a restrictive launch — cannot receive its
+early fix: `apply --retain-context` refuses before any input. When the operator
+has expressly required YOLO for every worker, restore that developer's own
+native session instead of clearing it or starting a fresh worker. The
+restoration keeps the task, native session ID, fix count, and ledger rows
+unchanged; it grants no attempt, review approval, or tier change.
+
+Preconditions, all required: the worker reads `idle` or `done`; its
+`agent_session` from `herdr agent get <name>` equals the `context_session`
+value of its preceding confirmed developer row in `teamlead state`, with
+`kind: id`; its composer is empty; the operator's YOLO requirement is recorded
+in the task ledger; the worker is non-tiered. A tiered retained fix verifies
+exact launch argv (`verify_argv`) and accepts no resume form; use the
+fresh-dispatch boundary for it. Stopping the process is a relaunch of a worker
+with outgoing work, so complete retrospective transition coverage first under
+`references/retrospectives.md`.
+
+1. Inspect and archive under the task's evidence directory: `herdr agent get
+   <name>` (state, `pane_id`, `agent_session`), `herdr pane process-info --pane
+   <pane>` (exactly one foreground `<kind>` process with its `pid` and `argv`),
+   and `herdr agent read <name> --source visible` showing the empty composer.
+   Any other reading stops the restoration. Never inspect, stop, or start
+   another worker's process.
+2. Stop only that PID with `kill -TERM <pid>`. Re-read `herdr pane
+   process-info` until the pane holds only its shell. A pane that does not
+   return to its shell stops the restoration; inspect it by hand.
+3. Restart the same session with the runtime's documented resume form, the
+   explicit YOLO flag, and the unchanged model/effort options, every one a
+   separate token after `--`:
+
+   ```bash
+   herdr agent start <name> --kind claude --pane <pane> -- --resume <uuid> --dangerously-skip-permissions
+   herdr agent start <name> --kind codex --pane <pane> -- resume <uuid> --dangerously-bypass-approvals-and-sandbox
+   herdr agent start <name> --kind grok --pane <pane> -- --resume <uuid> --always-approve
+   ```
+
+   `<uuid>` is the archived `agent_session` value, never a substitute or a
+   most-recent selector. No `--continue`, `--last`, `--fork-session`,
+   `--session-id`, picker, title, `--restore-code`, `--flag=value` spelling,
+   or prompt operand; for Codex, `resume` directly follows the executable.
+4. Reverify before any brief: `herdr agent get <name>` reports the same pane
+   and the same `agent_session` value, and `herdr pane process-info` shows one
+   `<kind>` process whose argv is the form above. A changed or missing
+   identity ends the restoration: report the concrete limitation, keep the
+   original rows, and recover through `recover-context` or a recorded fresh
+   handoff without resetting the counter.
+5. Dispatch normally with `apply --retain-context --task <task> --fix-round
+   <N>`. It verifies the resumed argv (`verify_worker_permissions`), the
+   ledger's preceding confirmed round, retrospective coverage, and live native
+   continuity before any input, then records `cleared: false, clear_reason:
+   retained` with the unchanged session. A retrospective refusal means the
+   restored process changed the transition evidence: run `retro-check` with the
+   emitted request, record the synthesis, and retry the same dispatch. Never
+   edit state.json, an assignment row, or the session value by hand.
+
+The resume grammar is verified against the installed help of Claude Code
+2.1.266, Codex CLI 0.153.2, and Grok Build 1.0.24; recheck it when a CLI
+upgrades. Herdr 0.8.2 passes the tokens after `--` to the executable, the same
+contract every verified launch relies on. The live restoration itself was not
+exercised by the change that documented it; archive the first live run's
+evidence beside the task ledger.
+
 ## Verified role-clear recovery
 
 Keep the developer reserved until initial and early-fix verification resolves. If the lead
