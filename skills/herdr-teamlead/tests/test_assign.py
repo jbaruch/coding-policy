@@ -262,6 +262,7 @@ class BuildStepsTest(unittest.TestCase):
                 "herdr agent read grok --source visible --lines 20 --format ansi",
                 "herdr pane process-info --pane w4:p1",
                 "herdr pane send-text w4:p1 /new",
+                "herdr pane process-info --pane w4:p1",
                 "herdr pane send-keys w4:p1 enter",
                 "herdr agent read grok --source visible --lines 20 --format ansi",
                 "herdr agent wait grok --until idle --until done --timeout 60000",
@@ -625,7 +626,7 @@ class SlashCommandDeliveryTest(unittest.TestCase):
     def test_every_typed_command_is_followed_by_enter(self):
         runner = runner_with({"grok": "idle"})
         apply(HerdrClient(runner=runner), {"developer": "grok"}, BY_NAME, self.paths, AT)
-        commands = runner.commands()
+        commands = runner.writes()
         index = commands.index("pane send-text w4:p1 /new")
         self.assertEqual(commands[index + 1], "pane send-keys w4:p1 enter")
 
@@ -638,7 +639,7 @@ class SlashCommandDeliveryTest(unittest.TestCase):
         result = apply(
             HerdrClient(runner=runner), {"developer": "grok"}, BY_NAME, self.paths, AT
         )
-        commands = runner.commands()
+        commands = runner.writes()
         self.assertEqual(
             commands[commands.index("pane send-text w4:p1 /new") + 1],
             "pane send-keys w4:p1 enter",
@@ -1183,6 +1184,20 @@ class ApplyTest(unittest.TestCase):
             apply(client, {"developer": "grok"}, BY_NAME, self.paths, AT, allow_recovery=True, warn=lambda _: None)
         self.assertEqual(runner.writes(), [])
 
+    def test_worker_replaced_after_slash_text_receives_no_enter(self):
+        runner = runner_with({"grok": "idle"})
+        client = HerdrClient(runner=runner)
+        original_send_text = client.pane_send_text
+
+        def type_then_replace(pane, text):
+            result = original_send_text(pane, text)
+            self.replace_worker_without_yolo(runner, "grok")
+            return result
+
+        with patch.object(client, "pane_send_text", side_effect=type_then_replace), self.assertRaisesRegex(HerdrError, "do not prove YOLO"):
+            apply(client, {"developer": "grok"}, BY_NAME, self.paths, AT)
+        self.assertEqual(runner.writes(), ["pane send-text w4:p1 /new"])
+
     def test_legacy_worker_permissions_are_proved_for_all_targets_before_any_input(self):
         runner = runner_with({"grok": "idle", "claude": "idle"})
         runner.set("pane process-info --pane " + PANES["claude"], json.dumps({"result": {"process_info": {
@@ -1233,6 +1248,7 @@ class ApplyTest(unittest.TestCase):
                 "agent read grok --source visible --lines 20 --format ansi",
                 "pane process-info --pane w4:p1",
                 "pane send-text w4:p1 /new",
+                "pane process-info --pane w4:p1",
                 "pane send-keys w4:p1 enter",
                 "agent read grok --source visible --lines 20 --format ansi",
                 "agent wait grok --until idle --until done --timeout 60000",

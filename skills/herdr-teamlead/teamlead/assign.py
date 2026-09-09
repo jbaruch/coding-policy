@@ -445,16 +445,12 @@ def build_steps(client, assignments, agents_by_name, paths, panes=None, no_clear
                                 "immediately before each recovery keystroke or extra Enter"))
         if not tier and not no_clear:
             commands.extend(composer_reads)
-            commands.append(client.argv_pane_process_info(pane_id))
-            commands.extend(
-                client.argv_deliver_slash_command(
-                    agent.slash_delivery,
-                    name,
-                    pane_id,
-                    agent.clear_prompt,
-                    enter_count=agent.slash_enter_count,
-                )
-            )
+            for command in client.argv_deliver_slash_command(
+                agent.slash_delivery, name, pane_id, agent.clear_prompt,
+                enter_count=agent.slash_enter_count,
+            ):
+                commands.append(client.argv_pane_process_info(pane_id))
+                commands.append(command)
             commands.extend(composer_reads)
             commands.append(
                 client.argv_agent_wait(name, until=SETTLE_STATES, timeout_ms=settle_timeout_ms)

@@ -137,6 +137,29 @@ class SendSlashCommandTest(unittest.TestCase):
         self._client().send_slash_command("w4:p1", "/usage")
         self.assertEqual(self.runner.pasted_prompts(), [])
 
+    def test_live_guard_runs_before_text_and_each_configured_enter(self):
+        expected = ["pane send-text w4:p1 /new", "pane send-keys w4:p1 enter", "pane send-keys w4:p1 enter"]
+        for stop_after in (0, 1, 2):
+            client = self._client()
+
+            def guard():
+                if len(self.runner.writes()) == stop_after:
+                    raise HerdrError("Worker changed; inspect the pane before further input.", {})
+
+            with self.subTest(stop_after=stop_after), self.assertRaisesRegex(HerdrError, "Worker changed"):
+                client.deliver_slash_command("type", "grok", "w4:p1", "/new", enter_count=2, before_input=guard)
+            self.assertEqual(self.runner.writes(), expected[:stop_after])
+
+    def test_pasted_slash_command_checks_guard_before_prompt(self):
+        client = self._client()
+
+        def guard():
+            raise HerdrError("Worker changed; inspect the pane before further input.", {})
+
+        with self.assertRaisesRegex(HerdrError, "Worker changed"):
+            client.deliver_slash_command("paste", "claude", "w4:p1", "/clear", before_input=guard)
+        self.assertEqual(self.runner.writes(), [])
+
     def test_the_newline_is_a_keystroke_not_part_of_the_text(self):
         self._client().send_slash_command("w4:p1", "/clear")
         sent = [c for c in self.runner.commands() if c.startswith("pane send-text")]

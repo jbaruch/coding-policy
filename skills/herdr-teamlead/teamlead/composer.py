@@ -592,8 +592,6 @@ def send_command(client, agent, pane_id, command, session=None, sleep=time.sleep
 
     # Remembered before it is sent, so a command that fails to submit is one
     # teamlead can account for -- and therefore one it may clear later.
-    if before_input is not None:
-        before_input()
     session.remember(command)
     client.deliver_slash_command(
         agent.slash_delivery,
@@ -601,6 +599,7 @@ def send_command(client, agent, pane_id, command, session=None, sleep=time.sleep
         pane_id,
         command,
         enter_count=agent.slash_enter_count,
+        before_input=before_input,
     )
     sleep(settle_sec)
     text, ansi = read_pane(client, agent, warn=warn)

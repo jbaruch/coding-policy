@@ -327,7 +327,7 @@ class SendCommandTest(unittest.TestCase):
         runner = self._runner([CODEX_EMPTY, CODEX_HELD])
 
         def guard():
-            if runner.writes():
+            if len(runner.writes()) >= 2:
                 raise HerdrError("Foreground worker changed; inspect the pane before sending more input.", {})
 
         with self.assertRaisesRegex(HerdrError, "Foreground worker changed"):
