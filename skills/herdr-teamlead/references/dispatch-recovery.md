@@ -1,5 +1,27 @@
 # Dispatch and Wait Recovery
 
+## Dispatch context
+
+Keep the same `--task` identifier from initial development through all its
+fixes. Omit `--fix-round` on the initial assignment; supply it on every fix.
+Never trim or merge legacy identities. Retained fixes dispatch developer alone
+with `--retain-context`; other roles get separate cleared assignments. Retention
+requires matching confirmed history, live native-session continuity, and a
+compatible verified tier. Missing evidence requires owner recovery, preserving
+the original record and counter. Tiered dispatch requires current qualification.
+
+After a recorded release clear, dispatch the next developer correction fresh
+within the same task and allowance. No context-change permission is required.
+Carry the release report, findings, original base, and cumulative count into
+the brief. Step 12's full verification remains required before release.
+
+After another role clears the developer, use `recover-role-clear` under the
+owner-managed recovery contract below. Pass its same `--work` to plan and fresh apply.
+
+Reuse an approved bounded correction plan while its scope and budget hold.
+An unknown dispatch outcome pauses implementation for evidence-based recovery.
+An identical completed retry returns its recorded result without sending again.
+
 ## Dispatch outcomes
 
 Each outcome names where the round goes next. Only a dispatched worker can

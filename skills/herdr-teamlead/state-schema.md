@@ -1,8 +1,9 @@
 # Team-Lead State Schema
 
-Schema for the cross-invocation state the `herdr-teamlead` skill's Python utility
-writes and reads, per `rules/stateful-artifacts.md`. The utility is the sole
-owner: it writes every record and is the only thing that may change their shape.
+Schemas for the cross-invocation artifacts owned by `herdr-teamlead`, per
+`rules/stateful-artifacts.md`. The Python utility alone writes and migrates
+`state.json`. The lead maintains the separate Markdown task ledger; the utility
+does not parse or update that document.
 
 ## Artifacts
 
@@ -10,6 +11,11 @@ owner: it writes every record and is the only thing that may change their shape.
 | ---- | ----- | ------- |
 | `$XDG_STATE_HOME/teamlead/state.json` (default `~/.local/state/teamlead/state.json`, override `--state FILE`) | `skills/herdr-teamlead/teamlead/state.py` and its `recovery.py` helper, within the same owner skill | Snapshots, append-only assignments, and audited task recovery |
 | `$XDG_CONFIG_HOME/teamlead/config.json` (default `~/.config/teamlead/config.json`, override `--config FILE`) | the operator | Per-agent usage / clear commands; teamlead reads it and never writes it |
+| `<task-reports-dir>/TASK-LEDGER.md` | `herdr-teamlead`, written by the lead | Evidence-backed assignment acceptance and task completion across rounds |
+
+The JSON formats and utility contracts below apply to `state.json` and config.
+The Markdown ledger has its own contract in Task Ledger below; adding it changes
+none of the existing JSON record shapes or versions.
 
 `skills/herdr-teamlead/config.example.json` is an example to adapt and commission before live tier use. Config schema 2
 adds per-agent `tiers` and `launch_args`; schema 1 remains readable without tiers.
@@ -59,6 +65,66 @@ planner's own weights one role at a time, and a role it omits keeps the
 default (see `skills/herdr-teamlead/references/round-setup.md`, Step 5).
 A missing map means no overrides; a value that is not a non-negative finite
 number is refused, naming the file and the role. `plan` is the only reader.
+
+## Task Ledger
+
+Choose one absolute task reports directory outside the shared checkout and
+worker worktrees. Keep `TASK-LEDGER.md` there across fixes, releases, and resumes.
+Record its absolute path in the saved task authorization context and the lead's
+handoff before first dispatch. Do not move or delete it during worktree cleanup.
+It replaces the informal round log, not the utility's dispatch/recovery ledger.
+
+The Markdown document's frontmatter contains `schema_version: 1`, the stable
+`task`, full original `base_revision`, and the absolute `dispatch_state` path
+of the utility ledger. Each appended event is a Markdown section with these
+required fields; unavailable values are the literal `unknown`, never guesses:
+
+| Field | Meaning |
+| --- | --- |
+| `schema_version` | `1` on every event |
+| `id`, `at` | Unique event identity and timezone-qualified observation time |
+| `subject` | `task` or `assignment` |
+| `dispatch_id`, `worker`, `role` | Actual utility dispatch identity and assigned worker/role; `not_applicable` for task events |
+| `report` | Absolute report path, or `unknown` before it is known |
+| `observed` | Source-attributed dispatch result, wait result, worker claim, or Herdr state; never an acceptance decision |
+| `decision` | Lead assessment using the status vocabulary in `references/task-ledger.md` |
+| `head_revision` | Full inspected commit SHA, `unknown` when unverified, or `not_applicable` for work without a VCS artifact |
+| `evidence` | Absolute report/artifact paths with the inspected content or digest, VCS refs, and gate/run URLs with their observed results; `unknown` when none exists |
+| `assessment` | Why this decision follows from the evidence, remaining criteria, and the next action |
+
+The task identity and base in the document apply to every event. Append a new
+decision when evidence changes; preserve earlier records. Event sections may
+contain prose under `assessment` for the lead's reasoning. This is a human-readable
+decision log, not a new machine status API or an input to `teamlead.sh apply`.
+
+- **Writer** — the lead running `herdr-teamlead` writes after dispatch, after
+  every wait outcome, after report assessment, and before any pause or handoff.
+  It also records gate changes, judge decisions, release evidence, and cleanup.
+  One active lead writes a task ledger; transfer ownership explicitly on handoff.
+- **Readers** — a resumed lead and `herdr-standup` read schema 1 without changing
+  its meaning. Workers never write it. Standup reads it without migration and
+  labels unaccepted worker claims as reported; it grants no completion status.
+- **Authority** — decisions refer to inspected evidence. Revalidate sources
+  before acting on a recalled entry. The document grants no authorization,
+  extra correction allowance, dispatch retry, or waiver of a gate. The utility
+  remains authoritative for its recorded dispatches, counters, and recovery.
+- **Missing, corrupt, or unsupported** — preserve any existing file and treat
+  it as no usable prior acceptance. Reconcile utility history, live worker
+  evidence, reports, VCS, and applicable external gates before continuing.
+  No automatic redispatch or counter reset follows from a missing ledger.
+- **Migration** — only `herdr-teamlead` may migrate documented older formats,
+  preserving the original entries and their evidence. Version 1 is the first
+  format; an unversioned round log is evidence to assess, never automatically
+  accepted history. A newer format requires an updated reader. Do not overwrite
+  an unreadable or newer ledger; retain it and record a recovered ledger at a
+  new disclosed path after reconciling sources. Bump the document and affected
+  record versions for future shape changes.
+
+Execution guidance and the blank event template:
+
+```text
+skills/herdr-teamlead/references/task-ledger.md
+```
 
 ## State Record Format
 

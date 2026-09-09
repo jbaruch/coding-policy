@@ -82,6 +82,11 @@ review their own branch.
 10. **Gate** — the lead reads every report in full and decides: another round,
    or the release hand-off.
 
+The lead appends decisions throughout this flow to the persistent task ledger,
+including before pauses and handoffs. `references/task-ledger.md` separates
+dispatch and report observations from assignment acceptance and task completion.
+All references to the round log here mean that ledger.
+
 ## Reading a Report
 
 A report is the worker's only channel to the lead. Read all of it, every time —
@@ -198,7 +203,7 @@ and no degraded ruling.
 - Brief a write action on a repo the operator does not own without their
   explicit per-repo, per-action permission recorded in the brief.
 - Release on a Phase 1 report. A plan is not a verification.
-- Treat a single `idle` or `done` observation as completion.
+- Treat Herdr status as assignment acceptance or task completion.
 - Merge on a worker's behalf. The developer runs the release skill.
 - Act against a judge's ruling, or seat the judge on developer, reviewer, or
   tester. Only the operator overrides a ruling.

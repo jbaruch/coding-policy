@@ -75,6 +75,10 @@ to know goes in the report.
 
 ## Reporting
 
+- YOLO mode changes runtime permission prompts, not this brief's authority,
+  role, or path limits. The lead classifies assignments before dispatch.
+- The lead owns the task ledger and accepts work from evidence. Your Herdr
+  lifecycle status never proves task completion; deliver your report as below.
 - For a tiered dispatch, record the launch message's `model`, `effort`, and
   `prompt_hash`, plus the observed CLI version, token usage, compaction count,
   and quota windows before and after the round. Mark unavailable observations

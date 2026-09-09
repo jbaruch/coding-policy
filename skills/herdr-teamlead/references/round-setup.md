@@ -3,6 +3,12 @@
 Detailed setup contracts and examples for Steps 2–9 of `skills/herdr-teamlead/SKILL.md`.
 The skill retains the execution order and continuation gates.
 
+Step 7's brief-completeness requirements apply to every composed brief: identify
+every issue, finding, file, and prior report in full. Phase 2 names the pushed
+SHA. Fixes carry the prior attempt count and required ownership handoff.
+Verification names `full` or `scoped`, prior findings, and the follow-up for new
+advisories. Final release verification is `full`.
+
 ## Step 2 — Verify Herdr and the Roster
 
 ```bash
@@ -135,8 +141,8 @@ round choice never overrides a model. Supply the fix number when planning
 fixes; pass that same number at dispatch. Register the original task/base with
 `teamlead task` and use the same `--task` on plan and apply. Authorized extra
 fixes also share `--correction-plan` and `--work`; their owner-managed bounds
-are documented in `references/dispatch-recovery.md`. Keep the configured operator launch
-options across worker restarts. The config, round-input, billing-evidence,
+are documented in `references/dispatch-recovery.md`. Keep YOLO mode and supported
+UI options across worker restarts. The config, round-input, billing-evidence,
 and qualification contracts are in:
 
 ```text

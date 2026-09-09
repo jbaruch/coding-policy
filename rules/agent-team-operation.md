@@ -155,11 +155,32 @@ description: Running a multi-agent team — headroom-driven role rotation, one w
 
 ## Dispatch Safety
 
+- Classify each assignment against the operator's task authorization and permitted actions before dispatch
 - Never send input to a `working` or `blocked` agent
 - Never clear a working agent's context
 - Wait on the report marker plus the report file, never on a single idle or done observation
 - Confirm a `blocked` verdict across two reads and the pane before acting on it
 - A blocked worker is surfaced to the operator, never answered on the operator's behalf beyond its brief
+
+## Worker Launch Mode
+
+- Start every team worker in YOLO mode, including reviewer, tester, release, and judge
+- Apply the same mode on every relaunch
+- Verify the worker's permission flags from launch or live foreground-process argv before dispatch
+- Preserve the assignment classifier and the brief's authority, role, and path limits
+- YOLO mode grants no additional task authority
+- Permission flags and their validation live in `skills/herdr-teamlead/teamlead/tiers.py`
+
+## Task Ledger
+
+- Herdr lifecycle and completion statuses are unreliable observations, never task-completion evidence
+- Maintain the lead-owned task ledger outside Herdr throughout the task
+- Record each dispatch outcome and each assessed worker outcome before continuing the round
+- Distinguish report delivery, accepted assignment work, and completion of the whole task
+- Bind acceptance to the actual report and the required artifact, VCS, and gate evidence
+- Reconcile recalled ledger entries against their sources on resume
+- Never restart accepted work solely on a stale Herdr status
+- The ledger's path, schema, ownership, and recovery contract are in `skills/herdr-teamlead/state-schema.md`
 
 ## Review Before PR
 
