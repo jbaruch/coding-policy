@@ -2,6 +2,23 @@
 
 ### Fixed
 
+- **Release helpers preserve literal tag names (#371, #374).** The run
+  resolver escapes quoted query arguments without changing the exact workflow,
+  commit, push-event or ref binding, and the GitHub release lookup encodes the
+  tag as a URL path component. Quoted and query-shaped refs, reserved URL bytes
+  and UTF-8 tags have deterministic transport fixtures; the resolver also runs
+  through its CLI with no system `jq` on `PATH`.
+
+  Policy review 5148294337 found that the GitHub-release test harness replaced
+  the helper's cleanup trap. Each invocation now owns its cleanup trap and the
+  harness checks that no script-created file remains after each case, covering
+  successful confirmations, definitive failures and indeterminate results.
+
+  The watch instruction keeps the channel-specific confirmation helpers and
+  moves its rationale here: propagating `gh run watch --exit-status` under
+  `set -e` would stop the wrapper before those helpers could report why the
+  publication was not confirmed.
+
 - **The Tessl review gate now follows Tessl distribution, not every plugin
   artifact (#374).** `context-artifacts` carried a Tessl-specific body under a
   generic `applyTo` action clause — "when authoring or modifying plugin

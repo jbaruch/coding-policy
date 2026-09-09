@@ -214,7 +214,7 @@ After merge — per `rules/ci-safety.md`'s Always Watch CI duty extended through
   gh run watch "$tag_run_id"
   ```
 
-  No `--exit-status` on the watch: each channel's confirmation reads the run conclusion explicitly — `verify-publish-landed.sh` for Tessl, `verify-github-release.sh` for a tag publication — and letting `--exit-status` propagate a non-zero exit would short-circuit `set -e` wrappers before they run.
+  Omit `--exit-status` from the watch. Read the run conclusion through each channel's confirmation helper — `verify-publish-landed.sh` for Tessl, `verify-github-release.sh` for a tag publication.
 
   `gh pr view` returns the specific merge commit for this PR, unaffected by parallel merges. The four facts the resolver binds, its enqueue-latency retry, and its refusal to pick between two runs matching all four are the script's decision contract — see `skills/release/resolve-publish-run.sh` header, not restated here (`rules/script-as-black-box.md`). Output is `{"database_id": N}` per `rules/script-delegation.md` — extract with `jq -r '.database_id'`. The watch is a timing precondition for the confirmations below, not the gate
 - **Tessl publication:** confirm the publish landed via the conjunction check — conjuncts 1 and 2 (resolved run's `conclusion == success` AND registry's `Latest Version > PRE`). Capture the emitted `current` version for the moderation check that follows:
