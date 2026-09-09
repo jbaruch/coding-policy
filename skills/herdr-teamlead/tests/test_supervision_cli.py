@@ -11,7 +11,8 @@ import json
 import os
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 from teamlead import cli, supervision
 from teamlead.errors import StateError
@@ -337,11 +338,14 @@ class SupervisionCliTest(fixture.CliCase):
         supervision.enroll(self.state, assignment, AT)
         client = self._client({"grok": "blocked"})
         self.runner.set("agent read grok --source visible --lines 200", "Candidate approval dialog")
-        with patch.object(cli, "now_iso", return_value=AT), patch.object(cli.time, "sleep") as sleep:
+        # Isolate the fleet sleeper from Python's shared time module: ps's
+        # subprocess timeout machinery may sleep while waiting for its child.
+        fleet_sleep = Mock(name="fleet_sleep")
+        with patch.object(cli, "now_iso", return_value=AT), patch.object(cli, "time", SimpleNamespace(sleep=fleet_sleep)):
             code, out, err = self.invoke(["supervision-watch", "--now", AT], client)
         self.assertEqual(code, 0, err)
         self.assertEqual(json.loads(out)["reason"], "events")
-        self.assertFalse(sleep.called)
+        fleet_sleep.assert_not_called()
         self.assertEqual(self.runner.writes(), [])
         self.assertTrue(self.saved()["events"])
 
