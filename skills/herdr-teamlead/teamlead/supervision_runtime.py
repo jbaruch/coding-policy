@@ -18,8 +18,8 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from . import supervision as store
-from .errors import StateError, TeamLeadError, UsageError
-from .herdr import HerdrClient
+from .errors import HerdrError, StateError, TeamLeadError, UsageError
+from .herdr import HerdrClient, scrub_for_trace
 
 DEFAULT_INTERVAL = 2.0
 DEFAULT_DURATION = 45.0
@@ -31,11 +31,29 @@ OBSERVATION_TIMEOUT = 3.0
 
 def observation_runner(argv):
     """Bound each read-only Herdr call so one broken worker cannot stall a sweep."""
-    return subprocess.run(argv, capture_output=True, text=True, check=False, timeout=OBSERVATION_TIMEOUT)
+    try:
+        return subprocess.run(argv, capture_output=True, text=True, check=False, timeout=OBSERVATION_TIMEOUT)
+    except FileNotFoundError:
+        # HerdrClient supplies the install/binary-path recovery instruction.
+        raise
+    except subprocess.TimeoutExpired:
+        raise HerdrError("Herdr observation exceeded its {}s read timeout. Inspect the named worker and Herdr connection, then retry this bounded read without relaunching the worker.".format(OBSERVATION_TIMEOUT), {}) from None
+    except OSError as exc:
+        raise HerdrError("Cannot start the Herdr observation: {}. Restore executable access and the Herdr installation, then retry this read.".format(scrub_for_trace(str(exc))), {}) from None
+
+
+class ObservationClient(HerdrClient):
+    """Reject malformed control shapes before native record access can abort a fleet sweep."""
+
+    def _run_json(self, argv):
+        result = super()._run_json(argv)
+        if not isinstance(result, dict):
+            raise HerdrError("Herdr returned a control response whose result is not an object. Check the installed Herdr version and restore its JSON control response before retrying this read.", {})
+        return result
 
 
 def read_client(binary=None):
-    return HerdrClient(binary=binary, runner=observation_runner)
+    return ObservationClient(binary=binary, runner=observation_runner)
 
 
 def process_identity(pid):
@@ -44,11 +62,12 @@ def process_identity(pid):
         result = subprocess.run(["ps", "-p", str(pid), "-o", "lstart=", "-o", "command="],
                                 capture_output=True, text=True, check=False, timeout=5)
     except (OSError, subprocess.TimeoutExpired) as exc:
-        raise StateError("Cannot verify supervision process {}: {}. Restore ps access before replacing a watcher.".format(pid, exc), {}) from None
-    if result.returncode == 1 and not result.stdout.strip():
+        raise StateError("Cannot verify supervision process {}: {}. Restore ps access before replacing a watcher.".format(pid, scrub_for_trace(str(exc))), {}) from None
+    if result.returncode == 1 and not result.stdout.strip() and not result.stderr.strip():
         return None
     if result.returncode != 0 or not result.stdout.strip():
-        raise StateError("ps could not verify watcher {}. Inspect the process before restarting supervision.".format(pid), {})
+        diagnostic = scrub_for_trace(result.stderr.strip()) or "no process identity returned"
+        raise StateError("ps could not verify watcher {} (exit {}): {}. Restore process visibility and inspect the existing execution handle before restarting supervision.".format(pid, result.returncode, diagnostic), {})
     return {"pid": pid, "identity": store.digest(result.stdout.strip())}
 
 
@@ -75,10 +94,27 @@ def status(state_path, at, probe=process_identity):
             "through": len(data["events"]), "hold": store.held(data), "watcher": health(data, at, probe)}
 
 
+def observation_error(exc, operation, agent):
+    """Persist a bounded actionable message, never arbitrary exception details."""
+    message = exc.message
+    if message.startswith("herdr returned non-JSON output"):
+        # HerdrClient includes a stdout excerpt in this exception. Its contents
+        # are not needed to identify a malformed control response.
+        message = "Herdr returned a non-JSON control response. Inspect the Herdr connection and installed version before retrying this read."
+    elif message.startswith("herdr returned JSON without a `result` field"):
+        message = "Herdr's JSON control response omitted the result field. Check the installed Herdr version before retrying this read."
+    return {"code": exc.code, "operation": operation, "agent": scrub_for_trace(agent),
+            "message": scrub_for_trace(message),
+            "recovery": "Inspect the named worker and restore the failing read operation before retrying observation. This error does not prove completion or permit a worker relaunch."}
+
+
 def observe(client, member):
     """Collect hints only; wait-report/report_delivery retain delivery authority."""
     assignment = store.expected_assignment(member)
-    live = client.agent_get(assignment["agent"])
+    try:
+        live = client.agent_get(assignment["agent"])
+    except TeamLeadError as exc:
+        return {"observation_error": observation_error(exc, "herdr agent get", assignment["agent"])}
     pane = live.get("pane_id")
     native = live.get("agent_session")
     expected_native = assignment["native_session"]
@@ -99,14 +135,21 @@ def observe(client, member):
     except FileNotFoundError:
         observations["report"] = {"present": False}
     except OSError as exc:
-        observations["report_error"] = {"reason": "report_unreadable", "error": type(exc).__name__}
+        observations["report_error"] = {"reason": "report_unreadable", "error": type(exc).__name__,
+                                        "operation": "read report file", "path": scrub_for_trace(str(report)),
+                                        "message": scrub_for_trace(str(exc)),
+                                        "recovery": "Restore access to the enrolled report file, then repeat the report-delivery checkpoint. Keep acceptance unverified while its evidence is unreadable."}
     else:
         observations["report"] = {"present": True, "path": str(report), "sha256": hashlib.sha256(body).hexdigest(), "size": len(body)}
     # Save only a digest of visible output, never raw potentially sensitive pane
     # contents. It lets the lead notice a blocked/report candidate changed.
     if pane and (live.get("agent_status") == "blocked" or observations.get("report", {}).get("present")):
-        visible = client.agent_read(assignment["agent"], source="visible", lines=READ_LINES)
-        observations["visible"] = {"sha256": store.digest(visible)}
+        try:
+            visible = client.agent_read(assignment["agent"], source="visible", lines=READ_LINES)
+        except TeamLeadError as exc:
+            observations["observation_error"] = observation_error(exc, "herdr agent read --source visible", assignment["agent"])
+        else:
+            observations["visible"] = {"sha256": store.digest(visible)}
     return observations
 
 
@@ -114,10 +157,7 @@ def sweep(state_path, client, at, watcher_id):
     data = store.load(state_path)
     members = [row for row in data["members"] if row["active"]]
     def sample(member):
-        try:
-            observed = observe(client, member)
-        except TeamLeadError as exc:
-            observed = {"observation_error": {"code": exc.code}}
+        observed = observe(client, member)
         return member["id"], store.digest(store.expected_assignment(member)), observed
     # Independent read-only observations run concurrently. No branch receives a
     # prompt/keys operation, and event order remains enrollment order.
