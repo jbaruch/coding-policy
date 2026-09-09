@@ -242,6 +242,47 @@ class MemoryTest(unittest.TestCase):
             self.assertEqual(len(memory.list_lessons(self.state, AT)["lessons"]), 1)
         self.assertEqual(len(self.raw()["records"]), 1)
 
+    def test_dangling_index_link_is_preserved_until_history_is_restored(self):
+        self.record()
+        index = memory.location(self.state)
+        original = index.read_bytes()
+        missing = self.root / "unavailable-history.json"
+        index.unlink()
+        index.symlink_to(missing)
+        for operation in (lambda: memory.list_lessons(self.state, LATER), lambda: memory.show(self.state, LATER),
+                          lambda: self.record(self.revision(), at=LATER), lambda: self.stow(at=LATER)):
+            with self.assertRaisesRegex(StateError, "dangling link.*restore"):
+                operation()
+            self.assertTrue(index.is_symlink())
+            self.assertEqual(index.readlink(), missing)
+            self.assertFalse(missing.exists())
+        missing.write_bytes(original)
+        self.assertEqual(memory.list_lessons(self.state, LATER)["lessons"][0]["id"], "lesson-1")
+        self.assertTrue(index.is_symlink())
+        self.assertEqual(missing.read_bytes(), original)
+
+    def test_cli_reports_dangling_index_without_replacing_it(self):
+        index = memory.location(self.state)
+        index.parent.mkdir()
+        missing = self.root / "missing-index.json"
+        index.symlink_to(missing)
+        draft = self.root / "input.json"
+        draft.write_text(json.dumps(self.lesson), encoding="utf-8")
+        for command in (["memory-list"], ["memory-record", "--record", str(draft)]):
+            result = subprocess.run(
+                [_sys.executable, "-m", "teamlead", "--state", str(self.state), *command, "--now", LATER],
+                env={**_os.environ, "PYTHONPATH": _ROOT, "PYTHONDONTWRITEBYTECODE": "1"},
+                capture_output=True, text=True, check=False,
+            )
+            self.assertEqual(result.returncode, 1)
+            self.assertEqual(result.stdout, "")
+            diagnostic = json.loads(result.stderr)
+            self.assertEqual(diagnostic["error"], "state_error")
+            self.assertIn("restore", diagnostic["message"])
+            self.assertTrue(index.is_symlink())
+            self.assertEqual(index.readlink(), missing)
+            self.assertFalse(missing.exists())
+
     def test_unknown_schema_preserves_bytes_for_reader_and_writer(self):
         self.record()
         document = self.raw()

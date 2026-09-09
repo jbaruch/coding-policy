@@ -146,6 +146,8 @@ def load(path):
     target = location(path)
     empty = {"schema_version": SCHEMA_VERSION, "state_path": str(Path(path).expanduser().resolve()), "records": []}
     if not target.exists():
+        if target.is_symlink():
+            raise StateError("Memory index {} is a dangling link; preserve the link and restore its saved target before reading or recording memory.".format(target), {})
         return empty
     document = _json(target)
     try:
