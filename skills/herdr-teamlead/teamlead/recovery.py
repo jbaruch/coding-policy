@@ -209,7 +209,12 @@ def checkpoint(store, assignments, data, at, judge_agent):
               "base_revision": task["base_revision"], **ruling}
     prior = next((row for row in store["checkpoints"] if row["id"] == data["id"]), None)
     if prior:
-        if any(prior[key] != value for key, value in record.items() if key != "at"):
+        # Replaying a checkpoint written before `judge_report` became optional
+        # must still return that row: comparing the writer's current version
+        # against a preserved one reports identical evidence as different, and
+        # a re-run of an already-recorded checkpoint would fail (#396).
+        compared = (set(prior) | set(record)) - {"at", "schema_version"}
+        if any(prior.get(key) != record.get(key) for key in compared):
             raise UsageError("Checkpoint identity already describes different evidence; record a new checkpoint without rewriting the old one.", {})
         return prior
     store["checkpoints"].append(record)

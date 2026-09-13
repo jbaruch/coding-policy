@@ -248,10 +248,15 @@ Dispatch it on exactly one of three triggers:
 
 All three are disputes. An exhausted correction allowance is not: only the
 operator can grant more attempts, so that boundary goes to the operator through
-Step 19's checkpoint. A re-granted budget exhausts too, and dispatching a ruling
-at each boundary made the seat a per-round toll on the window its developer and
-reviewers already share. When a ruling is still wanted there, the operator asks
-for one per task, never one per allowance.
+the checkpoint, never through a lead judge dispatch. A re-granted budget
+exhausts too, and dispatching a ruling at each boundary made the seat a
+per-round toll on the window its developer and reviewers already share.
+
+The one exception is the operator's own: having received the checkpoint, the
+operator may ask for one ruling for that task, and the lead then runs Steps
+13-18 for it as for any other dispatch. A task gets at most one such request,
+whatever later budgets it is granted. `rules/agent-team-operation.md` Judge
+Seat carries its preconditions.
 
 It is read-only without exception: no file edit, no mutating git or `gh`
 command, no GitHub post, no subagent dispatch. It reads both positions and the

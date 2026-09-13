@@ -16,11 +16,12 @@
   allowance stops the round and surfaces to the operator, who alone can grant
   more attempts; when a ruling is still wanted there, it is bounded to one per
   task rather than one per allowance boundary, so a re-granted budget cannot
-  re-fire it. `teamlead checkpoint` makes `judge_report` optional — a cited one
+  re-fire it, and it is the operator's own request rather than a lead dispatch. `teamlead checkpoint` makes `judge_report` optional — a cited one
   is still held to the completed-`RULING`/`ACTION` contract and the pinned
   judge's post-attempt assignment — and its records carry `schema_version` 2.
   Version-1 checkpoints keep their judge evidence required and are never
-  rewritten. The `judge_checkpoint_required` task status is now
+  rewritten, and replaying one returns that row rather than reading the
+  writer's newer version as changed evidence. The `judge_checkpoint_required` task status is now
   `checkpoint_required`.
 
 ## 0.3.206 — 2026-09-09

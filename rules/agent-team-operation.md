@@ -55,8 +55,13 @@ description: Running a multi-agent team — task-based specialist composition, c
 
 - The reserved `judge` seat runs on the most capable model available and holds no other responsibility
 - The lead dispatches the judge only for one of three triggers: a contested reviewer or tester verdict, a lead override of a blocking finding, or a bot finding the team disagrees with
-- An exhausted correction allowance goes to the operator, never to the judge
-- At such a boundary the operator may request at most one ruling per task, never one per allowance
+- An exhausted correction allowance goes to the operator, never to the lead's judge dispatch
+- Narrow exception for an operator-requested ruling at an exhausted allowance.
+- Preconditions (all required):
+  1. The operator requests the ruling explicitly, after receiving the exhausted-allowance checkpoint
+  2. No prior operator-requested exhaustion ruling exists for the task
+  3. The checkpoint records the ruling's evidence under the original task and base
+- Every other exhausted allowance reaches the operator with no judge dispatch
 - The judge is read-only: it never edits a repository file, never runs a mutating git or `gh` command, never posts to GitHub, never dispatches a subagent — its only output is its report file
 - The judge reads both positions and the governing rule, verifies the disputed facts against the tree, and returns `RULING: uphold A | uphold B | amend — <line> | blocked — <question>` with numbered reasons, an `ACTION:` naming the minimal step, and an `UNVERIFIED:` line
 - The judge's ruling binds the round; only the operator overrides it
