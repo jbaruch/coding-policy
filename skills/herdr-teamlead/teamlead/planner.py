@@ -18,6 +18,13 @@ An agent holding no seat burns nothing, so it is not part of that minimum.
 verifies the branch they wrote, so the lead bars the author from those seats. A
 role whose eligible field is empty is a PlanError, never a silent drop.
 
+Ranking is only as honest as the field it sorts, so three refusals guard the
+field itself before any seat is filled: a snapshot that does not cover every
+agent `config.json` declares, an `--exclude` list the snapshot matches no name
+of, and a ranked seat whose measured field holds one agent. Each of the three
+is a measurement that missed the fleet rather than a fleet with no capacity,
+and each used to plan a forced pick that read like a ranked one.
+
 Ordering within one role, in full:
 
 1. Agents excluded from that role are not candidates at all, and neither is
@@ -248,6 +255,86 @@ def _fillable(roles, agents, excluded):
     return True
 
 
+def _refuse_uncovered_roster(roster, agents):
+    """Halt when the snapshot leaves out an agent `config.json` declares.
+
+    A declared worker absent from the snapshot is a measurement that missed
+    the fleet, not a worker with nothing left: `measure` pointed at one
+    freshly spawned pane writes a snapshot of one, and every seat then ranks
+    against that pane while an idle worker at 97% headroom stays invisible to
+    the sort. Measuring the roster is what keeps that worker a candidate, so
+    the plan refuses here rather than filling seats from whatever happened to
+    be measured.
+
+    An agent present but unmeasured is a different state: it carries a null
+    headroom, sorts last, and is named in the rationale.
+    """
+    if not roster:
+        return
+    uncovered = sorted(set(roster) - set(agents))
+    if not uncovered:
+        return
+    raise PlanError(
+        "Snapshot does not cover {} - config.json declares {} and this "
+        "snapshot measured {}. Run `teamlead measure` over the roster before "
+        "planning, or drop the worker from config.json.".format(
+            ", ".join(uncovered), ", ".join(sorted(roster)), ", ".join(sorted(agents))
+        ),
+        {"uncovered": uncovered, "roster": sorted(roster), "agents": sorted(agents)},
+    )
+
+
+def _refuse_inert_exclusions(excluded, agents):
+    """Halt when the snapshot matches no name `--exclude` bars.
+
+    An exclusion the snapshot cannot match bars nobody, so the author the lead
+    meant to keep out of review is eligible again and the round reads as if
+    independence had been enforced. One stray name among several is a typo and
+    stays a note (`_notes`); every name stray means the caller is excluding
+    against a fleet this snapshot never measured.
+    """
+    named = sorted({name for names in excluded.values() for name in names})
+    if not named or any(name in agents for name in named):
+        return
+    raise PlanError(
+        "--exclude names {}, and the snapshot contains none of them ({}) - "
+        "every exclusion is inert, so nothing was barred. Re-measure the "
+        "roster, or correct the names against `herdr agent list`.".format(
+            ", ".join(named), ", ".join(sorted(agents))
+        ),
+        {"inert_exclusions": named, "agents": sorted(agents)},
+    )
+
+
+def _refuse_degenerate_field(roles, agents, judge_agent, roster):
+    """Halt when a ranked seat has no field to rank.
+
+    One candidate is a forced pick, and reporting it as a headroom-ranked one
+    hides that nothing was compared: five consecutive rounds filled from a
+    one-pane snapshot drained a single window to 77% used while another sat at
+    1%. The measured field, not the field after `--exclude`, is what this
+    reads: an operator barring the author down to one candidate chose that
+    narrowing deliberately, whereas a one-agent snapshot chose nothing.
+
+    The pinned judge seat is exempt -- it is assigned, never ranked -- and so
+    is a config that declares a single agent, which has no rotation to lose.
+    """
+    if len(agents) > 1:
+        return
+    if roster and len(roster) == 1:
+        return
+    ranked = [role for role in roles if role != "judge" or not judge_agent]
+    if not ranked:
+        return
+    raise PlanError(
+        "Role {} would be filled from a measured field of one agent ({}) - "
+        "one candidate is a forced pick, not a ranking. Run `teamlead "
+        "measure` over the roster so every idle worker is a candidate, then "
+        "plan again.".format(", ".join(repr(role) for role in ranked), ", ".join(sorted(agents))),
+        {"roles": ranked, "agents": sorted(agents)},
+    )
+
+
 def _unfillable_message(role, barred, remaining, later_roles, constrained=False):
     """Why one seat could not be filled, and what to change."""
     parts = [
@@ -326,7 +413,7 @@ def _refuse_unaffordable_judge(judge_agent, headrooms, cost, groups):
         )
 
 
-def plan(roles, snapshot, counts=None, exclude=None, role_costs=None, snapshot_ref=None, warn=None, judge_agent=None, judge_tier=None, tier_candidates=None, rounds=None, familiarity=None, requirements=None, selection_rationale=None):
+def plan(roles, snapshot, counts=None, exclude=None, role_costs=None, snapshot_ref=None, warn=None, judge_agent=None, judge_tier=None, tier_candidates=None, rounds=None, familiarity=None, requirements=None, selection_rationale=None, roster=None):
     """Assign `roles` to the agents in `snapshot`, heaviest seat first.
 
     `counts` is `{role: {agent: times_held}}` from the state ledger; omit it
@@ -341,10 +428,16 @@ def plan(roles, snapshot, counts=None, exclude=None, role_costs=None, snapshot_r
     document echoes it back as the tier the worker is started on, so a caller
     builds the launch flags from the config rather than typing them by hand.
 
+    `roster` is the agent names `config.json` declares, so the plan can tell a
+    snapshot that missed the fleet from a fleet with no capacity; omit it to
+    plan against whatever the snapshot holds.
+
     Raises PlanError when there are no roles, no agents, fewer agents than
     roles, an exclusion naming a role nobody is assigning, or a role whose
     eligible field is empty -- silently dropping a role would hide work nobody
-    is doing.
+    is doing. Raises it again for a field nothing could have been ranked in: a
+    snapshot missing a declared agent, an `--exclude` list naming nobody the
+    snapshot holds, or a ranked seat measured against one agent.
     """
     counts = counts or {}
     roles = list(roles)
@@ -397,6 +490,12 @@ def plan(roles, snapshot, counts=None, exclude=None, role_costs=None, snapshot_r
 
     warn = warn or stderr_warn
     excluded = _normalize_exclusions(exclude, roles)
+
+    # The field before the seats: a plan built on a snapshot that missed the
+    # fleet ranks nothing, whatever the sort then reports.
+    _refuse_uncovered_roster(roster, agents)
+    _refuse_inert_exclusions(excluded, agents)
+    _refuse_degenerate_field(roles, agents, judge_agent, roster)
 
     # The judge seat is pinned, never ranked. Without a `judge` block there is
     # nothing to pin it to, and ranking an ordinary worker into the seat would

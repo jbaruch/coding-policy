@@ -712,6 +712,7 @@ def cmd_plan(args, client=None, warn=None, trace=None):
             requirements=requirements,
             familiarity=constraints["familiarity"],
             selection_rationale=constraints["rationale"],
+            roster=[agent.name for agent in agents],
         )
     result["task_context"] = ({"task": args.task, "fix_round": args.fix_round,
                                "plan": args.correction_plan, "work": work} if args.task else None)

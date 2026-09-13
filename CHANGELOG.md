@@ -1,5 +1,26 @@
 # Changelog
 
+### Fixed
+
+- **The planner refuses a field it could not have ranked (#395).** `teamlead plan`
+  filled five consecutive rounds from a snapshot `measure --agent` had written
+  over one freshly spawned pane: one candidate per seat, an 18-name `--exclude`
+  list matching nothing in it, and a rationale reporting each forced pick as a
+  headroom ranking. The fleet dispatched 48 consecutive rounds into one weekly
+  window, taking it from 35% to 77% used in under eight hours, while another
+  window sat at 1% used with four idle panes and received nothing for three
+  days. Rotation had worked on the same task while the roster was measured
+  whole, and stopped at the first single-pane measure. Three refusals now gate
+  the field before any seat is filled: a snapshot that does not cover the
+  agents `config.json` declares, an `--exclude` list naming nobody the snapshot
+  measured (previously a trailing note), and a ranked seat measured against one
+  agent. The pinned judge seat is exempt — it is assigned, never ranked — and so
+  is a single-agent config. An exclusion narrowing a measured field to one
+  candidate still plans: the operator chose that narrowing, whereas a one-pane
+  snapshot chose nothing. Issue #315's unknown-headroom handling is unchanged —
+  an agent present but unmeasured is still a fallback candidate, never a
+  refusal.
+
 ## 0.3.206 — 2026-09-09
 
 ### Added

@@ -132,7 +132,7 @@ class NullHeadroomTest(unittest.TestCase):
 
 class OutputShapeTest(unittest.TestCase):
     def test_carries_a_schema_version(self):
-        self.assertEqual(plan(["developer"], snapshot(grok=100.0))["schema_version"], 5)
+        self.assertEqual(plan(["developer"], snapshot(grok=100.0, spare=50.0))["schema_version"], 5)
 
     def test_rationale_has_one_line_per_role_naming_the_field(self):
         result = plan(ROLES, snapshot(claude=92.0, codex=87.0, grok=100.0))
@@ -143,15 +143,15 @@ class OutputShapeTest(unittest.TestCase):
 
     def test_rationale_names_the_previous_role_count(self):
         counts = {"developer": {"grok": 4}}
-        result = plan(["developer"], snapshot(grok=100.0), counts)
+        result = plan(["developer"], snapshot(grok=100.0, spare=50.0), counts)
         self.assertIn("held this role 4x before", result["rationale"][0])
 
     def test_rationale_explains_a_null_headroom_pick(self):
-        result = plan(["developer"], snapshot(grok=None))
+        result = plan(["developer"], snapshot(grok=None, spare=None))
         self.assertIn("no headroom reading", result["rationale"][0])
 
     def test_snapshot_ref_defaults_to_the_measurement_timestamp(self):
-        result = plan(["developer"], snapshot(grok=100.0))
+        result = plan(["developer"], snapshot(grok=100.0, spare=50.0))
         self.assertEqual(
             result["snapshot_ref"],
             {"source": None, "measured_at": "2026-02-03T10:00:00+00:00"},
@@ -159,7 +159,7 @@ class OutputShapeTest(unittest.TestCase):
 
     def test_snapshot_ref_is_echoed_when_supplied(self):
         ref = {"source": "/tmp/snap.json", "measured_at": "2026-02-03T10:00:00+00:00"}
-        result = plan(["developer"], snapshot(grok=100.0), snapshot_ref=ref)
+        result = plan(["developer"], snapshot(grok=100.0, spare=50.0), snapshot_ref=ref)
         self.assertEqual(result["snapshot_ref"], ref)
 
 
@@ -199,12 +199,12 @@ class CostWeightTest(unittest.TestCase):
         self.assertEqual(result["assignments"], {"developer": "zeta", "tester": "alpha"})
 
     def test_the_rationale_names_the_weight_it_used(self):
-        result = plan(["developer"], snapshot(grok=100.0))
+        result = plan(["developer"], snapshot(grok=100.0, spare=50.0))
         self.assertIn("weight 12", result["rationale"][0])
         self.assertIn("88% projected", result["rationale"][0])
 
     def test_the_rationale_names_an_overridden_weight(self):
-        result = plan(["developer"], snapshot(grok=100.0), role_costs={"developer": 40.0})
+        result = plan(["developer"], snapshot(grok=100.0, spare=50.0), role_costs={"developer": 40.0})
         self.assertIn("weight 40", result["rationale"][0])
 
 
@@ -273,14 +273,14 @@ class ExclusionTest(unittest.TestCase):
         self.assertIn("reviewr", str(caught.exception))
         self.assertIn("developer, tester", str(caught.exception))
 
-    def test_excluding_an_agent_the_snapshot_lacks_warns_rather_than_refusing(self):
-        # The author may be busy and therefore unmeasured; refusing would
-        # block a round the exclusion does not actually affect.
+    def test_a_stray_name_beside_a_real_one_is_a_note_not_a_refusal(self):
+        # One name the snapshot lacks is a typo: the other exclusion still
+        # bars somebody, so the round is not planning against a stale roster.
         warnings = []
         result = plan(
             ["developer"],
             snapshot(alpha=90.0, zeta=60.0),
-            exclude={"developer": ["ghost"]},
+            exclude={"developer": ["ghost", "zeta"]},
             warn=warnings.append,
         )
         self.assertEqual(result["assignments"]["developer"], "alpha")
@@ -288,6 +288,19 @@ class ExclusionTest(unittest.TestCase):
         self.assertIn("ghost", warnings[0])
         self.assertIn("ghost", result["rationale"][-1])
         self.assertIn("changed nothing", result["rationale"][-1])
+
+    def test_exclusions_the_snapshot_matches_no_name_of_are_an_error(self):
+        # Every name stray means the caller is excluding against a fleet this
+        # snapshot never measured, so nothing was barred at all.
+        with self.assertRaises(PlanError) as caught:
+            plan(
+                ["developer"],
+                snapshot(alpha=90.0, zeta=60.0),
+                exclude={"developer": ["ghost", "phantom"]},
+                warn=lambda message: None,
+            )
+        self.assertIn("ghost, phantom", str(caught.exception))
+        self.assertIn("inert", str(caught.exception))
 
     def test_the_rationale_names_the_exclusions_applied(self):
         result = plan(
@@ -331,6 +344,98 @@ class SkippedSnapshotTest(unittest.TestCase):
         result = plan(["developer", "reviewer"], self._snapshot(zeta=True))
         self.assertIn("developer -> alpha", result["rationale"][0])
         self.assertIn("reviewer -> zeta", result["rationale"][1])
+
+
+class DegenerateFieldTest(unittest.TestCase):
+    """A field of one ranks nothing, whatever the sort then reports.
+
+    Five consecutive rounds planned from a one-pane snapshot drained one
+    weekly window to 77% used while another sat at 1% with idle workers.
+    Tracked as jbaruch/coding-policy#395.
+    """
+
+    def test_a_single_candidate_seat_is_an_error(self):
+        with self.assertRaises(PlanError) as caught:
+            plan(["reviewer"], snapshot(codex=23.0))
+        self.assertIn("forced pick", str(caught.exception))
+        self.assertIn("codex", str(caught.exception))
+
+    def test_the_refusal_names_every_ranked_seat_and_the_field(self):
+        with self.assertRaises(PlanError) as caught:
+            plan(["reviewer"], snapshot(codex=23.0))
+        self.assertEqual(caught.exception.details["roles"], ["reviewer"])
+        self.assertEqual(caught.exception.details["agents"], ["codex"])
+
+    def test_a_one_pane_snapshot_with_stray_exclusions_names_the_mismatch(self):
+        # The shape the fleet actually produced: `measure` pointed at one
+        # freshly spawned pane, an 18-name --exclude list matching none of it.
+        with self.assertRaises(PlanError) as caught:
+            plan(
+                ["reviewer"],
+                snapshot(codex=23.0),
+                exclude={"reviewer": ["claude", "grok"]},
+                warn=lambda message: None,
+            )
+        self.assertIn("inert", str(caught.exception))
+
+    def test_a_single_agent_config_still_plans(self):
+        result = plan(["reviewer"], snapshot(codex=23.0), roster=["codex"])
+        self.assertEqual(result["assignments"], {"reviewer": "codex"})
+
+    def test_the_pinned_judge_seat_is_exempt(self):
+        payload = snapshot(judge=90.0)
+        result = plan(
+            ["judge"], payload, warn=lambda message: None, judge_agent="judge"
+        )
+        self.assertEqual(result["assignments"], {"judge": "judge"})
+
+    def test_an_exclusion_narrowing_a_measured_field_to_one_still_plans(self):
+        # The operator barred the author deliberately; the snapshot still
+        # measured the fleet, which is the difference this gate reads.
+        result = plan(
+            ["reviewer"],
+            snapshot(alpha=90.0, zeta=60.0),
+            exclude={"reviewer": ["alpha"]},
+        )
+        self.assertEqual(result["assignments"], {"reviewer": "zeta"})
+        self.assertIn("excluded: alpha", result["rationale"][0])
+        self.assertIn("zeta=60%", result["rationale"][0])
+
+
+class RosterCoverageTest(unittest.TestCase):
+    """`measure` covers the roster, or no seat is ranked against real headroom."""
+
+    def test_a_declared_agent_missing_from_the_snapshot_is_an_error(self):
+        with self.assertRaises(PlanError) as caught:
+            plan(
+                ["developer", "reviewer"],
+                snapshot(alpha=90.0, zeta=60.0),
+                roster=["alpha", "zeta", "idle"],
+            )
+        self.assertIn("idle", str(caught.exception))
+        self.assertIn("teamlead measure", str(caught.exception))
+        self.assertEqual(caught.exception.details["uncovered"], ["idle"])
+
+    def test_a_covered_roster_plans_unchanged(self):
+        data = snapshot(alpha=90.0, zeta=60.0)
+        self.assertEqual(
+            plan(["developer", "reviewer"], data, roster=["alpha", "zeta"]),
+            plan(["developer", "reviewer"], data),
+        )
+
+    def test_an_unmeasured_agent_present_in_the_snapshot_is_not_a_refusal(self):
+        # Issue #315's unknown-headroom handling is untouched: a null reading
+        # is a fallback candidate, never a missing agent.
+        result = plan(
+            ["developer", "reviewer"],
+            snapshot(alpha=90.0, zeta=None),
+            roster=["alpha", "zeta"],
+        )
+        self.assertEqual(result["assignments"]["reviewer"], "zeta")
+
+    def test_an_unknown_roster_plans_against_the_snapshot(self):
+        result = plan(["developer"], snapshot(alpha=90.0, zeta=60.0), roster=[])
+        self.assertEqual(result["assignments"]["developer"], "alpha")
 
 
 class RefusalTest(unittest.TestCase):
