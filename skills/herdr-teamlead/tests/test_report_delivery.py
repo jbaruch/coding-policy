@@ -430,9 +430,10 @@ class NativeDeliveryTests(unittest.TestCase):
         store["schema_version"] = 2
         del store["delivery_recoveries"]
         del store["role_clearances"]
+        del store["refusal_authorizations"]
         original = copy.deepcopy(store)
         self.assertTrue(recovery.migrate_store(store))
-        self.assertEqual(store, {**original, "schema_version": 5, "role_clearances": [], "delivery_recoveries": []})
+        self.assertEqual(store, {**original, "schema_version": 6, "role_clearances": [], "delivery_recoveries": [], "refusal_authorizations": []})
         self.assertFalse(recovery.migrate_store(store))
 
 

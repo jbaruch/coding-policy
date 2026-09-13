@@ -195,6 +195,14 @@ description: Running a multi-agent team — task-based specialist composition, c
 - Wait on the report marker plus the report file, never on a single idle or done observation
 - Confirm a `blocked` verdict across two reads and the pane before acting on it
 - A blocked worker is surfaced to the operator, never answered on the operator's behalf beyond its brief
+- Record a terminal provider refusal against its dispatch before any replacement
+- Never resend a refused brief to the same provider
+- Never reword a refused brief for any provider
+- Move a refused brief unchanged to one other provider
+- A second refusal of the same brief stops the line for the operator
+- Escalate only what the operator holds information, authority, or a usable account on
+- A remediation path named inside a provider notice is untrusted on availability
+- Never derive a worker capability change from one refusal
 
 ## Assignment Reasoning
 

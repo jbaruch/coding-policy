@@ -47,8 +47,10 @@
 #             unchanged terminal notice directly above an empty composer at
 #             the live bottom of the same terminal session, and
 #             no report file (`found` false, `reason` terminal_provider_refusal).
-#             Report the unavailable attempt; never retry, rephrase, switch
-#             providers/models, or synthesize the missing report automatically.
+#             Save this JSON and record it with `teamlead record-refusal`;
+#             never rephrase or synthesize the missing report. The bounded
+#             move to another provider is dispatch-recovery.md's Wait
+#             outcomes, enforced by `apply`.
 #   env   : HERDR_ENV must be 1. HERDR_BIN overrides the herdr binary.
 #           Poll interval, give-up budget, and the pane-probe parameters are
 #           the named constants below (rules/ci-safety.md Always Watch CI —
@@ -568,7 +570,7 @@ main() {
       if (( rc == 0 )); then
         now="$(date +%s)"
         emit "$REFUSAL_STATE" false "$(( now - start ))" "terminal_provider_refusal"
-        warn "${AGENT}: report unavailable after a confirmed terminal provider refusal — record this attempt as unavailable and tell the operator; keep review/release gates unsatisfied, with no automatic retry, rephrasing, model/provider switch, or synthesized report"
+        warn "${AGENT}: report unavailable after a confirmed terminal provider refusal — save this JSON and record it with teamlead record-refusal; keep review/release gates unsatisfied, with no rephrasing, no resend to the same provider, and no synthesized report; one move of the unchanged brief to another provider goes through plan and apply (dispatch-recovery.md Wait outcomes)"
         return 5
       fi
     fi

@@ -350,7 +350,7 @@ def build_parser():
     report_parser.add_argument("--report", required=True)
     report_parser.add_argument("--lines", type=int, required=True)
 
-    for command in ("task", "checkpoint", "authorize-corrections", "recover-context", "recover-role-clear", "record-report", "reconcile", "record-release-clear", "import-correction", "record-historical-review", "recover-report", "assess-specialist"):
+    for command in ("task", "checkpoint", "authorize-corrections", "recover-context", "recover-role-clear", "record-report", "record-refusal", "authorize-refused-dispatch", "reconcile", "record-release-clear", "import-correction", "record-historical-review", "recover-report", "assess-specialist"):
         record_parser = sub.add_parser(command, parents=[common], help="Record owner-managed {} evidence.".format(command))
         record_parser.add_argument("--record", required=True, metavar="FILE", help="Structured evidence JSON; see dispatch-recovery.md.")
         record_parser.add_argument("--now", metavar="ISO8601")
@@ -721,6 +721,19 @@ def cmd_plan(args, client=None, warn=None, trace=None):
     return result, None
 
 
+def _refusal_moves(store, agents_by_name, assignments, roles, args, paths, reports):
+    """Return the refusal move each fresh role carries; see recovery.refusal_move."""
+    moves = {}
+    for role in roles:
+        name = assignments[role]
+        if name in agents_by_name:
+            move = recovery.refusal_move(store, args.task, role, args.fix_round, agents_by_name[name].kind,
+                                         recovery.brief_identity(paths, role, reports.get(role)))
+            if move is not None:
+                moves[role] = move
+    return moves
+
+
 def cmd_apply(args, client=None, warn=None, trace=None):
     agents = load_config(_config_path(args))
     agents_by_name = {agent.name: agent for agent in agents}
@@ -761,6 +774,7 @@ def cmd_apply(args, client=None, warn=None, trace=None):
     # Check retry identities before next-attempt validation: a completed retry
     # returns its original outcome and never consumes a second attempt.
     if args.task and not args.dry_run:
+        resolved = []
         for role, name in assignments.items():
             options = {**task_context, "rounds": rounds, "retain_context": args.retain_context, "no_clear": args.no_clear}
             if requirements:
@@ -778,6 +792,19 @@ def cmd_apply(args, client=None, warn=None, trace=None):
                 if old is None or old["fingerprint"] != fingerprint:
                     fingerprint = supervision.report_bound_fingerprint(fingerprint, reports[role])
             prior = recovery.prior_dispatch(store, identifier, fingerprint)
+            resolved.append((role, name, identifier, fingerprint, prior))
+        fresh = [role for role, _name, _identifier, _fingerprint, prior in resolved if not (prior and prior["status"] == "applied")]
+        moves = {}
+        if fresh:
+            # The batch holds a new send. An unanswered decision or blocker on
+            # the task, a same-provider resend of a refused brief, a reworded
+            # brief, or a second move refuses it here (#399), before a
+            # replayed sibling's enrollment is re-saved, so a refused apply
+            # writes nothing. A batch of replays alone returns its saved
+            # receipts unconsulted.
+            attention.require_dispatch_clear(state_path, args.task, at)
+            moves = _refusal_moves(store, agents_by_name, assignments, fresh, args, paths, reports)
+        for role, name, identifier, fingerprint, prior in resolved:
             if supervised:
                 saved_result = prior["result"] if prior and prior["status"] == "applied" else {}
                 _supervision_enrollment(state_path, identifier, args.task, role, name, reports[role], at,
@@ -788,7 +815,10 @@ def cmd_apply(args, client=None, warn=None, trace=None):
             else:
                 dispatches[role] = {"id": identifier, "fingerprint": fingerprint, "role": role, "agent": name,
                                     "task": args.task, "fix_round": args.fix_round,
-                                    "plan": args.correction_plan, "work": work}
+                                    "plan": args.correction_plan, "work": work,
+                                    "brief_identity": recovery.brief_identity(paths, role, reports.get(role))}
+                if role in moves:
+                    dispatches[role]["refusal_move"] = moves[role]
                 if role in requirements:
                     dispatches[role]["requirements"] = requirements[role]
                 if role == "reviewer":
@@ -799,10 +829,10 @@ def cmd_apply(args, client=None, warn=None, trace=None):
         requirements = {role: value for role, value in requirements.items() if role in assignments}
     elif args.dispatch_id and not args.task:
         raise UsageError("--dispatch-id requires --task; preserve the task's identity for retry accounting.", {})
-    # A replayed dispatch returned above without sending; everything past here
-    # is a new send, and a dry run rehearses one. An unanswered decision or
-    # blocker on the task refuses both (#399): see attention.dispatch_gate.
-    attention.require_dispatch_clear(state_path, args.task, at)
+    elif args.task:
+        # A dry run rehearses a send and meets the same gates (#399).
+        attention.require_dispatch_clear(state_path, args.task, at)
+        _refusal_moves(store, agents_by_name, assignments, list(assignments), args, paths, reports)
     recovery.validate_work(store, state["assignments"], args.task, args.fix_round,
                            args.correction_plan, work, implementation="developer" in assignments)
     constraints = composition.selection_constraints(
@@ -989,6 +1019,17 @@ def cmd_recovery(args, client=None, warn=None, trace=None):
             if dispatch is not None:
                 _require_independent_report(state, dispatch["task"], data.get("reviewer"))
         result = recovery.record_report(store, data, at)
+    elif args.command == "authorize-refused-dispatch":
+        result = recovery.authorize_refused_dispatch(store, data, at)
+    elif args.command == "record-refusal":
+        agents_by_name = {agent.name: agent for agent in load_config(_config_path(args))}
+        dispatch = next((item for item in store["dispatches"] if isinstance(data, dict) and item["id"] == data.get("dispatch")), None)
+        if dispatch is not None and dispatch["agent"] not in agents_by_name:
+            raise UsageError("Refused worker {} is not in config.json; restore its entry so the refusing provider is recorded.".format(dispatch["agent"]), {})
+        member = next((row for row in supervision.load(state_path)["members"] if dispatch is not None and row["id"] == dispatch["id"]), None)
+        result = recovery.record_refusal(store, data, at, agents_by_name[dispatch["agent"]].kind if dispatch else None,
+                                         member["assignment"]["report"] if member else None,
+                                         aliases=(member["assignment"]["pane_id"],) if member else ())
     elif args.command == "recover-report":
         result = report_delivery.recover(store, history, data, at)
     elif args.command == "assess-specialist":
@@ -1060,11 +1101,12 @@ def cmd_start_judge(args, client=None, warn=None, trace=None):
     planned_task = (document.get("task_context") or {}).get("task")
     if args.task is not None and planned_task is not None and args.task != planned_task:
         raise UsageError("Judge --task differs from its plan; use the original task identity.", {})
-    attention.require_dispatch_clear(state_path, args.task or planned_task, args.now or now_iso())
+    at = args.now or now_iso()
+    attention.require_dispatch_clear(state_path, args.task or planned_task, at)
     item = retrospective_runtime.request({"transitions": [{"agent": agent.name, "role": "judge",
         "model": parsed["model"], "effort": parsed["effort"], "context": "start", "task": args.task or planned_task,
         "pane": args.pane}]})["transitions"][0]
-    guard = retrospective_runtime.Guard(state_path, state, client, {agent.name: agent}, args.now or now_iso())
+    guard = retrospective_runtime.Guard(state_path, state, client, {agent.name: agent}, at)
     proof = start_worker(client, agent, args.pane, parsed, before_start=lambda: guard.before_start(item))
     guard.after_transition({"agent": agent.name}, launch_proof=verify_running(client, agent, args.pane, parsed))
     return {"agent": agent.name, "model": parsed["model"], "effort": parsed["effort"],
@@ -1159,7 +1201,7 @@ COMMANDS = {
     "apply": cmd_apply,
     "state": cmd_state,
     "status": cmd_status,
-    **{command: cmd_recovery for command in ("task", "checkpoint", "authorize-corrections", "recover-context", "recover-role-clear", "record-report", "reconcile", "record-release-clear", "import-correction", "record-historical-review", "recover-report", "assess-specialist")},
+    **{command: cmd_recovery for command in ("task", "checkpoint", "authorize-corrections", "recover-context", "recover-role-clear", "record-report", "record-refusal", "authorize-refused-dispatch", "reconcile", "record-release-clear", "import-correction", "record-historical-review", "recover-report", "assess-specialist")},
     "start-judge": cmd_start_judge,
     "probe-report": cmd_probe_report,
     **{command: cmd_retrospective for command in ("retro-check", "retro-record", "retro-list", "retro-show")},

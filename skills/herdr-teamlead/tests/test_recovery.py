@@ -9,15 +9,16 @@ if ROOT not in sys.path:
 
 import copy
 import hashlib
+import json
 import tempfile
 import unittest
 from pathlib import Path
 
 from teamlead.errors import UsageError
 from teamlead.recovery import (
-    abort_pre_send, authorize_context, authorize_plan, checkpoint, confirmed_fix,
+    abort_pre_send, authorize_context, authorize_plan, authorize_refused_dispatch, brief_identity, checkpoint, confirmed_fix,
     dispatch_identity, finish_dispatch, fresh_transition, mark_sending,
-    migrate_store, prior_dispatch, record_report, register_task, reserve,
+    migrate_store, prior_dispatch, record_refusal, record_report, refusal_move, register_task, reserve,
     task_statuses, validate_store, validate_work,
 )
 from teamlead.state import add_assignment, empty_state, load_state_checked, save_state
@@ -351,6 +352,313 @@ class RecoveryTests(unittest.TestCase):
         second = dispatch_identity(TASK, "developer", "worker", 1, paths_by_role, "try-1")
         self.assertEqual(first[0], second[0])
         self.assertNotEqual(first[1], second[1])
+
+    REPORT = "/reports/tester.md"
+    BRIEF = "brief-identity-tester"
+
+    def dispatch_tester(self, number, agent, identity: "str | None" = BRIEF):
+        record = {"id": "tester-{}-{}".format(number, agent), "task": TASK, "role": "tester", "agent": agent, "fix_round": None,
+                  "fingerprint": ("%02d" % number) * 32, "plan": None, "work": None, "brief_identity": identity}
+        reserve(self.store, record, AT)
+        mark_sending(self.store, record["id"], AT, {"cleared": True})
+        add_assignment(self.state, "2026-02-03T12:00:0{}+00:00".format(number), "tester", agent, task=TASK)
+        finish_dispatch(self.store, record["id"], {"status": "applied", **{
+            key: record[key] for key in ("task", "role", "agent", "fix_round")}}, len(self.history) - 1, AT)
+        return record["id"]
+
+    def refusal_receipt(self, agent, name="refusal.json", **overrides):
+        path = self.root / name
+        path.write_text(json.dumps({"agent": agent, "state": "idle", "report_path": self.REPORT,
+                                    "found": False, "elapsed_seconds": 12, "reason": "terminal_provider_refusal", **overrides}))
+        return str(path)
+
+    def test_refusal_is_recorded_once_against_its_applied_dispatch(self):
+        # coding-policy#399: wait-report's exit 5 went to stdout and nowhere
+        # else, so nothing could tell a first refusal from a second.
+        first = self.dispatch_tester(1, "codex-a")
+        receipt = self.refusal_receipt("codex-a")
+        with self.assertRaisesRegex(UsageError, "requires dispatch and receipt"):
+            record_refusal(self.store, {"dispatch": first}, AT, "codex", self.REPORT)
+        with self.assertRaisesRegex(UsageError, "exit-5 output"):
+            record_refusal(self.store, {"dispatch": first, "receipt": self.refusal_receipt("codex-a", "wrong.json", reason="marker_unconfirmed")}, AT, "codex", self.REPORT)
+        with self.assertRaisesRegex(UsageError, "exit-5 output"):
+            record_refusal(self.store, {"dispatch": first, "receipt": self.refusal_receipt("someone-else", "other.json")}, AT, "codex", self.REPORT)
+        with self.assertRaisesRegex(UsageError, "not wait-report JSON"):
+            record_refusal(self.store, {"dispatch": first, "receipt": str(self.review)}, AT, "codex", self.REPORT)
+        result = record_refusal(self.store, {"dispatch": first, "receipt": receipt}, AT, "codex", self.REPORT)
+        self.assertEqual((result["provider"], result["reason"]), ("codex", "terminal_provider_refusal"))
+        self.assertEqual(result["evidence"]["sha256"], hashlib.sha256(Path(receipt).read_bytes()).hexdigest())
+        self.assertEqual(record_refusal(self.store, {"dispatch": first, "receipt": receipt}, AT, "codex", self.REPORT), result)
+        with self.assertRaisesRegex(UsageError, "different refusal receipt"):
+            record_refusal(self.store, {"dispatch": first, "receipt": self.refusal_receipt("codex-a", "later.json", elapsed_seconds=99)}, AT, "codex", self.REPORT)
+        self.assertEqual([row["kind"] for row in self.store["events"] if row["kind"] == "provider_refusal_recorded"], ["provider_refusal_recorded"])
+        pending = {"id": "tester-pending", "task": TASK, "role": "tester", "agent": "claude-a", "fix_round": None,
+                   "fingerprint": "ab" * 32, "plan": None, "work": None}
+        reserve(self.store, pending, AT)
+        with self.assertRaisesRegex(UsageError, "confirmed applied dispatch"):
+            record_refusal(self.store, {"dispatch": "tester-pending", "receipt": self.refusal_receipt("claude-a", "pending.json")}, AT, "claude", self.REPORT)
+        abort_pre_send(self.store, "tester-pending", AT, "fixture")
+        validate_store(self.store, self.history)
+
+    def test_refusal_receipt_must_bind_to_the_dispatch_report_and_full_exit_five_shape(self):
+        first = self.dispatch_tester(1, "codex-a")
+        with self.assertRaisesRegex(UsageError, "no supervision enrollment"):
+            record_refusal(self.store, {"dispatch": first, "receipt": self.refusal_receipt("codex-a")}, AT, "codex", None)
+        with self.assertRaisesRegex(UsageError, "names report /reports/other.md"):
+            record_refusal(self.store, {"dispatch": first, "receipt": self.refusal_receipt("codex-a", "other.json", report_path="/reports/other.md")}, AT, "codex", self.REPORT)
+        with self.assertRaisesRegex(UsageError, "complete exit-5 output"):
+            record_refusal(self.store, {"dispatch": first, "receipt": self.refusal_receipt("codex-a", "working.json", state="working")}, AT, "codex", self.REPORT)
+        with self.assertRaisesRegex(UsageError, "complete exit-5 output"):
+            record_refusal(self.store, {"dispatch": first, "receipt": self.refusal_receipt("codex-a", "extra.json", extra=True)}, AT, "codex", self.REPORT)
+        result = record_refusal(self.store, {"dispatch": first, "receipt": self.refusal_receipt("codex-a")}, AT, "codex", self.REPORT)
+        self.assertEqual(result["report_path"], self.REPORT)
+        validate_store(self.store, self.history)
+
+    def test_a_reworded_brief_is_not_a_move(self):
+        first = self.dispatch_tester(1, "codex-a")
+        record_refusal(self.store, {"dispatch": first, "receipt": self.refusal_receipt("codex-a")}, AT, "codex", self.REPORT)
+        with self.assertRaisesRegex(UsageError, "reworded brief is not a move"):
+            refusal_move(self.store, TASK, "tester", None, "claude", "brief-identity-reworded")
+        self.assertIsNotNone(refusal_move(self.store, TASK, "tester", None, "claude", self.BRIEF))
+        validate_store(self.store, self.history)
+
+    def test_a_refused_dispatch_without_brief_identity_cannot_be_moved(self):
+        legacy = self.dispatch_tester(1, "grok-a", identity=None)
+        del self.store["dispatches"][-1]["brief_identity"]
+        record_refusal(self.store, {"dispatch": legacy, "receipt": self.refusal_receipt("grok-a", "legacy.json")}, AT, "grok", self.REPORT)
+        with self.assertRaisesRegex(UsageError, "predates brief identity"):
+            refusal_move(self.store, TASK, "tester", None, "claude", self.BRIEF)
+        validate_store(self.store, self.history)
+
+    def test_brief_identity_masks_only_the_report_path(self):
+        common = self.root / "COMMON.md"
+        common.write_text("# common\n")
+        brief = self.root / "tester.md"
+        paths = {"common": str(common), "tester": str(brief)}
+        brief.write_text("Write `/reports/a.md` covering the plan.\nREPORT: /reports/a.md\n")
+        first = brief_identity(paths, "tester", "/reports/a.md")
+        brief.write_text("Write `/reports/b.md` covering the plan.\nREPORT: /reports/b.md\n")
+        self.assertEqual(brief_identity(paths, "tester", "/reports/b.md"), first)
+        self.assertNotEqual(brief_identity(paths, "tester", None), first)
+        brief.write_text("Write `/reports/b.md` covering the plan.\nSkip the security checks.\nREPORT: /reports/b.md\n")
+        self.assertNotEqual(brief_identity(paths, "tester", "/reports/b.md"), first)
+        with self.assertRaisesRegex(UsageError, "Cannot read brief"):
+            brief_identity({**paths, "tester": str(self.root / "missing.md")}, "tester", None)
+
+    def test_one_refusal_permits_one_move_and_the_second_stops_the_line(self):
+        self.assertIsNone(refusal_move(self.store, TASK, "tester", None, "codex", self.BRIEF))
+        first = self.dispatch_tester(1, "codex-a")
+        record_refusal(self.store, {"dispatch": first, "receipt": self.refusal_receipt("codex-a")}, AT, "codex", self.REPORT)
+        with self.assertRaisesRegex(UsageError, "same provider"):
+            refusal_move(self.store, TASK, "tester", None, "codex", self.BRIEF)
+        self.assertIsNone(refusal_move(self.store, TASK, "reviewer", None, "codex", self.BRIEF))
+        self.assertIsNone(refusal_move(self.store, TASK, "tester", 3, "codex", self.BRIEF))
+        self.assertIsNone(refusal_move(self.store, "another-task", "tester", None, "codex", self.BRIEF))
+        move = refusal_move(self.store, TASK, "tester", None, "claude", self.BRIEF)
+        self.assertEqual(move, {"schema_version": 1, "from": first, "from_provider": "codex", "provider": "claude"})
+        second = self.dispatch_tester(2, "claude-a")
+        self.store["dispatches"][-1]["refusal_move"] = move
+        validate_store(self.store, self.history)
+        record_refusal(self.store, {"dispatch": second, "receipt": self.refusal_receipt("claude-a", "second.json")}, AT, "claude", self.REPORT)
+        with self.assertRaisesRegex(UsageError, "refused by 2 providers") as caught:
+            refusal_move(self.store, TASK, "tester", None, "grok", self.BRIEF)
+        self.assertEqual(caught.exception.details["refusals"], [first, second])
+        with self.assertRaisesRegex(UsageError, "refused by 2 providers"):
+            refusal_move(self.store, TASK, "tester", None, "codex", self.BRIEF)
+        validate_store(self.store, self.history)
+
+    def test_a_second_move_waits_for_the_first_moves_outcome(self):
+        first = self.dispatch_tester(1, "codex-a")
+        record_refusal(self.store, {"dispatch": first, "receipt": self.refusal_receipt("codex-a")}, AT, "codex", self.REPORT)
+        move = refusal_move(self.store, TASK, "tester", None, "claude", self.BRIEF)
+        pending = {"id": "tester-move", "task": TASK, "role": "tester", "agent": "claude-a", "fix_round": None,
+                   "fingerprint": "ab" * 32, "plan": None, "work": None, "refusal_move": move, "brief_identity": self.BRIEF}
+        reserve(self.store, pending, AT)
+        with self.assertRaisesRegex(UsageError, "already moved to provider claude"):
+            refusal_move(self.store, TASK, "tester", None, "grok", self.BRIEF)
+        abort_pre_send(self.store, "tester-move", AT, "fixture")
+        retry = refusal_move(self.store, TASK, "tester", None, "grok", self.BRIEF)
+        assert retry is not None
+        self.assertEqual(retry["from"], first)
+        second = self.dispatch_tester(2, "claude-a")
+        self.store["dispatches"][-1]["refusal_move"] = move
+        with self.assertRaisesRegex(UsageError, "already moved to provider claude") as caught:
+            refusal_move(self.store, TASK, "tester", None, "grok", self.BRIEF)
+        self.assertEqual(caught.exception.details["moves"], [second])
+        record_refusal(self.store, {"dispatch": second, "receipt": self.refusal_receipt("claude-a", "second.json")}, AT, "claude", self.REPORT)
+        with self.assertRaisesRegex(UsageError, "refused by 2 providers"):
+            refusal_move(self.store, TASK, "tester", None, "grok", self.BRIEF)
+        validate_store(self.store, self.history)
+
+    def test_store_six_migration_stamps_a_clean_five_and_refuses_unowned_refusals(self):
+        first = self.dispatch_tester(1, "codex-a")
+        identified = copy.deepcopy(self.store)
+        identified["schema_version"] = 5
+        del identified["refusal_authorizations"]
+        with self.assertRaisesRegex(UsageError, "unowned newer refusal"):
+            migrate_store(identified)
+        old = copy.deepcopy(self.store)
+        old["schema_version"] = 5
+        del old["refusal_authorizations"]
+        for row in old["dispatches"]:
+            del row["brief_identity"]
+        before = copy.deepcopy(old)
+        self.assertTrue(migrate_store(old))
+        self.assertEqual(old["schema_version"], 6)
+        self.assertEqual(old.pop("refusal_authorizations"), [])
+        self.assertEqual({key: value for key, value in old.items() if key != "schema_version"},
+                         {key: value for key, value in before.items() if key != "schema_version"})
+        old["refusal_authorizations"] = []
+        validate_store(old, self.history)
+        self.assertFalse(migrate_store(old))
+        stale = copy.deepcopy(self.store)
+        stale["schema_version"] = 5
+        for row in stale["dispatches"]:
+            del row["brief_identity"]
+        with self.assertRaisesRegex(UsageError, "unowned newer records"):
+            migrate_store(stale)
+        record_refusal(self.store, {"dispatch": first, "receipt": self.refusal_receipt("codex-a")}, AT, "codex", self.REPORT)
+        for version in (4, 5):
+            stale = copy.deepcopy(self.store)
+            stale["schema_version"] = version
+            del stale["refusal_authorizations"]
+            for row in stale["dispatches"]:
+                del row["brief_identity"]
+            with self.assertRaisesRegex(UsageError, "unowned newer refusal"):
+                migrate_store(stale)
+        with self.assertRaisesRegex(UsageError, "Unsupported recovery schema"):
+            validate_store({**copy.deepcopy(self.store), "schema_version": 5}, self.history)
+
+    def test_operator_authorization_permits_one_dispatch_after_the_stop(self):
+        grant = {"id": "auth-1", "task": TASK, "role": "tester", "fix_round": None, "provider": "codex", "brief": "revised",
+                 "decision": "Run the revised tester brief on codex.", "authorization": AUTH}
+        with self.assertRaisesRegex(UsageError, "refusals from 0 provider"):
+            authorize_refused_dispatch(self.store, grant, AT)
+        with self.assertRaisesRegex(UsageError, "requires id, task, role"):
+            authorize_refused_dispatch(self.store, {**grant, "extra": 1}, AT)
+        first = self.dispatch_tester(1, "codex-a")
+        record_refusal(self.store, {"dispatch": first, "receipt": self.refusal_receipt("codex-a")}, AT, "codex", self.REPORT)
+        # One refusal is a move, not an operator decision (Copilot on #402).
+        with self.assertRaisesRegex(UsageError, "refusals from 1 provider"):
+            authorize_refused_dispatch(self.store, grant, AT)
+        second = self.dispatch_tester(2, "claude-a")
+        self.store["dispatches"][-1]["refusal_move"] = {"schema_version": 1, "from": first, "from_provider": "codex", "provider": "claude"}
+        record_refusal(self.store, {"dispatch": second, "receipt": self.refusal_receipt("claude-a", "second.json")}, AT, "claude", self.REPORT)
+        with self.assertRaisesRegex(UsageError, "authorize-refused-dispatch"):
+            refusal_move(self.store, TASK, "tester", None, "grok", self.BRIEF)
+        saved = authorize_refused_dispatch(self.store, grant, AT)
+        self.assertEqual(authorize_refused_dispatch(self.store, grant, AT), saved)
+        with self.assertRaisesRegex(UsageError, "different decision"):
+            authorize_refused_dispatch(self.store, {**grant, "decision": "Something else."}, AT)
+        with self.assertRaisesRegex(UsageError, "unchanged or revised"):
+            authorize_refused_dispatch(self.store, {**grant, "id": "auth-bad", "brief": "anything"}, AT)
+        # The grant replaces the stop with its own scope: the approved provider and, here, a revised brief.
+        with self.assertRaisesRegex(UsageError, "approves provider codex"):
+            refusal_move(self.store, TASK, "tester", None, "grok", "brief-identity-reworded")
+        move = refusal_move(self.store, TASK, "tester", None, "codex", "brief-identity-reworded")
+        self.assertEqual(move, {"schema_version": 1, "from": second, "from_provider": "claude", "provider": "codex", "authorization": "auth-1"})
+        third = self.dispatch_tester(3, "codex-a", identity="brief-identity-reworded")
+        self.store["dispatches"][-1]["refusal_move"] = move
+        validate_store(self.store, self.history)
+        # The grant is consumed; the stop holds again until another decision.
+        with self.assertRaisesRegex(UsageError, "refused by 2 providers"):
+            refusal_move(self.store, TASK, "tester", None, "grok", self.BRIEF)
+        record_refusal(self.store, {"dispatch": third, "receipt": self.refusal_receipt("codex-a", "third.json")}, AT, "codex", self.REPORT)
+        with self.assertRaisesRegex(UsageError, "refused by 2 providers"):
+            refusal_move(self.store, TASK, "tester", None, "grok", self.BRIEF)
+        corrupt = copy.deepcopy(self.store)
+        corrupt["dispatches"][1]["refusal_move"]["authorization"] = "auth-1"
+        with self.assertRaisesRegex(UsageError, "reuses a consumed authorization"):
+            validate_store(corrupt, self.history)
+        for mutate in (
+            lambda grant: grant.update(role="reviewer"),
+            lambda grant: grant.update(provider="grok"),
+            lambda grant: grant.update(brief="unchanged"),
+        ):
+            corrupt = copy.deepcopy(self.store)
+            mutate(corrupt["refusal_authorizations"][0])
+            with self.assertRaisesRegex(UsageError, "exceeds its authorization"):
+                validate_store(corrupt, self.history)
+        corrupt = copy.deepcopy(self.store)
+        corrupt["dispatches"][-1]["refusal"]["provider"] = "grok"
+        with self.assertRaisesRegex(UsageError, "other than the one it moved to"):
+            validate_store(corrupt, self.history)
+        corrupt = copy.deepcopy(self.store)
+        corrupt["refusal_authorizations"].append({**saved, "id": "auth-early", "role": "reviewer"})
+        with self.assertRaisesRegex(UsageError, "precedes the independent refusals"):
+            validate_store(corrupt, self.history)
+        corrupt = copy.deepcopy(self.store)
+        corrupt["dispatches"][-1]["refusal_move"]["authorization"] = "auth-missing"
+        with self.assertRaises(UsageError):
+            validate_store(corrupt, self.history)
+        self.assertEqual(third, "tester-3-codex-a")
+
+    def test_an_unchanged_brief_authorization_holds_the_brief_fixed(self):
+        first = self.dispatch_tester(1, "codex-a")
+        record_refusal(self.store, {"dispatch": first, "receipt": self.refusal_receipt("codex-a")}, AT, "codex", self.REPORT)
+        second = self.dispatch_tester(2, "claude-a")
+        self.store["dispatches"][-1]["refusal_move"] = {"schema_version": 1, "from": first, "from_provider": "codex", "provider": "claude"}
+        record_refusal(self.store, {"dispatch": second, "receipt": self.refusal_receipt("claude-a", "second.json")}, AT, "claude", self.REPORT)
+        authorize_refused_dispatch(self.store, {"id": "auth-grok", "task": TASK, "role": "tester", "fix_round": None, "provider": "grok",
+                                                "brief": "unchanged", "decision": "Send the same brief to grok.", "authorization": AUTH}, AT)
+        with self.assertRaisesRegex(UsageError, "approves the refused brief unchanged"):
+            refusal_move(self.store, TASK, "tester", None, "grok", "brief-identity-reworded")
+        move = refusal_move(self.store, TASK, "tester", None, "grok", self.BRIEF)
+        assert move is not None
+        self.assertEqual((move["provider"], move["authorization"]), ("grok", "auth-grok"))
+        self.dispatch_tester(3, "grok-a")
+        self.store["dispatches"][-1]["refusal_move"] = move
+        validate_store(self.store, self.history)
+
+    def test_refusal_receipt_accepts_the_enrolled_pane_id_as_the_worker_name(self):
+        first = self.dispatch_tester(1, "codex-a")
+        receipt = self.refusal_receipt("w3:p1", "pane.json")
+        with self.assertRaisesRegex(UsageError, "complete exit-5 output"):
+            record_refusal(self.store, {"dispatch": first, "receipt": receipt}, AT, "codex", self.REPORT)
+        with self.assertRaisesRegex(UsageError, "complete exit-5 output"):
+            record_refusal(self.store, {"dispatch": first, "receipt": receipt}, AT, "codex", self.REPORT, aliases=(None,))
+        self.assertEqual(record_refusal(self.store, {"dispatch": first, "receipt": receipt}, AT, "codex", self.REPORT, aliases=("w3:p1",))["provider"], "codex")
+
+    def test_corrupt_refusal_records_refuse_the_ledger(self):
+        first = self.dispatch_tester(1, "codex-a")
+        record_refusal(self.store, {"dispatch": first, "receipt": self.refusal_receipt("codex-a")}, AT, "codex", self.REPORT)
+        second = self.dispatch_tester(2, "claude-a")
+        self.store["dispatches"][-1]["refusal_move"] = refusal_move(self.store, TASK, "tester", None, "claude", self.BRIEF)
+        validate_store(self.store, self.history)
+        for mutate in (
+            lambda row: row["refusal"].update(reason="something_else"),
+            lambda row: row["refusal"].update(evidence="not-a-receipt"),
+            lambda row: row["refusal"].update(receipt="/elsewhere/refusal.json"),
+            lambda row: row["refusal"].pop("report_path"),
+            lambda row: row["refusal"].pop("provider"),
+            lambda row: row.update(status="not_sent", result=None),
+        ):
+            corrupt = copy.deepcopy(self.store)
+            mutate(next(row for row in corrupt["dispatches"] if row["id"] == first))
+            with self.assertRaises(UsageError):
+                validate_store(corrupt, self.history)
+        for mutate in (
+            lambda row: row["refusal_move"].update({"from": second}),
+            lambda row: row["refusal_move"].update(provider="codex"),
+            lambda row: row["refusal_move"].update(from_provider="claude"),
+            lambda row: row["refusal_move"].update(schema_version=2),
+            lambda row: row["refusal_move"].pop("from"),
+            lambda row: row.update(brief_identity="brief-identity-reworded"),
+        ):
+            corrupt = copy.deepcopy(self.store)
+            mutate(next(row for row in corrupt["dispatches"] if row["id"] == second))
+            with self.assertRaises(UsageError):
+                validate_store(corrupt, self.history)
+        # A refused source must precede its move: a self-reference and a later row both refuse.
+        record_refusal(self.store, {"dispatch": second, "receipt": self.refusal_receipt("claude-a", "second.json")}, AT, "claude", self.REPORT)
+        corrupt = copy.deepcopy(self.store)
+        corrupt["dispatches"][-1]["refusal_move"] = {"schema_version": 1, "from": second, "from_provider": "claude", "provider": "grok"}
+        with self.assertRaises(UsageError):
+            validate_store(corrupt, self.history)
+        corrupt = copy.deepcopy(self.store)
+        corrupt["dispatches"][0]["refusal_move"] = {"schema_version": 1, "from": second, "from_provider": "claude", "provider": "codex"}
+        with self.assertRaises(UsageError):
+            validate_store(corrupt, self.history)
 
 
 if __name__ == "__main__":
