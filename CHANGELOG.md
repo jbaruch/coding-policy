@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.208 — 2026-09-13
+
 ### Changed
 
 - **An exhausted correction allowance goes to the operator, not the judge (#396).**
