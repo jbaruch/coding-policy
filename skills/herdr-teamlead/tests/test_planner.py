@@ -378,6 +378,13 @@ class DegenerateFieldTest(unittest.TestCase):
             )
         self.assertIn("inert", str(caught.exception))
 
+    def test_a_missing_judge_block_is_named_before_the_field(self):
+        # The remediation is the config, not the snapshot: a one-agent
+        # snapshot cannot act on a "measure the roster" diagnostic.
+        with self.assertRaises(PlanError) as caught:
+            plan(["judge"], snapshot(codex=23.0))
+        self.assertIn("`judge` block in config.json", str(caught.exception))
+
     def test_a_single_agent_config_still_plans(self):
         result = plan(["reviewer"], snapshot(codex=23.0), roster=["codex"])
         self.assertEqual(result["assignments"], {"reviewer": "codex"})

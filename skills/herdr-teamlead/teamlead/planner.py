@@ -491,12 +491,6 @@ def plan(roles, snapshot, counts=None, exclude=None, role_costs=None, snapshot_r
     warn = warn or stderr_warn
     excluded = _normalize_exclusions(exclude, roles)
 
-    # The field before the seats: a plan built on a snapshot that missed the
-    # fleet ranks nothing, whatever the sort then reports.
-    _refuse_uncovered_roster(roster, agents)
-    _refuse_inert_exclusions(excluded, agents)
-    _refuse_degenerate_field(roles, agents, judge_agent, roster)
-
     # The judge seat is pinned, never ranked. Without a `judge` block there is
     # nothing to pin it to, and ranking an ordinary worker into the seat would
     # produce a plan carrying no usable tier -- which fails later, at worker
@@ -510,6 +504,14 @@ def plan(roles, snapshot, counts=None, exclude=None, role_costs=None, snapshot_r
             "--roles.",
             {"role": "judge"},
         )
+
+    # The field before the seats: a plan built on a snapshot that missed the
+    # fleet ranks nothing, whatever the sort then reports. Ordered after the
+    # judge-block check, whose remediation is the config rather than the
+    # snapshot -- a one-agent snapshot cannot act on a field diagnostic.
+    _refuse_uncovered_roster(roster, agents)
+    _refuse_inert_exclusions(excluded, agents)
+    _refuse_degenerate_field(roles, agents, judge_agent, roster)
 
     # Expressed as exclusions so eligibility, fillability and the rationale all
     # read the same way they do for every other seat.
