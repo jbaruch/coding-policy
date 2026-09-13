@@ -316,22 +316,28 @@ def _refuse_degenerate_field(roles, agents, judge_agent, roster):
     reads: an operator barring the author down to one candidate chose that
     narrowing deliberately, whereas a one-agent snapshot chose nothing.
 
-    The pinned judge seat is exempt -- it is assigned, never ranked -- and so
-    is a config that declares a single agent, which has no rotation to lose.
+    The pinned judge is not in that field. Its seat is assigned rather than
+    ranked, and every other seat bars it structurally, so a `{judge, worker}`
+    snapshot offers a ranked seat exactly one candidate.
+
+    A config whose own rankable roster holds one agent is exempt: it has no
+    rotation for the snapshot to have missed.
     """
-    if len(agents) > 1:
+    if roster and len({name for name in roster if name != judge_agent}) <= 1:
         return
-    if roster and len(roster) == 1:
+    field = sorted(name for name in agents if name != judge_agent)
+    if len(field) > 1:
         return
     ranked = [role for role in roles if role != "judge" or not judge_agent]
     if not ranked:
         return
+    measured = "one agent ({})".format(field[0]) if field else "no agent at all"
     raise PlanError(
-        "Role {} would be filled from a measured field of one agent ({}) - "
-        "one candidate is a forced pick, not a ranking. Run `teamlead "
-        "measure` over the roster so every idle worker is a candidate, then "
-        "plan again.".format(", ".join(repr(role) for role in ranked), ", ".join(sorted(agents))),
-        {"roles": ranked, "agents": sorted(agents)},
+        "Role {} would be filled from a measured field of {} - one candidate "
+        "is a forced pick, not a ranking. Run `teamlead measure` over the "
+        "roster so every idle worker is a candidate, then plan "
+        "again.".format(", ".join(repr(role) for role in ranked), measured),
+        {"roles": ranked, "agents": field},
     )
 
 
@@ -413,7 +419,7 @@ def _refuse_unaffordable_judge(judge_agent, headrooms, cost, groups):
         )
 
 
-def plan(roles, snapshot, counts=None, exclude=None, role_costs=None, snapshot_ref=None, warn=None, judge_agent=None, judge_tier=None, tier_candidates=None, rounds=None, familiarity=None, requirements=None, selection_rationale=None, roster=None):
+def plan(roles, snapshot, counts=None, exclude=None, role_costs=None, snapshot_ref=None, warn=None, judge_agent=None, judge_tier=None, tier_candidates=None, rounds=None, familiarity=None, requirements=None, selection_rationale=None, roster=None, operator_exclude=None):
     """Assign `roles` to the agents in `snapshot`, heaviest seat first.
 
     `counts` is `{role: {agent: times_held}}` from the state ledger; omit it
@@ -430,7 +436,10 @@ def plan(roles, snapshot, counts=None, exclude=None, role_costs=None, snapshot_r
 
     `roster` is the agent names `config.json` declares, so the plan can tell a
     snapshot that missed the fleet from a fleet with no capacity; omit it to
-    plan against whatever the snapshot holds.
+    plan against whatever the snapshot holds. `operator_exclude` is the
+    exclusion map as the operator typed it, before a caller merges its own
+    generated bars into `exclude`; omit it when `exclude` carries only what
+    the operator asked for.
 
     Raises PlanError when there are no roles, no agents, fewer agents than
     roles, an exclusion naming a role nobody is assigning, or a role whose
@@ -510,7 +519,13 @@ def plan(roles, snapshot, counts=None, exclude=None, role_costs=None, snapshot_r
     # judge-block check, whose remediation is the config rather than the
     # snapshot -- a one-agent snapshot cannot act on a field diagnostic.
     _refuse_uncovered_roster(roster, agents)
-    _refuse_inert_exclusions(excluded, agents)
+    # Only the names the operator typed: a generated bar naming a measured
+    # agent would otherwise vouch for an exclusion list that matched nobody.
+    _refuse_inert_exclusions(
+        excluded if operator_exclude is None
+        else _normalize_exclusions(operator_exclude, roles),
+        agents,
+    )
     _refuse_degenerate_field(roles, agents, judge_agent, roster)
 
     # Expressed as exclusions so eligibility, fillability and the rationale all

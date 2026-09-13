@@ -378,6 +378,52 @@ class DegenerateFieldTest(unittest.TestCase):
             )
         self.assertIn("inert", str(caught.exception))
 
+    def test_the_pinned_judge_is_not_part_of_a_ranked_seats_field(self):
+        # Every other seat bars the judge structurally, so this reviewer had
+        # exactly one candidate however many agents the snapshot held.
+        with self.assertRaises(PlanError) as caught:
+            plan(
+                ["reviewer"],
+                snapshot(judge=90.0, worker=80.0),
+                warn=lambda message: None,
+                judge_agent="judge",
+            )
+        self.assertIn("forced pick", str(caught.exception))
+        self.assertEqual(caught.exception.details["agents"], ["worker"])
+
+    def test_a_config_whose_rankable_roster_is_one_worker_still_plans(self):
+        result = plan(
+            ["reviewer"],
+            snapshot(judge=90.0, worker=80.0),
+            warn=lambda message: None,
+            judge_agent="judge",
+            roster=["judge", "worker"],
+        )
+        self.assertEqual(result["assignments"], {"reviewer": "worker"})
+
+    def test_a_generated_exclusion_does_not_vouch_for_a_stray_operator_list(self):
+        # cmd_plan merges contribution bars into `exclude`; a real generated
+        # name must not downgrade an all-stray operator list to a note.
+        with self.assertRaises(PlanError) as caught:
+            plan(
+                ["developer", "reviewer"],
+                snapshot(alpha=90.0, zeta=60.0),
+                exclude={"reviewer": ["ghost", "alpha"]},
+                operator_exclude={"reviewer": ["ghost"]},
+                warn=lambda message: None,
+            )
+        self.assertIn("inert", str(caught.exception))
+        self.assertEqual(caught.exception.details["inert_exclusions"], ["ghost"])
+
+    def test_an_operator_list_the_snapshot_matches_still_plans(self):
+        result = plan(
+            ["developer", "reviewer"],
+            snapshot(alpha=90.0, zeta=60.0),
+            exclude={"reviewer": ["alpha"]},
+            operator_exclude={"reviewer": ["alpha"]},
+        )
+        self.assertEqual(result["assignments"]["reviewer"], "zeta")
+
     def test_a_missing_judge_block_is_named_before_the_field(self):
         # The remediation is the config, not the snapshot: a one-agent
         # snapshot cannot act on a "measure the roster" diagnostic.
@@ -933,7 +979,7 @@ class JudgeAffordabilityAfterOtherSeatsTest(unittest.TestCase):
         # Only the shared pool can hold the developer seat, so it must spend
         # from the window the judge needs: 25 - 20 = 5, and a ruling costs 15.
         payload = pooled_snapshot(
-            {"claude": "pool", "judge": "pool"}, claude=25, judge=25
+            {"claude": "pool", "judge": "pool"}, claude=25, judge=25, spare=1
         )
         with self.assertRaises(PlanError) as caught:
             plan(
@@ -947,7 +993,7 @@ class JudgeAffordabilityAfterOtherSeatsTest(unittest.TestCase):
 
     def test_a_window_that_covers_both_seats_still_plans(self):
         payload = pooled_snapshot(
-            {"claude": "pool", "judge": "pool"}, claude=90, judge=90
+            {"claude": "pool", "judge": "pool"}, claude=90, judge=90, spare=1
         )
         result = plan(
             ["developer", "judge"],
@@ -990,7 +1036,7 @@ class AssignedWorkerStillChargedTest(unittest.TestCase):
         # costs 20 and lands on claude, spending the window to 0; a ruling
         # costs 15.
         payload = pooled_snapshot(
-            {"claude": "pool", "judge": "pool"}, claude=20, judge=100
+            {"claude": "pool", "judge": "pool"}, claude=20, judge=100, spare=1
         )
         with self.assertRaises(PlanError) as caught:
             plan(
@@ -1004,7 +1050,7 @@ class AssignedWorkerStillChargedTest(unittest.TestCase):
 
     def test_the_charge_reaches_a_worker_already_holding_a_seat(self):
         payload = pooled_snapshot(
-            {"claude": "pool", "judge": "pool"}, claude=100, judge=100
+            {"claude": "pool", "judge": "pool"}, claude=100, judge=100, spare=1
         )
         result = plan(
             ["developer", "judge"],
@@ -1064,7 +1110,7 @@ class SpecialistOrderingTest(unittest.TestCase):
         self.assertEqual(result["assignments"], {"developer": "developer", "advisor": "spare"})
 
     def test_pinned_judge_cannot_become_a_familiar_specialist(self):
-        result = plan(["advisor"], snapshot(judge=90, worker=40), judge_agent="judge",
+        result = plan(["advisor"], snapshot(judge=90, worker=40, spare=10), judge_agent="judge",
                       familiarity={"advisor": {"judge": 1}}, requirements={"advisor": {}})
         self.assertEqual(result["assignments"], {"advisor": "worker"})
 

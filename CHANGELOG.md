@@ -15,7 +15,11 @@
   agents `config.json` declares, an `--exclude` list naming nobody the snapshot
   measured (previously a trailing note), and a ranked seat measured against one
   agent. The pinned judge seat is exempt — it is assigned, never ranked — and so
-  is a single-agent config. An exclusion narrowing a measured field to one
+  is a config whose own rankable roster holds one worker. The pinned judge is
+  not part of a ranked seat's field — every other seat bars it structurally, so
+  a `{judge, worker}` snapshot offers one candidate — and the inert-exclusion
+  check reads the names the operator typed, never the contribution bars the CLI
+  merges in beside them. An exclusion narrowing a measured field to one
   candidate still plans: the operator chose that narrowing, whereas a one-pane
   snapshot chose nothing. Issue #315's unknown-headroom handling is unchanged —
   an agent present but unmeasured is still a fallback candidate, never a

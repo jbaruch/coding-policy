@@ -150,10 +150,10 @@ never weaken required independence to fill a seat.
 
 Planning also refuses a field nothing could have been ranked in: a snapshot
 missing an agent `config.json` declares, an `--exclude` list naming nobody the
-snapshot measured, and a ranked seat measured against a single agent. Re-run
-Step 4's `measure` over the whole roster rather than planning from a
-single-worker snapshot; a pinned judge seat and a single-agent config are the
-only exemptions.
+snapshot measured, and a ranked seat measured against a single agent beside the
+pinned judge. Re-run Step 4's `measure` over the whole roster rather than
+planning from a single-worker snapshot; the pinned judge seat and a config whose
+rankable roster holds one worker are the only exemptions.
 
 For a retained fix, plan `--roles developer` and exclude every other rotating
 worker from that role. Use the task's existing developer, not a new headroom
