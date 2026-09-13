@@ -248,7 +248,7 @@ description: Running a multi-agent team — task-based specialist composition, c
 - Record the actual user answer or outcome evidence before closing an obligation
 - Defer an obligation with a return condition instead of silently dropping it
 - An open decision or blocker on a task refuses further dispatch on that task until it is resolved or explicitly deferred with recorded rationale
-- A question the lead keeps dispatching past is not a gate; record it as a decision or blocker and stop
+- Record an answer required before further dispatch as a decision or blocker, never as a question
 - Keep attention records separate from task acceptance and worker lifecycle observations
 - Follow `skills/herdr-teamlead/references/attention.md`
 
