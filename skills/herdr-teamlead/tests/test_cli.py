@@ -25,6 +25,7 @@ import unittest
 from unittest.mock import patch
 from pathlib import Path
 
+from teamlead import attention
 from teamlead.cli import build_parser, main
 from teamlead.herdr import HerdrClient
 from teamlead.state import STATE_SCHEMA_VERSION, add_assignment, empty_state, save_state
@@ -981,6 +982,73 @@ class ApplyCommandTest(CliCase):
             "--now", AT, "--task", "repo#322", "--fix-round", str(round_number),
             *extra,
         ] + self.brief_args("developer")
+
+    def _obligation(self, name, kind="decision", task: "str | None" = "repo#322"):
+        return {"id": name, "kind": kind, "task": task, "title": "Choose the replacement tester",
+                "context": "The tester's provider refused the brief.", "consequence": "No tester report exists.",
+                "resolution_condition": "Record the user's choice of replacement tester.", "priority": 99,
+                "sources": [{"schema_version": 1, "kind": "user_message", "ref": "conversation/1/message/3"}]}
+
+    def _answer(self, name, event_id="answer-1", revision=1):
+        return {"event_id": event_id, "id": name, "expected_revision": revision, "action": "resolve",
+                "reason": "The user answered.", "evidence": {"schema_version": 1, "kind": "user_answer",
+                "ref": "conversation/1/message/5", "summary": "Use the other provider."}}
+
+    def _retained(self):
+        return self._client({"grok": "idle"}, sessions={"grok": "task-session"})
+
+    def test_apply_refuses_while_a_decision_on_the_task_is_unanswered(self):
+        # coding-policy#399: the lead withheld a tester on an unanswered
+        # priority-99 decision and kept dispatching fix rounds on the same
+        # task. A lead that can keep dispatching has not been blocked.
+        self._seed_context()
+        attention.write(self.state, "record", self._obligation("acr14-tester"), AT)
+        for extra in ((), ("--dry-run",)):
+            self.out, self.err = io.StringIO(), io.StringIO()
+            code, out, err = self.run_cli(self._fix_args(1, "--retain-context", *extra), client=self._retained())
+            self.assertEqual(code, 1)
+            self.assertEqual(out, "")
+            failure = json.loads(err)
+            self.assertEqual(failure["error"], "usage_error")
+            self.assertIn("acr14-tester", failure["message"])
+            self.assertIn("Record the user's choice of replacement tester.", failure["message"])
+            self.assertEqual(failure["details"]["gating"][0]["id"], "acr14-tester")
+            self.assertEqual(self.runner.writes(), [])
+        self.assertEqual(json.loads(self.state.read_text(encoding="utf-8"))["assignments"][-1]["fix_round"], None)
+        # A presentation is not an answer; a decision on another task gates nothing.
+        attention.write(self.state, "update", {"event_id": "shown-1", "id": "acr14-tester", "expected_revision": 1,
+            "action": "present", "reason": "Shown in commentary.", "evidence": {"schema_version": 1, "kind": "delivery",
+            "ref": "conversation/1/message/4", "summary": "Mentioned in a long message."}}, AT)
+        attention.write(self.state, "record", self._obligation("elsewhere", task="repo#999"), AT)
+        self.out, self.err = io.StringIO(), io.StringIO()
+        code, _out, err = self.run_cli(self._fix_args(1, "--retain-context"), client=self._retained())
+        self.assertEqual(code, 1)
+        self.assertIn("acr14-tester", err)
+        attention.write(self.state, "update", self._answer("acr14-tester", revision=2), AT)
+        self.out, self.err = io.StringIO(), io.StringIO()
+        code, out, err = self.run_cli(self._fix_args(1, "--retain-context"), client=self._retained())
+        self.assertEqual(code, 0, err)
+        self.assertEqual(json.loads(out)["applied"][0]["agent"], "grok")
+        self.assertEqual(len(self.runner.writes()), 1)
+
+    def test_apply_refuses_a_malformed_attention_history(self):
+        self._seed_context()
+        attention.storage_path(self.state).write_text("{", encoding="utf-8")
+        code, out, err = self.run_cli(self._fix_args(1, "--retain-context"), client=self._retained())
+        self.assertEqual(code, 1)
+        self.assertEqual(out, "")
+        self.assertEqual(json.loads(err)["error"], "state_error")
+        self.assertEqual(self.runner.writes(), [])
+
+    def test_apply_without_a_task_ignores_the_attention_queue(self):
+        attention.write(self.state, "record", self._obligation("untasked", task=None), AT)
+        client = self._client({"grok": "idle"})
+        code, out, err = self.run_cli(
+            self.base() + ["apply", "--composer-settle", "0", "--assignments", json.dumps({"developer": "grok"}),
+                           "--common", str(self.common), "--now", AT] + self.brief_args("developer"),
+            client=client)
+        self.assertEqual(code, 0, err)
+        self.assertEqual(len(json.loads(out)["applied"]), 1)
 
     def test_retained_context_sends_one_prompt_and_persists_its_reason(self):
         self._seed_context()

@@ -15,6 +15,13 @@ SCHEMA_VERSION = 1
 IDENTIFIER = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
 KINDS = {"question", "decision", "review", "blocker", "failure", "followup", "update"}
 CLOSED = {"resolved", "superseded"}
+#: Obligation kinds whose open entry on a task refuses further dispatch on
+#: that task (#399). A `decision` resolves only with the user's answer and a
+#: `blocker` only with an answer, acknowledgement or verified recovery, so an
+#: open one is a question the lead asked and has not received; dispatching
+#: anyway is the third state where work proceeds while the gate is nominally
+#: open. `question`, `review`, `failure`, `followup` and `update` never gate.
+GATING_KINDS = frozenset({"decision", "blocker"})
 COMMANDS = {"attention-record", "attention-update", "attention-progress", "attention-list", "attention-show", "catch-up"}
 
 
@@ -264,6 +271,49 @@ def write(path, action, data, at):
         document["events"].append(event)
         save_state(storage_path(path), document)
     return {"schema_version": SCHEMA_VERSION, "event": event, "replayed": False}
+
+
+def dispatch_gate(path, task, at):
+    """Return the open obligations that refuse dispatch on `task`, oldest first.
+
+    Reads the sidecar at `path` through `load`, so a malformed or unsupported
+    history raises `StateError` and refuses dispatch rather than reading as an
+    empty queue; missing storage is first use and gates nothing. An entry gates
+    when its kind is in `GATING_KINDS`, its `task` equals `task`, and it is open
+    or a deferral whose `deferred_until` has passed at `at` (the same
+    resurfacing `attention_view.catch_up` reports). A `present` action never
+    changes the result. `task` None gates nothing: obligations without a task
+    describe no dispatch.
+    """
+    if task is None:
+        return []
+    now = timestamp(at, "Dispatch gate checkpoint")
+    _document, entries, _progress = load(path)
+    gating = []
+    for entry in entries.values():
+        if entry["kind"] not in GATING_KINDS or entry["task"] != task:
+            continue
+        resurfaced = entry["status"] == "deferred" and timestamp(entry["deferred_until"], "Resurface time") <= now
+        if entry["status"] != "open" and not resurfaced:
+            continue
+        gating.append({"id": entry["id"], "kind": entry["kind"], "title": entry["title"], "priority": entry["priority"],
+                       "resolution_condition": entry["resolution_condition"], "resurfaced": resurfaced,
+                       "created_at": entry["created_at"], "revision": entry["revision"]})
+    gating.sort(key=lambda row: (row["created_at"], row["id"]))
+    return gating
+
+
+def require_dispatch_clear(path, task, at):
+    """Raise `UsageError` naming every gating obligation on `task`, or return None."""
+    gating = dispatch_gate(path, task, at)
+    if not gating:
+        return None
+    first = gating[0]
+    raise UsageError(
+        "Dispatch on task {} is gated by unanswered {} {}: {} Record the user's answer with attention-update "
+        "(resolve) or an explicit deferral with recorded rationale (defer), then apply again.".format(
+            task, first["kind"], first["id"], first["resolution_condition"]),
+        {"task": task, "gating": gating})
 
 
 def show(path, name):

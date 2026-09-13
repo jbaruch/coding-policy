@@ -799,6 +799,10 @@ def cmd_apply(args, client=None, warn=None, trace=None):
         requirements = {role: value for role, value in requirements.items() if role in assignments}
     elif args.dispatch_id and not args.task:
         raise UsageError("--dispatch-id requires --task; preserve the task's identity for retry accounting.", {})
+    # A replayed dispatch returned above without sending; everything past here
+    # is a new send, and a dry run rehearses one. An unanswered decision or
+    # blocker on the task refuses both (#399): see attention.dispatch_gate.
+    attention.require_dispatch_clear(state_path, args.task, at)
     recovery.validate_work(store, state["assignments"], args.task, args.fix_round,
                            args.correction_plan, work, implementation="developer" in assignments)
     constraints = composition.selection_constraints(
@@ -1056,6 +1060,7 @@ def cmd_start_judge(args, client=None, warn=None, trace=None):
     planned_task = (document.get("task_context") or {}).get("task")
     if args.task is not None and planned_task is not None and args.task != planned_task:
         raise UsageError("Judge --task differs from its plan; use the original task identity.", {})
+    attention.require_dispatch_clear(state_path, args.task or planned_task, args.now or now_iso())
     item = retrospective_runtime.request({"transitions": [{"agent": agent.name, "role": "judge",
         "model": parsed["model"], "effort": parsed["effort"], "context": "start", "task": args.task or planned_task,
         "pane": args.pane}]})["transitions"][0]
