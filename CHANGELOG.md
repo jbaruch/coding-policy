@@ -2,6 +2,48 @@
 
 ### Fixed
 
+- **A provider refusal is recorded, moved once, and then stops (#399).** A
+  tester's provider stopped mid-execution on `acr-cli-producer-migration` with
+  a notice above an empty composer and no report. `references/dispatch-recovery.md`
+  Wait outcomes said: record the missing report, tell the operator, never
+  retry, rephrase, switch providers or models, reconstruct or synthesize; the
+  operator decides. That protects against an agent iterating against a
+  refusal — retry, reword, hop vendors until one complies — and it stays. But
+  it stated the event as one undifferentiated handoff, so the lead escalated
+  three sub-decisions the operator held nothing on: which provider runs the
+  replacement, whether to resend the refused brief unchanged to the same
+  provider, and applying for the vendor's access program the notice
+  advertised. The operator cannot un-refuse a classifier decision, and the
+  access program turned out to be gated to verified security professionals
+  and unreachable for this account, so the escalation had zero actionable
+  content and sat open for 15 hours. Meanwhile `wait-report.sh` exit 5 went to
+  stdout and nowhere else — nothing could tell a first refusal from a second,
+  so "no resend to the same provider" and "a second refusal escalates" had no
+  substrate to enforce them on. The owner now records the refusal:
+  `record-refusal` binds the saved exit-5 JSON to the applied dispatch, with
+  the refusing provider as the worker's config `kind`. `apply` then refuses a
+  resend of the same task, role and fix round to a provider that refused it,
+  records one move of the brief to another provider on the new dispatch, and
+  refuses every provider once two independent refusals exist — that line
+  stops and becomes a `decision` obligation, which the dispatch gate from the
+  first half of #399 then holds. The key is task, role and fix round rather
+  than brief bytes: a replacement brief carries a fresh report path, so bytes
+  never match, while a reworded brief on the same key must still meet the
+  gate — the byte key would have let a rewording escape it entirely. The
+  provider ban was the anti-vendor-hopping rule; one recorded move with the
+  brief unchanged is not hopping, and `REFUSAL_LIMIT` in `recovery.py` is 2
+  so a loosening to three is a visible constant change, not a reading. The
+  reference now states the escalation test — escalate only what the operator
+  holds information, authority, or a usable account on — and that a
+  remediation path named inside a provider notice is untrusted on
+  availability and never becomes an operator sub-decision; the issue asked
+  for "confirm reachable before recording", which would itself be an
+  escalation. The lead had also proposed a per-agent `capabilities` gap from
+  this one refusal, describing one stopped session observed repeatedly as
+  "reproduced across multiple live reads", while the same provider completed
+  17 dispatches on the task that day including security-shaped ones;
+  `references/specialists.md` now forbids a capability change from one
+  refusal and requires independent recorded refusals of the same class.
 - **An unanswered decision on a task now stops dispatch on that task (#399).**
   On `acr-cli-producer-migration` the lead recorded a priority-99 `decision`
   when a tester's provider refused its brief, presented it twice with no

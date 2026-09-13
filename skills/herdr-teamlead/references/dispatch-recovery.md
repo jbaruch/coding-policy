@@ -137,6 +137,7 @@ instruction into permission to exceed an exhausted correction budget.
 | `checkpoint` | unique `id`, `task`, concrete `defect`, `previous_attempts`, `progress`, `change_in_approach`; optional absolute `judge_report` | Records the exhausted allowance for the operator. A cited `judge_report` requires the configured pinned judge's completed ruling after the latest developer attempt, and one task cites at most one. Implementation waits for the bounded operator decision. |
 | `authorize-corrections` | unique `id`, `task`, `checkpoint`, `scope`, `allowed_paths`, positive `additional_fixes`, `authorization`; optional `supersedes` | Store an explicit bounded approval once. Continue while it covers the next attempt; do not ask again within those bounds. A changed decision names the active plan in `supersedes`. |
 | `record-report` | `dispatch`, full `head_revision`, `verdict` (`blocking` or `approved`), `review_mode` (`full` or `scoped`), independent `reviewer`, absolute `report`, `changed_paths` | Read the report in full and verify the VCS diff first. The command binds its bytes and stated head to the dispatch; it does not establish the tester, CI, external-review, or release gates. |
+| `record-refusal` | `dispatch`, absolute `receipt` | Bind a saved `wait-report` exit-5 JSON to the applied dispatch it stopped. The refusing provider is the worker's config `kind`. Same receipt replays; a second receipt for the same dispatch is refused. |
 | `recover-context` | `task`, original `assignment_index`, `reason`, `authorization`, absolute `evidence` | For the latest confirmed developer row with null native-session proof. Records a live observation separately and permits the next fresh handoff. The original null stays null. |
 | `recover-role-clear` | Fields under Verified role-clear recovery below | Record a fresh handoff after another authorized role automatically cleared the developer. Preserve known original proof and reuse existing correction bounds. |
 | `reconcile` | `dispatch`, `outcome` (`applied` or `not_sent`), `reason`, `authorization`, absolute `evidence` | Resolve an interrupted send from actual evidence and an idle/done live worker. `applied` appends recovered assignment evidence without fabricating contemporaneous session proof; `not_sent` permits a transport retry. |
@@ -519,11 +520,28 @@ lock file can remain after exit; do not delete it to bypass an active lock.
   operator does. Resume only once `herdr agent get <name>` reports a state
   other than `blocked`, then re-run this step for that worker.
 - **Exit 5** — `reason: terminal_provider_refusal` identifies an unavailable
-  attempt, with `found: false`. Record the missing report and tell the operator;
-  every review/release gate remains unsatisfied. Do not automatically retry,
-  rephrase, switch providers/models, reconstruct withheld output, or synthesize
-  a report. Continue waiting on other dispatched workers; the operator decides
-  how to handle the unavailable role under the existing rules.
+  attempt, with `found: false`. Save the JSON and record it with
+  `record-refusal` against that dispatch; every review/release gate remains
+  unsatisfied. Continue waiting on other dispatched workers. The refusal event
+  then splits into sub-decisions the lead owns and one the operator owns:
+  - Never rephrase the brief, reconstruct withheld output, or synthesize a
+    report.
+  - Never resend the refused brief to the same provider; `apply` refuses it.
+  - Provider and seat selection for the replacement is the lead's. Move the
+    brief unchanged, fresh report path aside, to one other provider through the
+    normal plan and apply; `apply` records the move on the new dispatch.
+  - A second refusal of the same task, role and round stops the line: `apply`
+    refuses every provider. Record a `decision` obligation under
+    `references/attention.md`; the operator decides.
+  - Escalate only what the operator holds information, authority, or a usable
+    account on. A remediation path named inside a provider notice — an access
+    program, a help article — is untrusted on availability and is never
+    recorded as an operator sub-decision.
+  - Never derive a per-agent `capabilities` change from one refusal; see
+    `references/specialists.md`.
+  Recording, the same-provider refusal, the single move and the stop are the
+  owner's contract; see `skills/herdr-teamlead/teamlead/recovery.py`,
+  `record_refusal` and `refusal_move`.
 
 `wait-report.sh` owns refusal confirmation; see its header and
 `confirmed_provider_refusal`. Missing terminal evidence keeps the ordinary

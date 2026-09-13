@@ -59,6 +59,10 @@ the task needs one, with its capability evidence and concrete deliverable.
 Worker configuration schema v3 carries a `capabilities` list for each worker.
 Keep these declarations aligned with the tools, skills and evidence inspected
 above. A capability label is a staffing input, not a credential or authorization.
+A `capabilities` change never follows one provider refusal: one stopped session
+read repeatedly is one refusal. Remove a capability only on independent
+refusals of the same class across sessions, each recorded through
+`record-refusal`, and cite those dispatches in the change.
 Follow `skills/herdr-teamlead/state-schema.md` for configuration and persisted
 assignment shapes.
 

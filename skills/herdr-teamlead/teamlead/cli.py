@@ -350,7 +350,7 @@ def build_parser():
     report_parser.add_argument("--report", required=True)
     report_parser.add_argument("--lines", type=int, required=True)
 
-    for command in ("task", "checkpoint", "authorize-corrections", "recover-context", "recover-role-clear", "record-report", "reconcile", "record-release-clear", "import-correction", "record-historical-review", "recover-report", "assess-specialist"):
+    for command in ("task", "checkpoint", "authorize-corrections", "recover-context", "recover-role-clear", "record-report", "record-refusal", "reconcile", "record-release-clear", "import-correction", "record-historical-review", "recover-report", "assess-specialist"):
         record_parser = sub.add_parser(command, parents=[common], help="Record owner-managed {} evidence.".format(command))
         record_parser.add_argument("--record", required=True, metavar="FILE", help="Structured evidence JSON; see dispatch-recovery.md.")
         record_parser.add_argument("--now", metavar="ISO8601")
@@ -803,6 +803,14 @@ def cmd_apply(args, client=None, warn=None, trace=None):
     # is a new send, and a dry run rehearses one. An unanswered decision or
     # blocker on the task refuses both (#399): see attention.dispatch_gate.
     attention.require_dispatch_clear(state_path, args.task, at)
+    if args.task:
+        # One refusal permits one move of the brief to another provider; a
+        # same-provider resend or a second refusal stops here (#399).
+        for role, name in assignments.items():
+            if name in agents_by_name:
+                move = recovery.refusal_move(store, args.task, role, args.fix_round, agents_by_name[name].kind)
+                if move is not None and role in dispatches:
+                    dispatches[role]["refusal_move"] = move
     recovery.validate_work(store, state["assignments"], args.task, args.fix_round,
                            args.correction_plan, work, implementation="developer" in assignments)
     constraints = composition.selection_constraints(
@@ -989,6 +997,12 @@ def cmd_recovery(args, client=None, warn=None, trace=None):
             if dispatch is not None:
                 _require_independent_report(state, dispatch["task"], data.get("reviewer"))
         result = recovery.record_report(store, data, at)
+    elif args.command == "record-refusal":
+        agents_by_name = {agent.name: agent for agent in load_config(_config_path(args))}
+        dispatch = next((item for item in store["dispatches"] if isinstance(data, dict) and item["id"] == data.get("dispatch")), None)
+        if dispatch is not None and dispatch["agent"] not in agents_by_name:
+            raise UsageError("Refused worker {} is not in config.json; restore its entry so the refusing provider is recorded.".format(dispatch["agent"]), {})
+        result = recovery.record_refusal(store, data, at, agents_by_name[dispatch["agent"]].kind if dispatch else None)
     elif args.command == "recover-report":
         result = report_delivery.recover(store, history, data, at)
     elif args.command == "assess-specialist":
@@ -1159,7 +1173,7 @@ COMMANDS = {
     "apply": cmd_apply,
     "state": cmd_state,
     "status": cmd_status,
-    **{command: cmd_recovery for command in ("task", "checkpoint", "authorize-corrections", "recover-context", "recover-role-clear", "record-report", "reconcile", "record-release-clear", "import-correction", "record-historical-review", "recover-report", "assess-specialist")},
+    **{command: cmd_recovery for command in ("task", "checkpoint", "authorize-corrections", "recover-context", "recover-role-clear", "record-report", "record-refusal", "reconcile", "record-release-clear", "import-correction", "record-historical-review", "recover-report", "assess-specialist")},
     "start-judge": cmd_start_judge,
     "probe-report": cmd_probe_report,
     **{command: cmd_retrospective for command in ("retro-check", "retro-record", "retro-list", "retro-show")},

@@ -9,6 +9,7 @@ if ROOT not in sys.path:
 
 import copy
 import hashlib
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -17,7 +18,7 @@ from teamlead.errors import UsageError
 from teamlead.recovery import (
     abort_pre_send, authorize_context, authorize_plan, checkpoint, confirmed_fix,
     dispatch_identity, finish_dispatch, fresh_transition, mark_sending,
-    migrate_store, prior_dispatch, record_report, register_task, reserve,
+    migrate_store, prior_dispatch, record_refusal, record_report, refusal_move, register_task, reserve,
     task_statuses, validate_store, validate_work,
 )
 from teamlead.state import add_assignment, empty_state, load_state_checked, save_state
@@ -351,6 +352,98 @@ class RecoveryTests(unittest.TestCase):
         second = dispatch_identity(TASK, "developer", "worker", 1, paths_by_role, "try-1")
         self.assertEqual(first[0], second[0])
         self.assertNotEqual(first[1], second[1])
+
+    def dispatch_tester(self, number, agent):
+        record = {"id": "tester-{}-{}".format(number, agent), "task": TASK, "role": "tester", "agent": agent, "fix_round": None,
+                  "fingerprint": ("%02d" % number) * 32, "plan": None, "work": None}
+        reserve(self.store, record, AT)
+        mark_sending(self.store, record["id"], AT, {"cleared": True})
+        add_assignment(self.state, "2026-02-03T12:00:0{}+00:00".format(number), "tester", agent, task=TASK)
+        finish_dispatch(self.store, record["id"], {"status": "applied", **{
+            key: record[key] for key in ("task", "role", "agent", "fix_round")}}, len(self.history) - 1, AT)
+        return record["id"]
+
+    def refusal_receipt(self, agent, name="refusal.json", **overrides):
+        path = self.root / name
+        path.write_text(json.dumps({"agent": agent, "state": "idle", "report_path": "/reports/tester.md",
+                                    "found": False, "elapsed_seconds": 12, "reason": "terminal_provider_refusal", **overrides}))
+        return str(path)
+
+    def test_refusal_is_recorded_once_against_its_applied_dispatch(self):
+        # coding-policy#399: wait-report's exit 5 went to stdout and nowhere
+        # else, so nothing could tell a first refusal from a second.
+        first = self.dispatch_tester(1, "codex-a")
+        receipt = self.refusal_receipt("codex-a")
+        with self.assertRaisesRegex(UsageError, "requires dispatch and receipt"):
+            record_refusal(self.store, {"dispatch": first}, AT, "codex")
+        with self.assertRaisesRegex(UsageError, "exit-5 output"):
+            record_refusal(self.store, {"dispatch": first, "receipt": self.refusal_receipt("codex-a", "wrong.json", reason="marker_unconfirmed")}, AT, "codex")
+        with self.assertRaisesRegex(UsageError, "exit-5 output"):
+            record_refusal(self.store, {"dispatch": first, "receipt": self.refusal_receipt("someone-else", "other.json")}, AT, "codex")
+        with self.assertRaisesRegex(UsageError, "not wait-report JSON"):
+            record_refusal(self.store, {"dispatch": first, "receipt": str(self.review)}, AT, "codex")
+        result = record_refusal(self.store, {"dispatch": first, "receipt": receipt}, AT, "codex")
+        self.assertEqual((result["provider"], result["reason"]), ("codex", "terminal_provider_refusal"))
+        self.assertEqual(result["evidence"]["sha256"], hashlib.sha256(Path(receipt).read_bytes()).hexdigest())
+        self.assertEqual(record_refusal(self.store, {"dispatch": first, "receipt": receipt}, AT, "codex"), result)
+        with self.assertRaisesRegex(UsageError, "different refusal receipt"):
+            record_refusal(self.store, {"dispatch": first, "receipt": self.refusal_receipt("codex-a", "later.json", elapsed_seconds=99)}, AT, "codex")
+        self.assertEqual([row["kind"] for row in self.store["events"] if row["kind"] == "provider_refusal_recorded"], ["provider_refusal_recorded"])
+        pending = {"id": "tester-pending", "task": TASK, "role": "tester", "agent": "claude-a", "fix_round": None,
+                   "fingerprint": "ab" * 32, "plan": None, "work": None}
+        reserve(self.store, pending, AT)
+        with self.assertRaisesRegex(UsageError, "confirmed applied dispatch"):
+            record_refusal(self.store, {"dispatch": "tester-pending", "receipt": self.refusal_receipt("claude-a", "pending.json")}, AT, "claude")
+        abort_pre_send(self.store, "tester-pending", AT, "fixture")
+        validate_store(self.store, self.history)
+
+    def test_one_refusal_permits_one_move_and_the_second_stops_the_line(self):
+        self.assertIsNone(refusal_move(self.store, TASK, "tester", None, "codex"))
+        first = self.dispatch_tester(1, "codex-a")
+        record_refusal(self.store, {"dispatch": first, "receipt": self.refusal_receipt("codex-a")}, AT, "codex")
+        with self.assertRaisesRegex(UsageError, "same provider"):
+            refusal_move(self.store, TASK, "tester", None, "codex")
+        self.assertIsNone(refusal_move(self.store, TASK, "reviewer", None, "codex"))
+        self.assertIsNone(refusal_move(self.store, TASK, "tester", 3, "codex"))
+        self.assertIsNone(refusal_move(self.store, "another-task", "tester", None, "codex"))
+        move = refusal_move(self.store, TASK, "tester", None, "claude")
+        self.assertEqual(move, {"schema_version": 1, "from": first, "from_provider": "codex", "provider": "claude"})
+        second = self.dispatch_tester(2, "claude-a")
+        self.store["dispatches"][-1]["refusal_move"] = move
+        validate_store(self.store, self.history)
+        record_refusal(self.store, {"dispatch": second, "receipt": self.refusal_receipt("claude-a", "second.json")}, AT, "claude")
+        with self.assertRaisesRegex(UsageError, "refused by 2 providers") as caught:
+            refusal_move(self.store, TASK, "tester", None, "grok")
+        self.assertEqual(caught.exception.details["refusals"], [first, second])
+        with self.assertRaisesRegex(UsageError, "refused by 2 providers"):
+            refusal_move(self.store, TASK, "tester", None, "codex")
+        validate_store(self.store, self.history)
+
+    def test_corrupt_refusal_records_refuse_the_ledger(self):
+        first = self.dispatch_tester(1, "codex-a")
+        record_refusal(self.store, {"dispatch": first, "receipt": self.refusal_receipt("codex-a")}, AT, "codex")
+        second = self.dispatch_tester(2, "claude-a")
+        self.store["dispatches"][-1]["refusal_move"] = refusal_move(self.store, TASK, "tester", None, "claude")
+        validate_store(self.store, self.history)
+        for mutate in (
+            lambda row: row["refusal"].update(reason="something_else"),
+            lambda row: row["refusal"].update(evidence="not-a-receipt"),
+            lambda row: row.update(status="not_sent", result=None),
+        ):
+            corrupt = copy.deepcopy(self.store)
+            mutate(next(row for row in corrupt["dispatches"] if row["id"] == first))
+            with self.assertRaises(UsageError):
+                validate_store(corrupt, self.history)
+        for mutate in (
+            lambda row: row["refusal_move"].update({"from": second}),
+            lambda row: row["refusal_move"].update(provider="codex"),
+            lambda row: row["refusal_move"].update(from_provider="claude"),
+            lambda row: row["refusal_move"].update(schema_version=2),
+        ):
+            corrupt = copy.deepcopy(self.store)
+            mutate(next(row for row in corrupt["dispatches"] if row["id"] == second))
+            with self.assertRaises(UsageError):
+                validate_store(corrupt, self.history)
 
 
 if __name__ == "__main__":

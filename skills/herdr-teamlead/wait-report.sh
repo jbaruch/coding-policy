@@ -47,8 +47,10 @@
 #             unchanged terminal notice directly above an empty composer at
 #             the live bottom of the same terminal session, and
 #             no report file (`found` false, `reason` terminal_provider_refusal).
-#             Report the unavailable attempt; never retry, rephrase, switch
-#             providers/models, or synthesize the missing report automatically.
+#             Save this JSON and record it with `teamlead record-refusal`;
+#             never rephrase or synthesize the missing report. The bounded
+#             move to another provider is dispatch-recovery.md's Wait
+#             outcomes, enforced by `apply`.
 #   env   : HERDR_ENV must be 1. HERDR_BIN overrides the herdr binary.
 #           Poll interval, give-up budget, and the pane-probe parameters are
 #           the named constants below (rules/ci-safety.md Always Watch CI —
