@@ -26,6 +26,9 @@ description: Running a multi-agent team — task-based specialist composition, c
 - Ground capability declarations in available skills, tools and observed work
 - Apply capability and contribution eligibility before task familiarity and measured subscription headroom through the owner planner
 - Headroom is the minimum remaining window per worker, never the average
+- Measure the declared roster before planning
+- A snapshot missing a declared worker plans no seat
+- A ranked seat measured against one worker is a forced pick, never a headroom ranking
 - Each assignment clears context except the retained rounds under Fix Loops or Specialist Consultations
 - Every assignment sends a self-contained role brief
 - Fewer eligible workers than required responsibilities is a staffing decision to record
