@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.207 — 2026-09-13
+
 ### Fixed
 
 - **The planner refuses a field it could not have ranked (#395).** `teamlead plan`
