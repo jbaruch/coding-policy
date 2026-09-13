@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.209 — 2026-09-13
+
 ### Fixed
 
 - **A provider refusal is recorded, moved once, and then stops (#399).** A
