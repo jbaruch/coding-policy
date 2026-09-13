@@ -44,6 +44,13 @@
   17 dispatches on the task that day including security-shaped ones;
   `references/specialists.md` now forbids a capability change from one
   refusal and requires independent recorded refusals of the same class.
+  Three Copilot advisories on the dispatch gate (#401) fold in here rather
+  than spending a round there: `dispatch_gate` refuses a checkpoint earlier
+  than the latest saved attention event, as `catch_up` already did, so a
+  stale `--now` cannot read a due deferral as pending; `start-judge` takes
+  one checkpoint for the gate and the retrospective guard; and the refusal
+  names the evidence the entry's kind requires and the command to rerun,
+  rather than `user_answer` and `apply` for a blocker or a judge start.
 - **An unanswered decision on a task now stops dispatch on that task (#399).**
   On `acr-cli-producer-migration` the lead recorded a priority-99 `decision`
   when a tester's provider refused its brief, presented it twice with no

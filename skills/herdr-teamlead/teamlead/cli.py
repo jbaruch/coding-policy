@@ -1074,11 +1074,12 @@ def cmd_start_judge(args, client=None, warn=None, trace=None):
     planned_task = (document.get("task_context") or {}).get("task")
     if args.task is not None and planned_task is not None and args.task != planned_task:
         raise UsageError("Judge --task differs from its plan; use the original task identity.", {})
-    attention.require_dispatch_clear(state_path, args.task or planned_task, args.now or now_iso())
+    at = args.now or now_iso()
+    attention.require_dispatch_clear(state_path, args.task or planned_task, at)
     item = retrospective_runtime.request({"transitions": [{"agent": agent.name, "role": "judge",
         "model": parsed["model"], "effort": parsed["effort"], "context": "start", "task": args.task or planned_task,
         "pane": args.pane}]})["transitions"][0]
-    guard = retrospective_runtime.Guard(state_path, state, client, {agent.name: agent}, args.now or now_iso())
+    guard = retrospective_runtime.Guard(state_path, state, client, {agent.name: agent}, at)
     proof = start_worker(client, agent, args.pane, parsed, before_start=lambda: guard.before_start(item))
     guard.after_transition({"agent": agent.name}, launch_proof=verify_running(client, agent, args.pane, parsed))
     return {"agent": agent.name, "model": parsed["model"], "effort": parsed["effort"],

@@ -278,7 +278,9 @@ def dispatch_gate(path, task, at):
 
     Reads the sidecar at `path` through `load`, so a malformed or unsupported
     history raises `StateError` and refuses dispatch rather than reading as an
-    empty queue; missing storage is first use and gates nothing. An entry gates
+    empty queue; missing storage is first use and gates nothing. A checkpoint
+    predating the latest saved event is refused, as `attention_view.catch_up`
+    refuses it: an earlier `--now` would read a due deferral as not yet due. An entry gates
     when its kind is in `GATING_KINDS`, its `task` equals `task`, and it is open
     or a deferral whose `deferred_until` has passed at `at` (the same
     resurfacing `attention_view.catch_up` reports). A `present` action never
@@ -288,7 +290,9 @@ def dispatch_gate(path, task, at):
     if task is None:
         return []
     now = timestamp(at, "Dispatch gate checkpoint")
-    _document, entries, _progress = load(path)
+    document, entries, _progress = load(path)
+    if document["events"] and timestamp(document["events"][-1]["at"], "Latest attention event") > now:
+        _fail("Dispatch checkpoint precedes saved attention events; use the current UTC checkpoint so a deferral cannot be read as not yet due.")
     gating = []
     for entry in entries.values():
         if entry["kind"] not in GATING_KINDS or entry["task"] != task:
@@ -310,8 +314,8 @@ def require_dispatch_clear(path, task, at):
         return None
     first = gating[0]
     raise UsageError(
-        "Dispatch on task {} is gated by unanswered {} {}: {} Record the user's answer with attention-update "
-        "(resolve) or an explicit deferral with recorded rationale (defer), then apply again.".format(
+        "Dispatch on task {} is gated by unanswered {} {}: {} Resolve it with attention-update and the evidence "
+        "its kind requires, or defer it with recorded rationale, then rerun this command.".format(
             task, first["kind"], first["id"], first["resolution_condition"]),
         {"task": task, "gating": gating})
 

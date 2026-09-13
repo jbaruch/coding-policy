@@ -409,6 +409,18 @@ class AttentionTest(unittest.TestCase):
         with self.assertRaises(UsageError):
             attention.dispatch_gate(self.path, "owner/repo#5", "not-a-time")
 
+    def test_dispatch_gate_refuses_a_checkpoint_before_the_latest_saved_event(self):
+        # A deferral due at DUE must not read as pending under an earlier --now.
+        self.record(obligation("d1", "decision"))
+        self.update("defer", event_id="defer-1", name="d1", until=DUE, at=LATER,
+                    evidence=evidence("source", "Lead recorded the deferral rationale."))
+        with self.assertRaisesRegex(UsageError, "precedes saved attention events"):
+            attention.dispatch_gate(self.path, "owner/repo#5", AT)
+        with self.assertRaisesRegex(UsageError, "precedes saved attention events"):
+            attention.require_dispatch_clear(self.path, "owner/repo#5", AT)
+        self.assertEqual(self.gate(at=LATER), [])
+        self.assertEqual(self.gate(at=AFTER), ["d1"])
+
 
 if __name__ == "__main__":
     unittest.main()
