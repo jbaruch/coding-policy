@@ -300,6 +300,18 @@ class SupervisionCliTest(fixture.CliCase):
         self.assertEqual(out, "")
         self.assertIn("refused by 2 providers", err)
         self.assertEqual(self.runner.writes(), [])
+        grant = self.tmp / "grant.json"
+        grant.write_text(json.dumps({"id": "grant-1", "task": TASK, "role": "tester", "fix_round": None,
+                                     "decision": "Run the tester on grok with the same brief.",
+                                     "authorization": {"source": "fixture operator message", "quote": "Send it to grok."}}))
+        code, _, err = self.invoke(["authorize-refused-dispatch", "--record", str(grant), "--now", AT])
+        self.assertEqual(code, 0, err)
+        code, out, err = self.invoke(self.refusal_args("grok", reports[4], "attempt-4"), self._client({"grok": "idle"}))
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.recovery_rows()[-1]["refusal_move"]["authorization"], "grant-1")
+        code, out, err = self.invoke(self.refusal_args("grok", str(self.tmp / "tester-5.md"), "attempt-5"), self._client({"grok": "idle"}))
+        self.assertEqual(code, 1)
+        self.assertIn("refused by 2 providers", err)
         code, _, err = self.invoke(["status"])
         self.assertEqual(code, 0, err)
 

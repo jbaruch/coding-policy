@@ -159,6 +159,7 @@ class SpecialistRecoveryTest(unittest.TestCase):
             with self.subTest(version=version):
                 old = copy.deepcopy(self.store)
                 old["schema_version"] = version
+                del old["refusal_authorizations"]
                 if version < 3:
                     for key in ("role_clearances", "delivery_recoveries"):
                         del old[key]
@@ -168,6 +169,7 @@ class SpecialistRecoveryTest(unittest.TestCase):
                 before = copy.deepcopy(old)
                 self.assertTrue(migrate_store(old))
                 self.assertEqual(old["schema_version"], 6)
+                self.assertEqual(old["refusal_authorizations"], [])
                 for key, value in before.items():
                     if key != "schema_version":
                         self.assertEqual(old[key], value)

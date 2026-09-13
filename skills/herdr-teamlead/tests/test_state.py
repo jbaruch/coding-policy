@@ -44,7 +44,8 @@ class EmptyStateTest(unittest.TestCase):
              "specialist_assessments": [],
              "recovery": {"schema_version": 6, "tasks": {}, "checkpoints": [], "plans": [],
                           "dispatches": [], "context_permissions": [], "events": [],
-                          "hand_clearances": [], "historical_attempts": [], "role_clearances": [], "delivery_recoveries": []}},
+                          "hand_clearances": [], "historical_attempts": [], "role_clearances": [], "delivery_recoveries": [],
+                          "refusal_authorizations": []}},
         )
 
 

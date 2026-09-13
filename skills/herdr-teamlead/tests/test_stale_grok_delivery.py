@@ -78,6 +78,7 @@ class StaleGrokDeliveryTests(unittest.TestCase):
         ledger_path, record_path = self.case.tmp / 'state.json', self.case.tmp / 'record.json'
         # Exercise the owner migration as well as writing a schema-2 receipt.
         self.document['recovery']['schema_version'] = 3
+        del self.document['recovery']['refusal_authorizations']
         state.save_state(ledger_path, self.document)
         record_path.write_text(json.dumps(self.data))
         original_bytes = {key: Path(value).read_bytes() for key, value in self.data.items() if key not in ('id', 'dispatch')}
@@ -286,9 +287,10 @@ class StaleGrokDeliveryTests(unittest.TestCase):
         document, data = legacy.recovery_fixture()
         original_receipt = delivery.recover(document['recovery'], document['assignments'], data, AT)
         document['recovery']['schema_version'] = 3
+        del document['recovery']['refusal_authorizations']
         before = copy.deepcopy(document)
         self.assertTrue(recovery.migrate_store(document['recovery']))
-        self.assertEqual(document['recovery'], {**before['recovery'], 'schema_version': 6})
+        self.assertEqual(document['recovery'], {**before['recovery'], 'schema_version': 6, 'refusal_authorizations': []})
         self.assertEqual(document['recovery']['delivery_recoveries'], [original_receipt])
         record = self.recover()
         self.document['recovery']['schema_version'] = 3

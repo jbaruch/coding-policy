@@ -350,7 +350,7 @@ def build_parser():
     report_parser.add_argument("--report", required=True)
     report_parser.add_argument("--lines", type=int, required=True)
 
-    for command in ("task", "checkpoint", "authorize-corrections", "recover-context", "recover-role-clear", "record-report", "record-refusal", "reconcile", "record-release-clear", "import-correction", "record-historical-review", "recover-report", "assess-specialist"):
+    for command in ("task", "checkpoint", "authorize-corrections", "recover-context", "recover-role-clear", "record-report", "record-refusal", "authorize-refused-dispatch", "reconcile", "record-release-clear", "import-correction", "record-historical-review", "recover-report", "assess-specialist"):
         record_parser = sub.add_parser(command, parents=[common], help="Record owner-managed {} evidence.".format(command))
         record_parser.add_argument("--record", required=True, metavar="FILE", help="Structured evidence JSON; see dispatch-recovery.md.")
         record_parser.add_argument("--now", metavar="ISO8601")
@@ -1019,6 +1019,8 @@ def cmd_recovery(args, client=None, warn=None, trace=None):
             if dispatch is not None:
                 _require_independent_report(state, dispatch["task"], data.get("reviewer"))
         result = recovery.record_report(store, data, at)
+    elif args.command == "authorize-refused-dispatch":
+        result = recovery.authorize_refused_dispatch(store, data, at)
     elif args.command == "record-refusal":
         agents_by_name = {agent.name: agent for agent in load_config(_config_path(args))}
         dispatch = next((item for item in store["dispatches"] if isinstance(data, dict) and item["id"] == data.get("dispatch")), None)
@@ -1198,7 +1200,7 @@ COMMANDS = {
     "apply": cmd_apply,
     "state": cmd_state,
     "status": cmd_status,
-    **{command: cmd_recovery for command in ("task", "checkpoint", "authorize-corrections", "recover-context", "recover-role-clear", "record-report", "record-refusal", "reconcile", "record-release-clear", "import-correction", "record-historical-review", "recover-report", "assess-specialist")},
+    **{command: cmd_recovery for command in ("task", "checkpoint", "authorize-corrections", "recover-context", "recover-role-clear", "record-report", "record-refusal", "authorize-refused-dispatch", "reconcile", "record-release-clear", "import-correction", "record-historical-review", "recover-report", "assess-specialist")},
     "start-judge": cmd_start_judge,
     "probe-report": cmd_probe_report,
     **{command: cmd_retrospective for command in ("retro-check", "retro-record", "retro-list", "retro-show")},

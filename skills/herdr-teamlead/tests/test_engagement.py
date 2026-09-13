@@ -211,6 +211,7 @@ class EngagementTest(unittest.TestCase):
         old.pop("specialist_assessments")
         old["schema_version"] = 5
         old["recovery"]["schema_version"] = 4
+        del old["recovery"]["refusal_authorizations"]
         original = old["assignments"][0]
         original["schema_version"] = 5
         original.pop("requirements")

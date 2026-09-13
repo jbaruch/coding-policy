@@ -18,9 +18,11 @@ from .chronology import assignment_after, latest_assignment
 
 
 RECOVERY_SCHEMA_VERSION = 1
-#: Store version 6 adds the optional `refusal` and `refusal_move` dispatch
-#: fields (#399). A version-5 store carrying either is unowned newer data
-#: and is refused; a clean one is stamped (rules/stateful-artifacts.md).
+#: Store version 6 adds the `brief_identity`, `refusal` and `refusal_move`
+#: dispatch fields and the `refusal_authorizations` collection (#399). A
+#: version-5 store carrying any of them is unowned newer data and is
+#: refused; a clean one is stamped and given the empty collection
+#: (rules/stateful-artifacts.md).
 RECOVERY_STORE_VERSION = 6
 REFUSAL_FIELDS = frozenset({"refusal", "refusal_move"})
 SPECIALIST_DISPATCH_VERSION = 2
@@ -49,7 +51,8 @@ SHA_RE = re.compile(r"[0-9a-f]{40}(?:[0-9a-f]{24})?\Z")
 def empty_recovery():
     return {"schema_version": RECOVERY_STORE_VERSION, "tasks": {}, "checkpoints": [],
             "plans": [], "dispatches": [], "context_permissions": [], "events": [],
-            "hand_clearances": [], "historical_attempts": [], "role_clearances": [], "delivery_recoveries": []}
+            "hand_clearances": [], "historical_attempts": [], "role_clearances": [], "delivery_recoveries": [],
+            "refusal_authorizations": []}
 
 
 def _migrate_checkpoints(store):
@@ -106,7 +109,9 @@ def migrate_store(store):
             raise UsageError("Older recovery requires a delivery_recoveries array; restore the original owner-written store.", {})
         if any(not isinstance(row, dict) or row.get("schema_version") != 1 for row in deliveries):
             raise UsageError("Older recovery contains unowned newer delivery records; preserve it for owner recovery.", {})
-    added = ["role_clearances", "delivery_recoveries"] if version < 3 else []
+    added = ["refusal_authorizations"]
+    if version < 3:
+        added.extend(["role_clearances", "delivery_recoveries"])
     if version == 1:
         added.extend(["hand_clearances", "historical_attempts"])
     if any(name in store for name in added):
@@ -580,6 +585,47 @@ def record_refusal(store, data, at, provider, report):
     return result
 
 
+def authorize_refused_dispatch(store, data, at):
+    """Record the operator's decision to dispatch a twice-refused brief again.
+
+    Requires a recorded refusal on the task, role and fix round. One
+    authorization permits one further dispatch on that key, any provider and
+    any brief, carried on that dispatch's `refusal_move.authorization`; a
+    later dispatch needs another. Same id with the same input replays.
+    """
+    required = {"id", "task", "role", "fix_round", "decision", "authorization"}
+    if not isinstance(data, dict) or set(data) != required:
+        raise UsageError("Refused-dispatch authorization requires id, task, role, fix_round, decision and explicit authorization.", {})
+    for key in ("id", "task", "role", "decision"):
+        text(data[key], key)
+    if data["fix_round"] is not None:
+        positive(data["fix_round"], "fix_round")
+    authorization(data["authorization"])
+    prior = next((row for row in store["refusal_authorizations"] if row["id"] == data["id"]), None)
+    if prior:
+        if any(prior.get(key) != value for key, value in data.items()):
+            raise UsageError("This authorization identity already records a different decision; use a new id for a new decision.", {})
+        return prior
+    if not refusals(store, data["task"], data["role"], data["fix_round"]):
+        raise UsageError("No provider refusal is recorded for task {} {} round {}; record the refusal before authorizing its recovery.".format(data["task"], data["role"], data["fix_round"]), {})
+    record = {"schema_version": RECOVERY_SCHEMA_VERSION, "at": at, **data}
+    store["refusal_authorizations"].append(record)
+    _event(store, at, "refused_dispatch_authorized", data["task"], {"authorization": data["id"], "role": data["role"], "fix_round": data["fix_round"]})
+    return record
+
+
+def _authorization_uses(store, identifier):
+    return [row for row in store["dispatches"] if row["status"] != "not_sent"
+            and (row.get("refusal_move") or {}).get("authorization") == identifier]
+
+
+def _unused_authorization(store, task, role, fix_round):
+    for row in store["refusal_authorizations"]:
+        if (row["task"], row["role"], row["fix_round"]) == (task, role, fix_round) and not _authorization_uses(store, row["id"]):
+            return row
+    return None
+
+
 def refusals(store, task, role, fix_round):
     return [row for row in store["dispatches"] if row.get("refusal") is not None
             and row["task"] == task and row["role"] == role and row["fix_round"] == fix_round]
@@ -594,11 +640,23 @@ def refusal_move(store, task, role, fix_round, provider, identity):
     round, a second move while one is reserved, uncertain or applied without
     a recorded refusal, and any dispatch once `REFUSAL_LIMIT` independent
     refusals are recorded: that line stops and goes to the operator. A
-    `not_sent` move consumed nothing.
+    `not_sent` move consumed nothing. An unused operator authorization on the
+    key (`authorize_refused_dispatch`) lifts every check for one dispatch.
     """
     refused = refusals(store, task, role, fix_round)
     if not refused:
         return None
+    authorized = _unused_authorization(store, task, role, fix_round)
+    if authorized is not None:
+        return {"schema_version": RECOVERY_SCHEMA_VERSION, "from": refused[-1]["id"], "from_provider": refused[-1]["refusal"]["provider"],
+                "provider": provider, "authorization": authorized["id"]}
+    providers = []
+    for row in refused:
+        if row["refusal"]["provider"] not in providers:
+            providers.append(row["refusal"]["provider"])
+    if len(providers) >= REFUSAL_LIMIT:
+        raise UsageError("Task {} {} round {} was refused by {} providers ({}); the line stops here. Record the operator's decision with authorize-refused-dispatch before any further dispatch of this brief.".format(
+            task, role, fix_round, len(providers), ", ".join(providers)), {"refusals": [row["id"] for row in refused]})
     for row in refused:
         if row.get("brief_identity") is None:
             raise UsageError("Refused dispatch {} predates brief identity, so an unchanged move cannot be verified; record the operator's decision before any further dispatch of this brief.".format(row["id"]), {"refusals": [item["id"] for item in refused]})
@@ -609,13 +667,6 @@ def refusal_move(store, task, role, fix_round, provider, identity):
     if moves:
         raise UsageError("Task {} {} round {} already moved to provider {} (dispatch {}, {}); one move per refusal. Wait for its report, record its refusal, or record the operator's decision before another dispatch of this brief.".format(
             task, role, fix_round, moves[-1]["refusal_move"]["provider"], moves[-1]["id"], moves[-1]["status"]), {"moves": [row["id"] for row in moves]})
-    providers = []
-    for row in refused:
-        if row["refusal"]["provider"] not in providers:
-            providers.append(row["refusal"]["provider"])
-    if len(providers) >= REFUSAL_LIMIT:
-        raise UsageError("Task {} {} round {} was refused by {} providers ({}); the line stops here. Record the operator's decision before any further dispatch of this brief.".format(
-            task, role, fix_round, len(providers), ", ".join(providers)), {"refusals": [row["id"] for row in refused]})
     if provider in providers:
         raise UsageError("Provider {} already refused task {} {} round {} (dispatch {}); a resend to the same provider is refused. Move the unchanged brief to another provider once, or record the operator's decision.".format(
             provider, task, role, fix_round, refused[-1]["id"]), {"refusals": [row["id"] for row in refused]})
@@ -640,7 +691,7 @@ def _validate_refusals(store):
                 raise UsageError("Refusal record's receipt path disagrees with its bound evidence; preserve it for owner recovery.", {})
         move = row.get("refusal_move")
         if move is not None:
-            if (not isinstance(move, dict) or set(move) != {"schema_version", "from", "from_provider", "provider"}
+            if (not isinstance(move, dict) or set(move) - {"authorization"} != {"schema_version", "from", "from_provider", "provider"}
                     or type(move["schema_version"]) is not int or move["schema_version"] != RECOVERY_SCHEMA_VERSION):
                 raise UsageError("Refusal move has an unsupported schema; preserve it for owner recovery.", {})
             source_index = next((position for position, item in enumerate(rows[:index]) if item["id"] == text(move["from"], "move source")), None)
@@ -648,10 +699,22 @@ def _validate_refusals(store):
                 raise UsageError("Refusal move names no earlier dispatch; preserve the ledger for owner recovery.", {})
             source = rows[source_index]
             if (source.get("refusal") is None or any(source[key] != row[key] for key in ("task", "role", "fix_round"))
-                    or source["refusal"]["provider"] != text(move["from_provider"], "move source provider")
-                    or text(move["provider"], "move provider") == move["from_provider"]
+                    or source["refusal"]["provider"] != text(move["from_provider"], "move source provider")):
+                raise UsageError("Refusal move does not name an earlier refused dispatch of the same task, role and fix round; preserve the ledger for owner recovery.", {})
+            text(move["provider"], "move provider")
+            if "authorization" in move:
+                grant = _item(store["refusal_authorizations"], move["authorization"], "refusal authorization")
+                if (grant["task"], grant["role"], grant["fix_round"]) != (row["task"], row["role"], row["fix_round"]) or len(_authorization_uses(store, grant["id"])) > 1:
+                    raise UsageError("An authorized refused dispatch names an authorization for another key or one already consumed; preserve the ledger for owner recovery.", {})
+            elif (move["provider"] == move["from_provider"]
                     or source.get("brief_identity") is None or source["brief_identity"] != row.get("brief_identity")):
-                raise UsageError("Refusal move does not name an earlier refused dispatch of the same task, role, fix round and brief on another provider; preserve the ledger for owner recovery.", {})
+                raise UsageError("Refusal move does not carry the refused brief unchanged to another provider; preserve the ledger for owner recovery.", {})
+    for row in store["refusal_authorizations"]:
+        for key in ("id", "task", "role", "decision"):
+            text(row[key], key)
+        if row["fix_round"] is not None:
+            positive(row["fix_round"], "authorization fix_round")
+        authorization(row["authorization"])
 
 
 def authorize_context(store, assignments, data, at, observed_session):
@@ -759,7 +822,7 @@ def validate_store(store, assignments):
     try:
         if not isinstance(store["tasks"], dict):
             raise UsageError("Recovery tasks must be an object; restore the owner-written ledger.", {})
-        for name in ("checkpoints", "plans", "dispatches", "context_permissions", "events", "hand_clearances", "historical_attempts", "role_clearances", "delivery_recoveries"):
+        for name in ("checkpoints", "plans", "dispatches", "context_permissions", "events", "hand_clearances", "historical_attempts", "role_clearances", "delivery_recoveries", "refusal_authorizations"):
             if not isinstance(store[name], list):
                 raise UsageError("Recovery {} must be an array; restore the owner-written ledger.".format(name), {})
             identifiers = []

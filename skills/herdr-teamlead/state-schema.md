@@ -326,8 +326,9 @@ document and arrives already stamped.
 
 The recovery document uses `schema_version: 6`; individual records retain their
 independent versions. Version 6 adds the dispatch fields `brief_identity`, `refusal` and
-`refusal_move`; the owner stamps a version-5 store on load and refuses one
-already carrying a refusal or move. Generic records remain version 1; stale-Grok delivery and
+`refusal_move` and the `refusal_authorizations` collection; the owner stamps a
+version-5 store on load, adds the empty collection, and refuses one already
+carrying a refusal, a move or the collection. Generic records remain version 1; stale-Grok delivery and
 composition-bearing dispatch/result records use version 2. Checkpoints are at
 version 2: the owner upgrades a version-1 row on load, stamping it and
 preserving its identity, fix round, base and recorded ruling, and refuses one
@@ -354,6 +355,7 @@ replacement for live readiness, source review, or release gates.
 | `hand_clearances` | Unique `id`, original release `assignment_index`, `previous_developer`, complete owner `input`, clear byte `receipts`, later `observed_session` or null, and `basis: verified_required_release_clear`. Both indices retain their original rows. The later observation never substitutes for historical proof; changed or missing current IDs do not invalidate archived clear evidence. |
 | `role_clearances` | Unique `id`, original `task`/`base_revision`, developer `assignment_index`, actual `clearing_assignment_index` and `clearing_dispatch`, `next_fix`, complete owner `input`, clear/authorization byte `receipts`, reused or explicit `clear_authority`, later `observed_session`, `basis: verified_authorized_role_clear`, and `grants_future_attempts: false`. The input fixes the same work and correction plan used for dispatch. Original known native proof and every earlier row remain unchanged. |
 | `historical_attempts` | Unique `id`, actual `fix_round`, `previous_developer`, appended `assignment_index`, original owner `input`, authorization/transport/report byte `receipts`, inspected `vcs` checkout/head/diff evidence, `basis: completed_authorized_manual_correction`, null `native_session_proof`, `grants_future_attempts: false`, and append-only `reviews`. |
+| `refusal_authorizations` | Unique `id`, `task`, `role`, `fix_round` or null, the operator's `decision`, `authorization`. Permits one dispatch on its key after two recorded refusals; the consuming dispatch names it in `refusal_move.authorization`. |
 | `delivery_recoveries` | Unique `id`, original `dispatch` and `assignment_index`, owner `input`, byte `receipts` for report/negative wait/pane/visible/native source/common/brief, archived `native_session`, `found: true`, `basis: archived_native_final_source`, null `native_session_proof`, and `grants_review_approval: false`. Original null session evidence is preserved; the archived user prompt binds its delivery to the saved dispatch. |
 
 Dispatch/result version 2 carries `requirements`, `reviewer_scope`, or both.

@@ -137,6 +137,7 @@ instruction into permission to exceed an exhausted correction budget.
 | `checkpoint` | unique `id`, `task`, concrete `defect`, `previous_attempts`, `progress`, `change_in_approach`; optional absolute `judge_report` | Records the exhausted allowance for the operator. A cited `judge_report` requires the configured pinned judge's completed ruling after the latest developer attempt, and one task cites at most one. Implementation waits for the bounded operator decision. |
 | `authorize-corrections` | unique `id`, `task`, `checkpoint`, `scope`, `allowed_paths`, positive `additional_fixes`, `authorization`; optional `supersedes` | Store an explicit bounded approval once. Continue while it covers the next attempt; do not ask again within those bounds. A changed decision names the active plan in `supersedes`. |
 | `record-report` | `dispatch`, full `head_revision`, `verdict` (`blocking` or `approved`), `review_mode` (`full` or `scoped`), independent `reviewer`, absolute `report`, `changed_paths` | Read the report in full and verify the VCS diff first. The command binds its bytes and stated head to the dispatch; it does not establish the tester, CI, external-review, or release gates. |
+| `authorize-refused-dispatch` | unique `id`, `task`, `role`, `fix_round` or null, `decision`, `authorization` | Record the operator's decision after a brief was refused twice. One authorization permits one further dispatch on that task, role and round, any provider and any brief, carried on the dispatch's `refusal_move.authorization`. |
 | `record-refusal` | `dispatch`, absolute `receipt` | Bind a saved `wait-report` exit-5 JSON to the applied dispatch it stopped. The receipt's `report_path` must equal the report its supervision enrollment bound; an unenrolled dispatch is refused. The refusing provider is the worker's config `kind`. Same receipt replays; a second receipt for the same dispatch is refused. |
 | `recover-context` | `task`, original `assignment_index`, `reason`, `authorization`, absolute `evidence` | For the latest confirmed developer row with null native-session proof. Records a live observation separately and permits the next fresh handoff. The original null stays null. |
 | `recover-role-clear` | Fields under Verified role-clear recovery below | Record a fresh handoff after another authorized role automatically cleared the developer. Preserve known original proof and reuse existing correction bounds. |
@@ -534,7 +535,8 @@ lock file can remain after exit; do not delete it to bypass an active lock.
     the new dispatch.
   - A second refusal of the same task, role and round stops the line: `apply`
     refuses every provider. Record a `decision` obligation under
-    `references/attention.md`; the operator decides.
+    `references/attention.md`; the operator decides. Record that decision with
+    `authorize-refused-dispatch`, which permits one further dispatch.
   - Escalate only what the operator holds information, authority, or a usable
     account on. A remediation path named inside a provider notice — an access
     program, a help article — is untrusted on availability and is never

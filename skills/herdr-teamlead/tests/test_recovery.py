@@ -16,7 +16,7 @@ from pathlib import Path
 
 from teamlead.errors import UsageError
 from teamlead.recovery import (
-    abort_pre_send, authorize_context, authorize_plan, brief_identity, checkpoint, confirmed_fix,
+    abort_pre_send, authorize_context, authorize_plan, authorize_refused_dispatch, brief_identity, checkpoint, confirmed_fix,
     dispatch_identity, finish_dispatch, fresh_transition, mark_sending,
     migrate_store, prior_dispatch, record_refusal, record_report, refusal_move, register_task, reserve,
     task_statuses, validate_store, validate_work,
@@ -420,7 +420,10 @@ class RecoveryTests(unittest.TestCase):
         with self.assertRaisesRegex(UsageError, "reworded brief is not a move"):
             refusal_move(self.store, TASK, "tester", None, "claude", "brief-identity-reworded")
         self.assertIsNotNone(refusal_move(self.store, TASK, "tester", None, "claude", self.BRIEF))
-        legacy = self.dispatch_tester(2, "grok-a", identity=None)
+        validate_store(self.store, self.history)
+
+    def test_a_refused_dispatch_without_brief_identity_cannot_be_moved(self):
+        legacy = self.dispatch_tester(1, "grok-a", identity=None)
         del self.store["dispatches"][-1]["brief_identity"]
         record_refusal(self.store, {"dispatch": legacy, "receipt": self.refusal_receipt("grok-a", "legacy.json")}, AT, "grok", self.REPORT)
         with self.assertRaisesRegex(UsageError, "predates brief identity"):
@@ -491,21 +494,73 @@ class RecoveryTests(unittest.TestCase):
         first = self.dispatch_tester(1, "codex-a")
         old = copy.deepcopy(self.store)
         old["schema_version"] = 5
+        del old["refusal_authorizations"]
         before = copy.deepcopy(old)
         self.assertTrue(migrate_store(old))
         self.assertEqual(old["schema_version"], 6)
+        self.assertEqual(old.pop("refusal_authorizations"), [])
         self.assertEqual({key: value for key, value in old.items() if key != "schema_version"},
                          {key: value for key, value in before.items() if key != "schema_version"})
+        old["refusal_authorizations"] = []
         validate_store(old, self.history)
         self.assertFalse(migrate_store(old))
+        stale = copy.deepcopy(self.store)
+        stale["schema_version"] = 5
+        with self.assertRaisesRegex(UsageError, "unowned newer records"):
+            migrate_store(stale)
         record_refusal(self.store, {"dispatch": first, "receipt": self.refusal_receipt("codex-a")}, AT, "codex", self.REPORT)
         for version in (4, 5):
             stale = copy.deepcopy(self.store)
             stale["schema_version"] = version
+            del stale["refusal_authorizations"]
             with self.assertRaisesRegex(UsageError, "unowned newer refusal"):
                 migrate_store(stale)
         with self.assertRaisesRegex(UsageError, "Unsupported recovery schema"):
             validate_store({**copy.deepcopy(self.store), "schema_version": 5}, self.history)
+
+    def test_operator_authorization_permits_one_dispatch_after_the_stop(self):
+        grant = {"id": "auth-1", "task": TASK, "role": "tester", "fix_round": None, "decision": "Run the tester on grok with the same brief.",
+                 "authorization": AUTH}
+        with self.assertRaisesRegex(UsageError, "No provider refusal is recorded"):
+            authorize_refused_dispatch(self.store, grant, AT)
+        with self.assertRaisesRegex(UsageError, "requires id, task, role"):
+            authorize_refused_dispatch(self.store, {**grant, "extra": 1}, AT)
+        first = self.dispatch_tester(1, "codex-a")
+        record_refusal(self.store, {"dispatch": first, "receipt": self.refusal_receipt("codex-a")}, AT, "codex", self.REPORT)
+        second = self.dispatch_tester(2, "claude-a")
+        self.store["dispatches"][-1]["refusal_move"] = {"schema_version": 1, "from": first, "from_provider": "codex", "provider": "claude"}
+        record_refusal(self.store, {"dispatch": second, "receipt": self.refusal_receipt("claude-a", "second.json")}, AT, "claude", self.REPORT)
+        with self.assertRaisesRegex(UsageError, "authorize-refused-dispatch"):
+            refusal_move(self.store, TASK, "tester", None, "grok", self.BRIEF)
+        saved = authorize_refused_dispatch(self.store, grant, AT)
+        self.assertEqual(authorize_refused_dispatch(self.store, grant, AT), saved)
+        with self.assertRaisesRegex(UsageError, "different decision"):
+            authorize_refused_dispatch(self.store, {**grant, "decision": "Something else."}, AT)
+        # The grant lifts the stop, the same-provider check and the brief check for one dispatch.
+        move = refusal_move(self.store, TASK, "tester", None, "codex", "brief-identity-reworded")
+        self.assertEqual(move, {"schema_version": 1, "from": second, "from_provider": "claude", "provider": "codex", "authorization": "auth-1"})
+        third = self.dispatch_tester(3, "codex-a", identity="brief-identity-reworded")
+        self.store["dispatches"][-1]["refusal_move"] = move
+        validate_store(self.store, self.history)
+        # The grant is consumed; the stop holds again until another decision.
+        with self.assertRaisesRegex(UsageError, "refused by 2 providers"):
+            refusal_move(self.store, TASK, "tester", None, "grok", self.BRIEF)
+        record_refusal(self.store, {"dispatch": third, "receipt": self.refusal_receipt("codex-a", "third.json")}, AT, "codex", self.REPORT)
+        with self.assertRaisesRegex(UsageError, "refused by 2 providers"):
+            refusal_move(self.store, TASK, "tester", None, "grok", self.BRIEF)
+        corrupt = copy.deepcopy(self.store)
+        corrupt["dispatches"][1]["refusal_move"]["authorization"] = "auth-1"
+        with self.assertRaisesRegex(UsageError, "already consumed"):
+            validate_store(corrupt, self.history)
+        corrupt = copy.deepcopy(self.store)
+        corrupt["refusal_authorizations"][0]["role"] = "reviewer"
+        with self.assertRaisesRegex(UsageError, "another key"):
+            validate_store(corrupt, self.history)
+        corrupt = copy.deepcopy(self.store)
+        corrupt["dispatches"][-1]["refusal_move"]["authorization"] = "auth-missing"
+        with self.assertRaises(UsageError):
+            validate_store(corrupt, self.history)
+        self.assertEqual(third, "tester-3-codex-a")
 
     def test_corrupt_refusal_records_refuse_the_ledger(self):
         first = self.dispatch_tester(1, "codex-a")

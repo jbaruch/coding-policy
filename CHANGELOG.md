@@ -45,9 +45,16 @@
   move is refused while the first is reserved, uncertain or applied without
   a recorded refusal, so a fresh dispatch to a third provider cannot slip in
   between the move and its outcome; a `not_sent` move consumed nothing. The
-  recovery store is version 6 for the two new optional dispatch fields; the
-  owner stamps a clean version-5 store on load and refuses one already
-  carrying either field as unowned newer data. The
+  recovery store is version 6 for the new dispatch fields and the
+  `refusal_authorizations` collection; the owner stamps a clean version-5
+  store on load, adds the empty collection, and refuses one already carrying
+  any of them as unowned newer data. Copilot also asked what lifts the stop:
+  nothing did, so "the operator decides" had no lever and every later `apply`
+  on that key stayed refused. `authorize-refused-dispatch` records the
+  operator's decision with their words, requires a recorded refusal on the
+  key, and permits one further dispatch there on any provider with any brief,
+  named on that dispatch's `refusal_move.authorization`; a second dispatch
+  needs a second decision. The
   reference now states the escalation test — escalate only what the operator
   holds information, authority, or a usable account on — and that a
   remediation path named inside a provider notice is untrusted on
