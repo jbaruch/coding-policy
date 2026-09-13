@@ -291,6 +291,8 @@ class RoleClearTests(fixture.fixture.CliCase):
         del state["recovery"]["role_clearances"]
         del state["recovery"]["delivery_recoveries"]
         del state["recovery"]["refusal_authorizations"]
+        for row in state["recovery"]["dispatches"]:
+            row.pop("brief_identity", None)
         self.state.write_text(json.dumps(state))
         code, _, err = self.invoke(["state"])
         self.assertEqual(code, 0, err)

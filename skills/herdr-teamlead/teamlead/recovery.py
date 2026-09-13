@@ -20,11 +20,11 @@ from .chronology import assignment_after, latest_assignment
 RECOVERY_SCHEMA_VERSION = 1
 #: Store version 6 adds the `brief_identity`, `refusal` and `refusal_move`
 #: dispatch fields and the `refusal_authorizations` collection (#399). A
-#: version-5 store carrying any of them is unowned newer data and is
-#: refused; a clean one is stamped and given the empty collection
+#: version-5 store carrying any of them, `brief_identity` included, is
+#: unowned newer data and is refused; a clean one is stamped and given the empty collection
 #: (rules/stateful-artifacts.md).
 RECOVERY_STORE_VERSION = 6
-REFUSAL_FIELDS = frozenset({"refusal", "refusal_move"})
+REFUSAL_FIELDS = frozenset({"brief_identity", "refusal", "refusal_move"})
 SPECIALIST_DISPATCH_VERSION = 2
 #: Checkpoint record version. 1 carries a mandatory pinned-judge ruling; 2
 #: makes it optional, because an exhausted allowance is a budget decision only
@@ -615,12 +615,22 @@ def authorize_refused_dispatch(store, data, at):
         if any(prior.get(key) != value for key, value in data.items()):
             raise UsageError("This authorization identity already records a different decision; use a new id for a new decision.", {})
         return prior
-    if not refusals(store, data["task"], data["role"], data["fix_round"]):
-        raise UsageError("No provider refusal is recorded for task {} {} round {}; record the refusal before authorizing its recovery.".format(data["task"], data["role"], data["fix_round"]), {})
+    providers = _refusal_providers(store, data["task"], data["role"], data["fix_round"])
+    if len(providers) < REFUSAL_LIMIT:
+        raise UsageError("Task {} {} round {} has refusals from {} provider(s); an operator decision follows {} independent refusals. Move the unchanged brief to another provider first, or record that refusal.".format(
+            data["task"], data["role"], data["fix_round"], len(providers), REFUSAL_LIMIT), {})
     record = {"schema_version": RECOVERY_SCHEMA_VERSION, "at": at, **data}
     store["refusal_authorizations"].append(record)
     _event(store, at, "refused_dispatch_authorized", data["task"], {"authorization": data["id"], "role": data["role"], "fix_round": data["fix_round"]})
     return record
+
+
+def _refusal_providers(store, task, role, fix_round):
+    providers = []
+    for row in refusals(store, task, role, fix_round):
+        if row["refusal"]["provider"] not in providers:
+            providers.append(row["refusal"]["provider"])
+    return providers
 
 
 def _authorization_uses(store, identifier):
@@ -666,10 +676,7 @@ def refusal_move(store, task, role, fix_round, provider, identity):
             raise UsageError("Authorization {} approves the refused brief unchanged, and this brief differs; send it unchanged or record a decision approving the revision.".format(authorized["id"]), {"authorization": authorized["id"]})
         return {"schema_version": RECOVERY_SCHEMA_VERSION, "from": refused[-1]["id"], "from_provider": refused[-1]["refusal"]["provider"],
                 "provider": provider, "authorization": authorized["id"]}
-    providers = []
-    for row in refused:
-        if row["refusal"]["provider"] not in providers:
-            providers.append(row["refusal"]["provider"])
+    providers = _refusal_providers(store, task, role, fix_round)
     if len(providers) >= REFUSAL_LIMIT:
         raise UsageError("Task {} {} round {} was refused by {} providers ({}); the line stops here. Record the operator's decision with authorize-refused-dispatch before any further dispatch of this brief.".format(
             task, role, fix_round, len(providers), ", ".join(providers)), {"refusals": [row["id"] for row in refused]})
@@ -736,6 +743,8 @@ def _validate_refusals(store):
             positive(row["fix_round"], "authorization fix_round")
         if row["brief"] not in AUTHORIZED_BRIEFS:
             raise UsageError("Refusal authorization names an unknown brief scope; preserve the ledger for owner recovery.", {})
+        if len(_refusal_providers(store, row["task"], row["role"], row["fix_round"])) < REFUSAL_LIMIT:
+            raise UsageError("Refusal authorization precedes the independent refusals it answers; preserve the ledger for owner recovery.", {})
         authorization(row["authorization"])
 
 

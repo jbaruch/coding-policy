@@ -61,7 +61,12 @@
   unchanged brief to one provider is not permission to send a rewrite to
   another. A receipt whose `agent` is the worker's enrolled pane id is
   accepted, since `wait-report.sh` takes either name, and a moved dispatch's
-  own refusal must come from the provider it moved to. The
+  own refusal must come from the provider it moved to. Copilot then caught
+  that the grant could be recorded after one refusal, where the move gate
+  consults it first and it would have let a reworded resend to the refusing
+  provider through: an authorization now requires the two independent
+  refusals it answers, at record time and in the validator. The version-5
+  migration guard also refuses a dispatch already carrying `brief_identity`. The
   reference now states the escalation test — escalate only what the operator
   holds information, authority, or a usable account on — and that a
   remediation path named inside a provider notice is untrusted on

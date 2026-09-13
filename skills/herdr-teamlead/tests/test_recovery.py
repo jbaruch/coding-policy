@@ -492,9 +492,16 @@ class RecoveryTests(unittest.TestCase):
 
     def test_store_six_migration_stamps_a_clean_five_and_refuses_unowned_refusals(self):
         first = self.dispatch_tester(1, "codex-a")
+        identified = copy.deepcopy(self.store)
+        identified["schema_version"] = 5
+        del identified["refusal_authorizations"]
+        with self.assertRaisesRegex(UsageError, "unowned newer refusal"):
+            migrate_store(identified)
         old = copy.deepcopy(self.store)
         old["schema_version"] = 5
         del old["refusal_authorizations"]
+        for row in old["dispatches"]:
+            del row["brief_identity"]
         before = copy.deepcopy(old)
         self.assertTrue(migrate_store(old))
         self.assertEqual(old["schema_version"], 6)
@@ -506,6 +513,8 @@ class RecoveryTests(unittest.TestCase):
         self.assertFalse(migrate_store(old))
         stale = copy.deepcopy(self.store)
         stale["schema_version"] = 5
+        for row in stale["dispatches"]:
+            del row["brief_identity"]
         with self.assertRaisesRegex(UsageError, "unowned newer records"):
             migrate_store(stale)
         record_refusal(self.store, {"dispatch": first, "receipt": self.refusal_receipt("codex-a")}, AT, "codex", self.REPORT)
@@ -513,6 +522,8 @@ class RecoveryTests(unittest.TestCase):
             stale = copy.deepcopy(self.store)
             stale["schema_version"] = version
             del stale["refusal_authorizations"]
+            for row in stale["dispatches"]:
+                del row["brief_identity"]
             with self.assertRaisesRegex(UsageError, "unowned newer refusal"):
                 migrate_store(stale)
         with self.assertRaisesRegex(UsageError, "Unsupported recovery schema"):
@@ -521,12 +532,15 @@ class RecoveryTests(unittest.TestCase):
     def test_operator_authorization_permits_one_dispatch_after_the_stop(self):
         grant = {"id": "auth-1", "task": TASK, "role": "tester", "fix_round": None, "provider": "codex", "brief": "revised",
                  "decision": "Run the revised tester brief on codex.", "authorization": AUTH}
-        with self.assertRaisesRegex(UsageError, "No provider refusal is recorded"):
+        with self.assertRaisesRegex(UsageError, "refusals from 0 provider"):
             authorize_refused_dispatch(self.store, grant, AT)
         with self.assertRaisesRegex(UsageError, "requires id, task, role"):
             authorize_refused_dispatch(self.store, {**grant, "extra": 1}, AT)
         first = self.dispatch_tester(1, "codex-a")
         record_refusal(self.store, {"dispatch": first, "receipt": self.refusal_receipt("codex-a")}, AT, "codex", self.REPORT)
+        # One refusal is a move, not an operator decision (Copilot on #402).
+        with self.assertRaisesRegex(UsageError, "refusals from 1 provider"):
+            authorize_refused_dispatch(self.store, grant, AT)
         second = self.dispatch_tester(2, "claude-a")
         self.store["dispatches"][-1]["refusal_move"] = {"schema_version": 1, "from": first, "from_provider": "codex", "provider": "claude"}
         record_refusal(self.store, {"dispatch": second, "receipt": self.refusal_receipt("claude-a", "second.json")}, AT, "claude", self.REPORT)
@@ -568,6 +582,10 @@ class RecoveryTests(unittest.TestCase):
         corrupt = copy.deepcopy(self.store)
         corrupt["dispatches"][-1]["refusal"]["provider"] = "grok"
         with self.assertRaisesRegex(UsageError, "other than the one it moved to"):
+            validate_store(corrupt, self.history)
+        corrupt = copy.deepcopy(self.store)
+        corrupt["refusal_authorizations"].append({**saved, "id": "auth-early", "role": "reviewer"})
+        with self.assertRaisesRegex(UsageError, "precedes the independent refusals"):
             validate_store(corrupt, self.history)
         corrupt = copy.deepcopy(self.store)
         corrupt["dispatches"][-1]["refusal_move"]["authorization"] = "auth-missing"
