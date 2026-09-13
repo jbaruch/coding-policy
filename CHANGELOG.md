@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.209 — 2026-09-13
+
 ### Fixed
 
 - **An unanswered decision on a task now stops dispatch on that task (#399).**
