@@ -172,18 +172,25 @@ and operator decisions; scope classification never waives a blocking finding.
 Read this task's confirmed fix history, name the next fix number,
 and return to Step 4 with self-contained briefs carrying the findings and prior
 reports. Preserve the developer for retained fixes; use a fresh context for the
-fresh-worker stage. Never reset the counter during re-planning. At an exhausted
-allowance, a contested verdict, or a lead override, go to Step 13 first. Use the
-recorded bounded plan for authorized extra attempts; collect each preceding
-attempt's actual blocking review before continuing.
+fresh-worker stage. Never reset the counter during re-planning. At a contested
+verdict or a lead override, go to Step 13 first. At an exhausted allowance,
+record the operator checkpoint and concrete correction proposal through the
+owner commands in `skills/herdr-teamlead/references/dispatch-recovery.md`,
+report implementation as `waiting_for_operator`, and finish the skill until the
+bounded decision arrives. Use the recorded bounded plan for authorized extra
+attempts; collect each preceding attempt's actual blocking review before
+continuing.
 
 ## Branch-Changing Ruling
 
 At Step 19, the lead never edits the branch itself. At an exhausted allowance,
 record the checkpoint and concrete correction proposal through the owner commands
-in `skills/herdr-teamlead/references/dispatch-recovery.md`. Report implementation
-as `waiting_for_operator` while the bounded decision is pending; finish the skill
-until it arrives. Record an explicit approval once and continue within it.
+in `skills/herdr-teamlead/references/dispatch-recovery.md`; the allowance boundary
+is the operator's budget decision, not a judge dispatch. An approved plan covers
+multiple attempts within its recorded bounds; fresh release handoffs do not ask
+for context-change permission. Report implementation as `waiting_for_operator`
+while the bounded decision is pending; finish the skill until it arrives. Record
+an explicit approval once and continue within it.
 Otherwise return to Step 12 carrying `ACTION:` verbatim as required work. Count
 that implementation as the next fix, under the same task identifier, and gate the
 resulting tip again before release.
@@ -229,20 +236,27 @@ available. It holds no other responsibility. `rules/agent-team-operation.md`
 Judge Seat is the contract; this section is the operational detail for
 Steps 13–19 of `skills/herdr-teamlead/SKILL.md`.
 
-Dispatch it on exactly one of four triggers:
+Dispatch it on exactly one of three triggers:
 
 - A contested reviewer or tester verdict — one worker's finding, another
   worker's (or the lead's) disagreement, neither side able to settle it by
   re-reading the rule.
 - A lead override of a blocking finding — the lead about to waive a finding a
   worker labelled blocking gets a second, independent read first.
-- A fix loop exhausted its allowance with blocking work remaining — the judge
-  rules before another correction proposal. Step 19 records the checkpoint
-  and waits for an explicit bounded plan. An approved plan covers multiple
-  attempts within its recorded bounds; fresh release handoffs do not ask for
-  context-change permission. See `references/dispatch-recovery.md`.
 - A bot finding the team disagrees with — the policy reviewer or Copilot flags
   something the developer and reviewer both think is wrong.
+
+All three are disputes. An exhausted correction allowance is not: only the
+operator can grant more attempts, so that boundary goes to the operator through
+the checkpoint, never through a lead judge dispatch. A re-granted budget
+exhausts too, and dispatching a ruling at each boundary made the seat a
+per-round toll on the window its developer and reviewers already share.
+
+The one exception is the operator's own: having received the checkpoint, the
+operator may ask for one ruling for that task, and the lead then runs Steps
+13-18 for it as for any other dispatch. A task gets at most one such request,
+whatever later budgets it is granted. `rules/agent-team-operation.md` Judge
+Seat carries its preconditions.
 
 It is read-only without exception: no file edit, no mutating git or `gh`
 command, no GitHub post, no subagent dispatch. It reads both positions and the

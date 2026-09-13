@@ -326,7 +326,10 @@ document and arrives already stamped.
 
 The recovery document uses `schema_version: 5`; individual records retain their
 independent versions. Generic records remain version 1; stale-Grok delivery and
-composition-bearing dispatch/result records use version 2. The owner adds empty `role_clearances` and
+composition-bearing dispatch/result records use version 2. Checkpoints are at
+version 2: the owner upgrades a version-1 row on load, stamping it and
+preserving its identity, fix round, base and recorded ruling, and refuses one
+missing the ruling evidence its version required. The owner adds empty `role_clearances` and
 `delivery_recoveries` arrays when migrating versions 1 or 2. Version 1 also
 gains empty `hand_clearances` and `historical_attempts` arrays. Existing
 record shapes, contents and evidence remain unchanged. Recovery 4 → 5 changes
@@ -341,7 +344,7 @@ replacement for live readiness, source review, or release gates.
 | Collection | Record fields and relationships |
 | --- | --- |
 | `tasks` | Keyed by original task identity; `task`, immutable full `base_revision`, `scope`, `allowed_paths`, `authorization`. Migration invents none of them. |
-| `checkpoints` | Unique `id`, `fix_round`, original `base_revision`, concrete `defect`, `previous_attempts`, `progress`, `change_in_approach`, `judge_agent`, `judge_report`, `judge_evidence`. Requires a completed pinned-judge assignment after the preceding developer attempt. |
+| `checkpoints` | Unique `id`, `fix_round`, original `base_revision`, concrete `defect`, `previous_attempts`, `progress`, `change_in_approach`. Carries `judge_agent`, `judge_report` and `judge_evidence` only when a ruling is cited, and a cited one requires a completed pinned-judge assignment after the preceding developer attempt. A partial trio is refused, one task records at most one cited ruling, and a migrated version-1 row keeps the ruling it recorded. |
 | `plans` | Unique `id`, `checkpoint`, original `base_revision`, `scope`, `allowed_paths`, `additional_fixes`, derived `first_fix`/`last_fix`, `authorization`; optional `supersedes` references a preserved prior approval. |
 | `dispatches` | Unique `id`, byte/input `fingerprint`, `role`, `agent`, cumulative `fix_round`, `plan` or null, `work` or null, `status`, `result`, `report`, and `assignment_index` once an outcome is recorded. CLI records `brief`, `common`, `observed_before`, and `context_before_send`; reconciled retries preserve `prior_assignment_indices`. |
 | `context_permissions` | Original `assignment_index`, `next_fix`, `reason`, `authorization`, `evidence`, `evidence_receipt`, later `observed_session`, and `basis: operator_authorized_fresh_handoff`. The original null session is never replaced. |

@@ -17,8 +17,8 @@ from teamlead.errors import UsageError
 from teamlead.recovery import (
     abort_pre_send, authorize_context, authorize_plan, checkpoint, confirmed_fix,
     dispatch_identity, finish_dispatch, fresh_transition, mark_sending,
-    prior_dispatch, record_report, register_task, reserve, task_statuses,
-    validate_store, validate_work,
+    migrate_store, prior_dispatch, record_report, register_task, reserve,
+    task_statuses, validate_store, validate_work,
 )
 from teamlead.state import add_assignment, empty_state, load_state_checked, save_state
 
@@ -45,9 +45,12 @@ class RecoveryTests(unittest.TestCase):
         self.review = self.root / "review.md"
         self.review.write_text("Reviewed head: " + HEAD + "\nBlocking finding F1: quoted input is still accepted as a completion signal.\n")
 
-    def seed_checkpoint(self):
+    def exhaust(self):
         for fix in (None, 1, 2, 3, 4, 5):
             add_assignment(self.state, "2026-02-03T09:00:0{}+00:00".format(fix or 0), "developer", "worker", task=TASK, fix_round=fix)
+
+    def seed_checkpoint(self):
+        self.exhaust()
         add_assignment(self.state, AT, "judge", "judge", task=TASK)
         return checkpoint(self.store, self.history, {
             "id": "checkpoint-5", "task": TASK, "defect": "F1 remains open", "previous_attempts": "Five attempts changed parsing and quoting",
@@ -111,12 +114,121 @@ class RecoveryTests(unittest.TestCase):
         status = task_statuses(self.store, self.history)[TASK]
         self.assertEqual((status["status"], status["paused_work"]), ("waiting_for_operator", "implementation"))
 
-    def test_checkpoint_needs_the_pinned_judge_after_latest_development(self):
-        for fix in (None, 1, 2, 3, 4, 5):
-            add_assignment(self.state, "2026-02-03T09:00:0{}+00:00".format(fix or 0), "developer", "worker", task=TASK, fix_round=fix)
+    def test_a_cited_judge_report_still_needs_the_pinned_judge_after_latest_development(self):
+        self.exhaust()
         with self.assertRaisesRegex(UsageError, "pinned judge"):
             checkpoint(self.store, self.history, {"id": "cp", "task": TASK, "defect": "F1", "previous_attempts": "Five fixes",
                 "progress": "Still blocked", "change_in_approach": "Reassess", "judge_report": str(self.judge_report)}, AT, "judge")
+
+    def test_an_exhausted_allowance_reaches_the_operator_without_a_judge(self):
+        # The allowance boundary is a budget decision only the operator makes.
+        # Requiring a ruling first spent 16 of one fleet's 30 lifetime judge
+        # dispatches on one task (jbaruch/coding-policy#396).
+        self.exhaust()
+        record = checkpoint(self.store, self.history, {"id": "cp", "task": TASK, "defect": "F1",
+            "previous_attempts": "Five fixes", "progress": "Still blocked",
+            "change_in_approach": "Reassess"}, AT, "judge")
+        self.assertNotIn("judge_evidence", record)
+        self.assertNotIn("judge_agent", record)
+        self.assertEqual(record["fix_round"], 5)
+        status = task_statuses(self.store, self.history)[TASK]
+        self.assertEqual((status["status"], status["paused_work"]), ("waiting_for_operator", "implementation"))
+
+    def test_that_checkpoint_carries_the_operator_bounded_approval_through(self):
+        self.exhaust()
+        checkpoint(self.store, self.history, {"id": "cp", "task": TASK, "defect": "F1",
+            "previous_attempts": "Five fixes", "progress": "Still blocked",
+            "change_in_approach": "Reassess"}, AT, "judge")
+        plan = authorize_plan(self.store, self.history, {"id": "plan-1", "task": TASK, "checkpoint": "cp",
+            "scope": WORK["scope"], "allowed_paths": ["src/*"], "additional_fixes": 2, "authorization": AUTH}, AT)
+        self.assertEqual((plan["first_fix"], plan["last_fix"]), (6, 7))
+        validate_work(self.store, self.history, TASK, 6, "plan-1", WORK)
+
+    def test_an_unexhausted_budget_still_refuses_the_checkpoint(self):
+        with self.assertRaisesRegex(UsageError, "not exhausted"):
+            checkpoint(self.store, self.history, {"id": "cp", "task": TASK, "defect": "F1",
+                "previous_attempts": "None", "progress": "None",
+                "change_in_approach": "Reassess"}, AT, "judge")
+
+    def test_an_exhausted_budget_names_the_operator_not_the_judge(self):
+        with self.assertRaisesRegex(UsageError, "operator checkpoint"):
+            validate_work(self.store, self.history, TASK, 6, None, WORK)
+
+    def replay_data(self):
+        return {"id": "checkpoint-5", "task": TASK, "defect": "F1 remains open",
+                "previous_attempts": "Five attempts changed parsing and quoting",
+                "progress": "Some counterexamples now pass; the quoted case remains red",
+                "change_in_approach": "Use one canonical parser", "judge_report": str(self.judge_report)}
+
+    def test_a_checkpoint_written_before_the_bump_migrates_with_its_evidence(self):
+        prior = self.seed_checkpoint()
+        evidence = copy.deepcopy(prior["judge_evidence"])
+        prior["schema_version"] = 1
+        self.assertTrue(migrate_store(self.store))
+        self.assertEqual(prior["schema_version"], 2)
+        self.assertEqual((prior["judge_agent"], prior["judge_evidence"]), ("judge", evidence))
+        validate_store(self.store, self.history)
+        self.assertFalse(migrate_store(self.store))
+
+    def test_an_older_checkpoint_without_its_required_ruling_refuses_to_migrate(self):
+        prior = self.seed_checkpoint()
+        prior["schema_version"] = 1
+        del prior["judge_evidence"]
+        with self.assertRaisesRegex(UsageError, "missing the ruling evidence"):
+            migrate_store(self.store)
+
+    def test_replaying_a_migrated_checkpoint_returns_it(self):
+        # The row outlives the writer's version: re-running an already-recorded
+        # checkpoint must return it, not read the version as changed evidence.
+        prior = self.seed_checkpoint()
+        prior["schema_version"] = 1
+        migrate_store(self.store)
+        replay = checkpoint(self.store, self.history, self.replay_data(), AT, "judge")
+        self.assertIs(replay, prior)
+        self.assertEqual(len(self.store["checkpoints"]), 1)
+        validate_store(self.store, self.history)
+
+    def test_reusing_a_checkpoint_identity_for_other_evidence_still_refuses(self):
+        self.seed_checkpoint()
+        with self.assertRaisesRegex(UsageError, "already describes different evidence"):
+            checkpoint(self.store, self.history, {"id": "checkpoint-5", "task": TASK, "defect": "Another defect",
+                "previous_attempts": "Five attempts changed parsing and quoting",
+                "progress": "Some counterexamples now pass; the quoted case remains red",
+                "change_in_approach": "Use one canonical parser", "judge_report": str(self.judge_report)}, AT, "judge")
+
+    def test_a_second_cited_ruling_for_the_task_is_refused(self):
+        # The bound is per task: a re-granted budget exhausting again must not
+        # buy another ruling (jbaruch/coding-policy#396).
+        self.seed_checkpoint()
+        for fix in (6, 7):
+            add_assignment(self.state, "2026-02-03T12:00:0{}+00:00".format(fix), "developer", "worker", task=TASK, fix_round=fix)
+        with self.assertRaisesRegex(UsageError, "at most one per task"):
+            checkpoint(self.store, self.history, {"id": "checkpoint-7", "task": TASK, "defect": "F1 still open",
+                "previous_attempts": "Seven attempts", "progress": "Unchanged",
+                "change_in_approach": "Rewrite the parser", "judge_report": str(self.judge_report)}, AT, "judge")
+
+    def test_a_later_checkpoint_without_a_ruling_still_records(self):
+        self.seed_checkpoint()
+        for fix in (6, 7):
+            add_assignment(self.state, "2026-02-03T12:00:0{}+00:00".format(fix), "developer", "worker", task=TASK, fix_round=fix)
+        record = checkpoint(self.store, self.history, {"id": "checkpoint-7", "task": TASK, "defect": "F1 still open",
+            "previous_attempts": "Seven attempts", "progress": "Unchanged",
+            "change_in_approach": "Rewrite the parser"}, AT, "judge")
+        self.assertEqual(record["fix_round"], 7)
+        self.assertNotIn("judge_evidence", record)
+
+    def test_a_partial_ruling_trio_on_a_checkpoint_is_refused(self):
+        prior = self.seed_checkpoint()
+        del prior["judge_evidence"]
+        with self.assertRaises(UsageError):
+            validate_store(self.store, self.history)
+
+    def test_an_unknown_checkpoint_field_is_refused(self):
+        self.exhaust()
+        with self.assertRaisesRegex(UsageError, "optional judge_report"):
+            checkpoint(self.store, self.history, {"id": "cp", "task": TASK, "defect": "F1",
+                "previous_attempts": "Five fixes", "progress": "Still blocked",
+                "change_in_approach": "Reassess", "operator_note": "approve"}, AT, "judge")
 
     def test_retry_returns_the_same_dispatch_and_never_consumes_twice(self):
         self.approve()
