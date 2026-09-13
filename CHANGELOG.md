@@ -1,5 +1,35 @@
 # Changelog
 
+### Fixed
+
+- **An unanswered decision on a task now stops dispatch on that task (#399).**
+  On `acr-cli-producer-migration` the lead recorded a priority-99 `decision`
+  when a tester's provider refused its brief, presented it twice with no
+  answer, and in the same hours dispatched fix rounds 15 through 19 on the
+  same task: 5 developer rounds, 6 reviewer rounds, 5 judge rulings, taking
+  `openai-weekly` from 35% to 77% used. Nothing made that state incoherent —
+  Fix Loops said to record `waiting_for_operator`, `references/attention.md`
+  said a `present` never resolves an entry, and no rule said an unanswered
+  decision stops dispatch. The lead treated the decision as blocking enough to
+  withhold a tester and not blocking enough to stop spending the window; a
+  priority-99 decision and a passing remark were indistinguishable at the
+  storage layer. `apply` and `start-judge` now read the attention sidecar
+  before any new send and refuse while an open `decision` or `blocker` on the
+  task exists, naming the obligation id and its resolution condition. The gate
+  is by kind, never by priority: the issue asked for "above a priority
+  threshold", but priority is a lead-assigned integer with no semantic anchor,
+  and a threshold of 90 moves the next stall to a decision recorded at 89 by
+  the same lead that wants to keep dispatching. `question` is the non-gating
+  kind for a lead that wants to ask without stopping. Deferral with recorded
+  rationale lifts the gate until its resurface time; a resurfaced deferral
+  gates again; `present` never lifts it; a malformed attention history refuses
+  as `state_error` rather than reading as an empty queue; a replayed dispatch
+  returns its saved receipt without consulting the gate, since it sends
+  nothing; a dry run is a rehearsal of a send and is refused the same way. The
+  refusal-recovery half of #399 — splitting the provider-refusal event into
+  lead-owned and operator-owned sub-decisions, persisting refusals, and
+  bounding a cross-provider move — ships separately.
+
 ## 0.3.208 — 2026-09-13
 
 ### Changed

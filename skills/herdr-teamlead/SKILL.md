@@ -254,7 +254,8 @@ bash "$CP/skills/herdr-teamlead/teamlead.sh" apply \
 
 Emits dispatch JSON under `state-schema.md`. Supply each role's fresh absolute
 report path from its brief. Apply enrolls before input; unknown sends remain
-observation obligations.
+observation obligations. Apply refuses while an open decision or blocker on the
+task is unanswered; see the attention reference's Dispatch gate.
 Classify every brief against Step 3's authorization before sending it.
 Append the dispatch outcome to the task ledger; `applied` proves dispatch only.
 
