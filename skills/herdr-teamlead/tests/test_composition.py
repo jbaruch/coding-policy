@@ -81,9 +81,10 @@ class RequirementTest(unittest.TestCase):
 class EligibilityTest(unittest.TestCase):
     def test_empty_specialist_bench_reports_the_actual_eligibility_gap(self):
         requests = {"advisor": requirement()}
-        constraints = selection_constraints(["advisor"], [worker("spare", ())], requests, [], "onboarding")
+        bench = [worker("spare", ()), worker("other", ())]
+        constraints = selection_constraints(["advisor"], bench, requests, [], "onboarding")
         with self.assertRaises(PlanError) as caught:
-            plan(["advisor"], snapshot(spare=99), exclude=constraints["exclude"], requirements=requests,
+            plan(["advisor"], snapshot(spare=99, other=80), exclude=constraints["exclude"], requirements=requests,
                  selection_rationale=constraints["rationale"])
         self.assertIn("missing declared capabilities browser, ux", str(caught.exception))
         self.assertIn("preserve independence", str(caught.exception))

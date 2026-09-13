@@ -398,6 +398,22 @@ class PlanCommandTest(CliCase):
         self.assertEqual(json.loads(err)["error"], "usage_error")
         self.assertIn("ROLE=AGENT", json.loads(err)["message"])
 
+    def test_a_snapshot_missing_a_configured_agent_refuses_end_to_end(self):
+        # The CLI is what hands the planner its roster; a regression dropping
+        # that argument restores jbaruch/coding-policy#395 while the planner's
+        # own tests stay green.
+        partial = json.loads(json.dumps(SNAPSHOT))
+        partial["agents"] = {"codex": partial["agents"]["codex"]}
+        self.snapshot.write_text(json.dumps(partial), encoding="utf-8")
+        code, out, err = self.run_cli(
+            self.base() + ["plan", "--roles", "reviewer", "--snapshot", str(self.snapshot)]
+        )
+        self.assertEqual(code, 1)
+        self.assertEqual(out, "")
+        self.assertEqual(json.loads(err)["error"], "plan_error")
+        self.assertIn("does not cover claude, grok", json.loads(err)["message"])
+        self.assertEqual(json.loads(err)["details"]["uncovered"], ["claude", "grok"])
+
     def test_role_costs_in_the_config_reweigh_the_seats(self):
         config = json.loads(json.dumps(CONFIG))
         config["role_costs"] = {"reviewer": 40}

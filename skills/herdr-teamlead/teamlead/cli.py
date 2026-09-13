@@ -681,6 +681,7 @@ def cmd_plan(args, client=None, warn=None, trace=None):
             {"source": source},
         )
 
+    operator_excludes = {role: list(names) for role, names in excludes.items()}
     constraints = composition.selection_constraints(
         roles, agents, requirements, state["assignments"], args.task,
         dispatches=state["recovery"]["dispatches"], assessments=state["specialist_assessments"],
@@ -712,6 +713,8 @@ def cmd_plan(args, client=None, warn=None, trace=None):
             requirements=requirements,
             familiarity=constraints["familiarity"],
             selection_rationale=constraints["rationale"],
+            roster=[agent.name for agent in agents],
+            operator_exclude=operator_excludes,
         )
     result["task_context"] = ({"task": args.task, "fix_round": args.fix_round,
                                "plan": args.correction_plan, "work": work} if args.task else None)

@@ -196,6 +196,33 @@ class RecoveryTests(unittest.TestCase):
                 "progress": "Some counterexamples now pass; the quoted case remains red",
                 "change_in_approach": "Use one canonical parser", "judge_report": str(self.judge_report)}, AT, "judge")
 
+    def test_a_second_cited_ruling_for_the_task_is_refused(self):
+        # The bound is per task: a re-granted budget exhausting again must not
+        # buy another ruling (jbaruch/coding-policy#396).
+        self.seed_checkpoint()
+        for fix in (6, 7):
+            add_assignment(self.state, "2026-02-03T12:00:0{}+00:00".format(fix), "developer", "worker", task=TASK, fix_round=fix)
+        with self.assertRaisesRegex(UsageError, "at most one per task"):
+            checkpoint(self.store, self.history, {"id": "checkpoint-7", "task": TASK, "defect": "F1 still open",
+                "previous_attempts": "Seven attempts", "progress": "Unchanged",
+                "change_in_approach": "Rewrite the parser", "judge_report": str(self.judge_report)}, AT, "judge")
+
+    def test_a_later_checkpoint_without_a_ruling_still_records(self):
+        self.seed_checkpoint()
+        for fix in (6, 7):
+            add_assignment(self.state, "2026-02-03T12:00:0{}+00:00".format(fix), "developer", "worker", task=TASK, fix_round=fix)
+        record = checkpoint(self.store, self.history, {"id": "checkpoint-7", "task": TASK, "defect": "F1 still open",
+            "previous_attempts": "Seven attempts", "progress": "Unchanged",
+            "change_in_approach": "Rewrite the parser"}, AT, "judge")
+        self.assertEqual(record["fix_round"], 7)
+        self.assertNotIn("judge_evidence", record)
+
+    def test_a_partial_ruling_trio_on_a_checkpoint_is_refused(self):
+        prior = self.seed_checkpoint()
+        del prior["judge_evidence"]
+        with self.assertRaises(UsageError):
+            validate_store(self.store, self.history)
+
     def test_an_unknown_checkpoint_field_is_refused(self):
         self.exhaust()
         with self.assertRaisesRegex(UsageError, "optional judge_report"):

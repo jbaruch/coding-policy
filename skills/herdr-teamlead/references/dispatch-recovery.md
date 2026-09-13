@@ -134,7 +134,7 @@ instruction into permission to exceed an exhausted correction budget.
 | Command | Record fields | Continuation |
 | --- | --- | --- |
 | `task` | `task`, original full `base_revision`, `scope`, `allowed_paths`, `authorization` | Register once before initial development; for legacy history, recover these facts from the original task and brief. Continue the same task. |
-| `checkpoint` | unique `id`, `task`, concrete `defect`, `previous_attempts`, `progress`, `change_in_approach`; optional absolute `judge_report` | Records the exhausted allowance for the operator. A cited `judge_report` requires the configured pinned judge's completed ruling after the latest developer attempt. Implementation waits for the bounded operator decision. |
+| `checkpoint` | unique `id`, `task`, concrete `defect`, `previous_attempts`, `progress`, `change_in_approach`; optional absolute `judge_report` | Records the exhausted allowance for the operator. A cited `judge_report` requires the configured pinned judge's completed ruling after the latest developer attempt, and one task cites at most one. Implementation waits for the bounded operator decision. |
 | `authorize-corrections` | unique `id`, `task`, `checkpoint`, `scope`, `allowed_paths`, positive `additional_fixes`, `authorization`; optional `supersedes` | Store an explicit bounded approval once. Continue while it covers the next attempt; do not ask again within those bounds. A changed decision names the active plan in `supersedes`. |
 | `record-report` | `dispatch`, full `head_revision`, `verdict` (`blocking` or `approved`), `review_mode` (`full` or `scoped`), independent `reviewer`, absolute `report`, `changed_paths` | Read the report in full and verify the VCS diff first. The command binds its bytes and stated head to the dispatch; it does not establish the tester, CI, external-review, or release gates. |
 | `recover-context` | `task`, original `assignment_index`, `reason`, `authorization`, absolute `evidence` | For the latest confirmed developer row with null native-session proof. Records a live observation separately and permits the next fresh handoff. The original null stays null. |
@@ -456,7 +456,7 @@ report/transport evidence, changed evidence, skipped
 count, conflicting head chain, pending dispatch, or out-of-scope diff refuses.
 All planning, status, next-fix validation and budget checks consume the imported
 count. Five canonical fixes plus imported fix6 means six consumed attempts;
-fix7 still requires its applicable judge checkpoint and bounded approval.
+fix7 still requires its applicable operator checkpoint and bounded approval.
 
 If an existing bounded owner plan still covers the next correction, reuse that
 approval. Record the imported attempt's actual blocking review through

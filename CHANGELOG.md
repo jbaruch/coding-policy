@@ -16,14 +16,43 @@
   allowance stops the round and surfaces to the operator, who alone can grant
   more attempts; when a ruling is still wanted there, it is bounded to one per
   task rather than one per allowance boundary, so a re-granted budget cannot
-  re-fire it, and it is the operator's own request rather than a lead dispatch. `teamlead checkpoint` makes `judge_report` optional — a cited one
+  re-fire it, and it is the operator's own request rather than a lead dispatch.
+  `teamlead checkpoint` makes `judge_report` optional — a cited one
   is still held to the completed-`RULING`/`ACTION` contract and the pinned
   judge's post-attempt assignment — and its records carry `schema_version` 2.
   The owner upgrades a version-1 checkpoint on load — the stamp alone, since a
   row that carried a required ruling is already a valid version-2 row — and
   refuses one missing the evidence its version required. Replay compares
-  identity and evidence, never the writer's version. The `judge_checkpoint_required` task status is now
-  `checkpoint_required`.
+  identity and evidence, never the writer's version, and a second cited ruling
+  for the same task is refused so the per-boundary dispatch cannot return. The
+  `judge_checkpoint_required` task status is now `checkpoint_required`.
+
+## 0.3.207 — 2026-09-13
+
+### Fixed
+
+- **The planner refuses a field it could not have ranked (#395).** `teamlead plan`
+  filled five consecutive rounds from a snapshot `measure --agent` had written
+  over one freshly spawned pane: one candidate per seat, an 18-name `--exclude`
+  list matching nothing in it, and a rationale reporting each forced pick as a
+  headroom ranking. The fleet dispatched 48 consecutive rounds into one weekly
+  window, taking it from 35% to 77% used in under eight hours, while another
+  window sat at 1% used with four idle panes and received nothing for three
+  days. Rotation had worked on the same task while the roster was measured
+  whole, and stopped at the first single-pane measure. Three refusals now gate
+  the field before any seat is filled: a snapshot that does not cover the
+  agents `config.json` declares, an `--exclude` list naming nobody the snapshot
+  measured (previously a trailing note), and a ranked seat measured against one
+  agent. The pinned judge seat is exempt — it is assigned, never ranked — and so
+  is a config whose own rankable roster holds one worker. The pinned judge is
+  not part of a ranked seat's field — every other seat bars it structurally, so
+  a `{judge, worker}` snapshot offers one candidate — and the inert-exclusion
+  check reads the names the operator typed, never the contribution bars the CLI
+  merges in beside them. An exclusion narrowing a measured field to one
+  candidate still plans: the operator chose that narrowing, whereas a one-pane
+  snapshot chose nothing. Issue #315's unknown-headroom handling is unchanged —
+  an agent present but unmeasured is still a fallback candidate, never a
+  refusal.
 
 ## 0.3.206 — 2026-09-09
 

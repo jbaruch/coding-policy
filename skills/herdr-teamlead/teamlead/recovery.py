@@ -222,6 +222,13 @@ def checkpoint(store, assignments, data, at, judge_agent):
         raise UsageError("A dispatch outcome is still unknown; reconcile it before proposing another correction budget.", {})
     ruling = {}
     if "judge_report" in data:
+        # One ruling per task, never one per allowance boundary: a re-granted
+        # budget exhausts too, and citing a ruling at each boundary is the
+        # per-round toll this routing removed
+        # (rules/agent-team-operation.md Judge Seat).
+        if any(row["task"] == data["task"] and row["id"] != data["id"] and "judge_evidence" in row
+               for row in store["checkpoints"]):
+            raise UsageError("This task already records an operator-requested ruling; the operator grants at most one per task. Record this checkpoint without judge_report.", {})
         developer = latest_assignment(assignments, task=data["task"], role="developer", status="applied")
         judge = latest_assignment(assignments, task=data["task"], role="judge", agent=judge_agent, status="applied")
         if not judge_agent or developer is None or judge is None or not assignment_after(assignments, judge[0], developer[0]):
@@ -622,10 +629,12 @@ def validate_store(store, assignments):
                 raise UsageError("Checkpoint does not match the original base or exhausted budget.", {})
             for field in ("defect", "previous_attempts", "progress", "change_in_approach"):
                 text(row[field], field)
-            # A checkpoint carries the pair only when a ruling was cited; a
-            # migrated version-1 row keeps the one it recorded.
-            if "judge_agent" in row or "judge_evidence" in row:
+            # A checkpoint carries the trio only when a ruling was cited, and
+            # a partial trio is a broken record, never an uncited checkpoint;
+            # a migrated version-1 row keeps the ruling it recorded.
+            if any(field in row for field in ("judge_agent", "judge_report", "judge_evidence")):
                 text(row["judge_agent"], "judge_agent")
+                text(row["judge_report"], "judge_report")
                 validate_receipt(row["judge_evidence"])
         for row in store["plans"]:
             source = _item(store["checkpoints"], row["checkpoint"], "checkpoint")
