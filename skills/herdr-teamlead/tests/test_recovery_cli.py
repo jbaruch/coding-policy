@@ -184,7 +184,7 @@ class RecoveryCommandTests(fixture.CliCase):
         self.assertEqual(len(self.saved()["recovery"]["plans"]), 1)
         code, out, err = self.invoke(["status"])
         self.assertEqual(code, 0, err)
-        self.assertEqual(json.loads(out)["tasks"][TASK]["status"], "judge_checkpoint_required")
+        self.assertEqual(json.loads(out)["tasks"][TASK]["status"], "checkpoint_required")
 
     def test_repeated_completed_apply_never_sends_or_consumes_again(self):
         self.register()

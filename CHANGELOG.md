@@ -1,5 +1,28 @@
 # Changelog
 
+### Changed
+
+- **An exhausted correction allowance goes to the operator, not the judge (#396).**
+  Judge Seat named four dispatch triggers; three were disputes and the fourth
+  was a budget event — and the budget event was the only one firing. Every judge
+  brief retained on disk cited it, all 15 leading with allowance exhaustion, none
+  dispatched for a contested verdict alone. It composed badly with the Fix Loops
+  bounded-correction-plan carve-out: the operator approves more attempts, that
+  budget exhausts, the trigger fires again. One task reached fix round 19 and
+  consumed 16 judge rulings — more than half the fleet's 30 lifetime dispatches,
+  five of them in a single day — at the heaviest seat's weight (15.0, above
+  `developer`'s 12.0) against the same weekly window its developer and every
+  reviewer drew from. The seat now keeps the three disputes. An exhausted
+  allowance stops the round and surfaces to the operator, who alone can grant
+  more attempts; when a ruling is still wanted there, it is bounded to one per
+  task rather than one per allowance boundary, so a re-granted budget cannot
+  re-fire it. `teamlead checkpoint` makes `judge_report` optional — a cited one
+  is still held to the completed-`RULING`/`ACTION` contract and the pinned
+  judge's post-attempt assignment — and its records carry `schema_version` 2.
+  Version-1 checkpoints keep their judge evidence required and are never
+  rewritten. The `judge_checkpoint_required` task status is now
+  `checkpoint_required`.
+
 ## 0.3.206 — 2026-09-09
 
 ### Added

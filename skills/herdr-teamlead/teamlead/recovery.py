@@ -20,6 +20,11 @@ from .chronology import assignment_after, latest_assignment
 RECOVERY_SCHEMA_VERSION = 1
 RECOVERY_STORE_VERSION = 5
 SPECIALIST_DISPATCH_VERSION = 2
+#: Checkpoint record version. 1 carries a mandatory pinned-judge ruling; 2
+#: makes it optional, because an exhausted allowance is a budget decision only
+#: the operator can make (rules/agent-team-operation.md Judge Seat). Version-1
+#: rows keep their judge evidence and are never rewritten.
+OPERATOR_CHECKPOINT_VERSION = 2
 DISPATCH_METADATA_FIELDS = frozenset({"requirements", "reviewer_scope"})
 DEFAULT_FIX_LIMIT = 5
 PENDING_STATUSES = frozenset({"reserved", "sending", "sent_but_not_started"})
@@ -169,10 +174,20 @@ def task_record(store, task):
 
 
 def checkpoint(store, assignments, data, at, judge_agent):
-    required = {"id", "task", "defect", "previous_attempts", "progress", "change_in_approach", "judge_report"}
-    if not isinstance(data, dict) or set(data) != required:
-        raise UsageError("Checkpoint requires id, task, defect, previous_attempts, progress, change_in_approach and judge_report; describe the concrete remaining work.", {})
-    for key in required:
+    """Pause implementation at an exhausted allowance and hand it to the operator.
+
+    The allowance boundary is a budget event, not a dispute: only the operator
+    can grant more attempts, so the checkpoint used to buy an expensive ruling
+    ahead of a decision the judge cannot make. One task spent 16 judge rulings
+    across 19 fix rounds that way, on the same window its developer and every
+    reviewer drew from. A ruling is still recordable here -- `judge_report` is
+    optional, and a supplied one is held to the same completed-ruling contract
+    as before.
+    """
+    required = {"id", "task", "defect", "previous_attempts", "progress", "change_in_approach"}
+    if not isinstance(data, dict) or not required <= set(data) or set(data) - required - {"judge_report"}:
+        raise UsageError("Checkpoint requires id, task, defect, previous_attempts, progress and change_in_approach, and allows an optional judge_report; describe the concrete remaining work.", {})
+    for key in set(data):
         text(data[key], key)
     task = task_record(store, data["task"])
     count = confirmed_fix(assignments, data["task"])
@@ -180,15 +195,18 @@ def checkpoint(store, assignments, data, at, judge_agent):
         raise UsageError("The normal correction budget is not exhausted; continue within it.", {})
     if any(row["task"] == data["task"] and row["status"] in PENDING_STATUSES for row in store["dispatches"]):
         raise UsageError("A dispatch outcome is still unknown; reconcile it before proposing another correction budget.", {})
-    developer = latest_assignment(assignments, task=data["task"], role="developer", status="applied")
-    judge = latest_assignment(assignments, task=data["task"], role="judge", agent=judge_agent, status="applied")
-    if not judge_agent or developer is None or judge is None or not assignment_after(assignments, judge[0], developer[0]):
-        raise UsageError("Dispatch the configured pinned judge after the latest developer attempt before recording this checkpoint.", {})
-    evidence, body = receipt(data["judge_report"])
-    if not re.search(r"^RULING: (?:uphold A|uphold B|amend)(?:\s|$)", body, re.MULTILINE) or not re.search(r"^ACTION: \S", body, re.MULTILINE):
-        raise UsageError("The judge report must contain its completed RULING and ACTION; a blocked judge requires the operator's answer first.", {})
-    record = {"schema_version": RECOVERY_SCHEMA_VERSION, "at": at, **data, "fix_round": count,
-              "base_revision": task["base_revision"], "judge_evidence": evidence, "judge_agent": judge_agent}
+    ruling = {}
+    if "judge_report" in data:
+        developer = latest_assignment(assignments, task=data["task"], role="developer", status="applied")
+        judge = latest_assignment(assignments, task=data["task"], role="judge", agent=judge_agent, status="applied")
+        if not judge_agent or developer is None or judge is None or not assignment_after(assignments, judge[0], developer[0]):
+            raise UsageError("A cited judge report needs the configured pinned judge's completed assignment after the latest developer attempt; omit judge_report to send the exhausted allowance straight to the operator.", {})
+        evidence, body = receipt(data["judge_report"])
+        if not re.search(r"^RULING: (?:uphold A|uphold B|amend)(?:\s|$)", body, re.MULTILINE) or not re.search(r"^ACTION: \S", body, re.MULTILINE):
+            raise UsageError("The judge report must contain its completed RULING and ACTION; a blocked judge requires the operator's answer first.", {})
+        ruling = {"judge_evidence": evidence, "judge_agent": judge_agent}
+    record = {"schema_version": OPERATOR_CHECKPOINT_VERSION, "at": at, **data, "fix_round": count,
+              "base_revision": task["base_revision"], **ruling}
     prior = next((row for row in store["checkpoints"] if row["id"] == data["id"]), None)
     if prior:
         if any(prior[key] != value for key, value in record.items() if key != "at"):
@@ -251,7 +269,7 @@ def validate_work(store, assignments, task, fix_round, plan_id=None, work=None, 
             raise UsageError("An extra-correction plan cannot relabel an ordinary fix; preserve the cumulative number.", {})
         return None
     if not task or not plan_id:
-        raise UsageError("The five-fix budget is exhausted. Dispatch the judge and record an explicit bounded correction plan; ordinary sixth attempts are refused.", {})
+        raise UsageError("The five-fix budget is exhausted. Record the operator checkpoint and its explicit bounded correction plan; ordinary sixth attempts are refused.", {})
     plan = _item(store["plans"], plan_id, "correction plan")
     if plan not in active_plans(store):
         raise UsageError("That approval was superseded by an explicit operator decision; use the current recorded bounds.", {})
@@ -549,7 +567,7 @@ def validate_store(store, assignments):
                 raise UsageError("Recovery {} must be an array; restore the owner-written ledger.".format(name), {})
             identifiers = []
             for row in store[name]:
-                versions = {1, 2} if name in {"delivery_recoveries", "dispatches"} else {RECOVERY_SCHEMA_VERSION}
+                versions = {1, 2} if name in {"delivery_recoveries", "dispatches", "checkpoints"} else {RECOVERY_SCHEMA_VERSION}
                 if not isinstance(row, dict) or type(row.get("schema_version")) is not int or row["schema_version"] not in versions:
                     raise UsageError("A recovery record has an unsupported schema; update its owner.", {})
                 text(row["at"], "record timestamp")
@@ -571,9 +589,14 @@ def validate_store(store, assignments):
             task = task_record(store, row["task"])
             if row["base_revision"] != task["base_revision"] or positive(row["fix_round"], "checkpoint fix") < DEFAULT_FIX_LIMIT:
                 raise UsageError("Checkpoint does not match the original base or exhausted budget.", {})
-            for field in ("defect", "previous_attempts", "progress", "change_in_approach", "judge_agent"):
+            for field in ("defect", "previous_attempts", "progress", "change_in_approach"):
                 text(row[field], field)
-            validate_receipt(row["judge_evidence"])
+            # A version-1 checkpoint bought its ruling before the operator saw
+            # the exhausted allowance, so its judge evidence stays required;
+            # version 2 carries the pair only when a ruling was actually cited.
+            if row["schema_version"] == RECOVERY_SCHEMA_VERSION or "judge_agent" in row or "judge_evidence" in row:
+                text(row["judge_agent"], "judge_agent")
+                validate_receipt(row["judge_evidence"])
         for row in store["plans"]:
             source = _item(store["checkpoints"], row["checkpoint"], "checkpoint")
             authorization(row["authorization"])
@@ -684,7 +707,7 @@ def task_statuses(store, assignments):
         checkpoint_row = next((row for row in reversed(store["checkpoints"]) if row["task"] == task), None)
         plan = next((row for row in reversed(active_plans(store)) if row["task"] == task and row["last_fix"] > count), None)
         status = ("dispatch_outcome_unknown" if pending else "within_authorized_budget" if plan or count < DEFAULT_FIX_LIMIT
-                  else "waiting_for_operator" if checkpoint_row and checkpoint_row["fix_round"] == count else "judge_checkpoint_required")
+                  else "waiting_for_operator" if checkpoint_row and checkpoint_row["fix_round"] == count else "checkpoint_required")
         result[task] = {"status": status, "paused_work": "implementation" if status != "within_authorized_budget" else None,
                         "confirmed_fixes": count, "plan": plan["id"] if plan else None,
                         "remaining_fixes": plan["last_fix"] - count if plan else max(0, DEFAULT_FIX_LIMIT - count)}

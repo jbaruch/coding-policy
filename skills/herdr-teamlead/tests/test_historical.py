@@ -275,7 +275,7 @@ class HistoricalCommandsTest(fixture.CliCase):
                     "judge_report": str(judge)})
                 self.assertEqual(code, expected, err)
                 if expected:
-                    self.assertIn("pinned judge after the latest developer", err)
+                    self.assertIn("pinned judge's completed assignment after the latest developer", err)
                 self.assertEqual(self.saved()["assignments"], preserved)
 
     def test_migrated_manual_fix_import_is_idempotent_and_next_fix_is_two(self):
@@ -336,7 +336,7 @@ class HistoricalCommandsTest(fixture.CliCase):
         code, out, err = self.invoke(["status"])
         self.assertEqual(code, 0, err)
         status = json.loads(out)["tasks"][TASK]
-        self.assertEqual((status["confirmed_fixes"], status["remaining_fixes"], status["status"]), (6, 0, "judge_checkpoint_required"))
+        self.assertEqual((status["confirmed_fixes"], status["remaining_fixes"], status["status"]), (6, 0, "checkpoint_required"))
         before = self.state.read_bytes()
         for args in (self.apply_args("developer", 7), ["plan", "--roles", "developer", "--snapshot", str(self.snapshot),
                     "--task", TASK, "--fix-round", "7", "--now", AT]):
