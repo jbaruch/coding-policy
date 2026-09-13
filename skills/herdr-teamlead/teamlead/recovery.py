@@ -38,13 +38,38 @@ def empty_recovery():
             "hand_clearances": [], "historical_attempts": [], "role_clearances": [], "delivery_recoveries": []}
 
 
+def _migrate_checkpoints(store):
+    """Upgrade version-1 checkpoints in place, preserving their evidence.
+
+    Version 1 required the pinned judge's ruling and version 2 makes it
+    optional, so every version-1 row is already a valid version-2 row and the
+    upgrade is the stamp alone: identity, fix round, base and recorded ruling
+    all survive it unchanged (rules/stateful-artifacts.md Migration Policy).
+    A version-1 row missing the ruling it was required to carry is refused
+    rather than stamped into a shape where the pair is optional.
+    """
+    rows = store.get("checkpoints")
+    if not isinstance(rows, list):
+        return False
+    migrated = False
+    for row in rows:
+        if not isinstance(row, dict) or row.get("schema_version") != 1:
+            continue
+        if "judge_agent" not in row or "judge_evidence" not in row:
+            raise UsageError("An older checkpoint is missing the ruling evidence its version required; restore the owner-written ledger.", {})
+        row["schema_version"] = OPERATOR_CHECKPOINT_VERSION
+        migrated = True
+    return migrated
+
+
 def migrate_store(store):
-    """Upgrade only the enclosing recovery document; old record shapes persist."""
+    """Upgrade the enclosing recovery document and its checkpoint records."""
     if not isinstance(store, dict) or type(store.get("schema_version")) is not int:
         return False
+    migrated = _migrate_checkpoints(store)
     version = store["schema_version"]
     if version not in {1, 2, 3, 4}:
-        return False
+        return migrated
     dispatches = store.get("dispatches")
     if not isinstance(dispatches, list):
         raise UsageError("Older recovery requires a dispatches array; restore the original owner-written store.", {})
@@ -209,10 +234,9 @@ def checkpoint(store, assignments, data, at, judge_agent):
               "base_revision": task["base_revision"], **ruling}
     prior = next((row for row in store["checkpoints"] if row["id"] == data["id"]), None)
     if prior:
-        # Replaying a checkpoint written before `judge_report` became optional
-        # must still return that row: comparing the writer's current version
-        # against a preserved one reports identical evidence as different, and
-        # a re-run of an already-recorded checkpoint would fail (#396).
+        # Identity and evidence decide a replay, never the writer's version:
+        # comparing versions reported an unmigrated version-1 row as different
+        # evidence, so re-running an already-recorded checkpoint failed (#396).
         compared = (set(prior) | set(record)) - {"at", "schema_version"}
         if any(prior.get(key) != record.get(key) for key in compared):
             raise UsageError("Checkpoint identity already describes different evidence; record a new checkpoint without rewriting the old one.", {})
@@ -572,7 +596,9 @@ def validate_store(store, assignments):
                 raise UsageError("Recovery {} must be an array; restore the owner-written ledger.".format(name), {})
             identifiers = []
             for row in store[name]:
-                versions = {1, 2} if name in {"delivery_recoveries", "dispatches", "checkpoints"} else {RECOVERY_SCHEMA_VERSION}
+                versions = ({1, 2} if name in {"delivery_recoveries", "dispatches"}
+                            else {OPERATOR_CHECKPOINT_VERSION} if name == "checkpoints"
+                            else {RECOVERY_SCHEMA_VERSION})
                 if not isinstance(row, dict) or type(row.get("schema_version")) is not int or row["schema_version"] not in versions:
                     raise UsageError("A recovery record has an unsupported schema; update its owner.", {})
                 text(row["at"], "record timestamp")
@@ -596,10 +622,9 @@ def validate_store(store, assignments):
                 raise UsageError("Checkpoint does not match the original base or exhausted budget.", {})
             for field in ("defect", "previous_attempts", "progress", "change_in_approach"):
                 text(row[field], field)
-            # A version-1 checkpoint bought its ruling before the operator saw
-            # the exhausted allowance, so its judge evidence stays required;
-            # version 2 carries the pair only when a ruling was actually cited.
-            if row["schema_version"] == RECOVERY_SCHEMA_VERSION or "judge_agent" in row or "judge_evidence" in row:
+            # A checkpoint carries the pair only when a ruling was cited; a
+            # migrated version-1 row keeps the one it recorded.
+            if "judge_agent" in row or "judge_evidence" in row:
                 text(row["judge_agent"], "judge_agent")
                 validate_receipt(row["judge_evidence"])
         for row in store["plans"]:

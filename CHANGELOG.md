@@ -19,9 +19,10 @@
   re-fire it, and it is the operator's own request rather than a lead dispatch. `teamlead checkpoint` makes `judge_report` optional — a cited one
   is still held to the completed-`RULING`/`ACTION` contract and the pinned
   judge's post-attempt assignment — and its records carry `schema_version` 2.
-  Version-1 checkpoints keep their judge evidence required and are never
-  rewritten, and replaying one returns that row rather than reading the
-  writer's newer version as changed evidence. The `judge_checkpoint_required` task status is now
+  The owner upgrades a version-1 checkpoint on load — the stamp alone, since a
+  row that carried a required ruling is already a valid version-2 row — and
+  refuses one missing the evidence its version required. Replay compares
+  identity and evidence, never the writer's version. The `judge_checkpoint_required` task status is now
   `checkpoint_required`.
 
 ## 0.3.206 — 2026-09-09

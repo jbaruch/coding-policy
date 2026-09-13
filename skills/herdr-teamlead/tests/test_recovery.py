@@ -17,8 +17,8 @@ from teamlead.errors import UsageError
 from teamlead.recovery import (
     abort_pre_send, authorize_context, authorize_plan, checkpoint, confirmed_fix,
     dispatch_identity, finish_dispatch, fresh_transition, mark_sending,
-    prior_dispatch, record_report, register_task, reserve, task_statuses,
-    validate_store, validate_work,
+    migrate_store, prior_dispatch, record_report, register_task, reserve,
+    task_statuses, validate_store, validate_work,
 )
 from teamlead.state import add_assignment, empty_state, load_state_checked, save_state
 
@@ -154,18 +154,37 @@ class RecoveryTests(unittest.TestCase):
         with self.assertRaisesRegex(UsageError, "operator checkpoint"):
             validate_work(self.store, self.history, TASK, 6, None, WORK)
 
-    def test_replaying_a_checkpoint_written_before_the_bump_returns_it(self):
+    def replay_data(self):
+        return {"id": "checkpoint-5", "task": TASK, "defect": "F1 remains open",
+                "previous_attempts": "Five attempts changed parsing and quoting",
+                "progress": "Some counterexamples now pass; the quoted case remains red",
+                "change_in_approach": "Use one canonical parser", "judge_report": str(self.judge_report)}
+
+    def test_a_checkpoint_written_before_the_bump_migrates_with_its_evidence(self):
+        prior = self.seed_checkpoint()
+        evidence = copy.deepcopy(prior["judge_evidence"])
+        prior["schema_version"] = 1
+        self.assertTrue(migrate_store(self.store))
+        self.assertEqual(prior["schema_version"], 2)
+        self.assertEqual((prior["judge_agent"], prior["judge_evidence"]), ("judge", evidence))
+        validate_store(self.store, self.history)
+        self.assertFalse(migrate_store(self.store))
+
+    def test_an_older_checkpoint_without_its_required_ruling_refuses_to_migrate(self):
+        prior = self.seed_checkpoint()
+        prior["schema_version"] = 1
+        del prior["judge_evidence"]
+        with self.assertRaisesRegex(UsageError, "missing the ruling evidence"):
+            migrate_store(self.store)
+
+    def test_replaying_a_migrated_checkpoint_returns_it(self):
         # The row outlives the writer's version: re-running an already-recorded
         # checkpoint must return it, not read the version as changed evidence.
         prior = self.seed_checkpoint()
         prior["schema_version"] = 1
-        data = {"id": "checkpoint-5", "task": TASK, "defect": "F1 remains open",
-                "previous_attempts": "Five attempts changed parsing and quoting",
-                "progress": "Some counterexamples now pass; the quoted case remains red",
-                "change_in_approach": "Use one canonical parser", "judge_report": str(self.judge_report)}
-        replay = checkpoint(self.store, self.history, data, AT, "judge")
+        migrate_store(self.store)
+        replay = checkpoint(self.store, self.history, self.replay_data(), AT, "judge")
         self.assertIs(replay, prior)
-        self.assertEqual(replay["schema_version"], 1)
         self.assertEqual(len(self.store["checkpoints"]), 1)
         validate_store(self.store, self.history)
 
