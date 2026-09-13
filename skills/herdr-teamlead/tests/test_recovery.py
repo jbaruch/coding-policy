@@ -429,7 +429,9 @@ class RecoveryTests(unittest.TestCase):
         with self.assertRaisesRegex(UsageError, "already moved to provider claude"):
             refusal_move(self.store, TASK, "tester", None, "grok")
         abort_pre_send(self.store, "tester-move", AT, "fixture")
-        self.assertEqual(refusal_move(self.store, TASK, "tester", None, "grok")["from"], first)
+        retry = refusal_move(self.store, TASK, "tester", None, "grok")
+        assert retry is not None
+        self.assertEqual(retry["from"], first)
         second = self.dispatch_tester(2, "claude-a")
         self.store["dispatches"][-1]["refusal_move"] = move
         with self.assertRaisesRegex(UsageError, "already moved to provider claude") as caught:
