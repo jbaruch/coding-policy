@@ -241,7 +241,7 @@ def authorize_plan(store, assignments, data, at):
     source = _item(store["checkpoints"], data["checkpoint"], "checkpoint")
     count = confirmed_fix(assignments, data["task"])
     if source["task"] != data["task"] or source["fix_round"] != count:
-        raise UsageError("Approval must match this task's current exhausted checkpoint; collect a fresh ruling and correction proposal.", {})
+        raise UsageError("Approval must match this task's current exhausted checkpoint; record a fresh operator checkpoint and correction proposal.", {})
     active = next((row for row in active_plans(store) if row["task"] == data["task"] and row["last_fix"] > count), None)
     if active and data.get("supersedes") != active["id"]:
         raise UsageError("This task still has an approved plan. Use its bounds, or explicitly name it in supersedes with the operator's changed decision.", {})
