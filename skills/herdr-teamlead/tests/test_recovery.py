@@ -356,7 +356,7 @@ class RecoveryTests(unittest.TestCase):
     REPORT = "/reports/tester.md"
     BRIEF = "brief-identity-tester"
 
-    def dispatch_tester(self, number, agent, identity=BRIEF):
+    def dispatch_tester(self, number, agent, identity: "str | None" = BRIEF):
         record = {"id": "tester-{}-{}".format(number, agent), "task": TASK, "role": "tester", "agent": agent, "fix_round": None,
                   "fingerprint": ("%02d" % number) * 32, "plan": None, "work": None, "brief_identity": identity}
         reserve(self.store, record, AT)

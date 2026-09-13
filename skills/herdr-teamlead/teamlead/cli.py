@@ -794,6 +794,7 @@ def cmd_apply(args, client=None, warn=None, trace=None):
             prior = recovery.prior_dispatch(store, identifier, fingerprint)
             resolved.append((role, name, identifier, fingerprint, prior))
         fresh = [role for role, _name, _identifier, _fingerprint, prior in resolved if not (prior and prior["status"] == "applied")]
+        moves = {}
         if fresh:
             # The batch holds a new send. An unanswered decision or blocker on
             # the task, a same-provider resend of a refused brief, a reworded

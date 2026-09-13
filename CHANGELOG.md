@@ -1,7 +1,5 @@
 # Changelog
 
-## 0.3.209 — 2026-09-13
-
 ### Fixed
 
 - **A provider refusal is recorded, moved once, and then stops (#399).** A
@@ -32,6 +30,14 @@
   than brief bytes: a replacement brief carries a fresh report path, so bytes
   never match, while a reworded brief on the same key must still meet the
   gate — the byte key would have let a rewording escape it entirely. The
+  unchanged-brief requirement is then checked inside that key: every task
+  dispatch records a `brief_identity`, the common and role brief bytes with
+  the enrolled report path masked, and a move whose identity differs from the
+  refused dispatch's is refused as a rewording. The receipt is bound too:
+  `record-refusal` requires the receipt's `report_path` to equal the report
+  the dispatch's supervision enrollment bound, so a stale exit-5 receipt from
+  the same worker cannot mark a different attempt refused, and an unenrolled
+  dispatch has no verifiable binding and is refused. The
   provider ban was the anti-vendor-hopping rule; one recorded move with the
   brief unchanged is not hopping, and `REFUSAL_LIMIT` in `recovery.py` is 2
   so a loosening to three is a visible constant change, not a reading. One
@@ -60,6 +66,11 @@
   one checkpoint for the gate and the retrospective guard; and the refusal
   names the evidence the entry's kind requires and the command to rerun,
   rather than `user_answer` and `apply` for a blocker or a judge start.
+
+## 0.3.209 — 2026-09-13
+
+### Fixed
+
 - **An unanswered decision on a task now stops dispatch on that task (#399).**
   On `acr-cli-producer-migration` the lead recorded a priority-99 `decision`
   when a tester's provider refused its brief, presented it twice with no
