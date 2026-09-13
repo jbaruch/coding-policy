@@ -519,6 +519,8 @@ def record_report(store, data, at):
 #: The exact object wait-report.sh emits on exit 5 (see its `emit`).
 REFUSAL_RECEIPT_FIELDS = frozenset({"agent", "state", "report_path", "found", "elapsed_seconds", "reason"})
 REFUSAL_STATES = frozenset({"idle", "done"})
+#: What an operator authorization says about the brief it approves.
+AUTHORIZED_BRIEFS = frozenset({"unchanged", "revised"})
 
 
 def brief_identity(paths_by_role, role, report):
@@ -543,12 +545,14 @@ def brief_identity(paths_by_role, role, report):
     return digest.hexdigest()
 
 
-def record_refusal(store, data, at, provider, report):
+def record_refusal(store, data, at, provider, report, aliases=()):
     """Bind a wait-report exit-5 receipt to the applied dispatch it stopped.
 
     `provider` is the refused agent's config `kind` and `report` the absolute
     report path the dispatch's supervision enrollment bound, both resolved by
     the caller; an unbound dispatch has no verifiable binding and is refused.
+    `aliases` are other names wait-report may have been given for this worker
+    (its enrolled pane id), accepted in the receipt's `agent` field.
     The receipt's JSON must be the complete exit-5 object for this agent and
     report. Recording the same receipt twice replays; a different receipt for
     an already-refused dispatch is refused.
@@ -568,7 +572,8 @@ def record_refusal(store, data, at, provider, report):
     except ValueError as exc:
         raise UsageError("Refusal receipt {} is not wait-report JSON: {}. Save the exact exit-5 output.".format(data["receipt"], exc), {}) from None
     if (not isinstance(payload, dict) or set(payload) != REFUSAL_RECEIPT_FIELDS or payload["reason"] != REFUSAL_REASON
-            or payload["found"] is not False or payload["agent"] != record["agent"] or payload["state"] not in REFUSAL_STATES
+            or payload["found"] is not False or payload["agent"] not in {record["agent"], *[alias for alias in aliases if alias]}
+            or payload["state"] not in REFUSAL_STATES
             or type(payload["elapsed_seconds"]) is not int):
         raise UsageError("Refusal receipt must be wait-report's complete exit-5 output for this dispatch's agent: reason {}, found false, an idle or done state. A missing report without that reason is not a refusal.".format(REFUSAL_REASON), {})
     if payload["report_path"] != report:
@@ -589,15 +594,19 @@ def authorize_refused_dispatch(store, data, at):
     """Record the operator's decision to dispatch a twice-refused brief again.
 
     Requires a recorded refusal on the task, role and fix round. One
-    authorization permits one further dispatch on that key, any provider and
-    any brief, carried on that dispatch's `refusal_move.authorization`; a
-    later dispatch needs another. Same id with the same input replays.
+    authorization permits one further dispatch on that key to the named
+    `provider` (a config `kind`), with the refused brief `unchanged` or, when
+    the operator approved a rewrite, `revised`; it is carried on that
+    dispatch's `refusal_move.authorization`, and a later dispatch needs
+    another. Same id with the same input replays.
     """
-    required = {"id", "task", "role", "fix_round", "decision", "authorization"}
+    required = {"id", "task", "role", "fix_round", "provider", "brief", "decision", "authorization"}
     if not isinstance(data, dict) or set(data) != required:
-        raise UsageError("Refused-dispatch authorization requires id, task, role, fix_round, decision and explicit authorization.", {})
-    for key in ("id", "task", "role", "decision"):
+        raise UsageError("Refused-dispatch authorization requires id, task, role, fix_round, the approved provider, brief (unchanged or revised), decision and explicit authorization.", {})
+    for key in ("id", "task", "role", "provider", "decision"):
         text(data[key], key)
+    if data["brief"] not in AUTHORIZED_BRIEFS:
+        raise UsageError("Authorization brief must be unchanged or revised; record which the operator approved.", {})
     if data["fix_round"] is not None:
         positive(data["fix_round"], "fix_round")
     authorization(data["authorization"])
@@ -641,13 +650,20 @@ def refusal_move(store, task, role, fix_round, provider, identity):
     a recorded refusal, and any dispatch once `REFUSAL_LIMIT` independent
     refusals are recorded: that line stops and goes to the operator. A
     `not_sent` move consumed nothing. An unused operator authorization on the
-    key (`authorize_refused_dispatch`) lifts every check for one dispatch.
+    key (`authorize_refused_dispatch`) replaces every check for one dispatch
+    with its own scope: the approved provider, and the brief unchanged unless
+    the operator approved a revision.
     """
     refused = refusals(store, task, role, fix_round)
     if not refused:
         return None
     authorized = _unused_authorization(store, task, role, fix_round)
     if authorized is not None:
+        if authorized["provider"] != provider:
+            raise UsageError("Authorization {} approves provider {} for task {} {} round {}, not {}; dispatch what the operator approved or record a new decision.".format(
+                authorized["id"], authorized["provider"], task, role, fix_round, provider), {"authorization": authorized["id"]})
+        if authorized["brief"] == "unchanged" and any(row.get("brief_identity") != identity for row in refused):
+            raise UsageError("Authorization {} approves the refused brief unchanged, and this brief differs; send it unchanged or record a decision approving the revision.".format(authorized["id"]), {"authorization": authorized["id"]})
         return {"schema_version": RECOVERY_SCHEMA_VERSION, "from": refused[-1]["id"], "from_provider": refused[-1]["refusal"]["provider"],
                 "provider": provider, "authorization": authorized["id"]}
     providers = []
@@ -702,18 +718,24 @@ def _validate_refusals(store):
                     or source["refusal"]["provider"] != text(move["from_provider"], "move source provider")):
                 raise UsageError("Refusal move does not name an earlier refused dispatch of the same task, role and fix round; preserve the ledger for owner recovery.", {})
             text(move["provider"], "move provider")
+            if refusal is not None and refusal["provider"] != move["provider"]:
+                raise UsageError("A moved dispatch records a refusal from a provider other than the one it moved to; preserve the ledger for owner recovery.", {})
             if "authorization" in move:
                 grant = _item(store["refusal_authorizations"], move["authorization"], "refusal authorization")
-                if (grant["task"], grant["role"], grant["fix_round"]) != (row["task"], row["role"], row["fix_round"]) or len(_authorization_uses(store, grant["id"])) > 1:
-                    raise UsageError("An authorized refused dispatch names an authorization for another key or one already consumed; preserve the ledger for owner recovery.", {})
+                if ((grant["task"], grant["role"], grant["fix_round"], grant["provider"]) != (row["task"], row["role"], row["fix_round"], move["provider"])
+                        or len(_authorization_uses(store, grant["id"])) > 1
+                        or grant["brief"] == "unchanged" and (source.get("brief_identity") is None or source["brief_identity"] != row.get("brief_identity"))):
+                    raise UsageError("An authorized refused dispatch exceeds its authorization's provider or brief scope, names another key, or reuses a consumed authorization; preserve the ledger for owner recovery.", {})
             elif (move["provider"] == move["from_provider"]
                     or source.get("brief_identity") is None or source["brief_identity"] != row.get("brief_identity")):
                 raise UsageError("Refusal move does not carry the refused brief unchanged to another provider; preserve the ledger for owner recovery.", {})
     for row in store["refusal_authorizations"]:
-        for key in ("id", "task", "role", "decision"):
+        for key in ("id", "task", "role", "provider", "decision"):
             text(row[key], key)
         if row["fix_round"] is not None:
             positive(row["fix_round"], "authorization fix_round")
+        if row["brief"] not in AUTHORIZED_BRIEFS:
+            raise UsageError("Refusal authorization names an unknown brief scope; preserve the ledger for owner recovery.", {})
         authorization(row["authorization"])
 
 

@@ -1028,7 +1028,8 @@ def cmd_recovery(args, client=None, warn=None, trace=None):
             raise UsageError("Refused worker {} is not in config.json; restore its entry so the refusing provider is recorded.".format(dispatch["agent"]), {})
         member = next((row for row in supervision.load(state_path)["members"] if dispatch is not None and row["id"] == dispatch["id"]), None)
         result = recovery.record_refusal(store, data, at, agents_by_name[dispatch["agent"]].kind if dispatch else None,
-                                         member["assignment"]["report"] if member else None)
+                                         member["assignment"]["report"] if member else None,
+                                         aliases=(member["assignment"]["pane_id"],) if member else ())
     elif args.command == "recover-report":
         result = report_delivery.recover(store, history, data, at)
     elif args.command == "assess-specialist":

@@ -301,11 +301,17 @@ class SupervisionCliTest(fixture.CliCase):
         self.assertIn("refused by 2 providers", err)
         self.assertEqual(self.runner.writes(), [])
         grant = self.tmp / "grant.json"
-        grant.write_text(json.dumps({"id": "grant-1", "task": TASK, "role": "tester", "fix_round": None,
+        grant.write_text(json.dumps({"id": "grant-1", "task": TASK, "role": "tester", "fix_round": None, "provider": "grok", "brief": "unchanged",
                                      "decision": "Run the tester on grok with the same brief.",
                                      "authorization": {"source": "fixture operator message", "quote": "Send it to grok."}}))
         code, _, err = self.invoke(["authorize-refused-dispatch", "--record", str(grant), "--now", AT])
         self.assertEqual(code, 0, err)
+        code, _, err = self.invoke(self.refusal_args("codex", reports[4], "attempt-4"), self._client({"codex": "idle"}))
+        self.assertEqual(code, 1)
+        self.assertIn("approves provider grok", err)
+        code, _, err = self.invoke(self.refusal_args("grok", reports[4], "attempt-4", brief=reworded.replace(reports[2], reports[4])), self._client({"grok": "idle"}))
+        self.assertEqual(code, 1)
+        self.assertIn("approves the refused brief unchanged", err)
         code, out, err = self.invoke(self.refusal_args("grok", reports[4], "attempt-4"), self._client({"grok": "idle"}))
         self.assertEqual(code, 0, err)
         self.assertEqual(self.recovery_rows()[-1]["refusal_move"]["authorization"], "grant-1")

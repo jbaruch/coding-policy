@@ -52,9 +52,16 @@
   nothing did, so "the operator decides" had no lever and every later `apply`
   on that key stayed refused. `authorize-refused-dispatch` records the
   operator's decision with their words, requires a recorded refusal on the
-  key, and permits one further dispatch there on any provider with any brief,
-  named on that dispatch's `refusal_move.authorization`; a second dispatch
-  needs a second decision. The
+  key, and permits one further dispatch there inside the scope the operator
+  actually approved — the named provider, and the refused brief unchanged
+  unless they approved a revision — named on that dispatch's
+  `refusal_move.authorization`; a second dispatch needs a second decision.
+  The first cut of that record granted any provider and any brief, which the
+  policy reviewer read against Dispatch Safety: permission to send the
+  unchanged brief to one provider is not permission to send a rewrite to
+  another. A receipt whose `agent` is the worker's enrolled pane id is
+  accepted, since `wait-report.sh` takes either name, and a moved dispatch's
+  own refusal must come from the provider it moved to. The
   reference now states the escalation test — escalate only what the operator
   holds information, authority, or a usable account on — and that a
   remediation path named inside a provider notice is untrusted on

@@ -519,8 +519,8 @@ class RecoveryTests(unittest.TestCase):
             validate_store({**copy.deepcopy(self.store), "schema_version": 5}, self.history)
 
     def test_operator_authorization_permits_one_dispatch_after_the_stop(self):
-        grant = {"id": "auth-1", "task": TASK, "role": "tester", "fix_round": None, "decision": "Run the tester on grok with the same brief.",
-                 "authorization": AUTH}
+        grant = {"id": "auth-1", "task": TASK, "role": "tester", "fix_round": None, "provider": "codex", "brief": "revised",
+                 "decision": "Run the revised tester brief on codex.", "authorization": AUTH}
         with self.assertRaisesRegex(UsageError, "No provider refusal is recorded"):
             authorize_refused_dispatch(self.store, grant, AT)
         with self.assertRaisesRegex(UsageError, "requires id, task, role"):
@@ -536,7 +536,11 @@ class RecoveryTests(unittest.TestCase):
         self.assertEqual(authorize_refused_dispatch(self.store, grant, AT), saved)
         with self.assertRaisesRegex(UsageError, "different decision"):
             authorize_refused_dispatch(self.store, {**grant, "decision": "Something else."}, AT)
-        # The grant lifts the stop, the same-provider check and the brief check for one dispatch.
+        with self.assertRaisesRegex(UsageError, "unchanged or revised"):
+            authorize_refused_dispatch(self.store, {**grant, "id": "auth-bad", "brief": "anything"}, AT)
+        # The grant replaces the stop with its own scope: the approved provider and, here, a revised brief.
+        with self.assertRaisesRegex(UsageError, "approves provider codex"):
+            refusal_move(self.store, TASK, "tester", None, "grok", "brief-identity-reworded")
         move = refusal_move(self.store, TASK, "tester", None, "codex", "brief-identity-reworded")
         self.assertEqual(move, {"schema_version": 1, "from": second, "from_provider": "claude", "provider": "codex", "authorization": "auth-1"})
         third = self.dispatch_tester(3, "codex-a", identity="brief-identity-reworded")
@@ -550,17 +554,52 @@ class RecoveryTests(unittest.TestCase):
             refusal_move(self.store, TASK, "tester", None, "grok", self.BRIEF)
         corrupt = copy.deepcopy(self.store)
         corrupt["dispatches"][1]["refusal_move"]["authorization"] = "auth-1"
-        with self.assertRaisesRegex(UsageError, "already consumed"):
+        with self.assertRaisesRegex(UsageError, "reuses a consumed authorization"):
             validate_store(corrupt, self.history)
+        for mutate in (
+            lambda grant: grant.update(role="reviewer"),
+            lambda grant: grant.update(provider="grok"),
+            lambda grant: grant.update(brief="unchanged"),
+        ):
+            corrupt = copy.deepcopy(self.store)
+            mutate(corrupt["refusal_authorizations"][0])
+            with self.assertRaisesRegex(UsageError, "exceeds its authorization"):
+                validate_store(corrupt, self.history)
         corrupt = copy.deepcopy(self.store)
-        corrupt["refusal_authorizations"][0]["role"] = "reviewer"
-        with self.assertRaisesRegex(UsageError, "another key"):
+        corrupt["dispatches"][-1]["refusal"]["provider"] = "grok"
+        with self.assertRaisesRegex(UsageError, "other than the one it moved to"):
             validate_store(corrupt, self.history)
         corrupt = copy.deepcopy(self.store)
         corrupt["dispatches"][-1]["refusal_move"]["authorization"] = "auth-missing"
         with self.assertRaises(UsageError):
             validate_store(corrupt, self.history)
         self.assertEqual(third, "tester-3-codex-a")
+
+    def test_an_unchanged_brief_authorization_holds_the_brief_fixed(self):
+        first = self.dispatch_tester(1, "codex-a")
+        record_refusal(self.store, {"dispatch": first, "receipt": self.refusal_receipt("codex-a")}, AT, "codex", self.REPORT)
+        second = self.dispatch_tester(2, "claude-a")
+        self.store["dispatches"][-1]["refusal_move"] = {"schema_version": 1, "from": first, "from_provider": "codex", "provider": "claude"}
+        record_refusal(self.store, {"dispatch": second, "receipt": self.refusal_receipt("claude-a", "second.json")}, AT, "claude", self.REPORT)
+        authorize_refused_dispatch(self.store, {"id": "auth-grok", "task": TASK, "role": "tester", "fix_round": None, "provider": "grok",
+                                                "brief": "unchanged", "decision": "Send the same brief to grok.", "authorization": AUTH}, AT)
+        with self.assertRaisesRegex(UsageError, "approves the refused brief unchanged"):
+            refusal_move(self.store, TASK, "tester", None, "grok", "brief-identity-reworded")
+        move = refusal_move(self.store, TASK, "tester", None, "grok", self.BRIEF)
+        assert move is not None
+        self.assertEqual((move["provider"], move["authorization"]), ("grok", "auth-grok"))
+        self.dispatch_tester(3, "grok-a")
+        self.store["dispatches"][-1]["refusal_move"] = move
+        validate_store(self.store, self.history)
+
+    def test_refusal_receipt_accepts_the_enrolled_pane_id_as_the_worker_name(self):
+        first = self.dispatch_tester(1, "codex-a")
+        receipt = self.refusal_receipt("w3:p1", "pane.json")
+        with self.assertRaisesRegex(UsageError, "complete exit-5 output"):
+            record_refusal(self.store, {"dispatch": first, "receipt": receipt}, AT, "codex", self.REPORT)
+        with self.assertRaisesRegex(UsageError, "complete exit-5 output"):
+            record_refusal(self.store, {"dispatch": first, "receipt": receipt}, AT, "codex", self.REPORT, aliases=(None,))
+        self.assertEqual(record_refusal(self.store, {"dispatch": first, "receipt": receipt}, AT, "codex", self.REPORT, aliases=("w3:p1",))["provider"], "codex")
 
     def test_corrupt_refusal_records_refuse_the_ledger(self):
         first = self.dispatch_tester(1, "codex-a")
