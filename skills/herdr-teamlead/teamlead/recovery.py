@@ -18,7 +18,11 @@ from .chronology import assignment_after, latest_assignment
 
 
 RECOVERY_SCHEMA_VERSION = 1
-RECOVERY_STORE_VERSION = 5
+#: Store version 6 adds the optional `refusal` and `refusal_move` dispatch
+#: fields (#399). A version-5 store carrying either is unowned newer data
+#: and is refused; a clean one is stamped (rules/stateful-artifacts.md).
+RECOVERY_STORE_VERSION = 6
+REFUSAL_FIELDS = frozenset({"refusal", "refusal_move"})
 SPECIALIST_DISPATCH_VERSION = 2
 #: Checkpoint record version. 1 carries a mandatory pinned-judge ruling; 2
 #: makes it optional, because an exhausted allowance is a budget decision only
@@ -78,13 +82,17 @@ def migrate_store(store):
         return False
     migrated = _migrate_checkpoints(store)
     version = store["schema_version"]
-    if version not in {1, 2, 3, 4}:
+    if version not in {1, 2, 3, 4, 5}:
         return migrated
     dispatches = store.get("dispatches")
     if not isinstance(dispatches, list):
         raise UsageError("Older recovery requires a dispatches array; restore the original owner-written store.", {})
     for row in dispatches:
-        if (not isinstance(row, dict) or type(row.get("schema_version")) is not int
+        if not isinstance(row, dict) or REFUSAL_FIELDS.intersection(row):
+            raise UsageError("Older recovery contains unowned newer refusal records; preserve it for owner recovery.", {})
+        if version == 5:
+            continue
+        if (type(row.get("schema_version")) is not int
                 or row["schema_version"] != RECOVERY_SCHEMA_VERSION or DISPATCH_METADATA_FIELDS.intersection(row)):
             raise UsageError("Older recovery contains unowned newer dispatch metadata; preserve it for owner recovery.", {})
         result = row.get("result")
@@ -547,12 +555,19 @@ def refusal_move(store, task, role, fix_round, provider):
     """Return the move record a new dispatch carries, or None without refusals.
 
     Refuses a resend to a provider that already refused this task, role and
-    fix round, and refuses any dispatch once `REFUSAL_LIMIT` independent
-    refusals are recorded: that line stops and goes to the operator.
+    fix round, refuses a second move while one is reserved, uncertain or
+    applied without a recorded refusal, and refuses any dispatch once
+    `REFUSAL_LIMIT` independent refusals are recorded: that line stops and
+    goes to the operator. A `not_sent` move consumed nothing.
     """
     refused = refusals(store, task, role, fix_round)
     if not refused:
         return None
+    moves = [row for row in store["dispatches"] if row.get("refusal_move") is not None and row["status"] != "not_sent"
+             and row["task"] == task and row["role"] == role and row["fix_round"] == fix_round and row.get("refusal") is None]
+    if moves:
+        raise UsageError("Task {} {} round {} already moved to provider {} (dispatch {}, {}); one move per refusal. Wait for its report, record its refusal, or record the operator's decision before another dispatch of this brief.".format(
+            task, role, fix_round, moves[-1]["refusal_move"]["provider"], moves[-1]["id"], moves[-1]["status"]), {"moves": [row["id"] for row in moves]})
     providers = []
     for row in refused:
         if row["refusal"]["provider"] not in providers:

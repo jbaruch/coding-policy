@@ -47,7 +47,7 @@ class SpecialistRecoveryTest(unittest.TestCase):
 
     def test_requirements_dispatch_and_saved_result_have_independent_version_two(self):
         saved = self.finish()
-        self.assertEqual(self.store["schema_version"], 5)
+        self.assertEqual(self.store["schema_version"], 6)
         self.assertEqual(saved["schema_version"], 2)
         self.assertEqual(saved["result"]["schema_version"], 2)
         self.assertEqual(saved["requirements"], REQUIREMENT)
@@ -167,7 +167,7 @@ class SpecialistRecoveryTest(unittest.TestCase):
                         del old[key]
                 before = copy.deepcopy(old)
                 self.assertTrue(migrate_store(old))
-                self.assertEqual(old["schema_version"], 5)
+                self.assertEqual(old["schema_version"], 6)
                 for key, value in before.items():
                     if key != "schema_version":
                         self.assertEqual(old[key], value)

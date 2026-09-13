@@ -419,6 +419,47 @@ class RecoveryTests(unittest.TestCase):
             refusal_move(self.store, TASK, "tester", None, "codex")
         validate_store(self.store, self.history)
 
+    def test_a_second_move_waits_for_the_first_moves_outcome(self):
+        first = self.dispatch_tester(1, "codex-a")
+        record_refusal(self.store, {"dispatch": first, "receipt": self.refusal_receipt("codex-a")}, AT, "codex")
+        move = refusal_move(self.store, TASK, "tester", None, "claude")
+        pending = {"id": "tester-move", "task": TASK, "role": "tester", "agent": "claude-a", "fix_round": None,
+                   "fingerprint": "ab" * 32, "plan": None, "work": None, "refusal_move": move}
+        reserve(self.store, pending, AT)
+        with self.assertRaisesRegex(UsageError, "already moved to provider claude"):
+            refusal_move(self.store, TASK, "tester", None, "grok")
+        abort_pre_send(self.store, "tester-move", AT, "fixture")
+        self.assertEqual(refusal_move(self.store, TASK, "tester", None, "grok")["from"], first)
+        second = self.dispatch_tester(2, "claude-a")
+        self.store["dispatches"][-1]["refusal_move"] = move
+        with self.assertRaisesRegex(UsageError, "already moved to provider claude") as caught:
+            refusal_move(self.store, TASK, "tester", None, "grok")
+        self.assertEqual(caught.exception.details["moves"], [second])
+        record_refusal(self.store, {"dispatch": second, "receipt": self.refusal_receipt("claude-a", "second.json")}, AT, "claude")
+        with self.assertRaisesRegex(UsageError, "refused by 2 providers"):
+            refusal_move(self.store, TASK, "tester", None, "grok")
+        validate_store(self.store, self.history)
+
+    def test_store_six_migration_stamps_a_clean_five_and_refuses_unowned_refusals(self):
+        first = self.dispatch_tester(1, "codex-a")
+        old = copy.deepcopy(self.store)
+        old["schema_version"] = 5
+        before = copy.deepcopy(old)
+        self.assertTrue(migrate_store(old))
+        self.assertEqual(old["schema_version"], 6)
+        self.assertEqual({key: value for key, value in old.items() if key != "schema_version"},
+                         {key: value for key, value in before.items() if key != "schema_version"})
+        validate_store(old, self.history)
+        self.assertFalse(migrate_store(old))
+        record_refusal(self.store, {"dispatch": first, "receipt": self.refusal_receipt("codex-a")}, AT, "codex")
+        for version in (4, 5):
+            stale = copy.deepcopy(self.store)
+            stale["schema_version"] = version
+            with self.assertRaisesRegex(UsageError, "unowned newer refusal"):
+                migrate_store(stale)
+        with self.assertRaisesRegex(UsageError, "Unsupported recovery schema"):
+            validate_store({**copy.deepcopy(self.store), "schema_version": 5}, self.history)
+
     def test_corrupt_refusal_records_refuse_the_ledger(self):
         first = self.dispatch_tester(1, "codex-a")
         record_refusal(self.store, {"dispatch": first, "receipt": self.refusal_receipt("codex-a")}, AT, "codex")

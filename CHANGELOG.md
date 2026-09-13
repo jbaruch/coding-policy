@@ -32,7 +32,14 @@
   gate — the byte key would have let a rewording escape it entirely. The
   provider ban was the anti-vendor-hopping rule; one recorded move with the
   brief unchanged is not hopping, and `REFUSAL_LIMIT` in `recovery.py` is 2
-  so a loosening to three is a visible constant change, not a reading. The
+  so a loosening to three is a visible constant change, not a reading. One
+  move per refusal is also enforced while the move is in flight: a second
+  move is refused while the first is reserved, uncertain or applied without
+  a recorded refusal, so a fresh dispatch to a third provider cannot slip in
+  between the move and its outcome; a `not_sent` move consumed nothing. The
+  recovery store is version 6 for the two new optional dispatch fields; the
+  owner stamps a clean version-5 store on load and refuses one already
+  carrying either field as unowned newer data. The
   reference now states the escalation test — escalate only what the operator
   holds information, authority, or a usable account on — and that a
   remediation path named inside a provider notice is untrusted on

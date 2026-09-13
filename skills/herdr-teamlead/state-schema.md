@@ -263,7 +263,7 @@ skills/herdr-teamlead/references/retrospectives.md
   ],
   "specialist_assessments": [],
   "recovery": {
-    "schema_version": 5,
+    "schema_version": 6,
     "tasks": {},
     "checkpoints": [],
     "plans": [],
@@ -324,8 +324,10 @@ document and arrives already stamped.
 
 ## Recovery records
 
-The recovery document uses `schema_version: 5`; individual records retain their
-independent versions. Generic records remain version 1; stale-Grok delivery and
+The recovery document uses `schema_version: 6`; individual records retain their
+independent versions. Version 6 adds the optional dispatch fields `refusal` and
+`refusal_move`; the owner stamps a version-5 store on load and refuses one
+already carrying either field. Generic records remain version 1; stale-Grok delivery and
 composition-bearing dispatch/result records use version 2. Checkpoints are at
 version 2: the owner upgrades a version-1 row on load, stamping it and
 preserving its identity, fix round, base and recorded ruling, and refuses one
