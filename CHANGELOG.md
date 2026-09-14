@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.211 — 2026-09-14
+
 ### Added
 
 - **The lead prunes leftover worktrees and branches every round.** After the
