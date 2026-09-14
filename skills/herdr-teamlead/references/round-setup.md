@@ -124,6 +124,13 @@ Choose the next needed responsibilities before selecting workers. Consult the
 profiles and requirement contract in `references/specialists.md`; available
 profiles need no activation until a bounded question or deliverable warrants it.
 
+Run `detect-triggers` against the task's base first, with the roles and
+requirements this round intends. It classifies the diff against this repo's
+`.herdr/triggers.json` and exits 1 when a fired trigger is neither staffed nor
+answered by a recorded staffing decision. The declaration's fields, the
+decisions file and the answers each trigger accepts are in
+`references/specialists.md`.
+
 ```bash
 CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
 bash "$CP/skills/herdr-teamlead/teamlead.sh" plan \
