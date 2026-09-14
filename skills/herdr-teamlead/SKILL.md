@@ -150,8 +150,8 @@ Supply its requirements file for specialized work. Keep the developer reserved
 through early fixes; schedule consultation and verification as the task needs them.
 
 The composition triggers decide part of that roster. Classify this round
-against the repo's declaration first. Phase 1 has no diff yet, so it passes
-`--planned` naming the surfaces the work will touch; a round with work already
+against the repo's declaration first. For a pre-implementation round, pass
+`--planned` naming the surfaces the work will touch. A round with work already
 written classifies that work:
 
 ```bash

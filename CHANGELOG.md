@@ -11,6 +11,17 @@
   runs it against a cache-free plugin copy and asserts none appears. Copilot
   finding from #383, deferred there as advisory.
 
+### Changed
+
+- **Step 5's detect-triggers prose states the instruction without its
+  rationale (#417).** The line read "Phase 1 has no diff yet, so it passes
+  `--planned` naming the surfaces the work will touch" — a justifying clause
+  attached to a directive in an auto-loaded artifact, which
+  `rules/context-writing-style.md` What to Cut forbids. The reason a
+  pre-implementation round has nothing to classify is archived here; the
+  skill now says only what to pass and when. Deferred advisory from the #416
+  review, filed rather than folded in under `rules/review-severity.md`.
+
 ## 0.3.215 — 2026-09-14
 
 ### Changed
