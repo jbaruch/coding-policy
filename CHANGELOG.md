@@ -12,10 +12,18 @@
   now decides, per worktree under the root: not the shared checkout, on a
   branch other than origin's default, not locked, `git status --porcelain`
   empty (untracked files count), branch an ancestor of origin's default
-  branch — remove and `branch -d`; otherwise keep and report the reason
+  branch — remove and delete the branch (`-D`, after that ancestry check:
+  `-d` re-checks against the shared checkout's own default, which may lag
+  origin's and refuse a branch just proved merged); otherwise keep and report the reason
   (`dirty`, `unmerged`, `locked`, `detached`, `outside-root`,
   `default-branch`). Merged local branches with no worktree are deleted the
-  same way; `--dry-run` previews. Two of the 14 were kept: one with an
+  same way; `--dry-run` previews, still fetching so its answer is current but
+  skipping the ref prune and metadata prune. A failed fetch or default-branch
+  lookup is a precondition failure, never a judgment from stale refs, and
+  origin's default branch is re-queried each run so a moved default cannot
+  leave the check pointed at a cached `origin/HEAD`. Ignored files do not
+  count as dirty: the ignore claims they are reproducible and `git worktree
+  remove` treats them the same way. Two of the 14 were kept: one with an
   uncommitted 13-line edit, one with an untracked `tester-data/` directory,
   both surfaced to the operator rather than discarded. Step 8 runs the prune
   before provisioning every round and Step 21 runs it again after the merge.

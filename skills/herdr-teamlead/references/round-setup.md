@@ -308,7 +308,8 @@ release-gating verification is `full`. Proceed immediately to Step 8.
 
 ## Step 8 — Provision the Worktrees
 
-One call per worker that writes anything:
+Run the prune in the skill's Step 8 first, every round. Then one call per
+worker that writes anything:
 
 ```bash
 CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"

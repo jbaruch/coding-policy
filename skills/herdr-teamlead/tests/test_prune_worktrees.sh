@@ -27,8 +27,10 @@
 #  13. Foreign worktree    -> a directory of ANOTHER repo under the root is
 #                             untouched.
 #  14. Usage / not a repo  -> exit 1, no JSON.
-#  15. Tool failure        -> an unresolvable origin ref is a failed row and
-#                             exit 2, never a kept 'unmerged'.
+#  15. Fetch failure       -> exit 1, no JSON; nothing judged from stale refs.
+#  16. Tool failure        -> a merge-base error is a failed row on stdout and
+#                             stderr, exit 2, never a kept 'unmerged'.
+#  17. Dry-run metadata    -> stale worktree metadata survives a dry run.
 #
 # Run: bash skills/herdr-teamlead/tests/test_prune_worktrees.sh
 set -uo pipefail
@@ -79,7 +81,12 @@ branch_kept_reason() { python3 -c 'import json,sys; d=json.load(sys.stdin); prin
 field() { python3 -c 'import json,sys; print(json.load(sys.stdin)[sys.argv[1]])' "$1" <<<"$OUT"; }
 mentions_path() { python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if any(r["path"]==sys.argv[1] for r in d["worktrees_kept"]+d["worktrees_removed"]) else 1)' "$1" <<<"$OUT"; }
 has_branch() { git -C "$1" show-ref --verify --quiet "refs/heads/$2"; }
-listed() { git -C "$1" worktree list --porcelain | grep -qx "worktree $2"; }
+listed() { # <shared> <path>  -> 0 listed, 1 not listed; a tool failure aborts the harness
+  local inventory rc=0
+  inventory="$(git -C "$1" worktree list --porcelain)" || die "git worktree list failed in $1"
+  grep -qx "worktree $2" <<<"$inventory" || rc=$?
+  case "$rc" in 0) return 0 ;; 1) return 1 ;; *) die "grep failed (exit $rc) reading the worktree inventory" ;; esac
+}
 
 main() {
   PASS=0; FAIL=0; RUN_SEQ=0
@@ -167,15 +174,43 @@ main() {
   echo "13. another repository's worktree under the root is untouched"
   if (( RC == 0 )) && [[ -d "$ROOT/thirteen-other" ]] && [[ "$OUT" != *thirteen-other* ]]; then pass; else fail "rc=$RC out=$OUT"; fi
 
-  # --- 15. a merge-base tool failure is a failed row and exit 2, never "unmerged".
+  # --- 15. an unreachable origin is a precondition failure: nothing is judged from stale refs.
   mk_repo fifteen
-  add_wt "$SHARED" review/broken "$ROOT/fifteen-broken"
-  git -C "$SHARED" update-ref -d refs/remotes/origin/main || die "update-ref failed"
-  git -C "$SHARED" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main || die "symbolic-ref failed"
+  add_wt "$SHARED" review/stale "$ROOT/fifteen-stale"
   git -C "$SHARED" remote set-url origin "$TMP/nowhere.git" || die "set-url failed"
   run "$SHARED"
-  echo "15. an unresolvable origin default ref surfaces as failed, exit 2, worktree untouched"
-  if (( RC == 2 )) && [[ "$OUT" == *'"failed": [{'*merge-base* ]] && [[ "$(kept_reason "$ROOT/fifteen-broken")" == "" ]] && [[ -d "$ROOT/fifteen-broken" ]]; then pass; else fail "rc=$RC out=$OUT err=$ERRTEXT"; fi
+  echo "15. a failed fetch is exit 1 with no JSON and the merged worktree untouched"
+  if (( RC == 1 )) && [[ -z "$OUT" ]] && [[ "$ERRTEXT" == *"stale refs"* ]] && [[ -d "$ROOT/fifteen-stale" ]] && has_branch "$SHARED" review/stale; then pass; else fail "rc=$RC out=$OUT err=$ERRTEXT"; fi
+
+  # --- 16. a merge-base tool failure is a failed row on stderr and stdout, exit 2, never "unmerged".
+  mk_repo sixteen
+  add_wt "$SHARED" review/broken "$ROOT/sixteen-broken"
+  git -C "$SHARED" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/vanished || die "symbolic-ref failed"
+  git -C "$SEED" push -q origin main:refs/heads/vanished || die "push vanished failed"
+  git -C "$SEED" symbolic-ref HEAD refs/heads/vanished || die "seed symbolic-ref failed"
+  git -C "$BARE" symbolic-ref HEAD refs/heads/vanished || die "bare HEAD failed"
+  git -C "$SHARED" fetch -q origin || die "fetch failed"
+  # origin's default is now `vanished`; a git shim corrupts its remote-tracking
+  # ref the moment the script reaches merge-base, after the run's own fetch.
+  mkdir -p "$TMP/shim" || die "mkdir shim failed"
+  cat > "$TMP/shim/git" <<SHIM || die "shim write failed"
+#!/usr/bin/env bash
+case "\$*" in *merge-base*) printf 'not-a-sha\n' > "$SHARED/.git/refs/remotes/origin/vanished" ;; esac
+exec "$(command -v git)" "\$@"
+SHIM
+  chmod +x "$TMP/shim/git" || die "chmod shim failed"
+  run_with_shim() { RUN_SEQ=$((RUN_SEQ+1)); OUT="$(env WORKTREE_ROOT="$ROOT" PATH="$TMP/shim:$PATH" bash "$SCRIPT" "$SHARED" 2>"$TMP/err.$RUN_SEQ")"; RC=$?; ERRTEXT="$(cat "$TMP/err.$RUN_SEQ")"; }
+  run_with_shim
+  echo "16. a merge-base tool failure lands in failed, on stderr, exit 2, worktree untouched"
+  if (( RC == 2 )) && [[ "$OUT" == *'"failed": [{'*merge-base* ]] && [[ "$ERRTEXT" == *"merge-base failed"* ]] && [[ "$(kept_reason "$ROOT/sixteen-broken")" == "" ]] && [[ -d "$ROOT/sixteen-broken" ]]; then pass; else fail "rc=$RC out=$OUT err=$ERRTEXT"; fi
+
+  # --- 17. dry run leaves stale metadata and remote-tracking refs in place.
+  mk_repo seventeen
+  add_wt "$SHARED" review/preview "$ROOT/seventeen-preview"
+  rm -rf "$ROOT/seventeen-preview" || die "rm failed"
+  run "$SHARED" --dry-run
+  echo "17. dry run does not prune stale metadata"
+  if (( RC == 0 )) && listed "$SHARED" "$ROOT/seventeen-preview"; then pass; else fail "rc=$RC out=$OUT err=$ERRTEXT"; fi
 
   # --- 14. usage / not a repo.
   run

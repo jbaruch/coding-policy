@@ -14,13 +14,22 @@
 #   * it lies under the worktree root,
 #   * it is on a branch (not detached) other than origin's default branch,
 #   * it is not locked,
-#   * `git status --porcelain` is empty — untracked files count as dirty,
-#   * its branch is an ancestor of origin's default branch (fully merged).
+#   * `git status --porcelain` is empty — untracked files count as dirty;
+#     ignored files do not, they are reproducible by the ignore's own claim
+#     and `git worktree remove` treats them the same way,
+#   * its branch is an ancestor of origin's default branch (fully merged),
+#     judged against refs fetched by THIS run and origin's default branch as
+#     re-queried by THIS run — a fetch or default-branch lookup that fails is
+#     a precondition failure, never a judgment from stale refs.
 # A local branch with no worktree is DELETED iff it is not the default branch
-# and is an ancestor of origin's default branch. Deletion is `git branch -d`,
-# never `-D`, and removal is `git worktree remove`, never `rm -rf`. Everything
-# else is KEPT and reported with its reason. Stale worktree metadata is
-# pruned first (`git worktree prune`). Nothing here touches origin.
+# and is an ancestor of origin's default branch. That ancestry check is the
+# safety; deletion is then `git branch -D`, since `-d` re-checks against the
+# shared checkout's own default branch, which may lag origin's and refuse a
+# branch this script just proved merged. Removal is `git worktree remove`,
+# never `rm -rf`. Everything else is KEPT and reported with its reason. Stale
+# worktree metadata is pruned first (`git worktree prune`). Nothing here
+# pushes to origin; a dry run still fetches (without --prune) and skips the
+# metadata prune, so its decisions are current and .git is otherwise untouched.
 #
 # Contract:
 #   argv  : <shared-checkout> [--dry-run]
@@ -33,11 +42,12 @@
 #            "branches_kept":[{"branch","reason"}],
 #            "failed":[{"target","error"}]}
 #           reason is one of: default-branch, detached, dirty, locked,
-#           outside-root, unmerged.
+#           outside-root, prunable (its directory is gone; a live run's
+#           metadata prune removes it), unmerged.
 #   stderr: diagnostics only.
 #   exit  : 0 every decision applied (or previewed),
 #           1 precondition unmet (usage, git or python3 absent, not a repo,
-#             no origin, default branch unresolvable),
+#             no origin, fetch failed, default branch unresolvable),
 #           2 at least one removal or deletion failed; the rest still ran and
 #             `failed` names each one.
 #   env   : WORKTREE_ROOT overrides the worktree root (default
@@ -61,14 +71,23 @@ cleanup() {
 
 # Append one decision row: <kind> <target> <branch> <reason>. Tabs never
 # appear in git paths this script provisions, and python3 splits on them.
-row() { printf '%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" >> "$ROWS"; }
+row() {
+  printf '%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" >> "$ROWS"
+  # A failure is a diagnostic on stderr as well as a JSON row
+  # (rules/script-delegation.md Script Requirements).
+  if [[ "$1" == failed ]]; then
+    warn "${2}: ${4} — inspect it by hand; nothing else was skipped on its account"
+  fi
+}
 
 default_branch_of() { # <shared>
-  local db=""
-  if db="$(git -C "$1" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null)"; then
-    printf '%s' "${db#origin/}"
-    return 0
-  fi
+  local db="" rc=0
+  db="$(git -C "$1" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>"$ERRFILE")" || rc=$?
+  case "$rc" in
+    0) printf '%s' "${db#origin/}"; return 0 ;;
+    1) ;;  # origin/HEAD is simply absent: fall back to the conventional names
+    *) warn "\`git symbolic-ref refs/remotes/origin/HEAD\` failed (exit ${rc}): $(tr '\n' ' ' < "$ERRFILE")"; return 2 ;;
+  esac
   local cand
   for cand in main master; do
     if git -C "$1" show-ref --verify --quiet "refs/remotes/origin/$cand"; then
@@ -110,6 +129,9 @@ decide_worktree() { # <shared> <abs_root> <default> <dry-run 0|1> <path> <branch
   if (( locked )); then
     row kept "$path" "$branch" locked; return 0
   fi
+  if [[ ! -d "$path" ]]; then
+    row kept "$path" "$branch" prunable; return 0
+  fi
   local status rc=0
   status="$(git -C "$path" status --porcelain 2>"$ERRFILE")" || rc=$?
   if (( rc != 0 )); then
@@ -131,8 +153,8 @@ decide_worktree() { # <shared> <abs_root> <default> <dry-run 0|1> <path> <branch
   if ! git -C "$shared" worktree remove "$path" 2>"$ERRFILE"; then
     row failed "$path" "$branch" "git worktree remove failed: $(tr '\n' ' ' < "$ERRFILE")"; return 0
   fi
-  if ! git -C "$shared" branch -d "$branch" >/dev/null 2>"$ERRFILE"; then
-    row failed "$branch" "$branch" "git branch -d failed after the worktree was removed: $(tr '\n' ' ' < "$ERRFILE")"; return 0
+  if ! git -C "$shared" branch -D "$branch" >/dev/null 2>"$ERRFILE"; then
+    row failed "$branch" "$branch" "git branch -D failed after the worktree was removed: $(tr '\n' ' ' < "$ERRFILE")"; return 0
   fi
   row removed "$path" "$branch" ""
   return 0
@@ -153,8 +175,8 @@ decide_branch() { # <shared> <default> <dry-run 0|1> <branch>
   if (( dry )); then
     row branch-deleted "$branch" "$branch" ""; return 0
   fi
-  if ! git -C "$shared" branch -d "$branch" >/dev/null 2>"$ERRFILE"; then
-    row failed "$branch" "$branch" "git branch -d failed: $(tr '\n' ' ' < "$ERRFILE")"; return 0
+  if ! git -C "$shared" branch -D "$branch" >/dev/null 2>"$ERRFILE"; then
+    row failed "$branch" "$branch" "git branch -D failed: $(tr '\n' ' ' < "$ERRFILE")"; return 0
   fi
   row branch-deleted "$branch" "$branch" ""
   return 0
@@ -200,15 +222,25 @@ main() {
   else
     abs_root="$(cd "$root" && pwd -P)"
   fi
-  if ! git -C "$shared" fetch --quiet --prune origin 2>"$ERRFILE"; then
-    warn "\`git -C ${shared} fetch --prune origin\` failed: $(tr '\n' ' ' < "$ERRFILE") — judging merged-ness from possibly stale refs; a branch merged per stale refs is still merged, an unmerged one is kept"
+  # Merged-ness is only as good as the refs it is judged against: a stale
+  # origin/<default> after a force-push, or a cached origin/HEAD after the
+  # remote's default branch moved, would delete work origin no longer holds.
+  local -a fetch_args=(fetch --quiet origin)
+  if (( ! dry )); then fetch_args=(fetch --quiet --prune origin); fi
+  if ! git -C "$shared" "${fetch_args[@]}" 2>"$ERRFILE"; then
+    warn "\`git -C ${shared} ${fetch_args[*]}\` failed: $(tr '\n' ' ' < "$ERRFILE") — check connectivity; refusing to judge merged-ness from stale refs"
+    return 1
+  fi
+  if ! git -C "$shared" remote set-head origin --auto >/dev/null 2>"$ERRFILE"; then
+    warn "\`git -C ${shared} remote set-head origin --auto\` failed: $(tr '\n' ' ' < "$ERRFILE") — cannot confirm origin's current default branch"
+    return 1
   fi
   local db
   if ! db="$(default_branch_of "$shared")"; then
     warn "cannot resolve origin's default branch — run \`git -C ${shared} remote set-head origin --auto\`"
     return 1
   fi
-  if ! git -C "$shared" worktree prune 2>"$ERRFILE"; then
+  if (( ! dry )) && ! git -C "$shared" worktree prune 2>"$ERRFILE"; then
     warn "\`git worktree prune\` failed: $(tr '\n' ' ' < "$ERRFILE") — stale metadata may remain"
   fi
 
