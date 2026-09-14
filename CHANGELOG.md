@@ -21,6 +21,22 @@
   pre-implementation round has nothing to classify is archived here; the
   skill now says only what to pass and when. Deferred advisory from the #416
   review, filed rather than folded in under `rules/review-severity.md`.
+- **`dispatch-recovery.md` points at the parser instead of restating it
+  (#373).** The live-validation procedure spelled out the Claude transcript
+  parser's requester-linkage and answered-once predicates, which
+  `rules/script-as-black-box.md` reserves to the script. The observed parallel
+  tool-result orderings stay — they are operator-facing facts about the CLI,
+  and both must be exercised — while the predicates deciding them are left to
+  `skills/herdr-teamlead/teamlead/claude_native.py`, already named as the
+  source contract earlier in the same file. Advisory from the #372 policy
+  review; documentation only, no parser change.
+- **`rules/agent-team-operation.md` reaches the source instruction index, and
+  a test keeps it there (#368).** `.claude/CLAUDE.md` imported 25 of the 26
+  declared rules, so an agent working in this checkout read every rule except
+  the one governing how the team itself operates — invisible to maintainers
+  while shipping correctly to consumers. `scripts/tests/test_source_index.py`
+  now fails when the manifest's `rules` array, the index's `@`-imports and
+  `rules/*.md` on disk disagree, so the next added rule cannot repeat it.
 
 ## 0.3.215 — 2026-09-14
 
