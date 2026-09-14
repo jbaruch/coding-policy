@@ -104,12 +104,23 @@ class RecoveryTests(unittest.TestCase):
             "progress": "The named change landed; the finding did not close",
             "change_in_approach": "Take the next remedy on the ladder"}, AT, "judge")["id"]
 
-    def run_diagnosis(self, data, judge="judge", enrolled=None):
+    def investigated(self, index=None):
+        """An assessed investigator consultation for this task, as #408 requires."""
+        if index is None:
+            # Later than every developer round the fixture records, so the
+            # assessment genuinely follows the attempt it explains.
+            add_assignment(self.state, "2026-02-03T13:00:00+00:00", "investigator", "worker", task=TASK)
+            index = len(self.history) - 1
+        return [{"task": TASK, "role": "investigator", "assignment_index": index}]
+
+    def run_diagnosis(self, data, judge="judge", enrolled=None, investigations=None):
         # The fixture's judge dispatch enrolls the report the request cites,
         # unless a case overrides it to prove the binding.
         if enrolled is None:
             enrolled = data.get("judge_report")
-        return diagnose(self.store, self.history, data, AT, judge, enrolled, enrolled is not None)
+        if investigations is None:
+            investigations = self.investigated()
+        return diagnose(self.store, self.history, data, AT, judge, enrolled, enrolled is not None, investigations)
 
     def diagnosis(self, name, remedy, bound, checkpoint_id="checkpoint-5"):
         return {"id": name, "task": TASK, "checkpoint": checkpoint_id, "judge_report": self.diagnosis_report(remedy, bound, name + ".md"),
@@ -244,6 +255,23 @@ class RecoveryTests(unittest.TestCase):
                         "EVIDENCE: rounds 10-20\nUNVERIFIED: none\n")
         with self.assertRaisesRegex(UsageError, "names its remedy and what it means"):
             self.run_diagnosis({**self.diagnosis("diag-1", "continue", 2), "judge_report": str(bare)}, "judge")
+
+    def test_a_diagnosis_rules_on_a_prepared_causal_assessment(self):
+        # coding-policy#408: the investigator's profile is written for repeated
+        # unsuccessful fixes, and the judge is the more expensive seat.
+        self.seed_checkpoint()
+        request = self.diagnosis("diag-1", "continue", 2)
+        with self.assertRaisesRegex(UsageError, "prepared causal assessment"):
+            self.run_diagnosis(request, investigations=[])
+        # Another task's assessment, and one predating the latest attempt, are
+        # not this loop's evidence.
+        with self.assertRaisesRegex(UsageError, "prepared causal assessment"):
+            self.run_diagnosis(request, investigations=[{"task": "another", "role": "investigator", "assignment_index": 0}])
+        with self.assertRaisesRegex(UsageError, "prepared causal assessment"):
+            self.run_diagnosis(request, investigations=[{"task": TASK, "role": "architect", "assignment_index": 0}])
+        with self.assertRaisesRegex(UsageError, "prepared causal assessment"):
+            self.run_diagnosis(request, investigations=self.investigated(index=0))
+        self.assertEqual(self.run_diagnosis(request)["remedy"], "continue")
 
     def test_an_adjudication_report_is_not_a_diagnosis(self):
         # coding-policy#407: RULING and ACTION belong to adjudication; a mixed

@@ -36,7 +36,7 @@ An implementation task runs through the round twice, and only the second pass
 gates release. Investigation-only tasks use Step 12's knowledge-deliverable
 gate; they do not require a pushed branch or release reports.
 
-**Phase 1 — pre-development (optional).** An architect or advisor supplies the
+**Phase 1 — pre-development.** An architect or advisor supplies the
 needed design or interaction report. An investigator may first resolve a causal
 question. Assess each consultation before using its outcome. The tester maps each acceptance
 criterion to a test, or delivers those tests as a patch (tester Mode A or B).
@@ -47,7 +47,11 @@ The developer implements against both, runs the repo's gates, pushes the
 branch, and stops without opening a PR.
 
 Skip Phase 1 for a change small enough that a design note would say less than
-the diff. Nothing in Phase 1 is a pass; it is preparation.
+the diff, and only when the work trips no Team Composition trigger. Work that
+trips one gates here: its deliverable lands before implementation, or the lead
+records the staffing decision and its reason. The cheap gate is the one worth
+making mandatory; a reviewer catching the same thing one finding per round is
+the expensive one. Nothing in Phase 1 is a pass; it is preparation.
 
 **Phase 2 — post-push verification (mandatory).** The reviewer reviews the
 pushed branch and posts a COMMENT review (Mode B). The tester runs the gates
@@ -181,7 +185,8 @@ fresh-worker stage. Never reset the counter during re-planning. At a contested
 verdict or a lead override, go to Step 13 first. At an exhausted allowance,
 record the checkpoint through the owner commands in
 `skills/herdr-teamlead/references/dispatch-recovery.md`, report implementation
-as `awaiting_diagnosis`, and go to Step 13 for the diagnosis. Use the plan its
+as `awaiting_diagnosis`, consult the investigator, and go to Step 13 with its
+assessed report. Use the plan its
 remedy records for the bounded extra attempts; collect each preceding attempt's
 actual blocking review before continuing.
 
@@ -256,7 +261,11 @@ adjudication at every allowance boundary made the seat a per-round toll on the
 window its developer and reviewers already share; that trigger is gone and
 stays gone.
 
-An exhausted allowance is a different question, and it gets the second mode.
+An exhausted allowance is a different question, and it gets the second mode —
+after the investigator. That profile is written for "unclear causality or
+repeated unsuccessful fixes", it is read-only and bounded, and it is the
+cheaper seat: it produces the reproduction and causal assessment, and the
+judge rules on them. A diagnosis without one is refused.
 The loop that exhausts its budget is rarely short of attempts: a find-rate
 that holds flat while every round closes its finding is a structural problem,
 and more rounds reproduce it. Diagnosis asks why the loop is not converging

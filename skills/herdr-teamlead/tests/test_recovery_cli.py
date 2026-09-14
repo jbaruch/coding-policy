@@ -52,6 +52,33 @@ class RecoveryCommandTests(fixture.CliCase):
                                            "allowed_paths": ["src/*"], "authorization": AUTH})
         self.assertEqual(code, 0, err)
 
+    def record_investigation(self):
+        """Seed the assessed investigator consultation #408 requires.
+
+        The assessment machinery has its own suite; this fixture only needs
+        the record the diagnosis gate reads.
+        """
+        state = self.saved()
+        add_assignment(state, "2026-02-03T13:00:00+00:00", "investigator", "grok", task=TASK)
+        index = len(state["assignments"]) - 1
+        row = state["assignments"][index]
+        row["status"] = "applied"
+        state["recovery"]["dispatches"].append({
+            "schema_version": 1, "at": "2026-02-03T13:00:00+00:00", "id": "investigator-dispatch",
+            "fingerprint": "e" * 64, "role": "investigator", "agent": "grok", "task": TASK,
+            "fix_round": None, "plan": None, "work": None, "status": "applied",
+            "assignment_index": index,
+            "result": {"schema_version": 1, "task": TASK, "role": "investigator", "agent": "grok",
+                       "fix_round": None, "status": "applied"}, "report": None})
+        state["specialist_assessments"].append({
+            "schema_version": 1, "at": "2026-02-03T14:00:00+00:00", "id": "inv-1", "dispatch": "investigator-dispatch",
+            "assignment_index": index, "task": TASK, "role": "investigator",
+            "agent": "grok", "report": "/reports/investigation.md", "delivery": "/reports/delivery.json",
+            "outcome": "delivered", "contribution": "design", "summary": "The find-rate tracks review surface area.",
+            "report_evidence": {"path": "/reports/investigation.md", "sha256": "a" * 64},
+            "delivery_evidence": {"path": "/reports/delivery.json", "sha256": "b" * 64}})
+        save_state(self.state, state)
+
     def saved(self):
         return json.loads(self.state.read_text())
 
@@ -93,6 +120,7 @@ class RecoveryCommandTests(fixture.CliCase):
         diagnosis = self.tmp / "diagnosis.md"
         diagnosis.write_text("DIAGNOSIS: the find-rate held flat\nREMEDY: continue — two more rounds\n"
                              "BOUND: 1\nEVIDENCE: rounds 1-5\nUNVERIFIED: none\n")
+        self.record_investigation()
         if skip_diagnosis:
             return
         code, _, err = self.owner("diagnose", {"id": "diag-cap", "task": TASK, "checkpoint": "cap-5",

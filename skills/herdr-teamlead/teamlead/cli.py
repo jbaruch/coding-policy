@@ -1028,7 +1028,8 @@ def cmd_recovery(args, client=None, warn=None, trace=None):
             if member is not None:
                 enrolled = supervision.expected_assignment(member)["report"]
         result = recovery.diagnose(store, history, data, at, judge.agent if judge else None, enrolled,
-                                   supervision.dispatch_binding(state_path) is not None)
+                                   supervision.dispatch_binding(state_path) is not None,
+                                   state["specialist_assessments"])
     elif args.command == "record-report":
         if isinstance(data, dict):
             dispatch = next((item for item in store["dispatches"] if item["id"] == data.get("dispatch")), None)
