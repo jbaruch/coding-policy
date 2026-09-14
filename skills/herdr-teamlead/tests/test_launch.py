@@ -60,6 +60,10 @@ class Client:
 
     def agent_start(self, name, kind, pane, flags):
         self.calls.append(("start", name, kind, pane, flags))
+        # Herdr refuses while it still holds the name, which is the whole
+        # failure #379 describes: a start issued too early costs an attempt.
+        if self.name_held_reads > 0:
+            raise herdr_error("agent_name_taken", "name in use")
         if self.name_taken_starts > 0:
             self.name_taken_starts -= 1
             raise herdr_error("agent_name_taken", "name in use")
@@ -93,11 +97,12 @@ class LaunchTest(unittest.TestCase):
         client.name_held_reads = 3
         proof = restart_worker(client, worker(), "w1:p2", TIER, sleep=lambda _: None)
         self.assertEqual(proof["source"], "launch_argv")
-        starts = [call for call in client.calls if call[0] == "start"]
+        # The fake refuses a start while it still holds the name, so a single
+        # successful start is itself the proof that the wait preceded it.
+        starts = [index for index, call in enumerate(client.calls) if call[0] == "start"]
         self.assertEqual(len(starts), 1)
-        # Every read of the held name precedes the single start.
-        self.assertLess(client.calls.index(starts[0]), len(client.calls))
-        self.assertGreaterEqual(len([c for c in client.calls if c[0] == "get"]), 4)
+        reads_before_start = [call for call in client.calls[:starts[0]] if call[0] == "get"]
+        self.assertGreaterEqual(len(reads_before_start), 4)
 
     def test_a_name_never_released_refuses_without_starting(self):
         client = Client()
