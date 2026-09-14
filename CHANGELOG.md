@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.226 — 2026-09-14
+
 ### Fixed
 
 - **A relaunched seat waits for Herdr to release its old name, and no brief is
