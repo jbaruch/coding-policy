@@ -51,7 +51,9 @@ to know goes in the report.
   under `~/.worktrees/`.
 - Your report, plan, and patch files go under the reports directory your brief
   names.
-- If your brief names a fixture root, fixtures go there and nothing else does.
+- If your brief names a fixture root, create it yourself under that exact name;
+  a directory that already exists, or one reached through a symlink, is a stop,
+  not a root to reuse. Fixtures go there and nothing else does.
   Prove the tool's effective root inside it before any command writes through
   the tool, record every user-level file the run can reach before and after,
   stop on an unexpected change, and remove the root when you finish

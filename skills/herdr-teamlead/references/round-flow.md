@@ -191,9 +191,15 @@ artifact under the reports directory as usual
 (`rules/agent-team-operation.md` Writers and Checkouts carries the
 preconditions).
 
+The root is this assignment's own: created under a name no other assignment
+uses, never a directory that already exists and never one reached through a
+symlink. The cleanup at the end removes it, and a reused or linked root would
+make that cleanup delete somebody else's files.
+
 Inside that root, before any command that writes through the tool:
 
-1. Walk the fixture's ancestors and record which of them configure the tool.
+1. Resolve the root to its physical path, then walk its ancestors and record
+   which of them configure the tool.
 2. Pre-seed the intended local manifest so the lookup settles inside the
    fixture rather than above it.
 3. Prove the effective root the tool resolved, and compare it to the fixture.

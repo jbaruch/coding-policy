@@ -18,6 +18,9 @@
   through it, recording each reachable user-level file before and after,
   stopping on an unexpected change, restoring from that record rather than
   reinstalling the operator's environment, and removing the root at the end.
+  The root is the assignment's own: created under a name no other assignment
+  uses, never a pre-existing directory and never one reached through a symlink,
+  since the mandated cleanup would otherwise delete somebody else's files.
 
   The worker-facing brief says the same: `templates/COMMON.md` now names the
   fixture root and its obligations instead of "nothing you write lands
