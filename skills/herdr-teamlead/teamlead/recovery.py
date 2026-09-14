@@ -342,10 +342,17 @@ def checkpoint(store, assignments, data, at, judge_agent):
         # The ruling is the operator's to request, and "operator-requested" was
         # the ledger's word for a request nothing in it recorded (#400). The
         # receipt is the same source/quote shape every other operator decision
-        # carries.
-        if "requested_by" not in data:
+        # carries, and it is required of NEW records alone: an older row was
+        # written before the field existed, so replaying its original payload
+        # is an already-processed request, not a missing receipt
+        # (rules/file-hygiene.md Idempotency).
+        replayed = next((row for row in store["checkpoints"] if row["id"] == data["id"]), None)
+        legacy_replay = (replayed is not None
+                         and replayed.get("schema_version", OPERATOR_CHECKPOINT_VERSION) < OPERATOR_CHECKPOINT_VERSION)
+        if "requested_by" not in data and not legacy_replay:
             raise UsageError("A cited ruling is the operator's to request: record their request as requested_by (source and quote), or record the checkpoint without judge_report.", {})
-        authorization(data["requested_by"])
+        if "requested_by" in data:
+            authorization(data["requested_by"])
         evidence, body = receipt(data["judge_report"])
         if not re.search(r"^RULING: (?:uphold A|uphold B|amend)(?:\s|$)", body, re.MULTILINE) or not re.search(r"^ACTION: \S", body, re.MULTILINE):
             raise UsageError("The judge report must contain its completed RULING and ACTION; a blocked judge requires the operator's answer first.", {})
@@ -363,6 +370,7 @@ def checkpoint(store, assignments, data, at, judge_agent):
         # evidence (rules/stateful-artifacts.md Migration Policy).
         if prior.get("schema_version", OPERATOR_CHECKPOINT_VERSION) < OPERATOR_CHECKPOINT_VERSION:
             compared -= {"requested_by"}
+            record.pop("requested_by", None)
         if any(prior.get(key) != record.get(key) for key in compared):
             raise UsageError("Checkpoint identity already describes different evidence; record a new checkpoint without rewriting the old one.", {})
         return prior
@@ -379,28 +387,22 @@ def investigated_after(assignments, row, task, developer_index):
 
 
 def require_investigation_before_judge(store, assignments, task, investigations):
-    """Refuse a judge dispatch at an exhausted allowance the seat cannot answer.
+    """Refuse a judge dispatch at an exhausted allowance with no assessment.
 
     The judge rules on the investigator's causal assessment (#408), so the
     expensive seat is never spent before that assessment exists. A judge
     dispatched for an ordinary dispute is untouched: the gate applies only
     while the task sits at an exhausted allowance with no unspent bound.
 
-    A task whose diagnoses reached `stop` with no plan authorized over it is
-    refused outright. `stop` ends implementation, the ladder is spent, and the
-    one operator-requested ruling a checkpoint may cite is bounded per task --
-    so there is nothing this dispatch could record, and the bound is better
-    read before the round than after its report exists (#400). The operator
-    overrides a `stop` by authorizing a plan over it
-    (`rules/review-severity.md` Judge-Accepted Defect Carve-Out), and an
-    authorized correction is ordinary work the judge serves as it serves any
-    other.
+    A `stop` diagnosis is NOT read here. `stop` ends implementation and the
+    diagnosis ladder; it does not end adjudication, which the judge still owes
+    a contested reviewer or tester verdict, a lead override, or a disputed bot
+    finding during the release of the clean scope
+    (`rules/agent-team-operation.md` Judge Seat). This gate sees no mode, so it
+    cannot refuse the one without refusing the other (#400).
     """
     if not task or task not in store["tasks"]:
         return None
-    stopped = any(row["remedy"] == "stop" for row in diagnoses_for(store, task))
-    if stopped and not any(row["task"] == task for row in active_plans(store)):
-        raise UsageError("Task {} is diagnosed `stop` with no plan authorized over it: implementation has ended and its one operator-requested ruling is spent, so a judge round records nothing. Ship what is clean and track the remainder, or record the operator's plan over this remedy first.".format(task), {})
     count = confirmed_fix(assignments, task)
     if count < DEFAULT_FIX_LIMIT:
         return None

@@ -11,13 +11,16 @@
     called the ruling "operator-requested" while holding nothing of the
     request. The checkpoint record bumps to version 3 for the added field;
     version 2 stays a valid shape for rows written before it, version-1 rows
-    migrate into 2, and no older row has a receipt invented for it.
-  - A task diagnosed `stop` with no plan authorized over it refuses a judge
-    dispatch outright. The bound was read only when the checkpoint was
-    written — after the seat had been planned, started and had produced its
-    report. An operator plan over the `stop` (`rules/review-severity.md`
-    Judge-Accepted Defect Carve-Out) is ordinary work the judge still
-    serves.
+    migrate into 2, and no older row has a receipt invented for it. The
+    receipt is required of new records alone, so replaying an older row's
+    original payload stays idempotent.
+  - The pre-dispatch bound the issue asked for is NOT shipped. A `stop`
+    diagnosis ends implementation and the diagnosis ladder, never
+    adjudication, and `require_investigation_before_judge` sees no judge
+    mode — refusing there would refuse a contested verdict's ruling during
+    the release of the clean scope. Reading the bound before the round needs
+    a declared mode at plan time; tracked as a follow-up. The checkpoint
+    recording still refuses a second cited ruling.
   - The read boundary enforces one cited ruling per task. It checked each
     checkpoint alone, so a hand-edited ledger holding two for one task
     validated.

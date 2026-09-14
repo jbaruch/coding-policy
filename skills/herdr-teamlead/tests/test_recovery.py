@@ -390,20 +390,13 @@ class RecoveryTests(unittest.TestCase):
         index = self.consult_investigator("2026-02-03T09:30:00+00:00", "2026-02-03T09:45:00+00:00")
         self.assertIsNone(require_investigation_before_judge(self.store, self.history, TASK, self.investigated(index=index)))
 
-    def test_a_stopped_task_refuses_the_judge_round_before_it_is_dispatched(self):
-        # coding-policy#400: the bound was enforced only when the checkpoint
-        # was written — after the seat had been planned, started and had
-        # produced a report. `stop` ends implementation and spends the ladder,
-        # so nothing a further judge round produces can be recorded.
+    def test_a_stopped_task_still_reaches_the_judge_for_an_adjudication(self):
+        # coding-policy#400: a pre-dispatch refusal was considered for a
+        # `stop`ped task and dropped. `stop` ends implementation and the
+        # diagnosis ladder, never adjudication — this gate sees no judge mode,
+        # so refusing here would refuse a contested verdict's ruling too.
         self.seed_checkpoint()
         self.run_diagnosis(self.diagnosis("diag-stop", "stop", None), "judge")
-        with self.assertRaisesRegex(UsageError, "diagnosed `stop`"):
-            require_investigation_before_judge(self.store, self.history, TASK, self.investigated())
-        # The operator overrides a `stop` by authorizing a plan over it
-        # (rules/review-severity.md Judge-Accepted Defect Carve-Out); the
-        # authorized correction is ordinary work the judge still serves.
-        authorize_plan(self.store, self.history, {"id": "over-stop", "task": TASK, "checkpoint": "checkpoint-5",
-            "scope": WORK["scope"], "allowed_paths": ["src/*"], "additional_fixes": 2, "authorization": AUTH}, AT)
         self.assertIsNone(require_investigation_before_judge(self.store, self.history, TASK, self.investigated()))
 
     def test_a_diagnosis_rules_on_a_prepared_causal_assessment(self):
@@ -632,6 +625,21 @@ class RecoveryTests(unittest.TestCase):
         del prior["judge_evidence"]
         with self.assertRaisesRegex(UsageError, "missing the ruling evidence"):
             migrate_store(self.store)
+
+    def test_replaying_a_legacy_checkpoint_with_its_original_payload_returns_it(self):
+        # coding-policy#400: the receipt is required of NEW records. An older
+        # row was written before the field existed, so re-running its original
+        # request is an already-processed one, not a missing receipt
+        # (rules/file-hygiene.md Idempotency).
+        prior = self.seed_checkpoint()
+        prior["schema_version"] = 2
+        prior.pop("requested_by", None)
+        legacy = {key: value for key, value in self.replay_data().items() if key != "requested_by"}
+        replay = checkpoint(self.store, self.history, legacy, AT, "judge")
+        self.assertIs(replay, prior)
+        self.assertNotIn("requested_by", replay)
+        self.assertEqual(len(self.store["checkpoints"]), 1)
+        validate_store(self.store, self.history)
 
     def test_replaying_a_migrated_checkpoint_returns_it(self):
         # The row outlives the writer's version: re-running an already-recorded
