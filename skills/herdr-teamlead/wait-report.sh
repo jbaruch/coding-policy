@@ -829,6 +829,10 @@ main() {
       if (( once_rc == 2 )); then return 2; fi
       if (( once_rc == 0 )); then
         once_stall="$(classify_worktree "$WORKTREE" "$BASE")"
+        if [[ -z "$once_stall" ]]; then
+          warn "the stall classifier produced no output for worktree '${WORKTREE}' — reporting the stall unclassified"
+          once_stall='{"class": "unknown", "evidence": {"worktree": null, "readable": false, "error": "classifier produced no output"}}'
+        fi
         emit "$state" false "$elapsed" "" "$once_stall"
         warn "${AGENT} stalled: no report, worker reads ${state}, and the ${TEAMLEAD_WAIT_BUDGET_SEC}s budget from ${SINCE} is spent — read the pane with \`${HERDR_BIN} agent read ${AGENT} --source visible\`, record a user-attention obligation, and preserve any partial work as evidence; never commit it on the strength of the tree building"
         return 1
@@ -846,6 +850,10 @@ main() {
       if (( srr == 0 )); then
         stalled=1
         stall="$(classify_worktree "$WORKTREE" "$BASE")"
+        if [[ -z "$stall" ]]; then
+          warn "the stall classifier produced no output for worktree '${WORKTREE}' — reporting the stall unclassified"
+          stall='{"class": "unknown", "evidence": {"worktree": null, "readable": false, "error": "classifier produced no output"}}'
+        fi
       fi
       emit "$state" false "$elapsed" "" "$stall"
       if (( stalled )); then

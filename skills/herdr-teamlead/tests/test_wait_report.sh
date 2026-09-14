@@ -731,13 +731,13 @@ ${base}"
   # A clean tree produced nothing: the dispatch is retryable.
   stall_run "$stall_wt" --base "$stall_base"
   if [[ $RC -eq 1 ]] && printf '%s' "$OUT" | jq -e '.stall.class == "no_work" and .stall.evidence.dispatch_commits == 0' >/dev/null; then
-    pass; else fail "clean worktree: expected no_work, got RC=$RC OUT=$OUT"; fi
+    pass; else fail "clean worktree: expected no_work, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
 
   # The same tree with no base cannot claim no_work: it could be a worker that
   # already pushed its commits and then stopped without reporting.
   stall_run "$stall_wt"
   if [[ $RC -eq 1 ]] && printf '%s' "$OUT" | jq -e '.stall.class == "unknown" and .stall.evidence.base == null' >/dev/null; then
-    pass; else fail "clean worktree without a base: expected unknown, got RC=$RC OUT=$OUT"; fi
+    pass; else fail "clean worktree without a base: expected unknown, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
 
   # Staged work the worker never committed is partial work, preserved as
   # evidence — never adopted because the tree looks finished.
@@ -745,7 +745,7 @@ ${base}"
   git -C "$stall_wt" add f || die "git add failed"
   stall_run "$stall_wt"
   if [[ $RC -eq 1 ]] && printf '%s' "$OUT" | jq -e '.stall.class == "partial_work" and .stall.evidence.staged == 1' >/dev/null; then
-    pass; else fail "staged worktree: expected partial_work, got RC=$RC OUT=$OUT"; fi
+    pass; else fail "staged worktree: expected partial_work, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
   if printf '%s' "$ERRTEXT" | grep -q "never commit it"; then
     pass; else fail "a stall warns against adopting partial work: ERR=$ERRTEXT"; fi
 
@@ -754,13 +754,13 @@ ${base}"
   : > "$stall_wt/.git/MERGE_HEAD" || die "merge marker failed"
   stall_run "$stall_wt"
   if [[ $RC -eq 1 ]] && printf '%s' "$OUT" | jq -e '.stall.class == "partial_work" and .stall.evidence.mid_operation == true' >/dev/null; then
-    pass; else fail "mid-merge worktree: expected partial_work, got RC=$RC OUT=$OUT"; fi
+    pass; else fail "mid-merge worktree: expected partial_work, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
   rm -f "$stall_wt/.git/MERGE_HEAD" || die "merge marker cleanup failed"
 
   # Committed and unpushed is completed work with a failed transport.
   stall_run "$stall_wt" --base "$stall_base"
   if [[ $RC -eq 1 ]] && printf '%s' "$OUT" | jq -e '.stall.class == "unpushed_commits" and .stall.evidence.unpushed_commits >= 1' >/dev/null; then
-    pass; else fail "committed worktree: expected unpushed_commits, got RC=$RC OUT=$OUT"; fi
+    pass; else fail "committed worktree: expected unpushed_commits, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
 
   # Pushed and unreported: the transport succeeded and the report did not, so
   # the work is recovery evidence, never a retryable dispatch.
@@ -768,12 +768,12 @@ ${base}"
   git -C "$stall_wt" fetch -q origin || die "git fetch failed"
   stall_run "$stall_wt" --base "$stall_base"
   if [[ $RC -eq 1 ]] && printf '%s' "$OUT" | jq -e '.stall.class == "pushed_commits" and .stall.evidence.unpushed_commits == 0 and .stall.evidence.dispatch_commits >= 1' >/dev/null; then
-    pass; else fail "pushed worktree: expected pushed_commits, got RC=$RC OUT=$OUT"; fi
+    pass; else fail "pushed worktree: expected pushed_commits, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
 
   # An unreadable worktree loses the classification, never the stall.
   stall_run "$TMP/not-a-worktree" --base "$stall_base"
   if [[ $RC -eq 1 ]] && printf '%s' "$OUT" | jq -e '.stall.class == "unknown"' >/dev/null; then
-    pass; else fail "unreadable worktree: expected unknown, got RC=$RC OUT=$OUT"; fi
+    pass; else fail "unreadable worktree: expected unknown, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
 
   # A checkpoint reaches the stall too, measured from the dispatch's own send
   # time — without one, repeated checkpoints reset the clock forever (#418).
