@@ -25,6 +25,13 @@
   a request-triggered one only once requested, and only the latter is
   diagnosed as unrequested rather than waited out.
 
+  `watch-pr-reviews.sh` reads the field too: a Copilot lane with no verdict at
+  this head and no pending request ends the watch at once with
+  `review_unrequested` and the command that would fix it, rather than spending
+  the budget proving nothing is coming. A lane that WAS requested still waits,
+  and a snapshot from an older poller — no `requested` field at all — waits as
+  before.
+
   `rules/agent-team-operation.md` Review Before PR points the developer stage
   at the snapshot on an open PR, and at the branch CI its push triggered
   before a PR exists — `poll-pr-reviews.sh` takes a PR number, and the

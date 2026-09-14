@@ -377,7 +377,8 @@ description: Running a multi-agent team — task-based specialist composition, c
 - Record legacy reviewer responsibilities as unknown until evidence establishes their contribution
 - Before a PR exists, the developer's own evidence is the branch CI its push triggered
 - On an open PR, the developer reads that evidence with `skills/release/poll-pr-reviews.sh`, never the pre-merge watch
-- A request-triggered reviewer the developer's assignment cannot request is reported unrequested, never waited on
+- The developer reports each reviewer lane's observed state, including whether a request is pending, whoever asked for it
+- The developer never waits on a request-triggered review its own assignment has no scope to request
 - The developer pushes the branch and stops
 - A shared GitHub account posts internal reviews as COMMENT reviews
 - The lead enforces the blocking findings a COMMENT review carries

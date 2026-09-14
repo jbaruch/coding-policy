@@ -312,9 +312,9 @@ main() {
   requested_logins=$(fetch_requested_logins "$owner" "$repo" "$pr_number") \
     || { echo "error: failed to fetch pending review requests for ${owner}/${repo}#${pr_number} — run 'gh auth status' to verify auth, then retry 'gh api repos/${owner}/${repo}/pulls/${pr_number}/requested_reviewers'" >&2; exit 1; }
   codex_requested=$(requested_among "$requested_logins" "${CODEX_REVIEW_LOGINS[@]}") \
-    || { echo "error: failed to resolve the policy reviewer's pending request" >&2; exit 1; }
+    || { echo "error: could not match the policy reviewer against the pending review requests on ${owner}/${repo}#${pr_number} — inspect the list with 'gh api graphql' for that PR's reviewRequests, then re-run this snapshot once it returns an array of reviewer logins" >&2; exit 1; }
   copilot_requested=$(requested_among "$requested_logins" "$COPILOT_REVIEW_LOGIN") \
-    || { echo "error: failed to resolve Copilot's pending request" >&2; exit 1; }
+    || { echo "error: could not match Copilot against the pending review requests on ${owner}/${repo}#${pr_number} — inspect the list with 'gh api graphql' for that PR's reviewRequests, then re-run this snapshot once it returns an array of reviewer logins" >&2; exit 1; }
 
   local codex_review copilot_review codex_comments copilot_comments
   codex_review=$(latest_review_by   "$owner" "$repo" "$pr_number" "${CODEX_REVIEW_LOGINS[@]}") \
