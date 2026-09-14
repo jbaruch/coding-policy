@@ -193,21 +193,38 @@ branch_tip() { # <shared> <branch>
 # The ancestry proof is the safety `branch -d` would otherwise re-derive
 # against the local default, which may lag origin's.
 delete_branch() { # <shared> <branch> <tip>  -> 0 deleted, 1 moved, 2 git refused
-  local rc=0 now
+  local rc=0 now refusal
   git -C "$1" update-ref -d "refs/heads/$2" "$3" 2>"$ERRFILE" || rc=$?
   if (( rc != 0 )); then
-    # Distinguish the race from a genuine refusal by re-reading the tip.
+    # Hold git's own words: the re-read below truncates ERRFILE, and a
+    # refusal the caller reports without them is undiagnosable.
+    refusal="$(tr '\n' ' ' < "$ERRFILE")"
     if now="$(branch_tip "$1" "$2")" && [[ "$now" != "$3" ]]; then
       return 1
     fi
+    printf '%s' "$refusal" > "$ERRFILE"
     return 2
   fi
   # `update-ref` leaves the branch config `branch -D` would have removed.
+  # Whether there is any is read first: `--remove-section` exits 128 for a
+  # missing section and for a malformed config alike, so the exit code alone
+  # cannot tell an expected non-result from a failure.
+  local keys=""
+  rc=0
+  keys="$(git -C "$1" config --get-regexp '^branch\.' 2>"$ERRFILE")" || rc=$?
+  case "$rc" in
+    0) ;;
+    1) return 0 ;;  # no branch.* config at all
+    *) warn "\`git config --get-regexp branch.\` failed (exit ${rc}): $(tr '\n' ' ' < "$ERRFILE") — ${2} is deleted; check its config by hand"
+       return 0 ;;
+  esac
+  if ! printf '%s\n' "$keys" | grep -qF -- "branch.$2."; then
+    return 0
+  fi
   rc=0
   git -C "$1" config --remove-section "branch.$2" >/dev/null 2>"$ERRFILE" || rc=$?
-  # 128 is "no such section": a branch that never tracked anything.
-  if (( rc != 0 && rc != 128 )); then
-    warn "\`git config --remove-section branch.$2\` failed (exit ${rc}): $(tr '\n' ' ' < "$ERRFILE") — the branch is deleted; remove its stale config by hand"
+  if (( rc != 0 )); then
+    warn "\`git config --remove-section branch.$2\` failed (exit ${rc}): $(tr '\n' ' ' < "$ERRFILE") — ${2} is deleted; remove its stale config by hand"
   fi
   return 0
 }

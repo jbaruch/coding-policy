@@ -43,6 +43,7 @@
 #                             deletion then fails.
 #  23. Deferred prunable   -> a prunable branch survives a skipped prune.
 #  24. Newline path        -> a record is not split by a newline in the path.
+#  25. Branch config       -> a deleted branch's branch.<name> config goes too.
 #
 # Run: bash skills/herdr-teamlead/tests/test_prune_worktrees.sh
 set -uo pipefail
@@ -313,7 +314,7 @@ SHIM
   RUN_SEQ=$((RUN_SEQ+1))
   OUT="$(env WORKTREE_ROOT="$ROOT" PATH="$TMP/shim22:$PATH" bash "$SCRIPT" "$SHARED" 2>"$TMP/err.$RUN_SEQ")"; RC=$?; ERRTEXT="$(cat "$TMP/err.$RUN_SEQ")"
   echo "22. the JSON reports the removal that happened even when the branch deletion fails"
-  if (( RC == 2 )) && [[ "$(removed_paths)" == *"$ROOT/twentytwo-halfway"* ]] && [[ ! -e "$ROOT/twentytwo-halfway" ]] && [[ "$OUT" == *'"failed": [{'*"deleting"* ]]; then pass; else fail "rc=$RC out=$OUT err=$ERRTEXT"; fi
+  if (( RC == 2 )) && [[ "$(removed_paths)" == *"$ROOT/twentytwo-halfway"* ]] && [[ ! -e "$ROOT/twentytwo-halfway" ]] && [[ "$OUT" == *'"failed": [{'*"deleting"* ]] && [[ "$OUT" == *"fixture refuses the deletion"* ]]; then pass; else fail "rc=$RC out=$OUT err=$ERRTEXT"; fi
 
   # --- 23. a prunable branch is deferred when the metadata prune is skipped.
   if [[ "$(id -u)" != 0 ]]; then
@@ -336,6 +337,15 @@ SHIM
   run "$SHARED"
   echo "24. a newline in a worktree path does not split its record"
   if (( RC == 0 )) && [[ "$OUT" != *'"path": "'"$ROOT"'/twentyfour-a"'* ]] && ! has_branch "$SHARED" review/newline; then pass; else fail "rc=$RC out=$OUT err=$ERRTEXT"; fi
+
+  # --- 25. a tracked branch's config goes with it.
+  mk_repo twentyfive
+  git -C "$SHARED" worktree add -q --track -b review/tracked "$ROOT/twentyfive-tracked" origin/main 2>/dev/null \
+    || die "fixture could not create a tracking worktree"
+  git -C "$SHARED" config --get-regexp '^branch\.review/tracked\.' >/dev/null || die "fixture branch has no tracking config"
+  run "$SHARED"
+  echo "25. a deleted branch leaves no stale branch.<name> config behind"
+  if (( RC == 0 )) && [[ "$(removed_paths)" == *"$ROOT/twentyfive-tracked"* ]] && ! git -C "$SHARED" config --get-regexp '^branch\.review/tracked\.' >/dev/null 2>&1; then pass; else fail "rc=$RC out=$OUT err=$ERRTEXT"; fi
 
   # --- 14. usage / not a repo.
   run
