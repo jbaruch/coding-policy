@@ -243,6 +243,19 @@ class RecoveryTests(unittest.TestCase):
         with self.assertRaisesRegex(UsageError, "names its remedy and what it means"):
             self.run_diagnosis({**self.diagnosis("diag-1", "continue", 2), "judge_report": str(bare)}, "judge")
 
+    def test_an_adjudication_report_is_not_a_diagnosis(self):
+        # coding-policy#407: RULING and ACTION belong to adjudication; a mixed
+        # report could carry a blocked ruling and still grant attempts.
+        self.seed_checkpoint()
+        mixed = self.root / "mixed.md"
+        mixed.write_text("RULING: blocked — which boundary ships?\nACTION: ask the operator\n"
+                         "DIAGNOSIS: flat find-rate\nREMEDY: continue — two more rounds\n"
+                         "BOUND: 2\nEVIDENCE: rounds 1-5\nUNVERIFIED: none\n")
+        with self.assertRaisesRegex(UsageError, "adjudication's RULING or ACTION"):
+            self.run_diagnosis({**self.diagnosis("diag-1", "continue", 2), "judge_report": str(mixed)})
+        self.assertEqual(self.store["diagnoses"], [])
+        self.assertEqual([row for row in self.store["plans"]], [])
+
     def test_corrupt_diagnoses_refuse_the_ledger(self):
         self.seed_checkpoint()
         self.run_diagnosis(self.diagnosis("diag-1", "continue", 2), "judge")

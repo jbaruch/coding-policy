@@ -311,7 +311,9 @@ rule in its place.
 
 The ruling or remedy binds the round the moment the lead reads it. Only the
 operator overrides one; record the override and why in the round log. No
-ruling waits on an operator for the task to reach a terminal state.
+diagnosis remedy waits on an operator for the task to reach a terminal state.
+A `blocked` adjudication is the one ruling that does: it stops the round and
+sends its named question to the operator, as it always has.
 
 The judge worker is declared in the main `config.json` and is measured and
 planned like every other seat, but its seat is pinned rather than ranked: the

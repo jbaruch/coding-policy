@@ -72,7 +72,7 @@ class RecoveryCommandTests(fixture.CliCase):
         ])
         return client
 
-    def seed_cap(self, diagnosis_only=False):
+    def seed_cap(self, diagnosis_only=False, skip_diagnosis=False):
         state = empty_state()
         for fix in (None, 1, 2, 3, 4, 5):
             add_assignment(state, "2026-02-03T09:00:0{}+00:00".format(fix or 0), "developer", "grok", task=TASK, fix_round=fix)
@@ -93,6 +93,8 @@ class RecoveryCommandTests(fixture.CliCase):
         diagnosis = self.tmp / "diagnosis.md"
         diagnosis.write_text("DIAGNOSIS: the find-rate held flat\nREMEDY: continue — two more rounds\n"
                              "BOUND: 1\nEVIDENCE: rounds 1-5\nUNVERIFIED: none\n")
+        if skip_diagnosis:
+            return
         code, _, err = self.owner("diagnose", {"id": "diag-cap", "task": TASK, "checkpoint": "cap-5",
             "judge_report": str(diagnosis), "scope": WORK["scope"], "allowed_paths": ["src/*"]})
         self.assertEqual(code, 0, err)
@@ -165,6 +167,31 @@ class RecoveryCommandTests(fixture.CliCase):
             "judge_report": record["judge_evidence"]["path"], "scope": WORK["scope"], "allowed_paths": ["src/*"]})
         self.assertEqual(code, 1)
         self.assertIn("unspent attempts under plan diag-cap:plan", err)
+
+    def test_a_bound_lead_must_cite_the_enrolled_report(self):
+        # coding-policy#407: every team round is supervised, so the public
+        # command resolves the enrollment and refuses anything else.
+        import os
+        from teamlead import supervision
+        self.seed_cap(diagnosis_only=True, skip_diagnosis=True)
+        os.environ.setdefault("XDG_STATE_HOME", str(self.tmp / "xdg"))
+        who = supervision.identity("lead-native", str(self.tmp), "fixture", pane_id="lead-pane")
+        supervision.bind(self.state, who, AT, root=self.tmp / "supervision-bindings")
+        delivered = self.tmp / "delivered-diagnosis.md"
+        delivered.write_text("DIAGNOSIS: flat find-rate\nREMEDY: continue — two more rounds\n"
+                             "BOUND: 2\nEVIDENCE: rounds 1-5\nUNVERIFIED: none\n")
+        supervision.enroll(self.state, {"id": "judge-dispatch", "agent": "claude", "task": TASK,
+                                        "report": str(delivered), "pane_id": None, "native_session": None}, AT)
+        other = self.tmp / "elsewhere.md"
+        other.write_text(delivered.read_text())
+        code, _, err = self.owner("diagnose", {"id": "diag-wrong", "task": TASK, "checkpoint": "cap-5",
+            "judge_report": str(other), "scope": WORK["scope"], "allowed_paths": ["src/*"]})
+        self.assertEqual(code, 1)
+        self.assertIn("supervision enrolled", err)
+        code, out, err = self.owner("diagnose", {"id": "diag-bound", "task": TASK, "checkpoint": "cap-5",
+            "judge_report": str(delivered), "scope": WORK["scope"], "allowed_paths": ["src/*"]})
+        self.assertEqual(code, 0, err)
+        self.assertEqual(json.loads(out)["remedy"], "continue")
 
     def test_diagnose_refuses_a_report_the_pinned_judge_did_not_deliver(self):
         self.seed_cap(diagnosis_only=True)

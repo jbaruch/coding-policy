@@ -394,6 +394,8 @@ def diagnose(store, assignments, data, at, judge_agent, enrolled_report, supervi
             or not re.search(r"^EVIDENCE: \S", body, re.MULTILINE)
             or not re.search(r"^UNVERIFIED: \S", body, re.MULTILINE)):
         raise UsageError("The judge report must carry DIAGNOSIS, REMEDY ({}), BOUND, EVIDENCE and UNVERIFIED.".format(" | ".join(DIAGNOSIS_LADDER)), {})
+    if re.search(r"^(?:RULING|ACTION):", body, re.MULTILINE):
+        raise UsageError("This report carries an adjudication's RULING or ACTION; a diagnosis carries neither. Dispatch the diagnosis brief and cite its report.", {})
     remedy = remedy_line.group(1)
     if not remedy_line.group(2).strip(" \t-—"):
         raise UsageError("REMEDY names its remedy and what it means: the rounds for continue, the structural change for restructure, what ships and what is tracked for stop.", {})
