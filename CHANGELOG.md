@@ -1,5 +1,29 @@
 # Changelog
 
+### Added
+
+- **A developer reads its own gate evidence instead of entering the pre-merge
+  wait (#369).** A developer finished its source work, pushed, and got green
+  CI plus the required policy approval — then called `watch-pr-reviews.sh` to
+  collect the result. No Copilot review had been requested, and requesting one
+  was outside that assignment's GitHub write scope, so the watcher waited on a
+  lane nobody had asked for until the lead stopped it.
+
+  `poll-pr-reviews.sh` now reports `requested` per reviewer: whether a review
+  request for that login is still pending on the PR. It separates a lane still
+  owed an answer from one nobody asked for, which a bare `state: "none"`
+  conflates. The probe reads GraphQL, not the REST `requested_reviewers`
+  endpoint, which omits bot reviewers entirely (#276) and would report every
+  bot lane as never requested.
+
+  `rules/ci-safety.md` Always Watch CI now says the pre-merge watch belongs to
+  the merge decision: a stage that does not merge takes a single snapshot, a
+  lane nobody requested is diagnosed and named rather than waited out, and no
+  role waits on a review it has no scope to request.
+  `rules/agent-team-operation.md` Review Before PR points the developer stage
+  at the snapshot. The release skill's deliberate request-then-watch sequence
+  is unchanged.
+
 ## 0.3.222 — 2026-09-14
 
 ### Changed

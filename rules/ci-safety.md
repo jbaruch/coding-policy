@@ -83,6 +83,11 @@ alwaysApply: true
 - Do not promote a reviewer's check to a required branch-protection gate while a fail-open path exists
 - The pre-merge review watch runs ONLY through `skills/release/watch-pr-reviews.sh` (see `skills/release/SKILL.md` Step 5) — never a hand-rolled poll loop
 - `watch-pr-reviews.sh` is the sole correct resolver of the gate fields above
+- The pre-merge watch is the merge decision's, never a reader's: a stage that does not merge takes a snapshot instead
+- Reading a branch's current gate evidence without merging runs `skills/release/poll-pr-reviews.sh` once, never the blocking watch
+- The snapshot's `requested` field separates a lane still owed an answer from one nobody asked for
+- A lane nobody requested is diagnosed and named, never waited out
+- Never wait on a review the waiting role has no scope to request
 - The gating reviewer's bot login varies by repository — resolved inside `poll-pr-reviews.sh`
 - A non-gating check that reds and surfaces as the watcher's `ci_failure` result is not a reason to hand-roll
 - On a `ci_failure` result, read the returned snapshot and act on the check that actually failed

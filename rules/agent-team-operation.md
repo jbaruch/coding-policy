@@ -375,6 +375,9 @@ description: Running a multi-agent team — task-based specialist composition, c
 - A role, model or session change never erases contribution history
 - Treat unassessed possible contributions as unresolved independence evidence
 - Record legacy reviewer responsibilities as unknown until evidence establishes their contribution
+- The developer reads its own current-tip evidence with `skills/release/poll-pr-reviews.sh`, never the pre-merge watch
+- That read covers the CI its push triggered and the policy review that follows it
+- A reviewer lane the developer's assignment cannot request is reported unrequested, never waited on
 - The developer pushes the branch and stops
 - A shared GitHub account posts internal reviews as COMMENT reviews
 - The lead enforces the blocking findings a COMMENT review carries

@@ -19,11 +19,11 @@
 #       "codex":   {"state": "APPROVED|CHANGES_REQUESTED|COMMENTED|none",
 #                   "submitted_at": "ISO-8601|null", "body": "text|null",
 #                   "commit_id": "<SHA the review is bound to>|null",
-#                   "stale": bool},
+#                   "stale": bool, "requested": bool},
 #       "copilot": {"state": "APPROVED|CHANGES_REQUESTED|COMMENTED|none",
 #                   "submitted_at": "ISO-8601|null", "body": "text|null",
 #                   "commit_id": "<SHA the review is bound to>|null",
-#                   "stale": bool}
+#                   "stale": bool, "requested": bool}
 #     },
 #     "inline_comments": {"codex": N, "copilot": N},
 #     "merge_state": {"status": "CLEAN|DIRTY|BLOCKED|BEHIND|UNSTABLE|...",
@@ -40,6 +40,15 @@
 # none, stale true). Binding both symptoms to head fixes them together: a
 # stale CHANGES_REQUESTED no longer false-reds a fix no reviewer has seen, and
 # a stale COMMENTED/APPROVED no longer false-readies unreviewed code (#186).
+#
+# `requested` is true while a review request for that login is still pending on
+# the PR. It separates two states a bare `state: "none"` conflates: a lane that
+# was asked for and has not answered yet (waiting is meaningful), and one
+# nobody asked for (waiting cannot produce it, and a reader without GitHub
+# write scope cannot ask). A developer collecting its own current-tip evidence
+# reads that rather than sitting out a budget on a review no one requested
+# (#369). A delivered review clears its own request, so `requested` is false
+# once `state` is set.
 #
 # `merge_state.status == "DIRTY"` / `mergeable == "CONFLICTING"` means GitHub
 # couldn't create `refs/pull/N/merge` and silently skipped `pull_request:`
@@ -197,6 +206,41 @@ fetch_merge_state() {
     | jq -c '{status: .mergeStateStatus, mergeable: .mergeable, head_sha: .headRefOid}'
 }
 
+# Logins with a review request still pending on the PR, lowercased and with the
+# `[bot]` suffix stripped so one spelling compares against another. GitHub
+# reports a bot reviewer under either spelling depending on the surface.
+# Logins with a review request still pending on the PR, lowercased and with the
+# `[bot]` suffix stripped so one spelling compares against another. GraphQL, not
+# the REST `requested_reviewers` endpoint: that endpoint omits bot reviewers
+# entirely (#276), so every bot lane would read "never requested" there.
+fetch_requested_logins() {
+  local owner="$1" repo="$2" pr="$3"
+  gh api graphql -f query="
+    query { repository(owner: \"${owner}\", name: \"${repo}\") {
+      pullRequest(number: ${pr}) {
+        reviewRequests(first: 50) { nodes { requestedReviewer {
+          __typename
+          ... on Bot { login }
+          ... on User { login }
+          ... on Team { slug }
+        } } }
+      }
+    } }
+  " --jq '[.data.repository.pullRequest.reviewRequests.nodes[]?.requestedReviewer
+           | (.login // .slug) | select(. != null) | ascii_downcase | sub("\\[bot\\]$"; "")]' \
+    | jq -c '.'
+}
+
+# Is any of <login...> among the pending review requests?
+requested_among() { # <requested-json> <login...>
+  local requested="$1"; shift
+  local logins_json
+  logins_json=$(jq -n '$ARGS.positional' --args "$@") || return 1
+  printf '%s' "$requested" | jq --argjson logins "$logins_json" \
+    '[$logins[] | ascii_downcase | sub("\\[bot\\]$"; "")] as $want
+     | any(.[]; . as $have | $want | index($have) != null)'
+}
+
 main() {
   if [[ $# -ne 3 ]]; then
     echo "usage: $0 <owner> <repo> <pr-number>" >&2
@@ -257,6 +301,14 @@ main() {
     exit 1
   fi
 
+  local requested_logins codex_requested copilot_requested
+  requested_logins=$(fetch_requested_logins "$owner" "$repo" "$pr_number") \
+    || { echo "error: failed to fetch pending review requests for ${owner}/${repo}#${pr_number} — run 'gh auth status' to verify auth, then retry 'gh api repos/${owner}/${repo}/pulls/${pr_number}/requested_reviewers'" >&2; exit 1; }
+  codex_requested=$(requested_among "$requested_logins" "${CODEX_REVIEW_LOGINS[@]}") \
+    || { echo "error: failed to resolve the policy reviewer's pending request" >&2; exit 1; }
+  copilot_requested=$(requested_among "$requested_logins" "$COPILOT_REVIEW_LOGIN") \
+    || { echo "error: failed to resolve Copilot's pending request" >&2; exit 1; }
+
   local codex_review copilot_review codex_comments copilot_comments
   codex_review=$(latest_review_by   "$owner" "$repo" "$pr_number" "${CODEX_REVIEW_LOGINS[@]}") \
     || { echo "error: failed to fetch Codex review state" >&2; exit 1; }
@@ -265,6 +317,8 @@ main() {
   # Resolve each verdict against head — stale reviews collapse to "none".
   codex_review=$(resolve_review_against_head   "$codex_review"   "$head_sha")
   copilot_review=$(resolve_review_against_head "$copilot_review" "$head_sha")
+  codex_review=$(printf '%s' "$codex_review"     | jq --argjson r "$codex_requested"   '. + {requested: $r}')
+  copilot_review=$(printf '%s' "$copilot_review" | jq --argjson r "$copilot_requested" '. + {requested: $r}')
   codex_comments=$(toplevel_comments_by   "$owner" "$repo" "$pr_number" "${CODEX_COMMENT_LOGINS[@]}") \
     || { echo "error: failed to count Codex inline comments" >&2; exit 1; }
   copilot_comments=$(toplevel_comments_by "$owner" "$repo" "$pr_number" "${COPILOT_COMMENT_LOGINS[@]}") \
