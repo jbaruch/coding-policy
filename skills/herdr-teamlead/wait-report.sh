@@ -592,10 +592,10 @@ classify_worktree() { # <worktree-path> [base-revision]
   jq -n --arg c "$class" --arg t "$tree" --arg b "$base" --argjson m "$mid" \
         --argjson s "$staged" --argjson d "$modified" --argjson u "$untracked" \
         --argjson p "$unpushed" --argjson o "$own" \
-    '{class: $c, evidence: {worktree: $t, readable: true, mid_operation: $m,
-                            staged: $s, modified: $d, untracked: $u, unpushed_commits: $p}
-              + (if $b == "" then {base: null, dispatch_commits: null}
-                 else {base: $b, dispatch_commits: $o} end)}'
+    '{class: $c, evidence: ({worktree: $t, readable: true, mid_operation: $m,
+                             staged: $s, modified: $d, untracked: $u, unpushed_commits: $p}
+               + (if $b == "" then {base: null, dispatch_commits: null}
+                  else {base: $b, dispatch_commits: $o} end))}'
   return 0
 }
 
