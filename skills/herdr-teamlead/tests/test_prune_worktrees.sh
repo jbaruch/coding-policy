@@ -46,6 +46,7 @@
 #  25. Branch config       -> a deleted branch's branch.<name> config goes too.
 #  26. Locked and gone     -> git keeps its metadata, so its branch is kept too.
 #  27. Split record        -> an old git plus a newline path decides nothing.
+#  28. Dry-run deferral    -> a preview defers what the live run would defer.
 #
 # Run: bash skills/herdr-teamlead/tests/test_prune_worktrees.sh
 set -uo pipefail
@@ -381,6 +382,19 @@ SHIM
   plain_dir=0; [[ -d "$ROOT/twentyseven-plain" ]] && plain_dir=1
   plain_branch=0; has_branch "$SHARED" review/plain && plain_branch=1
   if (( RC == 1 )) && [[ -z "$OUT" ]] && [[ "$ERRTEXT" == *"cannot list unambiguously"* ]] && (( plain_dir )) && (( plain_branch )); then pass; else fail "rc=$RC dir=$plain_dir branch=$plain_branch out=$OUT err=$ERRTEXT"; fi
+
+  # --- 28. a dry run previews the deferral a live run would make.
+  if [[ "$(id -u)" != 0 ]]; then
+    mk_repo twentyeight
+    add_wt "$SHARED" review/previewgone "$ROOT/twentyeight-gone"
+    rm -rf "$ROOT/twentyeight-gone" || die "rm failed"
+    add_wt "$SHARED" review/sealed28 "$ROOT/twentyeight-sealed"
+    chmod 000 "$ROOT/twentyeight-sealed" || die "chmod failed"
+    run "$SHARED" --dry-run
+    chmod 755 "$ROOT/twentyeight-sealed" || die "chmod restore failed"
+    echo "28. a dry run does not promise a deletion the live run would defer"
+    if (( RC == 2 )) && [[ "$(branches_deleted)" != *review/previewgone* ]] && has_branch "$SHARED" review/previewgone; then pass; else fail "rc=$RC out=$OUT err=$ERRTEXT"; fi
+  fi
 
   # --- 14. usage / not a repo.
   run

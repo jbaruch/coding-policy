@@ -220,8 +220,7 @@ delete_branch() { # <shared> <branch> <tip>  -> 0 deleted, 1 moved, 2 git refuse
   case "$rc" in
     0) ;;
     1) return 0 ;;  # no branch.* config at all
-    *) warn "\`git config --get-regexp branch.\` failed (exit ${rc}): $(tr '\n' ' ' < "$ERRFILE") — ${2} is deleted; check its config by hand"
-       return 0 ;;
+    *) return 3 ;;
   esac
   # A here-string, not a pipeline: `grep -q` exits early and would SIGPIPE its
   # producer under pipefail. Exit 1 is "no match"; anything else is grep
@@ -231,8 +230,8 @@ delete_branch() { # <shared> <branch> <tip>  -> 0 deleted, 1 moved, 2 git refuse
   case "$rc" in
     0) ;;
     1) return 0 ;;
-    *) warn "\`grep\` failed (exit ${rc}) reading ${2}'s config — it is deleted; check its config by hand"
-       return 0 ;;
+    *) printf 'grep failed (exit %s) reading the config list\n' "$rc" > "$ERRFILE"
+       return 3 ;;
   esac
   rc=0
   git -C "$1" config --remove-section "branch.$2" >/dev/null 2>"$ERRFILE" || rc=$?
@@ -306,7 +305,7 @@ decide_worktree() { # <shared> <abs_root> <default> <dry-run 0|1> <path> <branch
   case "$rc" in
     0) ;;
     1) row failed "$branch" "$branch" "branch ${branch} moved after its ancestry check and was left alone; its worktree is already removed, so re-run to judge the new tip" ;;
-    3) row failed "$branch" "$branch" "${branch} is deleted but its branch.${branch} config could not be removed: $(tr '\n' ' ' < "$ERRFILE") — remove it by hand" ;;
+    3) row failed "$branch" "$branch" "${branch} is deleted but its branch.${branch} config could not be cleaned up: $(tr '\n' ' ' < "$ERRFILE") — check and remove it by hand" ;;
     *) row failed "$branch" "$branch" "deleting ${branch} failed after the worktree was removed: $(tr '\n' ' ' < "$ERRFILE")" ;;
   esac
   return 0
@@ -335,7 +334,7 @@ decide_branch() { # <shared> <default> <dry-run 0|1> <branch>
     0) row branch-deleted "$branch" "$branch" "" ;;
     1) row failed "$branch" "$branch" "branch ${branch} moved after its ancestry check and was left alone; re-run to judge the new tip" ;;
     3) row branch-deleted "$branch" "$branch" ""
-       row failed "$branch" "$branch" "${branch} is deleted but its branch.${branch} config could not be removed: $(tr '\n' ' ' < "$ERRFILE") — remove it by hand" ;;
+       row failed "$branch" "$branch" "${branch} is deleted but its branch.${branch} config could not be cleaned up: $(tr '\n' ' ' < "$ERRFILE") — check and remove it by hand" ;;
     *) row failed "$branch" "$branch" "deleting ${branch} failed: $(tr '\n' ' ' < "$ERRFILE")" ;;
   esac
   return 0
@@ -534,10 +533,13 @@ main() {
   # so it is released to the branch pass only when the prune ran clean. A dry
   # run previews the live outcome, where the prune does run (#405).
   local released=1
+  # An unenterable worktree stops the prune in a live run, so a dry run defers
+  # the same branches: a preview that promises a deletion the live run would
+  # not make is worse than no preview.
+  if (( unenterable )); then released=0; fi
   if (( ! dry )); then
     if (( unenterable )); then
       warn "skipping \`git worktree prune\`: a worktree could not be entered; restore access and re-run"
-      released=0
     elif ! git -C "$shared" worktree prune --expire now 2>"$ERRFILE"; then
       # Recorded, not merely warned: the run continues, the exit stays non-zero.
       row failed "git worktree prune" "" "failed: $(tr '\n' ' ' < "$ERRFILE") — stale metadata may remain"
