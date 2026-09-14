@@ -279,7 +279,7 @@ description: Running a multi-agent team — task-based specialist composition, c
 - A worktree mid-operation, staged, modified or holding untracked files is recoverable partial work, preserved as evidence
 - A clean worktree with no commits of its own produced nothing; the dispatch is a `not_sent`-equivalent and may be retried
 - Commits present and unpushed are completed work with a failed transport, recovered through `skills/herdr-teamlead/references/dispatch-recovery.md`
-- A stalled worker's output is unreviewed: it stopped before reporting what it did and why
+- A stalled worker's output is unreviewed
 - Re-dispatch that work with the observed state described, or discard it
 - Never commit a stalled worker's partial work on the strength of the tree building or the conflict count reaching zero
 - A stall records a user-attention obligation through `skills/herdr-teamlead/references/attention.md`

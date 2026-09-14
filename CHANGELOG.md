@@ -17,7 +17,11 @@
   "$report" ]` loop could not terminate on a stall) and keeps the interval and
   budget script-owned.
 
-  `wait-report.sh` takes `--worktree` and classifies what a stalled worker
+  `wait-report.sh` takes `--since`, this dispatch's recorded send time, so a
+  checkpoint (`--once`) reaches the same script-owned budget: a checkpoint
+  carries no elapsed time of its own, and repeated rechecks through the
+  supervision loop the skill actually runs would otherwise restart the clock
+  forever. It also takes `--worktree` and classifies what a stalled worker
   left: `partial_work` (mid-operation, staged, modified or untracked),
   `unpushed_commits` (the existing dispatch-recovery path), `no_work` (a
   retryable `not_sent`-equivalent), or `unknown`. The classification never
@@ -25,7 +29,10 @@
   and built clean, and one of them had taken the wrong side of a merge on
   documentation `main` had already corrected — so partial work is preserved as
   evidence and re-dispatched with the observed state described, never
-  committed because the tree looks finished.
+  committed because the tree looks finished. A git read that fails inside the
+  classifier is `unknown` rather than a quiet zero — an unreadable history
+  would otherwise classify a worker's committed work as a retryable
+  `no_work`.
 
 - **A developer reads its own gate evidence instead of entering the pre-merge
   wait (#369).** A developer finished its source work, pushed, and got green

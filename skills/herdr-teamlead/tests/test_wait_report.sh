@@ -757,6 +757,38 @@ ${base}"
   if [[ $RC -eq 1 ]] && printf '%s' "$OUT" | jq -e '.stall.class == "unknown"' >/dev/null; then
     pass; else fail "unreadable worktree: expected unknown, got RC=$RC OUT=$OUT"; fi
 
+  # A checkpoint reaches the stall too, measured from the dispatch's own send
+  # time — without one, repeated checkpoints reset the clock forever (#418).
+  CHECK_ONCE=1
+  RUN_SEQ=$((RUN_SEQ+1))
+  OUT="$(env HERDR_ENV=1 HERDR_BIN="$FAKE" TEAMLEAD_WAIT_INTERVAL_SEC=0 TEAMLEAD_WAIT_BUDGET_SEC=600 \
+    TEAMLEAD_BLOCKED_CONFIRM_SEC=0 TEAMLEAD_REFUSAL_CONFIRM_SEC=0 FAKE_PANE_TEXT="nothing here" \
+    FAKE_MARKER=timeout FAKE_STATUS=idle \
+    bash "$SCRIPT" --once --worktree "$stall_wt" --since "2020-01-01T00:00:00+00:00" \
+    worker "$missing" </dev/null 2>"$TMP/once-stall")"; RC=$?
+  if [[ $RC -eq 1 ]] && printf '%s' "$OUT" | jq -e '.stall.class == "unpushed_commits" and (.reason // "") != "checkpoint_pending"' >/dev/null; then
+    pass; else fail "a checkpoint past the budget reports the stall: RC=$RC OUT=$OUT"; fi
+
+  # Inside the budget the same checkpoint is still pending, not a stall.
+  RUN_SEQ=$((RUN_SEQ+1))
+  OUT="$(env HERDR_ENV=1 HERDR_BIN="$FAKE" TEAMLEAD_WAIT_INTERVAL_SEC=0 TEAMLEAD_WAIT_BUDGET_SEC=600 \
+    TEAMLEAD_BLOCKED_CONFIRM_SEC=0 TEAMLEAD_REFUSAL_CONFIRM_SEC=0 FAKE_PANE_TEXT="nothing here" \
+    FAKE_MARKER=timeout FAKE_STATUS=idle \
+    bash "$SCRIPT" --once --worktree "$stall_wt" --since "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    worker "$missing" </dev/null 2>"$TMP/once-fresh")"; RC=$?
+  if [[ $RC -eq 1 ]] && printf '%s' "$OUT" | jq -e '.reason == "checkpoint_pending" and (has("stall") | not)' >/dev/null; then
+    pass; else fail "a checkpoint inside the budget stays pending: RC=$RC OUT=$OUT"; fi
+
+  # An unreadable --since is a usage/tool failure, never a silent stall.
+  RUN_SEQ=$((RUN_SEQ+1))
+  OUT="$(env HERDR_ENV=1 HERDR_BIN="$FAKE" TEAMLEAD_WAIT_INTERVAL_SEC=0 TEAMLEAD_WAIT_BUDGET_SEC=0 \
+    TEAMLEAD_BLOCKED_CONFIRM_SEC=0 TEAMLEAD_REFUSAL_CONFIRM_SEC=0 FAKE_PANE_TEXT="nothing here" \
+    FAKE_MARKER=timeout FAKE_STATUS=idle \
+    bash "$SCRIPT" --once --since "not-a-timestamp" worker "$missing" </dev/null 2>"$TMP/once-bad-since")"; RC=$?
+  if [[ $RC -eq 2 && -z "$OUT" ]] && grep -q "ISO-8601" "$TMP/once-bad-since"; then
+    pass; else fail "an unreadable --since is exit 2: RC=$RC OUT=$OUT"; fi
+  CHECK_ONCE=0
+
   # A worker that delivers normally is unchanged by any of this.
   RUN_SEQ=$((RUN_SEQ+1))
   OUT="$(env HERDR_ENV=1 HERDR_BIN="$FAKE" TEAMLEAD_WAIT_INTERVAL_SEC=0 TEAMLEAD_WAIT_BUDGET_SEC=0 \
