@@ -1018,16 +1018,17 @@ def cmd_recovery(args, client=None, warn=None, trace=None):
         judge = load_judge(_config_path(args))
         # Supervision knows where the judge's report was meant to land; a
         # dispatch marked applied proves only the send (#407).
+        # Supervision knows where the pinned judge's report was meant to land;
+        # a dispatch marked applied proves only the send (#407).
         enrolled = None
         if judge is not None and isinstance(data, dict):
-            row = next((item for item in reversed(store["dispatches"])
-                        if item["task"] == data.get("task") and item["role"] == "judge"
-                        and item["agent"] == judge.agent and item["status"] == "applied"), None)
-            member = next((item for item in supervision.load(state_path)["members"]
-                           if row is not None and item["id"] == row["id"]), None)
+            member = next((item for item in reversed(supervision.load(state_path)["members"])
+                           if item["assignment"]["task"] == data.get("task")
+                           and item["assignment"]["agent"] == judge.agent), None)
             if member is not None:
                 enrolled = supervision.expected_assignment(member)["report"]
-        result = recovery.diagnose(store, history, data, at, judge.agent if judge else None, enrolled)
+        result = recovery.diagnose(store, history, data, at, judge.agent if judge else None, enrolled,
+                                   supervision.dispatch_binding(state_path) is not None)
     elif args.command == "record-report":
         if isinstance(data, dict):
             dispatch = next((item for item in store["dispatches"] if item["id"] == data.get("dispatch")), None)

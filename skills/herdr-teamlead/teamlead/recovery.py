@@ -300,7 +300,7 @@ def _next_remedy_rung(store, task):
     return last + 1 if last + 1 < len(DIAGNOSIS_LADDER) else None
 
 
-def diagnose(store, assignments, data, at, judge_agent, enrolled_report=None):
+def diagnose(store, assignments, data, at, judge_agent, enrolled_report, supervised):
     """Record the judge's diagnosis of a fix loop that did not converge.
 
     An exhausted allowance is a diagnostic question, not a budget prompt: more
@@ -311,10 +311,12 @@ def diagnose(store, assignments, data, at, judge_agent, enrolled_report=None):
     with the ruling as its authorization. `stop` is terminal: it ships what is
     clean and the remainder is tracked.
 
-    `enrolled_report` is the report path supervision bound to the judge's
-    dispatch, resolved by the caller. A dispatch marked `applied` proves the
-    send, never the delivery, so when supervision knows the destination the
-    cited report must be it.
+    A dispatch marked `applied` proves the send, never the delivery. Every
+    team round is supervised (`rules/agent-team-operation.md` Fleet
+    Supervision), so when the lead is bound the cited report must be the one
+    supervision enrolled for the pinned judge, and a bound lead with no such
+    enrollment has no diagnosis to record. `supervised` and `enrolled_report`
+    are the caller's reading of that binding.
 
     Re-entry moves strictly down `DIAGNOSIS_LADDER`, so a failed remedy is
     never reissued and a task takes at most three diagnoses. That holds for a
@@ -338,6 +340,7 @@ def diagnose(store, assignments, data, at, judge_agent, enrolled_report=None):
         same = (prior["task"] == data["task"] and prior["checkpoint"] == data["checkpoint"]
                 and prior["scope"] == data["scope"] and prior["allowed_paths"] == data["allowed_paths"]
                 and prior.get("supersedes") == data.get("supersedes")
+                and prior.get("authorization") == data.get("authorization")
                 and prior["judge_evidence"] == receipt(data["judge_report"])[0])
         if not same:
             raise UsageError("Diagnosis identity already describes a different remedy; record a new diagnosis without rewriting the old one.", {})
@@ -377,8 +380,11 @@ def diagnose(store, assignments, data, at, judge_agent, enrolled_report=None):
     judge = latest_assignment(assignments, task=data["task"], role="judge", agent=judge_agent, status="applied")
     if not judge_agent or developer is None or judge is None or not assignment_after(assignments, judge[0], developer[0]):
         raise UsageError("A diagnosis needs the configured pinned judge's completed assignment after the latest developer attempt.", {})
-    if enrolled_report is not None and str(Path(data["judge_report"]).resolve()) != str(Path(enrolled_report).resolve()):
-        raise UsageError("The cited report is not the one supervision enrolled for this judge dispatch ({}); cite the delivered report.".format(enrolled_report), {})
+    if supervised:
+        if not isinstance(enrolled_report, str) or not enrolled_report.strip():
+            raise UsageError("This lead is bound, and no supervision enrollment binds a report to the pinned judge on task {}; dispatch the diagnosis through the bound round before recording it.".format(data["task"]), {})
+        if str(Path(data["judge_report"]).resolve()) != str(Path(enrolled_report).resolve()):
+            raise UsageError("The cited report is not the one supervision enrolled for this judge dispatch ({}); cite the delivered report.".format(enrolled_report), {})
     evidence, body = receipt(data["judge_report"])
     remedy_line = re.search(r"^REMEDY:[ \t]*(\S+)(.*)$", body, re.MULTILINE)
     bound_line = re.search(r"^BOUND:[ \t]*(\S+)", body, re.MULTILINE)
@@ -402,7 +408,7 @@ def diagnose(store, assignments, data, at, judge_agent, enrolled_report=None):
               "checkpoint": data["checkpoint"], "fix_round": count, "base_revision": task["base_revision"],
               "remedy": remedy, "bound": bound, "judge_agent": judge_agent, "judge_evidence": evidence,
               "scope": data["scope"], "allowed_paths": data["allowed_paths"],
-              "supersedes": data.get("supersedes"),
+              "supersedes": data.get("supersedes"), "authorization": data.get("authorization"),
               "plan": None if remedy == "stop" else data["id"] + ":plan"}
     if record["plan"] is not None:
         assert bound is not None
@@ -442,6 +448,11 @@ def authorize_plan(store, assignments, data, at):
     count = confirmed_fix(assignments, data["task"])
     if source["task"] != data["task"] or source["fix_round"] != count:
         raise UsageError("Approval must match this task's current exhausted checkpoint; record a fresh operator checkpoint and correction proposal.", {})
+    # The operator overrides a remedy; they do not stand in for one. Without a
+    # recorded diagnosis this path would reopen the budget prompt the judge
+    # replaced (rules/agent-team-operation.md Judge Seat).
+    if not diagnoses_for(store, data["task"]):
+        raise UsageError("This task has no recorded diagnosis to override; take the judge's diagnosis with `teamlead diagnose` first.", {})
     active = next((row for row in active_plans(store) if row["task"] == data["task"] and row["last_fix"] > count), None)
     if active and data.get("supersedes") != active["id"]:
         raise UsageError("This task still has an approved plan. Use its bounds, or explicitly name it in supersedes with the operator's changed decision.", {})
@@ -940,6 +951,10 @@ def _validate_refusals(store):
         seen_diagnoses[row["task"]] = rung
         if row.get("supersedes") is not None:
             text(row["supersedes"], "diagnosis supersedes")
+        if row.get("authorization") is not None:
+            if row.get("supersedes") is None:
+                raise UsageError("A diagnosis records an operator override with no plan it superseded; preserve the ledger for owner recovery.", {})
+            authorization(row["authorization"])
         if row["remedy"] == "stop":
             if row["bound"] is not None or row["plan"] is not None:
                 raise UsageError("A stop remedy carries no bound and no plan; preserve the ledger for owner recovery.", {})

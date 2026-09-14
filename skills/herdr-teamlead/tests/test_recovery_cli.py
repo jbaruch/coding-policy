@@ -88,8 +88,17 @@ class RecoveryCommandTests(fixture.CliCase):
             "previous_attempts": "Five fixes changed parser handling", "progress": "Most fixtures now pass",
             "change_in_approach": "Use a single parser", "judge_report": str(judge)})
         self.assertEqual(code, 0, err)
+        # The operator's budget overrides a recorded remedy; a bound round
+        # enrolls the judge's report before its diagnosis (#407).
+        diagnosis = self.tmp / "diagnosis.md"
+        diagnosis.write_text("DIAGNOSIS: the find-rate held flat\nREMEDY: continue — two more rounds\n"
+                             "BOUND: 1\nEVIDENCE: rounds 1-5\nUNVERIFIED: none\n")
+        code, _, err = self.owner("diagnose", {"id": "diag-cap", "task": TASK, "checkpoint": "cap-5",
+            "judge_report": str(diagnosis), "scope": WORK["scope"], "allowed_paths": ["src/*"]})
+        self.assertEqual(code, 0, err)
         code, _, err = self.owner("authorize-corrections", {"id": "two-fixes", "task": TASK, "checkpoint": "cap-5",
-            "scope": WORK["scope"], "allowed_paths": ["src/*"], "additional_fixes": 2, "authorization": AUTH})
+            "scope": WORK["scope"], "allowed_paths": ["src/*"], "additional_fixes": 2, "authorization": AUTH,
+            "supersedes": "diag-cap:plan"})
         self.assertEqual(code, 0, err)
 
     def test_two_release_fresh_fix_cycles_preserve_task_base_history_and_next_number(self):
@@ -181,7 +190,7 @@ class RecoveryCommandTests(fixture.CliCase):
             self.assertIn("outside the approved task or budget", err)
             self.assertEqual(self.runner.calls, [])
             self.assertEqual(self.state.read_bytes(), before)
-        self.assertEqual(len(self.saved()["recovery"]["plans"]), 1)
+        self.assertEqual([row["id"] for row in self.saved()["recovery"]["plans"] if not row.get("supersedes")], ["diag-cap:plan"])
         code, out, err = self.invoke(["status"])
         self.assertEqual(code, 0, err)
         self.assertEqual(json.loads(out)["tasks"][TASK]["status"], "checkpoint_required")

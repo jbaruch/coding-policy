@@ -46,8 +46,11 @@
   or paths, or the operator's recorded override — and descends the ladder like
   any other re-entry. `stop` ends implementation on the task outright, so no
   unspent allowance survives it. The cited report must be the one supervision
-  enrolled for that judge dispatch, since a dispatch marked applied proves the
-  send and not the delivery. No
+  enrolled for the pinned judge on that task whenever the lead is bound, since
+  a dispatch marked applied proves the send and not the delivery. The
+  operator's `authorize-corrections` path survives as an override of a
+  recorded remedy rather than a substitute for one: without a diagnosis it
+  would reopen the budget prompt the judge replaced. No
   operator sits in the path of any of them, and the deadlock disappears.
 
   The lead ran the loop and is the wrong diagnostician of its own dispatch
