@@ -122,7 +122,10 @@ def migrate_store(store):
     """Upgrade the enclosing recovery document and its checkpoint records."""
     if not isinstance(store, dict) or type(store.get("schema_version")) is not int:
         return False
-    migrated = _migrate_checkpoints(store) or _migrate_diagnoses(store)
+    # Both run: `or` would skip the second whenever the first reported work,
+    # leaving version-1 diagnoses for a validator that accepts only version 2.
+    checkpoints = _migrate_checkpoints(store)
+    migrated = _migrate_diagnoses(store) or checkpoints
     version = store["schema_version"]
     if version not in {1, 2, 3, 4, 5, 6, 7}:
         return migrated

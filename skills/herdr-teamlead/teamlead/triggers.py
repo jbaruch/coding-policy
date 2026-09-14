@@ -162,8 +162,28 @@ def load_requirements(path):
 
 
 def matches(path, globs):
-    """True when `path` matches any glob. `*` spans path separators."""
+    """True when `path` matches any path glob. `*` spans path separators.
+
+    A declared surface is a subtree -- `docs/*` covers everything under `docs`
+    -- so the path sets deliberately span separators.
+    """
     return any(fnmatch.fnmatchcase(path, glob) for glob in globs)
+
+
+def package_matches(directory, roots):
+    """True when `directory` is one of the declared package roots.
+
+    A package root names a directory, not a subtree, so `*` matches within one
+    path segment here: `skills/*` is every skill, never a directory nested
+    inside one.
+    """
+    segments = directory.split("/")
+    for glob in roots:
+        parts = glob.split("/")
+        if len(parts) == len(segments) and all(
+                fnmatch.fnmatchcase(segment, part) for segment, part in zip(segments, parts)):
+            return True
+    return False
 
 
 def package_of(path, roots):
@@ -175,7 +195,7 @@ def package_of(path, roots):
     parts = path.split("/")
     for cut in range(len(parts) - 1, 0, -1):
         candidate = "/".join(parts[:cut])
-        if matches(candidate, roots):
+        if package_matches(candidate, roots):
             return candidate
     return None
 
@@ -281,15 +301,23 @@ def parse_numstat(text):
 
 
 def parse_added_lines(text):
-    """Added lines of a unified diff, keyed by the file they were added to."""
-    added, current = {}, None
+    """Added lines of a unified diff, keyed by the file they were added to.
+
+    Header and payload are told apart by position, never by prefix alone: a
+    content line reading `++ x` arrives as `+++ x` and is an added line, not a
+    second file header.
+    """
+    added, current, in_hunk = {}, None, False
     for line in text.split("\n"):
-        if line.startswith("+++ b/"):
-            current = line[6:]
-            added.setdefault(current, [])
-        elif line.startswith("+++ "):
-            current = None
-        elif current is not None and line.startswith("+"):
+        if line.startswith("diff --git "):
+            current, in_hunk = None, False
+        elif not in_hunk and line.startswith("+++ "):
+            current = line[6:] if line.startswith("+++ b/") else None
+            if current is not None:
+                added.setdefault(current, [])
+        elif line.startswith("@@"):
+            in_hunk = True
+        elif in_hunk and current is not None and line.startswith("+"):
             added[current].append(line[1:])
     return added
 
@@ -315,6 +343,9 @@ def run_command(args, runner=None):
     roles = [role for role in (getattr(args, "roles", None) or "").split(",") if role]
     run = runner if runner is not None else git_runner(args.repo)
     head = getattr(args, "head", None)
+    # `base...head` diffs from the merge base, so "absent from the base" is
+    # read at that same commit rather than at the branch point's namesake.
+    left = run(["merge-base", args.base, head]).strip() if head else args.base
     span = [args.base + "..." + head] if head else [args.base]
     common = ["diff", "--no-renames", *span]
     changes = parse_name_status(run([*common, "--name-status", "-z"]))
@@ -322,7 +353,7 @@ def run_command(args, runner=None):
     candidates = sorted({package for package in
                          (package_of(path, declaration["package_roots"]) for path in changes)
                          if package is not None})
-    base_packages = {name: bool(run(["ls-tree", "--name-only", args.base, "--", name + "/"]).strip())
+    base_packages = {name: bool(run(["ls-tree", "--name-only", left, "--", name + "/"]).strip())
                      for name in candidates}
     fired = detect(declaration, changes, churn, base_packages)
     spec_paths = sorted(path for path in changes if matches(path, declaration["cli_spec_paths"]))

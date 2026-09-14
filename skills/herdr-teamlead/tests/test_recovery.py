@@ -332,7 +332,11 @@ class RecoveryTests(unittest.TestCase):
         row = older["diagnoses"][0]
         row.update(schema_version=1)
         del row["reissue"], row["investigator_report"]
+        # Both record kinds migrate in one pass; neither short-circuits the
+        # other (rules/stateful-artifacts.md Migration Policy).
+        older["checkpoints"][0]["schema_version"] = 1
         self.assertTrue(migrate_store(older))
+        self.assertEqual(older["checkpoints"][0]["schema_version"], 2)
         self.assertEqual(older["diagnoses"][0]["schema_version"], 2)
         self.assertIs(older["diagnoses"][0]["reissue"], False)
         self.assertIsNone(older["diagnoses"][0]["investigator_report"])

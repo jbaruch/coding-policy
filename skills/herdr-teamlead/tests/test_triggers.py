@@ -30,15 +30,23 @@ def declaration(**overrides):
     return {**DECLARATION, **overrides, "path": ".herdr/triggers.json"}
 
 
+class TempCase(unittest.TestCase):
+    def temp_dir(self):
+        """A directory removed on teardown (rules/testing-standards.md)."""
+        holder = tempfile.TemporaryDirectory()
+        self.addCleanup(holder.cleanup)
+        return Path(holder.name)
+
+
 def namespace(**overrides):
     fields = {"repo": ".", "base": "BASE", "head": None, "roles": None,
               "requirements": None, "decisions": None}
     return SimpleNamespace(**{**fields, **overrides})
 
 
-class DeclarationTest(unittest.TestCase):
+class DeclarationTest(TempCase):
     def setUp(self):
-        self.tmp = Path(tempfile.mkdtemp())
+        self.tmp = self.temp_dir()
         (self.tmp / ".herdr").mkdir()
         self.path = self.tmp / triggers.DECLARATION_FILE
 
@@ -107,9 +115,9 @@ class DeclarationTest(unittest.TestCase):
                 triggers.load_declaration(self.tmp)
 
 
-class DecisionsTest(unittest.TestCase):
+class DecisionsTest(TempCase):
     def setUp(self):
-        self.tmp = Path(tempfile.mkdtemp())
+        self.tmp = self.temp_dir()
         self.path = self.tmp / "decisions.json"
 
     def test_absent_file_is_no_decision(self):
@@ -142,9 +150,9 @@ class DecisionsTest(unittest.TestCase):
             triggers.load_decisions(self.path)
 
 
-class RequirementsTest(unittest.TestCase):
+class RequirementsTest(TempCase):
     def setUp(self):
-        self.tmp = Path(tempfile.mkdtemp())
+        self.tmp = self.temp_dir()
         self.path = self.tmp / "requirements.json"
 
     def test_collects_planned_specialties(self):
@@ -163,9 +171,14 @@ class RequirementsTest(unittest.TestCase):
 
 
 class MatchTest(unittest.TestCase):
-    def test_globs_span_path_separators(self):
+    def test_path_globs_span_path_separators(self):
         self.assertTrue(triggers.matches("docs/guide/install.md", ["docs/*"]))
         self.assertFalse(triggers.matches("README.md", ["docs/*"]))
+
+    def test_package_globs_match_one_segment(self):
+        self.assertTrue(triggers.package_matches("src/auth", ["src/*"]))
+        self.assertFalse(triggers.package_matches("src/auth/tokens", ["src/*"]))
+        self.assertEqual(triggers.package_of("src/auth/tokens/rs256.py", ["src/*"]), "src/auth")
 
     def test_nearest_declared_ancestor_owns_the_file(self):
         self.assertEqual(triggers.package_of("src/auth/token.py", ["src/*"]), "src/auth")
@@ -224,6 +237,15 @@ class CliSurfaceTest(unittest.TestCase):
         self.assertEqual(triggers.cli_surface(declaration(), {"src/cli/main.py": "M"},
                                               {"src/cli/main.py": ["    return payload"]}), [])
 
+    def test_a_declared_refusal_marker_fires(self):
+        # rules/agent-team-operation.md: a new user-facing refusal path is a
+        # UX and product trigger, not only a new command or flag.
+        found = triggers.cli_surface(declaration(cli_surface_markers=["raise UsageError("]),
+                                     {"src/cli/main.py": "M"},
+                                     {"src/cli/main.py": ['        raise UsageError("state it", {})']})
+        self.assertEqual(found[0]["signal"], "added_cli_surface")
+        self.assertIn("raise UsageError(", found[0]["evidence"])
+
     def test_a_marker_outside_the_spec_surface_stays_quiet(self):
         self.assertEqual(triggers.cli_surface(declaration(), {"src/old/a.py": "M"},
                                               {"src/old/a.py": ["add_argument("]}), [])
@@ -252,8 +274,10 @@ class ParseTest(unittest.TestCase):
             "+++ b/y.py",
             "@@ -0,0 +1 @@",
             "+added two",
+            "+++ content that looks like a file header",
         ])
-        self.assertEqual(triggers.parse_added_lines(patch), {"x.py": ["added one"], "y.py": ["added two"]})
+        self.assertEqual(triggers.parse_added_lines(patch),
+                         {"x.py": ["added one"], "y.py": ["added two", "++ content that looks like a file header"]})
 
 
 class ReportTest(unittest.TestCase):
@@ -301,9 +325,9 @@ class ReportTest(unittest.TestCase):
         self.assertEqual(payload["fired"], ["security"])
 
 
-class RunCommandTest(unittest.TestCase):
+class RunCommandTest(TempCase):
     def setUp(self):
-        self.tmp = Path(tempfile.mkdtemp())
+        self.tmp = self.temp_dir()
         (self.tmp / ".herdr").mkdir()
         (self.tmp / triggers.DECLARATION_FILE).write_text(json.dumps(DECLARATION))
         self.calls = []
@@ -326,8 +350,13 @@ class RunCommandTest(unittest.TestCase):
         self.assertIn(["ls-tree", "--name-only", "BASE", "--", "src/new/"], self.calls)
 
     def test_a_head_compares_from_the_merge_base(self):
-        triggers.run_command(namespace(repo=self.tmp, head="HEAD"), runner=self.runner({}))
-        self.assertIn("BASE...HEAD", self.calls[0])
+        responses = {"merge-base": "MERGEBASE\n", "--name-status": "A\0src/new/mod.py\0",
+                     "--numstat": "9\t0\tsrc/new/mod.py\0"}
+        triggers.run_command(namespace(repo=self.tmp, head="HEAD"), runner=self.runner(responses))
+        self.assertEqual(self.calls[0], ["merge-base", "BASE", "HEAD"])
+        self.assertIn("BASE...HEAD", self.calls[1])
+        # "Absent from the base" is read at the merge base, not at BASE.
+        self.assertIn(["ls-tree", "--name-only", "MERGEBASE", "--", "src/new/"], self.calls)
 
     def test_no_head_reads_the_working_tree(self):
         payload, _failure = triggers.run_command(namespace(repo=self.tmp), runner=self.runner({}))
@@ -342,7 +371,21 @@ class RunCommandTest(unittest.TestCase):
     def test_an_added_parser_fires_ux_product(self):
         responses = {"--name-status": "M\0src/cli/main.py\0", "--numstat": "2\t0\tsrc/cli/main.py\0",
                      "ls-tree": "src/cli/main.py\n",
-                     "--unified=0": "+++ b/src/cli/main.py\n+    sub.add_parser(\"ship\")\n"}
+                     "--unified=0": ("diff --git a/src/cli/main.py b/src/cli/main.py\n"
+                                     "--- a/src/cli/main.py\n+++ b/src/cli/main.py\n"
+                                     "@@ -1,0 +2 @@\n+    sub.add_parser(\"ship\")\n")}
+        payload, failure = triggers.run_command(namespace(repo=self.tmp), runner=self.runner(responses))
+        self.assertEqual(payload["fired"], ["ux-product"])
+        assert failure is not None
+
+    def test_a_refusal_only_change_fires_ux_product(self):
+        (self.tmp / triggers.DECLARATION_FILE).write_text(json.dumps(
+            {**DECLARATION, "cli_surface_markers": ["raise UsageError("]}))
+        responses = {"--name-status": "M\0src/cli/main.py\0", "--numstat": "1\t0\tsrc/cli/main.py\0",
+                     "ls-tree": "src/cli/main.py\n",
+                     "--unified=0": ("diff --git a/src/cli/main.py b/src/cli/main.py\n"
+                                     "--- a/src/cli/main.py\n+++ b/src/cli/main.py\n"
+                                     "@@ -9,0 +10 @@\n+    raise UsageError(\"state the surface\", {})\n")}
         payload, failure = triggers.run_command(namespace(repo=self.tmp), runner=self.runner(responses))
         self.assertEqual(payload["fired"], ["ux-product"])
         assert failure is not None
@@ -355,11 +398,11 @@ class RunCommandTest(unittest.TestCase):
         self.assertEqual(payload["unaddressed"], [])
 
 
-class DetectTriggersCommandTest(unittest.TestCase):
+class DetectTriggersCommandTest(TempCase):
     """The packaged command against a real git repository."""
 
     def setUp(self):
-        self.tmp = Path(tempfile.mkdtemp())
+        self.tmp = self.temp_dir()
         self.git("init", "-q", "-b", "main")
         self.git("config", "user.email", "tests@example.invalid")
         self.git("config", "user.name", "Tests")

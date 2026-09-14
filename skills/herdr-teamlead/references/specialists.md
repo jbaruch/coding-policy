@@ -74,11 +74,14 @@ trigger no longer fires never or always depending on who reads it.
 }
 ```
 
-`package_roots` are path globs naming the directories this repo treats as
-packages; the nearest matching ancestor owns a changed file. `package_change_lines`
-is the size a changed package must exceed to trigger the architect.
-`trust_boundary_paths`, `cli_spec_paths` and `user_doc_paths` are path globs;
-`*` spans path separators. `cli_surface_markers` are literal substrings that an
+`package_roots` name the directories this repo treats as packages, and the
+nearest matching ancestor owns a changed file. A package root is a directory
+rather than a subtree, so `*` matches within one path segment there: `skills/*`
+is every skill, never a directory nested inside one. `package_change_lines` is
+the size a changed package must exceed to trigger the architect.
+`trust_boundary_paths`, `cli_spec_paths` and `user_doc_paths` are subtree
+globs, where `*` does span path separators, so `docs/*` covers everything under
+`docs`. `cli_surface_markers` are literal substrings that an
 added line inside a CLI spec path must carry to count as a new command or flag.
 State `[]` for a surface this repo does not have — an empty list is a statement,
 an omitted field is not. Classification rules are in
