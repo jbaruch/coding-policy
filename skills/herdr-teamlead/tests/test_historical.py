@@ -24,6 +24,7 @@ CLEARED = "2026-02-03T08:30:00+00:00"
 COMPLETED = "2026-02-03T09:00:00+00:00"
 TASK = recovery_fixture.TASK
 AUTH = recovery_fixture.AUTH
+REQUEST = recovery_fixture.REQUEST
 SCOPE = recovery_fixture.WORK["scope"]
 
 
@@ -272,7 +273,7 @@ class HistoricalCommandsTest(fixture.CliCase):
                 code, _, err = self.owner("checkpoint", {"id": "chronological-checkpoint", "task": TASK,
                     "defect": "F1 remains blocking", "previous_attempts": "Five completed fixes",
                     "progress": "Other findings resolved", "change_in_approach": "Correct the boundary case",
-                    "judge_report": str(judge)})
+                    "judge_report": str(judge), "requested_by": REQUEST})
                 self.assertEqual(code, expected, err)
                 if expected:
                     self.assertIn("pinned judge's completed assignment after the latest developer", err)
@@ -458,7 +459,7 @@ class HistoricalCommandsTest(fixture.CliCase):
         judge.write_text("RULING: amend — correct F1\nACTION: Fix the remaining parser case\n")
         code, _, err = self.owner("checkpoint", {"id": "cap-5", "task": TASK, "defect": "Blocking F1",
             "previous_attempts": "Five completed fixes", "progress": "Most fixtures pass",
-            "change_in_approach": "Correct the remaining case", "judge_report": str(judge)})
+            "change_in_approach": "Correct the remaining case", "judge_report": str(judge), "requested_by": REQUEST})
         self.assertEqual(code, 0, err)
         # The diagnosis rules on a prepared causal assessment (#408), and the
         # operator's budget overrides the remedy it returns (#407). The

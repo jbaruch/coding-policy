@@ -33,7 +33,16 @@ SPECIALIST_DISPATCH_VERSION = 2
 #: makes it optional. Version-1 rows keep their judge evidence and are never
 #: rewritten. The checkpoint now records the exhaustion the diagnosis brief is
 #: built from (rules/agent-team-operation.md Judge Seat).
-OPERATOR_CHECKPOINT_VERSION = 2
+#: The version `checkpoint` writes. A cited ruling at this version carries the
+#: `requested_by` receipt for the operator request it answers (#400).
+OPERATOR_CHECKPOINT_VERSION = 3
+#: Versions the reader still accepts. A version-2 row predates the receipt and
+#: is never stamped into a shape whose request nobody recorded
+#: (rules/stateful-artifacts.md Migration Policy).
+CHECKPOINT_VERSIONS = frozenset({2, OPERATOR_CHECKPOINT_VERSION})
+#: What a version-1 row upgrades into: its ruling was mandatory there and
+#: optional at 2, so the stamp alone is the whole upgrade.
+MIGRATED_CHECKPOINT_VERSION = 2
 DISPATCH_METADATA_FIELDS = frozenset({"requirements", "reviewer_scope"})
 #: The judge's diagnosis remedies, descending. A task's next diagnosis sits
 #: below its last, or repeats that rung once against recorded progress, and
@@ -74,14 +83,20 @@ def empty_recovery():
 
 
 def _migrate_checkpoints(store):
-    """Upgrade version-1 checkpoints in place, preserving their evidence.
+    """Upgrade older checkpoints in place, preserving their evidence.
 
     Version 1 required the pinned judge's ruling and version 2 makes it
-    optional, so every version-1 row is already a valid version-2 row and the
-    upgrade is the stamp alone: identity, fix round, base and recorded ruling
-    all survive it unchanged (rules/stateful-artifacts.md Migration Policy).
+    optional, so every version-1 row is already a valid version-2 row.
+    Version 3 adds `requested_by`, the receipt for the operator request a
+    cited ruling answers (#400). Neither older version recorded that request,
+    and a migration never invents one: an older row keeps its ruling and
+    carries no receipt, which the reader accepts for those rows alone
+    (rules/stateful-artifacts.md Migration Policy).
+
     A version-1 row missing the ruling it was required to carry is refused
-    rather than stamped into a shape where the pair is optional.
+    rather than stamped into a shape where the pair is optional. A row
+    carrying `requested_by` at an older version is unowned newer data and is
+    refused rather than stamped.
     """
     rows = store.get("checkpoints")
     if not isinstance(rows, list):
@@ -92,7 +107,9 @@ def _migrate_checkpoints(store):
             continue
         if "judge_agent" not in row or "judge_evidence" not in row:
             raise UsageError("An older checkpoint is missing the ruling evidence its version required; restore the owner-written ledger.", {})
-        row["schema_version"] = OPERATOR_CHECKPOINT_VERSION
+        if "requested_by" in row:
+            raise UsageError("An older checkpoint carries an operator-request receipt its version never wrote; preserve the ledger for owner recovery.", {})
+        row["schema_version"] = MIGRATED_CHECKPOINT_VERSION
         migrated = True
     return migrated
 
@@ -124,17 +141,13 @@ def _migrate_diagnoses(store):
     return migrated
 
 
-def migrate_store(store):
-    """Upgrade the enclosing recovery document and its checkpoint records."""
-    if not isinstance(store, dict) or type(store.get("schema_version")) is not int:
-        return False
-    # Both run: `or` would skip the second whenever the first reported work,
-    # leaving version-1 diagnoses for a validator that accepts only version 2.
-    checkpoints = _migrate_checkpoints(store)
-    migrated = _migrate_diagnoses(store) or checkpoints
-    version = store["schema_version"]
-    if version not in {1, 2, 3, 4, 5, 6, 7}:
-        return migrated
+def _refuse_unowned_legacy(store, version):
+    """Refuse a legacy document holding records its own version never wrote.
+
+    Read-only, and it runs before any row is stamped: a document rejected here
+    used to be rejected with its version-1 checkpoints and diagnoses already
+    upgraded in memory (#400). Returns the record names this version adds.
+    """
     dispatches = store.get("dispatches")
     if not isinstance(dispatches, list):
         raise UsageError("Older recovery requires a dispatches array; restore the original owner-written store.", {})
@@ -167,6 +180,23 @@ def migrate_store(store):
         added.extend(["hand_clearances", "historical_attempts"])
     if any(name in store for name in added):
         raise UsageError("Older recovery contains unowned newer records; preserve it for owner recovery.", {})
+    return added
+
+
+def migrate_store(store):
+    """Upgrade the enclosing recovery document and its checkpoint records."""
+    if not isinstance(store, dict) or type(store.get("schema_version")) is not int:
+        return False
+    version = store["schema_version"]
+    legacy = version in {1, 2, 3, 4, 5, 6, 7}
+    added = _refuse_unowned_legacy(store, version) if legacy else None
+    # Both run: `or` would skip the second whenever the first reported work,
+    # leaving version-1 diagnoses for a validator that accepts only version 2.
+    checkpoints = _migrate_checkpoints(store)
+    migrated = _migrate_diagnoses(store) or checkpoints
+    if not legacy:
+        return migrated
+    assert added is not None
     store.update({name: [] for name in added})
     store["schema_version"] = RECOVERY_STORE_VERSION
     return True
@@ -284,10 +314,12 @@ def checkpoint(store, assignments, data, at, judge_agent):
     as before.
     """
     required = {"id", "task", "defect", "previous_attempts", "progress", "change_in_approach"}
-    if not isinstance(data, dict) or not required <= set(data) or set(data) - required - {"judge_report"}:
-        raise UsageError("Checkpoint requires id, task, defect, previous_attempts, progress and change_in_approach, and allows an optional judge_report; describe the concrete remaining work.", {})
-    for key in set(data):
+    if not isinstance(data, dict) or not required <= set(data) or set(data) - required - {"judge_report", "requested_by"}:
+        raise UsageError("Checkpoint requires id, task, defect, previous_attempts, progress and change_in_approach, and allows an optional judge_report with the requested_by receipt that authorized it; describe the concrete remaining work.", {})
+    for key in set(data) - {"requested_by"}:
         text(data[key], key)
+    if "requested_by" in data and "judge_report" not in data:
+        raise UsageError("requested_by records the operator request a cited ruling answers; record the checkpoint without it when no ruling is cited.", {})
     task = task_record(store, data["task"])
     count = confirmed_fix(assignments, data["task"])
     if count < DEFAULT_FIX_LIMIT:
@@ -307,6 +339,20 @@ def checkpoint(store, assignments, data, at, judge_agent):
         judge = latest_assignment(assignments, task=data["task"], role="judge", agent=judge_agent, status="applied")
         if not judge_agent or developer is None or judge is None or not assignment_after(assignments, judge[0], developer[0]):
             raise UsageError("A cited judge report needs the configured pinned judge's completed assignment after the latest developer attempt; omit judge_report to send the exhausted allowance straight to the operator.", {})
+        # The ruling is the operator's to request, and "operator-requested" was
+        # the ledger's word for a request nothing in it recorded (#400). The
+        # receipt is the same source/quote shape every other operator decision
+        # carries, and it is required of NEW records alone: an older row was
+        # written before the field existed, so replaying its original payload
+        # is an already-processed request, not a missing receipt
+        # (rules/file-hygiene.md Idempotency).
+        replayed = next((row for row in store["checkpoints"] if row["id"] == data["id"]), None)
+        legacy_replay = (replayed is not None
+                         and replayed.get("schema_version", OPERATOR_CHECKPOINT_VERSION) < OPERATOR_CHECKPOINT_VERSION)
+        if "requested_by" not in data and not legacy_replay:
+            raise UsageError("A cited ruling is the operator's to request: record their request as requested_by (source and quote), or record the checkpoint without judge_report.", {})
+        if "requested_by" in data:
+            authorization(data["requested_by"])
         evidence, body = receipt(data["judge_report"])
         if not re.search(r"^RULING: (?:uphold A|uphold B|amend)(?:\s|$)", body, re.MULTILINE) or not re.search(r"^ACTION: \S", body, re.MULTILINE):
             raise UsageError("The judge report must contain its completed RULING and ACTION; a blocked judge requires the operator's answer first.", {})
@@ -319,6 +365,12 @@ def checkpoint(store, assignments, data, at, judge_agent):
         # comparing versions reported an unmigrated version-1 row as different
         # evidence, so re-running an already-recorded checkpoint failed (#396).
         compared = (set(prior) | set(record)) - {"at", "schema_version"}
+        # A row written before version 3 carries no request receipt, so the
+        # field this version adds cannot make a replay read as changed
+        # evidence (rules/stateful-artifacts.md Migration Policy).
+        if prior.get("schema_version", OPERATOR_CHECKPOINT_VERSION) < OPERATOR_CHECKPOINT_VERSION:
+            compared -= {"requested_by"}
+            record.pop("requested_by", None)
         if any(prior.get(key) != record.get(key) for key in compared):
             raise UsageError("Checkpoint identity already describes different evidence; record a new checkpoint without rewriting the old one.", {})
         return prior
@@ -341,6 +393,13 @@ def require_investigation_before_judge(store, assignments, task, investigations)
     expensive seat is never spent before that assessment exists. A judge
     dispatched for an ordinary dispute is untouched: the gate applies only
     while the task sits at an exhausted allowance with no unspent bound.
+
+    A `stop` diagnosis is NOT read here. `stop` ends implementation and the
+    diagnosis ladder; it does not end adjudication, which the judge still owes
+    a contested reviewer or tester verdict, a lead override, or a disputed bot
+    finding during the release of the clean scope
+    (`rules/agent-team-operation.md` Judge Seat). This gate sees no mode, so it
+    cannot refuse the one without refusing the other (#400).
     """
     if not task or task not in store["tasks"]:
         return None
@@ -1273,7 +1332,7 @@ def validate_store(store, assignments):
             identifiers = []
             for row in store[name]:
                 versions = ({1, 2} if name in {"delivery_recoveries", "dispatches"}
-                            else {OPERATOR_CHECKPOINT_VERSION} if name == "checkpoints"
+                            else CHECKPOINT_VERSIONS if name == "checkpoints"
                             else {DIAGNOSIS_RECORD_VERSION} if name == "diagnoses"
                             else {RECOVERY_SCHEMA_VERSION})
                 if not isinstance(row, dict) or type(row.get("schema_version")) is not int or row["schema_version"] not in versions:
@@ -1293,6 +1352,7 @@ def validate_store(store, assignments):
             text(row["scope"], "task scope")
             paths(row["allowed_paths"], "task paths")
             authorization(row["authorization"])
+        ruled_tasks = set()
         for row in store["checkpoints"]:
             task = task_record(store, row["task"])
             if row["base_revision"] != task["base_revision"] or positive(row["fix_round"], "checkpoint fix") < DEFAULT_FIX_LIMIT:
@@ -1306,6 +1366,20 @@ def validate_store(store, assignments):
                 text(row["judge_agent"], "judge_agent")
                 text(row["judge_report"], "judge_report")
                 validate_receipt(row["judge_evidence"])
+                # The receipt rides with the version that records it: a
+                # version-2 row predates it and never has one invented (#400).
+                if row["schema_version"] == OPERATOR_CHECKPOINT_VERSION:
+                    authorization(row["requested_by"])
+                elif "requested_by" in row:
+                    raise UsageError("An older checkpoint carries an operator-request receipt its version never wrote; preserve the ledger for owner recovery.", {})
+                # `checkpoint` refuses a second cited ruling as it writes one,
+                # but the read boundary checked each row alone, so a ledger
+                # holding two for one task validated (#400).
+                if row["task"] in ruled_tasks:
+                    raise UsageError("A task cites more than one operator-requested ruling; the operator grants at most one. Preserve the ledger for owner recovery.", {})
+                ruled_tasks.add(row["task"])
+            elif "requested_by" in row:
+                raise UsageError("A checkpoint records an operator request with no ruling it authorized; preserve the ledger for owner recovery.", {})
         for row in store["plans"]:
             source = _item(store["checkpoints"], row["checkpoint"], "checkpoint")
             authorization(row["authorization"])

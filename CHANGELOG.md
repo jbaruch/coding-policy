@@ -1,5 +1,37 @@
 # Changelog
 
+### Fixed
+
+- **The operator-requested ruling is bounded where it is spent, and proved
+  where it is claimed (#400).** Five deferred advisories from #397 and #398;
+  none changes whether a round refuses, only how the refusal is proved or
+  worded.
+  - A checkpoint citing a judge ruling now records `requested_by`, the same
+    source/quote receipt every other operator decision carries. The ledger
+    called the ruling "operator-requested" while holding nothing of the
+    request. The checkpoint record bumps to version 3 for the added field;
+    version 2 stays a valid shape for rows written before it, version-1 rows
+    migrate into 2, and no older row has a receipt invented for it. The
+    receipt is required of new records alone, so replaying an older row's
+    original payload stays idempotent.
+  - The pre-dispatch bound the issue asked for is NOT shipped. A `stop`
+    diagnosis ends implementation and the diagnosis ladder, never
+    adjudication, and `require_investigation_before_judge` sees no judge
+    mode — refusing there would refuse a contested verdict's ruling during
+    the release of the clean scope. Reading the bound before the round needs
+    a declared mode at plan time; tracked as a follow-up. The checkpoint
+    recording still refuses a second cited ruling.
+  - The read boundary enforces one cited ruling per task. It checked each
+    checkpoint alone, so a hand-edited ledger holding two for one task
+    validated.
+  - `migrate_store` preflights the enclosing document before any row is
+    stamped. A store it then rejected had already had its version-1
+    checkpoints and diagnoses upgraded in memory.
+  - The planner names an uncovered roster before it counts capacity. A partial
+    snapshot failed "measure more agents or pass fewer roles" first, which
+    invites adding panes until the count fits instead of measuring the roster
+    `config.json` declares.
+
 ## 0.3.220 — 2026-09-14
 
 ### Fixed

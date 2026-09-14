@@ -490,6 +490,11 @@ def plan(roles, snapshot, counts=None, exclude=None, role_costs=None, snapshot_r
             "pass --snapshot pointing at a snapshot that has an `agents` object.",
             {},
         )
+    # Before the capacity count: a snapshot that missed declared workers fails
+    # "measure more agents or pass fewer roles" first, which invites adding
+    # panes until the count fits instead of measuring the roster the config
+    # declares (#400). The field is wrong before the arithmetic is.
+    _refuse_uncovered_roster(roster, agents)
     if len(agents) < len(roles):
         raise PlanError(
             "Cannot assign {} roles across {} agent(s) - measure more agents or "
@@ -514,11 +519,6 @@ def plan(roles, snapshot, counts=None, exclude=None, role_costs=None, snapshot_r
             {"role": "judge"},
         )
 
-    # The field before the seats: a plan built on a snapshot that missed the
-    # fleet ranks nothing, whatever the sort then reports. Ordered after the
-    # judge-block check, whose remediation is the config rather than the
-    # snapshot -- a one-agent snapshot cannot act on a field diagnostic.
-    _refuse_uncovered_roster(roster, agents)
     # Only the names the operator typed: a generated bar naming a measured
     # agent would otherwise vouch for an exclusion list that matched nobody.
     _refuse_inert_exclusions(

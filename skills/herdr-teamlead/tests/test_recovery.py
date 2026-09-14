@@ -30,6 +30,8 @@ TASK = "fixture-task"
 BASE = "a" * 40
 HEAD = "b" * 40
 AUTH = {"source": "fixture operator message", "quote": "Approve this task and its stated bounds."}
+#: The operator's request a cited checkpoint ruling answers (#400).
+REQUEST = {"source": "fixture operator message", "quote": "Ask the judge to rule on this exhaustion."}
 WORK = {"base_revision": BASE, "scope": "Correct parser findings", "paths": ["src/parser.py"], "findings": ["F1"]}
 PROGRESS = "PROGRESS: two of the three findings closed under the prior remedy.\n"
 
@@ -64,7 +66,7 @@ class RecoveryTests(unittest.TestCase):
         return checkpoint(self.store, self.history, {
             "id": "checkpoint-5", "task": TASK, "defect": "F1 remains open", "previous_attempts": "Five attempts changed parsing and quoting",
             "progress": "Some counterexamples now pass; the quoted case remains red", "change_in_approach": "Use one canonical parser",
-            "judge_report": str(self.judge_report),
+            "judge_report": str(self.judge_report), "requested_by": REQUEST,
         }, AT, "judge")
 
     def approve(self):
@@ -353,6 +355,7 @@ class RecoveryTests(unittest.TestCase):
         # Both record kinds migrate in one pass; neither short-circuits the
         # other (rules/stateful-artifacts.md Migration Policy).
         older["checkpoints"][0]["schema_version"] = 1
+        older["checkpoints"][0].pop("requested_by", None)
         self.assertTrue(migrate_store(older))
         self.assertEqual(older["checkpoints"][0]["schema_version"], 2)
         self.assertEqual(older["diagnoses"][0]["schema_version"], 2)
@@ -386,6 +389,15 @@ class RecoveryTests(unittest.TestCase):
             require_investigation_before_judge(self.store, self.history, TASK, [])
         index = self.consult_investigator("2026-02-03T09:30:00+00:00", "2026-02-03T09:45:00+00:00")
         self.assertIsNone(require_investigation_before_judge(self.store, self.history, TASK, self.investigated(index=index)))
+
+    def test_a_stopped_task_still_reaches_the_judge_for_an_adjudication(self):
+        # coding-policy#400: a pre-dispatch refusal was considered for a
+        # `stop`ped task and dropped. `stop` ends implementation and the
+        # diagnosis ladder, never adjudication — this gate sees no judge mode,
+        # so refusing here would refuse a contested verdict's ruling too.
+        self.seed_checkpoint()
+        self.run_diagnosis(self.diagnosis("diag-stop", "stop", None), "judge")
+        self.assertIsNone(require_investigation_before_judge(self.store, self.history, TASK, self.investigated()))
 
     def test_a_diagnosis_rules_on_a_prepared_causal_assessment(self):
         # coding-policy#408: the investigator's profile is written for repeated
@@ -527,7 +539,7 @@ class RecoveryTests(unittest.TestCase):
         self.exhaust()
         with self.assertRaisesRegex(UsageError, "pinned judge"):
             checkpoint(self.store, self.history, {"id": "cp", "task": TASK, "defect": "F1", "previous_attempts": "Five fixes",
-                "progress": "Still blocked", "change_in_approach": "Reassess", "judge_report": str(self.judge_report)}, AT, "judge")
+                "progress": "Still blocked", "change_in_approach": "Reassess", "judge_report": str(self.judge_report), "requested_by": REQUEST}, AT, "judge")
 
     def test_an_exhausted_allowance_awaits_the_diagnosis_without_a_judge_citation(self):
         # The allowance boundary is a budget decision only the operator makes.
@@ -576,30 +588,65 @@ class RecoveryTests(unittest.TestCase):
         return {"id": "checkpoint-5", "task": TASK, "defect": "F1 remains open",
                 "previous_attempts": "Five attempts changed parsing and quoting",
                 "progress": "Some counterexamples now pass; the quoted case remains red",
-                "change_in_approach": "Use one canonical parser", "judge_report": str(self.judge_report)}
+                "change_in_approach": "Use one canonical parser", "judge_report": str(self.judge_report), "requested_by": REQUEST}
 
     def test_a_checkpoint_written_before_the_bump_migrates_with_its_evidence(self):
         prior = self.seed_checkpoint()
         evidence = copy.deepcopy(prior["judge_evidence"])
         prior["schema_version"] = 1
+        prior.pop("requested_by", None)
         self.assertTrue(migrate_store(self.store))
         self.assertEqual(prior["schema_version"], 2)
+        self.assertNotIn("requested_by", prior)
         self.assertEqual((prior["judge_agent"], prior["judge_evidence"]), ("judge", evidence))
         validate_store(self.store, self.history)
         self.assertFalse(migrate_store(self.store))
 
+    def test_a_rejected_document_is_left_exactly_as_it_was_found(self):
+        # coding-policy#400: the nested row upgrades ran before the enclosing
+        # document's own preflight, so a store the migration then refused had
+        # already been stamped in memory.
+        prior = self.seed_checkpoint()
+        prior["schema_version"] = 1
+        prior.pop("requested_by", None)
+        rejected = copy.deepcopy(self.store)
+        rejected["schema_version"] = 5
+        # Unowned newer data for a version-5 document: the preflight refuses it.
+        before = copy.deepcopy(rejected)
+        with self.assertRaisesRegex(UsageError, "unowned newer"):
+            migrate_store(rejected)
+        self.assertEqual(rejected, before)
+        self.assertEqual(rejected["checkpoints"][0]["schema_version"], 1)
+
     def test_an_older_checkpoint_without_its_required_ruling_refuses_to_migrate(self):
         prior = self.seed_checkpoint()
         prior["schema_version"] = 1
+        prior.pop("requested_by", None)
         del prior["judge_evidence"]
         with self.assertRaisesRegex(UsageError, "missing the ruling evidence"):
             migrate_store(self.store)
+
+    def test_replaying_a_legacy_checkpoint_with_its_original_payload_returns_it(self):
+        # coding-policy#400: the receipt is required of NEW records. An older
+        # row was written before the field existed, so re-running its original
+        # request is an already-processed one, not a missing receipt
+        # (rules/file-hygiene.md Idempotency).
+        prior = self.seed_checkpoint()
+        prior["schema_version"] = 2
+        prior.pop("requested_by", None)
+        legacy = {key: value for key, value in self.replay_data().items() if key != "requested_by"}
+        replay = checkpoint(self.store, self.history, legacy, AT, "judge")
+        self.assertIs(replay, prior)
+        self.assertNotIn("requested_by", replay)
+        self.assertEqual(len(self.store["checkpoints"]), 1)
+        validate_store(self.store, self.history)
 
     def test_replaying_a_migrated_checkpoint_returns_it(self):
         # The row outlives the writer's version: re-running an already-recorded
         # checkpoint must return it, not read the version as changed evidence.
         prior = self.seed_checkpoint()
         prior["schema_version"] = 1
+        prior.pop("requested_by", None)
         migrate_store(self.store)
         replay = checkpoint(self.store, self.history, self.replay_data(), AT, "judge")
         self.assertIs(replay, prior)
@@ -612,7 +659,7 @@ class RecoveryTests(unittest.TestCase):
             checkpoint(self.store, self.history, {"id": "checkpoint-5", "task": TASK, "defect": "Another defect",
                 "previous_attempts": "Five attempts changed parsing and quoting",
                 "progress": "Some counterexamples now pass; the quoted case remains red",
-                "change_in_approach": "Use one canonical parser", "judge_report": str(self.judge_report)}, AT, "judge")
+                "change_in_approach": "Use one canonical parser", "judge_report": str(self.judge_report), "requested_by": REQUEST}, AT, "judge")
 
     def test_a_second_cited_ruling_for_the_task_is_refused(self):
         # The bound is per task: a re-granted budget exhausting again must not
@@ -623,7 +670,7 @@ class RecoveryTests(unittest.TestCase):
         with self.assertRaisesRegex(UsageError, "at most one per task"):
             checkpoint(self.store, self.history, {"id": "checkpoint-7", "task": TASK, "defect": "F1 still open",
                 "previous_attempts": "Seven attempts", "progress": "Unchanged",
-                "change_in_approach": "Rewrite the parser", "judge_report": str(self.judge_report)}, AT, "judge")
+                "change_in_approach": "Rewrite the parser", "judge_report": str(self.judge_report), "requested_by": REQUEST}, AT, "judge")
 
     def test_a_later_checkpoint_without_a_ruling_still_records(self):
         self.seed_checkpoint()
@@ -640,6 +687,40 @@ class RecoveryTests(unittest.TestCase):
         del prior["judge_evidence"]
         with self.assertRaises(UsageError):
             validate_store(self.store, self.history)
+
+    def test_a_cited_ruling_records_the_operator_request_that_asked_for_it(self):
+        # coding-policy#400: the ledger called the ruling "operator-requested"
+        # while recording nothing of the request.
+        self.exhaust()
+        self.consult_investigator("2026-02-03T09:30:00+00:00", "2026-02-03T09:45:00+00:00")
+        add_assignment(self.state, AT, "judge", "judge", task=TASK)
+        base = {"id": "cp", "task": TASK, "defect": "F1 remains open",
+                "previous_attempts": "Five attempts", "progress": "Partly",
+                "change_in_approach": "One parser"}
+        with self.assertRaisesRegex(UsageError, "the operator's to request"):
+            checkpoint(self.store, self.history, {**base, "judge_report": str(self.judge_report)}, AT, "judge")
+        for bad in ({"source": "operator"}, {"source": "operator", "quote": ""}, "operator said so"):
+            with self.subTest(receipt=bad):
+                with self.assertRaises(UsageError):
+                    checkpoint(self.store, self.history,
+                               {**base, "judge_report": str(self.judge_report), "requested_by": bad}, AT, "judge")
+        # The receipt without a ruling has nothing to authorize.
+        with self.assertRaisesRegex(UsageError, "record the checkpoint without it"):
+            checkpoint(self.store, self.history, {**base, "requested_by": REQUEST}, AT, "judge")
+        record = checkpoint(self.store, self.history,
+                            {**base, "judge_report": str(self.judge_report), "requested_by": REQUEST}, AT, "judge")
+        self.assertEqual(record["requested_by"], REQUEST)
+        validate_store(self.store, self.history)
+
+    def test_a_ledger_citing_two_rulings_for_one_task_is_refused(self):
+        # coding-policy#400: `checkpoint` refuses the second as it writes it;
+        # the read boundary checked each row alone and accepted both.
+        self.seed_checkpoint()
+        corrupt = copy.deepcopy(self.store)
+        first = corrupt["checkpoints"][0]
+        corrupt["checkpoints"].append({**first, "id": "checkpoint-5b"})
+        with self.assertRaisesRegex(UsageError, "more than one operator-requested ruling"):
+            validate_store(corrupt, self.history)
 
     def test_an_unknown_checkpoint_field_is_refused(self):
         self.exhaust()

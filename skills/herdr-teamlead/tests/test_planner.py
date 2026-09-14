@@ -469,6 +469,20 @@ class RosterCoverageTest(unittest.TestCase):
         self.assertIn("teamlead measure", str(caught.exception))
         self.assertEqual(caught.exception.details["uncovered"], ["idle"])
 
+    def test_an_uncovered_roster_is_named_before_the_capacity_count(self):
+        # coding-policy#400: a partial snapshot failed "measure more agents or
+        # pass fewer roles" first, which invites adding panes until the count
+        # fits instead of measuring the roster config.json declares.
+        with self.assertRaises(PlanError) as caught:
+            plan(
+                ["developer", "reviewer", "tester"],
+                snapshot(alpha=90.0),
+                roster=["alpha", "zeta", "idle"],
+            )
+        self.assertIn("teamlead measure", str(caught.exception))
+        self.assertNotIn("pass fewer roles", str(caught.exception))
+        self.assertEqual(caught.exception.details["uncovered"], ["idle", "zeta"])
+
     def test_a_covered_roster_plans_unchanged(self):
         data = snapshot(alpha=90.0, zeta=60.0)
         self.assertEqual(
