@@ -439,6 +439,14 @@ class RecoveryTests(unittest.TestCase):
         reserve(self.store, {**record, "provider": "claude", "brief_identity": "brief-identity-refreshed"}, AT)
         saved = next(row for row in self.store["dispatches"] if row["id"] == record["id"])
         self.assertEqual((saved["provider"], saved["brief_identity"]), ("claude", "brief-identity-refreshed"))
+        # A stale move naming the old provider would fail the ledger on the
+        # next refusal, so the retry drops one the new record does not carry.
+        abort_pre_send(self.store, record["id"], AT, "fixture")
+        self.store["dispatches"][-1]["refusal_move"] = {"schema_version": 1, "from": "gone", "from_provider": "codex", "provider": "claude"}
+        reserve(self.store, {**record, "provider": "grok"}, AT)
+        saved = next(row for row in self.store["dispatches"] if row["id"] == record["id"])
+        self.assertNotIn("refusal_move", saved)
+        self.assertEqual(saved["provider"], "grok")
         validate_store(self.store, self.history)
 
     def test_the_dispatchs_recorded_provider_outranks_the_current_config(self):

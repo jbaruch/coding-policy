@@ -450,10 +450,13 @@ def reserve(store, record, at):
         _event(store, at, "dispatch_transport_retry", record["task"], {"dispatch": prior["id"], "previous": dict(prior)})
         prior.update(status="reserved", report=None, result=None)
         # The fingerprint does not cover these, so a retry after a config
-        # change would otherwise keep the original row's provider (#403).
-        for key in ("provider", "brief_identity"):
+        # change would otherwise keep the original row's provider, and a move
+        # naming the old one fails validation on the next refusal (#403).
+        for key in ("provider", "brief_identity", "refusal_move"):
             if key in record:
                 prior[key] = record[key]
+            else:
+                prior.pop(key, None)
         prior.pop("reconciliation", None)
         item = prior
     else:

@@ -470,7 +470,13 @@ main() {
           return 0
         fi
       else
-        real="$(cd "$path" 2>"$ERRFILE" && pwd -P)" || rc=$?
+        # A sentinel past `pwd`'s own newline: command substitution strips
+        # trailing newlines, and a worktree path may end in one now that `-z`
+        # can carry it. Without this the run would decide against a truncated
+        # path.
+        real="$(cd "$path" 2>"$ERRFILE" && pwd -P && printf 'x')" || rc=$?
+        real="${real%x}"
+        real="${real%$'\n'}"
         if (( rc != 0 )); then
           row failed "$path" "$branch" "cannot enter the worktree: $(tr '\n' ' ' < "$ERRFILE")"
           if [[ -n "$branch" ]]; then seen_branches+=("$branch"); fi
