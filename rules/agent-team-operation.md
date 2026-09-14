@@ -389,14 +389,14 @@ description: Running a multi-agent team — task-based specialist composition, c
 - An investigation-only round gates its knowledge deliverable under `skills/herdr-teamlead/references/assignment-reasoning.md`
 - Pre-development output is a design note or a test plan, never a pass
 - The tester and the reviewer pass on the pushed branch before the PR opens
-- A round may fill several seats of one role against a declared partition of the review surface
+- A round may split its review surface across several reviewers against a declared partition
 - The partition is disjoint and exhaustive over the change
 - Every changed file belongs to exactly one slice
 - A partition leaving a changed file unowned is refused
 - A partition whose slices overlap is refused
-- `skills/herdr-teamlead/teamlead/partition.py` decides both refusals
-- `teamlead plan --partition` seats one worker per slice under the existing capability, contribution-exclusion and headroom ordering
-- Each seat's brief names its slice and forbids roaming
+- `skills/herdr-teamlead/teamlead/partition.py` decides both refusals, through `teamlead validate-partition`
+- Each slice is dispatched to a distinct worker under the existing capability, contribution-exclusion and headroom ordering
+- Each slice's brief names its slice and forbids roaming
 - An observation outside a reviewer's slice goes in a separate section of its report
 - An out-of-slice observation never forms part of that reviewer's verdict
 - A slice is saturated when its reviewer reports clean at the current tip

@@ -236,8 +236,6 @@ def build_parser():
                              help="Choose a configured round type for a role; never a model override.")
     plan_parser.add_argument("--round-context", metavar="FILE",
                              help="JSON object keyed by role with mechanical/risk evidence for this round.")
-    plan_parser.add_argument("--partition", metavar="FILE",
-                             help="Review partition; seats one worker per slice of the role it names. Validate it with `validate-partition` first.")
     plan_parser.add_argument("--fix-round", type=int, help="Task fix number; late fixes use the top tier.")
     plan_parser.add_argument("--task", help="Original task identity; preserve it through every correction.")
     plan_parser.add_argument("--requirements", metavar="FILE",
@@ -635,69 +633,21 @@ def cmd_measure(args, client=None, warn=None, trace=None):
     }
 
 
-def _expand_partition_seats(roles, partition_path):
-    """Replace the partitioned role with one seat per slice.
-
-    The planner is role-keyed throughout, so several seats of one role reach it
-    as distinct names (`reviewer#api`) mapped back to the role they fill.
-    Returns `(roles, {seat: role})`; an empty map when no partition is given
-    leaves a single-seat round untouched (#409).
-    """
-    if not partition_path:
-        return roles, {}
-    document = partition.load_partition(partition_path)
-    role = partition.partition_role(document)
-    if role not in roles:
-        raise PlanError(
-            "The partition seats {!r}, which --roles does not request; add it, or drop --partition.".format(role),
-            {"role": role, "roles": roles},
-        )
-    seats = partition.seats_for(document, role)
-    expanded = []
-    for item in roles:
-        expanded.extend(seats) if item == role else expanded.append(item)
-    return expanded, seats
-
-
-def _fan_out_seats(mapping, seats):
-    """Re-key a role-keyed input onto the seats that replaced the role.
-
-    The expanded role's own key is dropped: the seats ARE the roles this plan
-    assigns, and a leftover `reviewer` key reads as an entry naming a role the
-    plan is not filling (#409).
-    """
-    if not seats or not mapping:
-        return mapping
-    expanded = set(seats.values())
-    fanned = {key: value for key, value in mapping.items() if key not in expanded}
-    for seat, role in seats.items():
-        if seat in mapping:
-            fanned[seat] = mapping[seat]
-        elif role in mapping:
-            fanned[seat] = mapping[role]
-    return fanned
-
-
 def cmd_plan(args, client=None, warn=None, trace=None):
-    # `canonical` is what every module reasoning about RESPONSIBILITY sees --
-    # independence and contribution exclusion (composition.py), round tiers
-    # (tiers.py), requirements, fix history. `roles` carries the seat identity
-    # and reaches the planner alone, which ranks one worker per seat (#409).
-    canonical = [role.strip() for role in args.roles.split(",") if role.strip()]
-    roles, seats = _expand_partition_seats(canonical, getattr(args, "partition", None))
+    roles = [role.strip() for role in args.roles.split(",") if role.strip()]
     excludes = _parse_excludes(args.excludes)
     role_costs = load_role_costs(_config_path(args))
     judge = load_judge(_config_path(args))
-    rounds = _round_inputs(args, canonical)
+    rounds = _round_inputs(args, roles)
     agents = load_config(_config_path(args)) if _config_path(args).exists() else []
     state_path = _state_path(args)
     state = load_state(state_path, warn=warn)
-    requirements = composition.parse_requirements(_read_record(args.requirements) if args.requirements else None, canonical, args.task)
+    requirements = composition.parse_requirements(_read_record(args.requirements) if args.requirements else None, roles, args.task)
     work = _read_record(args.work) if args.work else None
     recovery.validate_work(state["recovery"], state["assignments"], args.task, args.fix_round,
-                           args.correction_plan, work, implementation="developer" in canonical)
+                           args.correction_plan, work, implementation="developer" in roles)
     if args.task:
-        validate_fix_history({role: None for role in canonical}, state["assignments"], args.task, args.fix_round)
+        validate_fix_history({role: None for role in roles}, state["assignments"], args.task, args.fix_round)
     if args.snapshot:
         snapshot_path = Path(args.snapshot)
         try:
@@ -736,26 +686,15 @@ def cmd_plan(args, client=None, warn=None, trace=None):
         )
 
     operator_excludes = {role: list(names) for role, names in excludes.items()}
-    # Resolved against the canonical roles, then given to each seat: a seat
-    # inherits its role's independence bars, tier candidates and round type.
     constraints = composition.selection_constraints(
-        canonical, agents, requirements, state["assignments"], args.task,
+        roles, agents, requirements, state["assignments"], args.task,
         dispatches=state["recovery"]["dispatches"], assessments=state["specialist_assessments"],
         candidate_names=snapshot.get("agents", {}).keys() if isinstance(snapshot.get("agents"), dict) else (),
     )
     for role, names in constraints["exclude"].items():
         excludes[role] = sorted(set(excludes.get(role, [])) | set(names))
-    tier_candidates = _candidate_tiers(canonical, agents, rounds, args.fix_round, judge,
+    tier_candidates = _candidate_tiers(roles, agents, rounds, args.fix_round, judge,
                                       None if args.preview_tiers else (args.now or now_iso()), excludes=excludes)
-    excludes = _fan_out_seats(excludes, seats)
-    operator_excludes = _fan_out_seats(operator_excludes, seats)
-    role_costs = _fan_out_seats(role_costs, seats)
-    rounds = _fan_out_seats(rounds, seats)
-    requirements = _fan_out_seats(requirements, seats)
-    tier_candidates = _fan_out_seats(tier_candidates, seats)
-    constraints = {**constraints,
-                   "familiarity": _fan_out_seats(constraints["familiarity"], seats),
-                   "rationale": _fan_out_seats(constraints["rationale"], seats)}
 
     result = build_plan(
             roles,

@@ -169,8 +169,7 @@ recorded decision with its reason. Re-run the command with the updated
 declaration, roles, requirements and decisions after every such change, and
 plan only once it exits 0.
 
-A round filling several seats of one role validates its partition first, and
-`plan --partition` then seats one worker per slice:
+A round that will split its review surface validates the partition first:
 
 ```bash
 CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
@@ -191,14 +190,13 @@ skills/herdr-teamlead/references/review-partition.md
 CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
 bash "$CP/skills/herdr-teamlead/teamlead.sh" plan \
   --roles <role[,role...]> [--requirements <requirements.json>] \
-  [--exclude <role>=<agent>[,<agent>...]]... [--partition <partition.json>] \
+  [--exclude <role>=<agent>[,<agent>...]]... \
   [--round <role>=<round-type>] [--round-context <evidence.json>] \
   --task <task-id> [--fix-round <N>] [--correction-plan <id> --work <work.json>]
 ```
 
-Emits the role plan without worker contact; a partitioned role is seated once
-per slice as `<role>#<slice>`. On exit 1, resolve the diagnostic before
-continuing. Apply the Step 5 constraints in `references/round-setup.md`:
+Emits the role plan without worker contact. On exit 1, resolve the diagnostic
+before continuing. Apply the Step 5 constraints in `references/round-setup.md`:
 exclude contributors from verification, reserve the developer through early fixes,
 preserve task identity and fix count, and reuse recorded correction bounds.
 Tier and qualification contracts:

@@ -71,10 +71,6 @@ class LoadPartition(unittest.TestCase):
         self.assertEqual(partition.partition_role(document()), "reviewer")
         self.assertEqual(partition.partition_role(document(role="tester")), "tester")
 
-    def test_seats_name_one_worker_per_slice(self):
-        self.assertEqual(partition.seats_for(document(), "reviewer"),
-                         {"reviewer#api": "reviewer", "reviewer#core": "reviewer"})
-
 
 class Validate(unittest.TestCase):
     def test_a_disjoint_exhaustive_partition_reports_its_ownership(self):

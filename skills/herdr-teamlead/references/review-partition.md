@@ -58,12 +58,11 @@ Fix the document and re-run. Plan only once it exits 0.
 
 ## Seating
 
-`plan --partition <partition.json>` replaces the named role with one seat per
-slice. Each seat inherits that role's cost, exclusions, round type and
-requirements, so capability, contribution-exclusion and headroom ordering apply
-unchanged and each slice gets a distinct worker. The plan's `assignments` are
-keyed `<role>#<slice>`.
+`plan` does not yet fill several seats from one partition. Dispatch resolves
+briefs, requirements and round tiers by role name, so a seat name would reach
+`apply` as an unknown role. Until it carries seats, a round runs its slices as
+separate reviewer dispatches, one per slice, against the same tip.
 
-Each seat's brief names its own slice and forbids roaming. An observation
+Each slice's brief names its own slice and forbids roaming. An observation
 outside the slice belongs in a separate section of that report and forms no
-part of that seat's verdict.
+part of that slice's verdict.
