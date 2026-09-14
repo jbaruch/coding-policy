@@ -37,6 +37,13 @@
   while shipping correctly to consumers. `scripts/tests/test_source_index.py`
   now fails when the manifest's `rules` array, the index's `@`-imports and
   `rules/*.md` on disk disagree, so the next added rule cannot repeat it.
+- **Every tracked Python file is inside the diagnostics gate's scope.**
+  `pyrightconfig.json` enumerates its includes by hand, and three modules had
+  fallen outside it — `test_resolve_policy_paths.py`,
+  `test_stale_grok_delivery.py` and the new index test — so CI type-checked
+  none of them while still reporting zero findings. The same suite now fails
+  when a tracked `.py` file is missing from the include list, or the list
+  names a path that no longer exists.
 
 ## 0.3.215 — 2026-09-14
 

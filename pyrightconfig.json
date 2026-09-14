@@ -84,7 +84,10 @@
     "skills/herdr-teamlead/tests/test_specialist_cli.py",
     "skills/herdr-teamlead/tests/test_specialist_delivery.py",
     "skills/herdr-teamlead/teamlead/triggers.py",
-    "skills/herdr-teamlead/tests/test_triggers.py"
+    "skills/herdr-teamlead/tests/test_triggers.py",
+    "skills/herdr-teamlead/tests/test_resolve_policy_paths.py",
+    "skills/herdr-teamlead/tests/test_stale_grok_delivery.py",
+    "scripts/tests/test_source_index.py"
   ],
   "executionEnvironments": [
     {

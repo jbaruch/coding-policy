@@ -1,16 +1,21 @@
 #!/usr/bin/env python3
-"""The source checkout's instruction index agrees with the published manifest.
+"""The checkout's hand-maintained file lists agree with what is on disk.
 
-`AGENTS.md` sends an agent working in this checkout to `.claude/CLAUDE.md`,
-which @-imports the rule files. A rule declared in `.tessl-plugin/plugin.json`
-but missing from that index ships to consumers while staying invisible to
-anyone working on the repo itself, and nothing caught the drift (#368). This
-suite is that check: the two lists must name the same files, and every named
-file must exist.
+Two lists in this repo enumerate files by hand, and both go stale silently.
+`.claude/CLAUDE.md` @-imports the rules an agent working in this checkout
+reads: a rule declared in `.tessl-plugin/plugin.json` but missing there ships
+to consumers while staying invisible to maintainers (#368).
+`pyrightconfig.json` enumerates the files the diagnostics gate type-checks: a
+Python file missing there is checked by nothing, and CI still reports zero
+findings (`rules/language-diagnostics.md` Gate It Deterministically).
+
+Neither drift breaks a build, so nothing surfaced either one. This suite is
+that check.
 """
 
 import json
 import re
+import subprocess
 import sys
 import unittest
 from pathlib import Path
@@ -18,6 +23,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent.parent
 MANIFEST = ROOT / ".tessl-plugin" / "plugin.json"
 INDEX = ROOT / ".claude" / "CLAUDE.md"
+PYRIGHT = ROOT / "pyrightconfig.json"
 
 #: An `@`-import line in the index, relative to `.claude/`.
 IMPORT = re.compile(r"^@\.\./(rules/[^\s]+\.md)\s*$", re.MULTILINE)
@@ -59,6 +65,30 @@ class SourceIndex(unittest.TestCase):
             sorted(set(on_disk) - set(indexed_rules())), [],
             "rules/*.md file missing from .claude/CLAUDE.md",
         )
+
+
+class DiagnosticsScope(unittest.TestCase):
+    """pyrightconfig.json's explicit include list covers every tracked module."""
+
+    def tracked_python(self):
+        listing = subprocess.run(["git", "ls-files", "*.py"], cwd=ROOT,
+                                 capture_output=True, text=True, check=True)
+        return sorted(listing.stdout.split())
+
+    def included(self):
+        return sorted(json.loads(PYRIGHT.read_text())["include"])
+
+    def test_every_tracked_module_is_type_checked(self):
+        uncovered = sorted(set(self.tracked_python()) - set(self.included()))
+        self.assertEqual(
+            uncovered, [],
+            "tracked .py file outside pyrightconfig.json's include list — the "
+            "diagnostics gate does not see it",
+        )
+
+    def test_every_included_path_exists(self):
+        missing = [path for path in self.included() if not (ROOT / path).is_file()]
+        self.assertEqual(missing, [], "pyrightconfig.json includes a path that does not exist")
 
 
 if __name__ == "__main__":
