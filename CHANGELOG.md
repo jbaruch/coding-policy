@@ -10,6 +10,25 @@
   `PYTHONDONTWRITEBYTECODE=1` for that invocation, and a subprocess fixture
   runs it against a cache-free plugin copy and asserts none appears. Copilot
   finding from #383, deferred there as advisory.
+- **The restoration gate's refusals describe what it observed (#388).** The
+  release wait runs twice — before the first start, and again after a start
+  Herdr refused with `agent_name_taken` — and every refusal it raised claimed
+  "No start was attempted", including from the second position where one had
+  been. A second diagnostic read any non-shell foreground state as the stopped
+  process still running, so an empty foreground list produced a timeout naming
+  a process that was already gone. `_start_clause` now reports the position the
+  gate was called from, and the pane state distinguishes the stopped process
+  from anything else the gate may wait out. Refusal and retry behavior is
+  unchanged.
+
+### Changed
+
+- **`references/model-tiers.md` names the resume grammar instead of repeating
+  it (#388).** The reference maintained its own list of accepted and refused
+  resume selectors beside the one in `teamlead/tiers.py`, which
+  `rules/script-as-black-box.md` reserves to the module. It now points at
+  `RESUME_OPTIONS`, `RESUME_SUBCOMMANDS`, `RESUME_REFUSALS` and `SESSION_UUID`
+  and the comment block above them. Both findings were advisory on #386.
 
 ## 0.3.215 — 2026-09-14
 
