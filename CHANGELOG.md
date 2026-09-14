@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.216 — 2026-09-14
+
 ### Fixed
 
 - **The supervision Stop hook writes no bytecode cache (#385).**
