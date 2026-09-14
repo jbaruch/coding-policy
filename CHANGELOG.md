@@ -13,6 +13,40 @@
   runs it against a cache-free plugin copy and asserts none appears. Copilot
   finding from #383, deferred there as advisory.
 
+### Changed
+
+- **Step 5's detect-triggers prose states the instruction without its
+  rationale (#417).** The line read "Phase 1 has no diff yet, so it passes
+  `--planned` naming the surfaces the work will touch" — a justifying clause
+  attached to a directive in an auto-loaded artifact, which
+  `rules/context-writing-style.md` What to Cut forbids. The reason a
+  pre-implementation round has nothing to classify is archived here; the
+  skill now says only what to pass and when. Deferred advisory from the #416
+  review, filed rather than folded in under `rules/review-severity.md`.
+- **`dispatch-recovery.md` points at the parser instead of restating it
+  (#373).** The live-validation procedure spelled out the Claude transcript
+  parser's requester-linkage and answered-once predicates, which
+  `rules/script-as-black-box.md` reserves to the script. The observed parallel
+  tool-result orderings stay — they are operator-facing facts about the CLI,
+  and both must be exercised — while the predicates deciding them are left to
+  `skills/herdr-teamlead/teamlead/claude_native.py`, already named as the
+  source contract earlier in the same file. Advisory from the #372 policy
+  review; documentation only, no parser change.
+- **`rules/agent-team-operation.md` reaches the source instruction index, and
+  a test keeps it there (#368).** `.claude/CLAUDE.md` imported 25 of the 26
+  declared rules, so an agent working in this checkout read every rule except
+  the one governing how the team itself operates — invisible to maintainers
+  while shipping correctly to consumers. `scripts/tests/test_source_index.py`
+  now fails when the manifest's `rules` array, the index's `@`-imports and
+  `rules/*.md` on disk disagree, so the next added rule cannot repeat it.
+- **Every tracked Python file is inside the diagnostics gate's scope.**
+  `pyrightconfig.json` enumerates its includes by hand, and three modules had
+  fallen outside it — `test_resolve_policy_paths.py`,
+  `test_stale_grok_delivery.py` and the new index test — so CI type-checked
+  none of them while still reporting zero findings. The same suite now fails
+  when a tracked `.py` file is missing from the include list, or the list
+  names a path that no longer exists.
+
 ## 0.3.215 — 2026-09-14
 
 ### Changed
