@@ -17,7 +17,7 @@ from pathlib import Path
 from teamlead.errors import UsageError
 from teamlead.recovery import (
     abort_pre_send, active_plans, authorize_context, authorize_plan, authorize_refused_dispatch, brief_identity, checkpoint, confirmed_fix,
-    diagnose,
+    diagnose, require_investigation_before_judge,
     dispatch_identity, finish_dispatch, fresh_transition, mark_sending,
     migrate_store, prior_dispatch, record_refusal, record_report, refusal_move, register_task, reserve,
     task_statuses, validate_store, validate_work,
@@ -264,6 +264,19 @@ class RecoveryTests(unittest.TestCase):
                         "EVIDENCE: rounds 10-20\nUNVERIFIED: none\n")
         with self.assertRaisesRegex(UsageError, "names its remedy and what it means"):
             self.run_diagnosis({**self.diagnosis("diag-1", "continue", 2), "judge_report": str(bare)}, "judge")
+
+    def test_a_judge_seat_is_not_spent_before_the_assessment_exists(self):
+        # coding-policy#408: the gate guards the dispatch, not only the record,
+        # so the most expensive seat is never spent on an uninvestigated loop.
+        # Inside the allowance an ordinary dispute reaches the judge freely.
+        add_assignment(self.state, "2026-02-03T09:00:00+00:00", "developer", "worker", task=TASK)
+        self.assertIsNone(require_investigation_before_judge(self.store, self.history, TASK, []))
+        self.assertIsNone(require_investigation_before_judge(self.store, self.history, "unknown-task", []))
+        self.exhaust()
+        with self.assertRaisesRegex(UsageError, "consult the investigator"):
+            require_investigation_before_judge(self.store, self.history, TASK, [])
+        index = self.consult_investigator("2026-02-03T09:30:00+00:00", "2026-02-03T09:45:00+00:00")
+        self.assertIsNone(require_investigation_before_judge(self.store, self.history, TASK, self.investigated(index=index)))
 
     def test_a_diagnosis_rules_on_a_prepared_causal_assessment(self):
         # coding-policy#408: the investigator's profile is written for repeated

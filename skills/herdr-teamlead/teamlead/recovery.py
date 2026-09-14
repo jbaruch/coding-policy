@@ -288,6 +288,36 @@ def checkpoint(store, assignments, data, at, judge_agent):
     return record
 
 
+def investigated_after(assignments, row, task, developer_index):
+    """True when `row` assesses an investigator consultation of `task` that
+    followed the developer attempt at `developer_index`."""
+    return (row["task"] == task and row["role"] == "investigator"
+            and assignment_after(assignments, row["assignment_index"], developer_index))
+
+
+def require_investigation_before_judge(store, assignments, task, investigations):
+    """Refuse a judge dispatch at an exhausted allowance with no assessment.
+
+    The judge rules on the investigator's causal assessment (#408), so the
+    expensive seat is never spent before that assessment exists. A judge
+    dispatched for an ordinary dispute is untouched: the gate applies only
+    while the task sits at an exhausted allowance with no unspent bound.
+    """
+    if not task or task not in store["tasks"]:
+        return None
+    count = confirmed_fix(assignments, task)
+    if count < DEFAULT_FIX_LIMIT:
+        return None
+    if any(row["task"] == task and row["last_fix"] > count for row in active_plans(store)):
+        return None
+    developer = latest_assignment(assignments, task=task, role="developer", status="applied")
+    if developer is None:
+        return None
+    if not any(investigated_after(assignments, row, task, developer[0]) for row in investigations):
+        raise UsageError("Task {} sits at an exhausted allowance: consult the investigator and assess its report before dispatching the judge, which rules on that assessment.".format(task), {})
+    return None
+
+
 def diagnoses_for(store, task):
     return [row for row in store["diagnoses"] if row["task"] == task]
 
@@ -391,8 +421,7 @@ def diagnose(store, assignments, data, at, judge_agent, enrolled_report, supervi
     # it. The assessment time is what matters: an investigator dispatched early
     # and assessed after the judge finished is not what the judge read (#408).
     judge_at = timestamp(assignments[judge[0]].get("at"), "Judge assignment chronology")
-    if not any(row["task"] == data["task"] and row["role"] == "investigator"
-               and assignment_after(assignments, row["assignment_index"], developer[0])
+    if not any(investigated_after(assignments, row, data["task"], developer[0])
                and timestamp(row["at"], "Investigator assessment chronology") < judge_at
                for row in investigations):
         raise UsageError("A diagnosis rules on a prepared causal assessment: record an assessed investigator consultation for task {} after its latest developer attempt, assessed before the judge dispatch you cite.".format(data["task"]), {})

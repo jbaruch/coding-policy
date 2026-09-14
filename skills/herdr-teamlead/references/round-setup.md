@@ -285,6 +285,10 @@ What you decide, and it is the whole of your job here:
   `references/specialists.md`; the composer selects `brief-specialist.md`.
 - For specialist developer, reviewer or tester work: `SPECIALIST_CONTEXT` in
   the normal role brief, with the applicable expertise, inputs and capability gaps.
+- For a judge diagnosis under the role key `judge-diagnosis`:
+  `INVESTIGATION_REPORT` (the assessed investigator report the judge rules on),
+  `TASK`, `FIX_ROUNDS`, `REMAINING_WORK`, `ROUND_HISTORY`, `TREE`, and
+  `PRIOR_REMEDY` (any earlier remedy and what it changed, or "none").
 
 | Phase | Role | Mode | Output |
 | ----- | ---- | ---- | ------ |

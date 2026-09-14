@@ -1127,6 +1127,11 @@ def cmd_start_judge(args, client=None, warn=None, trace=None):
         raise UsageError("Judge --task differs from its plan; use the original task identity.", {})
     at = args.now or now_iso()
     attention.require_dispatch_clear(state_path, args.task or planned_task, at)
+    # The judge rules on the investigator's assessment, so the seat is never
+    # started at an exhausted allowance before that assessment exists (#408).
+    full = _load_state_for_write(state_path, warn, persist_migration=False)
+    recovery.require_investigation_before_judge(full["recovery"], full["assignments"],
+                                                args.task or planned_task, full["specialist_assessments"])
     item = retrospective_runtime.request({"transitions": [{"agent": agent.name, "role": "judge",
         "model": parsed["model"], "effort": parsed["effort"], "context": "start", "task": args.task or planned_task,
         "pane": args.pane}]})["transitions"][0]

@@ -34,7 +34,10 @@
   eligible workers — so skipping becomes an explicit choice rather than the
   default silence produced. The exhaustion trigger is the exception with no
   alternative: the judge's diagnosis rules on that assessment, so `teamlead
-  diagnose` refuses without it and no staffing decision substitutes. The size a package must exceed is the consuming
+  diagnose` refuses without it, no staffing decision substitutes, and the
+  judge seat is not dispatched at an exhausted allowance before the assessment
+  exists — the gate guards the dispatch, not only the record, so the most
+  expensive seat is never spent on an uninvestigated loop. The size a package must exceed is the consuming
   repo's to state and that trigger waits on the number; the other four fire on
   their own terms in every repo.
 

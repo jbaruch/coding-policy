@@ -46,12 +46,14 @@ author is an implementation contributor, even while holding the tester role.
 The developer implements against both, runs the repo's gates, pushes the
 branch, and stops without opening a PR.
 
-Skip Phase 1 for a change small enough that a design note would say less than
-the diff, and only when the work trips no Team Composition trigger. Work that
-trips one gates here: its deliverable lands before implementation, or the lead
-records the staffing decision and its reason. The cheap gate is the one worth
-making mandatory; a reviewer catching the same thing one finding per round is
-the expensive one. Nothing in Phase 1 is a pass; it is preparation.
+Work that trips a Team Composition trigger gates here: its deliverable lands
+before implementation, or the lead records the staffing decision and its
+reason. The cheap gate is the one worth making mandatory; a reviewer catching
+the same thing one finding per round is the expensive one.
+
+Untriggered work keeps the old judgement, whatever its size: skip Phase 1 when
+a design note would say less than the diff. Nothing in Phase 1 is a pass; it
+is preparation.
 
 **Phase 2 — post-push verification (mandatory).** The reviewer reviews the
 pushed branch and posts a COMMENT review (Mode B). The tester runs the gates
