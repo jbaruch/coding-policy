@@ -42,6 +42,7 @@ Use these separate vocabularies:
 | assignment | `unavailable` | A report is missing or unavailable under the wait/recovery contract |
 | assignment | `unknown` | Dispatch or outcome evidence is insufficient; reconcile before retrying |
 | task | `in_progress` | Required task work remains |
+| task | `awaiting_diagnosis` | An exhausted allowance awaits the judge's remedy |
 | task | `waiting_for_operator` | A named required operator decision remains outstanding |
 | task | `ready_for_release` | Step 12's current-tip verification gate holds; release remains outstanding |
 | task | `completed` | All task acceptance criteria and required release/cleanup obligations are verified |

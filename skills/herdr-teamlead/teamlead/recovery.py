@@ -283,7 +283,7 @@ def checkpoint(store, assignments, data, at, judge_agent):
             raise UsageError("Checkpoint identity already describes different evidence; record a new checkpoint without rewriting the old one.", {})
         return prior
     store["checkpoints"].append(record)
-    _event(store, at, "waiting_for_operator", data["task"], {"checkpoint": data["id"], "paused_work": "implementation", "defect": data["defect"]})
+    _event(store, at, "awaiting_diagnosis", data["task"], {"checkpoint": data["id"], "paused_work": "implementation", "defect": data["defect"]})
     return record
 
 

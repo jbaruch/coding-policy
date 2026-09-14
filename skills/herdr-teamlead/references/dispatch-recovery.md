@@ -204,8 +204,10 @@ to work around uncertainty. Reconciliation records its later observations
 separately and preserves any original unconfirmed assignment row.
 
 `teamlead status` prints implementation state, confirmed fixes, active plan,
-and remaining allowance. `waiting_for_operator` explicitly pauses implementation
-while its checkpoint awaits approval; an audit worker may still be active.
+and remaining allowance. `awaiting_diagnosis` pauses implementation while its
+checkpoint awaits the judge's remedy, which the lead takes without an operator;
+an audit worker may still be active. `diagnosed_stop` is terminal: the task
+ships what is clean and tracks the remainder.
 `dispatch_outcome_unknown` requires reconciliation, and
 `checkpoint_required` requires the next exhausted-budget checkpoint.
 Neither an active worker nor a dispatch receipt proves that implementation or
