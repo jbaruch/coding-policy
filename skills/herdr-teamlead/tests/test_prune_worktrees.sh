@@ -44,6 +44,8 @@
 #  23. Deferred prunable   -> a prunable branch survives a skipped prune.
 #  24. Newline path        -> a record is not split by a newline in the path.
 #  25. Branch config       -> a deleted branch's branch.<name> config goes too.
+#  26. Locked and gone     -> git keeps its metadata, so its branch is kept too.
+#  27. Split record        -> an old git plus a newline path decides nothing.
 #
 # Run: bash skills/herdr-teamlead/tests/test_prune_worktrees.sh
 set -uo pipefail
@@ -345,7 +347,40 @@ SHIM
   git -C "$SHARED" config --get-regexp '^branch\.review/tracked\.' >/dev/null || die "fixture branch has no tracking config"
   run "$SHARED"
   echo "25. a deleted branch leaves no stale branch.<name> config behind"
-  if (( RC == 0 )) && [[ "$(removed_paths)" == *"$ROOT/twentyfive-tracked"* ]] && ! git -C "$SHARED" config --get-regexp '^branch\.review/tracked\.' >/dev/null 2>&1; then pass; else fail "rc=$RC out=$OUT err=$ERRTEXT"; fi
+  cfg_rc=0
+  git -C "$SHARED" config --get-regexp '^branch\.review/tracked\.' >/dev/null 2>"$TMP/cfg.err" || cfg_rc=$?
+  (( cfg_rc == 0 || cfg_rc == 1 )) || die "git config failed (exit $cfg_rc): $(cat "$TMP/cfg.err")"
+  if (( RC == 0 )) && [[ "$(removed_paths)" == *"$ROOT/twentyfive-tracked"* ]] && (( cfg_rc == 1 )); then pass; else fail "rc=$RC cfg_rc=$cfg_rc out=$OUT err=$ERRTEXT"; fi
+
+  # --- 26. a locked entry whose directory is gone keeps its branch.
+  mk_repo twentysix
+  add_wt "$SHARED" review/lockedgone "$ROOT/twentysix-lockedgone"
+  git -C "$SHARED" worktree lock "$ROOT/twentysix-lockedgone" || die "lock failed"
+  rm -rf "$ROOT/twentysix-lockedgone" || die "rm failed"
+  run "$SHARED"
+  echo "26. a locked entry git's prune preserves does not release its branch"
+  if (( RC == 0 )) && [[ "$(kept_reason "$ROOT/twentysix-lockedgone")" == locked ]] && [[ "$(branches_deleted)" != *review/lockedgone* ]] && has_branch "$SHARED" review/lockedgone; then pass; else fail "rc=$RC out=$OUT err=$ERRTEXT"; fi
+
+  # --- 27. without -z, a split record refuses the inventory instead of deciding.
+  mk_repo twentyseven
+  add_wt "$SHARED" review/plain "$ROOT/twentyseven-plain"
+  git -C "$SHARED" worktree add -q -b review/split "$ROOT/twentyseven-$(printf 'a\nb')" origin/main 2>/dev/null \
+    || die "fixture could not create a worktree at a newline-bearing path"
+  mkdir -p "$TMP/shim27" || die "mkdir shim failed"
+  cat > "$TMP/shim27/git" <<SHIM || die "shim write failed"
+#!/usr/bin/env bash
+set -euo pipefail
+# Stand in for a git older than 2.36, which has no -z on this subcommand.
+case "\$*" in *"worktree list"*-z*) echo "error: unknown option z" >&2; exit 129 ;; esac
+exec "$(command -v git)" "\$@"
+SHIM
+  chmod +x "$TMP/shim27/git" || die "chmod shim failed"
+  RUN_SEQ=$((RUN_SEQ+1))
+  OUT="$(env WORKTREE_ROOT="$ROOT" PATH="$TMP/shim27:$PATH" bash "$SCRIPT" "$SHARED" 2>"$TMP/err.$RUN_SEQ")"; RC=$?; ERRTEXT="$(cat "$TMP/err.$RUN_SEQ")"
+  echo "27. an old git plus a newline path refuses the inventory, deciding nothing"
+  plain_dir=0; [[ -d "$ROOT/twentyseven-plain" ]] && plain_dir=1
+  plain_branch=0; has_branch "$SHARED" review/plain && plain_branch=1
+  if (( RC == 1 )) && [[ -z "$OUT" ]] && [[ "$ERRTEXT" == *"cannot list unambiguously"* ]] && (( plain_dir )) && (( plain_branch )); then pass; else fail "rc=$RC dir=$plain_dir branch=$plain_branch out=$OUT err=$ERRTEXT"; fi
 
   # --- 14. usage / not a repo.
   run

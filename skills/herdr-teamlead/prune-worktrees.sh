@@ -25,6 +25,10 @@
 # A local branch with no worktree is DELETED iff it is not the default branch
 # and is an ancestor of origin's default branch. That ancestry check is the
 # safety, and it judges a captured commit rather than a name that can move.
+# `update-ref` carries no checked-out-worktree guard of its own, so a branch is
+# only ever deleted after this run has seen its worktree removed or has read
+# the inventory as holding none; git forbids two worktrees on one branch, so
+# no other tree can be holding it.
 # Deletion is then `git update-ref -d refs/heads/<branch> <that commit>`,
 # git's compare-and-delete: it removes the branch only while it still points
 # at the commit just proved merged, so a commit landing mid-run keeps the
@@ -45,8 +49,9 @@
 # Contract:
 #   argv  : <shared-checkout> [--dry-run]
 #           --dry-run reports the same decisions and removes nothing. It still
-#           fetches, so its answer is current: remote-tracking refs and
-#           FETCH_HEAD move, nothing else in .git does.
+#           fetches, so its answer is current: remote-tracking refs, FETCH_HEAD
+#           and the object database move as any fetch moves them. No worktree,
+#           branch, config or metadata entry changes.
 #   stdout: one JSON object —
 #           {"shared":"<abs>","default_branch":"<name>","dry_run":bool,
 #            "worktrees_removed":[{"path","branch"}],
@@ -192,7 +197,7 @@ branch_tip() { # <shared> <branch>
 # the check and the deletion the way a read-then-`branch -D` allows (#405).
 # The ancestry proof is the safety `branch -d` would otherwise re-derive
 # against the local default, which may lag origin's.
-delete_branch() { # <shared> <branch> <tip>  -> 0 deleted, 1 moved, 2 git refused
+delete_branch() { # <shared> <branch> <tip>  -> 0 deleted, 1 moved, 2 git refused, 3 deleted but config left
   local rc=0 now refusal
   git -C "$1" update-ref -d "refs/heads/$2" "$3" 2>"$ERRFILE" || rc=$?
   if (( rc != 0 )); then
@@ -232,13 +237,20 @@ delete_branch() { # <shared> <branch> <tip>  -> 0 deleted, 1 moved, 2 git refuse
   rc=0
   git -C "$1" config --remove-section "branch.$2" >/dev/null 2>"$ERRFILE" || rc=$?
   if (( rc != 0 )); then
-    warn "\`git config --remove-section branch.$2\` failed (exit ${rc}): $(tr '\n' ' ' < "$ERRFILE") — ${2} is deleted; remove its stale config by hand"
+    return 3
   fi
   return 0
 }
 
 # Decide one worktree; emits a row and performs the removal unless dry-run.
+#: Set by `decide_worktree` when, and only when, it decided `prunable`. Git
+#: keeps a locked entry's metadata through `worktree prune`, so a locked entry
+#: whose directory is gone stays checked out and its branch must not be
+#: released.
+DECIDED_PRUNABLE=0
+
 decide_worktree() { # <shared> <abs_root> <default> <dry-run 0|1> <path> <branch|""> <detached 0|1> <locked 0|1>
+  DECIDED_PRUNABLE=0
   local shared="$1" abs_root="$2" db="$3" dry="$4" path="$5" branch="$6" detached="$7" locked="$8"
   if [[ "$path" != "$abs_root"/* ]]; then
     row kept "$path" "$branch" outside-root; return 0
@@ -253,6 +265,9 @@ decide_worktree() { # <shared> <abs_root> <default> <dry-run 0|1> <path> <branch
     row kept "$path" "$branch" locked; return 0
   fi
   if [[ ! -d "$path" ]]; then
+    # The caller releases this branch to the branch pass once the metadata
+    # prune runs; an entry kept for any earlier reason never reaches here.
+    DECIDED_PRUNABLE=1
     row kept "$path" "$branch" prunable; return 0
   fi
   local status rc=0
@@ -291,6 +306,7 @@ decide_worktree() { # <shared> <abs_root> <default> <dry-run 0|1> <path> <branch
   case "$rc" in
     0) ;;
     1) row failed "$branch" "$branch" "branch ${branch} moved after its ancestry check and was left alone; its worktree is already removed, so re-run to judge the new tip" ;;
+    3) row failed "$branch" "$branch" "${branch} is deleted but its branch.${branch} config could not be removed: $(tr '\n' ' ' < "$ERRFILE") — remove it by hand" ;;
     *) row failed "$branch" "$branch" "deleting ${branch} failed after the worktree was removed: $(tr '\n' ' ' < "$ERRFILE")" ;;
   esac
   return 0
@@ -318,6 +334,8 @@ decide_branch() { # <shared> <default> <dry-run 0|1> <branch>
   case "$rc" in
     0) row branch-deleted "$branch" "$branch" "" ;;
     1) row failed "$branch" "$branch" "branch ${branch} moved after its ancestry check and was left alone; re-run to judge the new tip" ;;
+    3) row branch-deleted "$branch" "$branch" ""
+       row failed "$branch" "$branch" "${branch} is deleted but its branch.${branch} config could not be removed: $(tr '\n' ' ' < "$ERRFILE") — remove it by hand" ;;
     *) row failed "$branch" "$branch" "deleting ${branch} failed: $(tr '\n' ' ' < "$ERRFILE")" ;;
   esac
   return 0
@@ -432,7 +450,15 @@ main() {
           # no-worktree pass only once the metadata prune actually releases
           # it, so it is recorded here and released below.
           decide_worktree "$shared" "$abs_root" "$db" "$dry" "$path" "$branch" "$detached" "$locked"
-          if [[ -n "$branch" ]]; then prunable_branches+=("$branch"); fi
+          if [[ -n "$branch" ]]; then
+            if (( DECIDED_PRUNABLE )); then
+              prunable_branches+=("$branch")
+            else
+              # Kept for a reason that outranks prunable (locked, detached,
+              # outside the root, the default branch): still checked out.
+              seen_branches+=("$branch")
+            fi
+          fi
           path=""; branch=""; detached=0; locked=0
           return 0
         else
@@ -461,6 +487,25 @@ main() {
     fi
     path=""; branch=""; detached=0; locked=0
   }
+  # Without `-z`, a newline inside a path splits its record and the tail
+  # arrives as an unrecognized line. The whole inventory is scanned for one
+  # BEFORE any decision runs: a guard that fires afterwards has already
+  # removed a worktree it read from a truncated record.
+  local split=0
+  if (( ! zflag )); then
+    local scanned
+    while IFS= read -r scanned || [[ -n "$scanned" ]]; do
+      case "$scanned" in
+        "worktree "*|"branch refs/heads/"*|detached|"locked"*|"bare"|"prunable"*|"HEAD "*|"") ;;
+        *) split=1; break ;;
+      esac
+    done < "$inventory"
+  fi
+  if (( split )); then
+    warn "the worktree inventory holds a path this git cannot list unambiguously (a newline in a worktree path, and \`-z\` is unavailable) — upgrade git to 2.36+ or move that worktree; nothing was decided"
+    rm -f "$inventory" "$branches"
+    return 1
+  fi
   attribute() { # <attribute line>
     case "$1" in
       "worktree "*) flush; path="${1#worktree }" ;;

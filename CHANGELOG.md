@@ -41,7 +41,21 @@
   the deletion for one to slip through. `branch -d` would re-derive the safety
   against the local default, which may lag origin's, and `branch -D` would
   skip it; neither is atomic with the check. `--dry-run` now states in its
-  contract line that it fetches.
+  contract line that it fetches, object database included.
+
+  The rounds on this PR added four more, each the same shape. A confirmed-gone
+  entry releases its branch only when it was decided `prunable`: git keeps a
+  locked entry's metadata through the prune, so a locked entry whose directory
+  vanished is still checked out and its branch stays. Without `-z`, the whole
+  inventory is scanned for a split record before any decision runs, since a
+  guard that fires afterwards has already removed a worktree it read from a
+  truncated record. A `-z` failure falls back only for an unsupported option
+  and otherwise reports what git said. The config probe reads a here-string
+  and accepts only exit 1 as no match, and a config cleanup that fails is a
+  failed row rather than a warning. Report paths compare normalized, as the
+  dispatch parser already treats them, so an alias cannot enroll a second
+  attempt on a refused attempt's evidence, and a `not_sent` retry refreshes
+  the provider and brief identity its fingerprint does not cover.
 
 ## 0.3.211 — 2026-09-14
 

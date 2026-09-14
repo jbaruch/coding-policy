@@ -429,6 +429,18 @@ class RecoveryTests(unittest.TestCase):
                 record_refusal(self.store, {"dispatch": first, "receipt": str(path)}, AT, "codex", self.REPORT)
         self.assertIsNone(self.store["dispatches"][0].get("refusal"))
 
+    def test_a_not_sent_retry_refreshes_the_provider_the_fingerprint_misses(self):
+        # coding-policy#403: reserve reuses a not_sent row, so a config change
+        # before the retry would otherwise leave the original provider on it.
+        record = {"id": "tester-retry", "task": TASK, "role": "tester", "agent": "codex-a", "fix_round": None,
+                  "fingerprint": "cd" * 32, "plan": None, "work": None, "brief_identity": self.BRIEF, "provider": "codex"}
+        reserve(self.store, record, AT)
+        abort_pre_send(self.store, record["id"], AT, "fixture")
+        reserve(self.store, {**record, "provider": "claude", "brief_identity": "brief-identity-refreshed"}, AT)
+        saved = next(row for row in self.store["dispatches"] if row["id"] == record["id"])
+        self.assertEqual((saved["provider"], saved["brief_identity"]), ("claude", "brief-identity-refreshed"))
+        validate_store(self.store, self.history)
+
     def test_the_dispatchs_recorded_provider_outranks_the_current_config(self):
         # coding-policy#403: a config edit between the send and the record
         # must not re-attribute the refusal to the new kind.
@@ -448,6 +460,9 @@ class RecoveryTests(unittest.TestCase):
         with self.assertRaisesRegex(UsageError, "already carries the refusal"):
             refusal_move(self.store, TASK, "tester", None, "claude", self.BRIEF, self.REPORT)
         self.assertIsNotNone(refusal_move(self.store, TASK, "tester", None, "claude", self.BRIEF, "/reports/tester-2.md"))
+        # An alias of the burned path is the same file (#403).
+        with self.assertRaisesRegex(UsageError, "already carries the refusal"):
+            refusal_move(self.store, TASK, "tester", None, "claude", self.BRIEF, "/reports/sub/../tester.md")
         self.assertIsNotNone(refusal_move(self.store, TASK, "tester", None, "claude", self.BRIEF))
 
     def test_a_reworded_brief_is_not_a_move(self):

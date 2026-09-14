@@ -449,6 +449,11 @@ def reserve(store, record, at):
             raise UsageError("Retry changes the original composition metadata; restore the recorded dispatch inputs instead of reusing its identity.", {})
         _event(store, at, "dispatch_transport_retry", record["task"], {"dispatch": prior["id"], "previous": dict(prior)})
         prior.update(status="reserved", report=None, result=None)
+        # The fingerprint does not cover these, so a retry after a config
+        # change would otherwise keep the original row's provider (#403).
+        for key in ("provider", "brief_identity"):
+            if key in record:
+                prior[key] = record[key]
         prior.pop("reconciliation", None)
         item = prior
     else:
@@ -681,7 +686,11 @@ def refusal_move(store, task, role, fix_round, provider, identity, report=None):
     refused = refusals(store, task, role, fix_round)
     if not refused:
         return None
-    burned = [row for row in refused if report is not None and row["refusal"]["report_path"] == report]
+    # Normalized on both sides: `_parse_reports` already rejects two roles
+    # whose report paths resolve to one file, and an alias must not slip a
+    # second attempt onto a refused attempt's evidence.
+    target = str(Path(report).resolve()) if report is not None else None
+    burned = [row for row in refused if target is not None and str(Path(row["refusal"]["report_path"]).resolve()) == target]
     if burned:
         raise UsageError("Report path {} already carries the refusal of dispatch {}; give this attempt a fresh report path so their evidence cannot collide.".format(
             report, burned[-1]["id"]), {"refusals": [row["id"] for row in burned]})
