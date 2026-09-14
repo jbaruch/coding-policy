@@ -41,14 +41,21 @@
 # stale CHANGES_REQUESTED no longer false-reds a fix no reviewer has seen, and
 # a stale COMMENTED/APPROVED no longer false-readies unreviewed code (#186).
 #
-# `requested` is true while a review request for that login is still pending on
-# the PR. It separates two states a bare `state: "none"` conflates: a lane that
-# was asked for and has not answered yet (waiting is meaningful), and one
-# nobody asked for (waiting cannot produce it, and a reader without GitHub
-# write scope cannot ask). A developer collecting its own current-tip evidence
-# reads that rather than sitting out a budget on a review no one requested
-# (#369). A delivered review clears its own request, so `requested` is false
-# once `state` is set.
+# `requested` reports exactly one fact: a review request for that login is still
+# pending on the PR. It separates two states a bare `state: "none"` conflates
+# for a REQUEST-TRIGGERED reviewer (Copilot): asked for and not yet answered
+# (waiting is meaningful), versus never asked (waiting cannot produce it, and a
+# reader without GitHub write scope cannot ask). A developer collecting its own
+# current-tip evidence reads that rather than sitting out a budget on a review
+# nobody requested (#369).
+#
+# It is NOT a "has this review been triggered" flag. A delivered review clears
+# its own request, so `requested` is false once `state` is set. The policy
+# reviewer is PUSH-triggered — review-codex.yml and the fleet App run on the
+# push, never on a request — so its `requested` is false on every PR, and an
+# in-flight policy review reads `state: "none", requested: false` exactly like
+# an unrequested Copilot lane. Resolve a reviewer's arrival by how it is
+# triggered (rules/ci-safety.md Always Watch CI), never by this field alone.
 #
 # `merge_state.status == "DIRTY"` / `mergeable == "CONFLICTING"` means GitHub
 # couldn't create `refs/pull/N/merge` and silently skipped `pull_request:`

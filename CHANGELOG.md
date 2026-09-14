@@ -16,13 +16,20 @@
   endpoint, which omits bot reviewers entirely (#276) and would report every
   bot lane as never requested.
 
-  `rules/ci-safety.md` Always Watch CI now says the pre-merge watch belongs to
-  the merge decision: a stage that does not merge takes a single snapshot, a
-  lane nobody requested is diagnosed and named rather than waited out, and no
-  role waits on a review it has no scope to request.
+  `requested` is not a "has this review been triggered" flag, and the rules say
+  so. The policy reviewer is push-triggered — `review-codex.yml` and the fleet
+  App run on the push, never on a request — so its `requested` is false on
+  every PR, and an in-flight policy review looks exactly like an unrequested
+  Copilot lane. `rules/ci-safety.md` Always Watch CI resolves a reviewer's
+  arrival by how it is triggered: a push-triggered review is owed by the push,
+  a request-triggered one only once requested, and only the latter is
+  diagnosed as unrequested rather than waited out.
+
   `rules/agent-team-operation.md` Review Before PR points the developer stage
-  at the snapshot. The release skill's deliberate request-then-watch sequence
-  is unchanged.
+  at the snapshot on an open PR, and at the branch CI its push triggered
+  before a PR exists — `poll-pr-reviews.sh` takes a PR number, and the
+  pre-PR handoff has none. The release skill's deliberate request-then-watch
+  sequence is unchanged.
 
 ## 0.3.222 — 2026-09-14
 
