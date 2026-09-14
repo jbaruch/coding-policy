@@ -72,7 +72,7 @@ class RecoveryCommandTests(fixture.CliCase):
         ])
         return client
 
-    def seed_cap(self):
+    def seed_cap(self, diagnosis_only=False):
         state = empty_state()
         for fix in (None, 1, 2, 3, 4, 5):
             add_assignment(state, "2026-02-03T09:00:0{}+00:00".format(fix or 0), "developer", "grok", task=TASK, fix_round=fix)
@@ -96,6 +96,8 @@ class RecoveryCommandTests(fixture.CliCase):
         code, _, err = self.owner("diagnose", {"id": "diag-cap", "task": TASK, "checkpoint": "cap-5",
             "judge_report": str(diagnosis), "scope": WORK["scope"], "allowed_paths": ["src/*"]})
         self.assertEqual(code, 0, err)
+        if diagnosis_only:
+            return
         code, _, err = self.owner("authorize-corrections", {"id": "two-fixes", "task": TASK, "checkpoint": "cap-5",
             "scope": WORK["scope"], "allowed_paths": ["src/*"], "additional_fixes": 2, "authorization": AUTH,
             "supersedes": "diag-cap:plan"})
@@ -146,6 +148,39 @@ class RecoveryCommandTests(fixture.CliCase):
         self.assertEqual(code, 0, err)
         self.assertEqual(json.loads(out)["applied"][0]["context_transition"]["reason"], "authorized_context_recovery")
         self.assertEqual(self.saved()["assignments"][0], original)
+
+    def test_diagnose_wires_the_pinned_judge_and_its_enrolled_report(self):
+        # coding-policy#407: the public command, not just the owner function —
+        # pinned-judge loading, the enrollment lookup, and state persistence.
+        self.seed_cap(diagnosis_only=True)
+        saved = self.saved()["recovery"]
+        record = next(row for row in saved["diagnoses"] if row["id"] == "diag-cap")
+        self.assertEqual((record["remedy"], record["bound"], record["judge_agent"]), ("continue", 1, "claude"))
+        self.assertEqual(record["plan"], "diag-cap:plan")
+        plan = next(row for row in saved["plans"] if row["id"] == "diag-cap:plan")
+        self.assertEqual((plan["first_fix"], plan["last_fix"]), (6, 6))
+        self.assertEqual(plan["authorization"]["source"], record["judge_evidence"]["path"])
+        # Its own bound is unspent, so a second diagnosis is refused here too.
+        code, _, err = self.owner("diagnose", {"id": "diag-again", "task": TASK, "checkpoint": "cap-5",
+            "judge_report": record["judge_evidence"]["path"], "scope": WORK["scope"], "allowed_paths": ["src/*"]})
+        self.assertEqual(code, 1)
+        self.assertIn("unspent attempts under plan diag-cap:plan", err)
+
+    def test_diagnose_refuses_a_report_the_pinned_judge_did_not_deliver(self):
+        self.seed_cap(diagnosis_only=True)
+        other = self.tmp / "other-diagnosis.md"
+        other.write_text("DIAGNOSIS: x\nREMEDY: restructure — split the surface\nBOUND: 1\n"
+                         "EVIDENCE: rounds 1-5\nUNVERIFIED: none\n")
+        config = json.loads(self.config.read_text())
+        config["judge"] = {"agent": "grok", "model": "grok-4", "effort": "high"}
+        self.config.write_text(json.dumps(config))
+        # Past the unspent-bound check, the pinned judge from config.json is
+        # the one whose completed assignment the diagnosis needs.
+        code, _, err = self.owner("diagnose", {"id": "diag-wrong", "task": TASK, "checkpoint": "cap-5",
+            "judge_report": str(other), "scope": WORK["scope"], "allowed_paths": ["src/parser.py"],
+            "supersedes": "diag-cap:plan"})
+        self.assertEqual(code, 1)
+        self.assertIn("pinned judge", err)
 
     def test_two_extra_fixes_use_one_approval_with_actual_blocking_review_between(self):
         self.seed_cap()

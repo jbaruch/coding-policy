@@ -49,8 +49,9 @@
   enrolled for the pinned judge on that task whenever the lead is bound, since
   a dispatch marked applied proves the send and not the delivery. The
   operator's `authorize-corrections` path survives as an override of a
-  recorded remedy rather than a substitute for one: without a diagnosis it
-  would reopen the budget prompt the judge replaced. No
+  recorded remedy rather than a substitute for one, and the remedy must be
+  this exhaustion's: without that, an old diagnosis would extend an exhausted
+  plan indefinitely and reopen the budget prompt the judge replaced. No
   operator sits in the path of any of them, and the deadlock disappears.
 
   The lead ran the loop and is the wrong diagnostician of its own dispatch

@@ -451,8 +451,8 @@ def authorize_plan(store, assignments, data, at):
     # The operator overrides a remedy; they do not stand in for one. Without a
     # recorded diagnosis this path would reopen the budget prompt the judge
     # replaced (rules/agent-team-operation.md Judge Seat).
-    if not diagnoses_for(store, data["task"]):
-        raise UsageError("This task has no recorded diagnosis to override; take the judge's diagnosis with `teamlead diagnose` first.", {})
+    if not any(row["fix_round"] == count for row in diagnoses_for(store, data["task"])):
+        raise UsageError("This task has no diagnosis at fix round {}; an older remedy cannot authorize these attempts. Take the judge's diagnosis for this exhaustion with `teamlead diagnose` first.".format(count), {})
     active = next((row for row in active_plans(store) if row["task"] == data["task"] and row["last_fix"] > count), None)
     if active and data.get("supersedes") != active["id"]:
         raise UsageError("This task still has an approved plan. Use its bounds, or explicitly name it in supersedes with the operator's changed decision.", {})
@@ -935,8 +935,11 @@ def _validate_refusals(store):
         authorization(row["authorization"])
     seen_diagnoses = {}
     for row in store["diagnoses"]:
-        task_record(store, row["task"])
-        _item(store["checkpoints"], row["checkpoint"], "checkpoint")
+        task = task_record(store, row["task"])
+        source = _item(store["checkpoints"], row["checkpoint"], "checkpoint")
+        if (source["task"] != row["task"] or source["fix_round"] != row["fix_round"]
+                or row["base_revision"] != task["base_revision"]):
+            raise UsageError("A diagnosis cites a checkpoint from another task, base or fix round; preserve the ledger for owner recovery.", {})
         for key in ("id", "scope"):
             text(row[key], key)
         paths(row["allowed_paths"], "diagnosis paths")

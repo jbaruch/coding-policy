@@ -249,6 +249,12 @@ class RecoveryTests(unittest.TestCase):
         corrupt["diagnoses"].append({**corrupt["diagnoses"][0], "id": "diag-back", "remedy": "continue"})
         with self.assertRaisesRegex(UsageError, "strictly down the remedy ladder"):
             validate_store(corrupt, self.history)
+        for mutate in (lambda row: row.update(fix_round=4),
+                       lambda row: row.update(base_revision="f" * 40)):
+            corrupt = copy.deepcopy(self.store)
+            mutate(corrupt["diagnoses"][0])
+            with self.assertRaisesRegex(UsageError, "another task, base or fix round"):
+                validate_store(corrupt, self.history)
 
     def test_two_corrections_share_one_approval_and_the_first_outside_budget_refuses(self):
         plan = self.approve()
@@ -316,10 +322,11 @@ class RecoveryTests(unittest.TestCase):
             "previous_attempts": "Five fixes", "progress": "Still blocked",
             "change_in_approach": "Reassess"}, AT, "judge")
         # The operator overrides a remedy; without one there is nothing to override.
-        with self.assertRaisesRegex(UsageError, "no recorded diagnosis to override"):
+        with self.assertRaisesRegex(UsageError, "no diagnosis at fix round 5"):
             authorize_plan(self.store, self.history, {"id": "plan-1", "task": TASK, "checkpoint": "cp",
                 "scope": WORK["scope"], "allowed_paths": ["src/*"], "additional_fixes": 2, "authorization": AUTH}, AT)
         diag = self.run_diagnosis(self.diagnosis("diag-cp", "continue", 1, "cp"))
+        self.assertEqual(diag["fix_round"], 5)
         plan = authorize_plan(self.store, self.history, {"id": "plan-1", "task": TASK, "checkpoint": "cp",
             "scope": WORK["scope"], "allowed_paths": ["src/*"], "additional_fixes": 2, "authorization": AUTH,
             "supersedes": diag["plan"]}, AT)

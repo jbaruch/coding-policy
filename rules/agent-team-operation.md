@@ -66,7 +66,7 @@ description: Running a multi-agent team — task-based specialist composition, c
 - The judge's authority in diagnosis mode covers accepting a tracked defect into a release under a `stop` remedy
 - Record the diagnosis through `teamlead diagnose` under the original task and base before acting on its remedy
 - A bound lead cites the report supervision enrolled for the pinned judge, never another file
-- The operator overrides a recorded remedy; an approved budget never stands in for a diagnosis
+- The operator overrides this exhaustion's recorded remedy; an approved budget never stands in for a diagnosis, and an older remedy never authorizes new attempts
 - Re-enter diagnosis when a remedy's own bound exhausts with blocking work remaining
 - Re-enter before the bound is spent only for a changed scope or an operator override, naming the plan it supersedes and carrying the change it claims
 - A `stop` remedy ends implementation on its task; no unspent allowance survives it
