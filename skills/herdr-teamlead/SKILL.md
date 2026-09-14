@@ -374,14 +374,20 @@ With its release criteria met, proceed immediately to Step 13.
 
 ## Step 13 — Compose the Judge Brief
 
-Optional. Triggers and the ruling contract are in
+Optional. Modes, triggers and both report contracts are in
 `skills/herdr-teamlead/references/round-flow.md` "The Judge" (a bot
 disagreement inside Step 20 returns here first). No trigger — proceed to
 Step 20.
 
-Compose the brief from `templates/brief-judge.md` through Step 7: the
-dispute, both positions with report paths, the governing rule, the tree. Skip
-Step 8 for the read-only judge. Proceed immediately to Step 14.
+For a dispute, compose from `templates/brief-judge.md` through Step 7: the
+dispute, both positions with report paths, the governing rule, the tree.
+
+For an exhausted allowance, compose from `templates/brief-judge-diagnosis.md`
+through Step 7 under the role key `judge-diagnosis`: the task, rounds spent,
+remaining blocking work, the per-round history, the tree, and any prior remedy
+with what it changed. Dispatch it on the `judge` role in Step 17.
+
+Skip Step 8 for the read-only judge. Proceed immediately to Step 14.
 
 ## Step 14 — Re-measure the Shared Window
 
@@ -443,7 +449,7 @@ Run Step 11's fleet observation loop, including the judge named by Step 15.
 Proceed immediately to Step 19 once its report lands; keep other enrollments
 under observation.
 
-## Step 19 — Act on the Ruling
+## Step 19 — Act on the Ruling or Remedy
 
 Apply the Ruling Outcomes contract in `references/round-flow.md`. Investigation
 rulings return to Step 12's knowledge gate. Implementation rulings route

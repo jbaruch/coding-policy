@@ -17,6 +17,7 @@ from pathlib import Path
 from teamlead.errors import UsageError
 from teamlead.recovery import (
     abort_pre_send, authorize_context, authorize_plan, authorize_refused_dispatch, brief_identity, checkpoint, confirmed_fix,
+    diagnose,
     dispatch_identity, finish_dispatch, fresh_transition, mark_sending,
     migrate_store, prior_dispatch, record_refusal, record_report, refusal_move, register_task, reserve,
     task_statuses, validate_store, validate_work,
@@ -64,17 +65,117 @@ class RecoveryTests(unittest.TestCase):
         return authorize_plan(self.store, self.history, {"id": "plan-1", "task": TASK, "checkpoint": "checkpoint-5",
             "scope": WORK["scope"], "allowed_paths": ["src/*"], "additional_fixes": 2, "authorization": AUTH}, AT)
 
-    def reservation(self, number):
+    def reservation(self, number, plan="plan-1"):
         return {"id": f"fix-{number}", "task": TASK, "role": "developer", "agent": "worker", "fix_round": number,
-                "fingerprint": "c" * 64, "plan": "plan-1", "work": copy.deepcopy(WORK)}
+                "fingerprint": "c" * 64, "plan": plan, "work": copy.deepcopy(WORK)}
 
-    def finish(self, number):
-        record = self.reservation(number)
+    def finish(self, number, plan="plan-1"):
+        record = self.reservation(number, plan)
         reserve(self.store, record, AT)
         mark_sending(self.store, record["id"], AT, {"cleared": True})
         add_assignment(self.state, "2026-02-03T11:00:0{}+00:00".format(number), "developer", "worker", task=TASK, fix_round=number)
         finish_dispatch(self.store, record["id"], {"status": "applied", **{
             key: record[key] for key in ("task", "role", "agent", "fix_round")}}, len(self.history) - 1, AT)
+
+    def diagnosis_report(self, remedy, bound, name="diagnosis.md"):
+        path = self.root / name
+        path.write_text(
+            "DIAGNOSIS: the find-rate held flat while every round closed its finding.\n"
+            "REMEDY: {} — {}\n"
+            "BOUND: {}\n"
+            "EVIDENCE: rounds 10-20 and their review bodies.\n"
+            "UNVERIFIED: none\n".format(remedy, "the named change", bound))
+        return str(path)
+
+    def judge_after_developer(self, number):
+        # The diagnosis gate needs the pinned judge's assignment after the
+        # latest developer attempt, as an adjudication citation does.
+        add_assignment(self.state, "2026-02-03T12:00:0{}+00:00".format(number), "judge", "judge", task=TASK)
+
+    def next_checkpoint(self, name):
+        # Each exhaustion records its own checkpoint; a plan's first fix is
+        # always its checkpoint's round plus one.
+        return checkpoint(self.store, self.history, {
+            "id": name, "task": TASK, "defect": "F1 remains open", "previous_attempts": "The bounded remedy was spent",
+            "progress": "The named change landed; the finding did not close",
+            "change_in_approach": "Take the next remedy on the ladder"}, AT, "judge")["id"]
+
+    def diagnosis(self, name, remedy, bound, checkpoint_id="checkpoint-5"):
+        return {"id": name, "task": TASK, "checkpoint": checkpoint_id, "judge_report": self.diagnosis_report(remedy, bound, name + ".md"),
+                "scope": WORK["scope"], "allowed_paths": ["src/*"]}
+
+    def test_a_bounded_remedy_records_the_plan_its_bound_authorizes(self):
+        # coding-policy#407: the judge supplies the budget the operator used to.
+        self.seed_checkpoint()
+        record = diagnose(self.store, self.history, self.diagnosis("diag-1", "continue", 2), AT, "judge")
+        self.assertEqual((record["remedy"], record["bound"], record["fix_round"]), ("continue", 2, 5))
+        plan = _item_plan = next(row for row in self.store["plans"] if row["id"] == record["plan"])
+        self.assertEqual((plan["first_fix"], plan["last_fix"]), (6, 7))
+        self.assertEqual(plan["authorization"]["source"], record["judge_evidence"]["path"])
+        self.assertIn("REMEDY: continue", plan["authorization"]["quote"])
+        # The ordinary allowance machinery enforces it from here.
+        validate_work(self.store, self.history, TASK, 6, plan["id"], WORK)
+        with self.assertRaisesRegex(UsageError, "outside the approved task or budget"):
+            validate_work(self.store, self.history, TASK, 8, plan["id"], WORK)
+        self.assertEqual(diagnose(self.store, self.history, self.diagnosis("diag-1", "continue", 2), AT, "judge"), record)
+        validate_store(self.store, self.history)
+
+    def test_the_remedy_ladder_descends_and_stop_is_terminal(self):
+        self.seed_checkpoint()
+        diagnose(self.store, self.history, self.diagnosis("diag-1", "continue", 1), AT, "judge")
+        # The bound must be spent before the next diagnosis.
+        with self.assertRaisesRegex(UsageError, "unspent attempts under plan"):
+            diagnose(self.store, self.history, self.diagnosis("diag-2", "restructure", 2), AT, "judge")
+        self.finish(6, "diag-1:plan")
+        self.judge_after_developer(6)
+        second = self.next_checkpoint("checkpoint-6")
+        with self.assertRaisesRegex(UsageError, "may not sit above restructure"):
+            diagnose(self.store, self.history, self.diagnosis("diag-2", "continue", 2, second), AT, "judge")
+        diagnose(self.store, self.history, self.diagnosis("diag-2", "restructure", 1, second), AT, "judge")
+        self.finish(7, "diag-2:plan")
+        self.judge_after_developer(7)
+        third = self.next_checkpoint("checkpoint-7")
+        with self.assertRaisesRegex(UsageError, "may not sit above stop"):
+            diagnose(self.store, self.history, self.diagnosis("diag-3", "restructure", 1, third), AT, "judge")
+        stop = diagnose(self.store, self.history, self.diagnosis("diag-3", "stop", "none", third), AT, "judge")
+        self.assertEqual((stop["bound"], stop["plan"]), (None, None))
+        with self.assertRaisesRegex(UsageError, "terminal"):
+            diagnose(self.store, self.history, self.diagnosis("diag-4", "stop", "none", third), AT, "judge")
+        self.assertEqual(task_statuses(self.store, self.history)[TASK]["status"], "diagnosed_stop")
+        validate_store(self.store, self.history)
+
+    def test_a_diagnosis_needs_an_exhausted_budget_a_checkpoint_and_the_pinned_judge(self):
+        with self.assertRaisesRegex(UsageError, "requires id, task, checkpoint"):
+            diagnose(self.store, self.history, {"id": "d", "task": TASK}, AT, "judge")
+        self.seed_checkpoint()
+        for remedy, bound, message in (("continue", "0", "positive BOUND"), ("continue", "none", "positive BOUND"),
+                                       ("sideways", "1", "must carry DIAGNOSIS")):
+            with self.assertRaisesRegex(UsageError, message):
+                diagnose(self.store, self.history, self.diagnosis("diag-bad", remedy, bound), AT, "judge")
+        with self.assertRaisesRegex(UsageError, "pinned judge's completed assignment"):
+            diagnose(self.store, self.history, self.diagnosis("diag-1", "continue", 1), AT, "someone-else")
+        incomplete = self.root / "incomplete.md"
+        incomplete.write_text("DIAGNOSIS: x\nREMEDY: continue — more\nBOUND: 2\n")
+        with self.assertRaisesRegex(UsageError, "must carry DIAGNOSIS"):
+            diagnose(self.store, self.history, {**self.diagnosis("diag-2", "continue", 1), "judge_report": str(incomplete)}, AT, "judge")
+
+    def test_corrupt_diagnoses_refuse_the_ledger(self):
+        self.seed_checkpoint()
+        diagnose(self.store, self.history, self.diagnosis("diag-1", "continue", 2), AT, "judge")
+        for mutate in (
+            lambda row: row.update(remedy="sideways"),
+            lambda row: row.update(bound=None),
+            lambda row: row.update(plan=None),
+            lambda row: row.update(judge_evidence="not-a-receipt"),
+        ):
+            corrupt = copy.deepcopy(self.store)
+            mutate(corrupt["diagnoses"][0])
+            with self.assertRaises(UsageError):
+                validate_store(corrupt, self.history)
+        corrupt = copy.deepcopy(self.store)
+        corrupt["diagnoses"].append({**corrupt["diagnoses"][0], "id": "diag-back", "remedy": "continue"})
+        with self.assertRaisesRegex(UsageError, "strictly down the remedy ladder"):
+            validate_store(corrupt, self.history)
 
     def test_two_corrections_share_one_approval_and_the_first_outside_budget_refuses(self):
         plan = self.approve()
@@ -113,7 +214,7 @@ class RecoveryTests(unittest.TestCase):
         self.seed_checkpoint()
         add_assignment(self.state, AT, "reviewer", "auditor", task=TASK)
         status = task_statuses(self.store, self.history)[TASK]
-        self.assertEqual((status["status"], status["paused_work"]), ("waiting_for_operator", "implementation"))
+        self.assertEqual((status["status"], status["paused_work"]), ("awaiting_diagnosis", "implementation"))
 
     def test_a_cited_judge_report_still_needs_the_pinned_judge_after_latest_development(self):
         self.exhaust()
@@ -121,7 +222,7 @@ class RecoveryTests(unittest.TestCase):
             checkpoint(self.store, self.history, {"id": "cp", "task": TASK, "defect": "F1", "previous_attempts": "Five fixes",
                 "progress": "Still blocked", "change_in_approach": "Reassess", "judge_report": str(self.judge_report)}, AT, "judge")
 
-    def test_an_exhausted_allowance_reaches_the_operator_without_a_judge(self):
+    def test_an_exhausted_allowance_awaits_the_diagnosis_without_a_judge_citation(self):
         # The allowance boundary is a budget decision only the operator makes.
         # Requiring a ruling first spent 16 of one fleet's 30 lifetime judge
         # dispatches on one task (jbaruch/coding-policy#396).
@@ -133,7 +234,7 @@ class RecoveryTests(unittest.TestCase):
         self.assertNotIn("judge_agent", record)
         self.assertEqual(record["fix_round"], 5)
         status = task_statuses(self.store, self.history)[TASK]
-        self.assertEqual((status["status"], status["paused_work"]), ("waiting_for_operator", "implementation"))
+        self.assertEqual((status["status"], status["paused_work"]), ("awaiting_diagnosis", "implementation"))
 
     def test_that_checkpoint_carries_the_operator_bounded_approval_through(self):
         self.exhaust()
@@ -559,16 +660,19 @@ class RecoveryTests(unittest.TestCase):
         old = copy.deepcopy(self.store)
         old["schema_version"] = 5
         del old["refusal_authorizations"]
+        del old["diagnoses"]
         for row in old["dispatches"]:
             del row["brief_identity"]
             del row["provider"]
         before = copy.deepcopy(old)
         self.assertTrue(migrate_store(old))
-        self.assertEqual(old["schema_version"], 7)
+        self.assertEqual(old["schema_version"], 8)
         self.assertEqual(old.pop("refusal_authorizations"), [])
+        self.assertEqual(old.pop("diagnoses"), [])
         self.assertEqual({key: value for key, value in old.items() if key != "schema_version"},
                          {key: value for key, value in before.items() if key != "schema_version"})
         old["refusal_authorizations"] = []
+        old["diagnoses"] = []
         validate_store(old, self.history)
         self.assertFalse(migrate_store(old))
         stale = copy.deepcopy(self.store)
@@ -582,20 +686,24 @@ class RecoveryTests(unittest.TestCase):
         # one is unowned newer data, a clean one stamps to 7 (#403).
         six = copy.deepcopy(self.store)
         six["schema_version"] = 6
+        del six["diagnoses"]
         with self.assertRaisesRegex(UsageError, "unowned newer refusal"):
             migrate_store(six)
         six = copy.deepcopy(self.store)
         six["schema_version"] = 6
+        del six["diagnoses"]
         for row in six["dispatches"]:
             del row["provider"]
         self.assertTrue(migrate_store(six))
-        self.assertEqual(six["schema_version"], 7)
+        self.assertEqual(six["schema_version"], 8)
+        self.assertEqual(six["diagnoses"], [])
         validate_store(six, self.history)
         record_refusal(self.store, {"dispatch": first, "receipt": self.refusal_receipt("codex-a")}, AT, "codex", self.REPORT)
         for version in (4, 5):
             stale = copy.deepcopy(self.store)
             stale["schema_version"] = version
             del stale["refusal_authorizations"]
+            del stale["diagnoses"]
             for row in stale["dispatches"]:
                 del row["brief_identity"]
                 del row["provider"]

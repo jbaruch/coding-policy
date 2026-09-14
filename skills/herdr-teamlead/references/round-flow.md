@@ -174,23 +174,22 @@ and return to Step 4 with self-contained briefs carrying the findings and prior
 reports. Preserve the developer for retained fixes; use a fresh context for the
 fresh-worker stage. Never reset the counter during re-planning. At a contested
 verdict or a lead override, go to Step 13 first. At an exhausted allowance,
-record the operator checkpoint and concrete correction proposal through the
-owner commands in `skills/herdr-teamlead/references/dispatch-recovery.md`,
-report implementation as `waiting_for_operator`, and finish the skill until the
-bounded decision arrives. Use the recorded bounded plan for authorized extra
-attempts; collect each preceding attempt's actual blocking review before
-continuing.
+record the checkpoint through the owner commands in
+`skills/herdr-teamlead/references/dispatch-recovery.md`, report implementation
+as `awaiting_diagnosis`, and go to Step 13 for the diagnosis. Use the plan its
+remedy records for the bounded extra attempts; collect each preceding attempt's
+actual blocking review before continuing.
 
 ## Branch-Changing Ruling
 
 At Step 19, the lead never edits the branch itself. At an exhausted allowance,
-record the checkpoint and concrete correction proposal through the owner commands
-in `skills/herdr-teamlead/references/dispatch-recovery.md`; the allowance boundary
-is the operator's budget decision, not a judge dispatch. An approved plan covers
-multiple attempts within its recorded bounds; fresh release handoffs do not ask
-for context-change permission. Report implementation as `waiting_for_operator`
-while the bounded decision is pending; finish the skill until it arrives. Record
-an explicit approval once and continue within it.
+record the checkpoint through the owner commands in
+`skills/herdr-teamlead/references/dispatch-recovery.md` and take the diagnosis;
+the boundary is a diagnostic question, not a budget prompt. The plan its remedy
+records covers multiple attempts within those bounds; fresh release handoffs do
+not ask for context-change permission. Report implementation as
+`awaiting_diagnosis` while the diagnosis is pending. Record the remedy once and
+continue within it.
 Otherwise return to Step 12 carrying `ACTION:` verbatim as required work. Count
 that implementation as the next fix, under the same task identifier, and gate the
 resulting tip again before release.
@@ -236,7 +235,8 @@ available. It holds no other responsibility. `rules/agent-team-operation.md`
 Judge Seat is the contract; this section is the operational detail for
 Steps 13–19 of `skills/herdr-teamlead/SKILL.md`.
 
-Dispatch it on exactly one of three triggers:
+It runs in two modes. Adjudication settles a dispute; diagnosis asks why a fix
+loop is not converging. Dispatch adjudication on exactly one of three triggers:
 
 - A contested reviewer or tester verdict — one worker's finding, another
   worker's (or the lead's) disagreement, neither side able to settle it by
@@ -246,17 +246,45 @@ Dispatch it on exactly one of three triggers:
 - A bot finding the team disagrees with — the policy reviewer or Copilot flags
   something the developer and reviewer both think is wrong.
 
-All three are disputes. An exhausted correction allowance is not: only the
-operator can grant more attempts, so that boundary goes to the operator through
-the checkpoint, never through a lead judge dispatch. A re-granted budget
-exhausts too, and dispatching a ruling at each boundary made the seat a
-per-round toll on the window its developer and reviewers already share.
+All three are disputes, and a dispute is settled once. Dispatching an
+adjudication at every allowance boundary made the seat a per-round toll on the
+window its developer and reviewers already share; that trigger is gone and
+stays gone.
 
-The one exception is the operator's own: having received the checkpoint, the
-operator may ask for one ruling for that task, and the lead then runs Steps
-13-18 for it as for any other dispatch. A task gets at most one such request,
-whatever later budgets it is granted. `rules/agent-team-operation.md` Judge
-Seat carries its preconditions.
+An exhausted allowance is a different question, and it gets the second mode.
+The loop that exhausts its budget is rarely short of attempts: a find-rate
+that holds flat while every round closes its finding is a structural problem,
+and more rounds reproduce it. Diagnosis asks why the loop is not converging
+and what has to change. The lead ran the loop and is the wrong diagnostician
+of its own dispatch pattern, so the read is independent for the same reason a
+review is.
+
+Its report opens with five lines rather than three:
+
+```
+DIAGNOSIS: <why the loop is not converging, from the evidence>
+REMEDY: continue — <rounds, approach unchanged> | restructure — <the change> | stop — <what ships, what is tracked>
+BOUND: <attempts this remedy is allowed, or "none" for stop>
+EVIDENCE: <the rounds, findings and diffs the diagnosis rests on>
+UNVERIFIED: <anything unconfirmed against the tree, or "none">
+```
+
+A `continue` or `restructure` remedy carries the attempt budget in `BOUND`,
+which is the number the operator used to supply. A `stop` remedy ships what is
+clean and records the remainder as a tracked accepted defect; that authority is
+the judge's, stated so a lead does not re-escalate out of caution.
+
+The diagnosis is re-enterable when its own remedy's bound exhausts with
+blocking work remaining. A remedy that was independently diagnosed and still
+did not work is evidence for the next diagnosis, not for the operator, who
+holds nothing on the second pass they did not hold on the first. Re-entry
+moves strictly down the ladder `continue` → `restructure` → `stop`: a failed
+remedy is never reissued, the ladder never runs backwards, and `stop` is
+terminal, so a task takes at most three diagnoses. No operator sits in the
+path of any of them.
+
+`rules/agent-team-operation.md` Judge Seat carries the contract; the record
+shapes are the owner's, in `references/dispatch-recovery.md`.
 
 It is read-only without exception: no file edit, no mutating git or `gh`
 command, no GitHub post, no subagent dispatch. It reads both positions and the
@@ -271,8 +299,9 @@ the tree and the rule text alone. The round stops there and the named question
 goes to the operator. The lead does not dispatch a second judge and does not
 rule in its place.
 
-The ruling binds the round the moment the lead reads it. Only the operator
-overrides one; record the override and why in the round log.
+The ruling or remedy binds the round the moment the lead reads it. Only the
+operator overrides one; record the override and why in the round log. No
+ruling waits on an operator for the task to reach a terminal state.
 
 The judge worker is declared in the main `config.json` and is measured and
 planned like every other seat, but its seat is pinned rather than ranked: the
@@ -343,3 +372,14 @@ authorization. A blocked ruling follows the operator-question path below.
 - **`blocked`** — the judge declined to rule. Stop the round and put its
   named question to the operator. Do not dispatch a second judge and do not
   rule in its place. Finish here.
+- **`REMEDY: continue`** — record the diagnosis, then return to Step 12 and
+  spend the bounded rounds with the approach unchanged.
+- **`REMEDY: restructure`** — record the diagnosis, apply the named structural
+  change to the shape of the work, then return to Step 12 within its bound.
+  The change is the judge's to name and the lead's to carry out.
+- **`REMEDY: stop`** — record the diagnosis, release what is clean, and record
+  the remainder as a tracked accepted defect. The remedy carries that
+  authority; do not re-escalate it. Proceed to Step 20 for what ships.
+- A remedy's bound exhausting with blocking work remaining returns to Step 13
+  for the next diagnosis, one rung down the ladder. Never re-enter at the same
+  rung and never above it.

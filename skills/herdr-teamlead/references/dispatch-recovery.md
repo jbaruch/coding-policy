@@ -134,7 +134,8 @@ instruction into permission to exceed an exhausted correction budget.
 | Command | Record fields | Continuation |
 | --- | --- | --- |
 | `task` | `task`, original full `base_revision`, `scope`, `allowed_paths`, `authorization` | Register once before initial development; for legacy history, recover these facts from the original task and brief. Continue the same task. |
-| `checkpoint` | unique `id`, `task`, concrete `defect`, `previous_attempts`, `progress`, `change_in_approach`; optional absolute `judge_report` | Records the exhausted allowance for the operator. A cited `judge_report` requires the configured pinned judge's completed ruling after the latest developer attempt, and one task cites at most one. Implementation waits for the bounded operator decision. |
+| `checkpoint` | unique `id`, `task`, concrete `defect`, `previous_attempts`, `progress`, `change_in_approach`; optional absolute `judge_report` | Records the exhausted allowance and the evidence the diagnosis brief is built from. A cited `judge_report` requires the configured pinned judge's completed ruling after the latest developer attempt, and one task cites at most one. Implementation waits for the judge's remedy, never for an operator. |
+| `diagnose` | unique `id`, `task`, `checkpoint`, absolute `judge_report`, `scope`, `allowed_paths` | Record the judge's diagnosis of a non-converging loop. The report supplies `REMEDY` and `BOUND`; a `continue` or `restructure` remedy records the bounded plan its bound names, and `stop` records the terminal remedy. Each re-entry moves strictly down `continue` → `restructure` → `stop`. |
 | `authorize-corrections` | unique `id`, `task`, `checkpoint`, `scope`, `allowed_paths`, positive `additional_fixes`, `authorization`; optional `supersedes` | Store an explicit bounded approval once. Continue while it covers the next attempt; do not ask again within those bounds. A changed decision names the active plan in `supersedes`. |
 | `record-report` | `dispatch`, full `head_revision`, `verdict` (`blocking` or `approved`), `review_mode` (`full` or `scoped`), independent `reviewer`, absolute `report`, `changed_paths` | Read the report in full and verify the VCS diff first. The command binds its bytes and stated head to the dispatch; it does not establish the tester, CI, external-review, or release gates. |
 | `authorize-refused-dispatch` | unique `id`, `task`, `role`, `fix_round` or null, approved `provider`, `brief` (`unchanged` or `revised`), `decision`, `authorization` | Record the operator's decision after two independent refusals; fewer is refused, since one refusal is a move. One authorization permits one further dispatch on that task, role and round to the approved provider, with the refused brief unchanged unless the operator approved a revision, carried on the dispatch's `refusal_move.authorization`. |
@@ -162,7 +163,7 @@ number and fresh top-tier behavior. Each subsequent correction within a plan
 requires the preceding attempt's actual blocking review, recorded through
 `record-report`. Approved or absent findings do not justify another attempt.
 
-At budget exhaustion, record a new concrete operator checkpoint; the judge runs only on the operator's own request under `rules/agent-team-operation.md` Judge Seat.
+At budget exhaustion, record a new concrete checkpoint and take the judge's diagnosis through `diagnose`; its remedy supplies the bound under `rules/agent-team-operation.md` Judge Seat.
 Changed scope or a changed operator decision requires new explicit bounds;
 unchanged in-scope work reuses its approval. Do not rename the task or reset
 the counter. Every changed tip still needs full independent reviewer and
