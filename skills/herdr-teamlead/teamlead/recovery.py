@@ -300,7 +300,7 @@ def _next_remedy_rung(store, task):
     return last + 1 if last + 1 < len(DIAGNOSIS_LADDER) else None
 
 
-def diagnose(store, assignments, data, at, judge_agent):
+def diagnose(store, assignments, data, at, judge_agent, enrolled_report=None):
     """Record the judge's diagnosis of a fix loop that did not converge.
 
     An exhausted allowance is a diagnostic question, not a budget prompt: more
@@ -311,14 +311,21 @@ def diagnose(store, assignments, data, at, judge_agent):
     with the ruling as its authorization. `stop` is terminal: it ships what is
     clean and the remainder is tracked.
 
+    `enrolled_report` is the report path supervision bound to the judge's
+    dispatch, resolved by the caller. A dispatch marked `applied` proves the
+    send, never the delivery, so when supervision knows the destination the
+    cited report must be it.
+
     Re-entry moves strictly down `DIAGNOSIS_LADDER`, so a failed remedy is
     never reissued and a task takes at most three diagnoses. That holds for a
     supersession too: a changed scope or an operator override re-enters before
     the bound is spent, naming the plan it replaces, and still descends.
     """
     required = {"id", "task", "checkpoint", "judge_report", "scope", "allowed_paths"}
-    if not isinstance(data, dict) or not required <= set(data) or set(data) - required - {"supersedes"}:
-        raise UsageError("Diagnosis requires id, task, checkpoint, judge_report, scope and allowed_paths, and allows an optional supersedes.", {})
+    if not isinstance(data, dict) or not required <= set(data) or set(data) - required - {"supersedes", "authorization"}:
+        raise UsageError("Diagnosis requires id, task, checkpoint, judge_report, scope and allowed_paths, and allows an optional supersedes with authorization.", {})
+    if "authorization" in data and "supersedes" not in data:
+        raise UsageError("An operator override accompanies the supersedes it authorizes; record the plan it replaces.", {})
     if "supersedes" in data:
         text(data["supersedes"], "supersedes")
     for key in ("id", "task", "checkpoint", "judge_report", "scope"):
@@ -355,6 +362,13 @@ def diagnose(store, assignments, data, at, judge_agent):
     if data.get("supersedes"):
         if active is None or data["supersedes"] != active["id"]:
             raise UsageError("Supersedes must name this task's current unexhausted plan; inspect teamlead status before recording the changed decision.", {})
+        # Re-entry before the bound is spent is for a changed scope or an
+        # operator override; neither is proved by naming the plan alone.
+        changed = data["scope"] != active["scope"] or data["allowed_paths"] != active["allowed_paths"]
+        if not changed and "authorization" not in data:
+            raise UsageError("An early re-entry needs the change it claims: a scope or path change against plan {}, or the operator's recorded override in authorization.".format(active["id"]), {})
+        if "authorization" in data:
+            authorization(data["authorization"])
     elif active is not None:
         raise UsageError("This task still has unspent attempts under plan {}; diagnose again once that bound is exhausted, or name it in supersedes for a changed scope or an operator override.".format(active["id"]), {})
     if any(row["task"] == data["task"] and row["status"] in PENDING_STATUSES for row in store["dispatches"]):
@@ -363,6 +377,8 @@ def diagnose(store, assignments, data, at, judge_agent):
     judge = latest_assignment(assignments, task=data["task"], role="judge", agent=judge_agent, status="applied")
     if not judge_agent or developer is None or judge is None or not assignment_after(assignments, judge[0], developer[0]):
         raise UsageError("A diagnosis needs the configured pinned judge's completed assignment after the latest developer attempt.", {})
+    if enrolled_report is not None and str(Path(data["judge_report"]).resolve()) != str(Path(enrolled_report).resolve()):
+        raise UsageError("The cited report is not the one supervision enrolled for this judge dispatch ({}); cite the delivered report.".format(enrolled_report), {})
     evidence, body = receipt(data["judge_report"])
     remedy_line = re.search(r"^REMEDY:[ \t]*(\S+)(.*)$", body, re.MULTILINE)
     bound_line = re.search(r"^BOUND:[ \t]*(\S+)", body, re.MULTILINE)
@@ -372,6 +388,8 @@ def diagnose(store, assignments, data, at, judge_agent):
             or not re.search(r"^UNVERIFIED: \S", body, re.MULTILINE)):
         raise UsageError("The judge report must carry DIAGNOSIS, REMEDY ({}), BOUND, EVIDENCE and UNVERIFIED.".format(" | ".join(DIAGNOSIS_LADDER)), {})
     remedy = remedy_line.group(1)
+    if not remedy_line.group(2).strip(" \t-—"):
+        raise UsageError("REMEDY names its remedy and what it means: the rounds for continue, the structural change for restructure, what ships and what is tracked for stop.", {})
     if DIAGNOSIS_LADDER.index(remedy) < rung:
         raise UsageError("This task's next diagnosis may not sit above {}; a remedy that failed is never reissued and the ladder never runs backwards.".format(DIAGNOSIS_LADDER[rung]), {})
     bound = None
@@ -388,12 +406,12 @@ def diagnose(store, assignments, data, at, judge_agent):
               "plan": None if remedy == "stop" else data["id"] + ":plan"}
     if record["plan"] is not None:
         assert bound is not None
-        authorization = {"source": data["judge_report"],
-                         "quote": ("REMEDY: " + remedy + remedy_line.group(2)).strip()}
+        ruling = {"source": data["judge_report"],
+                  "quote": ("REMEDY: " + remedy + remedy_line.group(2)).strip()}
         plan = {"schema_version": RECOVERY_SCHEMA_VERSION, "at": at, "id": record["plan"],
                 "task": data["task"], "checkpoint": data["checkpoint"], "scope": data["scope"],
                 "allowed_paths": data["allowed_paths"], "additional_fixes": bound,
-                "authorization": authorization, "base_revision": task["base_revision"],
+                "authorization": ruling, "base_revision": task["base_revision"],
                 "first_fix": count + 1, "last_fix": count + bound}
         if data.get("supersedes"):
             plan["supersedes"] = data["supersedes"]
@@ -451,12 +469,14 @@ def validate_work(store, assignments, task, fix_round, plan_id=None, work=None, 
     if implementation:
         from .role_clear import validate_requested
         validate_requested(store, assignments, task, fix_round, plan_id, work)
+    if task and any(row["task"] == task and row["remedy"] == "stop" for row in store["diagnoses"]):
+        raise UsageError("This task's diagnosis is `stop`, which is terminal: ship what is clean and track the remainder. No further implementation runs under it.", {})
     if fix_round <= DEFAULT_FIX_LIMIT:
         if plan_id:
             raise UsageError("An extra-correction plan cannot relabel an ordinary fix; preserve the cumulative number.", {})
         return None
     if not task or not plan_id:
-        raise UsageError("The five-fix budget is exhausted. Record the operator checkpoint and its explicit bounded correction plan; ordinary sixth attempts are refused.", {})
+        raise UsageError("The five-fix budget is exhausted. Record the checkpoint and take the judge's diagnosis with `teamlead diagnose`; its bounded remedy authorizes the next attempts and ordinary sixth attempts are refused.", {})
     plan = _item(store["plans"], plan_id, "correction plan")
     if plan not in active_plans(store):
         raise UsageError("That approval was superseded by an explicit operator decision; use the current recorded bounds.", {})

@@ -64,7 +64,9 @@ that the lead applies it without asking you a question.
 goes out, and what is recorded as an accepted defect. Your remedy carries the
 authority to accept a tracked defect into a release.
 
-{{LADDER_NOTE}}
+A remedy this task already took cannot be taken again, and the ladder only
+descends: after `continue` the choices are `restructure` or `stop`, after
+`restructure` only `stop`. Any prior remedy is named above.
 
 Follow the five lines with your numbered reasons — each reason ties a verified
 fact about the rounds to the diagnosis.

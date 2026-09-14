@@ -153,15 +153,26 @@ class RecoveryTests(unittest.TestCase):
             diagnose(self.store, self.history, self.diagnosis("diag-2", "restructure", 2), AT, "judge")
         with self.assertRaisesRegex(UsageError, "Supersedes must name"):
             diagnose(self.store, self.history, {**self.diagnosis("diag-2", "restructure", 2), "supersedes": "plan-nope"}, AT, "judge")
+        # Naming the plan is not the change: an early re-entry proves one.
+        with self.assertRaisesRegex(UsageError, "needs the change it claims"):
+            diagnose(self.store, self.history, {**self.diagnosis("diag-2", "restructure", 2), "supersedes": first["plan"]}, AT, "judge")
+        narrowed = {**self.diagnosis("diag-2", "restructure", 2), "supersedes": first["plan"], "allowed_paths": ["src/parser.py"]}
         # The ladder still descends: a supersession is a diagnosis like any other.
         with self.assertRaisesRegex(UsageError, "may not sit above restructure"):
-            diagnose(self.store, self.history, {**self.diagnosis("diag-2", "continue", 2), "supersedes": first["plan"]}, AT, "judge")
-        second = diagnose(self.store, self.history,
-                          {**self.diagnosis("diag-2", "restructure", 2), "supersedes": first["plan"]}, AT, "judge")
+            diagnose(self.store, self.history, {**narrowed, **self.diagnosis("diag-2", "continue", 2), "supersedes": first["plan"], "allowed_paths": ["src/parser.py"]}, AT, "judge")
+        # An operator override stands in for a changed scope.
+        override = diagnose(self.store, self.history,
+                            {**self.diagnosis("diag-override", "restructure", 2), "supersedes": first["plan"],
+                             "authorization": AUTH}, AT, "judge")
+        self.assertEqual(override["supersedes"], first["plan"])
+        second = override
         self.assertEqual(second["supersedes"], first["plan"])
         plans = {row["id"]: row for row in self.store["plans"]}
         self.assertIn(first["plan"], plans)
         self.assertEqual(plans[second["plan"]]["supersedes"], first["plan"])
+        with self.assertRaisesRegex(UsageError, "needs the change it claims"):
+            diagnose(self.store, self.history,
+                     {**self.diagnosis("diag-late", "stop", "none"), "supersedes": second["plan"]}, AT, "judge")
         self.assertNotIn(first["plan"], [row["id"] for row in active_plans(self.store)])
         with self.assertRaisesRegex(UsageError, "superseded"):
             validate_work(self.store, self.history, TASK, 6, first["plan"], WORK)
@@ -182,6 +193,36 @@ class RecoveryTests(unittest.TestCase):
         incomplete.write_text("DIAGNOSIS: x\nREMEDY: continue — more\nBOUND: 2\n")
         with self.assertRaisesRegex(UsageError, "must carry DIAGNOSIS"):
             diagnose(self.store, self.history, {**self.diagnosis("diag-2", "continue", 1), "judge_report": str(incomplete)}, AT, "judge")
+
+    def test_a_stop_remedy_ends_implementation_on_the_task(self):
+        # coding-policy#407: `stop` is terminal, so no allowance survives it.
+        self.seed_checkpoint()
+        first = diagnose(self.store, self.history, self.diagnosis("diag-1", "continue", 3), AT, "judge")
+        validate_work(self.store, self.history, TASK, 6, first["plan"], WORK)
+        diagnose(self.store, self.history,
+                 {**self.diagnosis("diag-2", "stop", "none"), "supersedes": first["plan"], "authorization": AUTH}, AT, "judge")
+        for plan in (first["plan"], None):
+            with self.assertRaisesRegex(UsageError, "terminal"):
+                validate_work(self.store, self.history, TASK, 6, plan, WORK)
+        with self.assertRaisesRegex(UsageError, "terminal"):
+            validate_work(self.store, self.history, TASK, 3, None, None)
+        validate_store(self.store, self.history)
+
+    def test_a_report_must_be_the_one_supervision_enrolled(self):
+        self.seed_checkpoint()
+        request = self.diagnosis("diag-1", "continue", 2)
+        with self.assertRaisesRegex(UsageError, "not the one supervision enrolled"):
+            diagnose(self.store, self.history, request, AT, "judge", str(self.root / "elsewhere.md"))
+        record = diagnose(self.store, self.history, request, AT, "judge", request["judge_report"])
+        self.assertEqual(record["remedy"], "continue")
+
+    def test_a_remedy_names_what_it_means(self):
+        self.seed_checkpoint()
+        bare = self.root / "bare.md"
+        bare.write_text("DIAGNOSIS: flat find-rate\nREMEDY: restructure\nBOUND: 2\n"
+                        "EVIDENCE: rounds 10-20\nUNVERIFIED: none\n")
+        with self.assertRaisesRegex(UsageError, "names its remedy and what it means"):
+            diagnose(self.store, self.history, {**self.diagnosis("diag-1", "continue", 2), "judge_report": str(bare)}, AT, "judge")
 
     def test_corrupt_diagnoses_refuse_the_ledger(self):
         self.seed_checkpoint()
@@ -276,8 +317,8 @@ class RecoveryTests(unittest.TestCase):
                 "previous_attempts": "None", "progress": "None",
                 "change_in_approach": "Reassess"}, AT, "judge")
 
-    def test_an_exhausted_budget_names_the_operator_not_the_judge(self):
-        with self.assertRaisesRegex(UsageError, "operator checkpoint"):
+    def test_an_exhausted_budget_names_the_diagnosis_not_an_operator_plan(self):
+        with self.assertRaisesRegex(UsageError, "teamlead diagnose"):
             validate_work(self.store, self.history, TASK, 6, None, WORK)
 
     def replay_data(self):

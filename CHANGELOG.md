@@ -42,7 +42,12 @@
   remedy is never reissued, the ladder never runs backwards, `stop` is
   terminal, so a task takes at most three diagnoses and cannot loop. A changed
   scope or an operator override re-enters before the bound is spent, naming
-  the plan it supersedes, and descends the ladder like any other re-entry. No
+  the plan it supersedes and proving the change it claims — a different scope
+  or paths, or the operator's recorded override — and descends the ladder like
+  any other re-entry. `stop` ends implementation on the task outright, so no
+  unspent allowance survives it. The cited report must be the one supervision
+  enrolled for that judge dispatch, since a dispatch marked applied proves the
+  send and not the delivery. No
   operator sits in the path of any of them, and the deadlock disappears.
 
   The lead ran the loop and is the wrong diagnostician of its own dispatch

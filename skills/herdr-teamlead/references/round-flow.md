@@ -286,13 +286,18 @@ path of any of them.
 `rules/agent-team-operation.md` Judge Seat carries the contract; the record
 shapes are the owner's, in `references/dispatch-recovery.md`.
 
-It is read-only without exception: no file edit, no mutating git or `gh`
-command, no GitHub post, no subagent dispatch. It reads both positions and the
-governing rule, verifies the disputed facts against the tree itself rather
-than trusting either side's framing, and returns a report opening with three
+It is read-only without exception in either mode: no file edit, no mutating
+git or `gh` command, no GitHub post, no subagent dispatch.
+
+Adjudicating, it reads both positions and the governing rule, verifies the
+disputed facts against the tree itself rather than trusting either side's
+framing, and returns a report opening with three
 lines — `RULING: uphold A | uphold B | amend — <line> | blocked — <question>`,
 `ACTION:` naming the minimal step, `UNVERIFIED:` naming anything it could not
 check — followed by its numbered reasons.
+
+Those three lines belong to adjudication; a diagnosis carries the five above
+and never a `RULING:` or an `ACTION:`.
 
 `blocked` is the judge declining to rule on a dispute it cannot settle from
 the tree and the rule text alone. The round stops there and the named question

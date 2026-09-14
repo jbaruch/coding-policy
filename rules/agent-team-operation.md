@@ -66,13 +66,16 @@ description: Running a multi-agent team — task-based specialist composition, c
 - The judge's authority in diagnosis mode covers accepting a tracked defect into a release under a `stop` remedy
 - Record the diagnosis through `teamlead diagnose` under the original task and base before acting on its remedy
 - Re-enter diagnosis when a remedy's own bound exhausts with blocking work remaining
-- Re-enter before the bound is spent only for a changed scope or an operator override, naming the plan it supersedes
+- Re-enter before the bound is spent only for a changed scope or an operator override, naming the plan it supersedes and carrying the change it claims
+- A `stop` remedy ends implementation on its task; no unspent allowance survives it
 - Each re-entry moves strictly down the ladder `continue` → `restructure` → `stop`
 - Never reissue a remedy that already failed, and never move back up the ladder
 - `stop` is terminal; a task takes at most three diagnoses
 - No exhausted allowance waits on an operator decision
 - The judge is read-only: it never edits a repository file, never runs a mutating git or `gh` command, never posts to GitHub, never dispatches a subagent — its only output is its report file
-- The judge reads both positions and the governing rule, verifies the disputed facts against the tree, and returns `RULING: uphold A | uphold B | amend — <line> | blocked — <question>` with numbered reasons, an `ACTION:` naming the minimal step, and an `UNVERIFIED:` line
+- In adjudication mode the judge reads both positions and the governing rule, verifies the disputed facts against the tree, and returns `RULING: uphold A | uphold B | amend — <line> | blocked — <question>` with numbered reasons, an `ACTION:` naming the minimal step, and an `UNVERIFIED:` line
+- In diagnosis mode it reads the round history and verifies against the tree what each round changed, and returns the five diagnosis lines with numbered reasons
+- `RULING:` and `ACTION:` belong to adjudication alone; a diagnosis carries neither
 - The judge's ruling binds the round; only the operator overrides it
 - `blocked` is the judge declining to rule
 - A `blocked` ruling stops the round and sends the named question to the operator
