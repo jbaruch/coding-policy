@@ -1,5 +1,16 @@
 # Changelog
 
+### Fixed
+
+- **The supervision Stop hook writes no bytecode cache (#385).**
+  `hooks/herdr-supervision-stop.sh` imported the evaluator with bytecode
+  writing left on, so a Stop in a consumer dropped `__pycache__` into the
+  installed plugin tree — no ledger mutation, but still a write the
+  evaluator's read-only contract does not allow. The wrapper now sets
+  `PYTHONDONTWRITEBYTECODE=1` for that invocation, and a subprocess fixture
+  runs it against a cache-free plugin copy and asserts none appears. Copilot
+  finding from #383, deferred there as advisory.
+
 ## 0.3.215 — 2026-09-14
 
 ### Changed
