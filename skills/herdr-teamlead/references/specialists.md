@@ -38,9 +38,11 @@ worker. The pinned judge remains outside ordinary staffing.
 Read only the profiles needed for this task. Most are prompts for selecting
 questions and evidence, not checklists that every change must complete. Five
 are triggered: the condition fires, the profile is consulted, and its
-deliverable lands before implementation proceeds. A trigger that fires and is
-not consulted is a staffing decision recorded with its reason, the way a
-shortfall of eligible workers already is.
+deliverable lands before implementation proceeds. Four of them allow a
+recorded staffing decision instead, with its reason, the way a shortfall of
+eligible workers already does. The exhaustion trigger does not: the judge's
+diagnosis rules on that assessment, and `teamlead diagnose` refuses without
+it.
 
 | Trigger | Profile | Deliverable before implementation |
 | --- | --- | --- |
@@ -48,7 +50,7 @@ shortfall of eligible workers already is.
 | A new or changed trust boundary — anything deciding whether foreign input, generated content or a proposed change is safe | Security | A bounded threat assessment against that boundary |
 | A new user-facing command, flag or refusal path | UX and product | The flow, the alternatives considered, and acceptance criteria |
 | A new user-facing document | Documentation | A draft verified against the shipped behavior, never against intent |
-| Fix rounds reaching the allowance without converging | Investigator | A reproduction, a causal assessment and a discriminating experiment |
+| Fix rounds reaching the allowance without converging | Investigator | A reproduction, a causal assessment and a discriminating experiment. Required; no staffing decision substitutes for it |
 
 The size a package must exceed is the consuming repo's to state, and that
 trigger waits on the number. The other four do not: a trust boundary, a

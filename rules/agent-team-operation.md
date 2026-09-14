@@ -30,6 +30,7 @@ description: Running a multi-agent team — task-based specialist composition, c
 - Each trigger names its deliverable in `skills/herdr-teamlead/references/specialists.md`
 - A fired trigger is consulted, or recorded as a staffing decision with its reason
 - Silence is never that decision
+- The exhaustion trigger has no such alternative: a diagnosis without its assessed consultation is refused
 - Separate responsibility, specialty and execution worker in each specialist assignment
 - Ground capability declarations in available skills, tools and observed work
 - Apply capability and contribution eligibility before task familiarity and measured subscription headroom through the owner planner

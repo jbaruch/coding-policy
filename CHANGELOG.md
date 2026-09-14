@@ -32,7 +32,9 @@
   fired trigger is consulted or recorded as a staffing decision with its
   reason — the shape `Team Composition` already uses for a shortfall of
   eligible workers — so skipping becomes an explicit choice rather than the
-  default silence produced. The size a package must exceed is the consuming
+  default silence produced. The exhaustion trigger is the exception with no
+  alternative: the judge's diagnosis rules on that assessment, so `teamlead
+  diagnose` refuses without it and no staffing decision substitutes. The size a package must exceed is the consuming
   repo's to state and that trigger waits on the number; the other four fire on
   their own terms in every repo.
 
