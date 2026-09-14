@@ -28,7 +28,11 @@ description: Running a multi-agent team — task-based specialist composition, c
 - A new user-facing document triggers documentation
 - Fix rounds reaching the task's allowance without converging trigger the investigator
 - Each trigger names its deliverable in `skills/herdr-teamlead/references/specialists.md`
-- A fired trigger is consulted, or recorded as a staffing decision with its reason
+- The repo states each trigger surface and its package size in its own trigger declaration
+- `teamlead detect-triggers` classifies the round's diff against that declaration before the roles are planned
+- The four non-exhaustion triggers fire from that detection, never from the lead's reading of the diff
+- An absent or incomplete declaration is refused, never read as no trigger fired
+- A fired trigger is consulted, or recorded as a staffing decision with its reason the detector reads
 - Silence is never that decision
 - The exhaustion trigger has no such alternative: a diagnosis without its assessed consultation is refused
 - The judge seat is not dispatched at an exhausted allowance before that assessment exists

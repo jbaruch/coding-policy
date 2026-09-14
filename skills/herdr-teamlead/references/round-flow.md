@@ -48,7 +48,8 @@ branch, and stops without opening a PR.
 
 Work that trips a Team Composition trigger gates here: its deliverable lands
 before implementation, or the lead records the staffing decision and its
-reason. The cheap gate is the one worth making mandatory; a reviewer catching
+reason. Step 5's `detect-triggers` run decides which of the four fired, and
+reads that recorded decision; the lead's own reading of the diff does not. The cheap gate is the one worth making mandatory; a reviewer catching
 the same thing one finding per round is the expensive one.
 
 Untriggered work keeps the old judgement, whatever its size: skip Phase 1 when

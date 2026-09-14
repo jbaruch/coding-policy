@@ -52,10 +52,66 @@ it.
 | A new user-facing document | Documentation | A draft verified against the shipped behavior, never against intent |
 | Fix rounds reaching the allowance without converging | Investigator | A reproduction, a causal assessment and a discriminating experiment. Required; no staffing decision substitutes for it |
 
-The size a package must exceed is the consuming repo's to state, and that
-trigger waits on the number. The other four do not: a trust boundary, a
-user-facing command, flag or refusal path, a user-facing document and a
-non-converging loop fire on their own terms in every repo.
+The exhaustion trigger is enforced where the judge is dispatched. The other
+four are detected from the round's diff.
+
+## Declare this repo's trigger surfaces
+
+`teamlead detect-triggers` classifies a diff against `.herdr/triggers.json` in
+the consuming repo. Every field is required; an absent or incomplete
+declaration is refused rather than read as "nothing fired", so the architect
+trigger no longer fires never or always depending on who reads it.
+
+```json
+{
+  "schema_version": 1,
+  "package_roots": ["skills/*", "scripts"],
+  "package_change_lines": 400,
+  "trust_boundary_paths": [".github/workflows/*", "hooks/*"],
+  "cli_spec_paths": ["skills/herdr-teamlead/teamlead/*.py"],
+  "cli_surface_markers": ["add_parser(", "add_argument("],
+  "user_doc_paths": ["README.md", "docs/*"]
+}
+```
+
+`package_roots` are path globs naming the directories this repo treats as
+packages; the nearest matching ancestor owns a changed file. `package_change_lines`
+is the size a changed package must exceed to trigger the architect.
+`trust_boundary_paths`, `cli_spec_paths` and `user_doc_paths` are path globs;
+`*` spans path separators. `cli_surface_markers` are literal substrings that an
+added line inside a CLI spec path must carry to count as a new command or flag.
+State `[]` for a surface this repo does not have — an empty list is a statement,
+an omitted field is not. Classification rules are in
+`skills/herdr-teamlead/teamlead/triggers.py`, in its module docstring and the
+`detect` and `cli_surface` docstrings.
+
+Run it before `plan`, with the roles and requirements that round intends:
+
+```bash
+teamlead detect-triggers --repo <dir> --base <ref> [--head <ref>] \
+  --roles <role[,role...]> [--requirements <file>] [--decisions <file>]
+```
+
+Exit 0 means every fired trigger is staffed or answered. Exit 1 with an
+`unaddressed_trigger` error names the triggers that are neither. The architect
+trigger is answered by planning the `architect` role; security, UX and product
+and documentation are answered by a requirements assignment whose `specialty`
+is `security`, `ux-product` or `documentation`.
+
+A staffing decision answers a fired trigger instead, and the detector reads it:
+
+```json
+{
+  "schema_version": 1,
+  "decisions": {
+    "documentation": "the added file is an internal reference, not a reader-facing document"
+  }
+}
+```
+
+An empty reason is refused. Silence is never that decision. A decision for a
+trigger that did not fire is reported under `unused_decisions` and changes
+nothing.
 
 | Profile | Bring it in for | Useful output |
 | --- | --- | --- |
