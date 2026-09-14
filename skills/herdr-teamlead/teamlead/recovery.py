@@ -480,9 +480,11 @@ def active_plans(store):
 def validate_work(store, assignments, task, fix_round, plan_id=None, work=None, *, implementation=True):
     """The same allowance is checked by planning, dispatch and state readers."""
     stopped = next((row for row in store["diagnoses"] if row["task"] == task and row["remedy"] == "stop"), None)
-    if stopped is not None:
-        # `stop` is terminal. Only the operator overrides a ruling, and they do
-        # it by authorizing a plan over the stop, never by resuming silently.
+    if stopped is not None and implementation:
+        # Implementation only: `stop` ships what is clean, so the reviewer,
+        # tester and release roles it depends on still run.
+        # Only the operator overrides a ruling, and they do it by authorizing
+        # a plan over the stop, never by resuming silently.
         override = next((row for row in active_plans(store)
                          if row["task"] == task and row["first_fix"] > stopped["fix_round"]), None)
         if override is None:

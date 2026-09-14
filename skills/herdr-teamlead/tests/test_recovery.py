@@ -214,6 +214,9 @@ class RecoveryTests(unittest.TestCase):
                 validate_work(self.store, self.history, TASK, 6, plan, WORK)
         with self.assertRaisesRegex(UsageError, "terminal"):
             validate_work(self.store, self.history, TASK, 3, None, None)
+        # What `stop` ships still gets reviewed, tested and released.
+        validate_work(self.store, self.history, TASK, 6, None, WORK, implementation=False)
+        validate_work(self.store, self.history, TASK, None, None, None, implementation=False)
         # Only the operator overrides a ruling, and a plan over the stop is how.
         self.judge_after_developer(6)
         override = authorize_plan(self.store, self.history, {"id": "override", "task": TASK, "checkpoint": "checkpoint-5",

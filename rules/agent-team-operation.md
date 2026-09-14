@@ -67,7 +67,9 @@ description: Running a multi-agent team — task-based specialist composition, c
 - That acceptance follows `rules/review-severity.md` Judge-Accepted Defect Carve-Out; every other release gate holds
 - Record the diagnosis through `teamlead diagnose` under the original task and base before acting on its remedy
 - A bound lead cites the report supervision enrolled for the pinned judge, never another file
-- The operator overrides this exhaustion's recorded remedy; an approved budget never stands in for a diagnosis, and an older remedy never authorizes new attempts
+- The operator overrides this exhaustion's recorded remedy
+- An approved budget never stands in for a diagnosis
+- An older remedy never authorizes new attempts
 - Re-enter diagnosis when a remedy's own bound exhausts with blocking work remaining
 - Re-enter before the bound is spent only for a changed scope or an operator override, naming the plan it supersedes and carrying the change it claims
 - A `stop` remedy ends implementation on its task; no unspent allowance survives it
