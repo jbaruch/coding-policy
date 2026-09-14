@@ -96,7 +96,8 @@ teamlead detect-triggers --repo <dir> --base <ref> [--head <ref>] \
 ```
 
 Exit 0 means every fired trigger is staffed or answered. Exit 1 with an
-`unaddressed_trigger` error names the triggers that are neither. The architect
+`unaddressed_trigger` error names the triggers that are neither; re-run it
+after each change, since the failed invocation read none of them. The architect
 trigger is answered by planning the `architect` role; security, UX and product
 and documentation are answered by a requirements assignment whose `specialty`
 is `security`, `ux-product` or `documentation`.

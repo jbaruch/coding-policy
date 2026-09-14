@@ -14,11 +14,20 @@
     ".github/actions/skill-review/*",
     ".github/actions/publish-landed-gate/*",
     "hooks/*",
+    "skills/adopt-fork-pr/*",
     "skills/release/dismiss-stale-reviews.sh",
     "skills/release/smart-publish.sh",
     "skills/release/registry-has-version.sh",
     "skills/herdr-teamlead/verify-authority.sh",
-    "skills/adopt-fork-pr/*"
+    "skills/herdr-teamlead/teamlead/assign.py",
+    "skills/herdr-teamlead/teamlead/engagement.py",
+    "skills/herdr-teamlead/teamlead/historical.py",
+    "skills/herdr-teamlead/teamlead/qualification.py",
+    "skills/herdr-teamlead/teamlead/recovery.py",
+    "skills/herdr-teamlead/teamlead/report_delivery.py",
+    "skills/herdr-teamlead/teamlead/role_clear.py",
+    "skills/herdr-teamlead/teamlead/supervision.py",
+    "skills/herdr-teamlead/teamlead/triggers.py"
   ],
   "cli_spec_paths": [
     "skills/herdr-teamlead/teamlead/*.py"

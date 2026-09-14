@@ -325,6 +325,39 @@ class ReportTest(unittest.TestCase):
         self.assertEqual(payload["fired"], ["security"])
 
 
+class ThisRepoDeclarationTest(unittest.TestCase):
+    """This repo's own declaration, dogfooded as a consuming repo."""
+
+    def setUp(self):
+        self.repo = Path(__file__).resolve().parents[3]
+        self.declaration = triggers.load_declaration(self.repo)
+
+    def test_the_modules_that_gate_generated_evidence_are_trust_boundaries(self):
+        # rules/agent-team-operation.md: anything deciding whether generated
+        # content or a proposed change is safe triggers security.
+        for path in ("skills/herdr-teamlead/teamlead/recovery.py",
+                     "skills/herdr-teamlead/teamlead/engagement.py",
+                     "skills/herdr-teamlead/teamlead/report_delivery.py",
+                     "skills/herdr-teamlead/teamlead/supervision.py",
+                     "skills/herdr-teamlead/teamlead/assign.py",
+                     "skills/herdr-teamlead/teamlead/triggers.py",
+                     ".github/workflows/tests.yml"):
+            with self.subTest(path=path):
+                self.assertTrue((self.repo / path).exists(), path)
+                fired = triggers.detect(self.declaration, {path: "M"}, {path: 1}, {})
+                self.assertEqual([signal["evidence"] for signal in fired["security"]], [path])
+
+    def test_each_skill_is_one_package_root(self):
+        self.assertEqual(triggers.package_of("skills/herdr-teamlead/teamlead/cli.py",
+                                             self.declaration["package_roots"]), "skills/herdr-teamlead")
+
+    def test_a_new_refusal_path_fires_ux_product(self):
+        found = triggers.cli_surface(self.declaration, {"skills/herdr-teamlead/teamlead/recovery.py": "M"},
+                                     {"skills/herdr-teamlead/teamlead/recovery.py":
+                                      ['        raise UsageError("state the surface", {})']})
+        self.assertEqual(len(found), 1)
+
+
 class RunCommandTest(TempCase):
     def setUp(self):
         self.tmp = self.temp_dir()
