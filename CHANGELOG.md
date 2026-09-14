@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.213 — 2026-09-14
+
 ### Changed
 
 - **An exhausted allowance takes a judge diagnosis, not an operator budget
