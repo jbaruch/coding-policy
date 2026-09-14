@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.219 — 2026-09-14
+
 ### Fixed
 
 - **The diagnosis binds to its own judge dispatch and its whole plan (#412).**
