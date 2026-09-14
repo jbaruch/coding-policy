@@ -57,8 +57,10 @@ to know goes in the report.
   stop on an unexpected change, and remove the root when you finish
   (`rules/agent-team-operation.md` Writers and Checkouts carries the
   preconditions).
-- Write nowhere else: not the shared checkout, not your home directory, not a
-  path no brief named.
+- Write nowhere else — not the shared checkout, not your home directory, not a
+  path no brief named. Restoring a user-level file to the state you recorded
+  before the run is the one exception, and only for a file the run itself
+  changed.
 - Prefix every code-touching shell command with `cd <worktree> &&`. Your shell
   does not keep a working directory between calls.
 - Confirm `pwd` before running the build, the tests, or any gate.

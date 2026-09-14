@@ -223,11 +223,13 @@ description: Running a multi-agent team — task-based specialist composition, c
 - Applies when the tool under test resolves its configuration from filesystem ancestors, so a fixture placed under the reports directory initializes the operator's own project instead of the fixture's
 - Preconditions (all required):
   1. The brief names the fixture root, and it holds fixtures alone — every report, plan and patch artifact still goes under the reports directory
-  2. The root sits outside every ancestor that configures the tool, and the worker proves the tool's effective root inside the fixture before any command that writes through it
-  3. The worker records the state of each user-level file the rehearsal can reach, before and after, and stops on an unexpected change
-  4. A user-level file the rehearsal changed is restored from that record; reinstalling the operator's environment is never the automatic recovery
-  5. The worker removes the fixture root when the assignment ends
-- Every other artifact still goes under the reports directory its brief names; the worktree writes above and the restoration precondition 4 requires are unchanged
+  2. The root sits outside every ancestor that configures the tool
+  3. The worker proves the tool's effective root inside the fixture before any command that writes through it
+  4. The worker records the state of each user-level file the rehearsal can reach, before and after
+  5. An unexpected change stops the rehearsal
+  6. A user-level file the rehearsal changed is restored from that record, and reinstalling the operator's environment is never the automatic recovery
+  7. The worker removes the fixture root when the assignment ends
+- Every other artifact still goes under the reports directory its brief names; the worktree writes above and the restoration precondition 6 requires are unchanged
 - Every code-touching command carries its own `cd <worktree> &&` prefix
 - See `rules/agent-worktree-isolation.md`
 
