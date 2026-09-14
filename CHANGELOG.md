@@ -1,5 +1,23 @@
 # Changelog
 
+### Fixed
+
+- **The diagnosis binds to its own judge dispatch and its whole plan (#412).**
+  Neither changed behavior on a well-formed ledger.
+  - The enrollment resolver took the newest supervision member for the task
+    and the pinned judge. If a dispatch persisted and its enrollment or
+    refinement then failed, an older member could be selected and its report
+    accepted for the current diagnosis. `recovery.applied_judge_dispatch`
+    resolves the judge dispatch the diagnosis rules on, and the enrollment is
+    matched to that identity; a bound lead with no such member has no
+    diagnosis to record, as before.
+  - The diagnosis-to-plan integrity check compared task, bound and
+    authorization source. A same-task plan carrying another scope or path set
+    passed, after which `validate_work` enforced that unrelated plan's budget
+    and scope. It now compares every field `diagnose` derives — checkpoint,
+    base revision, scope, allowed paths, both ends of the fix range and the
+    supersession.
+
 ## 0.3.216 — 2026-09-14
 
 ### Fixed

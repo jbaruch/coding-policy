@@ -124,6 +124,16 @@ class RecoveryCommandTests(fixture.CliCase):
         self.record_investigation()
         state = self.saved()
         add_assignment(state, "2026-02-03T15:00:00+00:00", "judge", "claude", task=TASK)
+        # The dispatch the enrollment is keyed to: #412 resolves the judge's
+        # enrollment by this identity, not by newest-for-task-and-agent.
+        judge_index = len(state["assignments"]) - 1
+        state["recovery"]["dispatches"].append({
+            "schema_version": 1, "at": "2026-02-03T15:00:00+00:00", "id": "judge-dispatch",
+            "fingerprint": "f" * 64, "role": "judge", "agent": "claude", "task": TASK,
+            "fix_round": None, "plan": None, "work": None, "status": "applied",
+            "assignment_index": judge_index,
+            "result": {"schema_version": 1, "task": TASK, "role": "judge", "agent": "claude",
+                       "fix_round": None, "status": "applied"}, "report": None})
         save_state(self.state, state)
         judge = self.tmp / "judge.md"
         judge.write_text("RULING: amend — correct F1\nACTION: Use one canonical parser\n")
@@ -261,6 +271,30 @@ class RecoveryCommandTests(fixture.CliCase):
             "judge_report": str(delivered), "scope": WORK["scope"], "allowed_paths": ["src/*"]})
         self.assertEqual(code, 0, err)
         self.assertEqual(json.loads(out)["remedy"], "continue")
+
+    def test_an_older_enrollment_cannot_stand_in_for_this_judge_dispatch(self):
+        # coding-policy#412: resolving the enrollment by newest-for-task-and-
+        # agent accepted a stale member when the dispatch persisted and its own
+        # enrollment then failed. The current dispatch's identity decides it.
+        from teamlead import supervision
+        self.seed_cap(diagnosis_only=True, skip_diagnosis=True)
+        environment = patch.dict(os.environ, {"XDG_STATE_HOME": str(self.tmp / "xdg")})
+        environment.start()
+        self.addCleanup(environment.stop)
+        who = supervision.identity("lead-native", str(self.tmp), "fixture", pane_id="lead-pane")
+        supervision.bind(self.state, who, AT, root=self.tmp / "supervision-bindings")
+        stale = self.tmp / "stale-diagnosis.md"
+        stale.write_text("DIAGNOSIS: flat find-rate\nREMEDY: continue — two more rounds\n"
+                         "BOUND: 2 — one attempt per open finding\nASSESSMENT: " + self.investigation()
+                         + "\nEVIDENCE: rounds 1-5\nUNVERIFIED: none\n")
+        # An enrollment for the same task and judge, under another dispatch id,
+        # and the newest member on record.
+        supervision.enroll(self.state, {"id": "older-judge-dispatch", "agent": "claude", "task": TASK,
+                                        "report": str(stale), "pane_id": None, "native_session": None}, AT)
+        code, _, err = self.owner("diagnose", {"id": "diag-stale", "task": TASK, "checkpoint": "cap-5",
+            "judge_report": str(stale), "scope": WORK["scope"], "allowed_paths": ["src/*"]})
+        self.assertEqual(code, 1)
+        self.assertIn("no supervision enrollment binds a report", err)
 
     def test_a_stop_remedy_files_a_user_attention_obligation(self):
         # coding-policy#415: `stop` is terminal and waits on nobody, but the
