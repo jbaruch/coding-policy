@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.221 — 2026-09-14
+
 ### Fixed
 
 - **The operator-requested ruling is bounded where it is spent, and proved
