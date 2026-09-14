@@ -79,6 +79,22 @@ default_branch_of() { # <shared>
   return 1
 }
 
+# Echo merged|unmerged for <branch> against origin/<default>, or return 2 on
+# a tool failure. `merge-base --is-ancestor` exits 1 for "not an ancestor" and
+# anything else for an invalid ref or repository error; collapsing both into
+# "unmerged" would hide the failure behind a kept row
+# (rules/error-handling.md Shell Error Handling).
+ancestry() { # <shared> <branch> <default>
+  local rc=0
+  git -C "$1" merge-base --is-ancestor "$2" "origin/$3" 2>"$ERRFILE" || rc=$?
+  case "$rc" in
+    0) printf 'merged' ;;
+    1) printf 'unmerged' ;;
+    *) return 2 ;;
+  esac
+  return 0
+}
+
 # Decide one worktree; emits a row and performs the removal unless dry-run.
 decide_worktree() { # <shared> <abs_root> <default> <dry-run 0|1> <path> <branch|""> <detached 0|1> <locked 0|1>
   local shared="$1" abs_root="$2" db="$3" dry="$4" path="$5" branch="$6" detached="$7" locked="$8"
@@ -102,7 +118,11 @@ decide_worktree() { # <shared> <abs_root> <default> <dry-run 0|1> <path> <branch
   if [[ -n "$status" ]]; then
     row kept "$path" "$branch" dirty; return 0
   fi
-  if ! git -C "$shared" merge-base --is-ancestor "$branch" "origin/${db}" 2>"$ERRFILE"; then
+  local merged
+  if ! merged="$(ancestry "$shared" "$branch" "$db")"; then
+    row failed "$path" "$branch" "git merge-base failed for ${branch}: $(tr '\n' ' ' < "$ERRFILE")"; return 0
+  fi
+  if [[ "$merged" == unmerged ]]; then
     row kept "$path" "$branch" unmerged; return 0
   fi
   if (( dry )); then
@@ -123,7 +143,11 @@ decide_branch() { # <shared> <default> <dry-run 0|1> <branch>
   if [[ "$branch" == "$db" ]]; then
     return 0
   fi
-  if ! git -C "$shared" merge-base --is-ancestor "$branch" "origin/${db}" 2>"$ERRFILE"; then
+  local merged
+  if ! merged="$(ancestry "$shared" "$branch" "$db")"; then
+    row failed "$branch" "$branch" "git merge-base failed for ${branch}: $(tr '\n' ' ' < "$ERRFILE")"; return 0
+  fi
+  if [[ "$merged" == unmerged ]]; then
     row branch-kept "$branch" "$branch" unmerged; return 0
   fi
   if (( dry )); then
@@ -188,6 +212,22 @@ main() {
     warn "\`git worktree prune\` failed: $(tr '\n' ' ' < "$ERRFILE") — stale metadata may remain"
   fi
 
+  # Take both inventories up front: a failure inside a process substitution
+  # would not reach the loop, and an empty inventory would read as "nothing
+  # to prune" with exit 0 (rules/file-hygiene.md I/O Conventions).
+  local inventory branches
+  inventory="$(mktemp)"; branches="$(mktemp)"
+  if ! git -C "$shared" worktree list --porcelain >"$inventory" 2>"$ERRFILE"; then
+    warn "\`git worktree list --porcelain\` failed: $(tr '\n' ' ' < "$ERRFILE") — cannot inventory worktrees"
+    rm -f "$inventory" "$branches"
+    return 2
+  fi
+  if ! git -C "$shared" for-each-ref --format='%(refname:short)' refs/heads/ >"$branches" 2>"$ERRFILE"; then
+    warn "\`git for-each-ref refs/heads/\` failed: $(tr '\n' ' ' < "$ERRFILE") — cannot inventory branches"
+    rm -f "$inventory" "$branches"
+    return 2
+  fi
+
   # Walk `worktree list --porcelain`: blank-line-separated blocks.
   local path="" branch="" detached=0 locked=0 line
   local -a seen_branches=()
@@ -210,7 +250,7 @@ main() {
       "locked"*) locked=1 ;;
       "") flush ;;
     esac
-  done < <(git -C "$shared" worktree list --porcelain)
+  done < "$inventory"
   flush
 
   # Local branches with no worktree.
@@ -223,7 +263,10 @@ main() {
     done
     if (( skip )); then continue; fi
     decide_branch "$shared" "$db" "$dry" "$name"
-  done < <(git -C "$shared" for-each-ref --format='%(refname:short)' refs/heads/)
+  done < "$branches"
+  if ! rm -f "$inventory" "$branches"; then
+    warn "could not remove temp inventories ${inventory} ${branches} — remove them by hand"
+  fi
 
   local rc=0
   python3 - "$abs_shared" "$db" "$dry" "$ROWS" <<'PY' || rc=$?

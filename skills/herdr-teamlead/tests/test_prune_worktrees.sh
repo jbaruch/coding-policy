@@ -27,6 +27,8 @@
 #  13. Foreign worktree    -> a directory of ANOTHER repo under the root is
 #                             untouched.
 #  14. Usage / not a repo  -> exit 1, no JSON.
+#  15. Tool failure        -> an unresolvable origin ref is a failed row and
+#                             exit 2, never a kept 'unmerged'.
 #
 # Run: bash skills/herdr-teamlead/tests/test_prune_worktrees.sh
 set -uo pipefail
@@ -165,6 +167,16 @@ main() {
   echo "13. another repository's worktree under the root is untouched"
   if (( RC == 0 )) && [[ -d "$ROOT/thirteen-other" ]] && [[ "$OUT" != *thirteen-other* ]]; then pass; else fail "rc=$RC out=$OUT"; fi
 
+  # --- 15. a merge-base tool failure is a failed row and exit 2, never "unmerged".
+  mk_repo fifteen
+  add_wt "$SHARED" review/broken "$ROOT/fifteen-broken"
+  git -C "$SHARED" update-ref -d refs/remotes/origin/main || die "update-ref failed"
+  git -C "$SHARED" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main || die "symbolic-ref failed"
+  git -C "$SHARED" remote set-url origin "$TMP/nowhere.git" || die "set-url failed"
+  run "$SHARED"
+  echo "15. an unresolvable origin default ref surfaces as failed, exit 2, worktree untouched"
+  if (( RC == 2 )) && [[ "$OUT" == *'"failed": [{'*merge-base* ]] && [[ "$(kept_reason "$ROOT/fifteen-broken")" == "" ]] && [[ -d "$ROOT/fifteen-broken" ]]; then pass; else fail "rc=$RC out=$OUT err=$ERRTEXT"; fi
+
   # --- 14. usage / not a repo.
   run
   echo "14a. usage is exit 1 with no JSON"
@@ -182,4 +194,7 @@ main() {
   (( FAIL == 0 ))
 }
 
-main "$@"
+# Entry-point guard (rules/file-hygiene.md Standalone Scripts).
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  main "$@"
+fi
