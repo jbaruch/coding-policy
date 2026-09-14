@@ -50,7 +50,15 @@ to know goes in the report.
 - Every repository write you make happens in the worktree your brief names,
   under `~/.worktrees/`.
 - Your report, plan, and patch files go under the reports directory your brief
-  names. Nothing you write lands anywhere else.
+  names.
+- If your brief names a fixture root, fixtures go there and nothing else does.
+  Prove the tool's effective root inside it before any command writes through
+  the tool, record every user-level file the run can reach before and after,
+  stop on an unexpected change, and remove the root when you finish
+  (`rules/agent-team-operation.md` Writers and Checkouts carries the
+  preconditions).
+- Write nowhere else: not the shared checkout, not your home directory, not a
+  path no brief named.
 - Prefix every code-touching shell command with `cd <worktree> &&`. Your shell
   does not keep a working directory between calls.
 - Confirm `pwd` before running the build, the tests, or any gate.

@@ -227,7 +227,7 @@ description: Running a multi-agent team — task-based specialist composition, c
   3. The worker records the state of each user-level file the rehearsal can reach, before and after, and stops on an unexpected change
   4. A user-level file the rehearsal changed is restored from that record; reinstalling the operator's environment is never the automatic recovery
   5. The worker removes the fixture root when the assignment ends
-- Every other worker write stays under the reports directory its brief names
+- Every other artifact still goes under the reports directory its brief names; the worktree writes above and the restoration precondition 4 requires are unchanged
 - Every code-touching command carries its own `cd <worktree> &&` prefix
 - See `rules/agent-worktree-isolation.md`
 

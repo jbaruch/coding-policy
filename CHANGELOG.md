@@ -19,6 +19,11 @@
   stopping on an unexpected change, restoring from that record rather than
   reinstalling the operator's environment, and removing the root at the end.
 
+  The worker-facing brief says the same: `templates/COMMON.md` now names the
+  fixture root and its obligations instead of "nothing you write lands
+  anywhere else", which contradicted both the exception and the worktree
+  writes every worker already makes.
+
   `references/round-flow.md` carries the procedure — walk the ancestors,
   pre-seed the intended manifest, prove the resolved root, guard the
   user-level files — while which files and which manifest a given tool reads
