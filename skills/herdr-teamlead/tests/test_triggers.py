@@ -262,22 +262,28 @@ class ParseTest(unittest.TestCase):
     def test_numstat_sums_added_and_deleted(self):
         self.assertEqual(triggers.parse_numstat("3\t4\ta.py\0-\t-\tlogo.png\0"), {"a.py": 7, "logo.png": 0})
 
-    def test_added_lines_key_on_their_file(self):
+    def test_added_lines_come_from_the_hunks_alone(self):
         patch = "\n".join([
             "diff --git a/x.py b/x.py",
             "--- a/x.py",
             "+++ b/x.py",
             "@@ -1 +1,2 @@",
             "+added one",
-            "diff --git a/y.py b/y.py",
-            "--- /dev/null",
-            "+++ b/y.py",
-            "@@ -0,0 +1 @@",
-            "+added two",
             "+++ content that looks like a file header",
         ])
         self.assertEqual(triggers.parse_added_lines(patch),
-                         {"x.py": ["added one"], "y.py": ["added two", "++ content that looks like a file header"]})
+                         ["added one", "++ content that looks like a file header"])
+
+    def test_a_quoted_path_header_is_never_read(self):
+        # git quotes a path carrying a quote, a backslash or a non-ASCII byte.
+        patch = "\n".join([
+            'diff --git "a/src/cli/a\\"b.py" "b/src/cli/a\\"b.py"',
+            '--- "a/src/cli/a\\"b.py"',
+            '+++ "b/src/cli/a\\"b.py"',
+            "@@ -1,0 +2 @@",
+            '+    sub.add_parser("ship")',
+        ])
+        self.assertEqual(triggers.parse_added_lines(patch), ['    sub.add_parser("ship")'])
 
 
 class ReportTest(unittest.TestCase):
@@ -344,6 +350,8 @@ class ThisRepoDeclarationTest(unittest.TestCase):
                      "skills/herdr-teamlead/teamlead/cli.py",
                      "skills/herdr-teamlead/teamlead/triggers.py",
                      ".herdr/triggers.json",
+                     "rules/agent-team-operation.md",
+                     "rules/review-severity.md",
                      ".github/workflows/tests.yml"):
             with self.subTest(path=path):
                 self.assertTrue((self.repo / path).exists(), path)
@@ -532,6 +540,25 @@ class DetectTriggersCommandTest(TempCase):
         code, out, err = self.run_cli("--head", "HEAD")
         self.assertEqual(code, 0, err)
         self.assertEqual(json.loads(out)["fired"], [])
+
+    def test_a_quoted_filename_still_fires_ux_product(self):
+        # git quotes a path carrying a quote or a non-ASCII byte in its patch
+        # header; the added command must still be seen.
+        spec = self.tmp / "src" / "cli"
+        spec.mkdir(parents=True)
+        awkward = spec / 'a"b\u00e9.py'
+        awkward.write_text("# spec\n")
+        self.git("add", "-A")
+        self.git("commit", "-qm", "add spec")
+        base = self.git("rev-parse", "HEAD").strip()
+        awkward.write_text('# spec\nsub.add_parser("ship")\n')
+        self.git("add", "-A")
+        self.git("commit", "-qm", "add command")
+        out, err = io.StringIO(), io.StringIO()
+        code = cli.main(["detect-triggers", "--repo", str(self.tmp), "--base", base, "--head", "HEAD"],
+                        stdout=out, stderr=err)
+        self.assertEqual(code, 1, err.getvalue())
+        self.assertIn("ux-product", json.loads(out.getvalue())["fired"])
 
     def test_a_missing_declaration_refuses_the_round(self):
         (self.tmp / triggers.DECLARATION_FILE).unlink()

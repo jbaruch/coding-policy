@@ -301,24 +301,22 @@ def parse_numstat(text):
 
 
 def parse_added_lines(text):
-    """Added lines of a unified diff, keyed by the file they were added to.
+    """Added lines of a single-file unified diff.
 
-    Header and payload are told apart by position, never by prefix alone: a
-    content line reading `++ x` arrives as `+++ x` and is an added line, not a
-    second file header.
+    The caller asks for one path at a time and already holds it, so no file
+    header is read. git quotes a path carrying a quote, a backslash or a
+    non-ASCII byte (`+++ "b/src/a\\"b.py"`), and a parser keyed on that header
+    drops the file and its added command, flag or refusal with it (#415).
+    Reading only what follows a hunk header is immune to that quoting: a
+    content line reading `++ x` arrives as `+++ x` inside a hunk and is an
+    added line, never a header.
     """
-    added, current, in_hunk = {}, None, False
+    added, in_hunk = [], False
     for line in text.split("\n"):
-        if line.startswith("diff --git "):
-            current, in_hunk = None, False
-        elif not in_hunk and line.startswith("+++ "):
-            current = line[6:] if line.startswith("+++ b/") else None
-            if current is not None:
-                added.setdefault(current, [])
-        elif line.startswith("@@"):
+        if line.startswith("@@"):
             in_hunk = True
-        elif in_hunk and current is not None and line.startswith("+"):
-            added[current].append(line[1:])
+        elif in_hunk and line.startswith("+"):
+            added.append(line[1:])
     return added
 
 
@@ -396,8 +394,8 @@ def run_command(args, runner=None):
     tracked_specs = [path for path in spec_paths if path not in untracked]
     if spec_paths and declaration["cli_surface_markers"]:
         added = dict(untracked)
-        if tracked_specs:
-            added.update(parse_added_lines(run([*common, "--unified=0", "--", *tracked_specs])))
+        for path in tracked_specs:
+            added[path] = parse_added_lines(run([*common, "--unified=0", "--", path]))
         surface = cli_surface(declaration, changes, added)
         if surface:
             fired["ux-product"] = surface
