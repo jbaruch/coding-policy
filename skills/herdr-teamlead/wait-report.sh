@@ -13,7 +13,13 @@
 # the wait on a worker that has produced nothing.
 #
 # Contract:
-#   argv  : [--once] <agent-name> <report-path>
+#   argv  : [--once] [--worktree <path>] <agent-name> <report-path>
+#           --worktree names the worker's own checkout. With it, a budget
+#                  exhaustion classifies what the worker left behind and the
+#                  JSON carries a "stall" object; without it the exhaustion
+#                  reports the wait alone. The classification NEVER decides
+#                  that the work is usable -- a stalled worker's output is
+#                  unreviewed by construction (#418).
 #           --once checks current evidence without waiting for future work.
 #                  Existing blocked/refusal confirmations still run. A present
 #                  unconfirmed report gets the normal consecutive-read check.
@@ -29,7 +35,19 @@
 #   stderr: diagnostics and per-attempt progress.
 #   exit  : 0 report found (`found` true),
 #           1 pending checkpoint with --once; otherwise wait budget exhausted
-#             (`found` false, `state` last observed),
+#             (`found` false, `state` last observed). A budget exhaustion with
+#             the report absent and the worker terminal is a STALL: the wait
+#             ends rather than continuing, and the JSON adds
+#             {"stall":{"class":"<c>","evidence":{...}}}. Without --worktree
+#             class is `unclassified`; with it, class is
+#             partial_work (a worktree mid-operation, staged, modified or
+#             carrying untracked files -- preserve it as evidence),
+#             unpushed_commits (completed work with a failed transport; the
+#             dispatch-recovery path), no_work (clean and unchanged; the
+#             dispatch is a not_sent-equivalent and may be retried), or
+#             unknown (the worktree could not be read). Never commit a stalled
+#             worker's partial work: re-dispatch it with the observed state
+#             described, or discard it,
 #           2 usage error, precondition unmet, or a herdr/tool failure,
 #           3 the worker is blocked at an approval or question dialog,
 #             confirmed by two reads and the pane
@@ -155,6 +173,9 @@ ERRFILE=""
 # (rules/error-handling.md: fail visibly, never half-way).
 AGENT=""
 REPORT_PATH=""
+#: The worker's own checkout, when the caller named one. A stall classifies
+#: what it holds; without it the exhaustion reports the wait alone (#418).
+WORKTREE=""
 REFUSAL_STATE=""
 REFUSAL_PANE=""
 
@@ -167,13 +188,15 @@ cleanup() {
   return 0
 }
 
-emit() { # <state> <found-bool> <elapsed-seconds> [reason]
-  # `reason` appears only when set: the object stays the documented shape on
-  # every outcome, with one extra field for an unavailable delivery.
+emit() { # <state> <found-bool> <elapsed-seconds> [reason] [stall-json]
+  # `reason` and `stall` appear only when set: the object stays the documented
+  # shape on every outcome, with one extra field for an unavailable delivery
+  # and one for a stall's classification.
   jq -n --arg a "$AGENT" --arg s "$1" --arg p "$REPORT_PATH" \
-        --argjson f "$2" --argjson e "$3" --arg r "${4:-}" \
+        --argjson f "$2" --argjson e "$3" --arg r "${4:-}" --argjson st "${5:-null}" \
     '{agent: $a, state: $s, report_path: $p, found: $f, elapsed_seconds: $e}
-     + (if $r == "" then {} else {reason: $r} end)'
+     + (if $r == "" then {} else {reason: $r} end)
+     + (if $st == null then {} else {stall: $st} end)'
 }
 
 # Echo "<state> <pane_id>" for the agent, or return 2 on a herdr failure.
@@ -440,11 +463,87 @@ confirmed_provider_refusal() { # <pane-id>
   return 0
 }
 
+# Classify what a stalled worker left in its own checkout.
+#
+# A stalled worker's partial work can LOOK complete -- zero conflicts, a clean
+# build -- and still be wrong, so this reports what is on disk and decides
+# nothing about whether the work is usable (#418). Echoes one JSON object;
+# never fails the wait, because an unreadable worktree is `unknown`, not a
+# reason to lose the stall itself.
+classify_worktree() { # <worktree-path>
+  local tree="$1" status="" rc=0 mid=false staged=0 modified=0 untracked=0 unpushed=0 class
+  if [[ -z "$tree" ]]; then
+    # The stall is established without it; only the classification is missing.
+    jq -n '{class: "unclassified", evidence: {worktree: null, readable: false}}'
+    return 0
+  fi
+  if [[ ! -d "$tree" ]] || ! git -C "$tree" rev-parse --is-inside-work-tree >/dev/null 2>"$ERRFILE"; then
+    jq -n --arg t "$tree" '{class: "unknown", evidence: {worktree: $t, readable: false}}'
+    return 0
+  fi
+  local gitdir
+  gitdir="$(git -C "$tree" rev-parse --git-dir 2>"$ERRFILE")" || gitdir=""
+  if [[ -n "$gitdir" ]]; then
+    local marker
+    for marker in MERGE_HEAD REBASE_HEAD CHERRY_PICK_HEAD REVERT_HEAD BISECT_LOG; do
+      if [[ -e "${tree}/${gitdir}/${marker}" || -e "${gitdir}/${marker}" ]]; then mid=true; break; fi
+    done
+  fi
+  rc=0
+  status="$(git -C "$tree" status --porcelain --untracked-files=all 2>"$ERRFILE")" || rc=$?
+  if (( rc != 0 )); then
+    jq -n --arg t "$tree" --arg e "$(tr '\n' ' ' < "$ERRFILE")" \
+      '{class: "unknown", evidence: {worktree: $t, readable: false, error: $e}}'
+    return 0
+  fi
+  local line
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    case "$line" in
+      '??'*) untracked=$(( untracked + 1 )) ;;
+      ' '*) modified=$(( modified + 1 )) ;;
+      *) staged=$(( staged + 1 )) ;;
+    esac
+  done <<<"$status"
+  # Commits the worker made that no remote-tracking ref holds. A repository
+  # with no remote reports none, which is the honest answer for one.
+  rc=0
+  unpushed="$(git -C "$tree" rev-list --count HEAD --not --remotes 2>"$ERRFILE")" || rc=$?
+  if (( rc != 0 )) || [[ ! "$unpushed" =~ ^[0-9]+$ ]]; then unpushed=0; fi
+  # Order follows the recovery each class needs: partial work is preserved as
+  # evidence before anything else is read off the tree.
+  if [[ "$mid" == true ]] || (( staged > 0 || modified > 0 || untracked > 0 )); then
+    class="partial_work"
+  elif (( unpushed > 0 )); then
+    class="unpushed_commits"
+  else
+    class="no_work"
+  fi
+  jq -n --arg c "$class" --arg t "$tree" --argjson m "$mid" \
+        --argjson s "$staged" --argjson d "$modified" --argjson u "$untracked" --argjson p "$unpushed" \
+    '{class: $c, evidence: {worktree: $t, readable: true, mid_operation: $m,
+                            staged: $s, modified: $d, untracked: $u, unpushed_commits: $p}}'
+  return 0
+}
+
 main() {
   local once=0
-  if [[ "${1:-}" == "--once" ]]; then once=1; shift; fi
+  while (( $# )); do
+    case "${1:-}" in
+      --once) once=1; shift ;;
+      --worktree)
+        if (( $# < 2 )) || [[ -z "$2" ]]; then
+          warn "--worktree needs the worker's checkout path"
+          return 2
+        fi
+        WORKTREE="$2"; shift 2 ;;
+      --) shift; break ;;
+      -*) warn "unknown flag '${1}'"; warn "usage: wait-report.sh [--once] [--worktree <path>] <agent-name> <report-path>"; return 2 ;;
+      *) break ;;
+    esac
+  done
   if (( $# != 2 )); then
-    warn "usage: wait-report.sh [--once] <agent-name> <report-path>"
+    warn "usage: wait-report.sh [--once] [--worktree <path>] <agent-name> <report-path>"
     return 2
   fi
   AGENT="$1"
@@ -601,8 +700,20 @@ main() {
       return 1
     fi
     if (( elapsed >= TEAMLEAD_WAIT_BUDGET_SEC )); then
-      emit "$state" false "$elapsed"
-      warn "${AGENT} produced no report within ${TEAMLEAD_WAIT_BUDGET_SEC}s (marker seen: ${marker}, file present: $([[ -f "$REPORT_PATH" ]] && echo 1 || echo 0)) — read the pane with \`${HERDR_BIN} agent read ${AGENT} --source visible\` before re-dispatching"
+      # The report is absent, the worker reads terminal, and the budget is
+      # spent: that conjunction is the stall, and the wait ends on it rather
+      # than continuing on a signal that is never arriving (#418).
+      local stalled=0 stall=null
+      if [[ ! -f "$REPORT_PATH" ]] && [[ "$state" == "idle" || "$state" == "done" ]]; then
+        stalled=1
+        stall="$(classify_worktree "$WORKTREE")"
+      fi
+      emit "$state" false "$elapsed" "" "$stall"
+      if (( stalled )); then
+        warn "${AGENT} stalled: no report, worker reads ${state}, and the ${TEAMLEAD_WAIT_BUDGET_SEC}s budget is spent — read the pane with \`${HERDR_BIN} agent read ${AGENT} --source visible\`, record a user-attention obligation, and preserve any partial work as evidence; never commit it on the strength of the tree building"
+      else
+        warn "${AGENT} produced no report within ${TEAMLEAD_WAIT_BUDGET_SEC}s (marker seen: ${marker}, file present: $([[ -f "$REPORT_PATH" ]] && echo 1 || echo 0)) — read the pane with \`${HERDR_BIN} agent read ${AGENT} --source visible\` before re-dispatching"
+      fi
       return 1
     fi
 

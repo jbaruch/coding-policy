@@ -2,6 +2,31 @@
 
 ### Added
 
+- **A report wait ends on a stall instead of waiting forever (#418).** The
+  rules said what not to trust — `done` is not acceptance, so the lead waits
+  for the report — and never said what to do when the trusted signal does not
+  arrive. Two live workers reached a terminal status, wrote no report, and
+  left their lead waiting: one had resolved every merge conflict and stopped
+  before committing, the other hit a provider refusal. Only the operator
+  asking found either.
+
+  `rules/agent-team-operation.md` gains a Stalled Workers section. A stall is
+  three facts together — report absent, status terminal, budget spent — and a
+  terminal status alone still establishes nothing. Dispatch Safety now also
+  names `wait-report.sh` as the only wait (the lead's own `until [ -s
+  "$report" ]` loop could not terminate on a stall) and keeps the interval and
+  budget script-owned.
+
+  `wait-report.sh` takes `--worktree` and classifies what a stalled worker
+  left: `partial_work` (mid-operation, staged, modified or untracked),
+  `unpushed_commits` (the existing dispatch-recovery path), `no_work` (a
+  retryable `not_sent`-equivalent), or `unknown`. The classification never
+  decides the work is usable. The first stall's nine files were conflict-free
+  and built clean, and one of them had taken the wrong side of a merge on
+  documentation `main` had already corrected — so partial work is preserved as
+  evidence and re-dispatched with the observed state described, never
+  committed because the tree looks finished.
+
 - **A developer reads its own gate evidence instead of entering the pre-merge
   wait (#369).** A developer finished its source work, pushed, and got green
   CI plus the required policy approval — then called `watch-pr-reviews.sh` to
