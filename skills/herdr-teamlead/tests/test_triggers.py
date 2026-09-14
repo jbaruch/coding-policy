@@ -340,7 +340,10 @@ class ThisRepoDeclarationTest(unittest.TestCase):
                      "skills/herdr-teamlead/teamlead/report_delivery.py",
                      "skills/herdr-teamlead/teamlead/supervision.py",
                      "skills/herdr-teamlead/teamlead/assign.py",
+                     "skills/herdr-teamlead/teamlead/composition.py",
+                     "skills/herdr-teamlead/teamlead/cli.py",
                      "skills/herdr-teamlead/teamlead/triggers.py",
+                     ".herdr/triggers.json",
                      ".github/workflows/tests.yml"):
             with self.subTest(path=path):
                 self.assertTrue((self.repo / path).exists(), path)

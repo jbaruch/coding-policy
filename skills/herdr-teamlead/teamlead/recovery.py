@@ -102,7 +102,11 @@ def _migrate_diagnoses(store):
 
     A version-1 row predates both additions, so its defaults are the facts it
     already carried: it repeated no rung, and it cited no investigator report
-    (rules/stateful-artifacts.md Migration Policy).
+    (rules/stateful-artifacts.md Migration Policy). A version-1 row already
+    carrying either field is unowned newer data and is refused rather than
+    stamped, the way `migrate_store` refuses every other newer record: keeping
+    the present value would let a `reissue: true` or an investigator binding
+    reach the validator through a migration that never wrote it.
     """
     rows = store.get("diagnoses")
     if not isinstance(rows, list):
@@ -111,9 +115,11 @@ def _migrate_diagnoses(store):
     for row in rows:
         if not isinstance(row, dict) or row.get("schema_version") != 1:
             continue
+        if "reissue" in row or "investigator_report" in row:
+            raise UsageError("An older diagnosis carries newer recorded fields; preserve the ledger for owner recovery.", {})
         row["schema_version"] = DIAGNOSIS_RECORD_VERSION
-        row.setdefault("reissue", False)
-        row.setdefault("investigator_report", None)
+        row["reissue"] = False
+        row["investigator_report"] = None
         migrated = True
     return migrated
 

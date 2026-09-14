@@ -342,6 +342,20 @@ class RecoveryTests(unittest.TestCase):
         self.assertIsNone(older["diagnoses"][0]["investigator_report"])
         validate_store(older, self.history)
 
+    def test_an_older_diagnosis_carrying_newer_fields_is_refused(self):
+        # A version-1 row predates both fields, so one already carrying either
+        # is unowned newer data; stamping it would let the value through.
+        self.seed_checkpoint()
+        self.run_diagnosis(self.diagnosis("diag-1", "continue", 2), "judge")
+        for field, value in (("reissue", True), ("investigator_report", None)):
+            corrupt = copy.deepcopy(self.store)
+            row = corrupt["diagnoses"][0]
+            row.update(schema_version=1)
+            del row["reissue"], row["investigator_report"]
+            row[field] = value
+            with self.assertRaisesRegex(UsageError, "newer recorded fields"):
+                migrate_store(corrupt)
+
     def test_a_judge_seat_is_not_spent_before_the_assessment_exists(self):
         # coding-policy#408: the gate guards the dispatch, not only the record,
         # so the most expensive seat is never spent on an uninvestigated loop.
