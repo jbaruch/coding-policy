@@ -214,6 +214,14 @@ class RecoveryTests(unittest.TestCase):
                 validate_work(self.store, self.history, TASK, 6, plan, WORK)
         with self.assertRaisesRegex(UsageError, "terminal"):
             validate_work(self.store, self.history, TASK, 3, None, None)
+        # Only the operator overrides a ruling, and a plan over the stop is how.
+        self.judge_after_developer(6)
+        override = authorize_plan(self.store, self.history, {"id": "override", "task": TASK, "checkpoint": "checkpoint-5",
+            "scope": WORK["scope"], "allowed_paths": ["src/*"], "additional_fixes": 1, "authorization": AUTH}, AT)
+        self.assertEqual(override["first_fix"], 6)
+        validate_work(self.store, self.history, TASK, 6, "override", WORK)
+        with self.assertRaisesRegex(UsageError, "overridden by plan override"):
+            validate_work(self.store, self.history, TASK, 6, None, WORK)
         validate_store(self.store, self.history)
 
     def test_a_report_must_be_the_one_supervision_enrolled(self):

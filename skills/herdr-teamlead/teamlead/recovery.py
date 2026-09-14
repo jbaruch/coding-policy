@@ -100,7 +100,8 @@ def migrate_store(store):
     if not isinstance(dispatches, list):
         raise UsageError("Older recovery requires a dispatches array; restore the original owner-written store.", {})
     for row in dispatches:
-        if not isinstance(row, dict) or REFUSAL_FIELDS.intersection(row) - (ALLOWED_AT_6 if version == 6 else frozenset()):
+        allowed = ALLOWED_AT_6 if version == 6 else REFUSAL_FIELDS if version >= 7 else frozenset()
+        if not isinstance(row, dict) or REFUSAL_FIELDS.intersection(row) - allowed:
             raise UsageError("Older recovery contains unowned newer refusal records; preserve it for owner recovery.", {})
         if version >= 5:
             continue
@@ -399,7 +400,10 @@ def diagnose(store, assignments, data, at, judge_agent, enrolled_report, supervi
     if DIAGNOSIS_LADDER.index(remedy) < rung:
         raise UsageError("This task's next diagnosis may not sit above {}; a remedy that failed is never reissued and the ladder never runs backwards.".format(DIAGNOSIS_LADDER[rung]), {})
     bound = None
-    if remedy != "stop":
+    if remedy == "stop":
+        if bound_line.group(1).lower() != "none":
+            raise UsageError("A stop remedy allows no attempts; its BOUND is `none`.", {})
+    else:
         raw = bound_line.group(1)
         if not raw.isdigit() or int(raw) < 1:
             raise UsageError("A {} remedy needs a positive BOUND naming the attempts it allows.".format(remedy), {})
@@ -466,12 +470,25 @@ def authorize_plan(store, assignments, data, at):
 
 
 def active_plans(store):
+    # A diagnosis supersedes a plan too, and a `stop` remedy records no
+    # replacement, so a plan retired that way is retired here or nowhere.
     replaced = {row["supersedes"] for row in store["plans"] if row.get("supersedes")}
+    replaced |= {row["supersedes"] for row in store.get("diagnoses", []) if row.get("supersedes")}
     return [row for row in store["plans"] if row["id"] not in replaced]
 
 
 def validate_work(store, assignments, task, fix_round, plan_id=None, work=None, *, implementation=True):
     """The same allowance is checked by planning, dispatch and state readers."""
+    stopped = next((row for row in store["diagnoses"] if row["task"] == task and row["remedy"] == "stop"), None)
+    if stopped is not None:
+        # `stop` is terminal. Only the operator overrides a ruling, and they do
+        # it by authorizing a plan over the stop, never by resuming silently.
+        override = next((row for row in active_plans(store)
+                         if row["task"] == task and row["first_fix"] > stopped["fix_round"]), None)
+        if override is None:
+            raise UsageError("This task's diagnosis is `stop`, which is terminal: ship what is clean and track the remainder. Only the operator overrides it, by authorizing a plan over that remedy.", {})
+        if plan_id != override["id"]:
+            raise UsageError("This task's `stop` remedy is overridden by plan {}; name it to spend its attempts.".format(override["id"]), {})
     if fix_round is None:
         if plan_id:
             raise UsageError("A correction approval requires the actual cumulative fix number; do not reset it to initial development.", {})
@@ -480,8 +497,6 @@ def validate_work(store, assignments, task, fix_round, plan_id=None, work=None, 
     if implementation:
         from .role_clear import validate_requested
         validate_requested(store, assignments, task, fix_round, plan_id, work)
-    if task and any(row["task"] == task and row["remedy"] == "stop" for row in store["diagnoses"]):
-        raise UsageError("This task's diagnosis is `stop`, which is terminal: ship what is clean and track the remainder. No further implementation runs under it.", {})
     if fix_round <= DEFAULT_FIX_LIMIT:
         if plan_id:
             raise UsageError("An extra-correction plan cannot relabel an ordinary fix; preserve the cumulative number.", {})

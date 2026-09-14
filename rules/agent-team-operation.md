@@ -64,6 +64,7 @@ description: Running a multi-agent team — task-based specialist composition, c
 - A `continue` or `restructure` remedy's `BOUND` supplies the attempt budget the operator formerly supplied
 - A `stop` remedy ships what is clean and records the remainder as a tracked accepted defect
 - The judge's authority in diagnosis mode covers accepting a tracked defect into a release under a `stop` remedy
+- That acceptance follows `rules/review-severity.md` Judge-Accepted Defect Carve-Out; every other release gate holds
 - Record the diagnosis through `teamlead diagnose` under the original task and base before acting on its remedy
 - A bound lead cites the report supervision enrolled for the pinned judge, never another file
 - The operator overrides this exhaustion's recorded remedy; an approved budget never stands in for a diagnosis, and an older remedy never authorizes new attempts

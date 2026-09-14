@@ -152,6 +152,11 @@ For an authorized implementation release, Step 12 requires all four:
    gates run and every acceptance criterion met.
 4. Nothing has been pushed to the branch after those two reports.
 
+Under a recorded `stop` remedy, 2 and 3 read against what ships: the excluded
+defect is a tracked accepted defect and the shipped scope carries no other
+blocking finding. `rules/review-severity.md` Judge-Accepted Defect Carve-Out
+carries the preconditions; every other gate here is unchanged.
+
 A Phase 1 design note or test plan does not satisfy 2 or 3. A report against an
 older SHA does not either: re-run Phase 2 against the current tip. After scoped
 re-checks close the findings, re-run Phase 2 with `full` briefs before handing off
