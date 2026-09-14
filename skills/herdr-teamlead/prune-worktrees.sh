@@ -27,9 +27,13 @@
 # shared checkout's own default branch, which may lag origin's and refuse a
 # branch this script just proved merged. Removal is `git worktree remove`,
 # never `rm -rf`. Everything else is KEPT and reported with its reason. Stale
-# worktree metadata is pruned first (`git worktree prune`). Nothing here
-# pushes to origin; a dry run still fetches (without --prune) and skips the
-# metadata prune, so its decisions are current and .git is otherwise untouched.
+# worktree metadata is pruned last (`git worktree prune --expire now`), after
+# every decision, and skipped when any worktree could not be entered: git
+# would read an unreadable directory as gone and drop its entry. Nothing here
+# pushes to origin; a dry run still fetches (without --prune), reads origin's
+# default branch with `ls-remote --symref` instead of rewriting origin/HEAD,
+# and skips the metadata prune, so its decisions are current and .git is
+# otherwise untouched.
 #
 # Contract:
 #   argv  : <shared-checkout> [--dry-run]
@@ -47,9 +51,10 @@
 #   stderr: diagnostics only.
 #   exit  : 0 every decision applied (or previewed),
 #           1 precondition unmet (usage, git or python3 absent, not a repo,
-#             no origin, fetch failed, default branch unresolvable),
-#           2 at least one removal or deletion failed; the rest still ran and
-#             `failed` names each one.
+#             no origin, fetch failed, default branch unresolvable, worktree
+#             or branch inventory unreadable) — no JSON, nothing decided,
+#           2 at least one check, removal or deletion failed; the rest still
+#             ran and `failed` names each one.
 #   env   : WORKTREE_ROOT overrides the worktree root (default
 #           $HOME/.worktrees); the tests point it at a temp dir.
 set -euo pipefail
@@ -69,10 +74,10 @@ cleanup() {
   return 0
 }
 
-# Append one decision row: <kind> <target> <branch> <reason>. Tabs never
-# appear in git paths this script provisions, and python3 splits on them.
+# Append one decision row: <kind> <target> <branch> <reason>, NUL-delimited
+# so a path or diagnostic holding a tab or newline cannot shift the fields.
 row() {
-  printf '%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" >> "$ROWS"
+  printf '%s\0%s\0%s\0%s\0' "$1" "$2" "$3" "$4" >> "$ROWS"
   # A failure is a diagnostic on stderr as well as a JSON row
   # (rules/script-delegation.md Script Requirements).
   if [[ "$1" == failed ]]; then
@@ -80,14 +85,32 @@ row() {
   fi
 }
 
-default_branch_of() { # <shared>
+# Echo origin's default branch name, or return 1 when none can be confirmed.
+# A live run has just rewritten origin/HEAD from the remote; a dry run reads
+# the remote's HEAD with `ls-remote --symref` instead, rewriting nothing.
+default_branch_of() { # <shared> <dry-run 0|1>
   local db="" rc=0
-  db="$(git -C "$1" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>"$ERRFILE")" || rc=$?
-  case "$rc" in
-    0) printf '%s' "${db#origin/}"; return 0 ;;
-    1) ;;  # origin/HEAD is simply absent: fall back to the conventional names
-    *) warn "\`git symbolic-ref refs/remotes/origin/HEAD\` failed (exit ${rc}): $(tr '\n' ' ' < "$ERRFILE")"; return 2 ;;
-  esac
+  if (( $2 )); then
+    local sym
+    sym="$(git -C "$1" ls-remote --symref origin HEAD 2>"$ERRFILE")" || rc=$?
+    if (( rc != 0 )); then
+      warn "\`git ls-remote --symref origin HEAD\` failed (exit ${rc}): $(tr '\n' ' ' < "$ERRFILE")"
+      return 1
+    fi
+    db="$(printf '%s\n' "$sym" | sed -n 's#^ref: refs/heads/\(.*\)[[:space:]]HEAD$#\1#p' | head -n 1)"
+    if [[ -n "$db" ]] && git -C "$1" show-ref --verify --quiet "refs/remotes/origin/${db}"; then
+      printf '%s' "$db"; return 0
+    fi
+  else
+    db="$(git -C "$1" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>"$ERRFILE")" || rc=$?
+    case "$rc" in
+      0) db="${db#origin/}"
+         # A dangling origin/HEAD names a branch with no remote-tracking ref.
+         if git -C "$1" show-ref --verify --quiet "refs/remotes/origin/${db}"; then printf '%s' "$db"; return 0; fi ;;
+      1) ;;  # origin/HEAD is simply absent: fall back to the conventional names
+      *) warn "\`git symbolic-ref refs/remotes/origin/HEAD\` failed (exit ${rc}): $(tr '\n' ' ' < "$ERRFILE")"; return 1 ;;
+    esac
+  fi
   local cand
   for cand in main master; do
     if git -C "$1" show-ref --verify --quiet "refs/remotes/origin/$cand"; then
@@ -231,47 +254,55 @@ main() {
     warn "\`git -C ${shared} ${fetch_args[*]}\` failed: $(tr '\n' ' ' < "$ERRFILE") — check connectivity; refusing to judge merged-ness from stale refs"
     return 1
   fi
-  if ! git -C "$shared" remote set-head origin --auto >/dev/null 2>"$ERRFILE"; then
+  if (( ! dry )) && ! git -C "$shared" remote set-head origin --auto >/dev/null 2>"$ERRFILE"; then
     warn "\`git -C ${shared} remote set-head origin --auto\` failed: $(tr '\n' ' ' < "$ERRFILE") — cannot confirm origin's current default branch"
     return 1
   fi
   local db
-  if ! db="$(default_branch_of "$shared")"; then
+  if ! db="$(default_branch_of "$shared" "$dry")"; then
     warn "cannot resolve origin's default branch — run \`git -C ${shared} remote set-head origin --auto\`"
     return 1
-  fi
-  if (( ! dry )) && ! git -C "$shared" worktree prune 2>"$ERRFILE"; then
-    # Recorded, not merely warned: the run continues, the exit stays non-zero.
-    row failed "git worktree prune" "" "failed: $(tr '\n' ' ' < "$ERRFILE") — stale metadata may remain"
   fi
 
   # Take both inventories up front: a failure inside a process substitution
   # would not reach the loop, and an empty inventory would read as "nothing
-  # to prune" with exit 0 (rules/file-hygiene.md I/O Conventions).
+  # to prune" with exit 0 (rules/file-hygiene.md I/O Conventions). Nothing has
+  # been decided yet, so an unreadable inventory is a precondition failure.
   local inventory branches
   inventory="$(mktemp)"; branches="$(mktemp)"
   if ! git -C "$shared" worktree list --porcelain >"$inventory" 2>"$ERRFILE"; then
     warn "\`git worktree list --porcelain\` failed: $(tr '\n' ' ' < "$ERRFILE") — cannot inventory worktrees"
     rm -f "$inventory" "$branches"
-    return 2
+    return 1
   fi
   if ! git -C "$shared" for-each-ref --format='%(refname:short)' refs/heads/ >"$branches" 2>"$ERRFILE"; then
     warn "\`git for-each-ref refs/heads/\` failed: $(tr '\n' ' ' < "$ERRFILE") — cannot inventory branches"
     rm -f "$inventory" "$branches"
-    return 2
+    return 1
   fi
 
   # Walk `worktree list --porcelain`: blank-line-separated blocks.
-  local path="" branch="" detached=0 locked=0 line
+  local path="" branch="" detached=0 locked=0 line unenterable=0
   local -a seen_branches=()
   flush() {
     if [[ -n "$path" ]]; then
-      local real
-      real="$(cd "$path" 2>/dev/null && pwd -P)" || real="$path"
+      if [[ -n "$branch" ]]; then seen_branches+=("$branch"); fi
+      local real="" rc=0
+      if [[ ! -e "$path" ]]; then
+        # Its directory is gone: an expected non-result, decided as prunable.
+        real="$path"
+      else
+        real="$(cd "$path" 2>"$ERRFILE" && pwd -P)" || rc=$?
+        if (( rc != 0 )); then
+          row failed "$path" "$branch" "cannot enter the worktree: $(tr '\n' ' ' < "$ERRFILE")"
+          unenterable=1
+          path=""; branch=""; detached=0; locked=0
+          return 0
+        fi
+      fi
       if [[ "$real" != "$abs_shared" ]]; then
         decide_worktree "$shared" "$abs_root" "$db" "$dry" "$real" "$branch" "$detached" "$locked"
       fi
-      if [[ -n "$branch" ]]; then seen_branches+=("$branch"); fi
     fi
     path=""; branch=""; detached=0; locked=0
   }
@@ -297,6 +328,16 @@ main() {
     if (( skip )); then continue; fi
     decide_branch "$shared" "$db" "$dry" "$name"
   done < "$branches"
+  # Metadata prune last: git reads an unreadable worktree directory as gone
+  # and would drop its entry, orphaning a branch this run could not judge.
+  if (( ! dry )); then
+    if (( unenterable )); then
+      warn "skipping \`git worktree prune\`: a worktree could not be entered; restore access and re-run"
+    elif ! git -C "$shared" worktree prune --expire now 2>"$ERRFILE"; then
+      # Recorded, not merely warned: the run continues, the exit stays non-zero.
+      row failed "git worktree prune" "" "failed: $(tr '\n' ' ' < "$ERRFILE") — stale metadata may remain"
+    fi
+  fi
   if ! rm -f "$inventory" "$branches"; then
     warn "could not remove temp inventories ${inventory} ${branches} — remove them by hand"
   fi
@@ -307,12 +348,16 @@ import json, sys
 shared, db, dry, rows_path = sys.argv[1], sys.argv[2], sys.argv[3] == "1", sys.argv[4]
 result = {"shared": shared, "default_branch": db, "dry_run": dry, "worktrees_removed": [], "worktrees_kept": [],
           "branches_deleted": [], "branches_kept": [], "failed": []}
-with open(rows_path, encoding="utf-8") as handle:
-    for raw in handle:
-        raw = raw.rstrip("\n")
-        if not raw:
-            continue
-        kind, target, branch, reason = raw.split("\t", 3)
+with open(rows_path, "rb") as handle:
+    fields = handle.read().decode("utf-8", "surrogateescape").split("\0")
+if fields and fields[-1] == "":
+    fields.pop()
+if len(fields) % 4:
+    sys.stderr.write("prune-worktrees: decision rows are malformed; report this as a bug\n")
+    sys.exit(2)
+for index in range(0, len(fields), 4):
+    kind, target, branch, reason = fields[index:index + 4]
+    if True:
         if kind == "removed":
             result["worktrees_removed"].append({"path": target, "branch": branch})
         elif kind == "kept":

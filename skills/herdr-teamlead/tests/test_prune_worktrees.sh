@@ -30,7 +30,10 @@
 #  15. Fetch failure       -> exit 1, no JSON; nothing judged from stale refs.
 #  16. Tool failure        -> a merge-base error is a failed row on stdout and
 #                             stderr, exit 2, never a kept 'unmerged'.
-#  17. Dry-run metadata    -> stale worktree metadata survives a dry run.
+#  17. Dry-run metadata    -> stale metadata and origin/HEAD survive a dry run;
+#                             the remote default is still resolved.
+#  18. Unenterable         -> a worktree the run cannot cd into is a failed
+#                             row, exit 2 (skipped as root, who can enter anything).
 #
 # Run: bash skills/herdr-teamlead/tests/test_prune_worktrees.sh
 set -uo pipefail
@@ -212,9 +215,22 @@ SHIM
   mk_repo seventeen
   add_wt "$SHARED" review/preview "$ROOT/seventeen-preview"
   rm -rf "$ROOT/seventeen-preview" || die "rm failed"
+  git -C "$SHARED" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/elsewhere || die "symbolic-ref failed"
+  head_before="$(cat "$SHARED/.git/refs/remotes/origin/HEAD")" || die "read HEAD failed"
   run "$SHARED" --dry-run
-  echo "17. dry run does not prune stale metadata"
-  if (( RC == 0 )) && listed "$SHARED" "$ROOT/seventeen-preview"; then pass; else fail "rc=$RC out=$OUT err=$ERRTEXT"; fi
+  echo "17. dry run prunes no metadata, rewrites no origin/HEAD, and still finds the remote default"
+  if (( RC == 0 )) && listed "$SHARED" "$ROOT/seventeen-preview" && [[ "$(cat "$SHARED/.git/refs/remotes/origin/HEAD")" == "$head_before" ]] && [[ "$(field default_branch)" == main ]] && [[ "$(kept_reason "$ROOT/seventeen-preview")" == prunable ]]; then pass; else fail "rc=$RC out=$OUT err=$ERRTEXT"; fi
+
+  # --- 18. an unenterable worktree is a failed row, exit 2, never prunable.
+  if [[ "$(id -u)" != 0 ]]; then
+    mk_repo eighteen
+    add_wt "$SHARED" review/sealed "$ROOT/eighteen-sealed"
+    chmod 000 "$ROOT/eighteen-sealed" || die "chmod failed"
+    run "$SHARED"
+    chmod 755 "$ROOT/eighteen-sealed" || die "chmod restore failed"
+    echo "18. a worktree that cannot be entered is a failed row on stderr, exit 2"
+    if (( RC == 2 )) && [[ "$OUT" == *'"failed": [{'*"cannot enter"* ]] && [[ "$ERRTEXT" == *"cannot enter"* ]] && [[ "$ERRTEXT" == *"skipping"* ]] && has_branch "$SHARED" review/sealed && listed "$SHARED" "$ROOT/eighteen-sealed"; then pass; else fail "rc=$RC out=$OUT err=$ERRTEXT"; fi
+  fi
 
   # --- 14. usage / not a repo.
   run

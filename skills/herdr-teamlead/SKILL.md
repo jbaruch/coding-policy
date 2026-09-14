@@ -218,7 +218,7 @@ bash "$CP/skills/herdr-teamlead/prune-worktrees.sh" <shared-checkout>
 ```
 
 Emits the worktrees and branches removed, each kept one with its reason, and
-`failed`; exit 2 names a removal git refused. Report every kept `dirty`,
+`failed`; exit 2 lists every check or removal git refused, exit 1 decided nothing. Report every kept `dirty`,
 `unmerged`, `locked` and `detached` entry to the operator; never remove them by hand.
 
 Then run once per writing worker and every worktree named in a brief:
