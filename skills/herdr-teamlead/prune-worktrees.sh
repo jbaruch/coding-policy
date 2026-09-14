@@ -218,9 +218,17 @@ delete_branch() { # <shared> <branch> <tip>  -> 0 deleted, 1 moved, 2 git refuse
     *) warn "\`git config --get-regexp branch.\` failed (exit ${rc}): $(tr '\n' ' ' < "$ERRFILE") — ${2} is deleted; check its config by hand"
        return 0 ;;
   esac
-  if ! printf '%s\n' "$keys" | grep -qF -- "branch.$2."; then
-    return 0
-  fi
+  # A here-string, not a pipeline: `grep -q` exits early and would SIGPIPE its
+  # producer under pipefail. Exit 1 is "no match"; anything else is grep
+  # failing, which is not proof the section is absent.
+  rc=0
+  grep -qF -- "branch.$2." <<<"$keys" || rc=$?
+  case "$rc" in
+    0) ;;
+    1) return 0 ;;
+    *) warn "\`grep\` failed (exit ${rc}) reading ${2}'s config — it is deleted; check its config by hand"
+       return 0 ;;
+  esac
   rc=0
   git -C "$1" config --remove-section "branch.$2" >/dev/null 2>"$ERRFILE" || rc=$?
   if (( rc != 0 )); then
@@ -384,8 +392,16 @@ main() {
   # newline stays one field. An older git has no such form; its line-oriented
   # output is used and a multi-line path would split (#405).
   if ! git -C "$shared" worktree list --porcelain -z >"$inventory" 2>"$ERRFILE"; then
-    zflag=0
-    warn "\`git worktree list --porcelain -z\` is unavailable (git < 2.36): a worktree path containing a newline would be misread"
+    # Only an unsupported option falls back. Any other failure is git failing,
+    # and blaming it on an old git would discard the reason.
+    if grep -qiE 'unknown option|usage: git worktree' "$ERRFILE"; then
+      zflag=0
+      warn "\`git worktree list --porcelain -z\` is unavailable (git < 2.36): a worktree path containing a newline would be misread"
+    else
+      warn "\`git worktree list --porcelain -z\` failed: $(tr '\n' ' ' < "$ERRFILE") — cannot inventory worktrees"
+      rm -f "$inventory" "$branches"
+      return 1
+    fi
   fi
   if (( ! zflag )) && ! git -C "$shared" worktree list --porcelain >"$inventory" 2>"$ERRFILE"; then
     warn "\`git worktree list --porcelain\` failed: $(tr '\n' ' ' < "$ERRFILE") — cannot inventory worktrees"
