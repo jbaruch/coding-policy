@@ -358,7 +358,8 @@ class RecoveryTests(unittest.TestCase):
 
     def dispatch_tester(self, number, agent, identity: "str | None" = BRIEF):
         record = {"id": "tester-{}-{}".format(number, agent), "task": TASK, "role": "tester", "agent": agent, "fix_round": None,
-                  "fingerprint": ("%02d" % number) * 32, "plan": None, "work": None, "brief_identity": identity}
+                  "fingerprint": ("%02d" % number) * 32, "plan": None, "work": None, "brief_identity": identity,
+                  "provider": agent.rsplit("-", 1)[0]}
         reserve(self.store, record, AT)
         mark_sending(self.store, record["id"], AT, {"cleared": True})
         add_assignment(self.state, "2026-02-03T12:00:0{}+00:00".format(number), "tester", agent, task=TASK)
@@ -413,6 +414,64 @@ class RecoveryTests(unittest.TestCase):
         result = record_refusal(self.store, {"dispatch": first, "receipt": self.refusal_receipt("codex-a")}, AT, "codex", self.REPORT)
         self.assertEqual(result["report_path"], self.REPORT)
         validate_store(self.store, self.history)
+
+    def test_a_malformed_receipt_is_a_usage_error_not_a_crash(self):
+        # coding-policy#403: `agent` and `state` reached set membership
+        # unvalidated, so a list or object raised TypeError out of the CLI.
+        first = self.dispatch_tester(1, "codex-a")
+        for name, override in (("list-agent", {"agent": ["codex-a"]}), ("dict-state", {"state": {"idle": True}}),
+                               ("int-reason", {"reason": 5}), ("list-report", {"report_path": [self.REPORT]}),
+                               ("negative", {"elapsed_seconds": -1}), ("float", {"elapsed_seconds": 1.5})):
+            path = self.root / (name + ".json")
+            path.write_text(json.dumps({"agent": "codex-a", "state": "idle", "report_path": self.REPORT, "found": False,
+                                        "elapsed_seconds": 12, "reason": "terminal_provider_refusal", **override}))
+            with self.assertRaises(UsageError):
+                record_refusal(self.store, {"dispatch": first, "receipt": str(path)}, AT, "codex", self.REPORT)
+        self.assertIsNone(self.store["dispatches"][0].get("refusal"))
+
+    def test_a_not_sent_retry_refreshes_the_provider_the_fingerprint_misses(self):
+        # coding-policy#403: reserve reuses a not_sent row, so a config change
+        # before the retry would otherwise leave the original provider on it.
+        record = {"id": "tester-retry", "task": TASK, "role": "tester", "agent": "codex-a", "fix_round": None,
+                  "fingerprint": "cd" * 32, "plan": None, "work": None, "brief_identity": self.BRIEF, "provider": "codex"}
+        reserve(self.store, record, AT)
+        abort_pre_send(self.store, record["id"], AT, "fixture")
+        reserve(self.store, {**record, "provider": "claude", "brief_identity": "brief-identity-refreshed"}, AT)
+        saved = next(row for row in self.store["dispatches"] if row["id"] == record["id"])
+        self.assertEqual((saved["provider"], saved["brief_identity"]), ("claude", "brief-identity-refreshed"))
+        # A stale move naming the old provider would fail the ledger on the
+        # next refusal, so the retry drops one the new record does not carry.
+        abort_pre_send(self.store, record["id"], AT, "fixture")
+        self.store["dispatches"][-1]["refusal_move"] = {"schema_version": 1, "from": "gone", "from_provider": "codex", "provider": "claude"}
+        reserve(self.store, {**record, "provider": "grok"}, AT)
+        saved = next(row for row in self.store["dispatches"] if row["id"] == record["id"])
+        self.assertNotIn("refusal_move", saved)
+        self.assertEqual(saved["provider"], "grok")
+        validate_store(self.store, self.history)
+
+    def test_the_dispatchs_recorded_provider_outranks_the_current_config(self):
+        # coding-policy#403: a config edit between the send and the record
+        # must not re-attribute the refusal to the new kind.
+        first = self.dispatch_tester(1, "codex-a")
+        result = record_refusal(self.store, {"dispatch": first, "receipt": self.refusal_receipt("codex-a")}, AT, "claude", self.REPORT)
+        self.assertEqual(result["provider"], "codex")
+        legacy = self.dispatch_tester(2, "grok-a")
+        del self.store["dispatches"][-1]["provider"]
+        self.assertEqual(record_refusal(self.store, {"dispatch": legacy, "receipt": self.refusal_receipt("grok-a", "legacy.json")}, AT, "grok", self.REPORT)["provider"], "grok")
+        validate_store(self.store, self.history)
+
+    def test_a_move_never_reuses_a_report_path_the_chain_burned(self):
+        # coding-policy#403: two attempts enrolled against one file would let
+        # their evidence collide.
+        first = self.dispatch_tester(1, "codex-a")
+        record_refusal(self.store, {"dispatch": first, "receipt": self.refusal_receipt("codex-a")}, AT, "codex", self.REPORT)
+        with self.assertRaisesRegex(UsageError, "already carries the refusal"):
+            refusal_move(self.store, TASK, "tester", None, "claude", self.BRIEF, self.REPORT)
+        self.assertIsNotNone(refusal_move(self.store, TASK, "tester", None, "claude", self.BRIEF, "/reports/tester-2.md"))
+        # An alias of the burned path is the same file (#403).
+        with self.assertRaisesRegex(UsageError, "already carries the refusal"):
+            refusal_move(self.store, TASK, "tester", None, "claude", self.BRIEF, "/reports/sub/../tester.md")
+        self.assertIsNotNone(refusal_move(self.store, TASK, "tester", None, "claude", self.BRIEF))
 
     def test_a_reworded_brief_is_not_a_move(self):
         first = self.dispatch_tester(1, "codex-a")
@@ -490,7 +549,7 @@ class RecoveryTests(unittest.TestCase):
             refusal_move(self.store, TASK, "tester", None, "grok", self.BRIEF)
         validate_store(self.store, self.history)
 
-    def test_store_six_migration_stamps_a_clean_five_and_refuses_unowned_refusals(self):
+    def test_store_migration_stamps_a_clean_older_store_and_refuses_unowned_fields(self):
         first = self.dispatch_tester(1, "codex-a")
         identified = copy.deepcopy(self.store)
         identified["schema_version"] = 5
@@ -502,9 +561,10 @@ class RecoveryTests(unittest.TestCase):
         del old["refusal_authorizations"]
         for row in old["dispatches"]:
             del row["brief_identity"]
+            del row["provider"]
         before = copy.deepcopy(old)
         self.assertTrue(migrate_store(old))
-        self.assertEqual(old["schema_version"], 6)
+        self.assertEqual(old["schema_version"], 7)
         self.assertEqual(old.pop("refusal_authorizations"), [])
         self.assertEqual({key: value for key, value in old.items() if key != "schema_version"},
                          {key: value for key, value in before.items() if key != "schema_version"})
@@ -515,8 +575,22 @@ class RecoveryTests(unittest.TestCase):
         stale["schema_version"] = 5
         for row in stale["dispatches"]:
             del row["brief_identity"]
+            del row["provider"]
         with self.assertRaisesRegex(UsageError, "unowned newer records"):
             migrate_store(stale)
+        # Version 6 owned brief_identity but not provider: a v6 store carrying
+        # one is unowned newer data, a clean one stamps to 7 (#403).
+        six = copy.deepcopy(self.store)
+        six["schema_version"] = 6
+        with self.assertRaisesRegex(UsageError, "unowned newer refusal"):
+            migrate_store(six)
+        six = copy.deepcopy(self.store)
+        six["schema_version"] = 6
+        for row in six["dispatches"]:
+            del row["provider"]
+        self.assertTrue(migrate_store(six))
+        self.assertEqual(six["schema_version"], 7)
+        validate_store(six, self.history)
         record_refusal(self.store, {"dispatch": first, "receipt": self.refusal_receipt("codex-a")}, AT, "codex", self.REPORT)
         for version in (4, 5):
             stale = copy.deepcopy(self.store)
@@ -524,6 +598,7 @@ class RecoveryTests(unittest.TestCase):
             del stale["refusal_authorizations"]
             for row in stale["dispatches"]:
                 del row["brief_identity"]
+                del row["provider"]
             with self.assertRaisesRegex(UsageError, "unowned newer refusal"):
                 migrate_store(stale)
         with self.assertRaisesRegex(UsageError, "Unsupported recovery schema"):

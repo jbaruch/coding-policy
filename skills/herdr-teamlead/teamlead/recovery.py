@@ -19,12 +19,14 @@ from .chronology import assignment_after, latest_assignment
 
 RECOVERY_SCHEMA_VERSION = 1
 #: Store version 6 adds the `brief_identity`, `refusal` and `refusal_move`
-#: dispatch fields and the `refusal_authorizations` collection (#399). A
-#: version-5 store carrying any of them, `brief_identity` included, is
-#: unowned newer data and is refused; a clean one is stamped and given the empty collection
+#: dispatch fields and the `refusal_authorizations` collection (#399).
+#: Version 7 adds the dispatch's send-time `provider`, so a config edit
+#: between the send and `record-refusal` cannot re-attribute the refusal
+#: (#403). An older store carrying any of them is unowned newer data and is
+#: refused; a clean one is stamped and given the empty collection
 #: (rules/stateful-artifacts.md).
-RECOVERY_STORE_VERSION = 6
-REFUSAL_FIELDS = frozenset({"brief_identity", "refusal", "refusal_move"})
+RECOVERY_STORE_VERSION = 7
+REFUSAL_FIELDS = frozenset({"brief_identity", "refusal", "refusal_move", "provider"})
 SPECIALIST_DISPATCH_VERSION = 2
 #: Checkpoint record version. 1 carries a mandatory pinned-judge ruling; 2
 #: makes it optional, because an exhausted allowance is a budget decision only
@@ -45,6 +47,8 @@ REFUSAL_REASON = "terminal_provider_refusal"
 #: One refusal permits one move of the unchanged brief to another provider;
 #: the second refusal is information the operator did not have (#399).
 REFUSAL_LIMIT = 2
+#: Dispatch fields version 6 already owned; version 7 adds `provider` alone.
+ALLOWED_AT_6 = frozenset({"brief_identity", "refusal", "refusal_move"})
 SHA_RE = re.compile(r"[0-9a-f]{40}(?:[0-9a-f]{24})?\Z")
 
 
@@ -85,15 +89,15 @@ def migrate_store(store):
         return False
     migrated = _migrate_checkpoints(store)
     version = store["schema_version"]
-    if version not in {1, 2, 3, 4, 5}:
+    if version not in {1, 2, 3, 4, 5, 6}:
         return migrated
     dispatches = store.get("dispatches")
     if not isinstance(dispatches, list):
         raise UsageError("Older recovery requires a dispatches array; restore the original owner-written store.", {})
     for row in dispatches:
-        if not isinstance(row, dict) or REFUSAL_FIELDS.intersection(row):
+        if not isinstance(row, dict) or REFUSAL_FIELDS.intersection(row) - (ALLOWED_AT_6 if version == 6 else frozenset()):
             raise UsageError("Older recovery contains unowned newer refusal records; preserve it for owner recovery.", {})
-        if version == 5:
+        if version >= 5:
             continue
         if (type(row.get("schema_version")) is not int
                 or row["schema_version"] != RECOVERY_SCHEMA_VERSION or DISPATCH_METADATA_FIELDS.intersection(row)):
@@ -109,7 +113,7 @@ def migrate_store(store):
             raise UsageError("Older recovery requires a delivery_recoveries array; restore the original owner-written store.", {})
         if any(not isinstance(row, dict) or row.get("schema_version") != 1 for row in deliveries):
             raise UsageError("Older recovery contains unowned newer delivery records; preserve it for owner recovery.", {})
-    added = ["refusal_authorizations"]
+    added = ["refusal_authorizations"] if version < 6 else []
     if version < 3:
         added.extend(["role_clearances", "delivery_recoveries"])
     if version == 1:
@@ -445,6 +449,14 @@ def reserve(store, record, at):
             raise UsageError("Retry changes the original composition metadata; restore the recorded dispatch inputs instead of reusing its identity.", {})
         _event(store, at, "dispatch_transport_retry", record["task"], {"dispatch": prior["id"], "previous": dict(prior)})
         prior.update(status="reserved", report=None, result=None)
+        # The fingerprint does not cover these, so a retry after a config
+        # change would otherwise keep the original row's provider, and a move
+        # naming the old one fails validation on the next refusal (#403).
+        for key in ("provider", "brief_identity", "refusal_move"):
+            if key in record:
+                prior[key] = record[key]
+            else:
+                prior.pop(key, None)
         prior.pop("reconciliation", None)
         item = prior
     else:
@@ -551,6 +563,8 @@ def record_refusal(store, data, at, provider, report, aliases=()):
     `provider` is the refused agent's config `kind` and `report` the absolute
     report path the dispatch's supervision enrollment bound, both resolved by
     the caller; an unbound dispatch has no verifiable binding and is refused.
+    A dispatch that recorded its own send-time `provider` uses that instead,
+    so a config edit since the send cannot re-attribute the refusal (#403).
     `aliases` are other names wait-report may have been given for this worker
     (its enrolled pane id), accepted in the receipt's `agent` field.
     The receipt's JSON must be the complete exit-5 object for this agent and
@@ -563,6 +577,7 @@ def record_refusal(store, data, at, provider, report, aliases=()):
     record = _item(store["dispatches"], data["dispatch"], "dispatch")
     if record["status"] != "applied":
         raise UsageError("Record a provider refusal only against its confirmed applied dispatch; reconcile an uncertain send first.", {})
+    provider = record.get("provider") or provider
     text(provider, "provider")
     if not isinstance(report, str) or not Path(report).is_absolute():
         raise UsageError("Dispatch {} has no supervision enrollment binding its report path, so no receipt can be verified against it; record the operator's decision for this attempt instead.".format(record["id"]), {})
@@ -571,10 +586,15 @@ def record_refusal(store, data, at, provider, report, aliases=()):
         payload = json.loads(body)
     except ValueError as exc:
         raise UsageError("Refusal receipt {} is not wait-report JSON: {}. Save the exact exit-5 output.".format(data["receipt"], exc), {}) from None
-    if (not isinstance(payload, dict) or set(payload) != REFUSAL_RECEIPT_FIELDS or payload["reason"] != REFUSAL_REASON
-            or payload["found"] is not False or payload["agent"] not in {record["agent"], *[alias for alias in aliases if alias]}
+    # Every field is typed before any membership test: a receipt holding a
+    # list or object would raise TypeError on an unhashable value, and saved
+    # evidence must fail as a usage error (#403).
+    if (not isinstance(payload, dict) or set(payload) != REFUSAL_RECEIPT_FIELDS
+            or any(not isinstance(payload[key], str) for key in ("agent", "state", "reason", "report_path"))
+            or payload["reason"] != REFUSAL_REASON or payload["found"] is not False
+            or payload["agent"] not in {record["agent"], *[alias for alias in aliases if isinstance(alias, str) and alias]}
             or payload["state"] not in REFUSAL_STATES
-            or type(payload["elapsed_seconds"]) is not int):
+            or type(payload["elapsed_seconds"]) is not int or payload["elapsed_seconds"] < 0):
         raise UsageError("Refusal receipt must be wait-report's complete exit-5 output for this dispatch's agent: reason {}, found false, an idle or done state. A missing report without that reason is not a refusal.".format(REFUSAL_REASON), {})
     if payload["report_path"] != report:
         raise UsageError("Refusal receipt names report {} but dispatch {} is enrolled for {}; a receipt from another attempt does not refuse this one.".format(payload["report_path"], record["id"], report), {})
@@ -650,7 +670,7 @@ def refusals(store, task, role, fix_round):
             and row["task"] == task and row["role"] == role and row["fix_round"] == fix_round]
 
 
-def refusal_move(store, task, role, fix_round, provider, identity):
+def refusal_move(store, task, role, fix_round, provider, identity, report=None):
     """Return the move record a new dispatch carries, or None without refusals.
 
     `identity` is the new dispatch's `brief_identity`. Refuses a brief whose
@@ -659,7 +679,9 @@ def refusal_move(store, task, role, fix_round, provider, identity):
     round, a second move while one is reserved, uncertain or applied without
     a recorded refusal, and any dispatch once `REFUSAL_LIMIT` independent
     refusals are recorded: that line stops and goes to the operator. A
-    `not_sent` move consumed nothing. An unused operator authorization on the
+    `not_sent` move consumed nothing. `report` is the new dispatch's report
+    path; reusing one a refused attempt already claimed is refused, so two
+    attempts never enroll against one file. An unused operator authorization on the
     key (`authorize_refused_dispatch`) replaces every check for one dispatch
     with its own scope: the approved provider, and the brief unchanged unless
     the operator approved a revision.
@@ -667,6 +689,14 @@ def refusal_move(store, task, role, fix_round, provider, identity):
     refused = refusals(store, task, role, fix_round)
     if not refused:
         return None
+    # Normalized on both sides: `_parse_reports` already rejects two roles
+    # whose report paths resolve to one file, and an alias must not slip a
+    # second attempt onto a refused attempt's evidence.
+    target = str(Path(report).resolve()) if report is not None else None
+    burned = [row for row in refused if target is not None and str(Path(row["refusal"]["report_path"]).resolve()) == target]
+    if burned:
+        raise UsageError("Report path {} already carries the refusal of dispatch {}; give this attempt a fresh report path so their evidence cannot collide.".format(
+            report, burned[-1]["id"]), {"refusals": [row["id"] for row in burned]})
     authorized = _unused_authorization(store, task, role, fix_round)
     if authorized is not None:
         if authorized["provider"] != provider:
@@ -701,6 +731,8 @@ def _validate_refusals(store):
     for index, row in enumerate(rows):
         if "brief_identity" in row:
             text(row["brief_identity"], "brief identity")
+        if "provider" in row:
+            text(row["provider"], "dispatch provider")
         refusal = row.get("refusal")
         if refusal is not None:
             if (not isinstance(refusal, dict) or set(refusal) != {"schema_version", "at", "provider", "reason", "receipt", "report_path", "evidence"}

@@ -263,13 +263,14 @@ skills/herdr-teamlead/references/retrospectives.md
   ],
   "specialist_assessments": [],
   "recovery": {
-    "schema_version": 6,
+    "schema_version": 7,
     "tasks": {},
     "checkpoints": [],
     "plans": [],
     "dispatches": [],
     "context_permissions": [],
     "events": [],
+    "refusal_authorizations": [],
     "hand_clearances": [],
     "historical_attempts": [],
     "role_clearances": [],
@@ -324,11 +325,12 @@ document and arrives already stamped.
 
 ## Recovery records
 
-The recovery document uses `schema_version: 6`; individual records retain their
+The recovery document uses `schema_version: 7`; individual records retain their
 independent versions. Version 6 adds the dispatch fields `brief_identity`, `refusal` and
-`refusal_move` and the `refusal_authorizations` collection; the owner stamps a
-version-5 store on load, adds the empty collection, and refuses one already
-carrying a refusal, a move or the collection. Generic records remain version 1; stale-Grok delivery and
+`refusal_move` and the `refusal_authorizations` collection; version 7 adds the
+dispatch's send-time `provider`. The owner stamps an older store on load, adds
+the empty collection, and refuses one already carrying a field its version did
+not own. Generic records remain version 1; stale-Grok delivery and
 composition-bearing dispatch/result records use version 2. Checkpoints are at
 version 2: the owner upgrades a version-1 row on load, stamping it and
 preserving its identity, fix round, base and recorded ruling, and refuses one
@@ -349,7 +351,7 @@ replacement for live readiness, source review, or release gates.
 | `tasks` | Keyed by original task identity; `task`, immutable full `base_revision`, `scope`, `allowed_paths`, `authorization`. Migration invents none of them. |
 | `checkpoints` | Unique `id`, `fix_round`, original `base_revision`, concrete `defect`, `previous_attempts`, `progress`, `change_in_approach`. Carries `judge_agent`, `judge_report` and `judge_evidence` only when a ruling is cited, and a cited one requires a completed pinned-judge assignment after the preceding developer attempt. A partial trio is refused, one task records at most one cited ruling, and a migrated version-1 row keeps the ruling it recorded. |
 | `plans` | Unique `id`, `checkpoint`, original `base_revision`, `scope`, `allowed_paths`, `additional_fixes`, derived `first_fix`/`last_fix`, `authorization`; optional `supersedes` references a preserved prior approval. |
-| `dispatches` | Unique `id`, byte/input `fingerprint`, `role`, `agent`, cumulative `fix_round`, `plan` or null, `work` or null, `status`, `result`, `report`, and `assignment_index` once an outcome is recorded. CLI records `brief`, `common`, `observed_before`, and `context_before_send`; reconciled retries preserve `prior_assignment_indices`. `brief_identity` digests the common and role brief bytes with the enrolled report path masked. `refusal` (`provider`, `reason`, `receipt`, `report_path`, `evidence`) appears once `record-refusal` binds an exit-5 receipt to an applied row's enrolled report; `refusal_move` (`from`, `from_provider`, `provider`) appears on the dispatch that carried the refused brief, same `brief_identity`, to another provider. |
+| `dispatches` | Unique `id`, byte/input `fingerprint`, `role`, `agent`, cumulative `fix_round`, `plan` or null, `work` or null, `status`, `result`, `report`, and `assignment_index` once an outcome is recorded. CLI records `brief`, `common`, `observed_before`, and `context_before_send`; reconciled retries preserve `prior_assignment_indices`. `provider` is the worker's config `kind` at send time, authoritative for the refusal's attribution. `brief_identity` digests the common and role brief bytes with the enrolled report path masked. `refusal` (`provider`, `reason`, `receipt`, `report_path`, `evidence`) appears once `record-refusal` binds an exit-5 receipt to an applied row's enrolled report; `refusal_move` (`from`, `from_provider`, `provider`) appears on the dispatch that carried the refused brief, same `brief_identity`, to another provider. |
 | `context_permissions` | Original `assignment_index`, `next_fix`, `reason`, `authorization`, `evidence`, `evidence_receipt`, later `observed_session`, and `basis: operator_authorized_fresh_handoff`. The original null session is never replaced. |
 | `events` | Append-only `sequence`, `kind`, and structured `details` preserving approvals, waiting states, reservations, send transitions, results, transport retries, superseded review receipts, and recovery decisions. |
 | `hand_clearances` | Unique `id`, original release `assignment_index`, `previous_developer`, complete owner `input`, clear byte `receipts`, later `observed_session` or null, and `basis: verified_required_release_clear`. Both indices retain their original rows. The later observation never substitutes for historical proof; changed or missing current IDs do not invalidate archived clear evidence. |

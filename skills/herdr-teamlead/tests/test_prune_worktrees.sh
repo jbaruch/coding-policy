@@ -38,6 +38,15 @@
 #                             named origin/main, cannot stand in for either operand.
 #  20. Untraversable parent-> absence is not confirmed; failed row, metadata
 #                             kept, exit 2 (skipped as root).
+#  21. Raced branch        -> a tip that moved after its ancestry check is kept.
+#  22. Half-done removal   -> a removal is reported even when its branch
+#                             deletion then fails.
+#  23. Deferred prunable   -> a prunable branch survives a skipped prune.
+#  24. Newline path        -> a record is not split by a newline in the path.
+#  25. Branch config       -> a deleted branch's branch.<name> config goes too.
+#  26. Locked and gone     -> git keeps its metadata, so its branch is kept too.
+#  27. Split record        -> an old git plus a newline path decides nothing.
+#  28. Dry-run deferral    -> a preview defers what the live run would defer.
 #
 # Run: bash skills/herdr-teamlead/tests/test_prune_worktrees.sh
 set -uo pipefail
@@ -207,6 +216,7 @@ main() {
   mkdir -p "$TMP/shim" || die "mkdir shim failed"
   cat > "$TMP/shim/git" <<SHIM || die "shim write failed"
 #!/usr/bin/env bash
+set -euo pipefail
 case "\$*" in *merge-base*) printf 'not-a-sha\n' > "$SHARED/.git/refs/remotes/origin/vanished" ;; esac
 exec "$(command -v git)" "\$@"
 SHIM
@@ -256,6 +266,134 @@ SHIM
     chmod 755 "$ROOT/twenty-parent" || die "chmod restore failed"
     echo "20. a worktree behind an untraversable parent is a failed row, metadata and branch kept, exit 2"
     if (( RC == 2 )) && [[ "$OUT" == *'"failed": [{'*"cannot confirm"* ]] && [[ "$ERRTEXT" == *"skipping"* ]] && has_branch "$SHARED" review/hidden && listed "$SHARED" "$ROOT/twenty-parent/hidden"; then pass; else fail "rc=$RC out=$OUT err=$ERRTEXT"; fi
+  fi
+
+  # --- 21. a branch that moves between its ancestry check and the deletion is kept.
+  mk_repo twentyone
+  add_wt "$SHARED" review/racing "$ROOT/twentyone-racing"
+  # Advance origin/main so the shim has a second merged commit to move to.
+  commit_in "$SEED" second
+  git -C "$SEED" push -q origin main || die "push failed"
+  git -C "$SHARED" fetch -q origin || die "fetch failed"
+  mkdir -p "$TMP/shim21" || die "mkdir shim failed"
+  cat > "$TMP/shim21/git" <<SHIM || die "shim write failed"
+#!/usr/bin/env bash
+set -euo pipefail
+# Move the branch on the SECOND read of its tip — after the worktree is gone,
+# so the move is allowed, and before the compare-and-delete reads it. The new
+# tip is merged too, so only the guard can keep the branch. A move that fails
+# breaks the fixture's premise: say so and stop rather than let the run pass.
+case "\$*" in *"refs/heads/review/racing"*)
+  if [[ -e "$TMP/shim21/seen" ]]; then
+    # The move's own chatter must not reach stdout: the caller is capturing it
+    # as the branch tip.
+    if ! "$(command -v git)" -C "$SHARED" branch -f review/racing refs/remotes/origin/main >&2; then
+      echo "shim21: fixture could not move review/racing" >&2
+      exit 1
+    fi
+  else
+    : > "$TMP/shim21/seen"
+  fi ;;
+esac
+exec "$(command -v git)" "\$@"
+SHIM
+  chmod +x "$TMP/shim21/git" || die "chmod shim failed"
+  RUN_SEQ=$((RUN_SEQ+1))
+  OUT="$(env WORKTREE_ROOT="$ROOT" PATH="$TMP/shim21:$PATH" bash "$SCRIPT" "$SHARED" 2>"$TMP/err.$RUN_SEQ")"; RC=$?; ERRTEXT="$(cat "$TMP/err.$RUN_SEQ")"
+  echo "21. a branch that moved after its ancestry check is kept, its removal still reported, exit 2"
+  if (( RC == 2 )) && [[ "$(removed_paths)" == *"$ROOT/twentyone-racing"* ]] && [[ "$OUT" == *"moved after its ancestry check"* ]] && has_branch "$SHARED" review/racing; then pass; else fail "rc=$RC out=$OUT err=$ERRTEXT"; fi
+
+  # --- 22. a worktree removal whose branch deletion fails still reports the removal.
+  mk_repo twentytwo
+  add_wt "$SHARED" review/halfway "$ROOT/twentytwo-halfway"
+  mkdir -p "$TMP/shim22" || die "mkdir shim failed"
+  cat > "$TMP/shim22/git" <<SHIM || die "shim write failed"
+#!/usr/bin/env bash
+set -euo pipefail
+case "\$*" in *"update-ref -d"*) echo "fatal: fixture refuses the deletion" >&2; exit 1 ;; esac
+exec "$(command -v git)" "\$@"
+SHIM
+  chmod +x "$TMP/shim22/git" || die "chmod shim failed"
+  RUN_SEQ=$((RUN_SEQ+1))
+  OUT="$(env WORKTREE_ROOT="$ROOT" PATH="$TMP/shim22:$PATH" bash "$SCRIPT" "$SHARED" 2>"$TMP/err.$RUN_SEQ")"; RC=$?; ERRTEXT="$(cat "$TMP/err.$RUN_SEQ")"
+  echo "22. the JSON reports the removal that happened even when the branch deletion fails"
+  if (( RC == 2 )) && [[ "$(removed_paths)" == *"$ROOT/twentytwo-halfway"* ]] && [[ ! -e "$ROOT/twentytwo-halfway" ]] && [[ "$OUT" == *'"failed": [{'*"deleting"* ]] && [[ "$OUT" == *"fixture refuses the deletion"* ]]; then pass; else fail "rc=$RC out=$OUT err=$ERRTEXT"; fi
+
+  # --- 23. a prunable branch is deferred when the metadata prune is skipped.
+  if [[ "$(id -u)" != 0 ]]; then
+    mk_repo twentythree
+    add_wt "$SHARED" review/vanished "$ROOT/twentythree-vanished"
+    rm -rf "$ROOT/twentythree-vanished" || die "rm failed"
+    add_wt "$SHARED" review/sealed23 "$ROOT/twentythree-sealed"
+    chmod 000 "$ROOT/twentythree-sealed" || die "chmod failed"
+    run "$SHARED"
+    chmod 755 "$ROOT/twentythree-sealed" || die "chmod restore failed"
+    echo "23. a prunable branch is not deleted while its metadata survives a skipped prune"
+    if (( RC == 2 )) && [[ "$(kept_reason "$ROOT/twentythree-vanished")" == prunable ]] && [[ "$(branches_deleted)" != *review/vanished* ]] && has_branch "$SHARED" review/vanished; then pass; else fail "rc=$RC out=$OUT err=$ERRTEXT"; fi
+  fi
+
+  # --- 24. a worktree path holding a newline is one field, not two.
+  mk_repo twentyfour
+  newline_path="$ROOT/twentyfour-$(printf 'a\nb')"
+  git -C "$SHARED" worktree add -q -b review/newline "$newline_path" origin/main \
+    || die "fixture could not create a worktree at a newline-bearing path"
+  run "$SHARED"
+  echo "24. a newline in a worktree path does not split its record"
+  if (( RC == 0 )) && [[ "$OUT" != *'"path": "'"$ROOT"'/twentyfour-a"'* ]] && ! has_branch "$SHARED" review/newline; then pass; else fail "rc=$RC out=$OUT err=$ERRTEXT"; fi
+
+  # --- 25. a tracked branch's config goes with it.
+  mk_repo twentyfive
+  git -C "$SHARED" worktree add -q --track -b review/tracked "$ROOT/twentyfive-tracked" origin/main 2>/dev/null \
+    || die "fixture could not create a tracking worktree"
+  git -C "$SHARED" config --get-regexp '^branch\.review/tracked\.' >/dev/null || die "fixture branch has no tracking config"
+  run "$SHARED"
+  echo "25. a deleted branch leaves no stale branch.<name> config behind"
+  cfg_rc=0
+  git -C "$SHARED" config --get-regexp '^branch\.review/tracked\.' >/dev/null 2>"$TMP/cfg.err" || cfg_rc=$?
+  (( cfg_rc == 0 || cfg_rc == 1 )) || die "git config failed (exit $cfg_rc): $(cat "$TMP/cfg.err")"
+  if (( RC == 0 )) && [[ "$(removed_paths)" == *"$ROOT/twentyfive-tracked"* ]] && (( cfg_rc == 1 )); then pass; else fail "rc=$RC cfg_rc=$cfg_rc out=$OUT err=$ERRTEXT"; fi
+
+  # --- 26. a locked entry whose directory is gone keeps its branch.
+  mk_repo twentysix
+  add_wt "$SHARED" review/lockedgone "$ROOT/twentysix-lockedgone"
+  git -C "$SHARED" worktree lock "$ROOT/twentysix-lockedgone" || die "lock failed"
+  rm -rf "$ROOT/twentysix-lockedgone" || die "rm failed"
+  run "$SHARED"
+  echo "26. a locked entry git's prune preserves does not release its branch"
+  if (( RC == 0 )) && [[ "$(kept_reason "$ROOT/twentysix-lockedgone")" == locked ]] && [[ "$(branches_deleted)" != *review/lockedgone* ]] && has_branch "$SHARED" review/lockedgone; then pass; else fail "rc=$RC out=$OUT err=$ERRTEXT"; fi
+
+  # --- 27. without -z, a split record refuses the inventory instead of deciding.
+  mk_repo twentyseven
+  add_wt "$SHARED" review/plain "$ROOT/twentyseven-plain"
+  git -C "$SHARED" worktree add -q -b review/split "$ROOT/twentyseven-$(printf 'a\nb')" origin/main 2>/dev/null \
+    || die "fixture could not create a worktree at a newline-bearing path"
+  mkdir -p "$TMP/shim27" || die "mkdir shim failed"
+  cat > "$TMP/shim27/git" <<SHIM || die "shim write failed"
+#!/usr/bin/env bash
+set -euo pipefail
+# Stand in for a git older than 2.36, which has no -z on this subcommand.
+case "\$*" in *"worktree list"*-z*) echo "error: unknown option z" >&2; exit 129 ;; esac
+exec "$(command -v git)" "\$@"
+SHIM
+  chmod +x "$TMP/shim27/git" || die "chmod shim failed"
+  RUN_SEQ=$((RUN_SEQ+1))
+  OUT="$(env WORKTREE_ROOT="$ROOT" PATH="$TMP/shim27:$PATH" bash "$SCRIPT" "$SHARED" 2>"$TMP/err.$RUN_SEQ")"; RC=$?; ERRTEXT="$(cat "$TMP/err.$RUN_SEQ")"
+  echo "27. an old git plus a newline path refuses the inventory, deciding nothing"
+  plain_dir=0; [[ -d "$ROOT/twentyseven-plain" ]] && plain_dir=1
+  plain_branch=0; has_branch "$SHARED" review/plain && plain_branch=1
+  if (( RC == 1 )) && [[ -z "$OUT" ]] && [[ "$ERRTEXT" == *"cannot list unambiguously"* ]] && (( plain_dir )) && (( plain_branch )); then pass; else fail "rc=$RC dir=$plain_dir branch=$plain_branch out=$OUT err=$ERRTEXT"; fi
+
+  # --- 28. a dry run previews the deferral a live run would make.
+  if [[ "$(id -u)" != 0 ]]; then
+    mk_repo twentyeight
+    add_wt "$SHARED" review/previewgone "$ROOT/twentyeight-gone"
+    rm -rf "$ROOT/twentyeight-gone" || die "rm failed"
+    add_wt "$SHARED" review/sealed28 "$ROOT/twentyeight-sealed"
+    chmod 000 "$ROOT/twentyeight-sealed" || die "chmod failed"
+    run "$SHARED" --dry-run
+    chmod 755 "$ROOT/twentyeight-sealed" || die "chmod restore failed"
+    echo "28. a dry run does not promise a deletion the live run would defer"
+    if (( RC == 2 )) && [[ "$(branches_deleted)" != *review/previewgone* ]] && has_branch "$SHARED" review/previewgone; then pass; else fail "rc=$RC out=$OUT err=$ERRTEXT"; fi
   fi
 
   # --- 14. usage / not a repo.
