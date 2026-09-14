@@ -36,8 +36,9 @@
   alternative: the judge's diagnosis rules on that assessment, so `teamlead
   diagnose` refuses without it, no staffing decision substitutes, and the
   judge seat is not dispatched at an exhausted allowance before the assessment
-  exists — the gate guards the dispatch, not only the record, so the most
-  expensive seat is never spent on an uninvestigated loop. The size a package must exceed is the consuming
+  exists — both `apply` and `start-judge` guard it, dry runs included, so the
+  most expensive seat is never spent on an uninvestigated loop and a judge
+  dispatched for an ordinary dispute inside the allowance is untouched. The size a package must exceed is the consuming
   repo's to state and that trigger waits on the number; the other four fire on
   their own terms in every repo.
 

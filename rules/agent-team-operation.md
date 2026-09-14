@@ -333,7 +333,7 @@ description: Running a multi-agent team — task-based specialist composition, c
 
 - An implementation round runs two phases: pre-development planning, then mandatory post-push verification
 - Pre-development planning is optional for work that trips no Team Composition trigger
-- Work that trips one gates on its deliverable before implementation
+- Work that trips one gates on its deliverable before implementation, or on the recorded staffing decision the four non-exhaustion triggers allow
 - An investigation-only round gates its knowledge deliverable under `skills/herdr-teamlead/references/assignment-reasoning.md`
 - Pre-development output is a design note or a test plan, never a pass
 - The tester and the reviewer pass on the pushed branch before the PR opens

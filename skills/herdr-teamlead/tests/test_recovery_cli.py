@@ -182,6 +182,30 @@ class RecoveryCommandTests(fixture.CliCase):
         self.assertEqual(json.loads(out)["applied"][0]["context_transition"]["reason"], "authorized_context_recovery")
         self.assertEqual(self.saved()["assignments"][0], original)
 
+    def test_apply_refuses_a_judge_seat_before_the_assessment_exists(self):
+        # coding-policy#408: the dispatch path, not only the record, so the
+        # expensive seat is never spent on an uninvestigated loop.
+        state = empty_state()
+        for fix in (None, 1, 2, 3, 4, 5):
+            add_assignment(state, "2026-02-03T09:00:0{}+00:00".format(fix or 0), "developer", "grok", task=TASK, fix_round=fix)
+        save_state(self.state, state)
+        self.register()
+        config = json.loads(self.config.read_text())
+        config["judge"] = {"agent": "claude", "model": "claude-opus-4-6", "effort": "high"}
+        self.config.write_text(json.dumps(config))
+        self.briefs["judge"] = self.tmp / "judge-brief.md"
+        self.briefs["judge"].write_text("# judge\n")
+        args = ["apply", "--assignments", json.dumps({"judge": "claude"}), "--common", str(self.common),
+                "--brief", "judge=" + str(self.briefs["judge"]), "--task", TASK, "--now", AT, "--composer-settle", "0"]
+        for extra in ((), ("--dry-run",)):
+            code, out, err = self.invoke(args + list(extra), self._client({"claude": "idle"}))
+            self.assertEqual(code, 1)
+            self.assertEqual(out, "")
+            self.assertIn("consult the investigator", err)
+        self.record_investigation()
+        code, out, err = self.invoke(args + ["--dry-run"], self._client({}))
+        self.assertEqual(code, 0, err)
+
     def test_diagnose_wires_the_pinned_judge_and_its_enrolled_report(self):
         # coding-policy#407: the public command, not just the owner function —
         # pinned-judge loading, the enrollment lookup, and state persistence.
