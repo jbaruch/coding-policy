@@ -53,7 +53,7 @@ class RecoveryTests(unittest.TestCase):
 
     def seed_checkpoint(self):
         self.exhaust()
-        self.consult_investigator("2026-02-03T09:30:00+00:00")
+        self.consult_investigator("2026-02-03T09:30:00+00:00", "2026-02-03T09:45:00+00:00")
         add_assignment(self.state, AT, "judge", "judge", task=TASK)
         return checkpoint(self.store, self.history, {
             "id": "checkpoint-5", "task": TASK, "defect": "F1 remains open", "previous_attempts": "Five attempts changed parsing and quoting",
@@ -96,7 +96,7 @@ class RecoveryTests(unittest.TestCase):
         # The diagnosis gate needs the pinned judge's assignment after the
         # latest developer attempt, and the consultation it rules on before
         # that dispatch.
-        self.consult_investigator("2026-02-03T11:30:0{}+00:00".format(number))
+        self.consult_investigator("2026-02-03T11:30:0{}+00:00".format(number), "2026-02-03T11:45:0{}+00:00".format(number))
         add_assignment(self.state, "2026-02-03T12:00:0{}+00:00".format(number), "judge", "judge", task=TASK)
 
     def next_checkpoint(self, name):
@@ -107,17 +107,20 @@ class RecoveryTests(unittest.TestCase):
             "progress": "The named change landed; the finding did not close",
             "change_in_approach": "Take the next remedy on the ladder"}, AT, "judge")["id"]
 
-    def consult_investigator(self, at):
-        """Record the consultation the judge rules on, before its dispatch."""
+    def consult_investigator(self, at, assessed_at):
+        """Record the consultation the judge rules on, assessed before it."""
         add_assignment(self.state, at, "investigator", "worker", task=TASK)
         self.investigator_index = len(self.history) - 1
+        self.investigator_assessed_at = assessed_at
         return self.investigator_index
 
-    def investigated(self, index=None):
+    def investigated(self, index=None, at=None):
         """The assessed investigator consultation #408 requires."""
         if index is None:
             index = getattr(self, "investigator_index", 0)
-        return [{"task": TASK, "role": "investigator", "assignment_index": index}]
+        if at is None:
+            at = getattr(self, "investigator_assessed_at", "2026-02-03T09:45:00+00:00")
+        return [{"task": TASK, "role": "investigator", "assignment_index": index, "at": at}]
 
     def run_diagnosis(self, data, judge="judge", enrolled=None, investigations=None):
         # The fixture's judge dispatch enrolls the report the request cites,
@@ -266,7 +269,7 @@ class RecoveryTests(unittest.TestCase):
         # coding-policy#408: the investigator's profile is written for repeated
         # unsuccessful fixes, and the judge is the more expensive seat.
         self.seed_checkpoint()
-        seeded = self.investigator_index
+        seeded, seeded_at = self.investigator_index, self.investigator_assessed_at
         request = self.diagnosis("diag-1", "continue", 2)
         with self.assertRaisesRegex(UsageError, "prepared causal assessment"):
             self.run_diagnosis(request, investigations=[])
@@ -279,10 +282,13 @@ class RecoveryTests(unittest.TestCase):
         with self.assertRaisesRegex(UsageError, "prepared causal assessment"):
             self.run_diagnosis(request, investigations=self.investigated(index=0))
         # A consultation delivered after the judge dispatch is not what it read.
-        late = self.consult_investigator("2026-02-03T20:00:00+00:00")
-        with self.assertRaisesRegex(UsageError, "before the judge dispatch"):
+        late = self.consult_investigator("2026-02-03T20:00:00+00:00", "2026-02-03T20:30:00+00:00")
+        with self.assertRaisesRegex(UsageError, "assessed before the judge dispatch"):
             self.run_diagnosis(request, investigations=self.investigated(index=late))
-        self.assertEqual(self.run_diagnosis(request, investigations=self.investigated(index=seeded))["remedy"], "continue")
+        # Dispatched early, assessed late: the judge still did not read it.
+        with self.assertRaisesRegex(UsageError, "assessed before the judge dispatch"):
+            self.run_diagnosis(request, investigations=self.investigated(index=seeded, at="2026-02-03T23:00:00+00:00"))
+        self.assertEqual(self.run_diagnosis(request, investigations=self.investigated(index=seeded, at=seeded_at))["remedy"], "continue")
 
     def test_an_adjudication_report_is_not_a_diagnosis(self):
         # coding-policy#407: RULING and ACTION belong to adjudication; a mixed
@@ -382,7 +388,7 @@ class RecoveryTests(unittest.TestCase):
 
     def test_that_checkpoint_carries_the_operator_bounded_approval_through(self):
         self.exhaust()
-        self.consult_investigator("2026-02-03T09:30:00+00:00")
+        self.consult_investigator("2026-02-03T09:30:00+00:00", "2026-02-03T09:45:00+00:00")
         add_assignment(self.state, AT, "judge", "judge", task=TASK)
         checkpoint(self.store, self.history, {"id": "cp", "task": TASK, "defect": "F1",
             "previous_attempts": "Five fixes", "progress": "Still blocked",

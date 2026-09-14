@@ -50,8 +50,10 @@ shortfall of eligible workers already is.
 | A new user-facing document | Documentation | A draft verified against the shipped behavior, never against intent |
 | Fix rounds reaching the allowance without converging | Investigator | A reproduction, a causal assessment and a discriminating experiment |
 
-The size a package must exceed, and what counts as user-facing, are the
-consuming repo's to state. A repo that states neither triggers neither.
+The size a package must exceed is the consuming repo's to state, and that
+trigger waits on the number. The other four do not: a trust boundary, a
+user-facing command, flag or refusal path, a user-facing document and a
+non-converging loop fire on their own terms in every repo.
 
 | Profile | Bring it in for | Useful output |
 | --- | --- | --- |

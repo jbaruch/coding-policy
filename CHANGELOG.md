@@ -32,9 +32,9 @@
   fired trigger is consulted or recorded as a staffing decision with its
   reason — the shape `Team Composition` already uses for a shortfall of
   eligible workers — so skipping becomes an explicit choice rather than the
-  default silence produced. The size threshold and what counts as user-facing
-  are the consuming repo's to state, and a repo that states neither triggers
-  neither.
+  default silence produced. The size a package must exceed is the consuming
+  repo's to state and that trigger waits on the number; the other four fire on
+  their own terms in every repo.
 
   Pre-development planning stops being uniformly optional. It remains optional
   for work that trips no trigger and gates work that trips one: the ordering
@@ -50,8 +50,8 @@
   in the fleet, so ruling on a prepared assessment costs less than
   investigating from scratch. `teamlead diagnose` refuses without an assessed
   investigator consultation for the task that follows its latest developer
-  attempt and precedes the judge dispatch it cites — a consultation delivered
-  afterwards is not what the judge read. The diagnosis brief hands the judge
+  attempt and was assessed before the judge dispatch it cites — a consultation
+  assessed afterwards is not what the judge read, whenever it was dispatched. The diagnosis brief hands the judge
   that report to rule on, rather than asking it to derive causes from the
   round history itself.
   Re-entry on a failed remedy is unchanged: the ladder descends and terminates
