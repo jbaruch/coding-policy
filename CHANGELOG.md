@@ -1,5 +1,37 @@
 # Changelog
 
+### Changed
+
+- **A task-owned fixture root may sit outside the reports directory (#367).**
+  A real integration test followed the brief's requirement to keep fixtures
+  beneath its home-based report directory and modified the operator's own
+  Tessl project: an isolated `HOME` and XDG directories were not enough,
+  because `tessl init` walks filesystem ancestors, found the home-level
+  `tessl.json`, and initialized that project. An unauthenticated run then
+  wrote a rule index missing a private dependency.
+
+  `rules/agent-team-operation.md` Writers and Checkouts gains a narrow
+  exception for a brief-named fixture root outside every ancestor that
+  configures the tool. Fixtures alone live there; every report, plan and patch
+  artifact still goes under the reports directory. The preconditions require
+  proving the tool's effective root inside the fixture before anything writes
+  through it, recording each reachable user-level file before and after,
+  stopping on an unexpected change, restoring from that record rather than
+  reinstalling the operator's environment, and removing the root at the end.
+  The root is the assignment's own: created under a name no other assignment
+  uses, never a pre-existing directory and never one reached through a symlink,
+  since the mandated cleanup would otherwise delete somebody else's files.
+
+  The worker-facing brief says the same: `templates/COMMON.md` now names the
+  fixture root and its obligations instead of "nothing you write lands
+  anywhere else", which contradicted both the exception and the worktree
+  writes every worker already makes.
+
+  `references/round-flow.md` carries the procedure — walk the ancestors,
+  pre-seed the intended manifest, prove the resolved root, guard the
+  user-level files — while which files and which manifest a given tool reads
+  stays with that tool's own documentation.
+
 ## 0.3.221 — 2026-09-14
 
 ### Fixed

@@ -219,6 +219,22 @@ description: Running a multi-agent team — task-based specialist composition, c
 - The lead never removes a dirty, unmerged, locked or detached worktree
 - A worker's report, plan, and patch artifacts go only under the reports directory its brief names
 - A worker writes nowhere else
+- Narrow exception for a task-owned fixture root outside the reports directory
+- Applies when the tool under test resolves its configuration from filesystem ancestors, so a fixture placed under the reports directory initializes the operator's own project instead of the fixture's
+- Preconditions (all required):
+  1. The brief names the fixture root
+  2. The root is created by this assignment, under a name no other assignment uses
+  3. A root that already exists, or resolves through a symlink, is refused rather than reused
+  4. The root holds fixtures alone
+  5. The root resolves outside every ancestor that configures the tool
+  6. The worker proves the tool's effective root inside the fixture before any command that writes through it
+  7. The worker records the state of each user-level file the rehearsal can reach, before and after
+  8. An unexpected change stops the rehearsal
+  9. A user-level file the rehearsal changed is restored from that record
+  10. Reinstalling the operator's environment is never the automatic recovery
+  11. The worker removes the fixture root when the assignment ends
+- Every report, plan and patch artifact still goes under the reports directory its brief names
+- The worktree writes above and the restoration precondition 9 requires are unchanged
 - Every code-touching command carries its own `cd <worktree> &&` prefix
 - See `rules/agent-worktree-isolation.md`
 

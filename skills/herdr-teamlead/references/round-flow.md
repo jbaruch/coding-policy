@@ -176,6 +176,42 @@ the historical receipt, append the new gate decision and its evidence to the
 task ledger, and obtain a fresh independent report. Never rewrite the prior
 review or treat an old approval as authority over newer contribution evidence.
 
+## Ancestor-Sensitive Fixtures
+
+Some tools resolve their configuration by walking filesystem ancestors, so a
+fixture placed under the reports directory is not isolated from the operator's
+own project: an isolated `HOME` and the XDG directories are not enough when the
+lookup starts at the fixture and climbs. One real rehearsal initialized the
+operator's home-level Tessl project that way, and an unauthenticated run then
+wrote a rule index missing a private dependency.
+
+The brief names a task-owned fixture root for that work, outside every ancestor
+that configures the tool, and the worker keeps every report, plan and patch
+artifact under the reports directory as usual
+(`rules/agent-team-operation.md` Writers and Checkouts carries the
+preconditions).
+
+The root is this assignment's own: created under a name no other assignment
+uses, never a directory that already exists and never one reached through a
+symlink. The cleanup at the end removes it, and a reused or linked root would
+make that cleanup delete somebody else's files.
+
+Inside that root, before any command that writes through the tool:
+
+1. Resolve the root to its physical path, then walk its ancestors and record
+   which of them configure the tool.
+2. Pre-seed the intended local manifest so the lookup settles inside the
+   fixture rather than above it.
+3. Prove the effective root the tool resolved, and compare it to the fixture.
+   A root anywhere else stops the rehearsal.
+4. Record the state of each user-level file the rehearsal can reach, and read
+   it again afterwards. An unexpected change stops the rehearsal and is
+   reported; restore from that record rather than reinstalling the operator's
+   environment.
+
+Which files those are, and which manifest a given tool reads, belong to the
+tool's own documentation — not to this reference or a brief.
+
 ## Blocking Gate
 
 At Step 12, apply `skills/herdr-teamlead/references/assignment-reasoning.md` to
