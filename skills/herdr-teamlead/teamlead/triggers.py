@@ -322,6 +322,39 @@ def parse_added_lines(text):
     return added
 
 
+def read_lines(repo, path):
+    """The working tree's lines for an untracked file.
+
+    A file git is not tracking has no diff to read, so its own bytes are the
+    added lines. A binary file legitimately yields none; an unreadable one is a
+    failure, never an empty result.
+    """
+    try:
+        return Path(repo, path).read_text(encoding="utf-8").splitlines()
+    except UnicodeDecodeError:
+        return []
+    except OSError as exc:
+        raise UsageError("Cannot read untracked file {} in {} ({}); remove it or commit it before detecting the triggers.".format(
+            path, repo, exc.strerror), {}) from None
+
+
+def collect_untracked(run, repo, changes, churn, added_lines):
+    """Fold the working tree's untracked files into the diff facts.
+
+    `git diff` reports tracked changes only, so a whole new package or a new
+    user-facing document -- the very shapes the architect and documentation
+    triggers exist for -- would fire nothing while they sit untracked (#415).
+    They are added files by definition, and every line in them is an added
+    line. A comparison against a pushed head needs none of this: an untracked
+    file is in no commit.
+    """
+    for path in _records(run(["ls-files", "--others", "--exclude-standard", "-z"])):
+        lines = read_lines(repo, path)
+        changes[path] = "A"
+        churn[path] = len(lines)
+        added_lines[path] = lines
+
+
 def git_runner(repo):
     """A runner executing git in `repo` and returning stdout."""
 
@@ -350,6 +383,9 @@ def run_command(args, runner=None):
     common = ["diff", "--no-renames", *span]
     changes = parse_name_status(run([*common, "--name-status", "-z"]))
     churn = parse_numstat(run([*common, "--numstat", "-z"]))
+    untracked = {}
+    if not head:
+        collect_untracked(run, args.repo, changes, churn, untracked)
     candidates = sorted({package for package in
                          (package_of(path, declaration["package_roots"]) for path in changes)
                          if package is not None})
@@ -357,9 +393,12 @@ def run_command(args, runner=None):
                      for name in candidates}
     fired = detect(declaration, changes, churn, base_packages)
     spec_paths = sorted(path for path in changes if matches(path, declaration["cli_spec_paths"]))
+    tracked_specs = [path for path in spec_paths if path not in untracked]
     if spec_paths and declaration["cli_surface_markers"]:
-        surface = cli_surface(declaration, changes,
-                             parse_added_lines(run([*common, "--unified=0", "--", *spec_paths])))
+        added = dict(untracked)
+        if tracked_specs:
+            added.update(parse_added_lines(run([*common, "--unified=0", "--", *tracked_specs])))
+        surface = cli_surface(declaration, changes, added)
         if surface:
             fired["ux-product"] = surface
     return report(declaration, args.base, head or "worktree", fired, roles, specialties, decisions)

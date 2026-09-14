@@ -55,6 +55,12 @@
   Diagnosis record schema 2 adds `reissue` and `investigator_report`; version-1
   rows migrate with `reissue: false` and `investigator_report: null`.
 
+  Worktree detection folds in untracked files: `git diff` reports tracked
+  changes only, so a whole new package or a new user-facing document — the very
+  shapes the architect and documentation triggers exist for — would have fired
+  nothing while it sat untracked. A comparison against a pushed head needs none
+  of this, since an untracked file is in no commit.
+
   The issue's seventh item — "`teamlead diagnose` is named but absent from the
   CLI" — does not reproduce. `diagnose` is registered in `cli.py` and listed by
   `python3 -m teamlead --help`; the help output is long enough that the

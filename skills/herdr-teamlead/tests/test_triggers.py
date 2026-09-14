@@ -423,6 +423,13 @@ class RunCommandTest(TempCase):
         self.assertEqual(payload["fired"], ["ux-product"])
         assert failure is not None
 
+    def test_untracked_files_are_only_collected_without_a_head(self):
+        triggers.run_command(namespace(repo=self.tmp, head="HEAD"), runner=self.runner({}))
+        self.assertFalse(any("--others" in call for call in self.calls))
+        self.calls.clear()
+        triggers.run_command(namespace(repo=self.tmp), runner=self.runner({}))
+        self.assertTrue(any("--others" in call for call in self.calls))
+
     def test_roles_are_read_from_the_comma_list(self):
         responses = {"--name-status": "A\0src/new/mod.py\0", "--numstat": "9\t0\tsrc/new/mod.py\0"}
         payload, failure = triggers.run_command(namespace(repo=self.tmp, roles="developer,architect"),
@@ -484,6 +491,44 @@ class DetectTriggersCommandTest(TempCase):
         code, out, _err = self.run_cli("--head", "HEAD")
         self.assertEqual(code, 1)
         self.assertEqual(json.loads(out)["fired"], ["documentation"])
+
+    def test_an_untracked_package_fires_in_the_working_tree(self):
+        # coding-policy#415: `git diff` reports tracked changes only, so a whole
+        # new package would fire nothing while it sits untracked.
+        (self.tmp / "src" / "new").mkdir(parents=True)
+        (self.tmp / "src" / "new" / "mod.py").write_text("value = 1\n")
+        code, out, _err = self.run_cli()
+        self.assertEqual(code, 1)
+        self.assertEqual(json.loads(out)["unaddressed"], ["architect"])
+
+    def test_an_untracked_document_fires_documentation(self):
+        (self.tmp / "docs").mkdir()
+        (self.tmp / "docs" / "install.md").write_text("how to install\n")
+        code, out, _err = self.run_cli()
+        self.assertEqual(code, 1)
+        self.assertEqual(json.loads(out)["fired"], ["documentation"])
+
+    def test_an_untracked_spec_file_fires_ux_product(self):
+        (self.tmp / "src" / "cli").mkdir(parents=True)
+        (self.tmp / "src" / "cli" / "ship.py").write_text('sub.add_parser("ship")\n')
+        code, out, _err = self.run_cli("--roles", "architect")
+        self.assertEqual(code, 1)
+        self.assertEqual(json.loads(out)["unaddressed"], ["ux-product"])
+
+    def test_an_untracked_binary_file_counts_no_lines(self):
+        (self.tmp / "src" / "new").mkdir(parents=True)
+        (self.tmp / "src" / "new" / "logo.png").write_bytes(b"\x89PNG\r\n\x1a\n\xff\xfe")
+        code, out, _err = self.run_cli()
+        # It is still an added file in a package absent from the base.
+        self.assertEqual(code, 1)
+        self.assertEqual(json.loads(out)["fired"], ["architect"])
+
+    def test_a_pushed_head_ignores_the_working_tree(self):
+        (self.tmp / "docs").mkdir()
+        (self.tmp / "docs" / "install.md").write_text("how to install\n")
+        code, out, err = self.run_cli("--head", "HEAD")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(json.loads(out)["fired"], [])
 
     def test_a_missing_declaration_refuses_the_round(self):
         (self.tmp / triggers.DECLARATION_FILE).unlink()
