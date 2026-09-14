@@ -481,12 +481,15 @@ classify_worktree() { # <worktree-path>
     jq -n --arg t "$tree" '{class: "unknown", evidence: {worktree: $t, readable: false}}'
     return 0
   fi
+  # `--absolute-git-dir`, never the relative `--git-dir`: the relative form is
+  # resolved against the CALLER's cwd, so the lead's own repository mid-rebase
+  # would mark every worker worktree as mid-operation.
   local gitdir
-  gitdir="$(git -C "$tree" rev-parse --git-dir 2>"$ERRFILE")" || gitdir=""
+  gitdir="$(git -C "$tree" rev-parse --absolute-git-dir 2>"$ERRFILE")" || gitdir=""
   if [[ -n "$gitdir" ]]; then
     local marker
     for marker in MERGE_HEAD REBASE_HEAD CHERRY_PICK_HEAD REVERT_HEAD BISECT_LOG; do
-      if [[ -e "${tree}/${gitdir}/${marker}" || -e "${gitdir}/${marker}" ]]; then mid=true; break; fi
+      if [[ -e "${gitdir}/${marker}" ]]; then mid=true; break; fi
     done
   fi
   rc=0
