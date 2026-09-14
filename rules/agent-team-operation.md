@@ -378,7 +378,7 @@ description: Running a multi-agent team — task-based specialist composition, c
 - Before a PR exists, the developer's own evidence is the branch CI its push triggered
 - On an open PR, the developer reads that evidence with `skills/release/poll-pr-reviews.sh`, never the pre-merge watch
 - The developer reports each reviewer lane's observed state, including whether a request is pending, whoever asked for it
-- The developer never waits on a request-triggered review its own assignment has no scope to request
+- Waiting on a review the role cannot request follows `rules/ci-safety.md` Always Watch CI
 - The developer pushes the branch and stops
 - A shared GitHub account posts internal reviews as COMMENT reviews
 - The lead enforces the blocking findings a COMMENT review carries
