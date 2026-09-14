@@ -463,6 +463,23 @@ class PlannedSurfacesTest(TempCase):
         row = next(row for row in payload["triggers"] if row["trigger"] == "ux-product")
         self.assertEqual(row["signals"][0]["signal"], "planned_cli_surface")
 
+    def test_a_package_declared_only_by_its_size_is_checked_against_the_base(self):
+        # Its only mention is the size, so nothing puts it in `changes`; a
+        # missing candidate would read as a package the base already held.
+        payload, failure = triggers.run_command(
+            namespace(repo=self.tmp, planned=self.write(package_lines={"src/new": 1})),
+            runner=self.runner())
+        self.assertEqual(payload["fired"], ["architect"])
+        self.assertEqual(payload["triggers"][0]["signals"][0]["signal"], "new_package")
+        assert failure is not None
+        self.assertIn(["ls-tree", "--name-only", "BASE", "--", "src/new/"], self.calls)
+
+    def test_planned_package_lines_name_a_declared_package_root(self):
+        with self.assertRaises(UsageError) as caught:
+            triggers.run_command(namespace(repo=self.tmp, planned=self.write(package_lines={"src/new/deep": 1})),
+                                 runner=self.runner())
+        self.assertIn("declared package roots", caught.exception.message)
+
     def test_a_planned_cli_surface_is_classified_against_every_surface(self):
         # A spec path that is also a trust boundary fires security too;
         # answering UX and product alone must not let the round pass.

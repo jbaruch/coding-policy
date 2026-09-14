@@ -434,6 +434,9 @@ def run_command(args, runner=None):
         for path in plan["changed"]:
             changes.setdefault(path, "M")
         planned_lines = plan["package_lines"]
+        for name in planned_lines:
+            if not package_matches(name, declaration["package_roots"]):
+                raise UsageError("Planned package_lines names {}, which is not one of this repo's declared package roots; name a package root or widen the declaration.".format(name), {})
         for path in plan["cli_surface"]:
             if not matches(path, declaration["cli_spec_paths"]):
                 raise UsageError("Planned cli_surface names {}, which is outside this repo's declared CLI spec paths; name a spec path or widen the declaration.".format(path), {})
@@ -447,9 +450,12 @@ def run_command(args, runner=None):
     # success here is the silence the triggers exist to end (#415).
     if not changes and not planned_lines and not (plan is not None and plan["cli_surface"]):
         raise UsageError("This round classifies nothing: its diff is empty and no planned surface is declared. Name the paths, package sizes or CLI surfaces the work will touch in --planned before the developer is dispatched.", {})
+    # A package declared only by its planned size has no path in `changes`, and
+    # a candidate missing here reads as one the base already held -- so a
+    # planned new package would fire nothing (#415).
     candidates = sorted({package for package in
                          (package_of(path, declaration["package_roots"]) for path in changes)
-                         if package is not None})
+                         if package is not None} | set(planned_lines))
     base_packages = {name: bool(run(["ls-tree", "--name-only", left, "--", name + "/"]).strip())
                      for name in candidates}
     fired = detect(declaration, changes, churn, base_packages, planned_lines)
