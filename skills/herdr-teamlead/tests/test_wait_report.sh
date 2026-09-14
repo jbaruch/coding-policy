@@ -816,8 +816,35 @@ ${base}"
     FAKE_GET_COUNTER="$TMP/expired-since-count" \
     bash "$SCRIPT" --worktree "$stall_wt" --base "$stall_base" \
     --since "2026-01-01T00:00:00+00:00" worker "$missing" </dev/null 2>"$TMP/expired-since")"; RC=$?
-  if [[ $RC -eq 1 ]] && printf '%s' "$OUT" | jq -e '(.stall | type) == "object" and .elapsed_seconds == 0' >/dev/null; then
-    pass; else fail "an expired dispatch stalls on the first interval: RC=$RC OUT=$OUT"; fi
+  # One status read = one interval. `elapsed_seconds` comes from the real
+  # clock, so it cannot carry this assertion (rules/testing-standards.md).
+  expired_reads=0; [[ -r "$TMP/expired-since-count" ]] && read -r expired_reads < "$TMP/expired-since-count"
+  if [[ $RC -eq 1 ]] && printf '%s' "$OUT" | jq -e '(.stall | type) == "object"' >/dev/null && [[ "$expired_reads" == "1" ]]; then
+    pass; else fail "an expired dispatch stalls on the first interval: RC=$RC reads=$expired_reads OUT=$OUT"; fi
+
+  # Finding: a timezone offset is CONVERTED, never rewritten as Z. This stamp
+  # is 05:00Z — after the frozen now — so its budget has not started, let alone
+  # been spent. Rewriting the offset would read it as midnight and stall.
+  RUN_SEQ=$((RUN_SEQ+1))
+  OUT="$(env HERDR_ENV=1 HERDR_BIN="$FAKE" TEAMLEAD_WAIT_INTERVAL_SEC=0 TEAMLEAD_WAIT_BUDGET_SEC=600 \
+    TEAMLEAD_BLOCKED_CONFIRM_SEC=0 TEAMLEAD_REFUSAL_CONFIRM_SEC=0 FAKE_PANE_TEXT="nothing here" \
+    FAKE_MARKER=timeout FAKE_STATUS=idle TEAMLEAD_NOW_EPOCH=1767229200 \
+    bash "$SCRIPT" --once --worktree "$stall_wt" --base "$stall_base" \
+    --since "2026-01-01T00:00:00-05:00" worker "$missing" </dev/null 2>"$TMP/offset-since")"; RC=$?
+  if [[ $RC -eq 1 ]] && printf '%s' "$OUT" | jq -e '.reason == "checkpoint_pending" and (has("stall") | not)' >/dev/null; then
+    pass; else fail "a -05:00 stamp is converted, not rewritten as Z: RC=$RC OUT=$OUT"; fi
+
+  # The same instant written two ways reaches the same verdict.
+  for equivalent in "2026-01-01T00:00:00Z" "2025-12-31T19:00:00-05:00"; do
+    RUN_SEQ=$((RUN_SEQ+1))
+    OUT="$(env HERDR_ENV=1 HERDR_BIN="$FAKE" TEAMLEAD_WAIT_INTERVAL_SEC=0 TEAMLEAD_WAIT_BUDGET_SEC=600 \
+      TEAMLEAD_BLOCKED_CONFIRM_SEC=0 TEAMLEAD_REFUSAL_CONFIRM_SEC=0 FAKE_PANE_TEXT="nothing here" \
+      FAKE_MARKER=timeout FAKE_STATUS=idle TEAMLEAD_NOW_EPOCH=1767229200 \
+      bash "$SCRIPT" --once --worktree "$stall_wt" --base "$stall_base" \
+      --since "$equivalent" worker "$missing" </dev/null 2>"$TMP/equiv-since")"; RC=$?
+    if [[ $RC -eq 1 ]] && printf '%s' "$OUT" | jq -e '(.stall | type) == "object"' >/dev/null; then
+      pass; else fail "equivalent stamp ${equivalent} must reach the same stall: RC=$RC OUT=$OUT"; fi
+  done
 
   # An unreadable --since is a usage/tool failure, never a silent stall.
   RUN_SEQ=$((RUN_SEQ+1))

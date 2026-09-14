@@ -45,7 +45,9 @@
   tree. The stall conjunction is read on every interval, so a dispatch already
   past its budget stalls at once instead of waiting another full budget of the
   watcher's own. `TEAMLEAD_NOW_EPOCH` is the test seam that keeps the budget
-  cases off the run clock.
+  cases off the run clock. A `--since` offset is converted rather than
+  rewritten as `Z`: rewriting one moves the instant, so `00:00-05:00` would
+  read five hours older and its budget would be called spent before it was.
 
 - **A developer reads its own gate evidence instead of entering the pre-merge
   wait (#369).** A developer finished its source work, pushed, and got green

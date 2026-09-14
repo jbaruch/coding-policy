@@ -608,9 +608,19 @@ classify_worktree() { # <worktree-path> [base-revision]
 # and a bare `Z` both reach `fromdateiso8601` through the same normalization.
 epoch_of() { # <iso8601>
   local out rc=0
+  # The offset is SUBTRACTED, never rewritten as `Z`: rewriting it moves the
+  # instant (00:00-05:00 would read as midnight UTC, five hours older) and the
+  # budget would be declared spent before it was.
   out="$(jq -rn --arg t "$1" '
-    ($t | sub("(?<s>[+-][0-9]{2}):?(?<m>[0-9]{2})$"; "Z") | sub("\\.[0-9]+Z$"; "Z"))
-    | fromdateiso8601' 2>"$ERRFILE")" || rc=$?
+    ($t | capture("^(?<stamp>.*?)(?<zone>Z|[+-][0-9]{2}:?[0-9]{2})$")) as $parts
+    | (($parts.stamp | sub("\\.[0-9]+$"; "")) + "Z" | fromdateiso8601) as $naive
+    | (if $parts.zone == "Z" then 0
+       else ($parts.zone
+             | capture("^(?<sign>[+-])(?<h>[0-9]{2}):?(?<m>[0-9]{2})$")
+             | (((.h | tonumber) * 3600) + ((.m | tonumber) * 60))
+               * (if .sign == "-" then -1 else 1 end))
+       end) as $offset
+    | $naive - $offset' 2>"$ERRFILE")" || rc=$?
   if (( rc != 0 )) || [[ ! "$out" =~ ^-?[0-9]+$ ]]; then
     warn "could not read --since '${1}' as an ISO-8601 timestamp: $(tr '\n' ' ' < "$ERRFILE") — pass the dispatch's recorded send time"
     return 1
