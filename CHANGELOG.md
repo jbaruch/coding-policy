@@ -1,5 +1,43 @@
 # Changelog
 
+### Added
+
+- **A developer reads its own gate evidence instead of entering the pre-merge
+  wait (#369).** A developer finished its source work, pushed, and got green
+  CI plus the required policy approval — then called `watch-pr-reviews.sh` to
+  collect the result. No Copilot review had been requested, and requesting one
+  was outside that assignment's GitHub write scope, so the watcher waited on a
+  lane nobody had asked for until the lead stopped it.
+
+  `poll-pr-reviews.sh` now reports `requested` per reviewer: whether a review
+  request for that login is still pending on the PR. It separates a lane still
+  owed an answer from one nobody asked for, which a bare `state: "none"`
+  conflates. The probe reads GraphQL, not the REST `requested_reviewers`
+  endpoint, which omits bot reviewers entirely (#276) and would report every
+  bot lane as never requested.
+
+  `requested` is not a "has this review been triggered" flag, and the rules say
+  so. The policy reviewer is push-triggered — `review-codex.yml` and the fleet
+  App run on the push, never on a request — so its `requested` is false on
+  every PR, and an in-flight policy review looks exactly like an unrequested
+  Copilot lane. `rules/ci-safety.md` Always Watch CI resolves a reviewer's
+  arrival by how it is triggered: a push-triggered review is owed by the push,
+  a request-triggered one only once requested, and only the latter is
+  diagnosed as unrequested rather than waited out.
+
+  `watch-pr-reviews.sh` reads the field too: a Copilot lane with no verdict at
+  this head and no pending request ends the watch at once with
+  `review_unrequested` and the command that would fix it, rather than spending
+  the budget proving nothing is coming. A lane that WAS requested still waits,
+  and a snapshot from an older poller — no `requested` field at all — waits as
+  before.
+
+  `rules/agent-team-operation.md` Review Before PR points the developer stage
+  at the snapshot on an open PR, and at the branch CI its push triggered
+  before a PR exists — `poll-pr-reviews.sh` takes a PR number, and the
+  pre-PR handoff has none. The release skill's deliberate request-then-watch
+  sequence is unchanged.
+
 ## 0.3.222 — 2026-09-14
 
 ### Changed
