@@ -225,6 +225,8 @@ class RecoveryTests(unittest.TestCase):
         with self.assertRaisesRegex(UsageError, "overridden by plan override"):
             validate_work(self.store, self.history, TASK, 6, None, WORK)
         validate_work(self.store, self.history, TASK, 6, "override", WORK, implementation=False)
+        # The status follows the override, as validate_work does.
+        self.assertEqual(task_statuses(self.store, self.history)[TASK]["status"], "within_authorized_budget")
         validate_store(self.store, self.history)
 
     def test_a_report_must_be_the_one_supervision_enrolled(self):

@@ -1242,7 +1242,11 @@ def task_statuses(store, assignments):
                         and row["role"] in {"developer", "release"} and row["status"] in PENDING_STATUSES), None)
         checkpoint_row = next((row for row in reversed(store["checkpoints"]) if row["task"] == task), None)
         plan = next((row for row in reversed(active_plans(store)) if row["task"] == task and row["last_fix"] > count), None)
-        stopped = any(item["task"] == task and item["remedy"] == "stop" for item in store["diagnoses"])
+        # A `stop` the operator overrode is no longer terminal, the same way
+        # validate_work reads it (#407).
+        terminal = next((item for item in store["diagnoses"] if item["task"] == task and item["remedy"] == "stop"), None)
+        stopped = terminal is not None and not any(
+            row["task"] == task and row["first_fix"] > terminal["fix_round"] for row in active_plans(store))
         status = ("dispatch_outcome_unknown" if pending else "diagnosed_stop" if stopped
                   else "within_authorized_budget" if plan or count < DEFAULT_FIX_LIMIT
                   else "awaiting_diagnosis" if checkpoint_row and checkpoint_row["fix_round"] == count else "checkpoint_required")

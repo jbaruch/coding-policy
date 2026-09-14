@@ -171,10 +171,12 @@ class RecoveryCommandTests(fixture.CliCase):
     def test_a_bound_lead_must_cite_the_enrolled_report(self):
         # coding-policy#407: every team round is supervised, so the public
         # command resolves the enrollment and refuses anything else.
-        import os
         from teamlead import supervision
         self.seed_cap(diagnosis_only=True, skip_diagnosis=True)
-        os.environ.setdefault("XDG_STATE_HOME", str(self.tmp / "xdg"))
+        # Restored on teardown: a leaked path outlives this test's temp dir.
+        environment = patch.dict(os.environ, {"XDG_STATE_HOME": str(self.tmp / "xdg")})
+        environment.start()
+        self.addCleanup(environment.stop)
         who = supervision.identity("lead-native", str(self.tmp), "fixture", pane_id="lead-pane")
         supervision.bind(self.state, who, AT, root=self.tmp / "supervision-bindings")
         delivered = self.tmp / "delivered-diagnosis.md"
