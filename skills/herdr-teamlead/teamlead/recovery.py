@@ -383,6 +383,26 @@ def _remedy_options(store, task):
     return floor, repeat
 
 
+def applied_judge_dispatch(store, assignments, task, judge_agent):
+    """The applied judge dispatch whose report a diagnosis for `task` cites.
+
+    `diagnose` rules on the pinned judge's completed assignment after the
+    latest developer attempt, so the enrollment binding its report is the one
+    for THAT dispatch. Resolving by newest-for-task-and-agent instead let an
+    older enrollment stand in when the dispatch persisted and its enrollment or
+    refinement then failed (#412). None when no such dispatch is on record --
+    the caller has no enrollment to offer, and `diagnose` refuses.
+    """
+    developer = latest_assignment(assignments, task=task, role="developer", status="applied")
+    judge = latest_assignment(assignments, task=task, role="judge", agent=judge_agent, status="applied")
+    if developer is None or judge is None or not assignment_after(assignments, judge[0], developer[0]):
+        return None
+    return next((row for row in store["dispatches"]
+                 if row.get("assignment_index") == judge[0] and row.get("role") == "judge"
+                 and row.get("task") == task and row.get("agent") == judge_agent
+                 and row.get("status") == "applied"), None)
+
+
 def diagnose(store, assignments, data, at, judge_agent, enrolled_report, supervised, investigations=()):
     """Record the judge's diagnosis of a fix loop that did not converge.
 
@@ -1125,8 +1145,20 @@ def _validate_refusals(store):
         if positive(row["bound"], "diagnosis bound") and row["plan"] is None:
             raise UsageError("A bounded remedy records the plan its bound authorizes; preserve the ledger for owner recovery.", {})
         plan = _item(store["plans"], row["plan"], "diagnosis plan")
+        # Every field `diagnose` derives for the plan, not three of them: a
+        # same-task plan carrying another checkpoint, base, scope, path set,
+        # fix range or supersession used to pass here, after which
+        # `validate_work` enforced that unrelated plan's budget and scope
+        # against this diagnosis (#412).
         if (plan["task"] != row["task"] or plan["additional_fixes"] != row["bound"]
-                or plan["authorization"]["source"] != row["judge_evidence"]["path"]):
+                or plan["authorization"]["source"] != row["judge_evidence"]["path"]
+                or plan["checkpoint"] != row["checkpoint"]
+                or plan["base_revision"] != row["base_revision"]
+                or plan["scope"] != row["scope"]
+                or plan["allowed_paths"] != row["allowed_paths"]
+                or plan["first_fix"] != row["fix_round"] + 1
+                or plan["last_fix"] != row["fix_round"] + row["bound"]
+                or plan.get("supersedes") != row.get("supersedes")):
             raise UsageError("A diagnosis plan does not match the remedy that authorized it; preserve the ledger for owner recovery.", {})
 
 

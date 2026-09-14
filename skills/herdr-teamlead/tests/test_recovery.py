@@ -455,6 +455,35 @@ class RecoveryTests(unittest.TestCase):
             with self.assertRaisesRegex(UsageError, "another task, base or fix round"):
                 validate_store(corrupt, self.history)
 
+    def test_a_diagnosis_plan_is_matched_on_every_field_the_remedy_derives(self):
+        # coding-policy#412: the check compared task, bound and authorization
+        # source alone, so a same-task plan carrying another scope or path set
+        # could be attached and `validate_work` would then enforce ITS budget
+        # and scope against this diagnosis.
+        self.seed_checkpoint()
+        self.run_diagnosis(self.diagnosis("diag-1", "continue", 2), "judge")
+        for field, value in (("scope", "Something else entirely"),
+                             ("allowed_paths", ["docs/*"])):
+            with self.subTest(field=field):
+                corrupt = copy.deepcopy(self.store)
+                plan = next(row for row in corrupt["plans"] if row["id"] == corrupt["diagnoses"][0]["plan"])
+                plan[field] = value
+                with self.assertRaisesRegex(UsageError, "does not match the remedy that authorized it"):
+                    validate_store(corrupt, self.history)
+        # The rest are caught by the plan's own guards; the ledger is refused
+        # either way, and no substitution reaches `validate_work`.
+        for field, value in (("checkpoint", "another-checkpoint"),
+                             ("base_revision", "f" * 40),
+                             ("first_fix", 9),
+                             ("last_fix", 99),
+                             ("supersedes", "some-other-plan")):
+            with self.subTest(field=field):
+                corrupt = copy.deepcopy(self.store)
+                plan = next(row for row in corrupt["plans"] if row["id"] == corrupt["diagnoses"][0]["plan"])
+                plan[field] = value
+                with self.assertRaises(UsageError):
+                    validate_store(corrupt, self.history)
+
     def test_two_corrections_share_one_approval_and_the_first_outside_budget_refuses(self):
         plan = self.approve()
         self.assertEqual((plan["first_fix"], plan["last_fix"]), (6, 7))

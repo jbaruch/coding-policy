@@ -1055,17 +1055,19 @@ def cmd_recovery(args, client=None, warn=None, trace=None):
         result = recovery.authorize_plan(store, history, data, at)
     elif args.command == "diagnose":
         judge = load_judge(_config_path(args))
-        # Supervision knows where the judge's report was meant to land; a
-        # dispatch marked applied proves only the send (#407).
         # Supervision knows where the pinned judge's report was meant to land;
-        # a dispatch marked applied proves only the send (#407).
+        # a dispatch marked applied proves only the send (#407). The
+        # enrollment is resolved by that dispatch's own identity, so an older
+        # enrollment for the same task and judge cannot stand in for it
+        # (#412).
         enrolled = None
         if judge is not None and isinstance(data, dict):
-            member = next((item for item in reversed(supervision.load(state_path)["members"])
-                           if item["assignment"]["task"] == data.get("task")
-                           and item["assignment"]["agent"] == judge.agent), None)
-            if member is not None:
-                enrolled = supervision.expected_assignment(member)["report"]
+            dispatch = recovery.applied_judge_dispatch(store, history, data.get("task"), judge.agent)
+            if dispatch is not None:
+                member = next((item for item in supervision.load(state_path)["members"]
+                               if item["id"] == dispatch["id"]), None)
+                if member is not None:
+                    enrolled = supervision.expected_assignment(member)["report"]
         result = recovery.diagnose(store, history, data, at, judge.agent if judge else None, enrolled,
                                    supervision.dispatch_binding(state_path) is not None,
                                    state["specialist_assessments"])
