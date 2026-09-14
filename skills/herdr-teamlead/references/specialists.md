@@ -92,8 +92,33 @@ Run it before `plan`, with the roles and requirements that round intends:
 
 ```bash
 teamlead detect-triggers --repo <dir> --base <ref> [--head <ref>] \
-  --roles <role[,role...]> [--requirements <file>] [--decisions <file>]
+  --roles <role[,role...]> [--requirements <file>] [--planned <file>] \
+  [--decisions <file>]
 ```
+
+## Declare a pre-implementation round's surfaces
+
+The triggers gate work before implementation, and a task's first round has
+nothing committed to classify. `--planned` supplies the surfaces the work will
+touch, classified against the same declaration. A round that classifies neither
+a diff nor a plan is refused.
+
+```json
+{
+  "schema_version": 1,
+  "added": ["skills/new-thing/mod.py", "docs/new-guide.md"],
+  "changed": ["skills/herdr-teamlead/teamlead/recovery.py"],
+  "package_lines": {"skills/herdr-teamlead": 800},
+  "cli_surface": ["skills/herdr-teamlead/teamlead/cli.py"]
+}
+```
+
+`added` and `changed` are repo-relative paths the round will create or edit.
+`package_lines` states the lines the round will change in a package, for the
+architect trigger's size. `cli_surface` names the declared CLI spec paths the
+round will add a command, flag or refusal to; a path outside
+`cli_spec_paths` is refused. State `[]` or `{}` for what this round has none
+of. A later round classifies its diff, which is evidence rather than intent.
 
 Exit 0 means every fired trigger is staffed or answered. Exit 1 with an
 `unaddressed_trigger` error names the triggers that are neither; re-run it

@@ -149,15 +149,17 @@ Choose the responsibilities needed next under `references/specialists.md`.
 Supply its requirements file for specialized work. Keep the developer reserved
 through early fixes; schedule consultation and verification as the task needs them.
 
-The composition triggers decide part of that roster. Classify the diff against
-this repo's declaration first:
+The composition triggers decide part of that roster. Classify this round
+against the repo's declaration first. Phase 1 has no diff yet, so it passes
+`--planned` naming the surfaces the work will touch; a round with work already
+written classifies that work:
 
 ```bash
 CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
 bash "$CP/skills/herdr-teamlead/teamlead.sh" detect-triggers \
   --repo <repo-path> --base <recorded-base> [--head <pushed-head>] \
   --roles <role[,role...]> [--requirements <requirements.json>] \
-  [--decisions <decisions.json>]
+  [--planned <planned.json>] [--decisions <decisions.json>]
 ```
 
 Exit 0 means every fired trigger is staffed or answered. On exit 1, read the

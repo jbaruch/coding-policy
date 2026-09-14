@@ -348,7 +348,10 @@ class ThisRepoDeclarationTest(unittest.TestCase):
                      "skills/herdr-teamlead/teamlead/assign.py",
                      "skills/herdr-teamlead/teamlead/composition.py",
                      "skills/herdr-teamlead/teamlead/cli.py",
+                     "skills/herdr-teamlead/teamlead/tiers.py",
+                     "skills/herdr-teamlead/teamlead/launch.py",
                      "skills/herdr-teamlead/teamlead/triggers.py",
+                     "skills/herdr-teamlead/teamlead.sh",
                      ".herdr/triggers.json",
                      "rules/agent-team-operation.md",
                      "rules/review-severity.md",
@@ -367,6 +370,102 @@ class ThisRepoDeclarationTest(unittest.TestCase):
                                      {"skills/herdr-teamlead/teamlead/recovery.py":
                                       ['        raise UsageError("state the surface", {})']})
         self.assertEqual(len(found), 1)
+
+
+class PlannedSurfacesTest(TempCase):
+    """A pre-implementation round has no diff; it declares its surfaces."""
+
+    def setUp(self):
+        self.tmp = self.temp_dir()
+        (self.tmp / ".herdr").mkdir()
+        (self.tmp / triggers.DECLARATION_FILE).write_text(json.dumps(DECLARATION))
+        self.plan = self.tmp / "planned.json"
+        self.calls = []
+
+    def runner(self, responses=None):
+        responses = responses or {}
+        def run(arguments):
+            self.calls.append(arguments)
+            for key, value in responses.items():
+                if key in arguments:
+                    return value
+            return ""
+        return run
+
+    def write(self, **overrides):
+        payload = {"schema_version": 1, "added": [], "changed": [], "package_lines": {}, "cli_surface": []}
+        payload.update(overrides)
+        self.plan.write_text(json.dumps(payload))
+        return str(self.plan)
+
+    def test_an_empty_round_without_a_plan_is_refused(self):
+        with self.assertRaises(UsageError) as caught:
+            triggers.run_command(namespace(repo=self.tmp), runner=self.runner())
+        self.assertIn("--planned", caught.exception.message)
+
+    def test_a_planned_new_package_fires_the_architect(self):
+        payload, failure = triggers.run_command(
+            namespace(repo=self.tmp, planned=self.write(added=["src/new/mod.py"])), runner=self.runner())
+        self.assertEqual(payload["fired"], ["architect"])
+        assert failure is not None
+
+    def test_a_planned_package_above_the_stated_size_fires_the_architect(self):
+        payload, _failure = triggers.run_command(
+            namespace(repo=self.tmp, planned=self.write(changed=["src/old/a.py"], package_lines={"src/old": 51})),
+            runner=self.runner({"ls-tree": "src/old/a.py\n"}))
+        self.assertEqual(payload["fired"], ["architect"])
+
+    def test_a_planned_package_at_the_stated_size_stays_quiet(self):
+        payload, failure = triggers.run_command(
+            namespace(repo=self.tmp, planned=self.write(changed=["src/old/a.py"], package_lines={"src/old": 50})),
+            runner=self.runner({"ls-tree": "src/old/a.py\n"}))
+        self.assertEqual(payload["fired"], [])
+        self.assertIsNone(failure)
+
+    def test_a_planned_trust_boundary_fires_security(self):
+        payload, _failure = triggers.run_command(
+            namespace(repo=self.tmp, planned=self.write(changed=["src/auth/token.py"])),
+            runner=self.runner({"ls-tree": "src/auth/token.py\n"}))
+        self.assertEqual(payload["fired"], ["security"])
+
+    def test_a_planned_document_fires_documentation(self):
+        payload, _failure = triggers.run_command(
+            namespace(repo=self.tmp, planned=self.write(added=["docs/guide.md"])), runner=self.runner())
+        self.assertEqual(payload["fired"], ["documentation"])
+
+    def test_a_planned_cli_surface_fires_ux_product(self):
+        payload, _failure = triggers.run_command(
+            namespace(repo=self.tmp, planned=self.write(cli_surface=["src/cli/main.py"], changed=["src/cli/main.py"])),
+            runner=self.runner({"ls-tree": "src/cli/main.py\n"}))
+        self.assertIn("ux-product", payload["fired"])
+        row = next(row for row in payload["triggers"] if row["trigger"] == "ux-product")
+        self.assertEqual(row["signals"][0]["signal"], "planned_cli_surface")
+
+    def test_a_planned_cli_surface_outside_the_spec_paths_is_refused(self):
+        with self.assertRaises(UsageError) as caught:
+            triggers.run_command(namespace(repo=self.tmp, planned=self.write(cli_surface=["src/old/a.py"])),
+                                 runner=self.runner())
+        self.assertIn("declared CLI spec paths", caught.exception.message)
+
+    def test_a_staffed_plan_passes(self):
+        payload, failure = triggers.run_command(
+            namespace(repo=self.tmp, planned=self.write(added=["src/new/mod.py"]), roles="developer,architect"),
+            runner=self.runner())
+        self.assertIsNone(failure)
+        self.assertEqual(payload["unaddressed"], [])
+
+    def test_a_malformed_plan_is_refused(self):
+        for payload in ({"schema_version": 2, "added": [], "changed": [], "package_lines": {}, "cli_surface": []},
+                        {"schema_version": 1, "added": [], "changed": [], "package_lines": []},
+                        {"schema_version": 1, "added": [], "changed": [], "package_lines": {"src/old": -1}, "cli_surface": []}):
+            self.plan.write_text(json.dumps(payload))
+            with self.assertRaises(UsageError):
+                triggers.load_plan(self.plan)
+
+    def test_an_unreadable_plan_is_refused(self):
+        with self.assertRaises(UsageError) as caught:
+            triggers.load_plan(self.tmp / "absent.json")
+        self.assertIn("Cannot read planned surfaces", caught.exception.message)
 
 
 class RunCommandTest(TempCase):
@@ -403,7 +502,8 @@ class RunCommandTest(TempCase):
         self.assertIn(["ls-tree", "--name-only", "MERGEBASE", "--", "src/new/"], self.calls)
 
     def test_no_head_reads_the_working_tree(self):
-        payload, _failure = triggers.run_command(namespace(repo=self.tmp), runner=self.runner({}))
+        responses = {"--name-status": "M\0README.md\0", "--numstat": "1\t1\tREADME.md\0"}
+        payload, _failure = triggers.run_command(namespace(repo=self.tmp), runner=self.runner(responses))
         self.assertIn("BASE", self.calls[0])
         self.assertEqual(payload["head"], "worktree")
 
@@ -435,10 +535,11 @@ class RunCommandTest(TempCase):
         assert failure is not None
 
     def test_untracked_files_are_only_collected_without_a_head(self):
-        triggers.run_command(namespace(repo=self.tmp, head="HEAD"), runner=self.runner({}))
+        responses = {"--name-status": "M\0README.md\0", "--numstat": "1\t1\tREADME.md\0"}
+        triggers.run_command(namespace(repo=self.tmp, head="HEAD"), runner=self.runner(responses))
         self.assertFalse(any("--others" in call for call in self.calls))
         self.calls.clear()
-        triggers.run_command(namespace(repo=self.tmp), runner=self.runner({}))
+        triggers.run_command(namespace(repo=self.tmp), runner=self.runner(responses))
         self.assertTrue(any("--others" in call for call in self.calls))
 
     def test_roles_are_read_from_the_comma_list(self):
@@ -535,11 +636,20 @@ class DetectTriggersCommandTest(TempCase):
         self.assertEqual(json.loads(out)["fired"], ["architect"])
 
     def test_a_pushed_head_ignores_the_working_tree(self):
+        (self.tmp / "README.md").write_text("start\nmore\n")
+        self.git("add", "-A")
+        self.git("commit", "-qm", "edit readme")
+        # Untracked in the working tree, absent from the pushed commits.
         (self.tmp / "docs").mkdir()
         (self.tmp / "docs" / "install.md").write_text("how to install\n")
         code, out, err = self.run_cli("--head", "HEAD")
         self.assertEqual(code, 0, err)
         self.assertEqual(json.loads(out)["fired"], [])
+
+    def test_a_round_with_nothing_to_classify_is_refused(self):
+        code, _out, err = self.run_cli("--head", "HEAD")
+        self.assertEqual(code, 1)
+        self.assertIn("--planned", json.loads(err)["message"])
 
     def test_a_quoted_filename_still_fires_ux_product(self):
         # git quotes a path carrying a quote or a non-ASCII byte in its patch

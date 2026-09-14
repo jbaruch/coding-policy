@@ -55,6 +55,14 @@
   Diagnosis record schema 2 adds `reissue` and `investigator_report`; version-1
   rows migrate with `reissue: false` and `investigator_report: null`.
 
+  Detection has two inputs, because the triggers gate work *before*
+  implementation and a task's first round has nothing committed to read: a
+  diff-only detector reports every trigger quiet on exactly the round the
+  architect and security triggers exist for. `--planned` declares the surfaces
+  the work will touch, classified against the same declaration; a later round
+  classifies its diff, which is evidence rather than intent. A round that
+  classifies neither is refused.
+
   Worktree detection folds in untracked files: `git diff` reports tracked
   changes only, so a whole new package or a new user-facing document — the very
   shapes the architect and documentation triggers exist for — would have fired

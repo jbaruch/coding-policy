@@ -29,7 +29,10 @@ description: Running a multi-agent team — task-based specialist composition, c
 - Fix rounds reaching the task's allowance without converging trigger the investigator
 - Each trigger names its deliverable in `skills/herdr-teamlead/references/specialists.md`
 - The repo states each trigger surface and its package size in its own trigger declaration
-- `teamlead detect-triggers` classifies the round's diff against that declaration before the roles are planned
+- `teamlead detect-triggers` classifies the round against that declaration before the roles are planned
+- A round with work already written classifies its diff
+- A round before implementation declares the surfaces the work will touch, and classifies those
+- A round that classifies neither is refused, never read as no trigger fired
 - The four non-exhaustion triggers fire from that detection, never from the lead's reading of the diff
 - An absent or incomplete declaration is refused, never read as no trigger fired
 - A fired trigger is consulted, or recorded as a staffing decision with its reason the detector reads

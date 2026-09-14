@@ -35,6 +35,7 @@ import fnmatch
 import json
 import subprocess
 from pathlib import Path
+from typing import Any
 
 from .composition import REQUIREMENTS_SCHEMA_VERSION
 from .errors import UsageError
@@ -138,6 +139,45 @@ def load_decisions(path):
     return decisions
 
 
+PLAN_FIELDS = frozenset({"schema_version", "added", "changed", "package_lines", "cli_surface"})
+
+
+def load_plan(path):
+    """Read the surfaces a round intends to touch, before it has a diff.
+
+    The triggers gate work *before* implementation, and a task's first round has
+    nothing committed to read: a diff-only detector reports every trigger quiet
+    on exactly the round the architect and security triggers exist for (#415).
+    The lead declares the intended surfaces here, and the same declaration
+    classifies them. Later rounds keep reading the diff, which is evidence
+    rather than intent.
+    """
+    if path is None:
+        return None
+    try:
+        raw = Path(path).read_text(encoding="utf-8")
+    except OSError as exc:
+        raise UsageError("Cannot read planned surfaces at {} ({}); write the plan or omit --planned.".format(path, exc.strerror), {}) from None
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise UsageError("Planned surfaces {} are invalid JSON ({}); repair the plan.".format(path, exc.msg), {}) from None
+    if not isinstance(payload, dict) or set(payload) != PLAN_FIELDS or payload["schema_version"] != DECLARATION_SCHEMA_VERSION:
+        raise UsageError("Planned surfaces must be a schema_version {} object with added, changed, package_lines and cli_surface; state [] or {{}} for one this round has none of.".format(
+            DECLARATION_SCHEMA_VERSION), {})
+    plan: dict[str, Any] = {"schema_version": DECLARATION_SCHEMA_VERSION}
+    for field in ("added", "changed", "cli_surface"):
+        plan[field] = _globs(payload[field], "planned " + field)
+    lines = payload["package_lines"]
+    if not isinstance(lines, dict):
+        raise UsageError("Planned package_lines maps a package directory to the lines this round will change there; state {} when none.", {})
+    for name, count in lines.items():
+        if not isinstance(name, str) or not name.strip() or type(count) is not int or count < 0:
+            raise UsageError("Planned package_lines needs a package directory and a non-negative line count; state the size this round will change.", {})
+    plan["package_lines"] = dict(lines)
+    return plan
+
+
 def load_requirements(path):
     """Collect the specialties a requirements file staffs, for trigger cover."""
     if path is None:
@@ -200,17 +240,19 @@ def package_of(path, roots):
     return None
 
 
-def detect(declaration, changes, churn, base_packages):
+def detect(declaration, changes, churn, base_packages, planned_lines=None):
     """Classify one diff against the declaration. Pure.
 
     `changes` maps a repo-relative path to its git status letter under
     `--no-renames`, so a rename reads as a delete plus an add. `churn` maps a
     path to its added-plus-deleted line count; a binary path contributes 0.
     `base_packages` maps each candidate package directory to whether the base
-    revision held it -- the one fact the diff cannot supply.
+    revision held it -- the one fact the diff cannot supply. `planned_lines`
+    seeds a package's changed-line count from the round's declared plan, for
+    work that has not been written yet.
     """
     fired = {}
-    packages = {}
+    packages = dict(planned_lines or {})
     for path in changes:
         package = package_of(path, declaration["package_roots"])
         if package is not None:
@@ -371,6 +413,7 @@ def run_command(args, runner=None):
     declaration = load_declaration(args.repo)
     decisions = load_decisions(getattr(args, "decisions", None))
     specialties = load_requirements(getattr(args, "requirements", None))
+    plan = load_plan(getattr(args, "planned", None))
     roles = [role for role in (getattr(args, "roles", None) or "").split(",") if role]
     run = runner if runner is not None else git_runner(args.repo)
     head = getattr(args, "head", None)
@@ -384,12 +427,24 @@ def run_command(args, runner=None):
     untracked = {}
     if not head:
         collect_untracked(run, args.repo, changes, churn, untracked)
+    if not changes and plan is None:
+        raise UsageError("This round changes nothing yet, so the diff classifies nothing; declare the surfaces the work will touch with --planned before the developer is dispatched.", {})
+    planned_lines = {}
+    if plan is not None:
+        for path in plan["added"]:
+            changes.setdefault(path, "A")
+        for path in plan["changed"]:
+            changes.setdefault(path, "M")
+        planned_lines = plan["package_lines"]
+        for path in plan["cli_surface"]:
+            if not matches(path, declaration["cli_spec_paths"]):
+                raise UsageError("Planned cli_surface names {}, which is outside this repo's declared CLI spec paths; name a spec path or widen the declaration.".format(path), {})
     candidates = sorted({package for package in
                          (package_of(path, declaration["package_roots"]) for path in changes)
                          if package is not None})
     base_packages = {name: bool(run(["ls-tree", "--name-only", left, "--", name + "/"]).strip())
                      for name in candidates}
-    fired = detect(declaration, changes, churn, base_packages)
+    fired = detect(declaration, changes, churn, base_packages, planned_lines)
     spec_paths = sorted(path for path in changes if matches(path, declaration["cli_spec_paths"]))
     tracked_specs = [path for path in spec_paths if path not in untracked]
     if spec_paths and declaration["cli_surface_markers"]:
@@ -399,6 +454,9 @@ def run_command(args, runner=None):
         surface = cli_surface(declaration, changes, added)
         if surface:
             fired["ux-product"] = surface
+    if plan is not None and plan["cli_surface"]:
+        fired.setdefault("ux-product", []).extend(
+            {"signal": "planned_cli_surface", "evidence": path} for path in plan["cli_surface"])
     return report(declaration, args.base, head or "worktree", fired, roles, specialties, decisions)
 
 
@@ -413,3 +471,5 @@ def register_command(sub, common):
     parser.add_argument("--roles", metavar="ROLE[,ROLE...]", help="Roles this round plans, as given to `plan`.")
     parser.add_argument("--requirements", metavar="FILE", help="The requirements file this round gives `plan`.")
     parser.add_argument("--decisions", metavar="FILE", help="Recorded staffing decisions for fired triggers.")
+    parser.add_argument("--planned", metavar="FILE",
+                        help="Surfaces this round will touch, for a pre-implementation round with no diff yet.")
