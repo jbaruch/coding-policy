@@ -201,8 +201,11 @@ class ReleaseGateTest(RestorationCase):
 
     def test_name_bound_to_another_pane_refuses_without_start(self):
         self.runner.script("pane process-info", SHELL_ONLY).script("agent get", reserved(pane="w9:p1"))
-        with self.assertRaisesRegex(HerdrError, r"bound to pane 'w9:p1', not the restoration pane 'w7:p1'"):
+        with self.assertRaises(HerdrError) as raised:
             self.restore()
+        self.assertRegex(raised.exception.message, r"bound to pane 'w9:p1', not the restoration pane 'w7:p1'")
+        # The refusal names the recovery, not only the conflict.
+        self.assertIn("reconcile the archived identity before retrying", raised.exception.message)
         self.assertNoStart()
 
     def test_malformed_herdr_data_refuses_before_any_start(self):

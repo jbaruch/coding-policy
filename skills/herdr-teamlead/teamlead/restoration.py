@@ -123,7 +123,7 @@ def _name_state(client, name, pane, attempted=False):
         raise
     if record.get("pane_id") != pane:
         raise HerdrError(
-            "Agent name {!r} is bound to pane {!r}, not the restoration pane {!r}; the name belongs to another worker. {}".format(name, record.get("pane_id"), pane, _start_clause(attempted)),
+            "Agent name {!r} is bound to pane {!r}, not the restoration pane {!r}; the name belongs to another worker. {} Inspect that worker and both panes and reconcile the archived identity before retrying; rename or stop nothing on its account.".format(name, record.get("pane_id"), pane, _start_clause(attempted)),
             {"agent": name, "pane": pane, "bound_pane": record.get("pane_id")},
         )
     return "reserved"
