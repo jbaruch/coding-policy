@@ -22,6 +22,7 @@ TASK = "recovery-fixture"
 BASE = "a" * 40
 HEAD = "b" * 40
 AUTH = {"source": "fixture operator message", "quote": "Approve this task and the stated correction bounds."}
+REQUEST = {"source": "fixture operator message", "quote": "Ask the judge to rule on this exhaustion."}
 WORK = {"base_revision": BASE, "scope": "Correct parser findings", "paths": ["src/parser.py"], "findings": ["F1"]}
 
 
@@ -139,7 +140,8 @@ class RecoveryCommandTests(fixture.CliCase):
         judge.write_text("RULING: amend — correct F1\nACTION: Use one canonical parser\n")
         code, _, err = self.owner("checkpoint", {"id": "cap-5", "task": TASK, "defect": "F1 is still blocking",
             "previous_attempts": "Five fixes changed parser handling", "progress": "Most fixtures now pass",
-            "change_in_approach": "Use a single parser", "judge_report": str(judge)})
+            "change_in_approach": "Use a single parser", "judge_report": str(judge),
+            "requested_by": REQUEST})
         self.assertEqual(code, 0, err)
         # The operator's budget overrides a recorded remedy; a bound round
         # enrolls the judge's report before its diagnosis (#407).

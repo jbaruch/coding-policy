@@ -124,17 +124,13 @@ def _migrate_diagnoses(store):
     return migrated
 
 
-def migrate_store(store):
-    """Upgrade the enclosing recovery document and its checkpoint records."""
-    if not isinstance(store, dict) or type(store.get("schema_version")) is not int:
-        return False
-    # Both run: `or` would skip the second whenever the first reported work,
-    # leaving version-1 diagnoses for a validator that accepts only version 2.
-    checkpoints = _migrate_checkpoints(store)
-    migrated = _migrate_diagnoses(store) or checkpoints
-    version = store["schema_version"]
-    if version not in {1, 2, 3, 4, 5, 6, 7}:
-        return migrated
+def _refuse_unowned_legacy(store, version):
+    """Refuse a legacy document holding records its own version never wrote.
+
+    Read-only, and it runs before any row is stamped: a document rejected here
+    used to be rejected with its version-1 checkpoints and diagnoses already
+    upgraded in memory (#400). Returns the record names this version adds.
+    """
     dispatches = store.get("dispatches")
     if not isinstance(dispatches, list):
         raise UsageError("Older recovery requires a dispatches array; restore the original owner-written store.", {})
@@ -167,6 +163,23 @@ def migrate_store(store):
         added.extend(["hand_clearances", "historical_attempts"])
     if any(name in store for name in added):
         raise UsageError("Older recovery contains unowned newer records; preserve it for owner recovery.", {})
+    return added
+
+
+def migrate_store(store):
+    """Upgrade the enclosing recovery document and its checkpoint records."""
+    if not isinstance(store, dict) or type(store.get("schema_version")) is not int:
+        return False
+    version = store["schema_version"]
+    legacy = version in {1, 2, 3, 4, 5, 6, 7}
+    added = _refuse_unowned_legacy(store, version) if legacy else None
+    # Both run: `or` would skip the second whenever the first reported work,
+    # leaving version-1 diagnoses for a validator that accepts only version 2.
+    checkpoints = _migrate_checkpoints(store)
+    migrated = _migrate_diagnoses(store) or checkpoints
+    if not legacy:
+        return migrated
+    assert added is not None
     store.update({name: [] for name in added})
     store["schema_version"] = RECOVERY_STORE_VERSION
     return True
@@ -284,10 +297,12 @@ def checkpoint(store, assignments, data, at, judge_agent):
     as before.
     """
     required = {"id", "task", "defect", "previous_attempts", "progress", "change_in_approach"}
-    if not isinstance(data, dict) or not required <= set(data) or set(data) - required - {"judge_report"}:
-        raise UsageError("Checkpoint requires id, task, defect, previous_attempts, progress and change_in_approach, and allows an optional judge_report; describe the concrete remaining work.", {})
-    for key in set(data):
+    if not isinstance(data, dict) or not required <= set(data) or set(data) - required - {"judge_report", "requested_by"}:
+        raise UsageError("Checkpoint requires id, task, defect, previous_attempts, progress and change_in_approach, and allows an optional judge_report with the requested_by receipt that authorized it; describe the concrete remaining work.", {})
+    for key in set(data) - {"requested_by"}:
         text(data[key], key)
+    if "requested_by" in data and "judge_report" not in data:
+        raise UsageError("requested_by records the operator request a cited ruling answers; record the checkpoint without it when no ruling is cited.", {})
     task = task_record(store, data["task"])
     count = confirmed_fix(assignments, data["task"])
     if count < DEFAULT_FIX_LIMIT:
@@ -307,6 +322,13 @@ def checkpoint(store, assignments, data, at, judge_agent):
         judge = latest_assignment(assignments, task=data["task"], role="judge", agent=judge_agent, status="applied")
         if not judge_agent or developer is None or judge is None or not assignment_after(assignments, judge[0], developer[0]):
             raise UsageError("A cited judge report needs the configured pinned judge's completed assignment after the latest developer attempt; omit judge_report to send the exhausted allowance straight to the operator.", {})
+        # The ruling is the operator's to request, and "operator-requested" was
+        # the ledger's word for a request nothing in it recorded (#400). The
+        # receipt is the same source/quote shape every other operator decision
+        # carries.
+        if "requested_by" not in data:
+            raise UsageError("A cited ruling is the operator's to request: record their request as requested_by (source and quote), or record the checkpoint without judge_report.", {})
+        authorization(data["requested_by"])
         evidence, body = receipt(data["judge_report"])
         if not re.search(r"^RULING: (?:uphold A|uphold B|amend)(?:\s|$)", body, re.MULTILINE) or not re.search(r"^ACTION: \S", body, re.MULTILINE):
             raise UsageError("The judge report must contain its completed RULING and ACTION; a blocked judge requires the operator's answer first.", {})
@@ -335,15 +357,23 @@ def investigated_after(assignments, row, task, developer_index):
 
 
 def require_investigation_before_judge(store, assignments, task, investigations):
-    """Refuse a judge dispatch at an exhausted allowance with no assessment.
+    """Refuse a judge dispatch at an exhausted allowance the seat cannot answer.
 
     The judge rules on the investigator's causal assessment (#408), so the
     expensive seat is never spent before that assessment exists. A judge
     dispatched for an ordinary dispute is untouched: the gate applies only
     while the task sits at an exhausted allowance with no unspent bound.
+
+    A task whose diagnoses reached `stop` is refused outright. `stop` ends
+    implementation, the ladder is spent, and the one operator-requested ruling
+    a checkpoint may cite is bounded per task -- so there is nothing this
+    dispatch could record, and the bound is better read before the round than
+    after its report exists (#400).
     """
     if not task or task not in store["tasks"]:
         return None
+    if any(row["remedy"] == "stop" for row in diagnoses_for(store, task)):
+        raise UsageError("Task {} is diagnosed `stop`: implementation has ended and its one operator-requested ruling is spent, so a judge round records nothing. Ship what is clean and track the remainder.".format(task), {})
     count = confirmed_fix(assignments, task)
     if count < DEFAULT_FIX_LIMIT:
         return None
@@ -1293,6 +1323,7 @@ def validate_store(store, assignments):
             text(row["scope"], "task scope")
             paths(row["allowed_paths"], "task paths")
             authorization(row["authorization"])
+        ruled_tasks = set()
         for row in store["checkpoints"]:
             task = task_record(store, row["task"])
             if row["base_revision"] != task["base_revision"] or positive(row["fix_round"], "checkpoint fix") < DEFAULT_FIX_LIMIT:
@@ -1306,6 +1337,12 @@ def validate_store(store, assignments):
                 text(row["judge_agent"], "judge_agent")
                 text(row["judge_report"], "judge_report")
                 validate_receipt(row["judge_evidence"])
+                # `checkpoint` refuses a second cited ruling as it writes one,
+                # but the read boundary checked each row alone, so a ledger
+                # holding two for one task validated (#400).
+                if row["task"] in ruled_tasks:
+                    raise UsageError("A task cites more than one operator-requested ruling; the operator grants at most one. Preserve the ledger for owner recovery.", {})
+                ruled_tasks.add(row["task"])
         for row in store["plans"]:
             source = _item(store["checkpoints"], row["checkpoint"], "checkpoint")
             authorization(row["authorization"])
