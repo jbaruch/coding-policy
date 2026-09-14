@@ -167,19 +167,33 @@ stderr object: an absent declaration is written first (`references/specialists.m
 and an `unaddressed_trigger` is staffed in the roles below or answered by a
 recorded decision with its reason. Re-run the command with the updated
 declaration, roles, requirements and decisions after every such change, and
-plan only once it exits 0:
+plan only once it exits 0.
+
+A round filling several seats of one role validates its partition first, and
+`plan --partition` then seats one worker per slice:
+
+```bash
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
+bash "$CP/skills/herdr-teamlead/teamlead.sh" validate-partition \
+  --repo <repo-path> --base <recorded-base> [--head <pushed-head>] \
+  --partition <partition.json>
+```
+
+Exit 1 names every unowned changed path and every overlap. Fix the partition
+and re-run; plan only once it exits 0.
 
 ```bash
 CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
 bash "$CP/skills/herdr-teamlead/teamlead.sh" plan \
   --roles <role[,role...]> [--requirements <requirements.json>] \
-  [--exclude <role>=<agent>[,<agent>...]]... \
+  [--exclude <role>=<agent>[,<agent>...]]... [--partition <partition.json>] \
   [--round <role>=<round-type>] [--round-context <evidence.json>] \
   --task <task-id> [--fix-round <N>] [--correction-plan <id> --work <work.json>]
 ```
 
-Emits the role plan without worker contact. On exit 1, resolve the diagnostic
-before continuing. Apply the Step 5 constraints in `references/round-setup.md`:
+Emits the role plan without worker contact; a partitioned role is seated once
+per slice as `<role>#<slice>`. On exit 1, resolve the diagnostic before
+continuing. Apply the Step 5 constraints in `references/round-setup.md`:
 exclude contributors from verification, reserve the developer through early fixes,
 preserve task identity and fix count, and reuse recorded correction bounds.
 Tier and qualification contracts:

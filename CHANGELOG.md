@@ -1,5 +1,39 @@
 # Changelog
 
+### Added
+
+- **A review round can fill several seats of one role against a declared
+  partition (#409).** A reviewer roaming an unbounded surface that reports no
+  findings has not established the surface is clean — only that this pass
+  happened not to reach a defect. One twenty-round delivery ran blocking
+  findings of 3, 3, 2, 1, 1, 1, 2, 2, 1, 1: flat at about one for seven
+  consecutive rounds, each closing its own finding and each surfacing a new one
+  somewhere no previous reviewer had looked. No state meant "reviewed". The
+  same delivery used two of nine declared workers, because roles are filled one
+  worker at a time.
+
+  `teamlead validate-partition` decides whether a partition can carry a
+  verdict: every changed path belongs to exactly one slice. A gap is
+  indistinguishable from a clean slice in the result, and an overlap leaves a
+  file two verdicts and no owner, so both refuse by name before a worker is
+  spent. A slice owning nothing refuses too.
+
+  `teamlead plan --partition` seats one worker per slice, reaching the planner
+  as distinct role names (`reviewer#api`) that inherit the role's costs,
+  exclusions, round type and requirements — so capability, contribution
+  exclusion and headroom ordering apply unchanged. A round with no partition is
+  untouched.
+
+  `rules/agent-team-operation.md` Review Before PR carries what the partition
+  then means: each seat's brief names its slice and forbids roaming, an
+  out-of-slice observation goes in its own section and never forms part of that
+  seat's verdict, a slice is saturated when its reviewer reports clean at the
+  current tip, and a change is reviewed when every slice is saturated at one
+  tip. Severity, gating and independence are unchanged. A partition never makes
+  an unreviewable module feel reviewed; slice boundaries that cannot be drawn
+  without cutting through mutual dependencies are a structural finding for the
+  architect trigger (#408), not a bigger partition.
+
 ## 0.3.223 — 2026-09-14
 
 ### Added

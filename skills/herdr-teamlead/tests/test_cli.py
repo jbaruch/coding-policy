@@ -25,8 +25,9 @@ import unittest
 from unittest.mock import patch
 from pathlib import Path
 
-from teamlead import attention
+from teamlead import attention, cli
 from teamlead.cli import build_parser, main
+from teamlead.errors import PlanError
 from teamlead.herdr import HerdrClient
 from teamlead.state import STATE_SCHEMA_VERSION, add_assignment, empty_state, save_state
 
@@ -1491,6 +1492,42 @@ class ApplyCommandTest(CliCase):
         self.assertNotEqual(code, 0)
         self.assertIn("would destroy its contents", err)
         self.assertEqual(self.state.read_text(encoding="utf-8"), self.CORRUPT_STATE)
+
+
+class PartitionSeatsTest(unittest.TestCase):
+    """Several seats of one role reach the planner as distinct role names (#409)."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.path = self.tmp / "partition.json"
+        self.path.write_text(json.dumps({
+            "schema_version": 1,
+            "slices": [{"name": "api", "paths": ["src/api/*"]},
+                       {"name": "core", "paths": ["src/core/*"]}],
+        }))
+
+    def test_a_partition_expands_its_role_into_one_seat_per_slice(self):
+        roles, seats = cli._expand_partition_seats(["developer", "reviewer", "tester"], str(self.path))
+        self.assertEqual(roles, ["developer", "reviewer#api", "reviewer#core", "tester"])
+        self.assertEqual(seats, {"reviewer#api": "reviewer", "reviewer#core": "reviewer"})
+
+    def test_no_partition_leaves_a_single_seat_round_untouched(self):
+        roles, seats = cli._expand_partition_seats(["developer", "reviewer"], None)
+        self.assertEqual((roles, seats), (["developer", "reviewer"], {}))
+
+    def test_a_partition_seating_a_role_nobody_asked_for_refuses(self):
+        with self.assertRaisesRegex(PlanError, "which --roles does not request"):
+            cli._expand_partition_seats(["developer", "tester"], str(self.path))
+
+    def test_each_seat_inherits_its_role_s_inputs(self):
+        _roles, seats = cli._expand_partition_seats(["reviewer"], str(self.path))
+        self.assertEqual(cli._fan_out_seats({"reviewer": ["grok"]}, seats),
+                         {"reviewer": ["grok"], "reviewer#api": ["grok"], "reviewer#core": ["grok"]})
+        # A seat the caller already set keeps its own value.
+        self.assertEqual(cli._fan_out_seats({"reviewer": 1.0, "reviewer#api": 2.0}, seats),
+                         {"reviewer": 1.0, "reviewer#api": 2.0, "reviewer#core": 1.0})
+        self.assertEqual(cli._fan_out_seats({}, seats), {})
+
 
 if __name__ == "__main__":
     unittest.main()

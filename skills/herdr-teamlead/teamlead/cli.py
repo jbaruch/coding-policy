@@ -23,7 +23,7 @@ from types import SimpleNamespace
 from . import __version__
 from .assign import apply as apply_assignments
 from .assign import APPLY_SCHEMA_VERSION, dry_run, native_context_session, normalize_assignments, resolve_paths, validate_fix_history
-from . import attention, composition, engagement, historical, memory, recovery, report_delivery, restoration, role_clear, retrospective, retrospective_runtime, supervision, supervision_runtime, triggers
+from . import attention, composition, engagement, historical, memory, partition, recovery, report_delivery, restoration, role_clear, retrospective, retrospective_runtime, supervision, supervision_runtime, triggers
 from .config import default_config_path, load_config, load_judge, load_role_costs, select_agents
 from .errors import PlanError, StateError, TeamLeadError, UsageError
 from .herdr import (
@@ -131,6 +131,7 @@ def build_parser():
     attention.register_commands(sub, common)
     supervision_runtime.register_commands(sub, common)
     restoration.register_commands(sub, common)
+    partition.register_commands(sub, common)
 
     triggers.register_command(sub, common)
 
@@ -235,6 +236,8 @@ def build_parser():
                              help="Choose a configured round type for a role; never a model override.")
     plan_parser.add_argument("--round-context", metavar="FILE",
                              help="JSON object keyed by role with mechanical/risk evidence for this round.")
+    plan_parser.add_argument("--partition", metavar="FILE",
+                             help="Review partition; seats one worker per slice of the role it names. Validate it with `validate-partition` first.")
     plan_parser.add_argument("--fix-round", type=int, help="Task fix number; late fixes use the top tier.")
     plan_parser.add_argument("--task", help="Original task identity; preserve it through every correction.")
     plan_parser.add_argument("--requirements", metavar="FILE",
@@ -632,8 +635,44 @@ def cmd_measure(args, client=None, warn=None, trace=None):
     }
 
 
+def _expand_partition_seats(roles, partition_path):
+    """Replace the partitioned role with one seat per slice.
+
+    The planner is role-keyed throughout, so several seats of one role reach it
+    as distinct names (`reviewer#api`) mapped back to the role they fill.
+    Returns `(roles, {seat: role})`; an empty map when no partition is given
+    leaves a single-seat round untouched (#409).
+    """
+    if not partition_path:
+        return roles, {}
+    document = partition.load_partition(partition_path)
+    role = partition.partition_role(document)
+    if role not in roles:
+        raise PlanError(
+            "The partition seats {!r}, which --roles does not request; add it, or drop --partition.".format(role),
+            {"role": role, "roles": roles},
+        )
+    seats = partition.seats_for(document, role)
+    expanded = []
+    for item in roles:
+        expanded.extend(seats) if item == role else expanded.append(item)
+    return expanded, seats
+
+
+def _fan_out_seats(mapping, seats):
+    """Give each seat its role's entry, so every role-keyed input still resolves."""
+    if not seats or not mapping:
+        return mapping
+    fanned = dict(mapping)
+    for seat, role in seats.items():
+        if role in mapping and seat not in fanned:
+            fanned[seat] = mapping[role]
+    return fanned
+
+
 def cmd_plan(args, client=None, warn=None, trace=None):
     roles = [role.strip() for role in args.roles.split(",") if role.strip()]
+    roles, seats = _expand_partition_seats(roles, getattr(args, "partition", None))
     excludes = _parse_excludes(args.excludes)
     role_costs = load_role_costs(_config_path(args))
     judge = load_judge(_config_path(args))
@@ -684,6 +723,10 @@ def cmd_plan(args, client=None, warn=None, trace=None):
             {"source": source},
         )
 
+    excludes = _fan_out_seats(excludes, seats)
+    role_costs = _fan_out_seats(role_costs, seats)
+    rounds = _fan_out_seats(rounds, seats)
+    requirements = _fan_out_seats(requirements, seats)
     operator_excludes = {role: list(names) for role, names in excludes.items()}
     constraints = composition.selection_constraints(
         roles, agents, requirements, state["assignments"], args.task,
@@ -1243,6 +1286,10 @@ def cmd_detect_triggers(args, client=None, warn=None, trace=None):
     return triggers.run_command(args)
 
 
+def cmd_validate_partition(args, client=None, warn=None, trace=None):
+    return partition.run_command(args)
+
+
 def cmd_probe_report(args, client=None, warn=None, trace=None):
     if not Path(args.report).is_absolute() or any(ord(char) < 32 for char in args.report) or args.lines < 1:
         raise UsageError("Report probing needs an absolute one-row report path and positive --lines.", {})
@@ -1279,6 +1326,7 @@ COMMANDS = {
     "status": cmd_status,
     **{command: cmd_recovery for command in ("task", "checkpoint", "authorize-corrections", "recover-context", "recover-role-clear", "record-report", "record-refusal", "authorize-refused-dispatch", "diagnose", "reconcile", "record-release-clear", "import-correction", "record-historical-review", "recover-report", "assess-specialist")},
     "detect-triggers": cmd_detect_triggers,
+    "validate-partition": cmd_validate_partition,
     "start-judge": cmd_start_judge,
     "probe-report": cmd_probe_report,
     **{command: cmd_retrospective for command in ("retro-check", "retro-record", "retro-list", "retro-show")},
@@ -1305,7 +1353,7 @@ def main(argv=None, stdout=None, stderr=None, client=None):
     try:
         # Commands that may migrate or write state share its canonical lock.
         # Dry runs, probes, and retrospective reads remain read-only.
-        readonly = args.command in {"probe-report", "detect-triggers", "retro-check", "retro-list", "retro-show"} or getattr(args, "dry_run", False)
+        readonly = args.command in {"probe-report", "detect-triggers", "validate-partition", "retro-check", "retro-list", "retro-show"} or getattr(args, "dry_run", False)
         separate_owner = args.command in memory.COMMANDS | attention.COMMANDS | SUPERVISION_COMMANDS | restoration.COMMANDS
         lock = nullcontext() if readonly or separate_owner else state_lock(retrospective.canonical_state(_state_path(args)))
         with lock:
