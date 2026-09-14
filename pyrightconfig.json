@@ -82,7 +82,9 @@
     "skills/herdr-teamlead/tests/test_specialist_retention.py",
     "skills/herdr-teamlead/tests/test_specialist_recovery.py",
     "skills/herdr-teamlead/tests/test_specialist_cli.py",
-    "skills/herdr-teamlead/tests/test_specialist_delivery.py"
+    "skills/herdr-teamlead/tests/test_specialist_delivery.py",
+    "skills/herdr-teamlead/teamlead/triggers.py",
+    "skills/herdr-teamlead/tests/test_triggers.py"
   ],
   "executionEnvironments": [
     {

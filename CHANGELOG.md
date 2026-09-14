@@ -1,5 +1,84 @@
 # Changelog
 
+### Changed
+
+- **The four non-exhaustion composition triggers are detected from the diff,
+  and four gaps in the shipped diagnosis close (#415).** #408 shipped five
+  triggers. One was enforced in code — `require_investigation_before_judge`
+  refuses a judge dispatch at an exhausted allowance with no assessment. The
+  other four existed only as prose, so the operative rule was "the lead
+  notices, or it does not happen": the same condition #408 was filed to
+  replace, one level up. `rules/language-diagnostics.md` already holds the
+  stricter standard — "a deterministic check nobody runs does not exist".
+
+  `teamlead detect-triggers` is that check. It reads the consuming repo's
+  `.herdr/triggers.json`, classifies the round's diff against the declared
+  surfaces, and fails when a fired trigger is neither staffed nor answered by a
+  recorded staffing decision. Every signal is mechanical: a package directory
+  absent from the base, a changed path in the declared trust-boundary set, an
+  added line carrying a declared CLI-surface marker, an added file in the
+  declared user-facing docs set. Step 5 runs it before `plan`.
+
+  The architect trigger read "above the size the repo states", and a repo that
+  states no size — no grep across a consuming repo's `AGENTS.md`, `CLAUDE.md`
+  or `docs/` found one — had a trigger that fires never or always depending on
+  the reader. `package_change_lines` is now a required declaration field and a
+  missing declaration is refused, never read as "nothing fired".
+
+  The remedy ladder could strand a correct diagnosis. A first `restructure`
+  consumed the middle rung, and a restructure routinely surfaces work the first
+  pass could not see; when its bound exhausted, only `stop` remained, so a
+  diagnosis that needed a second increment terminated the task. A rung is now
+  reissuable once, against a `PROGRESS` line naming what the prior remedy
+  changed. Termination still holds: at most five diagnoses, `stop` still
+  terminal and never repeated.
+
+  `BOUND` had no floor, ceiling or units — `BOUND: 50` conformed. It now counts
+  developer attempts, carries its justification against the cited evidence, and
+  is refused above the ceiling rather than silently honoured; a correction
+  needing more than the task's own original allowance takes the next rung.
+
+  `stop` was terminal with no duty to surface it: a task could be terminated,
+  its remainder recorded as an accepted defect, and the operator learn of it
+  only by going to look. Recording a `stop` now files a user-attention
+  obligation the catch-up presents. Its kind sits outside the gating set — this
+  surfaces the outcome, it gates no dispatch and waits on no answer.
+
+  The judge need not have read the assessment. The gate checked that an
+  assessed consultation existed and was correctly ordered, not that the
+  diagnosis consumed it — while the neighbouring line does bind a path ("a
+  bound lead cites the report supervision enrolled for the pinned judge"). The
+  diagnosis now carries `ASSESSMENT:` naming the investigator report it ruled
+  on, that path must match an assessed consultation for the task, and the
+  record binds it.
+
+  Diagnosis record schema 2 adds `reissue` and `investigator_report`; version-1
+  rows migrate with `reissue: false` and `investigator_report: null`.
+
+  The diagnosis verifies the investigator report against the live file rather
+  than trusting the saved receipt — a report deleted or rewritten since its
+  assessment would otherwise authorize a correction plan on evidence nobody
+  holds any more (`rules/stateful-artifacts.md` Hints, Not Authority).
+
+  Detection has two inputs, because the triggers gate work *before*
+  implementation and a task's first round has nothing committed to read: a
+  diff-only detector reports every trigger quiet on exactly the round the
+  architect and security triggers exist for. `--planned` declares the surfaces
+  the work will touch, classified against the same declaration; a later round
+  classifies its diff, which is evidence rather than intent. A round that
+  classifies neither is refused.
+
+  Worktree detection folds in untracked files: `git diff` reports tracked
+  changes only, so a whole new package or a new user-facing document — the very
+  shapes the architect and documentation triggers exist for — would have fired
+  nothing while it sat untracked. A comparison against a pushed head needs none
+  of this, since an untracked file is in no commit.
+
+  The issue's seventh item — "`teamlead diagnose` is named but absent from the
+  CLI" — does not reproduce. `diagnose` is registered in `cli.py` and listed by
+  `python3 -m teamlead --help`; the help output is long enough that the
+  reporting session appears to have read only its head.
+
 ## 0.3.214 — 2026-09-14
 
 ### Changed

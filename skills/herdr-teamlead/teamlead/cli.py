@@ -11,6 +11,7 @@ I/O contract:
 """
 
 import argparse
+import hashlib
 import json
 import sys
 import time
@@ -22,7 +23,7 @@ from types import SimpleNamespace
 from . import __version__
 from .assign import apply as apply_assignments
 from .assign import APPLY_SCHEMA_VERSION, dry_run, native_context_session, normalize_assignments, resolve_paths, validate_fix_history
-from . import attention, composition, engagement, historical, memory, recovery, report_delivery, restoration, role_clear, retrospective, retrospective_runtime, supervision, supervision_runtime
+from . import attention, composition, engagement, historical, memory, recovery, report_delivery, restoration, role_clear, retrospective, retrospective_runtime, supervision, supervision_runtime, triggers
 from .config import default_config_path, load_config, load_judge, load_role_costs, select_agents
 from .errors import PlanError, StateError, TeamLeadError, UsageError
 from .herdr import (
@@ -130,6 +131,8 @@ def build_parser():
     attention.register_commands(sub, common)
     supervision_runtime.register_commands(sub, common)
     restoration.register_commands(sub, common)
+
+    triggers.register_command(sub, common)
 
     measure_parser = sub.add_parser(
         "measure",
@@ -1008,6 +1011,36 @@ def _require_independent_report(state, task, reviewer):
         raise UsageError("This reviewer contributed to the task; collect an independent report before recording approval.", {})
 
 
+def _record_stopped_task(state_path, diagnosis, at):
+    """Surface a terminal diagnosis to the operator.
+
+    A `stop` remedy ends implementation and records the remainder as a tracked
+    accepted defect, and no exhausted allowance waits on an operator decision.
+    The operator still holds the override, and cannot exercise one they never
+    learn they have (#415), so the terminal remedy lands in the attention queue
+    the catch-up presents. Its kind sits outside `attention.GATING_KINDS`: this
+    surfaces the outcome, it never gates the next dispatch.
+
+    The obligation identity is derived from the diagnosis identity, which is
+    free text, so the digest keeps it inside the queue's identifier alphabet
+    and keeps a replayed diagnosis on its original obligation.
+    """
+    name = "diagnosis-stop-" + hashlib.sha256(diagnosis["id"].encode("utf-8")).hexdigest()[:16]
+    return attention.write(state_path, "record", {
+        "id": name,
+        "kind": "failure",
+        "task": diagnosis["task"],
+        "priority": 80,
+        "title": "Task {} stopped at the judge's diagnosis".format(diagnosis["task"])[:300],
+        "context": "Diagnosis {} returned REMEDY: stop at fix round {}, ruling on the investigator's assessment.".format(
+            diagnosis["id"], diagnosis["fix_round"]),
+        "consequence": "Implementation on this task has ended. What is clean ships; the remainder is a tracked accepted defect under rules/review-severity.md Judge-Accepted Defect Carve-Out.",
+        "resolution_condition": "Record the acknowledgement, or authorize a plan over this remedy to override it.",
+        "sources": [{"schema_version": attention.SCHEMA_VERSION, "kind": "artifact",
+                     "ref": diagnosis["judge_evidence"]["path"]}],
+    }, at)
+
+
 def cmd_recovery(args, client=None, warn=None, trace=None):
     state_path = _state_path(args)
     state = _load_state_for_write(state_path, warn)
@@ -1036,6 +1069,8 @@ def cmd_recovery(args, client=None, warn=None, trace=None):
         result = recovery.diagnose(store, history, data, at, judge.agent if judge else None, enrolled,
                                    supervision.dispatch_binding(state_path) is not None,
                                    state["specialist_assessments"])
+        if result["remedy"] == "stop":
+            _record_stopped_task(state_path, result, at)
     elif args.command == "record-report":
         if isinstance(data, dict):
             dispatch = next((item for item in store["dispatches"] if item["id"] == data.get("dispatch")), None)
@@ -1202,6 +1237,10 @@ def cmd_retrospective(args, client=None, warn=None, trace=None):
     return retrospective.record(path, data, result["coverage"], at), None
 
 
+def cmd_detect_triggers(args, client=None, warn=None, trace=None):
+    return triggers.run_command(args)
+
+
 def cmd_probe_report(args, client=None, warn=None, trace=None):
     if not Path(args.report).is_absolute() or any(ord(char) < 32 for char in args.report) or args.lines < 1:
         raise UsageError("Report probing needs an absolute one-row report path and positive --lines.", {})
@@ -1237,6 +1276,7 @@ COMMANDS = {
     "state": cmd_state,
     "status": cmd_status,
     **{command: cmd_recovery for command in ("task", "checkpoint", "authorize-corrections", "recover-context", "recover-role-clear", "record-report", "record-refusal", "authorize-refused-dispatch", "diagnose", "reconcile", "record-release-clear", "import-correction", "record-historical-review", "recover-report", "assess-specialist")},
+    "detect-triggers": cmd_detect_triggers,
     "start-judge": cmd_start_judge,
     "probe-report": cmd_probe_report,
     **{command: cmd_retrospective for command in ("retro-check", "retro-record", "retro-list", "retro-show")},
@@ -1263,7 +1303,7 @@ def main(argv=None, stdout=None, stderr=None, client=None):
     try:
         # Commands that may migrate or write state share its canonical lock.
         # Dry runs, probes, and retrospective reads remain read-only.
-        readonly = args.command in {"probe-report", "retro-check", "retro-list", "retro-show"} or getattr(args, "dry_run", False)
+        readonly = args.command in {"probe-report", "detect-triggers", "retro-check", "retro-list", "retro-show"} or getattr(args, "dry_run", False)
         separate_owner = args.command in memory.COMMANDS | attention.COMMANDS | SUPERVISION_COMMANDS | restoration.COMMANDS
         lock = nullcontext() if readonly or separate_owner else state_lock(retrospective.canonical_state(_state_path(args)))
         with lock:

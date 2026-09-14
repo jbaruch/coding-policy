@@ -16,6 +16,7 @@ from pathlib import Path
 
 from teamlead.errors import UsageError
 from teamlead.recovery import (
+    DIAGNOSIS_BOUND_CEILING,
     abort_pre_send, active_plans, authorize_context, authorize_plan, authorize_refused_dispatch, brief_identity, checkpoint, confirmed_fix,
     diagnose, require_investigation_before_judge,
     dispatch_identity, finish_dispatch, fresh_transition, mark_sending,
@@ -30,6 +31,7 @@ BASE = "a" * 40
 HEAD = "b" * 40
 AUTH = {"source": "fixture operator message", "quote": "Approve this task and its stated bounds."}
 WORK = {"base_revision": BASE, "scope": "Correct parser findings", "paths": ["src/parser.py"], "findings": ["F1"]}
+PROGRESS = "PROGRESS: two of the three findings closed under the prior remedy.\n"
 
 
 class RecoveryTests(unittest.TestCase):
@@ -44,6 +46,10 @@ class RecoveryTests(unittest.TestCase):
                                   "allowed_paths": ["src/*"], "authorization": AUTH}, AT)
         self.judge_report = self.root / "judge.md"
         self.judge_report.write_text("RULING: amend — correct the remaining parser defect\nACTION: Use one canonical parser\n")
+        investigation = self.root / "investigation.md"
+        investigation.write_text("Reproduction: the quoted case. Cause: two parsers. Experiment: unify them.\n")
+        self.investigation = str(investigation)
+        self.investigation_sha = hashlib.sha256(investigation.read_bytes()).hexdigest()
         self.review = self.root / "review.md"
         self.review.write_text("Reviewed head: " + HEAD + "\nBlocking finding F1: quoted input is still accepted as a completion signal.\n")
 
@@ -82,14 +88,16 @@ class RecoveryTests(unittest.TestCase):
         finish_dispatch(self.store, record["id"], {"status": "applied", **{
             key: record[key] for key in ("task", "role", "agent", "fix_round")}}, len(self.history) - 1, AT)
 
-    def diagnosis_report(self, remedy, bound, name="diagnosis.md"):
+    def diagnosis_report(self, remedy, bound, name="diagnosis.md", extra="", assessment=None):
         path = self.root / name
         path.write_text(
             "DIAGNOSIS: the find-rate held flat while every round closed its finding.\n"
             "REMEDY: {} — {}\n"
-            "BOUND: {}\n"
+            "BOUND: {} — one attempt per open finding.\n"
+            "ASSESSMENT: {}\n"
             "EVIDENCE: rounds 10-20 and their review bodies.\n"
-            "UNVERIFIED: none\n".format(remedy, "the named change", bound))
+            "UNVERIFIED: none\n{}".format(remedy, "the named change", bound,
+                                           self.investigation if assessment is None else assessment, extra))
         return str(path)
 
     def judge_after_developer(self, number):
@@ -114,13 +122,18 @@ class RecoveryTests(unittest.TestCase):
         self.investigator_assessed_at = assessed_at
         return self.investigator_index
 
-    def investigated(self, index=None, at=None):
+    def investigated(self, index=None, at=None, report=None):
         """The assessed investigator consultation #408 requires."""
         if index is None:
             index = getattr(self, "investigator_index", 0)
         if at is None:
             at = getattr(self, "investigator_assessed_at", "2026-02-03T09:45:00+00:00")
-        return [{"task": TASK, "role": "investigator", "assignment_index": index, "at": at}]
+        report = self.investigation if report is None else report
+        sha = (self.investigation_sha if report == self.investigation
+               else hashlib.sha256(Path(report).read_bytes()).hexdigest() if Path(report).exists()
+               else "d" * 64)
+        return [{"task": TASK, "role": "investigator", "assignment_index": index, "at": at,
+                 "report": report, "report_evidence": {"path": report, "sha256": sha}}]
 
     def run_diagnosis(self, data, judge="judge", enrolled=None, investigations=None):
         # The fixture's judge dispatch enrolls the report the request cites,
@@ -131,8 +144,9 @@ class RecoveryTests(unittest.TestCase):
             investigations = self.investigated()
         return diagnose(self.store, self.history, data, AT, judge, enrolled, enrolled is not None, investigations)
 
-    def diagnosis(self, name, remedy, bound, checkpoint_id="checkpoint-5"):
-        return {"id": name, "task": TASK, "checkpoint": checkpoint_id, "judge_report": self.diagnosis_report(remedy, bound, name + ".md"),
+    def diagnosis(self, name, remedy, bound, checkpoint_id="checkpoint-5", extra="", assessment=None):
+        return {"id": name, "task": TASK, "checkpoint": checkpoint_id,
+                "judge_report": self.diagnosis_report(remedy, bound, name + ".md", extra, assessment),
                 "scope": WORK["scope"], "allowed_paths": ["src/*"]}
 
     def test_a_bounded_remedy_records_the_plan_its_bound_authorizes(self):
@@ -160,18 +174,33 @@ class RecoveryTests(unittest.TestCase):
         self.finish(6, "diag-1:plan")
         self.judge_after_developer(6)
         second = self.next_checkpoint("checkpoint-6")
-        with self.assertRaisesRegex(UsageError, "may not sit above restructure"):
+        # coding-policy#415: a rung is reissuable once, and only against the
+        # progress the re-entry records. A remedy that produced none is not.
+        with self.assertRaisesRegex(UsageError, "needs its PROGRESS line"):
             self.run_diagnosis(self.diagnosis("diag-2", "continue", 2, second), "judge")
-        self.run_diagnosis(self.diagnosis("diag-2", "restructure", 1, second), "judge")
+        again = self.run_diagnosis(self.diagnosis("diag-2", "continue", 2, second, extra=PROGRESS), "judge")
+        self.assertTrue(again["reissue"])
         self.finish(7, "diag-2:plan")
-        self.judge_after_developer(7)
+        self.finish(8, "diag-2:plan")
+        self.judge_after_developer(8)
         third = self.next_checkpoint("checkpoint-7")
+        # That rung is now spent; the reissue does not repeat.
+        with self.assertRaisesRegex(UsageError, "may not sit above restructure"):
+            self.run_diagnosis(self.diagnosis("diag-3", "continue", 1, third, extra=PROGRESS), "judge")
+        self.assertFalse(self.run_diagnosis(self.diagnosis("diag-3", "restructure", 1, third), "judge")["reissue"])
+        self.finish(9, "diag-3:plan")
+        self.judge_after_developer(9)
+        fourth = self.next_checkpoint("checkpoint-8")
+        self.assertTrue(self.run_diagnosis(self.diagnosis("diag-4", "restructure", 1, fourth, extra=PROGRESS), "judge")["reissue"])
+        self.finish(10, "diag-4:plan")
+        self.judge_after_developer(10)
+        fifth = self.next_checkpoint("checkpoint-9")
         with self.assertRaisesRegex(UsageError, "may not sit above stop"):
-            self.run_diagnosis(self.diagnosis("diag-3", "restructure", 1, third), "judge")
-        stop = self.run_diagnosis(self.diagnosis("diag-3", "stop", "none", third), "judge")
+            self.run_diagnosis(self.diagnosis("diag-5", "restructure", 1, fifth, extra=PROGRESS), "judge")
+        stop = self.run_diagnosis(self.diagnosis("diag-5", "stop", "none", fifth), "judge")
         self.assertEqual((stop["bound"], stop["plan"]), (None, None))
         with self.assertRaisesRegex(UsageError, "terminal"):
-            self.run_diagnosis(self.diagnosis("diag-4", "stop", "none", third), "judge")
+            self.run_diagnosis(self.diagnosis("diag-6", "stop", "none", fifth), "judge")
         self.assertEqual(task_statuses(self.store, self.history)[TASK]["status"], "diagnosed_stop")
         validate_store(self.store, self.history)
 
@@ -189,7 +218,7 @@ class RecoveryTests(unittest.TestCase):
             self.run_diagnosis({**self.diagnosis("diag-2", "restructure", 2), "supersedes": first["plan"]}, "judge")
         narrowed = {**self.diagnosis("diag-2", "restructure", 2), "supersedes": first["plan"], "allowed_paths": ["src/parser.py"]}
         # The ladder still descends: a supersession is a diagnosis like any other.
-        with self.assertRaisesRegex(UsageError, "may not sit above restructure"):
+        with self.assertRaisesRegex(UsageError, "needs its PROGRESS line"):
             self.run_diagnosis({**narrowed, **self.diagnosis("diag-2", "continue", 2), "supersedes": first["plan"], "allowed_paths": ["src/parser.py"]}, "judge")
         # An operator override stands in for a changed scope.
         override = self.run_diagnosis({**self.diagnosis("diag-override", "restructure", 2),
@@ -260,10 +289,90 @@ class RecoveryTests(unittest.TestCase):
     def test_a_remedy_names_what_it_means(self):
         self.seed_checkpoint()
         bare = self.root / "bare.md"
-        bare.write_text("DIAGNOSIS: flat find-rate\nREMEDY: restructure\nBOUND: 2\n"
-                        "EVIDENCE: rounds 10-20\nUNVERIFIED: none\n")
+        bare.write_text("DIAGNOSIS: flat find-rate\nREMEDY: restructure\nBOUND: 2 — one per finding\n"
+                        "ASSESSMENT: " + self.investigation + "\nEVIDENCE: rounds 10-20\nUNVERIFIED: none\n")
         with self.assertRaisesRegex(UsageError, "names its remedy and what it means"):
             self.run_diagnosis({**self.diagnosis("diag-1", "continue", 2), "judge_report": str(bare)}, "judge")
+
+    def test_a_bound_states_developer_attempts_within_a_ceiling(self):
+        # coding-policy#415: the operator's budget was a human pricing the
+        # spend; the replacement states its units and justifies the number.
+        self.seed_checkpoint()
+        with self.assertRaisesRegex(UsageError, "exceeds the 5-attempt ceiling"):
+            self.run_diagnosis(self.diagnosis("diag-1", "continue", DIAGNOSIS_BOUND_CEILING + 1), "judge")
+        bare = self.root / "unjustified.md"
+        bare.write_text("DIAGNOSIS: flat find-rate\nREMEDY: continue — two more rounds\nBOUND: 2\n"
+                        "ASSESSMENT: " + self.investigation + "\nEVIDENCE: rounds 10-20\nUNVERIFIED: none\n")
+        with self.assertRaisesRegex(UsageError, "justifies the number"):
+            self.run_diagnosis({**self.diagnosis("diag-1", "continue", 2), "judge_report": str(bare)}, "judge")
+        record = self.run_diagnosis(self.diagnosis("diag-1", "continue", DIAGNOSIS_BOUND_CEILING), "judge")
+        self.assertEqual(record["bound"], DIAGNOSIS_BOUND_CEILING)
+        validate_store(self.store, self.history)
+
+    def _report_without_assessment(self):
+        path = self.root / "noassess.md"
+        path.write_text("DIAGNOSIS: flat find-rate\nREMEDY: continue — two more rounds\n"
+                        "BOUND: 2 — one per finding\nEVIDENCE: rounds 10-20\nUNVERIFIED: none\n")
+        return str(path)
+
+    def test_a_changed_investigator_report_refuses_the_diagnosis(self):
+        # rules/stateful-artifacts.md Hints, Not Authority: the saved receipt
+        # is a last-seen snapshot, so a rewritten report authorizes nothing.
+        self.seed_checkpoint()
+        Path(self.investigation).write_text("Rewritten after the assessment.\n")
+        with self.assertRaisesRegex(UsageError, "changed since its assessment"):
+            self.run_diagnosis(self.diagnosis("diag-1", "continue", 2), "judge")
+        Path(self.investigation).unlink()
+        with self.assertRaisesRegex(UsageError, "Cannot read evidence"):
+            self.run_diagnosis(self.diagnosis("diag-2", "continue", 2), "judge")
+
+    def test_a_diagnosis_cites_the_assessment_it_ruled_on(self):
+        # coding-policy#415: the ordering gate proves an assessment exists; the
+        # citation proves this diagnosis consumed it.
+        self.seed_checkpoint()
+        with self.assertRaisesRegex(UsageError, "must carry DIAGNOSIS"):
+            self.run_diagnosis({**self.diagnosis("diag-1", "continue", 2),
+                                "judge_report": self._report_without_assessment()}, "judge")
+        with self.assertRaisesRegex(UsageError, "not an assessed investigator report"):
+            self.run_diagnosis(self.diagnosis("diag-1", "continue", 2, assessment=str(self.root / "other.md")), "judge")
+        record = self.run_diagnosis(self.diagnosis("diag-1", "continue", 2), "judge")
+        self.assertEqual(record["investigator_report"]["report"], self.investigation)
+        self.assertEqual(record["investigator_report"]["evidence"],
+                         {"path": self.investigation, "sha256": self.investigation_sha})
+        validate_store(self.store, self.history)
+
+    def test_an_older_diagnosis_row_migrates_to_the_recorded_shape(self):
+        # rules/stateful-artifacts.md: the owner upgrades, and a version-1 row
+        # carried neither field, so its defaults are the facts it already held.
+        self.seed_checkpoint()
+        self.run_diagnosis(self.diagnosis("diag-1", "continue", 2), "judge")
+        older = copy.deepcopy(self.store)
+        row = older["diagnoses"][0]
+        row.update(schema_version=1)
+        del row["reissue"], row["investigator_report"]
+        # Both record kinds migrate in one pass; neither short-circuits the
+        # other (rules/stateful-artifacts.md Migration Policy).
+        older["checkpoints"][0]["schema_version"] = 1
+        self.assertTrue(migrate_store(older))
+        self.assertEqual(older["checkpoints"][0]["schema_version"], 2)
+        self.assertEqual(older["diagnoses"][0]["schema_version"], 2)
+        self.assertIs(older["diagnoses"][0]["reissue"], False)
+        self.assertIsNone(older["diagnoses"][0]["investigator_report"])
+        validate_store(older, self.history)
+
+    def test_an_older_diagnosis_carrying_newer_fields_is_refused(self):
+        # A version-1 row predates both fields, so one already carrying either
+        # is unowned newer data; stamping it would let the value through.
+        self.seed_checkpoint()
+        self.run_diagnosis(self.diagnosis("diag-1", "continue", 2), "judge")
+        for field, value in (("reissue", True), ("investigator_report", None)):
+            corrupt = copy.deepcopy(self.store)
+            row = corrupt["diagnoses"][0]
+            row.update(schema_version=1)
+            del row["reissue"], row["investigator_report"]
+            row[field] = value
+            with self.assertRaisesRegex(UsageError, "newer recorded fields"):
+                migrate_store(corrupt)
 
     def test_a_judge_seat_is_not_spent_before_the_assessment_exists(self):
         # coding-policy#408: the gate guards the dispatch, not only the record,
@@ -310,7 +419,8 @@ class RecoveryTests(unittest.TestCase):
         mixed = self.root / "mixed.md"
         mixed.write_text("RULING: blocked — which boundary ships?\nACTION: ask the operator\n"
                          "DIAGNOSIS: flat find-rate\nREMEDY: continue — two more rounds\n"
-                         "BOUND: 2\nEVIDENCE: rounds 1-5\nUNVERIFIED: none\n")
+                         "BOUND: 2 — one per finding\nASSESSMENT: " + self.investigation
+                         + "\nEVIDENCE: rounds 1-5\nUNVERIFIED: none\n")
         with self.assertRaisesRegex(UsageError, "adjudication's RULING or ACTION"):
             self.run_diagnosis({**self.diagnosis("diag-1", "continue", 2), "judge_report": str(mixed)})
         self.assertEqual(self.store["diagnoses"], [])
@@ -324,6 +434,11 @@ class RecoveryTests(unittest.TestCase):
             lambda row: row.update(bound=None),
             lambda row: row.update(plan=None),
             lambda row: row.update(judge_evidence="not-a-receipt"),
+            lambda row: row.update(reissue=True),
+            lambda row: row.update(investigator_report={"schema_version": 2, "report": "relative.md",
+                                                        "evidence": {"path": "relative.md", "sha256": "d" * 64}}),
+            lambda row: row.update(investigator_report={"schema_version": 2, "report": "/tmp/other.md",
+                                                        "evidence": row["investigator_report"]["evidence"]}),
         ):
             corrupt = copy.deepcopy(self.store)
             mutate(corrupt["diagnoses"][0])
@@ -331,7 +446,7 @@ class RecoveryTests(unittest.TestCase):
                 validate_store(corrupt, self.history)
         corrupt = copy.deepcopy(self.store)
         corrupt["diagnoses"].append({**corrupt["diagnoses"][0], "id": "diag-back", "remedy": "continue"})
-        with self.assertRaisesRegex(UsageError, "strictly down the remedy ladder"):
+        with self.assertRaisesRegex(UsageError, "must move down the remedy ladder"):
             validate_store(corrupt, self.history)
         for mutate in (lambda row: row.update(fix_round=4),
                        lambda row: row.update(base_revision="f" * 40)):

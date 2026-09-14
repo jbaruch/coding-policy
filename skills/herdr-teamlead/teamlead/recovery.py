@@ -35,11 +35,20 @@ SPECIALIST_DISPATCH_VERSION = 2
 #: built from (rules/agent-team-operation.md Judge Seat).
 OPERATOR_CHECKPOINT_VERSION = 2
 DISPATCH_METADATA_FIELDS = frozenset({"requirements", "reviewer_scope"})
-#: The judge's diagnosis remedies, strictly descending. A task's next
-#: diagnosis sits below its last and `stop` is terminal, so a task takes at
-#: most three and cannot loop (rules/agent-team-operation.md Judge Seat).
+#: The judge's diagnosis remedies, descending. A task's next diagnosis sits
+#: below its last, or repeats that rung once against recorded progress, and
+#: `stop` is terminal, so a task takes at most five and cannot loop
+#: (rules/agent-team-operation.md Judge Seat).
 DIAGNOSIS_LADDER = ("continue", "restructure", "stop")
+#: Diagnosis record version. 1 recorded the remedy alone. 2 adds `reissue` --
+#: whether this diagnosis repeats its predecessor's rung -- and
+#: `investigator_report`, the assessment the judge ruled on (#415).
+DIAGNOSIS_RECORD_VERSION = 2
 DEFAULT_FIX_LIMIT = 5
+#: The most attempts one remedy may buy, in developer attempts. A remedy that
+#: needs more than the task's own original allowance is not a bounded
+#: correction; the judge takes the next rung instead (#415).
+DIAGNOSIS_BOUND_CEILING = DEFAULT_FIX_LIMIT
 PENDING_STATUSES = frozenset({"reserved", "sending", "sent_but_not_started"})
 DISPATCH_STATUSES = PENDING_STATUSES | {"applied", "not_sent"}
 #: The wait-report reason a refusal receipt must carry (see wait-report.sh
@@ -88,11 +97,41 @@ def _migrate_checkpoints(store):
     return migrated
 
 
+def _migrate_diagnoses(store):
+    """Stamp version-1 diagnosis rows with the fields version 2 records.
+
+    A version-1 row predates both additions, so its defaults are the facts it
+    already carried: it repeated no rung, and it cited no investigator report
+    (rules/stateful-artifacts.md Migration Policy). A version-1 row already
+    carrying either field is unowned newer data and is refused rather than
+    stamped, the way `migrate_store` refuses every other newer record: keeping
+    the present value would let a `reissue: true` or an investigator binding
+    reach the validator through a migration that never wrote it.
+    """
+    rows = store.get("diagnoses")
+    if not isinstance(rows, list):
+        return False
+    migrated = False
+    for row in rows:
+        if not isinstance(row, dict) or row.get("schema_version") != 1:
+            continue
+        if "reissue" in row or "investigator_report" in row:
+            raise UsageError("An older diagnosis carries newer recorded fields; preserve the ledger for owner recovery.", {})
+        row["schema_version"] = DIAGNOSIS_RECORD_VERSION
+        row["reissue"] = False
+        row["investigator_report"] = None
+        migrated = True
+    return migrated
+
+
 def migrate_store(store):
     """Upgrade the enclosing recovery document and its checkpoint records."""
     if not isinstance(store, dict) or type(store.get("schema_version")) is not int:
         return False
-    migrated = _migrate_checkpoints(store)
+    # Both run: `or` would skip the second whenever the first reported work,
+    # leaving version-1 diagnoses for a validator that accepts only version 2.
+    checkpoints = _migrate_checkpoints(store)
+    migrated = _migrate_diagnoses(store) or checkpoints
     version = store["schema_version"]
     if version not in {1, 2, 3, 4, 5, 6, 7}:
         return migrated
@@ -322,13 +361,26 @@ def diagnoses_for(store, task):
     return [row for row in store["diagnoses"] if row["task"] == task]
 
 
-def _next_remedy_rung(store, task):
-    """The lowest rung this task may still take, or None once `stop` is spent."""
+def _remedy_options(store, task):
+    """The rungs this task's next diagnosis may take: `(floor, repeat)`.
+
+    `floor` is the lowest rung still available, or None once `stop` is spent.
+    `repeat` is the rung this task may reissue once, or None. A monotonic
+    ladder guarantees termination but conflates "this remedy was wrong" with
+    "this remedy needed another increment": a restructure routinely surfaces
+    work the first pass could not see, and consuming the rung stranded that
+    correct diagnosis at `stop` (#415). One reissue per rung keeps termination
+    -- at most five diagnoses, `stop` still terminal -- and it costs the judge
+    the recorded progress its `PROGRESS` line carries.
+    """
     prior = diagnoses_for(store, task)
     if not prior:
-        return 0
-    last = DIAGNOSIS_LADDER.index(prior[-1]["remedy"])
-    return last + 1 if last + 1 < len(DIAGNOSIS_LADDER) else None
+        return 0, None
+    last = prior[-1]
+    index = DIAGNOSIS_LADDER.index(last["remedy"])
+    floor = index + 1 if index + 1 < len(DIAGNOSIS_LADDER) else None
+    repeat = None if last["remedy"] == "stop" or last.get("reissue") else index
+    return floor, repeat
 
 
 def diagnose(store, assignments, data, at, judge_agent, enrolled_report, supervised, investigations=()):
@@ -355,10 +407,15 @@ def diagnose(store, assignments, data, at, judge_agent, enrolled_report, supervi
     repeated unsuccessful fixes", and it is the cheaper seat (#408). One for
     this task after the latest developer attempt is required.
 
-    Re-entry moves strictly down `DIAGNOSIS_LADDER`, so a failed remedy is
-    never reissued and a task takes at most three diagnoses. That holds for a
+    Re-entry moves down `DIAGNOSIS_LADDER`, or repeats one rung once against a
+    recorded `PROGRESS` line, so a remedy that produced nothing is never
+    reissued and a task takes at most five diagnoses. That holds for a
     supersession too: a changed scope or an operator override re-enters before
-    the bound is spent, naming the plan it replaces, and still descends.
+    the bound is spent, naming the plan it replaces.
+
+    The report's `ASSESSMENT` line names the investigator report the diagnosis
+    ruled on, and that report is bound into the record the way supervision's
+    enrollment binds the judge's own.
     """
     required = {"id", "task", "checkpoint", "judge_report", "scope", "allowed_paths"}
     if not isinstance(data, dict) or not required <= set(data) or set(data) - required - {"supersedes", "authorization"}:
@@ -390,8 +447,8 @@ def diagnose(store, assignments, data, at, judge_agent, enrolled_report, supervi
     if source["fix_round"] != count:
         raise UsageError("Checkpoint {} records fix round {}, and this task stands at {}; record the exhaustion this diagnosis answers.".format(
             data["checkpoint"], source["fix_round"], count), {})
-    rung = _next_remedy_rung(store, data["task"])
-    if rung is None:
+    floor, repeat = _remedy_options(store, data["task"])
+    if floor is None and repeat is None:
         raise UsageError("This task's diagnosis reached `stop`, which is terminal; ship what is clean and track the remainder rather than diagnosing again.", {})
     if count < DEFAULT_FIX_LIMIT:
         raise UsageError("The normal correction budget is not exhausted; continue within it.", {})
@@ -421,9 +478,10 @@ def diagnose(store, assignments, data, at, judge_agent, enrolled_report, supervi
     # it. The assessment time is what matters: an investigator dispatched early
     # and assessed after the judge finished is not what the judge read (#408).
     judge_at = timestamp(assignments[judge[0]].get("at"), "Judge assignment chronology")
-    if not any(investigated_after(assignments, row, data["task"], developer[0])
-               and timestamp(row["at"], "Investigator assessment chronology") < judge_at
-               for row in investigations):
+    consulted = [row for row in investigations
+                 if investigated_after(assignments, row, data["task"], developer[0])
+                 and timestamp(row["at"], "Investigator assessment chronology") < judge_at]
+    if not consulted:
         raise UsageError("A diagnosis rules on a prepared causal assessment: record an assessed investigator consultation for task {} after its latest developer attempt, assessed before the judge dispatch you cite.".format(data["task"]), {})
     if supervised:
         if not isinstance(enrolled_report, str) or not enrolled_report.strip():
@@ -432,19 +490,41 @@ def diagnose(store, assignments, data, at, judge_agent, enrolled_report, supervi
             raise UsageError("The cited report is not the one supervision enrolled for this judge dispatch ({}); cite the delivered report.".format(enrolled_report), {})
     evidence, body = receipt(data["judge_report"])
     remedy_line = re.search(r"^REMEDY:[ \t]*(\S+)(.*)$", body, re.MULTILINE)
-    bound_line = re.search(r"^BOUND:[ \t]*(\S+)", body, re.MULTILINE)
-    if (not remedy_line or not bound_line or remedy_line.group(1) not in DIAGNOSIS_LADDER
+    bound_line = re.search(r"^BOUND:[ \t]*(\S+)(.*)$", body, re.MULTILINE)
+    assessment_line = re.search(r"^ASSESSMENT:[ \t]*(\S.*)$", body, re.MULTILINE)
+    if (not remedy_line or not bound_line or not assessment_line or remedy_line.group(1) not in DIAGNOSIS_LADDER
             or not re.search(r"^DIAGNOSIS: \S", body, re.MULTILINE)
             or not re.search(r"^EVIDENCE: \S", body, re.MULTILINE)
             or not re.search(r"^UNVERIFIED: \S", body, re.MULTILINE)):
-        raise UsageError("The judge report must carry DIAGNOSIS, REMEDY ({}), BOUND, EVIDENCE and UNVERIFIED.".format(" | ".join(DIAGNOSIS_LADDER)), {})
+        raise UsageError("The judge report must carry DIAGNOSIS, REMEDY ({}), BOUND, ASSESSMENT, EVIDENCE and UNVERIFIED.".format(" | ".join(DIAGNOSIS_LADDER)), {})
+    # The gate above proves an assessed consultation exists and is ordered
+    # before the judge; this one proves the diagnosis consumed it. The judge's
+    # own report is bound to the enrollment supervision made, and the report it
+    # ruled on gets the same binding rather than none (#415).
+    cited = assessment_line.group(1).strip()
+    assessment = next((row for row in consulted
+                       if str(Path(row["report"]).resolve()) == str(Path(cited).resolve())), None)
+    if assessment is None:
+        raise UsageError("ASSESSMENT names {}, which is not an assessed investigator report for task {} after its latest developer attempt; cite the report the diagnosis ruled on.".format(cited, data["task"]), {})
+    # The saved receipt is a last-seen snapshot, never authority
+    # (rules/stateful-artifacts.md Hints, Not Authority): a report deleted or
+    # rewritten since its assessment would otherwise authorize a correction
+    # plan on evidence nobody holds any more.
+    current, _assessed = receipt(assessment["report"])
+    if current != assessment["report_evidence"]:
+        raise UsageError("The investigator report {} changed since its assessment; restore the assessed bytes or record a fresh assessed consultation before diagnosing.".format(assessment["report"]), {})
     if re.search(r"^(?:RULING|ACTION):", body, re.MULTILINE):
         raise UsageError("This report carries an adjudication's RULING or ACTION; a diagnosis carries neither. Dispatch the diagnosis brief and cite its report.", {})
     remedy = remedy_line.group(1)
     if not remedy_line.group(2).strip(" \t-—"):
         raise UsageError("REMEDY names its remedy and what it means: the rounds for continue, the structural change for restructure, what ships and what is tracked for stop.", {})
-    if DIAGNOSIS_LADDER.index(remedy) < rung:
-        raise UsageError("This task's next diagnosis may not sit above {}; a remedy that failed is never reissued and the ladder never runs backwards.".format(DIAGNOSIS_LADDER[rung]), {})
+    index = DIAGNOSIS_LADDER.index(remedy)
+    reissue = index == repeat
+    if not reissue and (floor is None or index < floor):
+        raise UsageError("This task's next diagnosis may not sit above {}; the ladder never runs backwards, and a rung already reissued is spent.".format(
+            DIAGNOSIS_LADDER[floor] if floor is not None else DIAGNOSIS_LADDER[-1]), {})
+    if reissue and not re.search(r"^PROGRESS: \S", body, re.MULTILINE):
+        raise UsageError("Reissuing {} needs its PROGRESS line: a remedy that produced no progress is never reissued, and the ladder's next rung answers it instead.".format(remedy), {})
     bound = None
     if remedy == "stop":
         if bound_line.group(1).lower() != "none":
@@ -452,11 +532,18 @@ def diagnose(store, assignments, data, at, judge_agent, enrolled_report, supervi
     else:
         raw = bound_line.group(1)
         if not raw.isdigit() or int(raw) < 1:
-            raise UsageError("A {} remedy needs a positive BOUND naming the attempts it allows.".format(remedy), {})
+            raise UsageError("A {} remedy needs a positive BOUND naming the developer attempts it allows.".format(remedy), {})
         bound = int(raw)
-    record = {"schema_version": RECOVERY_SCHEMA_VERSION, "at": at, "id": data["id"], "task": data["task"],
+        if bound > DIAGNOSIS_BOUND_CEILING:
+            raise UsageError("BOUND {} exceeds the {}-attempt ceiling one remedy may buy; a correction needing more than the task's own allowance takes the next rung instead.".format(bound, DIAGNOSIS_BOUND_CEILING), {})
+        if not bound_line.group(2).strip(" \t-\u2014"):
+            raise UsageError("BOUND states the developer attempts and justifies the number against the evidence the diagnosis cites.", {})
+    record = {"schema_version": DIAGNOSIS_RECORD_VERSION, "at": at, "id": data["id"], "task": data["task"],
               "checkpoint": data["checkpoint"], "fix_round": count, "base_revision": task["base_revision"],
-              "remedy": remedy, "bound": bound, "judge_agent": judge_agent, "judge_evidence": evidence,
+              "remedy": remedy, "bound": bound, "reissue": reissue,
+              "judge_agent": judge_agent, "judge_evidence": evidence,
+              "investigator_report": {"schema_version": DIAGNOSIS_RECORD_VERSION,
+                                      "report": assessment["report"], "evidence": assessment["report_evidence"]},
               "scope": data["scope"], "allowed_paths": data["allowed_paths"],
               "supersedes": data.get("supersedes"), "authorization": data.get("authorization"),
               "plan": None if remedy == "stop" else data["id"] + ":plan"}
@@ -1011,10 +1098,20 @@ def _validate_refusals(store):
         text(row["judge_agent"], "diagnosis judge")
         validate_receipt(row["judge_evidence"])
         rung = DIAGNOSIS_LADDER.index(row["remedy"])
-        last = seen_diagnoses.get(row["task"])
-        if last is not None and rung <= last:
-            raise UsageError("A task's diagnoses must move strictly down the remedy ladder; preserve the ledger for owner recovery.", {})
-        seen_diagnoses[row["task"]] = rung
+        reissue = row.get("reissue") is True
+        last, repeated = seen_diagnoses.get(row["task"], (None, False))
+        if last is not None and (rung < last or rung == last and not reissue):
+            raise UsageError("A task's diagnoses must move down the remedy ladder; preserve the ledger for owner recovery.", {})
+        if reissue and (last is None or rung != last or repeated or row["remedy"] == "stop"):
+            raise UsageError("A diagnosis records a reissue of a rung its predecessor did not take, or of one already reissued; preserve the ledger for owner recovery.", {})
+        seen_diagnoses[row["task"]] = (rung, reissue)
+        cited = row.get("investigator_report")
+        if cited is not None:
+            if not isinstance(cited, dict) or set(cited) != {"schema_version", "report", "evidence"}:
+                raise UsageError("A diagnosis cites an investigator report in an unsupported shape; preserve the ledger for owner recovery.", {})
+            validate_receipt(cited["evidence"])
+            if text(cited["report"], "diagnosis investigator report") != cited["evidence"]["path"]:
+                raise UsageError("A diagnosis cites an investigator report whose receipt names another artifact; preserve the ledger for owner recovery.", {})
         if row.get("supersedes") is not None:
             text(row["supersedes"], "diagnosis supersedes")
         if row.get("authorization") is not None:
@@ -1145,6 +1242,7 @@ def validate_store(store, assignments):
             for row in store[name]:
                 versions = ({1, 2} if name in {"delivery_recoveries", "dispatches"}
                             else {OPERATOR_CHECKPOINT_VERSION} if name == "checkpoints"
+                            else {DIAGNOSIS_RECORD_VERSION} if name == "diagnoses"
                             else {RECOVERY_SCHEMA_VERSION})
                 if not isinstance(row, dict) or type(row.get("schema_version")) is not int or row["schema_version"] not in versions:
                     raise UsageError("A recovery record has an unsupported schema; update its owner.", {})

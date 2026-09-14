@@ -28,7 +28,14 @@ description: Running a multi-agent team — task-based specialist composition, c
 - A new user-facing document triggers documentation
 - Fix rounds reaching the task's allowance without converging trigger the investigator
 - Each trigger names its deliverable in `skills/herdr-teamlead/references/specialists.md`
-- A fired trigger is consulted, or recorded as a staffing decision with its reason
+- The repo states each trigger surface and its package size in its own trigger declaration
+- `teamlead detect-triggers` classifies the round against that declaration before the roles are planned
+- A round with work already written classifies its diff
+- A round before implementation declares the surfaces the work will touch, and classifies those
+- A round that classifies neither is refused, never read as no trigger fired
+- The four non-exhaustion triggers fire from that detection, never from the lead's reading of the diff
+- An absent or incomplete declaration is refused, never read as no trigger fired
+- A fired trigger is consulted, or recorded as a staffing decision with its reason the detector reads
 - Silence is never that decision
 - The exhaustion trigger has no such alternative: a diagnosis without its assessed consultation is refused
 - The judge seat is not dispatched at an exhausted allowance before that assessment exists
@@ -70,10 +77,15 @@ description: Running a multi-agent team — task-based specialist composition, c
 - The lead dispatches the judge in adjudication mode for one of three triggers: a contested reviewer or tester verdict, a lead override of a blocking finding, or a bot finding the team disagrees with
 - The lead dispatches the judge in diagnosis mode at an exhausted allowance with blocking work remaining, on the investigator's assessment
 - The judge rules on that assessment; it never investigates from scratch
+- The diagnosis cites in `ASSESSMENT:` the investigator report it ruled on, and the record binds that path
 - Diagnosis asks why the loop is not converging and what must change, never who is right
-- The diagnosis returns `DIAGNOSIS:`, `REMEDY: continue | restructure | stop`, `BOUND:`, `EVIDENCE:` and `UNVERIFIED:`
+- The diagnosis returns `DIAGNOSIS:`, `REMEDY: continue | restructure | stop`, `BOUND:`, `ASSESSMENT:`, `EVIDENCE:` and `UNVERIFIED:`
 - A `continue` or `restructure` remedy's `BOUND` supplies the attempt budget the operator formerly supplied
+- `BOUND` counts developer attempts and justifies the number against the evidence the diagnosis cites
+- A `BOUND` above the ceiling `teamlead diagnose` enforces is refused, never silently honoured
 - A `stop` remedy ships what is clean and records the remainder as a tracked accepted defect
+- A `stop` remedy records a user-attention obligation the catch-up surfaces
+- That obligation gates no dispatch and waits on no answer
 - The judge's authority in diagnosis mode covers accepting a tracked defect into a release under a `stop` remedy
 - That acceptance follows `rules/review-severity.md` Judge-Accepted Defect Carve-Out; every other release gate holds
 - Record the diagnosis through `teamlead diagnose` under the original task and base before acting on its remedy
@@ -84,13 +96,17 @@ description: Running a multi-agent team — task-based specialist composition, c
 - Re-enter diagnosis when a remedy's own bound exhausts with blocking work remaining
 - Re-enter before the bound is spent only for a changed scope or an operator override, naming the plan it supersedes and carrying the change it claims
 - A `stop` remedy ends implementation on its task; no unspent allowance survives it
-- Each re-entry moves strictly down the ladder `continue` → `restructure` → `stop`
-- Never reissue a remedy that already failed, and never move back up the ladder
-- `stop` is terminal; a task takes at most three diagnoses
+- Each re-entry moves down the ladder `continue` → `restructure` → `stop`, or repeats one rung once
+- A repeat carries the diagnosis's `PROGRESS:` line naming what the prior remedy changed
+- A remedy that produced no progress is never reissued
+- The ladder never runs backwards
+- A rung already repeated is spent
+- `stop` is terminal and never repeats; a task takes at most five diagnoses
 - No exhausted allowance waits on an operator decision
 - The judge is read-only: it never edits a repository file, never runs a mutating git or `gh` command, never posts to GitHub, never dispatches a subagent — its only output is its report file
 - In adjudication mode the judge reads both positions and the governing rule, verifies the disputed facts against the tree, and returns `RULING: uphold A | uphold B | amend — <line> | blocked — <question>` with numbered reasons, an `ACTION:` naming the minimal step, and an `UNVERIFIED:` line
-- In diagnosis mode it reads the round history and verifies against the tree what each round changed, and returns the five diagnosis lines with numbered reasons
+- In diagnosis mode it reads the round history and verifies against the tree what each round changed, and returns the six diagnosis lines with numbered reasons
+- A diagnosis repeating its predecessor's rung adds `PROGRESS:`
 - `RULING:` and `ACTION:` belong to adjudication alone; a diagnosis carries neither
 - The judge's ruling binds the round; only the operator overrides it
 - `blocked` is the judge declining to rule

@@ -124,6 +124,17 @@ Choose the next needed responsibilities before selecting workers. Consult the
 profiles and requirement contract in `references/specialists.md`; available
 profiles need no activation until a bounded question or deliverable warrants it.
 
+Run `detect-triggers` against the task's base first, with the roles and
+requirements this round intends. It classifies the diff against this repo's
+`.herdr/triggers.json` and exits 1 when a fired trigger is neither staffed nor
+answered by a recorded staffing decision. A Phase 1 round has no diff yet and
+passes `--planned` naming the surfaces the work will touch; a round that
+classifies neither a diff nor a plan is refused. Each invocation reads only the inputs
+it is given, so re-run it after staffing a role or recording a decision and
+plan only once it exits 0. The declaration's fields, the
+decisions file and the answers each trigger accepts are in
+`references/specialists.md`.
+
 ```bash
 CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
 bash "$CP/skills/herdr-teamlead/teamlead.sh" plan \
