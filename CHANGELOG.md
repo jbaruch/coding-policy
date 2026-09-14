@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.223 — 2026-09-14
+
 ### Added
 
 - **A developer reads its own gate evidence instead of entering the pre-merge
