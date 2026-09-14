@@ -357,7 +357,8 @@ Step 22. No implementation or release is inferred from the diagnostic result.
   contract and `rules/agent-team-operation.md` Fix Loops. Return to Step 4 for
   an authorized correction or Step 13 for a required judge ruling. At an
   exhausted allowance, record the checkpoint through
-  `references/dispatch-recovery.md` and proceed immediately to Step 13 for the
+  `references/dispatch-recovery.md`, consult the investigator under
+  `references/specialists.md`, and take its assessed report to Step 13 for the
   diagnosis; no operator decision is awaited.
 - **Advisory findings only** — record them in the round log and fold them into
   the next round that is already happening. Never spend a round on a lone
@@ -384,8 +385,9 @@ dispute, both positions with report paths, the governing rule, the tree.
 
 For an exhausted allowance, compose from `templates/brief-judge-diagnosis.md`
 through Step 7 under the role key `judge-diagnosis`, which writes
-`brief-judge-diagnosis.md`: the task, rounds spent, remaining blocking work,
-the per-round history, the tree, and any prior remedy with what it changed.
+`brief-judge-diagnosis.md`: the assessed investigator report, the task, rounds
+spent, remaining blocking work, the per-round history, the tree, and any prior
+remedy with what it changed.
 The pinned seat is still `judge`, so plan and dispatch that role and pass this
 file as its brief: `--brief judge=<outdir>/brief-judge-diagnosis.md`.
 

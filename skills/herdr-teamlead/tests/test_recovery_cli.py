@@ -52,6 +52,33 @@ class RecoveryCommandTests(fixture.CliCase):
                                            "allowed_paths": ["src/*"], "authorization": AUTH})
         self.assertEqual(code, 0, err)
 
+    def record_investigation(self):
+        """Seed the assessed investigator consultation #408 requires.
+
+        The assessment machinery has its own suite; this fixture only needs
+        the record the diagnosis gate reads.
+        """
+        state = self.saved()
+        add_assignment(state, "2026-02-03T13:00:00+00:00", "investigator", "grok", task=TASK)
+        index = len(state["assignments"]) - 1
+        row = state["assignments"][index]
+        row["status"] = "applied"
+        state["recovery"]["dispatches"].append({
+            "schema_version": 1, "at": "2026-02-03T13:00:00+00:00", "id": "investigator-dispatch",
+            "fingerprint": "e" * 64, "role": "investigator", "agent": "grok", "task": TASK,
+            "fix_round": None, "plan": None, "work": None, "status": "applied",
+            "assignment_index": index,
+            "result": {"schema_version": 1, "task": TASK, "role": "investigator", "agent": "grok",
+                       "fix_round": None, "status": "applied"}, "report": None})
+        state["specialist_assessments"].append({
+            "schema_version": 1, "at": "2026-02-03T14:00:00+00:00", "id": "inv-1", "dispatch": "investigator-dispatch",
+            "assignment_index": index, "task": TASK, "role": "investigator",
+            "agent": "grok", "report": "/reports/investigation.md", "delivery": "/reports/delivery.json",
+            "outcome": "delivered", "contribution": "design", "summary": "The find-rate tracks review surface area.",
+            "report_evidence": {"path": "/reports/investigation.md", "sha256": "a" * 64},
+            "delivery_evidence": {"path": "/reports/delivery.json", "sha256": "b" * 64}})
+        save_state(self.state, state)
+
     def saved(self):
         return json.loads(self.state.read_text())
 
@@ -76,12 +103,16 @@ class RecoveryCommandTests(fixture.CliCase):
         state = empty_state()
         for fix in (None, 1, 2, 3, 4, 5):
             add_assignment(state, "2026-02-03T09:00:0{}+00:00".format(fix or 0), "developer", "grok", task=TASK, fix_round=fix)
-        add_assignment(state, AT, "judge", "claude", task=TASK)
         save_state(self.state, state)
         self.register()
         config = json.loads(self.config.read_text())
         config["judge"] = {"agent": "claude", "model": "claude-opus-4-6", "effort": "high"}
         self.config.write_text(json.dumps(config))
+        # The consultation precedes the judge dispatch that rules on it (#408).
+        self.record_investigation()
+        state = self.saved()
+        add_assignment(state, "2026-02-03T15:00:00+00:00", "judge", "claude", task=TASK)
+        save_state(self.state, state)
         judge = self.tmp / "judge.md"
         judge.write_text("RULING: amend — correct F1\nACTION: Use one canonical parser\n")
         code, _, err = self.owner("checkpoint", {"id": "cap-5", "task": TASK, "defect": "F1 is still blocking",
@@ -150,6 +181,30 @@ class RecoveryCommandTests(fixture.CliCase):
         self.assertEqual(code, 0, err)
         self.assertEqual(json.loads(out)["applied"][0]["context_transition"]["reason"], "authorized_context_recovery")
         self.assertEqual(self.saved()["assignments"][0], original)
+
+    def test_apply_refuses_a_judge_seat_before_the_assessment_exists(self):
+        # coding-policy#408: the dispatch path, not only the record, so the
+        # expensive seat is never spent on an uninvestigated loop.
+        state = empty_state()
+        for fix in (None, 1, 2, 3, 4, 5):
+            add_assignment(state, "2026-02-03T09:00:0{}+00:00".format(fix or 0), "developer", "grok", task=TASK, fix_round=fix)
+        save_state(self.state, state)
+        self.register()
+        config = json.loads(self.config.read_text())
+        config["judge"] = {"agent": "claude", "model": "claude-opus-4-6", "effort": "high"}
+        self.config.write_text(json.dumps(config))
+        self.briefs["judge"] = self.tmp / "judge-brief.md"
+        self.briefs["judge"].write_text("# judge\n")
+        args = ["apply", "--assignments", json.dumps({"judge": "claude"}), "--common", str(self.common),
+                "--brief", "judge=" + str(self.briefs["judge"]), "--task", TASK, "--now", AT, "--composer-settle", "0"]
+        for extra in ((), ("--dry-run",)):
+            code, out, err = self.invoke(args + list(extra), self._client({"claude": "idle"}))
+            self.assertEqual(code, 1)
+            self.assertEqual(out, "")
+            self.assertIn("consult the investigator", err)
+        self.record_investigation()
+        code, out, err = self.invoke(args + ["--dry-run"], self._client({}))
+        self.assertEqual(code, 0, err)
 
     def test_diagnose_wires_the_pinned_judge_and_its_enrolled_report(self):
         # coding-policy#407: the public command, not just the owner function —

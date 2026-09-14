@@ -1,5 +1,73 @@
 # Changelog
 
+### Changed
+
+- **Specialist consultations are triggered, and non-convergence goes to the
+  investigator before the judge (#408).** Across a full delivery of ACR issue
+  #117 the lead selected two responsibilities, implementation and
+  verification: twenty-plus fix rounds, two of nine workers used, zero
+  specialist consultations. Every retrospective in the series recorded "no
+  specialist consultation ran in this interval" and nothing acted on it,
+  because `Team Composition` said to activate one "only for a bounded question
+  the task needs" and named no condition that obliged any.
+
+  The cost was not idle workers. The design was never reviewed by anyone, and
+  the reviewer then caught at the end, one finding per round, what a
+  specialist would have caught before implementation. Each late defect maps to
+  a profile that existed and was never consulted: a preservation checker blind
+  to test decorators, so an AI-proposed migration could disable a test while
+  the checker reported success (security, for a feature whose whole premise is
+  that foreign proposed changes are safe); a guide documenting a flag
+  resolution the code does not implement (documentation); a 10k-line package
+  with a back-edge, declared indivisible (architect); a deterministic path
+  refusing with eleven blockers whose `PATH` versus `--project` semantics
+  confused the guide's own author (UX and product); and nineteen rounds that
+  never converged, against an investigator profile that reads "unclear
+  causality or repeated unsuccessful fixes".
+
+  Five triggers now fire: a new or substantially changed package above the
+  size the repo states, a new or changed trust boundary, a new user-facing
+  command, flag or refusal path, a new user-facing document, and fix rounds
+  reaching the allowance without converging. Each names its deliverable. A
+  fired trigger is consulted or recorded as a staffing decision with its
+  reason — the shape `Team Composition` already uses for a shortfall of
+  eligible workers — so skipping becomes an explicit choice rather than the
+  default silence produced. The exhaustion trigger is the exception with no
+  alternative: the judge's diagnosis rules on that assessment, so `teamlead
+  diagnose` refuses without it, no staffing decision substitutes, and the
+  judge seat is not dispatched at an exhausted allowance before the assessment
+  exists — both `apply` and `start-judge` guard it, dry runs included, so the
+  most expensive seat is never spent on an uninvestigated loop and a judge
+  dispatched for an ordinary dispute inside the allowance is untouched. The size a package must exceed is the consuming
+  repo's to state and that trigger waits on the number; the other four fire on
+  their own terms in every repo.
+
+  Pre-development planning stops being uniformly optional. It remains optional
+  for work that trips no trigger and gates work that trips one: the ordering
+  was backwards, making the cheap gate optional and the expensive one
+  mandatory.
+
+  The exhaustion path splits into the two things it always contained. The
+  investigator, read-only and bounded, asks why the loop is not converging and
+  returns a reproduction, a causal assessment and a discriminating experiment;
+  it gathers evidence and decides nothing. The judge then rules on that
+  assessment with #407's remedy ladder. That matches each seat's contract: the
+  judge is an adjudicator, not a researcher, and it is the most expensive seat
+  in the fleet, so ruling on a prepared assessment costs less than
+  investigating from scratch. `teamlead diagnose` refuses without an assessed
+  investigator consultation for the task that follows its latest developer
+  attempt and was assessed before the judge dispatch it cites — a consultation
+  assessed afterwards is not what the judge read, whenever it was dispatched. The diagnosis brief hands the judge
+  that report to rule on, rather than asking it to derive causes from the
+  round history itself.
+  Re-entry on a failed remedy is unchanged: the ladder descends and terminates
+  at `stop`, with the investigator step repeating on the failed remedy.
+
+  No worker-utilization metric or quota follows. Two of nine workers was the
+  arithmetic consequence of selecting two responsibilities, not a scheduling
+  failure; chasing the number directly would produce make-work consultations,
+  which is worse than the current state.
+
 ## 0.3.213 — 2026-09-14
 
 ### Changed

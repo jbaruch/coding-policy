@@ -834,6 +834,12 @@ def cmd_apply(args, client=None, warn=None, trace=None):
         # A dry run rehearses a send and meets the same gates (#399).
         attention.require_dispatch_clear(state_path, args.task, at)
         _refusal_moves(store, agents_by_name, assignments, list(assignments), args, paths, reports)
+    # A fresh judge seat at an exhausted allowance waits for the assessment it
+    # rules on, dry runs included. A completed replay has left `assignments`
+    # already, so it is not re-gated (#408).
+    if args.task and "judge" in assignments:
+        recovery.require_investigation_before_judge(store, state["assignments"], args.task,
+                                                    state["specialist_assessments"])
     recovery.validate_work(store, state["assignments"], args.task, args.fix_round,
                            args.correction_plan, work, implementation="developer" in assignments)
     constraints = composition.selection_constraints(
@@ -1028,7 +1034,8 @@ def cmd_recovery(args, client=None, warn=None, trace=None):
             if member is not None:
                 enrolled = supervision.expected_assignment(member)["report"]
         result = recovery.diagnose(store, history, data, at, judge.agent if judge else None, enrolled,
-                                   supervision.dispatch_binding(state_path) is not None)
+                                   supervision.dispatch_binding(state_path) is not None,
+                                   state["specialist_assessments"])
     elif args.command == "record-report":
         if isinstance(data, dict):
             dispatch = next((item for item in store["dispatches"] if item["id"] == data.get("dispatch")), None)
@@ -1126,6 +1133,11 @@ def cmd_start_judge(args, client=None, warn=None, trace=None):
         raise UsageError("Judge --task differs from its plan; use the original task identity.", {})
     at = args.now or now_iso()
     attention.require_dispatch_clear(state_path, args.task or planned_task, at)
+    # The judge rules on the investigator's assessment, so the seat is never
+    # started at an exhausted allowance before that assessment exists (#408).
+    full = _load_state_for_write(state_path, warn, persist_migration=False)
+    recovery.require_investigation_before_judge(full["recovery"], full["assignments"],
+                                                args.task or planned_task, full["specialist_assessments"])
     item = retrospective_runtime.request({"transitions": [{"agent": agent.name, "role": "judge",
         "model": parsed["model"], "effort": parsed["effort"], "context": "start", "task": args.task or planned_task,
         "pane": args.pane}]})["transitions"][0]

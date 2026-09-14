@@ -434,7 +434,10 @@ class HistoricalCommandsTest(fixture.CliCase):
     def test_import_with_remaining_existing_plan_still_requires_actual_blocking_review(self):
         self.seed(5)
         state = self.saved()
-        add_assignment(state, COMPLETED, "judge", "claude", task=TASK)
+        add_assignment(state, "2026-03-01T13:00:00+00:00", "investigator", "grok", task=TASK)
+        investigator_index = len(state["assignments"]) - 1
+        state["assignments"][investigator_index]["status"] = "applied"
+        add_assignment(state, "2026-03-01T15:00:00+00:00", "judge", "claude", task=TASK)
         save_state(self.state, state)
         config = json.loads(self.config.read_text())
         config["judge"] = {"agent": "claude", "model": "claude-opus-4-6", "effort": "high"}
@@ -445,7 +448,26 @@ class HistoricalCommandsTest(fixture.CliCase):
             "previous_attempts": "Five completed fixes", "progress": "Most fixtures pass",
             "change_in_approach": "Correct the remaining case", "judge_report": str(judge)})
         self.assertEqual(code, 0, err)
-        # The operator's budget overrides a recorded remedy (#407).
+        # The diagnosis rules on a prepared causal assessment (#408), and the
+        # operator's budget overrides the remedy it returns (#407). The
+        # consultation precedes the judge dispatch that rules on it.
+        state = self.saved()
+        index = investigator_index
+        state["recovery"]["dispatches"].append({
+            "schema_version": 1, "at": "2026-03-01T13:00:00+00:00", "id": "investigator-dispatch",
+            "fingerprint": "e" * 64, "role": "investigator", "agent": "grok", "task": TASK,
+            "fix_round": None, "plan": None, "work": None, "status": "applied", "assignment_index": index,
+            "result": {"schema_version": 1, "task": TASK, "role": "investigator", "agent": "grok",
+                       "fix_round": None, "status": "applied"}, "report": None})
+        state["specialist_assessments"].append({
+            "schema_version": 1, "at": "2026-03-01T14:00:00+00:00", "id": "inv-1",
+            "dispatch": "investigator-dispatch", "assignment_index": index, "task": TASK,
+            "role": "investigator", "agent": "grok", "report": "/reports/investigation.md",
+            "delivery": "/reports/delivery.json", "outcome": "delivered", "contribution": "design",
+            "summary": "The loop did not converge on surface area.",
+            "report_evidence": {"path": "/reports/investigation.md", "sha256": "a" * 64},
+            "delivery_evidence": {"path": "/reports/delivery.json", "sha256": "b" * 64}})
+        save_state(self.state, state)
         diagnosis = self.tmp / "diagnosis.md"
         diagnosis.write_text("DIAGNOSIS: the loop did not converge\nREMEDY: continue — one more round\n"
                              "BOUND: 1\nEVIDENCE: the five completed fixes\nUNVERIFIED: none\n")

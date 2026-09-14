@@ -14,7 +14,7 @@ from fnmatch import fnmatchcase
 from pathlib import Path, PurePosixPath
 
 from .errors import UsageError
-from .chronology import assignment_after, latest_assignment
+from .chronology import assignment_after, latest_assignment, timestamp
 
 
 RECOVERY_SCHEMA_VERSION = 1
@@ -288,6 +288,36 @@ def checkpoint(store, assignments, data, at, judge_agent):
     return record
 
 
+def investigated_after(assignments, row, task, developer_index):
+    """True when `row` assesses an investigator consultation of `task` that
+    followed the developer attempt at `developer_index`."""
+    return (row["task"] == task and row["role"] == "investigator"
+            and assignment_after(assignments, row["assignment_index"], developer_index))
+
+
+def require_investigation_before_judge(store, assignments, task, investigations):
+    """Refuse a judge dispatch at an exhausted allowance with no assessment.
+
+    The judge rules on the investigator's causal assessment (#408), so the
+    expensive seat is never spent before that assessment exists. A judge
+    dispatched for an ordinary dispute is untouched: the gate applies only
+    while the task sits at an exhausted allowance with no unspent bound.
+    """
+    if not task or task not in store["tasks"]:
+        return None
+    count = confirmed_fix(assignments, task)
+    if count < DEFAULT_FIX_LIMIT:
+        return None
+    if any(row["task"] == task and row["last_fix"] > count for row in active_plans(store)):
+        return None
+    developer = latest_assignment(assignments, task=task, role="developer", status="applied")
+    if developer is None:
+        return None
+    if not any(investigated_after(assignments, row, task, developer[0]) for row in investigations):
+        raise UsageError("Task {} sits at an exhausted allowance: consult the investigator and assess its report before dispatching the judge, which rules on that assessment.".format(task), {})
+    return None
+
+
 def diagnoses_for(store, task):
     return [row for row in store["diagnoses"] if row["task"] == task]
 
@@ -301,7 +331,7 @@ def _next_remedy_rung(store, task):
     return last + 1 if last + 1 < len(DIAGNOSIS_LADDER) else None
 
 
-def diagnose(store, assignments, data, at, judge_agent, enrolled_report, supervised):
+def diagnose(store, assignments, data, at, judge_agent, enrolled_report, supervised, investigations=()):
     """Record the judge's diagnosis of a fix loop that did not converge.
 
     An exhausted allowance is a diagnostic question, not a budget prompt: more
@@ -318,6 +348,12 @@ def diagnose(store, assignments, data, at, judge_agent, enrolled_report, supervi
     supervision enrolled for the pinned judge, and a bound lead with no such
     enrollment has no diagnosis to record. `supervised` and `enrolled_report`
     are the caller's reading of that binding.
+
+    `investigations` are the lead's assessed specialist consultations. The
+    judge rules on a prepared causal assessment rather than investigating from
+    scratch: the investigator's profile is written for "unclear causality or
+    repeated unsuccessful fixes", and it is the cheaper seat (#408). One for
+    this task after the latest developer attempt is required.
 
     Re-entry moves strictly down `DIAGNOSIS_LADDER`, so a failed remedy is
     never reissued and a task takes at most three diagnoses. That holds for a
@@ -381,6 +417,14 @@ def diagnose(store, assignments, data, at, judge_agent, enrolled_report, supervi
     judge = latest_assignment(assignments, task=data["task"], role="judge", agent=judge_agent, status="applied")
     if not judge_agent or developer is None or judge is None or not assignment_after(assignments, judge[0], developer[0]):
         raise UsageError("A diagnosis needs the configured pinned judge's completed assignment after the latest developer attempt.", {})
+    # After the attempt it explains and assessed before the judge that rules on
+    # it. The assessment time is what matters: an investigator dispatched early
+    # and assessed after the judge finished is not what the judge read (#408).
+    judge_at = timestamp(assignments[judge[0]].get("at"), "Judge assignment chronology")
+    if not any(investigated_after(assignments, row, data["task"], developer[0])
+               and timestamp(row["at"], "Investigator assessment chronology") < judge_at
+               for row in investigations):
+        raise UsageError("A diagnosis rules on a prepared causal assessment: record an assessed investigator consultation for task {} after its latest developer attempt, assessed before the judge dispatch you cite.".format(data["task"]), {})
     if supervised:
         if not isinstance(enrolled_report, str) or not enrolled_report.strip():
             raise UsageError("This lead is bound, and no supervision enrollment binds a report to the pinned judge on task {}; dispatch the diagnosis through the bound round before recording it.".format(data["task"]), {})

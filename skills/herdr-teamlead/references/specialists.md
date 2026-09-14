@@ -35,14 +35,33 @@ worker. The pinned judge remains outside ordinary staffing.
 
 ## Choose relevant profiles
 
-Read only the profiles needed for this task. They are prompts for selecting
-questions and evidence, not checklists that every change must complete.
+Read only the profiles needed for this task. Most are prompts for selecting
+questions and evidence, not checklists that every change must complete. Five
+are triggered: the condition fires, the profile is consulted, and its
+deliverable lands before implementation proceeds. Four of them allow a
+recorded staffing decision instead, with its reason, the way a shortfall of
+eligible workers already does. The exhaustion trigger does not: the judge's
+diagnosis rules on that assessment, and `teamlead diagnose` refuses without
+it.
+
+| Trigger | Profile | Deliverable before implementation |
+| --- | --- | --- |
+| A new or substantially changed package above the size the repo states | Architect | The intended boundaries, the options and consequences, and the verification each boundary needs |
+| A new or changed trust boundary — anything deciding whether foreign input, generated content or a proposed change is safe | Security | A bounded threat assessment against that boundary |
+| A new user-facing command, flag or refusal path | UX and product | The flow, the alternatives considered, and acceptance criteria |
+| A new user-facing document | Documentation | A draft verified against the shipped behavior, never against intent |
+| Fix rounds reaching the allowance without converging | Investigator | A reproduction, a causal assessment and a discriminating experiment. Required; no staffing decision substitutes for it |
+
+The size a package must exceed is the consuming repo's to state, and that
+trigger waits on the number. The other four do not: a trust boundary, a
+user-facing command, flag or refusal path, a user-facing document and a
+non-converging loop fire on their own terms in every repo.
 
 | Profile | Bring it in for | Useful output |
 | --- | --- | --- |
 | [UX and product](specialists/ux-product.md) | A new flow, confusing behavior or unresolved interaction choice | Concrete flow, alternatives and acceptance criteria |
 | [Accessibility](specialists/accessibility.md) | An affected user path needs keyboard or assistive technology evidence | Reproducible findings with coverage and manual-check gaps |
-| [Investigator](specialists/investigator.md) | Unclear causality or repeated unsuccessful fixes | Reproduction, causal assessment and discriminating experiment |
+| [Investigator](specialists/investigator.md) | Unclear causality or repeated unsuccessful fixes, and every exhausted allowance | Reproduction, causal assessment and discriminating experiment |
 | [Architect](specialists/architect.md) | Cross-component choices or lasting contracts | Decision note with options, consequences and verification needs |
 | [Security](specialists/security.md) | A changed trust boundary or concrete security question | Bounded threat assessment and actionable findings |
 | [Performance and reliability](specialists/performance-reliability.md) | Latency, concurrency, resource or recovery uncertainty | Measured explanation and reproducible failure or improvement check |

@@ -17,7 +17,7 @@ from pathlib import Path
 from teamlead.errors import UsageError
 from teamlead.recovery import (
     abort_pre_send, active_plans, authorize_context, authorize_plan, authorize_refused_dispatch, brief_identity, checkpoint, confirmed_fix,
-    diagnose,
+    diagnose, require_investigation_before_judge,
     dispatch_identity, finish_dispatch, fresh_transition, mark_sending,
     migrate_store, prior_dispatch, record_refusal, record_report, refusal_move, register_task, reserve,
     task_statuses, validate_store, validate_work,
@@ -53,6 +53,7 @@ class RecoveryTests(unittest.TestCase):
 
     def seed_checkpoint(self):
         self.exhaust()
+        self.consult_investigator("2026-02-03T09:30:00+00:00", "2026-02-03T09:45:00+00:00")
         add_assignment(self.state, AT, "judge", "judge", task=TASK)
         return checkpoint(self.store, self.history, {
             "id": "checkpoint-5", "task": TASK, "defect": "F1 remains open", "previous_attempts": "Five attempts changed parsing and quoting",
@@ -93,7 +94,9 @@ class RecoveryTests(unittest.TestCase):
 
     def judge_after_developer(self, number):
         # The diagnosis gate needs the pinned judge's assignment after the
-        # latest developer attempt, as an adjudication citation does.
+        # latest developer attempt, and the consultation it rules on before
+        # that dispatch.
+        self.consult_investigator("2026-02-03T11:30:0{}+00:00".format(number), "2026-02-03T11:45:0{}+00:00".format(number))
         add_assignment(self.state, "2026-02-03T12:00:0{}+00:00".format(number), "judge", "judge", task=TASK)
 
     def next_checkpoint(self, name):
@@ -104,12 +107,29 @@ class RecoveryTests(unittest.TestCase):
             "progress": "The named change landed; the finding did not close",
             "change_in_approach": "Take the next remedy on the ladder"}, AT, "judge")["id"]
 
-    def run_diagnosis(self, data, judge="judge", enrolled=None):
+    def consult_investigator(self, at, assessed_at):
+        """Record the consultation the judge rules on, assessed before it."""
+        add_assignment(self.state, at, "investigator", "worker", task=TASK)
+        self.investigator_index = len(self.history) - 1
+        self.investigator_assessed_at = assessed_at
+        return self.investigator_index
+
+    def investigated(self, index=None, at=None):
+        """The assessed investigator consultation #408 requires."""
+        if index is None:
+            index = getattr(self, "investigator_index", 0)
+        if at is None:
+            at = getattr(self, "investigator_assessed_at", "2026-02-03T09:45:00+00:00")
+        return [{"task": TASK, "role": "investigator", "assignment_index": index, "at": at}]
+
+    def run_diagnosis(self, data, judge="judge", enrolled=None, investigations=None):
         # The fixture's judge dispatch enrolls the report the request cites,
         # unless a case overrides it to prove the binding.
         if enrolled is None:
             enrolled = data.get("judge_report")
-        return diagnose(self.store, self.history, data, AT, judge, enrolled, enrolled is not None)
+        if investigations is None:
+            investigations = self.investigated()
+        return diagnose(self.store, self.history, data, AT, judge, enrolled, enrolled is not None, investigations)
 
     def diagnosis(self, name, remedy, bound, checkpoint_id="checkpoint-5"):
         return {"id": name, "task": TASK, "checkpoint": checkpoint_id, "judge_report": self.diagnosis_report(remedy, bound, name + ".md"),
@@ -245,6 +265,44 @@ class RecoveryTests(unittest.TestCase):
         with self.assertRaisesRegex(UsageError, "names its remedy and what it means"):
             self.run_diagnosis({**self.diagnosis("diag-1", "continue", 2), "judge_report": str(bare)}, "judge")
 
+    def test_a_judge_seat_is_not_spent_before_the_assessment_exists(self):
+        # coding-policy#408: the gate guards the dispatch, not only the record,
+        # so the most expensive seat is never spent on an uninvestigated loop.
+        # Inside the allowance an ordinary dispute reaches the judge freely.
+        add_assignment(self.state, "2026-02-03T09:00:00+00:00", "developer", "worker", task=TASK)
+        self.assertIsNone(require_investigation_before_judge(self.store, self.history, TASK, []))
+        self.assertIsNone(require_investigation_before_judge(self.store, self.history, "unknown-task", []))
+        self.exhaust()
+        with self.assertRaisesRegex(UsageError, "consult the investigator"):
+            require_investigation_before_judge(self.store, self.history, TASK, [])
+        index = self.consult_investigator("2026-02-03T09:30:00+00:00", "2026-02-03T09:45:00+00:00")
+        self.assertIsNone(require_investigation_before_judge(self.store, self.history, TASK, self.investigated(index=index)))
+
+    def test_a_diagnosis_rules_on_a_prepared_causal_assessment(self):
+        # coding-policy#408: the investigator's profile is written for repeated
+        # unsuccessful fixes, and the judge is the more expensive seat.
+        self.seed_checkpoint()
+        seeded, seeded_at = self.investigator_index, self.investigator_assessed_at
+        request = self.diagnosis("diag-1", "continue", 2)
+        with self.assertRaisesRegex(UsageError, "prepared causal assessment"):
+            self.run_diagnosis(request, investigations=[])
+        # Another task's assessment, and one predating the latest attempt, are
+        # not this loop's evidence.
+        with self.assertRaisesRegex(UsageError, "prepared causal assessment"):
+            self.run_diagnosis(request, investigations=[{"task": "another", "role": "investigator", "assignment_index": 0}])
+        with self.assertRaisesRegex(UsageError, "prepared causal assessment"):
+            self.run_diagnosis(request, investigations=[{"task": TASK, "role": "architect", "assignment_index": 0}])
+        with self.assertRaisesRegex(UsageError, "prepared causal assessment"):
+            self.run_diagnosis(request, investigations=self.investigated(index=0))
+        # A consultation delivered after the judge dispatch is not what it read.
+        late = self.consult_investigator("2026-02-03T20:00:00+00:00", "2026-02-03T20:30:00+00:00")
+        with self.assertRaisesRegex(UsageError, "assessed before the judge dispatch"):
+            self.run_diagnosis(request, investigations=self.investigated(index=late))
+        # Dispatched early, assessed late: the judge still did not read it.
+        with self.assertRaisesRegex(UsageError, "assessed before the judge dispatch"):
+            self.run_diagnosis(request, investigations=self.investigated(index=seeded, at="2026-02-03T23:00:00+00:00"))
+        self.assertEqual(self.run_diagnosis(request, investigations=self.investigated(index=seeded, at=seeded_at))["remedy"], "continue")
+
     def test_an_adjudication_report_is_not_a_diagnosis(self):
         # coding-policy#407: RULING and ACTION belong to adjudication; a mixed
         # report could carry a blocked ruling and still grant attempts.
@@ -343,6 +401,7 @@ class RecoveryTests(unittest.TestCase):
 
     def test_that_checkpoint_carries_the_operator_bounded_approval_through(self):
         self.exhaust()
+        self.consult_investigator("2026-02-03T09:30:00+00:00", "2026-02-03T09:45:00+00:00")
         add_assignment(self.state, AT, "judge", "judge", task=TASK)
         checkpoint(self.store, self.history, {"id": "cp", "task": TASK, "defect": "F1",
             "previous_attempts": "Five fixes", "progress": "Still blocked",

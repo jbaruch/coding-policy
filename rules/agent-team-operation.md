@@ -21,7 +21,17 @@ description: Running a multi-agent team — task-based specialist composition, c
 
 - The lead selects the responsibilities needed at each stage of the task
 - Preserve developer, reviewer, tester and release responsibilities for implementation delivery
-- Activate specialist consultations only for a bounded question or deliverable the task needs
+- Activate a specialist consultation for a bounded question or deliverable the task needs, and whenever a trigger below fires
+- A new or substantially changed package above the size the repo states triggers the architect, before implementation
+- A new or changed trust boundary — anything deciding whether foreign input, generated content or a proposed change is safe — triggers security
+- A new user-facing command, flag or refusal path triggers UX and product
+- A new user-facing document triggers documentation
+- Fix rounds reaching the task's allowance without converging trigger the investigator
+- Each trigger names its deliverable in `skills/herdr-teamlead/references/specialists.md`
+- A fired trigger is consulted, or recorded as a staffing decision with its reason
+- Silence is never that decision
+- The exhaustion trigger has no such alternative: a diagnosis without its assessed consultation is refused
+- The judge seat is not dispatched at an exhausted allowance before that assessment exists
 - Separate responsibility, specialty and execution worker in each specialist assignment
 - Ground capability declarations in available skills, tools and observed work
 - Apply capability and contribution eligibility before task familiarity and measured subscription headroom through the owner planner
@@ -58,7 +68,8 @@ description: Running a multi-agent team — task-based specialist composition, c
 
 - The reserved `judge` seat runs on the most capable model available and holds no other responsibility
 - The lead dispatches the judge in adjudication mode for one of three triggers: a contested reviewer or tester verdict, a lead override of a blocking finding, or a bot finding the team disagrees with
-- The lead dispatches the judge in diagnosis mode at an exhausted allowance with blocking work remaining
+- The lead dispatches the judge in diagnosis mode at an exhausted allowance with blocking work remaining, on the investigator's assessment
+- The judge rules on that assessment; it never investigates from scratch
 - Diagnosis asks why the loop is not converging and what must change, never who is right
 - The diagnosis returns `DIAGNOSIS:`, `REMEDY: continue | restructure | stop`, `BOUND:`, `EVIDENCE:` and `UNVERIFIED:`
 - A `continue` or `restructure` remedy's `BOUND` supplies the attempt budget the operator formerly supplied
@@ -147,13 +158,16 @@ description: Running a multi-agent team — task-based specialist composition, c
 - Never edit repository content while holding the release role
 - Each fresh-worker brief includes the task, prior report, and open findings
 - Frame the handoff as "a prior developer attempted this N times; you own it now"
-- At an exhausted allowance with remaining blocking work, stop the round, record the checkpoint, and dispatch the judge in diagnosis mode
+- At an exhausted allowance with remaining blocking work, stop the round, record the checkpoint, and consult the investigator before the judge
+- The investigator asks why the loop is not converging and returns a reproduction, a causal assessment and a discriminating experiment
+- It gathers evidence and decides nothing
 - Narrow exception for a judge-diagnosed bounded correction plan.
 - Preconditions (all required):
   1. The task's latest developer attempt is confirmed applied with no dispatch outcome unknown
   2. A checkpoint names the concrete remaining defect, previous changes, observed progress, and changed approach
-  3. The pinned judge returns a completed diagnosis whose remedy is `continue` or `restructure`, with its bound
-  4. The owner utility records the diagnosis and its derived plan under the original task and base
+  3. An assessed investigator consultation for the task follows its latest developer attempt
+  4. The pinned judge returns a completed diagnosis whose remedy is `continue` or `restructure`, with its bound
+  5. The owner utility records the diagnosis and its derived plan under the original task and base
 - Every other exhausted loop takes its diagnosis first; never dispatch an automatic sixth fix
 - Reuse that plan across attempts within its bounds
 - Re-enter diagnosis when the bound exhausts, scope changes, or the operator overrides the remedy
@@ -317,7 +331,9 @@ description: Running a multi-agent team — task-based specialist composition, c
 
 ## Review Before PR
 
-- An implementation round runs two phases: optional pre-development planning, then mandatory post-push verification
+- An implementation round runs two phases: pre-development planning, then mandatory post-push verification
+- Pre-development planning is optional for work that trips no Team Composition trigger
+- Work that trips one gates on its deliverable before implementation, or on the recorded staffing decision the four non-exhaustion triggers allow
 - An investigation-only round gates its knowledge deliverable under `skills/herdr-teamlead/references/assignment-reasoning.md`
 - Pre-development output is a design note or a test plan, never a pass
 - The tester and the reviewer pass on the pushed branch before the PR opens
