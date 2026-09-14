@@ -18,6 +18,7 @@ import re
 import subprocess
 import sys
 import unittest
+from collections import Counter
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent.parent
@@ -43,16 +44,19 @@ def indexed_rules():
     return sorted(IMPORT.findall(INDEX.read_text()))
 
 
+def duplicates(paths):
+    """Paths listed more than once — a set difference would hide them."""
+    return sorted(path for path, count in Counter(paths).items() if count > 1)
+
+
 class SourceIndex(unittest.TestCase):
     def test_index_matches_manifest(self):
         declared, indexed = declared_rules(), indexed_rules()
+        self.assertEqual(duplicates(declared), [], "rule declared twice in .tessl-plugin/plugin.json")
+        self.assertEqual(duplicates(indexed), [], "rule imported twice by .claude/CLAUDE.md")
         self.assertEqual(
-            sorted(set(declared) - set(indexed)), [],
-            "declared in .tessl-plugin/plugin.json but not imported by .claude/CLAUDE.md",
-        )
-        self.assertEqual(
-            sorted(set(indexed) - set(declared)), [],
-            "imported by .claude/CLAUDE.md but not declared in .tessl-plugin/plugin.json",
+            declared, indexed,
+            ".tessl-plugin/plugin.json and .claude/CLAUDE.md do not name the same rule files",
         )
 
     def test_every_indexed_rule_exists(self):
@@ -77,6 +81,9 @@ class DiagnosticsScope(unittest.TestCase):
 
     def included(self):
         return sorted(json.loads(PYRIGHT.read_text())["include"])
+
+    def test_no_path_is_included_twice(self):
+        self.assertEqual(duplicates(self.included()), [], "pyrightconfig.json includes a path twice")
 
     def test_every_tracked_module_is_type_checked(self):
         uncovered = sorted(set(self.tracked_python()) - set(self.included()))

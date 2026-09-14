@@ -661,11 +661,11 @@ shape, which took two live rounds to see whole. When the results are flushed
 one at a time the rows read linearly (`tool_use`, its result, the next
 `tool_use`, its result); when both calls are written before either result
 lands, the rows no longer read in that order. Both orderings come from the
-same pinned CLI, and a session exhibiting either one is valid evidence to
-validate against. The linkage and answered-once predicates that decide it
-belong to the source contract named above. Give a Claude worker a SHORT
-report path: a long one wraps in the pane, and a wrapped marker
-cannot be told from a newline, so the watcher refuses it by design.
+same pinned CLI, and the validation covers both — a run that exhibited only
+one has not exercised the other. The linkage and answered-once predicates
+that decide them belong to the source contract named above. Give a Claude
+worker a SHORT report path: a long one wraps in the pane, and a wrapped
+marker cannot be told from a newline, so the watcher refuses it by design.
 
 For a stale-Grok regression, complete a short turn in an isolated Grok process,
 then let normal `teamlead apply` send `/new` and a fresh report-only brief. Save
