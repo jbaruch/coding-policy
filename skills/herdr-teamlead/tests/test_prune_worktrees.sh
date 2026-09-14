@@ -212,6 +212,7 @@ main() {
   mkdir -p "$TMP/shim" || die "mkdir shim failed"
   cat > "$TMP/shim/git" <<SHIM || die "shim write failed"
 #!/usr/bin/env bash
+set -euo pipefail
 case "\$*" in *merge-base*) printf 'not-a-sha\n' > "$SHARED/.git/refs/remotes/origin/vanished" ;; esac
 exec "$(command -v git)" "\$@"
 SHIM
@@ -273,12 +274,19 @@ SHIM
   mkdir -p "$TMP/shim21" || die "mkdir shim failed"
   cat > "$TMP/shim21/git" <<SHIM || die "shim write failed"
 #!/usr/bin/env bash
-# Move the branch on the SECOND read of its tip — the re-read the deletion
-# guards on, by which time the worktree is gone and the move is allowed. The
-# new tip is merged too, so only the guard can keep the branch.
+set -euo pipefail
+# Move the branch on the SECOND read of its tip — after the worktree is gone,
+# so the move is allowed, and before the compare-and-delete reads it. The new
+# tip is merged too, so only the guard can keep the branch. A move that fails
+# breaks the fixture's premise: say so and stop rather than let the run pass.
 case "\$*" in *"refs/heads/review/racing"*)
   if [[ -e "$TMP/shim21/seen" ]]; then
-    "$(command -v git)" -C "$SHARED" branch -f review/racing refs/remotes/origin/main >/dev/null 2>&1
+    # The move's own chatter must not reach stdout: the caller is capturing it
+    # as the branch tip.
+    if ! "$(command -v git)" -C "$SHARED" branch -f review/racing refs/remotes/origin/main >&2; then
+      echo "shim21: fixture could not move review/racing" >&2
+      exit 1
+    fi
   else
     : > "$TMP/shim21/seen"
   fi ;;
@@ -297,14 +305,15 @@ SHIM
   mkdir -p "$TMP/shim22" || die "mkdir shim failed"
   cat > "$TMP/shim22/git" <<SHIM || die "shim write failed"
 #!/usr/bin/env bash
-case "\$*" in *"branch -D"*) echo "fatal: fixture refuses the deletion" >&2; exit 1 ;; esac
+set -euo pipefail
+case "\$*" in *"update-ref -d"*) echo "fatal: fixture refuses the deletion" >&2; exit 1 ;; esac
 exec "$(command -v git)" "\$@"
 SHIM
   chmod +x "$TMP/shim22/git" || die "chmod shim failed"
   RUN_SEQ=$((RUN_SEQ+1))
   OUT="$(env WORKTREE_ROOT="$ROOT" PATH="$TMP/shim22:$PATH" bash "$SCRIPT" "$SHARED" 2>"$TMP/err.$RUN_SEQ")"; RC=$?; ERRTEXT="$(cat "$TMP/err.$RUN_SEQ")"
   echo "22. the JSON reports the removal that happened even when the branch deletion fails"
-  if (( RC == 2 )) && [[ "$(removed_paths)" == *"$ROOT/twentytwo-halfway"* ]] && [[ ! -e "$ROOT/twentytwo-halfway" ]] && [[ "$OUT" == *'"failed": [{'*"branch -D failed"* ]]; then pass; else fail "rc=$RC out=$OUT err=$ERRTEXT"; fi
+  if (( RC == 2 )) && [[ "$(removed_paths)" == *"$ROOT/twentytwo-halfway"* ]] && [[ ! -e "$ROOT/twentytwo-halfway" ]] && [[ "$OUT" == *'"failed": [{'*"deleting"* ]]; then pass; else fail "rc=$RC out=$OUT err=$ERRTEXT"; fi
 
   # --- 23. a prunable branch is deferred when the metadata prune is skipped.
   if [[ "$(id -u)" != 0 ]]; then
@@ -322,11 +331,11 @@ SHIM
   # --- 24. a worktree path holding a newline is one field, not two.
   mk_repo twentyfour
   newline_path="$ROOT/twentyfour-$(printf 'a\nb')"
-  if git -C "$SHARED" worktree add -q -b review/newline "$newline_path" origin/main 2>/dev/null; then
-    run "$SHARED"
-    echo "24. a newline in a worktree path does not split its record"
-    if (( RC == 0 )) && [[ "$OUT" != *'"path": "'"$ROOT"'/twentyfour-a"'* ]] && ! has_branch "$SHARED" review/newline; then pass; else fail "rc=$RC out=$OUT err=$ERRTEXT"; fi
-  fi
+  git -C "$SHARED" worktree add -q -b review/newline "$newline_path" origin/main \
+    || die "fixture could not create a worktree at a newline-bearing path"
+  run "$SHARED"
+  echo "24. a newline in a worktree path does not split its record"
+  if (( RC == 0 )) && [[ "$OUT" != *'"path": "'"$ROOT"'/twentyfour-a"'* ]] && ! has_branch "$SHARED" review/newline; then pass; else fail "rc=$RC out=$OUT err=$ERRTEXT"; fi
 
   # --- 14. usage / not a repo.
   run

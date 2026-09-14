@@ -24,11 +24,13 @@
 #     a precondition failure, never a judgment from stale refs.
 # A local branch with no worktree is DELETED iff it is not the default branch
 # and is an ancestor of origin's default branch. That ancestry check is the
-# safety; deletion is then `git branch -D`, since `-d` re-checks against the
-# shared checkout's own default branch, which may lag origin's and refuse a
-# branch this script just proved merged. The tip that ancestry check read is
-# re-read immediately before the deletion and a branch that moved in between
-# is kept, so a commit landing mid-run is never force-deleted. Removal is `git worktree remove`,
+# safety, and it judges a captured commit rather than a name that can move.
+# Deletion is then `git update-ref -d refs/heads/<branch> <that commit>`,
+# git's compare-and-delete: it removes the branch only while it still points
+# at the commit just proved merged, so a commit landing mid-run keeps the
+# branch instead of being force-deleted. `branch -d` would re-derive the
+# safety against the local default, which may lag origin's, and `branch -D`
+# would skip it entirely; neither is atomic with the check. Removal is `git worktree remove`,
 # never `rm -rf`. Everything else is KEPT and reported with its reason. Stale
 # worktree metadata is pruned (`git worktree prune --expire now`) after every
 # worktree decision and before the branch pass, so a confirmed-gone entry's
@@ -155,16 +157,18 @@ default_branch_of() { # <shared> <dry-run 0|1>
   return 1
 }
 
-# Echo merged|unmerged for refs/heads/<branch> against
-# refs/remotes/origin/<default>, or return 2 on a tool failure. `merge-base --is-ancestor` exits 1 for "not an ancestor" and
+# Echo merged|unmerged for <commit> against refs/remotes/origin/<default>,
+# or return 2 on a tool failure. The caller passes the commit it captured, so
+# a commit landing after the capture cannot become the judged tip.
+# `merge-base --is-ancestor` exits 1 for "not an ancestor" and
 # anything else for an invalid ref or repository error; collapsing both into
 # "unmerged" would hide the failure behind a kept row
 # (rules/error-handling.md Shell Error Handling).
-ancestry() { # <shared> <branch> <default>
+ancestry() { # <shared> <commit> <default>
   local rc=0
-  # Fully qualified on both sides: a tag or a local branch named like the
-  # operand would otherwise shadow it.
-  git -C "$1" merge-base --is-ancestor "refs/heads/$2" "refs/remotes/origin/$3" 2>"$ERRFILE" || rc=$?
+  # The default side is fully qualified: a tag or a local branch named like it
+  # would otherwise shadow it. The candidate side is already a commit id.
+  git -C "$1" merge-base --is-ancestor "$2" "refs/remotes/origin/$3" 2>"$ERRFILE" || rc=$?
   case "$rc" in
     0) printf 'merged' ;;
     1) printf 'unmerged' ;;
@@ -183,18 +187,28 @@ branch_tip() { # <shared> <branch>
   printf '%s' "$out"
 }
 
-# Delete <branch> only if it still points at <tip>. The ancestry check and the
-# deletion are separate git calls; a commit landing in between would otherwise
-# be force-deleted with the branch (#405).
+# Delete <branch> only if it still points at <tip>, atomically: `update-ref -d`
+# with an old value is git's compare-and-delete, so no commit can land between
+# the check and the deletion the way a read-then-`branch -D` allows (#405).
+# The ancestry proof is the safety `branch -d` would otherwise re-derive
+# against the local default, which may lag origin's.
 delete_branch() { # <shared> <branch> <tip>  -> 0 deleted, 1 moved, 2 git refused
-  local now
-  if ! now="$(branch_tip "$1" "$2")"; then
+  local rc=0 now
+  git -C "$1" update-ref -d "refs/heads/$2" "$3" 2>"$ERRFILE" || rc=$?
+  if (( rc != 0 )); then
+    # Distinguish the race from a genuine refusal by re-reading the tip.
+    if now="$(branch_tip "$1" "$2")" && [[ "$now" != "$3" ]]; then
+      return 1
+    fi
     return 2
   fi
-  if [[ "$now" != "$3" ]]; then
-    return 1
+  # `update-ref` leaves the branch config `branch -D` would have removed.
+  rc=0
+  git -C "$1" config --remove-section "branch.$2" >/dev/null 2>"$ERRFILE" || rc=$?
+  # 128 is "no such section": a branch that never tracked anything.
+  if (( rc != 0 && rc != 128 )); then
+    warn "\`git config --remove-section branch.$2\` failed (exit ${rc}): $(tr '\n' ' ' < "$ERRFILE") — the branch is deleted; remove its stale config by hand"
   fi
-  git -C "$1" branch -D "$2" >/dev/null 2>"$ERRFILE" || return 2
   return 0
 }
 
@@ -226,8 +240,13 @@ decide_worktree() { # <shared> <abs_root> <default> <dry-run 0|1> <path> <branch
   if [[ -n "$status" ]]; then
     row kept "$path" "$branch" dirty; return 0
   fi
-  local merged
-  if ! merged="$(ancestry "$shared" "$branch" "$db")"; then
+  # The tip is captured before it is judged, and the deletion below is
+  # conditional on that same commit, so one commit answers both (#405).
+  local tip merged
+  if ! tip="$(branch_tip "$shared" "$branch")"; then
+    row failed "$path" "$branch" "cannot read the tip of ${branch}: $(tr '\n' ' ' < "$ERRFILE")"; return 0
+  fi
+  if ! merged="$(ancestry "$shared" "$tip" "$db")"; then
     row failed "$path" "$branch" "git merge-base failed for ${branch}: $(tr '\n' ' ' < "$ERRFILE")"; return 0
   fi
   if [[ "$merged" == unmerged ]]; then
@@ -235,10 +254,6 @@ decide_worktree() { # <shared> <abs_root> <default> <dry-run 0|1> <path> <branch
   fi
   if (( dry )); then
     row removed "$path" "$branch" ""; return 0
-  fi
-  local tip
-  if ! tip="$(branch_tip "$shared" "$branch")"; then
-    row failed "$path" "$branch" "cannot read the tip of ${branch}: $(tr '\n' ' ' < "$ERRFILE")"; return 0
   fi
   if ! git -C "$shared" worktree remove "$path" 2>"$ERRFILE"; then
     row failed "$path" "$branch" "git worktree remove failed: $(tr '\n' ' ' < "$ERRFILE")"; return 0
@@ -251,7 +266,7 @@ decide_worktree() { # <shared> <abs_root> <default> <dry-run 0|1> <path> <branch
   case "$rc" in
     0) ;;
     1) row failed "$branch" "$branch" "branch ${branch} moved after its ancestry check and was left alone; its worktree is already removed, so re-run to judge the new tip" ;;
-    *) row failed "$branch" "$branch" "git branch -D failed after the worktree was removed: $(tr '\n' ' ' < "$ERRFILE")" ;;
+    *) row failed "$branch" "$branch" "deleting ${branch} failed after the worktree was removed: $(tr '\n' ' ' < "$ERRFILE")" ;;
   esac
   return 0
 }
@@ -261,8 +276,11 @@ decide_branch() { # <shared> <default> <dry-run 0|1> <branch>
   if [[ "$branch" == "$db" ]]; then
     return 0
   fi
-  local merged
-  if ! merged="$(ancestry "$shared" "$branch" "$db")"; then
+  local tip merged rc=0
+  if ! tip="$(branch_tip "$shared" "$branch")"; then
+    row failed "$branch" "$branch" "cannot read the tip of ${branch}: $(tr '\n' ' ' < "$ERRFILE")"; return 0
+  fi
+  if ! merged="$(ancestry "$shared" "$tip" "$db")"; then
     row failed "$branch" "$branch" "git merge-base failed for ${branch}: $(tr '\n' ' ' < "$ERRFILE")"; return 0
   fi
   if [[ "$merged" == unmerged ]]; then
@@ -271,15 +289,11 @@ decide_branch() { # <shared> <default> <dry-run 0|1> <branch>
   if (( dry )); then
     row branch-deleted "$branch" "$branch" ""; return 0
   fi
-  local tip rc=0
-  if ! tip="$(branch_tip "$shared" "$branch")"; then
-    row failed "$branch" "$branch" "cannot read the tip of ${branch}: $(tr '\n' ' ' < "$ERRFILE")"; return 0
-  fi
   delete_branch "$shared" "$branch" "$tip" || rc=$?
   case "$rc" in
     0) row branch-deleted "$branch" "$branch" "" ;;
     1) row failed "$branch" "$branch" "branch ${branch} moved after its ancestry check and was left alone; re-run to judge the new tip" ;;
-    *) row failed "$branch" "$branch" "git branch -D failed: $(tr '\n' ' ' < "$ERRFILE")" ;;
+    *) row failed "$branch" "$branch" "deleting ${branch} failed: $(tr '\n' ' ' < "$ERRFILE")" ;;
   esac
   return 0
 }

@@ -32,10 +32,16 @@
   find; the removal is now recorded whatever the deletion does. The inventory
   reads `git worktree list --porcelain -z` where git supports it, so a path
   holding a newline stays one field, and says so when it cannot. The ancestry
-  check and the deletion are separate git calls, so the tip that check read is
-  re-read immediately before `branch -D` and a branch that moved in between is
-  kept rather than force-deleted. `--dry-run` now states in its contract line
-  that it fetches.
+  check and the deletion were separate git calls over a name that can move, so
+  the tip is now captured first, that exact commit is what ancestry judges,
+  and the deletion is `git update-ref -d refs/heads/<branch> <that commit>` —
+  git's compare-and-delete, which removes the branch only while it still
+  points at the commit just proved merged. A commit landing mid-run keeps the
+  branch instead of being force-deleted, with no window between the check and
+  the deletion for one to slip through. `branch -d` would re-derive the safety
+  against the local default, which may lag origin's, and `branch -D` would
+  skip it; neither is atomic with the check. `--dry-run` now states in its
+  contract line that it fetches.
 
 ## 0.3.211 — 2026-09-14
 
