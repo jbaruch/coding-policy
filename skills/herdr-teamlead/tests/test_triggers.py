@@ -403,6 +403,25 @@ class PlannedSurfacesTest(TempCase):
             triggers.run_command(namespace(repo=self.tmp), runner=self.runner())
         self.assertIn("--planned", caught.exception.message)
 
+    def test_an_empty_plan_classifies_no_more_than_an_absent_one(self):
+        # A well-formed but empty plan would otherwise report success with no
+        # triggers, which is the silence the detector exists to end.
+        with self.assertRaises(UsageError) as caught:
+            triggers.run_command(namespace(repo=self.tmp, planned=self.write()), runner=self.runner())
+        self.assertIn("classifies nothing", caught.exception.message)
+
+    def test_a_plan_declaring_only_a_package_size_classifies(self):
+        payload, _failure = triggers.run_command(
+            namespace(repo=self.tmp, planned=self.write(package_lines={"src/old": 51})),
+            runner=self.runner({"ls-tree": "src/old/a.py\n"}))
+        self.assertEqual(payload["fired"], ["architect"])
+
+    def test_a_plan_declaring_only_a_cli_surface_classifies(self):
+        payload, _failure = triggers.run_command(
+            namespace(repo=self.tmp, planned=self.write(cli_surface=["src/cli/main.py"])),
+            runner=self.runner())
+        self.assertEqual(payload["fired"], ["ux-product"])
+
     def test_a_planned_new_package_fires_the_architect(self):
         payload, failure = triggers.run_command(
             namespace(repo=self.tmp, planned=self.write(added=["src/new/mod.py"])), runner=self.runner())

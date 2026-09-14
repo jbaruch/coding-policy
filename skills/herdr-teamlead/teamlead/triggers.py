@@ -427,8 +427,6 @@ def run_command(args, runner=None):
     untracked = {}
     if not head:
         collect_untracked(run, args.repo, changes, churn, untracked)
-    if not changes and plan is None:
-        raise UsageError("This round changes nothing yet, so the diff classifies nothing; declare the surfaces the work will touch with --planned before the developer is dispatched.", {})
     planned_lines = {}
     if plan is not None:
         for path in plan["added"]:
@@ -439,6 +437,11 @@ def run_command(args, runner=None):
         for path in plan["cli_surface"]:
             if not matches(path, declaration["cli_spec_paths"]):
                 raise UsageError("Planned cli_surface names {}, which is outside this repo's declared CLI spec paths; name a spec path or widen the declaration.".format(path), {})
+    # An empty plan classifies exactly as much as an absent one, so the guard
+    # reads the combined inputs rather than the plan's presence: a vacuous
+    # success here is the silence the triggers exist to end (#415).
+    if not changes and not planned_lines and not (plan is not None and plan["cli_surface"]):
+        raise UsageError("This round classifies nothing: its diff is empty and no planned surface is declared. Name the paths, package sizes or CLI surfaces the work will touch in --planned before the developer is dispatched.", {})
     candidates = sorted({package for package in
                          (package_of(path, declaration["package_roots"]) for path in changes)
                          if package is not None})
