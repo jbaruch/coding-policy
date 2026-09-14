@@ -374,6 +374,19 @@ class ThisRepoDeclarationTest(unittest.TestCase):
                                       ['        raise UsageError("state the surface", {})']})
         self.assertEqual(len(found), 1)
 
+    def test_a_shipped_shell_command_is_a_cli_surface(self):
+        # A shell command carries its own flags and refusals, and a new one
+        # must fire UX and product the way a new Python flag does.
+        for path, line in (("skills/herdr-teamlead/prune-worktrees.sh",
+                            '      --dry-run) warn "usage: prune-worktrees.sh <shared-checkout>"; return 1 ;;'),
+                           ("skills/release/watch-pr-reviews.sh", 'echo "usage: watch-pr-reviews.sh" >&2'),
+                           ("scripts/run-tests.sh", 'echo "Usage: run-tests.sh [base-dir]" >&2')):
+            with self.subTest(path=path):
+                self.assertTrue((self.repo / path).exists(), path)
+                self.assertTrue(triggers.matches(path, self.declaration["cli_spec_paths"]), path)
+                found = triggers.cli_surface(self.declaration, {path: "M"}, {path: [line]})
+                self.assertEqual(len(found), 1, path)
+
 
 class PlannedSurfacesTest(TempCase):
     """A pre-implementation round has no diff; it declares its surfaces."""
