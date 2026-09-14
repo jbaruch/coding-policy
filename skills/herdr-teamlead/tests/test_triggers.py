@@ -355,6 +355,9 @@ class ThisRepoDeclarationTest(unittest.TestCase):
                      ".herdr/triggers.json",
                      "rules/agent-team-operation.md",
                      "rules/review-severity.md",
+                     "skills/release/watch-pr-reviews.sh",
+                     "skills/release/poll-pr-reviews.sh",
+                     "skills/release/smart-publish.sh",
                      ".github/workflows/tests.yml"):
             with self.subTest(path=path):
                 self.assertTrue((self.repo / path).exists(), path)

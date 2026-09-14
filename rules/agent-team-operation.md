@@ -98,7 +98,8 @@ description: Running a multi-agent team — task-based specialist composition, c
 - A `stop` remedy ends implementation on its task; no unspent allowance survives it
 - Each re-entry moves down the ladder `continue` → `restructure` → `stop`, or repeats one rung once
 - A repeat carries the diagnosis's `PROGRESS:` line naming what the prior remedy changed
-- A remedy that produced no progress is never reissued, and the ladder never runs backwards
+- A remedy that produced no progress is never reissued
+- The ladder never runs backwards
 - A rung already repeated is spent
 - `stop` is terminal and never repeats; a task takes at most five diagnoses
 - No exhausted allowance waits on an operator decision

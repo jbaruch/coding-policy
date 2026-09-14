@@ -20,9 +20,7 @@
     "skills/herdr-teamlead/*.sh",
     "skills/herdr-teamlead/teamlead/*.py",
     "skills/herdr-teamlead/verify-authority.sh",
-    "skills/release/dismiss-stale-reviews.sh",
-    "skills/release/registry-has-version.sh",
-    "skills/release/smart-publish.sh"
+    "skills/release/*"
   ],
   "cli_spec_paths": [
     "skills/herdr-teamlead/teamlead/*.py"
