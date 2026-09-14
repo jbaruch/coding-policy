@@ -118,24 +118,30 @@ def validate(changed, partition):
             overlaps.append({"path": path, "slices": matched})
         else:
             assignment[matched[0]].append(path)
-    if unowned:
+    # A slice party to an overlap owns nothing yet, but its emptiness is that
+    # overlap's doing and naming it again would send the reader after the wrong
+    # fix.
+    contested = {name for row in overlaps for name in row["slices"]}
+    empty = sorted(name for name, paths in assignment.items()
+                   if not paths and name not in contested)
+    # Every problem in ONE run. Raising on the first class would hide an
+    # overlap behind a gap and cost a round per class to find them all.
+    if unowned or overlaps or empty:
+        parts = []
+        if unowned:
+            parts.append("leaves {} changed path(s) unowned, starting with {} (a gap is indistinguishable from a clean slice in the result)".format(
+                len(unowned), ", ".join(unowned[:5])))
+        if overlaps:
+            first = overlaps[0]
+            parts.append("gives {} changed path(s) more than one owner, starting with {} claimed by {} (two verdicts over one file leave it owned by neither)".format(
+                len(overlaps), first["path"], ", ".join(first["slices"])))
+        if empty:
+            parts.append("has slice(s) {} owning no changed path (a seat with nothing to review is a worker spent for no verdict)".format(
+                ", ".join(empty)))
         raise UsageError(
-            "The partition leaves {} changed path(s) unowned, starting with {}; a gap is indistinguishable from a clean slice in the result. Extend a slice to cover every changed path.".format(
-                len(unowned), ", ".join(unowned[:5])),
-            {"unowned": unowned},
-        )
-    if overlaps:
-        first = overlaps[0]
-        raise UsageError(
-            "The partition gives {} changed path(s) more than one owner, starting with {} (claimed by {}); two verdicts over one file leave it owned by neither. Narrow the overlapping slices.".format(
-                len(overlaps), first["path"], ", ".join(first["slices"])),
-            {"overlaps": overlaps},
-        )
-    empty = sorted(name for name, paths in assignment.items() if not paths)
-    if empty:
-        raise UsageError(
-            "Slice(s) {} own no changed path; a seat with nothing to review is a worker spent for no verdict. Drop the slice or widen it.".format(", ".join(empty)),
-            {"empty": empty},
+            "The partition cannot carry a verdict: it {}. Extend, narrow or drop the slices named in the details and re-run.".format(
+                "; and it ".join(parts)),
+            {"unowned": unowned, "overlaps": overlaps, "empty": empty},
         )
     return {"schema_version": PARTITION_SCHEMA_VERSION,
             "slices": [{"name": entry["name"], "paths": assignment[entry["name"]]} for entry in slices],

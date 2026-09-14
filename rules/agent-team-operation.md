@@ -396,7 +396,8 @@ description: Running a multi-agent team — task-based specialist composition, c
 - A partition whose slices overlap is refused
 - `skills/herdr-teamlead/teamlead/partition.py` decides both refusals, through `teamlead validate-partition`
 - Each slice is dispatched to a distinct worker under the existing capability, contribution-exclusion and headroom ordering
-- Each slice's brief names its slice and forbids roaming
+- Each slice's brief names its slice
+- Each slice's brief forbids roaming
 - An observation outside a reviewer's slice goes in a separate section of its report
 - An out-of-slice observation never forms part of that reviewer's verdict
 - A slice is saturated when its reviewer reports clean at the current tip

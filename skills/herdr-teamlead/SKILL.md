@@ -178,8 +178,8 @@ bash "$CP/skills/herdr-teamlead/teamlead.sh" validate-partition \
   --partition <partition.json>
 ```
 
-Exit 1 names every unowned changed path and every overlap. Fix the partition
-and re-run; plan only once it exits 0. The document's format, the ownership
+Exit 1 names every unowned path, every overlap and every slice owning nothing,
+in one run. Fix the partition and re-run; plan only once it exits 0. The document's format, the ownership
 payload and the seating it produces:
 
 ```text

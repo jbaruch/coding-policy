@@ -1,9 +1,9 @@
 # Review Partition
 
-The document `validate-partition` checks and `plan --partition` seats. One
-reviewer per slice, so a change reaches a state that means "reviewed": a slice
-is saturated when its reviewer reports clean at the current tip, and the change
-is reviewed when every slice is saturated at one tip.
+The document `validate-partition` checks. One reviewer per slice, so a change
+reaches a state that means "reviewed": a slice is saturated when its reviewer
+reports clean at the current tip, and the change is reviewed when every slice
+is saturated at one tip.
 
 `rules/agent-team-operation.md` Review Before PR carries the contract this
 format serves. Write the document only for a round filling several seats of one
@@ -48,13 +48,15 @@ owns, plus the full changed set:
  "changed": ["README.md", "src/api/routes.py", "src/core/db.py"]}
 ```
 
-Exit 1 names what cannot carry a verdict, with the paths in `details`:
+Exit 1 names everything that cannot carry a verdict, in one run, with the paths
+in `details`:
 
-- a changed path no slice owns (`unowned`) — a gap reads as a clean slice
-- a changed path more than one slice owns (`overlaps`) — two verdicts, no owner
-- a slice owning no changed path (`empty`) — a seat spent for no verdict
+- `unowned` — a changed path no slice owns; a gap reads as a clean slice
+- `overlaps` — a changed path more than one slice owns; two verdicts, no owner
+- `empty` — a slice owning no changed path; a worker spent for no verdict
 
-Fix the document and re-run. Plan only once it exits 0.
+A slice party to an overlap is not also reported empty: that overlap is why it
+owns nothing. Fix the document and re-run. Dispatch only once it exits 0.
 
 ## Seating
 

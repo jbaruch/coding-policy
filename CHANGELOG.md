@@ -14,7 +14,8 @@
   verdict: every changed path belongs to exactly one slice. A gap is
   indistinguishable from a clean slice in the result, and an overlap leaves a
   file two verdicts and no owner, so both refuse by name before a worker is
-  spent. A slice owning nothing refuses too.
+  spent. A slice owning nothing refuses too, unless an overlap is why it owns
+  nothing. Every problem is named in one run rather than a round per class.
   `references/review-partition.md` documents the format and the payload.
 
   `rules/agent-team-operation.md` Review Before PR carries what a partition

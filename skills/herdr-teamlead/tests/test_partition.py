@@ -85,6 +85,22 @@ class Validate(unittest.TestCase):
             partition.validate({"src/api/routes.py", "src/core/db.py", "docs/guide.md"}, document())
         self.assertIn("docs/guide.md", raised.exception.message)
         self.assertEqual(raised.exception.details["unowned"], ["docs/guide.md"])
+        self.assertEqual(raised.exception.details["overlaps"], [])
+
+    def test_every_problem_is_named_in_one_run(self):
+        # Raising on the first class would hide an overlap behind a gap and
+        # cost a round per class to find them all.
+        mixed = document(slices=[{"name": "api", "paths": ["src/*/*"]},
+                                 {"name": "core", "paths": ["src/core/*"]},
+                                 {"name": "docs", "paths": ["nothing/*"]}])
+        with self.assertRaises(UsageError) as raised:
+            partition.validate({"src/core/db.py", "README.md"}, mixed)
+        details = raised.exception.details
+        self.assertEqual(details["unowned"], ["README.md"])
+        self.assertEqual(details["overlaps"], [{"path": "src/core/db.py", "slices": ["api", "core"]}])
+        self.assertEqual(details["empty"], ["docs"])
+        for expected in ("README.md", "src/core/db.py", "docs"):
+            self.assertIn(expected, raised.exception.message)
 
     def test_an_overlap_is_refused_naming_both_slices(self):
         overlapping = document(slices=[{"name": "api", "paths": ["src/*/*"]},
@@ -93,6 +109,7 @@ class Validate(unittest.TestCase):
             partition.validate({"src/core/db.py"}, overlapping)
         self.assertEqual(raised.exception.details["overlaps"],
                          [{"path": "src/core/db.py", "slices": ["api", "core"]}])
+        self.assertEqual(raised.exception.details["unowned"], [])
 
     def test_a_slice_owning_nothing_is_refused(self):
         with self.assertRaises(UsageError) as raised:
