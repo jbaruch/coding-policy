@@ -210,7 +210,20 @@ Proceed immediately to Step 8.
 
 ## Step 8 — Provision the Worktrees
 
-Run once per writing worker and every worktree named in a brief:
+Prune first, every round:
+
+```bash
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
+bash "$CP/skills/herdr-teamlead/prune-worktrees.sh" <shared-checkout>
+```
+
+Emits the worktrees and branches removed, each kept one with its reason, and
+`failed`; exit 2 lists every check or removal git refused. Exit 1 decided
+nothing: fix its diagnostic and re-run before provisioning. Report every kept
+`dirty`, `unmerged`, `locked` and `detached` entry to the operator; never
+remove them by hand.
+
+Then run once per writing worker and every worktree named in a brief:
 
 ```bash
 CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
@@ -455,7 +468,8 @@ Record that evidence in the task ledger.
 ## Step 21 — Clean Up the Worktree
 
 Fast-forward the shared checkout, remove the worktree, and delete the branch
-per `rules/agent-worktree-isolation.md`. Proceed immediately to Step 22.
+per `rules/agent-worktree-isolation.md`, then run Step 8's prune script again
+for the round's other worktrees. Proceed immediately to Step 22.
 
 ## Step 22 — Log the Round
 
