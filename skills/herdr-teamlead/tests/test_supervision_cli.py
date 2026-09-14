@@ -321,6 +321,22 @@ class SupervisionCliTest(fixture.CliCase):
         code, _, err = self.invoke(["status"])
         self.assertEqual(code, 0, err)
 
+    def test_a_receipt_naming_the_refined_pane_id_is_accepted(self):
+        # coding-policy#403: supervision can fill in a pane id the enrollment
+        # never knew, and wait-report may have been given that one.
+        report = str(self.tmp / "tester-1.md")
+        code, out, err = self.invoke(self.refusal_args("codex", report, "attempt-1"), self._client({"codex": "idle"}))
+        self.assertEqual(code, 0, err)
+        first = json.loads(out)["applied"][0]["dispatch_id"]
+        # A replayed or legacy enrollment can carry no pane id; supervision
+        # fills it in afterwards through a refinement.
+        supervision.transaction(self.state, lambda data: data["members"][0]["assignment"].update(pane_id=None))
+        supervision.refine(self.state, first, "w9:p9", None, AT)
+        self.assertEqual(supervision.expected_assignment(self.saved()["members"][0])["pane_id"], "w9:p9")
+        code, out, err = self.record_refusal(first, self.refusal_receipt("w9:p9", report, "refined.json"))
+        self.assertEqual(code, 0, err)
+        self.assertEqual(json.loads(out)["provider"], "codex")
+
     def test_record_refusal_needs_the_refused_worker_in_config(self):
         report = str(self.tmp / "tester-1.md")
         code, out, err = self.invoke(self.refusal_args("codex", report, "attempt-1"), self._client({"codex": "idle"}))

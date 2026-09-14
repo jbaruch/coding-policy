@@ -26,7 +26,9 @@
 # and is an ancestor of origin's default branch. That ancestry check is the
 # safety; deletion is then `git branch -D`, since `-d` re-checks against the
 # shared checkout's own default branch, which may lag origin's and refuse a
-# branch this script just proved merged. Removal is `git worktree remove`,
+# branch this script just proved merged. The tip that ancestry check read is
+# re-read immediately before the deletion and a branch that moved in between
+# is kept, so a commit landing mid-run is never force-deleted. Removal is `git worktree remove`,
 # never `rm -rf`. Everything else is KEPT and reported with its reason. Stale
 # worktree metadata is pruned (`git worktree prune --expire now`) after every
 # worktree decision and before the branch pass, so a confirmed-gone entry's
@@ -40,7 +42,9 @@
 #
 # Contract:
 #   argv  : <shared-checkout> [--dry-run]
-#           --dry-run reports the same decisions and changes nothing.
+#           --dry-run reports the same decisions and removes nothing. It still
+#           fetches, so its answer is current: remote-tracking refs and
+#           FETCH_HEAD move, nothing else in .git does.
 #   stdout: one JSON object —
 #           {"shared":"<abs>","default_branch":"<name>","dry_run":bool,
 #            "worktrees_removed":[{"path","branch"}],
@@ -169,6 +173,31 @@ ancestry() { # <shared> <branch> <default>
   return 0
 }
 
+# Echo the commit refs/heads/<branch> points at, or return 1 on any failure.
+branch_tip() { # <shared> <branch>
+  local out rc=0
+  out="$(git -C "$1" rev-parse --verify --quiet "refs/heads/$2^{commit}" 2>"$ERRFILE")" || rc=$?
+  if (( rc != 0 )) || [[ -z "$out" ]]; then
+    return 1
+  fi
+  printf '%s' "$out"
+}
+
+# Delete <branch> only if it still points at <tip>. The ancestry check and the
+# deletion are separate git calls; a commit landing in between would otherwise
+# be force-deleted with the branch (#405).
+delete_branch() { # <shared> <branch> <tip>  -> 0 deleted, 1 moved, 2 git refused
+  local now
+  if ! now="$(branch_tip "$1" "$2")"; then
+    return 2
+  fi
+  if [[ "$now" != "$3" ]]; then
+    return 1
+  fi
+  git -C "$1" branch -D "$2" >/dev/null 2>"$ERRFILE" || return 2
+  return 0
+}
+
 # Decide one worktree; emits a row and performs the removal unless dry-run.
 decide_worktree() { # <shared> <abs_root> <default> <dry-run 0|1> <path> <branch|""> <detached 0|1> <locked 0|1>
   local shared="$1" abs_root="$2" db="$3" dry="$4" path="$5" branch="$6" detached="$7" locked="$8"
@@ -207,13 +236,23 @@ decide_worktree() { # <shared> <abs_root> <default> <dry-run 0|1> <path> <branch
   if (( dry )); then
     row removed "$path" "$branch" ""; return 0
   fi
+  local tip
+  if ! tip="$(branch_tip "$shared" "$branch")"; then
+    row failed "$path" "$branch" "cannot read the tip of ${branch}: $(tr '\n' ' ' < "$ERRFILE")"; return 0
+  fi
   if ! git -C "$shared" worktree remove "$path" 2>"$ERRFILE"; then
     row failed "$path" "$branch" "git worktree remove failed: $(tr '\n' ' ' < "$ERRFILE")"; return 0
   fi
-  if ! git -C "$shared" branch -D "$branch" >/dev/null 2>"$ERRFILE"; then
-    row failed "$branch" "$branch" "git branch -D failed after the worktree was removed: $(tr '\n' ' ' < "$ERRFILE")"; return 0
-  fi
+  # The removal happened: report it whatever the deletion does, so the JSON
+  # matches the disk a retry would find (#405).
   row removed "$path" "$branch" ""
+  local rc=0
+  delete_branch "$shared" "$branch" "$tip" || rc=$?
+  case "$rc" in
+    0) ;;
+    1) row failed "$branch" "$branch" "branch ${branch} moved after its ancestry check and was left alone; its worktree is already removed, so re-run to judge the new tip" ;;
+    *) row failed "$branch" "$branch" "git branch -D failed after the worktree was removed: $(tr '\n' ' ' < "$ERRFILE")" ;;
+  esac
   return 0
 }
 
@@ -232,10 +271,16 @@ decide_branch() { # <shared> <default> <dry-run 0|1> <branch>
   if (( dry )); then
     row branch-deleted "$branch" "$branch" ""; return 0
   fi
-  if ! git -C "$shared" branch -D "$branch" >/dev/null 2>"$ERRFILE"; then
-    row failed "$branch" "$branch" "git branch -D failed: $(tr '\n' ' ' < "$ERRFILE")"; return 0
+  local tip rc=0
+  if ! tip="$(branch_tip "$shared" "$branch")"; then
+    row failed "$branch" "$branch" "cannot read the tip of ${branch}: $(tr '\n' ' ' < "$ERRFILE")"; return 0
   fi
-  row branch-deleted "$branch" "$branch" ""
+  delete_branch "$shared" "$branch" "$tip" || rc=$?
+  case "$rc" in
+    0) row branch-deleted "$branch" "$branch" "" ;;
+    1) row failed "$branch" "$branch" "branch ${branch} moved after its ancestry check and was left alone; re-run to judge the new tip" ;;
+    *) row failed "$branch" "$branch" "git branch -D failed: $(tr '\n' ' ' < "$ERRFILE")" ;;
+  esac
   return 0
 }
 
@@ -302,9 +347,16 @@ main() {
   # would not reach the loop, and an empty inventory would read as "nothing
   # to prune" with exit 0 (rules/file-hygiene.md I/O Conventions). Nothing has
   # been decided yet, so an unreadable inventory is a precondition failure.
-  local inventory branches
+  local inventory branches zflag=1
   inventory="$(mktemp)"; branches="$(mktemp)"
-  if ! git -C "$shared" worktree list --porcelain >"$inventory" 2>"$ERRFILE"; then
+  # `-z` (git >= 2.36) terminates each attribute with NUL, so a path holding a
+  # newline stays one field. An older git has no such form; its line-oriented
+  # output is used and a multi-line path would split (#405).
+  if ! git -C "$shared" worktree list --porcelain -z >"$inventory" 2>"$ERRFILE"; then
+    zflag=0
+    warn "\`git worktree list --porcelain -z\` is unavailable (git < 2.36): a worktree path containing a newline would be misread"
+  fi
+  if (( ! zflag )) && ! git -C "$shared" worktree list --porcelain >"$inventory" 2>"$ERRFILE"; then
     warn "\`git worktree list --porcelain\` failed: $(tr '\n' ' ' < "$ERRFILE") — cannot inventory worktrees"
     rm -f "$inventory" "$branches"
     return 1
@@ -319,7 +371,7 @@ main() {
 
   # Walk `worktree list --porcelain`: blank-line-separated blocks.
   local path="" branch="" detached=0 locked=0 line unenterable=0
-  local -a seen_branches=()
+  local -a seen_branches=() prunable_branches=()
   flush() {
     if [[ -n "$path" ]]; then
       local real="" rc=0 parent
@@ -329,13 +381,18 @@ main() {
         # traversal. Absence is confirmed only through a traversable parent;
         # anything else is a failure that also inhibits the metadata prune.
         if [[ -d "$parent" && -x "$parent" ]]; then
-          # Confirmed gone: reported prunable, its metadata pruned below, and
-          # its branch left to the no-worktree pass in this same run.
+          # Confirmed gone: reported prunable. Its branch goes to the
+          # no-worktree pass only once the metadata prune actually releases
+          # it, so it is recorded here and released below.
           decide_worktree "$shared" "$abs_root" "$db" "$dry" "$path" "$branch" "$detached" "$locked"
+          if [[ -n "$branch" ]]; then prunable_branches+=("$branch"); fi
           path=""; branch=""; detached=0; locked=0
           return 0
         else
           row failed "$path" "$branch" "cannot confirm the worktree is gone: its parent ${parent} is missing or not traversable"
+          # Still checked out as far as git knows: the branch pass must not
+          # try `branch -D` on it (#405).
+          if [[ -n "$branch" ]]; then seen_branches+=("$branch"); fi
           unenterable=1
           path=""; branch=""; detached=0; locked=0
           return 0
@@ -344,6 +401,7 @@ main() {
         real="$(cd "$path" 2>"$ERRFILE" && pwd -P)" || rc=$?
         if (( rc != 0 )); then
           row failed "$path" "$branch" "cannot enter the worktree: $(tr '\n' ' ' < "$ERRFILE")"
+          if [[ -n "$branch" ]]; then seen_branches+=("$branch"); fi
           unenterable=1
           path=""; branch=""; detached=0; locked=0
           return 0
@@ -356,28 +414,46 @@ main() {
     fi
     path=""; branch=""; detached=0; locked=0
   }
-  while IFS= read -r line || [[ -n "$line" ]]; do
-    case "$line" in
-      "worktree "*) flush; path="${line#worktree }" ;;
-      "branch refs/heads/"*) branch="${line#branch refs/heads/}" ;;
+  attribute() { # <attribute line>
+    case "$1" in
+      "worktree "*) flush; path="${1#worktree }" ;;
+      "branch refs/heads/"*) branch="${1#branch refs/heads/}" ;;
       detached) detached=1 ;;
       "locked"*) locked=1 ;;
       "") flush ;;
     esac
-  done < "$inventory"
+  }
+  if (( zflag )); then
+    while IFS= read -r -d '' line || [[ -n "$line" ]]; do
+      attribute "$line"
+    done < "$inventory"
+  else
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      attribute "$line"
+    done < "$inventory"
+  fi
   flush
 
   # Metadata prune between the passes: after every worktree decision, so git reads an unreadable worktree directory as gone
   # a confirmed-gone entry is released before its branch is judged below;
   # skipped when a worktree could not be entered, since git reads an unreadable
   # directory as gone and would drop its entry.
+  # A prunable entry's branch is still checked out until its metadata goes,
+  # so it is released to the branch pass only when the prune ran clean. A dry
+  # run previews the live outcome, where the prune does run (#405).
+  local released=1
   if (( ! dry )); then
     if (( unenterable )); then
       warn "skipping \`git worktree prune\`: a worktree could not be entered; restore access and re-run"
+      released=0
     elif ! git -C "$shared" worktree prune --expire now 2>"$ERRFILE"; then
       # Recorded, not merely warned: the run continues, the exit stays non-zero.
       row failed "git worktree prune" "" "failed: $(tr '\n' ' ' < "$ERRFILE") — stale metadata may remain"
+      released=0
     fi
+  fi
+  if (( ! released )); then
+    seen_branches+=("${prunable_branches[@]+"${prunable_branches[@]}"}")
   fi
 
   # Local branches with no worktree.

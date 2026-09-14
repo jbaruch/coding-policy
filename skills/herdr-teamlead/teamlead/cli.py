@@ -728,7 +728,7 @@ def _refusal_moves(store, agents_by_name, assignments, roles, args, paths, repor
         name = assignments[role]
         if name in agents_by_name:
             move = recovery.refusal_move(store, args.task, role, args.fix_round, agents_by_name[name].kind,
-                                         recovery.brief_identity(paths, role, reports.get(role)))
+                                         recovery.brief_identity(paths, role, reports.get(role)), reports.get(role))
             if move is not None:
                 moves[role] = move
     return moves
@@ -816,7 +816,8 @@ def cmd_apply(args, client=None, warn=None, trace=None):
                 dispatches[role] = {"id": identifier, "fingerprint": fingerprint, "role": role, "agent": name,
                                     "task": args.task, "fix_round": args.fix_round,
                                     "plan": args.correction_plan, "work": work,
-                                    "brief_identity": recovery.brief_identity(paths, role, reports.get(role))}
+                                    "brief_identity": recovery.brief_identity(paths, role, reports.get(role)),
+                                    "provider": agents_by_name[name].kind}
                 if role in moves:
                     dispatches[role]["refusal_move"] = moves[role]
                 if role in requirements:
@@ -1027,9 +1028,16 @@ def cmd_recovery(args, client=None, warn=None, trace=None):
         if dispatch is not None and dispatch["agent"] not in agents_by_name:
             raise UsageError("Refused worker {} is not in config.json; restore its entry so the refusing provider is recorded.".format(dispatch["agent"]), {})
         member = next((row for row in supervision.load(state_path)["members"] if dispatch is not None and row["id"] == dispatch["id"]), None)
+        # The refined assignment, not the original: supervision fills in a
+        # pane id the enrollment did not know, and wait-report may have been
+        # given that one (#403).
+        report, aliases = None, ()
+        if member is not None:
+            expected = supervision.expected_assignment(member)
+            report = expected["report"]
+            aliases = (expected["pane_id"], member["assignment"]["pane_id"])
         result = recovery.record_refusal(store, data, at, agents_by_name[dispatch["agent"]].kind if dispatch else None,
-                                         member["assignment"]["report"] if member else None,
-                                         aliases=(member["assignment"]["pane_id"],) if member else ())
+                                         report, aliases=aliases)
     elif args.command == "recover-report":
         result = report_delivery.recover(store, history, data, at)
     elif args.command == "assess-specialist":

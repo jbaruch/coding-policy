@@ -1,5 +1,42 @@
 # Changelog
 
+### Fixed
+
+- **The deferred advisories from #402 and #404 (#403, #405).** Twelve findings
+  the two refusal-recovery and worktree-prune rounds left open, none of which
+  changed the outcome on well-formed input, all of which turn a wrong input
+  into a wrong answer rather than a diagnostic.
+
+  Refusal recording: a receipt's `agent` and `state` reached set membership
+  before any type check, so a list or object raised `TypeError` out of the CLI
+  instead of a usage error, and `elapsed_seconds` accepted a negative. Every
+  field is typed first. `record-refusal` read the refusing provider from the
+  current `config.json`, so an edit between the send and the record
+  re-attributed the refusal and could let a resend reach the provider that
+  actually refused; each task dispatch now stores its send-time `provider` and
+  that recorded kind wins, which makes the recovery store version 7. The
+  pane-id alias came from the enrollment's original assignment rather than
+  `supervision.expected_assignment`, so a receipt naming a pane id supervision
+  filled in later was rejected. A move could reuse the refused attempt's
+  report path, enrolling both against one file; `refusal_move` now refuses a
+  path the chain already burned. The schema document's recovery example was
+  missing `refusal_authorizations`.
+
+  Worktree pruning: a worktree whose `cd` failed left its branch unmarked, so
+  the branch pass tried `branch -D` on a branch git still considered checked
+  out — a second misleading failure live, a false `branch-deleted` on a dry
+  run. A confirmed-gone entry's branch is released to that pass only when the
+  metadata prune actually ran, since a skipped or failed prune leaves git
+  holding the checkout. A removal followed by a failed deletion reported no
+  `worktrees_removed` row, so the JSON disagreed with the disk a retry would
+  find; the removal is now recorded whatever the deletion does. The inventory
+  reads `git worktree list --porcelain -z` where git supports it, so a path
+  holding a newline stays one field, and says so when it cannot. The ancestry
+  check and the deletion are separate git calls, so the tip that check read is
+  re-read immediately before `branch -D` and a branch that moved in between is
+  kept rather than force-deleted. `--dry-run` now states in its contract line
+  that it fetches.
+
 ## 0.3.211 — 2026-09-14
 
 ### Added
