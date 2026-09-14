@@ -241,7 +241,8 @@ main() {
     return 1
   fi
   if (( ! dry )) && ! git -C "$shared" worktree prune 2>"$ERRFILE"; then
-    warn "\`git worktree prune\` failed: $(tr '\n' ' ' < "$ERRFILE") — stale metadata may remain"
+    # Recorded, not merely warned: the run continues, the exit stays non-zero.
+    row failed "git worktree prune" "" "failed: $(tr '\n' ' ' < "$ERRFILE") — stale metadata may remain"
   fi
 
   # Take both inventories up front: a failure inside a process substitution

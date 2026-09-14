@@ -80,7 +80,11 @@ branches_deleted() { python3 -c 'import json,sys; print("\n".join(json.load(sys.
 branch_kept_reason() { python3 -c 'import json,sys; d=json.load(sys.stdin); print(next((r["reason"] for r in d["branches_kept"] if r["branch"]==sys.argv[1]), ""))' "$1" <<<"$OUT"; }
 field() { python3 -c 'import json,sys; print(json.load(sys.stdin)[sys.argv[1]])' "$1" <<<"$OUT"; }
 mentions_path() { python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if any(r["path"]==sys.argv[1] for r in d["worktrees_kept"]+d["worktrees_removed"]) else 1)' "$1" <<<"$OUT"; }
-has_branch() { git -C "$1" show-ref --verify --quiet "refs/heads/$2"; }
+has_branch() { # <shared> <branch> -> 0 present, 1 absent; a git error aborts the harness
+  local rc=0
+  git -C "$1" show-ref --verify --quiet "refs/heads/$2" || rc=$?
+  case "$rc" in 0) return 0 ;; 1) return 1 ;; *) die "git show-ref failed (exit $rc) for $2 in $1" ;; esac
+}
 listed() { # <shared> <path>  -> 0 listed, 1 not listed; a tool failure aborts the harness
   local inventory rc=0
   inventory="$(git -C "$1" worktree list --porcelain)" || die "git worktree list failed in $1"
