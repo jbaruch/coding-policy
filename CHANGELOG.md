@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.220 — 2026-09-14
+
 ### Fixed
 
 - **Four residual ambiguity cases close in `prune-worktrees.sh` (#410).** None
