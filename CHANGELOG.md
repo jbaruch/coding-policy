@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.225 — 2026-09-14
+
 ### Added
 
 - **A review partition gets a validator and a contract (#409, partly).** A
