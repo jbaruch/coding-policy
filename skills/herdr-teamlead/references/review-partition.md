@@ -26,8 +26,8 @@ role; a single-seat round needs none.
 - `role` — optional, `reviewer` when absent. The role the slices seat. It never
   contains `#`.
 - `slices` — at least two. Each is `{name, paths}` and carries nothing else.
-  - `name` — non-empty, unique within the document. It becomes the seat name
-    `<role>#<name>` in the plan.
+  - `name` — non-empty, unique within the document. It names the slice in its
+    reviewer's brief and in that reviewer's report.
   - `paths` — a non-empty array of globs matched against the round's changed
     paths, `fnmatch`-style (`*` does not stop at `/`; `**` is ordinary text).
 
@@ -60,10 +60,15 @@ owns nothing. Fix the document and re-run. Dispatch only once it exits 0.
 
 ## Seating
 
-`plan` does not yet fill several seats from one partition. Dispatch resolves
-briefs, requirements and round tiers by role name, so a seat name would reach
-`apply` as an unknown role. Until it carries seats, a round runs its slices as
-separate reviewer dispatches, one per slice, against the same tip.
+One `plan` run fills one reviewer seat. A partitioned round therefore runs its
+slices as separate reviewer dispatches against the same tip: plan and apply
+each slice as an ordinary `reviewer` round, with that slice's brief, excluding
+the workers the earlier slices already used so each slice gets its own
+reviewer. Assignments stay keyed `reviewer`, which is what dispatch resolves
+briefs, requirements and round tiers by.
+
+Filling several slices from ONE plan is #434; the `<role>#<slice>` seat name is
+reserved for it and means nothing today.
 
 Each slice's brief names its own slice and forbids roaming. An observation
 outside the slice belongs in a separate section of that report and forms no
