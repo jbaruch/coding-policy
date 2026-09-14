@@ -276,29 +276,37 @@ and what has to change. The lead ran the loop and is the wrong diagnostician
 of its own dispatch pattern, so the read is independent for the same reason a
 review is.
 
-Its report opens with five lines rather than three:
+Its report opens with six lines rather than three:
 
 ```
 DIAGNOSIS: <why the loop is not converging, from the evidence>
 REMEDY: continue — <rounds, approach unchanged> | restructure — <the change> | stop — <what ships, what is tracked>
-BOUND: <attempts this remedy is allowed, or "none" for stop>
+BOUND: <developer attempts this remedy allows> — <why that number> | none — for stop
+ASSESSMENT: <the investigator report this diagnosis ruled on>
 EVIDENCE: <the rounds, findings and diffs the diagnosis rests on>
 UNVERIFIED: <anything unconfirmed against the tree, or "none">
 ```
 
 A `continue` or `restructure` remedy carries the attempt budget in `BOUND`,
-which is the number the operator used to supply. A `stop` remedy ships what is
-clean and records the remainder as a tracked accepted defect; that authority is
-the judge's, stated so a lead does not re-escalate out of caution.
+which is the number the operator used to supply. It is counted in developer
+attempts, justified against the cited evidence, and capped: the recording
+command refuses a bound above its ceiling rather than honouring it. `ASSESSMENT`
+names the investigator report the judge ruled on, and the record binds that
+path the way supervision's enrollment binds the judge's own report. A `stop`
+remedy ships what is clean and records the remainder as a tracked accepted
+defect; that authority is the judge's, stated so a lead does not re-escalate
+out of caution. Recording it also files a user-attention obligation, so the
+operator learns of the override they hold without going to look for it.
 
 The diagnosis is re-enterable when its own remedy's bound exhausts with
 blocking work remaining. A remedy that was independently diagnosed and still
 did not work is evidence for the next diagnosis, not for the operator, who
 holds nothing on the second pass they did not hold on the first. Re-entry
-moves strictly down the ladder `continue` → `restructure` → `stop`: a failed
-remedy is never reissued, the ladder never runs backwards, and `stop` is
-terminal, so a task takes at most three diagnoses. No operator sits in the
-path of any of them.
+moves down the ladder `continue` → `restructure` → `stop`, or repeats one rung
+once against a recorded `PROGRESS` line: a remedy that produced nothing is
+never reissued, the ladder never runs backwards, a rung already repeated is
+spent, and `stop` is terminal, so a task takes at most five diagnoses. No
+operator sits in the path of any of them.
 
 `rules/agent-team-operation.md` Judge Seat carries the contract; the record
 shapes are the owner's, in `references/dispatch-recovery.md`.
@@ -405,5 +413,6 @@ authorization. A blocked ruling follows the operator-question path below.
   the remainder as a tracked accepted defect. The remedy carries that
   authority; do not re-escalate it. Proceed to Step 20 for what ships.
 - A remedy's bound exhausting with blocking work remaining returns to Step 13
-  for the next diagnosis, one rung down the ladder. Never re-enter at the same
-  rung and never above it.
+  for the next diagnosis, one rung down the ladder — or at the same rung once,
+  when the spent remedy made progress the new diagnosis records in `PROGRESS`.
+  Never re-enter above the last rung, and never repeat a rung twice.

@@ -51,18 +51,25 @@ git command against it, and no git command against `{{SHARED_CHECKOUT}}`.
 
 ## Deliverable
 
-Your report opens with these five lines, in order:
+Your report opens with these six lines, in order:
 
 ```
 DIAGNOSIS: <why this loop is not converging: the assessed cause you adopt, or the one you reject and against which evidence>
 REMEDY: continue — <rounds, approach unchanged> | restructure — <the concrete structural change> | stop — <what ships, and what is tracked>
-BOUND: <attempts this remedy is allowed, or "none" for stop>
+BOUND: <developer attempts this remedy allows> — <why that number, against the evidence you cite> | none — for stop
+ASSESSMENT: {{INVESTIGATION_REPORT}}
 EVIDENCE: <the assessment, rounds, findings and diffs the diagnosis rests on>
 UNVERIFIED: <anything you could not confirm against the tree, or "none">
 ```
 
+`ASSESSMENT` names the investigator report you ruled on, and the recorded
+diagnosis binds that path. Cite the file you read, never another.
+
 `continue` is a legitimate remedy: the approach is right and it needs a stated
-number of further rounds. `BOUND` then carries that number.
+number of further rounds. `BOUND` then carries that number, counted in
+developer attempts and justified against the evidence. It has a ceiling the
+recording command enforces; a bound above it is refused rather than honoured,
+and the answer is the next rung, not a bigger number.
 
 `restructure` names a concrete change in the shape of the work — split the
 surface, change the sequence, replace the approach. Name it precisely enough
@@ -72,11 +79,20 @@ that the lead applies it without asking you a question.
 goes out, and what is recorded as an accepted defect. Your remedy carries the
 authority to accept a tracked defect into a release.
 
-A remedy this task already took cannot be taken again, and the ladder only
-descends: after `continue` the choices are `restructure` or `stop`, after
-`restructure` only `stop`. Any prior remedy is named above.
+The ladder descends, and one rung may be repeated once. A remedy that produced
+no progress is never reissued: after a fruitless `continue` the choices are
+`restructure` or `stop`, and after a fruitless `restructure` only `stop`. When
+the prior remedy did make progress and needs another increment, reissue its
+rung and add a seventh line naming that progress:
 
-Follow the five lines with your numbered reasons — each reason ties a verified
+```
+PROGRESS: <what the prior remedy changed, against the evidence>
+```
+
+A rung already repeated is spent, and `stop` never repeats. Any prior remedy is
+named above.
+
+Follow those lines with your numbered reasons — each reason ties a verified
 fact about the rounds to the diagnosis.
 
 Your remedy binds the round. Only the operator overrides it, and no operator
@@ -86,7 +102,7 @@ decision is required for the task to proceed.
 
 Write `{{REPORT}}` covering:
 
-- The five-line deliverable in full.
+- The deliverable lines in full.
 - Your numbered reasons.
 - What you verified against the tree and the round history, and how.
 

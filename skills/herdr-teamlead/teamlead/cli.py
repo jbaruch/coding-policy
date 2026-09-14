@@ -11,6 +11,7 @@ I/O contract:
 """
 
 import argparse
+import hashlib
 import json
 import sys
 import time
@@ -1010,6 +1011,36 @@ def _require_independent_report(state, task, reviewer):
         raise UsageError("This reviewer contributed to the task; collect an independent report before recording approval.", {})
 
 
+def _record_stopped_task(state_path, diagnosis, at):
+    """Surface a terminal diagnosis to the operator.
+
+    A `stop` remedy ends implementation and records the remainder as a tracked
+    accepted defect, and no exhausted allowance waits on an operator decision.
+    The operator still holds the override, and cannot exercise one they never
+    learn they have (#415), so the terminal remedy lands in the attention queue
+    the catch-up presents. Its kind sits outside `attention.GATING_KINDS`: this
+    surfaces the outcome, it never gates the next dispatch.
+
+    The obligation identity is derived from the diagnosis identity, which is
+    free text, so the digest keeps it inside the queue's identifier alphabet
+    and keeps a replayed diagnosis on its original obligation.
+    """
+    name = "diagnosis-stop-" + hashlib.sha256(diagnosis["id"].encode("utf-8")).hexdigest()[:16]
+    return attention.write(state_path, "record", {
+        "id": name,
+        "kind": "failure",
+        "task": diagnosis["task"],
+        "priority": 80,
+        "title": "Task {} stopped at the judge's diagnosis".format(diagnosis["task"])[:300],
+        "context": "Diagnosis {} returned REMEDY: stop at fix round {}, ruling on the investigator's assessment.".format(
+            diagnosis["id"], diagnosis["fix_round"]),
+        "consequence": "Implementation on this task has ended. What is clean ships; the remainder is a tracked accepted defect under rules/review-severity.md Judge-Accepted Defect Carve-Out.",
+        "resolution_condition": "Record the acknowledgement, or authorize a plan over this remedy to override it.",
+        "sources": [{"schema_version": attention.SCHEMA_VERSION, "kind": "artifact",
+                     "ref": diagnosis["judge_evidence"]["path"]}],
+    }, at)
+
+
 def cmd_recovery(args, client=None, warn=None, trace=None):
     state_path = _state_path(args)
     state = _load_state_for_write(state_path, warn)
@@ -1038,6 +1069,8 @@ def cmd_recovery(args, client=None, warn=None, trace=None):
         result = recovery.diagnose(store, history, data, at, judge.agent if judge else None, enrolled,
                                    supervision.dispatch_binding(state_path) is not None,
                                    state["specialist_assessments"])
+        if result["remedy"] == "stop":
+            _record_stopped_task(state_path, result, at)
     elif args.command == "record-report":
         if isinstance(data, dict):
             dispatch = next((item for item in store["dispatches"] if item["id"] == data.get("dispatch")), None)

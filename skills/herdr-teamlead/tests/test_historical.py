@@ -470,7 +470,7 @@ class HistoricalCommandsTest(fixture.CliCase):
         save_state(self.state, state)
         diagnosis = self.tmp / "diagnosis.md"
         diagnosis.write_text("DIAGNOSIS: the loop did not converge\nREMEDY: continue — one more round\n"
-                             "BOUND: 1\nEVIDENCE: the five completed fixes\nUNVERIFIED: none\n")
+                             "BOUND: 1 — one attempt per open finding\nASSESSMENT: /reports/investigation.md\nEVIDENCE: the five completed fixes\nUNVERIFIED: none\n")
         code, _, err = self.owner("diagnose", {"id": "diag-cap", "task": TASK, "checkpoint": "cap-5",
             "judge_report": str(diagnosis), "scope": SCOPE, "allowed_paths": ["src/*"]})
         self.assertEqual(code, 0, err)
