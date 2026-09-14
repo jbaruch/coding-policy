@@ -166,6 +166,11 @@ def source_final(body, kind, session):
 #: (#392). They belong to no message, so they neither start nor end a group.
 GROK_ATTACHMENT_UPDATES = frozenset({"image_compressed"})
 
+#: User-chunk content types that carry an attachment rather than prompt text.
+#: Only these are skipped; an unknown type is content the parser does not
+#: understand, and it refuses rather than authenticate the text around it.
+GROK_ATTACHMENT_CONTENT = frozenset({"image"})
+
 #: Grok's own marker for an attachment on a user turn, e.g. `[Image #1]`. It is
 #: appended AFTER the dispatched text; a marker anywhere else is altered
 #: assignment text and still refuses.
@@ -230,12 +235,16 @@ def source_prompt(body, kind, session=None):
                 content = update.get("content", {})
                 if not isinstance(content, dict):
                     return None
-                if content.get("type") != "text":
+                if content.get("type") in GROK_ATTACHMENT_CONTENT:
                     # An attachment chunk carries no prompt text and does not
                     # end the group the dispatched text was written in (#392).
+                    # Starting a group, it starts that group's text empty: the
+                    # following text belongs to THIS turn, not the previous one.
+                    if not in_chunks:
+                        prompt = ""
                     in_chunks = True
                     continue
-                if not isinstance(content.get("text"), str):
+                if content.get("type") != "text" or not isinstance(content.get("text"), str):
                     return None
                 prompt = (prompt or "") + content["text"] if in_chunks else content["text"]
                 in_chunks = True
@@ -430,7 +439,8 @@ def grok_clear_identity(body, prompt):
             if not submitted:
                 return None
             content = update.get("content")
-            if not isinstance(content, dict) or not isinstance(content.get("type"), str):
+            if (not isinstance(content, dict)
+                    or content.get("type") not in GROK_ATTACHMENT_CONTENT | {"text"}):
                 return None
             user_groups += previous != kind
             if user_groups != 1:

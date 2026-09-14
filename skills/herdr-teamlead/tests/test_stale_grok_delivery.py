@@ -282,6 +282,43 @@ class StaleGrokDeliveryTests(unittest.TestCase):
                 self.recover()
             self.assertEqual(self.document, before)
 
+    def test_an_unknown_chunk_type_refuses_rather_than_being_skipped(self):
+        # The attachment exception covers `image` alone. A block type the
+        # parser does not understand is content it cannot authenticate the text
+        # around, so it refuses rather than silently dropping it.
+        rows = copy.deepcopy(self.rows)
+        rows = rows[:3] + [grok_row({'sessionUpdate': 'user_message_chunk',
+                                     'content': {'type': 'audio', 'uri': 'data:audio/wav;base64,AAAA'}})] + rows[3:]
+        Path(self.data['source']).write_text(encode(rows))
+        before = copy.deepcopy(self.document)
+        with self.assertRaisesRegex(UsageError, 'grok_source_ambiguous'):
+            self.recover()
+        self.assertEqual(self.document, before)
+
+    def test_an_image_first_turn_reads_its_own_prompt(self):
+        # An attachment that STARTS the user group must not leave the previous
+        # group's text in the accumulator: the dispatched text follows it.
+        rows = [grok_row({'sessionUpdate': 'hook_execution', 'event_name': 'session_start'}),
+                grok_row({'sessionUpdate': 'user_message_chunk',
+                          'content': {'type': 'text', 'text': 'an earlier message'}}),
+                grok_row({'sessionUpdate': 'hook_execution', 'event_name': 'user_prompt_submit',
+                          'prompt_id': 'prompt-1'}),
+                grok_row({'sessionUpdate': 'user_message_chunk',
+                          'content': {'type': 'image', 'uri': 'data:image/png;base64,AAAA'}})]
+        rows += self.rows[2:]
+        Path(self.data['source']).write_text(encode(rows))
+        before = copy.deepcopy(self.document)
+        # Two user groups is still ambiguous — what matters is that the refusal
+        # is the group count, never a prompt silently built from both.
+        with self.assertRaisesRegex(UsageError, 'grok_source_ambiguous'):
+            self.recover()
+        self.assertEqual(self.document, before)
+        from teamlead.report_delivery import source_prompt
+        # Read directly: the image starts the group, so the prompt is this
+        # turn's text alone, not the earlier message concatenated onto it.
+        body = encode([rows[0], rows[3]] + self.rows[2:3])
+        self.assertEqual(source_prompt(body, 'grok'), self.prompt)
+
     def test_authored_or_wrapped_markers_do_not_gain_stale_identity_exception(self):
         for final in ('- ' + self.case.marker, '     ' + self.case.marker, '```\n' + self.case.marker,
                       '> example\n' + self.case.marker, self.case.marker + '\nmore output'):
