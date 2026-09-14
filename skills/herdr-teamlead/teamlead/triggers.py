@@ -437,6 +437,11 @@ def run_command(args, runner=None):
         for path in plan["cli_surface"]:
             if not matches(path, declaration["cli_spec_paths"]):
                 raise UsageError("Planned cli_surface names {}, which is outside this repo's declared CLI spec paths; name a spec path or widen the declaration.".format(path), {})
+            # A planned CLI surface is a planned change to that file, so it is
+            # classified against every surface the declaration names. A spec
+            # path that is also a trust boundary fires security too; validating
+            # it and classifying nothing let UX and product answer for both.
+            changes.setdefault(path, "M")
     # An empty plan classifies exactly as much as an absent one, so the guard
     # reads the combined inputs rather than the plan's presence: a vacuous
     # success here is the silence the triggers exist to end (#415).

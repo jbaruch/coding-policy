@@ -419,7 +419,7 @@ class PlannedSurfacesTest(TempCase):
     def test_a_plan_declaring_only_a_cli_surface_classifies(self):
         payload, _failure = triggers.run_command(
             namespace(repo=self.tmp, planned=self.write(cli_surface=["src/cli/main.py"])),
-            runner=self.runner())
+            runner=self.runner({"ls-tree": "src/cli/main.py\n"}))
         self.assertEqual(payload["fired"], ["ux-product"])
 
     def test_a_planned_new_package_fires_the_architect(self):
@@ -454,11 +454,24 @@ class PlannedSurfacesTest(TempCase):
 
     def test_a_planned_cli_surface_fires_ux_product(self):
         payload, _failure = triggers.run_command(
-            namespace(repo=self.tmp, planned=self.write(cli_surface=["src/cli/main.py"], changed=["src/cli/main.py"])),
+            namespace(repo=self.tmp, planned=self.write(cli_surface=["src/cli/main.py"])),
             runner=self.runner({"ls-tree": "src/cli/main.py\n"}))
         self.assertIn("ux-product", payload["fired"])
         row = next(row for row in payload["triggers"] if row["trigger"] == "ux-product")
         self.assertEqual(row["signals"][0]["signal"], "planned_cli_surface")
+
+    def test_a_planned_cli_surface_is_classified_against_every_surface(self):
+        # A spec path that is also a trust boundary fires security too;
+        # answering UX and product alone must not let the round pass.
+        declared = {**DECLARATION, "trust_boundary_paths": ["src/cli/*"]}
+        (self.tmp / triggers.DECLARATION_FILE).write_text(json.dumps(declared))
+        payload, failure = triggers.run_command(
+            namespace(repo=self.tmp, planned=self.write(cli_surface=["src/cli/main.py"]),
+                      requirements=None, roles=None),
+            runner=self.runner({"ls-tree": "src/cli/main.py\n"}))
+        self.assertEqual(payload["fired"], ["security", "ux-product"])
+        assert failure is not None
+        self.assertEqual(failure["details"]["unaddressed"], ["security", "ux-product"])
 
     def test_a_planned_cli_surface_outside_the_spec_paths_is_refused(self):
         with self.assertRaises(UsageError) as caught:
