@@ -14,7 +14,8 @@
 #   * it lies under the worktree root,
 #   * it is on a branch (not detached) other than origin's default branch,
 #   * it is not locked,
-#   * `git status --porcelain` is empty — untracked files count as dirty;
+#   * `git status --porcelain --untracked-files=all` is empty — untracked
+#     files count as dirty whatever `status.showUntrackedFiles` says;
 #     ignored files do not, they are reproducible by the ignore's own claim
 #     and `git worktree remove` treats them the same way,
 #   * its branch is an ancestor of origin's default branch (fully merged),
@@ -85,6 +86,17 @@ row() {
   fi
 }
 
+# 0 when <ref> exists, 1 when it is absent; any other show-ref exit is a tool
+# failure, warned about and returned as 2 so no fallback runs on top of it.
+ref_exists() { # <shared> <ref>
+  local rc=0
+  git -C "$1" show-ref --verify --quiet "$2" 2>"$ERRFILE" || rc=$?
+  case "$rc" in
+    0|1) return "$rc" ;;
+    *) warn "\`git show-ref --verify ${2}\` failed (exit ${rc}): $(tr '\n' ' ' < "$ERRFILE")"; return 2 ;;
+  esac
+}
+
 # Echo origin's default branch name, or return 1 when none can be confirmed.
 # A live run has just rewritten origin/HEAD from the remote; a dry run reads
 # the remote's HEAD with `ls-remote --symref` instead, rewriting nothing.
@@ -98,25 +110,25 @@ default_branch_of() { # <shared> <dry-run 0|1>
       return 1
     fi
     db="$(printf '%s\n' "$sym" | sed -n 's#^ref: refs/heads/\(.*\)[[:space:]]HEAD$#\1#p' | head -n 1)"
-    if [[ -n "$db" ]] && git -C "$1" show-ref --verify --quiet "refs/remotes/origin/${db}"; then
-      printf '%s' "$db"; return 0
+    if [[ -n "$db" ]]; then
+      ref_exists "$1" "refs/remotes/origin/${db}" || rc=$?
+      case "$rc" in 0) printf '%s' "$db"; return 0 ;; 1) rc=0 ;; *) return 1 ;; esac
     fi
   else
     db="$(git -C "$1" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>"$ERRFILE")" || rc=$?
     case "$rc" in
       0) db="${db#origin/}"
          # A dangling origin/HEAD names a branch with no remote-tracking ref.
-         if git -C "$1" show-ref --verify --quiet "refs/remotes/origin/${db}"; then printf '%s' "$db"; return 0; fi ;;
+         rc=0; ref_exists "$1" "refs/remotes/origin/${db}" || rc=$?
+         case "$rc" in 0) printf '%s' "$db"; return 0 ;; 1) ;; *) return 1 ;; esac ;;
       1) ;;  # origin/HEAD is simply absent: fall back to the conventional names
       *) warn "\`git symbolic-ref refs/remotes/origin/HEAD\` failed (exit ${rc}): $(tr '\n' ' ' < "$ERRFILE")"; return 1 ;;
     esac
   fi
   local cand
   for cand in main master; do
-    if git -C "$1" show-ref --verify --quiet "refs/remotes/origin/$cand"; then
-      printf '%s' "$cand"
-      return 0
-    fi
+    rc=0; ref_exists "$1" "refs/remotes/origin/$cand" || rc=$?
+    case "$rc" in 0) printf '%s' "$cand"; return 0 ;; 1) ;; *) return 1 ;; esac
   done
   return 1
 }
@@ -156,7 +168,9 @@ decide_worktree() { # <shared> <abs_root> <default> <dry-run 0|1> <path> <branch
     row kept "$path" "$branch" prunable; return 0
   fi
   local status rc=0
-  status="$(git -C "$path" status --porcelain 2>"$ERRFILE")" || rc=$?
+  # Explicit untracked mode: status.showUntrackedFiles=no would hide the
+  # very files the dirty check exists to protect.
+  status="$(git -C "$path" status --porcelain --untracked-files=all 2>"$ERRFILE")" || rc=$?
   if (( rc != 0 )); then
     row failed "$path" "$branch" "git status failed: $(tr '\n' ' ' < "$ERRFILE")"; return 0
   fi
