@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "package_roots": [
+    "skills/*",
+    "hooks",
+    "scripts",
+    ".github/actions/*",
+    ".github/codex-review"
+  ],
+  "package_change_lines": 400,
+  "trust_boundary_paths": [
+    ".github/codex-review/*",
+    ".github/workflows/*",
+    ".github/actions/skill-review/*",
+    ".github/actions/publish-landed-gate/*",
+    "hooks/*",
+    "skills/release/dismiss-stale-reviews.sh",
+    "skills/release/smart-publish.sh",
+    "skills/release/registry-has-version.sh",
+    "skills/herdr-teamlead/verify-authority.sh",
+    "skills/adopt-fork-pr/*"
+  ],
+  "cli_spec_paths": [
+    "skills/herdr-teamlead/teamlead/*.py"
+  ],
+  "cli_surface_markers": [
+    "add_parser(",
+    "add_argument("
+  ],
+  "user_doc_paths": [
+    "README.md",
+    "CONTRIBUTING.md",
+    "docs/*"
+  ]
+}
