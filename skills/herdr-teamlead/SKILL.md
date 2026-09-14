@@ -356,9 +356,9 @@ Step 22. No implementation or release is inferred from the diagnostic result.
 - **Any blocking finding** — apply the round-flow reference's Blocking Gate
   contract and `rules/agent-team-operation.md` Fix Loops. Return to Step 4 for
   an authorized correction or Step 13 for a required judge ruling. At an
-  exhausted allowance, record the operator checkpoint through
-  `references/dispatch-recovery.md` and finish here until its bounded decision
-  arrives.
+  exhausted allowance, record the checkpoint through
+  `references/dispatch-recovery.md` and proceed immediately to Step 13 for the
+  diagnosis; no operator decision is awaited.
 - **Advisory findings only** — record them in the round log and fold them into
   the next round that is already happening. Never spend a round on a lone
   advisory.
@@ -374,14 +374,22 @@ With its release criteria met, proceed immediately to Step 13.
 
 ## Step 13 — Compose the Judge Brief
 
-Optional. Triggers and the ruling contract are in
+Optional. Modes, triggers and both report contracts are in
 `skills/herdr-teamlead/references/round-flow.md` "The Judge" (a bot
 disagreement inside Step 20 returns here first). No trigger — proceed to
 Step 20.
 
-Compose the brief from `templates/brief-judge.md` through Step 7: the
-dispute, both positions with report paths, the governing rule, the tree. Skip
-Step 8 for the read-only judge. Proceed immediately to Step 14.
+For a dispute, compose from `templates/brief-judge.md` through Step 7: the
+dispute, both positions with report paths, the governing rule, the tree.
+
+For an exhausted allowance, compose from `templates/brief-judge-diagnosis.md`
+through Step 7 under the role key `judge-diagnosis`, which writes
+`brief-judge-diagnosis.md`: the task, rounds spent, remaining blocking work,
+the per-round history, the tree, and any prior remedy with what it changed.
+The pinned seat is still `judge`, so plan and dispatch that role and pass this
+file as its brief: `--brief judge=<outdir>/brief-judge-diagnosis.md`.
+
+Skip Step 8 for the read-only judge. Proceed immediately to Step 14.
 
 ## Step 14 — Re-measure the Shared Window
 
@@ -443,7 +451,7 @@ Run Step 11's fleet observation loop, including the judge named by Step 15.
 Proceed immediately to Step 19 once its report lands; keep other enrollments
 under observation.
 
-## Step 19 — Act on the Ruling
+## Step 19 — Act on the Ruling or Remedy
 
 Apply the Ruling Outcomes contract in `references/round-flow.md`. Investigation
 rulings return to Step 12's knowledge gate. Implementation rulings route

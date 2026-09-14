@@ -350,7 +350,7 @@ def build_parser():
     report_parser.add_argument("--report", required=True)
     report_parser.add_argument("--lines", type=int, required=True)
 
-    for command in ("task", "checkpoint", "authorize-corrections", "recover-context", "recover-role-clear", "record-report", "record-refusal", "authorize-refused-dispatch", "reconcile", "record-release-clear", "import-correction", "record-historical-review", "recover-report", "assess-specialist"):
+    for command in ("task", "checkpoint", "authorize-corrections", "recover-context", "recover-role-clear", "record-report", "record-refusal", "authorize-refused-dispatch", "diagnose", "reconcile", "record-release-clear", "import-correction", "record-historical-review", "recover-report", "assess-specialist"):
         record_parser = sub.add_parser(command, parents=[common], help="Record owner-managed {} evidence.".format(command))
         record_parser.add_argument("--record", required=True, metavar="FILE", help="Structured evidence JSON; see dispatch-recovery.md.")
         record_parser.add_argument("--now", metavar="ISO8601")
@@ -1014,6 +1014,21 @@ def cmd_recovery(args, client=None, warn=None, trace=None):
         result = recovery.checkpoint(store, history, data, at, judge.agent if judge else None)
     elif args.command == "authorize-corrections":
         result = recovery.authorize_plan(store, history, data, at)
+    elif args.command == "diagnose":
+        judge = load_judge(_config_path(args))
+        # Supervision knows where the judge's report was meant to land; a
+        # dispatch marked applied proves only the send (#407).
+        # Supervision knows where the pinned judge's report was meant to land;
+        # a dispatch marked applied proves only the send (#407).
+        enrolled = None
+        if judge is not None and isinstance(data, dict):
+            member = next((item for item in reversed(supervision.load(state_path)["members"])
+                           if item["assignment"]["task"] == data.get("task")
+                           and item["assignment"]["agent"] == judge.agent), None)
+            if member is not None:
+                enrolled = supervision.expected_assignment(member)["report"]
+        result = recovery.diagnose(store, history, data, at, judge.agent if judge else None, enrolled,
+                                   supervision.dispatch_binding(state_path) is not None)
     elif args.command == "record-report":
         if isinstance(data, dict):
             dispatch = next((item for item in store["dispatches"] if item["id"] == data.get("dispatch")), None)
@@ -1209,7 +1224,7 @@ COMMANDS = {
     "apply": cmd_apply,
     "state": cmd_state,
     "status": cmd_status,
-    **{command: cmd_recovery for command in ("task", "checkpoint", "authorize-corrections", "recover-context", "recover-role-clear", "record-report", "record-refusal", "authorize-refused-dispatch", "reconcile", "record-release-clear", "import-correction", "record-historical-review", "recover-report", "assess-specialist")},
+    **{command: cmd_recovery for command in ("task", "checkpoint", "authorize-corrections", "recover-context", "recover-role-clear", "record-report", "record-refusal", "authorize-refused-dispatch", "diagnose", "reconcile", "record-release-clear", "import-correction", "record-historical-review", "recover-report", "assess-specialist")},
     "start-judge": cmd_start_judge,
     "probe-report": cmd_probe_report,
     **{command: cmd_retrospective for command in ("retro-check", "retro-record", "retro-list", "retro-show")},

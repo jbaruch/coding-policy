@@ -57,16 +57,30 @@ description: Running a multi-agent team — task-based specialist composition, c
 ## Judge Seat
 
 - The reserved `judge` seat runs on the most capable model available and holds no other responsibility
-- The lead dispatches the judge only for one of three triggers: a contested reviewer or tester verdict, a lead override of a blocking finding, or a bot finding the team disagrees with
-- An exhausted correction allowance goes to the operator, never to the lead's judge dispatch
-- Narrow exception for an operator-requested ruling at an exhausted allowance.
-- Pre-dispatch gates (both required):
-  1. The operator requests the ruling explicitly, after receiving the exhausted-allowance checkpoint
-  2. No prior operator-requested exhaustion ruling exists for the task
-- Post-dispatch obligation: record the ruling's evidence on the task's checkpoint through `teamlead checkpoint`, under the original task and base
-- Every other exhausted allowance reaches the operator with no judge dispatch
+- The lead dispatches the judge in adjudication mode for one of three triggers: a contested reviewer or tester verdict, a lead override of a blocking finding, or a bot finding the team disagrees with
+- The lead dispatches the judge in diagnosis mode at an exhausted allowance with blocking work remaining
+- Diagnosis asks why the loop is not converging and what must change, never who is right
+- The diagnosis returns `DIAGNOSIS:`, `REMEDY: continue | restructure | stop`, `BOUND:`, `EVIDENCE:` and `UNVERIFIED:`
+- A `continue` or `restructure` remedy's `BOUND` supplies the attempt budget the operator formerly supplied
+- A `stop` remedy ships what is clean and records the remainder as a tracked accepted defect
+- The judge's authority in diagnosis mode covers accepting a tracked defect into a release under a `stop` remedy
+- That acceptance follows `rules/review-severity.md` Judge-Accepted Defect Carve-Out; every other release gate holds
+- Record the diagnosis through `teamlead diagnose` under the original task and base before acting on its remedy
+- A bound lead cites the report supervision enrolled for the pinned judge, never another file
+- The operator overrides this exhaustion's recorded remedy
+- An approved budget never stands in for a diagnosis
+- An older remedy never authorizes new attempts
+- Re-enter diagnosis when a remedy's own bound exhausts with blocking work remaining
+- Re-enter before the bound is spent only for a changed scope or an operator override, naming the plan it supersedes and carrying the change it claims
+- A `stop` remedy ends implementation on its task; no unspent allowance survives it
+- Each re-entry moves strictly down the ladder `continue` → `restructure` → `stop`
+- Never reissue a remedy that already failed, and never move back up the ladder
+- `stop` is terminal; a task takes at most three diagnoses
+- No exhausted allowance waits on an operator decision
 - The judge is read-only: it never edits a repository file, never runs a mutating git or `gh` command, never posts to GitHub, never dispatches a subagent — its only output is its report file
-- The judge reads both positions and the governing rule, verifies the disputed facts against the tree, and returns `RULING: uphold A | uphold B | amend — <line> | blocked — <question>` with numbered reasons, an `ACTION:` naming the minimal step, and an `UNVERIFIED:` line
+- In adjudication mode the judge reads both positions and the governing rule, verifies the disputed facts against the tree, and returns `RULING: uphold A | uphold B | amend — <line> | blocked — <question>` with numbered reasons, an `ACTION:` naming the minimal step, and an `UNVERIFIED:` line
+- In diagnosis mode it reads the round history and verifies against the tree what each round changed, and returns the five diagnosis lines with numbered reasons
+- `RULING:` and `ACTION:` belong to adjudication alone; a diagnosis carries neither
 - The judge's ruling binds the round; only the operator overrides it
 - `blocked` is the judge declining to rule
 - A `blocked` ruling stops the round and sends the named question to the operator
@@ -133,20 +147,20 @@ description: Running a multi-agent team — task-based specialist composition, c
 - Never edit repository content while holding the release role
 - Each fresh-worker brief includes the task, prior report, and open findings
 - Frame the handoff as "a prior developer attempted this N times; you own it now"
-- At an exhausted allowance with remaining blocking work, stop the round and record the operator checkpoint before proposing further implementation
-- Narrow exception for an operator-approved bounded correction plan.
+- At an exhausted allowance with remaining blocking work, stop the round, record the checkpoint, and dispatch the judge in diagnosis mode
+- Narrow exception for a judge-diagnosed bounded correction plan.
 - Preconditions (all required):
   1. The task's latest developer attempt is confirmed applied with no dispatch outcome unknown
   2. A checkpoint names the concrete remaining defect, previous changes, observed progress, and changed approach
-  3. The operator explicitly approves the task, scope, permitted paths, and additional attempt budget
-  4. The owner utility records the checkpoint and approval under the original task and base
-- Every other exhausted loop remains blocked; never dispatch an automatic sixth fix
-- Reuse that approval across attempts within its bounds
-- Ask again only when the approved budget is exhausted, scope changes, or the operator changes the decision
-- Record an explicit superseding decision without rewriting the prior approval
+  3. The pinned judge returns a completed diagnosis whose remedy is `continue` or `restructure`, with its bound
+  4. The owner utility records the diagnosis and its derived plan under the original task and base
+- Every other exhausted loop takes its diagnosis first; never dispatch an automatic sixth fix
+- Reuse that plan across attempts within its bounds
+- Re-enter diagnosis when the bound exhausts, scope changes, or the operator overrides the remedy
+- Record an explicit superseding decision without rewriting the prior plan
 - Preserve cumulative counts across clears, worker changes, retries, and interrupted dispatch
 - Reconcile an unknown send outcome before retrying; never charge or send the same attempt twice
-- Record `waiting_for_operator` when implementation awaits the bounded decision
+- Record `awaiting_diagnosis` when implementation awaits the judge's remedy
 - An active audit worker never establishes implementation progress
 - Scope fix re-checks to each prior finding: RESOLVED, OPEN, or DECLINED with a reason
 - Restrict NEW findings in a scoped re-check to blocking severity

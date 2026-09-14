@@ -1,5 +1,75 @@
 # Changelog
 
+### Changed
+
+- **An exhausted allowance takes a judge diagnosis, not an operator budget
+  prompt (#407).** On ACR PR120 the blocking-finding count per round ran
+  3, 3, 2, 1, 1, 1, 2, 2, 1, 1, 1: converged to about one, then held flat for
+  seven rounds. Every round closed its finding and every round a new one
+  appeared where no previous reviewer had reached. The PR was 88 files and
+  +15,536/-495 across 42 commits, and `Review Before PR` independence puts a
+  fresh reviewer on it each round, so the find-rate tracked review surface
+  area rather than remaining defect density. Nineteen developer rounds and
+  sixteen judge rulings did not converge; a sub-task of 8 files in the same
+  task converged in two.
+
+  The budget was the wrong artifact. Raising it buys more attempts at an
+  approach that is already failing, the number is the one input the lead can
+  derive, and the inputs the operator uniquely holds were never asked for.
+  Worse, `Fix Loops` named two outcomes and no default, so an operator who is
+  asleep leaves the only possible behavior an indefinite stall: fifteen
+  consecutive no-progress turns were observed on a PR that was MERGEABLE with
+  ten green checks.
+
+  The judge gains a second mode. Adjudication settles a dispute between two
+  positions; diagnosis asks why a loop is not converging and what has to
+  change, and returns `DIAGNOSIS:`, `REMEDY: continue | restructure | stop`,
+  `BOUND:`, `EVIDENCE:` and `UNVERIFIED:`. A `continue` or `restructure`
+  remedy carries in `BOUND` the attempt budget the operator used to supply.
+  A `stop` remedy ships what is clean and records the remainder as a tracked
+  accepted defect; the rule states outright that the judge's authority covers
+  accepting that defect into a release, so a lead does not re-escalate out of
+  caution and recreate the stall. `rules/review-severity.md` gains the
+  carve-out that authority needs — otherwise its own fix-before-merge rule and
+  the release gate's no-blocking-finding requirement would each forbid what
+  the remedy permits. Its preconditions are the recorded `stop` at this
+  exhaustion, the remainder tracked with its issue reference, a shipped scope
+  carrying no other blocking finding, and every other gate held: CI, the
+  external reviews, and independent reviewer and tester passes on the shipped
+  tip. `stop` is terminal in the ledger too — no allowance survives it, and a
+  plan it supersedes is retired even though the supersession lives on the
+  diagnosis rather than on a plan — and the operator overrides it the way they
+  override any ruling, by authorizing a plan over that remedy.
+
+  This is not a revert of #396. That issue removed exhaustion as a trigger
+  because it fired at every allowance boundary as a rubber stamp — 16 of the
+  fleet's 30 lifetime judge dispatches landed on one task that way — and the
+  removal stands. This fires once per exhaustion and asks a different
+  question. It is re-enterable when its own remedy's bound exhausts, because
+  "this approach was independently diagnosed and still did not work" is input
+  for the next diagnosis rather than for an operator who holds nothing new.
+  Re-entry moves strictly down `continue` → `restructure` → `stop`: a failed
+  remedy is never reissued, the ladder never runs backwards, `stop` is
+  terminal, so a task takes at most three diagnoses and cannot loop. A changed
+  scope or an operator override re-enters before the bound is spent, naming
+  the plan it supersedes and proving the change it claims — a different scope
+  or paths, or the operator's recorded override — and descends the ladder like
+  any other re-entry. `stop` ends implementation on the task outright, so no
+  unspent allowance survives it. The cited report must be the one supervision
+  enrolled for the pinned judge on that task whenever the lead is bound, since
+  a dispatch marked applied proves the send and not the delivery. The
+  operator's `authorize-corrections` path survives as an override of a
+  recorded remedy rather than a substitute for one, and the remedy must be
+  this exhaustion's: without that, an old diagnosis would extend an exhausted
+  plan indefinitely and reopen the budget prompt the judge replaced. No
+  operator sits in the path of any of them, and the deadlock disappears.
+
+  The lead ran the loop and is the wrong diagnostician of its own dispatch
+  pattern: in the worked case it treated each finding as an isolated
+  correction for nineteen rounds and identified the asymptote only when asked
+  to examine budget burn. Independence matters here for the reason it matters
+  in review.
+
 ## 0.3.212 — 2026-09-14
 
 ### Fixed
@@ -58,7 +128,6 @@
   dispatch parser already treats them, so an alias cannot enroll a second
   attempt on a refused attempt's evidence, and a `not_sent` retry refreshes
   the provider and brief identity its fingerprint does not cover.
-
 ## 0.3.211 — 2026-09-14
 
 ### Added

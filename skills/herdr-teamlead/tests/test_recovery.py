@@ -16,7 +16,8 @@ from pathlib import Path
 
 from teamlead.errors import UsageError
 from teamlead.recovery import (
-    abort_pre_send, authorize_context, authorize_plan, authorize_refused_dispatch, brief_identity, checkpoint, confirmed_fix,
+    abort_pre_send, active_plans, authorize_context, authorize_plan, authorize_refused_dispatch, brief_identity, checkpoint, confirmed_fix,
+    diagnose,
     dispatch_identity, finish_dispatch, fresh_transition, mark_sending,
     migrate_store, prior_dispatch, record_refusal, record_report, refusal_move, register_task, reserve,
     task_statuses, validate_store, validate_work,
@@ -60,21 +61,226 @@ class RecoveryTests(unittest.TestCase):
         }, AT, "judge")
 
     def approve(self):
+        # The operator overrides a remedy; a diagnosis is recorded first.
         self.seed_checkpoint()
+        remedy = self.diagnosis("diag-approve", "continue", 1)
+        diag = self.run_diagnosis(remedy, "judge")
         return authorize_plan(self.store, self.history, {"id": "plan-1", "task": TASK, "checkpoint": "checkpoint-5",
-            "scope": WORK["scope"], "allowed_paths": ["src/*"], "additional_fixes": 2, "authorization": AUTH}, AT)
+            "scope": WORK["scope"], "allowed_paths": ["src/*"], "additional_fixes": 2, "authorization": AUTH,
+            "supersedes": diag["plan"]}, AT)
 
-    def reservation(self, number):
+    def reservation(self, number, plan="plan-1"):
         return {"id": f"fix-{number}", "task": TASK, "role": "developer", "agent": "worker", "fix_round": number,
-                "fingerprint": "c" * 64, "plan": "plan-1", "work": copy.deepcopy(WORK)}
+                "fingerprint": "c" * 64, "plan": plan, "work": copy.deepcopy(WORK)}
 
-    def finish(self, number):
-        record = self.reservation(number)
+    def finish(self, number, plan="plan-1"):
+        record = self.reservation(number, plan)
         reserve(self.store, record, AT)
         mark_sending(self.store, record["id"], AT, {"cleared": True})
         add_assignment(self.state, "2026-02-03T11:00:0{}+00:00".format(number), "developer", "worker", task=TASK, fix_round=number)
         finish_dispatch(self.store, record["id"], {"status": "applied", **{
             key: record[key] for key in ("task", "role", "agent", "fix_round")}}, len(self.history) - 1, AT)
+
+    def diagnosis_report(self, remedy, bound, name="diagnosis.md"):
+        path = self.root / name
+        path.write_text(
+            "DIAGNOSIS: the find-rate held flat while every round closed its finding.\n"
+            "REMEDY: {} — {}\n"
+            "BOUND: {}\n"
+            "EVIDENCE: rounds 10-20 and their review bodies.\n"
+            "UNVERIFIED: none\n".format(remedy, "the named change", bound))
+        return str(path)
+
+    def judge_after_developer(self, number):
+        # The diagnosis gate needs the pinned judge's assignment after the
+        # latest developer attempt, as an adjudication citation does.
+        add_assignment(self.state, "2026-02-03T12:00:0{}+00:00".format(number), "judge", "judge", task=TASK)
+
+    def next_checkpoint(self, name):
+        # Each exhaustion records its own checkpoint; a plan's first fix is
+        # always its checkpoint's round plus one.
+        return checkpoint(self.store, self.history, {
+            "id": name, "task": TASK, "defect": "F1 remains open", "previous_attempts": "The bounded remedy was spent",
+            "progress": "The named change landed; the finding did not close",
+            "change_in_approach": "Take the next remedy on the ladder"}, AT, "judge")["id"]
+
+    def run_diagnosis(self, data, judge="judge", enrolled=None):
+        # The fixture's judge dispatch enrolls the report the request cites,
+        # unless a case overrides it to prove the binding.
+        if enrolled is None:
+            enrolled = data.get("judge_report")
+        return diagnose(self.store, self.history, data, AT, judge, enrolled, enrolled is not None)
+
+    def diagnosis(self, name, remedy, bound, checkpoint_id="checkpoint-5"):
+        return {"id": name, "task": TASK, "checkpoint": checkpoint_id, "judge_report": self.diagnosis_report(remedy, bound, name + ".md"),
+                "scope": WORK["scope"], "allowed_paths": ["src/*"]}
+
+    def test_a_bounded_remedy_records_the_plan_its_bound_authorizes(self):
+        # coding-policy#407: the judge supplies the budget the operator used to.
+        self.seed_checkpoint()
+        record = self.run_diagnosis(self.diagnosis("diag-1", "continue", 2), "judge")
+        self.assertEqual((record["remedy"], record["bound"], record["fix_round"]), ("continue", 2, 5))
+        plan = _item_plan = next(row for row in self.store["plans"] if row["id"] == record["plan"])
+        self.assertEqual((plan["first_fix"], plan["last_fix"]), (6, 7))
+        self.assertEqual(plan["authorization"]["source"], record["judge_evidence"]["path"])
+        self.assertIn("REMEDY: continue", plan["authorization"]["quote"])
+        # The ordinary allowance machinery enforces it from here.
+        validate_work(self.store, self.history, TASK, 6, plan["id"], WORK)
+        with self.assertRaisesRegex(UsageError, "outside the approved task or budget"):
+            validate_work(self.store, self.history, TASK, 8, plan["id"], WORK)
+        self.assertEqual(self.run_diagnosis(self.diagnosis("diag-1", "continue", 2)), record)
+        validate_store(self.store, self.history)
+
+    def test_the_remedy_ladder_descends_and_stop_is_terminal(self):
+        self.seed_checkpoint()
+        self.run_diagnosis(self.diagnosis("diag-1", "continue", 1), "judge")
+        # The bound must be spent before the next diagnosis.
+        with self.assertRaisesRegex(UsageError, "unspent attempts under plan"):
+            self.run_diagnosis(self.diagnosis("diag-2", "restructure", 2), "judge")
+        self.finish(6, "diag-1:plan")
+        self.judge_after_developer(6)
+        second = self.next_checkpoint("checkpoint-6")
+        with self.assertRaisesRegex(UsageError, "may not sit above restructure"):
+            self.run_diagnosis(self.diagnosis("diag-2", "continue", 2, second), "judge")
+        self.run_diagnosis(self.diagnosis("diag-2", "restructure", 1, second), "judge")
+        self.finish(7, "diag-2:plan")
+        self.judge_after_developer(7)
+        third = self.next_checkpoint("checkpoint-7")
+        with self.assertRaisesRegex(UsageError, "may not sit above stop"):
+            self.run_diagnosis(self.diagnosis("diag-3", "restructure", 1, third), "judge")
+        stop = self.run_diagnosis(self.diagnosis("diag-3", "stop", "none", third), "judge")
+        self.assertEqual((stop["bound"], stop["plan"]), (None, None))
+        with self.assertRaisesRegex(UsageError, "terminal"):
+            self.run_diagnosis(self.diagnosis("diag-4", "stop", "none", third), "judge")
+        self.assertEqual(task_statuses(self.store, self.history)[TASK]["status"], "diagnosed_stop")
+        validate_store(self.store, self.history)
+
+    def test_a_changed_scope_supersedes_an_unspent_remedy_and_still_descends(self):
+        # coding-policy#407: Fix Loops re-enters on a changed scope or an
+        # operator override, not only on an exhausted bound.
+        self.seed_checkpoint()
+        first = self.run_diagnosis(self.diagnosis("diag-1", "continue", 3), "judge")
+        with self.assertRaisesRegex(UsageError, "unspent attempts under plan"):
+            self.run_diagnosis(self.diagnosis("diag-2", "restructure", 2), "judge")
+        with self.assertRaisesRegex(UsageError, "Supersedes must name"):
+            self.run_diagnosis({**self.diagnosis("diag-2", "restructure", 2), "supersedes": "plan-nope"}, "judge")
+        # Naming the plan is not the change: an early re-entry proves one.
+        with self.assertRaisesRegex(UsageError, "needs the change it claims"):
+            self.run_diagnosis({**self.diagnosis("diag-2", "restructure", 2), "supersedes": first["plan"]}, "judge")
+        narrowed = {**self.diagnosis("diag-2", "restructure", 2), "supersedes": first["plan"], "allowed_paths": ["src/parser.py"]}
+        # The ladder still descends: a supersession is a diagnosis like any other.
+        with self.assertRaisesRegex(UsageError, "may not sit above restructure"):
+            self.run_diagnosis({**narrowed, **self.diagnosis("diag-2", "continue", 2), "supersedes": first["plan"], "allowed_paths": ["src/parser.py"]}, "judge")
+        # An operator override stands in for a changed scope.
+        override = self.run_diagnosis({**self.diagnosis("diag-override", "restructure", 2),
+                                       "supersedes": first["plan"], "authorization": AUTH})
+        self.assertEqual(override["supersedes"], first["plan"])
+        second = override
+        self.assertEqual(second["supersedes"], first["plan"])
+        plans = {row["id"]: row for row in self.store["plans"]}
+        self.assertIn(first["plan"], plans)
+        self.assertEqual(plans[second["plan"]]["supersedes"], first["plan"])
+        with self.assertRaisesRegex(UsageError, "needs the change it claims"):
+            self.run_diagnosis({**self.diagnosis("diag-late", "stop", "none"), "supersedes": second["plan"]})
+        self.assertNotIn(first["plan"], [row["id"] for row in active_plans(self.store)])
+        with self.assertRaisesRegex(UsageError, "superseded"):
+            validate_work(self.store, self.history, TASK, 6, first["plan"], WORK)
+        validate_work(self.store, self.history, TASK, 6, second["plan"], WORK)
+        validate_store(self.store, self.history)
+
+    def test_a_diagnosis_needs_an_exhausted_budget_a_checkpoint_and_the_pinned_judge(self):
+        with self.assertRaisesRegex(UsageError, "requires id, task, checkpoint"):
+            self.run_diagnosis({"id": "d", "task": TASK}, "judge")
+        self.seed_checkpoint()
+        for remedy, bound, message in (("continue", "0", "positive BOUND"), ("continue", "none", "positive BOUND"),
+                                       ("sideways", "1", "must carry DIAGNOSIS")):
+            with self.assertRaisesRegex(UsageError, message):
+                self.run_diagnosis(self.diagnosis("diag-bad", remedy, bound), "judge")
+        with self.assertRaisesRegex(UsageError, "pinned judge's completed assignment"):
+            self.run_diagnosis(self.diagnosis("diag-1", "continue", 1), "someone-else")
+        incomplete = self.root / "incomplete.md"
+        incomplete.write_text("DIAGNOSIS: x\nREMEDY: continue — more\nBOUND: 2\n")
+        with self.assertRaisesRegex(UsageError, "must carry DIAGNOSIS"):
+            self.run_diagnosis({**self.diagnosis("diag-2", "continue", 1), "judge_report": str(incomplete)}, "judge")
+
+    def test_a_stop_remedy_ends_implementation_on_the_task(self):
+        # coding-policy#407: `stop` is terminal, so no allowance survives it.
+        self.seed_checkpoint()
+        first = self.run_diagnosis(self.diagnosis("diag-1", "continue", 3), "judge")
+        validate_work(self.store, self.history, TASK, 6, first["plan"], WORK)
+        self.run_diagnosis({**self.diagnosis("diag-2", "stop", "none"), "supersedes": first["plan"], "authorization": AUTH})
+        for plan in (first["plan"], None):
+            with self.assertRaisesRegex(UsageError, "terminal"):
+                validate_work(self.store, self.history, TASK, 6, plan, WORK)
+        with self.assertRaisesRegex(UsageError, "terminal"):
+            validate_work(self.store, self.history, TASK, 3, None, None)
+        # What `stop` ships still gets reviewed, tested and released.
+        validate_work(self.store, self.history, TASK, None, None, None, implementation=False)
+        # Only the operator overrides a ruling, and a plan over the stop is how.
+        self.judge_after_developer(6)
+        override = authorize_plan(self.store, self.history, {"id": "override", "task": TASK, "checkpoint": "checkpoint-5",
+            "scope": WORK["scope"], "allowed_paths": ["src/*"], "additional_fixes": 1, "authorization": AUTH}, AT)
+        self.assertEqual(override["first_fix"], 6)
+        validate_work(self.store, self.history, TASK, 6, "override", WORK)
+        with self.assertRaisesRegex(UsageError, "overridden by plan override"):
+            validate_work(self.store, self.history, TASK, 6, None, WORK)
+        validate_work(self.store, self.history, TASK, 6, "override", WORK, implementation=False)
+        # The status follows the override, as validate_work does.
+        self.assertEqual(task_statuses(self.store, self.history)[TASK]["status"], "within_authorized_budget")
+        validate_store(self.store, self.history)
+
+    def test_a_report_must_be_the_one_supervision_enrolled(self):
+        self.seed_checkpoint()
+        request = self.diagnosis("diag-1", "continue", 2)
+        with self.assertRaisesRegex(UsageError, "not the one supervision enrolled"):
+            self.run_diagnosis(request, enrolled=str(self.root / "elsewhere.md"))
+        record = self.run_diagnosis(request)
+        self.assertEqual(record["remedy"], "continue")
+
+    def test_a_remedy_names_what_it_means(self):
+        self.seed_checkpoint()
+        bare = self.root / "bare.md"
+        bare.write_text("DIAGNOSIS: flat find-rate\nREMEDY: restructure\nBOUND: 2\n"
+                        "EVIDENCE: rounds 10-20\nUNVERIFIED: none\n")
+        with self.assertRaisesRegex(UsageError, "names its remedy and what it means"):
+            self.run_diagnosis({**self.diagnosis("diag-1", "continue", 2), "judge_report": str(bare)}, "judge")
+
+    def test_an_adjudication_report_is_not_a_diagnosis(self):
+        # coding-policy#407: RULING and ACTION belong to adjudication; a mixed
+        # report could carry a blocked ruling and still grant attempts.
+        self.seed_checkpoint()
+        mixed = self.root / "mixed.md"
+        mixed.write_text("RULING: blocked — which boundary ships?\nACTION: ask the operator\n"
+                         "DIAGNOSIS: flat find-rate\nREMEDY: continue — two more rounds\n"
+                         "BOUND: 2\nEVIDENCE: rounds 1-5\nUNVERIFIED: none\n")
+        with self.assertRaisesRegex(UsageError, "adjudication's RULING or ACTION"):
+            self.run_diagnosis({**self.diagnosis("diag-1", "continue", 2), "judge_report": str(mixed)})
+        self.assertEqual(self.store["diagnoses"], [])
+        self.assertEqual([row for row in self.store["plans"]], [])
+
+    def test_corrupt_diagnoses_refuse_the_ledger(self):
+        self.seed_checkpoint()
+        self.run_diagnosis(self.diagnosis("diag-1", "continue", 2), "judge")
+        for mutate in (
+            lambda row: row.update(remedy="sideways"),
+            lambda row: row.update(bound=None),
+            lambda row: row.update(plan=None),
+            lambda row: row.update(judge_evidence="not-a-receipt"),
+        ):
+            corrupt = copy.deepcopy(self.store)
+            mutate(corrupt["diagnoses"][0])
+            with self.assertRaises(UsageError):
+                validate_store(corrupt, self.history)
+        corrupt = copy.deepcopy(self.store)
+        corrupt["diagnoses"].append({**corrupt["diagnoses"][0], "id": "diag-back", "remedy": "continue"})
+        with self.assertRaisesRegex(UsageError, "strictly down the remedy ladder"):
+            validate_store(corrupt, self.history)
+        for mutate in (lambda row: row.update(fix_round=4),
+                       lambda row: row.update(base_revision="f" * 40)):
+            corrupt = copy.deepcopy(self.store)
+            mutate(corrupt["diagnoses"][0])
+            with self.assertRaisesRegex(UsageError, "another task, base or fix round"):
+                validate_store(corrupt, self.history)
 
     def test_two_corrections_share_one_approval_and_the_first_outside_budget_refuses(self):
         plan = self.approve()
@@ -88,7 +294,7 @@ class RecoveryTests(unittest.TestCase):
         self.assertEqual(result["evidence"]["sha256"], hashlib.sha256(self.review.read_bytes()).hexdigest())
         validate_work(self.store, self.history, TASK, 7, "plan-1", WORK)
         self.finish(7)
-        self.assertEqual(len(self.store["plans"]), 1)
+        self.assertEqual([row["id"] for row in active_plans(self.store)], ["plan-1"])
         self.assertEqual(confirmed_fix(self.history, TASK), 7)
         with self.assertRaisesRegex(UsageError, "outside the approved task or budget"):
             validate_work(self.store, self.history, TASK, 8, "plan-1", WORK)
@@ -113,7 +319,7 @@ class RecoveryTests(unittest.TestCase):
         self.seed_checkpoint()
         add_assignment(self.state, AT, "reviewer", "auditor", task=TASK)
         status = task_statuses(self.store, self.history)[TASK]
-        self.assertEqual((status["status"], status["paused_work"]), ("waiting_for_operator", "implementation"))
+        self.assertEqual((status["status"], status["paused_work"]), ("awaiting_diagnosis", "implementation"))
 
     def test_a_cited_judge_report_still_needs_the_pinned_judge_after_latest_development(self):
         self.exhaust()
@@ -121,7 +327,7 @@ class RecoveryTests(unittest.TestCase):
             checkpoint(self.store, self.history, {"id": "cp", "task": TASK, "defect": "F1", "previous_attempts": "Five fixes",
                 "progress": "Still blocked", "change_in_approach": "Reassess", "judge_report": str(self.judge_report)}, AT, "judge")
 
-    def test_an_exhausted_allowance_reaches_the_operator_without_a_judge(self):
+    def test_an_exhausted_allowance_awaits_the_diagnosis_without_a_judge_citation(self):
         # The allowance boundary is a budget decision only the operator makes.
         # Requiring a ruling first spent 16 of one fleet's 30 lifetime judge
         # dispatches on one task (jbaruch/coding-policy#396).
@@ -133,15 +339,23 @@ class RecoveryTests(unittest.TestCase):
         self.assertNotIn("judge_agent", record)
         self.assertEqual(record["fix_round"], 5)
         status = task_statuses(self.store, self.history)[TASK]
-        self.assertEqual((status["status"], status["paused_work"]), ("waiting_for_operator", "implementation"))
+        self.assertEqual((status["status"], status["paused_work"]), ("awaiting_diagnosis", "implementation"))
 
     def test_that_checkpoint_carries_the_operator_bounded_approval_through(self):
         self.exhaust()
+        add_assignment(self.state, AT, "judge", "judge", task=TASK)
         checkpoint(self.store, self.history, {"id": "cp", "task": TASK, "defect": "F1",
             "previous_attempts": "Five fixes", "progress": "Still blocked",
             "change_in_approach": "Reassess"}, AT, "judge")
+        # The operator overrides a remedy; without one there is nothing to override.
+        with self.assertRaisesRegex(UsageError, "no diagnosis at fix round 5"):
+            authorize_plan(self.store, self.history, {"id": "plan-1", "task": TASK, "checkpoint": "cp",
+                "scope": WORK["scope"], "allowed_paths": ["src/*"], "additional_fixes": 2, "authorization": AUTH}, AT)
+        diag = self.run_diagnosis(self.diagnosis("diag-cp", "continue", 1, "cp"))
+        self.assertEqual(diag["fix_round"], 5)
         plan = authorize_plan(self.store, self.history, {"id": "plan-1", "task": TASK, "checkpoint": "cp",
-            "scope": WORK["scope"], "allowed_paths": ["src/*"], "additional_fixes": 2, "authorization": AUTH}, AT)
+            "scope": WORK["scope"], "allowed_paths": ["src/*"], "additional_fixes": 2, "authorization": AUTH,
+            "supersedes": diag["plan"]}, AT)
         self.assertEqual((plan["first_fix"], plan["last_fix"]), (6, 7))
         validate_work(self.store, self.history, TASK, 6, "plan-1", WORK)
 
@@ -151,8 +365,8 @@ class RecoveryTests(unittest.TestCase):
                 "previous_attempts": "None", "progress": "None",
                 "change_in_approach": "Reassess"}, AT, "judge")
 
-    def test_an_exhausted_budget_names_the_operator_not_the_judge(self):
-        with self.assertRaisesRegex(UsageError, "operator checkpoint"):
+    def test_an_exhausted_budget_names_the_diagnosis_not_an_operator_plan(self):
+        with self.assertRaisesRegex(UsageError, "teamlead diagnose"):
             validate_work(self.store, self.history, TASK, 6, None, WORK)
 
     def replay_data(self):
@@ -292,7 +506,7 @@ class RecoveryTests(unittest.TestCase):
         with self.assertRaisesRegex(UsageError, "supersedes"):
             authorize_plan(self.store, self.history, data, AT)
         changed = authorize_plan(self.store, self.history, {**data, "supersedes": "plan-1"}, AT)
-        self.assertEqual(self.store["plans"][0], original)
+        self.assertEqual(next(row for row in self.store["plans"] if row["id"] == "plan-1"), original)
         self.assertEqual((changed["first_fix"], changed["last_fix"]), (6, 6))
         with self.assertRaisesRegex(UsageError, "superseded"):
             validate_work(self.store, self.history, TASK, 6, "plan-1", WORK)
@@ -559,16 +773,19 @@ class RecoveryTests(unittest.TestCase):
         old = copy.deepcopy(self.store)
         old["schema_version"] = 5
         del old["refusal_authorizations"]
+        del old["diagnoses"]
         for row in old["dispatches"]:
             del row["brief_identity"]
             del row["provider"]
         before = copy.deepcopy(old)
         self.assertTrue(migrate_store(old))
-        self.assertEqual(old["schema_version"], 7)
+        self.assertEqual(old["schema_version"], 8)
         self.assertEqual(old.pop("refusal_authorizations"), [])
+        self.assertEqual(old.pop("diagnoses"), [])
         self.assertEqual({key: value for key, value in old.items() if key != "schema_version"},
                          {key: value for key, value in before.items() if key != "schema_version"})
         old["refusal_authorizations"] = []
+        old["diagnoses"] = []
         validate_store(old, self.history)
         self.assertFalse(migrate_store(old))
         stale = copy.deepcopy(self.store)
@@ -582,20 +799,24 @@ class RecoveryTests(unittest.TestCase):
         # one is unowned newer data, a clean one stamps to 7 (#403).
         six = copy.deepcopy(self.store)
         six["schema_version"] = 6
+        del six["diagnoses"]
         with self.assertRaisesRegex(UsageError, "unowned newer refusal"):
             migrate_store(six)
         six = copy.deepcopy(self.store)
         six["schema_version"] = 6
+        del six["diagnoses"]
         for row in six["dispatches"]:
             del row["provider"]
         self.assertTrue(migrate_store(six))
-        self.assertEqual(six["schema_version"], 7)
+        self.assertEqual(six["schema_version"], 8)
+        self.assertEqual(six["diagnoses"], [])
         validate_store(six, self.history)
         record_refusal(self.store, {"dispatch": first, "receipt": self.refusal_receipt("codex-a")}, AT, "codex", self.REPORT)
         for version in (4, 5):
             stale = copy.deepcopy(self.store)
             stale["schema_version"] = version
             del stale["refusal_authorizations"]
+            del stale["diagnoses"]
             for row in stale["dispatches"]:
                 del row["brief_identity"]
                 del row["provider"]

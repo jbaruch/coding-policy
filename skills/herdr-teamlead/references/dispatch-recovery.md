@@ -134,8 +134,9 @@ instruction into permission to exceed an exhausted correction budget.
 | Command | Record fields | Continuation |
 | --- | --- | --- |
 | `task` | `task`, original full `base_revision`, `scope`, `allowed_paths`, `authorization` | Register once before initial development; for legacy history, recover these facts from the original task and brief. Continue the same task. |
-| `checkpoint` | unique `id`, `task`, concrete `defect`, `previous_attempts`, `progress`, `change_in_approach`; optional absolute `judge_report` | Records the exhausted allowance for the operator. A cited `judge_report` requires the configured pinned judge's completed ruling after the latest developer attempt, and one task cites at most one. Implementation waits for the bounded operator decision. |
-| `authorize-corrections` | unique `id`, `task`, `checkpoint`, `scope`, `allowed_paths`, positive `additional_fixes`, `authorization`; optional `supersedes` | Store an explicit bounded approval once. Continue while it covers the next attempt; do not ask again within those bounds. A changed decision names the active plan in `supersedes`. |
+| `checkpoint` | unique `id`, `task`, concrete `defect`, `previous_attempts`, `progress`, `change_in_approach`; optional absolute `judge_report` | Records the exhausted allowance and the evidence the diagnosis brief is built from. A cited `judge_report` is legacy: it replays a checkpoint recorded before diagnosis mode and requires the configured pinned judge's completed ruling after the latest developer attempt, one per task. A new checkpoint omits it and takes the diagnosis instead. Implementation waits for the judge's remedy, never for an operator. |
+| `diagnose` | unique `id`, `task`, `checkpoint`, absolute `judge_report`, `scope`, `allowed_paths`; optional `supersedes` | Record the judge's diagnosis of a non-converging loop. The report supplies `REMEDY` and `BOUND`; a `continue` or `restructure` remedy records the bounded plan its bound names, and `stop` records the terminal remedy. Each re-entry moves strictly down `continue` → `restructure` → `stop`. A re-entry before its bound is spent names the plan it supersedes and carries the change it claims — different `scope` or `allowed_paths`, or the operator's `authorization` — and the superseded plan is preserved. A bound lead's cited report must be the one supervision enrolled for the pinned judge on that task. |
+| `authorize-corrections` | unique `id`, `task`, `checkpoint`, `scope`, `allowed_paths`, positive `additional_fixes`, `authorization`; optional `supersedes` | The operator's override of this exhaustion's recorded remedy; the task needs a diagnosis at the current fix round first. Store an explicit bounded approval once. Continue while it covers the next attempt; do not ask again within those bounds. A changed decision names the active plan in `supersedes`. |
 | `record-report` | `dispatch`, full `head_revision`, `verdict` (`blocking` or `approved`), `review_mode` (`full` or `scoped`), independent `reviewer`, absolute `report`, `changed_paths` | Read the report in full and verify the VCS diff first. The command binds its bytes and stated head to the dispatch; it does not establish the tester, CI, external-review, or release gates. |
 | `authorize-refused-dispatch` | unique `id`, `task`, `role`, `fix_round` or null, approved `provider`, `brief` (`unchanged` or `revised`), `decision`, `authorization` | Record the operator's decision after two independent refusals; fewer is refused, since one refusal is a move. One authorization permits one further dispatch on that task, role and round to the approved provider, with the refused brief unchanged unless the operator approved a revision, carried on the dispatch's `refusal_move.authorization`. |
 | `record-refusal` | `dispatch`, absolute `receipt` | Bind a saved `wait-report` exit-5 JSON to the applied dispatch it stopped. The receipt's `report_path` must equal the report its supervision enrollment bound; an unenrolled dispatch is refused. The refusing provider is the worker's config `kind`. Same receipt replays; a second receipt for the same dispatch is refused. |
@@ -162,7 +163,7 @@ number and fresh top-tier behavior. Each subsequent correction within a plan
 requires the preceding attempt's actual blocking review, recorded through
 `record-report`. Approved or absent findings do not justify another attempt.
 
-At budget exhaustion, record a new concrete operator checkpoint; the judge runs only on the operator's own request under `rules/agent-team-operation.md` Judge Seat.
+At budget exhaustion, record a new concrete checkpoint and take the judge's diagnosis through `diagnose`; its remedy supplies the bound under `rules/agent-team-operation.md` Judge Seat.
 Changed scope or a changed operator decision requires new explicit bounds;
 unchanged in-scope work reuses its approval. Do not rename the task or reset
 the counter. Every changed tip still needs full independent reviewer and
@@ -203,8 +204,10 @@ to work around uncertainty. Reconciliation records its later observations
 separately and preserves any original unconfirmed assignment row.
 
 `teamlead status` prints implementation state, confirmed fixes, active plan,
-and remaining allowance. `waiting_for_operator` explicitly pauses implementation
-while its checkpoint awaits approval; an audit worker may still be active.
+and remaining allowance. `awaiting_diagnosis` pauses implementation while its
+checkpoint awaits the judge's remedy, which the lead takes without an operator;
+an audit worker may still be active. `diagnosed_stop` is terminal: the task
+ships what is clean and tracks the remainder.
 `dispatch_outcome_unknown` requires reconciliation, and
 `checkpoint_required` requires the next exhausted-budget checkpoint.
 Neither an active worker nor a dispatch receipt proves that implementation or
@@ -458,7 +461,7 @@ report/transport evidence, changed evidence, skipped
 count, conflicting head chain, pending dispatch, or out-of-scope diff refuses.
 All planning, status, next-fix validation and budget checks consume the imported
 count. Five canonical fixes plus imported fix6 means six consumed attempts;
-fix7 still requires its applicable operator checkpoint and bounded approval.
+fix7 still requires its applicable checkpoint and the judge's diagnosed bounded remedy.
 
 If an existing bounded owner plan still covers the next correction, reuse that
 approval. Record the imported attempt's actual blocking review through

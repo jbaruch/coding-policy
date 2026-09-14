@@ -445,8 +445,16 @@ class HistoricalCommandsTest(fixture.CliCase):
             "previous_attempts": "Five completed fixes", "progress": "Most fixtures pass",
             "change_in_approach": "Correct the remaining case", "judge_report": str(judge)})
         self.assertEqual(code, 0, err)
+        # The operator's budget overrides a recorded remedy (#407).
+        diagnosis = self.tmp / "diagnosis.md"
+        diagnosis.write_text("DIAGNOSIS: the loop did not converge\nREMEDY: continue — one more round\n"
+                             "BOUND: 1\nEVIDENCE: the five completed fixes\nUNVERIFIED: none\n")
+        code, _, err = self.owner("diagnose", {"id": "diag-cap", "task": TASK, "checkpoint": "cap-5",
+            "judge_report": str(diagnosis), "scope": SCOPE, "allowed_paths": ["src/*"]})
+        self.assertEqual(code, 0, err)
         code, _, err = self.owner("authorize-corrections", {"id": "two-fixes", "task": TASK, "checkpoint": "cap-5",
-            "scope": SCOPE, "allowed_paths": ["src/*"], "additional_fixes": 2, "authorization": AUTH})
+            "scope": SCOPE, "allowed_paths": ["src/*"], "additional_fixes": 2, "authorization": AUTH,
+            "supersedes": "diag-cap:plan"})
         self.assertEqual(code, 0, err)
         code, _, err = self.owner("import-correction", self.attempt(6))
         self.assertEqual(code, 0, err)
@@ -483,7 +491,7 @@ class HistoricalCommandsTest(fixture.CliCase):
         code, _, err = self.invoke(args, self.fresh_client("manual-6-session", "fix-7"))
         self.assertEqual(code, 0, err)
         self.assertEqual(self.saved()["assignments"][-1]["fix_round"], 7)
-        self.assertEqual(len(self.saved()["recovery"]["plans"]), 1)
+        self.assertEqual([row["id"] for row in self.saved()["recovery"]["plans"] if not row.get("supersedes")], ["diag-cap:plan"])
 
     def test_verified_hand_clear_unlocks_correctly_counted_fresh_fix_without_permission(self):
         original = self.seed(1, release=True)
@@ -625,12 +633,13 @@ class HistoricalCommandsTest(fixture.CliCase):
         del original["recovery"]["role_clearances"]
         del original["recovery"]["delivery_recoveries"]
         del original["recovery"]["refusal_authorizations"]
+        del original["recovery"]["diagnoses"]
         self.state.write_text(json.dumps(original))
         code, _, err = self.invoke(["state"])
         self.assertEqual(code, 0, err)
         result = self.saved()
         self.assertEqual(result["assignments"], original["assignments"])
-        expected = {**original["recovery"], "schema_version": 7, "hand_clearances": [], "historical_attempts": [], "role_clearances": [], "delivery_recoveries": [], "refusal_authorizations": []}
+        expected = {**original["recovery"], "schema_version": 8, "hand_clearances": [], "historical_attempts": [], "role_clearances": [], "delivery_recoveries": [], "refusal_authorizations": [], "diagnoses": []}
         self.assertEqual(result["recovery"], expected)
 
 

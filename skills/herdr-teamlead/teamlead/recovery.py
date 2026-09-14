@@ -24,16 +24,21 @@ RECOVERY_SCHEMA_VERSION = 1
 #: between the send and `record-refusal` cannot re-attribute the refusal
 #: (#403). An older store carrying any of them is unowned newer data and is
 #: refused; a clean one is stamped and given the empty collection
-#: (rules/stateful-artifacts.md).
-RECOVERY_STORE_VERSION = 7
+#: (rules/stateful-artifacts.md). Version 8 adds the `diagnoses` collection
+#: (#407).
+RECOVERY_STORE_VERSION = 8
 REFUSAL_FIELDS = frozenset({"brief_identity", "refusal", "refusal_move", "provider"})
 SPECIALIST_DISPATCH_VERSION = 2
 #: Checkpoint record version. 1 carries a mandatory pinned-judge ruling; 2
-#: makes it optional, because an exhausted allowance is a budget decision only
-#: the operator can make (rules/agent-team-operation.md Judge Seat). Version-1
-#: rows keep their judge evidence and are never rewritten.
+#: makes it optional. Version-1 rows keep their judge evidence and are never
+#: rewritten. The checkpoint now records the exhaustion the diagnosis brief is
+#: built from (rules/agent-team-operation.md Judge Seat).
 OPERATOR_CHECKPOINT_VERSION = 2
 DISPATCH_METADATA_FIELDS = frozenset({"requirements", "reviewer_scope"})
+#: The judge's diagnosis remedies, strictly descending. A task's next
+#: diagnosis sits below its last and `stop` is terminal, so a task takes at
+#: most three and cannot loop (rules/agent-team-operation.md Judge Seat).
+DIAGNOSIS_LADDER = ("continue", "restructure", "stop")
 DEFAULT_FIX_LIMIT = 5
 PENDING_STATUSES = frozenset({"reserved", "sending", "sent_but_not_started"})
 DISPATCH_STATUSES = PENDING_STATUSES | {"applied", "not_sent"}
@@ -56,7 +61,7 @@ def empty_recovery():
     return {"schema_version": RECOVERY_STORE_VERSION, "tasks": {}, "checkpoints": [],
             "plans": [], "dispatches": [], "context_permissions": [], "events": [],
             "hand_clearances": [], "historical_attempts": [], "role_clearances": [], "delivery_recoveries": [],
-            "refusal_authorizations": []}
+            "refusal_authorizations": [], "diagnoses": []}
 
 
 def _migrate_checkpoints(store):
@@ -89,13 +94,14 @@ def migrate_store(store):
         return False
     migrated = _migrate_checkpoints(store)
     version = store["schema_version"]
-    if version not in {1, 2, 3, 4, 5, 6}:
+    if version not in {1, 2, 3, 4, 5, 6, 7}:
         return migrated
     dispatches = store.get("dispatches")
     if not isinstance(dispatches, list):
         raise UsageError("Older recovery requires a dispatches array; restore the original owner-written store.", {})
     for row in dispatches:
-        if not isinstance(row, dict) or REFUSAL_FIELDS.intersection(row) - (ALLOWED_AT_6 if version == 6 else frozenset()):
+        allowed = ALLOWED_AT_6 if version == 6 else REFUSAL_FIELDS if version >= 7 else frozenset()
+        if not isinstance(row, dict) or REFUSAL_FIELDS.intersection(row) - allowed:
             raise UsageError("Older recovery contains unowned newer refusal records; preserve it for owner recovery.", {})
         if version >= 5:
             continue
@@ -113,7 +119,9 @@ def migrate_store(store):
             raise UsageError("Older recovery requires a delivery_recoveries array; restore the original owner-written store.", {})
         if any(not isinstance(row, dict) or row.get("schema_version") != 1 for row in deliveries):
             raise UsageError("Older recovery contains unowned newer delivery records; preserve it for owner recovery.", {})
-    added = ["refusal_authorizations"] if version < 6 else []
+    added = ["diagnoses"]
+    if version < 6:
+        added.append("refusal_authorizations")
     if version < 3:
         added.extend(["role_clearances", "delivery_recoveries"])
     if version == 1:
@@ -276,7 +284,153 @@ def checkpoint(store, assignments, data, at, judge_agent):
             raise UsageError("Checkpoint identity already describes different evidence; record a new checkpoint without rewriting the old one.", {})
         return prior
     store["checkpoints"].append(record)
-    _event(store, at, "waiting_for_operator", data["task"], {"checkpoint": data["id"], "paused_work": "implementation", "defect": data["defect"]})
+    _event(store, at, "awaiting_diagnosis", data["task"], {"checkpoint": data["id"], "paused_work": "implementation", "defect": data["defect"]})
+    return record
+
+
+def diagnoses_for(store, task):
+    return [row for row in store["diagnoses"] if row["task"] == task]
+
+
+def _next_remedy_rung(store, task):
+    """The lowest rung this task may still take, or None once `stop` is spent."""
+    prior = diagnoses_for(store, task)
+    if not prior:
+        return 0
+    last = DIAGNOSIS_LADDER.index(prior[-1]["remedy"])
+    return last + 1 if last + 1 < len(DIAGNOSIS_LADDER) else None
+
+
+def diagnose(store, assignments, data, at, judge_agent, enrolled_report, supervised):
+    """Record the judge's diagnosis of a fix loop that did not converge.
+
+    An exhausted allowance is a diagnostic question, not a budget prompt: more
+    attempts at a failing approach reproduce it, and the operator holds none of
+    the inputs the number needs (#407). The pinned judge reads the rounds and
+    returns a remedy. `continue` and `restructure` carry a bound, recorded here
+    as the correction plan the ordinary allowance machinery already enforces,
+    with the ruling as its authorization. `stop` is terminal: it ships what is
+    clean and the remainder is tracked.
+
+    A dispatch marked `applied` proves the send, never the delivery. Every
+    team round is supervised (`rules/agent-team-operation.md` Fleet
+    Supervision), so when the lead is bound the cited report must be the one
+    supervision enrolled for the pinned judge, and a bound lead with no such
+    enrollment has no diagnosis to record. `supervised` and `enrolled_report`
+    are the caller's reading of that binding.
+
+    Re-entry moves strictly down `DIAGNOSIS_LADDER`, so a failed remedy is
+    never reissued and a task takes at most three diagnoses. That holds for a
+    supersession too: a changed scope or an operator override re-enters before
+    the bound is spent, naming the plan it replaces, and still descends.
+    """
+    required = {"id", "task", "checkpoint", "judge_report", "scope", "allowed_paths"}
+    if not isinstance(data, dict) or not required <= set(data) or set(data) - required - {"supersedes", "authorization"}:
+        raise UsageError("Diagnosis requires id, task, checkpoint, judge_report, scope and allowed_paths, and allows an optional supersedes with authorization.", {})
+    if "authorization" in data and "supersedes" not in data:
+        raise UsageError("An operator override accompanies the supersedes it authorizes; record the plan it replaces.", {})
+    if "supersedes" in data:
+        text(data["supersedes"], "supersedes")
+    for key in ("id", "task", "checkpoint", "judge_report", "scope"):
+        text(data[key], key)
+    paths(data["allowed_paths"], "allowed_paths")
+    prior = next((row for row in store["diagnoses"] if row["id"] == data["id"]), None)
+    if prior is not None:
+        # Replay on identical inputs, decided before the state gates: the
+        # bound this diagnosis recorded is spent by the time it is re-run.
+        same = (prior["task"] == data["task"] and prior["checkpoint"] == data["checkpoint"]
+                and prior["scope"] == data["scope"] and prior["allowed_paths"] == data["allowed_paths"]
+                and prior.get("supersedes") == data.get("supersedes")
+                and prior.get("authorization") == data.get("authorization")
+                and prior["judge_evidence"] == receipt(data["judge_report"])[0])
+        if not same:
+            raise UsageError("Diagnosis identity already describes a different remedy; record a new diagnosis without rewriting the old one.", {})
+        return prior
+    task = task_record(store, data["task"])
+    source = _item(store["checkpoints"], data["checkpoint"], "checkpoint")
+    if source["task"] != data["task"]:
+        raise UsageError("The cited checkpoint belongs to another task; record this task's own exhausted-allowance checkpoint first.", {})
+    count = confirmed_fix(assignments, data["task"])
+    if source["fix_round"] != count:
+        raise UsageError("Checkpoint {} records fix round {}, and this task stands at {}; record the exhaustion this diagnosis answers.".format(
+            data["checkpoint"], source["fix_round"], count), {})
+    rung = _next_remedy_rung(store, data["task"])
+    if rung is None:
+        raise UsageError("This task's diagnosis reached `stop`, which is terminal; ship what is clean and track the remainder rather than diagnosing again.", {})
+    if count < DEFAULT_FIX_LIMIT:
+        raise UsageError("The normal correction budget is not exhausted; continue within it.", {})
+    # An unspent bound normally holds: the remedy has not had its attempts. A
+    # changed scope or an operator override is the exception Fix Loops names,
+    # and it supersedes that plan explicitly rather than shadowing it.
+    active = next((row for row in active_plans(store) if row["task"] == data["task"] and row["last_fix"] > count), None)
+    if data.get("supersedes"):
+        if active is None or data["supersedes"] != active["id"]:
+            raise UsageError("Supersedes must name this task's current unexhausted plan; inspect teamlead status before recording the changed decision.", {})
+        # Re-entry before the bound is spent is for a changed scope or an
+        # operator override; neither is proved by naming the plan alone.
+        changed = data["scope"] != active["scope"] or data["allowed_paths"] != active["allowed_paths"]
+        if not changed and "authorization" not in data:
+            raise UsageError("An early re-entry needs the change it claims: a scope or path change against plan {}, or the operator's recorded override in authorization.".format(active["id"]), {})
+        if "authorization" in data:
+            authorization(data["authorization"])
+    elif active is not None:
+        raise UsageError("This task still has unspent attempts under plan {}; diagnose again once that bound is exhausted, or name it in supersedes for a changed scope or an operator override.".format(active["id"]), {})
+    if any(row["task"] == data["task"] and row["status"] in PENDING_STATUSES for row in store["dispatches"]):
+        raise UsageError("A dispatch outcome is still unknown; reconcile it before diagnosing the loop.", {})
+    developer = latest_assignment(assignments, task=data["task"], role="developer", status="applied")
+    judge = latest_assignment(assignments, task=data["task"], role="judge", agent=judge_agent, status="applied")
+    if not judge_agent or developer is None or judge is None or not assignment_after(assignments, judge[0], developer[0]):
+        raise UsageError("A diagnosis needs the configured pinned judge's completed assignment after the latest developer attempt.", {})
+    if supervised:
+        if not isinstance(enrolled_report, str) or not enrolled_report.strip():
+            raise UsageError("This lead is bound, and no supervision enrollment binds a report to the pinned judge on task {}; dispatch the diagnosis through the bound round before recording it.".format(data["task"]), {})
+        if str(Path(data["judge_report"]).resolve()) != str(Path(enrolled_report).resolve()):
+            raise UsageError("The cited report is not the one supervision enrolled for this judge dispatch ({}); cite the delivered report.".format(enrolled_report), {})
+    evidence, body = receipt(data["judge_report"])
+    remedy_line = re.search(r"^REMEDY:[ \t]*(\S+)(.*)$", body, re.MULTILINE)
+    bound_line = re.search(r"^BOUND:[ \t]*(\S+)", body, re.MULTILINE)
+    if (not remedy_line or not bound_line or remedy_line.group(1) not in DIAGNOSIS_LADDER
+            or not re.search(r"^DIAGNOSIS: \S", body, re.MULTILINE)
+            or not re.search(r"^EVIDENCE: \S", body, re.MULTILINE)
+            or not re.search(r"^UNVERIFIED: \S", body, re.MULTILINE)):
+        raise UsageError("The judge report must carry DIAGNOSIS, REMEDY ({}), BOUND, EVIDENCE and UNVERIFIED.".format(" | ".join(DIAGNOSIS_LADDER)), {})
+    if re.search(r"^(?:RULING|ACTION):", body, re.MULTILINE):
+        raise UsageError("This report carries an adjudication's RULING or ACTION; a diagnosis carries neither. Dispatch the diagnosis brief and cite its report.", {})
+    remedy = remedy_line.group(1)
+    if not remedy_line.group(2).strip(" \t-—"):
+        raise UsageError("REMEDY names its remedy and what it means: the rounds for continue, the structural change for restructure, what ships and what is tracked for stop.", {})
+    if DIAGNOSIS_LADDER.index(remedy) < rung:
+        raise UsageError("This task's next diagnosis may not sit above {}; a remedy that failed is never reissued and the ladder never runs backwards.".format(DIAGNOSIS_LADDER[rung]), {})
+    bound = None
+    if remedy == "stop":
+        if bound_line.group(1).lower() != "none":
+            raise UsageError("A stop remedy allows no attempts; its BOUND is `none`.", {})
+    else:
+        raw = bound_line.group(1)
+        if not raw.isdigit() or int(raw) < 1:
+            raise UsageError("A {} remedy needs a positive BOUND naming the attempts it allows.".format(remedy), {})
+        bound = int(raw)
+    record = {"schema_version": RECOVERY_SCHEMA_VERSION, "at": at, "id": data["id"], "task": data["task"],
+              "checkpoint": data["checkpoint"], "fix_round": count, "base_revision": task["base_revision"],
+              "remedy": remedy, "bound": bound, "judge_agent": judge_agent, "judge_evidence": evidence,
+              "scope": data["scope"], "allowed_paths": data["allowed_paths"],
+              "supersedes": data.get("supersedes"), "authorization": data.get("authorization"),
+              "plan": None if remedy == "stop" else data["id"] + ":plan"}
+    if record["plan"] is not None:
+        assert bound is not None
+        ruling = {"source": data["judge_report"],
+                  "quote": ("REMEDY: " + remedy + remedy_line.group(2)).strip()}
+        plan = {"schema_version": RECOVERY_SCHEMA_VERSION, "at": at, "id": record["plan"],
+                "task": data["task"], "checkpoint": data["checkpoint"], "scope": data["scope"],
+                "allowed_paths": data["allowed_paths"], "additional_fixes": bound,
+                "authorization": ruling, "base_revision": task["base_revision"],
+                "first_fix": count + 1, "last_fix": count + bound}
+        if data.get("supersedes"):
+            plan["supersedes"] = data["supersedes"]
+        store["plans"].append(plan)
+    store["diagnoses"].append(record)
+    _event(store, at, "loop_diagnosed", data["task"],
+           {"diagnosis": data["id"], "remedy": remedy, "bound": bound, "plan": record["plan"]})
     return record
 
 
@@ -300,6 +454,11 @@ def authorize_plan(store, assignments, data, at):
     count = confirmed_fix(assignments, data["task"])
     if source["task"] != data["task"] or source["fix_round"] != count:
         raise UsageError("Approval must match this task's current exhausted checkpoint; record a fresh operator checkpoint and correction proposal.", {})
+    # The operator overrides a remedy; they do not stand in for one. Without a
+    # recorded diagnosis this path would reopen the budget prompt the judge
+    # replaced (rules/agent-team-operation.md Judge Seat).
+    if not any(row["fix_round"] == count for row in diagnoses_for(store, data["task"])):
+        raise UsageError("This task has no diagnosis at fix round {}; an older remedy cannot authorize these attempts. Take the judge's diagnosis for this exhaustion with `teamlead diagnose` first.".format(count), {})
     active = next((row for row in active_plans(store) if row["task"] == data["task"] and row["last_fix"] > count), None)
     if active and data.get("supersedes") != active["id"]:
         raise UsageError("This task still has an approved plan. Use its bounds, or explicitly name it in supersedes with the operator's changed decision.", {})
@@ -313,12 +472,27 @@ def authorize_plan(store, assignments, data, at):
 
 
 def active_plans(store):
+    # A diagnosis supersedes a plan too, and a `stop` remedy records no
+    # replacement, so a plan retired that way is retired here or nowhere.
     replaced = {row["supersedes"] for row in store["plans"] if row.get("supersedes")}
+    replaced |= {row["supersedes"] for row in store.get("diagnoses", []) if row.get("supersedes")}
     return [row for row in store["plans"] if row["id"] not in replaced]
 
 
 def validate_work(store, assignments, task, fix_round, plan_id=None, work=None, *, implementation=True):
     """The same allowance is checked by planning, dispatch and state readers."""
+    stopped = next((row for row in store["diagnoses"] if row["task"] == task and row["remedy"] == "stop"), None)
+    if stopped is not None and implementation:
+        # Implementation only: `stop` ships what is clean, so the reviewer,
+        # tester and release roles it depends on still run.
+        # Only the operator overrides a ruling, and they do it by authorizing
+        # a plan over the stop, never by resuming silently.
+        override = next((row for row in active_plans(store)
+                         if row["task"] == task and row["first_fix"] > stopped["fix_round"]), None)
+        if override is None:
+            raise UsageError("This task's diagnosis is `stop`, which is terminal: ship what is clean and track the remainder. Only the operator overrides it, by authorizing a plan over that remedy.", {})
+        if plan_id != override["id"]:
+            raise UsageError("This task's `stop` remedy is overridden by plan {}; name it to spend its attempts.".format(override["id"]), {})
     if fix_round is None:
         if plan_id:
             raise UsageError("A correction approval requires the actual cumulative fix number; do not reset it to initial development.", {})
@@ -332,7 +506,7 @@ def validate_work(store, assignments, task, fix_round, plan_id=None, work=None, 
             raise UsageError("An extra-correction plan cannot relabel an ordinary fix; preserve the cumulative number.", {})
         return None
     if not task or not plan_id:
-        raise UsageError("The five-fix budget is exhausted. Record the operator checkpoint and its explicit bounded correction plan; ordinary sixth attempts are refused.", {})
+        raise UsageError("The five-fix budget is exhausted. Record the checkpoint and take the judge's diagnosis with `teamlead diagnose`; its bounded remedy authorizes the next attempts and ordinary sixth attempts are refused.", {})
     plan = _item(store["plans"], plan_id, "correction plan")
     if plan not in active_plans(store):
         raise UsageError("That approval was superseded by an explicit operator decision; use the current recorded bounds.", {})
@@ -778,6 +952,41 @@ def _validate_refusals(store):
         if len(_refusal_providers(store, row["task"], row["role"], row["fix_round"])) < REFUSAL_LIMIT:
             raise UsageError("Refusal authorization precedes the independent refusals it answers; preserve the ledger for owner recovery.", {})
         authorization(row["authorization"])
+    seen_diagnoses = {}
+    for row in store["diagnoses"]:
+        task = task_record(store, row["task"])
+        source = _item(store["checkpoints"], row["checkpoint"], "checkpoint")
+        if (source["task"] != row["task"] or source["fix_round"] != row["fix_round"]
+                or row["base_revision"] != task["base_revision"]):
+            raise UsageError("A diagnosis cites a checkpoint from another task, base or fix round; preserve the ledger for owner recovery.", {})
+        for key in ("id", "scope"):
+            text(row[key], key)
+        paths(row["allowed_paths"], "diagnosis paths")
+        if row["remedy"] not in DIAGNOSIS_LADDER:
+            raise UsageError("A diagnosis names an unknown remedy; preserve the ledger for owner recovery.", {})
+        text(row["judge_agent"], "diagnosis judge")
+        validate_receipt(row["judge_evidence"])
+        rung = DIAGNOSIS_LADDER.index(row["remedy"])
+        last = seen_diagnoses.get(row["task"])
+        if last is not None and rung <= last:
+            raise UsageError("A task's diagnoses must move strictly down the remedy ladder; preserve the ledger for owner recovery.", {})
+        seen_diagnoses[row["task"]] = rung
+        if row.get("supersedes") is not None:
+            text(row["supersedes"], "diagnosis supersedes")
+        if row.get("authorization") is not None:
+            if row.get("supersedes") is None:
+                raise UsageError("A diagnosis records an operator override with no plan it superseded; preserve the ledger for owner recovery.", {})
+            authorization(row["authorization"])
+        if row["remedy"] == "stop":
+            if row["bound"] is not None or row["plan"] is not None:
+                raise UsageError("A stop remedy carries no bound and no plan; preserve the ledger for owner recovery.", {})
+            continue
+        if positive(row["bound"], "diagnosis bound") and row["plan"] is None:
+            raise UsageError("A bounded remedy records the plan its bound authorizes; preserve the ledger for owner recovery.", {})
+        plan = _item(store["plans"], row["plan"], "diagnosis plan")
+        if (plan["task"] != row["task"] or plan["additional_fixes"] != row["bound"]
+                or plan["authorization"]["source"] != row["judge_evidence"]["path"]):
+            raise UsageError("A diagnosis plan does not match the remedy that authorized it; preserve the ledger for owner recovery.", {})
 
 
 def authorize_context(store, assignments, data, at, observed_session):
@@ -885,7 +1094,7 @@ def validate_store(store, assignments):
     try:
         if not isinstance(store["tasks"], dict):
             raise UsageError("Recovery tasks must be an object; restore the owner-written ledger.", {})
-        for name in ("checkpoints", "plans", "dispatches", "context_permissions", "events", "hand_clearances", "historical_attempts", "role_clearances", "delivery_recoveries", "refusal_authorizations"):
+        for name in ("checkpoints", "plans", "dispatches", "context_permissions", "events", "hand_clearances", "historical_attempts", "role_clearances", "delivery_recoveries", "refusal_authorizations", "diagnoses"):
             if not isinstance(store[name], list):
                 raise UsageError("Recovery {} must be an array; restore the owner-written ledger.".format(name), {})
             identifiers = []
@@ -1033,8 +1242,14 @@ def task_statuses(store, assignments):
                         and row["role"] in {"developer", "release"} and row["status"] in PENDING_STATUSES), None)
         checkpoint_row = next((row for row in reversed(store["checkpoints"]) if row["task"] == task), None)
         plan = next((row for row in reversed(active_plans(store)) if row["task"] == task and row["last_fix"] > count), None)
-        status = ("dispatch_outcome_unknown" if pending else "within_authorized_budget" if plan or count < DEFAULT_FIX_LIMIT
-                  else "waiting_for_operator" if checkpoint_row and checkpoint_row["fix_round"] == count else "checkpoint_required")
+        # A `stop` the operator overrode is no longer terminal, the same way
+        # validate_work reads it (#407).
+        terminal = next((item for item in store["diagnoses"] if item["task"] == task and item["remedy"] == "stop"), None)
+        stopped = terminal is not None and not any(
+            row["task"] == task and row["first_fix"] > terminal["fix_round"] for row in active_plans(store))
+        status = ("dispatch_outcome_unknown" if pending else "diagnosed_stop" if stopped
+                  else "within_authorized_budget" if plan or count < DEFAULT_FIX_LIMIT
+                  else "awaiting_diagnosis" if checkpoint_row and checkpoint_row["fix_round"] == count else "checkpoint_required")
         result[task] = {"status": status, "paused_work": "implementation" if status != "within_authorized_budget" else None,
                         "confirmed_fixes": count, "plan": plan["id"] if plan else None,
                         "remaining_fixes": plan["last_fix"] - count if plan else max(0, DEFAULT_FIX_LIMIT - count)}
