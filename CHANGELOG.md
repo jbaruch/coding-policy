@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.215 — 2026-09-14
+
 ### Changed
 
 - **The four non-exhaustion composition triggers are detected from the diff,
