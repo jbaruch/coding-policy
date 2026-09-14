@@ -186,6 +186,20 @@ Apply the Step 6 base, range, and rebuild requirements in
 `references/round-setup.md`. Success prints the absolute review-package path;
 set it as `REVIEW_PACKAGE`. On non-zero, fix the diagnostic and retry before
 composing verification briefs. Other roles need no package.
+
+Then read which specialist triggers this change fires, over the same refs:
+
+```bash
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
+bash "$CP/skills/herdr-teamlead/detect-triggers.sh" \
+  <shared-checkout> <recorded-base-sha> <pushed-head-sha>
+```
+
+Emits `fired`, `quiet` and `undeclared`. Consult every fired trigger's profile
+under `references/specialists.md`, or record the staffing decision and its
+reason; silence is not that decision. Exit 1 decided nothing — a repo with no
+committed trigger config declares one before the round continues. Exit 2 is a
+git failure; fix it and re-run.
 Proceed immediately to Step 7.
 
 ## Step 7 — Compose the Briefs

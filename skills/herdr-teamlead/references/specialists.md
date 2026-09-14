@@ -52,10 +52,15 @@ it.
 | A new user-facing document | Documentation | A draft verified against the shipped behavior, never against intent |
 | Fix rounds reaching the allowance without converging | Investigator | A reproduction, a causal assessment and a discriminating experiment. Required; no staffing decision substitutes for it |
 
-The size a package must exceed is the consuming repo's to state, and that
-trigger waits on the number. The other four do not: a trust boundary, a
-user-facing command, flag or refusal path, a user-facing document and a
-non-converging loop fire on their own terms in every repo.
+The four diff-detected triggers are decided by
+`skills/herdr-teamlead/detect-triggers.sh`, which reads the repo's committed
+trigger config and the round's diff. What counts as a package, a trust
+boundary, a command surface and a user-facing document is that config's to
+declare, including the size a package must exceed; the script's header carries
+its shape and the decision each trigger turns on. A section the config omits
+reports `undeclared` and never fires, and a repo with no config at all is
+refused rather than reported quiet. The exhaustion trigger needs no config:
+`teamlead diagnose` and the judge dispatch paths enforce it where it happens.
 
 | Profile | Bring it in for | Useful output |
 | --- | --- | --- |

@@ -1,5 +1,40 @@
 # Changelog
 
+### Fixed
+
+- **The four diff-detected specialist triggers get a detector (#415).** #408
+  shipped five triggers. One, the exhausted allowance, is enforced where it
+  happens: `teamlead diagnose` and both judge dispatch paths refuse without an
+  assessed investigator consultation. The other four existed only as prose, so
+  the operative rule was "the lead notices, or it does not happen" — which is
+  the condition #408 was filed to replace. The old text was discretionary and
+  the bench stayed empty for twenty rounds; the new text was a list the lead
+  had to remember to apply against its own diff. `rules/language-diagnostics.md`
+  in this repo already holds the stricter standard: a check nobody runs does
+  not exist.
+
+  `skills/herdr-teamlead/detect-triggers.sh` reads the round's diff against a
+  trigger config the consuming repo commits, and reports which triggers fired,
+  which were quiet, and which the config never declared. The architect fires on
+  a package the base tree lacked, or a declared package whose changed lines
+  exceed the repo's stated size; security and UX and product fire on a changed
+  path in their declared sets; documentation fires on an *added* path in its
+  set, since an edit to an existing document is not a new one. The size a
+  package must exceed is the config's to state, which answers the second half
+  of the gap: a trigger reading "above the size the repo states" fires never or
+  always when no repo states one.
+
+  A repo with no committed config is refused rather than reported quiet: having
+  declared nothing is not evidence that nothing fired. An omitted section
+  reports `undeclared` and never fires, so a partial config cannot read as a
+  clean round. Step 6 runs the detector over the same base and head the review
+  package uses, and the lead consults each fired trigger or records the
+  staffing decision — which is what makes "silence is never that decision"
+  checkable.
+
+  This repo commits its own config, so its rounds are bound by the rule it
+  ships.
+
 ## 0.3.214 — 2026-09-14
 
 ### Changed

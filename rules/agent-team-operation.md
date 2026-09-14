@@ -22,12 +22,15 @@ description: Running a multi-agent team — task-based specialist composition, c
 - The lead selects the responsibilities needed at each stage of the task
 - Preserve developer, reviewer, tester and release responsibilities for implementation delivery
 - Activate a specialist consultation for a bounded question or deliverable the task needs, and whenever a trigger below fires
-- A new or substantially changed package above the size the repo states triggers the architect, before implementation
+- A new package, or a declared one whose changed lines exceed the size the repo states, triggers the architect before implementation
 - A new or changed trust boundary — anything deciding whether foreign input, generated content or a proposed change is safe — triggers security
 - A new user-facing command, flag or refusal path triggers UX and product
 - A new user-facing document triggers documentation
 - Fix rounds reaching the task's allowance without converging trigger the investigator
 - Each trigger names its deliverable in `skills/herdr-teamlead/references/specialists.md`
+- Run `skills/herdr-teamlead/detect-triggers.sh` against the round's base and head; its output decides which fired
+- The four diff-detected triggers read the repo's committed trigger config, never the lead's reading of its own diff
+- A repo with no trigger config has proved nothing quiet; the detector refuses and the round stops until it declares one
 - A fired trigger is consulted, or recorded as a staffing decision with its reason
 - Silence is never that decision
 - The exhaustion trigger has no such alternative: a diagnosis without its assessed consultation is refused

@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "architect": {
+    "package_globs": ["skills/*", "rules", ".github/actions/*"],
+    "changed_lines": 400
+  },
+  "security": {
+    "paths": [
+      ".github/workflows/**",
+      ".github/actions/**",
+      "**/author-family-gate.sh",
+      "**/verify-authority.sh",
+      "skills/herdr-teamlead/teamlead/supervision*.py"
+    ]
+  },
+  "ux_product": {
+    "paths": ["skills/herdr-teamlead/teamlead/cli.py", "skills/*/SKILL.md"]
+  },
+  "documentation": {
+    "paths": ["README.md", "docs/**", "skills/*/references/**"]
+  }
+}
