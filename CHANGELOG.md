@@ -40,7 +40,9 @@
   for the next diagnosis rather than for an operator who holds nothing new.
   Re-entry moves strictly down `continue` → `restructure` → `stop`: a failed
   remedy is never reissued, the ladder never runs backwards, `stop` is
-  terminal, so a task takes at most three diagnoses and cannot loop. No
+  terminal, so a task takes at most three diagnoses and cannot loop. A changed
+  scope or an operator override re-enters before the bound is spent, naming
+  the plan it supersedes, and descends the ladder like any other re-entry. No
   operator sits in the path of any of them, and the deadlock disappears.
 
   The lead ran the loop and is the wrong diagnostician of its own dispatch

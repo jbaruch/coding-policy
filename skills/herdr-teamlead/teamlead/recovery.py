@@ -312,11 +312,15 @@ def diagnose(store, assignments, data, at, judge_agent):
     clean and the remainder is tracked.
 
     Re-entry moves strictly down `DIAGNOSIS_LADDER`, so a failed remedy is
-    never reissued and a task takes at most three diagnoses.
+    never reissued and a task takes at most three diagnoses. That holds for a
+    supersession too: a changed scope or an operator override re-enters before
+    the bound is spent, naming the plan it replaces, and still descends.
     """
     required = {"id", "task", "checkpoint", "judge_report", "scope", "allowed_paths"}
-    if not isinstance(data, dict) or set(data) != required:
-        raise UsageError("Diagnosis requires id, task, checkpoint, judge_report, scope and allowed_paths.", {})
+    if not isinstance(data, dict) or not required <= set(data) or set(data) - required - {"supersedes"}:
+        raise UsageError("Diagnosis requires id, task, checkpoint, judge_report, scope and allowed_paths, and allows an optional supersedes.", {})
+    if "supersedes" in data:
+        text(data["supersedes"], "supersedes")
     for key in ("id", "task", "checkpoint", "judge_report", "scope"):
         text(data[key], key)
     paths(data["allowed_paths"], "allowed_paths")
@@ -326,6 +330,7 @@ def diagnose(store, assignments, data, at, judge_agent):
         # bound this diagnosis recorded is spent by the time it is re-run.
         same = (prior["task"] == data["task"] and prior["checkpoint"] == data["checkpoint"]
                 and prior["scope"] == data["scope"] and prior["allowed_paths"] == data["allowed_paths"]
+                and prior.get("supersedes") == data.get("supersedes")
                 and prior["judge_evidence"] == receipt(data["judge_report"])[0])
         if not same:
             raise UsageError("Diagnosis identity already describes a different remedy; record a new diagnosis without rewriting the old one.", {})
@@ -343,9 +348,15 @@ def diagnose(store, assignments, data, at, judge_agent):
         raise UsageError("This task's diagnosis reached `stop`, which is terminal; ship what is clean and track the remainder rather than diagnosing again.", {})
     if count < DEFAULT_FIX_LIMIT:
         raise UsageError("The normal correction budget is not exhausted; continue within it.", {})
+    # An unspent bound normally holds: the remedy has not had its attempts. A
+    # changed scope or an operator override is the exception Fix Loops names,
+    # and it supersedes that plan explicitly rather than shadowing it.
     active = next((row for row in active_plans(store) if row["task"] == data["task"] and row["last_fix"] > count), None)
-    if active is not None:
-        raise UsageError("This task still has unspent attempts under plan {}; diagnose again once that bound is exhausted.".format(active["id"]), {})
+    if data.get("supersedes"):
+        if active is None or data["supersedes"] != active["id"]:
+            raise UsageError("Supersedes must name this task's current unexhausted plan; inspect teamlead status before recording the changed decision.", {})
+    elif active is not None:
+        raise UsageError("This task still has unspent attempts under plan {}; diagnose again once that bound is exhausted, or name it in supersedes for a changed scope or an operator override.".format(active["id"]), {})
     if any(row["task"] == data["task"] and row["status"] in PENDING_STATUSES for row in store["dispatches"]):
         raise UsageError("A dispatch outcome is still unknown; reconcile it before diagnosing the loop.", {})
     developer = latest_assignment(assignments, task=data["task"], role="developer", status="applied")
@@ -373,16 +384,20 @@ def diagnose(store, assignments, data, at, judge_agent):
               "checkpoint": data["checkpoint"], "fix_round": count, "base_revision": task["base_revision"],
               "remedy": remedy, "bound": bound, "judge_agent": judge_agent, "judge_evidence": evidence,
               "scope": data["scope"], "allowed_paths": data["allowed_paths"],
+              "supersedes": data.get("supersedes"),
               "plan": None if remedy == "stop" else data["id"] + ":plan"}
     if record["plan"] is not None:
         assert bound is not None
         authorization = {"source": data["judge_report"],
                          "quote": ("REMEDY: " + remedy + remedy_line.group(2)).strip()}
-        store["plans"].append({"schema_version": RECOVERY_SCHEMA_VERSION, "at": at, "id": record["plan"],
-                               "task": data["task"], "checkpoint": data["checkpoint"], "scope": data["scope"],
-                               "allowed_paths": data["allowed_paths"], "additional_fixes": bound,
-                               "authorization": authorization, "base_revision": task["base_revision"],
-                               "first_fix": count + 1, "last_fix": count + bound})
+        plan = {"schema_version": RECOVERY_SCHEMA_VERSION, "at": at, "id": record["plan"],
+                "task": data["task"], "checkpoint": data["checkpoint"], "scope": data["scope"],
+                "allowed_paths": data["allowed_paths"], "additional_fixes": bound,
+                "authorization": authorization, "base_revision": task["base_revision"],
+                "first_fix": count + 1, "last_fix": count + bound}
+        if data.get("supersedes"):
+            plan["supersedes"] = data["supersedes"]
+        store["plans"].append(plan)
     store["diagnoses"].append(record)
     _event(store, at, "loop_diagnosed", data["task"],
            {"diagnosis": data["id"], "remedy": remedy, "bound": bound, "plan": record["plan"]})
@@ -903,6 +918,8 @@ def _validate_refusals(store):
         if last is not None and rung <= last:
             raise UsageError("A task's diagnoses must move strictly down the remedy ladder; preserve the ledger for owner recovery.", {})
         seen_diagnoses[row["task"]] = rung
+        if row.get("supersedes") is not None:
+            text(row["supersedes"], "diagnosis supersedes")
         if row["remedy"] == "stop":
             if row["bound"] is not None or row["plan"] is not None:
                 raise UsageError("A stop remedy carries no bound and no plan; preserve the ledger for owner recovery.", {})

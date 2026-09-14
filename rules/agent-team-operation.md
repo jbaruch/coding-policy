@@ -66,6 +66,7 @@ description: Running a multi-agent team — task-based specialist composition, c
 - The judge's authority in diagnosis mode covers accepting a tracked defect into a release under a `stop` remedy
 - Record the diagnosis through `teamlead diagnose` under the original task and base before acting on its remedy
 - Re-enter diagnosis when a remedy's own bound exhausts with blocking work remaining
+- Re-enter before the bound is spent only for a changed scope or an operator override, naming the plan it supersedes
 - Each re-entry moves strictly down the ladder `continue` → `restructure` → `stop`
 - Never reissue a remedy that already failed, and never move back up the ladder
 - `stop` is terminal; a task takes at most three diagnoses

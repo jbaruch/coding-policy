@@ -16,7 +16,7 @@ from pathlib import Path
 
 from teamlead.errors import UsageError
 from teamlead.recovery import (
-    abort_pre_send, authorize_context, authorize_plan, authorize_refused_dispatch, brief_identity, checkpoint, confirmed_fix,
+    abort_pre_send, active_plans, authorize_context, authorize_plan, authorize_refused_dispatch, brief_identity, checkpoint, confirmed_fix,
     diagnose,
     dispatch_identity, finish_dispatch, fresh_transition, mark_sending,
     migrate_store, prior_dispatch, record_refusal, record_report, refusal_move, register_task, reserve,
@@ -142,6 +142,30 @@ class RecoveryTests(unittest.TestCase):
         with self.assertRaisesRegex(UsageError, "terminal"):
             diagnose(self.store, self.history, self.diagnosis("diag-4", "stop", "none", third), AT, "judge")
         self.assertEqual(task_statuses(self.store, self.history)[TASK]["status"], "diagnosed_stop")
+        validate_store(self.store, self.history)
+
+    def test_a_changed_scope_supersedes_an_unspent_remedy_and_still_descends(self):
+        # coding-policy#407: Fix Loops re-enters on a changed scope or an
+        # operator override, not only on an exhausted bound.
+        self.seed_checkpoint()
+        first = diagnose(self.store, self.history, self.diagnosis("diag-1", "continue", 3), AT, "judge")
+        with self.assertRaisesRegex(UsageError, "unspent attempts under plan"):
+            diagnose(self.store, self.history, self.diagnosis("diag-2", "restructure", 2), AT, "judge")
+        with self.assertRaisesRegex(UsageError, "Supersedes must name"):
+            diagnose(self.store, self.history, {**self.diagnosis("diag-2", "restructure", 2), "supersedes": "plan-nope"}, AT, "judge")
+        # The ladder still descends: a supersession is a diagnosis like any other.
+        with self.assertRaisesRegex(UsageError, "may not sit above restructure"):
+            diagnose(self.store, self.history, {**self.diagnosis("diag-2", "continue", 2), "supersedes": first["plan"]}, AT, "judge")
+        second = diagnose(self.store, self.history,
+                          {**self.diagnosis("diag-2", "restructure", 2), "supersedes": first["plan"]}, AT, "judge")
+        self.assertEqual(second["supersedes"], first["plan"])
+        plans = {row["id"]: row for row in self.store["plans"]}
+        self.assertIn(first["plan"], plans)
+        self.assertEqual(plans[second["plan"]]["supersedes"], first["plan"])
+        self.assertNotIn(first["plan"], [row["id"] for row in active_plans(self.store)])
+        with self.assertRaisesRegex(UsageError, "superseded"):
+            validate_work(self.store, self.history, TASK, 6, first["plan"], WORK)
+        validate_work(self.store, self.history, TASK, 6, second["plan"], WORK)
         validate_store(self.store, self.history)
 
     def test_a_diagnosis_needs_an_exhausted_budget_a_checkpoint_and_the_pinned_judge(self):
