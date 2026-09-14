@@ -4,6 +4,53 @@
 
 ### Added
 
+- **A report wait ends on a stall instead of waiting forever (#418).** The
+  rules said what not to trust — `done` is not acceptance, so the lead waits
+  for the report — and never said what to do when the trusted signal does not
+  arrive. Two live workers reached a terminal status, wrote no report, and
+  left their lead waiting: one had resolved every merge conflict and stopped
+  before committing, the other hit a provider refusal. Only the operator
+  asking found either.
+
+  `rules/agent-team-operation.md` gains a Stalled Workers section. A stall is
+  three facts together — report absent, status terminal, budget spent — and a
+  terminal status alone still establishes nothing. Dispatch Safety now also
+  names `wait-report.sh` as the only wait (the lead's own `until [ -s
+  "$report" ]` loop could not terminate on a stall) and keeps the interval and
+  budget script-owned.
+
+  `wait-report.sh` takes `--base`, the revision the dispatch started from,
+  because zero UNPUSHED commits never established that a worker produced
+  nothing — it may have pushed its work and stopped before reporting. Commits
+  against that base with none outstanding are `pushed_commits`, recovery
+  evidence rather than a retryable dispatch; without a base the classifier says
+  `unknown` instead of guessing the retryable answer.
+
+  It also takes `--since`, this dispatch's recorded send time, so a
+  checkpoint (`--once`) reaches the same script-owned budget: a checkpoint
+  carries no elapsed time of its own, and repeated rechecks through the
+  supervision loop the skill actually runs would otherwise restart the clock
+  forever. It also takes `--worktree` and classifies what a stalled worker
+  left: `partial_work` (mid-operation, staged, modified or untracked),
+  `unpushed_commits` (the existing dispatch-recovery path), `no_work` (a
+  retryable `not_sent`-equivalent), or `unknown`. The classification never
+  decides the work is usable. The first stall's nine files were conflict-free
+  and built clean, and one of them had taken the wrong side of a merge on
+  documentation `main` had already corrected — so partial work is preserved as
+  evidence and re-dispatched with the observed state described, never
+  committed because the tree looks finished. A git read that fails inside the
+  classifier is `unknown` rather than a quiet zero — an unreadable history
+  would otherwise classify a worker's committed work as a retryable
+  `no_work`. Mid-operation covers the operation DIRECTORIES too
+  (`rebase-merge/`, `rebase-apply/`, `sequencer/`): a rebase paused at an
+  `exec` or `break` writes one with no `REBASE_HEAD` and can leave a clean
+  tree. The stall conjunction is read on every interval, so a dispatch already
+  past its budget stalls at once instead of waiting another full budget of the
+  watcher's own. `TEAMLEAD_NOW_EPOCH` is the test seam that keeps the budget
+  cases off the run clock. A `--since` offset is converted rather than
+  rewritten as `Z`: rewriting one moves the instant, so `00:00-05:00` would
+  read five hours older and its budget would be called spent before it was.
+
 - **A developer reads its own gate evidence instead of entering the pre-merge
   wait (#369).** A developer finished its source work, pushed, and got green
   CI plus the required policy approval — then called `watch-pr-reviews.sh` to

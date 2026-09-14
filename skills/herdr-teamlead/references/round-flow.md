@@ -140,9 +140,16 @@ a `## BLOCKED` section can sit under a report that otherwise reads as finished.
   dialog is input, and input to a blocked agent is exactly what Dispatch
   Safety forbids. The operator answers; the wait resumes once
   `herdr agent get <name>` reports a state other than `blocked`.
-- **`wait-report.sh --once` exit 1** — delivery remains pending. Record the
-  checkpoint, acknowledge its event with a scheduled pending recheck, and resume
-  the fleet watcher. Never send a second copy of the brief on a status hint.
+- **`wait-report.sh --once` exit 1 with `reason: checkpoint_pending`** —
+  delivery remains pending. Record the checkpoint, acknowledge its event with a
+  scheduled pending recheck, and resume the fleet watcher. Never send a second
+  copy of the brief on a status hint.
+- **`wait-report.sh --once` exit 1 carrying a `stall` object** — the report is
+  absent, the worker is terminal, and the budget measured from `--since` is
+  spent. This is terminal for that wait: schedule no further recheck. Read the
+  `stall.class`, record the user-attention obligation, and take the recovery
+  `rules/agent-team-operation.md` Stalled Workers names for that class. Never
+  commit the partial work on the strength of the tree building.
 - Persist blocked dialogs, missing reports, and required operator decisions in
   the attention queue before presenting them. Keep observing unrelated work.
   A pause or handoff must cover the entire active fleet under the supervision

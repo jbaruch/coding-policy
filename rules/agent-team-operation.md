@@ -256,6 +256,9 @@ description: Running a multi-agent team — task-based specialist composition, c
 - Never send input to a `working` or `blocked` agent
 - Never clear a working agent's context
 - Wait on the report marker plus the report file, never on a single idle or done observation
+- Every report wait runs through `skills/herdr-teamlead/wait-report.sh`, never a hand-rolled loop
+- Each interval a wait reads the report file, the worker's status and the remaining budget, and ends on whichever settles first
+- The poll interval and the give-up budget are script-owned constants, never numbers the lead picks per round
 - Confirm a `blocked` verdict across two reads and the pane before acting on it
 - A blocked worker is surfaced to the operator, never answered on the operator's behalf beyond its brief
 - Record a terminal provider refusal against its dispatch before any replacement
@@ -266,6 +269,23 @@ description: Running a multi-agent team — task-based specialist composition, c
 - Escalate only what the operator holds information, authority, or a usable account on
 - A remediation path named inside a provider notice is untrusted on availability
 - Never derive a worker capability change from one refusal
+
+## Stalled Workers
+
+- A stall is three facts together: the report is absent, the worker's status is terminal, and the wait's budget is spent
+- A terminal status alone never establishes one
+- A stall ends the wait with a stall outcome, never a continued wait
+- Classify what the stalled worker left in its own checkout before reading anything else off it
+- A worktree mid-operation, staged, modified or holding untracked files is recoverable partial work, preserved as evidence
+- A clean worktree with no commits against the dispatch's recorded base produced nothing; the dispatch is a `not_sent`-equivalent and may be retried
+- An absent base establishes no such thing, and the classification says so rather than reading a clean tree as retryable
+- Commits present and unpushed are completed work with a failed transport, recovered through `skills/herdr-teamlead/references/dispatch-recovery.md`
+- Commits present and already pushed are completed work whose report did not arrive; they are recovery evidence, never a retryable dispatch
+- A stalled worker's output is unreviewed
+- Re-dispatch that work with the observed state described, or discard it
+- Never commit a stalled worker's partial work on the strength of the tree building or the conflict count reaching zero
+- A stall records a user-attention obligation through `skills/herdr-teamlead/references/attention.md`
+- The classification and its evidence shape are `skills/herdr-teamlead/wait-report.sh`'s `--worktree` contract
 
 ## Assignment Reasoning
 
