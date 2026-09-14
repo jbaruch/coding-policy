@@ -29,7 +29,17 @@
   A `stop` remedy ships what is clean and records the remainder as a tracked
   accepted defect; the rule states outright that the judge's authority covers
   accepting that defect into a release, so a lead does not re-escalate out of
-  caution and recreate the stall.
+  caution and recreate the stall. `rules/review-severity.md` gains the
+  carve-out that authority needs — otherwise its own fix-before-merge rule and
+  the release gate's no-blocking-finding requirement would each forbid what
+  the remedy permits. Its preconditions are the recorded `stop` at this
+  exhaustion, the remainder tracked with its issue reference, a shipped scope
+  carrying no other blocking finding, and every other gate held: CI, the
+  external reviews, and independent reviewer and tester passes on the shipped
+  tip. `stop` is terminal in the ledger too — no allowance survives it, and a
+  plan it supersedes is retired even though the supersession lives on the
+  diagnosis rather than on a plan — and the operator overrides it the way they
+  override any ruling, by authorizing a plan over that remedy.
 
   This is not a revert of #396. That issue removed exhaustion as a trigger
   because it fired at every allowance boundary as a rubber stamp — 16 of the
