@@ -18,11 +18,14 @@
   file two verdicts and no owner, so both refuse by name before a worker is
   spent. A slice owning nothing refuses too.
 
-  `teamlead plan --partition` seats one worker per slice, reaching the planner
-  as distinct role names (`reviewer#api`) that inherit the role's costs,
-  exclusions, round type and requirements — so capability, contribution
-  exclusion and headroom ordering apply unchanged. A round with no partition is
-  untouched.
+  `teamlead plan --partition` seats one worker per slice. Responsibility and
+  seat identity stay separate: independence and contribution exclusion, round
+  tiers, requirements and fix history all resolve against the canonical role,
+  and only the planner sees the seats (`reviewer#api`), which inherit that
+  role's costs, exclusions, round type and requirements. Capability,
+  contribution exclusion and headroom ordering apply unchanged, and a round
+  with no partition is untouched. `references/review-partition.md` documents
+  the document format, the ownership payload and the seating.
 
   `rules/agent-team-operation.md` Review Before PR carries what the partition
   then means: each seat's brief names its slice and forbids roaming, an

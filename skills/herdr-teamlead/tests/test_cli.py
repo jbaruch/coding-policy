@@ -1498,13 +1498,41 @@ class PartitionSeatsTest(unittest.TestCase):
     """Several seats of one role reach the planner as distinct role names (#409)."""
 
     def setUp(self):
-        self.tmp = Path(tempfile.mkdtemp())
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.tmp = Path(temporary.name)
         self.path = self.tmp / "partition.json"
         self.path.write_text(json.dumps({
             "schema_version": 1,
             "slices": [{"name": "api", "paths": ["src/api/*"]},
                        {"name": "core", "paths": ["src/core/*"]}],
         }))
+
+    def agent(self, name):
+        return {"name": name, "kind": "claude", "usage_prompt": "/usage",
+                "usage_marker": "Current week", "usage_read_source": "visible",
+                "slash_delivery": "paste", "composer_glyph": "> ", "composer_ignore_dim": True,
+                "composer_placeholders": [], "recover_keys": ["ctrl+u"], "clear_prompt": "/clear"}
+
+    def test_a_partitioned_round_plans_a_distinct_worker_per_slice(self):
+        # The whole flow, not the expansion alone: independence, tiers and
+        # round inputs all key off the canonical role, and only the planner
+        # sees the seats (#409).
+        (self.tmp / "config.json").write_text(json.dumps(
+            {"schema_version": 3, "agents": [self.agent(n) for n in ("alpha", "beta", "gamma")]}))
+        (self.tmp / "snap.json").write_text(json.dumps(
+            {"schema_version": 1, "measured_at": "2026-01-01T00:00:00+00:00", "failed_agents": [],
+             "agents": {n: {"headroom_pct": h, "window": "w", "state": "idle"}
+                        for n, h in (("alpha", 90.0), ("beta", 70.0), ("gamma", 50.0))}}))
+        out = io.StringIO()
+        code = main(["plan", "--roles", "reviewer", "--partition", str(self.path),
+                     "--snapshot", str(self.tmp / "snap.json"),
+                     "--config", str(self.tmp / "config.json"),
+                     "--state", str(self.tmp / "state.json")], stdout=out)
+        self.assertEqual(code, 0, out.getvalue())
+        assignments = json.loads(out.getvalue())["assignments"]
+        self.assertEqual(sorted(assignments), ["reviewer#api", "reviewer#core"])
+        self.assertEqual(len(set(assignments.values())), 2)
 
     def test_a_partition_expands_its_role_into_one_seat_per_slice(self):
         roles, seats = cli._expand_partition_seats(["developer", "reviewer", "tester"], str(self.path))
@@ -1521,11 +1549,16 @@ class PartitionSeatsTest(unittest.TestCase):
 
     def test_each_seat_inherits_its_role_s_inputs(self):
         _roles, seats = cli._expand_partition_seats(["reviewer"], str(self.path))
+        # The expanded role's own key goes: the seats are the roles this plan
+        # assigns, and a leftover `reviewer` entry names a role it is not.
         self.assertEqual(cli._fan_out_seats({"reviewer": ["grok"]}, seats),
-                         {"reviewer": ["grok"], "reviewer#api": ["grok"], "reviewer#core": ["grok"]})
+                         {"reviewer#api": ["grok"], "reviewer#core": ["grok"]})
         # A seat the caller already set keeps its own value.
         self.assertEqual(cli._fan_out_seats({"reviewer": 1.0, "reviewer#api": 2.0}, seats),
-                         {"reviewer": 1.0, "reviewer#api": 2.0, "reviewer#core": 1.0})
+                         {"reviewer#api": 2.0, "reviewer#core": 1.0})
+        # An unrelated role is untouched.
+        self.assertEqual(cli._fan_out_seats({"reviewer": 1.0, "tester": 3.0}, seats),
+                         {"tester": 3.0, "reviewer#api": 1.0, "reviewer#core": 1.0})
         self.assertEqual(cli._fan_out_seats({}, seats), {})
 
 

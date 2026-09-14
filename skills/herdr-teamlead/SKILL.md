@@ -180,7 +180,12 @@ bash "$CP/skills/herdr-teamlead/teamlead.sh" validate-partition \
 ```
 
 Exit 1 names every unowned changed path and every overlap. Fix the partition
-and re-run; plan only once it exits 0.
+and re-run; plan only once it exits 0. The document's format, the ownership
+payload and the seating it produces:
+
+```text
+skills/herdr-teamlead/references/review-partition.md
+```
 
 ```bash
 CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"

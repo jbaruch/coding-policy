@@ -34,7 +34,9 @@ def document(**overrides):
 
 class LoadPartition(unittest.TestCase):
     def setUp(self):
-        self.tmp = Path(tempfile.mkdtemp())
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.tmp = Path(temporary.name)
 
     def write(self, payload):
         path = self.tmp / "partition.json"
@@ -104,7 +106,9 @@ class Validate(unittest.TestCase):
 
 class RunCommand(unittest.TestCase):
     def setUp(self):
-        self.tmp = Path(tempfile.mkdtemp())
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.tmp = Path(temporary.name)
         self.path = self.tmp / "partition.json"
         self.path.write_text(json.dumps(document()))
 
