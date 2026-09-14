@@ -34,6 +34,10 @@
 #                             the remote default is still resolved.
 #  18. Unenterable         -> a worktree the run cannot cd into is a failed
 #                             row, exit 2 (skipped as root, who can enter anything).
+#  19. Shadowing           -> a tag named like a branch, or a local branch
+#                             named origin/main, cannot stand in for either operand.
+#  20. Untraversable parent-> absence is not confirmed; failed row, metadata
+#                             kept, exit 2 (skipped as root).
 #
 # Run: bash skills/herdr-teamlead/tests/test_prune_worktrees.sh
 set -uo pipefail
@@ -170,8 +174,8 @@ main() {
   add_wt "$SHARED" review/gone "$ROOT/twelve-gone"
   rm -rf "$ROOT/twelve-gone" || die "rm failed"
   run "$SHARED"
-  echo "12. a hand-deleted worktree's metadata is pruned"
-  if (( RC == 0 )) && ! listed "$SHARED" "$ROOT/twelve-gone"; then pass; else fail "rc=$RC out=$OUT"; fi
+  echo "12. a hand-deleted worktree's metadata is pruned and its merged branch deleted in the same run"
+  if (( RC == 0 )) && ! listed "$SHARED" "$ROOT/twelve-gone" && [[ "$(kept_reason "$ROOT/twelve-gone")" == prunable ]] && [[ "$(branches_deleted)" == *review/gone* ]] && ! has_branch "$SHARED" review/gone; then pass; else fail "rc=$RC out=$OUT"; fi
 
   # --- 13. foreign worktree under the root.
   mk_repo thirteen
@@ -231,6 +235,27 @@ SHIM
     chmod 755 "$ROOT/eighteen-sealed" || die "chmod restore failed"
     echo "18. a worktree that cannot be entered is a failed row on stderr, exit 2"
     if (( RC == 2 )) && [[ "$OUT" == *'"failed": [{'*"cannot enter"* ]] && [[ "$ERRTEXT" == *"cannot enter"* ]] && [[ "$ERRTEXT" == *"skipping"* ]] && has_branch "$SHARED" review/sealed && listed "$SHARED" "$ROOT/eighteen-sealed"; then pass; else fail "rc=$RC out=$OUT err=$ERRTEXT"; fi
+  fi
+
+  # --- 19. a merged tag named like an unmerged branch must not shadow it.
+  mk_repo nineteen
+  add_wt "$SHARED" review/shadow "$ROOT/nineteen-shadow"; commit_in "$ROOT/nineteen-shadow" s
+  git -C "$SHARED" tag review/shadow origin/main || die "tag failed"
+  git -C "$SHARED" branch --no-track origin/main origin/main 2>/dev/null || die "shadow branch failed"
+  run "$SHARED"
+  echo "19. ancestry is judged on fully qualified refs: a same-name tag or an origin/main local branch cannot shadow"
+  if (( RC == 0 )) && [[ "$(kept_reason "$ROOT/nineteen-shadow")" == unmerged ]] && [[ -d "$ROOT/nineteen-shadow" ]] && has_branch "$SHARED" review/shadow; then pass; else fail "rc=$RC out=$OUT err=$ERRTEXT"; fi
+
+  # --- 20. an ancestor that denies traversal is not "gone".
+  if [[ "$(id -u)" != 0 ]]; then
+    mk_repo twenty
+    mkdir -p "$ROOT/twenty-parent" || die "mkdir failed"
+    add_wt "$SHARED" review/hidden "$ROOT/twenty-parent/hidden"
+    chmod 000 "$ROOT/twenty-parent" || die "chmod failed"
+    run "$SHARED"
+    chmod 755 "$ROOT/twenty-parent" || die "chmod restore failed"
+    echo "20. a worktree behind an untraversable parent is a failed row, metadata and branch kept, exit 2"
+    if (( RC == 2 )) && [[ "$OUT" == *'"failed": [{'*"cannot confirm"* ]] && [[ "$ERRTEXT" == *"skipping"* ]] && has_branch "$SHARED" review/hidden && listed "$SHARED" "$ROOT/twenty-parent/hidden"; then pass; else fail "rc=$RC out=$OUT err=$ERRTEXT"; fi
   fi
 
   # --- 14. usage / not a repo.

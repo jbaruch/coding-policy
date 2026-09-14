@@ -28,9 +28,11 @@
 # shared checkout's own default branch, which may lag origin's and refuse a
 # branch this script just proved merged. Removal is `git worktree remove`,
 # never `rm -rf`. Everything else is KEPT and reported with its reason. Stale
-# worktree metadata is pruned last (`git worktree prune --expire now`), after
-# every decision, and skipped when any worktree could not be entered: git
-# would read an unreadable directory as gone and drop its entry. Nothing here
+# worktree metadata is pruned (`git worktree prune --expire now`) after every
+# worktree decision and before the branch pass, so a confirmed-gone entry's
+# merged branch goes in the same run; the prune is skipped when any worktree
+# could not be entered, since git would read an unreadable directory as gone
+# and drop its entry. Nothing here
 # pushes to origin; a dry run still fetches (without --prune), reads origin's
 # default branch with `ls-remote --symref` instead of rewriting origin/HEAD,
 # and skips the metadata prune, so its decisions are current and .git is
@@ -111,16 +113,32 @@ default_branch_of() { # <shared> <dry-run 0|1>
     fi
     db="$(printf '%s\n' "$sym" | sed -n 's#^ref: refs/heads/\(.*\)[[:space:]]HEAD$#\1#p' | head -n 1)"
     if [[ -n "$db" ]]; then
+      # The remote named its default; a missing local origin/<name> is a
+      # refspec or fetch problem, never a reason to guess main or master.
       ref_exists "$1" "refs/remotes/origin/${db}" || rc=$?
-      case "$rc" in 0) printf '%s' "$db"; return 0 ;; 1) rc=0 ;; *) return 1 ;; esac
+      case "$rc" in
+        0) printf '%s' "$db"; return 0 ;;
+        1) warn "origin reports default branch '${db}' but refs/remotes/origin/${db} is absent after the fetch — check the fetch refspec"; return 1 ;;
+        *) return 1 ;;
+      esac
     fi
   else
-    db="$(git -C "$1" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>"$ERRFILE")" || rc=$?
+    # The full target, not --short: a local branch named origin/<x> makes the
+    # short form ambiguous and git renders it as remotes/origin/<x>.
+    db="$(git -C "$1" symbolic-ref --quiet refs/remotes/origin/HEAD 2>"$ERRFILE")" || rc=$?
     case "$rc" in
-      0) db="${db#origin/}"
-         # A dangling origin/HEAD names a branch with no remote-tracking ref.
+      0) if [[ "$db" != refs/remotes/origin/* ]]; then
+           warn "origin/HEAD points at '${db}', not a refs/remotes/origin/ ref — run \`git remote set-head origin --auto\`"; return 1
+         fi
+         db="${db#refs/remotes/origin/}"
+         # origin/HEAD was just rewritten from the remote; a dangling one is a
+         # refspec or fetch problem, never a reason to guess main or master.
          rc=0; ref_exists "$1" "refs/remotes/origin/${db}" || rc=$?
-         case "$rc" in 0) printf '%s' "$db"; return 0 ;; 1) ;; *) return 1 ;; esac ;;
+         case "$rc" in
+           0) printf '%s' "$db"; return 0 ;;
+           1) warn "origin/HEAD names '${db}' but refs/remotes/origin/${db} is absent after the fetch — check the fetch refspec"; return 1 ;;
+           *) return 1 ;;
+         esac ;;
       1) ;;  # origin/HEAD is simply absent: fall back to the conventional names
       *) warn "\`git symbolic-ref refs/remotes/origin/HEAD\` failed (exit ${rc}): $(tr '\n' ' ' < "$ERRFILE")"; return 1 ;;
     esac
@@ -133,14 +151,16 @@ default_branch_of() { # <shared> <dry-run 0|1>
   return 1
 }
 
-# Echo merged|unmerged for <branch> against origin/<default>, or return 2 on
-# a tool failure. `merge-base --is-ancestor` exits 1 for "not an ancestor" and
+# Echo merged|unmerged for refs/heads/<branch> against
+# refs/remotes/origin/<default>, or return 2 on a tool failure. `merge-base --is-ancestor` exits 1 for "not an ancestor" and
 # anything else for an invalid ref or repository error; collapsing both into
 # "unmerged" would hide the failure behind a kept row
 # (rules/error-handling.md Shell Error Handling).
 ancestry() { # <shared> <branch> <default>
   local rc=0
-  git -C "$1" merge-base --is-ancestor "$2" "origin/$3" 2>"$ERRFILE" || rc=$?
+  # Fully qualified on both sides: a tag or a local branch named like the
+  # operand would otherwise shadow it.
+  git -C "$1" merge-base --is-ancestor "refs/heads/$2" "refs/remotes/origin/$3" 2>"$ERRFILE" || rc=$?
   case "$rc" in
     0) printf 'merged' ;;
     1) printf 'unmerged' ;;
@@ -289,7 +309,9 @@ main() {
     rm -f "$inventory" "$branches"
     return 1
   fi
-  if ! git -C "$shared" for-each-ref --format='%(refname:short)' refs/heads/ >"$branches" 2>"$ERRFILE"; then
+  # Full refnames: `%(refname:short)` renders a local branch named like a
+  # remote-tracking ref (origin/main) as heads/origin/main.
+  if ! git -C "$shared" for-each-ref --format='%(refname)' refs/heads/ >"$branches" 2>"$ERRFILE"; then
     warn "\`git for-each-ref refs/heads/\` failed: $(tr '\n' ' ' < "$ERRFILE") — cannot inventory branches"
     rm -f "$inventory" "$branches"
     return 1
@@ -300,11 +322,24 @@ main() {
   local -a seen_branches=()
   flush() {
     if [[ -n "$path" ]]; then
-      if [[ -n "$branch" ]]; then seen_branches+=("$branch"); fi
-      local real="" rc=0
+      local real="" rc=0 parent
+      parent="$(dirname "$path")"
       if [[ ! -e "$path" ]]; then
-        # Its directory is gone: an expected non-result, decided as prunable.
-        real="$path"
+        # `-e` is false for a missing path and for one whose ancestor denies
+        # traversal. Absence is confirmed only through a traversable parent;
+        # anything else is a failure that also inhibits the metadata prune.
+        if [[ -d "$parent" && -x "$parent" ]]; then
+          # Confirmed gone: reported prunable, its metadata pruned below, and
+          # its branch left to the no-worktree pass in this same run.
+          decide_worktree "$shared" "$abs_root" "$db" "$dry" "$path" "$branch" "$detached" "$locked"
+          path=""; branch=""; detached=0; locked=0
+          return 0
+        else
+          row failed "$path" "$branch" "cannot confirm the worktree is gone: its parent ${parent} is missing or not traversable"
+          unenterable=1
+          path=""; branch=""; detached=0; locked=0
+          return 0
+        fi
       else
         real="$(cd "$path" 2>"$ERRFILE" && pwd -P)" || rc=$?
         if (( rc != 0 )); then
@@ -314,6 +349,7 @@ main() {
           return 0
         fi
       fi
+      if [[ -n "$branch" ]]; then seen_branches+=("$branch"); fi
       if [[ "$real" != "$abs_shared" ]]; then
         decide_worktree "$shared" "$abs_root" "$db" "$dry" "$real" "$branch" "$detached" "$locked"
       fi
@@ -331,19 +367,10 @@ main() {
   done < "$inventory"
   flush
 
-  # Local branches with no worktree.
-  local name skip
-  while IFS= read -r name; do
-    skip=0
-    local s
-    for s in "${seen_branches[@]+"${seen_branches[@]}"}"; do
-      if [[ "$s" == "$name" ]]; then skip=1; break; fi
-    done
-    if (( skip )); then continue; fi
-    decide_branch "$shared" "$db" "$dry" "$name"
-  done < "$branches"
-  # Metadata prune last: git reads an unreadable worktree directory as gone
-  # and would drop its entry, orphaning a branch this run could not judge.
+  # Metadata prune between the passes: after every worktree decision, so git reads an unreadable worktree directory as gone
+  # a confirmed-gone entry is released before its branch is judged below;
+  # skipped when a worktree could not be entered, since git reads an unreadable
+  # directory as gone and would drop its entry.
   if (( ! dry )); then
     if (( unenterable )); then
       warn "skipping \`git worktree prune\`: a worktree could not be entered; restore access and re-run"
@@ -352,6 +379,19 @@ main() {
       row failed "git worktree prune" "" "failed: $(tr '\n' ' ' < "$ERRFILE") — stale metadata may remain"
     fi
   fi
+
+  # Local branches with no worktree.
+  local name skip
+  while IFS= read -r name; do
+    name="${name#refs/heads/}"
+    skip=0
+    local s
+    for s in "${seen_branches[@]+"${seen_branches[@]}"}"; do
+      if [[ "$s" == "$name" ]]; then skip=1; break; fi
+    done
+    if (( skip )); then continue; fi
+    decide_branch "$shared" "$db" "$dry" "$name"
+  done < "$branches"
   if ! rm -f "$inventory" "$branches"; then
     warn "could not remove temp inventories ${inventory} ${branches} — remove them by hand"
   fi
