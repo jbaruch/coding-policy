@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.222 — 2026-09-14
+
 ### Changed
 
 - **A task-owned fixture root may sit outside the reports directory (#367).**
