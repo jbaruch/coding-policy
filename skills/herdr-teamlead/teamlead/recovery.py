@@ -506,6 +506,13 @@ def diagnose(store, assignments, data, at, judge_agent, enrolled_report, supervi
                        if str(Path(row["report"]).resolve()) == str(Path(cited).resolve())), None)
     if assessment is None:
         raise UsageError("ASSESSMENT names {}, which is not an assessed investigator report for task {} after its latest developer attempt; cite the report the diagnosis ruled on.".format(cited, data["task"]), {})
+    # The saved receipt is a last-seen snapshot, never authority
+    # (rules/stateful-artifacts.md Hints, Not Authority): a report deleted or
+    # rewritten since its assessment would otherwise authorize a correction
+    # plan on evidence nobody holds any more.
+    current, _assessed = receipt(assessment["report"])
+    if current != assessment["report_evidence"]:
+        raise UsageError("The investigator report {} changed since its assessment; restore the assessed bytes or record a fresh assessed consultation before diagnosing.".format(assessment["report"]), {})
     if re.search(r"^(?:RULING|ACTION):", body, re.MULTILINE):
         raise UsageError("This report carries an adjudication's RULING or ACTION; a diagnosis carries neither. Dispatch the diagnosis brief and cite its report.", {})
     remedy = remedy_line.group(1)

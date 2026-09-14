@@ -55,6 +55,11 @@
   Diagnosis record schema 2 adds `reissue` and `investigator_report`; version-1
   rows migrate with `reissue: false` and `investigator_report: null`.
 
+  The diagnosis verifies the investigator report against the live file rather
+  than trusting the saved receipt — a report deleted or rewritten since its
+  assessment would otherwise authorize a correction plan on evidence nobody
+  holds any more (`rules/stateful-artifacts.md` Hints, Not Authority).
+
   Detection has two inputs, because the triggers gate work *before*
   implementation and a task's first round has nothing committed to read: a
   diff-only detector reports every trigger quiet on exactly the round the

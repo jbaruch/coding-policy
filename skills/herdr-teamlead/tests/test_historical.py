@@ -431,6 +431,18 @@ class HistoricalCommandsTest(fixture.CliCase):
         self.assertIn("exceeds the recorded task or correction scope", err)
         self.assertEqual(self.state.read_bytes(), before)
 
+    def investigation(self):
+        """A real investigator report the diagnosis verifies live."""
+        path = self.tmp / "investigation.md"
+        if not path.exists():
+            path.write_text("Reproduction, causal assessment and discriminating experiment.\n")
+        return str(path)
+
+    def investigation_sha(self):
+        import hashlib
+        import pathlib
+        return hashlib.sha256(pathlib.Path(self.investigation()).read_bytes()).hexdigest()
+
     def test_import_with_remaining_existing_plan_still_requires_actual_blocking_review(self):
         self.seed(5)
         state = self.saved()
@@ -462,15 +474,15 @@ class HistoricalCommandsTest(fixture.CliCase):
         state["specialist_assessments"].append({
             "schema_version": 1, "at": "2026-03-01T14:00:00+00:00", "id": "inv-1",
             "dispatch": "investigator-dispatch", "assignment_index": index, "task": TASK,
-            "role": "investigator", "agent": "grok", "report": "/reports/investigation.md",
+            "role": "investigator", "agent": "grok", "report": self.investigation(),
             "delivery": "/reports/delivery.json", "outcome": "delivered", "contribution": "design",
             "summary": "The loop did not converge on surface area.",
-            "report_evidence": {"path": "/reports/investigation.md", "sha256": "a" * 64},
+            "report_evidence": {"path": self.investigation(), "sha256": self.investigation_sha()},
             "delivery_evidence": {"path": "/reports/delivery.json", "sha256": "b" * 64}})
         save_state(self.state, state)
         diagnosis = self.tmp / "diagnosis.md"
         diagnosis.write_text("DIAGNOSIS: the loop did not converge\nREMEDY: continue — one more round\n"
-                             "BOUND: 1 — one attempt per open finding\nASSESSMENT: /reports/investigation.md\nEVIDENCE: the five completed fixes\nUNVERIFIED: none\n")
+                             "BOUND: 1 — one attempt per open finding\nASSESSMENT: " + self.investigation() + "\nEVIDENCE: the five completed fixes\nUNVERIFIED: none\n")
         code, _, err = self.owner("diagnose", {"id": "diag-cap", "task": TASK, "checkpoint": "cap-5",
             "judge_report": str(diagnosis), "scope": SCOPE, "allowed_paths": ["src/*"]})
         self.assertEqual(code, 0, err)

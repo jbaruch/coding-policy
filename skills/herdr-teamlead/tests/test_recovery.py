@@ -46,7 +46,10 @@ class RecoveryTests(unittest.TestCase):
                                   "allowed_paths": ["src/*"], "authorization": AUTH}, AT)
         self.judge_report = self.root / "judge.md"
         self.judge_report.write_text("RULING: amend — correct the remaining parser defect\nACTION: Use one canonical parser\n")
-        self.investigation = str(self.root / "investigation.md")
+        investigation = self.root / "investigation.md"
+        investigation.write_text("Reproduction: the quoted case. Cause: two parsers. Experiment: unify them.\n")
+        self.investigation = str(investigation)
+        self.investigation_sha = hashlib.sha256(investigation.read_bytes()).hexdigest()
         self.review = self.root / "review.md"
         self.review.write_text("Reviewed head: " + HEAD + "\nBlocking finding F1: quoted input is still accepted as a completion signal.\n")
 
@@ -126,8 +129,11 @@ class RecoveryTests(unittest.TestCase):
         if at is None:
             at = getattr(self, "investigator_assessed_at", "2026-02-03T09:45:00+00:00")
         report = self.investigation if report is None else report
+        sha = (self.investigation_sha if report == self.investigation
+               else hashlib.sha256(Path(report).read_bytes()).hexdigest() if Path(report).exists()
+               else "d" * 64)
         return [{"task": TASK, "role": "investigator", "assignment_index": index, "at": at,
-                 "report": report, "report_evidence": {"path": report, "sha256": "d" * 64}}]
+                 "report": report, "report_evidence": {"path": report, "sha256": sha}}]
 
     def run_diagnosis(self, data, judge="judge", enrolled=None, investigations=None):
         # The fixture's judge dispatch enrolls the report the request cites,
@@ -309,6 +315,17 @@ class RecoveryTests(unittest.TestCase):
                         "BOUND: 2 — one per finding\nEVIDENCE: rounds 10-20\nUNVERIFIED: none\n")
         return str(path)
 
+    def test_a_changed_investigator_report_refuses_the_diagnosis(self):
+        # rules/stateful-artifacts.md Hints, Not Authority: the saved receipt
+        # is a last-seen snapshot, so a rewritten report authorizes nothing.
+        self.seed_checkpoint()
+        Path(self.investigation).write_text("Rewritten after the assessment.\n")
+        with self.assertRaisesRegex(UsageError, "changed since its assessment"):
+            self.run_diagnosis(self.diagnosis("diag-1", "continue", 2), "judge")
+        Path(self.investigation).unlink()
+        with self.assertRaisesRegex(UsageError, "Cannot read evidence"):
+            self.run_diagnosis(self.diagnosis("diag-2", "continue", 2), "judge")
+
     def test_a_diagnosis_cites_the_assessment_it_ruled_on(self):
         # coding-policy#415: the ordering gate proves an assessment exists; the
         # citation proves this diagnosis consumed it.
@@ -320,7 +337,8 @@ class RecoveryTests(unittest.TestCase):
             self.run_diagnosis(self.diagnosis("diag-1", "continue", 2, assessment=str(self.root / "other.md")), "judge")
         record = self.run_diagnosis(self.diagnosis("diag-1", "continue", 2), "judge")
         self.assertEqual(record["investigator_report"]["report"], self.investigation)
-        self.assertEqual(record["investigator_report"]["evidence"], {"path": self.investigation, "sha256": "d" * 64})
+        self.assertEqual(record["investigator_report"]["evidence"],
+                         {"path": self.investigation, "sha256": self.investigation_sha})
         validate_store(self.store, self.history)
 
     def test_an_older_diagnosis_row_migrates_to_the_recorded_shape(self):

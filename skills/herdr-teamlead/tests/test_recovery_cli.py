@@ -52,6 +52,18 @@ class RecoveryCommandTests(fixture.CliCase):
                                            "allowed_paths": ["src/*"], "authorization": AUTH})
         self.assertEqual(code, 0, err)
 
+    def investigation(self):
+        """A real investigator report the diagnosis verifies live."""
+        path = self.tmp / "investigation.md"
+        if not path.exists():
+            path.write_text("Reproduction, causal assessment and discriminating experiment.\n")
+        return str(path)
+
+    def investigation_sha(self):
+        import hashlib
+        import pathlib
+        return hashlib.sha256(pathlib.Path(self.investigation()).read_bytes()).hexdigest()
+
     def record_investigation(self):
         """Seed the assessed investigator consultation #408 requires.
 
@@ -73,9 +85,9 @@ class RecoveryCommandTests(fixture.CliCase):
         state["specialist_assessments"].append({
             "schema_version": 1, "at": "2026-02-03T14:00:00+00:00", "id": "inv-1", "dispatch": "investigator-dispatch",
             "assignment_index": index, "task": TASK, "role": "investigator",
-            "agent": "grok", "report": "/reports/investigation.md", "delivery": "/reports/delivery.json",
+            "agent": "grok", "report": self.investigation(), "delivery": "/reports/delivery.json",
             "outcome": "delivered", "contribution": "design", "summary": "The find-rate tracks review surface area.",
-            "report_evidence": {"path": "/reports/investigation.md", "sha256": "a" * 64},
+            "report_evidence": {"path": self.investigation(), "sha256": self.investigation_sha()},
             "delivery_evidence": {"path": "/reports/delivery.json", "sha256": "b" * 64}})
         save_state(self.state, state)
 
@@ -123,7 +135,7 @@ class RecoveryCommandTests(fixture.CliCase):
         # enrolls the judge's report before its diagnosis (#407).
         diagnosis = self.tmp / "diagnosis.md"
         diagnosis.write_text("DIAGNOSIS: the find-rate held flat\nREMEDY: continue — two more rounds\n"
-                             "BOUND: 1 — one attempt per open finding\nASSESSMENT: /reports/investigation.md\nEVIDENCE: rounds 1-5\nUNVERIFIED: none\n")
+                             "BOUND: 1 — one attempt per open finding\nASSESSMENT: " + self.investigation() + "\nEVIDENCE: rounds 1-5\nUNVERIFIED: none\n")
         if skip_diagnosis:
             return
         code, _, err = self.owner("diagnose", {"id": "diag-cap", "task": TASK, "checkpoint": "cap-5",
@@ -236,7 +248,7 @@ class RecoveryCommandTests(fixture.CliCase):
         supervision.bind(self.state, who, AT, root=self.tmp / "supervision-bindings")
         delivered = self.tmp / "delivered-diagnosis.md"
         delivered.write_text("DIAGNOSIS: flat find-rate\nREMEDY: continue — two more rounds\n"
-                             "BOUND: 2 — one attempt per open finding\nASSESSMENT: /reports/investigation.md\nEVIDENCE: rounds 1-5\nUNVERIFIED: none\n")
+                             "BOUND: 2 — one attempt per open finding\nASSESSMENT: " + self.investigation() + "\nEVIDENCE: rounds 1-5\nUNVERIFIED: none\n")
         supervision.enroll(self.state, {"id": "judge-dispatch", "agent": "claude", "task": TASK,
                                         "report": str(delivered), "pane_id": None, "native_session": None}, AT)
         other = self.tmp / "elsewhere.md"
@@ -258,7 +270,7 @@ class RecoveryCommandTests(fixture.CliCase):
         self.seed_cap(skip_diagnosis=True)
         stop = self.tmp / "stop-diagnosis.md"
         stop.write_text("DIAGNOSIS: the review surface is the cause\nREMEDY: stop — ship the parser, track F1\n"
-                        "BOUND: none\nASSESSMENT: /reports/investigation.md\n"
+                        "BOUND: none\nASSESSMENT: " + self.investigation() + "\n"
                         "EVIDENCE: rounds 1-5\nUNVERIFIED: none\n")
         # A free-text diagnosis identity still yields a valid obligation id.
         request = {"id": "diag stop 1", "task": TASK, "checkpoint": "cap-5", "judge_report": str(stop),
@@ -284,7 +296,7 @@ class RecoveryCommandTests(fixture.CliCase):
         self.seed_cap(diagnosis_only=True)
         other = self.tmp / "other-diagnosis.md"
         other.write_text("DIAGNOSIS: x\nREMEDY: restructure — split the surface\n"
-                         "BOUND: 1 — one attempt per open finding\nASSESSMENT: /reports/investigation.md\n"
+                         "BOUND: 1 — one attempt per open finding\nASSESSMENT: " + self.investigation() + "\n"
                          "EVIDENCE: rounds 1-5\nUNVERIFIED: none\n")
         config = json.loads(self.config.read_text())
         config["judge"] = {"agent": "grok", "model": "grok-4", "effort": "high"}

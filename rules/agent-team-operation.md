@@ -104,7 +104,8 @@ description: Running a multi-agent team — task-based specialist composition, c
 - No exhausted allowance waits on an operator decision
 - The judge is read-only: it never edits a repository file, never runs a mutating git or `gh` command, never posts to GitHub, never dispatches a subagent — its only output is its report file
 - In adjudication mode the judge reads both positions and the governing rule, verifies the disputed facts against the tree, and returns `RULING: uphold A | uphold B | amend — <line> | blocked — <question>` with numbered reasons, an `ACTION:` naming the minimal step, and an `UNVERIFIED:` line
-- In diagnosis mode it reads the round history and verifies against the tree what each round changed, and returns the five diagnosis lines with numbered reasons
+- In diagnosis mode it reads the round history and verifies against the tree what each round changed, and returns the six diagnosis lines with numbered reasons
+- A diagnosis repeating its predecessor's rung adds `PROGRESS:`
 - `RULING:` and `ACTION:` belong to adjudication alone; a diagnosis carries neither
 - The judge's ruling binds the round; only the operator overrides it
 - `blocked` is the judge declining to rule
