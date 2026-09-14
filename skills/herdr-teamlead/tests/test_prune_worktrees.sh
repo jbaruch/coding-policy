@@ -45,8 +45,17 @@
 #  24. Newline path        -> a record is not split by a newline in the path.
 #  25. Branch config       -> a deleted branch's branch.<name> config goes too.
 #  26. Locked and gone     -> git keeps its metadata, so its branch is kept too.
-#  27. Split record        -> an old git plus a newline path decides nothing.
+#  27. No -z               -> a git without `-z` decides nothing at all.
 #  28. Dry-run deferral    -> a preview defers what the live run would defer.
+#  29. Config sibling      -> branch.<name>.<key> of a LONGER branch name is
+#                             not read as this branch's config.
+#  30. Claimed branch      -> a branch a worktree holds is kept, not deleted.
+#  31. Claimed mid-delete  -> a worktree claiming it inside the deletion's own
+#                             window gets the branch back.
+#  32. Newline parent      -> absence is confirmed through a parent whose own
+#                             name ends in a newline.
+#  33. Unreadable recheck   -> a failed post-deletion occupancy read is a
+#                             failure, never an unoccupied answer.
 #
 # Run: bash skills/herdr-teamlead/tests/test_prune_worktrees.sh
 set -uo pipefail
@@ -362,11 +371,11 @@ SHIM
   echo "26. a locked entry git's prune preserves does not release its branch"
   if (( RC == 0 )) && [[ "$(kept_reason "$ROOT/twentysix-lockedgone")" == locked ]] && [[ "$(branches_deleted)" != *review/lockedgone* ]] && has_branch "$SHARED" review/lockedgone; then pass; else fail "rc=$RC out=$OUT err=$ERRTEXT"; fi
 
-  # --- 27. without -z, a split record refuses the inventory instead of deciding.
+  # --- 27. without -z there is no unambiguous inventory, so nothing is decided.
+  # No newline path is needed: the line-oriented form cannot be trusted at all,
+  # since a path whose tail reads as an attribute passes any scan (#410).
   mk_repo twentyseven
   add_wt "$SHARED" review/plain "$ROOT/twentyseven-plain"
-  git -C "$SHARED" worktree add -q -b review/split "$ROOT/twentyseven-$(printf 'a\nb')" origin/main 2>/dev/null \
-    || die "fixture could not create a worktree at a newline-bearing path"
   mkdir -p "$TMP/shim27" || die "mkdir shim failed"
   cat > "$TMP/shim27/git" <<SHIM || die "shim write failed"
 #!/usr/bin/env bash
@@ -378,10 +387,10 @@ SHIM
   chmod +x "$TMP/shim27/git" || die "chmod shim failed"
   RUN_SEQ=$((RUN_SEQ+1))
   OUT="$(env WORKTREE_ROOT="$ROOT" PATH="$TMP/shim27:$PATH" bash "$SCRIPT" "$SHARED" 2>"$TMP/err.$RUN_SEQ")"; RC=$?; ERRTEXT="$(cat "$TMP/err.$RUN_SEQ")"
-  echo "27. an old git plus a newline path refuses the inventory, deciding nothing"
+  echo "27. a git without -z refuses the inventory, deciding nothing"
   plain_dir=0; [[ -d "$ROOT/twentyseven-plain" ]] && plain_dir=1
   plain_branch=0; has_branch "$SHARED" review/plain && plain_branch=1
-  if (( RC == 1 )) && [[ -z "$OUT" ]] && [[ "$ERRTEXT" == *"cannot list unambiguously"* ]] && (( plain_dir )) && (( plain_branch )); then pass; else fail "rc=$RC dir=$plain_dir branch=$plain_branch out=$OUT err=$ERRTEXT"; fi
+  if (( RC == 1 )) && [[ -z "$OUT" ]] && [[ "$ERRTEXT" == *"cannot be listed unambiguously"* ]] && (( plain_dir )) && (( plain_branch )); then pass; else fail "rc=$RC dir=$plain_dir branch=$plain_branch out=$OUT err=$ERRTEXT"; fi
 
   # --- 28. a dry run previews the deferral a live run would make.
   if [[ "$(id -u)" != 0 ]]; then
@@ -395,6 +404,102 @@ SHIM
     echo "28. a dry run does not promise a deletion the live run would defer"
     if (( RC == 2 )) && [[ "$(branches_deleted)" != *review/previewgone* ]] && has_branch "$SHARED" review/previewgone; then pass; else fail "rc=$RC out=$OUT err=$ERRTEXT"; fi
   fi
+
+  # --- 29. a longer branch's config is not this branch's config.
+  mk_repo twentynine
+  # --no-track: a tracking branch has its own branch.<name>.* section, and
+  # removing that would succeed whether or not the probe matched the sibling.
+  git -C "$SHARED" branch --no-track review/foo origin/main || die "branch failed"
+  # Section `review/foo.bar`, key `remote` — `branch.review/foo.` prefixes it,
+  # but it belongs to another branch entirely.
+  git -C "$SHARED" config "branch.review/foo.bar.remote" origin || die "config failed"
+  run "$SHARED"
+  echo "29. a sibling branch's config section is not mistaken for this branch's"
+  sibling_kept=0
+  config_rc=0
+  git -C "$SHARED" config --get "branch.review/foo.bar.remote" >/dev/null || config_rc=$?
+  case "$config_rc" in 0) sibling_kept=1 ;; 1) ;; *) die "git config --get failed (exit $config_rc)" ;; esac
+  if (( RC == 0 )) && [[ "$(branches_deleted)" == *review/foo* ]] && ! has_branch "$SHARED" review/foo && (( sibling_kept )); then pass; else fail "rc=$RC sibling=$sibling_kept out=$OUT err=$ERRTEXT"; fi
+
+  # --- 30. a branch a worktree holds is kept even when the inventory missed it.
+  mk_repo thirty
+  add_wt "$SHARED" review/claimed "$ROOT/thirty-claimed"
+  mkdir -p "$TMP/shim30" || die "mkdir shim failed"
+  # The run's own inventory read comes back empty, so the branch reaches the
+  # branch pass as if no worktree held it; every later read is the real thing.
+  cat > "$TMP/shim30/git" <<SHIM || die "shim write failed"
+#!/usr/bin/env bash
+set -euo pipefail
+case "\$*" in
+  *"worktree list"*-z*)
+    if [[ ! -e "$TMP/shim30/seen" ]]; then : > "$TMP/shim30/seen"; exit 0; fi ;;
+esac
+exec "$(command -v git)" "\$@"
+SHIM
+  chmod +x "$TMP/shim30/git" || die "chmod shim failed"
+  RUN_SEQ=$((RUN_SEQ+1))
+  OUT="$(env WORKTREE_ROOT="$ROOT" PATH="$TMP/shim30:$PATH" bash "$SCRIPT" "$SHARED" 2>"$TMP/err.$RUN_SEQ")"; RC=$?; ERRTEXT="$(cat "$TMP/err.$RUN_SEQ")"
+  echo "30. a branch checked out in a worktree the inventory missed is kept"
+  if (( RC == 0 )) && [[ "$(branch_kept_reason review/claimed)" == checked-out ]] && has_branch "$SHARED" review/claimed && [[ -d "$ROOT/thirty-claimed" ]]; then pass; else fail "rc=$RC out=$OUT err=$ERRTEXT"; fi
+
+  # --- 31. a worktree claiming the branch inside the deletion window.
+  mk_repo thirtyone
+  git -C "$SHARED" branch review/raced origin/main || die "branch failed"
+  mkdir -p "$TMP/shim31" || die "mkdir shim failed"
+  # `update-ref -d` has no checked-out guard: the shim claims the branch just
+  # before the deletion lands, exactly the race the inventory cannot see.
+  cat > "$TMP/shim31/git" <<SHIM || die "shim write failed"
+#!/usr/bin/env bash
+set -euo pipefail
+case "\$*" in
+  *"update-ref -d refs/heads/review/raced"*)
+    if [[ ! -e "$TMP/shim31/seen" ]]; then
+      : > "$TMP/shim31/seen"
+      if ! "$(command -v git)" -C "$SHARED" worktree add -q "$ROOT/thirtyone-raced" review/raced >/dev/null; then
+        echo "shim31: fixture could not claim review/raced" >&2
+      fi
+    fi ;;
+esac
+exec "$(command -v git)" "\$@"
+SHIM
+  chmod +x "$TMP/shim31/git" || die "chmod shim failed"
+  RUN_SEQ=$((RUN_SEQ+1))
+  OUT="$(env WORKTREE_ROOT="$ROOT" PATH="$TMP/shim31:$PATH" bash "$SCRIPT" "$SHARED" 2>"$TMP/err.$RUN_SEQ")"; RC=$?; ERRTEXT="$(cat "$TMP/err.$RUN_SEQ")"
+  echo "31. a branch claimed while it was being deleted is put back"
+  if (( RC == 2 )) && has_branch "$SHARED" review/raced && [[ "$OUT" == *"was restored at"* ]]; then pass; else fail "rc=$RC out=$OUT err=$ERRTEXT"; fi
+
+  # --- 33. a post-deletion occupancy read that fails is not "nothing holds it".
+  mk_repo thirtythree
+  git -C "$SHARED" branch --no-track review/unreadable origin/main || die "branch failed"
+  mkdir -p "$TMP/shim33" || die "mkdir shim failed"
+  # The reads before the deletion answer; the one after it fails, so the run
+  # must say the safety check did not run rather than report a clean deletion.
+  cat > "$TMP/shim33/git" <<SHIM || die "shim write failed"
+#!/usr/bin/env bash
+set -euo pipefail
+case "\$*" in
+  *"worktree list"*-z*)
+    if [[ -e "$TMP/shim33/deleted" ]]; then echo "fatal: fixture inventory failure" >&2; exit 128; fi ;;
+  *"update-ref -d refs/heads/review/unreadable"*) : > "$TMP/shim33/deleted" ;;
+esac
+exec "$(command -v git)" "\$@"
+SHIM
+  chmod +x "$TMP/shim33/git" || die "chmod shim failed"
+  RUN_SEQ=$((RUN_SEQ+1))
+  OUT="$(env WORKTREE_ROOT="$ROOT" PATH="$TMP/shim33:$PATH" bash "$SCRIPT" "$SHARED" 2>"$TMP/err.$RUN_SEQ")"; RC=$?; ERRTEXT="$(cat "$TMP/err.$RUN_SEQ")"
+  echo "33. a failed post-deletion occupancy read is reported, not read as unoccupied"
+  if (( RC == 2 )) && [[ "$OUT" == *"could not be read"* ]] && [[ "$OUT" == *"fixture inventory failure"* ]] && [[ "$(branches_deleted)" != *review/unreadable* ]]; then pass; else fail "rc=$RC out=$OUT err=$ERRTEXT"; fi
+
+  # --- 32. a parent whose own name ends in a newline still confirms absence.
+  mk_repo thirtytwo
+  nl_parent="$ROOT/thirtytwo-p"$'\n'
+  mkdir -p "$nl_parent" || die "mkdir newline parent failed"
+  git -C "$SHARED" worktree add -q -b review/nlparent "$nl_parent/wt" origin/main 2>/dev/null \
+    || die "fixture could not create a worktree under a newline-bearing parent"
+  rm -rf "$nl_parent/wt" || die "rm failed"
+  run "$SHARED"
+  echo "32. absence is confirmed through a parent whose name ends in a newline"
+  if (( RC == 0 )) && [[ "$ERRTEXT" != *"cannot confirm the worktree is gone"* ]] && ! has_branch "$SHARED" review/nlparent; then pass; else fail "rc=$RC out=$OUT err=$ERRTEXT"; fi
 
   # --- 14. usage / not a repo.
   run

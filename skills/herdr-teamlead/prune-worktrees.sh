@@ -25,10 +25,11 @@
 # A local branch with no worktree is DELETED iff it is not the default branch
 # and is an ancestor of origin's default branch. That ancestry check is the
 # safety, and it judges a captured commit rather than a name that can move.
-# `update-ref` carries no checked-out-worktree guard of its own, so a branch is
-# only ever deleted after this run has seen its worktree removed or has read
-# the inventory as holding none; git forbids two worktrees on one branch, so
-# no other tree can be holding it.
+# `update-ref` carries no checked-out-worktree guard of its own, and the
+# inventory is a snapshot, so occupancy is re-read from git either side of
+# every deletion: a branch a worktree holds is KEPT with reason checked-out,
+# and one claimed inside the deletion's own window is restored at the commit
+# it was deleted from.
 # Deletion is then `git update-ref -d refs/heads/<branch> <that commit>`,
 # git's compare-and-delete: it removes the branch only while it still points
 # at the commit just proved merged, so a commit landing mid-run keeps the
@@ -59,7 +60,8 @@
 #            "branches_deleted":["<name>"],
 #            "branches_kept":[{"branch","reason"}],
 #            "failed":[{"target","error"}]}
-#           reason is one of: default-branch, detached, dirty, locked,
+#           reason is one of: checked-out (a worktree claimed the branch after
+#           the inventory was taken), default-branch, detached, dirty, locked,
 #           outside-root, prunable (its directory is gone; a live run's
 #           metadata prune removes it), unmerged.
 #   stderr: diagnostics only.
@@ -192,13 +194,41 @@ branch_tip() { # <shared> <branch>
   printf '%s' "$out"
 }
 
+# Echo 1 when some worktree currently has <branch> checked out and 0 when none
+# does; return 1 when the inventory cannot be read. `update-ref -d` carries
+# none of git's own checked-out-worktree guard, and the run's inventory is a
+# snapshot: a `worktree add` claiming the branch after it was taken is
+# invisible to `seen_branches` (#410). So occupancy is re-read at the deletion.
+branch_checked_out() { # <shared> <branch>
+  local listing rc=0 field found=0
+  listing="$(mktemp)" || return 1
+  if ! git -C "$1" worktree list --porcelain -z >"$listing" 2>"$ERRFILE"; then
+    if ! rm -f "$listing"; then warn "could not remove temp file ${listing} — remove it by hand"; fi
+    return 1
+  fi
+  while IFS= read -r -d '' field || [[ -n "$field" ]]; do
+    if [[ "$field" == "branch refs/heads/$2" ]]; then found=1; break; fi
+  done < "$listing"
+  if ! rm -f "$listing"; then warn "could not remove temp file ${listing} — remove it by hand"; fi
+  printf '%s' "$found"
+}
+
 # Delete <branch> only if it still points at <tip>, atomically: `update-ref -d`
 # with an old value is git's compare-and-delete, so no commit can land between
 # the check and the deletion the way a read-then-`branch -D` allows (#405).
 # The ancestry proof is the safety `branch -d` would otherwise re-derive
-# against the local default, which may lag origin's.
-delete_branch() { # <shared> <branch> <tip>  -> 0 deleted, 1 moved, 2 git refused, 3 deleted but config left
-  local rc=0 now refusal
+# against the local default, which may lag origin's. Occupancy is re-read
+# either side of it: before, so a worktree created since the inventory is
+# seen; after, so one created inside that window is put back rather than left
+# checked out on a branch that no longer exists (#410).
+delete_branch() { # <shared> <branch> <tip>  -> 0 deleted, 1 moved, 2 git refused, 3 deleted but config left, 4 occupancy unreadable, 5 checked out, 6 claimed mid-run and restored, 7 claimed mid-run and not restored, 8 deleted and post-deletion occupancy unreadable
+  local rc=0 now refusal occupied
+  if ! occupied="$(branch_checked_out "$1" "$2")"; then
+    return 4
+  fi
+  if [[ "$occupied" == 1 ]]; then
+    return 5
+  fi
   git -C "$1" update-ref -d "refs/heads/$2" "$3" 2>"$ERRFILE" || rc=$?
   if (( rc != 0 )); then
     # Hold git's own words: the re-read below truncates ERRFILE, and a
@@ -209,6 +239,24 @@ delete_branch() { # <shared> <branch> <tip>  -> 0 deleted, 1 moved, 2 git refuse
     fi
     printf '%s' "$refusal" > "$ERRFILE"
     return 2
+  fi
+  # The window between the check above and the deletion is small, not empty.
+  # A worktree that claimed the branch inside it is now checked out on a ref
+  # that is gone, so the branch goes back at the commit it was deleted from —
+  # `update-ref` with an empty old value creates it only while it is still
+  # absent, so a racing `worktree add -b` that made its own is left alone.
+  # A failed read here is not "no worktree holds it": returning to the config
+  # probe below would overwrite this diagnostic and report a clean deletion
+  # whose safety check never ran (rules/error-handling.md Shell Error
+  # Handling — an expected non-result is not a tool failure).
+  if ! occupied="$(branch_checked_out "$1" "$2")"; then
+    return 8
+  fi
+  if [[ "$occupied" == 1 ]]; then
+    if git -C "$1" update-ref "refs/heads/$2" "$3" "" 2>"$ERRFILE"; then
+      return 6
+    fi
+    return 7
   fi
   # `update-ref` leaves the branch config `branch -D` would have removed.
   # Whether there is any is read first: `--remove-section` exits 128 for a
@@ -222,17 +270,23 @@ delete_branch() { # <shared> <branch> <tip>  -> 0 deleted, 1 moved, 2 git refuse
     1) return 0 ;;  # no branch.* config at all
     *) return 3 ;;
   esac
-  # A here-string, not a pipeline: `grep -q` exits early and would SIGPIPE its
-  # producer under pipefail. Exit 1 is "no match"; anything else is grep
-  # failing, which is not proof the section is absent.
-  rc=0
-  grep -qF -- "branch.$2." <<<"$keys" || rc=$?
-  case "$rc" in
-    0) ;;
-    1) return 0 ;;
-    *) printf 'grep failed (exit %s) reading the config list\n' "$rc" > "$ERRFILE"
-       return 3 ;;
-  esac
+  # Section equality, not a substring: `branch.foo.` also prefixes
+  # `branch.foo.bar.remote`, which belongs to the branch `foo.bar`. Reading
+  # that as `foo`'s config makes `--remove-section branch.foo` fail on a
+  # section that was never there, and the run reports a cleanup failure it
+  # invented (#410). A config key is `branch.<name>.<key>` and `<name>` may
+  # hold dots, so the name is what sits between the first dot and the last.
+  local keyline key section found=0
+  while IFS= read -r keyline; do
+    key="${keyline%% *}"
+    [[ "$key" == branch.*.* ]] || continue
+    section="${key#branch.}"
+    section="${section%.*}"
+    if [[ "$section" == "$2" ]]; then found=1; break; fi
+  done <<<"$keys"
+  if (( ! found )); then
+    return 0
+  fi
   rc=0
   git -C "$1" config --remove-section "branch.$2" >/dev/null 2>"$ERRFILE" || rc=$?
   if (( rc != 0 )); then
@@ -306,6 +360,11 @@ decide_worktree() { # <shared> <abs_root> <default> <dry-run 0|1> <path> <branch
     0) ;;
     1) row failed "$branch" "$branch" "branch ${branch} moved after its ancestry check and was left alone; its worktree is already removed, so re-run to judge the new tip" ;;
     3) row failed "$branch" "$branch" "${branch} is deleted but its branch.${branch} config could not be cleaned up: $(tr '\n' ' ' < "$ERRFILE") — check and remove it by hand" ;;
+    4) row failed "$branch" "$branch" "could not re-read which worktrees hold ${branch} after its own was removed, so it was left alone: $(tr '\n' ' ' < "$ERRFILE")" ;;
+    5) row failed "$branch" "$branch" "another worktree claimed ${branch} after its own was removed, so it was left alone; re-run once that worktree is gone" ;;
+    6) row failed "$branch" "$branch" "another worktree claimed ${branch} while it was being deleted; the branch was restored at ${tip} and that worktree is intact — re-run once it is gone" ;;
+    7) row failed "$branch" "$branch" "another worktree claimed ${branch} while it was being deleted and it could not be restored: $(tr '\n' ' ' < "$ERRFILE") — inspect that worktree by hand" ;;
+    8) row failed "$branch" "$branch" "${branch} is deleted and whether a worktree claimed it meanwhile could not be read: $(tr '\n' ' ' < "$ERRFILE") — check \`git worktree list\` and restore ${branch} at ${tip} if one holds it" ;;
     *) row failed "$branch" "$branch" "deleting ${branch} failed after the worktree was removed: $(tr '\n' ' ' < "$ERRFILE")" ;;
   esac
   return 0
@@ -335,6 +394,11 @@ decide_branch() { # <shared> <default> <dry-run 0|1> <branch>
     1) row failed "$branch" "$branch" "branch ${branch} moved after its ancestry check and was left alone; re-run to judge the new tip" ;;
     3) row branch-deleted "$branch" "$branch" ""
        row failed "$branch" "$branch" "${branch} is deleted but its branch.${branch} config could not be cleaned up: $(tr '\n' ' ' < "$ERRFILE") — check and remove it by hand" ;;
+    4) row failed "$branch" "$branch" "could not re-read which worktrees hold ${branch}, so it was left alone: $(tr '\n' ' ' < "$ERRFILE")" ;;
+    5) row branch-kept "$branch" "$branch" checked-out ;;
+    6) row failed "$branch" "$branch" "a worktree claimed ${branch} while it was being deleted; the branch was restored at ${tip} and that worktree is intact — re-run once it is gone" ;;
+    7) row failed "$branch" "$branch" "a worktree claimed ${branch} while it was being deleted and it could not be restored: $(tr '\n' ' ' < "$ERRFILE") — inspect that worktree by hand" ;;
+    8) row failed "$branch" "$branch" "${branch} is deleted and whether a worktree claimed it meanwhile could not be read: $(tr '\n' ' ' < "$ERRFILE") — check \`git worktree list\` and restore ${branch} at ${tip} if one holds it" ;;
     *) row failed "$branch" "$branch" "deleting ${branch} failed: $(tr '\n' ' ' < "$ERRFILE")" ;;
   esac
   return 0
@@ -403,25 +467,21 @@ main() {
   # would not reach the loop, and an empty inventory would read as "nothing
   # to prune" with exit 0 (rules/file-hygiene.md I/O Conventions). Nothing has
   # been decided yet, so an unreadable inventory is a precondition failure.
-  local inventory branches zflag=1
+  local inventory branches
   inventory="$(mktemp)"; branches="$(mktemp)"
   # `-z` (git >= 2.36) terminates each attribute with NUL, so a path holding a
-  # newline stays one field. An older git has no such form; its line-oriented
-  # output is used and a multi-line path would split (#405).
+  # newline stays one field. Without it there is no unambiguous read and no
+  # cross-check that settles one: a scan refusing unrecognized lines still
+  # accepts a path whose tail reads as an attribute (`...<newline>HEAD <sha>`,
+  # `...<newline>branch refs/heads/other`), and the parser then takes that
+  # tail for the record's metadata. So an inventory without `-z` decides
+  # nothing (#410).
   if ! git -C "$shared" worktree list --porcelain -z >"$inventory" 2>"$ERRFILE"; then
-    # Only an unsupported option falls back. Any other failure is git failing,
-    # and blaming it on an old git would discard the reason.
     if grep -qiE 'unknown option|usage: git worktree' "$ERRFILE"; then
-      zflag=0
-      warn "\`git worktree list --porcelain -z\` is unavailable (git < 2.36): a worktree path containing a newline would be misread"
+      warn "\`git worktree list --porcelain -z\` is unavailable (git < 2.36): a worktree path cannot be listed unambiguously — upgrade git to 2.36 or newer; nothing was decided"
     else
       warn "\`git worktree list --porcelain -z\` failed: $(tr '\n' ' ' < "$ERRFILE") — cannot inventory worktrees"
-      rm -f "$inventory" "$branches"
-      return 1
     fi
-  fi
-  if (( ! zflag )) && ! git -C "$shared" worktree list --porcelain >"$inventory" 2>"$ERRFILE"; then
-    warn "\`git worktree list --porcelain\` failed: $(tr '\n' ' ' < "$ERRFILE") — cannot inventory worktrees"
     rm -f "$inventory" "$branches"
     return 1
   fi
@@ -439,7 +499,12 @@ main() {
   flush() {
     if [[ -n "$path" ]]; then
       local real="" rc=0 parent
-      parent="$(dirname "$path")"
+      # The sentinel guards the same truncation `pwd -P` needs it for below:
+      # when the PARENT's own name ends in a newline, `dirname`'s output ends
+      # in two and command substitution strips both (#410).
+      parent="$(dirname "$path" && printf 'x')"
+      parent="${parent%x}"
+      parent="${parent%$'\n'}"
       if [[ ! -e "$path" ]]; then
         # `-e` is false for a missing path and for one whose ancestor denies
         # traversal. Absence is confirmed only through a traversable parent;
@@ -492,43 +557,15 @@ main() {
     fi
     path=""; branch=""; detached=0; locked=0
   }
-  # Without `-z`, a newline inside a path splits its record and the tail
-  # arrives as an unrecognized line. The whole inventory is scanned for one
-  # BEFORE any decision runs: a guard that fires afterwards has already
-  # removed a worktree it read from a truncated record.
-  local split=0
-  if (( ! zflag )); then
-    local scanned
-    while IFS= read -r scanned || [[ -n "$scanned" ]]; do
-      case "$scanned" in
-        "worktree "*|"branch refs/heads/"*|detached|"locked"*|"bare"|"prunable"*|"HEAD "*|"") ;;
-        *) split=1; break ;;
-      esac
-    done < "$inventory"
-  fi
-  if (( split )); then
-    warn "the worktree inventory holds a path this git cannot list unambiguously (a newline in a worktree path, and \`-z\` is unavailable) — upgrade git to 2.36+ or move that worktree; nothing was decided"
-    rm -f "$inventory" "$branches"
-    return 1
-  fi
-  attribute() { # <attribute line>
-    case "$1" in
-      "worktree "*) flush; path="${1#worktree }" ;;
-      "branch refs/heads/"*) branch="${1#branch refs/heads/}" ;;
+  while IFS= read -r -d '' line || [[ -n "$line" ]]; do
+    case "$line" in
+      "worktree "*) flush; path="${line#worktree }" ;;
+      "branch refs/heads/"*) branch="${line#branch refs/heads/}" ;;
       detached) detached=1 ;;
       "locked"*) locked=1 ;;
       "") flush ;;
     esac
-  }
-  if (( zflag )); then
-    while IFS= read -r -d '' line || [[ -n "$line" ]]; do
-      attribute "$line"
-    done < "$inventory"
-  else
-    while IFS= read -r line || [[ -n "$line" ]]; do
-      attribute "$line"
-    done < "$inventory"
-  fi
+  done < "$inventory"
   flush
 
   # Metadata prune between the passes: after every worktree decision, so git reads an unreadable worktree directory as gone
