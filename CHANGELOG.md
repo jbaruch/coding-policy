@@ -49,7 +49,11 @@
   judge is an adjudicator, not a researcher, and it is the most expensive seat
   in the fleet, so ruling on a prepared assessment costs less than
   investigating from scratch. `teamlead diagnose` refuses without an assessed
-  investigator consultation for the task after its latest developer attempt.
+  investigator consultation for the task that follows its latest developer
+  attempt and precedes the judge dispatch it cites — a consultation delivered
+  afterwards is not what the judge read. The diagnosis brief hands the judge
+  that report to rule on, rather than asking it to derive causes from the
+  round history itself.
   Re-entry on a failed remedy is unchanged: the ladder descends and terminates
   at `stop`, with the investigator step repeating on the failed remedy.
 
