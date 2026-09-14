@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.214 — 2026-09-14
+
 ### Changed
 
 - **Specialist consultations are triggered, and non-convergence goes to the
