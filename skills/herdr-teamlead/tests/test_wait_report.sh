@@ -757,6 +757,14 @@ ${base}"
     pass; else fail "mid-merge worktree: expected partial_work, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
   rm -f "$stall_wt/.git/MERGE_HEAD" || die "merge marker cleanup failed"
 
+  # A rebase paused at an `exec` or `break`: `rebase-merge/` with no
+  # REBASE_HEAD and a clean tree, which read as completed or retryable work.
+  mkdir -p "$stall_wt/.git/rebase-merge" || die "rebase state fixture failed"
+  stall_run "$stall_wt" --base "$stall_base"
+  if [[ $RC -eq 1 ]] && printf '%s' "$OUT" | jq -e '.stall.class == "partial_work" and .stall.evidence.mid_operation == true' >/dev/null; then
+    pass; else fail "paused rebase: expected partial_work, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
+  rmdir "$stall_wt/.git/rebase-merge" || die "rebase state cleanup failed"
+
   # Committed and unpushed is completed work with a failed transport.
   stall_run "$stall_wt" --base "$stall_base"
   if [[ $RC -eq 1 ]] && printf '%s' "$OUT" | jq -e '.stall.class == "unpushed_commits" and .stall.evidence.unpushed_commits >= 1' >/dev/null; then
@@ -798,6 +806,18 @@ ${base}"
     worker "$missing" </dev/null 2>"$TMP/once-fresh")"; RC=$?
   if [[ $RC -eq 1 ]] && printf '%s' "$OUT" | jq -e '.reason == "checkpoint_pending" and (has("stall") | not)' >/dev/null; then
     pass; else fail "a checkpoint inside the budget stays pending: RC=$RC OUT=$OUT"; fi
+
+  # A dispatch already past its budget stalls on the FIRST interval of a
+  # blocking wait, not after another full budget of this invocation's own.
+  RUN_SEQ=$((RUN_SEQ+1))
+  OUT="$(env HERDR_ENV=1 HERDR_BIN="$FAKE" TEAMLEAD_WAIT_INTERVAL_SEC=0 TEAMLEAD_WAIT_BUDGET_SEC=600 \
+    TEAMLEAD_BLOCKED_CONFIRM_SEC=0 TEAMLEAD_REFUSAL_CONFIRM_SEC=0 FAKE_PANE_TEXT="nothing here" \
+    FAKE_MARKER=timeout FAKE_STATUS=idle TEAMLEAD_NOW_EPOCH=1767229200 \
+    FAKE_GET_COUNTER="$TMP/expired-since-count" \
+    bash "$SCRIPT" --worktree "$stall_wt" --base "$stall_base" \
+    --since "2026-01-01T00:00:00+00:00" worker "$missing" </dev/null 2>"$TMP/expired-since")"; RC=$?
+  if [[ $RC -eq 1 ]] && printf '%s' "$OUT" | jq -e '(.stall | type) == "object" and .elapsed_seconds == 0' >/dev/null; then
+    pass; else fail "an expired dispatch stalls on the first interval: RC=$RC OUT=$OUT"; fi
 
   # An unreadable --since is a usage/tool failure, never a silent stall.
   RUN_SEQ=$((RUN_SEQ+1))

@@ -39,8 +39,13 @@
   committed because the tree looks finished. A git read that fails inside the
   classifier is `unknown` rather than a quiet zero — an unreadable history
   would otherwise classify a worker's committed work as a retryable
-  `no_work`. `TEAMLEAD_NOW_EPOCH` is the test seam that keeps the budget cases
-  off the run clock.
+  `no_work`. Mid-operation covers the operation DIRECTORIES too
+  (`rebase-merge/`, `rebase-apply/`, `sequencer/`): a rebase paused at an
+  `exec` or `break` writes one with no `REBASE_HEAD` and can leave a clean
+  tree. The stall conjunction is read on every interval, so a dispatch already
+  past its budget stalls at once instead of waiting another full budget of the
+  watcher's own. `TEAMLEAD_NOW_EPOCH` is the test seam that keeps the budget
+  cases off the run clock.
 
 - **A developer reads its own gate evidence instead of entering the pre-merge
   wait (#369).** A developer finished its source work, pushed, and got green

@@ -517,8 +517,12 @@ classify_worktree() { # <worktree-path> [base-revision]
       '{class: "unknown", evidence: {worktree: $t, readable: false, error: $e}}'
     return 0
   fi
+  # Marker files AND operation directories. A rebase paused at an `exec` or
+  # `break` writes `rebase-merge/` with no REBASE_HEAD and can leave a clean
+  # tree, which would classify as no_work or as completed commits.
   local marker
-  for marker in MERGE_HEAD REBASE_HEAD CHERRY_PICK_HEAD REVERT_HEAD BISECT_LOG; do
+  for marker in MERGE_HEAD REBASE_HEAD CHERRY_PICK_HEAD REVERT_HEAD BISECT_LOG \
+                rebase-merge rebase-apply sequencer; do
     if [[ -e "${gitdir}/${marker}" ]]; then mid=true; break; fi
   done
   rc=0
@@ -815,52 +819,38 @@ main() {
     else
       unconfirmed_idle=0
     fi
+    # The stall conjunction is read on EVERY interval. With `--since` the budget
+    # is measured from the dispatch, so one already past it stalls here rather
+    # than after another full budget of this invocation's own (#418). Without
+    # `--since` this fires exactly at the budget boundary, as before.
+    local stall_rc=0
+    stalled_now "$state" "$elapsed" || stall_rc=$?
+    if (( stall_rc == 2 )); then return 2; fi
+    if (( stall_rc == 0 )); then
+      local stall
+      stall="$(classify_worktree "$WORKTREE" "$BASE")"
+      if [[ -z "$stall" ]]; then
+        warn "the stall classifier produced no output for worktree '${WORKTREE}' — reporting the stall unclassified"
+        stall='{"class": "unknown", "evidence": {"worktree": null, "readable": false, "error": "classifier produced no output"}}'
+      fi
+      emit "$state" false "$elapsed" "" "$stall"
+      warn "${AGENT} stalled: no report, worker reads ${state}, and the ${TEAMLEAD_WAIT_BUDGET_SEC}s budget${SINCE:+ from ${SINCE}} is spent — read the pane with \`${HERDR_BIN} agent read ${AGENT} --source visible\`, record a user-attention obligation, and preserve any partial work as evidence; never commit it on the strength of the tree building"
+      return 1
+    fi
+
     if (( once )); then
       if (( unconfirmed_idle > 0 )); then
         sleep "$CHECK_CONFIRM_SEC"
         continue
       fi
-      # A checkpoint reaches the stall outcome too, measured from `--since`.
-      # Without it a checkpoint has no elapsed time of its own and every
-      # recheck restarts the clock, so the stall would never be reached
-      # through the supervision loop the skill actually runs (#418).
-      local once_stall=null once_rc=0
-      stalled_now "$state" "$elapsed" || once_rc=$?
-      if (( once_rc == 2 )); then return 2; fi
-      if (( once_rc == 0 )); then
-        once_stall="$(classify_worktree "$WORKTREE" "$BASE")"
-        if [[ -z "$once_stall" ]]; then
-          warn "the stall classifier produced no output for worktree '${WORKTREE}' — reporting the stall unclassified"
-          once_stall='{"class": "unknown", "evidence": {"worktree": null, "readable": false, "error": "classifier produced no output"}}'
-        fi
-        emit "$state" false "$elapsed" "" "$once_stall"
-        warn "${AGENT} stalled: no report, worker reads ${state}, and the ${TEAMLEAD_WAIT_BUDGET_SEC}s budget from ${SINCE} is spent — read the pane with \`${HERDR_BIN} agent read ${AGENT} --source visible\`, record a user-attention obligation, and preserve any partial work as evidence; never commit it on the strength of the tree building"
-        return 1
-      fi
       emit "$state" false "$elapsed" "checkpoint_pending"
       return 1
     fi
     if (( elapsed >= TEAMLEAD_WAIT_BUDGET_SEC )); then
-      # The report is absent, the worker reads terminal, and the budget is
-      # spent: that conjunction is the stall, and the wait ends on it rather
-      # than continuing on a signal that is never arriving (#418).
-      local stalled=0 stall=null srr=0
-      stalled_now "$state" "$elapsed" || srr=$?
-      if (( srr == 2 )); then return 2; fi
-      if (( srr == 0 )); then
-        stalled=1
-        stall="$(classify_worktree "$WORKTREE" "$BASE")"
-        if [[ -z "$stall" ]]; then
-          warn "the stall classifier produced no output for worktree '${WORKTREE}' — reporting the stall unclassified"
-          stall='{"class": "unknown", "evidence": {"worktree": null, "readable": false, "error": "classifier produced no output"}}'
-        fi
-      fi
-      emit "$state" false "$elapsed" "" "$stall"
-      if (( stalled )); then
-        warn "${AGENT} stalled: no report, worker reads ${state}, and the ${TEAMLEAD_WAIT_BUDGET_SEC}s budget is spent — read the pane with \`${HERDR_BIN} agent read ${AGENT} --source visible\`, record a user-attention obligation, and preserve any partial work as evidence; never commit it on the strength of the tree building"
-      else
-        warn "${AGENT} produced no report within ${TEAMLEAD_WAIT_BUDGET_SEC}s (marker seen: ${marker}, file present: $([[ -f "$REPORT_PATH" ]] && echo 1 || echo 0)) — read the pane with \`${HERDR_BIN} agent read ${AGENT} --source visible\` before re-dispatching"
-      fi
+      # Exhaustion that is NOT a stall: the report landed, or the worker is
+      # still working. The stall conjunction returned above.
+      emit "$state" false "$elapsed"
+      warn "${AGENT} produced no report within ${TEAMLEAD_WAIT_BUDGET_SEC}s (marker seen: ${marker}, file present: $([[ -f "$REPORT_PATH" ]] && echo 1 || echo 0)) — read the pane with \`${HERDR_BIN} agent read ${AGENT} --source visible\` before re-dispatching"
       return 1
     fi
 
