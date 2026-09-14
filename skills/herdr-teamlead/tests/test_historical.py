@@ -434,7 +434,10 @@ class HistoricalCommandsTest(fixture.CliCase):
     def test_import_with_remaining_existing_plan_still_requires_actual_blocking_review(self):
         self.seed(5)
         state = self.saved()
-        add_assignment(state, COMPLETED, "judge", "claude", task=TASK)
+        add_assignment(state, "2026-03-01T13:00:00+00:00", "investigator", "grok", task=TASK)
+        investigator_index = len(state["assignments"]) - 1
+        state["assignments"][investigator_index]["status"] = "applied"
+        add_assignment(state, "2026-03-01T15:00:00+00:00", "judge", "claude", task=TASK)
         save_state(self.state, state)
         config = json.loads(self.config.read_text())
         config["judge"] = {"agent": "claude", "model": "claude-opus-4-6", "effort": "high"}
@@ -446,11 +449,10 @@ class HistoricalCommandsTest(fixture.CliCase):
             "change_in_approach": "Correct the remaining case", "judge_report": str(judge)})
         self.assertEqual(code, 0, err)
         # The diagnosis rules on a prepared causal assessment (#408), and the
-        # operator's budget overrides the remedy it returns (#407).
+        # operator's budget overrides the remedy it returns (#407). The
+        # consultation precedes the judge dispatch that rules on it.
         state = self.saved()
-        add_assignment(state, "2026-03-01T13:00:00+00:00", "investigator", "grok", task=TASK)
-        index = len(state["assignments"]) - 1
-        state["assignments"][index]["status"] = "applied"
+        index = investigator_index
         state["recovery"]["dispatches"].append({
             "schema_version": 1, "at": "2026-03-01T13:00:00+00:00", "id": "investigator-dispatch",
             "fingerprint": "e" * 64, "role": "investigator", "agent": "grok", "task": TASK,

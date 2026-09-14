@@ -103,12 +103,16 @@ class RecoveryCommandTests(fixture.CliCase):
         state = empty_state()
         for fix in (None, 1, 2, 3, 4, 5):
             add_assignment(state, "2026-02-03T09:00:0{}+00:00".format(fix or 0), "developer", "grok", task=TASK, fix_round=fix)
-        add_assignment(state, AT, "judge", "claude", task=TASK)
         save_state(self.state, state)
         self.register()
         config = json.loads(self.config.read_text())
         config["judge"] = {"agent": "claude", "model": "claude-opus-4-6", "effort": "high"}
         self.config.write_text(json.dumps(config))
+        # The consultation precedes the judge dispatch that rules on it (#408).
+        self.record_investigation()
+        state = self.saved()
+        add_assignment(state, "2026-02-03T15:00:00+00:00", "judge", "claude", task=TASK)
+        save_state(self.state, state)
         judge = self.tmp / "judge.md"
         judge.write_text("RULING: amend — correct F1\nACTION: Use one canonical parser\n")
         code, _, err = self.owner("checkpoint", {"id": "cap-5", "task": TASK, "defect": "F1 is still blocking",
@@ -120,7 +124,6 @@ class RecoveryCommandTests(fixture.CliCase):
         diagnosis = self.tmp / "diagnosis.md"
         diagnosis.write_text("DIAGNOSIS: the find-rate held flat\nREMEDY: continue — two more rounds\n"
                              "BOUND: 1\nEVIDENCE: rounds 1-5\nUNVERIFIED: none\n")
-        self.record_investigation()
         if skip_diagnosis:
             return
         code, _, err = self.owner("diagnose", {"id": "diag-cap", "task": TASK, "checkpoint": "cap-5",

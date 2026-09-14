@@ -385,8 +385,9 @@ dispute, both positions with report paths, the governing rule, the tree.
 
 For an exhausted allowance, compose from `templates/brief-judge-diagnosis.md`
 through Step 7 under the role key `judge-diagnosis`, which writes
-`brief-judge-diagnosis.md`: the task, rounds spent, remaining blocking work,
-the per-round history, the tree, and any prior remedy with what it changed.
+`brief-judge-diagnosis.md`: the assessed investigator report, the task, rounds
+spent, remaining blocking work, the per-round history, the tree, and any prior
+remedy with what it changed.
 The pinned seat is still `judge`, so plan and dispatch that role and pass this
 file as its brief: `--brief judge=<outdir>/brief-judge-diagnosis.md`.
 

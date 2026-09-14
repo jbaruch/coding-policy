@@ -387,10 +387,13 @@ def diagnose(store, assignments, data, at, judge_agent, enrolled_report, supervi
     judge = latest_assignment(assignments, task=data["task"], role="judge", agent=judge_agent, status="applied")
     if not judge_agent or developer is None or judge is None or not assignment_after(assignments, judge[0], developer[0]):
         raise UsageError("A diagnosis needs the configured pinned judge's completed assignment after the latest developer attempt.", {})
+    # After the attempt it explains and before the judge that rules on it: a
+    # consultation delivered afterwards is not what the judge read (#408).
     if not any(row["task"] == data["task"] and row["role"] == "investigator"
                and assignment_after(assignments, row["assignment_index"], developer[0])
+               and assignment_after(assignments, judge[0], row["assignment_index"])
                for row in investigations):
-        raise UsageError("A diagnosis rules on a prepared causal assessment: record an assessed investigator consultation for task {} after its latest developer attempt, then dispatch the judge.".format(data["task"]), {})
+        raise UsageError("A diagnosis rules on a prepared causal assessment: record an assessed investigator consultation for task {} after its latest developer attempt and before the judge dispatch you cite.".format(data["task"]), {})
     if supervised:
         if not isinstance(enrolled_report, str) or not enrolled_report.strip():
             raise UsageError("This lead is bound, and no supervision enrollment binds a report to the pinned judge on task {}; dispatch the diagnosis through the bound round before recording it.".format(data["task"]), {})

@@ -53,6 +53,7 @@ class RecoveryTests(unittest.TestCase):
 
     def seed_checkpoint(self):
         self.exhaust()
+        self.consult_investigator("2026-02-03T09:30:00+00:00")
         add_assignment(self.state, AT, "judge", "judge", task=TASK)
         return checkpoint(self.store, self.history, {
             "id": "checkpoint-5", "task": TASK, "defect": "F1 remains open", "previous_attempts": "Five attempts changed parsing and quoting",
@@ -93,7 +94,9 @@ class RecoveryTests(unittest.TestCase):
 
     def judge_after_developer(self, number):
         # The diagnosis gate needs the pinned judge's assignment after the
-        # latest developer attempt, as an adjudication citation does.
+        # latest developer attempt, and the consultation it rules on before
+        # that dispatch.
+        self.consult_investigator("2026-02-03T11:30:0{}+00:00".format(number))
         add_assignment(self.state, "2026-02-03T12:00:0{}+00:00".format(number), "judge", "judge", task=TASK)
 
     def next_checkpoint(self, name):
@@ -104,13 +107,16 @@ class RecoveryTests(unittest.TestCase):
             "progress": "The named change landed; the finding did not close",
             "change_in_approach": "Take the next remedy on the ladder"}, AT, "judge")["id"]
 
+    def consult_investigator(self, at):
+        """Record the consultation the judge rules on, before its dispatch."""
+        add_assignment(self.state, at, "investigator", "worker", task=TASK)
+        self.investigator_index = len(self.history) - 1
+        return self.investigator_index
+
     def investigated(self, index=None):
-        """An assessed investigator consultation for this task, as #408 requires."""
+        """The assessed investigator consultation #408 requires."""
         if index is None:
-            # Later than every developer round the fixture records, so the
-            # assessment genuinely follows the attempt it explains.
-            add_assignment(self.state, "2026-02-03T13:00:00+00:00", "investigator", "worker", task=TASK)
-            index = len(self.history) - 1
+            index = getattr(self, "investigator_index", 0)
         return [{"task": TASK, "role": "investigator", "assignment_index": index}]
 
     def run_diagnosis(self, data, judge="judge", enrolled=None, investigations=None):
@@ -260,6 +266,7 @@ class RecoveryTests(unittest.TestCase):
         # coding-policy#408: the investigator's profile is written for repeated
         # unsuccessful fixes, and the judge is the more expensive seat.
         self.seed_checkpoint()
+        seeded = self.investigator_index
         request = self.diagnosis("diag-1", "continue", 2)
         with self.assertRaisesRegex(UsageError, "prepared causal assessment"):
             self.run_diagnosis(request, investigations=[])
@@ -271,7 +278,11 @@ class RecoveryTests(unittest.TestCase):
             self.run_diagnosis(request, investigations=[{"task": TASK, "role": "architect", "assignment_index": 0}])
         with self.assertRaisesRegex(UsageError, "prepared causal assessment"):
             self.run_diagnosis(request, investigations=self.investigated(index=0))
-        self.assertEqual(self.run_diagnosis(request)["remedy"], "continue")
+        # A consultation delivered after the judge dispatch is not what it read.
+        late = self.consult_investigator("2026-02-03T20:00:00+00:00")
+        with self.assertRaisesRegex(UsageError, "before the judge dispatch"):
+            self.run_diagnosis(request, investigations=self.investigated(index=late))
+        self.assertEqual(self.run_diagnosis(request, investigations=self.investigated(index=seeded))["remedy"], "continue")
 
     def test_an_adjudication_report_is_not_a_diagnosis(self):
         # coding-policy#407: RULING and ACTION belong to adjudication; a mixed
@@ -371,6 +382,7 @@ class RecoveryTests(unittest.TestCase):
 
     def test_that_checkpoint_carries_the_operator_bounded_approval_through(self):
         self.exhaust()
+        self.consult_investigator("2026-02-03T09:30:00+00:00")
         add_assignment(self.state, AT, "judge", "judge", task=TASK)
         checkpoint(self.store, self.history, {"id": "cp", "task": TASK, "defect": "F1",
             "previous_attempts": "Five fixes", "progress": "Still blocked",
