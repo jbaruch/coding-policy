@@ -112,7 +112,7 @@ def _pane_state(client, pane, shell_pid, stopped_pid, attempted=False):
     return "stopping" if stopped_pid in pids else "settling"
 
 
-def _name_state(client, name, pane, attempted=False):
+def name_state(client, name, pane, attempted=False):
     """`released` once Herdr answers agent_not_found, `reserved` while the old
     record still names this pane. Any other answer raises."""
     try:
@@ -135,11 +135,11 @@ def await_release(client, name, pane, shell_pid, stopped_pid, sleep=time.sleep, 
     Both predicates are re-read on every attempt and must hold on the same
     read; a pane that regresses after the shell appeared is not released.
     """
-    pane_state = name_state = None
+    pane_state = current_name = None
     for attempt in range(1, RELEASE_POLL_ATTEMPTS + 1):
         pane_state = _pane_state(client, pane, shell_pid, stopped_pid, attempted)
-        name_state = _name_state(client, name, pane, attempted)
-        if pane_state == "shell" and name_state == "released":
+        current_name = name_state(client, name, pane, attempted)
+        if pane_state == "shell" and current_name == "released":
             return {"attempts": attempt, "shell_pid": shell_pid}
         if attempt < RELEASE_POLL_ATTEMPTS:
             sleep(RELEASE_POLL_INTERVAL_SEC)
@@ -148,7 +148,7 @@ def await_release(client, name, pane, shell_pid, stopped_pid, sleep=time.sleep, 
         pending.append("pane {} still runs the stopped process {}".format(pane, stopped_pid))
     elif pane_state != "shell":
         pending.append("pane {} holds neither only its shell {} nor the stopped process {}".format(pane, shell_pid, stopped_pid))
-    if name_state != "released":
+    if current_name != "released":
         pending.append("Herdr still reserves the agent name {!r}".format(name))
     raise HerdrError(
         "Release wait exhausted after {} reads: {}. {} Inspect the pane by hand before retrying.".format(RELEASE_POLL_ATTEMPTS, "; ".join(pending), _start_clause(attempted)),

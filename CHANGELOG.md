@@ -1,5 +1,34 @@
 # Changelog
 
+### Fixed
+
+- **A relaunched seat waits for Herdr to release its old name, and no brief is
+  typed into a modal (#379, #393).** Two live dispatch failures, one per half.
+
+  Herdr keeps an agent name reserved briefly after the process exits, and the
+  relaunch waited only for the pane's shell. A fresh judge dispatch terminated
+  the old process, started immediately, and was refused with
+  `agent_name_taken` while the seat still read Idle — the attempt was correctly
+  recorded `not_sent`, and the retry from the same verified shell then worked.
+  `launch.restart_worker` now waits for the name to read released (the same
+  bounded gate `restoration.py` already used for a retained worker) and retries
+  a reservation that lapses late, a bounded number of times, re-proving the
+  pane and the name each round. Every other start failure still ends the
+  relaunch untried, since Herdr may already have started the process.
+
+  Separately, Codex opened its startup review dialog over the prompt. Herdr
+  reported `interactive_ready`, the first assignment went into that dialog, and
+  the apply returned `sent_but_not_started` with no model turn and no
+  assignment in the transcript. `ensure_ready` judged the composer's CONTENT,
+  and an absent composer has none, so a modal drawn over the prompt read as an
+  empty one. It now requires the composer to be VISIBLE first, waiting a
+  prompt that has not appeared yet out and refusing one that never appears —
+  before any input. No permission or hook configuration is touched.
+
+  The shared test runner models the release too: `agent get` answers
+  `agent_not_found` between a terminate and the next start, which is what a
+  real relaunch sees.
+
 ## 0.3.225 — 2026-09-14
 
 ### Added
