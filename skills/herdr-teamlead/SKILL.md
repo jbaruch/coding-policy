@@ -167,7 +167,24 @@ stderr object: an absent declaration is written first (`references/specialists.m
 and an `unaddressed_trigger` is staffed in the roles below or answered by a
 recorded decision with its reason. Re-run the command with the updated
 declaration, roles, requirements and decisions after every such change, and
-plan only once it exits 0:
+plan only once it exits 0.
+
+A round that will split its review surface validates the partition first:
+
+```bash
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
+bash "$CP/skills/herdr-teamlead/teamlead.sh" validate-partition \
+  --repo <repo-path> --base <recorded-base> [--head <pushed-head>] \
+  --partition <partition.json>
+```
+
+Exit 1 names every unowned path, every overlap and every slice owning nothing,
+in one run. Fix the partition and re-run; plan only once it exits 0. The document's format, the ownership
+payload and the seating it produces:
+
+```text
+skills/herdr-teamlead/references/review-partition.md
+```
 
 ```bash
 CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"

@@ -389,6 +389,23 @@ description: Running a multi-agent team — task-based specialist composition, c
 - An investigation-only round gates its knowledge deliverable under `skills/herdr-teamlead/references/assignment-reasoning.md`
 - Pre-development output is a design note or a test plan, never a pass
 - The tester and the reviewer pass on the pushed branch before the PR opens
+- A round may split its review surface across several reviewers against a declared partition
+- The partition is disjoint and exhaustive over the change
+- Every changed file belongs to exactly one slice
+- A partition leaving a changed file unowned is refused
+- A partition whose slices overlap is refused
+- `skills/herdr-teamlead/teamlead/partition.py` decides both refusals, through `teamlead validate-partition`
+- Each slice is dispatched to a distinct worker under the existing capability, contribution-exclusion and headroom ordering
+- Each slice's brief names its slice
+- Each slice's brief forbids roaming
+- An observation outside a reviewer's slice goes in a separate section of its report
+- An out-of-slice observation never forms part of that reviewer's verdict
+- A slice is saturated when its reviewer reports clean at the current tip
+- A change is reviewed when every slice is saturated at one tip
+- Severity classification, gating and independence are unchanged
+- A slice verdict is an ordinary reviewer verdict over a smaller surface
+- A partition never makes an unreviewable module feel reviewed
+- Slice boundaries that cannot be drawn without cutting through mutual dependencies are a structural finding for the architect trigger
 - The gate reads the post-push reports for the current branch tip
 - A pre-development report never satisfies the gate
 - Exclude actual design and implementation contributors from independent verification of that task

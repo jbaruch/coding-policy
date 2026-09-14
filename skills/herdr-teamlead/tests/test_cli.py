@@ -1492,5 +1492,7 @@ class ApplyCommandTest(CliCase):
         self.assertIn("would destroy its contents", err)
         self.assertEqual(self.state.read_text(encoding="utf-8"), self.CORRUPT_STATE)
 
+
+
 if __name__ == "__main__":
     unittest.main()

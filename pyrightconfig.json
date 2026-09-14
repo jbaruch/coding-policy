@@ -87,7 +87,9 @@
     "skills/herdr-teamlead/tests/test_triggers.py",
     "skills/herdr-teamlead/tests/test_resolve_policy_paths.py",
     "skills/herdr-teamlead/tests/test_stale_grok_delivery.py",
-    "scripts/tests/test_source_index.py"
+    "scripts/tests/test_source_index.py",
+    "skills/herdr-teamlead/teamlead/partition.py",
+    "skills/herdr-teamlead/tests/test_partition.py"
   ],
   "executionEnvironments": [
     {
