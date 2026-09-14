@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.212 — 2026-09-14
+
 ### Fixed
 
 - **The deferred advisories from #402 and #404 (#403, #405).** Twelve findings
