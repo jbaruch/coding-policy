@@ -9,10 +9,15 @@
   - A checkpoint citing a judge ruling now records `requested_by`, the same
     source/quote receipt every other operator decision carries. The ledger
     called the ruling "operator-requested" while holding nothing of the
-    request.
-  - A task diagnosed `stop` refuses a judge dispatch outright. The bound was
-    read only when the checkpoint was written — after the seat had been
-    planned, started and had produced its report.
+    request. The checkpoint record bumps to version 3 for the added field;
+    version 2 stays a valid shape for rows written before it, version-1 rows
+    migrate into 2, and no older row has a receipt invented for it.
+  - A task diagnosed `stop` with no plan authorized over it refuses a judge
+    dispatch outright. The bound was read only when the checkpoint was
+    written — after the seat had been planned, started and had produced its
+    report. An operator plan over the `stop` (`rules/review-severity.md`
+    Judge-Accepted Defect Carve-Out) is ordinary work the judge still
+    serves.
   - The read boundary enforces one cited ruling per task. It checked each
     checkpoint alone, so a hand-edited ledger holding two for one task
     validated.

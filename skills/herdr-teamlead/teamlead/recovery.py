@@ -33,7 +33,16 @@ SPECIALIST_DISPATCH_VERSION = 2
 #: makes it optional. Version-1 rows keep their judge evidence and are never
 #: rewritten. The checkpoint now records the exhaustion the diagnosis brief is
 #: built from (rules/agent-team-operation.md Judge Seat).
-OPERATOR_CHECKPOINT_VERSION = 2
+#: The version `checkpoint` writes. A cited ruling at this version carries the
+#: `requested_by` receipt for the operator request it answers (#400).
+OPERATOR_CHECKPOINT_VERSION = 3
+#: Versions the reader still accepts. A version-2 row predates the receipt and
+#: is never stamped into a shape whose request nobody recorded
+#: (rules/stateful-artifacts.md Migration Policy).
+CHECKPOINT_VERSIONS = frozenset({2, OPERATOR_CHECKPOINT_VERSION})
+#: What a version-1 row upgrades into: its ruling was mandatory there and
+#: optional at 2, so the stamp alone is the whole upgrade.
+MIGRATED_CHECKPOINT_VERSION = 2
 DISPATCH_METADATA_FIELDS = frozenset({"requirements", "reviewer_scope"})
 #: The judge's diagnosis remedies, descending. A task's next diagnosis sits
 #: below its last, or repeats that rung once against recorded progress, and
@@ -74,14 +83,20 @@ def empty_recovery():
 
 
 def _migrate_checkpoints(store):
-    """Upgrade version-1 checkpoints in place, preserving their evidence.
+    """Upgrade older checkpoints in place, preserving their evidence.
 
     Version 1 required the pinned judge's ruling and version 2 makes it
-    optional, so every version-1 row is already a valid version-2 row and the
-    upgrade is the stamp alone: identity, fix round, base and recorded ruling
-    all survive it unchanged (rules/stateful-artifacts.md Migration Policy).
+    optional, so every version-1 row is already a valid version-2 row.
+    Version 3 adds `requested_by`, the receipt for the operator request a
+    cited ruling answers (#400). Neither older version recorded that request,
+    and a migration never invents one: an older row keeps its ruling and
+    carries no receipt, which the reader accepts for those rows alone
+    (rules/stateful-artifacts.md Migration Policy).
+
     A version-1 row missing the ruling it was required to carry is refused
-    rather than stamped into a shape where the pair is optional.
+    rather than stamped into a shape where the pair is optional. A row
+    carrying `requested_by` at an older version is unowned newer data and is
+    refused rather than stamped.
     """
     rows = store.get("checkpoints")
     if not isinstance(rows, list):
@@ -92,7 +107,9 @@ def _migrate_checkpoints(store):
             continue
         if "judge_agent" not in row or "judge_evidence" not in row:
             raise UsageError("An older checkpoint is missing the ruling evidence its version required; restore the owner-written ledger.", {})
-        row["schema_version"] = OPERATOR_CHECKPOINT_VERSION
+        if "requested_by" in row:
+            raise UsageError("An older checkpoint carries an operator-request receipt its version never wrote; preserve the ledger for owner recovery.", {})
+        row["schema_version"] = MIGRATED_CHECKPOINT_VERSION
         migrated = True
     return migrated
 
@@ -341,6 +358,11 @@ def checkpoint(store, assignments, data, at, judge_agent):
         # comparing versions reported an unmigrated version-1 row as different
         # evidence, so re-running an already-recorded checkpoint failed (#396).
         compared = (set(prior) | set(record)) - {"at", "schema_version"}
+        # A row written before version 3 carries no request receipt, so the
+        # field this version adds cannot make a replay read as changed
+        # evidence (rules/stateful-artifacts.md Migration Policy).
+        if prior.get("schema_version", OPERATOR_CHECKPOINT_VERSION) < OPERATOR_CHECKPOINT_VERSION:
+            compared -= {"requested_by"}
         if any(prior.get(key) != record.get(key) for key in compared):
             raise UsageError("Checkpoint identity already describes different evidence; record a new checkpoint without rewriting the old one.", {})
         return prior
@@ -364,16 +386,21 @@ def require_investigation_before_judge(store, assignments, task, investigations)
     dispatched for an ordinary dispute is untouched: the gate applies only
     while the task sits at an exhausted allowance with no unspent bound.
 
-    A task whose diagnoses reached `stop` is refused outright. `stop` ends
-    implementation, the ladder is spent, and the one operator-requested ruling
-    a checkpoint may cite is bounded per task -- so there is nothing this
-    dispatch could record, and the bound is better read before the round than
-    after its report exists (#400).
+    A task whose diagnoses reached `stop` with no plan authorized over it is
+    refused outright. `stop` ends implementation, the ladder is spent, and the
+    one operator-requested ruling a checkpoint may cite is bounded per task --
+    so there is nothing this dispatch could record, and the bound is better
+    read before the round than after its report exists (#400). The operator
+    overrides a `stop` by authorizing a plan over it
+    (`rules/review-severity.md` Judge-Accepted Defect Carve-Out), and an
+    authorized correction is ordinary work the judge serves as it serves any
+    other.
     """
     if not task or task not in store["tasks"]:
         return None
-    if any(row["remedy"] == "stop" for row in diagnoses_for(store, task)):
-        raise UsageError("Task {} is diagnosed `stop`: implementation has ended and its one operator-requested ruling is spent, so a judge round records nothing. Ship what is clean and track the remainder.".format(task), {})
+    stopped = any(row["remedy"] == "stop" for row in diagnoses_for(store, task))
+    if stopped and not any(row["task"] == task for row in active_plans(store)):
+        raise UsageError("Task {} is diagnosed `stop` with no plan authorized over it: implementation has ended and its one operator-requested ruling is spent, so a judge round records nothing. Ship what is clean and track the remainder, or record the operator's plan over this remedy first.".format(task), {})
     count = confirmed_fix(assignments, task)
     if count < DEFAULT_FIX_LIMIT:
         return None
@@ -1303,7 +1330,7 @@ def validate_store(store, assignments):
             identifiers = []
             for row in store[name]:
                 versions = ({1, 2} if name in {"delivery_recoveries", "dispatches"}
-                            else {OPERATOR_CHECKPOINT_VERSION} if name == "checkpoints"
+                            else CHECKPOINT_VERSIONS if name == "checkpoints"
                             else {DIAGNOSIS_RECORD_VERSION} if name == "diagnoses"
                             else {RECOVERY_SCHEMA_VERSION})
                 if not isinstance(row, dict) or type(row.get("schema_version")) is not int or row["schema_version"] not in versions:
@@ -1337,12 +1364,20 @@ def validate_store(store, assignments):
                 text(row["judge_agent"], "judge_agent")
                 text(row["judge_report"], "judge_report")
                 validate_receipt(row["judge_evidence"])
+                # The receipt rides with the version that records it: a
+                # version-2 row predates it and never has one invented (#400).
+                if row["schema_version"] == OPERATOR_CHECKPOINT_VERSION:
+                    authorization(row["requested_by"])
+                elif "requested_by" in row:
+                    raise UsageError("An older checkpoint carries an operator-request receipt its version never wrote; preserve the ledger for owner recovery.", {})
                 # `checkpoint` refuses a second cited ruling as it writes one,
                 # but the read boundary checked each row alone, so a ledger
                 # holding two for one task validated (#400).
                 if row["task"] in ruled_tasks:
                     raise UsageError("A task cites more than one operator-requested ruling; the operator grants at most one. Preserve the ledger for owner recovery.", {})
                 ruled_tasks.add(row["task"])
+            elif "requested_by" in row:
+                raise UsageError("A checkpoint records an operator request with no ruling it authorized; preserve the ledger for owner recovery.", {})
         for row in store["plans"]:
             source = _item(store["checkpoints"], row["checkpoint"], "checkpoint")
             authorization(row["authorization"])

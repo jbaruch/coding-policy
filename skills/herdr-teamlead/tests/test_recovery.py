@@ -355,6 +355,7 @@ class RecoveryTests(unittest.TestCase):
         # Both record kinds migrate in one pass; neither short-circuits the
         # other (rules/stateful-artifacts.md Migration Policy).
         older["checkpoints"][0]["schema_version"] = 1
+        older["checkpoints"][0].pop("requested_by", None)
         self.assertTrue(migrate_store(older))
         self.assertEqual(older["checkpoints"][0]["schema_version"], 2)
         self.assertEqual(older["diagnoses"][0]["schema_version"], 2)
@@ -398,6 +399,12 @@ class RecoveryTests(unittest.TestCase):
         self.run_diagnosis(self.diagnosis("diag-stop", "stop", None), "judge")
         with self.assertRaisesRegex(UsageError, "diagnosed `stop`"):
             require_investigation_before_judge(self.store, self.history, TASK, self.investigated())
+        # The operator overrides a `stop` by authorizing a plan over it
+        # (rules/review-severity.md Judge-Accepted Defect Carve-Out); the
+        # authorized correction is ordinary work the judge still serves.
+        authorize_plan(self.store, self.history, {"id": "over-stop", "task": TASK, "checkpoint": "checkpoint-5",
+            "scope": WORK["scope"], "allowed_paths": ["src/*"], "additional_fixes": 2, "authorization": AUTH}, AT)
+        self.assertIsNone(require_investigation_before_judge(self.store, self.history, TASK, self.investigated()))
 
     def test_a_diagnosis_rules_on_a_prepared_causal_assessment(self):
         # coding-policy#408: the investigator's profile is written for repeated
@@ -594,8 +601,10 @@ class RecoveryTests(unittest.TestCase):
         prior = self.seed_checkpoint()
         evidence = copy.deepcopy(prior["judge_evidence"])
         prior["schema_version"] = 1
+        prior.pop("requested_by", None)
         self.assertTrue(migrate_store(self.store))
         self.assertEqual(prior["schema_version"], 2)
+        self.assertNotIn("requested_by", prior)
         self.assertEqual((prior["judge_agent"], prior["judge_evidence"]), ("judge", evidence))
         validate_store(self.store, self.history)
         self.assertFalse(migrate_store(self.store))
@@ -606,6 +615,7 @@ class RecoveryTests(unittest.TestCase):
         # already been stamped in memory.
         prior = self.seed_checkpoint()
         prior["schema_version"] = 1
+        prior.pop("requested_by", None)
         rejected = copy.deepcopy(self.store)
         rejected["schema_version"] = 5
         # Unowned newer data for a version-5 document: the preflight refuses it.
@@ -618,6 +628,7 @@ class RecoveryTests(unittest.TestCase):
     def test_an_older_checkpoint_without_its_required_ruling_refuses_to_migrate(self):
         prior = self.seed_checkpoint()
         prior["schema_version"] = 1
+        prior.pop("requested_by", None)
         del prior["judge_evidence"]
         with self.assertRaisesRegex(UsageError, "missing the ruling evidence"):
             migrate_store(self.store)
@@ -627,6 +638,7 @@ class RecoveryTests(unittest.TestCase):
         # checkpoint must return it, not read the version as changed evidence.
         prior = self.seed_checkpoint()
         prior["schema_version"] = 1
+        prior.pop("requested_by", None)
         migrate_store(self.store)
         replay = checkpoint(self.store, self.history, self.replay_data(), AT, "judge")
         self.assertIs(replay, prior)
@@ -696,11 +708,9 @@ class RecoveryTests(unittest.TestCase):
         # coding-policy#400: `checkpoint` refuses the second as it writes it;
         # the read boundary checked each row alone and accepted both.
         self.seed_checkpoint()
-        for fix in (6, 7):
-            add_assignment(self.state, "2026-02-03T12:00:0{}+00:00".format(fix), "developer", "worker", task=TASK, fix_round=fix)
         corrupt = copy.deepcopy(self.store)
         first = corrupt["checkpoints"][0]
-        corrupt["checkpoints"].append({**first, "id": "checkpoint-7", "fix_round": 7})
+        corrupt["checkpoints"].append({**first, "id": "checkpoint-5b"})
         with self.assertRaisesRegex(UsageError, "more than one operator-requested ruling"):
             validate_store(corrupt, self.history)
 
