@@ -326,18 +326,18 @@ For each event or pending recheck, verify report delivery:
 ```bash
 CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
 bash "$CP/skills/herdr-teamlead/wait-report.sh" --once \
-  [--worktree <worker-checkout>] [--since <dispatch-sent-at>] <agent-name> <report-path>
+  [--worktree <worker-checkout>] [--base <dispatch-base>] \
+  [--since <dispatch-sent-at>] <agent-name> <report-path>
 ```
 
 The checkpoint emits delivery JSON; exit 2 emits only stderr. Exit 0 confirms
 delivery, 1 remains pending, 3 confirms blocked, 4 lacks confirmed delivery, and
 5 proves terminal refusal; record it with `record-refusal`. Read delivered
-reports in full. Pass `--since` with this dispatch's recorded send time and
-`--worktree` with the worker's checkout: a checkpoint carries no elapsed time
-of its own, so `--since` is what lets the budget be reached, and the exit-1
-stall then carries its `stall` classification. Act on it under
-`rules/agent-team-operation.md` Stalled Workers and record the obligation
-through `references/attention.md`. Preserve the blocked/refusal and native-recovery paths in the
+reports in full. Pass this dispatch's recorded send time as `--since`, its
+recorded base as `--base`, and the worker's checkout as `--worktree`. An exit 1
+then carries either `reason: checkpoint_pending` or a `stall` object; act on a
+stall under `rules/agent-team-operation.md` Stalled Workers and record the
+obligation through `references/attention.md`. Preserve the blocked/refusal and native-recovery paths in the
 following references; never re-dispatch over uncertainty or resend a refused
 brief to its provider.
 

@@ -17,7 +17,14 @@
   "$report" ]` loop could not terminate on a stall) and keeps the interval and
   budget script-owned.
 
-  `wait-report.sh` takes `--since`, this dispatch's recorded send time, so a
+  `wait-report.sh` takes `--base`, the revision the dispatch started from,
+  because zero UNPUSHED commits never established that a worker produced
+  nothing — it may have pushed its work and stopped before reporting. Commits
+  against that base with none outstanding are `pushed_commits`, recovery
+  evidence rather than a retryable dispatch; without a base the classifier says
+  `unknown` instead of guessing the retryable answer.
+
+  It also takes `--since`, this dispatch's recorded send time, so a
   checkpoint (`--once`) reaches the same script-owned budget: a checkpoint
   carries no elapsed time of its own, and repeated rechecks through the
   supervision loop the skill actually runs would otherwise restart the clock
@@ -32,7 +39,8 @@
   committed because the tree looks finished. A git read that fails inside the
   classifier is `unknown` rather than a quiet zero — an unreadable history
   would otherwise classify a worker's committed work as a retryable
-  `no_work`.
+  `no_work`. `TEAMLEAD_NOW_EPOCH` is the test seam that keeps the budget cases
+  off the run clock.
 
 - **A developer reads its own gate evidence instead of entering the pre-merge
   wait (#369).** A developer finished its source work, pushed, and got green

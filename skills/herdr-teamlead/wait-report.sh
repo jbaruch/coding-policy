@@ -13,13 +13,18 @@
 # the wait on a worker that has produced nothing.
 #
 # Contract:
-#   argv  : [--once] [--worktree <path>] [--since <iso8601>] <agent-name> <report-path>
+#   argv  : [--once] [--worktree <path>] [--base <revision>] [--since <iso8601>]
+#           <agent-name> <report-path>
 #           --worktree names the worker's own checkout. With it, a budget
 #                  exhaustion classifies what the worker left behind and the
 #                  JSON carries a "stall" object; without it the exhaustion
 #                  reports the wait alone. The classification NEVER decides
 #                  that the work is usable -- a stalled worker's output is
 #                  unreviewed by construction (#418).
+#           --base names the revision this dispatch started from, from the
+#                  ledger. Without it a clean checkout cannot be told from one
+#                  whose worker pushed and then stopped, so `no_work` is never
+#                  claimed and the class reads `unknown`.
 #           --since names when this dispatch was sent, from the ledger. A
 #                  checkpoint (`--once`) carries no elapsed time of its own, so
 #                  without it repeated checkpoints reset the clock and the
@@ -184,6 +189,9 @@ WORKTREE=""
 #: This dispatch's recorded send time, when the caller named one. A checkpoint
 #: measures the budget from it rather than from its own start (#418).
 SINCE=""
+#: The revision this dispatch started from, when the caller named one. Without
+#: it a clean checkout cannot be told from one whose worker pushed (#418).
+BASE=""
 REFUSAL_STATE=""
 REFUSAL_PANE=""
 
@@ -478,15 +486,19 @@ confirmed_provider_refusal() { # <pane-id>
 # nothing about whether the work is usable (#418). Echoes one JSON object;
 # never fails the wait, because an unreadable worktree is `unknown`, not a
 # reason to lose the stall itself.
-classify_worktree() { # <worktree-path>
-  local tree="$1" status="" mid=false staged=0 modified=0 untracked=0 unpushed=0 class
+classify_worktree() { # <worktree-path> [base-revision]
+  local tree="$1" base="${2:-}" status="" mid=false staged=0 modified=0 untracked=0 unpushed=0 own=-1 class
   if [[ -z "$tree" ]]; then
     # The stall is established without it; only the classification is missing.
     jq -n '{class: "unclassified", evidence: {worktree: null, readable: false}}'
     return 0
   fi
   if [[ ! -d "$tree" ]] || ! git -C "$tree" rev-parse --is-inside-work-tree >/dev/null 2>"$ERRFILE"; then
-    jq -n --arg t "$tree" '{class: "unknown", evidence: {worktree: $t, readable: false}}'
+    local why
+    why="$(tr '\n' ' ' < "$ERRFILE")"
+    warn "\`git rev-parse --is-inside-work-tree\` found no work tree at ${tree}: ${why:-no such directory} — the stall is recorded, its classification is not; inspect that path by hand"
+    jq -n --arg t "$tree" --arg e "${why:-no such directory}" \
+      '{class: "unknown", evidence: {worktree: $t, readable: false, error: $e}}'
     return 0
   fi
   # `--absolute-git-dir`, never the relative `--git-dir`: the relative form is
@@ -512,7 +524,10 @@ classify_worktree() { # <worktree-path>
   rc=0
   status="$(git -C "$tree" status --porcelain --untracked-files=all 2>"$ERRFILE")" || rc=$?
   if (( rc != 0 )); then
-    jq -n --arg t "$tree" --arg e "$(tr '\n' ' ' < "$ERRFILE")" \
+    local why
+    why="$(tr '\n' ' ' < "$ERRFILE")"
+    warn "\`git status\` failed in ${tree}: ${why:-no diagnostic} — the stall is recorded, its classification is not; inspect that checkout by hand"
+    jq -n --arg t "$tree" --arg e "${why:-no diagnostic}" \
       '{class: "unknown", evidence: {worktree: $t, readable: false, error: $e}}'
     return 0
   fi
@@ -541,19 +556,46 @@ classify_worktree() { # <worktree-path>
                                      mid_operation: $m, staged: $s, modified: $d, untracked: $u}}'
     return 0
   fi
+  # Commits this dispatch produced, against the base its brief recorded. Zero
+  # UNPUSHED commits never establishes "produced nothing": a worker can push
+  # its work and stop before reporting, and calling that a retryable no_work
+  # would discard completed work as evidence.
+  if [[ -n "$base" ]]; then
+    rc=0
+    own="$(git -C "$tree" rev-list --count "${base}..HEAD" 2>"$ERRFILE")" || rc=$?
+    if (( rc != 0 )) || [[ ! "$own" =~ ^[0-9]+$ ]]; then
+      local why
+      why="$(tr '\n' ' ' < "$ERRFILE")"
+      warn "could not count this dispatch's commits in ${tree} against ${base}: ${why:-unreadable rev-list output} — the stall is recorded, its classification is not; inspect that checkout by hand"
+      jq -n --arg t "$tree" --arg b "$base" --arg e "${why:-unreadable rev-list output}" \
+        '{class: "unknown", evidence: {worktree: $t, base: $b, readable: false, error: $e}}'
+      return 0
+    fi
+  fi
   # Order follows the recovery each class needs: partial work is preserved as
   # evidence before anything else is read off the tree.
   if [[ "$mid" == true ]] || (( staged > 0 || modified > 0 || untracked > 0 )); then
     class="partial_work"
   elif (( unpushed > 0 )); then
     class="unpushed_commits"
-  else
+  elif (( own > 0 )); then
+    # Pushed and unreported: completed work whose transport succeeded and whose
+    # report did not. Recovery evidence, never a retryable dispatch.
+    class="pushed_commits"
+  elif (( own == 0 )); then
     class="no_work"
+  else
+    # No base to judge against: a clean tree could be an untouched checkout or
+    # a worker that already pushed. Say so rather than guess the retryable one.
+    class="unknown"
   fi
-  jq -n --arg c "$class" --arg t "$tree" --argjson m "$mid" \
-        --argjson s "$staged" --argjson d "$modified" --argjson u "$untracked" --argjson p "$unpushed" \
+  jq -n --arg c "$class" --arg t "$tree" --arg b "$base" --argjson m "$mid" \
+        --argjson s "$staged" --argjson d "$modified" --argjson u "$untracked" \
+        --argjson p "$unpushed" --argjson o "$own" \
     '{class: $c, evidence: {worktree: $t, readable: true, mid_operation: $m,
-                            staged: $s, modified: $d, untracked: $u, unpushed_commits: $p}}'
+                            staged: $s, modified: $d, untracked: $u, unpushed_commits: $p}
+              + (if $b == "" then {base: null, dispatch_commits: null}
+                 else {base: $b, dispatch_commits: $o} end)}'
   return 0
 }
 
@@ -580,10 +622,17 @@ epoch_of() { # <iso8601>
 stalled_now() { # <state> <elapsed-seconds>
   [[ ! -f "$REPORT_PATH" ]] || return 1
   [[ "$1" == "idle" || "$1" == "done" ]] || return 1
-  local elapsed="$2" started
+  local elapsed="$2" started now
   if [[ -n "$SINCE" ]]; then
     started="$(epoch_of "$SINCE")" || return 2
-    elapsed=$(( $(date +%s) - started ))
+    # TEAMLEAD_NOW_EPOCH is the test seam: a budget case needs a fixed clock,
+    # never the run date (rules/testing-standards.md Determinism).
+    now="${TEAMLEAD_NOW_EPOCH:-$(date +%s)}"
+    if [[ ! "$now" =~ ^-?[0-9]+$ ]]; then
+      warn "TEAMLEAD_NOW_EPOCH='${now}' is not epoch seconds"
+      return 2
+    fi
+    elapsed=$(( now - started ))
   fi
   (( elapsed >= TEAMLEAD_WAIT_BUDGET_SEC )) || return 1
   return 0
@@ -606,13 +655,19 @@ main() {
           return 2
         fi
         SINCE="$2"; shift 2 ;;
+      --base)
+        if (( $# < 2 )) || [[ -z "$2" ]]; then
+          warn "--base needs the revision this dispatch started from"
+          return 2
+        fi
+        BASE="$2"; shift 2 ;;
       --) shift; break ;;
-      -*) warn "unknown flag '${1}'"; warn "usage: wait-report.sh [--once] [--worktree <path>] [--since <iso8601>] <agent-name> <report-path>"; return 2 ;;
+      -*) warn "unknown flag '${1}'"; warn "usage: wait-report.sh [--once] [--worktree <path>] [--base <revision>] [--since <iso8601>] <agent-name> <report-path>"; return 2 ;;
       *) break ;;
     esac
   done
   if (( $# != 2 )); then
-    warn "usage: wait-report.sh [--once] [--worktree <path>] [--since <iso8601>] <agent-name> <report-path>"
+    warn "usage: wait-report.sh [--once] [--worktree <path>] [--base <revision>] [--since <iso8601>] <agent-name> <report-path>"
     return 2
   fi
   AGENT="$1"
@@ -773,7 +828,7 @@ main() {
       stalled_now "$state" "$elapsed" || once_rc=$?
       if (( once_rc == 2 )); then return 2; fi
       if (( once_rc == 0 )); then
-        once_stall="$(classify_worktree "$WORKTREE")"
+        once_stall="$(classify_worktree "$WORKTREE" "$BASE")"
         emit "$state" false "$elapsed" "" "$once_stall"
         warn "${AGENT} stalled: no report, worker reads ${state}, and the ${TEAMLEAD_WAIT_BUDGET_SEC}s budget from ${SINCE} is spent — read the pane with \`${HERDR_BIN} agent read ${AGENT} --source visible\`, record a user-attention obligation, and preserve any partial work as evidence; never commit it on the strength of the tree building"
         return 1
@@ -790,7 +845,7 @@ main() {
       if (( srr == 2 )); then return 2; fi
       if (( srr == 0 )); then
         stalled=1
-        stall="$(classify_worktree "$WORKTREE")"
+        stall="$(classify_worktree "$WORKTREE" "$BASE")"
       fi
       emit "$state" false "$elapsed" "" "$stall"
       if (( stalled )); then
