@@ -1,5 +1,34 @@
 # Changelog
 
+### Fixed
+
+- **Four residual ambiguity cases close in `prune-worktrees.sh` (#410).** None
+  changed the outcome on a well-formed checkout with git 2.36 or newer; each
+  was a way the decision could rest on evidence that did not mean what the
+  script read it to mean.
+  - The pre-2.36 fallback is gone. Its scan refused an inventory holding an
+    unrecognized line, which caught a path whose tail was `b`, but a path
+    ending in `<newline>HEAD <sha>` or `<newline>branch refs/heads/other` reads
+    as metadata and passes any scan. No cross-check settles it, so an
+    inventory without `-z` now decides nothing and says to upgrade git.
+  - Branch occupancy is re-read from git either side of every deletion.
+    `update-ref -d` carries none of git's checked-out-worktree guard, and a
+    `worktree add` claiming a branch after the inventory snapshot was
+    invisible to `seen_branches`. A branch a worktree holds is kept with the
+    new reason `checked-out`; one claimed inside the deletion's own window is
+    restored at the commit it was deleted from.
+  - A failed occupancy read after the deletion is a failure, not an
+    unoccupied answer. Falling through to the config probe would overwrite
+    its diagnostic and report a clean deletion whose safety check never ran.
+  - The branch-config probe compares the section instead of a substring.
+    `branch.foo.` also prefixes `branch.foo.bar.remote`, which belongs to the
+    branch `foo.bar`, so with `foo` itself unconfigured the run reported a
+    cleanup failure for a section that was never there.
+  - `dirname` no longer loses a parent's own trailing newline. Command
+    substitution strips both newlines when the parent's name ends in one, so
+    absence was checked against a truncated parent and a confirmed-gone
+    worktree read as unconfirmable.
+
 ## 0.3.219 — 2026-09-14
 
 ### Fixed
