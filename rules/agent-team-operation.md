@@ -170,6 +170,8 @@ description: Running a multi-agent team — task-based specialist composition, c
 - The worker names that drift in its report
 - The worker acts on none of it
 - A worker's repository writes happen only in the worktree its brief names, under `~/.worktrees/`
+- The lead prunes merged, clean worktrees and merged local branches every round, before provisioning and after the merge
+- A dirty, unmerged, locked or detached worktree is reported to the operator, never removed by the lead
 - A worker's report, plan, and patch artifacts go only under the reports directory its brief names
 - A worker writes nowhere else
 - Every code-touching command carries its own `cd <worktree> &&` prefix

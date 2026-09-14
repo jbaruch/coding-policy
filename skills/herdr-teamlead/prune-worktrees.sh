@@ -1,0 +1,259 @@
+#!/usr/bin/env bash
+# Remove the worker worktrees and local branches a round left behind.
+#
+# Every Herdr round provisions worktrees under the worktree root
+# (`provision-worktree.sh`) and the lead removes the task's own worktree after
+# its merge (`rules/agent-worktree-isolation.md` Cleanup). Review, test and
+# verify worktrees from earlier rounds, and the local branches a removed
+# worktree leaves behind, accumulate until someone notices `git worktree list`
+# scrolling. Which of them are safe to remove is one right answer per input,
+# so the decision lives here (`rules/script-delegation.md`).
+#
+# Decision predicate — a worktree is REMOVED (and its branch deleted) iff:
+#   * it is not the shared checkout itself,
+#   * it lies under the worktree root,
+#   * it is on a branch (not detached) other than origin's default branch,
+#   * it is not locked,
+#   * `git status --porcelain` is empty — untracked files count as dirty,
+#   * its branch is an ancestor of origin's default branch (fully merged).
+# A local branch with no worktree is DELETED iff it is not the default branch
+# and is an ancestor of origin's default branch. Deletion is `git branch -d`,
+# never `-D`, and removal is `git worktree remove`, never `rm -rf`. Everything
+# else is KEPT and reported with its reason. Stale worktree metadata is
+# pruned first (`git worktree prune`). Nothing here touches origin.
+#
+# Contract:
+#   argv  : <shared-checkout> [--dry-run]
+#           --dry-run reports the same decisions and changes nothing.
+#   stdout: one JSON object —
+#           {"shared":"<abs>","default_branch":"<name>","dry_run":bool,
+#            "worktrees_removed":[{"path","branch"}],
+#            "worktrees_kept":[{"path","branch","reason"}],
+#            "branches_deleted":["<name>"],
+#            "branches_kept":[{"branch","reason"}],
+#            "failed":[{"target","error"}]}
+#           reason is one of: default-branch, detached, dirty, locked,
+#           outside-root, unmerged.
+#   stderr: diagnostics only.
+#   exit  : 0 every decision applied (or previewed),
+#           1 precondition unmet (usage, git or python3 absent, not a repo,
+#             no origin, default branch unresolvable),
+#           2 at least one removal or deletion failed; the rest still ran and
+#             `failed` names each one.
+#   env   : WORKTREE_ROOT overrides the worktree root (default
+#           $HOME/.worktrees); the tests point it at a temp dir.
+set -euo pipefail
+
+ERRFILE=""
+ROWS=""
+
+warn() { printf 'prune-worktrees: %s\n' "$1" >&2; }
+
+cleanup() {
+  local f
+  for f in "$ERRFILE" "$ROWS"; do
+    if [[ -n "$f" ]] && ! rm -f "$f"; then
+      warn "could not remove temp file ${f} — remove it by hand"
+    fi
+  done
+  return 0
+}
+
+# Append one decision row: <kind> <target> <branch> <reason>. Tabs never
+# appear in git paths this script provisions, and python3 splits on them.
+row() { printf '%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" >> "$ROWS"; }
+
+default_branch_of() { # <shared>
+  local db=""
+  if db="$(git -C "$1" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null)"; then
+    printf '%s' "${db#origin/}"
+    return 0
+  fi
+  local cand
+  for cand in main master; do
+    if git -C "$1" show-ref --verify --quiet "refs/remotes/origin/$cand"; then
+      printf '%s' "$cand"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# Decide one worktree; emits a row and performs the removal unless dry-run.
+decide_worktree() { # <shared> <abs_root> <default> <dry-run 0|1> <path> <branch|""> <detached 0|1> <locked 0|1>
+  local shared="$1" abs_root="$2" db="$3" dry="$4" path="$5" branch="$6" detached="$7" locked="$8"
+  if [[ "$path" != "$abs_root"/* ]]; then
+    row kept "$path" "$branch" outside-root; return 0
+  fi
+  if (( detached )); then
+    row kept "$path" "" detached; return 0
+  fi
+  if [[ "$branch" == "$db" ]]; then
+    row kept "$path" "$branch" default-branch; return 0
+  fi
+  if (( locked )); then
+    row kept "$path" "$branch" locked; return 0
+  fi
+  local status rc=0
+  status="$(git -C "$path" status --porcelain 2>"$ERRFILE")" || rc=$?
+  if (( rc != 0 )); then
+    row failed "$path" "$branch" "git status failed: $(tr '\n' ' ' < "$ERRFILE")"; return 0
+  fi
+  if [[ -n "$status" ]]; then
+    row kept "$path" "$branch" dirty; return 0
+  fi
+  if ! git -C "$shared" merge-base --is-ancestor "$branch" "origin/${db}" 2>"$ERRFILE"; then
+    row kept "$path" "$branch" unmerged; return 0
+  fi
+  if (( dry )); then
+    row removed "$path" "$branch" ""; return 0
+  fi
+  if ! git -C "$shared" worktree remove "$path" 2>"$ERRFILE"; then
+    row failed "$path" "$branch" "git worktree remove failed: $(tr '\n' ' ' < "$ERRFILE")"; return 0
+  fi
+  if ! git -C "$shared" branch -d "$branch" >/dev/null 2>"$ERRFILE"; then
+    row failed "$branch" "$branch" "git branch -d failed after the worktree was removed: $(tr '\n' ' ' < "$ERRFILE")"; return 0
+  fi
+  row removed "$path" "$branch" ""
+  return 0
+}
+
+decide_branch() { # <shared> <default> <dry-run 0|1> <branch>
+  local shared="$1" db="$2" dry="$3" branch="$4"
+  if [[ "$branch" == "$db" ]]; then
+    return 0
+  fi
+  if ! git -C "$shared" merge-base --is-ancestor "$branch" "origin/${db}" 2>"$ERRFILE"; then
+    row branch-kept "$branch" "$branch" unmerged; return 0
+  fi
+  if (( dry )); then
+    row branch-deleted "$branch" "$branch" ""; return 0
+  fi
+  if ! git -C "$shared" branch -d "$branch" >/dev/null 2>"$ERRFILE"; then
+    row failed "$branch" "$branch" "git branch -d failed: $(tr '\n' ' ' < "$ERRFILE")"; return 0
+  fi
+  row branch-deleted "$branch" "$branch" ""
+  return 0
+}
+
+main() {
+  local shared="" dry=0 arg
+  for arg in "$@"; do
+    case "$arg" in
+      --dry-run) dry=1 ;;
+      -*) warn "unknown flag '${arg}'"; warn "usage: prune-worktrees.sh <shared-checkout> [--dry-run]"; return 1 ;;
+      *) if [[ -n "$shared" ]]; then warn "usage: prune-worktrees.sh <shared-checkout> [--dry-run]"; return 1; fi; shared="$arg" ;;
+    esac
+  done
+  if [[ -z "$shared" ]]; then
+    warn "usage: prune-worktrees.sh <shared-checkout> [--dry-run]"
+    return 1
+  fi
+  local tool
+  for tool in git python3; do
+    if ! command -v "$tool" >/dev/null 2>&1; then
+      warn "${tool} not found on PATH"
+      return 1
+    fi
+  done
+  ERRFILE="$(mktemp)"
+  ROWS="$(mktemp)"
+  trap cleanup EXIT
+  if [[ ! -d "$shared" ]] || ! git -C "$shared" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    warn "'${shared}' is not a git work tree — pass the shared checkout's path"
+    return 1
+  fi
+  local abs_shared
+  abs_shared="$(git -C "$shared" rev-parse --show-toplevel)"
+  if ! git -C "$shared" remote get-url origin >/dev/null 2>&1; then
+    warn "${shared} has no origin remote — merged-ness is judged against origin's default branch"
+    return 1
+  fi
+  local root="${WORKTREE_ROOT:-${HOME}/.worktrees}" abs_root
+  if [[ ! -d "$root" ]]; then
+    warn "worktree root ${root} does not exist — nothing to prune"
+    abs_root="$root"
+  else
+    abs_root="$(cd "$root" && pwd -P)"
+  fi
+  if ! git -C "$shared" fetch --quiet --prune origin 2>"$ERRFILE"; then
+    warn "\`git -C ${shared} fetch --prune origin\` failed: $(tr '\n' ' ' < "$ERRFILE") — judging merged-ness from possibly stale refs; a branch merged per stale refs is still merged, an unmerged one is kept"
+  fi
+  local db
+  if ! db="$(default_branch_of "$shared")"; then
+    warn "cannot resolve origin's default branch — run \`git -C ${shared} remote set-head origin --auto\`"
+    return 1
+  fi
+  if ! git -C "$shared" worktree prune 2>"$ERRFILE"; then
+    warn "\`git worktree prune\` failed: $(tr '\n' ' ' < "$ERRFILE") — stale metadata may remain"
+  fi
+
+  # Walk `worktree list --porcelain`: blank-line-separated blocks.
+  local path="" branch="" detached=0 locked=0 line
+  local -a seen_branches=()
+  flush() {
+    if [[ -n "$path" ]]; then
+      local real
+      real="$(cd "$path" 2>/dev/null && pwd -P)" || real="$path"
+      if [[ "$real" != "$abs_shared" ]]; then
+        decide_worktree "$shared" "$abs_root" "$db" "$dry" "$real" "$branch" "$detached" "$locked"
+      fi
+      if [[ -n "$branch" ]]; then seen_branches+=("$branch"); fi
+    fi
+    path=""; branch=""; detached=0; locked=0
+  }
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    case "$line" in
+      "worktree "*) flush; path="${line#worktree }" ;;
+      "branch refs/heads/"*) branch="${line#branch refs/heads/}" ;;
+      detached) detached=1 ;;
+      "locked"*) locked=1 ;;
+      "") flush ;;
+    esac
+  done < <(git -C "$shared" worktree list --porcelain)
+  flush
+
+  # Local branches with no worktree.
+  local name skip
+  while IFS= read -r name; do
+    skip=0
+    local s
+    for s in "${seen_branches[@]+"${seen_branches[@]}"}"; do
+      if [[ "$s" == "$name" ]]; then skip=1; break; fi
+    done
+    if (( skip )); then continue; fi
+    decide_branch "$shared" "$db" "$dry" "$name"
+  done < <(git -C "$shared" for-each-ref --format='%(refname:short)' refs/heads/)
+
+  local rc=0
+  python3 - "$abs_shared" "$db" "$dry" "$ROWS" <<'PY' || rc=$?
+import json, sys
+shared, db, dry, rows_path = sys.argv[1], sys.argv[2], sys.argv[3] == "1", sys.argv[4]
+result = {"shared": shared, "default_branch": db, "dry_run": dry, "worktrees_removed": [], "worktrees_kept": [],
+          "branches_deleted": [], "branches_kept": [], "failed": []}
+with open(rows_path, encoding="utf-8") as handle:
+    for raw in handle:
+        raw = raw.rstrip("\n")
+        if not raw:
+            continue
+        kind, target, branch, reason = raw.split("\t", 3)
+        if kind == "removed":
+            result["worktrees_removed"].append({"path": target, "branch": branch})
+        elif kind == "kept":
+            result["worktrees_kept"].append({"path": target, "branch": branch or None, "reason": reason})
+        elif kind == "branch-deleted":
+            result["branches_deleted"].append(branch)
+        elif kind == "branch-kept":
+            result["branches_kept"].append({"branch": branch, "reason": reason})
+        else:
+            result["failed"].append({"target": target, "error": reason})
+print(json.dumps(result, sort_keys=True))
+sys.exit(2 if result["failed"] else 0)
+PY
+  return "$rc"
+}
+
+# Entry-point guard (rules/file-hygiene.md Standalone Scripts).
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  main "$@"
+fi
