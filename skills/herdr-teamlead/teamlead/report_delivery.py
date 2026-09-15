@@ -166,6 +166,16 @@ def source_final(body, kind, session):
 #: (#392). They belong to no message, so they neither start nor end a group.
 GROK_ATTACHMENT_UPDATES = frozenset({"image_compressed"})
 
+def _is_one_of(value, names):
+    """Membership that survives untrusted JSON.
+
+    A malformed row can carry a list or object where a name belongs, and `in`
+    on a frozenset raises TypeError for an unhashable value -- crashing the
+    recovery instead of refusing the evidence and preserving its receipt.
+    """
+    return isinstance(value, str) and value in names
+
+
 #: User-chunk content types that carry an attachment rather than prompt text.
 #: Only these are skipped; an unknown type is content the parser does not
 #: understand, and it refuses rather than authenticate the text around it.
@@ -229,13 +239,13 @@ def source_prompt(body, kind, session=None):
             update = params.get("update", {}) if isinstance(params, dict) else {}
             if not isinstance(update, dict):
                 return None
-            if update.get("sessionUpdate") in GROK_ATTACHMENT_UPDATES:
+            if _is_one_of(update.get("sessionUpdate"), GROK_ATTACHMENT_UPDATES):
                 continue
             if update.get("sessionUpdate") == "user_message_chunk":
                 content = update.get("content", {})
                 if not isinstance(content, dict):
                     return None
-                if content.get("type") in GROK_ATTACHMENT_CONTENT:
+                if _is_one_of(content.get("type"), GROK_ATTACHMENT_CONTENT):
                     # An attachment chunk carries no prompt text and does not
                     # end the group the dispatched text was written in (#392).
                     # Starting a group, it starts that group's text empty: the
@@ -424,7 +434,7 @@ def grok_clear_identity(body, prompt):
             return None
         if event == "session_start" and index != 0:
             return None
-        if kind in GROK_ATTACHMENT_UPDATES:
+        if _is_one_of(kind, GROK_ATTACHMENT_UPDATES):
             # `previous` is deliberately untouched: the user chunks either side
             # of an attachment's metadata are one group, which is what the
             # runtime wrote (#392).
@@ -440,7 +450,7 @@ def grok_clear_identity(body, prompt):
                 return None
             content = update.get("content")
             if (not isinstance(content, dict)
-                    or content.get("type") not in GROK_ATTACHMENT_CONTENT | {"text"}):
+                    or not _is_one_of(content.get("type"), GROK_ATTACHMENT_CONTENT | {"text"})):
                 return None
             user_groups += previous != kind
             if user_groups != 1:

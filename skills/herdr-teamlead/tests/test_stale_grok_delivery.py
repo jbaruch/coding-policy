@@ -295,6 +295,30 @@ class StaleGrokDeliveryTests(unittest.TestCase):
             self.recover()
         self.assertEqual(self.document, before)
 
+    def test_a_malformed_chunk_type_refuses_instead_of_crashing(self):
+        # Untrusted JSON: an unhashable value where a name belongs must take
+        # the refusal path, never raise out of the recovery.
+        for malformed in ([], {}, 7, None):
+            rows = copy.deepcopy(self.rows)
+            rows = rows[:3] + [grok_row({'sessionUpdate': 'user_message_chunk',
+                                         'content': {'type': malformed}})] + rows[3:]
+            Path(self.data['source']).write_text(encode(rows))
+            before = copy.deepcopy(self.document)
+            with self.subTest(type=malformed), self.assertRaisesRegex(UsageError, 'grok_source_ambiguous'):
+                self.recover()
+            self.assertEqual(self.document, before)
+        # An unhashable `sessionUpdate` is an unrecognized kind, not content:
+        # it need not refuse, but it must never raise out of the recovery.
+        for malformed in ([], {}, 7):
+            rows = copy.deepcopy(self.rows)
+            rows = rows[:3] + [grok_row({'sessionUpdate': malformed})] + rows[3:]
+            Path(self.data['source']).write_text(encode(rows))
+            with self.subTest(update=malformed):
+                try:
+                    self.recover()
+                except UsageError:
+                    pass
+
     def test_an_image_first_turn_reads_its_own_prompt(self):
         # An attachment that STARTS the user group must not leave the previous
         # group's text in the accumulator: the dispatched text follows it.

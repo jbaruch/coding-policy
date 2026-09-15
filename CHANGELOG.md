@@ -22,7 +22,9 @@
   block type is content the parser cannot authenticate the text around, so it
   refuses rather than silently dropping it — and an image that STARTS a group
   starts that group's text empty, so a following chunk cannot be read as a
-  continuation of the previous message. `prompt_matches` accepts the dispatched text
+  continuation of the previous message. Every name test survives untrusted
+  JSON: an unhashable value where a name belongs took the refusal path rather
+  than raising `TypeError` out of the recovery and losing the receipt. `prompt_matches` accepts the dispatched text
   followed only by that trailing marker, at both places the prompt is
   authenticated. Everything else still refuses — multiple sessions or turns,
   failed or cancelled turns, altered assignment text, a marker anywhere but the
