@@ -107,7 +107,7 @@ is_herdr_worker() {
 
 main() {
   local input active inside
-  local -a gone_branches=() wt_paths=() wt_branches=() wt_locked=() leftover=() orphaned=() spent_detached=() changed=()
+  local -a gone_branches=() wt_paths=() wt_branches=() wt_locked=() leftover=() orphaned=() spent_detached=() held=() changed=()
   local -a blocking=() reports=()
 
   # jq is required to read stop_hook_active and to emit the block JSON safely.
@@ -165,21 +165,26 @@ main() {
     if [[ -z "$base" ]]; then
       warn "could not resolve origin's default branch — reporting only worktrees whose upstream is gone"
     fi
-    # `rules/agent-team-operation.md` Writers and Checkouts: the lead never
-    # removes a locked or detached worktree, and reports it to the operator
-    # instead. A locked one is left out entirely -- git keeps its metadata
-    # through a prune, and the lock is somebody saying so.
+    # `rules/agent-team-operation.md` Writers and Checkouts: the lead removes
+    # only a merged, clean worktree, and reports a dirty, unmerged, locked or
+    # detached one to the operator. So removal ALWAYS requires clean and
+    # contained -- a gone upstream is a reason to look, never a licence, since
+    # an upstream can vanish while its tree is dirty or ahead.
+    local spent
     for (( i = 0; i < ${#wt_paths[@]}; i++ )); do
       b="${wt_branches[$i]}"; p="${wt_paths[$i]}"
-      [[ "${wt_locked[$i]}" == "1" ]] && continue
-      if [[ -n "$b" ]] && in_list "$b" ${gone_branches[@]+"${gone_branches[@]}"}; then
-        orphaned+=("${p} (branch ${b})")
-      elif [[ -n "$base" ]] && worktree_is_spent "$p" "$b" "$base"; then
-        if [[ -n "$b" ]]; then
-          orphaned+=("${p} (branch ${b}, nothing ${base} lacks)")
-        else
-          spent_detached+=("${p} (detached, nothing ${base} lacks)")
-        fi
+      if [[ "${wt_locked[$i]}" == "1" ]]; then
+        held+=("${p}$([[ -n "$b" ]] && printf ' (branch %s)' "$b" || printf ' (detached)') — locked")
+        continue
+      fi
+      spent=0
+      if [[ -n "$base" ]] && worktree_is_spent "$p" "$b" "$base"; then spent=1; fi
+      if (( spent )) && [[ -n "$b" ]]; then
+        orphaned+=("${p} (branch ${b}, nothing ${base} lacks)")
+      elif (( spent )); then
+        spent_detached+=("${p} (detached, nothing ${base} lacks)")
+      elif [[ -n "$b" ]] && in_list "$b" ${gone_branches[@]+"${gone_branches[@]}"}; then
+        held+=("${p} (branch ${b}) — its upstream is gone, but the tree is not both clean and merged")
       fi
     done
 
@@ -263,10 +268,14 @@ default_branch_ref() {
     warn "git symbolic-ref refs/remotes/origin/HEAD failed (exit ${rc}) — falling back to origin/main or origin/master; run \`git remote set-head origin --auto\` if the fallback is wrong"
   fi
   for cand in main master; do
-    if git show-ref --verify --quiet "refs/remotes/origin/${cand}"; then
-      printf 'origin/%s' "$cand"
-      return 0
-    fi
+    rc=0
+    git show-ref --verify --quiet "refs/remotes/origin/${cand}" || rc=$?
+    case "$rc" in
+      0) printf 'origin/%s' "$cand"; return 0 ;;
+      1) ;;  # the expected "no such ref"; try the next candidate
+      *) warn "\`git show-ref --verify refs/remotes/origin/${cand}\` failed (exit ${rc}) — cannot confirm the default branch; no worktree is reported removable this run"
+         return 1 ;;
+    esac
   done
   return 1
 }
@@ -343,10 +352,13 @@ build_branch_findings() {
     done
     blocking+=("$section")
   fi
-  # Report-only, never an instruction to remove: a detached worktree is the
-  # operator's call under Writers and Checkouts, whoever else finds it spent.
+  # Report-only, never an instruction to remove: a detached, locked, dirty or
+  # unmerged worktree is the operator's call under Writers and Checkouts.
   for p in ${spent_detached[@]+"${spent_detached[@]}"}; do
     reports+=("Detached worktree holding nothing new: ${p} — report it to the operator; the lead never removes a detached worktree.")
+  done
+  for p in ${held[@]+"${held[@]}"}; do
+    reports+=("Worktree left for the operator: ${p} — the lead never removes a dirty, unmerged, locked or detached worktree.")
   done
   return 0
 }

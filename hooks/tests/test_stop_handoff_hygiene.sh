@@ -179,14 +179,29 @@ main() {
      && ! reason_has "r4b-detached"; then
     pass; else fail "detached worktree: expected a report, not a removal instruction, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
 
-  # 4a-ii-b. A LOCKED worktree is left out entirely: the lock is somebody
-  # saying so, and git keeps its metadata through a prune.
+  # 4a-ii-b. A LOCKED worktree is reported to the operator and never listed
+  # under "remove them": Writers and Checkouts requires both.
   mk_origin o4f; clone_from "$BARE" "$TMP/r4f"
   g -C "$TMP/r4f" worktree add -q "$TMP/r4f-locked" -b review/locked || die "r4f worktree add failed"
   g -C "$TMP/r4f" worktree lock "$TMP/r4f-locked" || die "r4f lock failed"
   OUT="$(cd "$TMP/r4f" && printf '%s' '{"stop_hook_active":false}' | bash "$HOOK" 2>"$TMP/r4f.err")"; RC=$?
-  if [[ $RC -eq 0 ]] && ! reason_has "r4f-locked" && [[ "$(cat "$TMP/r4f.err")" != *"r4f-locked"* ]]; then
-    pass; else fail "locked worktree must be left alone: RC=$RC OUT=$OUT ERR=$(cat "$TMP/r4f.err")"; fi
+  if [[ $RC -eq 0 ]] && ! reason_has "r4f-locked" \
+     && [[ "$(cat "$TMP/r4f.err")" == *"r4f-locked"* ]] \
+     && [[ "$(cat "$TMP/r4f.err")" == *"locked"* ]]; then
+    pass; else fail "locked worktree must be reported, never listed for removal: RC=$RC OUT=$OUT ERR=$(cat "$TMP/r4f.err")"; fi
+
+  # 4a-ii-c. A gone upstream is a reason to look, never a licence: a tree with
+  # unmerged commits is reported, not listed for removal, even then.
+  mk_origin o4g; clone_from "$BARE" "$TMP/r4g"
+  g -C "$TMP/r4g" worktree add -q "$TMP/r4g-wt" -b feat/gone-ahead || die "r4g worktree add failed"
+  make_gone_branch "$TMP/r4g-wt" feat/gone-ahead
+  printf 'ahead\n' > "$TMP/r4g-wt/h" || die "r4g write failed"
+  g -C "$TMP/r4g-wt" add h || die "r4g add failed"
+  g -C "$TMP/r4g-wt" commit -q -m ahead || die "r4g commit failed"
+  g -C "$TMP/r4g" fetch -q --prune || die "r4g prune failed"
+  OUT="$(cd "$TMP/r4g" && printf '%s' '{"stop_hook_active":false}' | bash "$HOOK" 2>"$TMP/r4g.err")"; RC=$?
+  if [[ $RC -eq 0 ]] && ! reason_has "r4g-wt" && [[ "$(cat "$TMP/r4g.err")" == *"r4g-wt"* ]]; then
+    pass; else fail "a gone upstream with unmerged work must be reported, not removed: RC=$RC OUT=$OUT ERR=$(cat "$TMP/r4g.err")"; fi
 
   # 4a-iii. Real unmerged work is NOT reported, on a branch or detached.
   mk_origin o4c; clone_from "$BARE" "$TMP/r4c"

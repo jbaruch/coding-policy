@@ -17,10 +17,13 @@
   The default branch is resolved explicitly, since the hook can run from a
   linked worktree whose HEAD is not it.
 
-  What the lead may act on is unchanged. `rules/agent-team-operation.md`
-  Writers and Checkouts forbids a lead removing a locked or detached worktree,
-  so a locked one is left out of the report entirely and a spent detached one
-  is surfaced to the operator on stderr rather than listed under "remove them".
+  What the lead may act on tightened. `rules/agent-team-operation.md` Writers
+  and Checkouts lets a lead remove only a merged, clean worktree, so removal
+  now ALWAYS requires clean-and-contained: a gone upstream is a reason to look,
+  never a licence, since an upstream can vanish while its tree is dirty or
+  ahead — and the old check listed exactly that for removal. A locked or
+  detached tree, and one whose upstream is gone but is not both clean and
+  merged, is reported to the operator on stderr instead.
 
   The predicate fails closed. A worktree whose status cannot be read is never
   reported removable: reading an unreadable tree as clean is how a hand-rolled
