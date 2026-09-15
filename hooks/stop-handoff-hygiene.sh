@@ -186,7 +186,15 @@ main() {
       elif (( spent )); then
         spent_detached+=("${p} (detached, nothing ${base} lacks)")
       elif [[ -z "$base" ]]; then
-        : # no default branch to judge against; the resolver already warned
+        # No default branch to judge containment against. What IS observable
+        # still reaches the operator: a detached tree is detached whatever the
+        # base, and `status` needs none.
+        local why="containment unknown — no default branch resolved"
+        [[ -n "$b" ]] || why="detached, ${why}"
+        if [[ -d "$p" ]] && [[ -n "$(git -C "$p" status --porcelain 2>/dev/null)" ]]; then
+          why="dirty, ${why}"
+        fi
+        held+=("${named} — ${why}")
       else
         # Every protected state reaches the operator, whatever its upstream:
         # a never-pushed dirty or unmerged tree has no upstream to be gone.

@@ -25,6 +25,9 @@
   state now reaches the operator on stderr instead, with its reason: locked,
   detached, dirty, unmerged, or unreadable. A never-pushed dirty tree has no
   upstream to be gone, so an upstream-keyed report would never have named it.
+  With no default branch resolvable, what is observable without one — detached,
+  dirty — is still reported, with containment marked unknown and nothing listed
+  for removal.
 
   The predicate fails closed. A worktree whose status cannot be read is never
   reported removable: reading an unreadable tree as clean is how a hand-rolled

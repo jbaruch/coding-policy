@@ -234,6 +234,17 @@ main() {
   if [[ $RC -eq 0 ]] && ! reason_has "r4e-gone" && [[ "$(cat "$TMP/r4e.err")" == *"r4e-gone"* ]]; then
     pass; else fail "unreadable worktree: report, never remove: RC=$RC OUT=$OUT ERR=$(cat "$TMP/r4e.err")"; fi
 
+  # 4a-ii-d. With no default branch to judge containment against, what IS
+  # observable still reaches the operator, and nothing is listed for removal.
+  mk_origin o4h; clone_from "$BARE" "$TMP/r4h"
+  g -C "$TMP/r4h" worktree add -q "$TMP/r4h-wt" -b review/nobase || die "r4h worktree add failed"
+  g -C "$TMP/r4h" remote remove origin || die "r4h remote remove failed"
+  OUT="$(cd "$TMP/r4h" && printf '%s' '{"stop_hook_active":false}' | bash "$HOOK" 2>"$TMP/r4h.err")"; RC=$?
+  if [[ $RC -eq 0 ]] && ! reason_has "r4h-wt" \
+     && [[ "$(cat "$TMP/r4h.err")" == *"r4h-wt"* ]] \
+     && [[ "$(cat "$TMP/r4h.err")" == *"containment unknown"* ]]; then
+    pass; else fail "no default branch: report what is observable, remove nothing: RC=$RC OUT=$OUT ERR=$(cat "$TMP/r4h.err")"; fi
+
   # 4b. The same orphaned worktree, seen from INSIDE a linked worktree with
   # HERDR_ENV set: that is a worker session, and removing a worktree is the
   # lead's job (rules/agent-team-operation.md). Blocking here would force the
