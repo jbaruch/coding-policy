@@ -783,9 +783,10 @@ def cmd_plan(args, client=None, warn=None, trace=None):
     tier_candidates = _candidate_tiers(canonical, agents, rounds, args.fix_round, judge,
                                       None if args.preview_tiers else (args.now or now_iso()), excludes=excludes)
     # Each seat inherits its role's bars, tiers, round type and requirements.
+    # `role_costs` is not fanned out: the planner resolves a seat's default
+    # weight and rotation history through its role (#434).
     excludes = _fan_out_seats(excludes, seats)
     operator_excludes = _fan_out_seats(operator_excludes, seats)
-    role_costs = _fan_out_seats(role_costs, seats)
     rounds = _fan_out_seats(rounds, seats)
     requirements = _fan_out_seats(requirements, seats)
     tier_candidates = _fan_out_seats(tier_candidates, seats)
@@ -1037,10 +1038,10 @@ def cmd_apply(args, client=None, warn=None, trace=None):
         context = {key: result[key] for key in ("cleared", "clear_reason", "task", "fix_round", "context_session", "tier")}
         context["requirements"] = result.get("requirements")
         context["reviewer_scope"] = result.get("reviewer_scope")
-        # The ledger records the RESPONSIBILITY, so per-role history does not
-        # fragment across seat names; the seat stays on the dispatch, which is
-        # what a slice's verdict is read back through (#434).
-        add_assignment(state, at, base, result["agent"], status=result["status"], **context)
+        # `add_assignment` records the RESPONSIBILITY a seat fills; the seat
+        # stays on the dispatch, which is what a slice's verdict is read back
+        # through (#434).
+        add_assignment(state, at, seat, result["agent"], status=result["status"], **context)
         if args.task:
             result["dispatch_id"] = dispatches[result["role"]]["id"]
             recovery.finish_dispatch(store, result["dispatch_id"], dict(result), len(state["assignments"]) - 1, at)

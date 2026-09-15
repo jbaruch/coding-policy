@@ -23,12 +23,15 @@ role; a single-seat round needs none.
 ```
 
 - `schema_version` — `1`. Any other value is refused.
-- `role` — optional, `reviewer` when absent. The role the slices seat. It never
-  contains `#`.
+- `role` — optional, `reviewer` when absent, and `reviewer` or `tester`
+  otherwise. Every other responsibility carries a per-task counter one seat
+  owns, so slicing it would leave two workers holding one count.
 - `slices` — at least two. Each is `{name, paths}` and carries nothing else.
-  - `name` — non-empty, unique within the document. It becomes the seat name
-    `<role>#<name>` in the plan, and names the slice in that seat's brief and
-    report.
+  - `name` — unique within the document, and written with letters, digits,
+    underscores, dots or hyphens, starting with a letter or digit. It becomes
+    the seat name `<role>#<name>` in the plan, and a seat is a CLI key: the
+    left side of `--brief SEAT=PATH` and `--report SEAT=PATH`. A name carrying
+    `=`, `#`, a comma or whitespace does not read back, and is refused.
   - `paths` — a non-empty array of globs matched against the round's changed
     paths, `fnmatch`-style (`*` does not stop at `/`; `**` is ordinary text).
 
@@ -62,10 +65,11 @@ owns nothing. Fix the document and re-run. Dispatch only once it exits 0.
 ## Seating
 
 `plan --partition <partition.json>` replaces the named role with one seat per
-slice, keyed `<role>#<slice>` in the plan's `assignments`. Each seat inherits
-that role's cost, exclusions, round type and requirements, so capability,
-contribution-exclusion and headroom ordering apply unchanged and each slice
-gets a distinct worker.
+slice, keyed `<role>#<slice>` in the plan's `assignments`. A seat's ROLE
+decides everything the responsibility governs — its cost and rotation history,
+exclusions, round type, requirements, tier qualification and the review-package
+checks its brief owes — so capability, contribution-exclusion and headroom
+ordering apply unchanged and each slice gets a distinct worker.
 
 `apply` takes those seat names directly: pass each seat its own brief
 (`--brief reviewer#api=<path>`). A seat takes its ROLE's brief template, and

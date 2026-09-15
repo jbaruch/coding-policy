@@ -377,6 +377,24 @@ JSON
      && printf '%s' "$ERRTEXT" | grep -q 'overlaps a generated brief'; then
     pass; else fail "report/brief overlap: RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
 
+  # 16. A review SEAT owes its role's review-package checks. The slice narrows
+  #     what a reviewer reviews, never what its brief must carry (#434).
+  local v16="$TMP/v16.json" o16="$TMP/out16"
+  jq --arg p "$TMP/package.diff" \
+    '.roles = {"tester#core": (.roles.tester + {REVIEW_PACKAGE: $p, REVIEW_BASE: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", REVIEW_HEAD: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", REPORT: "/r/slice-core.md"})}' \
+    "$v1" > "$v16" || die "could not build seat fixture"
+  run "$TPL" "$v16" "$o16"
+  if [[ $RC -eq 0 ]] && [[ -f "$o16/brief-tester#core.md" ]]; then
+    pass; else fail "seat brief: expected the role's template to render for tester#core, got RC=$RC ERR=$ERRTEXT"; fi
+  local seat_invalid
+  for seat_invalid in '.["tester#core"].REVIEW_BASE = "not-a-sha"' '.["tester#core"].REVIEW_PACKAGE = "/absent/package.diff"'; do
+    jq "(.roles) |= ($seat_invalid)" "$v16" > "$TMP/v16-bad.json" || die "could not build invalid seat fixture"
+    run "$TPL" "$TMP/v16-bad.json" "$TMP/out16-bad"
+    if [[ $RC -eq 2 && -z "$OUT" && ! -e "$TMP/out16-bad" ]] \
+       && printf '%s' "$ERRTEXT" | grep -q "tester#core"; then
+      pass; else fail "seat review package: an invalid $seat_invalid must refuse, got RC=$RC ERR=$ERRTEXT"; fi
+  done
+
   echo "─────────────────────────────────────────────" >&2
   if [[ $FAIL -gt 0 ]]; then echo "FAILED: ${FAIL} failed, ${PASS} passed" >&2; exit 1; fi
   echo "PASSED: all ${PASS} checks" >&2

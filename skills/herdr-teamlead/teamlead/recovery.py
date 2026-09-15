@@ -1464,7 +1464,12 @@ def validate_store(store, assignments):
                 if type(index) is not int or not 0 <= index < len(assignments):
                     raise UsageError("Dispatch has no matching assignment row; reconcile it without fabricating history.", {})
                 assignment = assignments[index]
-                if any(assignment.get(key) != row[key] for key in ("task", "role", "agent", "fix_round")) or assignment.get("status") != "applied":
+                # The ledger row carries the RESPONSIBILITY and the dispatch
+                # carries the seat, so a `reviewer#api` send matches its
+                # `reviewer` row instead of reading as a disagreement (#434).
+                if (assignment.get("role") != canonical_role(row["role"])
+                        or any(assignment.get(key) != row[key] for key in ("task", "agent", "fix_round"))
+                        or assignment.get("status") != "applied"):
                     raise UsageError("Dispatch outcome disagrees with its assignment row.", {})
                 if row["schema_version"] == SPECIALIST_DISPATCH_VERSION and any(assignment.get(key) != row.get(key) for key in DISPATCH_METADATA_FIELDS):
                     raise UsageError("Dispatch and assignment composition metadata disagree; restore their original shared engagement and reviewer scope before continuing.", {})
@@ -1492,7 +1497,8 @@ def validate_store(store, assignments):
         for index, row in enumerate(assignments):
             if (row.get("fix_round") or 0) > DEFAULT_FIX_LIMIT and not any(
                 index in [dispatch.get("assignment_index"), *dispatch.get("prior_assignment_indices", [])]
-                and all(dispatch[key] == row.get(key) for key in ("task", "role", "agent", "fix_round"))
+                and canonical_role(dispatch["role"]) == row.get("role")
+                and all(dispatch[key] == row.get(key) for key in ("task", "agent", "fix_round"))
                 for dispatch in store["dispatches"]
             ) and not any(item["assignment_index"] == index for item in store["historical_attempts"]):
                 raise UsageError("An extra correction lacks its owner-managed authorization and dispatch record.", {})

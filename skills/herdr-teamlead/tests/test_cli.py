@@ -31,7 +31,7 @@ from teamlead import attention, cli
 from teamlead.cli import build_parser, main
 from teamlead.errors import UsageError
 from teamlead.herdr import HerdrClient
-from teamlead.state import STATE_SCHEMA_VERSION, add_assignment, empty_state, save_state
+from teamlead.state import STATE_SCHEMA_VERSION, add_assignment, empty_state, load_state_checked, save_state
 
 from tests.fakes import (
     FakeRunner,
@@ -784,6 +784,30 @@ class ApplyCommandTest(CliCase):
         dispatch = saved["recovery"]["dispatches"][0]
         self.assertEqual(dispatch["role"], "reviewer#api")
         self.assertEqual(dispatch["reviewer_scope"], "verification")
+
+    def test_a_saved_seat_dispatch_reloads_with_its_history(self):
+        # The ledger row carries the responsibility and the dispatch carries
+        # the seat, so the NEXT load must still read them as one confirmed
+        # outcome. A store that rejects the pair returns an empty ledger and
+        # loses the contribution and recovery history it was keeping (#434).
+        save_state(self.state, empty_state())
+        code, _, err = self.run_cli(
+            self.base()
+            + ["apply", "--composer-settle", "0",
+               "--assignments", json.dumps({"reviewer#api": "grok"}),
+               "--task", "t-reload-seat", "--common", str(self.common), "--now", AT]
+            + ["--brief", "reviewer#api=" + str(self.briefs["reviewer"]),
+               "--report", "reviewer#api=" + str(self.tmp / "reload-report.md")],
+            client=self._client({"grok": "idle"}),
+        )
+        self.assertEqual(code, 0, err)
+        warnings = []
+        reloaded, usable = load_state_checked(self.state, warn=warnings.append)
+        self.assertTrue(usable, warnings)
+        self.assertEqual(warnings, [])
+        self.assertEqual([row["role"] for row in reloaded["assignments"]], ["reviewer"])
+        self.assertEqual(reloaded["assignments"][0]["reviewer_scope"], "verification")
+        self.assertEqual([row["role"] for row in reloaded["recovery"]["dispatches"]], ["reviewer#api"])
 
     def test_a_contributor_cannot_take_a_review_seat(self):
         # The responsibility decides independence: a worker the ledger records

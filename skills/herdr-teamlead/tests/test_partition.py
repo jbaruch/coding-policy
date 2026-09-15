@@ -61,7 +61,16 @@ class LoadPartition(unittest.TestCase):
             ("duplicate name", document(slices=[SLICES[0], SLICES[0]]), "appears twice"),
             ("empty paths", document(slices=[{"name": "api", "paths": []}, SLICES[1]]), "non-empty array"),
             ("slice not an object", document(slices=["api", SLICES[1]]), "non-empty name"),
-            ("role with the separator", document(role="rev#iew"), "without"),
+            ("role with the separator", document(role="rev#iew"), "A partition seats"),
+            ("a role that owns per-task gates", document(role="developer"), "A partition seats"),
+            ("slice name with the apply key separator",
+             document(slices=[{"name": "api=v2", "paths": ["src/api/*"]}, SLICES[1]]), "cannot address its seat"),
+            ("slice name with the seat separator",
+             document(slices=[{"name": "api#v2", "paths": ["src/api/*"]}, SLICES[1]]), "cannot address its seat"),
+            ("slice name with a control character",
+             document(slices=[{"name": "api\nv2", "paths": ["src/api/*"]}, SLICES[1]]), "cannot address its seat"),
+            ("slice name with a comma",
+             document(slices=[{"name": "api,core", "paths": ["src/api/*"]}, SLICES[1]]), "cannot address its seat"),
         ):
             with self.subTest(case=label):
                 with self.assertRaisesRegex(UsageError, pattern):
@@ -70,6 +79,14 @@ class LoadPartition(unittest.TestCase):
     def test_the_seated_role_defaults_to_reviewer(self):
         self.assertEqual(partition.partition_role(document()), "reviewer")
         self.assertEqual(partition.partition_role(document(role="tester")), "tester")
+
+    def test_a_seat_name_reads_back_through_the_apply_key_parsers(self):
+        seats = partition.seats_for(partition.load_partition(self.write(document())), "reviewer")
+        for seat in seats:
+            key, _, value = seat.partition("=")
+            self.assertEqual(key, seat, "a seat must survive --brief SEAT=PATH parsing")
+            self.assertEqual(value, "")
+            self.assertEqual(partition.slice_of(seat), seat.split("#", 1)[1])
 
 
 class Validate(unittest.TestCase):

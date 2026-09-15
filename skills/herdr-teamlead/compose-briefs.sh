@@ -129,8 +129,11 @@ validate_values() { # <values-json> <label>
   return 0
 }
 
-validate_review_package() { # <merged-values-json> <role>
-  case "$2" in reviewer|tester) ;; *) return 0 ;; esac
+validate_review_package() { # <merged-values-json> <role-or-seat>
+  # A seat (`reviewer#api`) owes its ROLE's review-package checks: the slice
+  # narrows what it reviews, never what its brief must carry (#434).
+  local role="${2%%#*}"
+  case "$role" in reviewer|tester) ;; *) return 0 ;; esac
   local package ref key
   for key in REVIEW_BASE REVIEW_HEAD; do
     ref="$(printf '%s' "$1" | jq -r --arg k "$key" '.[$k] // ""')" || return 2

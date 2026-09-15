@@ -34,6 +34,14 @@ class QualificationTest(unittest.TestCase):
         proof = require_qualification(qualified_tier(), "developer", AT)
         self.assertEqual(proof["promotion_cases"], 20)
 
+    def test_a_seat_reads_its_responsibility_battery(self):
+        # A promotion certifies a role's model and effort pair, so every seat
+        # of that role is covered by the role's recorded evidence (#434).
+        tier = qualified_tier()
+        tier["qualification"][0]["role"] = "reviewer"
+        proof = require_qualification(tier, "reviewer#api", AT)
+        self.assertEqual(proof["role"], "reviewer")
+
     def test_missing_wrong_role_or_wrong_effort_refuses(self):
         for tier, role in (({"model": "sonnet-5", "effort": "high"}, "developer"),
                            (qualified_tier(), "reviewer"), ({**qualified_tier(), "effort": "xhigh"}, "developer")):

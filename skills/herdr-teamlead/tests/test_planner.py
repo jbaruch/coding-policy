@@ -188,6 +188,31 @@ class CostWeightTest(unittest.TestCase):
         )
         self.assertEqual(result["assignments"], {"developer": "alpha", "reviewer": "zeta"})
 
+    def test_a_seat_costs_what_its_responsibility_costs(self):
+        # `reviewer#api` is a reviewer round: it must not fall through to the
+        # generic weight an unweighed role gets (#434).
+        result = plan(["developer", "reviewer#api"], snapshot(alpha=60.0, zeta=55.0))
+        self.assertIn("weight 5", " ".join(result["rationale"]))
+        self.assertEqual(result["assignments"], {"developer": "alpha", "reviewer#api": "zeta"})
+
+    def test_a_role_override_reaches_every_seat_of_it(self):
+        result = plan(
+            ["developer", "reviewer#api"],
+            snapshot(alpha=60.0, zeta=55.0),
+            role_costs={"reviewer": 30.0},
+        )
+        self.assertEqual(result["assignments"], {"developer": "zeta", "reviewer#api": "alpha"})
+
+    def test_a_seat_reads_its_responsibilitys_rotation_history(self):
+        # Prior rounds ledger `reviewer`, so the tie-break must not start every
+        # slice at zero and pin one worker to the role (#434).
+        result = plan(
+            ["reviewer#api"],
+            snapshot(alpha=60.0, zeta=60.0),
+            counts={"reviewer": {"alpha": 3}},
+        )
+        self.assertEqual(result["assignments"], {"reviewer#api": "zeta"})
+
     def test_roles_nobody_weighed_keep_the_callers_order(self):
         result = plan(["scribe", "courier"], snapshot(alpha=90.0, zeta=60.0))
         self.assertEqual(result["assignments"], {"scribe": "alpha", "courier": "zeta"})

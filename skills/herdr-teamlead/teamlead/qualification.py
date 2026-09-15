@@ -11,6 +11,7 @@ import re
 from datetime import datetime, timedelta
 
 from .errors import UsageError
+from .tiers import canonical_role
 
 QUALIFICATION_SCHEMA_VERSION = 1
 SCREEN_CASES = 5
@@ -70,8 +71,13 @@ def _trials(trials, count, tier):
 
 
 def require_qualification(tier, role, at):
-    """Require a complete matching promotion plus a current stable canary."""
+    """Require a complete matching promotion plus a current stable canary.
+
+    A promotion certifies a RESPONSIBILITY's model and effort pair, so every
+    seat of a role reads the role's own recorded evidence (#434).
+    """
     now = _time(at)
+    role = canonical_role(role)
     evidence = tier.get("qualification", [])
     if not isinstance(evidence, list):
         evidence = []

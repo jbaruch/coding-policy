@@ -67,7 +67,7 @@ from pathlib import Path
 
 from .diagnostics import stderr_warn as _warn
 from .errors import ConfigError, HerdrError, StateError, UsageError
-from .tiers import parse_launch_args, parse_tiers, verify_argv
+from .tiers import canonical_role, parse_launch_args, parse_tiers, verify_argv
 from .recovery import DEFAULT_FIX_LIMIT, empty_recovery, migrate_store, validate_store
 
 #: The version this build writes for the document and assignment rows.
@@ -606,7 +606,13 @@ def add_assignment(state, at, role, agent, status=STATUS_APPLIED, *,
 
     The row carries its own `schema_version`, so a later migration can walk the
     ledger row by row rather than inferring a row's shape from the document.
+
+    A seat is written as the RESPONSIBILITY it fills: `reviewer#api` ledgers as
+    `reviewer`, so per-role history, independence and rotation read one role
+    instead of fragmenting across slice names. The seat stays on the dispatch,
+    which is what a slice's verdict is read back through (#434).
     """
+    role = canonical_role(role)
     state.setdefault("assignments", []).append(
         {
             "schema_version": STATE_SCHEMA_VERSION,
