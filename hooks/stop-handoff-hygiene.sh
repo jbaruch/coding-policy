@@ -191,8 +191,18 @@ main() {
         # base, and `status` needs none.
         local why="containment unknown — no default branch resolved"
         [[ -n "$b" ]] || why="detached, ${why}"
-        if [[ -d "$p" ]] && [[ -n "$(git -C "$p" status --porcelain 2>/dev/null)" ]]; then
-          why="dirty, ${why}"
+        if [[ -d "$p" ]]; then
+          local st strc=0
+          st="$(git -C "$p" status --porcelain 2>/dev/null)" || strc=$?
+          if (( strc != 0 )); then
+            warn "\`git status\` failed in ${p} (exit ${strc}) — its cleanliness is unknown; inspect that checkout by hand"
+            why="unreadable, ${why}"
+          elif [[ -n "$st" ]]; then
+            why="dirty, ${why}"
+          fi
+        else
+          warn "worktree ${p} is listed but its directory is missing — inspect it by hand"
+          why="missing, ${why}"
         fi
         held+=("${named} — ${why}")
       else

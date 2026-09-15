@@ -245,6 +245,18 @@ main() {
      && [[ "$(cat "$TMP/r4h.err")" == *"containment unknown"* ]]; then
     pass; else fail "no default branch: report what is observable, remove nothing: RC=$RC OUT=$OUT ERR=$(cat "$TMP/r4h.err")"; fi
 
+  # 4a-ii-e. With no base AND an unreadable tree, the failure is named rather
+  # than passing as clean.
+  mk_origin o4i; clone_from "$BARE" "$TMP/r4i"
+  g -C "$TMP/r4i" worktree add -q "$TMP/r4i-wt" -b review/nobase-gone || die "r4i worktree add failed"
+  g -C "$TMP/r4i" remote remove origin || die "r4i remote remove failed"
+  rm -rf "$TMP/r4i-wt" || die "r4i rm failed"
+  OUT="$(cd "$TMP/r4i" && printf '%s' '{"stop_hook_active":false}' | bash "$HOOK" 2>"$TMP/r4i.err")"; RC=$?
+  if [[ $RC -eq 0 ]] && ! reason_has "r4i-wt" \
+     && [[ "$(cat "$TMP/r4i.err")" == *"r4i-wt"* ]] \
+     && [[ "$(cat "$TMP/r4i.err")" == *"missing"* ]]; then
+    pass; else fail "no base + missing tree: name the failure: RC=$RC OUT=$OUT ERR=$(cat "$TMP/r4i.err")"; fi
+
   # 4b. The same orphaned worktree, seen from INSIDE a linked worktree with
   # HERDR_ENV set: that is a worker session, and removing a worktree is the
   # lead's job (rules/agent-team-operation.md). Blocking here would force the
