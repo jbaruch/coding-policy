@@ -16,6 +16,11 @@
   remedy, and leaves an adjudication on the same task untouched. The assessment
   requirement (#408) belongs to diagnosis alone.
 
+  The choice is made once. `plan` records the mode beside the judge's tier, and
+  `start-judge` reads it from the plan — a plan carrying none starts no worker.
+  Steps 15, 16 and 17 of the skill carry it through, so the mode Step 13 chose
+  when it composed the brief is the one every later gate reads.
+
 ## 0.3.230 — 2026-09-15
 
 ### Fixed

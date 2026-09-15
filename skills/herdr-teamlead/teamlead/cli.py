@@ -116,7 +116,7 @@ def build_parser():
     judge_parser.add_argument("--kind", choices=("claude", "codex", "grok"), default="claude")
     judge_parser.add_argument("--task")
     judge_parser.add_argument("--judge-mode", choices=recovery.JUDGE_MODES,
-                              help="What this judge seat is for; the plan's own mode when omitted.")
+                              help="What this judge seat is for; the plan's recorded mode when omitted.")
     judge_parser.add_argument("--now", metavar="ISO")
 
     for command in ("retro-check", "retro-record"):
@@ -720,6 +720,7 @@ def cmd_plan(args, client=None, warn=None, trace=None):
             }
             if judge
             else None,
+            judge_mode=getattr(args, "judge_mode", None),
             snapshot_ref={"source": source, "measured_at": snapshot.get("measured_at")},
             warn=warn,
             tier_candidates=tier_candidates,
@@ -1173,6 +1174,9 @@ def cmd_start_judge(args, client=None, warn=None, trace=None):
         raise UsageError("Plan has no usable judge tier; run plan --roles judge.", {})
     if normalize_assignments(document).get("judge") != tier["agent"]:
         raise UsageError("Plan judge tier and assignment name different workers; replan.", {})
+    # The plan carries the mode the lead declared; the flag overrides it, and
+    # neither present is a refusal rather than a default (#425).
+    judge_mode = recovery.require_judge_mode(getattr(args, "judge_mode", None) or tier.get("mode"))
     parsed = parse_tiers({"build": {"model": tier.get("model"), "effort": tier.get("effort")}}, args.kind)["build"]
     agent = SimpleNamespace(name=tier["agent"], kind=args.kind, idle_markers=(), working_markers=(),
                             launch_args=parse_launch_args(tier.get("launch_args", []), args.kind))
@@ -1189,7 +1193,7 @@ def cmd_start_judge(args, client=None, warn=None, trace=None):
     full = _load_state_for_write(state_path, warn, persist_migration=False)
     recovery.require_investigation_before_judge(full["recovery"], full["assignments"],
                                                 args.task or planned_task, full["specialist_assessments"],
-                                                mode=getattr(args, "judge_mode", None))
+                                                mode=judge_mode)
     item = retrospective_runtime.request({"transitions": [{"agent": agent.name, "role": "judge",
         "model": parsed["model"], "effort": parsed["effort"], "context": "start", "task": args.task or planned_task,
         "pane": args.pane}]})["transitions"][0]

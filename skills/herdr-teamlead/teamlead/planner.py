@@ -419,7 +419,7 @@ def _refuse_unaffordable_judge(judge_agent, headrooms, cost, groups):
         )
 
 
-def plan(roles, snapshot, counts=None, exclude=None, role_costs=None, snapshot_ref=None, warn=None, judge_agent=None, judge_tier=None, tier_candidates=None, rounds=None, familiarity=None, requirements=None, selection_rationale=None, roster=None, operator_exclude=None):
+def plan(roles, snapshot, counts=None, exclude=None, role_costs=None, snapshot_ref=None, warn=None, judge_agent=None, judge_tier=None, judge_mode=None, tier_candidates=None, rounds=None, familiarity=None, requirements=None, selection_rationale=None, roster=None, operator_exclude=None):
     """Assign `roles` to the agents in `snapshot`, heaviest seat first.
 
     `counts` is `{role: {agent: times_held}}` from the state ledger; omit it
@@ -433,6 +433,8 @@ def plan(roles, snapshot, counts=None, exclude=None, role_costs=None, snapshot_r
     is that block's `{model, effort}`; when the judge seat is planned the
     document echoes it back as the tier the worker is started on, so a caller
     builds the launch flags from the config rather than typing them by hand.
+    `judge_mode` is the seat's declared mode, echoed beside the tier so the
+    start and the dispatch read the lead's choice instead of retaking it.
 
     `roster` is the agent names `config.json` declares, so the plan can tell a
     snapshot that missed the fleet from a fleet with no capacity; omit it to
@@ -694,6 +696,11 @@ def plan(roles, snapshot, counts=None, exclude=None, role_costs=None, snapshot_r
         }
         if tier.get("launch_args"):
             document["judge"]["launch_args"] = tier["launch_args"]
+        # The seat's declared mode travels with the plan, so `start-judge` and
+        # `apply` read the choice the lead already made rather than taking it
+        # again -- or, worse, defaulting it (#425).
+        if judge_mode:
+            document["judge"]["mode"] = judge_mode
 
     if tier_candidates is not None:
         document["tiers"] = {

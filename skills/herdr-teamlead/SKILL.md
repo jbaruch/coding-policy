@@ -451,8 +451,13 @@ Plan the pinned judge against Step 14's fresh snapshot:
 ```bash
 CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
 bash "$CP/skills/herdr-teamlead/teamlead.sh" plan \
-  --roles judge --snapshot <step-14-measure-output> --task <task-id>
+  --roles judge --judge-mode <adjudication|diagnosis> \
+  --snapshot <step-14-measure-output> --task <task-id>
 ```
+
+`adjudication` for a dispute, `diagnosis` for an exhausted allowance — the same
+choice Step 13 made when it composed the brief. The plan records it, so Steps
+16 and 17 need no second decision. An undeclared mode is refused.
 
 Exit 0 names the judge worker; proceed immediately to Step 16. On non-zero,
 report the diagnostic and finish here. Never substitute a judge, lower its tier,
@@ -469,7 +474,8 @@ bash "$CP/skills/herdr-teamlead/start-judge-worker.sh" \
   <step-15-plan-file> <pane> [claude|codex|grok] --task <task-id> [--state <state-file>]
 ```
 
-Starts the pinned judge and verifies launch argv. The header owns the contract.
+Starts the pinned judge and verifies launch argv, on the mode Step 15 recorded
+in the plan. The header owns the contract.
 
 - **Exit 0** — proceed immediately to Step 17 with `--no-clear`.
 - **Any non-zero** — report the diagnostic and finish here without briefing
@@ -484,11 +490,12 @@ CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
 bash "$CP/skills/herdr-teamlead/teamlead.sh" apply \
   --assignments <plan-file> \
   --brief judge=<round>-judge.md --report judge=<absolute-report-path> \
-  --common <path-to-COMMON.md> \
+  --common <path-to-COMMON.md> --judge-mode <adjudication|diagnosis> \
   --task <task-id> [--no-clear]
 ```
 
-Step 10's outcomes govern. Use `--no-clear` only for the worker just started in
+Pass the same `--judge-mode` Step 15 planned. Step 10's outcomes govern. Use
+`--no-clear` only for the worker just started in
 Step 16; an existing judge receives the default cleared relaunch with retrospective
 coverage. Apply verifies the live tier before input. Proceed immediately to Step 18.
 
