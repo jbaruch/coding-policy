@@ -89,7 +89,9 @@
     "skills/herdr-teamlead/tests/test_stale_grok_delivery.py",
     "scripts/tests/test_source_index.py",
     "skills/herdr-teamlead/teamlead/partition.py",
-    "skills/herdr-teamlead/tests/test_partition.py"
+    "skills/herdr-teamlead/tests/test_partition.py",
+    "skills/herdr-teamlead/teamlead/legacy_recovery.py",
+    "skills/herdr-teamlead/tests/test_legacy_recovery.py"
   ],
   "executionEnvironments": [
     {

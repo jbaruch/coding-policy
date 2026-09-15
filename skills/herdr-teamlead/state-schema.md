@@ -326,7 +326,7 @@ document and arrives already stamped.
 
 ## Recovery records
 
-The recovery document uses `schema_version: 8`; individual records retain their
+The recovery document uses `schema_version: 9`; individual records retain their
 independent versions. Version 6 adds the dispatch fields `brief_identity`, `refusal` and
 `refusal_move` and the `refusal_authorizations` collection; version 7 adds the
 dispatch's send-time `provider`; version 8 adds the `diagnoses` collection. The
@@ -637,3 +637,36 @@ apply here.
 - `apply` never trusts a snapshot for an agent's lifecycle state. It re-reads
   the live agent through `herdr agent get` and refuses a `working` or `blocked`
   worker before sending a single keystroke.
+
+
+## Explicit legacy ruling recovery
+
+Recovery store schema 9 adds `legacy_ruling_recoveries`. The owner migrates
+stores 1–8 by adding an empty collection and retaining existing records.
+An older store already containing this collection is refused. State document
+schema 6 and checkpoint record versions remain unchanged. Older owner builds
+cannot write schema 9; use the upgraded owner for every dispatch and reader.
+
+`recover-legacy-rulings` is an explicitly authorized repair of duplicate
+version-2 checkpoint citations. A preview names the original rows and their
+digests. Apply binds the reviewed state SHA-256, creates a private exclusive
+backup of its exact bytes, validates the complete candidate and atomically
+replaces the live state under its existing lock. A changed source, a conflicting
+backup, a version-3 duplicate or unrelated invalid history refuses the repair.
+A retry verifies the saved receipt and backup without rewriting either.
+
+Each schema-1 recovery record carries `id`, `task`, `at`, the actual operator
+`authorization` source/quote, `backup` path/SHA-256, a `checkpoints` object
+mapping original checkpoint IDs to canonical JSON SHA-256 digests, and
+`grants_future_attempts: false`. Every referenced row retains its complete
+original content and must remain at version 2 without `requested_by`. Reading
+validates these bindings without fetching historical files. Altered, new or
+overlapping citations do not inherit the recovery. The checkpoint writer still
+sees the original cited rulings and refuses another ruling for the task.
+No task identity, base, assignment, attempt count, plan, evidence or authorization
+is removed or invented. The operator's recovery request grants no corrections,
+review approvals or new dispatch authority.
+
+Keep the backup and its receipt for the ledger's lifetime. The Herdr team-lead
+skill owns both. The operator supplies an accessible private directory outside
+the live state and sidecars. Recovery never garbage-collects historical bytes.

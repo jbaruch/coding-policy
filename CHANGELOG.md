@@ -1,5 +1,9 @@
 # Changelog
 
+## Next
+
+- Add explicit, backed-up recovery of legacy Herdr ruling citations while preserving task history and correction bounds.
+
 ## 0.3.226 — 2026-09-14
 
 ### Fixed

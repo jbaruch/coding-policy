@@ -25,8 +25,8 @@ RECOVERY_SCHEMA_VERSION = 1
 #: (#403). An older store carrying any of them is unowned newer data and is
 #: refused; a clean one is stamped and given the empty collection
 #: (rules/stateful-artifacts.md). Version 8 adds the `diagnoses` collection
-#: (#407).
-RECOVERY_STORE_VERSION = 8
+#: (#407). Version 9 adds explicit digest-bound legacy ruling recovery receipts.
+RECOVERY_STORE_VERSION = 9
 REFUSAL_FIELDS = frozenset({"brief_identity", "refusal", "refusal_move", "provider"})
 SPECIALIST_DISPATCH_VERSION = 2
 #: Checkpoint record version. 1 carries a mandatory pinned-judge ruling; 2
@@ -79,7 +79,7 @@ def empty_recovery():
     return {"schema_version": RECOVERY_STORE_VERSION, "tasks": {}, "checkpoints": [],
             "plans": [], "dispatches": [], "context_permissions": [], "events": [],
             "hand_clearances": [], "historical_attempts": [], "role_clearances": [], "delivery_recoveries": [],
-            "refusal_authorizations": [], "diagnoses": []}
+            "refusal_authorizations": [], "diagnoses": [], "legacy_ruling_recoveries": []}
 
 
 def _migrate_checkpoints(store):
@@ -171,7 +171,9 @@ def _refuse_unowned_legacy(store, version):
             raise UsageError("Older recovery requires a delivery_recoveries array; restore the original owner-written store.", {})
         if any(not isinstance(row, dict) or row.get("schema_version") != 1 for row in deliveries):
             raise UsageError("Older recovery contains unowned newer delivery records; preserve it for owner recovery.", {})
-    added = ["diagnoses"]
+    added = ["legacy_ruling_recoveries"]
+    if version < 8:
+        added.append("diagnoses")
     if version < 6:
         added.append("refusal_authorizations")
     if version < 3:
@@ -188,7 +190,7 @@ def migrate_store(store):
     if not isinstance(store, dict) or type(store.get("schema_version")) is not int:
         return False
     version = store["schema_version"]
-    legacy = version in {1, 2, 3, 4, 5, 6, 7}
+    legacy = version in {1, 2, 3, 4, 5, 6, 7, 8}
     added = _refuse_unowned_legacy(store, version) if legacy else None
     # Both run: `or` would skip the second whenever the first reported work,
     # leaving version-1 diagnoses for a validator that accepts only version 2.
@@ -1352,6 +1354,8 @@ def validate_store(store, assignments):
             text(row["scope"], "task scope")
             paths(row["allowed_paths"], "task paths")
             authorization(row["authorization"])
+        from .legacy_recovery import validate_recoveries
+        recovered = validate_recoveries(store)
         ruled_tasks = set()
         for row in store["checkpoints"]:
             task = task_record(store, row["task"])
@@ -1375,7 +1379,7 @@ def validate_store(store, assignments):
                 # `checkpoint` refuses a second cited ruling as it writes one,
                 # but the read boundary checked each row alone, so a ledger
                 # holding two for one task validated (#400).
-                if row["task"] in ruled_tasks:
+                if row["task"] in ruled_tasks and row["id"] not in recovered:
                     raise UsageError("A task cites more than one operator-requested ruling; the operator grants at most one. Preserve the ledger for owner recovery.", {})
                 ruled_tasks.add(row["task"])
             elif "requested_by" in row:
