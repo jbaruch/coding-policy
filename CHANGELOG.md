@@ -1,5 +1,23 @@
 # Changelog
 
+### Fixed
+
+- **A ledger already written at recovery schema 9 still reads (#439).** The
+  unmerged #436 prototype wrote four digest-bound `legacy_ruling_recoveries`
+  receipts and bumped the recovery store to 9. #437 then fixed the original
+  version-2 citation rejection without a migration, so the published schema-8
+  owner refuses the live ledger ("Unsupported recovery schema") while restoring
+  the pre-recovery backup would drop the assignments, dispatches, events and
+  task appended since.
+
+  The owner now migrates a clean schema-8 store by adding the empty collection,
+  reads schema 9, and validates every original receipt against the cited
+  checkpoint rows. Altered, overlapping or malformed receipts, and unsupported
+  versions, refuse without writes. Version-3 one-ruling bounds and correction
+  limits are unchanged. The prototype `recover-legacy-rulings` command is not
+  published: existing history does not need a new repair command to stay
+  readable.
+
 ## 0.3.231 — 2026-09-15
 
 ### Added
@@ -50,7 +68,7 @@
   previous command had left there — the reported occupancy-read failure named
   the wrong cause. Deferred Copilot advisories from #422.
 
-## 0.3.228 — 2026-09-15
+## 0.3.229 — 2026-09-15
 
 ### Fixed
 
@@ -69,6 +87,8 @@
   boundary as #400 intended. No ledger needs migrating, and nothing is deleted
   to make one readable: the legacy citations, their evidence receipts and their
   correction counts stay exactly as written.
+
+## 0.3.228 — 2026-09-15
 
 ### Fixed
 
