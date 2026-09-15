@@ -1,5 +1,41 @@
 # Changelog
 
+### Fixed
+
+- **The handoff hook sees every spent worktree, not only the pushed ones
+  (#433).** It reported an orphaned worktree only when the branch's upstream
+  read `[gone]`, so a branch that was never pushed — the majority of what the
+  team flow creates, since review, test and judge seats pin a tip and report to
+  a file — was invisible to it, permanently. Detached worktrees could not match
+  a branch-name predicate at all. One live repository accumulated 45 linked
+  worktrees and about 800 MB of residue; the check named 1 of the 43 that were
+  safely removable.
+
+  Upstream state stays a sufficient condition and gains a second: clean, and
+  holding nothing the default branch lacks — `rev-list --count <default>..<branch>`
+  at zero, or for a detached tree a HEAD the default branch already contains.
+  The default branch is resolved explicitly, since the hook can run from a
+  linked worktree whose HEAD is not it.
+
+  What the lead may act on tightened. `rules/agent-team-operation.md` Writers
+  and Checkouts lets a lead remove only a merged, clean worktree, so removal
+  now ALWAYS requires clean-and-contained: a gone upstream is a reason to look,
+  never a licence, since an upstream can vanish while its tree is dirty or
+  ahead — and the old check listed exactly that for removal. Every protected
+  state now reaches the operator on stderr instead, with its reason: locked,
+  detached, dirty, unmerged, or unreadable. A never-pushed dirty tree has no
+  upstream to be gone, so an upstream-keyed report would never have named it.
+  With no default branch resolvable, what is observable without one — detached,
+  dirty — is still reported, with containment marked unknown and nothing listed
+  for removal.
+
+  The predicate fails closed. A worktree whose status cannot be read is never
+  reported removable: reading an unreadable tree as clean is how a hand-rolled
+  version of this passed trees it had never inspected, and every failed check
+  now says on stderr which command failed and what to inspect. Dirty trees and
+  trees holding unmerged commits are still left alone, and the leftover-branch
+  section is untouched.
+
 ## 0.3.226 — 2026-09-14
 
 ### Fixed
