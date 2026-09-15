@@ -33,7 +33,7 @@ def normalize_requirement(record, role):
         raise UsageError("A specialist assignment needs at least one required capability; record the skills or tools its worker must have.", {"role": role})
     if type(record["independent"]) is not bool:
         raise UsageError("Specialist independent must be a JSON boolean; state whether this assignment requires an independent assessor.", {"role": role})
-    if role in {"reviewer", "tester"} and not record["independent"]:
+    if canonical_role(role) in {"reviewer", "tester"} and not record["independent"]:
         raise UsageError("Reviewer and tester assignments require independent:true; use advisor for non-independent consultation.", {"role": role})
     engagement = record["engagement"]
     if (not isinstance(engagement, str) or not engagement.strip() or engagement != engagement.strip()
@@ -118,7 +118,11 @@ def selection_constraints(roles, agents, requirements, history, task, dispatches
     rationale = []
     for role in roles:
         requirement = normalized.get(role)
-        independent = role in {"reviewer", "tester"} or requirement is not None and requirement["independent"]
+        # The RESPONSIBILITY decides independence, never the seat's own name: a
+        # `reviewer#api` seat is a reviewer, and a contributor barred from
+        # `reviewer` is barred from every seat of it (#434).
+        base = canonical_role(role)
+        independent = base in {"reviewer", "tester"} or requirement is not None and requirement["independent"]
         for name in names:
             agent = by_name.get(name)
             unconfigured = requirement is not None and agent is None
@@ -136,7 +140,8 @@ def selection_constraints(roles, agents, requirements, history, task, dispatches
                 rationale.append("{} excludes {}: {}.".format(role, name, "; ".join(reasons)))
                 continue
             if requirement is not None:
-                familiar = any(row.get("task") == task and row.get("role") == role
+                # History records the responsibility, so familiarity reads it.
+                familiar = any(row.get("task") == task and row.get("role") == base
                                and row.get("agent") == name and row.get("status") == "applied"
                                and row.get("requirements") == requirement for row in history)
                 familiarity[role][name] = int(familiar)

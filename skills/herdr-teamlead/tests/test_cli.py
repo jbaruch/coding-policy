@@ -718,9 +718,11 @@ class ApplyCommandTest(CliCase):
         partition = self.tmp / "partition.json"
         partition.write_text(json.dumps({"schema_version": 1, "slices": [
             {"name": "api", "paths": ["src/api/*"]}, {"name": "core", "paths": ["src/core/*"]}]}))
+        # With --task, which is the documented invocation and the one that
+        # exercises the contribution-exclusion path.
         out = io.StringIO()
         code = main(self.base() + ["plan", "--roles", "reviewer", "--partition", str(partition),
-                                   "--snapshot", str(self.snapshot)], stdout=out)
+                                   "--task", "t-partition", "--snapshot", str(self.snapshot)], stdout=out)
         self.assertEqual(code, 0, out.getvalue())
         plan = json.loads(out.getvalue())
         self.assertEqual(sorted(plan["assignments"]), ["reviewer#api", "reviewer#core"])
@@ -736,7 +738,7 @@ class ApplyCommandTest(CliCase):
         code, applied, err = self.run_cli(
             self.base()
             + ["apply", "--composer-settle", "0", "--assignments", str(plan_file),
-               "--common", str(self.common), "--dry-run"]
+               "--task", "t-partition", "--common", str(self.common), "--dry-run"]
             + self.brief_args(*plan["assignments"]),
             client=self._client({}),
         )
@@ -759,6 +761,24 @@ class ApplyCommandTest(CliCase):
         self.assertEqual(code, 0, err)
         rows = json.loads(self.state.read_text())["assignments"]
         self.assertEqual([row["role"] for row in rows], ["reviewer"])
+
+    def test_a_contributor_cannot_take_a_review_seat(self):
+        # The responsibility decides independence: a worker the ledger records
+        # as a contributor on this task is barred from every seat of the
+        # reviewer role, not only from the literal name `reviewer` (#434).
+        state = empty_state()
+        add_assignment(state, AT, "developer", "grok", task="t-seat", fix_round=1)
+        save_state(self.state, state)
+        code, _, err = self.run_cli(
+            self.base()
+            + ["apply", "--composer-settle", "0",
+               "--assignments", json.dumps({"reviewer#api": "grok"}),
+               "--task", "t-seat", "--common", str(self.common), "--dry-run"]
+            + ["--brief", "reviewer#api=" + str(self.briefs["reviewer"])],
+            client=self._client({}),
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("ineligible", err)
 
     def test_live_apply_clears_then_assigns_and_records_the_ledger(self):
         client = self._client({"grok": "idle", "claude": "done"})

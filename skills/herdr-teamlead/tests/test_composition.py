@@ -220,5 +220,39 @@ class EligibilityTest(unittest.TestCase):
         self.assertEqual(constraints["familiarity"]["advisor"], {})
 
 
+
+class SeatResponsibilityTest(unittest.TestCase):
+    """A seat is its role for every responsibility check (#434)."""
+
+    def agent(self, name):
+        return SimpleNamespace(name=name, capabilities=("review",))
+
+    def history(self):
+        return [{"task": "t1", "role": "developer", "agent": "alpha", "status": "applied",
+                 "reviewer_scope": None}]
+
+    def test_a_contributor_is_barred_from_every_seat_of_the_role(self):
+        for role in ("reviewer", "reviewer#api"):
+            with self.subTest(role=role):
+                result = selection_constraints(
+                    [role], [self.agent("alpha"), self.agent("beta")], {}, self.history(), "t1")
+                self.assertEqual(result["exclude"][role], ["alpha"])
+
+    def test_a_seat_requirement_still_requires_independence(self):
+        record = {"specialty": "api-review", "required_capabilities": ["review"],
+                  "independent": False, "engagement": "review the api slice"}
+        for role in ("reviewer", "reviewer#api"):
+            with self.subTest(role=role):
+                with self.assertRaisesRegex(UsageError, "require independent:true"):
+                    normalize_requirement(record, role)
+
+    def test_a_seat_requirement_resolves_its_role(self):
+        record = {"specialty": "api-review", "required_capabilities": ["review"],
+                  "independent": True, "engagement": "review the api slice"}
+        self.assertEqual(normalize_requirement(record, "reviewer#api")["specialty"], "api-review")
+        with self.assertRaisesRegex(UsageError, "invent a responsibility"):
+            normalize_requirement(record, "nonsense#api")
+
+
 if __name__ == "__main__":
     unittest.main()

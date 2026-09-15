@@ -789,9 +789,10 @@ def cmd_plan(args, client=None, warn=None, trace=None):
     rounds = _fan_out_seats(rounds, seats)
     requirements = _fan_out_seats(requirements, seats)
     tier_candidates = _fan_out_seats(tier_candidates, seats)
+    # `rationale` is a list of sentences, not a role-keyed map: fanning it out
+    # would crash, and each seat's own line is already in it (#434).
     constraints = {**constraints,
-                   "familiarity": _fan_out_seats(constraints["familiarity"], seats),
-                   "rationale": _fan_out_seats(constraints["rationale"], seats)}
+                   "familiarity": _fan_out_seats(constraints["familiarity"], seats)}
 
     result = build_plan(
             roles,

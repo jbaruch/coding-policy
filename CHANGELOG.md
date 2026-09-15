@@ -13,7 +13,11 @@
   `tiers.canonical_role` resolves the responsibility a seat fills, and every
   module that reasons about responsibility reads through it: independence and
   contribution exclusion, round tiers, requirements, fix history, the brief
-  template, and the reviewer-scope classification. The seat identity reaches
+  template, and the reviewer-scope classification. Independence is the one that
+  had to be right — a worker the ledger records as a contributor on the task is
+  barred from every seat of the reviewer role, not only from the literal name
+  `reviewer`, and a seat's requirement still cannot declare itself
+  non-independent. The seat identity reaches
   the planner and the dispatch record — which is what a slice's verdict is read
   back through — while the ledger records the role, so history does not
   fragment.
