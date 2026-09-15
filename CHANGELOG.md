@@ -4,6 +4,34 @@
 
 ### Fixed
 
+- **A Grok report whose dispatched turn carried an image is recoverable
+  (#392).** A completed review could not be accepted: `recover-report` refused
+  the unique original transcript with `grok_source_ambiguous`, and the round
+  needed a fresh independent reviewer for work that was already done. The
+  transcript held exactly what it should — one fresh session, one
+  `user_prompt_submit`, one `turn_completed` with `stop_reason=end_turn`, and a
+  final assistant message naming the requested report path.
+
+  Two causes, both in how the parser read the attachment. `grok_clear_identity`
+  required one contiguous run of user chunks, and the `image_compressed`
+  metadata Grok writes between them ended the run, so one group read as two.
+  And the prompt comparison required exact equality, while Grok appends its own
+  `[Image #1]` marker after the dispatched text.
+
+  Attachment metadata now belongs to no message: it neither starts nor ends a
+  user group, and a user chunk carrying an image contributes no prompt text
+  while staying in the same group. The exception is `image` alone — an unknown
+  block type is content the parser cannot authenticate the text around, so it
+  refuses rather than silently dropping it — and an image that STARTS a group
+  starts that group's text empty, so a following chunk cannot be read as a
+  continuation of the previous message. Every name test survives untrusted
+  JSON: an unhashable value where a name belongs took the refusal path rather
+  than raising `TypeError` out of the recovery and losing the receipt. `prompt_matches` accepts the dispatched text
+  followed only by that trailing marker, at both places the prompt is
+  authenticated. Everything else still refuses — multiple sessions or turns,
+  failed or cancelled turns, altered assignment text, a marker anywhere but the
+  end, extra user text after it, and a second user group.
+
 - **A relaunched seat waits for Herdr to release its old name, and no brief is
   typed into a modal (#379, #393).** Two live dispatch failures, one per half.
 
