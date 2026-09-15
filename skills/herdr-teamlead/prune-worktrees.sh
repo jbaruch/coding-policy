@@ -201,7 +201,14 @@ branch_tip() { # <shared> <branch>
 # invisible to `seen_branches` (#410). So occupancy is re-read at the deletion.
 branch_checked_out() { # <shared> <branch>
   local listing rc=0 field found=0
-  listing="$(mktemp)" || return 1
+  # The caller builds its failure row from ERRFILE, so a bare `return 1` here
+  # would report the occupancy read as failing for whatever the previous
+  # command left there (#426).
+  listing="$(mktemp 2>"$ERRFILE")" || rc=$?
+  if (( rc != 0 )) || [[ -z "$listing" ]]; then
+    printf 'mktemp failed (exit %s): %s\n' "${rc:-0}" "$(tr '\n' ' ' < "$ERRFILE")" > "$ERRFILE"
+    return 1
+  fi
   if ! git -C "$1" worktree list --porcelain -z >"$listing" 2>"$ERRFILE"; then
     if ! rm -f "$listing"; then warn "could not remove temp file ${listing} — remove it by hand"; fi
     return 1
@@ -286,6 +293,19 @@ delete_branch() { # <shared> <branch> <tip>  -> 0 deleted, 1 moved, 2 git refuse
   done <<<"$keys"
   if (( ! found )); then
     return 0
+  fi
+  # The section may have been recreated since the deletion: `worktree add
+  # --track -b` writes a fresh `branch.<name>.*` for the NEW branch, and
+  # removing it then deletes configuration belonging to a live checkout (#426).
+  # Occupancy is re-read immediately before the removal, the same guard the
+  # deletion itself takes.
+  local now_held
+  if ! now_held="$(branch_checked_out "$1" "$2")"; then
+    return 4
+  fi
+  if [[ "$now_held" == 1 ]]; then
+    printf 'branch.%s config belongs to a branch a worktree recreated after the deletion; left untouched\n' "$2" > "$ERRFILE"
+    return 3
   fi
   rc=0
   git -C "$1" config --remove-section "branch.$2" >/dev/null 2>"$ERRFILE" || rc=$?

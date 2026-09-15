@@ -501,6 +501,38 @@ SHIM
   echo "32. absence is confirmed through a parent whose name ends in a newline"
   if (( RC == 0 )) && [[ "$ERRTEXT" != *"cannot confirm the worktree is gone"* ]] && ! has_branch "$SHARED" review/nlparent; then pass; else fail "rc=$RC out=$OUT err=$ERRTEXT"; fi
 
+  # --- 34. the config cleanup will not delete a recreated branch's section.
+  # The window is narrow: after the post-deletion occupancy re-check says the
+  # branch is free, and before `--remove-section` runs. The shim recreates the
+  # branch during the config READ, which sits exactly in it.
+  mk_repo thirtyfour
+  git -C "$SHARED" branch --no-track review/recreated origin/main || die "branch failed"
+  git -C "$SHARED" config "branch.review/recreated.description" "original" || die "config failed"
+  mkdir -p "$TMP/shim34" || die "mkdir shim failed"
+  cat > "$TMP/shim34/git" <<SHIM || die "shim write failed"
+#!/usr/bin/env bash
+set -euo pipefail
+case "\$*" in
+  *"config --get-regexp"*)
+    if [[ ! -e "$TMP/shim34/seen" ]]; then
+      : > "$TMP/shim34/seen"
+      if ! "$(command -v git)" -C "$SHARED" worktree add -q --track -b review/recreated "$ROOT/thirtyfour-live" origin/main >/dev/null 2>&1; then
+        echo "shim34: fixture could not recreate review/recreated" >&2
+      fi
+    fi ;;
+esac
+exec "$(command -v git)" "\$@"
+SHIM
+  chmod +x "$TMP/shim34/git" || die "chmod shim failed"
+  RUN_SEQ=$((RUN_SEQ+1))
+  OUT="$(env WORKTREE_ROOT="$ROOT" PATH="$TMP/shim34:$PATH" bash "$SCRIPT" "$SHARED" 2>"$TMP/err.$RUN_SEQ")"; RC=$?; ERRTEXT="$(cat "$TMP/err.$RUN_SEQ")"
+  echo "34. a branch.<name> section recreated after the deletion is left untouched"
+  kept_config=0
+  config_rc=0
+  git -C "$SHARED" config --get "branch.review/recreated.remote" >/dev/null || config_rc=$?
+  case "$config_rc" in 0) kept_config=1 ;; 1) ;; *) die "git config --get failed (exit $config_rc)" ;; esac
+  if (( kept_config )); then pass; else fail "the recreated branch's config was deleted: rc=$RC out=$OUT err=$ERRTEXT"; fi
+
   # --- 14. usage / not a repo.
   run
   echo "14a. usage is exit 1 with no JSON"

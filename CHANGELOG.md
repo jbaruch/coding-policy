@@ -1,5 +1,21 @@
 # Changelog
 
+### Fixed
+
+- **The prune's config cleanup will not delete a recreated branch's section
+  (#426).** `delete_branch` re-reads occupancy either side of the ref deletion,
+  but `--remove-section branch.<name>` ran after that guard. A concurrent
+  `worktree add --track -b` in the window between them writes a fresh
+  `branch.<name>.*` for the NEW branch, and the cleanup then removed
+  configuration belonging to a live checkout while the branch itself survived.
+  Occupancy is re-read immediately before the removal, and a section a worktree
+  now holds is left untouched and reported.
+
+- **A failed `mktemp` in the occupancy read names itself.** It returned without
+  writing to `ERRFILE`, so the caller built its failure row from whatever the
+  previous command had left there — the reported occupancy-read failure named
+  the wrong cause. Deferred Copilot advisories from #422.
+
 ## 0.3.228 — 2026-09-15
 
 ### Fixed
