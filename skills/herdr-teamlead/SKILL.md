@@ -149,17 +149,56 @@ Choose the responsibilities needed next under `references/specialists.md`.
 Supply its requirements file for specialized work. Keep the developer reserved
 through early fixes; schedule consultation and verification as the task needs them.
 
+The composition triggers decide part of that roster. Classify this round
+against the repo's declaration first. For a pre-implementation round, pass
+`--planned` naming the surfaces the work will touch. A round with work already
+written classifies that work:
+
+```bash
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
+bash "$CP/skills/herdr-teamlead/teamlead.sh" detect-triggers \
+  --repo <repo-path> --base <recorded-base> [--head <pushed-head>] \
+  --roles <role[,role...]> [--requirements <requirements.json>] \
+  [--planned <planned.json>] [--decisions <decisions.json>]
+```
+
+Exit 0 means every fired trigger is staffed or answered. On exit 1, read the
+stderr object: an absent declaration is written first (`references/specialists.md`),
+and an `unaddressed_trigger` is staffed in the roles below or answered by a
+recorded decision with its reason. Re-run the command with the updated
+declaration, roles, requirements and decisions after every such change, and
+plan only once it exits 0.
+
+A round that will split its review surface validates the partition first:
+
+```bash
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
+bash "$CP/skills/herdr-teamlead/teamlead.sh" validate-partition \
+  --repo <repo-path> --base <recorded-base> [--head <pushed-head>] \
+  --partition <partition.json>
+```
+
+Exit 1 names every unowned path, every overlap and every slice owning nothing,
+in one run. Fix the partition and re-run; plan only once it exits 0. The document's format, the ownership
+payload and the seating it produces:
+
+```text
+skills/herdr-teamlead/references/review-partition.md
+```
+
 ```bash
 CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
 bash "$CP/skills/herdr-teamlead/teamlead.sh" plan \
   --roles <role[,role...]> [--requirements <requirements.json>] \
-  [--exclude <role>=<agent>[,<agent>...]]... \
+  [--exclude <role>=<agent>[,<agent>...]]... [--judge-mode adjudication|diagnosis] \
   [--round <role>=<round-type>] [--round-context <evidence.json>] \
   --task <task-id> [--fix-round <N>] [--correction-plan <id> --work <work.json>]
 ```
 
-Emits the role plan without worker contact. On exit 1, resolve the diagnostic
-before continuing. Apply the Step 5 constraints in `references/round-setup.md`:
+Emits the role plan without worker contact. A judge seat declares its mode:
+`adjudication` rules on a contested verdict, `diagnosis` on the investigator's
+assessment at an exhausted allowance. Pass the same `--judge-mode` to `apply`.
+On exit 1, resolve the diagnostic before continuing. Apply the Step 5 constraints in `references/round-setup.md`:
 exclude contributors from verification, reserve the developer through early fixes,
 preserve task identity and fix count, and reuse recorded correction bounds.
 Tier and qualification contracts:
@@ -210,7 +249,20 @@ Proceed immediately to Step 8.
 
 ## Step 8 — Provision the Worktrees
 
-Run once per writing worker and every worktree named in a brief:
+Prune first, every round:
+
+```bash
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
+bash "$CP/skills/herdr-teamlead/prune-worktrees.sh" <shared-checkout>
+```
+
+Emits the worktrees and branches removed, each kept one with its reason, and
+`failed`; exit 2 lists every check or removal git refused. Exit 1 decided
+nothing: fix its diagnostic and re-run before provisioning. Report every kept
+`dirty`, `unmerged`, `locked` and `detached` entry to the operator; never
+remove them by hand.
+
+Then run once per writing worker and every worktree named in a brief:
 
 ```bash
 CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
@@ -254,7 +306,8 @@ bash "$CP/skills/herdr-teamlead/teamlead.sh" apply \
 
 Emits dispatch JSON under `state-schema.md`. Supply each role's fresh absolute
 report path from its brief. Apply enrolls before input; unknown sends remain
-observation obligations.
+observation obligations. Apply refuses while an open decision or blocker on the
+task is unanswered; see the attention reference's Dispatch gate.
 Classify every brief against Step 3's authorization before sending it.
 Append the dispatch outcome to the task ledger; `applied` proves dispatch only.
 
@@ -291,14 +344,21 @@ For each event or pending recheck, verify report delivery:
 
 ```bash
 CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
-bash "$CP/skills/herdr-teamlead/wait-report.sh" --once <agent-name> <report-path>
+bash "$CP/skills/herdr-teamlead/wait-report.sh" --once \
+  [--worktree <worker-checkout>] [--base <dispatch-base>] \
+  [--since <dispatch-sent-at>] <agent-name> <report-path>
 ```
 
 The checkpoint emits delivery JSON; exit 2 emits only stderr. Exit 0 confirms
 delivery, 1 remains pending, 3 confirms blocked, 4 lacks confirmed delivery, and
-5 proves terminal refusal. Read delivered reports in full. Preserve the
-blocked/refusal and native-recovery paths in the following references; never
-re-dispatch over uncertainty or automatically retry a provider refusal.
+5 proves terminal refusal; record it with `record-refusal`. Read delivered
+reports in full. Pass this dispatch's recorded send time as `--since`, its
+recorded base as `--base`, and the worker's checkout as `--worktree`. An exit 1
+then carries either `reason: checkpoint_pending` or a `stall` object; act on a
+stall under `rules/agent-team-operation.md` Stalled Workers and record the
+obligation through `references/attention.md`. Preserve the blocked/refusal and native-recovery paths in the
+following references; never re-dispatch over uncertainty or resend a refused
+brief to its provider.
 
 ```text
 skills/herdr-teamlead/references/supervision.md
@@ -340,7 +400,11 @@ Step 22. No implementation or release is inferred from the diagnostic result.
 
 - **Any blocking finding** — apply the round-flow reference's Blocking Gate
   contract and `rules/agent-team-operation.md` Fix Loops. Return to Step 4 for
-  an authorized correction or Step 13 for a required judge ruling.
+  an authorized correction or Step 13 for a required judge ruling. At an
+  exhausted allowance, record the checkpoint through
+  `references/dispatch-recovery.md`, consult the investigator under
+  `references/specialists.md`, and take its assessed report to Step 13 for the
+  diagnosis; no operator decision is awaited.
 - **Advisory findings only** — record them in the round log and fold them into
   the next round that is already happening. Never spend a round on a lone
   advisory.
@@ -356,14 +420,23 @@ With its release criteria met, proceed immediately to Step 13.
 
 ## Step 13 — Compose the Judge Brief
 
-Optional. Triggers and the ruling contract are in
+Optional. Modes, triggers and both report contracts are in
 `skills/herdr-teamlead/references/round-flow.md` "The Judge" (a bot
 disagreement inside Step 20 returns here first). No trigger — proceed to
 Step 20.
 
-Compose the brief from `templates/brief-judge.md` through Step 7: the
-dispute, both positions with report paths, the governing rule, the tree. Skip
-Step 8 for the read-only judge. Proceed immediately to Step 14.
+For a dispute, compose from `templates/brief-judge.md` through Step 7: the
+dispute, both positions with report paths, the governing rule, the tree.
+
+For an exhausted allowance, compose from `templates/brief-judge-diagnosis.md`
+through Step 7 under the role key `judge-diagnosis`, which writes
+`brief-judge-diagnosis.md`: the assessed investigator report, the task, rounds
+spent, remaining blocking work, the per-round history, the tree, and any prior
+remedy with what it changed.
+The pinned seat is still `judge`, so plan and dispatch that role and pass this
+file as its brief: `--brief judge=<outdir>/brief-judge-diagnosis.md`.
+
+Skip Step 8 for the read-only judge. Proceed immediately to Step 14.
 
 ## Step 14 — Re-measure the Shared Window
 
@@ -378,8 +451,13 @@ Plan the pinned judge against Step 14's fresh snapshot:
 ```bash
 CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
 bash "$CP/skills/herdr-teamlead/teamlead.sh" plan \
-  --roles judge --snapshot <step-14-measure-output> --task <task-id>
+  --roles judge --judge-mode <adjudication|diagnosis> \
+  --snapshot <step-14-measure-output> --task <task-id>
 ```
+
+`adjudication` for a dispute, `diagnosis` for an exhausted allowance — the same
+choice Step 13 made when it composed the brief. Use the recorded mode in Steps
+16 and 17. An undeclared mode is refused.
 
 Exit 0 names the judge worker; proceed immediately to Step 16. On non-zero,
 report the diagnostic and finish here. Never substitute a judge, lower its tier,
@@ -396,7 +474,8 @@ bash "$CP/skills/herdr-teamlead/start-judge-worker.sh" \
   <step-15-plan-file> <pane> [claude|codex|grok] --task <task-id> [--state <state-file>]
 ```
 
-Starts the pinned judge and verifies launch argv. The header owns the contract.
+Starts the pinned judge and verifies launch argv, on the mode Step 15 recorded
+in the plan. The header owns the contract.
 
 - **Exit 0** — proceed immediately to Step 17 with `--no-clear`.
 - **Any non-zero** — report the diagnostic and finish here without briefing
@@ -411,11 +490,12 @@ CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
 bash "$CP/skills/herdr-teamlead/teamlead.sh" apply \
   --assignments <plan-file> \
   --brief judge=<round>-judge.md --report judge=<absolute-report-path> \
-  --common <path-to-COMMON.md> \
+  --common <path-to-COMMON.md> --judge-mode <adjudication|diagnosis> \
   --task <task-id> [--no-clear]
 ```
 
-Step 10's outcomes govern. Use `--no-clear` only for the worker just started in
+Pass the same `--judge-mode` Step 15 planned. Step 10's outcomes govern. Use
+`--no-clear` only for the worker just started in
 Step 16; an existing judge receives the default cleared relaunch with retrospective
 coverage. Apply verifies the live tier before input. Proceed immediately to Step 18.
 
@@ -425,7 +505,7 @@ Run Step 11's fleet observation loop, including the judge named by Step 15.
 Proceed immediately to Step 19 once its report lands; keep other enrollments
 under observation.
 
-## Step 19 — Act on the Ruling
+## Step 19 — Act on the Ruling or Remedy
 
 Apply the Ruling Outcomes contract in `references/round-flow.md`. Investigation
 rulings return to Step 12's knowledge gate. Implementation rulings route
@@ -450,7 +530,8 @@ Record that evidence in the task ledger.
 ## Step 21 — Clean Up the Worktree
 
 Fast-forward the shared checkout, remove the worktree, and delete the branch
-per `rules/agent-worktree-isolation.md`. Proceed immediately to Step 22.
+per `rules/agent-worktree-isolation.md`, then run Step 8's prune script again
+for the round's other worktrees. Proceed immediately to Step 22.
 
 ## Step 22 — Log the Round
 

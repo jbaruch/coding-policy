@@ -1,7 +1,10 @@
 # Investigator
 
 Use for surprising behavior, unclear causality, or repeated fixes that do not
-explain the failure. Give the investigator a question whose answer will change
+explain the failure. An exhausted correction allowance is always one of these:
+the judge's diagnosis rules on this assessment rather than investigating from
+scratch, so the reproduction, causal assessment and discriminating experiment
+are the inputs its remedy turns on. Give the investigator a question whose answer will change
 the next implementation or user decision.
 
 ## Brief inputs

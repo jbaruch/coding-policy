@@ -124,6 +124,17 @@ Choose the next needed responsibilities before selecting workers. Consult the
 profiles and requirement contract in `references/specialists.md`; available
 profiles need no activation until a bounded question or deliverable warrants it.
 
+Run `detect-triggers` against the task's base first, with the roles and
+requirements this round intends. It classifies the diff against this repo's
+`.herdr/triggers.json` and exits 1 when a fired trigger is neither staffed nor
+answered by a recorded staffing decision. A Phase 1 round has no diff yet and
+passes `--planned` naming the surfaces the work will touch; a round that
+classifies neither a diff nor a plan is refused. Each invocation reads only the inputs
+it is given, so re-run it after staffing a role or recording a decision and
+plan only once it exits 0. The declaration's fields, the
+decisions file and the answers each trigger accepts are in
+`references/specialists.md`.
+
 ```bash
 CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
 bash "$CP/skills/herdr-teamlead/teamlead.sh" plan \
@@ -147,6 +158,13 @@ establishes independence. See `references/specialists.md` for assessed contribut
 history. Exit 1 covers an unknown role, missing capability or tier, and any field
 that cannot fill the requested responsibilities. Resolve the actual diagnostic;
 never weaken required independence to fill a seat.
+
+Planning also refuses a field nothing could have been ranked in: a snapshot
+missing an agent `config.json` declares, an `--exclude` list naming nobody the
+snapshot measured, and a ranked seat measured against a single agent beside the
+pinned judge. Re-run Step 4's `measure` over the whole roster rather than
+planning from a single-worker snapshot; the pinned judge seat and a config whose
+rankable roster holds one worker are the only exemptions.
 
 For a retained fix, plan `--roles developer` and exclude every other rotating
 worker from that role. Use the task's existing developer, not a new headroom
@@ -278,6 +296,10 @@ What you decide, and it is the whole of your job here:
   `references/specialists.md`; the composer selects `brief-specialist.md`.
 - For specialist developer, reviewer or tester work: `SPECIALIST_CONTEXT` in
   the normal role brief, with the applicable expertise, inputs and capability gaps.
+- For a judge diagnosis under the role key `judge-diagnosis`:
+  `INVESTIGATION_REPORT` (the assessed investigator report the judge rules on),
+  `TASK`, `FIX_ROUNDS`, `REMAINING_WORK`, `ROUND_HISTORY`, `TREE`, and
+  `PRIOR_REMEDY` (any earlier remedy and what it changed, or "none").
 
 | Phase | Role | Mode | Output |
 | ----- | ---- | ---- | ------ |
@@ -301,7 +323,8 @@ release-gating verification is `full`. Proceed immediately to Step 8.
 
 ## Step 8 — Provision the Worktrees
 
-One call per worker that writes anything:
+Run the prune in the skill's Step 8 first, every round. Then one call per
+worker that writes anything:
 
 ```bash
 CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"

@@ -36,7 +36,7 @@ An implementation task runs through the round twice, and only the second pass
 gates release. Investigation-only tasks use Step 12's knowledge-deliverable
 gate; they do not require a pushed branch or release reports.
 
-**Phase 1 — pre-development (optional).** An architect or advisor supplies the
+**Phase 1 — pre-development.** An architect or advisor supplies the
 needed design or interaction report. An investigator may first resolve a causal
 question. Assess each consultation before using its outcome. The tester maps each acceptance
 criterion to a test, or delivers those tests as a patch (tester Mode A or B).
@@ -46,8 +46,15 @@ author is an implementation contributor, even while holding the tester role.
 The developer implements against both, runs the repo's gates, pushes the
 branch, and stops without opening a PR.
 
-Skip Phase 1 for a change small enough that a design note would say less than
-the diff. Nothing in Phase 1 is a pass; it is preparation.
+Work that trips a Team Composition trigger gates here: its deliverable lands
+before implementation, or the lead records the staffing decision and its
+reason. Step 5's `detect-triggers` run decides which of the four fired, and
+reads that recorded decision; the lead's own reading of the diff does not. The cheap gate is the one worth making mandatory; a reviewer catching
+the same thing one finding per round is the expensive one.
+
+Untriggered work keeps the old judgement, whatever its size: skip Phase 1 when
+a design note would say less than the diff. Nothing in Phase 1 is a pass; it
+is preparation.
 
 **Phase 2 — post-push verification (mandatory).** The reviewer reviews the
 pushed branch and posts a COMMENT review (Mode B). The tester runs the gates
@@ -133,9 +140,16 @@ a `## BLOCKED` section can sit under a report that otherwise reads as finished.
   dialog is input, and input to a blocked agent is exactly what Dispatch
   Safety forbids. The operator answers; the wait resumes once
   `herdr agent get <name>` reports a state other than `blocked`.
-- **`wait-report.sh --once` exit 1** — delivery remains pending. Record the
-  checkpoint, acknowledge its event with a scheduled pending recheck, and resume
-  the fleet watcher. Never send a second copy of the brief on a status hint.
+- **`wait-report.sh --once` exit 1 with `reason: checkpoint_pending`** —
+  delivery remains pending. Record the checkpoint, acknowledge its event with a
+  scheduled pending recheck, and resume the fleet watcher. Never send a second
+  copy of the brief on a status hint.
+- **`wait-report.sh --once` exit 1 carrying a `stall` object** — the report is
+  absent, the worker is terminal, and the budget measured from `--since` is
+  spent. This is terminal for that wait: schedule no further recheck. Read the
+  `stall.class`, record the user-attention obligation, and take the recovery
+  `rules/agent-team-operation.md` Stalled Workers names for that class. Never
+  commit the partial work on the strength of the tree building.
 - Persist blocked dialogs, missing reports, and required operator decisions in
   the attention queue before presenting them. Keep observing unrelated work.
   A pause or handoff must cover the entire active fleet under the supervision
@@ -152,6 +166,11 @@ For an authorized implementation release, Step 12 requires all four:
    gates run and every acceptance criterion met.
 4. Nothing has been pushed to the branch after those two reports.
 
+Under a recorded `stop` remedy, 2 and 3 read against what ships: the excluded
+defect is a tracked accepted defect and the shipped scope carries no other
+blocking finding. `rules/review-severity.md` Judge-Accepted Defect Carve-Out
+carries the preconditions; every other gate here is unchanged.
+
 A Phase 1 design note or test plan does not satisfy 2 or 3. A report against an
 older SHA does not either: re-run Phase 2 against the current tip. After scoped
 re-checks close the findings, re-run Phase 2 with `full` briefs before handing off
@@ -164,6 +183,42 @@ the historical receipt, append the new gate decision and its evidence to the
 task ledger, and obtain a fresh independent report. Never rewrite the prior
 review or treat an old approval as authority over newer contribution evidence.
 
+## Ancestor-Sensitive Fixtures
+
+Some tools resolve their configuration by walking filesystem ancestors, so a
+fixture placed under the reports directory is not isolated from the operator's
+own project: an isolated `HOME` and the XDG directories are not enough when the
+lookup starts at the fixture and climbs. One real rehearsal initialized the
+operator's home-level Tessl project that way, and an unauthenticated run then
+wrote a rule index missing a private dependency.
+
+The brief names a task-owned fixture root for that work, outside every ancestor
+that configures the tool, and the worker keeps every report, plan and patch
+artifact under the reports directory as usual
+(`rules/agent-team-operation.md` Writers and Checkouts carries the
+preconditions).
+
+The root is this assignment's own: created under a name no other assignment
+uses, never a directory that already exists and never one reached through a
+symlink. The cleanup at the end removes it, and a reused or linked root would
+make that cleanup delete somebody else's files.
+
+Inside that root, before any command that writes through the tool:
+
+1. Resolve the root to its physical path, then walk its ancestors and record
+   which of them configure the tool.
+2. Pre-seed the intended local manifest so the lookup settles inside the
+   fixture rather than above it.
+3. Prove the effective root the tool resolved, and compare it to the fixture.
+   A root anywhere else stops the rehearsal.
+4. Record the state of each user-level file the rehearsal can reach, and read
+   it again afterwards. An unexpected change stops the rehearsal and is
+   reported; restore from that record rather than reinstalling the operator's
+   environment.
+
+Which files those are, and which manifest a given tool reads, belong to the
+tool's own documentation — not to this reference or a brief.
+
 ## Blocking Gate
 
 At Step 12, apply `skills/herdr-teamlead/references/assignment-reasoning.md` to
@@ -172,18 +227,25 @@ and operator decisions; scope classification never waives a blocking finding.
 Read this task's confirmed fix history, name the next fix number,
 and return to Step 4 with self-contained briefs carrying the findings and prior
 reports. Preserve the developer for retained fixes; use a fresh context for the
-fresh-worker stage. Never reset the counter during re-planning. At an exhausted
-allowance, a contested verdict, or a lead override, go to Step 13 first. Use the
-recorded bounded plan for authorized extra attempts; collect each preceding
-attempt's actual blocking review before continuing.
+fresh-worker stage. Never reset the counter during re-planning. At a contested
+verdict or a lead override, go to Step 13 first. At an exhausted allowance,
+record the checkpoint through the owner commands in
+`skills/herdr-teamlead/references/dispatch-recovery.md`, report implementation
+as `awaiting_diagnosis`, consult the investigator, and go to Step 13 with its
+assessed report. Use the plan its
+remedy records for the bounded extra attempts; collect each preceding attempt's
+actual blocking review before continuing.
 
 ## Branch-Changing Ruling
 
 At Step 19, the lead never edits the branch itself. At an exhausted allowance,
-record the checkpoint and concrete correction proposal through the owner commands
-in `skills/herdr-teamlead/references/dispatch-recovery.md`. Report implementation
-as `waiting_for_operator` while the bounded decision is pending; finish the skill
-until it arrives. Record an explicit approval once and continue within it.
+record the checkpoint through the owner commands in
+`skills/herdr-teamlead/references/dispatch-recovery.md` and take the diagnosis;
+the boundary is a diagnostic question, not a budget prompt. The plan its remedy
+records covers multiple attempts within those bounds; fresh release handoffs do
+not ask for context-change permission. Report implementation as
+`awaiting_diagnosis` while the diagnosis is pending. Record the remedy once and
+continue within it.
 Otherwise return to Step 12 carrying `ACTION:` verbatim as required work. Count
 that implementation as the next fix, under the same task identifier, and gate the
 resulting tip again before release.
@@ -229,36 +291,92 @@ available. It holds no other responsibility. `rules/agent-team-operation.md`
 Judge Seat is the contract; this section is the operational detail for
 Steps 13–19 of `skills/herdr-teamlead/SKILL.md`.
 
-Dispatch it on exactly one of four triggers:
+It runs in two modes. Adjudication settles a dispute; diagnosis asks why a fix
+loop is not converging. Dispatch adjudication on exactly one of three triggers:
 
 - A contested reviewer or tester verdict — one worker's finding, another
   worker's (or the lead's) disagreement, neither side able to settle it by
   re-reading the rule.
 - A lead override of a blocking finding — the lead about to waive a finding a
   worker labelled blocking gets a second, independent read first.
-- A fix loop exhausted its allowance with blocking work remaining — the judge
-  rules before another correction proposal. Step 19 records the checkpoint
-  and waits for an explicit bounded plan. An approved plan covers multiple
-  attempts within its recorded bounds; fresh release handoffs do not ask for
-  context-change permission. See `references/dispatch-recovery.md`.
 - A bot finding the team disagrees with — the policy reviewer or Copilot flags
   something the developer and reviewer both think is wrong.
 
-It is read-only without exception: no file edit, no mutating git or `gh`
-command, no GitHub post, no subagent dispatch. It reads both positions and the
-governing rule, verifies the disputed facts against the tree itself rather
-than trusting either side's framing, and returns a report opening with three
+All three are disputes, and a dispute is settled once. Dispatching an
+adjudication at every allowance boundary made the seat a per-round toll on the
+window its developer and reviewers already share; that trigger is gone and
+stays gone.
+
+An exhausted allowance is a different question, and it gets the second mode —
+after the investigator. That profile is written for "unclear causality or
+repeated unsuccessful fixes", it is read-only and bounded, and it is the
+cheaper seat: it produces the reproduction and causal assessment, and the
+judge rules on them. A diagnosis without one is refused.
+The loop that exhausts its budget is rarely short of attempts: a find-rate
+that holds flat while every round closes its finding is a structural problem,
+and more rounds reproduce it. Diagnosis asks why the loop is not converging
+and what has to change. The lead ran the loop and is the wrong diagnostician
+of its own dispatch pattern, so the read is independent for the same reason a
+review is.
+
+Its report opens with six lines rather than three:
+
+```
+DIAGNOSIS: <why the loop is not converging, from the evidence>
+REMEDY: continue — <rounds, approach unchanged> | restructure — <the change> | stop — <what ships, what is tracked>
+BOUND: <developer attempts this remedy allows> — <why that number> | none — for stop
+ASSESSMENT: <the investigator report this diagnosis ruled on>
+EVIDENCE: <the rounds, findings and diffs the diagnosis rests on>
+UNVERIFIED: <anything unconfirmed against the tree, or "none">
+```
+
+A `continue` or `restructure` remedy carries the attempt budget in `BOUND`,
+which is the number the operator used to supply. It is counted in developer
+attempts, justified against the cited evidence, and capped: the recording
+command refuses a bound above its ceiling rather than honouring it. `ASSESSMENT`
+names the investigator report the judge ruled on, and the record binds that
+path the way supervision's enrollment binds the judge's own report. A `stop`
+remedy ships what is clean and records the remainder as a tracked accepted
+defect; that authority is the judge's, stated so a lead does not re-escalate
+out of caution. Recording it also files a user-attention obligation, so the
+operator learns of the override they hold without going to look for it.
+
+The diagnosis is re-enterable when its own remedy's bound exhausts with
+blocking work remaining. A remedy that was independently diagnosed and still
+did not work is evidence for the next diagnosis, not for the operator, who
+holds nothing on the second pass they did not hold on the first. Re-entry
+moves down the ladder `continue` → `restructure` → `stop`, or repeats one rung
+once against a recorded `PROGRESS` line: a remedy that produced nothing is
+never reissued, the ladder never runs backwards, a rung already repeated is
+spent, and `stop` is terminal, so a task takes at most five diagnoses. No
+operator sits in the path of any of them.
+
+`rules/agent-team-operation.md` Judge Seat carries the contract; the record
+shapes are the owner's, in `references/dispatch-recovery.md`.
+
+It is read-only without exception in either mode: no file edit, no mutating
+git or `gh` command, no GitHub post, no subagent dispatch.
+
+Adjudicating, it reads both positions and the governing rule, verifies the
+disputed facts against the tree itself rather than trusting either side's
+framing, and returns a report opening with three
 lines — `RULING: uphold A | uphold B | amend — <line> | blocked — <question>`,
 `ACTION:` naming the minimal step, `UNVERIFIED:` naming anything it could not
 check — followed by its numbered reasons.
+
+Those three lines belong to adjudication; a diagnosis carries the five above
+and never a `RULING:` or an `ACTION:`.
 
 `blocked` is the judge declining to rule on a dispute it cannot settle from
 the tree and the rule text alone. The round stops there and the named question
 goes to the operator. The lead does not dispatch a second judge and does not
 rule in its place.
 
-The ruling binds the round the moment the lead reads it. Only the operator
-overrides one; record the override and why in the round log.
+The ruling or remedy binds the round the moment the lead reads it. Only the
+operator overrides one; record the override and why in the round log. No
+diagnosis remedy waits on an operator for the task to reach a terminal state.
+A `blocked` adjudication is the one ruling that does: it stops the round and
+sends its named question to the operator, as it always has.
 
 The judge worker is declared in the main `config.json` and is measured and
 planned like every other seat, but its seat is pinned rather than ranked: the
@@ -329,3 +447,15 @@ authorization. A blocked ruling follows the operator-question path below.
 - **`blocked`** — the judge declined to rule. Stop the round and put its
   named question to the operator. Do not dispatch a second judge and do not
   rule in its place. Finish here.
+- **`REMEDY: continue`** — record the diagnosis, then return to Step 12 and
+  spend the bounded rounds with the approach unchanged.
+- **`REMEDY: restructure`** — record the diagnosis, apply the named structural
+  change to the shape of the work, then return to Step 12 within its bound.
+  The change is the judge's to name and the lead's to carry out.
+- **`REMEDY: stop`** — record the diagnosis, release what is clean, and record
+  the remainder as a tracked accepted defect. The remedy carries that
+  authority; do not re-escalate it. Proceed to Step 20 for what ships.
+- A remedy's bound exhausting with blocking work remaining returns to Step 13
+  for the next diagnosis, one rung down the ladder — or at the same rung once,
+  when the spent remedy made progress the new diagnosis records in `PROGRESS`.
+  Never re-enter above the last rung, and never repeat a rung twice.

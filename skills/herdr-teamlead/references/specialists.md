@@ -35,14 +35,120 @@ worker. The pinned judge remains outside ordinary staffing.
 
 ## Choose relevant profiles
 
-Read only the profiles needed for this task. They are prompts for selecting
-questions and evidence, not checklists that every change must complete.
+Read only the profiles needed for this task. Most are prompts for selecting
+questions and evidence, not checklists that every change must complete. Five
+are triggered: the condition fires, the profile is consulted, and its
+deliverable lands before implementation proceeds. Four of them allow a
+recorded staffing decision instead, with its reason, the way a shortfall of
+eligible workers already does. The exhaustion trigger does not: the judge's
+diagnosis rules on that assessment, and `teamlead diagnose` refuses without
+it.
+
+| Trigger | Profile | Deliverable before implementation |
+| --- | --- | --- |
+| A new or substantially changed package above the size the repo states | Architect | The intended boundaries, the options and consequences, and the verification each boundary needs |
+| A new or changed trust boundary — anything deciding whether foreign input, generated content or a proposed change is safe | Security | A bounded threat assessment against that boundary |
+| A new user-facing command, flag or refusal path | UX and product | The flow, the alternatives considered, and acceptance criteria |
+| A new user-facing document | Documentation | A draft verified against the shipped behavior, never against intent |
+| Fix rounds reaching the allowance without converging | Investigator | A reproduction, a causal assessment and a discriminating experiment. Required; no staffing decision substitutes for it |
+
+The exhaustion trigger is enforced where the judge is dispatched. The other
+four are detected from the round's diff.
+
+## Declare this repo's trigger surfaces
+
+`teamlead detect-triggers` classifies a diff against `.herdr/triggers.json` in
+the consuming repo. Every field is required; an absent or incomplete
+declaration is refused rather than read as "nothing fired", so the architect
+trigger no longer fires never or always depending on who reads it.
+
+```json
+{
+  "schema_version": 1,
+  "package_roots": ["skills/*", "scripts"],
+  "package_change_lines": 400,
+  "trust_boundary_paths": [".github/workflows/*", "hooks/*"],
+  "cli_spec_paths": ["skills/herdr-teamlead/teamlead/*.py"],
+  "cli_surface_markers": ["add_parser(", "add_argument("],
+  "user_doc_paths": ["README.md", "docs/*"]
+}
+```
+
+`package_roots` name the directories this repo treats as packages, and the
+nearest matching ancestor owns a changed file. A package root is a directory
+rather than a subtree, so `*` matches within one path segment there: `skills/*`
+is every skill, never a directory nested inside one. `package_change_lines` is
+the size a changed package must exceed to trigger the architect.
+`trust_boundary_paths`, `cli_spec_paths` and `user_doc_paths` are subtree
+globs, where `*` does span path separators, so `docs/*` covers everything under
+`docs`. `cli_surface_markers` are literal substrings that an
+added line inside a CLI spec path must carry to count as a new command or flag.
+State `[]` for a surface this repo does not have — an empty list is a statement,
+an omitted field is not. Classification rules are in
+`skills/herdr-teamlead/teamlead/triggers.py`, in its module docstring and the
+`detect` and `cli_surface` docstrings.
+
+Run it before `plan`, with the roles and requirements that round intends:
+
+```bash
+teamlead detect-triggers --repo <dir> --base <ref> [--head <ref>] \
+  --roles <role[,role...]> [--requirements <file>] [--planned <file>] \
+  [--decisions <file>]
+```
+
+## Declare a pre-implementation round's surfaces
+
+The triggers gate work before implementation, and a task's first round has
+nothing committed to classify. `--planned` supplies the surfaces the work will
+touch, classified against the same declaration. A round that classifies neither
+a diff nor a plan is refused.
+
+```json
+{
+  "schema_version": 1,
+  "added": ["skills/new-thing/mod.py", "docs/new-guide.md"],
+  "changed": ["skills/herdr-teamlead/teamlead/recovery.py"],
+  "package_lines": {"skills/herdr-teamlead": 800},
+  "cli_surface": ["skills/herdr-teamlead/teamlead/cli.py"]
+}
+```
+
+`added` and `changed` are repo-relative paths the round will create or edit.
+`package_lines` states the lines the round will change in a package, for the
+architect trigger's size. `cli_surface` names the declared CLI spec paths the
+round will add a command, flag or refusal to; a path outside
+`cli_spec_paths` is refused. State `[]` or `{}` for what this round has none
+of. A later round classifies its diff, which is evidence rather than intent.
+
+Exit 0 means every fired trigger is staffed or answered. Exit 1 with an
+`unaddressed_trigger` error names the triggers that are neither; re-run it
+after each change, since the failed invocation read none of them. A trigger is
+answered by planning its role or by a requirements assignment carrying its
+specialty; which role and which specialty answer each trigger are the
+`TRIGGER_ROLES` and `TRIGGER_SPECIALTIES` constants in
+`skills/herdr-teamlead/teamlead/triggers.py`, and the detection payload names
+the one it accepted.
+
+A staffing decision answers a fired trigger instead, and the detector reads it:
+
+```json
+{
+  "schema_version": 1,
+  "decisions": {
+    "documentation": "the added file is an internal reference, not a reader-facing document"
+  }
+}
+```
+
+An empty reason is refused. Silence is never that decision. A decision for a
+trigger that did not fire is reported under `unused_decisions` and changes
+nothing.
 
 | Profile | Bring it in for | Useful output |
 | --- | --- | --- |
 | [UX and product](specialists/ux-product.md) | A new flow, confusing behavior or unresolved interaction choice | Concrete flow, alternatives and acceptance criteria |
 | [Accessibility](specialists/accessibility.md) | An affected user path needs keyboard or assistive technology evidence | Reproducible findings with coverage and manual-check gaps |
-| [Investigator](specialists/investigator.md) | Unclear causality or repeated unsuccessful fixes | Reproduction, causal assessment and discriminating experiment |
+| [Investigator](specialists/investigator.md) | Unclear causality or repeated unsuccessful fixes, and every exhausted allowance | Reproduction, causal assessment and discriminating experiment |
 | [Architect](specialists/architect.md) | Cross-component choices or lasting contracts | Decision note with options, consequences and verification needs |
 | [Security](specialists/security.md) | A changed trust boundary or concrete security question | Bounded threat assessment and actionable findings |
 | [Performance and reliability](specialists/performance-reliability.md) | Latency, concurrency, resource or recovery uncertainty | Measured explanation and reproducible failure or improvement check |
@@ -59,6 +165,10 @@ the task needs one, with its capability evidence and concrete deliverable.
 Worker configuration schema v3 carries a `capabilities` list for each worker.
 Keep these declarations aligned with the tools, skills and evidence inspected
 above. A capability label is a staffing input, not a credential or authorization.
+A `capabilities` change never follows one provider refusal: one stopped session
+read repeatedly is one refusal. Remove a capability only on independent
+refusals of the same class across sessions, each recorded through
+`record-refusal`, and cite those dispatches in the change.
 Follow `skills/herdr-teamlead/state-schema.md` for configuration and persisted
 assignment shapes.
 

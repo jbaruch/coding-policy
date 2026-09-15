@@ -1,5 +1,987 @@
 # Changelog
 
+## 0.3.232 — 2026-09-15
+
+### Fixed
+
+- **A ledger already written at recovery schema 9 still reads (#439).** The
+  unmerged #436 prototype wrote four digest-bound `legacy_ruling_recoveries`
+  receipts and bumped the recovery store to 9. #437 then fixed the original
+  version-2 citation rejection without a migration, so the published schema-8
+  owner refuses the live ledger ("Unsupported recovery schema") while restoring
+  the pre-recovery backup would drop the assignments, dispatches, events and
+  task appended since.
+
+  The owner now migrates a clean schema-8 store by adding the empty collection,
+  reads schema 9, and validates every original receipt against the cited
+  checkpoint rows. Altered, overlapping or malformed receipts, and unsupported
+  versions, refuse without writes. Version-3 one-ruling bounds and correction
+  limits are unchanged. The prototype `recover-legacy-rulings` command is not
+  published: existing history does not need a new repair command to stay
+  readable.
+
+## 0.3.231 — 2026-09-15
+
+### Added
+
+- **A judge dispatch declares which of its two modes it is for (#425).** Every
+  pre-dispatch gate saw one undifferentiated "judge dispatch", so #400's bound
+  — a task diagnosed `stop` buys nothing from another judge round — could not
+  ship at all: refusing there would also have refused an adjudication the judge
+  still owes during the release of the clean scope.
+
+  `plan`, `apply` and `start-judge` take `--judge-mode adjudication|diagnosis`,
+  and a seated judge without one is refused rather than defaulted — defaulting
+  would pick one of the two gates for the lead. With the mode declared,
+  `require_investigation_before_judge` refuses a diagnosis on a `stop`ped task
+  before the seat is started, unless the operator authorized a plan over that
+  remedy, and leaves an adjudication on the same task untouched. The assessment
+  requirement (#408) belongs to diagnosis alone.
+
+  The choice is made once. `plan` records the mode beside the judge's tier
+  (plan schema 6, documented in `state-schema.md` with its reader/writer
+  contract), and `start-judge` and `apply` read it from there — a plan carrying
+  none starts no worker — a flag cannot supply what that plan's brief was never
+  composed for — and a `--judge-mode` that differs from the plan's refuses
+  before any worker contact rather than holding the seat to the other gate than
+  the one its brief was composed for. A bare `{role: agent}` map seats nothing,
+  so the flag remains its only source. Steps 15, 16 and 17 of the
+  skill carry it through. Team Composition's assessment directive is scoped to
+  diagnosis, matching what the gate now enforces.
+
+## 0.3.230 — 2026-09-15
+
+### Fixed
+
+- **The prune's config cleanup will not delete a recreated branch's section
+  (#426).** `delete_branch` re-reads occupancy either side of the ref deletion,
+  but `--remove-section branch.<name>` ran after that guard. A concurrent
+  `worktree add --track -b` in the window between them writes a fresh
+  `branch.<name>.*` for the NEW branch, and the cleanup then removed
+  configuration belonging to a live checkout while the branch itself survived.
+  Occupancy is re-read immediately before the removal, and a section a worktree
+  now holds is left untouched under its own outcome — the deletion is still
+  reported, and the diagnostic says to remove nothing by hand rather than
+  reusing the cleanup-failed message, whose prescribed recovery would delete
+  exactly the config this guard protects.
+
+- **A failed `mktemp` in the occupancy read names itself.** It returned without
+  writing to `ERRFILE`, so the caller built its failure row from whatever the
+  previous command had left there — the reported occupancy-read failure named
+  the wrong cause. Deferred Copilot advisories from #422.
+
+## 0.3.229 — 2026-09-15
+
+### Fixed
+
+- **A ledger written before the one-ruling bound still reads (#436).** #400
+  added the bound to the read boundary as well as the write, over every
+  checkpoint carrying a ruling — including version-2 rows, which predate both
+  the bound and the receipt it came with. One real ledger holds 20 such
+  citations across four tasks: the read refused the document, state fell back
+  to an empty in-memory copy, and writes then correctly declined to overwrite
+  history, so new work on those tasks was blocked by a rule that did not exist
+  when the rows were written.
+
+  The bound is now read only over the rows written under it — version 3, the
+  version that records the operator's request. Two version-3 citations for one
+  task are still refused, at the write boundary as before and at the read
+  boundary as #400 intended. No ledger needs migrating, and nothing is deleted
+  to make one readable: the legacy citations, their evidence receipts and their
+  correction counts stay exactly as written.
+
+## 0.3.228 — 2026-09-15
+
+### Fixed
+
+- **The handoff hook sees every spent worktree, not only the pushed ones
+  (#433).** It reported an orphaned worktree only when the branch's upstream
+  read `[gone]`, so a branch that was never pushed — the majority of what the
+  team flow creates, since review, test and judge seats pin a tip and report to
+  a file — was invisible to it, permanently. Detached worktrees could not match
+  a branch-name predicate at all. One live repository accumulated 45 linked
+  worktrees and about 800 MB of residue; the check named 1 of the 43 that were
+  safely removable.
+
+  Upstream state stays a sufficient condition and gains a second: clean, and
+  holding nothing the default branch lacks — `rev-list --count <default>..<branch>`
+  at zero, or for a detached tree a HEAD the default branch already contains.
+  The default branch is resolved explicitly, since the hook can run from a
+  linked worktree whose HEAD is not it.
+
+  What the lead may act on tightened. `rules/agent-team-operation.md` Writers
+  and Checkouts lets a lead remove only a merged, clean worktree, so removal
+  now ALWAYS requires clean-and-contained: a gone upstream is a reason to look,
+  never a licence, since an upstream can vanish while its tree is dirty or
+  ahead — and the old check listed exactly that for removal. Every protected
+  state now reaches the operator on stderr instead, with its reason: locked,
+  detached, dirty, unmerged, or unreadable. A never-pushed dirty tree has no
+  upstream to be gone, so an upstream-keyed report would never have named it.
+  With no default branch resolvable, what is observable without one — detached,
+  dirty — is still reported, with containment marked unknown and nothing listed
+  for removal.
+
+  The predicate fails closed. A worktree whose status cannot be read is never
+  reported removable: reading an unreadable tree as clean is how a hand-rolled
+  version of this passed trees it had never inspected, and every failed check
+  now says on stderr which command failed and what to inspect. Dirty trees and
+  trees holding unmerged commits are still left alone, and the leftover-branch
+  section is untouched.
+
+## 0.3.226 — 2026-09-14
+
+### Fixed
+
+- **A Grok report whose dispatched turn carried an image is recoverable
+  (#392).** A completed review could not be accepted: `recover-report` refused
+  the unique original transcript with `grok_source_ambiguous`, and the round
+  needed a fresh independent reviewer for work that was already done. The
+  transcript held exactly what it should — one fresh session, one
+  `user_prompt_submit`, one `turn_completed` with `stop_reason=end_turn`, and a
+  final assistant message naming the requested report path.
+
+  Two causes, both in how the parser read the attachment. `grok_clear_identity`
+  required one contiguous run of user chunks, and the `image_compressed`
+  metadata Grok writes between them ended the run, so one group read as two.
+  And the prompt comparison required exact equality, while Grok appends its own
+  `[Image #1]` marker after the dispatched text.
+
+  Attachment metadata now belongs to no message: it neither starts nor ends a
+  user group, and a user chunk carrying an image contributes no prompt text
+  while staying in the same group. The exception is `image` alone — an unknown
+  block type is content the parser cannot authenticate the text around, so it
+  refuses rather than silently dropping it — and an image that STARTS a group
+  starts that group's text empty, so a following chunk cannot be read as a
+  continuation of the previous message. Every name test survives untrusted
+  JSON: an unhashable value where a name belongs took the refusal path rather
+  than raising `TypeError` out of the recovery and losing the receipt. `prompt_matches` accepts the dispatched text
+  followed only by that trailing marker, at both places the prompt is
+  authenticated. Everything else still refuses — multiple sessions or turns,
+  failed or cancelled turns, altered assignment text, a marker anywhere but the
+  end, extra user text after it, and a second user group.
+
+- **A relaunched seat waits for Herdr to release its old name, and no brief is
+  typed into a modal (#379, #393).** Two live dispatch failures, one per half.
+
+  Herdr keeps an agent name reserved briefly after the process exits, and the
+  relaunch waited only for the pane's shell. A fresh judge dispatch terminated
+  the old process, started immediately, and was refused with
+  `agent_name_taken` while the seat still read Idle — the attempt was correctly
+  recorded `not_sent`, and the retry from the same verified shell then worked.
+  `launch.restart_worker` now waits for the name to read released (the same
+  bounded gate `restoration.py` already used for a retained worker) and retries
+  a reservation that lapses late, a bounded number of times, re-proving the
+  pane and the name each round. Every other start failure still ends the
+  relaunch untried, since Herdr may already have started the process.
+
+  Separately, Codex opened its startup review dialog over the prompt. Herdr
+  reported `interactive_ready`, the first assignment went into that dialog, and
+  the apply returned `sent_but_not_started` with no model turn and no
+  assignment in the transcript. `ensure_ready` judged the composer's CONTENT,
+  and an absent composer has none, so a modal drawn over the prompt read as an
+  empty one. It now requires the composer to be VISIBLE first, waiting a
+  prompt that has not appeared yet out and refusing one that never appears —
+  before any input. No permission or hook configuration is touched.
+
+  The shared test runner models the release too: `agent get` answers
+  `agent_not_found` between a terminate and the next start, which is what a
+  real relaunch sees.
+
+## 0.3.225 — 2026-09-14
+
+### Added
+
+- **A review partition gets a validator and a contract (#409, partly).** A
+  reviewer roaming an unbounded surface that reports no findings has not
+  established the surface is clean — only that this pass happened not to reach
+  a defect. One twenty-round delivery ran blocking findings of 3, 3, 2, 1, 1,
+  1, 2, 2, 1, 1: flat at about one for seven consecutive rounds, each closing
+  its own finding and each surfacing a new one somewhere no previous reviewer
+  had looked. No state meant "reviewed".
+
+  `teamlead validate-partition` decides whether a partition can carry a
+  verdict: every changed path belongs to exactly one slice. A gap is
+  indistinguishable from a clean slice in the result, and an overlap leaves a
+  file two verdicts and no owner, so both refuse by name before a worker is
+  spent. A slice owning nothing refuses too, unless an overlap is why it owns
+  nothing. Every problem is named in one run rather than a round per class.
+  `references/review-partition.md` documents the format and the payload.
+
+  `rules/agent-team-operation.md` Review Before PR carries what a partition
+  then means: each slice's brief names its slice and forbids roaming, an
+  out-of-slice observation goes in its own section and never forms part of that
+  slice's verdict, a slice is saturated when its reviewer reports clean at the
+  current tip, and a change is reviewed when every slice is saturated at one
+  tip. Severity, gating and independence are unchanged. A partition never makes
+  an unreviewable module feel reviewed; slice boundaries that cannot be drawn
+  without cutting through mutual dependencies are a structural finding for the
+  architect trigger (#408).
+
+  Seating several slices from ONE plan is not shipped. Dispatch resolves
+  briefs, requirements and round tiers by role name, so a seat name would reach
+  `apply` as an unknown role and the plan would be a trap; until that carries
+  seats, a round runs its slices as separate reviewer dispatches against the
+  same tip. Tracked in #434.
+
+## 0.3.223 — 2026-09-14
+
+### Added
+
+- **A report wait ends on a stall instead of waiting forever (#418).** The
+  rules said what not to trust — `done` is not acceptance, so the lead waits
+  for the report — and never said what to do when the trusted signal does not
+  arrive. Two live workers reached a terminal status, wrote no report, and
+  left their lead waiting: one had resolved every merge conflict and stopped
+  before committing, the other hit a provider refusal. Only the operator
+  asking found either.
+
+  `rules/agent-team-operation.md` gains a Stalled Workers section. A stall is
+  three facts together — report absent, status terminal, budget spent — and a
+  terminal status alone still establishes nothing. Dispatch Safety now also
+  names `wait-report.sh` as the only wait (the lead's own `until [ -s
+  "$report" ]` loop could not terminate on a stall) and keeps the interval and
+  budget script-owned.
+
+  `wait-report.sh` takes `--base`, the revision the dispatch started from,
+  because zero UNPUSHED commits never established that a worker produced
+  nothing — it may have pushed its work and stopped before reporting. Commits
+  against that base with none outstanding are `pushed_commits`, recovery
+  evidence rather than a retryable dispatch; without a base the classifier says
+  `unknown` instead of guessing the retryable answer.
+
+  It also takes `--since`, this dispatch's recorded send time, so a
+  checkpoint (`--once`) reaches the same script-owned budget: a checkpoint
+  carries no elapsed time of its own, and repeated rechecks through the
+  supervision loop the skill actually runs would otherwise restart the clock
+  forever. It also takes `--worktree` and classifies what a stalled worker
+  left: `partial_work` (mid-operation, staged, modified or untracked),
+  `unpushed_commits` (the existing dispatch-recovery path), `no_work` (a
+  retryable `not_sent`-equivalent), or `unknown`. The classification never
+  decides the work is usable. The first stall's nine files were conflict-free
+  and built clean, and one of them had taken the wrong side of a merge on
+  documentation `main` had already corrected — so partial work is preserved as
+  evidence and re-dispatched with the observed state described, never
+  committed because the tree looks finished. A git read that fails inside the
+  classifier is `unknown` rather than a quiet zero — an unreadable history
+  would otherwise classify a worker's committed work as a retryable
+  `no_work`. Mid-operation covers the operation DIRECTORIES too
+  (`rebase-merge/`, `rebase-apply/`, `sequencer/`): a rebase paused at an
+  `exec` or `break` writes one with no `REBASE_HEAD` and can leave a clean
+  tree. The stall conjunction is read on every interval, so a dispatch already
+  past its budget stalls at once instead of waiting another full budget of the
+  watcher's own. `TEAMLEAD_NOW_EPOCH` is the test seam that keeps the budget
+  cases off the run clock. A `--since` offset is converted rather than
+  rewritten as `Z`: rewriting one moves the instant, so `00:00-05:00` would
+  read five hours older and its budget would be called spent before it was.
+
+- **A developer reads its own gate evidence instead of entering the pre-merge
+  wait (#369).** A developer finished its source work, pushed, and got green
+  CI plus the required policy approval — then called `watch-pr-reviews.sh` to
+  collect the result. No Copilot review had been requested, and requesting one
+  was outside that assignment's GitHub write scope, so the watcher waited on a
+  lane nobody had asked for until the lead stopped it.
+
+  `poll-pr-reviews.sh` now reports `requested` per reviewer: whether a review
+  request for that login is still pending on the PR. It separates a lane still
+  owed an answer from one nobody asked for, which a bare `state: "none"`
+  conflates. The probe reads GraphQL, not the REST `requested_reviewers`
+  endpoint, which omits bot reviewers entirely (#276) and would report every
+  bot lane as never requested.
+
+  `requested` is not a "has this review been triggered" flag, and the rules say
+  so. The policy reviewer is push-triggered — `review-codex.yml` and the fleet
+  App run on the push, never on a request — so its `requested` is false on
+  every PR, and an in-flight policy review looks exactly like an unrequested
+  Copilot lane. `rules/ci-safety.md` Always Watch CI resolves a reviewer's
+  arrival by how it is triggered: a push-triggered review is owed by the push,
+  a request-triggered one only once requested, and only the latter is
+  diagnosed as unrequested rather than waited out.
+
+  `watch-pr-reviews.sh` reads the field too: a Copilot lane with no verdict at
+  this head and no pending request ends the watch at once with
+  `review_unrequested` and the command that would fix it, rather than spending
+  the budget proving nothing is coming. A lane that WAS requested still waits,
+  and a snapshot from an older poller — no `requested` field at all — waits as
+  before.
+
+  `rules/agent-team-operation.md` Review Before PR points the developer stage
+  at the snapshot on an open PR, and at the branch CI its push triggered
+  before a PR exists — `poll-pr-reviews.sh` takes a PR number, and the
+  pre-PR handoff has none. The release skill's deliberate request-then-watch
+  sequence is unchanged.
+
+## 0.3.222 — 2026-09-14
+
+### Changed
+
+- **A task-owned fixture root may sit outside the reports directory (#367).**
+  A real integration test followed the brief's requirement to keep fixtures
+  beneath its home-based report directory and modified the operator's own
+  Tessl project: an isolated `HOME` and XDG directories were not enough,
+  because `tessl init` walks filesystem ancestors, found the home-level
+  `tessl.json`, and initialized that project. An unauthenticated run then
+  wrote a rule index missing a private dependency.
+
+  `rules/agent-team-operation.md` Writers and Checkouts gains a narrow
+  exception for a brief-named fixture root outside every ancestor that
+  configures the tool. Fixtures alone live there; every report, plan and patch
+  artifact still goes under the reports directory. The preconditions require
+  proving the tool's effective root inside the fixture before anything writes
+  through it, recording each reachable user-level file before and after,
+  stopping on an unexpected change, restoring from that record rather than
+  reinstalling the operator's environment, and removing the root at the end.
+  The root is the assignment's own: created under a name no other assignment
+  uses, never a pre-existing directory and never one reached through a symlink,
+  since the mandated cleanup would otherwise delete somebody else's files.
+
+  The worker-facing brief says the same: `templates/COMMON.md` now names the
+  fixture root and its obligations instead of "nothing you write lands
+  anywhere else", which contradicted both the exception and the worktree
+  writes every worker already makes.
+
+  `references/round-flow.md` carries the procedure — walk the ancestors,
+  pre-seed the intended manifest, prove the resolved root, guard the
+  user-level files — while which files and which manifest a given tool reads
+  stays with that tool's own documentation.
+
+## 0.3.221 — 2026-09-14
+
+### Fixed
+
+- **The operator-requested ruling is bounded where it is spent, and proved
+  where it is claimed (#400).** Five deferred advisories from #397 and #398;
+  none changes whether a round refuses, only how the refusal is proved or
+  worded.
+  - A checkpoint citing a judge ruling now records `requested_by`, the same
+    source/quote receipt every other operator decision carries. The ledger
+    called the ruling "operator-requested" while holding nothing of the
+    request. The checkpoint record bumps to version 3 for the added field;
+    version 2 stays a valid shape for rows written before it, version-1 rows
+    migrate into 2, and no older row has a receipt invented for it. The
+    receipt is required of new records alone, so replaying an older row's
+    original payload stays idempotent.
+  - The pre-dispatch bound the issue asked for is NOT shipped. A `stop`
+    diagnosis ends implementation and the diagnosis ladder, never
+    adjudication, and `require_investigation_before_judge` sees no judge
+    mode — refusing there would refuse a contested verdict's ruling during
+    the release of the clean scope. Reading the bound before the round needs
+    a declared mode at plan time; tracked as a follow-up. The checkpoint
+    recording still refuses a second cited ruling.
+  - The read boundary enforces one cited ruling per task. It checked each
+    checkpoint alone, so a hand-edited ledger holding two for one task
+    validated.
+  - `migrate_store` preflights the enclosing document before any row is
+    stamped. A store it then rejected had already had its version-1
+    checkpoints and diagnoses upgraded in memory.
+  - The planner names an uncovered roster before it counts capacity. A partial
+    snapshot failed "measure more agents or pass fewer roles" first, which
+    invites adding panes until the count fits instead of measuring the roster
+    `config.json` declares.
+
+## 0.3.220 — 2026-09-14
+
+### Fixed
+
+- **Four residual ambiguity cases close in `prune-worktrees.sh` (#410).** None
+  changed the outcome on a well-formed checkout with git 2.36 or newer; each
+  was a way the decision could rest on evidence that did not mean what the
+  script read it to mean.
+  - The pre-2.36 fallback is gone. Its scan refused an inventory holding an
+    unrecognized line, which caught a path whose tail was `b`, but a path
+    ending in `<newline>HEAD <sha>` or `<newline>branch refs/heads/other` reads
+    as metadata and passes any scan. No cross-check settles it, so an
+    inventory without `-z` now decides nothing and says to upgrade git.
+  - Branch occupancy is re-read from git either side of every deletion.
+    `update-ref -d` carries none of git's checked-out-worktree guard, and a
+    `worktree add` claiming a branch after the inventory snapshot was
+    invisible to `seen_branches`. A branch a worktree holds is kept with the
+    new reason `checked-out`; one claimed inside the deletion's own window is
+    restored at the commit it was deleted from.
+  - A failed occupancy read after the deletion is a failure, not an
+    unoccupied answer. Falling through to the config probe would overwrite
+    its diagnostic and report a clean deletion whose safety check never ran.
+  - The branch-config probe compares the section instead of a substring.
+    `branch.foo.` also prefixes `branch.foo.bar.remote`, which belongs to the
+    branch `foo.bar`, so with `foo` itself unconfigured the run reported a
+    cleanup failure for a section that was never there.
+  - `dirname` no longer loses a parent's own trailing newline. Command
+    substitution strips both newlines when the parent's name ends in one, so
+    absence was checked against a truncated parent and a confirmed-gone
+    worktree read as unconfirmable.
+
+## 0.3.219 — 2026-09-14
+
+### Fixed
+
+- **The diagnosis binds to its own judge dispatch and its whole plan (#412).**
+  Neither changed behavior on a well-formed ledger.
+  - The enrollment resolver took the newest supervision member for the task
+    and the pinned judge. If a dispatch persisted and its enrollment or
+    refinement then failed, an older member could be selected and its report
+    accepted for the current diagnosis. `recovery.applied_judge_dispatch`
+    resolves the judge dispatch the diagnosis rules on, and the enrollment is
+    matched to that identity; a bound lead with no such member has no
+    diagnosis to record, as before.
+  - The diagnosis-to-plan integrity check compared task, bound and
+    authorization source. A same-task plan carrying another scope or path set
+    passed, after which `validate_work` enforced that unrelated plan's budget
+    and scope. It now compares every field `diagnose` derives — checkpoint,
+    base revision, scope, allowed paths, both ends of the fix range and the
+    supersession.
+
+## 0.3.216 — 2026-09-14
+
+### Fixed
+
+- **The supervision Stop hook writes no bytecode cache (#385).**
+  `hooks/herdr-supervision-stop.sh` imported the evaluator with bytecode
+  writing left on, so a Stop in a consumer dropped `__pycache__` into the
+  installed plugin tree — no ledger mutation, but still a write the
+  evaluator's read-only contract does not allow. The wrapper now sets
+  `PYTHONDONTWRITEBYTECODE=1` for that invocation, and a subprocess fixture
+  runs it against a cache-free plugin copy and asserts none appears. Copilot
+  finding from #383, deferred there as advisory.
+- **The restoration gate's refusals describe what it observed (#388).** The
+  release wait runs twice — before the first start, and again after a start
+  Herdr refused with `agent_name_taken` — and every refusal it raised claimed
+  "No start was attempted", including from the second position where one had
+  been. A second diagnostic read any non-shell foreground state as the stopped
+  process still running, so an empty foreground list produced a timeout naming
+  a process that was already gone. `_start_clause` now reports the position the
+  gate was called from, and the pane state distinguishes the stopped process
+  from anything else the gate may wait out. Refusal and retry behavior is
+  unchanged.
+
+### Changed
+
+- **`references/model-tiers.md` names the resume grammar instead of repeating
+  it (#388).** The reference maintained its own list of accepted and refused
+  resume selectors beside the one in `teamlead/tiers.py`, which
+  `rules/script-as-black-box.md` reserves to the module. It now points at
+  `RESUME_OPTIONS`, `RESUME_SUBCOMMANDS`, `RESUME_REFUSALS` and `SESSION_UUID`
+  and the comment block above them. Both findings were advisory on #386.
+
+### Changed
+
+- **Step 5's detect-triggers prose states the instruction without its
+  rationale (#417).** The line read "Phase 1 has no diff yet, so it passes
+  `--planned` naming the surfaces the work will touch" — a justifying clause
+  attached to a directive in an auto-loaded artifact, which
+  `rules/context-writing-style.md` What to Cut forbids. The reason a
+  pre-implementation round has nothing to classify is archived here; the
+  skill now says only what to pass and when. Deferred advisory from the #416
+  review, filed rather than folded in under `rules/review-severity.md`.
+- **`dispatch-recovery.md` points at the parser instead of restating it
+  (#373).** The live-validation procedure spelled out the Claude transcript
+  parser's requester-linkage and answered-once predicates, which
+  `rules/script-as-black-box.md` reserves to the script. The observed parallel
+  tool-result orderings stay — they are operator-facing facts about the CLI,
+  and both must be exercised — while the predicates deciding them are left to
+  `skills/herdr-teamlead/teamlead/claude_native.py`, already named as the
+  source contract earlier in the same file. Advisory from the #372 policy
+  review; documentation only, no parser change.
+- **`rules/agent-team-operation.md` reaches the source instruction index, and
+  a test keeps it there (#368).** `.claude/CLAUDE.md` imported 25 of the 26
+  declared rules, so an agent working in this checkout read every rule except
+  the one governing how the team itself operates — invisible to maintainers
+  while shipping correctly to consumers. `scripts/tests/test_source_index.py`
+  now fails when the manifest's `rules` array, the index's `@`-imports and
+  `rules/*.md` on disk disagree, so the next added rule cannot repeat it.
+- **Every tracked Python file is inside the diagnostics gate's scope.**
+  `pyrightconfig.json` enumerates its includes by hand, and three modules had
+  fallen outside it — `test_resolve_policy_paths.py`,
+  `test_stale_grok_delivery.py` and the new index test — so CI type-checked
+  none of them while still reporting zero findings. The same suite now fails
+  when a tracked `.py` file is missing from the include list, or the list
+  names a path that no longer exists.
+
+## 0.3.215 — 2026-09-14
+
+### Changed
+
+- **The four non-exhaustion composition triggers are detected from the diff,
+  and four gaps in the shipped diagnosis close (#415).** #408 shipped five
+  triggers. One was enforced in code — `require_investigation_before_judge`
+  refuses a judge dispatch at an exhausted allowance with no assessment. The
+  other four existed only as prose, so the operative rule was "the lead
+  notices, or it does not happen": the same condition #408 was filed to
+  replace, one level up. `rules/language-diagnostics.md` already holds the
+  stricter standard — "a deterministic check nobody runs does not exist".
+
+  `teamlead detect-triggers` is that check. It reads the consuming repo's
+  `.herdr/triggers.json`, classifies the round's diff against the declared
+  surfaces, and fails when a fired trigger is neither staffed nor answered by a
+  recorded staffing decision. Every signal is mechanical: a package directory
+  absent from the base, a changed path in the declared trust-boundary set, an
+  added line carrying a declared CLI-surface marker, an added file in the
+  declared user-facing docs set. Step 5 runs it before `plan`.
+
+  The architect trigger read "above the size the repo states", and a repo that
+  states no size — no grep across a consuming repo's `AGENTS.md`, `CLAUDE.md`
+  or `docs/` found one — had a trigger that fires never or always depending on
+  the reader. `package_change_lines` is now a required declaration field and a
+  missing declaration is refused, never read as "nothing fired".
+
+  The remedy ladder could strand a correct diagnosis. A first `restructure`
+  consumed the middle rung, and a restructure routinely surfaces work the first
+  pass could not see; when its bound exhausted, only `stop` remained, so a
+  diagnosis that needed a second increment terminated the task. A rung is now
+  reissuable once, against a `PROGRESS` line naming what the prior remedy
+  changed. Termination still holds: at most five diagnoses, `stop` still
+  terminal and never repeated.
+
+  `BOUND` had no floor, ceiling or units — `BOUND: 50` conformed. It now counts
+  developer attempts, carries its justification against the cited evidence, and
+  is refused above the ceiling rather than silently honoured; a correction
+  needing more than the task's own original allowance takes the next rung.
+
+  `stop` was terminal with no duty to surface it: a task could be terminated,
+  its remainder recorded as an accepted defect, and the operator learn of it
+  only by going to look. Recording a `stop` now files a user-attention
+  obligation the catch-up presents. Its kind sits outside the gating set — this
+  surfaces the outcome, it gates no dispatch and waits on no answer.
+
+  The judge need not have read the assessment. The gate checked that an
+  assessed consultation existed and was correctly ordered, not that the
+  diagnosis consumed it — while the neighbouring line does bind a path ("a
+  bound lead cites the report supervision enrolled for the pinned judge"). The
+  diagnosis now carries `ASSESSMENT:` naming the investigator report it ruled
+  on, that path must match an assessed consultation for the task, and the
+  record binds it.
+
+  Diagnosis record schema 2 adds `reissue` and `investigator_report`; version-1
+  rows migrate with `reissue: false` and `investigator_report: null`.
+
+  The diagnosis verifies the investigator report against the live file rather
+  than trusting the saved receipt — a report deleted or rewritten since its
+  assessment would otherwise authorize a correction plan on evidence nobody
+  holds any more (`rules/stateful-artifacts.md` Hints, Not Authority).
+
+  Detection has two inputs, because the triggers gate work *before*
+  implementation and a task's first round has nothing committed to read: a
+  diff-only detector reports every trigger quiet on exactly the round the
+  architect and security triggers exist for. `--planned` declares the surfaces
+  the work will touch, classified against the same declaration; a later round
+  classifies its diff, which is evidence rather than intent. A round that
+  classifies neither is refused.
+
+  Worktree detection folds in untracked files: `git diff` reports tracked
+  changes only, so a whole new package or a new user-facing document — the very
+  shapes the architect and documentation triggers exist for — would have fired
+  nothing while it sat untracked. A comparison against a pushed head needs none
+  of this, since an untracked file is in no commit.
+
+  The issue's seventh item — "`teamlead diagnose` is named but absent from the
+  CLI" — does not reproduce. `diagnose` is registered in `cli.py` and listed by
+  `python3 -m teamlead --help`; the help output is long enough that the
+  reporting session appears to have read only its head.
+
+## 0.3.214 — 2026-09-14
+
+### Changed
+
+- **Specialist consultations are triggered, and non-convergence goes to the
+  investigator before the judge (#408).** Across a full delivery of ACR issue
+  #117 the lead selected two responsibilities, implementation and
+  verification: twenty-plus fix rounds, two of nine workers used, zero
+  specialist consultations. Every retrospective in the series recorded "no
+  specialist consultation ran in this interval" and nothing acted on it,
+  because `Team Composition` said to activate one "only for a bounded question
+  the task needs" and named no condition that obliged any.
+
+  The cost was not idle workers. The design was never reviewed by anyone, and
+  the reviewer then caught at the end, one finding per round, what a
+  specialist would have caught before implementation. Each late defect maps to
+  a profile that existed and was never consulted: a preservation checker blind
+  to test decorators, so an AI-proposed migration could disable a test while
+  the checker reported success (security, for a feature whose whole premise is
+  that foreign proposed changes are safe); a guide documenting a flag
+  resolution the code does not implement (documentation); a 10k-line package
+  with a back-edge, declared indivisible (architect); a deterministic path
+  refusing with eleven blockers whose `PATH` versus `--project` semantics
+  confused the guide's own author (UX and product); and nineteen rounds that
+  never converged, against an investigator profile that reads "unclear
+  causality or repeated unsuccessful fixes".
+
+  Five triggers now fire: a new or substantially changed package above the
+  size the repo states, a new or changed trust boundary, a new user-facing
+  command, flag or refusal path, a new user-facing document, and fix rounds
+  reaching the allowance without converging. Each names its deliverable. A
+  fired trigger is consulted or recorded as a staffing decision with its
+  reason — the shape `Team Composition` already uses for a shortfall of
+  eligible workers — so skipping becomes an explicit choice rather than the
+  default silence produced. The exhaustion trigger is the exception with no
+  alternative: the judge's diagnosis rules on that assessment, so `teamlead
+  diagnose` refuses without it, no staffing decision substitutes, and the
+  judge seat is not dispatched at an exhausted allowance before the assessment
+  exists — both `apply` and `start-judge` guard it, dry runs included, so the
+  most expensive seat is never spent on an uninvestigated loop and a judge
+  dispatched for an ordinary dispute inside the allowance is untouched. The size a package must exceed is the consuming
+  repo's to state and that trigger waits on the number; the other four fire on
+  their own terms in every repo.
+
+  Pre-development planning stops being uniformly optional. It remains optional
+  for work that trips no trigger and gates work that trips one: the ordering
+  was backwards, making the cheap gate optional and the expensive one
+  mandatory.
+
+  The exhaustion path splits into the two things it always contained. The
+  investigator, read-only and bounded, asks why the loop is not converging and
+  returns a reproduction, a causal assessment and a discriminating experiment;
+  it gathers evidence and decides nothing. The judge then rules on that
+  assessment with #407's remedy ladder. That matches each seat's contract: the
+  judge is an adjudicator, not a researcher, and it is the most expensive seat
+  in the fleet, so ruling on a prepared assessment costs less than
+  investigating from scratch. `teamlead diagnose` refuses without an assessed
+  investigator consultation for the task that follows its latest developer
+  attempt and was assessed before the judge dispatch it cites — a consultation
+  assessed afterwards is not what the judge read, whenever it was dispatched. The diagnosis brief hands the judge
+  that report to rule on, rather than asking it to derive causes from the
+  round history itself.
+  Re-entry on a failed remedy is unchanged: the ladder descends and terminates
+  at `stop`, with the investigator step repeating on the failed remedy.
+
+  No worker-utilization metric or quota follows. Two of nine workers was the
+  arithmetic consequence of selecting two responsibilities, not a scheduling
+  failure; chasing the number directly would produce make-work consultations,
+  which is worse than the current state.
+
+## 0.3.213 — 2026-09-14
+
+### Changed
+
+- **An exhausted allowance takes a judge diagnosis, not an operator budget
+  prompt (#407).** On ACR PR120 the blocking-finding count per round ran
+  3, 3, 2, 1, 1, 1, 2, 2, 1, 1, 1: converged to about one, then held flat for
+  seven rounds. Every round closed its finding and every round a new one
+  appeared where no previous reviewer had reached. The PR was 88 files and
+  +15,536/-495 across 42 commits, and `Review Before PR` independence puts a
+  fresh reviewer on it each round, so the find-rate tracked review surface
+  area rather than remaining defect density. Nineteen developer rounds and
+  sixteen judge rulings did not converge; a sub-task of 8 files in the same
+  task converged in two.
+
+  The budget was the wrong artifact. Raising it buys more attempts at an
+  approach that is already failing, the number is the one input the lead can
+  derive, and the inputs the operator uniquely holds were never asked for.
+  Worse, `Fix Loops` named two outcomes and no default, so an operator who is
+  asleep leaves the only possible behavior an indefinite stall: fifteen
+  consecutive no-progress turns were observed on a PR that was MERGEABLE with
+  ten green checks.
+
+  The judge gains a second mode. Adjudication settles a dispute between two
+  positions; diagnosis asks why a loop is not converging and what has to
+  change, and returns `DIAGNOSIS:`, `REMEDY: continue | restructure | stop`,
+  `BOUND:`, `EVIDENCE:` and `UNVERIFIED:`. A `continue` or `restructure`
+  remedy carries in `BOUND` the attempt budget the operator used to supply.
+  A `stop` remedy ships what is clean and records the remainder as a tracked
+  accepted defect; the rule states outright that the judge's authority covers
+  accepting that defect into a release, so a lead does not re-escalate out of
+  caution and recreate the stall. `rules/review-severity.md` gains the
+  carve-out that authority needs — otherwise its own fix-before-merge rule and
+  the release gate's no-blocking-finding requirement would each forbid what
+  the remedy permits. Its preconditions are the recorded `stop` at this
+  exhaustion, the remainder tracked with its issue reference, a shipped scope
+  carrying no other blocking finding, and every other gate held: CI, the
+  external reviews, and independent reviewer and tester passes on the shipped
+  tip. `stop` is terminal in the ledger too — no allowance survives it, and a
+  plan it supersedes is retired even though the supersession lives on the
+  diagnosis rather than on a plan — and the operator overrides it the way they
+  override any ruling, by authorizing a plan over that remedy.
+
+  This is not a revert of #396. That issue removed exhaustion as a trigger
+  because it fired at every allowance boundary as a rubber stamp — 16 of the
+  fleet's 30 lifetime judge dispatches landed on one task that way — and the
+  removal stands. This fires once per exhaustion and asks a different
+  question. It is re-enterable when its own remedy's bound exhausts, because
+  "this approach was independently diagnosed and still did not work" is input
+  for the next diagnosis rather than for an operator who holds nothing new.
+  Re-entry moves strictly down `continue` → `restructure` → `stop`: a failed
+  remedy is never reissued, the ladder never runs backwards, `stop` is
+  terminal, so a task takes at most three diagnoses and cannot loop. A changed
+  scope or an operator override re-enters before the bound is spent, naming
+  the plan it supersedes and proving the change it claims — a different scope
+  or paths, or the operator's recorded override — and descends the ladder like
+  any other re-entry. `stop` ends implementation on the task outright, so no
+  unspent allowance survives it. The cited report must be the one supervision
+  enrolled for the pinned judge on that task whenever the lead is bound, since
+  a dispatch marked applied proves the send and not the delivery. The
+  operator's `authorize-corrections` path survives as an override of a
+  recorded remedy rather than a substitute for one, and the remedy must be
+  this exhaustion's: without that, an old diagnosis would extend an exhausted
+  plan indefinitely and reopen the budget prompt the judge replaced. No
+  operator sits in the path of any of them, and the deadlock disappears.
+
+  The lead ran the loop and is the wrong diagnostician of its own dispatch
+  pattern: in the worked case it treated each finding as an isolated
+  correction for nineteen rounds and identified the asymptote only when asked
+  to examine budget burn. Independence matters here for the reason it matters
+  in review.
+
+## 0.3.212 — 2026-09-14
+
+### Fixed
+
+- **The deferred advisories from #402 and #404 (#403, #405).** Twelve findings
+  the two refusal-recovery and worktree-prune rounds left open, none of which
+  changed the outcome on well-formed input, all of which turn a wrong input
+  into a wrong answer rather than a diagnostic.
+
+  Refusal recording: a receipt's `agent` and `state` reached set membership
+  before any type check, so a list or object raised `TypeError` out of the CLI
+  instead of a usage error, and `elapsed_seconds` accepted a negative. Every
+  field is typed first. `record-refusal` read the refusing provider from the
+  current `config.json`, so an edit between the send and the record
+  re-attributed the refusal and could let a resend reach the provider that
+  actually refused; each task dispatch now stores its send-time `provider` and
+  that recorded kind wins, which makes the recovery store version 7. The
+  pane-id alias came from the enrollment's original assignment rather than
+  `supervision.expected_assignment`, so a receipt naming a pane id supervision
+  filled in later was rejected. A move could reuse the refused attempt's
+  report path, enrolling both against one file; `refusal_move` now refuses a
+  path the chain already burned. The schema document's recovery example was
+  missing `refusal_authorizations`.
+
+  Worktree pruning: a worktree whose `cd` failed left its branch unmarked, so
+  the branch pass tried `branch -D` on a branch git still considered checked
+  out — a second misleading failure live, a false `branch-deleted` on a dry
+  run. A confirmed-gone entry's branch is released to that pass only when the
+  metadata prune actually ran, since a skipped or failed prune leaves git
+  holding the checkout. A removal followed by a failed deletion reported no
+  `worktrees_removed` row, so the JSON disagreed with the disk a retry would
+  find; the removal is now recorded whatever the deletion does. The inventory
+  reads `git worktree list --porcelain -z` where git supports it, so a path
+  holding a newline stays one field, and says so when it cannot. The ancestry
+  check and the deletion were separate git calls over a name that can move, so
+  the tip is now captured first, that exact commit is what ancestry judges,
+  and the deletion is `git update-ref -d refs/heads/<branch> <that commit>` —
+  git's compare-and-delete, which removes the branch only while it still
+  points at the commit just proved merged. A commit landing mid-run keeps the
+  branch instead of being force-deleted, with no window between the check and
+  the deletion for one to slip through. `branch -d` would re-derive the safety
+  against the local default, which may lag origin's, and `branch -D` would
+  skip it; neither is atomic with the check. `--dry-run` now states in its
+  contract line that it fetches, object database included.
+
+  The rounds on this PR added four more, each the same shape. A confirmed-gone
+  entry releases its branch only when it was decided `prunable`: git keeps a
+  locked entry's metadata through the prune, so a locked entry whose directory
+  vanished is still checked out and its branch stays. Without `-z`, the whole
+  inventory is scanned for a split record before any decision runs, since a
+  guard that fires afterwards has already removed a worktree it read from a
+  truncated record. A `-z` failure falls back only for an unsupported option
+  and otherwise reports what git said. The config probe reads a here-string
+  and accepts only exit 1 as no match, and a config cleanup that fails is a
+  failed row rather than a warning. Report paths compare normalized, as the
+  dispatch parser already treats them, so an alias cannot enroll a second
+  attempt on a refused attempt's evidence, and a `not_sent` retry refreshes
+  the provider and brief identity its fingerprint does not cover.
+## 0.3.211 — 2026-09-14
+
+### Added
+
+- **The lead prunes leftover worktrees and branches every round.** After the
+  #399 rounds, `git worktree list` on the shared checkout held 15 entries:
+  14 review, test and verify worktrees from Herdr rounds on 2026-09-08, all
+  merged into `main` days earlier, and their 14 local branches, 951 MB on
+  disk. Step 21 removes the task's own worktree after its merge and nothing
+  removed the others; `rules/agent-worktree-isolation.md` said "do not leave
+  orphans" and no step ran that check. `skills/herdr-teamlead/prune-worktrees.sh`
+  now decides, per worktree under the root: not the shared checkout, on a
+  branch other than origin's default, not locked, `git status --porcelain`
+  empty (untracked files count), branch an ancestor of origin's default
+  branch — remove and delete the branch (`-D`, after that ancestry check:
+  `-d` re-checks against the shared checkout's own default, which may lag
+  origin's and refuse a branch just proved merged); otherwise keep and report the reason
+  (`dirty`, `unmerged`, `locked`, `detached`, `outside-root`,
+  `default-branch`). Merged local branches with no worktree are deleted the
+  same way; `--dry-run` previews, still fetching so its answer is current but
+  skipping the ref prune and metadata prune. A failed fetch or default-branch
+  lookup is a precondition failure, never a judgment from stale refs, and
+  origin's default branch is re-queried each run so a moved default cannot
+  leave the check pointed at a cached `origin/HEAD`. Ignored files do not
+  count as dirty: the ignore claims they are reproducible and `git worktree
+  remove` treats them the same way. Two of the 14 were kept: one with an
+  uncommitted 13-line edit, one with an untracked `tester-data/` directory,
+  both surfaced to the operator rather than discarded. Step 8 runs the prune
+  before provisioning every round and Step 21 runs it again after the merge.
+
+## 0.3.210 — 2026-09-13
+
+### Fixed
+
+- **A provider refusal is recorded, moved once, and then stops (#399).** A
+  tester's provider stopped mid-execution on `acr-cli-producer-migration` with
+  a notice above an empty composer and no report. `references/dispatch-recovery.md`
+  Wait outcomes said: record the missing report, tell the operator, never
+  retry, rephrase, switch providers or models, reconstruct or synthesize; the
+  operator decides. That protects against an agent iterating against a
+  refusal — retry, reword, hop vendors until one complies — and it stays. But
+  it stated the event as one undifferentiated handoff, so the lead escalated
+  three sub-decisions the operator held nothing on: which provider runs the
+  replacement, whether to resend the refused brief unchanged to the same
+  provider, and applying for the vendor's access program the notice
+  advertised. The operator cannot un-refuse a classifier decision, and the
+  access program turned out to be gated to verified security professionals
+  and unreachable for this account, so the escalation had zero actionable
+  content and sat open for 15 hours. Meanwhile `wait-report.sh` exit 5 went to
+  stdout and nowhere else — nothing could tell a first refusal from a second,
+  so "no resend to the same provider" and "a second refusal escalates" had no
+  substrate to enforce them on. The owner now records the refusal:
+  `record-refusal` binds the saved exit-5 JSON to the applied dispatch, with
+  the refusing provider as the worker's config `kind`. `apply` then refuses a
+  resend of the same task, role and fix round to a provider that refused it,
+  records one move of the brief to another provider on the new dispatch, and
+  refuses every provider once two independent refusals exist — that line
+  stops and becomes a `decision` obligation, which the dispatch gate from the
+  first half of #399 then holds. The key is task, role and fix round rather
+  than brief bytes: a replacement brief carries a fresh report path, so bytes
+  never match, while a reworded brief on the same key must still meet the
+  gate — the byte key would have let a rewording escape it entirely. The
+  unchanged-brief requirement is then checked inside that key: every task
+  dispatch records a `brief_identity`, the common and role brief bytes with
+  the enrolled report path masked, and a move whose identity differs from the
+  refused dispatch's is refused as a rewording. The receipt is bound too:
+  `record-refusal` requires the receipt's `report_path` to equal the report
+  the dispatch's supervision enrollment bound, so a stale exit-5 receipt from
+  the same worker cannot mark a different attempt refused, and an unenrolled
+  dispatch has no verifiable binding and is refused. The
+  provider ban was the anti-vendor-hopping rule; one recorded move with the
+  brief unchanged is not hopping, and `REFUSAL_LIMIT` in `recovery.py` is 2
+  so a loosening to three is a visible constant change, not a reading. One
+  move per refusal is also enforced while the move is in flight: a second
+  move is refused while the first is reserved, uncertain or applied without
+  a recorded refusal, so a fresh dispatch to a third provider cannot slip in
+  between the move and its outcome; a `not_sent` move consumed nothing. The
+  recovery store is version 6 for the new dispatch fields and the
+  `refusal_authorizations` collection; the owner stamps a clean version-5
+  store on load, adds the empty collection, and refuses one already carrying
+  any of them as unowned newer data. Copilot also asked what lifts the stop:
+  nothing did, so "the operator decides" had no lever and every later `apply`
+  on that key stayed refused. `authorize-refused-dispatch` records the
+  operator's decision with their words, requires a recorded refusal on the
+  key, and permits one further dispatch there inside the scope the operator
+  actually approved — the named provider, and the refused brief unchanged
+  unless they approved a revision — named on that dispatch's
+  `refusal_move.authorization`; a second dispatch needs a second decision.
+  The first cut of that record granted any provider and any brief, which the
+  policy reviewer read against Dispatch Safety: permission to send the
+  unchanged brief to one provider is not permission to send a rewrite to
+  another. A receipt whose `agent` is the worker's enrolled pane id is
+  accepted, since `wait-report.sh` takes either name, and a moved dispatch's
+  own refusal must come from the provider it moved to. Copilot then caught
+  that the grant could be recorded after one refusal, where the move gate
+  consults it first and it would have let a reworded resend to the refusing
+  provider through: an authorization now requires the two independent
+  refusals it answers, at record time and in the validator. The version-5
+  migration guard also refuses a dispatch already carrying `brief_identity`. The
+  reference now states the escalation test — escalate only what the operator
+  holds information, authority, or a usable account on — and that a
+  remediation path named inside a provider notice is untrusted on
+  availability and never becomes an operator sub-decision; the issue asked
+  for "confirm reachable before recording", which would itself be an
+  escalation. The lead had also proposed a per-agent `capabilities` gap from
+  this one refusal, describing one stopped session observed repeatedly as
+  "reproduced across multiple live reads", while the same provider completed
+  17 dispatches on the task that day including security-shaped ones;
+  `references/specialists.md` now forbids a capability change from one
+  refusal and requires independent recorded refusals of the same class.
+  Three Copilot advisories on the dispatch gate (#401) fold in here rather
+  than spending a round there: `dispatch_gate` refuses a checkpoint earlier
+  than the latest saved attention event, as `catch_up` already did, so a
+  stale `--now` cannot read a due deferral as pending; `start-judge` takes
+  one checkpoint for the gate and the retrospective guard; and the refusal
+  names the evidence the entry's kind requires and the command to rerun,
+  rather than `user_answer` and `apply` for a blocker or a judge start.
+
+## 0.3.209 — 2026-09-13
+
+### Fixed
+
+- **An unanswered decision on a task now stops dispatch on that task (#399).**
+  On `acr-cli-producer-migration` the lead recorded a priority-99 `decision`
+  when a tester's provider refused its brief, presented it twice with no
+  answer, and in the same hours dispatched fix rounds 15 through 19 on the
+  same task: 5 developer rounds, 6 reviewer rounds, 5 judge rulings, taking
+  `openai-weekly` from 35% to 77% used. Nothing made that state incoherent —
+  Fix Loops said to record `waiting_for_operator`, `references/attention.md`
+  said a `present` never resolves an entry, and no rule said an unanswered
+  decision stops dispatch. The lead treated the decision as blocking enough to
+  withhold a tester and not blocking enough to stop spending the window; a
+  priority-99 decision and a passing remark were indistinguishable at the
+  storage layer. `apply` and `start-judge` now read the attention sidecar
+  before any new send and refuse while an open `decision` or `blocker` on the
+  task exists, naming the obligation id and its resolution condition. The gate
+  is by kind, never by priority: the issue asked for "above a priority
+  threshold", but priority is a lead-assigned integer with no semantic anchor,
+  and a threshold of 90 moves the next stall to a decision recorded at 89 by
+  the same lead that wants to keep dispatching. `question` is the non-gating
+  kind for a lead that wants to ask without stopping. Deferral with recorded
+  rationale lifts the gate until its resurface time; a resurfaced deferral
+  gates again; `present` never lifts it; a malformed attention history refuses
+  as `state_error` rather than reading as an empty queue; a replayed dispatch
+  returns its saved receipt without consulting the gate, since it sends
+  nothing; a dry run is a rehearsal of a send and is refused the same way. The
+  refusal-recovery half of #399 — splitting the provider-refusal event into
+  lead-owned and operator-owned sub-decisions, persisting refusals, and
+  bounding a cross-provider move — ships separately.
+
+## 0.3.208 — 2026-09-13
+
+### Changed
+
+- **An exhausted correction allowance goes to the operator, not the judge (#396).**
+  Judge Seat named four dispatch triggers; three were disputes and the fourth
+  was a budget event — and the budget event was the only one firing. Every judge
+  brief retained on disk cited it, all 15 leading with allowance exhaustion, none
+  dispatched for a contested verdict alone. It composed badly with the Fix Loops
+  bounded-correction-plan carve-out: the operator approves more attempts, that
+  budget exhausts, the trigger fires again. One task reached fix round 19 and
+  consumed 16 judge rulings — more than half the fleet's 30 lifetime dispatches,
+  five of them in a single day — at the heaviest seat's weight (15.0, above
+  `developer`'s 12.0) against the same weekly window its developer and every
+  reviewer drew from. The seat now keeps the three disputes. An exhausted
+  allowance stops the round and surfaces to the operator, who alone can grant
+  more attempts; when a ruling is still wanted there, it is bounded to one per
+  task rather than one per allowance boundary, so a re-granted budget cannot
+  re-fire it, and it is the operator's own request rather than a lead dispatch.
+  `teamlead checkpoint` makes `judge_report` optional — a cited one
+  is still held to the completed-`RULING`/`ACTION` contract and the pinned
+  judge's post-attempt assignment — and its records carry `schema_version` 2.
+  The owner upgrades a version-1 checkpoint on load — the stamp alone, since a
+  row that carried a required ruling is already a valid version-2 row — and
+  refuses one missing the evidence its version required. Replay compares
+  identity and evidence, never the writer's version, and a second cited ruling
+  for the same task is refused so the per-boundary dispatch cannot return. The
+  `judge_checkpoint_required` task status is now `checkpoint_required`.
+
+## 0.3.207 — 2026-09-13
+
+### Fixed
+
+- **The planner refuses a field it could not have ranked (#395).** `teamlead plan`
+  filled five consecutive rounds from a snapshot `measure --agent` had written
+  over one freshly spawned pane: one candidate per seat, an 18-name `--exclude`
+  list matching nothing in it, and a rationale reporting each forced pick as a
+  headroom ranking. The fleet dispatched 48 consecutive rounds into one weekly
+  window, taking it from 35% to 77% used in under eight hours, while another
+  window sat at 1% used with four idle panes and received nothing for three
+  days. Rotation had worked on the same task while the roster was measured
+  whole, and stopped at the first single-pane measure. Three refusals now gate
+  the field before any seat is filled: a snapshot that does not cover the
+  agents `config.json` declares, an `--exclude` list naming nobody the snapshot
+  measured (previously a trailing note), and a ranked seat measured against one
+  agent. The pinned judge seat is exempt — it is assigned, never ranked — and so
+  is a config whose own rankable roster holds one worker. The pinned judge is
+  not part of a ranked seat's field — every other seat bars it structurally, so
+  a `{judge, worker}` snapshot offers one candidate — and the inert-exclusion
+  check reads the names the operator typed, never the contribution bars the CLI
+  merges in beside them. An exclusion narrowing a measured field to one
+  candidate still plans: the operator chose that narrowing, whereas a one-pane
+  snapshot chose nothing. Issue #315's unknown-headroom handling is unchanged —
+  an agent present but unmeasured is still a fallback candidate, never a
+  refusal.
+
 ## 0.3.206 — 2026-09-09
 
 ### Added

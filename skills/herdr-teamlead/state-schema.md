@@ -47,8 +47,13 @@ copies it onto each record (snapshot `schema_version` 3), and `plan` charges a s
 worker in that window. An agent that declares none has a window to itself.
 
 The optional top-level `judge` key pins the judge agent, model, and effort.
-Plan schema 5 echoes them in a `judge` object; a plan without that seat omits
-it. Model and effort become explicit launch flags. Legacy `banner_pattern`
+Plan schema 6 echoes them in a `judge` object, with `mode` — the seat's
+declared `adjudication` or `diagnosis` — beside them; a plan without that seat
+omits the object. Writer: `plan`, from its own `--judge-mode`. Readers:
+`start-judge` and `apply`, which use the recorded mode and refuse a supplied
+one that differs from it. A version-5 plan carries no `mode`; its readers
+refuse the start rather than defaulting one, since the choice decides which
+pre-dispatch gate the seat is held to. Model and effort become explicit launch flags. Legacy `banner_pattern`
 values are ignored: proof comes from launch or live process argv. The planner
 never ranks the judge seat or gives its pinned worker another role.
 
@@ -263,13 +268,16 @@ skills/herdr-teamlead/references/retrospectives.md
   ],
   "specialist_assessments": [],
   "recovery": {
-    "schema_version": 5,
+    "schema_version": 9,
     "tasks": {},
     "checkpoints": [],
     "plans": [],
     "dispatches": [],
     "context_permissions": [],
     "events": [],
+    "refusal_authorizations": [],
+    "diagnoses": [],
+    "legacy_ruling_recoveries": [],
     "hand_clearances": [],
     "historical_attempts": [],
     "role_clearances": [],
@@ -324,9 +332,17 @@ document and arrives already stamped.
 
 ## Recovery records
 
-The recovery document uses `schema_version: 5`; individual records retain their
-independent versions. Generic records remain version 1; stale-Grok delivery and
-composition-bearing dispatch/result records use version 2. The owner adds empty `role_clearances` and
+The recovery document uses `schema_version: 9`; individual records retain their
+independent versions. Version 6 adds the dispatch fields `brief_identity`, `refusal` and
+`refusal_move` and the `refusal_authorizations` collection; version 7 adds the
+dispatch's send-time `provider`; version 8 adds the `diagnoses` collection;
+version 9 adds `legacy_ruling_recoveries`. The
+owner stamps an older store on load, adds the empty collections, and refuses one
+already carrying a field its version did not own. Generic records remain version 1; stale-Grok delivery and
+composition-bearing dispatch/result records use version 2. Checkpoints are at
+version 2: the owner upgrades a version-1 row on load, stamping it and
+preserving its identity, fix round, base and recorded ruling, and refuses one
+missing the ruling evidence its version required. The owner adds empty `role_clearances` and
 `delivery_recoveries` arrays when migrating versions 1 or 2. Version 1 also
 gains empty `hand_clearances` and `historical_attempts` arrays. Existing
 record shapes, contents and evidence remain unchanged. Recovery 4 → 5 changes
@@ -341,15 +357,18 @@ replacement for live readiness, source review, or release gates.
 | Collection | Record fields and relationships |
 | --- | --- |
 | `tasks` | Keyed by original task identity; `task`, immutable full `base_revision`, `scope`, `allowed_paths`, `authorization`. Migration invents none of them. |
-| `checkpoints` | Unique `id`, `fix_round`, original `base_revision`, concrete `defect`, `previous_attempts`, `progress`, `change_in_approach`, `judge_agent`, `judge_report`, `judge_evidence`. Requires a completed pinned-judge assignment after the preceding developer attempt. |
+| `checkpoints` | Record schema 3. Unique `id`, `fix_round`, original `base_revision`, concrete `defect`, `previous_attempts`, `progress`, `change_in_approach`. Carries `judge_agent`, `judge_report` and `judge_evidence` only when a ruling is cited, and a cited one requires a completed pinned-judge assignment after the preceding developer attempt plus the `requested_by` receipt (source and quote) for the operator request it answers. A partial trio is refused, one task records at most one cited ruling, and `requested_by` without a cited ruling is refused. Version-1 rows migrate to 2, the shape that predates the receipt; a version-2 row carrying one is refused, and neither older version has a receipt invented for it. The reader accepts versions 2 and 3. |
 | `plans` | Unique `id`, `checkpoint`, original `base_revision`, `scope`, `allowed_paths`, `additional_fixes`, derived `first_fix`/`last_fix`, `authorization`; optional `supersedes` references a preserved prior approval. |
-| `dispatches` | Unique `id`, byte/input `fingerprint`, `role`, `agent`, cumulative `fix_round`, `plan` or null, `work` or null, `status`, `result`, `report`, and `assignment_index` once an outcome is recorded. CLI records `brief`, `common`, `observed_before`, and `context_before_send`; reconciled retries preserve `prior_assignment_indices`. |
+| `dispatches` | Unique `id`, byte/input `fingerprint`, `role`, `agent`, cumulative `fix_round`, `plan` or null, `work` or null, `status`, `result`, `report`, and `assignment_index` once an outcome is recorded. CLI records `brief`, `common`, `observed_before`, and `context_before_send`; reconciled retries preserve `prior_assignment_indices`. `provider` is the worker's config `kind` at send time, authoritative for the refusal's attribution. `brief_identity` digests the common and role brief bytes with the enrolled report path masked. `refusal` (`provider`, `reason`, `receipt`, `report_path`, `evidence`) appears once `record-refusal` binds an exit-5 receipt to an applied row's enrolled report; `refusal_move` (`from`, `from_provider`, `provider`) appears on the dispatch that carried the refused brief, same `brief_identity`, to another provider. |
 | `context_permissions` | Original `assignment_index`, `next_fix`, `reason`, `authorization`, `evidence`, `evidence_receipt`, later `observed_session`, and `basis: operator_authorized_fresh_handoff`. The original null session is never replaced. |
 | `events` | Append-only `sequence`, `kind`, and structured `details` preserving approvals, waiting states, reservations, send transitions, results, transport retries, superseded review receipts, and recovery decisions. |
 | `hand_clearances` | Unique `id`, original release `assignment_index`, `previous_developer`, complete owner `input`, clear byte `receipts`, later `observed_session` or null, and `basis: verified_required_release_clear`. Both indices retain their original rows. The later observation never substitutes for historical proof; changed or missing current IDs do not invalidate archived clear evidence. |
 | `role_clearances` | Unique `id`, original `task`/`base_revision`, developer `assignment_index`, actual `clearing_assignment_index` and `clearing_dispatch`, `next_fix`, complete owner `input`, clear/authorization byte `receipts`, reused or explicit `clear_authority`, later `observed_session`, `basis: verified_authorized_role_clear`, and `grants_future_attempts: false`. The input fixes the same work and correction plan used for dispatch. Original known native proof and every earlier row remain unchanged. |
 | `historical_attempts` | Unique `id`, actual `fix_round`, `previous_developer`, appended `assignment_index`, original owner `input`, authorization/transport/report byte `receipts`, inspected `vcs` checkout/head/diff evidence, `basis: completed_authorized_manual_correction`, null `native_session_proof`, `grants_future_attempts: false`, and append-only `reviews`. |
+| `diagnoses` | Record schema 2. Unique `id`, `task`, `checkpoint`, `fix_round`, original `base_revision`, `remedy` (`continue`, `restructure` or `stop`), `bound` or null, `reissue` (whether this diagnosis repeats its predecessor's rung), `judge_agent`, `judge_evidence`, `investigator_report` binding the assessed report the judge ruled on or null on a migrated row, `scope`, `allowed_paths`, the `plan` a bounded remedy authorized or null, `supersedes` naming a replaced plan or null, and the operator `authorization` that permitted an early supersession or null. A task's diagnoses move down the remedy ladder, each nonterminal rung repeating at most once, and `stop` is terminal and never repeats. Version-1 rows migrate to 2 with `reissue: false` and `investigator_report: null`. |
+| `refusal_authorizations` | Unique `id`, `task`, `role`, `fix_round` or null, approved `provider`, `brief` (`unchanged` or `revised`), the operator's `decision`, `authorization`. Permits one dispatch on its key to that provider after two recorded refusals, the brief held to the refused identity unless `revised`; the consuming dispatch names it in `refusal_move.authorization`. |
 | `delivery_recoveries` | Unique `id`, original `dispatch` and `assignment_index`, owner `input`, byte `receipts` for report/negative wait/pane/visible/native source/common/brief, archived `native_session`, `found: true`, `basis: archived_native_final_source`, null `native_session_proof`, and `grants_review_approval: false`. Original null session evidence is preserved; the archived user prompt binds its delivery to the saved dispatch. |
+| `legacy_ruling_recoveries` | Schema-1 receipts already written for historical version-2 citations. Unique `id`, `task`, `at`, operator `authorization` source/quote, `backup` path/SHA-256, `checkpoints` mapping original IDs to canonical JSON SHA-256 digests, and `grants_future_attempts: false`. Reading validates these bindings without fetching historical files. Altered, new or overlapping citations do not inherit a receipt. Empty after a schema-8 migration. |
 
 Dispatch/result version 2 carries `requirements`, `reviewer_scope`, or both.
 Requirements contain the assigned role's normalized object; reviewer scope is
@@ -626,3 +645,29 @@ apply here.
 - `apply` never trusts a snapshot for an agent's lifecycle state. It re-reads
   the live agent through `herdr agent get` and refuses a `working` or `blocked`
   worker before sending a single keystroke.
+
+
+## Explicit legacy ruling recovery
+
+Recovery store schema 9 adds `legacy_ruling_recoveries`. The owner migrates
+stores 1–8 by adding an empty collection and retaining existing records.
+An older store already containing this collection is refused. State document
+schema 6 and checkpoint record versions remain unchanged. Older owner builds
+cannot write schema 9; use the upgraded owner for every dispatch and reader.
+
+Existing schema-1 receipts stay in the ledger. Each carries `id`, `task`, `at`,
+the actual operator `authorization` source/quote, `backup` path/SHA-256, a
+`checkpoints` object mapping original checkpoint IDs to canonical JSON SHA-256
+digests, and `grants_future_attempts: false`. Every referenced row retains its
+complete original content and must read as version 2 after the owner's checkpoint migration, without `requested_by`.
+Reading validates these bindings without fetching historical files. Altered,
+new or overlapping citations do not inherit a receipt. Malformed or unsupported
+recovery state is refused without writes.
+
+The version-3 one-ruling read bound is unchanged: version-2 citations read as
+written. The checkpoint writer still refuses another ruling for a task that
+already has one, and correction limits are unchanged. No task identity, base,
+assignment, attempt count, plan, evidence or authorization is removed or
+invented. Receipts grant no corrections, review approvals or new dispatch
+authority. There is no owner command that appends, deletes or downgrades these
+records.
