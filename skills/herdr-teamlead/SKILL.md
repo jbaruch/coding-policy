@@ -456,8 +456,8 @@ bash "$CP/skills/herdr-teamlead/teamlead.sh" plan \
 ```
 
 `adjudication` for a dispute, `diagnosis` for an exhausted allowance — the same
-choice Step 13 made when it composed the brief. The plan records it, so Steps
-16 and 17 need no second decision. An undeclared mode is refused.
+choice Step 13 made when it composed the brief. Use the recorded mode in Steps
+16 and 17. An undeclared mode is refused.
 
 Exit 0 names the judge worker; proceed immediately to Step 16. On non-zero,
 report the diagnostic and finish here. Never substitute a judge, lower its tier,

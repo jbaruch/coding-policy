@@ -19,9 +19,11 @@
   The choice is made once. `plan` records the mode beside the judge's tier
   (plan schema 6, documented in `state-schema.md` with its reader/writer
   contract), and `start-judge` and `apply` read it from there — a plan carrying
-  none starts no worker, and a `--judge-mode` that differs from the plan's
-  refuses before any worker contact rather than holding the seat to the other
-  gate than the one its brief was composed for. Steps 15, 16 and 17 of the
+  none starts no worker — a flag cannot supply what that plan's brief was never
+  composed for — and a `--judge-mode` that differs from the plan's refuses
+  before any worker contact rather than holding the seat to the other gate than
+  the one its brief was composed for. A bare `{role: agent}` map seats nothing,
+  so the flag remains its only source. Steps 15, 16 and 17 of the
   skill carry it through. Team Composition's assessment directive is scoped to
   diagnosis, matching what the gate now enforces.
 

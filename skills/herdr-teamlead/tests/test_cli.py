@@ -1522,10 +1522,17 @@ class JudgeModeTest(unittest.TestCase):
         with self.assertRaisesRegex(UsageError, "the plan's mode is the one its brief was composed for"):
             cli._judge_mode_for(args, self.plan_doc("diagnosis"))
 
-    def test_a_legacy_plan_carries_none(self):
-        self.assertIsNone(cli._judge_mode_for(self.args, self.plan_doc()))
+    def test_a_plan_seating_a_judge_without_a_mode_refuses(self):
+        # A flag cannot supply what the plan's brief was never composed for.
+        for args in (self.args, SimpleNamespace(judge_mode="adjudication")):
+            with self.assertRaisesRegex(UsageError, "re-plan with --judge-mode"):
+                cli._judge_mode_for(args, self.plan_doc())
+
+    def test_a_bare_assignments_map_takes_the_flag(self):
+        # Not a plan document: there is no seat to have recorded a mode.
         args = SimpleNamespace(judge_mode="adjudication")
-        self.assertEqual(cli._judge_mode_for(args, self.plan_doc()), "adjudication")
+        self.assertEqual(cli._judge_mode_for(args, {"judge": "claude"}), "adjudication")
+        self.assertIsNone(cli._judge_mode_for(self.args, {"judge": "claude"}))
 
 
 if __name__ == "__main__":

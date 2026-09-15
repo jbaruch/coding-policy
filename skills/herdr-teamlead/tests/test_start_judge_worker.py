@@ -122,7 +122,7 @@ print(json.dumps({"result": {"agent": {"name": args[2], "agent": kind,
             env={**os.environ, "HERDR_BIN": str(self.fake), "FAKE_LOG": str(self.log)},
             capture_output=True, text=True, check=False)
         self.assertEqual(result.returncode, 1)
-        self.assertIn("declares what it is for", result.stdout + result.stderr)
+        self.assertIn("re-plan with --judge-mode", result.stdout + result.stderr)
         self.assertFalse(self.log.exists(), "no worker may be started without a declared mode")
 
     def test_invalid_config_never_starts(self):

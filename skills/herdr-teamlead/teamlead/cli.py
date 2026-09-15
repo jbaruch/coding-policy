@@ -650,17 +650,26 @@ def _judge_mode_for(args, document):
     mismatch refuses before any worker contact (#425).
     """
     supplied = getattr(args, "judge_mode", None)
-    planned = None
-    if isinstance(document, dict):
-        block = document.get("judge")
-        if isinstance(block, dict):
-            planned = block.get("mode")
-    if supplied and planned and supplied != planned:
+    block = document.get("judge") if isinstance(document, dict) else None
+    if not isinstance(block, dict):
+        # Not a plan document -- a bare {role: agent} map carries no seat, so
+        # the flag is the only source there is.
+        return supplied
+    planned = block.get("mode")
+    if planned is None:
+        # A plan that seats the judge and declares no mode is a plan from
+        # before the mode existed. Re-plan rather than let a flag supply what
+        # its brief was never composed for (state-schema.md, plan schema 6).
+        raise UsageError(
+            "This plan seats the judge without a declared mode; re-plan with --judge-mode {} rather than supplying one here.".format(" | ".join(recovery.JUDGE_MODES)),
+            {},
+        )
+    if supplied and supplied != planned:
         raise UsageError(
             "This plan seats the judge for {!r} and --judge-mode says {!r}; the plan's mode is the one its brief was composed for. Re-plan for the other mode rather than overriding it here.".format(planned, supplied),
             {"planned": planned, "supplied": supplied},
         )
-    return supplied or planned
+    return planned
 
 
 def cmd_plan(args, client=None, warn=None, trace=None):
