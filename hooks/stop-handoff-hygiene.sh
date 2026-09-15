@@ -25,7 +25,12 @@
 #
 # Blocking findings (gate the stop, once):
 #   - Leftover local branches whose upstream is gone (merged then remote-deleted).
-#   - Orphaned linked worktrees whose branch's upstream is gone.
+#   - Orphaned linked worktrees: clean AND either the branch's upstream is gone,
+#     or the tree holds nothing the default branch does not already have. The
+#     upstream test alone saw only worktrees whose branch had been pushed, so
+#     every review, test and judge seat -- which pin a tip and report to a file,
+#     and never push -- was invisible to it (#433). Detached worktrees are read
+#     the same way, against their HEAD.
 #   - Diagnostics findings in the CHANGED set only (uncommitted .sh/.py):
 #     lint the .sh with shellcheck, the .py with pyright. Skipped when nothing
 #     lintable changed, so a clean handoff costs nothing. An absent engine is
@@ -155,9 +160,18 @@ main() {
     for b in ${gone_branches[@]+"${gone_branches[@]}"}; do
       in_list "$b" ${wt_branches[@]+"${wt_branches[@]}"} || leftover+=("$b")
     done
+    local base=""
+    base="$(default_branch_ref)" || base=""
+    if [[ -z "$base" ]]; then
+      warn "could not resolve origin's default branch — reporting only worktrees whose upstream is gone"
+    fi
     for (( i = 0; i < ${#wt_paths[@]}; i++ )); do
       b="${wt_branches[$i]}"; p="${wt_paths[$i]}"
-      if in_list "$b" ${gone_branches[@]+"${gone_branches[@]}"}; then orphaned+=("${p} (branch ${b})"); fi
+      if [[ -n "$b" ]] && in_list "$b" ${gone_branches[@]+"${gone_branches[@]}"}; then
+        orphaned+=("${p} (branch ${b})")
+      elif [[ -n "$base" ]] && worktree_is_spent "$p" "$b" "$base"; then
+        orphaned+=("${p} ($([[ -n "$b" ]] && printf 'branch %s' "$b" || printf 'detached'), nothing ${base} lacks)")
+      fi
     done
 
     build_branch_findings
@@ -193,8 +207,9 @@ collect_gone_branches() {
 }
 
 # Populate wt_paths/wt_branches for LINKED worktrees only (the first porcelain
-# record is the main worktree and is skipped). Detached worktrees have no branch
-# and are skipped.
+# record is the main worktree and is skipped). A detached worktree is recorded
+# with an EMPTY branch rather than dropped: it can be as merged and as removable
+# as any other, and a branch-name predicate could never see it (#433).
 collect_worktrees() {
   local out rc=0 line key val cur_path="" cur_branch="" first=1
   out="$(git worktree list --porcelain)" || rc=$?
@@ -204,7 +219,7 @@ collect_worktrees() {
   fi
   flush() {
     if (( first )); then first=0
-    elif [[ -n "$cur_branch" ]]; then wt_paths+=("$cur_path"); wt_branches+=("$cur_branch"); fi
+    elif [[ -n "$cur_path" ]]; then wt_paths+=("$cur_path"); wt_branches+=("$cur_branch"); fi
     cur_path=""; cur_branch=""
   }
   while IFS= read -r line; do
@@ -216,6 +231,51 @@ collect_worktrees() {
     esac
   done <<< "$out"
   [[ -n "$cur_path" ]] && flush   # flush a trailing record with no blank line
+  return 0
+}
+
+# Echo the default branch's ref (`origin/main`), or return 1 when none can be
+# confirmed. Named explicitly rather than read off the current checkout: this
+# hook can run from a linked worktree, whose HEAD is not the default branch.
+default_branch_ref() {
+  local out rc=0 name cand
+  out="$(git symbolic-ref --quiet refs/remotes/origin/HEAD 2>/dev/null)" || rc=$?
+  if (( rc == 0 )) && [[ "$out" == refs/remotes/origin/* ]]; then
+    printf 'origin/%s' "${out#refs/remotes/origin/}"
+    return 0
+  fi
+  for cand in main master; do
+    if git show-ref --verify --quiet "refs/remotes/origin/${cand}"; then
+      printf 'origin/%s' "$cand"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# Does <path> hold nothing the default branch does not already have?
+#
+# 0 = clean and fully contained, 1 = no (dirty, ahead, or unreadable). FAIL
+# CLOSED: a check that cannot run returns 1, so a tree this never inspected is
+# never reported removable. Reading an unreadable tree as clean is how the
+# first hand-rolled version of this passed trees it had never looked at (#433).
+worktree_is_spent() { # <path> <branch|""> <default-ref>
+  local path="$1" branch="$2" base="$3" status rc=0 ahead head
+  [[ -d "$path" ]] || return 1
+  status="$(git -C "$path" status --porcelain 2>/dev/null)" || rc=$?
+  (( rc == 0 )) || return 1
+  [[ -z "$status" ]] || return 1
+  if [[ -n "$branch" ]]; then
+    rc=0
+    ahead="$(git -C "$path" rev-list --count "${base}..${branch}" 2>/dev/null)" || rc=$?
+    (( rc == 0 )) || return 1
+    [[ "$ahead" == "0" ]] || return 1
+    return 0
+  fi
+  rc=0
+  head="$(git -C "$path" rev-parse --verify HEAD 2>/dev/null)" || rc=$?
+  (( rc == 0 )) && [[ -n "$head" ]] || return 1
+  git -C "$path" merge-base --is-ancestor "$head" "$base" 2>/dev/null || return 1
   return 0
 }
 
@@ -239,7 +299,7 @@ build_branch_findings() {
     blocking+=("$section")
   fi
   if (( ${#orphaned[@]} > 0 )); then
-    section="Orphaned worktrees (branch merged, upstream deleted) — remove them:"
+    section="Orphaned worktrees (clean, holding nothing the default branch lacks) — remove them:"
     for p in "${orphaned[@]}"; do
       section+=$'\n'"  - ${p}: git worktree remove <path> && git branch -d <branch>"
     done

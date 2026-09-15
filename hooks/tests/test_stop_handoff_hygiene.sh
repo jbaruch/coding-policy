@@ -157,6 +157,50 @@ main() {
      && ! reason_has "Leftover local branches"; then
     pass; else fail "orphaned worktree: expected worktree block only, got RC=$RC OUT=$OUT"; fi
 
+  # 4a-i. A never-pushed worktree, clean and holding nothing main lacks: the
+  # majority shape of the herdr flow, and invisible to the upstream test (#433).
+  mk_origin o4a; clone_from "$BARE" "$TMP/r4a"
+  g -C "$TMP/r4a" worktree add -q "$TMP/r4a-review" -b review/never-pushed || die "r4a worktree add failed"
+  run_hook "$TMP/r4a" '{"stop_hook_active":false}'
+  if [[ $RC -eq 0 ]] && reason_has "Orphaned worktrees" && reason_has "r4a-review"; then
+    pass; else fail "never-pushed worktree: expected an orphaned report, got RC=$RC OUT=$OUT"; fi
+
+  # 4a-ii. A DETACHED worktree at a commit main already has. No branch name
+  # could ever have matched it.
+  g -C "$TMP/r4a" worktree add -q --detach "$TMP/r4a-detached" || die "r4a detached add failed"
+  run_hook "$TMP/r4a" '{"stop_hook_active":false}'
+  if [[ $RC -eq 0 ]] && reason_has "r4a-detached" && reason_has "detached"; then
+    pass; else fail "detached worktree: expected an orphaned report, got RC=$RC OUT=$OUT"; fi
+
+  # 4a-iii. Real unmerged work is NOT reported, on a branch or detached.
+  mk_origin o4c; clone_from "$BARE" "$TMP/r4c"
+  g -C "$TMP/r4c" worktree add -q "$TMP/r4c-work" -b feat/ahead || die "r4c worktree add failed"
+  printf 'new\n' > "$TMP/r4c-work/g" || die "r4c write failed"
+  g -C "$TMP/r4c-work" add g || die "r4c add failed"
+  g -C "$TMP/r4c-work" commit -q -m ahead || die "r4c commit failed"
+  run_hook "$TMP/r4c" '{"stop_hook_active":false}'
+  if [[ $RC -eq 0 ]] && ! reason_has "r4c-work"; then
+    pass; else fail "unmerged worktree must not be reported: RC=$RC OUT=$OUT"; fi
+
+  # 4a-iv. A dirty worktree is not reported either, even when its commits are
+  # all in main: the uncommitted work is the thing that would be lost.
+  mk_origin o4d; clone_from "$BARE" "$TMP/r4d"
+  g -C "$TMP/r4d" worktree add -q "$TMP/r4d-dirty" -b review/dirty || die "r4d worktree add failed"
+  printf 'uncommitted\n' > "$TMP/r4d-dirty/scratch.txt" || die "r4d write failed"
+  g -C "$TMP/r4d-dirty" add scratch.txt || die "r4d add failed"
+  run_hook "$TMP/r4d" '{"stop_hook_active":false}'
+  if [[ $RC -eq 0 ]] && ! reason_has "r4d-dirty"; then
+    pass; else fail "dirty worktree must not be reported: RC=$RC OUT=$OUT"; fi
+
+  # 4a-v. A worktree the check cannot read is never reported removable: the
+  # guard fails closed rather than passing a tree it never inspected.
+  mk_origin o4e; clone_from "$BARE" "$TMP/r4e"
+  g -C "$TMP/r4e" worktree add -q "$TMP/r4e-gone" -b review/vanished || die "r4e worktree add failed"
+  rm -rf "$TMP/r4e-gone" || die "r4e rm failed"
+  run_hook "$TMP/r4e" '{"stop_hook_active":false}'
+  if [[ $RC -eq 0 ]] && ! reason_has "r4e-gone"; then
+    pass; else fail "unreadable worktree must not be reported: RC=$RC OUT=$OUT"; fi
+
   # 4b. The same orphaned worktree, seen from INSIDE a linked worktree with
   # HERDR_ENV set: that is a worker session, and removing a worktree is the
   # lead's job (rules/agent-team-operation.md). Blocking here would force the
