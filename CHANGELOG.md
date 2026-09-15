@@ -9,7 +9,10 @@
   `branch.<name>.*` for the NEW branch, and the cleanup then removed
   configuration belonging to a live checkout while the branch itself survived.
   Occupancy is re-read immediately before the removal, and a section a worktree
-  now holds is left untouched and reported.
+  now holds is left untouched under its own outcome — the deletion is still
+  reported, and the diagnostic says to remove nothing by hand rather than
+  reusing the cleanup-failed message, whose prescribed recovery would delete
+  exactly the config this guard protects.
 
 - **A failed `mktemp` in the occupancy read names itself.** It returned without
   writing to `ERRFILE`, so the caller built its failure row from whatever the

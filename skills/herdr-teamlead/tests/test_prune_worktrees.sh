@@ -531,7 +531,8 @@ SHIM
   config_rc=0
   git -C "$SHARED" config --get "branch.review/recreated.remote" >/dev/null || config_rc=$?
   case "$config_rc" in 0) kept_config=1 ;; 1) ;; *) die "git config --get failed (exit $config_rc)" ;; esac
-  if (( kept_config )); then pass; else fail "the recreated branch's config was deleted: rc=$RC out=$OUT err=$ERRTEXT"; fi
+  if (( kept_config )) && [[ "$OUT" == *"remove nothing by hand"* ]] && [[ "$OUT" == *'"branches_deleted": ['*'review/recreated'* ]]; then
+    pass; else fail "the recreated branch's config must survive and be reported: rc=$RC out=$OUT err=$ERRTEXT"; fi
 
   # --- 14. usage / not a repo.
   run

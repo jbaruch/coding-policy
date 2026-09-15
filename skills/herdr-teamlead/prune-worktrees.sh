@@ -228,7 +228,7 @@ branch_checked_out() { # <shared> <branch>
 # either side of it: before, so a worktree created since the inventory is
 # seen; after, so one created inside that window is put back rather than left
 # checked out on a branch that no longer exists (#410).
-delete_branch() { # <shared> <branch> <tip>  -> 0 deleted, 1 moved, 2 git refused, 3 deleted but config left, 4 occupancy unreadable, 5 checked out, 6 claimed mid-run and restored, 7 claimed mid-run and not restored, 8 deleted and post-deletion occupancy unreadable
+delete_branch() { # <shared> <branch> <tip>  -> 0 deleted, 1 moved, 2 git refused, 3 deleted but config left, 4 occupancy unreadable, 5 checked out, 6 claimed mid-run and restored, 7 claimed mid-run and not restored, 8 deleted and post-deletion occupancy unreadable, 9 deleted and its config section left to a branch recreated since
   local rc=0 now refusal occupied
   if ! occupied="$(branch_checked_out "$1" "$2")"; then
     return 4
@@ -301,11 +301,11 @@ delete_branch() { # <shared> <branch> <tip>  -> 0 deleted, 1 moved, 2 git refuse
   # deletion itself takes.
   local now_held
   if ! now_held="$(branch_checked_out "$1" "$2")"; then
-    return 4
+    # The deletion already happened; 4 would tell the caller it did not.
+    return 8
   fi
   if [[ "$now_held" == 1 ]]; then
-    printf 'branch.%s config belongs to a branch a worktree recreated after the deletion; left untouched\n' "$2" > "$ERRFILE"
-    return 3
+    return 9
   fi
   rc=0
   git -C "$1" config --remove-section "branch.$2" >/dev/null 2>"$ERRFILE" || rc=$?
@@ -385,6 +385,7 @@ decide_worktree() { # <shared> <abs_root> <default> <dry-run 0|1> <path> <branch
     6) row failed "$branch" "$branch" "another worktree claimed ${branch} while it was being deleted; the branch was restored at ${tip} and that worktree is intact — re-run once it is gone" ;;
     7) row failed "$branch" "$branch" "another worktree claimed ${branch} while it was being deleted and it could not be restored: $(tr '\n' ' ' < "$ERRFILE") — inspect that worktree by hand" ;;
     8) row failed "$branch" "$branch" "${branch} is deleted and whether a worktree claimed it meanwhile could not be read: $(tr '\n' ' ' < "$ERRFILE") — check \`git worktree list\` and restore ${branch} at ${tip} if one holds it" ;;
+    9) row failed "$branch" "$branch" "${branch} is deleted, and a worktree recreated a branch of that name before its config could be cleaned up — branch.${branch} belongs to that live branch and was left untouched; remove nothing by hand" ;;
     *) row failed "$branch" "$branch" "deleting ${branch} failed after the worktree was removed: $(tr '\n' ' ' < "$ERRFILE")" ;;
   esac
   return 0
@@ -419,6 +420,8 @@ decide_branch() { # <shared> <default> <dry-run 0|1> <branch>
     6) row failed "$branch" "$branch" "a worktree claimed ${branch} while it was being deleted; the branch was restored at ${tip} and that worktree is intact — re-run once it is gone" ;;
     7) row failed "$branch" "$branch" "a worktree claimed ${branch} while it was being deleted and it could not be restored: $(tr '\n' ' ' < "$ERRFILE") — inspect that worktree by hand" ;;
     8) row failed "$branch" "$branch" "${branch} is deleted and whether a worktree claimed it meanwhile could not be read: $(tr '\n' ' ' < "$ERRFILE") — check \`git worktree list\` and restore ${branch} at ${tip} if one holds it" ;;
+    9) row branch-deleted "$branch" "$branch" ""
+       row failed "$branch" "$branch" "${branch} is deleted, and a worktree recreated a branch of that name before its config could be cleaned up — branch.${branch} belongs to that live branch and was left untouched; remove nothing by hand" ;;
     *) row failed "$branch" "$branch" "deleting ${branch} failed: $(tr '\n' ' ' < "$ERRFILE")" ;;
   esac
   return 0
