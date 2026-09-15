@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.228 — 2026-09-15
+
 ### Fixed
 
 - **The handoff hook sees every spent worktree, not only the pushed ones
