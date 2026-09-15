@@ -1,5 +1,21 @@
 # Changelog
 
+### Changed
+
+- **The publication-confirmation rules read one directive per bullet (#375).**
+  The independent review of #374 found four bullets in `rules/ci-safety.md`
+  Always Watch CI each carrying two directives behind a colon or a semicolon:
+  the other-channel evidence bullet (the release exists, and the artifact is
+  retrievable), the moderation-wait bullet (the backoff budget, and what an
+  exhausted budget means), the security-finding bullet (an advisory suggests,
+  a blocking finding requires), and the re-run bullet (what a naive re-run
+  costs, and what to do instead). Each is now its own bullet. The moderation
+  bullet names Tessl, so the reader sees which publication's mechanics the
+  explanations that follow the release contract qualify. The contract is
+  unchanged: every publication is still confirmed against the channel that
+  carried it, a Tessl publication still owes the registry advance and the
+  moderation clear, and no bullet's conditional meaning moved.
+
 ## 0.3.232 — 2026-09-15
 
 ### Fixed
