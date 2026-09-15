@@ -762,6 +762,28 @@ class ApplyCommandTest(CliCase):
         rows = json.loads(self.state.read_text())["assignments"]
         self.assertEqual([row["role"] for row in rows], ["reviewer"])
 
+    def test_a_live_seat_dispatch_reserves_and_records(self):
+        # Not a dry run: reserving a live `reviewer#api` dispatch exercises the
+        # recovery store's metadata validation, which read the literal role
+        # (#434).
+        state = empty_state()
+        save_state(self.state, state)
+        code, _, err = self.run_cli(
+            self.base()
+            + ["apply", "--composer-settle", "0",
+               "--assignments", json.dumps({"reviewer#api": "grok"}),
+               "--task", "t-live-seat", "--common", str(self.common), "--now", AT]
+            + ["--brief", "reviewer#api=" + str(self.briefs["reviewer"]),
+               "--report", "reviewer#api=" + str(self.tmp / "seat-report.md")],
+            client=self._client({"grok": "idle"}),
+        )
+        self.assertEqual(code, 0, err)
+        saved = json.loads(self.state.read_text())
+        self.assertEqual([row["role"] for row in saved["assignments"]], ["reviewer"])
+        dispatch = saved["recovery"]["dispatches"][0]
+        self.assertEqual(dispatch["role"], "reviewer#api")
+        self.assertEqual(dispatch["reviewer_scope"], "verification")
+
     def test_a_contributor_cannot_take_a_review_seat(self):
         # The responsibility decides independence: a worker the ledger records
         # as a contributor on this task is barred from every seat of the

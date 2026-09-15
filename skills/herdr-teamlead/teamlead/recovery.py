@@ -15,6 +15,7 @@ from pathlib import Path, PurePosixPath
 
 from .errors import UsageError
 from .chronology import assignment_after, latest_assignment, timestamp
+from .tiers import canonical_role
 
 
 RECOVERY_SCHEMA_VERSION = 1
@@ -830,7 +831,9 @@ def _dispatch_version(record):
         requirement = record["requirements"]
         if normalize_requirement(requirement, record.get("role")) != requirement:
             raise UsageError("Dispatch requirements must be canonical owner-normalized values; replan without editing saved engagement metadata.", {})
-    if "reviewer_scope" in record and (record.get("role") != "reviewer"
+    # The responsibility, not the seat's own name: every seat of the reviewer
+    # role carries a reviewer scope (#434).
+    if "reviewer_scope" in record and (canonical_role(record.get("role")) != "reviewer"
             or not isinstance(record["reviewer_scope"], str) or record["reviewer_scope"] not in {"verification", "design"}):
         raise UsageError("New reviewer_scope must name verification or design on a reviewer dispatch; preserve unknown scope only in legacy assignment history.", {})
     return SPECIALIST_DISPATCH_VERSION
