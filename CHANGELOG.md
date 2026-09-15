@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.231 — 2026-09-15
+
 ### Added
 
 - **A judge dispatch declares which of its two modes it is for (#425).** Every
