@@ -874,12 +874,17 @@ def cmd_apply(args, client=None, warn=None, trace=None):
     # A fresh judge seat at an exhausted allowance waits for the assessment it
     # rules on, dry runs included. A completed replay has left `assignments`
     # already, so it is not re-gated (#408).
+    judge_mode = None
     if "judge" in assignments:
-        recovery.require_judge_mode(_judge_mode_for(args, document if isinstance(document, dict) else None))
+        judge_mode = recovery.require_judge_mode(
+            _judge_mode_for(args, document if isinstance(document, dict) else None))
     if args.task and "judge" in assignments:
+        # The RESOLVED mode, not the flag: a planned diagnosis dispatched
+        # without one would otherwise reach the gate as None and skip the stop
+        # refusal it owes (#425).
         recovery.require_investigation_before_judge(store, state["assignments"], args.task,
                                                     state["specialist_assessments"],
-                                                    mode=getattr(args, "judge_mode", None))
+                                                    mode=judge_mode)
     recovery.validate_work(store, state["assignments"], args.task, args.fix_round,
                            args.correction_plan, work, implementation="developer" in assignments)
     constraints = composition.selection_constraints(

@@ -275,6 +275,42 @@ class RecoveryCommandTests(fixture.CliCase):
         self.assertEqual(code, 0, err)
         self.assertEqual(json.loads(out)["remedy"], "continue")
 
+    def test_apply_reads_the_plan_s_mode_when_no_flag_is_passed(self):
+        # coding-policy#425: a planned diagnosis dispatched without the flag
+        # must still meet the diagnosis gates, and a planned adjudication must
+        # still be exempt from the assessment requirement.
+        self.register()
+        config = json.loads(self.config.read_text())
+        config["judge"] = {"agent": "claude", "model": "claude-opus-4-6", "effort": "high"}
+        self.config.write_text(json.dumps(config))
+        self.briefs["judge"] = self.tmp / "judge-brief.md"
+        self.briefs["judge"].write_text("# judge\n")
+        state = empty_state()
+        for fix in (None, 1, 2, 3, 4, 5):
+            add_assignment(state, "2026-02-03T09:00:0{}+00:00".format(fix or 0), "developer", "grok",
+                           task=TASK, fix_round=fix)
+        save_state(self.state, state)
+        code, _, err = self.owner("task", {"task": TASK, "base_revision": BASE, "scope": WORK["scope"],
+                                           "allowed_paths": WORK["paths"], "authorization": AUTH})
+        self.assertEqual(code, 0, err)
+
+        def plan_with(mode):
+            path = self.tmp / ("plan-" + mode + ".json")
+            path.write_text(json.dumps({"schema_version": 6, "assignments": {"judge": "claude"},
+                "judge": {"agent": "claude", "model": "claude-opus-4-6", "effort": "high", "mode": mode}}))
+            return ["apply", "--assignments", str(path), "--common", str(self.common),
+                    "--brief", "judge=" + str(self.briefs["judge"]), "--task", TASK, "--now", AT,
+                    "--composer-settle", "0", "--dry-run"]
+
+        # No flag, planned diagnosis: the assessment gate still applies.
+        code, out, err = self.invoke(plan_with("diagnosis"), self._client({"claude": "idle"}))
+        self.assertEqual(code, 1)
+        self.assertEqual(out, "")
+        self.assertIn("consult the investigator", err)
+        # No flag, planned adjudication: exempt, and it reaches the dispatch.
+        code, _, err = self.invoke(plan_with("adjudication"), self._client({}))
+        self.assertEqual(code, 0, err)
+
     def test_an_older_enrollment_cannot_stand_in_for_this_judge_dispatch(self):
         # coding-policy#412: resolving the enrollment by newest-for-task-and-
         # agent accepted a stale member when the dispatch persisted and its own
