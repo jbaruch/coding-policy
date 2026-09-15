@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.230 — 2026-09-15
+
 ### Fixed
 
 - **The prune's config cleanup will not delete a recreated branch's section
