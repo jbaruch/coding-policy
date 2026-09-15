@@ -209,9 +209,10 @@ main() {
   printf 'new\n' > "$TMP/r4c-work/g" || die "r4c write failed"
   g -C "$TMP/r4c-work" add g || die "r4c add failed"
   g -C "$TMP/r4c-work" commit -q -m ahead || die "r4c commit failed"
-  run_hook "$TMP/r4c" '{"stop_hook_active":false}'
-  if [[ $RC -eq 0 ]] && ! reason_has "r4c-work"; then
-    pass; else fail "unmerged worktree must not be reported: RC=$RC OUT=$OUT"; fi
+  OUT="$(cd "$TMP/r4c" && printf '%s' '{"stop_hook_active":false}' | bash "$HOOK" 2>"$TMP/r4c.err")"; RC=$?
+  if [[ $RC -eq 0 ]] && ! reason_has "r4c-work" \
+     && [[ "$(cat "$TMP/r4c.err")" == *"r4c-work"* ]] && [[ "$(cat "$TMP/r4c.err")" == *"unmerged"* ]]; then
+    pass; else fail "unmerged worktree: report, never remove: RC=$RC OUT=$OUT ERR=$(cat "$TMP/r4c.err")"; fi
 
   # 4a-iv. A dirty worktree is not reported either, even when its commits are
   # all in main: the uncommitted work is the thing that would be lost.
@@ -219,18 +220,19 @@ main() {
   g -C "$TMP/r4d" worktree add -q "$TMP/r4d-dirty" -b review/dirty || die "r4d worktree add failed"
   printf 'uncommitted\n' > "$TMP/r4d-dirty/scratch.txt" || die "r4d write failed"
   g -C "$TMP/r4d-dirty" add scratch.txt || die "r4d add failed"
-  run_hook "$TMP/r4d" '{"stop_hook_active":false}'
-  if [[ $RC -eq 0 ]] && ! reason_has "r4d-dirty"; then
-    pass; else fail "dirty worktree must not be reported: RC=$RC OUT=$OUT"; fi
+  OUT="$(cd "$TMP/r4d" && printf '%s' '{"stop_hook_active":false}' | bash "$HOOK" 2>"$TMP/r4d.err")"; RC=$?
+  if [[ $RC -eq 0 ]] && ! reason_has "r4d-dirty" \
+     && [[ "$(cat "$TMP/r4d.err")" == *"r4d-dirty"* ]] && [[ "$(cat "$TMP/r4d.err")" == *"dirty"* ]]; then
+    pass; else fail "dirty worktree: report, never remove: RC=$RC OUT=$OUT ERR=$(cat "$TMP/r4d.err")"; fi
 
   # 4a-v. A worktree the check cannot read is never reported removable: the
   # guard fails closed rather than passing a tree it never inspected.
   mk_origin o4e; clone_from "$BARE" "$TMP/r4e"
   g -C "$TMP/r4e" worktree add -q "$TMP/r4e-gone" -b review/vanished || die "r4e worktree add failed"
   rm -rf "$TMP/r4e-gone" || die "r4e rm failed"
-  run_hook "$TMP/r4e" '{"stop_hook_active":false}'
-  if [[ $RC -eq 0 ]] && ! reason_has "r4e-gone"; then
-    pass; else fail "unreadable worktree must not be reported: RC=$RC OUT=$OUT"; fi
+  OUT="$(cd "$TMP/r4e" && printf '%s' '{"stop_hook_active":false}' | bash "$HOOK" 2>"$TMP/r4e.err")"; RC=$?
+  if [[ $RC -eq 0 ]] && ! reason_has "r4e-gone" && [[ "$(cat "$TMP/r4e.err")" == *"r4e-gone"* ]]; then
+    pass; else fail "unreadable worktree: report, never remove: RC=$RC OUT=$OUT ERR=$(cat "$TMP/r4e.err")"; fi
 
   # 4b. The same orphaned worktree, seen from INSIDE a linked worktree with
   # HERDR_ENV set: that is a worker session, and removing a worktree is the

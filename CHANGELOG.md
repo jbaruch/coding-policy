@@ -21,9 +21,10 @@
   and Checkouts lets a lead remove only a merged, clean worktree, so removal
   now ALWAYS requires clean-and-contained: a gone upstream is a reason to look,
   never a licence, since an upstream can vanish while its tree is dirty or
-  ahead — and the old check listed exactly that for removal. A locked or
-  detached tree, and one whose upstream is gone but is not both clean and
-  merged, is reported to the operator on stderr instead.
+  ahead — and the old check listed exactly that for removal. Every protected
+  state now reaches the operator on stderr instead, with its reason: locked,
+  detached, dirty, unmerged, or unreadable. A never-pushed dirty tree has no
+  upstream to be gone, so an upstream-keyed report would never have named it.
 
   The predicate fails closed. A worktree whose status cannot be read is never
   reported removable: reading an unreadable tree as clean is how a hand-rolled

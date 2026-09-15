@@ -177,14 +177,20 @@ main() {
         held+=("${p}$([[ -n "$b" ]] && printf ' (branch %s)' "$b" || printf ' (detached)') — locked")
         continue
       fi
-      spent=0
+      spent=0; SPENT_REASON="unreadable"
       if [[ -n "$base" ]] && worktree_is_spent "$p" "$b" "$base"; then spent=1; fi
+      local named
+      named="${p}$([[ -n "$b" ]] && printf ' (branch %s)' "$b" || printf ' (detached)')"
       if (( spent )) && [[ -n "$b" ]]; then
         orphaned+=("${p} (branch ${b}, nothing ${base} lacks)")
       elif (( spent )); then
         spent_detached+=("${p} (detached, nothing ${base} lacks)")
-      elif [[ -n "$b" ]] && in_list "$b" ${gone_branches[@]+"${gone_branches[@]}"}; then
-        held+=("${p} (branch ${b}) — its upstream is gone, but the tree is not both clean and merged")
+      elif [[ -z "$base" ]]; then
+        : # no default branch to judge against; the resolver already warned
+      else
+        # Every protected state reaches the operator, whatever its upstream:
+        # a never-pushed dirty or unmerged tree has no upstream to be gone.
+        held+=("${named} — ${SPENT_REASON}")
       fi
     done
 
@@ -286,10 +292,16 @@ default_branch_ref() {
 # CLOSED: a check that cannot run returns 1, so a tree this never inspected is
 # never reported removable. Reading an unreadable tree as clean is how the
 # first hand-rolled version of this passed trees it had never looked at (#433).
+#: Why the last `worktree_is_spent` said no, for the operator-facing report:
+#: `dirty`, `unmerged` or `unreadable`. Empty when it said yes.
+SPENT_REASON=""
+
 worktree_is_spent() { # <path> <branch|""> <default-ref>
   local path="$1" branch="$2" base="$3" status rc=0 ahead head
+  SPENT_REASON="unreadable"
   if [[ ! -d "$path" ]]; then
     warn "worktree ${path} is listed but its directory is missing — not reporting it as removable; run \`git worktree prune\` after confirming it by hand"
+    SPENT_REASON="missing"
     return 1
   fi
   status="$(git -C "$path" status --porcelain 2>/dev/null)" || rc=$?
@@ -297,7 +309,7 @@ worktree_is_spent() { # <path> <branch|""> <default-ref>
     warn "\`git status\` failed in ${path} (exit ${rc}) — not reporting it as removable; inspect that checkout by hand"
     return 1
   fi
-  [[ -z "$status" ]] || return 1
+  if [[ -n "$status" ]]; then SPENT_REASON="dirty"; return 1; fi
   if [[ -n "$branch" ]]; then
     rc=0
     ahead="$(git -C "$path" rev-list --count "${base}..${branch}" 2>/dev/null)" || rc=$?
@@ -305,7 +317,8 @@ worktree_is_spent() { # <path> <branch|""> <default-ref>
       warn "\`git rev-list --count ${base}..${branch}\` failed in ${path} (exit ${rc}) — not reporting it as removable; inspect its history by hand"
       return 1
     fi
-    [[ "$ahead" == "0" ]] || return 1
+    if [[ "$ahead" != "0" ]]; then SPENT_REASON="unmerged"; return 1; fi
+    SPENT_REASON=""
     return 0
   fi
   rc=0
@@ -319,8 +332,8 @@ worktree_is_spent() { # <path> <branch|""> <default-ref>
   rc=0
   git -C "$path" merge-base --is-ancestor "$head" "$base" 2>/dev/null || rc=$?
   case "$rc" in
-    0) return 0 ;;
-    1) return 1 ;;
+    0) SPENT_REASON=""; return 0 ;;
+    1) SPENT_REASON="unmerged"; return 1 ;;
     *) warn "\`git merge-base --is-ancestor\` failed in ${path} (exit ${rc}) — not reporting it as removable; inspect its history by hand"
        return 1 ;;
   esac
