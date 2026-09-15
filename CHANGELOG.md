@@ -1,8 +1,81 @@
 # Changelog
 
-## Next
+## 0.3.230 — 2026-09-15
 
-- Add explicit, backed-up recovery of legacy Herdr ruling citations while preserving task history and correction bounds.
+### Fixed
+
+- **The prune's config cleanup will not delete a recreated branch's section
+  (#426).** `delete_branch` re-reads occupancy either side of the ref deletion,
+  but `--remove-section branch.<name>` ran after that guard. A concurrent
+  `worktree add --track -b` in the window between them writes a fresh
+  `branch.<name>.*` for the NEW branch, and the cleanup then removed
+  configuration belonging to a live checkout while the branch itself survived.
+  Occupancy is re-read immediately before the removal, and a section a worktree
+  now holds is left untouched under its own outcome — the deletion is still
+  reported, and the diagnostic says to remove nothing by hand rather than
+  reusing the cleanup-failed message, whose prescribed recovery would delete
+  exactly the config this guard protects.
+
+- **A failed `mktemp` in the occupancy read names itself.** It returned without
+  writing to `ERRFILE`, so the caller built its failure row from whatever the
+  previous command had left there — the reported occupancy-read failure named
+  the wrong cause. Deferred Copilot advisories from #422.
+
+## 0.3.228 — 2026-09-15
+
+### Fixed
+
+- **A ledger written before the one-ruling bound still reads (#436).** #400
+  added the bound to the read boundary as well as the write, over every
+  checkpoint carrying a ruling — including version-2 rows, which predate both
+  the bound and the receipt it came with. One real ledger holds 20 such
+  citations across four tasks: the read refused the document, state fell back
+  to an empty in-memory copy, and writes then correctly declined to overwrite
+  history, so new work on those tasks was blocked by a rule that did not exist
+  when the rows were written.
+
+  The bound is now read only over the rows written under it — version 3, the
+  version that records the operator's request. Two version-3 citations for one
+  task are still refused, at the write boundary as before and at the read
+  boundary as #400 intended. No ledger needs migrating, and nothing is deleted
+  to make one readable: the legacy citations, their evidence receipts and their
+  correction counts stay exactly as written.
+
+### Fixed
+
+- **The handoff hook sees every spent worktree, not only the pushed ones
+  (#433).** It reported an orphaned worktree only when the branch's upstream
+  read `[gone]`, so a branch that was never pushed — the majority of what the
+  team flow creates, since review, test and judge seats pin a tip and report to
+  a file — was invisible to it, permanently. Detached worktrees could not match
+  a branch-name predicate at all. One live repository accumulated 45 linked
+  worktrees and about 800 MB of residue; the check named 1 of the 43 that were
+  safely removable.
+
+  Upstream state stays a sufficient condition and gains a second: clean, and
+  holding nothing the default branch lacks — `rev-list --count <default>..<branch>`
+  at zero, or for a detached tree a HEAD the default branch already contains.
+  The default branch is resolved explicitly, since the hook can run from a
+  linked worktree whose HEAD is not it.
+
+  What the lead may act on tightened. `rules/agent-team-operation.md` Writers
+  and Checkouts lets a lead remove only a merged, clean worktree, so removal
+  now ALWAYS requires clean-and-contained: a gone upstream is a reason to look,
+  never a licence, since an upstream can vanish while its tree is dirty or
+  ahead — and the old check listed exactly that for removal. Every protected
+  state now reaches the operator on stderr instead, with its reason: locked,
+  detached, dirty, unmerged, or unreadable. A never-pushed dirty tree has no
+  upstream to be gone, so an upstream-keyed report would never have named it.
+  With no default branch resolvable, what is observable without one — detached,
+  dirty — is still reported, with containment marked unknown and nothing listed
+  for removal.
+
+  The predicate fails closed. A worktree whose status cannot be read is never
+  reported removable: reading an unreadable tree as clean is how a hand-rolled
+  version of this passed trees it had never inspected, and every failed check
+  now says on stderr which command failed and what to inspect. Dirty trees and
+  trees holding unmerged commits are still left alone, and the leftover-branch
+  section is untouched.
 
 ## 0.3.226 — 2026-09-14
 

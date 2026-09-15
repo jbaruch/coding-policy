@@ -722,6 +722,27 @@ class RecoveryTests(unittest.TestCase):
         with self.assertRaisesRegex(UsageError, "more than one operator-requested ruling"):
             validate_store(corrupt, self.history)
 
+    def test_legacy_citations_predating_the_bound_still_read(self):
+        # coding-policy#436: the bound arrived with version 3. Reading it over
+        # version-2 rows made ledgers written before it exist unreadable, which
+        # blocked new work on four tasks and 20 rows of real history.
+        self.seed_checkpoint()
+        legacy = copy.deepcopy(self.store)
+        for index, row in enumerate(list(legacy["checkpoints"])):
+            row["schema_version"] = 2
+            row.pop("requested_by", None)
+            legacy["checkpoints"].append({**copy.deepcopy(row), "id": "legacy-{}".format(index)})
+        self.assertEqual(len(legacy["checkpoints"]), 2)
+        validate_store(legacy, self.history)
+        # A version-3 row still carries the bound: one per task, no more.
+        mixed = copy.deepcopy(legacy)
+        current = {**copy.deepcopy(self.store["checkpoints"][0]), "id": "current-a"}
+        mixed["checkpoints"].append(current)
+        validate_store(mixed, self.history)
+        mixed["checkpoints"].append({**copy.deepcopy(current), "id": "current-b"})
+        with self.assertRaisesRegex(UsageError, "more than one operator-requested ruling"):
+            validate_store(mixed, self.history)
+
     def test_an_unknown_checkpoint_field_is_refused(self):
         self.exhaust()
         with self.assertRaisesRegex(UsageError, "optional judge_report"):
