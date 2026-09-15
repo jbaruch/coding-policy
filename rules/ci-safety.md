@@ -101,7 +101,8 @@ alwaysApply: true
 - The duty is keyed on the publication, never on the package — a package that publishes through more than one channel owes it once per publication, each confirmed against the channel that carried it
 - The release contract below is the Tessl form: its registry-baseline capture, its registry-advance and moderation conjuncts, its moderation wait and `skills/release/verify-moderation-cleared.sh` confirm a Tessl publication and nothing else
 - Every Tessl publication keeps that contract whole, mixed distribution included — a tag, release or artifact on another channel never substitutes for the Tessl registry advance or the moderation clear
-- A publication through another channel substitutes that channel's own published-artifact evidence for those Tessl mechanics: the immutable release or tag exists, and the artifact is retrievable at the version the run attempted
+- A publication through another channel substitutes that channel's own published-artifact evidence for those Tessl mechanics
+- That evidence is two facts: the immutable release or tag exists, and the artifact is retrievable at the version the run attempted
 - A GitHub tag/asset publication reads that evidence through `skills/release/verify-github-release.sh`
 - A Tessl publish confirmed on the registry says nothing about another channel's release, which needs its own evidence
 - Channel-independent, whatever publishes the package:
@@ -123,11 +124,14 @@ alwaysApply: true
 - See `skills/release/SKILL.md` Step 7 for the agent-executable form of the release contract
 - Do not derive an expected version from the merge SHA's manifest
 - Do not compare against a specific expected version
-- Moderation gates `tessl install` after publish — a freshly published version can be install-blocked until its moderation state reaches `pass`
-- The moderation wait uses exponential backoff to a bounded budget (see `skills/release/verify-moderation-cleared.sh`); a still-pending or blocked state at budget exhaustion is an unconfirmed release, surfaced as a failure, never reported as success
-- A security finding is distinct from moderation: an advisory only suggests review, a blocking finding requires an override flag for `tessl install`
+- Tessl moderation gates `tessl install` after publish — a freshly published version can be install-blocked until its moderation state reaches `pass`
+- The moderation wait uses exponential backoff to a bounded budget — see `skills/release/verify-moderation-cleared.sh`
+- A still-pending or blocked state at budget exhaustion is an unconfirmed release, surfaced as a failure, never reported as success
+- A security finding is distinct from moderation
+- A security advisory only suggests review; a blocking finding requires an override flag for `tessl install`
 - If any conjunct fails, the publish is not confirmed — query the real moderation state, never invent one to hedge a failed publish
-- Naively re-running a failed publish can create an extra release when the workflow includes a version-bump step (e.g., `tesslio/patch-version-publish`) and the run got past it. Safer recovery: a follow-up commit fires a fresh publish on merge
+- Naively re-running a failed publish can create an extra release when the workflow includes a version-bump step (e.g., `tesslio/patch-version-publish`) and the run got past it
+- Recover instead with a follow-up commit, which fires a fresh publish on merge
 
 ## Credits Never Block Publishing
 
