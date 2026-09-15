@@ -2,6 +2,27 @@
 
 ### Added
 
+- **One plan fills every slice of a partitioned review (#434, completing
+  #409).** #430 shipped the partition validator and held the seating back:
+  `plan` could emit `{"reviewer#api": "alpha", "reviewer#core": "beta"}`, but
+  the seat name then reached `apply` as an unknown role — `normalize_requirement`
+  refused it, `tiers` rejected the round's configured tier,
+  `compose-briefs.sh` looked for a `brief-reviewer#api.md` that does not exist,
+  and a seat-named ledger row fragmented the per-role history.
+
+  `tiers.canonical_role` resolves the responsibility a seat fills, and every
+  module that reasons about responsibility reads through it: independence and
+  contribution exclusion, round tiers, requirements, fix history, the brief
+  template, and the reviewer-scope classification. The seat identity reaches
+  the planner and the dispatch record — which is what a slice's verdict is read
+  back through — while the ledger records the role, so history does not
+  fragment.
+
+  `plan --partition` is restored, and `apply` takes the seat names directly
+  with a brief per seat. A round with no partition is untouched at every step.
+
+### Added
+
 - **A judge dispatch declares which of its two modes it is for (#425).** Every
   pre-dispatch gate saw one undifferentiated "judge dispatch", so #400's bound
   — a task diagnosed `stop` buys nothing from another judge round — could not

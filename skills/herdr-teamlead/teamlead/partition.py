@@ -36,6 +36,7 @@ import json
 from pathlib import Path
 
 from .errors import UsageError
+from .tiers import SEAT_SEPARATOR
 from .triggers import git_runner, parse_name_status
 
 #: The partition document's own version, so a later shape change is auditable
@@ -44,10 +45,7 @@ PARTITION_SCHEMA_VERSION = 1
 
 COMMANDS = frozenset({"validate-partition"})
 
-#: Separates a seat from the slice it owns in a planned role name. A role name
-#: never contains it, so `reviewer#api` will read back unambiguously once the
-#: dispatch side carries seats (#434).
-SEAT_SEPARATOR = "#"
+
 
 
 def load_partition(path):
@@ -80,6 +78,27 @@ def load_partition(path):
                 or any(not isinstance(item, str) or not item.strip() for item in patterns)):
             raise UsageError("Slice {!r} needs a non-empty array of path globs.".format(entry["name"]), {"path": str(path)})
     return document
+
+
+def seat_name(role, slice_name):
+    """The planner's name for the seat that owns `slice_name`."""
+    return role + SEAT_SEPARATOR + slice_name
+
+
+def seats_for(partition, role):
+    """`{seat_name: role}` for every slice, in declaration order.
+
+    The planner is role-keyed throughout, so several seats of one role reach it
+    as distinct names mapped back to the responsibility they fill (#409).
+    """
+    return {seat_name(role, entry["name"]): role for entry in partition["slices"]}
+
+
+def slice_of(seat):
+    """The slice a seat owns, or None for a plain role name."""
+    if not isinstance(seat, str) or SEAT_SEPARATOR not in seat:
+        return None
+    return seat.split(SEAT_SEPARATOR, 1)[1]
 
 
 def partition_role(partition):

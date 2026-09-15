@@ -711,6 +711,55 @@ class ApplyCommandTest(CliCase):
         self.assertEqual(code, 0)
         self.assertEqual(json.loads(out)["steps"][0]["agent"], "grok")
 
+    def test_a_partitioned_plan_dispatches_each_seat(self):
+        # coding-policy#434: the seat names the planner emits must survive
+        # apply — brief templates, requirements, round tiers and the ledger all
+        # resolve the responsibility a seat fills.
+        partition = self.tmp / "partition.json"
+        partition.write_text(json.dumps({"schema_version": 1, "slices": [
+            {"name": "api", "paths": ["src/api/*"]}, {"name": "core", "paths": ["src/core/*"]}]}))
+        out = io.StringIO()
+        code = main(self.base() + ["plan", "--roles", "reviewer", "--partition", str(partition),
+                                   "--snapshot", str(self.snapshot)], stdout=out)
+        self.assertEqual(code, 0, out.getvalue())
+        plan = json.loads(out.getvalue())
+        self.assertEqual(sorted(plan["assignments"]), ["reviewer#api", "reviewer#core"])
+        self.assertEqual(len(set(plan["assignments"].values())), 2)
+
+        # Each seat takes its role's brief template and dispatches.
+        for seat in plan["assignments"]:
+            brief = self.tmp / (seat.replace("#", "-") + ".md")
+            brief.write_text("# " + seat + "\n", encoding="utf-8")
+            self.briefs[seat] = brief
+        plan_file = self.tmp / "partitioned-plan.json"
+        plan_file.write_text(json.dumps(plan), encoding="utf-8")
+        code, applied, err = self.run_cli(
+            self.base()
+            + ["apply", "--composer-settle", "0", "--assignments", str(plan_file),
+               "--common", str(self.common), "--dry-run"]
+            + self.brief_args(*plan["assignments"]),
+            client=self._client({}),
+        )
+        self.assertEqual(code, 0, err)
+        steps = {step["role"]: step["agent"] for step in json.loads(applied)["steps"]}
+        self.assertEqual(sorted(steps), ["reviewer#api", "reviewer#core"])
+        self.assertEqual(len(set(steps.values())), 2)
+
+    def test_a_seat_records_its_responsibility_in_the_ledger(self):
+        # The per-role history must not fragment across seat names (#434).
+        client = self._client({"grok": "idle"})
+        code, _, err = self.run_cli(
+            self.base()
+            + ["apply", "--composer-settle", "0",
+               "--assignments", json.dumps({"reviewer#api": "grok"}),
+               "--common", str(self.common), "--now", AT]
+            + ["--brief", "reviewer#api=" + str(self.briefs["reviewer"])],
+            client=client,
+        )
+        self.assertEqual(code, 0, err)
+        rows = json.loads(self.state.read_text())["assignments"]
+        self.assertEqual([row["role"] for row in rows], ["reviewer"])
+
     def test_live_apply_clears_then_assigns_and_records_the_ledger(self):
         client = self._client({"grok": "idle", "claude": "done"})
         code, out, _ = self.run_cli(

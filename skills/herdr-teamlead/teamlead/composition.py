@@ -8,7 +8,7 @@ those declarations nor dispatch history certify expertise or completed work.
 
 from .config import CAPABILITY_ID, parse_capabilities
 from .errors import UsageError
-from .tiers import ROLE_ROUNDS
+from .tiers import ROLE_ROUNDS, canonical_role
 
 
 REQUIREMENTS_SCHEMA_VERSION = 1
@@ -21,7 +21,7 @@ REQUIREMENT_FIELDS = frozenset({"specialty", "required_capabilities", "independe
 
 def normalize_requirement(record, role):
     """Validate one persisted assignment requirement without inventing defaults."""
-    if role not in ROLE_ROUNDS:
+    if canonical_role(role) not in ROLE_ROUNDS:
         raise UsageError("Specialist requirements cannot change the pinned judge or invent a responsibility; choose a documented role.", {"role": role})
     if not isinstance(record, dict) or set(record) != REQUIREMENT_FIELDS:
         raise UsageError("Each specialist requirement needs specialty, required_capabilities, independent and engagement; use the documented requirements shape.", {"role": role})
