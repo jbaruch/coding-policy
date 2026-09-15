@@ -76,6 +76,10 @@ description: Running a multi-agent team — task-based specialist composition, c
 - The reserved `judge` seat runs on the most capable model available and holds no other responsibility
 - The lead dispatches the judge in adjudication mode for one of three triggers: a contested reviewer or tester verdict, a lead override of a blocking finding, or a bot finding the team disagrees with
 - The lead dispatches the judge in diagnosis mode at an exhausted allowance with blocking work remaining, on the investigator's assessment
+- Every judge dispatch declares which mode it is for, at plan and at apply
+- An undeclared mode is refused, never defaulted
+- A diagnosis on a task whose ladder reached `stop` is refused before the round runs, unless the operator authorized a plan over that remedy
+- An adjudication is never refused on that ground
 - The judge rules on that assessment; it never investigates from scratch
 - The diagnosis cites in `ASSESSMENT:` the investigator report it ruled on, and the record binds that path
 - Diagnosis asks why the loop is not converging and what must change, never who is right

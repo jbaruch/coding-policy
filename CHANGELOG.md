@@ -1,5 +1,21 @@
 # Changelog
 
+### Added
+
+- **A judge dispatch declares which of its two modes it is for (#425).** Every
+  pre-dispatch gate saw one undifferentiated "judge dispatch", so #400's bound
+  — a task diagnosed `stop` buys nothing from another judge round — could not
+  ship at all: refusing there would also have refused an adjudication the judge
+  still owes during the release of the clean scope.
+
+  `plan`, `apply` and `start-judge` take `--judge-mode adjudication|diagnosis`,
+  and a seated judge without one is refused rather than defaulted — defaulting
+  would pick one of the two gates for the lead. With the mode declared,
+  `require_investigation_before_judge` refuses a diagnosis on a `stop`ped task
+  before the seat is started, unless the operator authorized a plan over that
+  remedy, and leaves an adjudication on the same task untouched. The assessment
+  requirement (#408) belongs to diagnosis alone.
+
 ## 0.3.230 — 2026-09-15
 
 ### Fixed

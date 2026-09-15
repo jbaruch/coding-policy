@@ -115,6 +115,8 @@ def build_parser():
     judge_parser.add_argument("--pane", required=True)
     judge_parser.add_argument("--kind", choices=("claude", "codex", "grok"), default="claude")
     judge_parser.add_argument("--task")
+    judge_parser.add_argument("--judge-mode", choices=recovery.JUDGE_MODES,
+                              help="What this judge seat is for; the plan's own mode when omitted.")
     judge_parser.add_argument("--now", metavar="ISO")
 
     for command in ("retro-check", "retro-record"):
@@ -236,6 +238,8 @@ def build_parser():
                              help="Choose a configured round type for a role; never a model override.")
     plan_parser.add_argument("--round-context", metavar="FILE",
                              help="JSON object keyed by role with mechanical/risk evidence for this round.")
+    plan_parser.add_argument("--judge-mode", choices=recovery.JUDGE_MODES,
+                             help="What this round's judge seat is for. Required with --roles judge.")
     plan_parser.add_argument("--fix-round", type=int, help="Task fix number; late fixes use the top tier.")
     plan_parser.add_argument("--task", help="Original task identity; preserve it through every correction.")
     plan_parser.add_argument("--requirements", metavar="FILE",
@@ -258,6 +262,10 @@ def build_parser():
         required=True,
         metavar="FILE_OR_JSON",
         help="`teamlead plan` output, a {role: agent} object, or a path to either.",
+    )
+    apply_parser.add_argument(
+        "--judge-mode", choices=recovery.JUDGE_MODES,
+        help="What this dispatch's judge seat is for. Required when the batch holds a judge.",
     )
     apply_parser.add_argument(
         "--brief",
@@ -635,6 +643,8 @@ def cmd_measure(args, client=None, warn=None, trace=None):
 
 def cmd_plan(args, client=None, warn=None, trace=None):
     roles = [role.strip() for role in args.roles.split(",") if role.strip()]
+    if "judge" in roles:
+        recovery.require_judge_mode(getattr(args, "judge_mode", None))
     excludes = _parse_excludes(args.excludes)
     role_costs = load_role_costs(_config_path(args))
     judge = load_judge(_config_path(args))
@@ -841,9 +851,12 @@ def cmd_apply(args, client=None, warn=None, trace=None):
     # A fresh judge seat at an exhausted allowance waits for the assessment it
     # rules on, dry runs included. A completed replay has left `assignments`
     # already, so it is not re-gated (#408).
+    if "judge" in assignments:
+        recovery.require_judge_mode(getattr(args, "judge_mode", None))
     if args.task and "judge" in assignments:
         recovery.require_investigation_before_judge(store, state["assignments"], args.task,
-                                                    state["specialist_assessments"])
+                                                    state["specialist_assessments"],
+                                                    mode=getattr(args, "judge_mode", None))
     recovery.validate_work(store, state["assignments"], args.task, args.fix_round,
                            args.correction_plan, work, implementation="developer" in assignments)
     constraints = composition.selection_constraints(
@@ -1175,7 +1188,8 @@ def cmd_start_judge(args, client=None, warn=None, trace=None):
     # started at an exhausted allowance before that assessment exists (#408).
     full = _load_state_for_write(state_path, warn, persist_migration=False)
     recovery.require_investigation_before_judge(full["recovery"], full["assignments"],
-                                                args.task or planned_task, full["specialist_assessments"])
+                                                args.task or planned_task, full["specialist_assessments"],
+                                                mode=getattr(args, "judge_mode", None))
     item = retrospective_runtime.request({"transitions": [{"agent": agent.name, "role": "judge",
         "model": parsed["model"], "effort": parsed["effort"], "context": "start", "task": args.task or planned_task,
         "pane": args.pane}]})["transitions"][0]

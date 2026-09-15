@@ -47,6 +47,10 @@ class SupervisionCliTest(fixture.CliCase):
         reports = {role: self.reports[role] for role in assignments} if reports is None else reports
         result = ["apply", "--assignments", json.dumps(assignments), "--common", str(self.common),
                   "--composer-settle", "0", "--now", AT, "--dispatch-id", "dispatch-fixture"]
+        # A seated judge declares what it is for (#425); these fixtures
+        # exercise adjudication, which carries no assessment requirement.
+        if "judge" in assignments and "judge_mode" not in options:
+            result += ["--judge-mode", "adjudication"]
         if task is not None:
             result += ["--task", task]
         result += self.brief_args(*assignments)

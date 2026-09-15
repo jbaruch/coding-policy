@@ -220,7 +220,8 @@ class RecoveryCommandTests(fixture.CliCase):
         self.briefs["judge"] = self.tmp / "judge-brief.md"
         self.briefs["judge"].write_text("# judge\n")
         args = ["apply", "--assignments", json.dumps({"judge": "claude"}), "--common", str(self.common),
-                "--brief", "judge=" + str(self.briefs["judge"]), "--task", TASK, "--now", AT, "--composer-settle", "0"]
+                "--brief", "judge=" + str(self.briefs["judge"]), "--task", TASK, "--now", AT,
+                "--judge-mode", "diagnosis", "--composer-settle", "0"]
         for extra in ((), ("--dry-run",)):
             code, out, err = self.invoke(args + list(extra), self._client({"claude": "idle"}))
             self.assertEqual(code, 1)

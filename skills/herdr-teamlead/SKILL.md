@@ -190,13 +190,15 @@ skills/herdr-teamlead/references/review-partition.md
 CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
 bash "$CP/skills/herdr-teamlead/teamlead.sh" plan \
   --roles <role[,role...]> [--requirements <requirements.json>] \
-  [--exclude <role>=<agent>[,<agent>...]]... \
+  [--exclude <role>=<agent>[,<agent>...]]... [--judge-mode adjudication|diagnosis] \
   [--round <role>=<round-type>] [--round-context <evidence.json>] \
   --task <task-id> [--fix-round <N>] [--correction-plan <id> --work <work.json>]
 ```
 
-Emits the role plan without worker contact. On exit 1, resolve the diagnostic
-before continuing. Apply the Step 5 constraints in `references/round-setup.md`:
+Emits the role plan without worker contact. A judge seat declares its mode:
+`adjudication` rules on a contested verdict, `diagnosis` on the investigator's
+assessment at an exhausted allowance. Pass the same `--judge-mode` to `apply`.
+On exit 1, resolve the diagnostic before continuing. Apply the Step 5 constraints in `references/round-setup.md`:
 exclude contributors from verification, reserve the developer through early fixes,
 preserve task identity and fix count, and reuse recorded correction bounds.
 Tier and qualification contracts:
