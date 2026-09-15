@@ -24,6 +24,53 @@
 
 ### Added
 
+- **One plan fills every slice of a partitioned review (#434, completing
+  #409).** #430 shipped the partition validator and held the seating back:
+  `plan` could emit `{"reviewer#api": "alpha", "reviewer#core": "beta"}`, but
+  the seat name then reached `apply` as an unknown role — `normalize_requirement`
+  refused it, `tiers` rejected the round's configured tier,
+  `compose-briefs.sh` looked for a `brief-reviewer#api.md` that does not exist,
+  and a seat-named ledger row fragmented the per-role history.
+
+  `tiers.canonical_role` resolves the responsibility a seat fills, and every
+  module that reasons about responsibility reads through it: independence and
+  contribution exclusion, round tiers, requirements, fix history, the brief
+  template, and the reviewer-scope classification. Independence is the one that
+  had to be right — a worker the ledger records as a contributor on the task is
+  barred from every seat of the reviewer role, not only from the literal name
+  `reviewer`, and a seat's requirement still cannot declare itself
+  non-independent. The seat identity reaches
+  the planner and the dispatch record — which is what a slice's verdict is read
+  back through — while the ledger records the role, so history does not
+  fragment.
+
+  `plan --partition` is restored, and `apply` takes the seat names directly
+  with a brief per seat. A round with no partition is untouched at every step.
+
+  Every join that reads a seat as a responsibility resolves through
+  `canonical_role`, in the module that owns the check rather than at each call
+  site: `state.add_assignment` canonicalizes the ledger row it writes (so the
+  recovery path that reconciles an unknown send ledgers the role too, and a
+  seat's reviewer scope survives), `recovery.validate_store` matches a
+  `reviewer#api` dispatch to its `reviewer` row (without it, the NEXT state
+  load rejected the pair and returned an empty ledger, losing the contribution
+  and recovery history it was keeping), `qualification.require_qualification`
+  reads the role's recorded promotion and canary, `engagement` accepts a
+  slice's delivered report for assessment, `planner` prices a seat at its
+  role's weight and reads its role's rotation history, and
+  `compose-briefs.sh` holds a seat to its role's review-package checks.
+
+  Two refusals bound the feature instead of patching around it. A partition
+  seats `reviewer` or `tester` alone: every other responsibility carries a
+  per-task counter — the developer fix count, the retained-context transition —
+  that one seat owns, and a slice of one would read as a second worker holding
+  the same count. And a slice name is written with letters, digits,
+  underscores, dots or hyphens, because a seat is a CLI key (`--brief
+  SEAT=PATH`) and a name carrying `=`, `#`, a comma or whitespace plans a seat
+  the round cannot address.
+
+### Added
+
 - **A judge dispatch declares which of its two modes it is for (#425).** Every
   pre-dispatch gate saw one undifferentiated "judge dispatch", so #400's bound
   — a task diagnosed `stop` buys nothing from another judge round — could not

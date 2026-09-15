@@ -39,6 +39,25 @@ DEFAULT_ROUNDS = {
     "critic": "critic", "lead": "lead",
     "advisor": "architect", "investigator": "reconciliation",
 }
+#: Separates a seat from the slice it owns in a role name (`reviewer#api`). A
+#: role name never contains it, so the seat reads back unambiguously (#409).
+SEAT_SEPARATOR = "#"
+
+
+def canonical_role(name):
+    """The responsibility a seat fills.
+
+    Several seats of one role are distinct names to the planner and one
+    responsibility to everything else -- independence, round tiers,
+    requirements, brief templates and the per-role history all resolve through
+    here, so a seat inherits its role's contract instead of reading as an
+    unknown one (#434).
+    """
+    if not isinstance(name, str):
+        return name
+    return name.split(SEAT_SEPARATOR, 1)[0]
+
+
 ROLE_ROUNDS = {
     "developer": frozenset({"build", "fix", "mechanical"}),
     "tester": frozenset({"test_plan", "hostile_verify", "recheck"}),
@@ -333,8 +352,9 @@ def select_tier(agent, role, round_type=None, context=None, fix_round=None):
     # Selection preserves the true cumulative number for authorized recovery.
     if fix_round is not None and (type(fix_round) is not int or fix_round < 1):
         raise UsageError("Fix round must be a positive integer; preserve the task counter.", {})
-    round_type = round_type or ("fix" if role == "developer" and fix_round else DEFAULT_ROUNDS.get(role))
-    if not isinstance(round_type, str) or round_type not in ROLE_ROUNDS.get(role, frozenset()):
+    base = canonical_role(role)
+    round_type = round_type or ("fix" if base == "developer" and fix_round else DEFAULT_ROUNDS.get(base))
+    if not isinstance(round_type, str) or round_type not in ROLE_ROUNDS.get(base, frozenset()):
         raise UsageError("Round {!r} cannot perform role {!r}; choose its documented round type.".format(round_type, role), {})
     chosen_round = round_type
     if round_type == "build" and _nonnegative_int(context, "failed_gates") >= BUILD_FAILED_GATES:

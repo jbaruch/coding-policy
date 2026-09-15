@@ -33,9 +33,11 @@ Contract:
 
 import fnmatch
 import json
+import re
 from pathlib import Path
 
 from .errors import UsageError
+from .tiers import SEAT_SEPARATOR
 from .triggers import git_runner, parse_name_status
 
 #: The partition document's own version, so a later shape change is auditable
@@ -44,10 +46,20 @@ PARTITION_SCHEMA_VERSION = 1
 
 COMMANDS = frozenset({"validate-partition"})
 
-#: Separates a seat from the slice it owns in a planned role name. A role name
-#: never contains it, so `reviewer#api` will read back unambiguously once the
-#: dispatch side carries seats (#434).
-SEAT_SEPARATOR = "#"
+#: A slice name becomes half of a seat, and a seat is a CLI key: the left side
+#: of `--brief SEAT=PATH` and `--report SEAT=PATH`, and a line-oriented key
+#: `compose-briefs.sh` reads back. A name outside this shape does not round-trip
+#: through those parsers, so the round would plan a seat it cannot address.
+SLICE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*")
+
+#: The responsibilities a partition seats. Slicing supplies a termination
+#: condition for INDEPENDENT VERIFICATION of a surface. A developer or release
+#: seat carries per-task gates -- the fix counter, the retained-context
+#: transition -- that are keyed to one responsibility per task, and a slice of
+#: one would read as a second worker holding the same counter.
+PARTITION_ROLES = frozenset({"reviewer", "tester"})
+
+
 
 
 def load_partition(path):
@@ -72,6 +84,11 @@ def load_partition(path):
         if (not isinstance(entry, dict) or set(entry) != {"name", "paths"}
                 or not isinstance(entry["name"], str) or not entry["name"].strip()):
             raise UsageError("Each slice is an object with a non-empty name and a paths array.", {"path": str(path)})
+        if not SLICE_NAME.fullmatch(entry["name"]):
+            raise UsageError(
+                "Slice name {!r} cannot address its seat: name it with letters, digits, underscores, dots or hyphens, starting with a letter or digit. A seat is a CLI key, and a name carrying {!r}, a separator or whitespace does not read back.".format(
+                    entry["name"], SEAT_SEPARATOR),
+                {"path": str(path)})
         if entry["name"] in seen:
             raise UsageError("Slice name {!r} appears twice; each seat owns one named slice.".format(entry["name"]), {"path": str(path)})
         seen.add(entry["name"])
@@ -82,11 +99,35 @@ def load_partition(path):
     return document
 
 
+def seat_name(role, slice_name):
+    """The planner's name for the seat that owns `slice_name`."""
+    return role + SEAT_SEPARATOR + slice_name
+
+
+def seats_for(partition, role):
+    """`{seat_name: role}` for every slice, in declaration order.
+
+    The planner is role-keyed throughout, so several seats of one role reach it
+    as distinct names mapped back to the responsibility they fill (#409).
+    """
+    return {seat_name(role, entry["name"]): role for entry in partition["slices"]}
+
+
+def slice_of(seat):
+    """The slice a seat owns, or None for a plain role name."""
+    if not isinstance(seat, str) or SEAT_SEPARATOR not in seat:
+        return None
+    return seat.split(SEAT_SEPARATOR, 1)[1]
+
+
 def partition_role(partition):
     """The role the partition seats; `reviewer` unless the document says."""
     role = partition.get("role", "reviewer")
-    if not isinstance(role, str) or not role.strip() or SEAT_SEPARATOR in role:
-        raise UsageError("A partition's role is a non-empty name without {!r}.".format(SEAT_SEPARATOR), {})
+    if role not in PARTITION_ROLES:
+        raise UsageError(
+            "A partition seats {}; every other responsibility carries per-task gates one seat owns.".format(
+                " or ".join(sorted(PARTITION_ROLES))),
+            {"role": role})
     return role
 
 

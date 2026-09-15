@@ -11,7 +11,8 @@
 #   values: {"shared": {"KEY": "value", ...},
 #            "roles":  {"<role>": {"KEY": "value", ...}, ...}}
 #           `shared` fills COMMON.md and every brief; a role's own values win
-#           on a collision. Roles map to `brief-<role>.md` in the templates dir.
+#           on a collision. Roles map to `brief-<role>.md` in the templates dir;
+#           a seat `<role>#<slice>` takes its role's template.
 #           advisor/investigator/architect fall back to brief-specialist.md.
 #           SPECIALIST_CONTEXT defaults to empty only where the template uses it.
 #   stdout: one JSON object —
@@ -50,9 +51,12 @@ TEAMLEAD_REPORT_PATH_MAX_COLS="${TEAMLEAD_REPORT_PATH_MAX_COLS:-100}"
 warn() { printf 'compose-briefs: %s\n' "$1" >&2; }
 
 template_for_role() { # <templates> <role>
-  local path="${1}/brief-${2}.md"
+  # A seat (`reviewer#api`) takes its ROLE's template: the slice is brief
+  # content, never a separate template to author (#434).
+  local role="${2%%#*}"
+  local path="${1}/brief-${role}.md"
   if [[ ! -r "$path" ]]; then
-    case "$2" in
+    case "$role" in
       advisor|investigator|architect) path="${1}/brief-specialist.md" ;;
     esac
   fi
@@ -125,8 +129,11 @@ validate_values() { # <values-json> <label>
   return 0
 }
 
-validate_review_package() { # <merged-values-json> <role>
-  case "$2" in reviewer|tester) ;; *) return 0 ;; esac
+validate_review_package() { # <merged-values-json> <role-or-seat>
+  # A seat (`reviewer#api`) owes its ROLE's review-package checks: the slice
+  # narrows what it reviews, never what its brief must carry (#434).
+  local role="${2%%#*}"
+  case "$role" in reviewer|tester) ;; *) return 0 ;; esac
   local package ref key
   for key in REVIEW_BASE REVIEW_HEAD; do
     ref="$(printf '%s' "$1" | jq -r --arg k "$key" '.[$k] // ""')" || return 2

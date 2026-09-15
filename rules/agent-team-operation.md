@@ -400,7 +400,13 @@ description: Running a multi-agent team — task-based specialist composition, c
 - A partition leaving a changed file unowned is refused
 - A partition whose slices overlap is refused
 - `skills/herdr-teamlead/teamlead/partition.py` decides both refusals, through `teamlead validate-partition`
-- Each slice is dispatched to a distinct worker under the existing capability, contribution-exclusion and headroom ordering
+- A partition seats the reviewer or the tester responsibility alone
+- A responsibility holding a per-task counter is never sliced
+- A seat's role decides its bars, tiers, requirements, weight, qualification and history
+- `teamlead plan --partition` seats one worker per slice under the existing capability, contribution-exclusion and headroom ordering
+- A seat carries its slice's identity
+- The responsibility a seat fills is its role
+- The ledger records that role, never the seat
 - Each slice's brief names its slice
 - Each slice's brief forbids roaming
 - An observation outside a reviewer's slice goes in a separate section of its report

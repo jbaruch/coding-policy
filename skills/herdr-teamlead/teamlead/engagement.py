@@ -11,6 +11,7 @@ import json
 from .chronology import latest_assignment
 from .errors import UsageError
 from .recovery import receipt, text, validate_receipt
+from .tiers import canonical_role
 from . import supervision
 
 
@@ -32,7 +33,10 @@ def _input(data):
 
 def _dispatch(state, identifier):
     found = next((row for row in state["recovery"]["dispatches"] if row["id"] == identifier), None)
-    if found is None or found["status"] != "applied" or found["role"] not in ASSESSABLE_ROLES:
+    # The seat stays on the dispatch, so its RESPONSIBILITY decides whether the
+    # delivered report is assessable: a `reviewer#api` slice verdict is a
+    # reviewer's (#434).
+    if found is None or found["status"] != "applied" or canonical_role(found["role"]) not in ASSESSABLE_ROLES:
         raise UsageError("Assess a confirmed consultation, reviewer or tester dispatch; reconcile an unknown send before recording its outcome.", {})
     index = found.get("assignment_index")
     if type(index) is not int or not 0 <= index < len(state["assignments"]):
