@@ -4,6 +4,24 @@
 
 ### Fixed
 
+- **A ledger written before the one-ruling bound still reads (#436).** #400
+  added the bound to the read boundary as well as the write, over every
+  checkpoint carrying a ruling — including version-2 rows, which predate both
+  the bound and the receipt it came with. One real ledger holds 20 such
+  citations across four tasks: the read refused the document, state fell back
+  to an empty in-memory copy, and writes then correctly declined to overwrite
+  history, so new work on those tasks was blocked by a rule that did not exist
+  when the rows were written.
+
+  The bound is now read only over the rows written under it — version 3, the
+  version that records the operator's request. Two version-3 citations for one
+  task are still refused, at the write boundary as before and at the read
+  boundary as #400 intended. No ledger needs migrating, and nothing is deleted
+  to make one readable: the legacy citations, their evidence receipts and their
+  correction counts stay exactly as written.
+
+### Fixed
+
 - **The handoff hook sees every spent worktree, not only the pushed ones
   (#433).** It reported an orphaned worktree only when the branch's upstream
   read `[gone]`, so a branch that was never pushed — the majority of what the

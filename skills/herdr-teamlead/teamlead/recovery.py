@@ -1370,14 +1370,17 @@ def validate_store(store, assignments):
                 # version-2 row predates it and never has one invented (#400).
                 if row["schema_version"] == OPERATOR_CHECKPOINT_VERSION:
                     authorization(row["requested_by"])
+                    # The one-ruling-per-task bound is read only over the rows
+                    # written under it. A version-2 row predates the bound as
+                    # well as the receipt, and enforcing it over history turned
+                    # legitimately-written ledgers into unreadable ones --
+                    # blocking new work on a rule that did not exist when they
+                    # were written (#436).
+                    if row["task"] in ruled_tasks:
+                        raise UsageError("A task cites more than one operator-requested ruling; the operator grants at most one. Preserve the ledger for owner recovery.", {})
+                    ruled_tasks.add(row["task"])
                 elif "requested_by" in row:
                     raise UsageError("An older checkpoint carries an operator-request receipt its version never wrote; preserve the ledger for owner recovery.", {})
-                # `checkpoint` refuses a second cited ruling as it writes one,
-                # but the read boundary checked each row alone, so a ledger
-                # holding two for one task validated (#400).
-                if row["task"] in ruled_tasks:
-                    raise UsageError("A task cites more than one operator-requested ruling; the operator grants at most one. Preserve the ledger for owner recovery.", {})
-                ruled_tasks.add(row["task"])
             elif "requested_by" in row:
                 raise UsageError("A checkpoint records an operator request with no ruling it authorized; preserve the ledger for owner recovery.", {})
         for row in store["plans"]:
