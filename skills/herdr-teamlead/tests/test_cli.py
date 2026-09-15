@@ -722,7 +722,8 @@ class ApplyCommandTest(CliCase):
         # exercises the contribution-exclusion path.
         out = io.StringIO()
         code = main(self.base() + ["plan", "--roles", "reviewer", "--partition", str(partition),
-                                   "--task", "t-partition", "--snapshot", str(self.snapshot)], stdout=out)
+                                   "--task", "t-partition", "--now", AT,
+                                   "--snapshot", str(self.snapshot)], stdout=out)
         self.assertEqual(code, 0, out.getvalue())
         plan = json.loads(out.getvalue())
         self.assertEqual(sorted(plan["assignments"]), ["reviewer#api", "reviewer#core"])
@@ -738,7 +739,7 @@ class ApplyCommandTest(CliCase):
         code, applied, err = self.run_cli(
             self.base()
             + ["apply", "--composer-settle", "0", "--assignments", str(plan_file),
-               "--task", "t-partition", "--common", str(self.common), "--dry-run"]
+               "--task", "t-partition", "--now", AT, "--common", str(self.common), "--dry-run"]
             + self.brief_args(*plan["assignments"]),
             client=self._client({}),
         )
@@ -795,7 +796,7 @@ class ApplyCommandTest(CliCase):
             self.base()
             + ["apply", "--composer-settle", "0",
                "--assignments", json.dumps({"reviewer#api": "grok"}),
-               "--task", "t-seat", "--common", str(self.common), "--dry-run"]
+               "--task", "t-seat", "--now", AT, "--common", str(self.common), "--dry-run"]
             + ["--brief", "reviewer#api=" + str(self.briefs["reviewer"])],
             client=self._client({}),
         )
