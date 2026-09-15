@@ -244,7 +244,8 @@ class RetrospectiveRuntimeTest(unittest.TestCase):
         plan = self.root / "judge-plan.json"
         plan.write_text(json.dumps({"assignments": {"judge": "codex"},
                                    "task_context": {"task": "judge-task"},
-                                   "judge": {"agent": "codex", "model": "gpt-5.6-sol", "effort": "high"}}))
+                                   "judge": {"agent": "codex", "model": "gpt-5.6-sol", "effort": "high",
+                                             "mode": "adjudication"}}))
         self.runner.set("pane process-info", json.dumps({"result": {"process_info": {
             "pane_id": "w3:p1", "shell_pid": 100, "foreground_processes": [{"name": "zsh", "pid": 100, "argv": ["zsh"]}]}}}))
         def start(name, kind, pane, flags):
@@ -270,7 +271,8 @@ class RetrospectiveRuntimeTest(unittest.TestCase):
         plan = self.root / "gated-judge-plan.json"
         plan.write_text(json.dumps({"assignments": {"judge": "codex"},
                                    "task_context": {"task": "judge-task"},
-                                   "judge": {"agent": "codex", "model": "gpt-5.6-sol", "effort": "high"}}))
+                                   "judge": {"agent": "codex", "model": "gpt-5.6-sol", "effort": "high",
+                                             "mode": "adjudication"}}))
         attention.write(self.path, "record", {
             "id": "judge-task-tester", "kind": "decision", "task": "judge-task", "title": "Choose the replacement tester",
             "context": "The tester's provider refused the brief.", "consequence": "No tester report exists.",

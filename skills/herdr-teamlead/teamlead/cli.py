@@ -115,6 +115,8 @@ def build_parser():
     judge_parser.add_argument("--pane", required=True)
     judge_parser.add_argument("--kind", choices=("claude", "codex", "grok"), default="claude")
     judge_parser.add_argument("--task")
+    judge_parser.add_argument("--judge-mode", choices=recovery.JUDGE_MODES,
+                              help="What this judge seat is for; the plan's recorded mode when omitted.")
     judge_parser.add_argument("--now", metavar="ISO")
 
     for command in ("retro-check", "retro-record"):
@@ -236,6 +238,8 @@ def build_parser():
                              help="Choose a configured round type for a role; never a model override.")
     plan_parser.add_argument("--round-context", metavar="FILE",
                              help="JSON object keyed by role with mechanical/risk evidence for this round.")
+    plan_parser.add_argument("--judge-mode", choices=recovery.JUDGE_MODES,
+                             help="What this round's judge seat is for. Required with --roles judge.")
     plan_parser.add_argument("--fix-round", type=int, help="Task fix number; late fixes use the top tier.")
     plan_parser.add_argument("--task", help="Original task identity; preserve it through every correction.")
     plan_parser.add_argument("--requirements", metavar="FILE",
@@ -258,6 +262,10 @@ def build_parser():
         required=True,
         metavar="FILE_OR_JSON",
         help="`teamlead plan` output, a {role: agent} object, or a path to either.",
+    )
+    apply_parser.add_argument(
+        "--judge-mode", choices=recovery.JUDGE_MODES,
+        help="What this dispatch's judge seat is for. Required when the batch holds a judge.",
     )
     apply_parser.add_argument(
         "--brief",
@@ -633,8 +641,41 @@ def cmd_measure(args, client=None, warn=None, trace=None):
     }
 
 
+def _judge_mode_for(args, document):
+    """The judge seat's mode: the plan's, and a supplied one must agree.
+
+    The plan records the choice the lead made when it composed the brief. A
+    flag that differs would hold the seat to the other gate than the one it was
+    planned for -- a diagnosis plan passing the adjudication gate -- so the
+    mismatch refuses before any worker contact (#425).
+    """
+    supplied = getattr(args, "judge_mode", None)
+    block = document.get("judge") if isinstance(document, dict) else None
+    if not isinstance(block, dict):
+        # Not a plan document -- a bare {role: agent} map carries no seat, so
+        # the flag is the only source there is.
+        return supplied
+    planned = block.get("mode")
+    if planned is None:
+        # A plan that seats the judge and declares no mode is a plan from
+        # before the mode existed. Re-plan rather than let a flag supply what
+        # its brief was never composed for (state-schema.md, plan schema 6).
+        raise UsageError(
+            "This plan seats the judge without a declared mode; re-plan with --judge-mode {} rather than supplying one here.".format(" | ".join(recovery.JUDGE_MODES)),
+            {},
+        )
+    if supplied and supplied != planned:
+        raise UsageError(
+            "This plan seats the judge for {!r} and --judge-mode says {!r}; the plan's mode is the one its brief was composed for. Re-plan for the other mode rather than overriding it here.".format(planned, supplied),
+            {"planned": planned, "supplied": supplied},
+        )
+    return planned
+
+
 def cmd_plan(args, client=None, warn=None, trace=None):
     roles = [role.strip() for role in args.roles.split(",") if role.strip()]
+    if "judge" in roles:
+        recovery.require_judge_mode(getattr(args, "judge_mode", None))
     excludes = _parse_excludes(args.excludes)
     role_costs = load_role_costs(_config_path(args))
     judge = load_judge(_config_path(args))
@@ -710,6 +751,7 @@ def cmd_plan(args, client=None, warn=None, trace=None):
             }
             if judge
             else None,
+            judge_mode=getattr(args, "judge_mode", None),
             snapshot_ref={"source": source, "measured_at": snapshot.get("measured_at")},
             warn=warn,
             tier_candidates=tier_candidates,
@@ -841,9 +883,17 @@ def cmd_apply(args, client=None, warn=None, trace=None):
     # A fresh judge seat at an exhausted allowance waits for the assessment it
     # rules on, dry runs included. A completed replay has left `assignments`
     # already, so it is not re-gated (#408).
+    judge_mode = None
+    if "judge" in assignments:
+        judge_mode = recovery.require_judge_mode(
+            _judge_mode_for(args, document if isinstance(document, dict) else None))
     if args.task and "judge" in assignments:
+        # The RESOLVED mode, not the flag: a planned diagnosis dispatched
+        # without one would otherwise reach the gate as None and skip the stop
+        # refusal it owes (#425).
         recovery.require_investigation_before_judge(store, state["assignments"], args.task,
-                                                    state["specialist_assessments"])
+                                                    state["specialist_assessments"],
+                                                    mode=judge_mode)
     recovery.validate_work(store, state["assignments"], args.task, args.fix_round,
                            args.correction_plan, work, implementation="developer" in assignments)
     constraints = composition.selection_constraints(
@@ -1160,6 +1210,9 @@ def cmd_start_judge(args, client=None, warn=None, trace=None):
         raise UsageError("Plan has no usable judge tier; run plan --roles judge.", {})
     if normalize_assignments(document).get("judge") != tier["agent"]:
         raise UsageError("Plan judge tier and assignment name different workers; replan.", {})
+    # The plan carries the mode the lead declared; the flag overrides it, and
+    # neither present is a refusal rather than a default (#425).
+    judge_mode = recovery.require_judge_mode(_judge_mode_for(args, document))
     parsed = parse_tiers({"build": {"model": tier.get("model"), "effort": tier.get("effort")}}, args.kind)["build"]
     agent = SimpleNamespace(name=tier["agent"], kind=args.kind, idle_markers=(), working_markers=(),
                             launch_args=parse_launch_args(tier.get("launch_args", []), args.kind))
@@ -1175,7 +1228,8 @@ def cmd_start_judge(args, client=None, warn=None, trace=None):
     # started at an exhausted allowance before that assessment exists (#408).
     full = _load_state_for_write(state_path, warn, persist_migration=False)
     recovery.require_investigation_before_judge(full["recovery"], full["assignments"],
-                                                args.task or planned_task, full["specialist_assessments"])
+                                                args.task or planned_task, full["specialist_assessments"],
+                                                mode=judge_mode)
     item = retrospective_runtime.request({"transitions": [{"agent": agent.name, "role": "judge",
         "model": parsed["model"], "effort": parsed["effort"], "context": "start", "task": args.task or planned_task,
         "pane": args.pane}]})["transitions"][0]

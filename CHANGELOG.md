@@ -1,5 +1,32 @@
 # Changelog
 
+### Added
+
+- **A judge dispatch declares which of its two modes it is for (#425).** Every
+  pre-dispatch gate saw one undifferentiated "judge dispatch", so #400's bound
+  — a task diagnosed `stop` buys nothing from another judge round — could not
+  ship at all: refusing there would also have refused an adjudication the judge
+  still owes during the release of the clean scope.
+
+  `plan`, `apply` and `start-judge` take `--judge-mode adjudication|diagnosis`,
+  and a seated judge without one is refused rather than defaulted — defaulting
+  would pick one of the two gates for the lead. With the mode declared,
+  `require_investigation_before_judge` refuses a diagnosis on a `stop`ped task
+  before the seat is started, unless the operator authorized a plan over that
+  remedy, and leaves an adjudication on the same task untouched. The assessment
+  requirement (#408) belongs to diagnosis alone.
+
+  The choice is made once. `plan` records the mode beside the judge's tier
+  (plan schema 6, documented in `state-schema.md` with its reader/writer
+  contract), and `start-judge` and `apply` read it from there — a plan carrying
+  none starts no worker — a flag cannot supply what that plan's brief was never
+  composed for — and a `--judge-mode` that differs from the plan's refuses
+  before any worker contact rather than holding the seat to the other gate than
+  the one its brief was composed for. A bare `{role: agent}` map seats nothing,
+  so the flag remains its only source. Steps 15, 16 and 17 of the
+  skill carry it through. Team Composition's assessment directive is scoped to
+  diagnosis, matching what the gate now enforces.
+
 ## 0.3.230 — 2026-09-15
 
 ### Fixed
