@@ -18,7 +18,7 @@ from teamlead.errors import UsageError
 from teamlead.recovery import (
     DIAGNOSIS_BOUND_CEILING,
     abort_pre_send, active_plans, authorize_context, authorize_plan, authorize_refused_dispatch, brief_identity, checkpoint, confirmed_fix,
-    diagnose, require_investigation_before_judge,
+    diagnose, require_investigation_before_judge, require_judge_mode,
     dispatch_identity, finish_dispatch, fresh_transition, mark_sending,
     migrate_store, prior_dispatch, record_refusal, record_report, refusal_move, register_task, reserve,
     task_statuses, validate_store, validate_work,
@@ -389,6 +389,43 @@ class RecoveryTests(unittest.TestCase):
             require_investigation_before_judge(self.store, self.history, TASK, [])
         index = self.consult_investigator("2026-02-03T09:30:00+00:00", "2026-02-03T09:45:00+00:00")
         self.assertIsNone(require_investigation_before_judge(self.store, self.history, TASK, self.investigated(index=index)))
+
+    def test_a_declared_diagnosis_on_a_stopped_task_refuses_before_dispatch(self):
+        # coding-policy#425: with the mode declared, the bound #400 could not
+        # enforce is enforceable — before the expensive round, not after its
+        # report exists.
+        self.seed_checkpoint()
+        self.run_diagnosis(self.diagnosis("diag-stop", "stop", None), "judge")
+        with self.assertRaisesRegex(UsageError, "diagnosed `stop`"):
+            require_investigation_before_judge(self.store, self.history, TASK, self.investigated(),
+                                               mode="diagnosis")
+        # An adjudication on the same task is untouched: `stop` ends
+        # implementation and the ladder, never a contested verdict's ruling.
+        self.assertIsNone(require_investigation_before_judge(self.store, self.history, TASK,
+                                                            self.investigated(), mode="adjudication"))
+        # The operator's plan over the stop lifts the refusal.
+        authorize_plan(self.store, self.history, {"id": "over-stop", "task": TASK, "checkpoint": "checkpoint-5",
+            "scope": WORK["scope"], "allowed_paths": ["src/*"], "additional_fixes": 2, "authorization": AUTH}, AT)
+        self.assertIsNone(require_investigation_before_judge(self.store, self.history, TASK,
+                                                            self.investigated(), mode="diagnosis"))
+
+    def test_an_adjudication_carries_no_assessment_requirement(self):
+        # The assessment gate belongs to diagnosis; an adjudication rules on a
+        # contested verdict and needs none.
+        self.exhaust()
+        with self.assertRaisesRegex(UsageError, "consult the investigator"):
+            require_investigation_before_judge(self.store, self.history, TASK, [], mode="diagnosis")
+        self.assertIsNone(require_investigation_before_judge(self.store, self.history, TASK, [],
+                                                             mode="adjudication"))
+
+    def test_an_unknown_mode_is_refused_rather_than_defaulted(self):
+        self.seed_checkpoint()
+        with self.assertRaisesRegex(UsageError, "declares its mode"):
+            require_investigation_before_judge(self.store, self.history, TASK, self.investigated(),
+                                               mode="whatever")
+        with self.assertRaisesRegex(UsageError, "declares what it is for"):
+            require_judge_mode(None)
+        self.assertEqual(require_judge_mode("diagnosis"), "diagnosis")
 
     def test_a_stopped_task_still_reaches_the_judge_for_an_adjudication(self):
         # coding-policy#400: a pre-dispatch refusal was considered for a

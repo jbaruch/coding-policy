@@ -47,8 +47,13 @@ copies it onto each record (snapshot `schema_version` 3), and `plan` charges a s
 worker in that window. An agent that declares none has a window to itself.
 
 The optional top-level `judge` key pins the judge agent, model, and effort.
-Plan schema 5 echoes them in a `judge` object; a plan without that seat omits
-it. Model and effort become explicit launch flags. Legacy `banner_pattern`
+Plan schema 6 echoes them in a `judge` object, with `mode` — the seat's
+declared `adjudication` or `diagnosis` — beside them; a plan without that seat
+omits the object. Writer: `plan`, from its own `--judge-mode`. Readers:
+`start-judge` and `apply`, which use the recorded mode and refuse a supplied
+one that differs from it. A version-5 plan carries no `mode`; its readers
+refuse the start rather than defaulting one, since the choice decides which
+pre-dispatch gate the seat is held to. Model and effort become explicit launch flags. Legacy `banner_pattern`
 values are ignored: proof comes from launch or live process argv. The planner
 never ranks the judge seat or gives its pinned worker another role.
 

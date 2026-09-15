@@ -38,7 +38,8 @@ description: Running a multi-agent team — task-based specialist composition, c
 - A fired trigger is consulted, or recorded as a staffing decision with its reason the detector reads
 - Silence is never that decision
 - The exhaustion trigger has no such alternative: a diagnosis without its assessed consultation is refused
-- The judge seat is not dispatched at an exhausted allowance before that assessment exists
+- A diagnosis is not dispatched at an exhausted allowance before that assessment exists
+- An adjudication at that same allowance is unaffected; it rules on a contested verdict and needs no assessment
 - Separate responsibility, specialty and execution worker in each specialist assignment
 - Ground capability declarations in available skills, tools and observed work
 - Apply capability and contribution eligibility before task familiarity and measured subscription headroom through the owner planner
@@ -76,6 +77,10 @@ description: Running a multi-agent team — task-based specialist composition, c
 - The reserved `judge` seat runs on the most capable model available and holds no other responsibility
 - The lead dispatches the judge in adjudication mode for one of three triggers: a contested reviewer or tester verdict, a lead override of a blocking finding, or a bot finding the team disagrees with
 - The lead dispatches the judge in diagnosis mode at an exhausted allowance with blocking work remaining, on the investigator's assessment
+- Every judge dispatch declares which mode it is for, at plan and at apply
+- An undeclared mode is refused, never defaulted
+- A diagnosis on a task whose ladder reached `stop` is refused before the round runs, unless the operator authorized a plan over that remedy
+- An adjudication is never refused on that ground
 - The judge rules on that assessment; it never investigates from scratch
 - The diagnosis cites in `ASSESSMENT:` the investigator report it ruled on, and the record binds that path
 - Diagnosis asks why the loop is not converging and what must change, never who is right
@@ -174,7 +179,7 @@ description: Running a multi-agent team — task-based specialist composition, c
 - Never edit repository content while holding the release role
 - Each fresh-worker brief includes the task, prior report, and open findings
 - Frame the handoff as "a prior developer attempted this N times; you own it now"
-- At an exhausted allowance with remaining blocking work, stop the round, record the checkpoint, and consult the investigator before the judge
+- At an exhausted allowance with remaining blocking work, stop the round, record the checkpoint, and consult the investigator before the judge's diagnosis
 - The investigator asks why the loop is not converging and returns a reproduction, a causal assessment and a discriminating experiment
 - It gathers evidence and decides nothing
 - Narrow exception for a judge-diagnosed bounded correction plan.

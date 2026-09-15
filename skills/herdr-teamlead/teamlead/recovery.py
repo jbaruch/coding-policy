@@ -429,22 +429,58 @@ def investigated_after(assignments, row, task, developer_index):
             and assignment_after(assignments, row["assignment_index"], developer_index))
 
 
-def require_investigation_before_judge(store, assignments, task, investigations):
-    """Refuse a judge dispatch at an exhausted allowance with no assessment.
+#: The judge's two modes (`rules/agent-team-operation.md` Judge Seat). A
+#: dispatch declares which it is for, so a gate can tell a diagnosis -- which
+#: rules on the investigator's assessment and follows the remedy ladder -- from
+#: an adjudication of a contested verdict, which does neither (#425).
+JUDGE_MODES = ("adjudication", "diagnosis")
+
+
+def require_judge_mode(mode):
+    """A seated judge declares which mode it is for, never a default.
+
+    Defaulting would pick one of the two gates for the lead: an undeclared
+    dispatch would either skip the stop refusal a diagnosis owes, or apply it
+    to an adjudication the judge still owes (#425).
+    """
+    if mode is None:
+        raise UsageError("A judge seat declares what it is for: pass --judge-mode {}. Adjudication rules on a contested verdict; diagnosis rules on the investigator's assessment at an exhausted allowance.".format(" | ".join(JUDGE_MODES)), {})
+    if mode not in JUDGE_MODES:
+        raise UsageError("A judge dispatch declares its mode as one of {}; an undeclared mode is refused rather than defaulted.".format(" | ".join(JUDGE_MODES)), {"mode": mode})
+    return mode
+
+
+def require_investigation_before_judge(store, assignments, task, investigations, mode=None):
+    """Refuse a judge dispatch the seat cannot answer.
 
     The judge rules on the investigator's causal assessment (#408), so the
     expensive seat is never spent before that assessment exists. A judge
-    dispatched for an ordinary dispute is untouched: the gate applies only
-    while the task sits at an exhausted allowance with no unspent bound.
+    dispatched for an ordinary dispute is untouched: the assessment gate
+    applies only to a DIAGNOSIS at an exhausted allowance with no unspent
+    bound.
 
-    A `stop` diagnosis is NOT read here. `stop` ends implementation and the
-    diagnosis ladder; it does not end adjudication, which the judge still owes
-    a contested reviewer or tester verdict, a lead override, or a disputed bot
-    finding during the release of the clean scope
-    (`rules/agent-team-operation.md` Judge Seat). This gate sees no mode, so it
-    cannot refuse the one without refusing the other (#400).
+    `mode` is the dispatch's declared judge mode. With it, a diagnosis for a
+    task whose ladder reached `stop` is refused before the round runs: `stop`
+    ends implementation and the ladder, and the one operator-requested ruling a
+    checkpoint may cite is bounded per task, so there is nothing such a round
+    could record. An adjudication is untouched on the same task -- the judge
+    still owes a contested reviewer or tester verdict, a lead override, or a
+    disputed bot finding during the release of the clean scope. An operator
+    plan authorized over the `stop` lifts the refusal, since the correction it
+    authorizes is ordinary work.
+
+    Without a declared mode the stop refusal is not read: the gate cannot tell
+    the two apart, and refusing both would refuse an adjudication the judge
+    owes (#400).
     """
+    if mode is not None and mode not in JUDGE_MODES:
+        raise UsageError("A judge dispatch declares its mode as one of {}; an undeclared mode is refused rather than defaulted.".format(" | ".join(JUDGE_MODES)), {"mode": mode})
     if not task or task not in store["tasks"]:
+        return None
+    if mode == "diagnosis" and any(row["remedy"] == "stop" for row in diagnoses_for(store, task)):
+        if not any(row["task"] == task for row in active_plans(store)):
+            raise UsageError("Task {} is diagnosed `stop` with no plan authorized over it: implementation has ended and the ladder is spent, so a diagnosis round records nothing. Ship what is clean and track the remainder, or record the operator's plan over this remedy first.".format(task), {})
+    if mode == "adjudication":
         return None
     count = confirmed_fix(assignments, task)
     if count < DEFAULT_FIX_LIMIT:
