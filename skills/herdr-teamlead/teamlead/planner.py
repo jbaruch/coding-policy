@@ -63,10 +63,14 @@ from .errors import PlanError
 #: pinned seat's agent, model and effort. Version 3 adds round-tier data. Additive: a version-1
 #: plan simply has no `judge` key, which is indistinguishable from a version-2
 #: plan that assigned no judge seat, so both readers take the same path.
-#: Version 5 adds normalized specialist requirements when requested.
+#: Version 5 adds normalized specialist requirements when requested. Version 6
+#: adds `judge.mode`, the seat's declared adjudication-or-diagnosis choice, so
+#: the start and the dispatch read the lead's decision rather than retaking it
+#: (#425). Additive: a version-5 plan simply carries no mode, and its readers
+#: refuse the start rather than defaulting one.
 #: A plan is a round's instruction, not stored state -- it is produced and
 #: consumed inside one round and never migrated (rules/stateful-artifacts.md).
-PLAN_SCHEMA_VERSION = 5
+PLAN_SCHEMA_VERSION = 6
 
 #: What one round in each seat is expected to burn, in points of the agent's
 #: remaining headroom percentage. The ORDER is what the planner acts on:

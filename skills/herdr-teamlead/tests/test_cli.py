@@ -25,8 +25,11 @@ import unittest
 from unittest.mock import patch
 from pathlib import Path
 
-from teamlead import attention
+from types import SimpleNamespace
+
+from teamlead import attention, cli
 from teamlead.cli import build_parser, main
+from teamlead.errors import UsageError
 from teamlead.herdr import HerdrClient
 from teamlead.state import STATE_SCHEMA_VERSION, add_assignment, empty_state, save_state
 
@@ -1492,6 +1495,37 @@ class ApplyCommandTest(CliCase):
         self.assertIn("would destroy its contents", err)
         self.assertEqual(self.state.read_text(encoding="utf-8"), self.CORRUPT_STATE)
 
+
+
+
+class JudgeModeTest(unittest.TestCase):
+    """A seat's mode is chosen once, at plan, and read everywhere after (#425)."""
+
+    def setUp(self):
+        self.args = SimpleNamespace(judge_mode=None)
+
+    def plan_doc(self, mode=None):
+        judge = {"agent": "claude", "model": "opus-5", "effort": "high"}
+        if mode is not None:
+            judge["mode"] = mode
+        return {"schema_version": 6, "assignments": {"judge": "claude"}, "judge": judge}
+
+    def test_the_plan_supplies_the_mode(self):
+        self.assertEqual(cli._judge_mode_for(self.args, self.plan_doc("diagnosis")), "diagnosis")
+
+    def test_a_matching_flag_agrees(self):
+        args = SimpleNamespace(judge_mode="diagnosis")
+        self.assertEqual(cli._judge_mode_for(args, self.plan_doc("diagnosis")), "diagnosis")
+
+    def test_a_differing_flag_refuses(self):
+        args = SimpleNamespace(judge_mode="adjudication")
+        with self.assertRaisesRegex(UsageError, "the plan's mode is the one its brief was composed for"):
+            cli._judge_mode_for(args, self.plan_doc("diagnosis"))
+
+    def test_a_legacy_plan_carries_none(self):
+        self.assertIsNone(cli._judge_mode_for(self.args, self.plan_doc()))
+        args = SimpleNamespace(judge_mode="adjudication")
+        self.assertEqual(cli._judge_mode_for(args, self.plan_doc()), "adjudication")
 
 
 if __name__ == "__main__":

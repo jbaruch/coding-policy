@@ -16,10 +16,14 @@
   remedy, and leaves an adjudication on the same task untouched. The assessment
   requirement (#408) belongs to diagnosis alone.
 
-  The choice is made once. `plan` records the mode beside the judge's tier, and
-  `start-judge` reads it from the plan — a plan carrying none starts no worker.
-  Steps 15, 16 and 17 of the skill carry it through, so the mode Step 13 chose
-  when it composed the brief is the one every later gate reads.
+  The choice is made once. `plan` records the mode beside the judge's tier
+  (plan schema 6, documented in `state-schema.md` with its reader/writer
+  contract), and `start-judge` and `apply` read it from there — a plan carrying
+  none starts no worker, and a `--judge-mode` that differs from the plan's
+  refuses before any worker contact rather than holding the seat to the other
+  gate than the one its brief was composed for. Steps 15, 16 and 17 of the
+  skill carry it through. Team Composition's assessment directive is scoped to
+  diagnosis, matching what the gate now enforces.
 
 ## 0.3.230 — 2026-09-15
 

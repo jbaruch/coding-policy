@@ -641,6 +641,28 @@ def cmd_measure(args, client=None, warn=None, trace=None):
     }
 
 
+def _judge_mode_for(args, document):
+    """The judge seat's mode: the plan's, and a supplied one must agree.
+
+    The plan records the choice the lead made when it composed the brief. A
+    flag that differs would hold the seat to the other gate than the one it was
+    planned for -- a diagnosis plan passing the adjudication gate -- so the
+    mismatch refuses before any worker contact (#425).
+    """
+    supplied = getattr(args, "judge_mode", None)
+    planned = None
+    if isinstance(document, dict):
+        block = document.get("judge")
+        if isinstance(block, dict):
+            planned = block.get("mode")
+    if supplied and planned and supplied != planned:
+        raise UsageError(
+            "This plan seats the judge for {!r} and --judge-mode says {!r}; the plan's mode is the one its brief was composed for. Re-plan for the other mode rather than overriding it here.".format(planned, supplied),
+            {"planned": planned, "supplied": supplied},
+        )
+    return supplied or planned
+
+
 def cmd_plan(args, client=None, warn=None, trace=None):
     roles = [role.strip() for role in args.roles.split(",") if role.strip()]
     if "judge" in roles:
@@ -853,7 +875,7 @@ def cmd_apply(args, client=None, warn=None, trace=None):
     # rules on, dry runs included. A completed replay has left `assignments`
     # already, so it is not re-gated (#408).
     if "judge" in assignments:
-        recovery.require_judge_mode(getattr(args, "judge_mode", None))
+        recovery.require_judge_mode(_judge_mode_for(args, document if isinstance(document, dict) else None))
     if args.task and "judge" in assignments:
         recovery.require_investigation_before_judge(store, state["assignments"], args.task,
                                                     state["specialist_assessments"],
@@ -1176,7 +1198,7 @@ def cmd_start_judge(args, client=None, warn=None, trace=None):
         raise UsageError("Plan judge tier and assignment name different workers; replan.", {})
     # The plan carries the mode the lead declared; the flag overrides it, and
     # neither present is a refusal rather than a default (#425).
-    judge_mode = recovery.require_judge_mode(getattr(args, "judge_mode", None) or tier.get("mode"))
+    judge_mode = recovery.require_judge_mode(_judge_mode_for(args, document))
     parsed = parse_tiers({"build": {"model": tier.get("model"), "effort": tier.get("effort")}}, args.kind)["build"]
     agent = SimpleNamespace(name=tier["agent"], kind=args.kind, idle_markers=(), working_markers=(),
                             launch_args=parse_launch_args(tier.get("launch_args", []), args.kind))

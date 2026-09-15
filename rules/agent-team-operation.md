@@ -38,7 +38,8 @@ description: Running a multi-agent team — task-based specialist composition, c
 - A fired trigger is consulted, or recorded as a staffing decision with its reason the detector reads
 - Silence is never that decision
 - The exhaustion trigger has no such alternative: a diagnosis without its assessed consultation is refused
-- The judge seat is not dispatched at an exhausted allowance before that assessment exists
+- A diagnosis is not dispatched at an exhausted allowance before that assessment exists
+- An adjudication at that same allowance is unaffected; it rules on a contested verdict and needs no assessment
 - Separate responsibility, specialty and execution worker in each specialist assignment
 - Ground capability declarations in available skills, tools and observed work
 - Apply capability and contribution eligibility before task familiarity and measured subscription headroom through the owner planner
@@ -178,7 +179,7 @@ description: Running a multi-agent team — task-based specialist composition, c
 - Never edit repository content while holding the release role
 - Each fresh-worker brief includes the task, prior report, and open findings
 - Frame the handoff as "a prior developer attempted this N times; you own it now"
-- At an exhausted allowance with remaining blocking work, stop the round, record the checkpoint, and consult the investigator before the judge
+- At an exhausted allowance with remaining blocking work, stop the round, record the checkpoint, and consult the investigator before the judge's diagnosis
 - The investigator asks why the loop is not converging and returns a reproduction, a causal assessment and a discriminating experiment
 - It gathers evidence and decides nothing
 - Narrow exception for a judge-diagnosed bounded correction plan.
