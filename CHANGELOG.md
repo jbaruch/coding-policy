@@ -68,7 +68,7 @@
   previous command had left there — the reported occupancy-read failure named
   the wrong cause. Deferred Copilot advisories from #422.
 
-## 0.3.228 — 2026-09-15
+## 0.3.229 — 2026-09-15
 
 ### Fixed
 
@@ -87,6 +87,8 @@
   boundary as #400 intended. No ledger needs migrating, and nothing is deleted
   to make one readable: the legacy citations, their evidence receipts and their
   correction counts stay exactly as written.
+
+## 0.3.228 — 2026-09-15
 
 ### Fixed
 

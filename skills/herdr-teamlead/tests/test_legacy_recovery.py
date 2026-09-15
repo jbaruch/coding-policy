@@ -7,6 +7,7 @@ _ROOT = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
 if _ROOT not in _sys.path:
     _sys.path.insert(0, _ROOT)
 
+import contextlib
 import copy
 import hashlib
 import io
@@ -146,6 +147,36 @@ class SchemaNineCompatibilityTests(unittest.TestCase):
         self.assertFalse(usable)
         self.assertEqual(self.path.read_bytes(), prepended)
 
+    def test_schema8_store_carrying_receipt_collection_refuses_without_writes(self):
+        self.state["recovery"]["legacy_ruling_recoveries"] = []
+        self.write_state()
+        raw = self.path.read_bytes()
+        _, usable = load_state_checked(
+            self.path, warn=lambda _: None, persist_migration=False)
+        self.assertFalse(usable)
+        self.assertEqual(self.path.read_bytes(), raw)
+
+    def test_duplicate_or_overlapping_receipts_refuse_without_writes(self):
+        self.install_receipts()
+        overlapping = copy.deepcopy(self.state["recovery"]["legacy_ruling_recoveries"][0])
+        overlapping["id"] += ":dup"
+        self.state["recovery"]["legacy_ruling_recoveries"].append(overlapping)
+        self.write_state()
+        overlapped = self.path.read_bytes()
+        _, usable = load_state_checked(
+            self.path, warn=lambda _: None, persist_migration=False)
+        self.assertFalse(usable)
+        self.assertEqual(self.path.read_bytes(), overlapped)
+        duplicate = copy.deepcopy(self.state["recovery"]["legacy_ruling_recoveries"][0])
+        self.state["recovery"]["legacy_ruling_recoveries"] = [
+            self.state["recovery"]["legacy_ruling_recoveries"][0], duplicate]
+        self.write_state()
+        duplicated = self.path.read_bytes()
+        _, usable = load_state_checked(
+            self.path, warn=lambda _: None, persist_migration=False)
+        self.assertFalse(usable)
+        self.assertEqual(self.path.read_bytes(), duplicated)
+
     def test_malformed_and_unsupported_state_refuses_without_writes(self):
         self.install_receipts()
         cases = []
@@ -218,10 +249,15 @@ class SchemaNineCompatibilityTests(unittest.TestCase):
 
     def test_recover_legacy_rulings_command_is_absent(self):
         self.assertNotIn("recover-legacy-rulings", COMMANDS)
-        with self.assertRaises(SystemExit):
-            build_parser().parse_args([
-                "recover-legacy-rulings", "--state", str(self.path), "--record", str(self.path),
-            ])
+        captured = io.StringIO()
+        with contextlib.redirect_stderr(captured):
+            with self.assertRaises(SystemExit) as raised:
+                build_parser().parse_args([
+                    "recover-legacy-rulings", "--state", str(self.path), "--record", str(self.path),
+                ])
+        self.assertEqual(raised.exception.code, 2)
+        self.assertIn("invalid choice", captured.getvalue())
+        self.assertIn("recover-legacy-rulings", captured.getvalue())
         self.assertEqual(self.path.read_bytes(), self.raw)
 
 

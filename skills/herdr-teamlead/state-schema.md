@@ -659,7 +659,7 @@ Existing schema-1 receipts stay in the ledger. Each carries `id`, `task`, `at`,
 the actual operator `authorization` source/quote, `backup` path/SHA-256, a
 `checkpoints` object mapping original checkpoint IDs to canonical JSON SHA-256
 digests, and `grants_future_attempts: false`. Every referenced row retains its
-complete original content and must remain at version 2 without `requested_by`.
+complete original content and must read as version 2 after the owner's checkpoint migration, without `requested_by`.
 Reading validates these bindings without fetching historical files. Altered,
 new or overlapping citations do not inherit a receipt. Malformed or unsupported
 recovery state is refused without writes.
