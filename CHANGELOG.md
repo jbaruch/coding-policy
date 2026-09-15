@@ -17,10 +17,16 @@
   The default branch is resolved explicitly, since the hook can run from a
   linked worktree whose HEAD is not it.
 
+  What the lead may act on is unchanged. `rules/agent-team-operation.md`
+  Writers and Checkouts forbids a lead removing a locked or detached worktree,
+  so a locked one is left out of the report entirely and a spent detached one
+  is surfaced to the operator on stderr rather than listed under "remove them".
+
   The predicate fails closed. A worktree whose status cannot be read is never
   reported removable: reading an unreadable tree as clean is how a hand-rolled
-  version of this passed trees it had never inspected. Dirty trees and trees
-  holding unmerged commits are still left alone, and the leftover-branch
+  version of this passed trees it had never inspected, and every failed check
+  now says on stderr which command failed and what to inspect. Dirty trees and
+  trees holding unmerged commits are still left alone, and the leftover-branch
   section is untouched.
 
 ## 0.3.226 — 2026-09-14

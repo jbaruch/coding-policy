@@ -166,11 +166,27 @@ main() {
     pass; else fail "never-pushed worktree: expected an orphaned report, got RC=$RC OUT=$OUT"; fi
 
   # 4a-ii. A DETACHED worktree at a commit main already has. No branch name
-  # could ever have matched it.
-  g -C "$TMP/r4a" worktree add -q --detach "$TMP/r4a-detached" || die "r4a detached add failed"
-  run_hook "$TMP/r4a" '{"stop_hook_active":false}'
-  if [[ $RC -eq 0 ]] && reason_has "r4a-detached" && reason_has "detached"; then
-    pass; else fail "detached worktree: expected an orphaned report, got RC=$RC OUT=$OUT"; fi
+  # could ever have matched it — and the lead never removes one
+  # (rules/agent-team-operation.md Writers and Checkouts), so it is surfaced on
+  # stderr and never listed under "remove them".
+  mk_origin o4b; clone_from "$BARE" "$TMP/r4b"
+  g -C "$TMP/r4b" worktree add -q --detach "$TMP/r4b-detached" || die "r4b detached add failed"
+  ERRFILE="$TMP/r4b.err"
+  OUT="$(cd "$TMP/r4b" && printf '%s' '{"stop_hook_active":false}' | bash "$HOOK" 2>"$ERRFILE")"; RC=$?
+  ERRTEXT="$(cat "$ERRFILE")"
+  if [[ $RC -eq 0 ]] && [[ "$ERRTEXT" == *"r4b-detached"* ]] \
+     && [[ "$ERRTEXT" == *"never removes a detached worktree"* ]] \
+     && ! reason_has "r4b-detached"; then
+    pass; else fail "detached worktree: expected a report, not a removal instruction, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
+
+  # 4a-ii-b. A LOCKED worktree is left out entirely: the lock is somebody
+  # saying so, and git keeps its metadata through a prune.
+  mk_origin o4f; clone_from "$BARE" "$TMP/r4f"
+  g -C "$TMP/r4f" worktree add -q "$TMP/r4f-locked" -b review/locked || die "r4f worktree add failed"
+  g -C "$TMP/r4f" worktree lock "$TMP/r4f-locked" || die "r4f lock failed"
+  OUT="$(cd "$TMP/r4f" && printf '%s' '{"stop_hook_active":false}' | bash "$HOOK" 2>"$TMP/r4f.err")"; RC=$?
+  if [[ $RC -eq 0 ]] && ! reason_has "r4f-locked" && [[ "$(cat "$TMP/r4f.err")" != *"r4f-locked"* ]]; then
+    pass; else fail "locked worktree must be left alone: RC=$RC OUT=$OUT ERR=$(cat "$TMP/r4f.err")"; fi
 
   # 4a-iii. Real unmerged work is NOT reported, on a branch or detached.
   mk_origin o4c; clone_from "$BARE" "$TMP/r4c"

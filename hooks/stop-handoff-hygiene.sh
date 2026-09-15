@@ -107,7 +107,7 @@ is_herdr_worker() {
 
 main() {
   local input active inside
-  local -a gone_branches=() wt_paths=() wt_branches=() leftover=() orphaned=() changed=()
+  local -a gone_branches=() wt_paths=() wt_branches=() wt_locked=() leftover=() orphaned=() spent_detached=() changed=()
   local -a blocking=() reports=()
 
   # jq is required to read stop_hook_active and to emit the block JSON safely.
@@ -165,12 +165,21 @@ main() {
     if [[ -z "$base" ]]; then
       warn "could not resolve origin's default branch — reporting only worktrees whose upstream is gone"
     fi
+    # `rules/agent-team-operation.md` Writers and Checkouts: the lead never
+    # removes a locked or detached worktree, and reports it to the operator
+    # instead. A locked one is left out entirely -- git keeps its metadata
+    # through a prune, and the lock is somebody saying so.
     for (( i = 0; i < ${#wt_paths[@]}; i++ )); do
       b="${wt_branches[$i]}"; p="${wt_paths[$i]}"
+      [[ "${wt_locked[$i]}" == "1" ]] && continue
       if [[ -n "$b" ]] && in_list "$b" ${gone_branches[@]+"${gone_branches[@]}"}; then
         orphaned+=("${p} (branch ${b})")
       elif [[ -n "$base" ]] && worktree_is_spent "$p" "$b" "$base"; then
-        orphaned+=("${p} ($([[ -n "$b" ]] && printf 'branch %s' "$b" || printf 'detached'), nothing ${base} lacks)")
+        if [[ -n "$b" ]]; then
+          orphaned+=("${p} (branch ${b}, nothing ${base} lacks)")
+        else
+          spent_detached+=("${p} (detached, nothing ${base} lacks)")
+        fi
       fi
     done
 
@@ -211,7 +220,7 @@ collect_gone_branches() {
 # with an EMPTY branch rather than dropped: it can be as merged and as removable
 # as any other, and a branch-name predicate could never see it (#433).
 collect_worktrees() {
-  local out rc=0 line key val cur_path="" cur_branch="" first=1
+  local out rc=0 line key val cur_path="" cur_branch="" cur_locked=0 first=1
   out="$(git worktree list --porcelain)" || rc=$?
   if (( rc != 0 )); then
     warn "git worktree list failed (exit ${rc}) — skipping the orphaned-worktree check"
@@ -219,8 +228,10 @@ collect_worktrees() {
   fi
   flush() {
     if (( first )); then first=0
-    elif [[ -n "$cur_path" ]]; then wt_paths+=("$cur_path"); wt_branches+=("$cur_branch"); fi
-    cur_path=""; cur_branch=""
+    elif [[ -n "$cur_path" ]]; then
+      wt_paths+=("$cur_path"); wt_branches+=("$cur_branch"); wt_locked+=("$cur_locked")
+    fi
+    cur_path=""; cur_branch=""; cur_locked=0
   }
   while IFS= read -r line; do
     if [[ -z "$line" ]]; then flush; continue; fi
@@ -228,6 +239,7 @@ collect_worktrees() {
     case "$key" in
       worktree) cur_path="$val" ;;
       branch)   cur_branch="${val#refs/heads/}" ;;
+      locked)   cur_locked=1 ;;
     esac
   done <<< "$out"
   [[ -n "$cur_path" ]] && flush   # flush a trailing record with no blank line
@@ -238,11 +250,17 @@ collect_worktrees() {
 # confirmed. Named explicitly rather than read off the current checkout: this
 # hook can run from a linked worktree, whose HEAD is not the default branch.
 default_branch_ref() {
-  local out rc=0 name cand
+  local out rc=0 cand
+  # `--quiet` makes exit 1 the expected "no such symbolic ref"; any other exit
+  # is git failing, and reading it as an absent ref would hide the fault behind
+  # the main/master fallback (rules/error-handling.md).
   out="$(git symbolic-ref --quiet refs/remotes/origin/HEAD 2>/dev/null)" || rc=$?
   if (( rc == 0 )) && [[ "$out" == refs/remotes/origin/* ]]; then
     printf 'origin/%s' "${out#refs/remotes/origin/}"
     return 0
+  fi
+  if (( rc != 0 && rc != 1 )); then
+    warn "git symbolic-ref refs/remotes/origin/HEAD failed (exit ${rc}) — falling back to origin/main or origin/master; run \`git remote set-head origin --auto\` if the fallback is wrong"
   fi
   for cand in main master; do
     if git show-ref --verify --quiet "refs/remotes/origin/${cand}"; then
@@ -261,22 +279,42 @@ default_branch_ref() {
 # first hand-rolled version of this passed trees it had never looked at (#433).
 worktree_is_spent() { # <path> <branch|""> <default-ref>
   local path="$1" branch="$2" base="$3" status rc=0 ahead head
-  [[ -d "$path" ]] || return 1
+  if [[ ! -d "$path" ]]; then
+    warn "worktree ${path} is listed but its directory is missing — not reporting it as removable; run \`git worktree prune\` after confirming it by hand"
+    return 1
+  fi
   status="$(git -C "$path" status --porcelain 2>/dev/null)" || rc=$?
-  (( rc == 0 )) || return 1
+  if (( rc != 0 )); then
+    warn "\`git status\` failed in ${path} (exit ${rc}) — not reporting it as removable; inspect that checkout by hand"
+    return 1
+  fi
   [[ -z "$status" ]] || return 1
   if [[ -n "$branch" ]]; then
     rc=0
     ahead="$(git -C "$path" rev-list --count "${base}..${branch}" 2>/dev/null)" || rc=$?
-    (( rc == 0 )) || return 1
+    if (( rc != 0 )) || [[ ! "$ahead" =~ ^[0-9]+$ ]]; then
+      warn "\`git rev-list --count ${base}..${branch}\` failed in ${path} (exit ${rc}) — not reporting it as removable; inspect its history by hand"
+      return 1
+    fi
     [[ "$ahead" == "0" ]] || return 1
     return 0
   fi
   rc=0
   head="$(git -C "$path" rev-parse --verify HEAD 2>/dev/null)" || rc=$?
-  (( rc == 0 )) && [[ -n "$head" ]] || return 1
-  git -C "$path" merge-base --is-ancestor "$head" "$base" 2>/dev/null || return 1
-  return 0
+  if (( rc != 0 )) || [[ -z "$head" ]]; then
+    warn "\`git rev-parse HEAD\` failed in ${path} (exit ${rc}) — not reporting it as removable; inspect that checkout by hand"
+    return 1
+  fi
+  # merge-base exits 1 for the expected "not an ancestor"; anything else is a
+  # tool failure and must not read as a plain negative.
+  rc=0
+  git -C "$path" merge-base --is-ancestor "$head" "$base" 2>/dev/null || rc=$?
+  case "$rc" in
+    0) return 0 ;;
+    1) return 1 ;;
+    *) warn "\`git merge-base --is-ancestor\` failed in ${path} (exit ${rc}) — not reporting it as removable; inspect its history by hand"
+       return 1 ;;
+  esac
 }
 
 # Turn leftover branches and orphaned worktrees into blocking-finding sections.
@@ -305,6 +343,11 @@ build_branch_findings() {
     done
     blocking+=("$section")
   fi
+  # Report-only, never an instruction to remove: a detached worktree is the
+  # operator's call under Writers and Checkouts, whoever else finds it spent.
+  for p in ${spent_detached[@]+"${spent_detached[@]}"}; do
+    reports+=("Detached worktree holding nothing new: ${p} — report it to the operator; the lead never removes a detached worktree.")
+  done
   return 0
 }
 
