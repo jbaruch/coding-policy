@@ -358,10 +358,6 @@ def build_parser():
         record_parser = sub.add_parser(command, parents=[common], help="Record owner-managed {} evidence.".format(command))
         record_parser.add_argument("--record", required=True, metavar="FILE", help="Structured evidence JSON; see dispatch-recovery.md.")
         record_parser.add_argument("--now", metavar="ISO8601")
-    legacy_parser = sub.add_parser("recover-legacy-rulings", parents=[common], help="Recover explicitly reviewed legacy ruling citations without changing attempt history.")
-    legacy_parser.add_argument("--record", required=True, metavar="FILE")
-    legacy_parser.add_argument("--dry-run", action="store_true")
-    legacy_parser.add_argument("--now", metavar="ISO8601")
     sub.add_parser("status", parents=[common], help="Show implementation budgets and paused work separately from active audit workers.")
 
     sub.add_parser(
@@ -1046,11 +1042,6 @@ def _record_stopped_task(state_path, diagnosis, at):
     }, at)
 
 
-def cmd_legacy_recovery(args, client=None, warn=None, trace=None):
-    from .legacy_recovery import recover_file
-    return recover_file(_state_path(args), Path(args.record), args.now or now_iso(), dry_run=args.dry_run), None
-
-
 def cmd_recovery(args, client=None, warn=None, trace=None):
     state_path = _state_path(args)
     state = _load_state_for_write(state_path, warn)
@@ -1291,7 +1282,6 @@ COMMANDS = {
     "apply": cmd_apply,
     "state": cmd_state,
     "status": cmd_status,
-    "recover-legacy-rulings": cmd_legacy_recovery,
     **{command: cmd_recovery for command in ("task", "checkpoint", "authorize-corrections", "recover-context", "recover-role-clear", "record-report", "record-refusal", "authorize-refused-dispatch", "diagnose", "reconcile", "record-release-clear", "import-correction", "record-historical-review", "recover-report", "assess-specialist")},
     "detect-triggers": cmd_detect_triggers,
     "validate-partition": cmd_validate_partition,

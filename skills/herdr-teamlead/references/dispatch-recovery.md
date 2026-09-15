@@ -678,23 +678,3 @@ null continuity and no review approval. A fresh process whose first identity
 already matches its transcript does not exercise this regression. Keep config,
 caches and transcripts report-local (`GROK_HOME` selects native source storage).
 Never input to, clear or restart an active team worker for this validation.
-
-
-## Recover historical ruling citations
-
-For a ledger rejected for duplicate historical ruling citations, preserve the
-ledger and inspect the actual checkpoint records before requesting a repair.
-The operator authorizes recovery explicitly. Record that source and quote;
-never use an unrelated release request as the recovery authorization.
-
-Prepare a JSON request containing `id`, `state_sha256` for the reviewed ledger,
-`backup` as a fresh absolute file path, and `authorization` with `source` and
-`quote`. Run the owner command `recover-legacy-rulings --record <request.json>
---dry-run` with the canonical `--state`. Read every named record in the preview.
-Run the same command without `--dry-run` to apply the authorized repair.
-
-The command contract lives in `teamlead/legacy_recovery.py`; its persisted shape
-is documented in `state-schema.md`, Explicit legacy ruling recovery. Use the
-upgraded owner after recovery, then verify `status`, supervision and ordinary
-planning before sending worker input. Retain all original task ledgers,
-correction counts and pending obligations.
