@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.232 — 2026-09-15
+
 ### Fixed
 
 - **A ledger already written at recovery schema 9 still reads (#439).** The
