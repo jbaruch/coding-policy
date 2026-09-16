@@ -36,45 +36,26 @@ skills/herdr-teamlead/references/attention.md
 skills/herdr-teamlead/references/supervision.md
 skills/herdr-teamlead/references/assignment-reasoning.md
 skills/herdr-teamlead/references/specialists.md
+skills/herdr-teamlead/references/judge-round.md
 skills/herdr-teamlead/state-schema.md
 ```
 
 ## Step 1 — Determine the Mode
 
-For catch-up or saved attention, follow `references/attention.md`. For lesson
-curation, saved lead context, or a lead handoff, follow `references/working-memory.md`.
-Use the recorded state override or default; these commands need no live Herdr.
-Finish here after the requested operation. They grant no new task authority.
+Three request kinds are answered offline, need no live Herdr, and finish here
+after the requested operation. Each reference carries its own owner commands and
+their contracts. Use the recorded state override or default, report any non-zero
+diagnostic, and never fabricate missing history. They grant no new task
+authority.
 
-```bash
-CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
-bash "$CP/skills/herdr-teamlead/teamlead.sh" catch-up [--state <state-file>]
-```
+- **Catch-up or saved attention** — `references/attention.md`. Read all
+  attention pages before claiming completeness.
+- **Lesson curation, saved lead context, or a lead handoff** —
+  `references/working-memory.md`.
+- **A saved retrospective** — `references/retrospectives.md`. Report the note's
+  date, coverage, conclusions, and path.
 
-```bash
-CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
-bash "$CP/skills/herdr-teamlead/teamlead.sh" memory-show [--state <state-file>] [--id <stow-id>]
-```
-
-Read all attention pages before claiming completeness. Use the referenced owner
-commands for recording, resolution, lessons, and a new stow. Non-zero requires
-reporting its diagnostic; never fabricate missing history.
-
-For saved retrospective requests, use the recorded state override or default.
-Read saved notes; report their date, coverage, conclusions, and path. Finish here.
-
-```bash
-CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
-bash "$CP/skills/herdr-teamlead/teamlead.sh" retro-list [--state <state-file>] [--task <task-id>] [--since <ISO-time>]
-```
-
-```bash
-CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
-bash "$CP/skills/herdr-teamlead/teamlead.sh" retro-show [--state <state-file>] [--id <retro-id>] [--task <task-id>]
-```
-
-Both emit JSON; non-zero requires reporting the diagnostic. `retro-show` defaults
-to latest. For other requests, read `HERDR_ENV` before running scripts.
+For every other request, read `HERDR_ENV` before running scripts.
 
 - **Unset or empty** — this skill does not apply. Say so and do the task
   directly, without roster calls, briefs, provisioning, reports, or simulated
@@ -395,8 +376,8 @@ responsibility. For an investigation-only task, use the knowledge gate below.
 For an investigation-only task, assess every assigned report against the requested
 knowledge deliverable. Resolve blocking findings through the same bounded and
 judge paths below. Once its criteria hold, present the findings and preserve open
-user decisions; proceed to Step 21 if a task worktree needs cleanup, otherwise
-Step 22. No implementation or release is inferred from the diagnostic result.
+user decisions; proceed to Step 15 if a task worktree needs cleanup, otherwise
+Step 16. No implementation or release is inferred from the diagnostic result.
 
 - **Any blocking finding** — apply the round-flow reference's Blocking Gate
   contract and `rules/agent-team-operation.md` Fix Loops. Return to Step 4 for
@@ -418,103 +399,24 @@ skills/herdr-teamlead/references/round-flow.md
 
 With its release criteria met, proceed immediately to Step 13.
 
-## Step 13 — Compose the Judge Brief
+## Step 13 — Run the Judge Round
 
-Optional. Modes, triggers and both report contracts are in
-`skills/herdr-teamlead/references/round-flow.md` "The Judge" (a bot
-disagreement inside Step 20 returns here first). No trigger — proceed to
-Step 20.
+Optional. No trigger — proceed to Step 14. A bot disagreement inside Step 14
+returns here first.
 
-For a dispute, compose from `templates/brief-judge.md` through Step 7: the
-dispute, both positions with report paths, the governing rule, the tree.
+Run the round's seven steps in order — compose the brief, re-measure the shared
+window, plan the pinned seat, start its worker on the pinned tier, dispatch,
+wait, act on the ruling:
 
-For an exhausted allowance, compose from `templates/brief-judge-diagnosis.md`
-through Step 7 under the role key `judge-diagnosis`, which writes
-`brief-judge-diagnosis.md`: the assessed investigator report, the task, rounds
-spent, remaining blocking work, the per-round history, the tree, and any prior
-remedy with what it changed.
-The pinned seat is still `judge`, so plan and dispatch that role and pass this
-file as its brief: `--brief judge=<outdir>/brief-judge-diagnosis.md`.
-
-Skip Step 8 for the read-only judge. Proceed immediately to Step 14.
-
-## Step 14 — Re-measure the Shared Window
-
-Re-run Step 4's `measure` under its outcome contract. Resolve any unreadable
-judge window before planning. Pass the fresh snapshot to Step 15; never reuse
-the earlier reading as affordability proof. Proceed immediately to Step 15.
-
-## Step 15 — Plan the Judge Seat
-
-Plan the pinned judge against Step 14's fresh snapshot:
-
-```bash
-CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
-bash "$CP/skills/herdr-teamlead/teamlead.sh" plan \
-  --roles judge --judge-mode <adjudication|diagnosis> \
-  --snapshot <step-14-measure-output> --task <task-id>
+```text
+skills/herdr-teamlead/references/judge-round.md
 ```
 
-`adjudication` for a dispute, `diagnosis` for an exhausted allowance — the same
-choice Step 13 made when it composed the brief. Use the recorded mode in Steps
-16 and 17. An undeclared mode is refused.
+The judge is read-only, so Step 8 is skipped for it. Never substitute a judge,
+lower its tier, or hand-write an assignment to bypass a refusal. Its last step
+names where to continue.
 
-Exit 0 names the judge worker; proceed immediately to Step 16. On non-zero,
-report the diagnostic and finish here. Never substitute a judge, lower its tier,
-or hand-write an assignment to bypass the refusal.
-
-## Step 16 — Start the Judge Worker on Its Pinned Tier
-
-For an existing judge worker, proceed to Step 17 with a clearing dispatch.
-For an empty shell pane, complete retrospective checks for the start and run:
-
-```bash
-CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
-bash "$CP/skills/herdr-teamlead/start-judge-worker.sh" \
-  <step-15-plan-file> <pane> [claude|codex|grok] --task <task-id> [--state <state-file>]
-```
-
-Starts the pinned judge and verifies launch argv, on the mode Step 15 recorded
-in the plan. The header owns the contract.
-
-- **Exit 0** — proceed immediately to Step 17 with `--no-clear`.
-- **Any non-zero** — report the diagnostic and finish here without briefing
-  the worker or overriding its tier.
-
-## Step 17 — Dispatch the Judge
-
-Use Step 15's plan under Step 10's dispatch contract:
-
-```bash
-CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
-bash "$CP/skills/herdr-teamlead/teamlead.sh" apply \
-  --assignments <plan-file> \
-  --brief judge=<round>-judge.md --report judge=<absolute-report-path> \
-  --common <path-to-COMMON.md> --judge-mode <adjudication|diagnosis> \
-  --task <task-id> [--no-clear]
-```
-
-Pass the same `--judge-mode` Step 15 planned. Step 10's outcomes govern. Use
-`--no-clear` only for the worker just started in
-Step 16; an existing judge receives the default cleared relaunch with retrospective
-coverage. Apply verifies the live tier before input. Proceed immediately to Step 18.
-
-## Step 18 — Wait for the Ruling
-
-Run Step 11's fleet observation loop, including the judge named by Step 15.
-Proceed immediately to Step 19 once its report lands; keep other enrollments
-under observation.
-
-## Step 19 — Act on the Ruling or Remedy
-
-Apply the Ruling Outcomes contract in `references/round-flow.md`. Investigation
-rulings return to Step 12's knowledge gate. Implementation rulings route
-unchanged-branch rulings to verified release or renewed verification,
-branch-changing rulings to the counted correction path, and a blocked ruling
-to its saved operator question. Only the operator overrides a ruling.
-Continue immediately to the step named by that outcome.
-
-## Step 20 — Release the Pull Request
+## Step 14 — Release the Pull Request
 
 The release is one more assignment, never a prompt into the developer's
 existing context. Return to Step 7 with the role `release` for
@@ -523,17 +425,17 @@ the developer's agent (template `templates/brief-release.md`, the same
 `already-provisioned`), dispatch through Step 10 so the context is cleared and
 the brief is fresh, and wait on the report in Step 11. A source-changing
 release finding returns to Step 12 for the next counted developer assignment.
-The worker merges after all gates pass. Proceed immediately to Step 21 only
+The worker merges after all gates pass. Proceed immediately to Step 15 only
 after verifying its reported release against the live VCS and release gates.
 Record that evidence in the task ledger.
 
-## Step 21 — Clean Up the Worktree
+## Step 15 — Clean Up the Worktree
 
 Fast-forward the shared checkout, remove the worktree, and delete the branch
 per `rules/agent-worktree-isolation.md`, then run Step 8's prune script again
-for the round's other worktrees. Proceed immediately to Step 22.
+for the round's other worktrees. Proceed immediately to Step 16.
 
-## Step 22 — Log the Round
+## Step 16 — Log the Round
 
 Finalize the task ledger with the round outcome and remaining obligations.
 Mark the task completed only after its acceptance criteria and required

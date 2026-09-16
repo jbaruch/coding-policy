@@ -265,6 +265,7 @@ main() {
   done
 
   check_invocations round-setup "$skills_root/herdr-teamlead/references/round-setup.md"
+  check_invocations judge-round "$skills_root/herdr-teamlead/references/judge-round.md"
   check_cleanup_retry
 
   skill="${skills_root}/${MODE_GATE_SKILL}/SKILL.md"

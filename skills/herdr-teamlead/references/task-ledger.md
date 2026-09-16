@@ -28,7 +28,7 @@ accept work. A conflicting observation requires reconciliation, not a resend.
 Append an event after each dispatch outcome, wait outcome, and evidence-based
 assessment. Record missing reports and unknown send outcomes before continuing
 another worker. Append blocker, judge, release, cleanup, and handoff decisions
-when they happen; Step 22 finalizes the log rather than creating it from memory.
+when they happen; Step 16 finalizes the log rather than creating it from memory.
 
 Use these separate vocabularies:
 
