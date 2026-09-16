@@ -268,7 +268,7 @@ skills/herdr-teamlead/references/retrospectives.md
   ],
   "specialist_assessments": [],
   "recovery": {
-    "schema_version": 8,
+    "schema_version": 9,
     "tasks": {},
     "checkpoints": [],
     "plans": [],
@@ -277,6 +277,7 @@ skills/herdr-teamlead/references/retrospectives.md
     "events": [],
     "refusal_authorizations": [],
     "diagnoses": [],
+    "legacy_ruling_recoveries": [],
     "hand_clearances": [],
     "historical_attempts": [],
     "role_clearances": [],
@@ -331,10 +332,11 @@ document and arrives already stamped.
 
 ## Recovery records
 
-The recovery document uses `schema_version: 8`; individual records retain their
+The recovery document uses `schema_version: 9`; individual records retain their
 independent versions. Version 6 adds the dispatch fields `brief_identity`, `refusal` and
 `refusal_move` and the `refusal_authorizations` collection; version 7 adds the
-dispatch's send-time `provider`; version 8 adds the `diagnoses` collection. The
+dispatch's send-time `provider`; version 8 adds the `diagnoses` collection;
+version 9 adds `legacy_ruling_recoveries`. The
 owner stamps an older store on load, adds the empty collections, and refuses one
 already carrying a field its version did not own. Generic records remain version 1; stale-Grok delivery and
 composition-bearing dispatch/result records use version 2. Checkpoints are at
@@ -366,6 +368,7 @@ replacement for live readiness, source review, or release gates.
 | `diagnoses` | Record schema 2. Unique `id`, `task`, `checkpoint`, `fix_round`, original `base_revision`, `remedy` (`continue`, `restructure` or `stop`), `bound` or null, `reissue` (whether this diagnosis repeats its predecessor's rung), `judge_agent`, `judge_evidence`, `investigator_report` binding the assessed report the judge ruled on or null on a migrated row, `scope`, `allowed_paths`, the `plan` a bounded remedy authorized or null, `supersedes` naming a replaced plan or null, and the operator `authorization` that permitted an early supersession or null. A task's diagnoses move down the remedy ladder, each nonterminal rung repeating at most once, and `stop` is terminal and never repeats. Version-1 rows migrate to 2 with `reissue: false` and `investigator_report: null`. |
 | `refusal_authorizations` | Unique `id`, `task`, `role`, `fix_round` or null, approved `provider`, `brief` (`unchanged` or `revised`), the operator's `decision`, `authorization`. Permits one dispatch on its key to that provider after two recorded refusals, the brief held to the refused identity unless `revised`; the consuming dispatch names it in `refusal_move.authorization`. |
 | `delivery_recoveries` | Unique `id`, original `dispatch` and `assignment_index`, owner `input`, byte `receipts` for report/negative wait/pane/visible/native source/common/brief, archived `native_session`, `found: true`, `basis: archived_native_final_source`, null `native_session_proof`, and `grants_review_approval: false`. Original null session evidence is preserved; the archived user prompt binds its delivery to the saved dispatch. |
+| `legacy_ruling_recoveries` | Schema-1 receipts already written for historical version-2 citations. Unique `id`, `task`, `at`, operator `authorization` source/quote, `backup` path/SHA-256, `checkpoints` mapping original IDs to canonical JSON SHA-256 digests, and `grants_future_attempts: false`. Reading validates these bindings without fetching historical files. Altered, new or overlapping citations do not inherit a receipt. Empty after a schema-8 migration. |
 
 Dispatch/result version 2 carries `requirements`, `reviewer_scope`, or both.
 Requirements contain the assigned role's normalized object; reviewer scope is
@@ -651,3 +654,29 @@ apply here.
 - `apply` never trusts a snapshot for an agent's lifecycle state. It re-reads
   the live agent through `herdr agent get` and refuses a `working` or `blocked`
   worker before sending a single keystroke.
+
+
+## Explicit legacy ruling recovery
+
+Recovery store schema 9 adds `legacy_ruling_recoveries`. The owner migrates
+stores 1–8 by adding an empty collection and retaining existing records.
+An older store already containing this collection is refused. State document
+schema 6 and checkpoint record versions remain unchanged. Older owner builds
+cannot write schema 9; use the upgraded owner for every dispatch and reader.
+
+Existing schema-1 receipts stay in the ledger. Each carries `id`, `task`, `at`,
+the actual operator `authorization` source/quote, `backup` path/SHA-256, a
+`checkpoints` object mapping original checkpoint IDs to canonical JSON SHA-256
+digests, and `grants_future_attempts: false`. Every referenced row retains its
+complete original content and must read as version 2 after the owner's checkpoint migration, without `requested_by`.
+Reading validates these bindings without fetching historical files. Altered,
+new or overlapping citations do not inherit a receipt. Malformed or unsupported
+recovery state is refused without writes.
+
+The version-3 one-ruling read bound is unchanged: version-2 citations read as
+written. The checkpoint writer still refuses another ruling for a task that
+already has one, and correction limits are unchanged. No task identity, base,
+assignment, attempt count, plan, evidence or authorization is removed or
+invented. Receipts grant no corrections, review approvals or new dispatch
+authority. There is no owner command that appends, deletes or downgrades these
+records.

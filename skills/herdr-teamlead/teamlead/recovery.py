@@ -26,8 +26,8 @@ RECOVERY_SCHEMA_VERSION = 1
 #: (#403). An older store carrying any of them is unowned newer data and is
 #: refused; a clean one is stamped and given the empty collection
 #: (rules/stateful-artifacts.md). Version 8 adds the `diagnoses` collection
-#: (#407).
-RECOVERY_STORE_VERSION = 8
+#: (#407). Version 9 adds explicit digest-bound legacy ruling recovery receipts.
+RECOVERY_STORE_VERSION = 9
 REFUSAL_FIELDS = frozenset({"brief_identity", "refusal", "refusal_move", "provider"})
 SPECIALIST_DISPATCH_VERSION = 2
 #: Checkpoint record version. 1 carries a mandatory pinned-judge ruling; 2
@@ -80,7 +80,7 @@ def empty_recovery():
     return {"schema_version": RECOVERY_STORE_VERSION, "tasks": {}, "checkpoints": [],
             "plans": [], "dispatches": [], "context_permissions": [], "events": [],
             "hand_clearances": [], "historical_attempts": [], "role_clearances": [], "delivery_recoveries": [],
-            "refusal_authorizations": [], "diagnoses": []}
+            "refusal_authorizations": [], "diagnoses": [], "legacy_ruling_recoveries": []}
 
 
 def _migrate_checkpoints(store):
@@ -172,7 +172,9 @@ def _refuse_unowned_legacy(store, version):
             raise UsageError("Older recovery requires a delivery_recoveries array; restore the original owner-written store.", {})
         if any(not isinstance(row, dict) or row.get("schema_version") != 1 for row in deliveries):
             raise UsageError("Older recovery contains unowned newer delivery records; preserve it for owner recovery.", {})
-    added = ["diagnoses"]
+    added = ["legacy_ruling_recoveries"]
+    if version < 8:
+        added.append("diagnoses")
     if version < 6:
         added.append("refusal_authorizations")
     if version < 3:
@@ -189,7 +191,7 @@ def migrate_store(store):
     if not isinstance(store, dict) or type(store.get("schema_version")) is not int:
         return False
     version = store["schema_version"]
-    legacy = version in {1, 2, 3, 4, 5, 6, 7}
+    legacy = version in {1, 2, 3, 4, 5, 6, 7, 8}
     added = _refuse_unowned_legacy(store, version) if legacy else None
     # Both run: `or` would skip the second whenever the first reported work,
     # leaving version-1 diagnoses for a validator that accepts only version 2.
@@ -258,6 +260,47 @@ def validate_receipt(value):
             or not isinstance(value["path"], str) or not Path(value["path"]).is_absolute()
             or not isinstance(value["sha256"], str) or re.fullmatch(r"[0-9a-f]{64}", value["sha256"]) is None):
         raise UsageError("Recorded evidence needs an absolute artifact path and byte digest; restore the owner-written receipt.", {})
+
+
+def canonical_digest(value):
+    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+
+def validate_legacy_ruling_recoveries(store):
+    """Validate digest-bound receipts against the original checkpoint rows."""
+    records = store.get("legacy_ruling_recoveries")
+    if not isinstance(records, list):
+        raise UsageError("Legacy ruling recoveries must be an array; restore owner-written state.", {})
+    checkpoints = {row["id"]: row for row in store["checkpoints"]}
+    recovered = set()
+    identities = set()
+    for record in records:
+        required = {"schema_version", "id", "task", "authorization", "backup", "checkpoints", "grants_future_attempts", "at"}
+        if (not isinstance(record, dict) or set(record) != required
+                or type(record["schema_version"]) is not int or record["schema_version"] != 1
+                or record["grants_future_attempts"] is not False):
+            raise UsageError("Invalid legacy ruling recovery; restore its original owner receipt.", {})
+        key = text(record["id"], "recovery identity")
+        if key in identities:
+            raise UsageError("Duplicate legacy recovery identity; restore its original owner receipt.", {})
+        identities.add(key)
+        text(record["at"], "recovery timestamp")
+        authorization(record["authorization"])
+        validate_receipt(record["backup"])
+        rows = record["checkpoints"]
+        if not isinstance(rows, dict) or len(rows) < 2:
+            raise UsageError("A legacy recovery must bind multiple original citations; restore its receipt.", {})
+        actual = {item["id"] for item in store["checkpoints"] if item["task"] == record["task"] and "judge_evidence" in item}
+        if actual != set(rows):
+            raise UsageError("Recovered task citations changed; review the original ledger before continuing.", {})
+        for identifier, expected in rows.items():
+            row = checkpoints.get(identifier)
+            if (row is None or row["task"] != record["task"] or row["schema_version"] != 2
+                    or "requested_by" in row or "judge_evidence" not in row
+                    or expected != canonical_digest(row) or identifier in recovered):
+                raise UsageError("Recovered legacy citations changed or overlap; restore the original checkpoints.", {})
+            recovered.add(identifier)
+    return recovered
 
 
 def _event(store, at, kind, task, details):
@@ -1365,7 +1408,7 @@ def validate_store(store, assignments):
     try:
         if not isinstance(store["tasks"], dict):
             raise UsageError("Recovery tasks must be an object; restore the owner-written ledger.", {})
-        for name in ("checkpoints", "plans", "dispatches", "context_permissions", "events", "hand_clearances", "historical_attempts", "role_clearances", "delivery_recoveries", "refusal_authorizations", "diagnoses"):
+        for name in ("checkpoints", "plans", "dispatches", "context_permissions", "events", "hand_clearances", "historical_attempts", "role_clearances", "delivery_recoveries", "refusal_authorizations", "diagnoses", "legacy_ruling_recoveries"):
             if not isinstance(store[name], list):
                 raise UsageError("Recovery {} must be an array; restore the owner-written ledger.".format(name), {})
             identifiers = []
@@ -1391,6 +1434,7 @@ def validate_store(store, assignments):
             text(row["scope"], "task scope")
             paths(row["allowed_paths"], "task paths")
             authorization(row["authorization"])
+        validate_legacy_ruling_recoveries(store)
         ruled_tasks = set()
         for row in store["checkpoints"]:
             task = task_record(store, row["task"])
