@@ -1,9 +1,10 @@
 # Review Partition
 
-The document `validate-partition` checks. One reviewer per slice, so a change
-reaches a state that means "reviewed": a slice is saturated when its reviewer
-reports clean at the current tip, and the change is reviewed when every slice
-is saturated at one tip.
+The document `validate-partition` checks. One seat per slice, so a change
+reaches a state that means the seated responsibility has passed: a slice is
+saturated when its seat reports clean at the current tip, and the
+responsibility has passed when every slice is saturated at one tip. A tester
+partition passes the tester gate, never the reviewer's.
 
 `rules/agent-team-operation.md` Review Before PR carries the contract this
 format serves. Write the document only for a round filling several seats of one
@@ -23,11 +24,15 @@ role; a single-seat round needs none.
 ```
 
 - `schema_version` — `1`. Any other value is refused.
-- `role` — optional, `reviewer` when absent. The role the slices seat. It never
-  contains `#`.
+- `role` — optional, and `reviewer` when absent. The accepted set is the
+  script's — see `skills/herdr-teamlead/teamlead/tiers.py`, the `SEATABLE_ROLES`
+  constant. A role outside it is refused, at the document and at `--roles`.
 - `slices` — at least two. Each is `{name, paths}` and carries nothing else.
-  - `name` — non-empty, unique within the document. It names the slice in its
-    reviewer's brief and in that reviewer's report.
+  - `name` — unique within the document, and written with letters, digits,
+    underscores, dots or hyphens, starting with a letter or digit. It becomes
+    the seat name `<role>#<name>` in the plan, and a seat is a CLI key: the
+    left side of `--brief SEAT=PATH` and `--report SEAT=PATH`. A name carrying
+    `=`, `#`, a comma or whitespace does not read back, and is refused.
   - `paths` — a non-empty array of globs matched against the round's changed
     paths, `fnmatch`-style (`*` does not stop at `/`; `**` is ordinary text).
 
@@ -60,15 +65,26 @@ owns nothing. Fix the document and re-run. Dispatch only once it exits 0.
 
 ## Seating
 
-One `plan` run fills one reviewer seat. A partitioned round therefore runs its
-slices as separate reviewer dispatches against the same tip: plan and apply
-each slice as an ordinary `reviewer` round, with that slice's brief, excluding
-the workers the earlier slices already used so each slice gets its own
-reviewer. Assignments stay keyed `reviewer`, which is what dispatch resolves
-briefs, requirements and round tiers by.
+`plan --partition <partition.json>` replaces the named role with one seat per
+slice, keyed `<role>#<slice>` in the plan's `assignments`. A seat's ROLE
+decides everything the responsibility governs — its cost and rotation history,
+exclusions, round type, requirements, tier qualification and the review-package
+checks its brief owes — so capability, contribution-exclusion and headroom
+ordering apply unchanged and each slice gets a distinct worker.
 
-Filling several slices from ONE plan is #434; the `<role>#<slice>` seat name is
-reserved for it and means nothing today.
+`plan --partition` emits `slice_paths`, a `{seat: [glob, ...]}` map taken from
+the validated document, so the boundary reaches the composer without a hand
+copy. Each seat's values carry those globs as `SLICE_PATHS`. `compose-briefs.sh`
+renders the slice name and those paths into the brief's `SLICE_SCOPE` and
+refuses a seat without them: a slice name alone leaves the worker no boundary
+to resolve, and the composer never reads the partition document. `SLICE_SCOPE`
+itself is composed, never supplied.
+
+`apply` takes those seat names directly: pass each seat its own brief
+(`--brief reviewer#api=<path>`), and `--task`, since the seat lives on the
+dispatch. A seat takes its ROLE's brief template, and the ledger records the
+role, so the per-role history does not fragment across seats. The dispatch
+record keeps the seat, which is what a slice's verdict is read back through.
 
 Each slice's brief names its own slice and forbids roaming. An observation
 outside the slice belongs in a separate section of that report and forms no

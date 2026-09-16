@@ -8,7 +8,7 @@ those declarations nor dispatch history certify expertise or completed work.
 
 from .config import CAPABILITY_ID, parse_capabilities
 from .errors import UsageError
-from .tiers import ROLE_ROUNDS
+from .tiers import ROLE_ROUNDS, SEAT_SEPARATOR, canonical_role
 
 
 REQUIREMENTS_SCHEMA_VERSION = 1
@@ -17,11 +17,13 @@ CONTRIBUTOR_ROLES = frozenset({"developer", "architect", "advisor", "investigato
 CONTRIBUTOR_ROUNDS = frozenset({"architect", "reconciliation", "test_plan"})
 POSSIBLE_CONTRIBUTION = frozenset({"applied", "unknown", "sending", "sent_but_not_started"})
 REQUIREMENT_FIELDS = frozenset({"specialty", "required_capabilities", "independent", "engagement"})
+#: Distinguishes an absent requirement key from one explicitly set to null.
+_MISSING = object()
 
 
 def normalize_requirement(record, role):
     """Validate one persisted assignment requirement without inventing defaults."""
-    if role not in ROLE_ROUNDS:
+    if canonical_role(role) not in ROLE_ROUNDS:
         raise UsageError("Specialist requirements cannot change the pinned judge or invent a responsibility; choose a documented role.", {"role": role})
     if not isinstance(record, dict) or set(record) != REQUIREMENT_FIELDS:
         raise UsageError("Each specialist requirement needs specialty, required_capabilities, independent and engagement; use the documented requirements shape.", {"role": role})
@@ -33,7 +35,7 @@ def normalize_requirement(record, role):
         raise UsageError("A specialist assignment needs at least one required capability; record the skills or tools its worker must have.", {"role": role})
     if type(record["independent"]) is not bool:
         raise UsageError("Specialist independent must be a JSON boolean; state whether this assignment requires an independent assessor.", {"role": role})
-    if role in {"reviewer", "tester"} and not record["independent"]:
+    if canonical_role(role) in {"reviewer", "tester"} and not record["independent"]:
         raise UsageError("Reviewer and tester assignments require independent:true; use advisor for non-independent consultation.", {"role": role})
     engagement = record["engagement"]
     if (not isinstance(engagement, str) or not engagement.strip() or engagement != engagement.strip()
@@ -59,8 +61,24 @@ def parse_requirements(payload, roles, task, *, allow_historical_architect=False
                 or not isinstance(payload.get("assignments"), dict)):
             raise UsageError("Requirements must be a schema_version 1 object with an assignments map; use the documented requirements file.", {})
         assignments = payload["assignments"]
-        if not assignments or set(assignments) - set(roles):
+        # A seat inherits its ROLE's requirement, so one `reviewer` entry
+        # covers every slice; a seat's own key overrides it for that slice
+        # alone (#434).
+        inherited = {canonical_role(role) for role in roles}
+        if not assignments or set(assignments) - set(roles) - inherited:
             raise UsageError("Requirements must name at least one role and only roles this plan assigns; correct the role keys.", {})
+        # A seat's ROLE decides its requirement. Carrying both lets the seat
+        # entry replace its role's, so a seat could require less than the
+        # responsibility does and admit a worker the role's capabilities bar
+        # (rules/agent-team-operation.md Review Before PR).
+        both = sorted(key for key in assignments
+                      if SEAT_SEPARATOR in key and canonical_role(key) in assignments)
+        if both:
+            raise UsageError(
+                "Requirements name {} beside its responsibility: a seat inherits its role's "
+                "requirement, and a seat entry alongside it would decide the seat's capabilities "
+                "instead. Keep the role's entry alone.".format(", ".join(both)),
+                {"roles": both})
     missing = CONSULTATION_ROLES.intersection(roles) - set(assignments)
     if allow_historical_architect:
         missing -= {"architect"}
@@ -68,22 +86,34 @@ def parse_requirements(payload, roles, task, *, allow_historical_architect=False
         raise UsageError("Roles {} require explicit specialist requirements; supply their specialty, capabilities, independence and engagement with --requirements.".format(", ".join(sorted(missing))), {"roles": sorted(missing)})
     if assignments and (not isinstance(task, str) or not task.strip()):
         raise UsageError("Specialist assignments require --task; preserve their task identity for independence and consultation continuity.", {})
-    return {role: normalize_requirement(assignments[role], role) for role in roles if role in assignments}
+    resolved = {}
+    for role in roles:
+        # A sentinel, never `None`: an explicit `{"advisor": null}` is a
+        # requirement the owner must reject, not an absent one to skip.
+        record = assignments.get(role, _MISSING)
+        if record is _MISSING:
+            record = assignments.get(canonical_role(role), _MISSING)
+        if record is not _MISSING:
+            resolved[role] = normalize_requirement(record, role)
+    return resolved
 
 
 def _contributor(row, assessment=None):
     if row.get("status", "unknown") not in POSSIBLE_CONTRIBUTION:
         return False
-    if row.get("role") == "developer":
+    # A dispatch keeps its SEAT (`reviewer#api`); the ledger keeps the
+    # responsibility. Both reach here, so the responsibility decides (#434).
+    base = canonical_role(row.get("role"))
+    if base == "developer":
         return True
     if assessment is not None:
         return assessment["contribution"] != "none"
     tier = row.get("tier")
     if tier is None and isinstance(row.get("result"), dict):
         tier = row["result"].get("tier")
-    return (row.get("role") in CONTRIBUTOR_ROLES
+    return (base in CONTRIBUTOR_ROLES
             or isinstance(tier, dict) and tier.get("round") in CONTRIBUTOR_ROUNDS
-            or row.get("role") == "reviewer" and row.get("reviewer_scope") != "verification")
+            or base == "reviewer" and row.get("reviewer_scope") != "verification")
 
 
 def selection_constraints(roles, agents, requirements, history, task, dispatches=(), assessments=(), candidate_names=None):
@@ -118,7 +148,11 @@ def selection_constraints(roles, agents, requirements, history, task, dispatches
     rationale = []
     for role in roles:
         requirement = normalized.get(role)
-        independent = role in {"reviewer", "tester"} or requirement is not None and requirement["independent"]
+        # The RESPONSIBILITY decides independence, never the seat's own name: a
+        # `reviewer#api` seat is a reviewer, and a contributor barred from
+        # `reviewer` is barred from every seat of it (#434).
+        base = canonical_role(role)
+        independent = base in {"reviewer", "tester"} or requirement is not None and requirement["independent"]
         for name in names:
             agent = by_name.get(name)
             unconfigured = requirement is not None and agent is None
@@ -136,7 +170,8 @@ def selection_constraints(roles, agents, requirements, history, task, dispatches
                 rationale.append("{} excludes {}: {}.".format(role, name, "; ".join(reasons)))
                 continue
             if requirement is not None:
-                familiar = any(row.get("task") == task and row.get("role") == role
+                # History records the responsibility, so familiarity reads it.
+                familiar = any(row.get("task") == task and row.get("role") == base
                                and row.get("agent") == name and row.get("status") == "applied"
                                and row.get("requirements") == requirement for row in history)
                 familiarity[role][name] = int(familiar)

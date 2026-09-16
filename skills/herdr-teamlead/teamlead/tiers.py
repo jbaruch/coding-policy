@@ -39,6 +39,82 @@ DEFAULT_ROUNDS = {
     "critic": "critic", "lead": "lead",
     "advisor": "architect", "investigator": "reconciliation",
 }
+#: Separates a seat from the slice it owns in a role name (`reviewer#api`). A
+#: role name never contains it, so the seat reads back unambiguously (#409).
+SEAT_SEPARATOR = "#"
+
+
+#: The responsibilities a SEAT may fill. Slicing supplies a termination
+#: condition for independent verification of a surface. Every other
+#: responsibility holds a per-task counter one seat owns -- the developer fix
+#: count, the retained-context transition, the release role -- and a slice of
+#: one would read as a second worker holding the same count.
+SEATABLE_ROLES = frozenset({"reviewer", "tester"})
+
+#: The slice half of a seat. A seat is a CLI key -- the left side of `--brief
+#: SEAT=PATH` and `--report SEAT=PATH`, and a line-oriented key
+#: `compose-briefs.sh` reads back -- so a name outside this shape plans a seat
+#: the round cannot address. `partition` validates its document against the
+#: same pattern, so a hand-written seat and a generated one are held to one
+#: grammar.
+SLICE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*")
+
+
+#: What a role name can never carry: `/` escapes the brief's output directory,
+#: and `=` and `,` are the separators `--brief ROLE=PATH` and `--roles a,b`
+#: split on. `compose-briefs.sh` refuses the same set, so a name `plan` emits
+#: always composes.
+UNADDRESSABLE_ROLE = re.compile(r"[/=,\x00-\x1f\x7f]")
+
+
+def require_seatable(name):
+    """Refuse a name that is not a seat this fleet can address.
+
+    `partition_role` and `load_partition` bar an unseatable role and a
+    malformed slice inside the partition document; this bars both wherever a
+    role name is READ -- `--roles developer#api`, `--assignments {"reviewer#":
+    ...}` and any other hand-written map reach the same refusal (#434).
+    """
+    if isinstance(name, str) and UNADDRESSABLE_ROLE.search(name):
+        raise UsageError(
+            "Role {!r} cannot be addressed: a name carrying a path separator, '=', ',' or a "
+            "control character neither names its brief nor reads back through "
+            "`--brief ROLE=PATH` and `--roles a,b`.".format(name),
+            {"role": name})
+    if not isinstance(name, str) or SEAT_SEPARATOR not in name:
+        return name
+    base = canonical_role(name)
+    if base not in SEATABLE_ROLES:
+        raise UsageError(
+            "Role {!r} names a seat of {!r}, which holds a per-task counter one "
+            "worker owns. Pass {!r} unseated, or seat the slice under {}.".format(
+                name, base, base, " or ".join(sorted(SEATABLE_ROLES))),
+            {"role": name})
+    slice_name = name.split(SEAT_SEPARATOR, 1)[1]
+    if not SLICE_NAME.fullmatch(slice_name):
+        raise UsageError(
+            "Seat {!r} names the slice {!r}, which cannot address it: name a slice "
+            "with letters, digits, underscores, dots or hyphens, starting with a "
+            "letter or digit. A seat is a CLI key, and any other name does not read "
+            "back through `--brief SEAT=PATH`.".format(name, slice_name),
+            {"role": name})
+    return name
+
+
+def canonical_role(name):
+    """The responsibility a seat fills.
+
+    Several seats of one role are distinct names to the planner and one
+    responsibility to everything else -- independence, round tiers,
+    requirements, brief templates and the per-role history all resolve through
+    here, so a seat inherits its role's contract instead of reading as an
+    unknown one (#434).
+    """
+    if not isinstance(name, str):
+        return name
+    return name.split(SEAT_SEPARATOR, 1)[0]
+
+
 ROLE_ROUNDS = {
     "developer": frozenset({"build", "fix", "mechanical"}),
     "tester": frozenset({"test_plan", "hostile_verify", "recheck"}),
@@ -333,8 +409,9 @@ def select_tier(agent, role, round_type=None, context=None, fix_round=None):
     # Selection preserves the true cumulative number for authorized recovery.
     if fix_round is not None and (type(fix_round) is not int or fix_round < 1):
         raise UsageError("Fix round must be a positive integer; preserve the task counter.", {})
-    round_type = round_type or ("fix" if role == "developer" and fix_round else DEFAULT_ROUNDS.get(role))
-    if not isinstance(round_type, str) or round_type not in ROLE_ROUNDS.get(role, frozenset()):
+    base = canonical_role(role)
+    round_type = round_type or ("fix" if base == "developer" and fix_round else DEFAULT_ROUNDS.get(base))
+    if not isinstance(round_type, str) or round_type not in ROLE_ROUNDS.get(base, frozenset()):
         raise UsageError("Round {!r} cannot perform role {!r}; choose its documented round type.".format(round_type, role), {})
     chosen_round = round_type
     if round_type == "build" and _nonnegative_int(context, "failed_gates") >= BUILD_FAILED_GATES:

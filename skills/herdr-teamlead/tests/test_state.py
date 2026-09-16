@@ -42,7 +42,7 @@ class EmptyStateTest(unittest.TestCase):
             empty_state(),
             {"schema_version": STATE_SCHEMA_VERSION, "snapshots": [], "assignments": [],
              "specialist_assessments": [],
-             "recovery": {"schema_version": 9, "tasks": {}, "checkpoints": [], "plans": [],
+             "recovery": {"schema_version": 10, "tasks": {}, "checkpoints": [], "plans": [],
                           "dispatches": [], "context_permissions": [], "events": [],
                           "hand_clearances": [], "historical_attempts": [], "role_clearances": [], "delivery_recoveries": [],
                           "refusal_authorizations": [], "diagnoses": [], "legacy_ruling_recoveries": []}},
@@ -240,6 +240,42 @@ class MigrationTest(unittest.TestCase):
                         "at": "2026-01-01T00:00:00+00:00",
                         "role": "developer",
                         "agent": "grok",
+                    }
+                ],
+            }
+        )
+        before = self.path.read_text(encoding="utf-8")
+        self.assertEqual(self.load(), empty_state())
+        self.assertEqual(self.path.read_text(encoding="utf-8"), before)
+
+    def test_a_seat_named_assignment_row_is_refused(self):
+        # The ledger row holds the responsibility and the dispatch holds the
+        # seat. A seat-named row loads with no matching dispatch, and
+        # `role_counts` then keys history under the seat, fragmenting the
+        # per-role rotation the canonical write exists to keep (#434).
+        self.write(
+            {
+                "schema_version": STATE_SCHEMA_VERSION,
+                "specialist_assessments": [],
+                "snapshots": [],
+                "assignments": [
+                    {
+                        "schema_version": STATE_SCHEMA_VERSION,
+                        "at": "2026-01-01T00:00:00+00:00",
+                        "role": "reviewer#api",
+                        "agent": "grok",
+                        "status": "applied",
+                        "cleared": None,
+                        "clear_reason": "unknown",
+                        "task": None,
+                        "fix_round": None,
+                        "context_session": None,
+                        "tier": None,
+                        "requirements": None,
+                        # Null, so the reviewer-scope provenance check passes
+                        # and the seat guard is the only thing that can refuse
+                        # this row.
+                        "reviewer_scope": None,
                     }
                 ],
             }

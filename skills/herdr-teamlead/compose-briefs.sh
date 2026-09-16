@@ -11,7 +11,8 @@
 #   values: {"shared": {"KEY": "value", ...},
 #            "roles":  {"<role>": {"KEY": "value", ...}, ...}}
 #           `shared` fills COMMON.md and every brief; a role's own values win
-#           on a collision. Roles map to `brief-<role>.md` in the templates dir.
+#           on a collision. Roles map to `brief-<role>.md` in the templates dir;
+#           a seat `<role>#<slice>` takes its role's template.
 #           advisor/investigator/architect fall back to brief-specialist.md.
 #           SPECIALIST_CONTEXT defaults to empty only where the template uses it.
 #   stdout: one JSON object —
@@ -49,10 +50,34 @@ TEAMLEAD_REPORT_PATH_MAX_COLS="${TEAMLEAD_REPORT_PATH_MAX_COLS:-100}"
 
 warn() { printf 'compose-briefs: %s\n' "$1" >&2; }
 
+#: The responsibilities a SEAT may fill, mirroring `tiers.SEATABLE_ROLES`.
+SEATABLE_ROLES="reviewer tester"
+
+# The slice boundary a seat's brief carries, or empty for a plain role. Derived
+# from the seat, so a round cannot dispatch several full-surface verdicts by
+# forgetting to write the boundary by hand (rules/agent-team-operation.md
+# Review Before PR).
+slice_scope() { # <role-or-seat> <slice-paths-json>
+  # Named paths, not just a slice name: a boundary a worker cannot resolve is
+  # not a boundary, and the composer receives no partition document.
+  local listed
+  case "$1" in
+    *"#"*)
+      listed="$(printf '%s' "$2" | jq -r 'map("`" + . + "`") | join(", ")')" || return 3
+      printf 'Your slice this round is **%s**, and it owns %s. That slice is your whole surface: a full pass covers all of it and nothing beyond it. An observation outside your slice goes in a separate section of your report and forms no part of your verdict.' \
+        "${1#*#}" "$listed"
+      ;;
+    *) printf '' ;;
+  esac
+}
+
 template_for_role() { # <templates> <role>
-  local path="${1}/brief-${2}.md"
+  # A seat (`reviewer#api`) takes its ROLE's template: the slice is brief
+  # content, never a separate template to author (#434).
+  local role="${2%%#*}"
+  local path="${1}/brief-${role}.md"
   if [[ ! -r "$path" ]]; then
-    case "$2" in
+    case "$role" in
       advisor|investigator|architect) path="${1}/brief-specialist.md" ;;
     esac
   fi
@@ -125,8 +150,11 @@ validate_values() { # <values-json> <label>
   return 0
 }
 
-validate_review_package() { # <merged-values-json> <role>
-  case "$2" in reviewer|tester) ;; *) return 0 ;; esac
+validate_review_package() { # <merged-values-json> <role-or-seat>
+  # A seat (`reviewer#api`) owes its ROLE's review-package checks: the slice
+  # narrows what it reviews, never what its brief must carry (#434).
+  local role="${2%%#*}"
+  case "$role" in reviewer|tester) ;; *) return 0 ;; esac
   local package ref key
   for key in REVIEW_BASE REVIEW_HEAD; do
     ref="$(printf '%s' "$1" | jq -r --arg k "$key" '.[$k] // ""')" || return 2
@@ -203,17 +231,69 @@ main() {
     warn "values file ${values_file} names no roles — nothing to compose"
     return 1
   fi
+  # In jq, before the keys become a newline-delimited list: a key carrying a
+  # newline is split into two pseudo-roles by the `while read` below, so a
+  # later shell test never sees the offending key at all.
+  local bad_key
+  bad_key="$(printf '%s' "$values" | jq -r '[.roles | keys[] | select(length == 0 or test("[/=,\u0000-\u001f\u007f]"))] | first // empty')" || return 2
+  if [[ -n "$bad_key" ]]; then
+    warn "values file ${values_file} has a role key that cannot name the brief it writes — a key carrying a path separator, '=', ',' or a control character does not read back through the output path and the CLI keys"
+    return 2
+  fi
 
   local shared
   shared="$(printf '%s' "$values" | jq -c '.shared // {}')"
 
   # Every source file must exist before anything is written.
-  local common_tpl="${templates}/COMMON.md" role role_tpl
+  local common_tpl="${templates}/COMMON.md" role role_tpl seatable_base
   if [[ ! -r "$common_tpl" ]]; then
     warn "template not found: ${common_tpl}"
     return 1
   fi
   while IFS= read -r role; do
+    # The key names the brief this run WRITES (`brief-<role>.md`), so it is
+    # checked before it reaches a path. `template_for_role` resolves a seat to
+    # its role, which would otherwise let `reviewer#/../../outside` take the
+    # reviewer template and redirect the output outside `outdir` (#434). The
+    # CLI's own `require_seatable` is not in the picture when this script runs
+    # directly.
+    # A denylist, not an allowlist: the planner accepts any custom role name,
+    # so rejecting more than what could reach a path would break the plan →
+    # compose round-trip for a round the planner happily emits.
+    # Exactly what cannot name `brief-<role>.md` inside the output directory or
+    # read back through `--brief ROLE=PATH` and `--roles a,b`. The `brief-`
+    # prefix makes a leading dot or dash harmless, and `..` without a separator
+    # names an ordinary file, so neither is rejected: the planner emits custom
+    # roles, and everything it emits has to compose.
+    # The jq pass above rejects the whole set before the keys are split into
+    # lines; this arm catches what a line-oriented read could still hand us.
+    if [[ -z "$role" || "$role" == *"/"* || "$role" == *"="* || "$role" == *","* ]]; then
+      warn "role key '${role}' cannot name the brief it writes — a key carrying a path separator, '=', ',' or a control character does not read back through the output path and the CLI keys"
+      return 2
+    fi
+    # Only a responsibility whose verification a slice terminates is seated;
+    # `plan`, `apply` and recovery all refuse the rest, so composing a brief
+    # for one would write a round nothing downstream accepts (#434).
+    if [[ "$role" == *"#"* ]] && ! [[ "${role#*#}" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]]; then
+      warn "seat '${role}' names the slice '${role#*#}', which cannot address it: name a slice with letters, digits, underscores, dots or hyphens, starting with a letter or digit"
+      return 2
+    fi
+    if [[ "$role" == *"#"* ]]; then
+      # An exact arm, never substring membership: `reviewer tester#api` matches
+      # inside " reviewer tester " and would pass as a seat.
+      case " ${SEATABLE_ROLES} " in
+        *" ${role%%#*} "*)
+          case "${role%%#*}" in
+            *[[:space:]]*) seatable_base="" ;;
+            *) seatable_base="${role%%#*}" ;;
+          esac ;;
+        *) seatable_base="" ;;
+      esac
+      if [[ -z "$seatable_base" ]]; then
+        warn "role key '${role}' seats '${role%%#*}', and only ${SEATABLE_ROLES// /, } are seated — every other responsibility holds a per-task counter one worker owns"
+        return 2
+      fi
+    fi
     role_tpl="$(template_for_role "$templates" "$role")"
     if [[ ! -r "$role_tpl" ]]; then
       warn "template not found: ${role_tpl} — supply the packaged role template"
@@ -225,7 +305,7 @@ main() {
   # round behind, and no output directory either (`rules/file-hygiene.md`
   # Idempotency); the directory is created only once every check has passed.
   local -a out_paths=() out_bodies=() report_paths=()
-  local merged rendered leftovers supplied known common_known unused key report
+  local merged rendered leftovers supplied known common_known unused key report rendered_scope
   local common_body scan_rc=0
   validate_values "$shared" "the shared values" || return 2
   # Resolver-produced policy paths are explicit brief inputs. Custom templates
@@ -264,10 +344,50 @@ main() {
       return 2
     fi
     merged="$(jq -c -n --argjson a "$shared" --argjson b "$(printf '%s' "$values" | jq -c --arg r "$role" '.roles[$r]')" '$a * $b')"
+    # SLICE_PATHS is a list, not a placeholder value: it is read here and
+    # dropped before the text check, which every rendered value must pass.
+    merged="$(printf '%s' "$merged" | jq -c 'del(.SLICE_PATHS)')" || return 2
     validate_values "$merged" "the values for role '${role}'" || return 2
     known="$(placeholders_in "$role_tpl")" || return 3
     if [[ $'\n'"${known}"$'\n' == *$'\nSPECIALIST_CONTEXT\n'* ]]; then
       merged="$(printf '%s' "$merged" | jq -c '{SPECIALIST_CONTEXT:""} * .')" || return 2
+    fi
+    # `.shared` too: a key merged from there is overwritten below, so leaving it
+    # unchecked would accept a supplied boundary by silently discarding it.
+    if printf '%s' "$values" | jq -e --arg r "$role" '(.shared // {} | has("SLICE_SCOPE")) or (.roles[$r] | has("SLICE_SCOPE"))' >/dev/null; then
+      warn "SLICE_SCOPE for role '${role}' is composed from the seat and its paths, not supplied — remove the key from .shared and .roles"
+      return 2
+    fi
+    if printf '%s' "$values" | jq -e '.shared // {} | has("SLICE_PATHS")' >/dev/null; then
+      warn "SLICE_PATHS belongs to one seat, never to .shared — every slice owns different paths"
+      return 2
+    fi
+    local slice_paths="[]"
+    if [[ "$role" == *"#"* ]]; then
+      # The globs are rendered verbatim into the worker's brief, so a backtick
+      # or a control character could close the code span and append
+      # instructions of its own. A path glob needs neither.
+      if ! printf '%s' "$values" | jq -e --arg r "$role" '.roles[$r].SLICE_PATHS | type == "array" and length > 0 and all(type == "string" and (. | gsub("\\s";"") | length) > 0 and (test("[\u0000-\u001f\u007f`]") | not))' >/dev/null; then
+        warn "seat '${role}' needs SLICE_PATHS: the non-empty list of path globs its slice owns, copied from the partition validate-partition accepted, each a string without backticks or control characters. A slice name alone leaves the worker no boundary to respect"
+        return 2
+      fi
+      slice_paths="$(printf '%s' "$values" | jq -c --arg r "$role" '.roles[$r].SLICE_PATHS')" || return 2
+    elif printf '%s' "$values" | jq -e --arg r "$role" '.roles[$r] | has("SLICE_PATHS")' >/dev/null; then # unseated
+      warn "SLICE_PATHS for role '${role}' names a slice it does not own — an unseated role reviews the whole change"
+      return 2
+    fi
+    if [[ $'\n'"${known}"$'\n' == *$'\nSLICE_SCOPE\n'* ]]; then
+      # Assigned and checked on its own line: nested in the outer jq's --arg,
+      # a failing slice_scope is discarded and the brief composes with an empty
+      # boundary -- the one outcome the placeholder exists to prevent.
+      rendered_scope="$(slice_scope "$role" "$slice_paths")" || return 3
+      merged="$(printf '%s' "$merged" | jq -c --arg s "$rendered_scope" '. + {SLICE_SCOPE:$s}')" || return 2
+    elif [[ "$role" == *"#"* ]]; then
+      # A custom template without the placeholder would compose a seated brief
+      # carrying no boundary, and its worker would return a full-surface
+      # verdict over a partitioned change.
+      warn "the template for seat '${role}' carries no {{SLICE_SCOPE}} placeholder — a seated brief must render its slice boundary; add it to $(basename "$role_tpl")"
+      return 2
     fi
     case "$role" in
       advisor|investigator|architect)

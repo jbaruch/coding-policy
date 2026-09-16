@@ -11,6 +11,7 @@ import json
 from .chronology import latest_assignment
 from .errors import UsageError
 from .recovery import receipt, text, validate_receipt
+from .tiers import canonical_role
 from . import supervision
 
 
@@ -32,7 +33,10 @@ def _input(data):
 
 def _dispatch(state, identifier):
     found = next((row for row in state["recovery"]["dispatches"] if row["id"] == identifier), None)
-    if found is None or found["status"] != "applied" or found["role"] not in ASSESSABLE_ROLES:
+    # The seat stays on the dispatch, so its RESPONSIBILITY decides whether the
+    # delivered report is assessable: a `reviewer#api` slice verdict is a
+    # reviewer's (#434).
+    if found is None or found["status"] != "applied" or canonical_role(found["role"]) not in ASSESSABLE_ROLES:
         raise UsageError("Assess a confirmed consultation, reviewer or tester dispatch; reconcile an unknown send before recording its outcome.", {})
     index = found.get("assignment_index")
     if type(index) is not int or not 0 <= index < len(state["assignments"]):
@@ -59,7 +63,9 @@ def validate_assessments(state):
         dispatch, index = _dispatch(state, record["dispatch"])
         if supervision.timestamp(record["at"]) < supervision.timestamp(state["assignments"][index]["at"]):
             raise UsageError("Specialist assessment predates its assignment; restore the original dated evidence.", {})
-        if type(record["assignment_index"]) is not int or record["assignment_index"] != index or any(record[key] != dispatch[key] for key in ("task", "role", "agent")):
+        if (type(record["assignment_index"]) is not int or record["assignment_index"] != index
+                or record["task"] != dispatch["task"] or record["agent"] != dispatch["agent"]
+                or record["role"] != canonical_role(dispatch["role"])):
             raise UsageError("Specialist assessment no longer matches its original dispatch; restore the owned assignment relationship.", {})
         for key, source in (("report_evidence", "report"), ("delivery_evidence", "delivery")):
             validate_receipt(record[key])
@@ -97,8 +103,13 @@ def record_assessment(state, state_path, data, at):
               and proof.get("agent") == dispatch["agent"] and proof.get("report_path") == data["report"])
     if not waited and recovered is None:
         raise UsageError("Delivery receipt must prove this worker's exact report arrived; a lifecycle status or pending checkpoint is insufficient.", {})
+    # The RESPONSIBILITY, never the seat: this record is independently
+    # versioned, and widening its `role` to hold `reviewer#api` would repurpose
+    # the field without versioning it (rules/stateful-artifacts.md Migration
+    # Policy). The seat stays on the dispatch this record cites (#434).
     result = {"schema_version": ASSESSMENT_SCHEMA_VERSION, "at": at, **data,
-              "assignment_index": index, "task": dispatch["task"], "role": dispatch["role"], "agent": dispatch["agent"],
+              "assignment_index": index, "task": dispatch["task"],
+              "role": canonical_role(dispatch["role"]), "agent": dispatch["agent"],
               "report_evidence": report_evidence, "delivery_evidence": delivery_evidence}
     state["specialist_assessments"].append(result)
     return result
@@ -112,7 +123,7 @@ def require_followup(state, state_path, assignments):
             raise UsageError("No previous specialist assignment exists; dispatch a fresh consultation first.", {})
         index, row = prior
         assessment = next((item for item in reversed(state["specialist_assessments"]) if item["assignment_index"] == index), None)
-        if assessment is None or row["role"] != role:
+        if assessment is None or row["role"] != canonical_role(role):
             raise UsageError("Retained specialist needs the preceding assignment's saved lead assessment; run assess-specialist before following up.", {})
         for key in ("report_evidence", "delivery_evidence"):
             current, _body = receipt(assessment[key]["path"])

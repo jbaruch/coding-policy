@@ -1,5 +1,227 @@
 # Changelog
 
+### Added
+
+- **One plan fills every slice of a partitioned review (#434, completing
+  #409).** #430 shipped the partition validator and held the seating back:
+  `plan` could emit `{"reviewer#api": "alpha", "reviewer#core": "beta"}`, but
+  the seat name then reached `apply` as an unknown role — `normalize_requirement`
+  refused it, `tiers` rejected the round's configured tier,
+  `compose-briefs.sh` looked for a `brief-reviewer#api.md` that does not exist,
+  and a seat-named ledger row fragmented the per-role history.
+
+  `tiers.canonical_role` resolves the responsibility a seat fills, and every
+  module that reasons about responsibility reads through it: independence and
+  contribution exclusion, round tiers, requirements, fix history, the brief
+  template, and the reviewer-scope classification. Independence is the one that
+  had to be right — a worker the ledger records as a contributor on the task is
+  barred from every seat of the reviewer role, not only from the literal name
+  `reviewer`, and a seat's requirement still cannot declare itself
+  non-independent. The seat identity reaches
+  the planner and the dispatch record — which is what a slice's verdict is read
+  back through — while the ledger records the role, so history does not
+  fragment.
+
+  `plan --partition` is restored, and `apply` takes the seat names directly
+  with a brief per seat. A round with no partition is untouched at every step.
+
+  Every join that reads a seat as a responsibility resolves through
+  `canonical_role`, in the module that owns the check rather than at each call
+  site: `state.add_assignment` canonicalizes the ledger row it writes (so the
+  recovery path that reconciles an unknown send ledgers the role too, and a
+  seat's reviewer scope survives), `recovery.validate_store` matches a
+  `reviewer#api` dispatch to its `reviewer` row (without it, the NEXT state
+  load rejected the pair and returned an empty ledger, losing the contribution
+  and recovery history it was keeping), `qualification.require_qualification`
+  reads the role's recorded promotion and canary, `engagement` accepts a
+  slice's delivered report for assessment, `planner` prices a seat at its
+  role's weight and reads its role's rotation history, and
+  `compose-briefs.sh` holds a seat to its role's review-package checks.
+
+  Two refusals bound the feature instead of patching around it. A partition
+  seats `reviewer` or `tester` alone: every other responsibility carries a
+  per-task counter — the developer fix count, the retained-context transition —
+  that one seat owns, and a slice of one would read as a second worker holding
+  the same count. And a slice name is written with letters, digits,
+  underscores, dots or hyphens, because a seat is a CLI key (`--brief
+  SEAT=PATH`) and a name carrying `=`, `#`, a comma or whitespace plans a seat
+  the round cannot address.
+
+  The first refusal holds wherever a role name is READ, not only inside the
+  partition document. `tiers.require_seatable` gates the shared plan/apply
+  input boundary, so a hand-written `--roles developer#api` or an
+  `--assignments` map naming `release#core` is refused with the responsibility
+  it tried to seat. Without it, `partition_role`'s reviewer/tester restriction
+  was bypassable from the command line: `select_tier` would resolve the seat to
+  `developer` and hand it a build tier while `assign.validate_fix_history` kept
+  counting the literal `developer` key, splitting one task's correction
+  allowance across as many seats as the lead cared to name.
+
+  `_contributor` resolved the ledger row's role but not the dispatch's, and a
+  dispatch keeps the seat — a pending `reviewer#api` design round therefore
+  read as no contribution, leaving that worker eligible for an independent seat
+  on its own task before the send even resolved. And `partition_role` tested
+  membership against a frozenset before checking the type, so a document whose
+  `role` is `[]` or `{}` raised `TypeError` out of `load_partition` instead of
+  the `UsageError` every caller handles. And the seat fan-out let a
+  seat-specific exclusion REPLACE its role's, so `--exclude reviewer#api=beta`
+  lifted the contributor bar the role already carried and the planner could
+  hand that slice to the worker that wrote the task; exclusions now union.
+
+  The recovery store is at schema 10. `dispatches[].role` now holds a seat
+  while the assignment row holds the responsibility, and a reader that matched
+  the two literally no longer reads the pair correctly — a silent field
+  repurpose that `rules/stateful-artifacts.md` Migration Policy forbids. No
+  field is added, so the migration is a stamp, and an older store carrying a
+  seat-named dispatch is refused as unowned newer data, its saved result
+  included: a non-applied row keeps its own copy of the role, and checking the
+  top-level one alone let such a store be stamped rather than preserved. The legacy set is
+  derived from the constant rather than written out, so a reader pinned to an
+  older version reads a newer store as newer instead of migrating it downward.
+
+  The seat grammar is enforced where a seat is read, not only where one is
+  generated. `require_seatable` validates the slice half against the same
+  pattern the partition document uses, so `reviewer#` and `reviewer#a=b` are
+  refused at the plan/apply boundary; `recovery` applies it too, since
+  `reserve` and state loading reach the validators without passing a CLI
+  parser. A seat also inherits its ROLE's requirement entry, so one
+  `{"reviewer": ...}` record covers every slice; `plan` still validates its
+  `--requirements` file against the role set, which is what
+  `rules/agent-team-operation.md` means by a seat's role deciding its
+  requirements. The lookup uses a sentinel rather than `None`, so an explicit
+  `{"advisor": null}` still reaches the owner's validation instead of reading
+  as an absent requirement and skipping the specialist contract.
+
+  `compose-briefs.sh` checks the role key before it reaches a path. The key
+  names the brief the run writes (`brief-<role>.md`), and `template_for_role`
+  resolves a seat to its role, so an unchecked `reviewer#/../../outside` took
+  the reviewer template and redirected its output out of the round's directory.
+  The script is invoked directly, so the CLI's own refusal never saw it.
+
+  Two boundaries around the seats themselves. `--roles` names
+  responsibilities: a pre-seated `--roles reviewer#api,reviewer#core` is
+  refused, since a seat comes from `--partition` alone and a hand-seated round
+  would plan seats against no declared partition at all. `plan` reads the
+  document; `validate-partition` is what checks it disjoint and exhaustive
+  over the round's change, and `plan` does not re-run that check. And tier candidacy is decided per responsibility, so it
+  reads the role-keyed bars alone — a `--exclude reviewer#api=claude` seat key
+  reached the planner's exclusion parser as an unknown role once a tier table
+  was configured.
+
+  And a seated `apply` needs `--task`. The seat lives on the dispatch, which a
+  task-less apply never records, so a partitioned round without one ledgered
+  the responsibility and kept nothing naming the slice — its verdict had
+  nothing to be read back through.
+
+  A seat's brief now carries its slice. `rules/agent-team-operation.md` says
+  each slice's brief names its slice and forbids roaming, and nothing rendered
+  that: a seat took its role's template, which identifies the responsibility
+  and says nothing about a surface, so a partitioned round could dispatch
+  several full-surface reviews whose verdicts were not independent over the
+  declared partition. `compose-briefs.sh` derives the boundary from the seat
+  into a `SLICE_SCOPE` placeholder the reviewer and tester templates carry, and
+  refuses a supplied one — the boundary is the script's to write, not the
+  lead's to remember. The composer also holds a `#` key to a seatable
+  responsibility, and its role-key grammar accepts the custom role names the
+  planner already allows.
+
+  The boundary names paths, not just a slice. The composer reads no partition
+  document, so each seat's values carry `SLICE_PATHS` — the globs its slice
+  owns, copied from the partition `validate-partition` accepted — and a seat
+  without them is refused. "Your slice is **api**" that a worker cannot resolve
+  to files is not a boundary. Both derived keys are refused in `.shared` as
+  well as per-role: merged into every brief and overwritten, a shared one would
+  have been accepted by being silently discarded. The composer's role-key
+  grammar accepts exactly what the planner emits, so a custom role cannot pass
+  `plan` and then fail compose.
+
+  Two ways the boundary could still go missing are closed. A glob carrying a
+  backtick or a control character is refused: the globs render verbatim into
+  the worker's brief, so one could close the Markdown code span and append
+  instructions of its own, and a path glob needs neither character. And a
+  custom template whose reviewer or tester brief omits `{{SLICE_SCOPE}}` is
+  refused for a seat rather than composed without it, which would have
+  dispatched a seated worker carrying no boundary at all.
+
+  The shipped briefs say what "full" means for a seat. `brief-reviewer.md` and
+  `brief-tester.md` required a full pass to cover the whole branch, which a
+  rendered slice boundary then contradicted — a seated worker read "review the
+  whole branch" and "review only your slice" in one brief. Full now means the
+  whole surface the brief assigns: the branch unseated, the slice when seated.
+  Both say a scoped pass is neither, and that every slice's full verdict at one
+  tip together satisfies the responsibility's gate, with no seat's verdict
+  covering another's.
+
+  `plan --partition` emits `slice_paths`, a `{seat: [glob, ...]}` map from the
+  validated document. Requiring `SLICE_PATHS` without emitting it left the
+  documented validate → plan → compose flow unable to round-trip except by
+  hand-copying the boundary, which is the one value a round cannot afford to
+  retype.
+
+  Two contract edges the rule already decided. A seat costs what its
+  responsibility costs, so a `role_costs` entry keyed to one seat is refused
+  rather than silently weighing one slice apart from its siblings — slices of
+  one responsibility competing under different costs is what the rule's "a
+  seat's role decides its weight" rules out. And the composer's key check is a
+  denylist of what cannot name a file, not an allowlist: the planner accepts
+  any custom role name, so anything stricter broke the plan → compose
+  round-trip for a round the planner emits happily. A seat requirement carried
+  beside its role's is refused for the same reason the cost is: the seat entry
+  would decide that seat's capabilities instead of its role's, so
+  `reviewer` requiring `security` and `reviewer#api` requiring only `review`
+  admitted a worker the responsibility bars.
+
+  Three edges where a seat could still reach an older contract. The partition
+  loader refuses a glob carrying a backtick or a control character, so a
+  document `validate-partition` accepts always composes rather than failing a
+  round later at the brief. `validate`'s ownership payload names the role it
+  seated, so a tester partition's result says so. And `reserve` refuses a
+  seated dispatch against a store below version 10: appending one leaves the
+  store carrying a row its version never wrote, and the next load refuses the
+  whole ledger rather than that row.
+
+  The composer's key check rejects exactly what cannot name
+  `brief-<role>.md` inside the output directory or read back through
+  `--brief ROLE=PATH` and `--roles a,b`: a path separator, `=`, `,` or a
+  control character. The `brief-` prefix makes a leading dot or dash harmless
+  and `..` without a separator names an ordinary file, so `foo..bar`,
+  `.custom`, `-custom` and `two words` compose, as the planner emits them. A
+  whitespace-only glob is refused too, since it resolves to nothing.
+
+  `specialist_assessments[].role` keeps holding the responsibility. That record
+  carries its own `ASSESSMENT_SCHEMA_VERSION`, which the recovery-store bump
+  does not cover, so letting a seat into it would widen the field's domain
+  without versioning it — the repurpose Migration Policy forbids, in the one
+  place the store bump did not reach. The seat stays on the dispatch each
+  assessment cites, and the reader compares responsibilities. The state reader
+  refuses a persisted assignment row that names a seat, so the ledger's
+  contract is enforced on load rather than only on the canonical write: such a
+  row has no matching dispatch, and `role_counts` would key history under the
+  seat.
+
+  The two halves of the role-key contract now agree. `require_seatable` refuses
+  a name carrying a path separator, `=`, `,` or a control character wherever a
+  role name is read, so `plan --roles dev/eloper` no longer emits an assignment
+  `compose-briefs.sh` then refuses. And the composer's seatable-base test is an
+  exact `case` arm rather than substring membership, which matched
+  `reviewer tester#api` inside `" reviewer tester "` and passed it as a seat.
+  The key check also runs in jq before `.roles | keys[]` becomes a
+  newline-delimited list: a key carrying a newline is split into two
+  pseudo-roles by the line-oriented read, so the shell test never saw the
+  offending key and the script composed the wrong fragments instead of refusing
+  it. And the rendered boundary is assigned and checked on its own line: nested
+  in the outer `jq`'s `--arg`, a failing renderer's status was discarded and the
+  seated brief composed with an empty `SLICE_SCOPE` — the one outcome the
+  placeholder exists to prevent.
+
+  The live retrospective guard reads the prior SEAT off the dispatch rather
+  than the responsibility off the ledger row. Comparing the canonicalized row
+  with the seat a dispatch names marked every retained seat as a role change,
+  and `Guard.preflight` then blocked its next dispatch until a fresh
+  retrospective event existed. Moving a worker between slices is still a
+  transition.
+
+
 ## 0.3.239 — 2026-09-16
 
 ### Changed

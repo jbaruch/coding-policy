@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from teamlead.composition import normalize_requirement, parse_requirements, selection_constraints
+from teamlead.composition import REQUIREMENTS_SCHEMA_VERSION, normalize_requirement, parse_requirements, selection_constraints
 from teamlead.errors import PlanError, UsageError
 from teamlead.planner import plan
 from tests.test_planner import snapshot
@@ -218,6 +218,94 @@ class EligibilityTest(unittest.TestCase):
                                             [assignment(requirements=request)], "onboarding")
         self.assertEqual(constraints["exclude"]["advisor"], ["prior"])
         self.assertEqual(constraints["familiarity"]["advisor"], {})
+
+
+
+class SeatResponsibilityTest(unittest.TestCase):
+    """A seat is its role for every responsibility check (#434)."""
+
+    def agent(self, name):
+        return SimpleNamespace(name=name, capabilities=("review",))
+
+    def history(self):
+        return [{"task": "t1", "role": "developer", "agent": "alpha", "status": "applied",
+                 "reviewer_scope": None}]
+
+    def test_a_contributor_is_barred_from_every_seat_of_the_role(self):
+        for role in ("reviewer", "reviewer#api"):
+            with self.subTest(role=role):
+                result = selection_constraints(
+                    [role], [self.agent("alpha"), self.agent("beta")], {}, self.history(), "t1")
+                self.assertEqual(result["exclude"][role], ["alpha"])
+
+    def test_a_pending_design_seat_contributes_like_its_role(self):
+        # A dispatch keeps the SEAT while the ledger keeps the responsibility,
+        # so the contributor classifier reads `reviewer#api` on the pending row.
+        # Reading it literally leaves a design reviewer eligible for an
+        # independent seat on its own task before the send even resolves (#434).
+        for role in ("reviewer", "reviewer#api"):
+            with self.subTest(role=role):
+                dispatch = {"task": "t1", "role": role, "agent": "alpha", "status": "sending",
+                            "reviewer_scope": "design"}
+                result = selection_constraints(
+                    ["reviewer#core"], [self.agent("alpha"), self.agent("beta")], {}, [], "t1",
+                    dispatches=[dispatch])
+                self.assertEqual(result["exclude"]["reviewer#core"], ["alpha"])
+
+    def test_a_seat_requirement_still_requires_independence(self):
+        record = {"specialty": "api-review", "required_capabilities": ["review"],
+                  "independent": False, "engagement": "review the api slice"}
+        for role in ("reviewer", "reviewer#api"):
+            with self.subTest(role=role):
+                with self.assertRaisesRegex(UsageError, "require independent:true"):
+                    normalize_requirement(record, role)
+
+    def test_a_seat_inherits_its_role_requirement(self):
+        # One `reviewer` entry covers every slice (#434).
+        record = {"specialty": "api-review", "required_capabilities": ["review"],
+                  "independent": True, "engagement": "review the slice"}
+        payload = {"schema_version": REQUIREMENTS_SCHEMA_VERSION,
+                   "assignments": {"reviewer": record}}
+        parsed = parse_requirements(payload, ["reviewer#api", "reviewer#core"], "t1")
+        self.assertEqual(parsed["reviewer#api"]["specialty"], "api-review")
+        self.assertEqual(parsed["reviewer#core"]["specialty"], "api-review")
+
+    def test_a_seat_requirement_beside_its_role_is_refused(self):
+        # The seat entry would decide that seat's capabilities instead of its
+        # role's, so a seat could require less than the responsibility does and
+        # admit a worker the role's capabilities bar (#434).
+        role_record = {"specialty": "api-review", "required_capabilities": ["review", "security"],
+                       "independent": True, "engagement": "review the slice"}
+        weaker = {"specialty": "api-review", "required_capabilities": ["review"],
+                  "independent": True, "engagement": "review the slice"}
+        payload = {"schema_version": REQUIREMENTS_SCHEMA_VERSION,
+                   "assignments": {"reviewer": role_record, "reviewer#api": weaker}}
+        with self.assertRaisesRegex(UsageError, "beside its responsibility"):
+            parse_requirements(payload, ["reviewer#api", "reviewer#core"], "t1")
+
+    def test_an_explicitly_null_requirement_is_refused(self):
+        # `assignments.get(...)` returns None for an absent key and for an
+        # explicit null alike, so a sentinel keeps `{"advisor": null}` from
+        # reading as "no requirement" and bypassing the specialist contract.
+        payload = {"schema_version": REQUIREMENTS_SCHEMA_VERSION,
+                   "assignments": {"advisor": None}}
+        with self.assertRaisesRegex(UsageError, "Each specialist requirement needs"):
+            parse_requirements(payload, ["advisor"], "t1")
+
+    def test_a_requirement_for_an_unassigned_role_is_still_refused(self):
+        record = {"specialty": "api-review", "required_capabilities": ["review"],
+                  "independent": True, "engagement": "review the slice"}
+        payload = {"schema_version": REQUIREMENTS_SCHEMA_VERSION,
+                   "assignments": {"tester": record}}
+        with self.assertRaisesRegex(UsageError, "only roles this plan assigns"):
+            parse_requirements(payload, ["reviewer#api"], "t1")
+
+    def test_a_seat_requirement_resolves_its_role(self):
+        record = {"specialty": "api-review", "required_capabilities": ["review"],
+                  "independent": True, "engagement": "review the api slice"}
+        self.assertEqual(normalize_requirement(record, "reviewer#api")["specialty"], "api-review")
+        with self.assertRaisesRegex(UsageError, "invent a responsibility"):
+            normalize_requirement(record, "nonsense#api")
 
 
 if __name__ == "__main__":

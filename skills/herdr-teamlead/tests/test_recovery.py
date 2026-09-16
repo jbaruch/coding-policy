@@ -817,6 +817,21 @@ class RecoveryTests(unittest.TestCase):
         self.assertEqual(len(self.store["dispatches"]), 1)
         self.assertEqual(confirmed_fix(self.history, TASK), 5)
 
+    def test_a_seated_dispatch_needs_the_migrated_store(self):
+        # A seat in the dispatch role is what store version 10 added. Appending
+        # one to an older store leaves it carrying a row its version never
+        # wrote, and the next load refuses the whole ledger, not the row (#434).
+        record = {**self.reservation(1), "role": "reviewer#api", "fix_round": None,
+                  "plan": None, "work": None}
+        older = copy.deepcopy(self.store)
+        older["schema_version"] = 9
+        before = copy.deepcopy(older)
+        with self.assertRaisesRegex(UsageError, "needs the owner-migrated recovery store"):
+            reserve(older, record, AT)
+        self.assertEqual(older, before)
+        reserve(self.store, record, AT)
+        self.assertEqual(self.store["dispatches"][-1]["role"], "reviewer#api")
+
     def test_release_clear_and_explicit_null_recovery_preserve_original_rows(self):
         add_assignment(self.state, AT, "developer", "worker", task=TASK)
         original = copy.deepcopy(self.history)
@@ -1122,7 +1137,7 @@ class RecoveryTests(unittest.TestCase):
             del row["provider"]
         before = copy.deepcopy(old)
         self.assertTrue(migrate_store(old))
-        self.assertEqual(old["schema_version"], 9)
+        self.assertEqual(old["schema_version"], 10)
         self.assertEqual(old.pop("refusal_authorizations"), [])
         self.assertEqual(old.pop("diagnoses"), [])
         self.assertEqual(old.pop("legacy_ruling_recoveries"), [])
@@ -1155,7 +1170,7 @@ class RecoveryTests(unittest.TestCase):
         for row in six["dispatches"]:
             del row["provider"]
         self.assertTrue(migrate_store(six))
-        self.assertEqual(six["schema_version"], 9)
+        self.assertEqual(six["schema_version"], 10)
         self.assertEqual(six["diagnoses"], [])
         validate_store(six, self.history)
         record_refusal(self.store, {"dispatch": first, "receipt": self.refusal_receipt("codex-a")}, AT, "codex", self.REPORT)

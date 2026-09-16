@@ -9,7 +9,7 @@ from types import SimpleNamespace
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from teamlead.errors import ConfigError, HerdrError, UsageError
-from teamlead.tiers import MissingTierError, launch_flags, mechanical_allowed, parse_tiers, select_tier as _select_tier, verify_argv, verify_worker_permissions, worker_launch_args
+from teamlead.tiers import MissingTierError, SEATABLE_ROLES, launch_flags, mechanical_allowed, parse_tiers, require_seatable, select_tier as _select_tier, verify_argv, verify_worker_permissions, worker_launch_args
 
 
 def select_tier(*args, **kwargs):
@@ -316,6 +316,54 @@ class ArgvTest(unittest.TestCase):
                      ["echo"] + wanted, ["claude", "--model", "opus-5-extra", "--effort", "high"]):
             with self.subTest(argv=argv), self.assertRaises(HerdrError):
                 verify_argv("claude", tier, argv)
+
+
+class SeatableRoleTest(unittest.TestCase):
+    """Only a responsibility whose verification a slice terminates is seated (#434)."""
+
+    def test_a_seat_of_a_seatable_role_passes_through(self):
+        for name in ("reviewer#api", "tester#core", "reviewer", "developer", "release"):
+            with self.subTest(name=name):
+                self.assertEqual(require_seatable(name), name)
+
+    def test_a_seat_whose_slice_cannot_address_it_is_refused(self):
+        # A seat is a CLI key. `--brief SEAT=PATH` splits at the first `=`, and
+        # `compose-briefs.sh` reads a line-oriented `.roles` key, so a slice
+        # carrying a separator, whitespace or nothing at all plans a seat the
+        # round cannot address (#434).
+        # `=`, `,` and control characters are refused as unaddressable before
+        # the slice grammar is reached; both refusals name the same defect.
+        for name in ("reviewer#", "reviewer#a b", "reviewer#-lead"):
+            with self.subTest(name=name):
+                with self.assertRaisesRegex(UsageError, "cannot address it"):
+                    require_seatable(name)
+        for name in ("reviewer#a=b", "reviewer#a,b", "tester#a\nb"):
+            with self.subTest(name=name):
+                with self.assertRaisesRegex(UsageError, "cannot be addressed"):
+                    require_seatable(name)
+
+    def test_a_role_name_the_cli_keys_cannot_carry_is_refused(self):
+        # `plan --roles dev/eloper` emitted an assignment `compose-briefs.sh`
+        # then refused, so the same set is refused where the name is read.
+        for name in ("dev/eloper", "dev=eloper", "dev,eloper", "dev\neloper"):
+            with self.subTest(name=name):
+                with self.assertRaisesRegex(UsageError, "cannot be addressed"):
+                    require_seatable(name)
+        for name in ("developer", "role_v2", "reviewer.v2", "foo..bar", "two words"):
+            with self.subTest(name=name):
+                self.assertEqual(require_seatable(name), name)
+
+    def test_a_seat_of_a_per_task_counter_role_is_refused(self):
+        for name in ("developer#api", "release#core", "judge#api", "lead#x"):
+            with self.subTest(name=name):
+                with self.assertRaisesRegex(UsageError, "names a seat of"):
+                    require_seatable(name)
+
+    def test_the_refusal_names_the_seatable_roles(self):
+        with self.assertRaises(UsageError) as caught:
+            require_seatable("developer#api")
+        for role in SEATABLE_ROLES:
+            self.assertIn(role, str(caught.exception))
 
 
 if __name__ == "__main__":

@@ -150,7 +150,8 @@ recorded decision with its reason. Re-run the command with the updated
 declaration, roles, requirements and decisions after every such change, and
 plan only once it exits 0.
 
-A round that will split its review surface validates the partition first:
+A round that will split its review surface validates the partition first, then
+plans it with `--partition`:
 
 ```bash
 CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
@@ -171,12 +172,15 @@ skills/herdr-teamlead/references/review-partition.md
 CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
 bash "$CP/skills/herdr-teamlead/teamlead.sh" plan \
   --roles <role[,role...]> [--requirements <requirements.json>] \
-  [--exclude <role>=<agent>[,<agent>...]]... [--judge-mode adjudication|diagnosis] \
+  [--exclude <role>=<agent>[,<agent>...]]... [--partition <partition.json>] \
+  [--judge-mode adjudication|diagnosis] \
   [--round <role>=<round-type>] [--round-context <evidence.json>] \
   --task <task-id> [--fix-round <N>] [--correction-plan <id> --work <work.json>]
 ```
 
-Emits the role plan without worker contact. A judge seat declares its mode:
+Emits the role plan without worker contact; a partitioned role is seated once
+per slice as `<role>#<slice>`, and Step 10 dispatches each seat with its own
+brief. A judge seat declares its mode:
 `adjudication` rules on a contested verdict, `diagnosis` on the investigator's
 assessment at an exhausted allowance. Pass the same `--judge-mode` to `apply`.
 On exit 1, resolve the diagnostic before continuing. Apply the Step 5 constraints in `references/round-setup.md`:

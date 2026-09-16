@@ -15,6 +15,7 @@ from pathlib import Path, PurePosixPath
 
 from .errors import UsageError
 from .chronology import assignment_after, latest_assignment, timestamp
+from .tiers import SEAT_SEPARATOR, canonical_role, require_seatable
 
 
 RECOVERY_SCHEMA_VERSION = 1
@@ -26,7 +27,12 @@ RECOVERY_SCHEMA_VERSION = 1
 #: refused; a clean one is stamped and given the empty collection
 #: (rules/stateful-artifacts.md). Version 8 adds the `diagnoses` collection
 #: (#407). Version 9 adds explicit digest-bound legacy ruling recovery receipts.
-RECOVERY_STORE_VERSION = 9
+#: Version 10 widens `dispatches[].role` to a SEAT (`reviewer#api`) while the
+#: assignment row keeps the responsibility, so a reader that matches the two
+#: literally no longer reads the pair correctly (#434). No field is added, so a
+#: store at an older version carrying a seat-named dispatch is unowned newer
+#: data and is refused (rules/stateful-artifacts.md Migration Policy).
+RECOVERY_STORE_VERSION = 10
 REFUSAL_FIELDS = frozenset({"brief_identity", "refusal", "refusal_move", "provider"})
 SPECIALIST_DISPATCH_VERSION = 2
 #: Checkpoint record version. 1 carries a mandatory pinned-judge ruling; 2
@@ -152,6 +158,14 @@ def _refuse_unowned_legacy(store, version):
     if not isinstance(dispatches, list):
         raise UsageError("Older recovery requires a dispatches array; restore the original owner-written store.", {})
     for row in dispatches:
+        # A seat reaches a dispatch's role only at version 10. An older store
+        # carrying one was written by a newer owner -- including on a saved
+        # result, which a non-applied row keeps its own copy of.
+        seated = [row.get("role")] if isinstance(row, dict) else []
+        if isinstance(row, dict) and isinstance(row.get("result"), dict):
+            seated.append(row["result"].get("role"))
+        if any(isinstance(value, str) and SEAT_SEPARATOR in value for value in seated):
+            raise UsageError("Older recovery contains a seat-named dispatch this version never wrote; preserve it for owner recovery.", {})
         allowed = ALLOWED_AT_6 if version == 6 else REFUSAL_FIELDS if version >= 7 else frozenset()
         if not isinstance(row, dict) or REFUSAL_FIELDS.intersection(row) - allowed:
             raise UsageError("Older recovery contains unowned newer refusal records; preserve it for owner recovery.", {})
@@ -171,7 +185,7 @@ def _refuse_unowned_legacy(store, version):
             raise UsageError("Older recovery requires a delivery_recoveries array; restore the original owner-written store.", {})
         if any(not isinstance(row, dict) or row.get("schema_version") != 1 for row in deliveries):
             raise UsageError("Older recovery contains unowned newer delivery records; preserve it for owner recovery.", {})
-    added = ["legacy_ruling_recoveries"]
+    added = [] if version >= 9 else ["legacy_ruling_recoveries"]
     if version < 8:
         added.append("diagnoses")
     if version < 6:
@@ -190,7 +204,10 @@ def migrate_store(store):
     if not isinstance(store, dict) or type(store.get("schema_version")) is not int:
         return False
     version = store["schema_version"]
-    legacy = version in {1, 2, 3, 4, 5, 6, 7, 8}
+    # Derived, never a literal set: a reader pinned to an older version (a
+    # fleet consumer lagging a release) must read a newer store as newer,
+    # not migrate it downward (rules/stateful-artifacts.md).
+    legacy = 1 <= version < RECOVERY_STORE_VERSION
     added = _refuse_unowned_legacy(store, version) if legacy else None
     # Both run: `or` would skip the second whenever the first reported work,
     # leaving version-1 diagnoses for a validator that accepts only version 2.
@@ -866,6 +883,10 @@ def prior_dispatch(store, identifier, fingerprint):
 
 def _dispatch_version(record):
     """Composition metadata is explicit v2 evidence, never a legacy default."""
+    # The CLI parsers gate their own inputs, but `reserve` and state loading
+    # reach here directly, so the seat grammar is checked where the record is
+    # (#434).
+    require_seatable(record.get("role"))
     if not DISPATCH_METADATA_FIELDS.intersection(record):
         return RECOVERY_SCHEMA_VERSION
     if "requirements" in record:
@@ -873,7 +894,9 @@ def _dispatch_version(record):
         requirement = record["requirements"]
         if normalize_requirement(requirement, record.get("role")) != requirement:
             raise UsageError("Dispatch requirements must be canonical owner-normalized values; replan without editing saved engagement metadata.", {})
-    if "reviewer_scope" in record and (record.get("role") != "reviewer"
+    # The responsibility, not the seat's own name: every seat of the reviewer
+    # role carries a reviewer scope (#434).
+    if "reviewer_scope" in record and (canonical_role(record.get("role")) != "reviewer"
             or not isinstance(record["reviewer_scope"], str) or record["reviewer_scope"] not in {"verification", "design"}):
         raise UsageError("New reviewer_scope must name verification or design on a reviewer dispatch; preserve unknown scope only in legacy assignment history.", {})
     return SPECIALIST_DISPATCH_VERSION
@@ -899,6 +922,16 @@ def reserve(store, record, at):
     version = _dispatch_version(record)
     if version == SPECIALIST_DISPATCH_VERSION and store.get("schema_version") != RECOVERY_STORE_VERSION:
         raise UsageError("Composition dispatch metadata needs the owner-migrated recovery store; load the current state before reserving this assignment.", {})
+    # A seat in the dispatch role is what store version 10 added. Appending one
+    # to an older store leaves it carrying a row its version never wrote, which
+    # the next load refuses as unowned newer data -- the whole ledger, not the
+    # row (#434).
+    if (isinstance(record.get("role"), str) and SEAT_SEPARATOR in record["role"]
+            and store.get("schema_version") != RECOVERY_STORE_VERSION):
+        raise UsageError(
+            "A seated dispatch needs the owner-migrated recovery store; load the current state "
+            "before reserving {!r}, or the next load refuses the whole ledger.".format(record["role"]),
+            {"role": record["role"]})
     pending = [row for row in store["dispatches"] if row["status"] in PENDING_STATUSES
                and (row["agent"] == record["agent"] or row["task"] == record["task"]
                     and row["role"] in {"developer", "release"} and record["role"] in {"developer", "release"})]
@@ -1482,6 +1515,7 @@ def validate_store(store, assignments):
             _validate_dispatch_metadata(row)
             for key in ("id", "fingerprint", "role", "agent"):
                 text(row[key], key)
+            require_seatable(row["role"])
             if row["status"] not in DISPATCH_STATUSES:
                 raise UsageError("Unknown dispatch status; recover through the owner without dropping the attempt.", {})
             if row["status"] in PENDING_STATUSES:
@@ -1505,7 +1539,12 @@ def validate_store(store, assignments):
                 if type(index) is not int or not 0 <= index < len(assignments):
                     raise UsageError("Dispatch has no matching assignment row; reconcile it without fabricating history.", {})
                 assignment = assignments[index]
-                if any(assignment.get(key) != row[key] for key in ("task", "role", "agent", "fix_round")) or assignment.get("status") != "applied":
+                # The ledger row carries the RESPONSIBILITY and the dispatch
+                # carries the seat, so a `reviewer#api` send matches its
+                # `reviewer` row instead of reading as a disagreement (#434).
+                if (assignment.get("role") != canonical_role(row["role"])
+                        or any(assignment.get(key) != row[key] for key in ("task", "agent", "fix_round"))
+                        or assignment.get("status") != "applied"):
                     raise UsageError("Dispatch outcome disagrees with its assignment row.", {})
                 if row["schema_version"] == SPECIALIST_DISPATCH_VERSION and any(assignment.get(key) != row.get(key) for key in DISPATCH_METADATA_FIELDS):
                     raise UsageError("Dispatch and assignment composition metadata disagree; restore their original shared engagement and reviewer scope before continuing.", {})
@@ -1533,7 +1572,8 @@ def validate_store(store, assignments):
         for index, row in enumerate(assignments):
             if (row.get("fix_round") or 0) > DEFAULT_FIX_LIMIT and not any(
                 index in [dispatch.get("assignment_index"), *dispatch.get("prior_assignment_indices", [])]
-                and all(dispatch[key] == row.get(key) for key in ("task", "role", "agent", "fix_round"))
+                and canonical_role(dispatch["role"]) == row.get("role")
+                and all(dispatch[key] == row.get(key) for key in ("task", "agent", "fix_round"))
                 for dispatch in store["dispatches"]
             ) and not any(item["assignment_index"] == index for item in store["historical_attempts"]):
                 raise UsageError("An extra correction lacks its owner-managed authorization and dispatch record.", {})

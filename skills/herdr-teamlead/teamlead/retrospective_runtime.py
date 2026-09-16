@@ -75,11 +75,16 @@ def target(item):
 def _prior(state, name):
     latest = latest_assignment(state["assignments"], agent=name)
     if latest is None:
-        return None, None, None
+        return None, None, None, None
     index, row = latest
-    dispatch = next((entry.get("id") for entry in state.get("recovery", {}).get("dispatches", [])
-                     if entry.get("assignment_index") == index and entry.get("agent") == name), None)
-    return index, row, dispatch
+    entry = next((entry for entry in state.get("recovery", {}).get("dispatches", [])
+                  if entry.get("assignment_index") == index and entry.get("agent") == name), None)
+    # The ledger row holds the RESPONSIBILITY and the dispatch holds the seat,
+    # so the seat a worker last held is read off the dispatch. Without it, one
+    # `reviewer#api` round leaves every later `reviewer#api` target reading as
+    # a role change (#434).
+    seat = entry.get("role") if entry else None
+    return index, row, (entry.get("id") if entry else None), seat
 
 
 def _dispatch_evidence(state, identifier, unavailable=None):
@@ -138,7 +143,7 @@ def describe(state, client, agents, item, index=None):
     name = item["agent"]
     if name not in agents:
         raise UsageError("Retrospective worker {} is absent from config; restore its configured identity.".format(name), {})
-    offset, row, dispatch = _prior(state, name)
+    offset, row, dispatch, seat = _prior(state, name)
     observed = _observation(client, name, agents[name].kind, item["pane"], starting=item["context"] == "start", agent=agents[name])
     source = {"assignment_index": offset, "assignment_digest": notes.digest(row) if row is not None else None,
               "dispatch_id": dispatch, "dispatch_evidence": _dispatch_evidence(state, dispatch, item["unavailable"]), "task": row.get("task") if row else None,
@@ -151,7 +156,8 @@ def describe(state, client, agents, item, index=None):
     fresh = row is None and observed["shell"] and not seen
     desired = target(item)
     old_tier = (row or {}).get("tier") or {}
-    transition = not fresh and (row is None or item["context"] != "retain" or row.get("role") != desired["role"]
+    held = seat if seat is not None else (row or {}).get("role")
+    transition = not fresh and (row is None or item["context"] != "retain" or held != desired["role"]
                                or row.get("task") != desired["task"] or old_tier.get("model") != desired["model"]
                                or old_tier.get("effort") != desired["effort"])
     result = {"schema_version": notes.SCHEMA_VERSION, "agent": name, "source": source, "target": desired,
@@ -198,7 +204,7 @@ class Guard:
                 "brief": step["brief"], "common": step["common"], "report": None, "unavailable": None, "pane": step["pane_id"]}
 
     def _known_report(self, item, index):
-        _offset, row, _dispatch = _prior(self.state, item["agent"])
+        _offset, row, _dispatch, _seat = _prior(self.state, item["agent"])
         row_digest = notes.digest(row) if row else None
         for record in reversed(index["records"]):
             for descriptor in record["coverage"]:
@@ -289,7 +295,7 @@ class Guard:
         index = notes.load(self.path)
         original = self.original[step["agent"]]
         item = self._known_report(self.requests[step["agent"]], index)
-        _offset, row, _dispatch = _prior(self.state, item["agent"])
+        _offset, row, _dispatch, _seat = _prior(self.state, item["agent"])
         current_report = notes.receipt(item["report"]) if item["report"] else None
         row_digest = notes.digest(row) if row else None
         if row_digest != original["source"]["assignment_digest"] or _dispatch_evidence(self.state, _dispatch, item["unavailable"]) != original["source"]["dispatch_evidence"]:

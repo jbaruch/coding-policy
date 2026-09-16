@@ -31,7 +31,7 @@ from teamlead import attention, cli
 from teamlead.cli import build_parser, main
 from teamlead.errors import UsageError
 from teamlead.herdr import HerdrClient
-from teamlead.state import STATE_SCHEMA_VERSION, add_assignment, empty_state, save_state
+from teamlead.state import STATE_SCHEMA_VERSION, add_assignment, empty_state, load_state_checked, save_state
 
 from tests.fakes import (
     FakeRunner,
@@ -710,6 +710,223 @@ class ApplyCommandTest(CliCase):
         )
         self.assertEqual(code, 0)
         self.assertEqual(json.loads(out)["steps"][0]["agent"], "grok")
+
+    def test_a_partitioned_plan_dispatches_each_seat(self):
+        # coding-policy#434: the seat names the planner emits must survive
+        # apply — brief templates, requirements, round tiers and the ledger all
+        # resolve the responsibility a seat fills.
+        partition = self.tmp / "partition.json"
+        partition.write_text(json.dumps({"schema_version": 1, "slices": [
+            {"name": "api", "paths": ["src/api/*"]}, {"name": "core", "paths": ["src/core/*"]}]}))
+        # With --task, which is the documented invocation and the one that
+        # exercises the contribution-exclusion path.
+        out = io.StringIO()
+        code = main(self.base() + ["plan", "--roles", "reviewer", "--partition", str(partition),
+                                   "--task", "t-partition", "--now", AT,
+                                   "--snapshot", str(self.snapshot)], stdout=out)
+        self.assertEqual(code, 0, out.getvalue())
+        plan = json.loads(out.getvalue())
+        self.assertEqual(sorted(plan["assignments"]), ["reviewer#api", "reviewer#core"])
+        self.assertEqual(len(set(plan["assignments"].values())), 2)
+        # The composer requires each seat's owned paths and reads no partition,
+        # so the plan carries them out of the validated document (#434).
+        self.assertEqual(plan["slice_paths"],
+                         {"reviewer#api": ["src/api/*"], "reviewer#core": ["src/core/*"]})
+
+        # Each seat takes its role's brief template and dispatches.
+        for seat in plan["assignments"]:
+            brief = self.tmp / (seat.replace("#", "-") + ".md")
+            brief.write_text("# " + seat + "\n", encoding="utf-8")
+            self.briefs[seat] = brief
+        plan_file = self.tmp / "partitioned-plan.json"
+        plan_file.write_text(json.dumps(plan), encoding="utf-8")
+        code, applied, err = self.run_cli(
+            self.base()
+            + ["apply", "--composer-settle", "0", "--assignments", str(plan_file),
+               "--task", "t-partition", "--now", AT, "--common", str(self.common), "--dry-run"]
+            + self.brief_args(*plan["assignments"]),
+            client=self._client({}),
+        )
+        self.assertEqual(code, 0, err)
+        steps = {step["role"]: step["agent"] for step in json.loads(applied)["steps"]}
+        self.assertEqual(sorted(steps), ["reviewer#api", "reviewer#core"])
+        self.assertEqual(len(set(steps.values())), 2)
+
+    def test_a_seat_inherits_its_role_bars_alongside_its_own(self):
+        # An exclusion is a bar, not a setting a seat overrides. Naming one
+        # seat's own excluded worker must not lift the contributor bar the
+        # role already carries, or the planner hands independent verification
+        # of a slice to the worker that wrote the task (#434).
+        partition = self.tmp / "bars.json"
+        partition.write_text(json.dumps({"schema_version": 1, "slices": [
+            {"name": "api", "paths": ["src/api/*"]}, {"name": "core", "paths": ["src/core/*"]}]}))
+        state = empty_state()
+        add_assignment(state, AT, "developer", "grok", task="t-bar", status="applied")
+        save_state(self.state, state)
+        out = io.StringIO()
+        code = main(self.base() + ["plan", "--roles", "reviewer", "--partition", str(partition),
+                                   "--task", "t-bar", "--now", AT,
+                                   "--exclude", "reviewer#api=claude",
+                                   "--snapshot", str(self.snapshot)], stdout=out)
+        self.assertEqual(code, 0, out.getvalue())
+        assignments = json.loads(out.getvalue())["assignments"]
+        self.assertEqual(sorted(assignments), ["reviewer#api", "reviewer#core"])
+        self.assertEqual(assignments["reviewer#api"], "codex")
+        self.assertNotIn("grok", assignments.values())
+
+    def test_an_unpartitioned_plan_carries_no_slice_paths(self):
+        out = io.StringIO()
+        code = main(self.base() + ["plan", "--roles", "reviewer", "--now", AT,
+                                   "--snapshot", str(self.snapshot)], stdout=out)
+        self.assertEqual(code, 0, out.getvalue())
+        self.assertNotIn("slice_paths", json.loads(out.getvalue()))
+
+    def test_a_pre_seated_role_input_is_refused(self):
+        # `--partition` is what proves the slices disjoint and exhaustive, so a
+        # seat named straight into `--roles` would plan several seats over an
+        # unchecked surface (#434).
+        code, _, err = self.run_cli(
+            self.base() + ["plan", "--roles", "reviewer#api,reviewer#core", "--now", AT,
+                           "--snapshot", str(self.snapshot)])
+        self.assertEqual(code, 1)
+        self.assertIn("came pre-seated", err)
+
+    def test_a_seat_exclusion_does_not_reach_the_tier_candidates(self):
+        # Tier candidacy is decided per responsibility, so a seat key would
+        # reach the planner's exclusion parser as an unknown role (#434).
+        partition = self.tmp / "tiers.json"
+        partition.write_text(json.dumps({"schema_version": 1, "slices": [
+            {"name": "api", "paths": ["src/api/*"]}, {"name": "core", "paths": ["src/core/*"]}]}))
+        out = io.StringIO()
+        code = main(self.base() + ["plan", "--roles", "reviewer", "--partition", str(partition),
+                                   "--task", "t-tiers", "--now", AT,
+                                   "--exclude", "reviewer#api=claude",
+                                   "--snapshot", str(self.snapshot)], stdout=out, stderr=self.err)
+        self.assertEqual(code, 0, self.err.getvalue())
+        assignments = json.loads(out.getvalue())["assignments"]
+        self.assertEqual(sorted(assignments), ["reviewer#api", "reviewer#core"])
+        self.assertNotEqual(assignments["reviewer#api"], "claude")
+
+    def test_a_seat_of_an_unseatable_responsibility_is_refused(self):
+        # A partition document can only seat a reviewer or a tester, but the
+        # role names reaching plan and apply come straight off the command
+        # line. `developer#api` would take a reviewer's seat contract while
+        # `validate_fix_history` keeps counting the literal `developer`, so
+        # the fix counter would fragment across seats (#434).
+        for role in ("developer#api", "release#core", "judge#api"):
+            with self.subTest(role=role, command="plan"):
+                code, _, err = self.run_cli(
+                    self.base() + ["plan", "--roles", role, "--now", AT,
+                                   "--snapshot", str(self.snapshot)])
+                self.assertEqual(code, 1)
+                self.assertIn("names a seat of", err)
+            with self.subTest(role=role, command="apply"):
+                code, _, err = self.run_cli(
+                    self.base()
+                    + ["apply", "--composer-settle", "0",
+                       "--assignments", json.dumps({role: "grok"}),
+                       "--common", str(self.common), "--now", AT, "--dry-run"]
+                    + ["--brief", role + "=" + str(self.briefs["developer"])],
+                    client=self._client({}),
+                )
+                self.assertEqual(code, 1)
+                self.assertIn("names a seat of", err)
+
+    def test_a_seat_records_its_responsibility_in_the_ledger(self):
+        # The per-role history must not fragment across seat names (#434).
+        client = self._client({"grok": "idle"})
+        code, _, err = self.run_cli(
+            self.base()
+            + ["apply", "--composer-settle", "0",
+               "--assignments", json.dumps({"reviewer#api": "grok"}),
+               "--task", "t-ledger-seat", "--common", str(self.common), "--now", AT]
+            + ["--brief", "reviewer#api=" + str(self.briefs["reviewer"]),
+               "--report", "reviewer#api=" + str(self.tmp / "ledger-seat.md")],
+            client=client,
+        )
+        self.assertEqual(code, 0, err)
+        rows = json.loads(self.state.read_text())["assignments"]
+        self.assertEqual([row["role"] for row in rows], ["reviewer"])
+
+    def test_a_seated_apply_without_a_task_is_refused(self):
+        # The ledger row records the responsibility and the DISPATCH records
+        # the seat, and a dispatch exists only under a task. A task-less seated
+        # apply would leave nothing naming the slice, so its verdict could
+        # never be read back (#434).
+        code, _, err = self.run_cli(
+            self.base()
+            + ["apply", "--composer-settle", "0",
+               "--assignments", json.dumps({"reviewer#api": "grok"}),
+               "--common", str(self.common), "--now", AT, "--dry-run"]
+            + ["--brief", "reviewer#api=" + str(self.briefs["reviewer"])],
+            client=self._client({}),
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("need --task", err)
+
+    def test_a_live_seat_dispatch_reserves_and_records(self):
+        # Not a dry run: reserving a live `reviewer#api` dispatch exercises the
+        # recovery store's metadata validation, which read the literal role
+        # (#434).
+        state = empty_state()
+        save_state(self.state, state)
+        code, _, err = self.run_cli(
+            self.base()
+            + ["apply", "--composer-settle", "0",
+               "--assignments", json.dumps({"reviewer#api": "grok"}),
+               "--task", "t-live-seat", "--common", str(self.common), "--now", AT]
+            + ["--brief", "reviewer#api=" + str(self.briefs["reviewer"]),
+               "--report", "reviewer#api=" + str(self.tmp / "seat-report.md")],
+            client=self._client({"grok": "idle"}),
+        )
+        self.assertEqual(code, 0, err)
+        saved = json.loads(self.state.read_text())
+        self.assertEqual([row["role"] for row in saved["assignments"]], ["reviewer"])
+        dispatch = saved["recovery"]["dispatches"][0]
+        self.assertEqual(dispatch["role"], "reviewer#api")
+        self.assertEqual(dispatch["reviewer_scope"], "verification")
+
+    def test_a_saved_seat_dispatch_reloads_with_its_history(self):
+        # The ledger row carries the responsibility and the dispatch carries
+        # the seat, so the NEXT load must still read them as one confirmed
+        # outcome. A store that rejects the pair returns an empty ledger and
+        # loses the contribution and recovery history it was keeping (#434).
+        save_state(self.state, empty_state())
+        code, _, err = self.run_cli(
+            self.base()
+            + ["apply", "--composer-settle", "0",
+               "--assignments", json.dumps({"reviewer#api": "grok"}),
+               "--task", "t-reload-seat", "--common", str(self.common), "--now", AT]
+            + ["--brief", "reviewer#api=" + str(self.briefs["reviewer"]),
+               "--report", "reviewer#api=" + str(self.tmp / "reload-report.md")],
+            client=self._client({"grok": "idle"}),
+        )
+        self.assertEqual(code, 0, err)
+        warnings = []
+        reloaded, usable = load_state_checked(self.state, warn=warnings.append)
+        self.assertTrue(usable, warnings)
+        self.assertEqual(warnings, [])
+        self.assertEqual([row["role"] for row in reloaded["assignments"]], ["reviewer"])
+        self.assertEqual(reloaded["assignments"][0]["reviewer_scope"], "verification")
+        self.assertEqual([row["role"] for row in reloaded["recovery"]["dispatches"]], ["reviewer#api"])
+
+    def test_a_contributor_cannot_take_a_review_seat(self):
+        # The responsibility decides independence: a worker the ledger records
+        # as a contributor on this task is barred from every seat of the
+        # reviewer role, not only from the literal name `reviewer` (#434).
+        state = empty_state()
+        add_assignment(state, AT, "developer", "grok", task="t-seat", fix_round=1)
+        save_state(self.state, state)
+        code, _, err = self.run_cli(
+            self.base()
+            + ["apply", "--composer-settle", "0",
+               "--assignments", json.dumps({"reviewer#api": "grok"}),
+               "--task", "t-seat", "--now", AT, "--common", str(self.common), "--dry-run"]
+            + ["--brief", "reviewer#api=" + str(self.briefs["reviewer"])],
+            client=self._client({}),
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("ineligible", err)
 
     def test_live_apply_clears_then_assigns_and_records_the_ledger(self):
         client = self._client({"grok": "idle", "claude": "done"})

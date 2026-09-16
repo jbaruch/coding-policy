@@ -92,7 +92,7 @@ class SchemaNineCompatibilityTests(unittest.TestCase):
         restored, usable = load_state_checked(self.path)
         self.assertTrue(usable)
         expected = copy.deepcopy(before)
-        expected["recovery"]["schema_version"] = 9
+        expected["recovery"]["schema_version"] = 10
         expected["recovery"]["legacy_ruling_recoveries"] = []
         self.assertEqual(restored, expected)
         self.assertEqual(restored["recovery"]["checkpoints"], before["recovery"]["checkpoints"])
@@ -101,14 +101,17 @@ class SchemaNineCompatibilityTests(unittest.TestCase):
         self.assertEqual(code, 0, error)
         self.assertIn("old-task", json.loads(output)["tasks"])
 
-    def test_schema9_receipts_and_appended_history_are_preserved(self):
+    def test_schema9_receipts_and_appended_history_survive_the_stamp(self):
+        # Version 10 widens the dispatch role to a seat (#434). A schema-9
+        # store is stamped to it, and the stamp is the whole upgrade: every
+        # receipt and every appended row reads back unchanged.
         self.install_receipts()
         before = copy.deepcopy(self.state)
-        raw = self.path.read_bytes()
         restored, usable = load_state_checked(self.path)
         self.assertTrue(usable)
-        self.assertEqual(self.path.read_bytes(), raw)
-        self.assertEqual(restored, before)
+        expected = copy.deepcopy(before)
+        expected["recovery"]["schema_version"] = 10
+        self.assertEqual(restored, expected)
         self.assertEqual(len(restored["recovery"]["legacy_ruling_recoveries"]), 1)
         self.assertEqual(restored["recovery"]["legacy_ruling_recoveries"][0]["checkpoints"],
                          before["recovery"]["legacy_ruling_recoveries"][0]["checkpoints"])
@@ -116,8 +119,60 @@ class SchemaNineCompatibilityTests(unittest.TestCase):
         self.assertEqual(restored["assignments"][-1]["role"], "reviewer")
         code, output, error = self.run_status()
         self.assertEqual(code, 0, error)
-        self.assertEqual(self.path.read_bytes(), raw)
         self.assertIn("old-task", json.loads(output)["tasks"])
+
+    def test_a_current_store_reads_without_a_rewrite(self):
+        self.install_receipts()
+        self.state["recovery"]["schema_version"] = 10
+        self.write_state()
+        raw = self.path.read_bytes()
+        restored, usable = load_state_checked(self.path)
+        self.assertTrue(usable)
+        self.assertEqual(self.path.read_bytes(), raw)
+        self.assertEqual(restored["recovery"]["schema_version"], 10)
+        code, _, error = self.run_status()
+        self.assertEqual(code, 0, error)
+        self.assertEqual(self.path.read_bytes(), raw)
+
+    def test_an_older_store_carrying_a_seat_dispatch_refuses_without_writes(self):
+        # A seat reaches the dispatch role only at version 10. A store still
+        # stamped 9 carrying one was written by a newer owner, so it is
+        # preserved rather than migrated (rules/stateful-artifacts.md).
+        self.install_receipts()
+        self.state["recovery"]["dispatches"].append({
+            "schema_version": 1, "at": AT, "id": "d-1", "task": "old-task",
+            "role": "reviewer#api", "agent": "worker", "fix_round": None,
+            "plan": None, "work": None, "status": "applied", "result": None,
+            "report": None, "assignment_index": None, "fingerprint": "f",
+        })
+        self.write_state()
+        raw = self.path.read_bytes()
+        warnings = []
+        _, usable = load_state_checked(self.path, warn=warnings.append, persist_migration=True)
+        self.assertFalse(usable)
+        self.assertEqual(self.path.read_bytes(), raw)
+        self.assertIn("seat-named dispatch", " ".join(warnings))
+
+    def test_an_older_store_whose_saved_result_names_a_seat_refuses(self):
+        # A non-applied row keeps its own copy of the role, so checking the
+        # top-level one alone let a schema-9 store carrying
+        # `result.role = "reviewer#api"` be stamped to 10 instead of preserved.
+        self.install_receipts()
+        self.state["recovery"]["dispatches"].append({
+            "schema_version": 1, "at": AT, "id": "d-2", "task": "old-task",
+            "role": "reviewer", "agent": "worker", "fix_round": None,
+            "plan": None, "work": None, "status": "sent_but_not_started",
+            "result": {"schema_version": 1, "role": "reviewer#api", "status": "sent_but_not_started"},
+            "report": None, "assignment_index": None, "fingerprint": "f",
+        })
+        self.state["recovery"]["schema_version"] = 9
+        self.write_state()
+        raw = self.path.read_bytes()
+        warnings = []
+        _, usable = load_state_checked(self.path, warn=warnings.append, persist_migration=True)
+        self.assertFalse(usable)
+        self.assertEqual(self.path.read_bytes(), raw)
+        self.assertIn("seat-named dispatch", " ".join(warnings))
 
     def test_changed_or_new_citations_refuse_without_writes(self):
         self.install_receipts()
@@ -219,7 +274,7 @@ class SchemaNineCompatibilityTests(unittest.TestCase):
         del payload["recovery"]["legacy_ruling_recoveries"]
         cases.append(payload)
         payload = json.loads(self.path.read_bytes())
-        payload["recovery"]["schema_version"] = 10
+        payload["recovery"]["schema_version"] = 11
         cases.append(payload)
         for case in cases:
             encoded = json.dumps(case, indent=2).encode()

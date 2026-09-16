@@ -33,9 +33,11 @@ Contract:
 
 import fnmatch
 import json
+import re
 from pathlib import Path
 
 from .errors import UsageError
+from .tiers import SEAT_SEPARATOR, SEATABLE_ROLES, SLICE_NAME
 from .triggers import git_runner, parse_name_status
 
 #: The partition document's own version, so a later shape change is auditable
@@ -44,10 +46,15 @@ PARTITION_SCHEMA_VERSION = 1
 
 COMMANDS = frozenset({"validate-partition"})
 
-#: Separates a seat from the slice it owns in a planned role name. A role name
-#: never contains it, so `reviewer#api` will read back unambiguously once the
-#: dispatch side carries seats (#434).
-SEAT_SEPARATOR = "#"
+#: Characters a path glob never needs, and that a seat's rendered brief cannot
+#: carry safely.
+UNSAFE_GLOB = re.compile(r"[`\x00-\x1f\x7f]")
+
+#: The responsibilities a partition seats, which are the seatable roles
+#: `tiers.SEATABLE_ROLES` names.
+PARTITION_ROLES = SEATABLE_ROLES
+
+
 
 
 def load_partition(path):
@@ -72,6 +79,11 @@ def load_partition(path):
         if (not isinstance(entry, dict) or set(entry) != {"name", "paths"}
                 or not isinstance(entry["name"], str) or not entry["name"].strip()):
             raise UsageError("Each slice is an object with a non-empty name and a paths array.", {"path": str(path)})
+        if not SLICE_NAME.fullmatch(entry["name"]):
+            raise UsageError(
+                "Slice name {!r} cannot address its seat: name it with letters, digits, underscores, dots or hyphens, starting with a letter or digit. A seat is a CLI key, and a name carrying {!r}, a separator or whitespace does not read back.".format(
+                    entry["name"], SEAT_SEPARATOR),
+                {"path": str(path)})
         if entry["name"] in seen:
             raise UsageError("Slice name {!r} appears twice; each seat owns one named slice.".format(entry["name"]), {"path": str(path)})
         seen.add(entry["name"])
@@ -79,14 +91,59 @@ def load_partition(path):
         if (not isinstance(patterns, list) or not patterns
                 or any(not isinstance(item, str) or not item.strip() for item in patterns)):
             raise UsageError("Slice {!r} needs a non-empty array of path globs.".format(entry["name"]), {"path": str(path)})
+        # A glob is rendered verbatim into the seat's brief, where a backtick
+        # or a control character could close the code span and append
+        # instructions of its own. Refused here so an accepted partition always
+        # composes, rather than failing a round later (#434).
+        if any(UNSAFE_GLOB.search(item) for item in patterns):
+            raise UsageError(
+                "Slice {!r} has a path glob carrying a backtick or a control character; a glob needs "
+                "neither, and each one is rendered into its seat's brief.".format(entry["name"]),
+                {"path": str(path)})
     return document
+
+
+def seat_name(role, slice_name):
+    """The planner's name for the seat that owns `slice_name`."""
+    return role + SEAT_SEPARATOR + slice_name
+
+
+def seats_for(partition, role):
+    """`{seat_name: role}` for every slice, in declaration order.
+
+    The planner is role-keyed throughout, so several seats of one role reach it
+    as distinct names mapped back to the responsibility they fill (#409).
+    """
+    return {seat_name(role, entry["name"]): role for entry in partition["slices"]}
+
+
+def seat_paths(partition, role):
+    """`{seat_name: [glob, ...]}` — the paths each seat's slice owns.
+
+    The composer requires a seat's paths and reads no partition document, so
+    the plan carries them out of the validated partition rather than leaving
+    the lead to copy the boundary by hand (#434).
+    """
+    return {seat_name(role, entry["name"]): list(entry["paths"]) for entry in partition["slices"]}
+
+
+def slice_of(seat):
+    """The slice a seat owns, or None for a plain role name."""
+    if not isinstance(seat, str) or SEAT_SEPARATOR not in seat:
+        return None
+    return seat.split(SEAT_SEPARATOR, 1)[1]
 
 
 def partition_role(partition):
     """The role the partition seats; `reviewer` unless the document says."""
     role = partition.get("role", "reviewer")
-    if not isinstance(role, str) or not role.strip() or SEAT_SEPARATOR in role:
-        raise UsageError("A partition's role is a non-empty name without {!r}.".format(SEAT_SEPARATOR), {})
+    # A JSON document can name an unhashable role. The membership test would
+    # raise TypeError past every caller expecting this module's UsageError.
+    if not isinstance(role, str) or role not in PARTITION_ROLES:
+        raise UsageError(
+            "A partition seats {}; every other responsibility carries per-task gates one seat owns.".format(
+                " or ".join(sorted(PARTITION_ROLES))),
+            {"role": role})
     return role
 
 
@@ -144,6 +201,7 @@ def validate(changed, partition):
             {"unowned": unowned, "overlaps": overlaps, "empty": empty},
         )
     return {"schema_version": PARTITION_SCHEMA_VERSION,
+            "role": partition_role(partition),
             "slices": [{"name": entry["name"], "paths": assignment[entry["name"]]} for entry in slices],
             "changed": sorted(changed)}
 

@@ -14,7 +14,7 @@ if _ROOT not in _sys.path:
 import unittest
 
 from teamlead.errors import PlanError
-from teamlead.planner import plan
+from teamlead.planner import DEFAULT_ROLE_COSTS, _costs_for, plan
 
 ROLES = ["developer", "tester", "reviewer"]
 
@@ -187,6 +187,31 @@ class CostWeightTest(unittest.TestCase):
             role_costs={"tester": 99.0},
         )
         self.assertEqual(result["assignments"], {"developer": "alpha", "reviewer": "zeta"})
+
+    def test_a_seat_costs_what_its_responsibility_costs(self):
+        # `reviewer#api` is a reviewer round: it must not fall through to the
+        # generic weight an unweighed role gets (#434).
+        result = plan(["developer", "reviewer#api"], snapshot(alpha=60.0, zeta=55.0))
+        self.assertIn("weight 5", " ".join(result["rationale"]))
+        self.assertEqual(result["assignments"], {"developer": "alpha", "reviewer#api": "zeta"})
+
+    def test_a_role_override_reaches_every_seat_of_it(self):
+        result = plan(
+            ["developer", "reviewer#api"],
+            snapshot(alpha=60.0, zeta=55.0),
+            role_costs={"reviewer": 30.0},
+        )
+        self.assertEqual(result["assignments"], {"developer": "zeta", "reviewer#api": "alpha"})
+
+    def test_a_seat_reads_its_responsibilitys_rotation_history(self):
+        # Prior rounds ledger `reviewer`, so the tie-break must not start every
+        # slice at zero and pin one worker to the role (#434).
+        result = plan(
+            ["reviewer#api"],
+            snapshot(alpha=60.0, zeta=60.0),
+            counts={"reviewer": {"alpha": 3}},
+        )
+        self.assertEqual(result["assignments"], {"reviewer#api": "zeta"})
 
     def test_roles_nobody_weighed_keep_the_callers_order(self):
         result = plan(["scribe", "courier"], snapshot(alpha=90.0, zeta=60.0))
@@ -1127,6 +1152,24 @@ class SpecialistOrderingTest(unittest.TestCase):
         result = plan(["advisor"], snapshot(judge=90, worker=40, spare=10), judge_agent="judge",
                       familiarity={"advisor": {"judge": 1}}, requirements={"advisor": {}})
         self.assertEqual(result["assignments"], {"advisor": "worker"})
+
+
+    def test_a_seat_costs_what_its_responsibility_costs(self):
+        # Weighing one seat apart would make slices of one responsibility
+        # compete under different costs, and the rule gives the role the
+        # weight (#434). Asserted on the resolved costs themselves: the plan
+        # result carries assignments and rationale, not per-seat weights, so a
+        # conditional read of it would assert nothing.
+        self.assertEqual(_costs_for(["reviewer#api", "reviewer#core"], {"reviewer": 40}),
+                         {"reviewer#api": 40.0, "reviewer#core": 40.0})
+        self.assertEqual(_costs_for(["reviewer#api", "reviewer"], None),
+                         {"reviewer#api": DEFAULT_ROLE_COSTS["reviewer"],
+                          "reviewer": DEFAULT_ROLE_COSTS["reviewer"]})
+
+    def test_a_seat_keyed_role_cost_is_refused(self):
+        with self.assertRaisesRegex(PlanError, "never one of its seats"):
+            plan(["reviewer#api", "reviewer#core"], snapshot(a=90, b=80),
+                 role_costs={"reviewer#api": 40})
 
 
 if __name__ == "__main__":

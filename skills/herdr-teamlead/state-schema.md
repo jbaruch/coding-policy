@@ -268,7 +268,7 @@ skills/herdr-teamlead/references/retrospectives.md
   ],
   "specialist_assessments": [],
   "recovery": {
-    "schema_version": 9,
+    "schema_version": 10,
     "tasks": {},
     "checkpoints": [],
     "plans": [],
@@ -332,13 +332,14 @@ document and arrives already stamped.
 
 ## Recovery records
 
-The recovery document uses `schema_version: 9`; individual records retain their
+The recovery document uses `schema_version: 10`; individual records retain their
 independent versions. Version 6 adds the dispatch fields `brief_identity`, `refusal` and
 `refusal_move` and the `refusal_authorizations` collection; version 7 adds the
 dispatch's send-time `provider`; version 8 adds the `diagnoses` collection;
-version 9 adds `legacy_ruling_recoveries`. The
+version 9 adds `legacy_ruling_recoveries`; version 10 widens `dispatches[].role`
+to a seat, per Seat vs responsibility above. The
 owner stamps an older store on load, adds the empty collections, and refuses one
-already carrying a field its version did not own. Generic records remain version 1; stale-Grok delivery and
+already carrying a field — or a seat-named dispatch — its version did not own. Generic records remain version 1; stale-Grok delivery and
 composition-bearing dispatch/result records use version 2. Checkpoints are at
 version 2: the owner upgrades a version-1 row on load, stamping it and
 preserving its identity, fix round, base and recorded ruling, and refuses one
@@ -359,7 +360,7 @@ replacement for live readiness, source review, or release gates.
 | `tasks` | Keyed by original task identity; `task`, immutable full `base_revision`, `scope`, `allowed_paths`, `authorization`. Migration invents none of them. |
 | `checkpoints` | Record schema 3. Unique `id`, `fix_round`, original `base_revision`, concrete `defect`, `previous_attempts`, `progress`, `change_in_approach`. Carries `judge_agent`, `judge_report` and `judge_evidence` only when a ruling is cited, and a cited one requires a completed pinned-judge assignment after the preceding developer attempt plus the `requested_by` receipt (source and quote) for the operator request it answers. A partial trio is refused, one task records at most one cited ruling, and `requested_by` without a cited ruling is refused. Version-1 rows migrate to 2, the shape that predates the receipt; a version-2 row carrying one is refused, and neither older version has a receipt invented for it. The reader accepts versions 2 and 3. |
 | `plans` | Unique `id`, `checkpoint`, original `base_revision`, `scope`, `allowed_paths`, `additional_fixes`, derived `first_fix`/`last_fix`, `authorization`; optional `supersedes` references a preserved prior approval. |
-| `dispatches` | Unique `id`, byte/input `fingerprint`, `role`, `agent`, cumulative `fix_round`, `plan` or null, `work` or null, `status`, `result`, `report`, and `assignment_index` once an outcome is recorded. CLI records `brief`, `common`, `observed_before`, and `context_before_send`; reconciled retries preserve `prior_assignment_indices`. `provider` is the worker's config `kind` at send time, authoritative for the refusal's attribution. `brief_identity` digests the common and role brief bytes with the enrolled report path masked. `refusal` (`provider`, `reason`, `receipt`, `report_path`, `evidence`) appears once `record-refusal` binds an exit-5 receipt to an applied row's enrolled report; `refusal_move` (`from`, `from_provider`, `provider`) appears on the dispatch that carried the refused brief, same `brief_identity`, to another provider. |
+| `dispatches` | Unique `id`, byte/input `fingerprint`, `role` (the SEAT, per the Writer / Reader Contract's Seat vs responsibility), `agent`, cumulative `fix_round`, `plan` or null, `work` or null, `status`, `result`, `report`, and `assignment_index` once an outcome is recorded. CLI records `brief`, `common`, `observed_before`, and `context_before_send`; reconciled retries preserve `prior_assignment_indices`. `provider` is the worker's config `kind` at send time, authoritative for the refusal's attribution. `brief_identity` digests the common and role brief bytes with the enrolled report path masked. `refusal` (`provider`, `reason`, `receipt`, `report_path`, `evidence`) appears once `record-refusal` binds an exit-5 receipt to an applied row's enrolled report; `refusal_move` (`from`, `from_provider`, `provider`) appears on the dispatch that carried the refused brief, same `brief_identity`, to another provider. |
 | `context_permissions` | Original `assignment_index`, `next_fix`, `reason`, `authorization`, `evidence`, `evidence_receipt`, later `observed_session`, and `basis: operator_authorized_fresh_handoff`. The original null session is never replaced. |
 | `events` | Append-only `sequence`, `kind`, and structured `details` preserving approvals, waiting states, reservations, send transitions, results, transport retries, superseded review receipts, and recovery decisions. |
 | `hand_clearances` | Unique `id`, original release `assignment_index`, `previous_developer`, complete owner `input`, clear byte `receipts`, later `observed_session` or null, and `basis: verified_required_release_clear`. Both indices retain their original rows. The later observation never substitutes for historical proof; changed or missing current IDs do not invalidate archived clear evidence. |
@@ -478,6 +479,15 @@ informational plan name and never feeds headroom.
   implementation separately from active audit work. `apply --dry-run` reads
   current recovery bounds without writes; an older ledger requires an owner
   `state` command first. Dry-run never proves live continuity or qualification.
+- **Seat vs responsibility** — a partitioned round plans several seats of one
+  role (`reviewer#api`, `reviewer#core`). `assignments[].role` holds the
+  RESPONSIBILITY (`reviewer`), so per-role history, independence and rotation
+  read one role instead of fragmenting across slice names.
+  `recovery.dispatches[].role` holds the SEAT, which is what a slice's verdict
+  is read back through. A reader comparing the two resolves the dispatch's
+  responsibility first (`tiers.canonical_role`); the two strings are equal only
+  on an unpartitioned round. Which roles are seatable, and the grammar a seat's
+  slice half follows, are in `skills/herdr-teamlead/references/review-partition.md`.
 - **Assignment chronology** — assignment `at` records the event time; import receipt
   `at` records when the owner appended its evidence. Reads preserve original row
   indices and never reorder the audit. Chronological lookup returns the original
@@ -654,6 +664,12 @@ stores 1–8 by adding an empty collection and retaining existing records.
 An older store already containing this collection is refused. State document
 schema 6 and checkpoint record versions remain unchanged. Older owner builds
 cannot write schema 9; use the upgraded owner for every dispatch and reader.
+
+Schema 10 adds no collection: it widens `dispatches[].role` to a seat. The
+owner stamps a store at 1–9 and retains its records; a store at those versions
+carrying a seat-named dispatch is unowned newer data and is refused without
+writes. A reader pinned to 9 or lower reads a schema-10 store as newer and
+takes its no-prior-state path rather than migrating it downward.
 
 Existing schema-1 receipts stay in the ledger. Each carries `id`, `task`, `at`,
 the actual operator `authorization` source/quote, `backup` path/SHA-256, a

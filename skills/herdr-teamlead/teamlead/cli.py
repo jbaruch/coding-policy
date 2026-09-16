@@ -33,6 +33,7 @@ from .herdr import (
     trace_enabled_in_env,
 )
 from .composer import COMPOSER_SETTLE_SEC, DEFAULT_START_TIMEOUT_MS
+from .tiers import SEAT_SEPARATOR, canonical_role, require_seatable
 from .diagnostics import PREFIX as DIAGNOSTIC_PREFIX
 from .measure import (
     DEFAULT_MARKER_POLL_ATTEMPTS,
@@ -238,6 +239,8 @@ def build_parser():
                              help="Choose a configured round type for a role; never a model override.")
     plan_parser.add_argument("--round-context", metavar="FILE",
                              help="JSON object keyed by role with mechanical/risk evidence for this round.")
+    plan_parser.add_argument("--partition", metavar="FILE",
+                             help="Review partition; seats one worker per slice of the role it names. Validate it with `validate-partition` first.")
     plan_parser.add_argument("--judge-mode", choices=recovery.JUDGE_MODES,
                              help="What this round's judge seat is for. Required with --roles judge.")
     plan_parser.add_argument("--fix-round", type=int, help="Task fix number; late fixes use the top tier.")
@@ -672,23 +675,97 @@ def _judge_mode_for(args, document):
     return planned
 
 
+def _expand_partition_seats(roles, partition_path):
+    """Replace the partitioned role with one seat per slice.
+
+    Returns `(roles, {seat: role}, {seat: [glob, ...]})`. Without a partition
+    the round is untouched, which is every single-seat round (#409).
+    """
+    if not partition_path:
+        return roles, {}, {}
+    document = partition.load_partition(partition_path)
+    role = partition.partition_role(document)
+    if role not in roles:
+        raise PlanError(
+            "The partition seats {!r}, which --roles does not request; add it, or drop --partition.".format(role),
+            {"role": role, "roles": roles},
+        )
+    seats = partition.seats_for(document, role)
+    expanded = []
+    for item in roles:
+        expanded.extend(seats) if item == role else expanded.append(item)
+    return expanded, seats, partition.seat_paths(document, role)
+
+
+def _fan_out_seats(mapping, seats):
+    """Re-key a role-keyed input onto the seats that replaced the role.
+
+    The expanded role's own key is dropped: the seats ARE the roles this plan
+    assigns, and a leftover `reviewer` key names a role it is not filling.
+    """
+    if not seats or not mapping:
+        return mapping
+    expanded = set(seats.values())
+    fanned = {key: value for key, value in mapping.items() if key not in expanded}
+    for seat, role in seats.items():
+        if seat in mapping:
+            fanned[seat] = mapping[seat]
+        elif role in mapping:
+            fanned[seat] = mapping[role]
+    return fanned
+
+
+def _fan_out_exclusions(mapping, seats):
+    """Re-key an exclusion map onto its seats, unioning the role's bars in.
+
+    An exclusion is a BAR, not a setting a seat overrides. A seat inherits
+    every name barred from its role and adds whatever the lead barred from the
+    seat itself, so `--exclude reviewer#api=beta` never lifts the contributor
+    `alpha` the role already excludes (#434).
+    """
+    if not seats or not mapping:
+        return mapping
+    expanded = set(seats.values())
+    fanned = {key: value for key, value in mapping.items() if key not in expanded}
+    for seat, role in seats.items():
+        barred = sorted(set(mapping.get(role, ())) | set(mapping.get(seat, ())))
+        if barred:
+            fanned[seat] = barred
+    return fanned
+
+
 def cmd_plan(args, client=None, warn=None, trace=None):
-    roles = [role.strip() for role in args.roles.split(",") if role.strip()]
-    if "judge" in roles:
+    # `canonical` is what every module reasoning about RESPONSIBILITY sees;
+    # `roles` carries the seat identity and reaches the planner alone (#434).
+    canonical = [require_seatable(role.strip()) for role in args.roles.split(",") if role.strip()]
+    # `--roles` names RESPONSIBILITIES. A seat comes from `--partition` alone,
+    # which is the declared surface split `validate-partition` checks disjoint
+    # and exhaustive; accepting a pre-seated name here would plan seats against
+    # no declared partition at all (#434).
+    seated = [role for role in canonical if SEAT_SEPARATOR in role]
+    if seated:
+        raise UsageError(
+            "--roles names responsibilities, not seats: {} came pre-seated. Pass {} and "
+            "seat the slices with --partition, after validate-partition has checked it "
+            "disjoint and exhaustive over the round's change.".format(
+                ", ".join(seated), ", ".join(sorted({canonical_role(role) for role in seated}))),
+            {"roles": seated})
+    roles, seats, seat_paths = _expand_partition_seats(canonical, getattr(args, "partition", None))
+    if "judge" in canonical:
         recovery.require_judge_mode(getattr(args, "judge_mode", None))
     excludes = _parse_excludes(args.excludes)
     role_costs = load_role_costs(_config_path(args))
     judge = load_judge(_config_path(args))
-    rounds = _round_inputs(args, roles)
+    rounds = _round_inputs(args, canonical)
     agents = load_config(_config_path(args)) if _config_path(args).exists() else []
     state_path = _state_path(args)
     state = load_state(state_path, warn=warn)
-    requirements = composition.parse_requirements(_read_record(args.requirements) if args.requirements else None, roles, args.task)
+    requirements = composition.parse_requirements(_read_record(args.requirements) if args.requirements else None, canonical, args.task)
     work = _read_record(args.work) if args.work else None
     recovery.validate_work(state["recovery"], state["assignments"], args.task, args.fix_round,
-                           args.correction_plan, work, implementation="developer" in roles)
+                           args.correction_plan, work, implementation="developer" in canonical)
     if args.task:
-        validate_fix_history({role: None for role in roles}, state["assignments"], args.task, args.fix_round)
+        validate_fix_history({role: None for role in canonical}, state["assignments"], args.task, args.fix_round)
     if args.snapshot:
         snapshot_path = Path(args.snapshot)
         try:
@@ -728,14 +805,30 @@ def cmd_plan(args, client=None, warn=None, trace=None):
 
     operator_excludes = {role: list(names) for role, names in excludes.items()}
     constraints = composition.selection_constraints(
-        roles, agents, requirements, state["assignments"], args.task,
+        canonical, agents, requirements, state["assignments"], args.task,
         dispatches=state["recovery"]["dispatches"], assessments=state["specialist_assessments"],
         candidate_names=snapshot.get("agents", {}).keys() if isinstance(snapshot.get("agents"), dict) else (),
     )
     for role, names in constraints["exclude"].items():
         excludes[role] = sorted(set(excludes.get(role, [])) | set(names))
-    tier_candidates = _candidate_tiers(roles, agents, rounds, args.fix_round, judge,
-                                      None if args.preview_tiers else (args.now or now_iso()), excludes=excludes)
+    # Tier candidacy is decided per RESPONSIBILITY, so it reads the role-keyed
+    # bars alone: a seat key would reach the planner's exclusion parser as an
+    # unknown role (#434).
+    tier_candidates = _candidate_tiers(canonical, agents, rounds, args.fix_round, judge,
+                                      None if args.preview_tiers else (args.now or now_iso()),
+                                      excludes={role: names for role, names in excludes.items() if role in set(canonical)})
+    # Each seat inherits its role's bars, tiers, round type and requirements.
+    # `role_costs` is not fanned out: the planner resolves a seat's default
+    # weight and rotation history through its role (#434).
+    excludes = _fan_out_exclusions(excludes, seats)
+    operator_excludes = _fan_out_exclusions(operator_excludes, seats)
+    rounds = _fan_out_seats(rounds, seats)
+    requirements = _fan_out_seats(requirements, seats)
+    tier_candidates = _fan_out_seats(tier_candidates, seats)
+    # `rationale` is a list of sentences, not a role-keyed map: fanning it out
+    # would crash, and each seat's own line is already in it (#434).
+    constraints = {**constraints,
+                   "familiarity": _fan_out_seats(constraints["familiarity"], seats)}
 
     result = build_plan(
             roles,
@@ -764,6 +857,10 @@ def cmd_plan(args, client=None, warn=None, trace=None):
         )
     result["task_context"] = ({"task": args.task, "fix_round": args.fix_round,
                                "plan": args.correction_plan, "work": work} if args.task else None)
+    # The composer requires each seat's owned paths and reads no partition, so
+    # the plan hands them over from the document `validate-partition` accepted.
+    if seat_paths:
+        result["slice_paths"] = {seat: paths for seat, paths in seat_paths.items() if seat in result["assignments"]}
     return result, None
 
 
@@ -785,6 +882,17 @@ def cmd_apply(args, client=None, warn=None, trace=None):
     agents_by_name = {agent.name: agent for agent in agents}
     document = _load_assignments(args.assignments, document=True)
     assignments = normalize_assignments(document)
+    # The ledger row records the responsibility and the DISPATCH records the
+    # seat, and a dispatch exists only under a task. Without one, a seated
+    # round would leave nothing that names the slice, so its verdict could
+    # never be read back (#434).
+    seated = sorted(role for role in assignments if SEAT_SEPARATOR in role)
+    if seated and not (isinstance(args.task, str) and args.task.strip()):
+        raise UsageError(
+            "Seats {} need --task: the slice lives on the dispatch, which a task-less "
+            "apply never records, and its verdict would have nothing to be read back "
+            "through.".format(", ".join(seated)),
+            {"roles": seated})
     requirements = composition.parse_requirements(
         {"schema_version": 1, "assignments": document["requirements"]} if "requirements" in document else None,
         list(assignments), args.task, allow_historical_architect=True,
@@ -868,7 +976,7 @@ def cmd_apply(args, client=None, warn=None, trace=None):
                     dispatches[role]["refusal_move"] = moves[role]
                 if role in requirements:
                     dispatches[role]["requirements"] = requirements[role]
-                if role == "reviewer":
+                if canonical_role(role) == "reviewer":
                     dispatches[role]["reviewer_scope"] = "design" if rounds.get(role, {}).get("type") in {"architect", "reconciliation"} else "verification"
         if len(replayed) == len(assignments):
             return {"schema_version": APPLY_SCHEMA_VERSION, "dry_run": False, "applied_at": at, "applied": replayed}, None
@@ -895,7 +1003,8 @@ def cmd_apply(args, client=None, warn=None, trace=None):
                                                     state["specialist_assessments"],
                                                     mode=judge_mode)
     recovery.validate_work(store, state["assignments"], args.task, args.fix_round,
-                           args.correction_plan, work, implementation="developer" in assignments)
+                           args.correction_plan, work,
+                           implementation=any(canonical_role(role) == "developer" for role in assignments))
     constraints = composition.selection_constraints(
         list(assignments), agents, {role: value for role, value in requirements.items() if role in assignments},
         state["assignments"], args.task, dispatches=store["dispatches"],
@@ -972,12 +1081,17 @@ def cmd_apply(args, client=None, warn=None, trace=None):
             save_state(state_path, state)
 
     def record(result):
-        if result["role"] == "reviewer":
-            result["reviewer_scope"] = "design" if rounds.get("reviewer", {}).get("type") in {"architect", "reconciliation"} else "verification"
+        seat = result["role"]
+        base = canonical_role(seat)
+        if base == "reviewer":
+            result["reviewer_scope"] = "design" if rounds.get(seat, {}).get("type") in {"architect", "reconciliation"} else "verification"
         context = {key: result[key] for key in ("cleared", "clear_reason", "task", "fix_round", "context_session", "tier")}
         context["requirements"] = result.get("requirements")
         context["reviewer_scope"] = result.get("reviewer_scope")
-        add_assignment(state, at, result["role"], result["agent"], status=result["status"], **context)
+        # `add_assignment` records the RESPONSIBILITY a seat fills; the seat
+        # stays on the dispatch, which is what a slice's verdict is read back
+        # through (#434).
+        add_assignment(state, at, seat, result["agent"], status=result["status"], **context)
         if args.task:
             result["dispatch_id"] = dispatches[result["role"]]["id"]
             recovery.finish_dispatch(store, result["dispatch_id"], dict(result), len(state["assignments"]) - 1, at)

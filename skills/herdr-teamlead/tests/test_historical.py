@@ -675,7 +675,7 @@ class HistoricalCommandsTest(fixture.CliCase):
         self.assertEqual(code, 0, err)
         result = self.saved()
         self.assertEqual(result["assignments"], original["assignments"])
-        expected = {**original["recovery"], "schema_version": 9, "hand_clearances": [], "historical_attempts": [], "role_clearances": [], "delivery_recoveries": [], "refusal_authorizations": [], "diagnoses": [], "legacy_ruling_recoveries": []}
+        expected = {**original["recovery"], "schema_version": 10, "hand_clearances": [], "historical_attempts": [], "role_clearances": [], "delivery_recoveries": [], "refusal_authorizations": [], "diagnoses": [], "legacy_ruling_recoveries": []}
         self.assertEqual(result["recovery"], expected)
 
 

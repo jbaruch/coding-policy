@@ -53,7 +53,8 @@ class EngagementTest(unittest.TestCase):
         result = {key: copy.deepcopy(dispatch[key]) for key in ("task", "role", "agent", "fix_round", "requirements", "reviewer_scope") if key in dispatch}
         recovery.finish_dispatch(self.state["recovery"], dispatch["id"], {**result, "status": "applied"}, len(self.state["assignments"]) - 1, AT)
         supervision.enroll(self.path, {"id": dispatch["id"], "agent": dispatch["agent"], "task": dispatch["task"],
-                                      "report": str(self.report), "pane_id": "worker-pane", "native_session": None}, AT)
+                                      "report": dispatch.get("report", str(self.report)),
+                                      "pane_id": dispatch["agent"] + "-pane", "native_session": None}, AT)
 
     def assess(self, data=None, at=LATER):
         return engagement.record_assessment(self.state, self.path, self.data if data is None else data, at)
@@ -76,6 +77,29 @@ class EngagementTest(unittest.TestCase):
         loaded, usable = load_state_checked(self.path)
         self.assertTrue(usable)
         self.assertEqual(loaded, self.state)
+
+    def test_a_review_seats_delivered_report_is_assessable(self):
+        # The seat stays on the dispatch, so a slice's verdict reaches its
+        # assessment through the responsibility it fills (#434).
+        report = self.root / "slice-report.md"
+        report.write_text("Reviewed the api slice at the pushed tip; no blocking findings.\n")
+        delivery = self.root / "slice-delivery.json"
+        delivery.write_text(json.dumps({"found": True, "agent": "slicer", "report_path": str(report)}))
+        seat = {**self.dispatch, "id": "slice-1", "role": "reviewer#api", "agent": "slicer",
+                "reviewer_scope": "verification"}
+        seat.pop("requirements")
+        self.seed({**seat, "report": str(report)})
+        result = self.assess({**self.data, "id": "assessment-slice", "dispatch": "slice-1",
+                              "report": str(report), "delivery": str(delivery),
+                              "contribution": "none", "outcome": "slice reviewed clean"})
+        # The assessment record is independently versioned, so its `role` keeps
+        # holding the RESPONSIBILITY. The seat stays on the dispatch the record
+        # cites (#434).
+        self.assertEqual(result["role"], "reviewer")
+        self.assertEqual(result["dispatch"], "slice-1")
+        self.assertEqual(self.state["recovery"]["dispatches"][-1]["role"], "reviewer#api")
+        self.assertEqual(self.state["assignments"][-1]["role"], "reviewer")
+        engagement.validate_assessments(self.state)
 
     def test_exact_assessment_retry_preserves_original_time_and_unavailable_receipts(self):
         original = copy.deepcopy(self.assess())
@@ -224,7 +248,7 @@ class EngagementTest(unittest.TestCase):
         self.assertEqual(migrated["specialist_assessments"], [])
         self.assertEqual(migrated["assignments"][0], {**original, "schema_version": 6,
                                                     "requirements": None, "reviewer_scope": "unknown"})
-        self.assertEqual(migrated["recovery"]["schema_version"], 9)
+        self.assertEqual(migrated["recovery"]["schema_version"], 10)
 
     def test_older_schema_cannot_bless_future_composition_fields(self):
         for target in ("document", "assignment"):
