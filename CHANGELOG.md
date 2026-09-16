@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.239 — 2026-09-16
+
 ### Changed
 
 - **The judge round moved out of the team-lead execution plan (#441).**
