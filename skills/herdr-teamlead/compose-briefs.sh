@@ -329,8 +329,11 @@ main() {
     fi
     local slice_paths="[]"
     if [[ "$role" == *"#"* ]]; then
-      if ! printf '%s' "$values" | jq -e --arg r "$role" '.roles[$r].SLICE_PATHS | type == "array" and length > 0 and all(type == "string" and (. | length) > 0)' >/dev/null; then
-        warn "seat '${role}' needs SLICE_PATHS: the non-empty list of path globs its slice owns, copied from the partition validate-partition accepted. A slice name alone leaves the worker no boundary to respect"
+      # The globs are rendered verbatim into the worker's brief, so a backtick
+      # or a control character could close the code span and append
+      # instructions of its own. A path glob needs neither.
+      if ! printf '%s' "$values" | jq -e --arg r "$role" '.roles[$r].SLICE_PATHS | type == "array" and length > 0 and all(type == "string" and (. | length) > 0 and (test("[\u0000-\u001f\u007f`]") | not))' >/dev/null; then
+        warn "seat '${role}' needs SLICE_PATHS: the non-empty list of path globs its slice owns, copied from the partition validate-partition accepted, each a string without backticks or control characters. A slice name alone leaves the worker no boundary to respect"
         return 2
       fi
       slice_paths="$(printf '%s' "$values" | jq -c --arg r "$role" '.roles[$r].SLICE_PATHS')" || return 2
@@ -340,6 +343,12 @@ main() {
     fi
     if [[ $'\n'"${known}"$'\n' == *$'\nSLICE_SCOPE\n'* ]]; then
       merged="$(printf '%s' "$merged" | jq -c --arg s "$(slice_scope "$role" "$slice_paths")" '. + {SLICE_SCOPE:$s}')" || return 2
+    elif [[ "$role" == *"#"* ]]; then
+      # A custom template without the placeholder would compose a seated brief
+      # carrying no boundary, and its worker would return a full-surface
+      # verdict over a partitioned change.
+      warn "the template for seat '${role}' carries no {{SLICE_SCOPE}} placeholder — a seated brief must render its slice boundary; add it to $(basename "$role_tpl")"
+      return 2
     fi
     case "$role" in
       advisor|investigator|architect)

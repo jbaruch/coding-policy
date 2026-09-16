@@ -132,6 +132,14 @@
   grammar accepts exactly what the planner emits, so a custom role cannot pass
   `plan` and then fail compose.
 
+  Two ways the boundary could still go missing are closed. A glob carrying a
+  backtick or a control character is refused: the globs render verbatim into
+  the worker's brief, so one could close the Markdown code span and append
+  instructions of its own, and a path glob needs neither character. And a
+  custom template whose reviewer or tester brief omits `{{SLICE_SCOPE}}` is
+  refused for a seat rather than composed without it, which would have
+  dispatched a seated worker carrying no boundary at all.
+
   The live retrospective guard reads the prior SEAT off the dispatch rather
   than the responsibility off the ledger row. Comparing the canonicalized row
   with the seat a dispatch names marked every retained seat as a role change,
