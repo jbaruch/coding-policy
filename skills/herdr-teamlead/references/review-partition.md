@@ -79,12 +79,16 @@ partition proven disjoint and exhaustive over this round's change. `plan` reads
 no repo, base or head and cannot check ownership itself; passing the document
 is refused, naming the command to run.
 
-`plan` emits `slice_paths`, a `{seat: [glob, ...]}` map, and `slice_digest`
-over it. Each seat's values carry those globs as `SLICE_PATHS` and that digest
-as `SLICE_DIGEST`; `compose-briefs.sh` renders both into the brief, and `apply`
-recomputes the digest from the plan and reads it back out of each seat's brief.
-A boundary edited after validation — in the plan, in the values, or in a brief
-written by hand — no longer matches, and the dispatch is refused. `compose-briefs.sh`
+`plan` emits `slice_paths`, a `{seat: [glob, ...]}` map, `slice_digest` over it,
+and `seat_digests`, one digest per seat over that seat and the globs it owns.
+Each seat's values carry its globs as `SLICE_PATHS` and its own `seat_digests`
+entry as `SLICE_DIGEST`; `compose-briefs.sh` renders both into the brief without
+recomputing either. `apply` re-derives each seat's digest from the plan and
+checks three facts against that seat's brief: the digest, the slice name, and
+every one of its globs. A boundary edited after validation — in the plan, in the
+values, or in a brief written by hand — no longer matches, and the dispatch is
+refused. Two seats' briefs exchanged are refused with it, which a round-level
+digest alone would pass. `compose-briefs.sh`
 renders the slice name and those paths into the brief's `SLICE_SCOPE` and
 refuses a seat without them: a slice name alone leaves the worker no boundary
 to resolve, and the composer never reads the partition document. `SLICE_SCOPE`

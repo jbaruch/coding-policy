@@ -373,8 +373,11 @@ main() {
         return 2
       fi
       slice_paths="$(printf '%s' "$values" | jq -c --arg r "$role" '.roles[$r].SLICE_PATHS')" || return 2
+      # Transported, never derived here: the digest is computed in one place
+      # (`partition.seat_digest`), and `apply` re-derives it from the plan and
+      # compares. A second implementation in shell would drift from the first.
       if ! printf '%s' "$values" | jq -e --arg r "$role" '.roles[$r].SLICE_DIGEST | type == "string" and test("^[0-9a-f]{12}$")' >/dev/null; then
-        warn "seat '${role}' needs SLICE_DIGEST: the twelve-character digest plan stamped over the accepted partition, copied from its slice_digest field. It travels into the brief so a boundary edited after validation is refused at dispatch"
+        warn "seat '${role}' needs SLICE_DIGEST: its twelve-character entry from the plan's seat_digests. It travels into the brief, and apply re-derives it from the plan, so a boundary edited after validation is refused at dispatch"
         return 2
       fi
       slice_digest="$(printf '%s' "$values" | jq -r --arg r "$role" '.roles[$r].SLICE_DIGEST')" || return 2

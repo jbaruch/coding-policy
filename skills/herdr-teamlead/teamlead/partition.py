@@ -123,6 +123,18 @@ def seats_for(partition, role):
     return {seat_name(role, entry["name"]): role for entry in partition["slices"]}
 
 
+def seat_digest(seat, paths):
+    """A short digest over ONE seat and the paths it owns.
+
+    Per seat, not per round: a round-level digest is identical in every seat's
+    brief, so swapping two seats' briefs passes a check that only asks whether
+    the digest appears. Binding the seat's own name and globs makes each brief
+    answerable for its own boundary (#453).
+    """
+    canonical = json.dumps([seat, list(paths)], sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:12]
+
+
 def slice_digest(seat_paths):
     """A short digest over the accepted `{seat: [glob, ...]}` map.
 
@@ -169,9 +181,16 @@ def load_validated(path):
             "The validated partition's `changed` must list the round's changed paths; "
             "re-run `validate-partition` rather than editing its result.",
             {"path": str(path)})
-    # Everything else is the document's own contract, checked unchanged.
+    # The document's own contract, then its OWNERSHIP re-derived against the
+    # `changed` set it carries. Reading the result's shape and trusting its
+    # verdict would accept an edited result: overlapping slices and an
+    # uncovered file pass a shape check, and the round seats against them.
+    # Re-running `validate` costs nothing and re-proves the property rather
+    # than taking the artifact's word for it (#453).
     inner = {key: value for key, value in document.items() if key != "changed"}
-    return validate_document(inner, str(path))
+    accepted = validate_document(inner, str(path))
+    validate(set(changed), accepted)
+    return accepted
 
 
 def seat_paths(partition, role):

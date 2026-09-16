@@ -865,6 +865,11 @@ def cmd_plan(args, client=None, warn=None, trace=None):
         # The digest travels with the map, into each brief and back at dispatch,
         # so an edit between the validated partition and the send is refused.
         result["slice_digest"] = partition.slice_digest(accepted)
+        # Per seat as well: one digest for the whole round is identical in
+        # every brief, so swapping two seats' briefs would pass a check that
+        # only asks whether a digest is present.
+        result["seat_digests"] = {seat: partition.seat_digest(seat, paths)
+                                  for seat, paths in accepted.items()}
     return result, None
 
 
@@ -915,17 +920,23 @@ def _require_bound_slices(document, seated, briefs):
         brief = briefs.get(role)
         try:
             body = Path(brief).read_text(encoding="utf-8") if brief else ""
-        except OSError as exc:
+        except (OSError, UnicodeError) as exc:
             raise UsageError(
                 "Cannot read the brief for seat {!r} at {}: {}.".format(role, brief, exc),
                 {"role": role}) from None
-        if recorded not in body:
+        # Three facts, not one. The per-seat digest alone would pass a brief
+        # that carries the right digest and the wrong text; the slice name and
+        # its globs are what a worker actually reads its boundary from.
+        expected_seat = partition.seat_digest(role, slice_paths[role])
+        missing = [item for item in (expected_seat, role.split(SEAT_SEPARATOR, 1)[1],
+                                     *slice_paths[role]) if item not in body]
+        if missing:
             raise UsageError(
-                "The brief for seat {!r} does not carry partition {}, so it was not "
-                "composed against the boundary this plan checked. Compose it with "
-                "`compose-briefs.sh` from the plan's slice_paths and slice_digest.".format(
-                    role, recorded),
-                {"role": role})
+                "The brief for seat {!r} does not carry {}, so it was not composed "
+                "against this seat's checked boundary. Compose it with "
+                "`compose-briefs.sh` from the plan's slice_paths and seat_digests.".format(
+                    role, ", ".join(repr(item) for item in missing)),
+                {"role": role, "missing": missing})
 
 
 def cmd_apply(args, client=None, warn=None, trace=None):

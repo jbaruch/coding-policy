@@ -141,8 +141,7 @@ class CliCase(unittest.TestCase):
         self.seat_plan = bound_seat_plan({"reviewer#api": "grok"})
         self.seat_brief = self.tmp / "reviewer-api.md"
         self.seat_brief.write_text(
-            "# reviewer#api\n\n(Partition {}.)\n".format(self.seat_plan["slice_digest"]),
-            encoding="utf-8")
+            seat_brief_text("reviewer#api", self.seat_plan), encoding="utf-8")
         # A stand-in herdr that always fails, for the paths that build a real
         # client instead of taking an injected one.
         self.fake_herdr = self.tmp / "herdr-stub"
@@ -645,13 +644,21 @@ class MeasureCommandTest(CliCase):
 def bound_seat_plan(assignments, slice_paths=None):
     """An apply document for seats, carrying the boundary `plan` checked.
 
-    A seated apply is refused without it: the digest is what ties the brief and
-    the dispatch to the partition `validate-partition` accepted (#453).
+    A seated apply is refused without it: the digests are what tie each brief
+    and its dispatch to the partition `validate-partition` accepted (#453).
     """
-    from teamlead.partition import slice_digest
+    from teamlead.partition import seat_digest, slice_digest
     paths = slice_paths or {seat: ["src/{}/*".format(seat.split("#", 1)[1])] for seat in assignments}
     return {"schema_version": 1, "assignments": dict(assignments),
-            "slice_paths": paths, "slice_digest": slice_digest(paths)}
+            "slice_paths": paths, "slice_digest": slice_digest(paths),
+            "seat_digests": {seat: seat_digest(seat, globs) for seat, globs in paths.items()}}
+
+
+def seat_brief_text(seat, plan):
+    """A brief carrying what a seated dispatch checks: seat, globs, digest."""
+    globs = plan["slice_paths"][seat]
+    return "# {}\n\nYour slice this round is **{}**, and it owns {}. (Partition {}.)\n".format(
+        seat, seat.split("#", 1)[1], ", ".join(globs), plan["seat_digests"][seat])
 
 
 def validated_partition(slices=None, changed=None):
@@ -774,8 +781,7 @@ class ApplyCommandTest(CliCase):
         # dispatches.
         for seat in plan["assignments"]:
             brief = self.tmp / (seat.replace("#", "-") + ".md")
-            brief.write_text("# {}\n\n(Partition {}.)\n".format(seat, plan["slice_digest"]),
-                             encoding="utf-8")
+            brief.write_text(seat_brief_text(seat, plan), encoding="utf-8")
             self.briefs[seat] = brief
         plan_file = self.tmp / "partitioned-plan.json"
         plan_file.write_text(json.dumps(plan), encoding="utf-8")
@@ -900,6 +906,22 @@ class ApplyCommandTest(CliCase):
         self.assertIn("carries no `changed` set", err)
         self.assertIn("validate-partition", err)
 
+    def test_planning_from_an_edited_validated_result_is_refused(self):
+        # The result's verdict is not taken on faith: overlapping slices and a
+        # changed file no slice owns both pass a shape check, so ownership is
+        # re-derived against the `changed` set the result carries (#453).
+        edited = self.tmp / "edited-result.json"
+        edited.write_text(json.dumps(validated_partition(
+            slices=[{"name": "api", "paths": ["src/**"]},
+                    {"name": "core", "paths": ["src/core/*"]}],
+            changed=["src/core/db.py", "docs/guide.md"])), encoding="utf-8")
+        code, _, err = self.run_cli(
+            self.base() + ["plan", "--roles", "reviewer", "--partition", str(edited),
+                           "--task", "t-edited-result", "--now", AT,
+                           "--snapshot", str(self.snapshot)])
+        self.assertEqual(code, 1)
+        self.assertIn("docs/guide.md", err)
+
     def test_a_boundary_edited_after_planning_is_refused(self):
         # The digest is stamped over the map the validated partition carried;
         # editing the plan's paths afterwards no longer matches it.
@@ -927,7 +949,29 @@ class ApplyCommandTest(CliCase):
             client=self._client({}),
         )
         self.assertEqual(code, 1)
-        self.assertIn("does not carry partition", err)
+        self.assertIn("does not carry", err)
+        self.assertIn("checked boundary", err)
+
+    def test_swapped_seat_briefs_are_refused(self):
+        # A round-level digest is identical in every brief, so a check that
+        # only asks whether the digest is present passes two seats whose briefs
+        # were exchanged. Each brief answers for its OWN seat (#453).
+        plan = bound_seat_plan({"reviewer#api": "grok", "reviewer#core": "claude"})
+        swapped = {}
+        for seat, other in (("reviewer#api", "reviewer#core"), ("reviewer#core", "reviewer#api")):
+            brief = self.tmp / (seat.replace("#", "-") + "-swapped.md")
+            brief.write_text(seat_brief_text(other, plan), encoding="utf-8")
+            swapped[seat] = brief
+        code, _, err = self.run_cli(
+            self.base()
+            + ["apply", "--composer-settle", "0", "--assignments", json.dumps(plan),
+               "--task", "t-swapped", "--common", str(self.common), "--now", AT, "--dry-run"]
+            + ["--brief", "reviewer#api=" + str(swapped["reviewer#api"]),
+               "--brief", "reviewer#core=" + str(swapped["reviewer#core"])],
+            client=self._client({}),
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("checked boundary", err)
 
     def test_a_hand_written_seat_assignment_is_refused(self):
         # A bare `{seat: agent}` map has no checked boundary at all.

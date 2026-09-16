@@ -15,15 +15,22 @@
   the `changed` set they were checked against — and refuses the bare document,
   naming the command to run. `plan` has no repo, base or head and cannot check
   ownership itself, which is why it seats from the result rather than
-  re-deriving it.
+  re-deriving it. The result's verdict is not taken on faith: `load_validated`
+  re-derives ownership against the `changed` set the result carries, so an
+  edited result whose slices overlap or leave a changed file unowned is refused
+  rather than seated. A shape check alone would accept it.
 
-  `plan` stamps `slice_digest` over the accepted `{seat: [glob, ...]}` map.
+  `plan` stamps `slice_digest` over the accepted `{seat: [glob, ...]}` map, and
+  a `seat_digests` entry over each seat and the globs it owns. Per seat matters:
+  one digest for the whole round is identical in every brief, so exchanging two
+  seats' briefs passes a check that only asks whether a digest is present.
   `compose-briefs.sh` requires each seat's `SLICE_DIGEST` beside its
-  `SLICE_PATHS` and renders both into the brief. `apply` recomputes the digest
-  from the plan and reads it back out of each seat's brief, so a boundary
-  edited after validation — in the plan, in the values, or in a brief written
-  by hand — no longer matches and the dispatch is refused. An unseated round is
-  untouched at every step.
+  `SLICE_PATHS` and renders both into the brief, transporting the digest rather
+  than recomputing it in shell. `apply` checks three facts against each brief —
+  the seat's own digest, its slice name, and every one of its globs — so a brief
+  carrying the right digest and the wrong text is refused along with a boundary
+  edited after validation, in the plan, in the values, or in a brief written by
+  hand. An unseated round is untouched at every step.
 
 ## 0.3.242 — 2026-09-16
 
