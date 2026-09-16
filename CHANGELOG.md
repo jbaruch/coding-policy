@@ -32,6 +32,13 @@
   edited after validation, in the plan, in the values, or in a brief written by
   hand. An unseated round is untouched at every step.
 
+  Plan schema 7 carries the three keys — `slice_paths`, `slice_digest`,
+  `seat_digests` — and `state-schema.md` records their writer and readers. A
+  version-6 seated plan has no `seat_digests`, so briefs composed from its
+  round-level digest fail the per-seat check and the dispatch is refused: the
+  round digest is not evidence that each seat's boundary was bound. An
+  unpartitioned plan carries none of the three at either version.
+
 ## 0.3.242 — 2026-09-16
 
 ### Fixed

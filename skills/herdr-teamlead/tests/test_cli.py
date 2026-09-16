@@ -972,6 +972,29 @@ class ApplyCommandTest(CliCase):
         self.assertIn("does not carry", err)
         self.assertIn("checked boundary", err)
 
+    def test_a_version_6_shaped_seated_plan_is_refused(self):
+        # Plan schema 7 adds `seat_digests`. A version-6 seated plan carried
+        # only the round-level digest, so briefs composed from it name no
+        # seat's own boundary — the round digest is not evidence each seat was
+        # bound, and the dispatch is refused rather than accepting it (#453).
+        from teamlead.partition import slice_digest as _round_digest
+        plan = bound_seat_plan({"reviewer#api": "grok"})
+        legacy = self.tmp / "legacy-seat.md"
+        legacy.write_text(
+            "# reviewer#api\n\nYour slice this round is **api**, and it owns "
+            "src/api/*. (Partition {}.)\n".format(_round_digest(plan["slice_paths"])),
+            encoding="utf-8")
+        code, _, err = self.run_cli(
+            self.base()
+            + ["apply", "--composer-settle", "0", "--assignments", json.dumps(plan),
+               "--task", "t-legacy-seat", "--common", str(self.common), "--now", AT,
+               "--dry-run"]
+            + ["--brief", "reviewer#api=" + str(legacy)],
+            client=self._client({}),
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("checked boundary", err)
+
     def test_swapped_seat_briefs_are_refused(self):
         # A round-level digest is identical in every brief, so a check that
         # only asks whether the digest is present passes two seats whose briefs

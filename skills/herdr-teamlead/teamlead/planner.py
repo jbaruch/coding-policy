@@ -68,10 +68,16 @@ from .tiers import SEAT_SEPARATOR, canonical_role
 #: adds `judge.mode`, the seat's declared adjudication-or-diagnosis choice, so
 #: the start and the dispatch read the lead's decision rather than retaking it
 #: (#425). Additive: a version-5 plan simply carries no mode, and its readers
-#: refuse the start rather than defaulting one.
+#: refuse the start rather than defaulting one. Version 7 adds `slice_paths`,
+#: `slice_digest` and `seat_digests` on a partitioned round, the boundary a
+#: seated dispatch is checked against (#453). A version-6 seated plan carries
+#: no `seat_digests`, so briefs composed from its round-level digest fail
+#: apply's per-seat check and the dispatch is refused -- the reader states the
+#: boundary was never bound per seat rather than accepting the round digest as
+#: evidence it was. An unseated plan is unaffected at either version.
 #: A plan is a round's instruction, not stored state -- it is produced and
 #: consumed inside one round and never migrated (rules/stateful-artifacts.md).
-PLAN_SCHEMA_VERSION = 6
+PLAN_SCHEMA_VERSION = 7
 
 #: What one round in each seat is expected to burn, in points of the agent's
 #: remaining headroom percentage. The ORDER is what the planner acts on:
