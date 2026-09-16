@@ -678,11 +678,11 @@ def _judge_mode_for(args, document):
 def _expand_partition_seats(roles, partition_path):
     """Replace the partitioned role with one seat per slice.
 
-    Returns `(roles, {seat: role})`. Without a partition the round is
-    untouched, which is every single-seat round (#409).
+    Returns `(roles, {seat: role}, {seat: [glob, ...]})`. Without a partition
+    the round is untouched, which is every single-seat round (#409).
     """
     if not partition_path:
-        return roles, {}
+        return roles, {}, {}
     document = partition.load_partition(partition_path)
     role = partition.partition_role(document)
     if role not in roles:
@@ -694,7 +694,7 @@ def _expand_partition_seats(roles, partition_path):
     expanded = []
     for item in roles:
         expanded.extend(seats) if item == role else expanded.append(item)
-    return expanded, seats
+    return expanded, seats, partition.seat_paths(document, role)
 
 
 def _fan_out_seats(mapping, seats):
@@ -749,7 +749,7 @@ def cmd_plan(args, client=None, warn=None, trace=None):
             "seat the slices with --partition, which checks them disjoint and exhaustive.".format(
                 ", ".join(seated), ", ".join(sorted({canonical_role(role) for role in seated}))),
             {"roles": seated})
-    roles, seats = _expand_partition_seats(canonical, getattr(args, "partition", None))
+    roles, seats, seat_paths = _expand_partition_seats(canonical, getattr(args, "partition", None))
     if "judge" in canonical:
         recovery.require_judge_mode(getattr(args, "judge_mode", None))
     excludes = _parse_excludes(args.excludes)
@@ -856,6 +856,10 @@ def cmd_plan(args, client=None, warn=None, trace=None):
         )
     result["task_context"] = ({"task": args.task, "fix_round": args.fix_round,
                                "plan": args.correction_plan, "work": work} if args.task else None)
+    # The composer requires each seat's owned paths and reads no partition, so
+    # the plan hands them over from the document `validate-partition` accepted.
+    if seat_paths:
+        result["slice_paths"] = {seat: paths for seat, paths in seat_paths.items() if seat in result["assignments"]}
     return result, None
 
 

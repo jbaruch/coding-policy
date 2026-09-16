@@ -149,6 +149,12 @@
   tip together satisfies the responsibility's gate, with no seat's verdict
   covering another's.
 
+  `plan --partition` emits `slice_paths`, a `{seat: [glob, ...]}` map from the
+  validated document. Requiring `SLICE_PATHS` without emitting it left the
+  documented validate → plan → compose flow unable to round-trip except by
+  hand-copying the boundary, which is the one value a round cannot afford to
+  retype.
+
   The live retrospective guard reads the prior SEAT off the dispatch rather
   than the responsibility off the ledger row. Comparing the canonicalized row
   with the seat a dispatch names marked every retained seat as a role change,

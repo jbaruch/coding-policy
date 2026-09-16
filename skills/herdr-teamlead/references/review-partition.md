@@ -72,8 +72,9 @@ exclusions, round type, requirements, tier qualification and the review-package
 checks its brief owes — so capability, contribution-exclusion and headroom
 ordering apply unchanged and each slice gets a distinct worker.
 
-Each seat's values carry `SLICE_PATHS`, the list of globs its slice owns,
-copied from the partition `validate-partition` accepted. `compose-briefs.sh`
+`plan --partition` emits `slice_paths`, a `{seat: [glob, ...]}` map taken from
+the validated document, so the boundary reaches the composer without a hand
+copy. Each seat's values carry those globs as `SLICE_PATHS`. `compose-briefs.sh`
 renders the slice name and those paths into the brief's `SLICE_SCOPE` and
 refuses a seat without them: a slice name alone leaves the worker no boundary
 to resolve, and the composer never reads the partition document. `SLICE_SCOPE`

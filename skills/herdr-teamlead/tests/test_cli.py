@@ -728,6 +728,10 @@ class ApplyCommandTest(CliCase):
         plan = json.loads(out.getvalue())
         self.assertEqual(sorted(plan["assignments"]), ["reviewer#api", "reviewer#core"])
         self.assertEqual(len(set(plan["assignments"].values())), 2)
+        # The composer requires each seat's owned paths and reads no partition,
+        # so the plan carries them out of the validated document (#434).
+        self.assertEqual(plan["slice_paths"],
+                         {"reviewer#api": ["src/api/*"], "reviewer#core": ["src/core/*"]})
 
         # Each seat takes its role's brief template and dispatches.
         for seat in plan["assignments"]:
@@ -769,6 +773,13 @@ class ApplyCommandTest(CliCase):
         self.assertEqual(sorted(assignments), ["reviewer#api", "reviewer#core"])
         self.assertEqual(assignments["reviewer#api"], "codex")
         self.assertNotIn("grok", assignments.values())
+
+    def test_an_unpartitioned_plan_carries_no_slice_paths(self):
+        out = io.StringIO()
+        code = main(self.base() + ["plan", "--roles", "reviewer", "--now", AT,
+                                   "--snapshot", str(self.snapshot)], stdout=out)
+        self.assertEqual(code, 0, out.getvalue())
+        self.assertNotIn("slice_paths", json.loads(out.getvalue()))
 
     def test_a_pre_seated_role_input_is_refused(self):
         # `--partition` is what proves the slices disjoint and exhaustive, so a

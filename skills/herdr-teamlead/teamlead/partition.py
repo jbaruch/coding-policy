@@ -103,6 +103,16 @@ def seats_for(partition, role):
     return {seat_name(role, entry["name"]): role for entry in partition["slices"]}
 
 
+def seat_paths(partition, role):
+    """`{seat_name: [glob, ...]}` — the paths each seat's slice owns.
+
+    The composer requires a seat's paths and reads no partition document, so
+    the plan carries them out of the validated partition rather than leaving
+    the lead to copy the boundary by hand (#434).
+    """
+    return {seat_name(role, entry["name"]): list(entry["paths"]) for entry in partition["slices"]}
+
+
 def slice_of(seat):
     """The slice a seat owns, or None for a plain role name."""
     if not isinstance(seat, str) or SEAT_SEPARATOR not in seat:
