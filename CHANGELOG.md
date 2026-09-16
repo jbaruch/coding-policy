@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.241 — 2026-09-16
+
 ### Fixed
 
 - **#384's entry is filed under the version that published it (#452).** It
