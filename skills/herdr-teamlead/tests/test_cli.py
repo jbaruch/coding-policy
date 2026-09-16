@@ -973,22 +973,24 @@ class ApplyCommandTest(CliCase):
         self.assertIn("scope block", err)
 
     def test_a_version_6_shaped_seated_plan_is_refused(self):
-        # Plan schema 7 adds `seat_digests`. A version-6 seated plan carried
-        # only the round-level digest, so briefs composed from it name no
-        # seat's own boundary — the round digest is not evidence each seat was
-        # bound, and the dispatch is refused rather than accepting it (#453).
-        from teamlead.partition import slice_digest as _round_digest
+        # Plan schema 7 adds `seat_digests`. Model the pre-7 document itself —
+        # the boundary keys a version-6 plan carried and no per-seat entry —
+        # together with the brief such a plan produced, which could only carry
+        # the round-level digest. The round digest is not evidence each seat's
+        # boundary was bound, so the dispatch is refused (#453).
+        from teamlead.partition import slice_digest as _round_digest, slice_scope
         plan = bound_seat_plan({"reviewer#api": "grok"})
+        legacy_plan = {key: value for key, value in plan.items() if key != "seat_digests"}
+        self.assertNotIn("seat_digests", legacy_plan)
         legacy = self.tmp / "legacy-seat.md"
-        from teamlead.partition import slice_scope
         legacy.write_text(
             "# reviewer#api\n\n{}\n".format(slice_scope(
-                "reviewer#api", plan["slice_paths"]["reviewer#api"],
-                _round_digest(plan["slice_paths"]))),
+                "reviewer#api", legacy_plan["slice_paths"]["reviewer#api"],
+                _round_digest(legacy_plan["slice_paths"]))),
             encoding="utf-8")
         code, _, err = self.run_cli(
             self.base()
-            + ["apply", "--composer-settle", "0", "--assignments", json.dumps(plan),
+            + ["apply", "--composer-settle", "0", "--assignments", json.dumps(legacy_plan),
                "--task", "t-legacy-seat", "--common", str(self.common), "--now", AT,
                "--dry-run"]
             + ["--brief", "reviewer#api=" + str(legacy)],
