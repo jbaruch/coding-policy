@@ -541,6 +541,9 @@ JSON
   {
     printf '#!/bin/sh\n'
     printf 'for a in "$@"; do\n'
+    # The shim's own source, written literally: the backtick and `$a` are the
+    # text of the generated script, not expansions this shell should perform.
+    # shellcheck disable=SC2016
     printf '  case "$a" in *"map(\\"\\`\\""*) exit 4 ;; esac\n'
     printf 'done\n'
     printf 'exec %s "$@"\n' "$(command -v jq)"
