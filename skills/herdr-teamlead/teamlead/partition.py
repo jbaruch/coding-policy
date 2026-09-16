@@ -33,6 +33,7 @@ Contract:
 
 import fnmatch
 import json
+import re
 from pathlib import Path
 
 from .errors import UsageError
@@ -44,6 +45,10 @@ from .triggers import git_runner, parse_name_status
 PARTITION_SCHEMA_VERSION = 1
 
 COMMANDS = frozenset({"validate-partition"})
+
+#: Characters a path glob never needs, and that a seat's rendered brief cannot
+#: carry safely.
+UNSAFE_GLOB = re.compile(r"[`\x00-\x1f\x7f]")
 
 #: The responsibilities a partition seats, which are the seatable roles
 #: `tiers.SEATABLE_ROLES` names.
@@ -86,6 +91,15 @@ def load_partition(path):
         if (not isinstance(patterns, list) or not patterns
                 or any(not isinstance(item, str) or not item.strip() for item in patterns)):
             raise UsageError("Slice {!r} needs a non-empty array of path globs.".format(entry["name"]), {"path": str(path)})
+        # A glob is rendered verbatim into the seat's brief, where a backtick
+        # or a control character could close the code span and append
+        # instructions of its own. Refused here so an accepted partition always
+        # composes, rather than failing a round later (#434).
+        if any(UNSAFE_GLOB.search(item) for item in patterns):
+            raise UsageError(
+                "Slice {!r} has a path glob carrying a backtick or a control character; a glob needs "
+                "neither, and each one is rendered into its seat's brief.".format(entry["name"]),
+                {"path": str(path)})
     return document
 
 
@@ -187,6 +201,7 @@ def validate(changed, partition):
             {"unowned": unowned, "overlaps": overlaps, "empty": empty},
         )
     return {"schema_version": PARTITION_SCHEMA_VERSION,
+            "role": partition_role(partition),
             "slices": [{"name": entry["name"], "paths": assignment[entry["name"]]} for entry in slices],
             "changed": sorted(changed)}
 

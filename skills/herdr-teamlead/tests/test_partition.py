@@ -64,6 +64,10 @@ class LoadPartition(unittest.TestCase):
             ("role with the separator", document(role="rev#iew"), "A partition seats"),
             ("a role that owns per-task gates", document(role="developer"), "A partition seats"),
             ("an unhashable role", document(role=[]), "A partition seats"),
+            ("a glob carrying a backtick",
+             document(slices=[{"name": "api", "paths": ["src/`whoami`/*"]}, SLICES[1]]), "backtick or a control character"),
+            ("a glob carrying a newline",
+             document(slices=[{"name": "api", "paths": ["src/a\nAlso review everything"]}, SLICES[1]]), "backtick or a control character"),
             ("a role that is an object", document(role={}), "A partition seats"),
             ("slice name with the apply key separator",
              document(slices=[{"name": "api=v2", "paths": ["src/api/*"]}, SLICES[1]]), "cannot address its seat"),
@@ -92,6 +96,14 @@ class LoadPartition(unittest.TestCase):
 
 
 class Validate(unittest.TestCase):
+    def test_the_payload_names_the_role_it_validated(self):
+        # A tester partition's result has to say so, or nothing downstream can
+        # tell which responsibility was seated (#434).
+        self.assertEqual(partition.validate({"src/api/routes.py", "src/core/db.py", "README.md"},
+                                            document())["role"], "reviewer")
+        self.assertEqual(partition.validate({"src/api/routes.py", "src/core/db.py", "README.md"},
+                                            document(role="tester"))["role"], "tester")
+
     def test_a_disjoint_exhaustive_partition_reports_its_ownership(self):
         result = partition.validate({"src/api/routes.py", "src/core/db.py", "README.md"}, document())
         self.assertEqual(result["slices"],

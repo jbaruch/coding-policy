@@ -168,6 +168,15 @@
   `reviewer` requiring `security` and `reviewer#api` requiring only `review`
   admitted a worker the responsibility bars.
 
+  Three edges where a seat could still reach an older contract. The partition
+  loader refuses a glob carrying a backtick or a control character, so a
+  document `validate-partition` accepts always composes rather than failing a
+  round later at the brief. `validate`'s ownership payload names the role it
+  seated, so a tester partition's result says so. And `reserve` refuses a
+  seated dispatch against a store below version 10: appending one leaves the
+  store carrying a row its version never wrote, and the next load refuses the
+  whole ledger rather than that row.
+
   The live retrospective guard reads the prior SEAT off the dispatch rather
   than the responsibility off the ledger row. Comparing the canonicalized row
   with the seat a dispatch names marked every retained seat as a role change,

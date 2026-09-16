@@ -918,6 +918,16 @@ def reserve(store, record, at):
     version = _dispatch_version(record)
     if version == SPECIALIST_DISPATCH_VERSION and store.get("schema_version") != RECOVERY_STORE_VERSION:
         raise UsageError("Composition dispatch metadata needs the owner-migrated recovery store; load the current state before reserving this assignment.", {})
+    # A seat in the dispatch role is what store version 10 added. Appending one
+    # to an older store leaves it carrying a row its version never wrote, which
+    # the next load refuses as unowned newer data -- the whole ledger, not the
+    # row (#434).
+    if (isinstance(record.get("role"), str) and SEAT_SEPARATOR in record["role"]
+            and store.get("schema_version") != RECOVERY_STORE_VERSION):
+        raise UsageError(
+            "A seated dispatch needs the owner-migrated recovery store; load the current state "
+            "before reserving {!r}, or the next load refuses the whole ledger.".format(record["role"]),
+            {"role": record["role"]})
     pending = [row for row in store["dispatches"] if row["status"] in PENDING_STATUSES
                and (row["agent"] == record["agent"] or row["task"] == record["task"]
                     and row["role"] in {"developer", "release"} and record["role"] in {"developer", "release"})]
