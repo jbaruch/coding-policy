@@ -1,5 +1,29 @@
 # Changelog
 
+### Fixed
+
+- **#384's entry is filed under the version that published it (#452).** It
+  shipped as 0.3.238 and sat under `## 0.3.236`, with no 0.3.238 heading in the
+  file at all. The entry text is unchanged; it moves under its own heading, in
+  order.
+
+### Added
+
+- **A CHANGELOG entry the publish step cannot stamp is refused on the pull
+  request (#452).** The misfiling was nobody's bug and every step's correct
+  behavior. `stamp-changelog.py` stamps the topmost UN-HEADED `### ` block and
+  is a documented no-op once the file's first `## ` sits above the first `### `.
+  A branch cut before an intervening publish carries its block at what was the
+  top, and the three-way merge lands it BELOW a heading added since — so the
+  entry arrives already headed, the stamp finds nothing to do, and the work
+  ships filed under someone else's version. #384 merged two publishes behind
+  and landed under `## 0.3.236`.
+
+  `skills/release/check-changelog-placement.py` reads the entry lines a branch
+  ADDS, by line number rather than text — `### Added` heads many blocks — and
+  requires each to sit above the first version heading, the one place the stamp
+  can reach. It runs as a pull-request job, where the fix is still a rebase.
+
 ## 0.3.240 — 2026-09-16
 
 ### Added
@@ -254,22 +278,7 @@
   list. Its precondition that `tests/test_skill_invocations.sh` check every
   covered block is met by the same commit.
 
-## 0.3.237 — 2026-09-16
-
-### Added
-
-- **A checkpoint row missing its `id` is covered by regression (#441).** A
-  receipt cites a checkpoint by `id`, so a row without one cannot be matched
-  to the receipt accounting for it. The behavior already held — `validate_store`
-  translates the lookup failure and `load_state_checked` refuses before saving —
-  but nothing pinned it. `test_legacy_recovery.py` now covers both loads: the
-  schema-9 store under `persist_migration=False`, and the migrating schema-8
-  store under `persist_migration=True`, where a save would otherwise be the
-  path that writes a refused store back. Each asserts `usable=False`, unchanged
-  bytes, and a warning naming `'id'`, so a refusal arriving for some other
-  reason does not pass for this one.
-
-## 0.3.236 — 2026-09-16
+## 0.3.238 — 2026-09-16
 
 ### Changed
 
@@ -292,6 +301,23 @@
   blocks also stopped piping a helper straight into `jq`: a non-zero helper
   exit reached `jq` as empty input, which succeeds, leaving `PRE` or a run id
   empty and the flow running past the gate that was supposed to stop it.
+
+## 0.3.237 — 2026-09-16
+
+### Added
+
+- **A checkpoint row missing its `id` is covered by regression (#441).** A
+  receipt cites a checkpoint by `id`, so a row without one cannot be matched
+  to the receipt accounting for it. The behavior already held — `validate_store`
+  translates the lookup failure and `load_state_checked` refuses before saving —
+  but nothing pinned it. `test_legacy_recovery.py` now covers both loads: the
+  schema-9 store under `persist_migration=False`, and the migrating schema-8
+  store under `persist_migration=True`, where a save would otherwise be the
+  path that writes a refused store back. Each asserts `usable=False`, unchanged
+  bytes, and a warning naming `'id'`, so a refusal arriving for some other
+  reason does not pass for this one.
+
+## 0.3.236 — 2026-09-16
 
 ### Changed
 

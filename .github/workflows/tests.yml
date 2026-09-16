@@ -12,6 +12,8 @@ name: Tests
 #      breaks publish.yml's first step after merge.
 #   3. unit-tests — every module's bash unit suite via scripts/run-tests.sh
 #      (rules/testing-standards.md). Gated on diagnostics passing.
+#   4. changelog-placement — pull requests only: the entry this branch adds
+#      must sit where the publish step's stamp can reach it (#452).
 # publish.yml reruns lint + diagnostics + the suites before release as
 # defense-in-depth.
 on:
@@ -41,6 +43,21 @@ jobs:
           token: ${{ secrets.TESSL_TOKEN }}
       - name: Lint plugin
         run: tessl plugin lint
+
+  changelog-placement:
+    # Pull requests only: it compares the branch against the base it will merge
+    # into, which a push to `main` has no counterpart for.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The check diffs against the merge base, so it needs both sides.
+          fetch-depth: 0
+      - name: Check the CHANGELOG entry is one the publish step can stamp
+        run: |
+          git fetch --no-tags origin "${{ github.base_ref }}"
+          python3 skills/release/check-changelog-placement.py --base "origin/${{ github.base_ref }}"
 
   unit-tests:
     needs: [diagnostics, lint]
