@@ -45,19 +45,33 @@ jobs:
         run: tessl plugin lint
 
   changelog-placement:
-    # Pull requests only: it compares the branch against the base it will merge
-    # into, which a push to `main` has no counterpart for.
-    if: github.event_name == 'pull_request'
+    # Prevention on the pull request, detection on `main`. The pull-request run
+    # alone can be outrun: it passes against the base of the moment, another
+    # publish then adds a version heading, and the stale branch still merges
+    # green — the branch-cut race this check exists to catch. Branch protection
+    # requiring an up-to-date branch is the real close; until then `main`'s own
+    # run turns a silent misfiling into a red default branch.
+    if: github.event_name == 'pull_request' || github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
         with:
-          # The check diffs against the merge base, so it needs both sides.
+          # The check diffs against a base commit, so it needs both sides.
           fetch-depth: 0
       - name: Check the CHANGELOG entry is one the publish step can stamp
         run: |
-          git fetch --no-tags origin "${{ github.base_ref }}"
-          python3 skills/release/check-changelog-placement.py --base "origin/${{ github.base_ref }}"
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            git fetch --no-tags origin "${{ github.base_ref }}"
+            base="origin/${{ github.base_ref }}"
+          else
+            # What this push added, measured against the commit it landed on.
+            base="${{ github.event.before }}"
+            if ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
+              echo "::notice::no usable before-commit for this push; skipping the placement check"
+              exit 0
+            fi
+          fi
+          python3 skills/release/check-changelog-placement.py --base "$base"
 
   unit-tests:
     needs: [diagnostics, lint]

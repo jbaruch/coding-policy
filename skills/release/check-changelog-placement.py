@@ -46,9 +46,15 @@ def base_text(base: str, changelog: str) -> str:
         raise RuntimeError(
             "cannot run `git` ({}); install it, or run this check from an "
             "environment where it is on PATH".format(exc)) from None
+    except UnicodeError as exc:
+        raise RuntimeError(
+            "cannot decode {}:{} as UTF-8 ({}); re-save it as UTF-8".format(
+                base, changelog, exc)) from None
     if proc.returncode != 0:
         raise RuntimeError(
-            "`git show {}:{}` failed (exit {}): {}".format(
+            "`git show {}:{}` failed (exit {}): {}. Fetch the base ref "
+            "(`git fetch origin <branch>`) or correct --base, and check that "
+            "--changelog names a path that exists in it.".format(
                 base, changelog, proc.returncode,
                 proc.stderr.strip() or "no diagnostic"))
     return proc.stdout
@@ -78,7 +84,14 @@ def main(argv=None) -> int:
     try:
         text = path.read_text(encoding="utf-8")
     except OSError as exc:
-        print("error: cannot read {}: {}".format(path, exc), file=sys.stderr)
+        print("error: cannot read {}: {}. Correct --changelog, or restore the "
+              "file and its read permission.".format(path, exc), file=sys.stderr)
+        return 2
+    except UnicodeError as exc:
+        # Not an OSError. Letting it escape exits 1 — the misfiling verdict —
+        # so a file this tool cannot decode would read as a finding.
+        print("error: cannot decode {} as UTF-8: {}. Re-save it as UTF-8, or "
+              "point --changelog at the file that is.".format(path, exc), file=sys.stderr)
         return 2
     try:
         original = base_text(args.base, args.changelog)

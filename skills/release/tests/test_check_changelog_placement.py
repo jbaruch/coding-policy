@@ -155,6 +155,15 @@ class RepositoryTest(unittest.TestCase):
         self.assertEqual(proc.returncode, 2, proc.stderr)
         self.assertIn("cannot run `git`", proc.stderr)
 
+    def test_an_undecodable_changelog_is_a_tool_error_not_a_verdict(self):
+        # UnicodeDecodeError is not an OSError; letting it escape exits 1, the
+        # misfiling verdict, for a file the tool simply cannot read.
+        self.commit_changelog(MISFILED)
+        self.changelog.write_bytes(b"# Changelog\n\n\xff\xfe not utf-8\n")
+        code, err = self.run_check()
+        self.assertEqual(code, 2, err)
+        self.assertIn("cannot decode", err)
+
     def test_an_unknown_base_is_a_tool_error_not_a_verdict(self):
         self.commit_changelog(STAMPABLE)
         proc = subprocess.run(

@@ -29,7 +29,17 @@
   entry parked under a heading raises it. It runs as a pull-request job, where
   the fix is still a rebase. An absent `git` exits 2, the tool-error code:
   `subprocess.run` raises `FileNotFoundError`, and letting that escape exits 1
-  — the misfiling verdict — so a missing tool would have read as a finding.
+  — the misfiling verdict — so a missing tool would have read as a finding. A
+  CHANGELOG that is not UTF-8 exits 2 for the same reason: `UnicodeDecodeError`
+  is not an `OSError`.
+
+  The check runs on `main` as well as on the pull request. The pull-request run
+  alone can be outrun — it passes against the base of the moment, another
+  publish adds a heading, and the stale branch still merges green, which is the
+  branch-cut race the check exists to catch. Branch protection requiring an
+  up-to-date branch is the real close, and is the repository owner's to set;
+  until then `main`'s own run turns a silent misfiling into a red default
+  branch.
 
 ## 0.3.240 — 2026-09-16
 
