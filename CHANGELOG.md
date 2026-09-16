@@ -86,6 +86,13 @@
   `{"reviewer": ...}` record covers every slice and a seat's own key overrides
   it for that slice alone.
 
+  The live retrospective guard reads the prior SEAT off the dispatch rather
+  than the responsibility off the ledger row. Comparing the canonicalized row
+  with the seat a dispatch names marked every retained seat as a role change,
+  and `Guard.preflight` then blocked its next dispatch until a fresh
+  retrospective event existed. Moving a worker between slices is still a
+  transition.
+
 ## 0.3.237 — 2026-09-16
 
 ### Added

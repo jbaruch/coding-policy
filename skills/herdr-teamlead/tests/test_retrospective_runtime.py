@@ -216,6 +216,28 @@ class RetrospectiveRuntimeTest(unittest.TestCase):
         self.assertEqual(rc, 1)
         self.assertIn("changed since", err)
 
+    def test_a_retained_seat_is_not_read_as_a_role_change(self):
+        # The ledger row records `reviewer` and the dispatch records
+        # `reviewer#api`, so the prior SEAT is read off the dispatch. Comparing
+        # the ledger row with the seat target marked every retained seat as a
+        # transition and blocked its next dispatch (#434).
+        state = empty_state()
+        add_assignment(state, OLD, "reviewer#api", "grok", task="old-task")
+        state["recovery"]["dispatches"].append({
+            "schema_version": 1, "at": OLD, "id": "d-seat", "task": "old-task",
+            "role": "reviewer#api", "agent": "grok", "fix_round": None, "plan": None,
+            "work": None, "status": "applied", "result": None, "report": None,
+            "assignment_index": 0, "fingerprint": "f",
+        })
+        self.assertEqual(state["assignments"][0]["role"], "reviewer")
+        item = {"agent": "grok", "role": "reviewer#api", "model": None, "effort": None,
+                "context": "retain", "task": "old-task", "brief": None, "common": None,
+                "report": None, "unavailable": None, "pane": "w4:p1"}
+        described = runtime.describe(state, self.client, self.agents, item)
+        self.assertFalse(described["transition_required"])
+        moved = runtime.describe(state, self.client, self.agents, {**item, "role": "reviewer#core"})
+        self.assertTrue(moved["transition_required"])
+
     def test_same_transition_retry_reuses_bridge_but_new_target_does_not(self):
         self.record(self.request([self.steps[0]]))
         first = self.guard()
