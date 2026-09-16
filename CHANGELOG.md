@@ -140,6 +140,15 @@
   refused for a seat rather than composed without it, which would have
   dispatched a seated worker carrying no boundary at all.
 
+  The shipped briefs say what "full" means for a seat. `brief-reviewer.md` and
+  `brief-tester.md` required a full pass to cover the whole branch, which a
+  rendered slice boundary then contradicted — a seated worker read "review the
+  whole branch" and "review only your slice" in one brief. Full now means the
+  whole surface the brief assigns: the branch unseated, the slice when seated.
+  Both say a scoped pass is neither, and that every slice's full verdict at one
+  tip together satisfies the responsibility's gate, with no seat's verdict
+  covering another's.
+
   The live retrospective guard reads the prior SEAT off the dispatch rather
   than the responsibility off the ledger row. Comparing the canonicalized row
   with the seat a dispatch names marked every retained seat as a role change,

@@ -75,9 +75,13 @@ Restrict `NEW` findings to blocking severity. Record new advisories in the
 brief's follow-up issue; they never extend the fix loop. Name missing scope
 inputs in a `## BLOCKED` report instead of guessing which findings to check.
 
-A **full** verification covers the whole branch, every gate and every
-acceptance criterion. The final verification before release stays full;
-a scoped pass cannot replace it.
+A **full** verification covers the whole surface this brief assigns you,
+against every gate and acceptance criterion: the whole branch, or the slice
+named above when this brief seats you on one. A scoped pass re-checks named
+findings and is neither. The final verification before release stays full; a
+scoped pass cannot replace it. On a partitioned round, every slice's full
+verdict at one tip together satisfies the tester gate, and no seat's verdict
+covers another's.
 
 ## Report
 

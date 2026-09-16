@@ -64,7 +64,7 @@ slice_scope() { # <role-or-seat> <slice-paths-json>
   case "$1" in
     *"#"*)
       listed="$(printf '%s' "$2" | jq -r 'map("`" + . + "`") | join(", ")')" || return 3
-      printf 'Your slice this round is **%s**, and it owns %s. Review only what those paths match. An observation outside your slice goes in a separate section of your report and forms no part of your verdict.' \
+      printf 'Your slice this round is **%s**, and it owns %s. That slice is your whole surface: a full pass covers all of it and nothing beyond it. An observation outside your slice goes in a separate section of your report and forms no part of your verdict.' \
         "${1#*#}" "$listed"
       ;;
     *) printf '' ;;
