@@ -33,7 +33,7 @@ from .herdr import (
     trace_enabled_in_env,
 )
 from .composer import COMPOSER_SETTLE_SEC, DEFAULT_START_TIMEOUT_MS
-from .tiers import canonical_role
+from .tiers import canonical_role, require_seatable
 from .diagnostics import PREFIX as DIAGNOSTIC_PREFIX
 from .measure import (
     DEFAULT_MARKER_POLL_ATTEMPTS,
@@ -718,7 +718,7 @@ def _fan_out_seats(mapping, seats):
 def cmd_plan(args, client=None, warn=None, trace=None):
     # `canonical` is what every module reasoning about RESPONSIBILITY sees;
     # `roles` carries the seat identity and reaches the planner alone (#434).
-    canonical = [role.strip() for role in args.roles.split(",") if role.strip()]
+    canonical = [require_seatable(role.strip()) for role in args.roles.split(",") if role.strip()]
     roles, seats = _expand_partition_seats(canonical, getattr(args, "partition", None))
     if "judge" in canonical:
         recovery.require_judge_mode(getattr(args, "judge_mode", None))

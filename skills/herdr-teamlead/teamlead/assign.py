@@ -58,7 +58,7 @@ from .chronology import latest_assignment
 from .state import MAX_FIX_ROUNDS
 from .recovery import empty_recovery, fresh_transition, task_record, validate_work
 from .launch import restart_worker, verify_running, verify_running_permissions
-from .tiers import launch_flags, worker_launch_args
+from .tiers import launch_flags, require_seatable, worker_launch_args
 from .qualification import require_qualification
 from .composition import normalize_requirement, parse_requirements
 
@@ -141,6 +141,7 @@ def normalize_assignments(payload):
                 "agent name string.".format(role, agent),
                 {"role": role},
             )
+        require_seatable(role)
 
     reject_duplicate_agents(payload)
     return dict(payload)

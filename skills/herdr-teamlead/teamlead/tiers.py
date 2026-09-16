@@ -44,6 +44,31 @@ DEFAULT_ROUNDS = {
 SEAT_SEPARATOR = "#"
 
 
+#: The responsibilities a SEAT may fill. Slicing supplies a termination
+#: condition for independent verification of a surface. Every other
+#: responsibility holds a per-task counter one seat owns -- the developer fix
+#: count, the retained-context transition, the release role -- and a slice of
+#: one would read as a second worker holding the same count.
+SEATABLE_ROLES = frozenset({"reviewer", "tester"})
+
+
+def require_seatable(name):
+    """Refuse a seat whose responsibility one worker must own alone.
+
+    `partition_role` bars an unseatable role in the partition document; this
+    bars it wherever a role name is READ -- `--roles developer#api` and an
+    `--assignments` map written by hand reach the same refusal (#434).
+    """
+    if isinstance(name, str) and SEAT_SEPARATOR in name and canonical_role(name) not in SEATABLE_ROLES:
+        raise UsageError(
+            "Role {!r} names a seat of {!r}, which holds a per-task counter one "
+            "worker owns. Pass {!r} unseated, or seat the slice under {}.".format(
+                name, canonical_role(name), canonical_role(name),
+                " or ".join(sorted(SEATABLE_ROLES))),
+            {"role": name})
+    return name
+
+
 def canonical_role(name):
     """The responsibility a seat fills.
 

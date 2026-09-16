@@ -47,6 +47,16 @@
   SEAT=PATH`) and a name carrying `=`, `#`, a comma or whitespace plans a seat
   the round cannot address.
 
+  The first refusal holds wherever a role name is READ, not only inside the
+  partition document. `tiers.require_seatable` gates the shared plan/apply
+  input boundary, so a hand-written `--roles developer#api` or an
+  `--assignments` map naming `release#core` is refused with the responsibility
+  it tried to seat. Without it, `partition_role`'s reviewer/tester restriction
+  was bypassable from the command line: `select_tier` would resolve the seat to
+  `developer` and hand it a build tier while `assign.validate_fix_history` kept
+  counting the literal `developer` key, splitting one task's correction
+  allowance across as many seats as the lead cared to name.
+
 ### Added
 
 - **A judge dispatch declares which of its two modes it is for (#425).** Every

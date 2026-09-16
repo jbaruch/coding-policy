@@ -748,6 +748,31 @@ class ApplyCommandTest(CliCase):
         self.assertEqual(sorted(steps), ["reviewer#api", "reviewer#core"])
         self.assertEqual(len(set(steps.values())), 2)
 
+    def test_a_seat_of_an_unseatable_responsibility_is_refused(self):
+        # A partition document can only seat a reviewer or a tester, but the
+        # role names reaching plan and apply come straight off the command
+        # line. `developer#api` would take a reviewer's seat contract while
+        # `validate_fix_history` keeps counting the literal `developer`, so
+        # the fix counter would fragment across seats (#434).
+        for role in ("developer#api", "release#core", "judge#api"):
+            with self.subTest(role=role, command="plan"):
+                code, _, err = self.run_cli(
+                    self.base() + ["plan", "--roles", role, "--now", AT,
+                                   "--snapshot", str(self.snapshot)])
+                self.assertEqual(code, 1)
+                self.assertIn("names a seat of", err)
+            with self.subTest(role=role, command="apply"):
+                code, _, err = self.run_cli(
+                    self.base()
+                    + ["apply", "--composer-settle", "0",
+                       "--assignments", json.dumps({role: "grok"}),
+                       "--common", str(self.common), "--now", AT, "--dry-run"]
+                    + ["--brief", role + "=" + str(self.briefs["developer"])],
+                    client=self._client({}),
+                )
+                self.assertEqual(code, 1)
+                self.assertIn("names a seat of", err)
+
     def test_a_seat_records_its_responsibility_in_the_ledger(self):
         # The per-role history must not fragment across seat names (#434).
         client = self._client({"grok": "idle"})

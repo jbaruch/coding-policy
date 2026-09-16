@@ -37,7 +37,7 @@ import re
 from pathlib import Path
 
 from .errors import UsageError
-from .tiers import SEAT_SEPARATOR
+from .tiers import SEAT_SEPARATOR, SEATABLE_ROLES
 from .triggers import git_runner, parse_name_status
 
 #: The partition document's own version, so a later shape change is auditable
@@ -52,12 +52,9 @@ COMMANDS = frozenset({"validate-partition"})
 #: through those parsers, so the round would plan a seat it cannot address.
 SLICE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*")
 
-#: The responsibilities a partition seats. Slicing supplies a termination
-#: condition for INDEPENDENT VERIFICATION of a surface. A developer or release
-#: seat carries per-task gates -- the fix counter, the retained-context
-#: transition -- that are keyed to one responsibility per task, and a slice of
-#: one would read as a second worker holding the same counter.
-PARTITION_ROLES = frozenset({"reviewer", "tester"})
+#: The responsibilities a partition seats, which are the seatable roles
+#: `tiers.SEATABLE_ROLES` names.
+PARTITION_ROLES = SEATABLE_ROLES
 
 
 
