@@ -110,6 +110,18 @@
   the responsibility and kept nothing naming the slice — its verdict had
   nothing to be read back through.
 
+  A seat's brief now carries its slice. `rules/agent-team-operation.md` says
+  each slice's brief names its slice and forbids roaming, and nothing rendered
+  that: a seat took its role's template, which identifies the responsibility
+  and says nothing about a surface, so a partitioned round could dispatch
+  several full-surface reviews whose verdicts were not independent over the
+  declared partition. `compose-briefs.sh` derives the boundary from the seat
+  into a `SLICE_SCOPE` placeholder the reviewer and tester templates carry, and
+  refuses a supplied one — the boundary is the script's to write, not the
+  lead's to remember. The composer also holds a `#` key to a seatable
+  responsibility, and its role-key grammar accepts the custom role names the
+  planner already allows.
+
   The live retrospective guard reads the prior SEAT off the dispatch rather
   than the responsibility off the ledger row. Comparing the canonicalized row
   with the seat a dispatch names marked every retained seat as a role change,

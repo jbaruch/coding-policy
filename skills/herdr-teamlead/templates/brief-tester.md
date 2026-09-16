@@ -5,6 +5,8 @@ file.
 
 {{SPECIALIST_CONTEXT}}
 
+{{SLICE_SCOPE}}
+
 You do not dispatch subagents. Prove delegated work from the VCS diff,
 never from the worker's self-report. A delegated verdict is not evidence.
 

@@ -40,7 +40,7 @@ mk_templates() { # <dir>
     || die "could not write COMMON.md"
   printf 'Dev on {{BRANCH}} in {{WORKTREE}} for {{ISSUE}}\nReport: {{REPORT}}\n' > "$1/brief-developer.md" \
     || die "could not write brief-developer.md"
-  printf 'Tester for {{ISSUE}}\nReport: {{REPORT}}\nPackage: {{REVIEW_PACKAGE}}\nRange: {{REVIEW_BASE}}..{{REVIEW_HEAD}}\n' > "$1/brief-tester.md" \
+  printf 'Tester for {{ISSUE}}\nReport: {{REPORT}}\nPackage: {{REVIEW_PACKAGE}}\nRange: {{REVIEW_BASE}}..{{REVIEW_HEAD}}\n{{SLICE_SCOPE}}\n' > "$1/brief-tester.md" \
     || die "could not write brief-tester.md"
 }
 
@@ -401,7 +401,7 @@ JSON
   #     could take the reviewer template and redirect its output out of the
   #     output directory (#434).
   local bad_key
-  for bad_key in 'developer#/../../outside' 'developer#' 'developer#a b' '../developer' 'Developer'; do
+  for bad_key in 'reviewer#/../../outside' 'reviewer#' 'reviewer#a b' '../developer' 'Developer'; do
     jq --arg k "$bad_key" '.roles = {($k): .roles.developer}' "$v1" > "$TMP/v17.json" \
       || die "could not build the malformed-key fixture"
     run "$TPL" "$TMP/v17.json" "$TMP/out17"
@@ -409,6 +409,55 @@ JSON
        && printf '%s' "$ERRTEXT" | grep -q "is not a role or a"; then
       pass; else fail "role key: '$bad_key' must refuse before writing, got RC=$RC ERR=$ERRTEXT"; fi
     rm -rf "$TMP/out17"
+  done
+
+  # 18. Only a seatable responsibility is seated. The shape check alone would
+  #     compose a `developer#api` brief that `plan`, `apply` and recovery all
+  #     refuse (#434).
+  local unseatable
+  for unseatable in 'developer#api' 'advisor#core' 'release#a'; do
+    jq --arg k "$unseatable" '.roles = {($k): .roles.developer}' "$v1" > "$TMP/v18.json" \
+      || die "could not build the unseatable-seat fixture"
+    run "$TPL" "$TMP/v18.json" "$TMP/out18"
+    if [[ $RC -eq 2 && -z "$OUT" && ! -e "$TMP/out18" ]] \
+       && printf '%s' "$ERRTEXT" | grep -q "only reviewer, tester are seated"; then
+      pass; else fail "unseatable seat: '$unseatable' must refuse, got RC=$RC ERR=$ERRTEXT"; fi
+    rm -rf "$TMP/out18"
+  done
+
+  # 19. A custom unseated role key keeps composing: the planner accepts one and
+  #     the composer already resolved `brief-<role>.md` for it.
+  local v19="$TMP/v19.json" o19="$TMP/out19"
+  cp "$TPL/brief-developer.md" "$TPL/brief-role_v2.md" || die "could not add the custom template"
+  jq '.roles = {"role_v2": .roles.developer}' "$v1" > "$v19" || die "could not build the custom-role fixture"
+  run "$TPL" "$v19" "$o19"
+  if [[ $RC -eq 0 ]] && [[ -f "$o19/brief-role_v2.md" ]]; then
+    pass; else fail "custom role: 'role_v2' must compose, got RC=$RC ERR=$ERRTEXT"; fi
+
+  # 20. A seat's brief names its slice and forbids roaming, rendered from the
+  #     seat rather than supplied, so a partitioned round cannot dispatch
+  #     several full-surface verdicts (rules/agent-team-operation.md).
+  local o20="$TMP/out20"
+  run "$TPL" "$v16" "$o20"
+  if [[ $RC -eq 0 ]] && grep -q "Your slice this round is \*\*core\*\*" "$o20/brief-tester#core.md" \
+     && grep -q "forms no part of your verdict" "$o20/brief-tester#core.md"; then
+    pass; else fail "slice scope: the seat brief must name its slice, got RC=$RC ERR=$ERRTEXT"; fi
+  local o20b="$TMP/out20b"
+  run "$TPL" "$v1" "$o20b"
+  if [[ $RC -eq 0 ]] && ! grep -q "Your slice this round" "$o20b/brief-tester.md"; then
+    pass; else fail "slice scope: an unseated tester brief must carry none, got RC=$RC ERR=$ERRTEXT"; fi
+  jq '.roles["tester#core"].SLICE_SCOPE = "mine"' "$v16" > "$TMP/v20.json" || die "could not build the supplied-scope fixture"
+  run "$TPL" "$TMP/v20.json" "$TMP/out20c"
+  if [[ $RC -eq 2 ]] && printf '%s' "$ERRTEXT" | grep -q "composed from the seat, not supplied"; then
+    pass; else fail "slice scope: a supplied SLICE_SCOPE must refuse, got RC=$RC ERR=$ERRTEXT"; fi
+
+  # 21. The SHIPPED reviewer and tester templates carry the placeholder, so a
+  #     real seated round renders the boundary rather than dropping it.
+  local shipped shipped_role
+  shipped="$(cd "$(dirname "$SCRIPT")/templates" && pwd)" || die "could not resolve the shipped templates"
+  for shipped_role in reviewer tester; do
+    if grep -q "{{SLICE_SCOPE}}" "$shipped/brief-${shipped_role}.md"; then
+      pass; else fail "shipped brief-${shipped_role}.md must carry {{SLICE_SCOPE}}"; fi
   done
 
   echo "─────────────────────────────────────────────" >&2

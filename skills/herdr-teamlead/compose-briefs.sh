@@ -50,6 +50,20 @@ TEAMLEAD_REPORT_PATH_MAX_COLS="${TEAMLEAD_REPORT_PATH_MAX_COLS:-100}"
 
 warn() { printf 'compose-briefs: %s\n' "$1" >&2; }
 
+#: The responsibilities a SEAT may fill, mirroring `tiers.SEATABLE_ROLES`.
+SEATABLE_ROLES="reviewer tester"
+
+# The slice boundary a seat's brief carries, or empty for a plain role. Derived
+# from the seat, so a round cannot dispatch several full-surface verdicts by
+# forgetting to write the boundary by hand (rules/agent-team-operation.md
+# Review Before PR).
+slice_scope() { # <role-or-seat>
+  case "$1" in
+    *"#"*) printf 'Your slice this round is **%s**. Review only what the round'"'"'s declared partition assigns to that slice. An observation outside it goes in a separate section of your report and forms no part of your verdict.' "${1#*#}" ;;
+    *) printf '' ;;
+  esac
+}
+
 template_for_role() { # <templates> <role>
   # A seat (`reviewer#api`) takes its ROLE's template: the slice is brief
   # content, never a separate template to author (#434).
@@ -227,8 +241,15 @@ main() {
     # reviewer template and redirect the output outside `outdir` (#434). The
     # CLI's own `require_seatable` is not in the picture when this script runs
     # directly.
-    if [[ ! "$role" =~ ^[a-z][a-z-]*(#[A-Za-z0-9][A-Za-z0-9_.-]*)?$ ]]; then
-      warn "role key '${role}' is not a role or a <role>#<slice> seat — name a role with lowercase letters and hyphens, and a slice with letters, digits, underscores, dots or hyphens"
+    if [[ ! "$role" =~ ^[a-z][a-z0-9_.-]*(#[A-Za-z0-9][A-Za-z0-9_.-]*)?$ ]]; then
+      warn "role key '${role}' is not a role or a <role>#<slice> seat — start a role with a lowercase letter, and name a slice with letters, digits, underscores, dots or hyphens"
+      return 2
+    fi
+    # Only a responsibility whose verification a slice terminates is seated;
+    # `plan`, `apply` and recovery all refuse the rest, so composing a brief
+    # for one would write a round nothing downstream accepts (#434).
+    if [[ "$role" == *"#"* && " ${SEATABLE_ROLES} " != *" ${role%%#*} "* ]]; then
+      warn "role key '${role}' seats '${role%%#*}', and only ${SEATABLE_ROLES// /, } are seated — every other responsibility holds a per-task counter one worker owns"
       return 2
     fi
     role_tpl="$(template_for_role "$templates" "$role")"
@@ -285,6 +306,13 @@ main() {
     known="$(placeholders_in "$role_tpl")" || return 3
     if [[ $'\n'"${known}"$'\n' == *$'\nSPECIALIST_CONTEXT\n'* ]]; then
       merged="$(printf '%s' "$merged" | jq -c '{SPECIALIST_CONTEXT:""} * .')" || return 2
+    fi
+    if [[ $'\n'"${known}"$'\n' == *$'\nSLICE_SCOPE\n'* ]]; then
+      if printf '%s' "$values" | jq -e --arg r "$role" '.roles[$r] | has("SLICE_SCOPE")' >/dev/null; then
+        warn "SLICE_SCOPE for role '${role}' is composed from the seat, not supplied — remove the key"
+        return 2
+      fi
+      merged="$(printf '%s' "$merged" | jq -c --arg s "$(slice_scope "$role")" '. + {SLICE_SCOPE:$s}')" || return 2
     fi
     case "$role" in
       advisor|investigator|architect)
