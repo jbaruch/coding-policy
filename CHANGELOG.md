@@ -1,5 +1,18 @@
 # Changelog
 
+### Added
+
+- **A checkpoint row missing its `id` is covered by regression (#441).** A
+  receipt cites a checkpoint by `id`, so a row without one cannot be matched
+  to the receipt accounting for it. The behavior already held — `validate_store`
+  translates the lookup failure and `load_state_checked` refuses before saving —
+  but nothing pinned it. `test_legacy_recovery.py` now covers both loads: the
+  schema-9 store under `persist_migration=False`, and the migrating schema-8
+  store under `persist_migration=True`, where a save would otherwise be the
+  path that writes a refused store back. Each asserts `usable=False`, unchanged
+  bytes, and a warning naming `'id'`, so a refusal arriving for some other
+  reason does not pass for this one.
+
 ## 0.3.236 — 2026-09-16
 
 ### Changed
