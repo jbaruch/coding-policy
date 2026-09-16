@@ -177,6 +177,32 @@ class SchemaNineCompatibilityTests(unittest.TestCase):
         self.assertFalse(usable)
         self.assertEqual(self.path.read_bytes(), duplicated)
 
+    def test_a_checkpoint_missing_its_id_refuses_without_writes(self):
+        # A receipt cites a checkpoint by `id`, so a row without one cannot be
+        # matched to the receipt that is supposed to account for it. The reader
+        # translates the lookup failure into a refusal, and a refused store is
+        # never written back -- including on the migrating schema-8 path, where
+        # `persist_migration=True` would otherwise save the result (#441).
+        self.install_receipts()
+        del self.state["recovery"]["checkpoints"][0]["id"]
+        self.write_state()
+        raw = self.path.read_bytes()
+        warnings = []
+        _, usable = load_state_checked(self.path, warn=warnings.append, persist_migration=False)
+        self.assertFalse(usable)
+        self.assertEqual(self.path.read_bytes(), raw)
+        self.assertIn("'id'", " ".join(warnings))
+
+    def test_a_migrating_checkpoint_missing_its_id_refuses_without_writes(self):
+        del self.state["recovery"]["checkpoints"][0]["id"]
+        self.write_state()
+        raw = self.path.read_bytes()
+        warnings = []
+        _, usable = load_state_checked(self.path, warn=warnings.append, persist_migration=True)
+        self.assertFalse(usable)
+        self.assertEqual(self.path.read_bytes(), raw)
+        self.assertIn("'id'", " ".join(warnings))
+
     def test_malformed_and_unsupported_state_refuses_without_writes(self):
         self.install_receipts()
         cases = []
