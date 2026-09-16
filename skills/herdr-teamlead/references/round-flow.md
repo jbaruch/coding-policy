@@ -238,7 +238,7 @@ actual blocking review before continuing.
 
 ## Branch-Changing Ruling
 
-At Step 19, the lead never edits the branch itself. At an exhausted allowance,
+Acting on a ruling, the lead never edits the branch itself. At an exhausted allowance,
 record the checkpoint through the owner commands in
 `skills/herdr-teamlead/references/dispatch-recovery.md` and take the diagnosis;
 the boundary is a diagnostic question, not a budget prompt. The plan its remedy
@@ -425,7 +425,7 @@ finish, apply the whole-fleet pause/handoff contract in `references/supervision.
 
 ## Ruling Outcomes
 
-Step 19 follows these branches. Before a finish, preserve any user question and
+`skills/herdr-teamlead/references/judge-round.md` step 7 follows these branches. Before a finish, preserve any user question and
 apply the whole-fleet pause/handoff contract in `references/supervision.md`.
 
 The `RULING:` line binds the round. Only the operator overrides it.
@@ -433,11 +433,11 @@ The `RULING:` line binds the round. Only the operator overrides it.
 For an investigation-only task, a non-blocked ruling returns to Step 12's
 knowledge-deliverable gate with the ruling and any required authorized research.
 Apply the existing correction allowance and judge rules to remaining findings.
-Do not enter implementation Phase 2 or Step 20 without implementation/release
+Do not enter implementation Phase 2 or Step 14 without implementation/release
 authorization. A blocked ruling follows the operator-question path below.
 
 - **`uphold A` / `uphold B` / `amend`, `ACTION:` changing no branch content**
-  — record the ruling. Proceed to Step 20 only with Step 12's broad reports
+  — record the ruling. Proceed to Step 14 only with Step 12's broad reports
   against the current tip. Otherwise re-run Phase 2 with full briefs carrying
   the ruling. Do not re-dispatch the judge for the same settled dispute.
 - **`uphold A` / `uphold B` / `amend`, `ACTION:` changing the branch** — apply
@@ -454,7 +454,7 @@ authorization. A blocked ruling follows the operator-question path below.
   The change is the judge's to name and the lead's to carry out.
 - **`REMEDY: stop`** — record the diagnosis, release what is clean, and record
   the remainder as a tracked accepted defect. The remedy carries that
-  authority; do not re-escalate it. Proceed to Step 20 for what ships.
+  authority; do not re-escalate it. Proceed to Step 14 for what ships.
 - A remedy's bound exhausting with blocking work remaining returns to Step 13
   for the next diagnosis, one rung down the ladder — or at the same rung once,
   when the spent remedy made progress the new diagnosis records in `PROGRESS`.
