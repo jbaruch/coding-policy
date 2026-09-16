@@ -66,9 +66,17 @@ jobs:
           else
             # What this push added, measured against the commit it landed on.
             base="${{ github.event.before }}"
+            # Only the all-zero sentinel — a first push to the ref — is a
+            # reason to skip. Treating every `cat-file` failure as that case
+            # lets a corrupt checkout pass the one push-time guard green.
+            case "$base" in
+              *[!0]*) ;;
+              *) echo "::notice::initial push to this ref; no before-commit to measure against"
+                 exit 0 ;;
+            esac
             if ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
-              echo "::notice::no usable before-commit for this push; skipping the placement check"
-              exit 0
+              echo "::error::before-commit ${base} is not in this checkout — the placement check cannot run; fix the checkout rather than skipping it" >&2
+              exit 1
             fi
           fi
           python3 skills/release/check-changelog-placement.py --base "$base"

@@ -65,18 +65,42 @@ MISFILED = """# Changelog
 """
 
 
-class ParkedCountTest(unittest.TestCase):
+class ParkedIdentityTest(unittest.TestCase):
     def test_an_entry_above_the_first_heading_is_not_parked(self):
-        self.assertEqual(check.parked(STAMPABLE), 1)
+        # The published entry below the heading is parked, as it should be;
+        # the new one above it is not, which is what makes it stampable.
+        parked = check.parked(STAMPABLE)
+        self.assertEqual(len(parked), 1)
+        self.assertIn("A published entry.", parked[0])
+        self.assertNotIn("A new entry.", "\n".join(parked))
 
     def test_an_entry_under_a_version_heading_is_parked(self):
-        self.assertEqual(check.parked(MISFILED), 2)
+        self.assertEqual(len(check.parked(MISFILED)), 2)
 
     def test_a_changelog_with_no_version_heading_yet_parks_nothing(self):
-        self.assertEqual(check.parked("# Changelog\n\n### Added\n"), 0)
+        self.assertEqual(check.parked("# Changelog\n\n### Added\n"), [])
 
-    def test_the_published_baseline_parks_its_own_entry(self):
-        self.assertEqual(check.parked(HEADED), 1)
+    def test_a_moved_block_is_known_to_the_base(self):
+        self.assertEqual(check.newly_parked(HEADED, HEADED), [])
+
+    def test_a_new_block_parked_under_a_heading_is_flagged(self):
+        flagged = check.newly_parked(HEADED, MISFILED)
+        self.assertEqual(len(flagged), 1)
+        self.assertIn("A new entry.", flagged[0])
+
+    def test_a_swap_that_keeps_the_count_is_still_flagged(self):
+        # The count rule this replaced was satisfied by adding one misfiled
+        # block while dropping another parked one.
+        swapped = """# Changelog
+
+## 0.3.9 — 2026-01-02
+
+### Added
+
+- **A new entry.** Not yet stamped.
+"""
+        self.assertEqual(len(check.parked(swapped)), len(check.parked(HEADED)))
+        self.assertEqual(len(check.newly_parked(HEADED, swapped)), 1)
 
 
 class RepositoryTest(unittest.TestCase):
@@ -120,8 +144,19 @@ class RepositoryTest(unittest.TestCase):
         self.commit_changelog(MISFILED)
         code, err = self.run_check()
         self.assertEqual(code, 1, err)
-        self.assertIn("already-published version heading (1 -> 2)", err)
+        self.assertIn("whose content is new to", err)
         self.assertIn("Rebase onto main", err)
+
+    def test_a_swap_that_keeps_the_count_is_refused(self):
+        # Adds a misfiled block and drops a parked one: the net count is
+        # unchanged, and identity still catches it.
+        swapped = HEADED.replace(
+            "- **A published entry.** Already stamped.\n",
+            "- **A new entry.** Not yet stamped.\n")
+        self.commit_changelog(swapped)
+        code, err = self.run_check()
+        self.assertEqual(code, 1, err)
+        self.assertIn("whose content is new to", err)
 
     def test_moving_an_entry_between_headings_is_allowed(self):
         # An archive repair -- filing a past entry under the version that

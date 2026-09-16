@@ -60,17 +60,47 @@ def base_text(base: str, changelog: str) -> str:
     return proc.stdout
 
 
-def parked(text: str) -> int:
-    """How many entry blocks sit under a version heading.
+def block_at(lines: list[str], index: int) -> str:
+    """The entry block starting at `index`, to the next entry or heading."""
+    end = len(lines)
+    for i in range(index + 1, len(lines)):
+        if lines[i].startswith(ENTRY) or lines[i].startswith(H2):
+            end = i
+            break
+    return "\n".join(lines[index:end]).rstrip()
 
-    Zero while the file carries no version heading at all, which is a first
+
+def blocks(text: str) -> list[str]:
+    """Every entry block in `text`, in order."""
+    lines = text.splitlines()
+    return [block_at(lines, i) for i, ln in enumerate(lines) if ln.startswith(ENTRY)]
+
+
+def parked(text: str) -> list[str]:
+    """The entry blocks sitting under a version heading.
+
+    Empty while the file carries no version heading at all, which is a first
     release rather than a misfiling.
     """
     lines = text.splitlines()
     first_h2 = next((i for i, ln in enumerate(lines) if ln.startswith(H2)), None)
     if first_h2 is None:
-        return 0
-    return sum(1 for ln in lines[first_h2:] if ln.startswith(ENTRY))
+        return []
+    return [block_at(lines, i) for i, ln in enumerate(lines)
+            if i > first_h2 and ln.startswith(ENTRY)]
+
+
+def newly_parked(original: str, text: str) -> list[str]:
+    """Parked blocks whose content is new to `original`.
+
+    Identity, not a count. A net-count rule is satisfied by a branch that adds
+    a misfiled block while moving or dropping another parked one, and the
+    misfiling goes through. A block whose text already exists on the base is a
+    move — filing a past entry under the version that published it, say — and
+    a block that does not is new content parked where the stamp cannot reach.
+    """
+    known = set(blocks(original))
+    return [block for block in parked(text) if block not in known]
 
 
 def main(argv=None) -> int:
@@ -99,15 +129,17 @@ def main(argv=None) -> int:
         print("error: {}".format(exc), file=sys.stderr)
         return 2
 
-    before, after = parked(original), parked(text)
-    if after <= before:
+    new_parked = newly_parked(original, text)
+    if not new_parked:
         return 0
     print(
-        "error: this branch parks {} more entry block(s) under an "
-        "already-published version heading ({} -> {}). The publish step stamps "
+        "error: this branch parks {} entry block(s) under an already-published "
+        "version heading whose content is new to {}. The publish step stamps "
         "only what sits ABOVE the first `## ` heading, so an entry below one "
-        "ships filed under a version that already shipped.".format(
-            after - before, before, after), file=sys.stderr)
+        "ships filed under a version that already shipped:".format(
+            len(new_parked), args.base), file=sys.stderr)
+    for block in new_parked:
+        print("  {}".format(block.splitlines()[0]), file=sys.stderr)
     print(
         "Rebase onto {} and move the new block above the topmost `## ` heading. "
         "Moving an existing entry between headings is fine and does not raise "

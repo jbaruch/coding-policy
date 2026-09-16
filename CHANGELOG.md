@@ -19,14 +19,16 @@
   ships filed under someone else's version. #384 merged two publishes behind
   and landed under `## 0.3.236`.
 
-  `skills/release/check-changelog-placement.py` requires that a branch not
-  raise the number of entry blocks parked under already-published headings. The
-  rule is a count rather than a position because diff attribution cannot answer
+  `skills/release/check-changelog-placement.py` refuses a branch that parks an
+  entry block under an already-published heading whose CONTENT is new to the
+  base. Identity rather than diff position, because attribution cannot answer
   "which entry is the new one" when two blocks read alike: given two adjacent
   `### Added`, git marks the lower as added though the upper is the new entry.
-  Counting also lets a deliberate archive repair through — moving an entry
-  under the heading that published it leaves the count unchanged, while a new
-  entry parked under a heading raises it. It runs as a pull-request job, where
+  Identity rather than a count, because a net count is satisfied by a branch
+  that adds a misfiled block while dropping another parked one. A block already
+  on the base is a move — filing a past entry under the version that published
+  it — and passes; a block that is not is new content parked where the stamp
+  cannot reach. It runs as a pull-request job, where
   the fix is still a rebase. An absent `git` exits 2, the tool-error code:
   `subprocess.run` raises `FileNotFoundError`, and letting that escape exits 1
   — the misfiling verdict — so a missing tool would have read as a finding. A
@@ -39,7 +41,9 @@
   branch-cut race the check exists to catch. Branch protection requiring an
   up-to-date branch is the real close, and is the repository owner's to set;
   until then `main`'s own run turns a silent misfiling into a red default
-  branch.
+  branch. Only the all-zero sentinel of a first push skips that run: treating
+  every `git cat-file` failure as "nothing to compare" would let a corrupt
+  checkout pass the one push-time guard green.
 
 ## 0.3.240 — 2026-09-16
 
