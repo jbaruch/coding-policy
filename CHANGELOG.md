@@ -126,7 +126,11 @@
   document, so each seat's values carry `SLICE_PATHS` — the globs its slice
   owns, copied from the partition `validate-partition` accepted — and a seat
   without them is refused. "Your slice is **api**" that a worker cannot resolve
-  to files is not a boundary.
+  to files is not a boundary. Both derived keys are refused in `.shared` as
+  well as per-role: merged into every brief and overwritten, a shared one would
+  have been accepted by being silently discarded. The composer's role-key
+  grammar accepts exactly what the planner emits, so a custom role cannot pass
+  `plan` and then fail compose.
 
   The live retrospective guard reads the prior SEAT off the dispatch rather
   than the responsibility off the ledger row. Comparing the canonicalized row

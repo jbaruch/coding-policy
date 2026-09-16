@@ -401,7 +401,7 @@ JSON
   #     could take the reviewer template and redirect its output out of the
   #     output directory (#434).
   local bad_key
-  for bad_key in 'reviewer#/../../outside' 'reviewer#' 'reviewer#a b' '../developer' 'Developer'; do
+  for bad_key in 'reviewer#/../../outside' 'reviewer#' 'reviewer#a b' '../developer' 'dev/eloper' 'dev,eloper'; do
     jq --arg k "$bad_key" '.roles = {($k): .roles.developer}' "$v1" > "$TMP/v17.json" \
       || die "could not build the malformed-key fixture"
     run "$TPL" "$TMP/v17.json" "$TMP/out17"
@@ -427,12 +427,17 @@ JSON
 
   # 19. A custom unseated role key keeps composing: the planner accepts one and
   #     the composer already resolved `brief-<role>.md` for it.
-  local v19="$TMP/v19.json" o19="$TMP/out19"
-  cp "$TPL/brief-developer.md" "$TPL/brief-role_v2.md" || die "could not add the custom template"
-  jq '.roles = {"role_v2": .roles.developer}' "$v1" > "$v19" || die "could not build the custom-role fixture"
-  run "$TPL" "$v19" "$o19"
-  if [[ $RC -eq 0 ]] && [[ -f "$o19/brief-role_v2.md" ]]; then
-    pass; else fail "custom role: 'role_v2' must compose, got RC=$RC ERR=$ERRTEXT"; fi
+  #     The composer accepts exactly what the planner emits, so a custom role
+  #     cannot pass plan and then fail compose.
+  local v19="$TMP/v19.json" o19="$TMP/out19" custom
+  for custom in role_v2 reviewer.v2 Role; do
+    cp "$TPL/brief-developer.md" "$TPL/brief-${custom}.md" || die "could not add the custom template"
+    jq --arg k "$custom" '.roles = {($k): .roles.developer}' "$v1" > "$v19" || die "could not build the custom-role fixture"
+    rm -rf "$o19"
+    run "$TPL" "$v19" "$o19"
+    if [[ $RC -eq 0 ]] && [[ -f "$o19/brief-${custom}.md" ]]; then
+      pass; else fail "custom role: '$custom' must compose, got RC=$RC ERR=$ERRTEXT"; fi
+  done
 
   # 20. A seat's brief names its slice and forbids roaming, rendered from the
   #     seat rather than supplied, so a partitioned round cannot dispatch
@@ -472,6 +477,20 @@ JSON
   if grep -qF 'src/core/*' "$o20/brief-tester#core.md" \
      && grep -qF 'README.md' "$o20/brief-tester#core.md"; then
     pass; else fail "slice paths: the seat brief must list the paths its slice owns"; fi
+
+  # 21b. A derived key supplied through `.shared` is refused too: merged into
+  #      every brief and overwritten below, it would otherwise be accepted by
+  #      being silently discarded.
+  jq '.shared.SLICE_SCOPE = "mine"' "$v16" > "$TMP/v21d.json" || die "could not build the shared-scope fixture"
+  run "$TPL" "$TMP/v21d.json" "$TMP/out21d"
+  if [[ $RC -eq 2 ]] && printf '%s' "$ERRTEXT" | grep -q "remove the key from .shared"; then
+    pass; else fail "slice scope: a shared SLICE_SCOPE must refuse, got RC=$RC ERR=$ERRTEXT"; fi
+  jq '.shared.SLICE_PATHS = ["src/*"]' "$v16" > "$TMP/v21e.json" || die "could not build the shared-paths fixture"
+  run "$TPL" "$TMP/v21e.json" "$TMP/out21e"
+  # The shared text check reaches an array first; either refusal names the key,
+  # and both leave nothing written.
+  if [[ $RC -eq 2 && ! -e "$TMP/out21e" ]] && printf '%s' "$ERRTEXT" | grep -q "SLICE_PATHS"; then
+    pass; else fail "slice paths: a shared SLICE_PATHS must refuse, got RC=$RC ERR=$ERRTEXT"; fi
 
   # 22. The SHIPPED reviewer and tester templates carry the placeholder, so a
   #     real seated round renders the boundary rather than dropping it.

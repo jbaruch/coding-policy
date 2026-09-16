@@ -248,8 +248,8 @@ main() {
     # reviewer template and redirect the output outside `outdir` (#434). The
     # CLI's own `require_seatable` is not in the picture when this script runs
     # directly.
-    if [[ ! "$role" =~ ^[a-z][a-z0-9_.-]*(#[A-Za-z0-9][A-Za-z0-9_.-]*)?$ ]]; then
-      warn "role key '${role}' is not a role or a <role>#<slice> seat — start a role with a lowercase letter, and name a slice with letters, digits, underscores, dots or hyphens"
+    if [[ ! "$role" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*(#[A-Za-z0-9][A-Za-z0-9_.-]*)?$ ]]; then
+      warn "role key '${role}' is not a role or a <role>#<slice> seat — name each half with letters, digits, underscores, dots or hyphens, starting with a letter or digit"
       return 2
     fi
     # Only a responsibility whose verification a slice terminates is seated;
@@ -317,8 +317,14 @@ main() {
     if [[ $'\n'"${known}"$'\n' == *$'\nSPECIALIST_CONTEXT\n'* ]]; then
       merged="$(printf '%s' "$merged" | jq -c '{SPECIALIST_CONTEXT:""} * .')" || return 2
     fi
-    if printf '%s' "$values" | jq -e --arg r "$role" '.roles[$r] | has("SLICE_SCOPE")' >/dev/null; then
-      warn "SLICE_SCOPE for role '${role}' is composed from the seat and its paths, not supplied — remove the key"
+    # `.shared` too: a key merged from there is overwritten below, so leaving it
+    # unchecked would accept a supplied boundary by silently discarding it.
+    if printf '%s' "$values" | jq -e --arg r "$role" '(.shared // {} | has("SLICE_SCOPE")) or (.roles[$r] | has("SLICE_SCOPE"))' >/dev/null; then
+      warn "SLICE_SCOPE for role '${role}' is composed from the seat and its paths, not supplied — remove the key from .shared and .roles"
+      return 2
+    fi
+    if printf '%s' "$values" | jq -e '.shared // {} | has("SLICE_PATHS")' >/dev/null; then
+      warn "SLICE_PATHS belongs to one seat, never to .shared — every slice owns different paths"
       return 2
     fi
     local slice_paths="[]"
