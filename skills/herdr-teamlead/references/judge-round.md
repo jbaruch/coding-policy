@@ -60,7 +60,7 @@ For an empty shell pane, complete retrospective checks for the start and run:
 ```bash
 CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
 bash "$CP/skills/herdr-teamlead/start-judge-worker.sh" \
-  <step-15-plan-file> <pane> [claude|codex|grok] --task <task-id> [--state <state-file>]
+  <step-3-plan-file> <pane> [claude|codex|grok] --task <task-id> [--state <state-file>]
 ```
 
 Starts the pinned judge and verifies launch argv, on the mode step 3 recorded
