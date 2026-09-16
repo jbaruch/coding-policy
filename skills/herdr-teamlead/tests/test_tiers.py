@@ -331,11 +331,27 @@ class SeatableRoleTest(unittest.TestCase):
         # `compose-briefs.sh` reads a line-oriented `.roles` key, so a slice
         # carrying a separator, whitespace or nothing at all plans a seat the
         # round cannot address (#434).
-        for name in ("reviewer#", "reviewer#a=b", "reviewer#a b", "reviewer#a,b",
-                     "reviewer#-lead", "tester#a\nb"):
+        # `=`, `,` and control characters are refused as unaddressable before
+        # the slice grammar is reached; both refusals name the same defect.
+        for name in ("reviewer#", "reviewer#a b", "reviewer#-lead"):
             with self.subTest(name=name):
                 with self.assertRaisesRegex(UsageError, "cannot address it"):
                     require_seatable(name)
+        for name in ("reviewer#a=b", "reviewer#a,b", "tester#a\nb"):
+            with self.subTest(name=name):
+                with self.assertRaisesRegex(UsageError, "cannot be addressed"):
+                    require_seatable(name)
+
+    def test_a_role_name_the_cli_keys_cannot_carry_is_refused(self):
+        # `plan --roles dev/eloper` emitted an assignment `compose-briefs.sh`
+        # then refused, so the same set is refused where the name is read.
+        for name in ("dev/eloper", "dev=eloper", "dev,eloper", "dev\neloper"):
+            with self.subTest(name=name):
+                with self.assertRaisesRegex(UsageError, "cannot be addressed"):
+                    require_seatable(name)
+        for name in ("developer", "role_v2", "reviewer.v2", "foo..bar", "two words"):
+            with self.subTest(name=name):
+                self.assertEqual(require_seatable(name), name)
 
     def test_a_seat_of_a_per_task_counter_role_is_refused(self):
         for name in ("developer#api", "release#core", "judge#api", "lead#x"):

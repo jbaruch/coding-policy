@@ -415,7 +415,8 @@ JSON
   #     compose a `developer#api` brief that `plan`, `apply` and recovery all
   #     refuse (#434).
   local unseatable
-  for unseatable in 'developer#api' 'advisor#core' 'release#a'; do
+  # The last one matched inside " reviewer tester " under substring membership.
+  for unseatable in 'developer#api' 'advisor#core' 'release#a' 'reviewer tester#api'; do
     jq --arg k "$unseatable" '.roles = {($k): .roles.developer}' "$v1" > "$TMP/v18.json" \
       || die "could not build the unseatable-seat fixture"
     run "$TPL" "$TMP/v18.json" "$TMP/out18"

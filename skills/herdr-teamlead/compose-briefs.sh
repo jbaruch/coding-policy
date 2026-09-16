@@ -236,7 +236,7 @@ main() {
   shared="$(printf '%s' "$values" | jq -c '.shared // {}')"
 
   # Every source file must exist before anything is written.
-  local common_tpl="${templates}/COMMON.md" role role_tpl
+  local common_tpl="${templates}/COMMON.md" role role_tpl seatable_base
   if [[ ! -r "$common_tpl" ]]; then
     warn "template not found: ${common_tpl}"
     return 1
@@ -267,9 +267,21 @@ main() {
       warn "seat '${role}' names the slice '${role#*#}', which cannot address it: name a slice with letters, digits, underscores, dots or hyphens, starting with a letter or digit"
       return 2
     fi
-    if [[ "$role" == *"#"* && " ${SEATABLE_ROLES} " != *" ${role%%#*} "* ]]; then
-      warn "role key '${role}' seats '${role%%#*}', and only ${SEATABLE_ROLES// /, } are seated — every other responsibility holds a per-task counter one worker owns"
-      return 2
+    if [[ "$role" == *"#"* ]]; then
+      # An exact arm, never substring membership: `reviewer tester#api` matches
+      # inside " reviewer tester " and would pass as a seat.
+      case " ${SEATABLE_ROLES} " in
+        *" ${role%%#*} "*)
+          case "${role%%#*}" in
+            *[[:space:]]*) seatable_base="" ;;
+            *) seatable_base="${role%%#*}" ;;
+          esac ;;
+        *) seatable_base="" ;;
+      esac
+      if [[ -z "$seatable_base" ]]; then
+        warn "role key '${role}' seats '${role%%#*}', and only ${SEATABLE_ROLES// /, } are seated — every other responsibility holds a per-task counter one worker owns"
+        return 2
+      fi
     fi
     role_tpl="$(template_for_role "$templates" "$role")"
     if [[ ! -r "$role_tpl" ]]; then

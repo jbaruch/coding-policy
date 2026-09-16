@@ -192,6 +192,13 @@
   place the store bump did not reach. The seat stays on the dispatch each
   assessment cites, and the reader compares responsibilities.
 
+  The two halves of the role-key contract now agree. `require_seatable` refuses
+  a name carrying a path separator, `=`, `,` or a control character wherever a
+  role name is read, so `plan --roles dev/eloper` no longer emits an assignment
+  `compose-briefs.sh` then refuses. And the composer's seatable-base test is an
+  exact `case` arm rather than substring membership, which matched
+  `reviewer tester#api` inside `" reviewer tester "` and passed it as a seat.
+
   The live retrospective guard reads the prior SEAT off the dispatch rather
   than the responsibility off the ledger row. Comparing the canonicalized row
   with the seat a dispatch names marked every retained seat as a role change,

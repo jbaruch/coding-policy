@@ -60,6 +60,13 @@ SEATABLE_ROLES = frozenset({"reviewer", "tester"})
 SLICE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*")
 
 
+#: What a role name can never carry: `/` escapes the brief's output directory,
+#: and `=` and `,` are the separators `--brief ROLE=PATH` and `--roles a,b`
+#: split on. `compose-briefs.sh` refuses the same set, so a name `plan` emits
+#: always composes.
+UNADDRESSABLE_ROLE = re.compile(r"[/=,\x00-\x1f\x7f]")
+
+
 def require_seatable(name):
     """Refuse a name that is not a seat this fleet can address.
 
@@ -68,6 +75,12 @@ def require_seatable(name):
     role name is READ -- `--roles developer#api`, `--assignments {"reviewer#":
     ...}` and any other hand-written map reach the same refusal (#434).
     """
+    if isinstance(name, str) and UNADDRESSABLE_ROLE.search(name):
+        raise UsageError(
+            "Role {!r} cannot be addressed: a name carrying a path separator, '=', ',' or a "
+            "control character neither names its brief nor reads back through "
+            "`--brief ROLE=PATH` and `--roles a,b`.".format(name),
+            {"role": name})
     if not isinstance(name, str) or SEAT_SEPARATOR not in name:
         return name
     base = canonical_role(name)
