@@ -140,7 +140,7 @@ Run it once Step 5's poll shows every bot's latest verdict clean. It emits a JSO
 skills/release/PUBLICATION.md
 ```
 
-**Tessl publication:** capture the registry baseline into `PRE` with `capture-registry-baseline.sh` before merging. A publication on another channel skips this gate.
+**Tessl publication:** capture the registry baseline into `PRE` with `registry-baseline.sh` before merging. A publication on another channel skips this gate.
 
 Pick the right cleanup path based on where you ran the skill from.
 
@@ -188,14 +188,17 @@ After merge — per `rules/ci-safety.md`'s Always Watch CI duty extended through
 - **GitHub tag/asset publication:** push the release tag from the fast-forwarded `main` before resolving anything. Its publish workflow fires on the tag, never on the merge. The version follows Step 3
 - **Every publication, whatever channel carries it:** resolve that publication's own run with `resolve-publish-run.sh`
 - Bind that resolution to the workflow, the exact commit, the `push` event and the ref that fired it, never to "latest on main"
-- Watch the resolved run to a terminal state, and require its `conclusion` to be `success`
+- Watch the resolved run to a terminal state
+- Require its `conclusion` to be `success`
 - Each channel keeps its own run id; a mixed publication holds both at once, and each confirmation below reads the id for its own channel
-- **Tessl publication:** confirm conjuncts 1 and 2 with `verify-publish-landed.sh` — the resolved run's `conclusion == success` AND the registry's `Latest Version > PRE`
-- Gate on that helper's exit code and keep the emitted `current` version
+- **Tessl publication:** confirm conjuncts 1 and 2 with `confirm-tessl-landed.sh` — the resolved run's `conclusion == success` AND the registry's `Latest Version > PRE`
+- Gate on that helper's exit code
+- Keep the version it prints for the moderation gate
 - A non-zero exit stops the release there, with no fall-through to moderation
 - Do not compare against a specific expected version
 - **Tessl publication:** confirm conjunct 3 with `verify-moderation-cleared.sh` on that `current` version. A freshly published version can be install-blocked until its moderation state reaches `pass`. Never report the release confirmed until this clears
-- **GitHub tag/asset publication:** confirm its own two conjuncts with `verify-github-release.sh` — the resolved run's `conclusion` is `success`, AND the release exists at that exact tag, is published, and carries retrievable assets. Run none of the three Tessl helpers for it
+- **GitHub tag/asset publication:** confirm its own two conjuncts with `verify-github-release.sh` — the resolved run's `conclusion` is `success`, AND the release exists at that exact tag, is published, and carries retrievable assets
+- Run none of the three Tessl helpers for a tag/asset publication
 - Report the outcome: merged PR URL, the version published, and each publication's own confirmation — registry advance plus moderation clear for a Tessl publication, the published release and its retrievable assets for a tag publication, both for a package on both channels
 
 When this step is wrapped in a reusable script (e.g., `merge-and-cleanup.sh` that other devs run unattended), see `skills/release/SCRIPTING.md` for the gates the script must enforce.

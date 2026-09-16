@@ -62,6 +62,14 @@ Scripts follow the baseline in `rules/file-hygiene.md` (exit codes, stderr, idem
   3. The package contains the resolved commit range, commit list, diff stat, and patch
 - Every other skill script retains the JSON-producing requirement
 
+- Narrow exception for `skills/release/registry-baseline.sh` and `skills/release/confirm-tessl-landed.sh` version stdout.
+- Applies when a release-gate wrapper's whole output is the version string its caller passes as an argument to the next gate command
+- Preconditions (all required):
+  1. Success emits only that version and a newline
+  2. Failure emits no version, exits non-zero, and writes an actionable diagnostic to stderr
+  3. Each distinct verdict of the helper it wraps reaches the caller as a distinct exit code
+- Every other release script retains the JSON-producing requirement
+
 ## Precheck Gating
 
 - For scheduled or recurring tasks where most runs are no-ops, have the script produce a last-line JSON payload such as `{"wake_agent": false, "data": {}}`; `wake_agent` is a boolean and `data` is an object

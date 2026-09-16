@@ -1,5 +1,38 @@
 # Changelog
 
+### Fixed
+
+- **The release flow's rc dispatch moved out of `PUBLICATION.md` and into two
+  helpers (#450).** The reference carried the logic as Markdown for a caller to
+  retype: a capture, an extraction and an emptiness check for the baseline, and
+  an `rc` `case` for the landing. Each step has a failure mode a retyping caller
+  gets wrong. An absent `jq` or a payload without `.version` leaves `PRE` empty,
+  and an empty baseline passes the registry-advance conjunct VACUOUSLY — the
+  release reports a publish that never happened. Collapsing the landing's rc 2
+  into rc 1 reports an unreachable `gh` as a failed publish, sending the
+  operator after a registry that did nothing wrong.
+
+  `skills/release/registry-baseline.sh` prints the baseline version or fails;
+  it has no verdict exit, since an absent baseline is never a valid input to
+  the conjunction. `skills/release/confirm-tessl-landed.sh` prints the landed
+  version and keeps rc 1 apart from rc 2 — one is an answer about the publish,
+  the other is the absence of one. `PUBLICATION.md` and SKILL.md Step 7 now
+  name the commands and their exit codes and point at the script headers for
+  which condition lands in which code, rather than enumerating a set that
+  drifts (`rules/script-as-black-box.md`).
+
+  Both print a bare version rather than JSON, since the whole value of the
+  wrapper is that its stdout drops straight into the next gate's argument list.
+  `rules/script-delegation.md` carries a narrow carve-out naming the two, in
+  the shape of the existing `review-package.sh` one.
+
+  `skills/release/tests/test_release_helpers.sh` stubs each wrapped helper and
+  holds the dispatch: a good baseline, a failing capture, a non-JSON payload
+  and one without `.version`; a landed publish, an rc-1 verdict, an rc-2
+  indeterminate and a payload without `.current`.
+
+  Three `SKILL.md` Step 7 bullets carrying two directives each are split.
+
 ## 0.3.241 — 2026-09-16
 
 ### Fixed
@@ -8,6 +41,7 @@
   shipped as 0.3.238 and sat under `## 0.3.236`, with no 0.3.238 heading in the
   file at all. The entry text is unchanged; it moves under its own heading, in
   order.
+
 
 ### Added
 
