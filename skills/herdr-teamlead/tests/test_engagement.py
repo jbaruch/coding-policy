@@ -92,7 +92,12 @@ class EngagementTest(unittest.TestCase):
         result = self.assess({**self.data, "id": "assessment-slice", "dispatch": "slice-1",
                               "report": str(report), "delivery": str(delivery),
                               "contribution": "none", "outcome": "slice reviewed clean"})
-        self.assertEqual(result["role"], "reviewer#api")
+        # The assessment record is independently versioned, so its `role` keeps
+        # holding the RESPONSIBILITY. The seat stays on the dispatch the record
+        # cites (#434).
+        self.assertEqual(result["role"], "reviewer")
+        self.assertEqual(result["dispatch"], "slice-1")
+        self.assertEqual(self.state["recovery"]["dispatches"][-1]["role"], "reviewer#api")
         self.assertEqual(self.state["assignments"][-1]["role"], "reviewer")
         engagement.validate_assessments(self.state)
 

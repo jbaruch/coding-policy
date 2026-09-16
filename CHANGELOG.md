@@ -185,6 +185,13 @@
   `.custom`, `-custom` and `two words` compose, as the planner emits them. A
   whitespace-only glob is refused too, since it resolves to nothing.
 
+  `specialist_assessments[].role` keeps holding the responsibility. That record
+  carries its own `ASSESSMENT_SCHEMA_VERSION`, which the recovery-store bump
+  does not cover, so letting a seat into it would widen the field's domain
+  without versioning it — the repurpose Migration Policy forbids, in the one
+  place the store bump did not reach. The seat stays on the dispatch each
+  assessment cites, and the reader compares responsibilities.
+
   The live retrospective guard reads the prior SEAT off the dispatch rather
   than the responsibility off the ledger row. Comparing the canonicalized row
   with the seat a dispatch names marked every retained seat as a role change,
