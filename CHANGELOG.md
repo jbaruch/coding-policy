@@ -199,6 +199,11 @@
   `compose-briefs.sh` then refuses. And the composer's seatable-base test is an
   exact `case` arm rather than substring membership, which matched
   `reviewer tester#api` inside `" reviewer tester "` and passed it as a seat.
+  The key check also runs in jq before `.roles | keys[]` becomes a
+  newline-delimited list: a key carrying a newline is split into two
+  pseudo-roles by the line-oriented read, so the shell test never saw the
+  offending key and the script composed the wrong fragments instead of refusing
+  it.
 
   The live retrospective guard reads the prior SEAT off the dispatch rather
   than the responsibility off the ledger row. Comparing the canonicalized row

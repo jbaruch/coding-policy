@@ -231,6 +231,15 @@ main() {
     warn "values file ${values_file} names no roles — nothing to compose"
     return 1
   fi
+  # In jq, before the keys become a newline-delimited list: a key carrying a
+  # newline is split into two pseudo-roles by the `while read` below, so a
+  # later shell test never sees the offending key at all.
+  local bad_key
+  bad_key="$(printf '%s' "$values" | jq -r '[.roles | keys[] | select(length == 0 or test("[/=,\u0000-\u001f\u007f]"))] | first // empty')" || return 2
+  if [[ -n "$bad_key" ]]; then
+    warn "values file ${values_file} has a role key that cannot name the brief it writes — a key carrying a path separator, '=', ',' or a control character does not read back through the output path and the CLI keys"
+    return 2
+  fi
 
   local shared
   shared="$(printf '%s' "$values" | jq -c '.shared // {}')"
@@ -256,7 +265,9 @@ main() {
     # prefix makes a leading dot or dash harmless, and `..` without a separator
     # names an ordinary file, so neither is rejected: the planner emits custom
     # roles, and everything it emits has to compose.
-    if [[ -z "$role" || "$role" == *"/"* || "$role" == *"="* || "$role" == *","* || "$role" == *[[:cntrl:]]* ]]; then
+    # The jq pass above rejects the whole set before the keys are split into
+    # lines; this arm catches what a line-oriented read could still hand us.
+    if [[ -z "$role" || "$role" == *"/"* || "$role" == *"="* || "$role" == *","* ]]; then
       warn "role key '${role}' cannot name the brief it writes — a key carrying a path separator, '=', ',' or a control character does not read back through the output path and the CLI keys"
       return 2
     fi

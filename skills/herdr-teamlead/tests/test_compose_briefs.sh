@@ -411,6 +411,20 @@ JSON
     rm -rf "$TMP/out17"
   done
 
+  # 17b. A key carrying a newline is split into two pseudo-roles by the
+  #      line-oriented read, so the shell test never sees it. Rejected in jq,
+  #      before the keys become lines.
+  local split_key
+  for split_key in '"dev\neloper"' '"dev\u0000eloper"' '"dev\u0007eloper"'; do
+    jq --argjson k "$split_key" '.roles = {($k): .roles.developer}' "$v1" > "$TMP/v17b.json" \
+      || die "could not build the split-key fixture"
+    run "$TPL" "$TMP/v17b.json" "$TMP/out17b"
+    if [[ $RC -eq 2 && -z "$OUT" && ! -e "$TMP/out17b" ]] \
+       && printf '%s' "$ERRTEXT" | grep -q "cannot name the brief it writes"; then
+      pass; else fail "role key: a key carrying $split_key must refuse, got RC=$RC ERR=$ERRTEXT"; fi
+    rm -rf "$TMP/out17b"
+  done
+
   # 18. Only a seatable responsibility is seated. The shape check alone would
   #     compose a `developer#api` brief that `plan`, `apply` and recovery all
   #     refuse (#434).
