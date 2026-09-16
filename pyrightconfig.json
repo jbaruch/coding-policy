@@ -24,6 +24,7 @@
     "skills/herdr-teamlead/teamlead/retrospective_runtime.py",
     "skills/herdr-teamlead/teamlead/memory.py",
     "skills/herdr-teamlead/tests/test_memory.py",
+    "skills/herdr-teamlead/tests/test_slice_scope_parity.py",
     "skills/herdr-teamlead/teamlead/attention.py",
     "skills/herdr-teamlead/teamlead/attention_view.py",
     "skills/herdr-teamlead/tests/test_attention.py",
