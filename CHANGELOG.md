@@ -2,6 +2,23 @@
 
 ### Changed
 
+- **The release skill's Step 7 names its publication gates and leaves the
+  mechanics to a reference file (#384).** `tessl plugin lint` reported
+  `skills/release/SKILL.md` at ~5382 tokens against a recommended 5000, and
+  Step 7 alone was ~3036 of them — mostly per-channel command blocks and
+  exit-code contracts, which a reader only needs once they know which channel
+  they are on. New `skills/release/PUBLICATION.md` carries how each channel is
+  recognized, the command for every gate, each helper's exit-code contract, and
+  a walkthrough of the Tessl-only, tag/asset-only and mixed cases. Step 7 keeps
+  the ordered execution plan and names every gate — baseline, merge, cleanup,
+  tag push, run resolution and watch, the two Tessl conjunct checks, the
+  moderation clear, the tag/asset release check, and the report — so no gate
+  moved out of the loaded surface. SKILL.md is ~4154 tokens and the lint
+  warning is gone. The `script-as-black-box` pointers for the moved helpers
+  moved with them, one reference per concept.
+
+### Changed
+
 - **The last two publication-confirmation bullets read one directive each
   (#446, completing #375).** #444 split four of the six bullets the
   independent review of #374 named and left two: the other-channel evidence

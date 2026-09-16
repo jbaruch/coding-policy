@@ -134,19 +134,13 @@ skills/release/dismiss-stale-reviews.sh <owner> <repo> <pr-number>
 
 Run it once Step 5's poll shows every bot's latest verdict clean. It emits a JSON summary of what it dismissed and what it left active, exits non-zero on API failure, and is idempotent on re-run. Which reviews it dismisses and which it leaves is the script's decision contract — see `skills/release/dismiss-stale-reviews.sh` header, not restated here (`rules/script-as-black-box.md`).
 
-**Name this repo's publication channels before merging.** The confirmation a release owes is keyed on the publication, never on the package — a package that publishes through more than one channel owes the duty once per publication, each confirmed against the channel that carried it (`rules/ci-safety.md` Always Watch CI). Read the repo's publish workflow and its manifest, and name every channel it publishes on:
+**Name this repo's publication channels before merging.** The confirmation a release owes is keyed on the publication, never on the package — a package that publishes through more than one channel owes the duty once per publication, each confirmed against the channel that carried it (`rules/ci-safety.md` Always Watch CI). Read the repo's publish workflow and its manifest, and name every channel it publishes on. How each channel is recognized, the command for every gate below, each helper's exit-code contract, and a walkthrough of the Tessl-only, tag/asset-only and mixed cases:
 
-- **Tessl** — a Tessl plugin manifest (`.tessl-plugin/plugin.json`, legacy `tile.json`), or a publish path calling `tessl plugin publish` or `tesslio/patch-version-publish`
-- **GitHub tag/asset** — a publish workflow triggered on a tag push (`on: push: tags:`) that creates a release carrying the package's assets, an ACR package published by `acr publish`
-- **Both** — every step below marked Tessl AND every step marked tag/asset, each read from its own channel. A green GitHub release confirms nothing about a pending Tessl moderation, and a cleared Tessl publish confirms nothing about an absent GitHub asset
-
-**Tessl publication:** capture the registry baseline before merging. A publication on another channel skips this step:
-
-```bash
-PRE=$(skills/release/capture-registry-baseline.sh <workspace> <plugin> | jq -r .version)
+```text
+skills/release/PUBLICATION.md
 ```
 
-It emits one JSON object and exits non-zero on a parse miss or an empty registry value, so an unparseable baseline fails loudly instead of flowing into `verify-publish-landed.sh` as an empty `PRE` (which would pass conjunct 2 vacuously). The parse hardening and numeric-only output contract are the script's — see `skills/release/capture-registry-baseline.sh` header, not restated here (`rules/script-as-black-box.md`).
+**Tessl publication:** capture the registry baseline into `PRE` with `capture-registry-baseline.sh` before merging. A publication on another channel skips this gate.
 
 Pick the right cleanup path based on where you ran the skill from.
 
@@ -188,66 +182,14 @@ git remote prune origin
 
 Order in (B) is mandatory: `git branch -d` refuses to delete a branch that is checked out in any worktree, so the `git worktree remove` step must come before `git branch -d`. Reversing the order produces a "checked out at `<path>`" error and leaves a stranded branch.
 
-After merge — per `rules/ci-safety.md`'s Always Watch CI duty extended through release:
+After merge — per `rules/ci-safety.md`'s Always Watch CI duty extended through release, run each gate its channels owe, in order:
 
 - Verify the merge landed on main (`git pull --ff-only` succeeds; `git log -1 --oneline` shows the merge commit)
-- **GitHub tag/asset publication:** push the release tag from the fast-forwarded `main` before resolving anything. Its publish workflow fires on the tag, never on the merge. The version follows Step 3:
-
-  ```bash
-  git tag <tag> && git push origin <tag>
-  ```
-
-- **Every publication, whatever channel carries it:** resolve that publication's own run, watch it to a terminal state, and require its `conclusion` to be `success`. Bind the resolution to the workflow, the exact commit, the `push` event and the ref that fired it, never to "latest on main". The lookup polls until the run is listed, past the publish workflow's enqueue latency:
-
-  Each channel keeps its own run id in its own variable. A mixed publication runs both blocks and holds both ids at once; each confirmation below reads the id for its own channel.
-
-  ```bash
-  # Tessl — the publish workflow fires on the merge commit.
-  merge_sha=$(gh pr view <N> --json mergeCommit --jq '.mergeCommit.oid')
-  tessl_run_id=$(skills/release/resolve-publish-run.sh <owner> <repo> "$merge_sha" "<tessl-publish-workflow>" | jq -r '.database_id')
-  gh run watch "$tessl_run_id"
-
-  # GitHub tag/asset — the publish workflow fires on the pushed tag, whose
-  # run carries the tag name as its `headBranch`. Pass the tag as the fifth
-  # argument and the commit the tag points at as the third.
-  tag_sha=$(git rev-list -n 1 "<tag>")
-  tag_run_id=$(skills/release/resolve-publish-run.sh <owner> <repo> "$tag_sha" "<tag-publish-workflow>" "<tag>" | jq -r '.database_id')
-  gh run watch "$tag_run_id"
-  ```
-
-  Omit `--exit-status` from the watch. Read the run conclusion through each channel's confirmation helper — `verify-publish-landed.sh` for Tessl, `verify-github-release.sh` for a tag publication.
-
-  `gh pr view` returns the specific merge commit for this PR, unaffected by parallel merges. The four facts the resolver binds, its enqueue-latency retry, and its refusal to pick between two runs matching all four are the script's decision contract — see `skills/release/resolve-publish-run.sh` header, not restated here (`rules/script-as-black-box.md`). Output is `{"database_id": N}` per `rules/script-delegation.md` — extract with `jq -r '.database_id'`. The watch is a timing precondition for the confirmations below, not the gate
-- **Tessl publication:** confirm the publish landed via the conjunction check — conjuncts 1 and 2 (resolved run's `conclusion == success` AND registry's `Latest Version > PRE`). Capture the emitted `current` version for the moderation check that follows:
-
-  ```bash
-  # Gate on the exit code — only a clean conjunction (rc 0) may proceed to
-  # the moderation step. A non-zero rc (publish did not land, or a tool
-  # error) stops the release here; do not fall through to moderation.
-  landed=$(skills/release/verify-publish-landed.sh <workspace> <plugin> "$PRE" "$tessl_run_id") \
-    || { echo "Publish not confirmed — $(jq -r '.reason // "see stderr"' <<<"$landed")" >&2; exit 1; }
-  CURRENT=$(jq -r '.current' <<<"$landed")
-  ```
-
-  Output is exit-code-dependent: rc 0/1 emits the JSON envelope `{"ok": bool, "reason": "...", "run_conclusion": "...", "pre": "...", "current": "..."}` on stdout (parse it for the finding); rc 2 emits the stderr diagnostic (tool-state errors: run still in flight, gh/tessl unreachable). Exception: the missing-jq guard at rc 2 emits a minimal JSON envelope on stdout (the script can't use jq to format JSON when jq itself is absent) so wrappers that always parse stdout still see a parseable failure. Do not compare against a specific expected version. See `rules/ci-safety.md` for full release-contract semantics and failed-publish recovery
-- **Tessl publication:** once conjuncts 1 and 2 hold, confirm moderation cleared — conjunct 3. A freshly published version can be install-blocked until its moderation state reaches `pass`; poll with exponential backoff (the script owns the backoff constants and the cleared/blocked decision):
-
-  ```bash
-  skills/release/verify-moderation-cleared.sh <workspace> <plugin> "$CURRENT"
-  ```
-
-  Exit 0 = moderation cleared. Exit 1 = blocked or still-pending at budget exhaustion — an unconfirmed release; surface it and do not report success. Exit 2 = tool-state error (tessl unreachable, jq missing). Never report the release confirmed until this clears. See `rules/ci-safety.md` for the full three-conjunct contract. Every Tessl publication keeps this whole contract, mixed distribution included
-- **GitHub tag/asset publication:** confirm its own two conjuncts — the resolved run's `conclusion` is `success`, AND the release the run was supposed to create exists at that exact tag, is published, and carries retrievable assets. Run none of the three Tessl helpers above for it:
-
-  ```bash
-  # Gate on the exit code, the same way the Tessl path gates on
-  # verify-publish-landed.sh. Pass THIS channel's run id: its conclusion
-  # is this check's first conjunct, and a mixed publication must not
-  # confirm the tag release against the Tessl run.
-  skills/release/verify-github-release.sh <owner> <repo> "<tag>" "$tag_run_id"
-  ```
-
-  Exit 0 = both conjuncts hold. Exit 1 = a definitive no (the run concluded something other than `success`, or the release is absent, draft, empty, or carries an asset still uploading) — an unconfirmed release; surface it and do not report success. Exit 2 = indeterminate (run still in flight, gh absent or unreachable); an indeterminate answer is never a landing. Which conjuncts it reads is the script's decision contract — see `skills/release/verify-github-release.sh` header, not restated here (`rules/script-as-black-box.md`)
+- **GitHub tag/asset publication:** push the release tag from the fast-forwarded `main` before resolving anything. Its publish workflow fires on the tag, never on the merge. The version follows Step 3
+- **Every publication, whatever channel carries it:** resolve that publication's own run with `resolve-publish-run.sh`, watch it to a terminal state, and require its `conclusion` to be `success`. Bind the resolution to the workflow, the exact commit, the `push` event and the ref that fired it, never to "latest on main". Each channel keeps its own run id; a mixed publication holds both at once, and each confirmation below reads the id for its own channel
+- **Tessl publication:** confirm conjuncts 1 and 2 with `verify-publish-landed.sh` — the resolved run's `conclusion == success` AND the registry's `Latest Version > PRE`. Gate on its exit code and keep the emitted `current` version; a non-zero exit stops the release here, with no fall-through to moderation. Do not compare against a specific expected version
+- **Tessl publication:** confirm conjunct 3 with `verify-moderation-cleared.sh` on that `current` version. A freshly published version can be install-blocked until its moderation state reaches `pass`. Never report the release confirmed until this clears
+- **GitHub tag/asset publication:** confirm its own two conjuncts with `verify-github-release.sh` — the resolved run's `conclusion` is `success`, AND the release exists at that exact tag, is published, and carries retrievable assets. Run none of the three Tessl helpers for it
 - Report the outcome: merged PR URL, the version published, and each publication's own confirmation — registry advance plus moderation clear for a Tessl publication, the published release and its retrievable assets for a tag publication, both for a package on both channels
 
 When this step is wrapped in a reusable script (e.g., `merge-and-cleanup.sh` that other devs run unattended), see `skills/release/SCRIPTING.md` for the gates the script must enforce.
