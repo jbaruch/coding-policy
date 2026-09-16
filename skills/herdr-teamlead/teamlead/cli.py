@@ -739,14 +739,15 @@ def cmd_plan(args, client=None, warn=None, trace=None):
     # `roles` carries the seat identity and reaches the planner alone (#434).
     canonical = [require_seatable(role.strip()) for role in args.roles.split(",") if role.strip()]
     # `--roles` names RESPONSIBILITIES. A seat comes from `--partition` alone,
-    # which is what proves the slices disjoint and exhaustive; accepting a
-    # pre-seated name here would plan several seats over an unchecked surface
-    # (#434).
+    # which is the declared surface split `validate-partition` checks disjoint
+    # and exhaustive; accepting a pre-seated name here would plan seats against
+    # no declared partition at all (#434).
     seated = [role for role in canonical if SEAT_SEPARATOR in role]
     if seated:
         raise UsageError(
             "--roles names responsibilities, not seats: {} came pre-seated. Pass {} and "
-            "seat the slices with --partition, which checks them disjoint and exhaustive.".format(
+            "seat the slices with --partition, after validate-partition has checked it "
+            "disjoint and exhaustive over the round's change.".format(
                 ", ".join(seated), ", ".join(sorted({canonical_role(role) for role in seated}))),
             {"roles": seated})
     roles, seats, seat_paths = _expand_partition_seats(canonical, getattr(args, "partition", None))

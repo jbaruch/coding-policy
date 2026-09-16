@@ -98,9 +98,10 @@
 
   Two boundaries around the seats themselves. `--roles` names
   responsibilities: a pre-seated `--roles reviewer#api,reviewer#core` is
-  refused, since `--partition` is what proves the slices disjoint and
-  exhaustive and a hand-seated round would plan several seats over an
-  unchecked surface. And tier candidacy is decided per responsibility, so it
+  refused, since a seat comes from `--partition` alone and a hand-seated round
+  would plan seats against no declared partition at all. `plan` reads the
+  document; `validate-partition` is what checks it disjoint and exhaustive
+  over the round's change, and `plan` does not re-run that check. And tier candidacy is decided per responsibility, so it
   reads the role-keyed bars alone — a `--exclude reviewer#api=claude` seat key
   reached the planner's exclusion parser as an unknown role once a tier table
   was configured.
