@@ -88,7 +88,7 @@ The resolved run's `conclusion` is `success`, AND the release the run was suppos
 
 ```bash
 # Gate on the exit code, the same way the Tessl path gates on
-# verify-publish-landed.sh. Pass THIS channel's run id: its conclusion
+# confirm-tessl-landed.sh. Pass THIS channel's run id: its conclusion
 # is this check's first conjunct, and a mixed publication must not
 # confirm the tag release against the Tessl run.
 skills/release/verify-github-release.sh <owner> <repo> "<tag>" "$tag_run_id"
@@ -98,8 +98,8 @@ Exit 0 = both conjuncts hold. Exit 1 = a definitive no — an unconfirmed releas
 
 ## Walkthroughs
 
-**Tessl-only** (this repo). Name the channel from `.tessl-plugin/plugin.json`. Capture `PRE` before merging. Merge, fast-forward `main`, verify the merge commit. Resolve the publish run by merge SHA, watch it. Run `verify-publish-landed.sh` with `$PRE` and the run id; gate on rc 0 and keep `CURRENT`. Run `verify-moderation-cleared.sh` on `CURRENT`. Report the PR URL, `CURRENT`, the registry advance and the moderation clear. Push no tag and run `verify-github-release.sh` for nothing.
+**Tessl-only** (this repo). Name the channel from `.tessl-plugin/plugin.json`. Capture `PRE` before merging. Merge, fast-forward `main`, verify the merge commit. Resolve the publish run by merge SHA, watch it. Run `confirm-tessl-landed.sh` with `$PRE` and the run id; gate on its exit code and keep the version it prints as `CURRENT`. Run `verify-moderation-cleared.sh` on `CURRENT`. Report the PR URL, `CURRENT`, the registry advance and the moderation clear. Push no tag and run `verify-github-release.sh` for nothing.
 
 **GitHub tag/asset-only** (an ACR package). Name the channel from the publish workflow's `on: push: tags:`. Skip the registry baseline. Write the version into the package manifest in the PR per Step 3. Merge, fast-forward `main`, verify the merge commit, then `git tag <tag> && git push origin <tag>`. Resolve the run by the tag's commit with the tag as the fifth argument, watch it. Run `verify-github-release.sh` with the tag and that run id. Report the PR URL, the tag, the published release and its retrievable assets. Run none of the Tessl helpers.
 
-**Both.** Set one version explicitly in every channel's manifest in the PR and confirm the Tessl publisher preserves it without auto-bumping (Step 3). Capture `PRE` before merging. Merge, fast-forward `main`, push the tag. Resolve TWO runs — `tessl_run_id` from the merge SHA, `tag_run_id` from the tag — and watch both. Run `verify-publish-landed.sh` and `verify-moderation-cleared.sh` against the Tessl channel, and `verify-github-release.sh` against `tag_run_id`. Report both confirmations. Neither channel's result stands in for the other's.
+**Both.** Set one version explicitly in every channel's manifest in the PR and confirm the Tessl publisher preserves it without auto-bumping (Step 3). Capture `PRE` before merging. Merge, fast-forward `main`, push the tag. Resolve TWO runs — `tessl_run_id` from the merge SHA, `tag_run_id` from the tag — and watch both. Run `confirm-tessl-landed.sh` and `verify-moderation-cleared.sh` against the Tessl channel, and `verify-github-release.sh` against `tag_run_id`. Report both confirmations. Neither channel's result stands in for the other's.
