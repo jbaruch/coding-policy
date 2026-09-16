@@ -381,7 +381,7 @@ JSON
   #     what a reviewer reviews, never what its brief must carry (#434).
   local v16="$TMP/v16.json" o16="$TMP/out16"
   jq --arg p "$TMP/package.diff" \
-    '.roles = {"tester#core": (.roles.tester + {REVIEW_PACKAGE: $p, REVIEW_BASE: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", REVIEW_HEAD: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", REPORT: "/r/slice-core.md"})}' \
+    '.roles = {"tester#core": (.roles.tester + {REVIEW_PACKAGE: $p, REVIEW_BASE: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", REVIEW_HEAD: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", REPORT: "/r/slice-core.md", SLICE_PATHS: ["src/core/*", "README.md"]})}' \
     "$v1" > "$v16" || die "could not build seat fixture"
   run "$TPL" "$v16" "$o16"
   if [[ $RC -eq 0 ]] && [[ -f "$o16/brief-tester#core.md" ]]; then
@@ -448,10 +448,32 @@ JSON
     pass; else fail "slice scope: an unseated tester brief must carry none, got RC=$RC ERR=$ERRTEXT"; fi
   jq '.roles["tester#core"].SLICE_SCOPE = "mine"' "$v16" > "$TMP/v20.json" || die "could not build the supplied-scope fixture"
   run "$TPL" "$TMP/v20.json" "$TMP/out20c"
-  if [[ $RC -eq 2 ]] && printf '%s' "$ERRTEXT" | grep -q "composed from the seat, not supplied"; then
+  if [[ $RC -eq 2 ]] && printf '%s' "$ERRTEXT" | grep -q "composed from the seat and its paths, not supplied"; then
     pass; else fail "slice scope: a supplied SLICE_SCOPE must refuse, got RC=$RC ERR=$ERRTEXT"; fi
 
-  # 21. The SHIPPED reviewer and tester templates carry the placeholder, so a
+  # 21. A seat needs the paths its slice owns. A slice name alone leaves the
+  #     worker no boundary to resolve, and the composer sees no partition.
+  jq 'del(.roles["tester#core"].SLICE_PATHS)' "$v16" > "$TMP/v21.json" || die "could not build the pathless-seat fixture"
+  run "$TPL" "$TMP/v21.json" "$TMP/out21"
+  if [[ $RC -eq 2 && ! -e "$TMP/out21" ]] && printf '%s' "$ERRTEXT" | grep -q "needs SLICE_PATHS"; then
+    pass; else fail "slice paths: a seat without SLICE_PATHS must refuse, got RC=$RC ERR=$ERRTEXT"; fi
+  local bad_paths
+  for bad_paths in '[]' '"src/core/*"' '[""]' '[1]'; do
+    jq --argjson v "$bad_paths" '.roles["tester#core"].SLICE_PATHS = $v' "$v16" > "$TMP/v21b.json" \
+      || die "could not build the malformed-paths fixture"
+    run "$TPL" "$TMP/v21b.json" "$TMP/out21b"
+    if [[ $RC -eq 2 ]] && printf '%s' "$ERRTEXT" | grep -q "needs SLICE_PATHS"; then
+      pass; else fail "slice paths: '$bad_paths' must refuse, got RC=$RC ERR=$ERRTEXT"; fi
+  done
+  jq '.roles.developer.SLICE_PATHS = ["src/*"]' "$v1" > "$TMP/v21c.json" || die "could not build the unseated-paths fixture"
+  run "$TPL" "$TMP/v21c.json" "$TMP/out21c"
+  if [[ $RC -eq 2 ]] && printf '%s' "$ERRTEXT" | grep -q "names a slice it does not own"; then
+    pass; else fail "slice paths: an unseated role must not carry SLICE_PATHS, got RC=$RC ERR=$ERRTEXT"; fi
+  if grep -qF 'src/core/*' "$o20/brief-tester#core.md" \
+     && grep -qF 'README.md' "$o20/brief-tester#core.md"; then
+    pass; else fail "slice paths: the seat brief must list the paths its slice owns"; fi
+
+  # 22. The SHIPPED reviewer and tester templates carry the placeholder, so a
   #     real seated round renders the boundary rather than dropping it.
   local shipped shipped_role
   shipped="$(cd "$(dirname "$SCRIPT")/templates" && pwd)" || die "could not resolve the shipped templates"

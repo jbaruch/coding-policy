@@ -57,9 +57,16 @@ SEATABLE_ROLES="reviewer tester"
 # from the seat, so a round cannot dispatch several full-surface verdicts by
 # forgetting to write the boundary by hand (rules/agent-team-operation.md
 # Review Before PR).
-slice_scope() { # <role-or-seat>
+slice_scope() { # <role-or-seat> <slice-paths-json>
+  # Named paths, not just a slice name: a boundary a worker cannot resolve is
+  # not a boundary, and the composer receives no partition document.
+  local listed
   case "$1" in
-    *"#"*) printf 'Your slice this round is **%s**. Review only what the round'"'"'s declared partition assigns to that slice. An observation outside it goes in a separate section of your report and forms no part of your verdict.' "${1#*#}" ;;
+    *"#"*)
+      listed="$(printf '%s' "$2" | jq -r 'map("`" + . + "`") | join(", ")')" || return 3
+      printf 'Your slice this round is **%s**, and it owns %s. Review only what those paths match. An observation outside your slice goes in a separate section of your report and forms no part of your verdict.' \
+        "${1#*#}" "$listed"
+      ;;
     *) printf '' ;;
   esac
 }
@@ -302,17 +309,31 @@ main() {
       return 2
     fi
     merged="$(jq -c -n --argjson a "$shared" --argjson b "$(printf '%s' "$values" | jq -c --arg r "$role" '.roles[$r]')" '$a * $b')"
+    # SLICE_PATHS is a list, not a placeholder value: it is read here and
+    # dropped before the text check, which every rendered value must pass.
+    merged="$(printf '%s' "$merged" | jq -c 'del(.SLICE_PATHS)')" || return 2
     validate_values "$merged" "the values for role '${role}'" || return 2
     known="$(placeholders_in "$role_tpl")" || return 3
     if [[ $'\n'"${known}"$'\n' == *$'\nSPECIALIST_CONTEXT\n'* ]]; then
       merged="$(printf '%s' "$merged" | jq -c '{SPECIALIST_CONTEXT:""} * .')" || return 2
     fi
-    if [[ $'\n'"${known}"$'\n' == *$'\nSLICE_SCOPE\n'* ]]; then
-      if printf '%s' "$values" | jq -e --arg r "$role" '.roles[$r] | has("SLICE_SCOPE")' >/dev/null; then
-        warn "SLICE_SCOPE for role '${role}' is composed from the seat, not supplied — remove the key"
+    if printf '%s' "$values" | jq -e --arg r "$role" '.roles[$r] | has("SLICE_SCOPE")' >/dev/null; then
+      warn "SLICE_SCOPE for role '${role}' is composed from the seat and its paths, not supplied — remove the key"
+      return 2
+    fi
+    local slice_paths="[]"
+    if [[ "$role" == *"#"* ]]; then
+      if ! printf '%s' "$values" | jq -e --arg r "$role" '.roles[$r].SLICE_PATHS | type == "array" and length > 0 and all(type == "string" and (. | length) > 0)' >/dev/null; then
+        warn "seat '${role}' needs SLICE_PATHS: the non-empty list of path globs its slice owns, copied from the partition validate-partition accepted. A slice name alone leaves the worker no boundary to respect"
         return 2
       fi
-      merged="$(printf '%s' "$merged" | jq -c --arg s "$(slice_scope "$role")" '. + {SLICE_SCOPE:$s}')" || return 2
+      slice_paths="$(printf '%s' "$values" | jq -c --arg r "$role" '.roles[$r].SLICE_PATHS')" || return 2
+    elif printf '%s' "$values" | jq -e --arg r "$role" '.roles[$r] | has("SLICE_PATHS")' >/dev/null; then # unseated
+      warn "SLICE_PATHS for role '${role}' names a slice it does not own — an unseated role reviews the whole change"
+      return 2
+    fi
+    if [[ $'\n'"${known}"$'\n' == *$'\nSLICE_SCOPE\n'* ]]; then
+      merged="$(printf '%s' "$merged" | jq -c --arg s "$(slice_scope "$role" "$slice_paths")" '. + {SLICE_SCOPE:$s}')" || return 2
     fi
     case "$role" in
       advisor|investigator|architect)

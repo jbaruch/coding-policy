@@ -72,11 +72,18 @@ exclusions, round type, requirements, tier qualification and the review-package
 checks its brief owes — so capability, contribution-exclusion and headroom
 ordering apply unchanged and each slice gets a distinct worker.
 
+Each seat's values carry `SLICE_PATHS`, the list of globs its slice owns,
+copied from the partition `validate-partition` accepted. `compose-briefs.sh`
+renders the slice name and those paths into the brief's `SLICE_SCOPE` and
+refuses a seat without them: a slice name alone leaves the worker no boundary
+to resolve, and the composer never reads the partition document. `SLICE_SCOPE`
+itself is composed, never supplied.
+
 `apply` takes those seat names directly: pass each seat its own brief
-(`--brief reviewer#api=<path>`). A seat takes its ROLE's brief template, and
-the ledger records the role, so the per-role history does not fragment across
-seats. The dispatch record keeps the seat, which is what a slice's verdict is
-read back through.
+(`--brief reviewer#api=<path>`), and `--task`, since the seat lives on the
+dispatch. A seat takes its ROLE's brief template, and the ledger records the
+role, so the per-role history does not fragment across seats. The dispatch
+record keeps the seat, which is what a slice's verdict is read back through.
 
 Each slice's brief names its own slice and forbids roaming. An observation
 outside the slice belongs in a separate section of that report and forms no

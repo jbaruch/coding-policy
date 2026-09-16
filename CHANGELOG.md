@@ -122,6 +122,12 @@
   responsibility, and its role-key grammar accepts the custom role names the
   planner already allows.
 
+  The boundary names paths, not just a slice. The composer reads no partition
+  document, so each seat's values carry `SLICE_PATHS` — the globs its slice
+  owns, copied from the partition `validate-partition` accepted — and a seat
+  without them is refused. "Your slice is **api**" that a worker cannot resolve
+  to files is not a boundary.
+
   The live retrospective guard reads the prior SEAT off the dispatch rather
   than the responsibility off the ledger row. Comparing the canonicalized row
   with the seat a dispatch names marked every retained seat as a role change,
