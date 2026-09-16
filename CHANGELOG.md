@@ -162,7 +162,11 @@
   seat's role decides its weight" rules out. And the composer's key check is a
   denylist of what cannot name a file, not an allowlist: the planner accepts
   any custom role name, so anything stricter broke the plan → compose
-  round-trip for a round the planner emits happily.
+  round-trip for a round the planner emits happily. A seat requirement carried
+  beside its role's is refused for the same reason the cost is: the seat entry
+  would decide that seat's capabilities instead of its role's, so
+  `reviewer` requiring `security` and `reviewer#api` requiring only `review`
+  admitted a worker the responsibility bars.
 
   The live retrospective guard reads the prior SEAT off the dispatch rather
   than the responsibility off the ledger row. Comparing the canonicalized row

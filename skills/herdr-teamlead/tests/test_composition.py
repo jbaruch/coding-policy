@@ -261,16 +261,27 @@ class SeatResponsibilityTest(unittest.TestCase):
                     normalize_requirement(record, role)
 
     def test_a_seat_inherits_its_role_requirement(self):
-        # One `reviewer` entry covers every slice; a seat's own key overrides
-        # it for that slice alone (#434).
+        # One `reviewer` entry covers every slice (#434).
         record = {"specialty": "api-review", "required_capabilities": ["review"],
                   "independent": True, "engagement": "review the slice"}
-        seat_record = {**record, "specialty": "core-review"}
         payload = {"schema_version": REQUIREMENTS_SCHEMA_VERSION,
-                   "assignments": {"reviewer": record, "reviewer#core": seat_record}}
+                   "assignments": {"reviewer": record}}
         parsed = parse_requirements(payload, ["reviewer#api", "reviewer#core"], "t1")
         self.assertEqual(parsed["reviewer#api"]["specialty"], "api-review")
-        self.assertEqual(parsed["reviewer#core"]["specialty"], "core-review")
+        self.assertEqual(parsed["reviewer#core"]["specialty"], "api-review")
+
+    def test_a_seat_requirement_beside_its_role_is_refused(self):
+        # The seat entry would decide that seat's capabilities instead of its
+        # role's, so a seat could require less than the responsibility does and
+        # admit a worker the role's capabilities bar (#434).
+        role_record = {"specialty": "api-review", "required_capabilities": ["review", "security"],
+                       "independent": True, "engagement": "review the slice"}
+        weaker = {"specialty": "api-review", "required_capabilities": ["review"],
+                  "independent": True, "engagement": "review the slice"}
+        payload = {"schema_version": REQUIREMENTS_SCHEMA_VERSION,
+                   "assignments": {"reviewer": role_record, "reviewer#api": weaker}}
+        with self.assertRaisesRegex(UsageError, "beside its responsibility"):
+            parse_requirements(payload, ["reviewer#api", "reviewer#core"], "t1")
 
     def test_an_explicitly_null_requirement_is_refused(self):
         # `assignments.get(...)` returns None for an absent key and for an

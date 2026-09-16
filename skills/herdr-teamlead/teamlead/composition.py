@@ -8,7 +8,7 @@ those declarations nor dispatch history certify expertise or completed work.
 
 from .config import CAPABILITY_ID, parse_capabilities
 from .errors import UsageError
-from .tiers import ROLE_ROUNDS, canonical_role
+from .tiers import ROLE_ROUNDS, SEAT_SEPARATOR, canonical_role
 
 
 REQUIREMENTS_SCHEMA_VERSION = 1
@@ -67,6 +67,18 @@ def parse_requirements(payload, roles, task, *, allow_historical_architect=False
         inherited = {canonical_role(role) for role in roles}
         if not assignments or set(assignments) - set(roles) - inherited:
             raise UsageError("Requirements must name at least one role and only roles this plan assigns; correct the role keys.", {})
+        # A seat's ROLE decides its requirement. Carrying both lets the seat
+        # entry replace its role's, so a seat could require less than the
+        # responsibility does and admit a worker the role's capabilities bar
+        # (rules/agent-team-operation.md Review Before PR).
+        both = sorted(key for key in assignments
+                      if SEAT_SEPARATOR in key and canonical_role(key) in assignments)
+        if both:
+            raise UsageError(
+                "Requirements name {} beside its responsibility: a seat inherits its role's "
+                "requirement, and a seat entry alongside it would decide the seat's capabilities "
+                "instead. Keep the role's entry alone.".format(", ".join(both)),
+                {"roles": both})
     missing = CONSULTATION_ROLES.intersection(roles) - set(assignments)
     if allow_historical_architect:
         missing -= {"architect"}
