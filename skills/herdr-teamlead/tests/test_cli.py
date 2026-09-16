@@ -770,6 +770,32 @@ class ApplyCommandTest(CliCase):
         self.assertEqual(assignments["reviewer#api"], "codex")
         self.assertNotIn("grok", assignments.values())
 
+    def test_a_pre_seated_role_input_is_refused(self):
+        # `--partition` is what proves the slices disjoint and exhaustive, so a
+        # seat named straight into `--roles` would plan several seats over an
+        # unchecked surface (#434).
+        code, _, err = self.run_cli(
+            self.base() + ["plan", "--roles", "reviewer#api,reviewer#core", "--now", AT,
+                           "--snapshot", str(self.snapshot)])
+        self.assertEqual(code, 1)
+        self.assertIn("came pre-seated", err)
+
+    def test_a_seat_exclusion_does_not_reach_the_tier_candidates(self):
+        # Tier candidacy is decided per responsibility, so a seat key would
+        # reach the planner's exclusion parser as an unknown role (#434).
+        partition = self.tmp / "tiers.json"
+        partition.write_text(json.dumps({"schema_version": 1, "slices": [
+            {"name": "api", "paths": ["src/api/*"]}, {"name": "core", "paths": ["src/core/*"]}]}))
+        out = io.StringIO()
+        code = main(self.base() + ["plan", "--roles", "reviewer", "--partition", str(partition),
+                                   "--task", "t-tiers", "--now", AT,
+                                   "--exclude", "reviewer#api=claude",
+                                   "--snapshot", str(self.snapshot)], stdout=out, stderr=self.err)
+        self.assertEqual(code, 0, self.err.getvalue())
+        assignments = json.loads(out.getvalue())["assignments"]
+        self.assertEqual(sorted(assignments), ["reviewer#api", "reviewer#core"])
+        self.assertNotEqual(assignments["reviewer#api"], "claude")
+
     def test_a_seat_of_an_unseatable_responsibility_is_refused(self):
         # A partition document can only seat a reviewer or a tester, but the
         # role names reaching plan and apply come straight off the command

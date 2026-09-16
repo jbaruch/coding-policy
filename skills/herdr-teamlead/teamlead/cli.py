@@ -33,7 +33,7 @@ from .herdr import (
     trace_enabled_in_env,
 )
 from .composer import COMPOSER_SETTLE_SEC, DEFAULT_START_TIMEOUT_MS
-from .tiers import canonical_role, require_seatable
+from .tiers import SEAT_SEPARATOR, canonical_role, require_seatable
 from .diagnostics import PREFIX as DIAGNOSTIC_PREFIX
 from .measure import (
     DEFAULT_MARKER_POLL_ATTEMPTS,
@@ -738,6 +738,17 @@ def cmd_plan(args, client=None, warn=None, trace=None):
     # `canonical` is what every module reasoning about RESPONSIBILITY sees;
     # `roles` carries the seat identity and reaches the planner alone (#434).
     canonical = [require_seatable(role.strip()) for role in args.roles.split(",") if role.strip()]
+    # `--roles` names RESPONSIBILITIES. A seat comes from `--partition` alone,
+    # which is what proves the slices disjoint and exhaustive; accepting a
+    # pre-seated name here would plan several seats over an unchecked surface
+    # (#434).
+    seated = [role for role in canonical if SEAT_SEPARATOR in role]
+    if seated:
+        raise UsageError(
+            "--roles names responsibilities, not seats: {} came pre-seated. Pass {} and "
+            "seat the slices with --partition, which checks them disjoint and exhaustive.".format(
+                ", ".join(seated), ", ".join(sorted({canonical_role(role) for role in seated}))),
+            {"roles": seated})
     roles, seats = _expand_partition_seats(canonical, getattr(args, "partition", None))
     if "judge" in canonical:
         recovery.require_judge_mode(getattr(args, "judge_mode", None))
@@ -799,8 +810,12 @@ def cmd_plan(args, client=None, warn=None, trace=None):
     )
     for role, names in constraints["exclude"].items():
         excludes[role] = sorted(set(excludes.get(role, [])) | set(names))
+    # Tier candidacy is decided per RESPONSIBILITY, so it reads the role-keyed
+    # bars alone: a seat key would reach the planner's exclusion parser as an
+    # unknown role (#434).
     tier_candidates = _candidate_tiers(canonical, agents, rounds, args.fix_round, judge,
-                                      None if args.preview_tiers else (args.now or now_iso()), excludes=excludes)
+                                      None if args.preview_tiers else (args.now or now_iso()),
+                                      excludes={role: names for role, names in excludes.items() if role in set(canonical)})
     # Each seat inherits its role's bars, tiers, round type and requirements.
     # `role_costs` is not fanned out: the planner resolves a seat's default
     # weight and rotation history through its role (#434).

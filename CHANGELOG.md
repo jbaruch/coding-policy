@@ -96,6 +96,15 @@
   the reviewer template and redirected its output out of the round's directory.
   The script is invoked directly, so the CLI's own refusal never saw it.
 
+  Two boundaries around the seats themselves. `--roles` names
+  responsibilities: a pre-seated `--roles reviewer#api,reviewer#core` is
+  refused, since `--partition` is what proves the slices disjoint and
+  exhaustive and a hand-seated round would plan several seats over an
+  unchecked surface. And tier candidacy is decided per responsibility, so it
+  reads the role-keyed bars alone — a `--exclude reviewer#api=claude` seat key
+  reached the planner's exclusion parser as an unknown role once a tier table
+  was configured.
+
   The live retrospective guard reads the prior SEAT off the dispatch rather
   than the responsibility off the ledger row. Comparing the canonicalized row
   with the seat a dispatch names marked every retained seat as a role change,
