@@ -326,6 +326,17 @@ class SeatableRoleTest(unittest.TestCase):
             with self.subTest(name=name):
                 self.assertEqual(require_seatable(name), name)
 
+    def test_a_seat_whose_slice_cannot_address_it_is_refused(self):
+        # A seat is a CLI key. `--brief SEAT=PATH` splits at the first `=`, and
+        # `compose-briefs.sh` reads a line-oriented `.roles` key, so a slice
+        # carrying a separator, whitespace or nothing at all plans a seat the
+        # round cannot address (#434).
+        for name in ("reviewer#", "reviewer#a=b", "reviewer#a b", "reviewer#a,b",
+                     "reviewer#-lead", "tester#a\nb"):
+            with self.subTest(name=name):
+                with self.assertRaisesRegex(UsageError, "cannot address it"):
+                    require_seatable(name)
+
     def test_a_seat_of_a_per_task_counter_role_is_refused(self):
         for name in ("developer#api", "release#core", "judge#api", "lead#x"):
             with self.subTest(name=name):

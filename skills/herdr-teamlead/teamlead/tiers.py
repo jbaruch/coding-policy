@@ -51,20 +51,39 @@ SEAT_SEPARATOR = "#"
 #: one would read as a second worker holding the same count.
 SEATABLE_ROLES = frozenset({"reviewer", "tester"})
 
+#: The slice half of a seat. A seat is a CLI key -- the left side of `--brief
+#: SEAT=PATH` and `--report SEAT=PATH`, and a line-oriented key
+#: `compose-briefs.sh` reads back -- so a name outside this shape plans a seat
+#: the round cannot address. `partition` validates its document against the
+#: same pattern, so a hand-written seat and a generated one are held to one
+#: grammar.
+SLICE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*")
+
 
 def require_seatable(name):
-    """Refuse a seat whose responsibility one worker must own alone.
+    """Refuse a name that is not a seat this fleet can address.
 
-    `partition_role` bars an unseatable role in the partition document; this
-    bars it wherever a role name is READ -- `--roles developer#api` and an
-    `--assignments` map written by hand reach the same refusal (#434).
+    `partition_role` and `load_partition` bar an unseatable role and a
+    malformed slice inside the partition document; this bars both wherever a
+    role name is READ -- `--roles developer#api`, `--assignments {"reviewer#":
+    ...}` and any other hand-written map reach the same refusal (#434).
     """
-    if isinstance(name, str) and SEAT_SEPARATOR in name and canonical_role(name) not in SEATABLE_ROLES:
+    if not isinstance(name, str) or SEAT_SEPARATOR not in name:
+        return name
+    base = canonical_role(name)
+    if base not in SEATABLE_ROLES:
         raise UsageError(
             "Role {!r} names a seat of {!r}, which holds a per-task counter one "
             "worker owns. Pass {!r} unseated, or seat the slice under {}.".format(
-                name, canonical_role(name), canonical_role(name),
-                " or ".join(sorted(SEATABLE_ROLES))),
+                name, base, base, " or ".join(sorted(SEATABLE_ROLES))),
+            {"role": name})
+    slice_name = name.split(SEAT_SEPARATOR, 1)[1]
+    if not SLICE_NAME.fullmatch(slice_name):
+        raise UsageError(
+            "Seat {!r} names the slice {!r}, which cannot address it: name a slice "
+            "with letters, digits, underscores, dots or hyphens, starting with a "
+            "letter or digit. A seat is a CLI key, and any other name does not read "
+            "back through `--brief SEAT=PATH`.".format(name, slice_name),
             {"role": name})
     return name
 

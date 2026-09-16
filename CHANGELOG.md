@@ -2,70 +2,6 @@
 
 ### Added
 
-- **A checkpoint row missing its `id` is covered by regression (#441).** A
-  receipt cites a checkpoint by `id`, so a row without one cannot be matched
-  to the receipt accounting for it. The behavior already held — `validate_store`
-  translates the lookup failure and `load_state_checked` refuses before saving —
-  but nothing pinned it. `test_legacy_recovery.py` now covers both loads: the
-  schema-9 store under `persist_migration=False`, and the migrating schema-8
-  store under `persist_migration=True`, where a save would otherwise be the
-  path that writes a refused store back. Each asserts `usable=False`, unchanged
-  bytes, and a warning naming `'id'`, so a refusal arriving for some other
-  reason does not pass for this one.
-
-## 0.3.236 — 2026-09-16
-
-### Changed
-
-- **The last two publication-confirmation bullets read one directive each
-  (#446, completing #375).** #444 split four of the six bullets the
-  independent review of #374 named and left two: the other-channel evidence
-  bullet still carried its two facts behind a colon, and the security-finding
-  bullet still joined the advisory and the blocking case with a semicolon. The
-  first is now a `both required` lead-in over two nested bullets, the second is
-  two bullets. Both reviewers classified the remainder as presentation-only, so
-  it never gated #444; the contract is unchanged.
-
-## 0.3.235 — 2026-09-16
-
-### Changed
-
-- **The publication-confirmation rules read one directive per bullet (#375).**
-  The independent review of #374 found four bullets in `rules/ci-safety.md`
-  Always Watch CI each carrying two directives behind a colon or a semicolon:
-  the other-channel evidence bullet (the release exists, and the artifact is
-  retrievable), the moderation-wait bullet (the backoff budget, and what an
-  exhausted budget means), the security-finding bullet (an advisory suggests,
-  a blocking finding requires), and the re-run bullet (what a naive re-run
-  costs, and what to do instead). Each is now its own bullet. The moderation
-  bullet names Tessl, so the reader sees which publication's mechanics the
-  explanations that follow the release contract qualify. The contract is
-  unchanged: every publication is still confirmed against the channel that
-  carried it, a Tessl publication still owes the registry advance and the
-  moderation clear, and no bullet's conditional meaning moved.
-
-## 0.3.232 — 2026-09-15
-
-### Fixed
-
-- **A ledger already written at recovery schema 9 still reads (#439).** The
-  unmerged #436 prototype wrote four digest-bound `legacy_ruling_recoveries`
-  receipts and bumped the recovery store to 9. #437 then fixed the original
-  version-2 citation rejection without a migration, so the published schema-8
-  owner refuses the live ledger ("Unsupported recovery schema") while restoring
-  the pre-recovery backup would drop the assignments, dispatches, events and
-  task appended since.
-
-  The owner now migrates a clean schema-8 store by adding the empty collection,
-  reads schema 9, and validates every original receipt against the cited
-  checkpoint rows. Altered, overlapping or malformed receipts, and unsupported
-  versions, refuse without writes. Version-3 one-ruling bounds and correction
-  limits are unchanged. The prototype `recover-legacy-rulings` command is not
-  published: existing history does not need a new repair command to stay
-  readable.
-
-## 0.3.231 — 2026-09-15
-
 - **One plan fills every slice of a partitioned review (#434, completing
   #409).** #430 shipped the partition validator and held the seating back:
   `plan` could emit `{"reviewer#api": "alpha", "reviewer#core": "beta"}`, but
@@ -131,6 +67,92 @@
   seat-specific exclusion REPLACE its role's, so `--exclude reviewer#api=beta`
   lifted the contributor bar the role already carried and the planner could
   hand that slice to the worker that wrote the task; exclusions now union.
+
+  The recovery store is at schema 10. `dispatches[].role` now holds a seat
+  while the assignment row holds the responsibility, and a reader that matched
+  the two literally no longer reads the pair correctly — a silent field
+  repurpose that `rules/stateful-artifacts.md` Migration Policy forbids. No
+  field is added, so the migration is a stamp, and an older store carrying a
+  seat-named dispatch is refused as unowned newer data. The legacy set is
+  derived from the constant rather than written out, so a reader pinned to an
+  older version reads a newer store as newer instead of migrating it downward.
+
+  The seat grammar is enforced where a seat is read, not only where one is
+  generated. `require_seatable` validates the slice half against the same
+  pattern the partition document uses, so `reviewer#` and `reviewer#a=b` are
+  refused at the plan/apply boundary; `recovery` applies it too, since
+  `reserve` and state loading reach the validators without passing a CLI
+  parser. A seat also inherits its ROLE's requirement entry, so one
+  `{"reviewer": ...}` record covers every slice and a seat's own key overrides
+  it for that slice alone.
+
+## 0.3.237 — 2026-09-16
+
+### Added
+
+- **A checkpoint row missing its `id` is covered by regression (#441).** A
+  receipt cites a checkpoint by `id`, so a row without one cannot be matched
+  to the receipt accounting for it. The behavior already held — `validate_store`
+  translates the lookup failure and `load_state_checked` refuses before saving —
+  but nothing pinned it. `test_legacy_recovery.py` now covers both loads: the
+  schema-9 store under `persist_migration=False`, and the migrating schema-8
+  store under `persist_migration=True`, where a save would otherwise be the
+  path that writes a refused store back. Each asserts `usable=False`, unchanged
+  bytes, and a warning naming `'id'`, so a refusal arriving for some other
+  reason does not pass for this one.
+
+## 0.3.236 — 2026-09-16
+
+### Changed
+
+- **The last two publication-confirmation bullets read one directive each
+  (#446, completing #375).** #444 split four of the six bullets the
+  independent review of #374 named and left two: the other-channel evidence
+  bullet still carried its two facts behind a colon, and the security-finding
+  bullet still joined the advisory and the blocking case with a semicolon. The
+  first is now a `both required` lead-in over two nested bullets, the second is
+  two bullets. Both reviewers classified the remainder as presentation-only, so
+  it never gated #444; the contract is unchanged.
+
+## 0.3.235 — 2026-09-16
+
+### Changed
+
+- **The publication-confirmation rules read one directive per bullet (#375).**
+  The independent review of #374 found four bullets in `rules/ci-safety.md`
+  Always Watch CI each carrying two directives behind a colon or a semicolon:
+  the other-channel evidence bullet (the release exists, and the artifact is
+  retrievable), the moderation-wait bullet (the backoff budget, and what an
+  exhausted budget means), the security-finding bullet (an advisory suggests,
+  a blocking finding requires), and the re-run bullet (what a naive re-run
+  costs, and what to do instead). Each is now its own bullet. The moderation
+  bullet names Tessl, so the reader sees which publication's mechanics the
+  explanations that follow the release contract qualify. The contract is
+  unchanged: every publication is still confirmed against the channel that
+  carried it, a Tessl publication still owes the registry advance and the
+  moderation clear, and no bullet's conditional meaning moved.
+
+## 0.3.232 — 2026-09-15
+
+### Fixed
+
+- **A ledger already written at recovery schema 9 still reads (#439).** The
+  unmerged #436 prototype wrote four digest-bound `legacy_ruling_recoveries`
+  receipts and bumped the recovery store to 9. #437 then fixed the original
+  version-2 citation rejection without a migration, so the published schema-8
+  owner refuses the live ledger ("Unsupported recovery schema") while restoring
+  the pre-recovery backup would drop the assignments, dispatches, events and
+  task appended since.
+
+  The owner now migrates a clean schema-8 store by adding the empty collection,
+  reads schema 9, and validates every original receipt against the cited
+  checkpoint rows. Altered, overlapping or malformed receipts, and unsupported
+  versions, refuse without writes. Version-3 one-ruling bounds and correction
+  limits are unchanged. The prototype `recover-legacy-rulings` command is not
+  published: existing history does not need a new repair command to stay
+  readable.
+
+## 0.3.231 — 2026-09-15
 
 ### Added
 

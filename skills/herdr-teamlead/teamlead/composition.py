@@ -59,7 +59,11 @@ def parse_requirements(payload, roles, task, *, allow_historical_architect=False
                 or not isinstance(payload.get("assignments"), dict)):
             raise UsageError("Requirements must be a schema_version 1 object with an assignments map; use the documented requirements file.", {})
         assignments = payload["assignments"]
-        if not assignments or set(assignments) - set(roles):
+        # A seat inherits its ROLE's requirement, so one `reviewer` entry
+        # covers every slice; a seat's own key overrides it for that slice
+        # alone (#434).
+        inherited = {canonical_role(role) for role in roles}
+        if not assignments or set(assignments) - set(roles) - inherited:
             raise UsageError("Requirements must name at least one role and only roles this plan assigns; correct the role keys.", {})
     missing = CONSULTATION_ROLES.intersection(roles) - set(assignments)
     if allow_historical_architect:
@@ -68,7 +72,12 @@ def parse_requirements(payload, roles, task, *, allow_historical_architect=False
         raise UsageError("Roles {} require explicit specialist requirements; supply their specialty, capabilities, independence and engagement with --requirements.".format(", ".join(sorted(missing))), {"roles": sorted(missing)})
     if assignments and (not isinstance(task, str) or not task.strip()):
         raise UsageError("Specialist assignments require --task; preserve their task identity for independence and consultation continuity.", {})
-    return {role: normalize_requirement(assignments[role], role) for role in roles if role in assignments}
+    resolved = {}
+    for role in roles:
+        record = assignments.get(role, assignments.get(canonical_role(role)))
+        if record is not None:
+            resolved[role] = normalize_requirement(record, role)
+    return resolved
 
 
 def _contributor(row, assessment=None):

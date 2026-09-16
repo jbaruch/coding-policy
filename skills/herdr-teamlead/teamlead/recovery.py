@@ -15,7 +15,7 @@ from pathlib import Path, PurePosixPath
 
 from .errors import UsageError
 from .chronology import assignment_after, latest_assignment, timestamp
-from .tiers import canonical_role
+from .tiers import SEAT_SEPARATOR, canonical_role, require_seatable
 
 
 RECOVERY_SCHEMA_VERSION = 1
@@ -27,7 +27,12 @@ RECOVERY_SCHEMA_VERSION = 1
 #: refused; a clean one is stamped and given the empty collection
 #: (rules/stateful-artifacts.md). Version 8 adds the `diagnoses` collection
 #: (#407). Version 9 adds explicit digest-bound legacy ruling recovery receipts.
-RECOVERY_STORE_VERSION = 9
+#: Version 10 widens `dispatches[].role` to a SEAT (`reviewer#api`) while the
+#: assignment row keeps the responsibility, so a reader that matches the two
+#: literally no longer reads the pair correctly (#434). No field is added, so a
+#: store at an older version carrying a seat-named dispatch is unowned newer
+#: data and is refused (rules/stateful-artifacts.md Migration Policy).
+RECOVERY_STORE_VERSION = 10
 REFUSAL_FIELDS = frozenset({"brief_identity", "refusal", "refusal_move", "provider"})
 SPECIALIST_DISPATCH_VERSION = 2
 #: Checkpoint record version. 1 carries a mandatory pinned-judge ruling; 2
@@ -153,6 +158,10 @@ def _refuse_unowned_legacy(store, version):
     if not isinstance(dispatches, list):
         raise UsageError("Older recovery requires a dispatches array; restore the original owner-written store.", {})
     for row in dispatches:
+        # A seat reaches `dispatches[].role` only at version 10. An older
+        # store carrying one was written by a newer owner.
+        if isinstance(row, dict) and isinstance(row.get("role"), str) and SEAT_SEPARATOR in row["role"]:
+            raise UsageError("Older recovery contains a seat-named dispatch this version never wrote; preserve it for owner recovery.", {})
         allowed = ALLOWED_AT_6 if version == 6 else REFUSAL_FIELDS if version >= 7 else frozenset()
         if not isinstance(row, dict) or REFUSAL_FIELDS.intersection(row) - allowed:
             raise UsageError("Older recovery contains unowned newer refusal records; preserve it for owner recovery.", {})
@@ -172,7 +181,7 @@ def _refuse_unowned_legacy(store, version):
             raise UsageError("Older recovery requires a delivery_recoveries array; restore the original owner-written store.", {})
         if any(not isinstance(row, dict) or row.get("schema_version") != 1 for row in deliveries):
             raise UsageError("Older recovery contains unowned newer delivery records; preserve it for owner recovery.", {})
-    added = ["legacy_ruling_recoveries"]
+    added = [] if version >= 9 else ["legacy_ruling_recoveries"]
     if version < 8:
         added.append("diagnoses")
     if version < 6:
@@ -191,7 +200,10 @@ def migrate_store(store):
     if not isinstance(store, dict) or type(store.get("schema_version")) is not int:
         return False
     version = store["schema_version"]
-    legacy = version in {1, 2, 3, 4, 5, 6, 7, 8}
+    # Derived, never a literal set: a reader pinned to an older version (a
+    # fleet consumer lagging a release) must read a newer store as newer,
+    # not migrate it downward (rules/stateful-artifacts.md).
+    legacy = 1 <= version < RECOVERY_STORE_VERSION
     added = _refuse_unowned_legacy(store, version) if legacy else None
     # Both run: `or` would skip the second whenever the first reported work,
     # leaving version-1 diagnoses for a validator that accepts only version 2.
@@ -867,6 +879,10 @@ def prior_dispatch(store, identifier, fingerprint):
 
 def _dispatch_version(record):
     """Composition metadata is explicit v2 evidence, never a legacy default."""
+    # The CLI parsers gate their own inputs, but `reserve` and state loading
+    # reach here directly, so the seat grammar is checked where the record is
+    # (#434).
+    require_seatable(record.get("role"))
     if not DISPATCH_METADATA_FIELDS.intersection(record):
         return RECOVERY_SCHEMA_VERSION
     if "requirements" in record:
@@ -1485,6 +1501,7 @@ def validate_store(store, assignments):
             _validate_dispatch_metadata(row)
             for key in ("id", "fingerprint", "role", "agent"):
                 text(row[key], key)
+            require_seatable(row["role"])
             if row["status"] not in DISPATCH_STATUSES:
                 raise UsageError("Unknown dispatch status; recover through the owner without dropping the attempt.", {})
             if row["status"] in PENDING_STATUSES:

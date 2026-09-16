@@ -243,7 +243,7 @@ class EngagementTest(unittest.TestCase):
         self.assertEqual(migrated["specialist_assessments"], [])
         self.assertEqual(migrated["assignments"][0], {**original, "schema_version": 6,
                                                     "requirements": None, "reviewer_scope": "unknown"})
-        self.assertEqual(migrated["recovery"]["schema_version"], 9)
+        self.assertEqual(migrated["recovery"]["schema_version"], 10)
 
     def test_older_schema_cannot_bless_future_composition_fields(self):
         for target in ("document", "assignment"):

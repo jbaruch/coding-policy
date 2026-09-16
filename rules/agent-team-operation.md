@@ -394,7 +394,7 @@ description: Running a multi-agent team — task-based specialist composition, c
 - An investigation-only round gates its knowledge deliverable under `skills/herdr-teamlead/references/assignment-reasoning.md`
 - Pre-development output is a design note or a test plan, never a pass
 - The tester and the reviewer pass on the pushed branch before the PR opens
-- A round may split its review surface across several reviewers against a declared partition
+- A round may split a reviewer's or a tester's surface across several seats against a declared partition
 - The partition is disjoint and exhaustive over the change
 - Every changed file belongs to exactly one slice
 - A partition leaving a changed file unowned is refused
@@ -409,12 +409,13 @@ description: Running a multi-agent team — task-based specialist composition, c
 - The ledger records that role, never the seat
 - Each slice's brief names its slice
 - Each slice's brief forbids roaming
-- An observation outside a reviewer's slice goes in a separate section of its report
-- An out-of-slice observation never forms part of that reviewer's verdict
-- A slice is saturated when its reviewer reports clean at the current tip
-- A change is reviewed when every slice is saturated at one tip
+- An observation outside a seat's slice goes in a separate section of its report
+- An out-of-slice observation never forms part of that seat's verdict
+- A slice is saturated when its seat reports clean at the current tip
+- A partitioned responsibility has passed when every slice is saturated at one tip
+- A tester partition passes the tester gate, never the reviewer's
 - Severity classification, gating and independence are unchanged
-- A slice verdict is an ordinary reviewer verdict over a smaller surface
+- A slice verdict is an ordinary verdict of its responsibility over a smaller surface
 - A partition never makes an unreviewable module feel reviewed
 - Slice boundaries that cannot be drawn without cutting through mutual dependencies are a structural finding for the architect trigger
 - The gate reads the post-push reports for the current branch tip

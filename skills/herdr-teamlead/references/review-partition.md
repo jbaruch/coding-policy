@@ -1,9 +1,10 @@
 # Review Partition
 
-The document `validate-partition` checks. One reviewer per slice, so a change
-reaches a state that means "reviewed": a slice is saturated when its reviewer
-reports clean at the current tip, and the change is reviewed when every slice
-is saturated at one tip.
+The document `validate-partition` checks. One seat per slice, so a change
+reaches a state that means the seated responsibility has passed: a slice is
+saturated when its seat reports clean at the current tip, and the
+responsibility has passed when every slice is saturated at one tip. A tester
+partition passes the tester gate, never the reviewer's.
 
 `rules/agent-team-operation.md` Review Before PR carries the contract this
 format serves. Write the document only for a round filling several seats of one

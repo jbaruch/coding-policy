@@ -268,7 +268,7 @@ skills/herdr-teamlead/references/retrospectives.md
   ],
   "specialist_assessments": [],
   "recovery": {
-    "schema_version": 9,
+    "schema_version": 10,
     "tasks": {},
     "checkpoints": [],
     "plans": [],
@@ -332,13 +332,14 @@ document and arrives already stamped.
 
 ## Recovery records
 
-The recovery document uses `schema_version: 9`; individual records retain their
+The recovery document uses `schema_version: 10`; individual records retain their
 independent versions. Version 6 adds the dispatch fields `brief_identity`, `refusal` and
 `refusal_move` and the `refusal_authorizations` collection; version 7 adds the
 dispatch's send-time `provider`; version 8 adds the `diagnoses` collection;
-version 9 adds `legacy_ruling_recoveries`. The
+version 9 adds `legacy_ruling_recoveries`; version 10 widens `dispatches[].role`
+to a seat, per Seat vs responsibility above. The
 owner stamps an older store on load, adds the empty collections, and refuses one
-already carrying a field its version did not own. Generic records remain version 1; stale-Grok delivery and
+already carrying a field — or a seat-named dispatch — its version did not own. Generic records remain version 1; stale-Grok delivery and
 composition-bearing dispatch/result records use version 2. Checkpoints are at
 version 2: the owner upgrades a version-1 row on load, stamping it and
 preserving its identity, fix round, base and recorded ruling, and refuses one
@@ -485,8 +486,8 @@ informational plan name and never feeds headroom.
   `recovery.dispatches[].role` holds the SEAT, which is what a slice's verdict
   is read back through. A reader comparing the two resolves the dispatch's
   responsibility first (`tiers.canonical_role`); the two strings are equal only
-  on an unpartitioned round. Only `reviewer` and `tester` are seatable — see
-  `skills/herdr-teamlead/teamlead/tiers.py`, the `SEATABLE_ROLES` constant.
+  on an unpartitioned round. Which roles are seatable, and the grammar a seat's
+  slice half follows, are in `skills/herdr-teamlead/references/review-partition.md`.
 - **Assignment chronology** — assignment `at` records the event time; import receipt
   `at` records when the owner appended its evidence. Reads preserve original row
   indices and never reorder the audit. Chronological lookup returns the original
@@ -663,6 +664,12 @@ stores 1–8 by adding an empty collection and retaining existing records.
 An older store already containing this collection is refused. State document
 schema 6 and checkpoint record versions remain unchanged. Older owner builds
 cannot write schema 9; use the upgraded owner for every dispatch and reader.
+
+Schema 10 adds no collection: it widens `dispatches[].role` to a seat. The
+owner stamps a store at 1–9 and retains its records; a store at those versions
+carrying a seat-named dispatch is unowned newer data and is refused without
+writes. A reader pinned to 9 or lower reads a schema-10 store as newer and
+takes its no-prior-state path rather than migrating it downward.
 
 Existing schema-1 receipts stay in the ledger. Each carries `id`, `task`, `at`,
 the actual operator `authorization` source/quote, `backup` path/SHA-256, a

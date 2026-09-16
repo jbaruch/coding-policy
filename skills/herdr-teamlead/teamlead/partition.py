@@ -33,11 +33,10 @@ Contract:
 
 import fnmatch
 import json
-import re
 from pathlib import Path
 
 from .errors import UsageError
-from .tiers import SEAT_SEPARATOR, SEATABLE_ROLES
+from .tiers import SEAT_SEPARATOR, SEATABLE_ROLES, SLICE_NAME
 from .triggers import git_runner, parse_name_status
 
 #: The partition document's own version, so a later shape change is auditable
@@ -45,12 +44,6 @@ from .triggers import git_runner, parse_name_status
 PARTITION_SCHEMA_VERSION = 1
 
 COMMANDS = frozenset({"validate-partition"})
-
-#: A slice name becomes half of a seat, and a seat is a CLI key: the left side
-#: of `--brief SEAT=PATH` and `--report SEAT=PATH`, and a line-oriented key
-#: `compose-briefs.sh` reads back. A name outside this shape does not round-trip
-#: through those parsers, so the round would plan a seat it cannot address.
-SLICE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*")
 
 #: The responsibilities a partition seats, which are the seatable roles
 #: `tiers.SEATABLE_ROLES` names.
