@@ -1,5 +1,16 @@
 # Changelog
 
+### Changed
+
+- **The last two publication-confirmation bullets read one directive each
+  (#446, completing #375).** #444 split four of the six bullets the
+  independent review of #374 named and left two: the other-channel evidence
+  bullet still carried its two facts behind a colon, and the security-finding
+  bullet still joined the advisory and the blocking case with a semicolon. The
+  first is now a `both required` lead-in over two nested bullets, the second is
+  two bullets. Both reviewers classified the remainder as presentation-only, so
+  it never gated #444; the contract is unchanged.
+
 ## 0.3.235 — 2026-09-16
 
 ### Changed
