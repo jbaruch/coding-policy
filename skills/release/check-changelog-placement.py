@@ -8,74 +8,56 @@ hazard is between them: a branch cut before an intervening publish carries its
 `### ` block at what WAS the top, and the three-way merge lands that block
 BELOW a version heading added since. The entry is then already headed, the
 stamp finds nothing to do, and the work ships filed under someone else's
-version — silently, because every step behaved as designed
+version -- silently, because every step behaved as designed
 (jbaruch/coding-policy#452, where #384's entry published as 0.3.238 and landed
 under `## 0.3.236`).
 
-This check runs on the pull request, where the fix is still a rebase. It reads
-the entries the branch ADDS and requires each to sit above the first version
-heading, which is the one place the stamp can reach.
+The rule is a COUNT, not a position: a branch must not increase the number of
+entry blocks parked under already-published headings. Counting sidesteps diff
+attribution, which cannot answer "which entry is the new one" when two blocks
+read alike -- given two adjacent `### Added`, git marks the lower as added
+though the upper is the new entry. It also lets a deliberate archive repair
+through: moving an entry under the heading that published it leaves the count
+unchanged, while a new entry parked under a heading raises it.
 
 Usage:
     check-changelog-placement.py --base <ref> [--changelog CHANGELOG.md]
 
-Exit 0 when every added entry is stampable, or when the branch adds none.
-Exit 1 when an added entry sits under a version heading. Exit 2 on a usage or
+Exit 0 when the count did not rise. Exit 1 when it did. Exit 2 on a usage or
 tool error (`git` unavailable, base ref unknown, unreadable file).
 """
 import argparse
-import re
 import subprocess
 import sys
 from pathlib import Path
 
 H2 = "## "
 ENTRY = "### "
-HUNK = re.compile(r"^@@ -\\d+(?:,\\d+)? \\+(\\d+)(?:,\\d+)? @@")
 
 
-def added_entry_lines(base: str, changelog: str) -> list[int]:
-    """The NEW-file line numbers of `### ` lines this branch adds.
-
-    Line numbers, never the line text: `### Added` heads many blocks, so
-    matching by content would flag a published entry that happens to read the
-    same as the new one.
-    """
-    proc = subprocess.run(
-        ["git", "diff", "--unified=0", f"{base}...HEAD", "--", changelog],
-        capture_output=True, text=True,
-    )
+def base_text(base: str, changelog: str) -> str:
+    """The changelog as it stands on `base`."""
+    proc = subprocess.run(["git", "show", f"{base}:{changelog}"],
+                          capture_output=True, text=True)
     if proc.returncode != 0:
         raise RuntimeError(
-            "`git diff {}...HEAD -- {}` failed (exit {}): {}".format(
+            "`git show {}:{}` failed (exit {}): {}".format(
                 base, changelog, proc.returncode,
                 proc.stderr.strip() or "no diagnostic"))
-    numbers: list[int] = []
-    cursor = 0
-    for line in proc.stdout.splitlines():
-        header = HUNK.match(line)
-        if header:
-            cursor = int(header.group(1))
-            continue
-        if line.startswith("+++"):
-            continue
-        if line.startswith("+"):
-            if line[1:].startswith(ENTRY):
-                numbers.append(cursor)
-            cursor += 1
-        elif not line.startswith("-"):
-            cursor += 1
-    return numbers
+    return proc.stdout
 
 
-def misfiled(text: str, added: list[int]) -> list[str]:
-    """The added entries at or below the first version heading, as text."""
+def parked(text: str) -> int:
+    """How many entry blocks sit under a version heading.
+
+    Zero while the file carries no version heading at all, which is a first
+    release rather than a misfiling.
+    """
     lines = text.splitlines()
     first_h2 = next((i for i, ln in enumerate(lines) if ln.startswith(H2)), None)
     if first_h2 is None:
-        return []
-    return [lines[n - 1] for n in added
-            if 0 < n <= len(lines) and n - 1 > first_h2]
+        return 0
+    return sum(1 for ln in lines[first_h2:] if ln.startswith(ENTRY))
 
 
 def main(argv=None) -> int:
@@ -92,26 +74,24 @@ def main(argv=None) -> int:
         print("error: cannot read {}: {}".format(path, exc), file=sys.stderr)
         return 2
     try:
-        added = added_entry_lines(args.base, args.changelog)
+        original = base_text(args.base, args.changelog)
     except RuntimeError as exc:
         print("error: {}".format(exc), file=sys.stderr)
         return 2
 
-    if not added:
-        return 0
-    bad = misfiled(text, added)
-    if not bad:
+    before, after = parked(original), parked(text)
+    if after <= before:
         return 0
     print(
-        "error: {} entry line(s) this branch adds sit under a version heading, "
-        "where the publish step cannot stamp them — they would ship filed under "
-        "an already-published version:".format(len(bad)), file=sys.stderr)
-    for line in bad:
-        print("  {}".format(line), file=sys.stderr)
+        "error: this branch parks {} more entry block(s) under an "
+        "already-published version heading ({} -> {}). The publish step stamps "
+        "only what sits ABOVE the first `## ` heading, so an entry below one "
+        "ships filed under a version that already shipped.".format(
+            after - before, before, after), file=sys.stderr)
     print(
-        "Rebase onto {} and move the block above the topmost `## ` heading, so "
-        "the stamp step files it under the version this merge publishes.".format(args.base),
-        file=sys.stderr)
+        "Rebase onto {} and move the new block above the topmost `## ` heading. "
+        "Moving an existing entry between headings is fine and does not raise "
+        "the count.".format(args.base), file=sys.stderr)
     return 1
 
 

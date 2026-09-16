@@ -21,9 +21,11 @@ import tempfile
 import unittest
 from pathlib import Path
 
-_SPEC = importlib.util.spec_from_file_location(
-    "check_changelog_placement",
-    _os.path.join(_ROOT, "check-changelog-placement.py"))
+_SCRIPT = _os.path.join(_ROOT, "check-changelog-placement.py")
+_SPEC = importlib.util.spec_from_file_location("check_changelog_placement", _SCRIPT)
+# Narrowed for the type checker the same way its sibling suite narrows, since
+# `spec_from_file_location` is Optional at the type level.
+assert _SPEC and _SPEC.loader, f"cannot load check-changelog-placement.py at {_SCRIPT}"
 check = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(check)
 
@@ -63,24 +65,18 @@ MISFILED = """# Changelog
 """
 
 
-class MisfiledTest(unittest.TestCase):
-    def test_an_entry_above_the_first_heading_is_stampable(self):
-        # Line 3 of STAMPABLE, above its first `## ` at line 7.
-        self.assertEqual(check.misfiled(STAMPABLE, [3]), [])
+class ParkedCountTest(unittest.TestCase):
+    def test_an_entry_above_the_first_heading_is_not_parked(self):
+        self.assertEqual(check.parked(STAMPABLE), 1)
 
-    def test_an_entry_under_a_version_heading_is_refused(self):
-        # Line 5 of MISFILED, below its first `## ` at line 3.
-        self.assertEqual(check.misfiled(MISFILED, [5]), ["### Added"])
+    def test_an_entry_under_a_version_heading_is_parked(self):
+        self.assertEqual(check.parked(MISFILED), 2)
 
-    def test_a_published_entry_reading_the_same_is_not_confused_for_it(self):
-        # Both blocks read `### Added`; only the added line number is judged.
-        self.assertEqual(check.misfiled(STAMPABLE, [3]), [])
+    def test_a_changelog_with_no_version_heading_yet_parks_nothing(self):
+        self.assertEqual(check.parked("# Changelog\n\n### Added\n"), 0)
 
-    def test_a_changelog_with_no_version_heading_yet_is_stampable(self):
-        self.assertEqual(check.misfiled("# Changelog\n\n### Added\n", [3]), [])
-
-    def test_an_unchanged_changelog_is_not_inspected(self):
-        self.assertEqual(check.misfiled(MISFILED, []), [])
+    def test_the_published_baseline_parks_its_own_entry(self):
+        self.assertEqual(check.parked(HEADED), 1)
 
 
 class RepositoryTest(unittest.TestCase):
@@ -123,9 +119,20 @@ class RepositoryTest(unittest.TestCase):
     def test_an_entry_merged_under_a_heading_is_refused(self):
         self.commit_changelog(MISFILED)
         code, err = self.run_check()
-        self.assertEqual(code, 1)
-        self.assertIn("under a version heading", err)
+        self.assertEqual(code, 1, err)
+        self.assertIn("already-published version heading (1 -> 2)", err)
         self.assertIn("Rebase onto main", err)
+
+    def test_moving_an_entry_between_headings_is_allowed(self):
+        # An archive repair -- filing a past entry under the version that
+        # published it -- appears in the diff as an addition below a heading,
+        # exactly like the hazard. The count tells them apart (#452).
+        moved = HEADED.replace(
+            "## 0.3.9 — 2026-01-02\n\n### Added\n\n- **A published entry.** Already stamped.\n",
+            "## 0.3.10 — 2026-01-03\n\n### Added\n\n- **A published entry.** Already stamped.\n")
+        self.commit_changelog(moved)
+        code, err = self.run_check()
+        self.assertEqual(code, 0, err)
 
     def test_a_branch_touching_no_entries_passes(self):
         self.git("checkout", "-q", "-b", "work")

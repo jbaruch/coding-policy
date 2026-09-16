@@ -19,10 +19,15 @@
   ships filed under someone else's version. #384 merged two publishes behind
   and landed under `## 0.3.236`.
 
-  `skills/release/check-changelog-placement.py` reads the entry lines a branch
-  ADDS, by line number rather than text — `### Added` heads many blocks — and
-  requires each to sit above the first version heading, the one place the stamp
-  can reach. It runs as a pull-request job, where the fix is still a rebase.
+  `skills/release/check-changelog-placement.py` requires that a branch not
+  raise the number of entry blocks parked under already-published headings. The
+  rule is a count rather than a position because diff attribution cannot answer
+  "which entry is the new one" when two blocks read alike: given two adjacent
+  `### Added`, git marks the lower as added though the upper is the new entry.
+  Counting also lets a deliberate archive repair through — moving an entry
+  under the heading that published it leaves the count unchanged, while a new
+  entry parked under a heading raises it. It runs as a pull-request job, where
+  the fix is still a rebase.
 
 ## 0.3.240 — 2026-09-16
 
