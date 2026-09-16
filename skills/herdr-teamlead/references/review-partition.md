@@ -23,9 +23,9 @@ role; a single-seat round needs none.
 ```
 
 - `schema_version` — `1`. Any other value is refused.
-- `role` — optional, `reviewer` when absent, and `reviewer` or `tester`
-  otherwise. Every other responsibility carries a per-task counter one seat
-  owns, so slicing it would leave two workers holding one count.
+- `role` — optional, and `reviewer` when absent. The accepted set is the
+  script's — see `skills/herdr-teamlead/teamlead/tiers.py`, the `SEATABLE_ROLES`
+  constant. A role outside it is refused, at the document and at `--roles`.
 - `slices` — at least two. Each is `{name, paths}` and carries nothing else.
   - `name` — unique within the document, and written with letters, digits,
     underscores, dots or hyphens, starting with a letter or digit. It becomes
