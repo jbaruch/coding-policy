@@ -23,6 +23,11 @@
 
   SKILL.md is ~4924 tokens and the lint warning is gone.
 
+  `rules/script-delegation.md`'s Herdr bootstrap carve-out names the files its
+  inline `CP=` resolver may appear in, so the new reference is added to that
+  list. Its precondition that `tests/test_skill_invocations.sh` check every
+  covered block is met by the same commit.
+
 ## 0.3.237 — 2026-09-16
 
 ### Added
