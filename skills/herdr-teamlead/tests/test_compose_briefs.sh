@@ -401,7 +401,7 @@ JSON
   #     could take the reviewer template and redirect its output out of the
   #     output directory (#434).
   local bad_key
-  for bad_key in 'reviewer#/../../outside' 'reviewer#' 'reviewer#a b' '../developer' 'dev/eloper' 'dev,eloper'; do
+  for bad_key in 'reviewer#/../../outside' 'reviewer#' 'reviewer#a b' '../developer' 'dev/eloper' 'dev,eloper' 'dev=eloper'; do
     jq --arg k "$bad_key" '.roles = {($k): .roles.developer}' "$v1" > "$TMP/v17.json" \
       || die "could not build the malformed-key fixture"
     run "$TPL" "$TMP/v17.json" "$TMP/out17"
@@ -430,7 +430,7 @@ JSON
   #     The composer accepts exactly what the planner emits, so a custom role
   #     cannot pass plan and then fail compose.
   local v19="$TMP/v19.json" o19="$TMP/out19" custom
-  for custom in role_v2 reviewer.v2 Role 'foo@bar'; do
+  for custom in role_v2 reviewer.v2 Role 'foo@bar' 'foo..bar' '.custom' '-custom' 'two words'; do
     cp "$TPL/brief-developer.md" "$TPL/brief-${custom}.md" || die "could not add the custom template"
     jq --arg k "$custom" '.roles = {($k): .roles.developer}' "$v1" > "$v19" || die "could not build the custom-role fixture"
     rm -rf "$o19"
@@ -463,7 +463,7 @@ JSON
   if [[ $RC -eq 2 && ! -e "$TMP/out21" ]] && printf '%s' "$ERRTEXT" | grep -q "needs SLICE_PATHS"; then
     pass; else fail "slice paths: a seat without SLICE_PATHS must refuse, got RC=$RC ERR=$ERRTEXT"; fi
   local bad_paths
-  for bad_paths in '[]' '"src/core/*"' '[""]' '[1]'; do
+  for bad_paths in '[]' '"src/core/*"' '[""]' '["   "]' '[1]'; do
     jq --argjson v "$bad_paths" '.roles["tester#core"].SLICE_PATHS = $v' "$v16" > "$TMP/v21b.json" \
       || die "could not build the malformed-paths fixture"
     run "$TPL" "$TMP/v21b.json" "$TMP/out21b"

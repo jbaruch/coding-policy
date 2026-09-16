@@ -14,7 +14,7 @@ if _ROOT not in _sys.path:
 import unittest
 
 from teamlead.errors import PlanError
-from teamlead.planner import plan
+from teamlead.planner import DEFAULT_ROLE_COSTS, _costs_for, plan
 
 ROLES = ["developer", "tester", "reviewer"]
 
@@ -1157,14 +1157,14 @@ class SpecialistOrderingTest(unittest.TestCase):
     def test_a_seat_costs_what_its_responsibility_costs(self):
         # Weighing one seat apart would make slices of one responsibility
         # compete under different costs, and the rule gives the role the
-        # weight (#434).
-        result = plan(["reviewer#api", "reviewer#core"], snapshot(a=90, b=80),
-                      role_costs={"reviewer": 40})
-        self.assertEqual(sorted(result["assignments"]), ["reviewer#api", "reviewer#core"])
-        weights = {row["role"]: row["cost"] for row in result["explanation"]} \
-            if "explanation" in result else None
-        if weights is not None:
-            self.assertEqual(weights["reviewer#api"], weights["reviewer#core"])
+        # weight (#434). Asserted on the resolved costs themselves: the plan
+        # result carries assignments and rationale, not per-seat weights, so a
+        # conditional read of it would assert nothing.
+        self.assertEqual(_costs_for(["reviewer#api", "reviewer#core"], {"reviewer": 40}),
+                         {"reviewer#api": 40.0, "reviewer#core": 40.0})
+        self.assertEqual(_costs_for(["reviewer#api", "reviewer"], None),
+                         {"reviewer#api": DEFAULT_ROLE_COSTS["reviewer"],
+                          "reviewer": DEFAULT_ROLE_COSTS["reviewer"]})
 
     def test_a_seat_keyed_role_cost_is_refused(self):
         with self.assertRaisesRegex(PlanError, "never one of its seats"):

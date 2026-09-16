@@ -177,6 +177,14 @@
   store carrying a row its version never wrote, and the next load refuses the
   whole ledger rather than that row.
 
+  The composer's key check rejects exactly what cannot name
+  `brief-<role>.md` inside the output directory or read back through
+  `--brief ROLE=PATH` and `--roles a,b`: a path separator, `=`, `,` or a
+  control character. The `brief-` prefix makes a leading dot or dash harmless
+  and `..` without a separator names an ordinary file, so `foo..bar`,
+  `.custom`, `-custom` and `two words` compose, as the planner emits them. A
+  whitespace-only glob is refused too, since it resolves to nothing.
+
   The live retrospective guard reads the prior SEAT off the dispatch rather
   than the responsibility off the ledger row. Comparing the canonicalized row
   with the seat a dispatch names marked every retained seat as a role change,

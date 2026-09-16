@@ -251,9 +251,13 @@ main() {
     # A denylist, not an allowlist: the planner accepts any custom role name,
     # so rejecting more than what could reach a path would break the plan →
     # compose round-trip for a round the planner happily emits.
-    if [[ -z "$role" || "$role" == *"/"* || "$role" == *".."* || "$role" == .* || "$role" == -*
-          || "$role" == *"="* || "$role" == *","* || "$role" == *[[:space:]]* || "$role" == *[[:cntrl:]]* ]]; then
-      warn "role key '${role}' cannot name the brief it writes — a key carrying a path separator, '..', '=', ',', whitespace or a control character, or starting with '.' or '-', does not read back"
+    # Exactly what cannot name `brief-<role>.md` inside the output directory or
+    # read back through `--brief ROLE=PATH` and `--roles a,b`. The `brief-`
+    # prefix makes a leading dot or dash harmless, and `..` without a separator
+    # names an ordinary file, so neither is rejected: the planner emits custom
+    # roles, and everything it emits has to compose.
+    if [[ -z "$role" || "$role" == *"/"* || "$role" == *"="* || "$role" == *","* || "$role" == *[[:cntrl:]]* ]]; then
+      warn "role key '${role}' cannot name the brief it writes — a key carrying a path separator, '=', ',' or a control character does not read back through the output path and the CLI keys"
       return 2
     fi
     # Only a responsibility whose verification a slice terminates is seated;
@@ -340,7 +344,7 @@ main() {
       # The globs are rendered verbatim into the worker's brief, so a backtick
       # or a control character could close the code span and append
       # instructions of its own. A path glob needs neither.
-      if ! printf '%s' "$values" | jq -e --arg r "$role" '.roles[$r].SLICE_PATHS | type == "array" and length > 0 and all(type == "string" and (. | length) > 0 and (test("[\u0000-\u001f\u007f`]") | not))' >/dev/null; then
+      if ! printf '%s' "$values" | jq -e --arg r "$role" '.roles[$r].SLICE_PATHS | type == "array" and length > 0 and all(type == "string" and (. | gsub("\\s";"") | length) > 0 and (test("[\u0000-\u001f\u007f`]") | not))' >/dev/null; then
         warn "seat '${role}' needs SLICE_PATHS: the non-empty list of path globs its slice owns, copied from the partition validate-partition accepted, each a string without backticks or control characters. A slice name alone leaves the worker no boundary to respect"
         return 2
       fi
