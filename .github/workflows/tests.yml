@@ -12,6 +12,8 @@ name: Tests
 #      breaks publish.yml's first step after merge.
 #   3. unit-tests — every module's bash unit suite via scripts/run-tests.sh
 #      (rules/testing-standards.md). Gated on diagnostics passing.
+#   4. changelog-placement — pull requests only: the entry this branch adds
+#      must sit where the publish step's stamp can reach it (#452).
 # publish.yml reruns lint + diagnostics + the suites before release as
 # defense-in-depth.
 on:
@@ -41,6 +43,43 @@ jobs:
           token: ${{ secrets.TESSL_TOKEN }}
       - name: Lint plugin
         run: tessl plugin lint
+
+  changelog-placement:
+    # Prevention on the pull request, detection on `main`. The pull-request run
+    # alone can be outrun: it passes against the base of the moment, another
+    # publish then adds a version heading, and the stale branch still merges
+    # green — the branch-cut race this check exists to catch. Branch protection
+    # requiring an up-to-date branch is the real close; until then `main`'s own
+    # run turns a silent misfiling into a red default branch.
+    if: github.event_name == 'pull_request' || github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The check diffs against a base commit, so it needs both sides.
+          fetch-depth: 0
+      - name: Check the CHANGELOG entry is one the publish step can stamp
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            git fetch --no-tags origin "${{ github.base_ref }}"
+            base="origin/${{ github.base_ref }}"
+          else
+            # What this push added, measured against the commit it landed on.
+            base="${{ github.event.before }}"
+            # Only the all-zero sentinel — a first push to the ref — is a
+            # reason to skip. Treating every `cat-file` failure as that case
+            # lets a corrupt checkout pass the one push-time guard green.
+            case "$base" in
+              *[!0]*) ;;
+              *) echo "::notice::initial push to this ref; no before-commit to measure against"
+                 exit 0 ;;
+            esac
+            if ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
+              echo "::error::before-commit ${base} is not in this checkout — the placement check cannot run; fix the checkout rather than skipping it" >&2
+              exit 1
+            fi
+          fi
+          python3 skills/release/check-changelog-placement.py --base "$base"
 
   unit-tests:
     needs: [diagnostics, lint]

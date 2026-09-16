@@ -2,6 +2,8 @@
   "include": [
     "skills/release/stamp-changelog.py",
     "skills/release/tests/test_stamp_changelog.py",
+    "skills/release/check-changelog-placement.py",
+    "skills/release/tests/test_check_changelog_placement.py",
     "skills/herdr-teamlead/teamlead/__init__.py",
     "skills/herdr-teamlead/teamlead/__main__.py",
     "skills/herdr-teamlead/teamlead/assign.py",
