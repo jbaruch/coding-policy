@@ -748,6 +748,28 @@ class ApplyCommandTest(CliCase):
         self.assertEqual(sorted(steps), ["reviewer#api", "reviewer#core"])
         self.assertEqual(len(set(steps.values())), 2)
 
+    def test_a_seat_inherits_its_role_bars_alongside_its_own(self):
+        # An exclusion is a bar, not a setting a seat overrides. Naming one
+        # seat's own excluded worker must not lift the contributor bar the
+        # role already carries, or the planner hands independent verification
+        # of a slice to the worker that wrote the task (#434).
+        partition = self.tmp / "bars.json"
+        partition.write_text(json.dumps({"schema_version": 1, "slices": [
+            {"name": "api", "paths": ["src/api/*"]}, {"name": "core", "paths": ["src/core/*"]}]}))
+        state = empty_state()
+        add_assignment(state, AT, "developer", "grok", task="t-bar", status="applied")
+        save_state(self.state, state)
+        out = io.StringIO()
+        code = main(self.base() + ["plan", "--roles", "reviewer", "--partition", str(partition),
+                                   "--task", "t-bar", "--now", AT,
+                                   "--exclude", "reviewer#api=claude",
+                                   "--snapshot", str(self.snapshot)], stdout=out)
+        self.assertEqual(code, 0, out.getvalue())
+        assignments = json.loads(out.getvalue())["assignments"]
+        self.assertEqual(sorted(assignments), ["reviewer#api", "reviewer#core"])
+        self.assertEqual(assignments["reviewer#api"], "codex")
+        self.assertNotIn("grok", assignments.values())
+
     def test_a_seat_of_an_unseatable_responsibility_is_refused(self):
         # A partition document can only seat a reviewer or a tester, but the
         # role names reaching plan and apply come straight off the command

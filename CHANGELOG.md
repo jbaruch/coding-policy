@@ -63,7 +63,10 @@
   on its own task before the send even resolved. And `partition_role` tested
   membership against a frozenset before checking the type, so a document whose
   `role` is `[]` or `{}` raised `TypeError` out of `load_partition` instead of
-  the `UsageError` every caller handles.
+  the `UsageError` every caller handles. And the seat fan-out let a
+  seat-specific exclusion REPLACE its role's, so `--exclude reviewer#api=beta`
+  lifted the contributor bar the role already carried and the planner could
+  hand that slice to the worker that wrote the task; exclusions now union.
 
 ### Added
 

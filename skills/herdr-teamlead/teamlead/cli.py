@@ -715,6 +715,25 @@ def _fan_out_seats(mapping, seats):
     return fanned
 
 
+def _fan_out_exclusions(mapping, seats):
+    """Re-key an exclusion map onto its seats, unioning the role's bars in.
+
+    An exclusion is a BAR, not a setting a seat overrides. A seat inherits
+    every name barred from its role and adds whatever the lead barred from the
+    seat itself, so `--exclude reviewer#api=beta` never lifts the contributor
+    `alpha` the role already excludes (#434).
+    """
+    if not seats or not mapping:
+        return mapping
+    expanded = set(seats.values())
+    fanned = {key: value for key, value in mapping.items() if key not in expanded}
+    for seat, role in seats.items():
+        barred = sorted(set(mapping.get(role, ())) | set(mapping.get(seat, ())))
+        if barred:
+            fanned[seat] = barred
+    return fanned
+
+
 def cmd_plan(args, client=None, warn=None, trace=None):
     # `canonical` is what every module reasoning about RESPONSIBILITY sees;
     # `roles` carries the seat identity and reaches the planner alone (#434).
@@ -785,8 +804,8 @@ def cmd_plan(args, client=None, warn=None, trace=None):
     # Each seat inherits its role's bars, tiers, round type and requirements.
     # `role_costs` is not fanned out: the planner resolves a seat's default
     # weight and rotation history through its role (#434).
-    excludes = _fan_out_seats(excludes, seats)
-    operator_excludes = _fan_out_seats(operator_excludes, seats)
+    excludes = _fan_out_exclusions(excludes, seats)
+    operator_excludes = _fan_out_exclusions(operator_excludes, seats)
     rounds = _fan_out_seats(rounds, seats)
     requirements = _fan_out_seats(requirements, seats)
     tier_candidates = _fan_out_seats(tier_candidates, seats)
