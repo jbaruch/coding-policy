@@ -1,37 +1,5 @@
 # Changelog
 
-## 0.3.239 — 2026-09-16
-
-### Changed
-
-- **The judge round moved out of the team-lead execution plan (#441).**
-  `tessl plugin lint` reported `skills/herdr-teamlead/SKILL.md` at ~6022 tokens
-  against a recommended 5000. Two cuts, no contract change.
-
-  The judge round is a conditional branch most rounds never take, and it held
-  seven of the skill's twenty-two steps. Those seven now live in
-  `references/judge-round.md` with their own numbering, and SKILL.md Step 13
-  names the sequence and points at them. Steps 20–22 renumber to 14–16, and the
-  pointers in `references/round-flow.md` and `references/task-ledger.md` follow.
-  `tests/test_skill_invocations.sh` checks the new reference's command blocks
-  the way it already checks `round-setup.md`'s, so the moved bootstraps keep
-  their coverage.
-
-  Step 1's offline branch carried four command blocks that
-  `references/attention.md`, `references/working-memory.md` and
-  `references/retrospectives.md` already document in full. It now names the
-  three request kinds and the reference that owns each. The `HERDR_ENV` gate
-  and its refusal are untouched.
-
-  SKILL.md is ~4924 tokens and the lint warning is gone.
-
-  `rules/script-delegation.md`'s Herdr bootstrap carve-out names the files its
-  inline `CP=` resolver may appear in, so the new reference is added to that
-  list. Its precondition that `tests/test_skill_invocations.sh` check every
-  covered block is met by the same commit.
-
-## 0.3.237 — 2026-09-16
-
 ### Added
 
 - **One plan fills every slice of a partitioned review (#434, completing
@@ -143,6 +111,37 @@
   and `Guard.preflight` then blocked its next dispatch until a fresh
   retrospective event existed. Moving a worker between slices is still a
   transition.
+
+
+## 0.3.239 — 2026-09-16
+
+### Changed
+
+- **The judge round moved out of the team-lead execution plan (#441).**
+  `tessl plugin lint` reported `skills/herdr-teamlead/SKILL.md` at ~6022 tokens
+  against a recommended 5000. Two cuts, no contract change.
+
+  The judge round is a conditional branch most rounds never take, and it held
+  seven of the skill's twenty-two steps. Those seven now live in
+  `references/judge-round.md` with their own numbering, and SKILL.md Step 13
+  names the sequence and points at them. Steps 20–22 renumber to 14–16, and the
+  pointers in `references/round-flow.md` and `references/task-ledger.md` follow.
+  `tests/test_skill_invocations.sh` checks the new reference's command blocks
+  the way it already checks `round-setup.md`'s, so the moved bootstraps keep
+  their coverage.
+
+  Step 1's offline branch carried four command blocks that
+  `references/attention.md`, `references/working-memory.md` and
+  `references/retrospectives.md` already document in full. It now names the
+  three request kinds and the reference that owns each. The `HERDR_ENV` gate
+  and its refusal are untouched.
+
+  SKILL.md is ~4924 tokens and the lint warning is gone.
+
+  `rules/script-delegation.md`'s Herdr bootstrap carve-out names the files its
+  inline `CP=` resolver may appear in, so the new reference is added to that
+  list. Its precondition that `tests/test_skill_invocations.sh` check every
+  covered block is met by the same commit.
 
 ## 0.3.237 — 2026-09-16
 
