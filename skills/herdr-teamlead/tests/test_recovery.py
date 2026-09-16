@@ -821,7 +821,8 @@ class RecoveryTests(unittest.TestCase):
         # A seat in the dispatch role is what store version 10 added. Appending
         # one to an older store leaves it carrying a row its version never
         # wrote, and the next load refuses the whole ledger, not the row (#434).
-        record = {**self.reservation(1, plan=None), "role": "reviewer#api", "fix_round": None, "work": None}
+        record = {**self.reservation(1), "role": "reviewer#api", "fix_round": None,
+                  "plan": None, "work": None}
         older = copy.deepcopy(self.store)
         older["schema_version"] = 9
         before = copy.deepcopy(older)
