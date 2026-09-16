@@ -904,6 +904,20 @@ def _require_bound_slices(document, seated, briefs):
             "assignments, so the boundary that ships is the one that was checked.".format(
                 ", ".join(seated)),
             {"roles": seated})
+    # Shape before hashing: `slice_paths` rides in an editable `--assignments`
+    # document, and a seat mapped to a non-list — or to a list carrying a
+    # non-string — reaches the digest as an unhashable value and leaves a
+    # traceback where this function promises a refusal.
+    malformed = [seat for seat, globs in slice_paths.items()
+                 if not isinstance(seat, str) or not isinstance(globs, list) or not globs
+                 or any(not isinstance(glob, str) or not glob.strip() for glob in globs)]
+    if malformed:
+        raise UsageError(
+            "The plan's slice_paths maps {} to something other than a non-empty list of "
+            "globs; re-run `plan --partition <validate-partition output>` rather than "
+            "editing the assignments.".format(
+                ", ".join(repr(seat) for seat in sorted(map(str, malformed)))),
+            {"seats": [str(seat) for seat in malformed]})
     expected = partition.slice_digest(slice_paths)
     if expected != recorded:
         raise UsageError(

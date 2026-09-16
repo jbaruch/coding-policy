@@ -936,6 +936,26 @@ class ApplyCommandTest(CliCase):
         self.assertEqual(code, 1)
         self.assertIn("no longer match its slice_digest", err)
 
+    def test_a_malformed_slice_paths_map_is_refused_not_crashed(self):
+        # `slice_paths` rides in an editable document, and a seat mapped to a
+        # non-list reached the digest as an unhashable value — a traceback
+        # where `apply` promises a refusal (#453).
+        for broken in ({"reviewer#api": None}, {"reviewer#api": []},
+                       {"reviewer#api": ["src/api/*", 7]}):
+            with self.subTest(broken=broken):
+                edited = {**self.seat_plan, "slice_paths": broken}
+                code, _, err = self.run_cli(
+                    self.base()
+                    + ["apply", "--composer-settle", "0", "--assignments", json.dumps(edited),
+                       "--task", "t-malformed", "--common", str(self.common), "--now", AT,
+                       "--dry-run"]
+                    + ["--brief", "reviewer#api=" + str(self.seat_brief)],
+                    client=self._client({}),
+                )
+                self.assertEqual(code, 1)
+                self.assertIn("non-empty list of globs", err)
+                self.assertNotIn("Traceback", err)
+
     def test_a_seat_brief_missing_its_boundary_is_refused(self):
         # A hand-written or differently-composed brief carries no digest, so a
         # full-surface brief cannot be dispatched as a slice verdict.
