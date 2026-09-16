@@ -938,19 +938,20 @@ def _require_bound_slices(document, seated, briefs):
             raise UsageError(
                 "Cannot read the brief for seat {!r} at {}: {}.".format(role, brief, exc),
                 {"role": role}) from None
-        # Three facts, not one. The per-seat digest alone would pass a brief
-        # that carries the right digest and the wrong text; the slice name and
-        # its globs are what a worker actually reads its boundary from.
+        # The whole scope block, not the facts it contains. A brief that
+        # scatters the digest, the slice name and a path while directing a
+        # whole-repository pass satisfies three substring checks and still
+        # dispatches a full-surface verdict as a slice one; the block carries
+        # its own restrictions, so requiring it requires those too.
         expected_seat = partition.seat_digest(role, slice_paths[role])
-        missing = [item for item in (expected_seat, role.split(SEAT_SEPARATOR, 1)[1],
-                                     *slice_paths[role]) if item not in body]
-        if missing:
+        expected_scope = partition.slice_scope(role, slice_paths[role], expected_seat)
+        if expected_scope not in body:
             raise UsageError(
-                "The brief for seat {!r} does not carry {}, so it was not composed "
-                "against this seat's checked boundary. Compose it with "
-                "`compose-briefs.sh` from the plan's slice_paths and seat_digests.".format(
-                    role, ", ".join(repr(item) for item in missing)),
-                {"role": role, "missing": missing})
+                "The brief for seat {!r} does not carry this seat's scope block, so it "
+                "was not composed against the boundary this plan checked. Compose it "
+                "with `compose-briefs.sh` from the plan's slice_paths and seat_digests; "
+                "the block it renders reads: {}".format(role, expected_scope),
+                {"role": role, "expected_scope": expected_scope})
 
 
 def cmd_apply(args, client=None, warn=None, trace=None):

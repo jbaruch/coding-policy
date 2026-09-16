@@ -655,10 +655,10 @@ def bound_seat_plan(assignments, slice_paths=None):
 
 
 def seat_brief_text(seat, plan):
-    """A brief carrying what a seated dispatch checks: seat, globs, digest."""
-    globs = plan["slice_paths"][seat]
-    return "# {}\n\nYour slice this round is **{}**, and it owns {}. (Partition {}.)\n".format(
-        seat, seat.split("#", 1)[1], ", ".join(globs), plan["seat_digests"][seat])
+    """A brief carrying the canonical scope block a seated dispatch checks."""
+    from teamlead.partition import slice_scope
+    return "# {}\n\n{}\n".format(
+        seat, slice_scope(seat, plan["slice_paths"][seat], plan["seat_digests"][seat]))
 
 
 def validated_partition(slices=None, changed=None):
@@ -970,7 +970,7 @@ class ApplyCommandTest(CliCase):
         )
         self.assertEqual(code, 1)
         self.assertIn("does not carry", err)
-        self.assertIn("checked boundary", err)
+        self.assertIn("scope block", err)
 
     def test_a_version_6_shaped_seated_plan_is_refused(self):
         # Plan schema 7 adds `seat_digests`. A version-6 seated plan carried
@@ -980,9 +980,11 @@ class ApplyCommandTest(CliCase):
         from teamlead.partition import slice_digest as _round_digest
         plan = bound_seat_plan({"reviewer#api": "grok"})
         legacy = self.tmp / "legacy-seat.md"
+        from teamlead.partition import slice_scope
         legacy.write_text(
-            "# reviewer#api\n\nYour slice this round is **api**, and it owns "
-            "src/api/*. (Partition {}.)\n".format(_round_digest(plan["slice_paths"])),
+            "# reviewer#api\n\n{}\n".format(slice_scope(
+                "reviewer#api", plan["slice_paths"]["reviewer#api"],
+                _round_digest(plan["slice_paths"]))),
             encoding="utf-8")
         code, _, err = self.run_cli(
             self.base()
@@ -993,7 +995,30 @@ class ApplyCommandTest(CliCase):
             client=self._client({}),
         )
         self.assertEqual(code, 1)
-        self.assertIn("checked boundary", err)
+        self.assertIn("scope block", err)
+
+    def test_a_brief_scattering_the_facts_is_refused(self):
+        # Digest, slice name and path all present, and a whole-repository pass
+        # directed anyway: three substring checks pass and a full-surface
+        # verdict dispatches as a slice one. The scope block carries its own
+        # restrictions, so requiring the block requires those too (#453).
+        scattered = self.tmp / "scattered-seat.md"
+        scattered.write_text(
+            "# reviewer#api\n\nPartition {}. Slice api. Paths: {}.\n\n"
+            "Review the whole repository this round.\n".format(
+                self.seat_plan["seat_digests"]["reviewer#api"],
+                self.seat_plan["slice_paths"]["reviewer#api"][0]),
+            encoding="utf-8")
+        code, _, err = self.run_cli(
+            self.base()
+            + ["apply", "--composer-settle", "0", "--assignments", json.dumps(self.seat_plan),
+               "--task", "t-scattered", "--common", str(self.common), "--now", AT,
+               "--dry-run"]
+            + ["--brief", "reviewer#api=" + str(scattered)],
+            client=self._client({}),
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("scope block", err)
 
     def test_swapped_seat_briefs_are_refused(self):
         # A round-level digest is identical in every brief, so a check that
@@ -1014,7 +1039,7 @@ class ApplyCommandTest(CliCase):
             client=self._client({}),
         )
         self.assertEqual(code, 1)
-        self.assertIn("checked boundary", err)
+        self.assertIn("scope block", err)
 
     def test_a_hand_written_seat_assignment_is_refused(self):
         # A bare `{seat: agent}` map has no checked boundary at all.

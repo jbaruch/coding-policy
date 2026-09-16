@@ -135,6 +135,28 @@ def seat_digest(seat, paths):
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:12]
 
 
+def slice_scope(seat, paths, digest):
+    """The canonical scope block a seated brief must carry, verbatim.
+
+    One sentence, not three facts a brief may scatter: a hand-written brief
+    that mentions the slice name, a path and the digest while directing a
+    whole-repository pass satisfies three substring checks and still dispatches
+    a full-surface verdict as a slice one. Requiring this block requires the
+    restrictions with it (#453).
+
+    `compose-briefs.sh` renders the same string for the brief; its
+    `slice_scope()` and this function are pinned together by
+    `tests/test_slice_scope_parity.py`.
+    """
+    listed = ", ".join("`{}`".format(glob) for glob in paths)
+    return (
+        "Your slice this round is **{}**, and it owns {}. That slice is your "
+        "whole surface: a full pass covers all of it and nothing beyond it. An "
+        "observation outside your slice goes in a separate section of your "
+        "report and forms no part of your verdict. (Partition {}.)".format(
+            seat.split(SEAT_SEPARATOR, 1)[1], listed, digest))
+
+
 def slice_digest(seat_paths):
     """A short digest over the accepted `{seat: [glob, ...]}` map.
 

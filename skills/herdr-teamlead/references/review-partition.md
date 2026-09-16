@@ -83,9 +83,13 @@ is refused, naming the command to run.
 and `seat_digests`, one digest per seat over that seat and the globs it owns.
 Each seat's values carry its globs as `SLICE_PATHS` and its own `seat_digests`
 entry as `SLICE_DIGEST`; `compose-briefs.sh` renders both into the brief without
-recomputing either. `apply` re-derives each seat's digest from the plan and
-checks three facts against that seat's brief: the digest, the slice name, and
-every one of its globs. A boundary edited after validation — in the plan, in the
+recomputing either. `apply` re-derives each seat's digest from the plan,
+renders that seat's scope block from the plan exactly as the composer does, and
+requires the brief to carry that block verbatim. The block, not the facts inside
+it: a brief that scatters the digest, the slice name and a path while directing
+a whole-repository pass satisfies three substring checks and still dispatches a
+full-surface verdict as a slice one, and the block carries the no-roaming
+restrictions with it. A boundary edited after validation — in the plan, in the
 values, or in a brief written by hand — no longer matches, and the dispatch is
 refused. Two seats' briefs exchanged are refused with it, which a round-level
 digest alone would pass. `compose-briefs.sh`

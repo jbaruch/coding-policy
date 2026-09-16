@@ -26,11 +26,18 @@
   seats' briefs passes a check that only asks whether a digest is present.
   `compose-briefs.sh` requires each seat's `SLICE_DIGEST` beside its
   `SLICE_PATHS` and renders both into the brief, transporting the digest rather
-  than recomputing it in shell. `apply` checks three facts against each brief —
-  the seat's own digest, its slice name, and every one of its globs — so a brief
-  carrying the right digest and the wrong text is refused along with a boundary
-  edited after validation, in the plan, in the values, or in a brief written by
-  hand. An unseated round is untouched at every step.
+  than recomputing it in shell. `apply` renders that seat's scope block from the plan,
+  exactly as the composer does, and requires the brief to carry it verbatim —
+  the block rather than the facts inside it, since a brief that scatters the
+  digest, the slice name and a path while directing a whole-repository pass
+  satisfies three substring checks and dispatches a full-surface verdict as a
+  slice one. The block carries its own no-roaming restrictions, so requiring it
+  requires those too. A brief carrying the right digest and the wrong text is
+  refused along with a boundary edited after validation, in the plan, in the
+  values, or in a brief written by hand. `partition.slice_scope` and
+  `compose-briefs.sh`'s `slice_scope` render that block in two languages;
+  `tests/test_slice_scope_parity.py` pins them byte for byte, since one
+  character of drift would refuse every seated dispatch. An unseated round is untouched at every step.
 
   Plan schema 7 carries the three keys — `slice_paths`, `slice_digest`,
   `seat_digests` — and `state-schema.md` records their writer and readers. A
