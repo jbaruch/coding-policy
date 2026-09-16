@@ -683,7 +683,7 @@ def _expand_partition_seats(roles, partition_path):
     """
     if not partition_path:
         return roles, {}, {}
-    document = partition.load_partition(partition_path)
+    document = partition.load_validated(partition_path)
     role = partition.partition_role(document)
     if role not in roles:
         raise PlanError(
@@ -860,7 +860,11 @@ def cmd_plan(args, client=None, warn=None, trace=None):
     # The composer requires each seat's owned paths and reads no partition, so
     # the plan hands them over from the document `validate-partition` accepted.
     if seat_paths:
-        result["slice_paths"] = {seat: paths for seat, paths in seat_paths.items() if seat in result["assignments"]}
+        accepted = {seat: paths for seat, paths in seat_paths.items() if seat in result["assignments"]}
+        result["slice_paths"] = accepted
+        # The digest travels with the map, into each brief and back at dispatch,
+        # so an edit between the validated partition and the send is refused.
+        result["slice_digest"] = partition.slice_digest(accepted)
     return result, None
 
 
@@ -875,6 +879,53 @@ def _refusal_moves(store, agents_by_name, assignments, roles, args, paths, repor
             if move is not None:
                 moves[role] = move
     return moves
+
+
+def _require_bound_slices(document, seated, briefs):
+    """Refuse a seated dispatch whose boundary is not the one that was checked.
+
+    `plan` stamps `slice_digest` over the map `validate-partition` accepted and
+    `compose-briefs.sh` renders it into each seat's brief. Recomputing it here
+    catches a plan edited after planning, and reading it back out of the brief
+    catches a brief composed against a different boundary or written by hand —
+    the two places a human artifact sits between the check and the send (#453).
+    """
+    recorded = document.get("slice_digest")
+    slice_paths = document.get("slice_paths")
+    if not isinstance(recorded, str) or not isinstance(slice_paths, dict):
+        raise UsageError(
+            "Seats {} need the plan's slice_paths and slice_digest: seat them with "
+            "`plan --partition <validate-partition output>` rather than hand-writing the "
+            "assignments, so the boundary that ships is the one that was checked.".format(
+                ", ".join(seated)),
+            {"roles": seated})
+    expected = partition.slice_digest(slice_paths)
+    if expected != recorded:
+        raise UsageError(
+            "The plan's slice_paths no longer match its slice_digest ({} vs {}); the "
+            "boundary changed after planning. Re-run validate-partition and plan rather "
+            "than editing either.".format(expected, recorded),
+            {"expected": expected, "recorded": recorded})
+    for role in seated:
+        if role not in slice_paths:
+            raise UsageError(
+                "Seat {!r} is not in the plan's slice_paths, so its boundary was never "
+                "checked; plan the round from the validated partition.".format(role),
+                {"role": role})
+        brief = briefs.get(role)
+        try:
+            body = Path(brief).read_text(encoding="utf-8") if brief else ""
+        except OSError as exc:
+            raise UsageError(
+                "Cannot read the brief for seat {!r} at {}: {}.".format(role, brief, exc),
+                {"role": role}) from None
+        if recorded not in body:
+            raise UsageError(
+                "The brief for seat {!r} does not carry partition {}, so it was not "
+                "composed against the boundary this plan checked. Compose it with "
+                "`compose-briefs.sh` from the plan's slice_paths and slice_digest.".format(
+                    role, recorded),
+                {"role": role})
 
 
 def cmd_apply(args, client=None, warn=None, trace=None):
@@ -917,6 +968,9 @@ def cmd_apply(args, client=None, warn=None, trace=None):
     if document.get("task_context") is not None and document["task_context"] != task_context:
         raise UsageError("Saved plan and apply name different task, count or correction bounds; replan from the current ledger.", {})
     paths = resolve_paths(assignments, _parse_briefs(args.briefs), args.common)
+    if seated:
+        # After the briefs resolve, since the check reads each seat's brief.
+        _require_bound_slices(document, seated, paths)
     reports = _parse_reports(args.reports, assignments)
     supervised = supervision.dispatch_binding(state_path) is not None
     if requirements and not args.dry_run and not supervised:

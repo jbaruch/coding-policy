@@ -381,7 +381,7 @@ JSON
   #     what a reviewer reviews, never what its brief must carry (#434).
   local v16="$TMP/v16.json" o16="$TMP/out16"
   jq --arg p "$TMP/package.diff" \
-    '.roles = {"tester#core": (.roles.tester + {REVIEW_PACKAGE: $p, REVIEW_BASE: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", REVIEW_HEAD: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", REPORT: "/r/slice-core.md", SLICE_PATHS: ["src/core/*", "README.md"]})}' \
+    '.roles = {"tester#core": (.roles.tester + {REVIEW_PACKAGE: $p, REVIEW_BASE: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", REVIEW_HEAD: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", REPORT: "/r/slice-core.md", SLICE_PATHS: ["src/core/*", "README.md"], SLICE_DIGEST: "0123456789ab"})}' \
     "$v1" > "$v16" || die "could not build seat fixture"
   run "$TPL" "$v16" "$o16"
   if [[ $RC -eq 0 ]] && [[ -f "$o16/brief-tester#core.md" ]]; then
@@ -492,6 +492,27 @@ JSON
   if grep -qF 'src/core/*' "$o20/brief-tester#core.md" \
      && grep -qF 'README.md' "$o20/brief-tester#core.md"; then
     pass; else fail "slice paths: the seat brief must list the paths its slice owns"; fi
+
+  # 21j. The digest travels into the brief, and a seat without one is refused:
+  #      it is what `apply` reads back to prove the boundary is the checked one.
+  if grep -qF '(Partition 0123456789ab.)' "$o20/brief-tester#core.md"; then
+    pass; else fail "slice digest: the seat brief must carry its partition digest"; fi
+  local bad_digest
+  for bad_digest in 'null' '"short"' '"NOTHEXDIGIT"' '""'; do
+    jq --argjson v "$bad_digest" '.roles["tester#core"].SLICE_DIGEST = $v' "$v16" > "$TMP/v21j.json" \
+      || die "could not build the bad-digest fixture"
+    run "$TPL" "$TMP/v21j.json" "$TMP/out21j"
+    if [[ $RC -eq 2 && ! -e "$TMP/out21j" ]] && printf '%s' "$ERRTEXT" | grep -q "needs SLICE_DIGEST"; then
+      pass; else fail "slice digest: '$bad_digest' must refuse, got RC=$RC ERR=$ERRTEXT"; fi
+  done
+  jq 'del(.roles["tester#core"].SLICE_DIGEST)' "$v16" > "$TMP/v21k.json" || die "could not build the digestless fixture"
+  run "$TPL" "$TMP/v21k.json" "$TMP/out21k"
+  if [[ $RC -eq 2 ]] && printf '%s' "$ERRTEXT" | grep -q "needs SLICE_DIGEST"; then
+    pass; else fail "slice digest: a seat without one must refuse, got RC=$RC ERR=$ERRTEXT"; fi
+  jq '.roles.developer.SLICE_DIGEST = "0123456789ab"' "$v1" > "$TMP/v21l.json" || die "could not build the unseated-digest fixture"
+  run "$TPL" "$TMP/v21l.json" "$TMP/out21l"
+  if [[ $RC -eq 2 ]] && printf '%s' "$ERRTEXT" | grep -q "names a slice it does not own"; then
+    pass; else fail "slice digest: an unseated role must not carry one, got RC=$RC ERR=$ERRTEXT"; fi
 
   # 21a. A glob is rendered verbatim into the worker's brief, so one carrying a
   #      backtick or a control character could close the code span and append

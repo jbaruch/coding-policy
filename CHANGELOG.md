@@ -1,5 +1,30 @@
 # Changelog
 
+### Changed
+
+- **A seated round is bound to the partition `validate-partition` accepted
+  (#453).** #443 closed every path where the composer writes the brief and the
+  planner writes the boundary. These are the paths where a human artifact sat
+  between the check and the send, and nothing tied the two together: `plan
+  --partition` read the document's shape and never its ownership, `slice_paths`
+  was emitted but never verified, and `apply` accepted any brief for a seat. A
+  full-surface review could be dispatched and recorded as a slice verdict.
+
+  The proof is now the artifact. `plan --partition` takes the OUTPUT of
+  `validate-partition` — it carries the slices with their resolved paths and
+  the `changed` set they were checked against — and refuses the bare document,
+  naming the command to run. `plan` has no repo, base or head and cannot check
+  ownership itself, which is why it seats from the result rather than
+  re-deriving it.
+
+  `plan` stamps `slice_digest` over the accepted `{seat: [glob, ...]}` map.
+  `compose-briefs.sh` requires each seat's `SLICE_DIGEST` beside its
+  `SLICE_PATHS` and renders both into the brief. `apply` recomputes the digest
+  from the plan and reads it back out of each seat's brief, so a boundary
+  edited after validation — in the plan, in the values, or in a brief written
+  by hand — no longer matches and the dispatch is refused. An unseated round is
+  untouched at every step.
+
 ## 0.3.242 — 2026-09-16
 
 ### Fixed

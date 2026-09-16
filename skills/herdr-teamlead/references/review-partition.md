@@ -72,9 +72,19 @@ exclusions, round type, requirements, tier qualification and the review-package
 checks its brief owes — so capability, contribution-exclusion and headroom
 ordering apply unchanged and each slice gets a distinct worker.
 
-`plan --partition` emits `slice_paths`, a `{seat: [glob, ...]}` map taken from
-the validated document, so the boundary reaches the composer without a hand
-copy. Each seat's values carry those globs as `SLICE_PATHS`. `compose-briefs.sh`
+`plan --partition` takes the OUTPUT of `validate-partition`, not the document
+it was built from. The result carries the slices with their resolved paths and
+the `changed` set they were checked against, so a seated round is seated from a
+partition proven disjoint and exhaustive over this round's change. `plan` reads
+no repo, base or head and cannot check ownership itself; passing the document
+is refused, naming the command to run.
+
+`plan` emits `slice_paths`, a `{seat: [glob, ...]}` map, and `slice_digest`
+over it. Each seat's values carry those globs as `SLICE_PATHS` and that digest
+as `SLICE_DIGEST`; `compose-briefs.sh` renders both into the brief, and `apply`
+recomputes the digest from the plan and reads it back out of each seat's brief.
+A boundary edited after validation — in the plan, in the values, or in a brief
+written by hand — no longer matches, and the dispatch is refused. `compose-briefs.sh`
 renders the slice name and those paths into the brief's `SLICE_SCOPE` and
 refuses a seat without them: a slice name alone leaves the worker no boundary
 to resolve, and the composer never reads the partition document. `SLICE_SCOPE`

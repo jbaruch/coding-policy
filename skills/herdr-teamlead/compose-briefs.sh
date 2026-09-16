@@ -57,15 +57,15 @@ SEATABLE_ROLES="reviewer tester"
 # from the seat, so a round cannot dispatch several full-surface verdicts by
 # forgetting to write the boundary by hand (rules/agent-team-operation.md
 # Review Before PR).
-slice_scope() { # <role-or-seat> <slice-paths-json>
+slice_scope() { # <role-or-seat> <slice-paths-json> <digest>
   # Named paths, not just a slice name: a boundary a worker cannot resolve is
   # not a boundary, and the composer receives no partition document.
   local listed
   case "$1" in
     *"#"*)
       listed="$(printf '%s' "$2" | jq -r 'map("`" + . + "`") | join(", ")')" || return 3
-      printf 'Your slice this round is **%s**, and it owns %s. That slice is your whole surface: a full pass covers all of it and nothing beyond it. An observation outside your slice goes in a separate section of your report and forms no part of your verdict.' \
-        "${1#*#}" "$listed"
+      printf 'Your slice this round is **%s**, and it owns %s. That slice is your whole surface: a full pass covers all of it and nothing beyond it. An observation outside your slice goes in a separate section of your report and forms no part of your verdict. (Partition %s.)' \
+        "${1#*#}" "$listed" "$3"
       ;;
     *) printf '' ;;
   esac
@@ -305,7 +305,7 @@ main() {
   # round behind, and no output directory either (`rules/file-hygiene.md`
   # Idempotency); the directory is created only once every check has passed.
   local -a out_paths=() out_bodies=() report_paths=()
-  local merged rendered leftovers supplied known common_known unused key report rendered_scope
+  local merged rendered leftovers supplied known common_known unused key report rendered_scope slice_digest
   local common_body scan_rc=0
   validate_values "$shared" "the shared values" || return 2
   # Resolver-produced policy paths are explicit brief inputs. Custom templates
@@ -346,7 +346,7 @@ main() {
     merged="$(jq -c -n --argjson a "$shared" --argjson b "$(printf '%s' "$values" | jq -c --arg r "$role" '.roles[$r]')" '$a * $b')"
     # SLICE_PATHS is a list, not a placeholder value: it is read here and
     # dropped before the text check, which every rendered value must pass.
-    merged="$(printf '%s' "$merged" | jq -c 'del(.SLICE_PATHS)')" || return 2
+    merged="$(printf '%s' "$merged" | jq -c 'del(.SLICE_PATHS, .SLICE_DIGEST)')" || return 2
     validate_values "$merged" "the values for role '${role}'" || return 2
     known="$(placeholders_in "$role_tpl")" || return 3
     if [[ $'\n'"${known}"$'\n' == *$'\nSPECIALIST_CONTEXT\n'* ]]; then
@@ -363,6 +363,7 @@ main() {
       return 2
     fi
     local slice_paths="[]"
+    slice_digest=""
     if [[ "$role" == *"#"* ]]; then
       # The globs are rendered verbatim into the worker's brief, so a backtick
       # or a control character could close the code span and append
@@ -372,7 +373,12 @@ main() {
         return 2
       fi
       slice_paths="$(printf '%s' "$values" | jq -c --arg r "$role" '.roles[$r].SLICE_PATHS')" || return 2
-    elif printf '%s' "$values" | jq -e --arg r "$role" '.roles[$r] | has("SLICE_PATHS")' >/dev/null; then # unseated
+      if ! printf '%s' "$values" | jq -e --arg r "$role" '.roles[$r].SLICE_DIGEST | type == "string" and test("^[0-9a-f]{12}$")' >/dev/null; then
+        warn "seat '${role}' needs SLICE_DIGEST: the twelve-character digest plan stamped over the accepted partition, copied from its slice_digest field. It travels into the brief so a boundary edited after validation is refused at dispatch"
+        return 2
+      fi
+      slice_digest="$(printf '%s' "$values" | jq -r --arg r "$role" '.roles[$r].SLICE_DIGEST')" || return 2
+    elif printf '%s' "$values" | jq -e --arg r "$role" '.roles[$r] | has("SLICE_PATHS") or has("SLICE_DIGEST")' >/dev/null; then # unseated
       warn "SLICE_PATHS for role '${role}' names a slice it does not own — an unseated role reviews the whole change"
       return 2
     fi
@@ -380,7 +386,7 @@ main() {
       # Assigned and checked on its own line: nested in the outer jq's --arg,
       # a failing slice_scope is discarded and the brief composes with an empty
       # boundary -- the one outcome the placeholder exists to prevent.
-      rendered_scope="$(slice_scope "$role" "$slice_paths")" || return 3
+      rendered_scope="$(slice_scope "$role" "$slice_paths" "$slice_digest")" || return 3
       merged="$(printf '%s' "$merged" | jq -c --arg s "$rendered_scope" '. + {SLICE_SCOPE:$s}')" || return 2
     elif [[ "$role" == *"#"* ]]; then
       # A custom template without the placeholder would compose a seated brief

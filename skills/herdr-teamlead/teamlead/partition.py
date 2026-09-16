@@ -32,6 +32,7 @@ Contract:
 """
 
 import fnmatch
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -65,6 +66,11 @@ def load_partition(path):
         document = json.loads(Path(path).read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         raise UsageError("Cannot read the partition at {}: {}. Write a JSON object with schema_version and slices.".format(path, exc), {"path": str(path)}) from None
+    return validate_document(document, str(path))
+
+
+def validate_document(document, path):
+    """The document's own contract, shared by the raw and validated loaders."""
     if not isinstance(document, dict) or document.get("schema_version") != PARTITION_SCHEMA_VERSION:
         raise UsageError("The partition must be a JSON object at schema_version {}.".format(PARTITION_SCHEMA_VERSION), {"path": str(path)})
     partition_role(document)
@@ -115,6 +121,57 @@ def seats_for(partition, role):
     as distinct names mapped back to the responsibility they fill (#409).
     """
     return {seat_name(role, entry["name"]): role for entry in partition["slices"]}
+
+
+def slice_digest(seat_paths):
+    """A short digest over the accepted `{seat: [glob, ...]}` map.
+
+    Carried from the plan into each seat's brief and checked at dispatch, so a
+    boundary edited between `validate-partition` and the send is refused rather
+    than dispatched (#453). Twelve hex characters: enough to catch an edit,
+    short enough to sit in a brief a worker reads.
+    """
+    canonical = json.dumps({seat: list(paths) for seat, paths in sorted(seat_paths.items())},
+                           sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:12]
+
+
+def load_validated(path):
+    """Read a `validate-partition` RESULT, not the document it was built from.
+
+    The result is the proof: it carries the slices with their RESOLVED paths
+    and the `changed` set they were checked against, so a plan seated from it
+    is seated from a partition proven disjoint and exhaustive over this round's
+    change. `load_partition` alone reads shape and cannot check ownership —
+    `plan` has no repo, base or head to check against (#453).
+    """
+    if not path:
+        raise UsageError(
+            "Pass --partition naming the output of `teamlead validate-partition`; a "
+            "multi-seat round seats from the checked result, never from the document.",
+            {})
+    try:
+        document = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise UsageError(
+            "Cannot read the validated partition at {}: {}. Pass the JSON "
+            "`validate-partition` wrote.".format(path, exc), {"path": str(path)}) from None
+    if not isinstance(document, dict) or "changed" not in document:
+        raise UsageError(
+            "The partition at {} carries no `changed` set, so it is the document rather "
+            "than a checked result: run `teamlead validate-partition --repo <path> --base "
+            "<sha> [--head <sha>] --partition {}` and pass its output.".format(path, path),
+            {"path": str(path)})
+    changed = document["changed"]
+    if not isinstance(changed, list) or not changed or any(
+            not isinstance(item, str) or not item.strip() for item in changed):
+        raise UsageError(
+            "The validated partition's `changed` must list the round's changed paths; "
+            "re-run `validate-partition` rather than editing its result.",
+            {"path": str(path)})
+    # Everything else is the document's own contract, checked unchanged.
+    inner = {key: value for key, value in document.items() if key != "changed"}
+    return validate_document(inner, str(path))
 
 
 def seat_paths(partition, role):
