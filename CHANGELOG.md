@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.242 — 2026-09-16
+
 ### Fixed
 
 - **The release flow's rc dispatch moved out of `PUBLICATION.md` and into two
