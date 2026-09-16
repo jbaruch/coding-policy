@@ -289,7 +289,8 @@ whatever GitHub's merge box says.
 A reserved seat outside ordinary staffing, on the most capable model
 available. It holds no other responsibility. `rules/agent-team-operation.md`
 Judge Seat is the contract; this section is the operational detail for
-Steps 13–19 of `skills/herdr-teamlead/SKILL.md`.
+`skills/herdr-teamlead/SKILL.md` Step 13, whose seven steps run from
+`skills/herdr-teamlead/references/judge-round.md`.
 
 It runs in two modes. Adjudication settles a dispute; diagnosis asks why a fix
 loop is not converging. Dispatch adjudication on exactly one of three triggers:
