@@ -37,8 +37,15 @@ ENTRY = "### "
 
 def base_text(base: str, changelog: str) -> str:
     """The changelog as it stands on `base`."""
-    proc = subprocess.run(["git", "show", f"{base}:{changelog}"],
-                          capture_output=True, text=True)
+    try:
+        proc = subprocess.run(["git", "show", f"{base}:{changelog}"],
+                              capture_output=True, text=True)
+    except OSError as exc:
+        # An absent or unrunnable `git` is the absence of an answer, never the
+        # misfiling verdict. Letting it raise exits 1, which is that verdict.
+        raise RuntimeError(
+            "cannot run `git` ({}); install it, or run this check from an "
+            "environment where it is on PATH".format(exc)) from None
     if proc.returncode != 0:
         raise RuntimeError(
             "`git show {}:{}` failed (exit {}): {}".format(

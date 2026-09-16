@@ -142,6 +142,19 @@ class RepositoryTest(unittest.TestCase):
         code, err = self.run_check()
         self.assertEqual(code, 0, err)
 
+    def test_absent_git_is_a_tool_error_not_a_verdict(self):
+        # `subprocess.run` raises FileNotFoundError, and an uncaught exception
+        # exits 1 — the misfiling verdict. A missing tool is the absence of an
+        # answer, so it must exit 2.
+        self.commit_changelog(MISFILED)
+        env = dict(_os.environ, PATH=str(self.root / "no-tools"))
+        proc = subprocess.run(
+            [_sys.executable, _os.path.join(_ROOT, "check-changelog-placement.py"),
+             "--base", "main"],
+            cwd=self.root, capture_output=True, text=True, env=env)
+        self.assertEqual(proc.returncode, 2, proc.stderr)
+        self.assertIn("cannot run `git`", proc.stderr)
+
     def test_an_unknown_base_is_a_tool_error_not_a_verdict(self):
         self.commit_changelog(STAMPABLE)
         proc = subprocess.run(

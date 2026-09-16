@@ -27,7 +27,9 @@
   Counting also lets a deliberate archive repair through — moving an entry
   under the heading that published it leaves the count unchanged, while a new
   entry parked under a heading raises it. It runs as a pull-request job, where
-  the fix is still a rebase.
+  the fix is still a rebase. An absent `git` exits 2, the tool-error code:
+  `subprocess.run` raises `FileNotFoundError`, and letting that escape exits 1
+  — the misfiling verdict — so a missing tool would have read as a finding.
 
 ## 0.3.240 — 2026-09-16
 
