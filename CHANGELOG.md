@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.235 — 2026-09-16
+
 ### Changed
 
 - **The publication-confirmation rules read one directive per bullet (#375).**
