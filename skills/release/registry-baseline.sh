@@ -34,11 +34,11 @@ main() {
     return 2
   fi
   if ! version="$(printf '%s' "$payload" | jq -r '.version // empty')"; then
-    echo "registry-baseline: baseline payload is not JSON: ${payload}" >&2
+    echo "registry-baseline: baseline payload is not JSON: ${payload}. Run 'bash ${here}/capture-registry-baseline.sh ${workspace} ${plugin}' directly and repair its output contract — one JSON object with a .version — before retrying the release" >&2
     return 2
   fi
   if [ -z "$version" ]; then
-    echo "registry-baseline: baseline payload carries no .version: ${payload}. An empty baseline passes the registry-advance conjunct vacuously, so the release stops here" >&2
+    echo "registry-baseline: baseline payload carries no .version: ${payload}. An empty baseline passes the registry-advance conjunct vacuously, so the release stops here. Run 'bash ${here}/capture-registry-baseline.sh ${workspace} ${plugin}' directly and repair its .version output before retrying" >&2
     return 2
   fi
   printf '%s\n' "$version"

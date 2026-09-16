@@ -17,7 +17,7 @@ Read the repo's publish workflow and its manifest:
 A publication on another channel skips this gate.
 
 ```bash
-PRE=$(skills/release/registry-baseline.sh <workspace> <plugin>) || exit 1
+PRE=$(skills/release/registry-baseline.sh <workspace> <plugin>) || exit
 ```
 
 Exit 0 prints the version and nothing else. Any other exit means the baseline could not be vouched for and the release stops: an empty `PRE` passes the registry-advance conjunct vacuously, reporting a publish that never happened. Which conditions it refuses, and why it has no verdict exit, are the script's contract — see `skills/release/registry-baseline.sh` header, not restated here (`rules/script-as-black-box.md`).
@@ -43,7 +43,7 @@ Each channel keeps its own run id in its own variable. A mixed publication runs 
 
 # Tessl — the publish workflow fires on the merge commit.
 merge_sha=$(gh pr view <N> --json mergeCommit --jq '.mergeCommit.oid')
-tessl_run=$(skills/release/resolve-publish-run.sh <owner> <repo> "$merge_sha" "<tessl-publish-workflow>") || exit 1
+tessl_run=$(skills/release/resolve-publish-run.sh <owner> <repo> "$merge_sha" "<tessl-publish-workflow>") || exit
 tessl_run_id=$(jq -r '.database_id' <<<"$tessl_run")
 gh run watch "$tessl_run_id"
 
@@ -51,7 +51,7 @@ gh run watch "$tessl_run_id"
 # run carries the tag name as its `headBranch`. Pass the tag as the fifth
 # argument and the commit the tag points at as the third.
 tag_sha=$(git rev-list -n 1 "<tag>")
-tag_run=$(skills/release/resolve-publish-run.sh <owner> <repo> "$tag_sha" "<tag-publish-workflow>" "<tag>") || exit 1
+tag_run=$(skills/release/resolve-publish-run.sh <owner> <repo> "$tag_sha" "<tag-publish-workflow>" "<tag>") || exit
 tag_run_id=$(jq -r '.database_id' <<<"$tag_run")
 gh run watch "$tag_run_id"
 ```
@@ -65,8 +65,10 @@ Omit `--exit-status` from the watch. Read the run conclusion through each channe
 Capture the emitted `current` version for the moderation gate that follows.
 
 ```bash
-CURRENT=$(skills/release/confirm-tessl-landed.sh <workspace> <plugin> "$PRE" "$tessl_run_id") || exit 1
+CURRENT=$(skills/release/confirm-tessl-landed.sh <workspace> <plugin> "$PRE" "$tessl_run_id") || exit
 ```
+
+A bare `exit` propagates the helper's own status rather than flattening it to 1, so a caller scripting from this reference keeps the distinction the next paragraph draws.
 
 Exit 0 prints the landed version. Exit 1 is a definitive "did not land"; exit 2 is "cannot tell yet" — the run is not terminal, or a tool is unreachable. Neither proceeds to moderation, and the two are kept apart because their recoveries differ: a caller that collapses them reports an unreachable `gh` as a failed release. The wrapper owns that dispatch so no caller retypes it; its contract and the underlying envelope are the scripts' — see `skills/release/confirm-tessl-landed.sh` and `skills/release/verify-publish-landed.sh` headers, not restated here (`rules/script-as-black-box.md`). Do not compare against a specific expected version. See `rules/ci-safety.md` for full release-contract semantics and failed-publish recovery.
 

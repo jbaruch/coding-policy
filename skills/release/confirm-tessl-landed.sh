@@ -38,7 +38,7 @@ main() {
       ;;
   esac
   if ! current="$(printf '%s' "$landed" | jq -r '.current // empty')" || [ -z "$current" ]; then
-    echo "confirm-tessl-landed: landed payload carries no .current: ${landed}" >&2
+    echo "confirm-tessl-landed: landed payload carries no .current: ${landed}. Run 'bash ${here}/verify-publish-landed.sh $1 $2 $3 $4' directly and repair its envelope — an exit-0 envelope carries .current — before retrying the confirmation" >&2
     return 2
   fi
   printf '%s\n' "$current"
