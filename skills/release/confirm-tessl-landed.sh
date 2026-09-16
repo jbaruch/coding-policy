@@ -22,6 +22,10 @@ main() {
     echo "usage: confirm-tessl-landed.sh <workspace> <plugin> <pre-baseline> <run-id>" >&2
     return 2
   fi
+  if ! command -v jq >/dev/null 2>&1; then
+    echo "confirm-tessl-landed: jq is not installed; install it before confirming a publish" >&2
+    return 2
+  fi
   local landed status reason current
   status=0
   landed="$(bash "${here}/verify-publish-landed.sh" "$1" "$2" "$3" "$4")" || status=$?
@@ -37,7 +41,13 @@ main() {
       return 2
       ;;
   esac
-  if ! current="$(printf '%s' "$landed" | jq -r '.current // empty')" || [ -z "$current" ]; then
+  # Parse failure and a well-formed envelope missing `.current` are different
+  # repairs, so they get different diagnostics rather than one that guesses.
+  if ! current="$(printf '%s' "$landed" | jq -r '.current // empty')"; then
+    echo "confirm-tessl-landed: landed payload is not JSON: ${landed}. Run 'bash ${here}/verify-publish-landed.sh $1 $2 $3 $4' directly and repair its output contract — an exit-0 envelope is one JSON object — before retrying the confirmation" >&2
+    return 2
+  fi
+  if [ -z "$current" ]; then
     echo "confirm-tessl-landed: landed payload carries no .current: ${landed}. Run 'bash ${here}/verify-publish-landed.sh $1 $2 $3 $4' directly and repair its envelope — an exit-0 envelope carries .current — before retrying the confirmation" >&2
     return 2
   fi

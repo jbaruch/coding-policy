@@ -103,6 +103,25 @@ main() {
   if [[ $RC -eq 2 && -z "$OUT" ]] && printf '%s' "$ERRTEXT" | grep -q "carries no .current"; then
     pass; else fail "a payload without .current exits 2, got RC=$RC ERR=$ERRTEXT"; fi
 
+  install_wrapper confirm-tessl-landed.sh verify-publish-landed.sh 0 'not json'
+  run_landed
+  if [[ $RC -eq 2 && -z "$OUT" ]] && printf '%s' "$ERRTEXT" | grep -q "is not JSON"; then
+    pass; else fail "a non-JSON landed payload names the parse, not a missing .current, got RC=$RC ERR=$ERRTEXT"; fi
+
+  # `jq` shadowed by a stub that is not on PATH: the wrapper must say so rather
+  # than blame the envelope it never managed to read.
+  install_wrapper confirm-tessl-landed.sh verify-publish-landed.sh 0 '{"ok":true,"current":"0.3.10"}'
+  mkdir -p "$TMP/nojq" || die "could not make the jq-less dir"
+  for tool in bash sh printf grep mktemp rm cat chmod mkdir dirname pwd; do
+    target="$(command -v "$tool" 2>/dev/null)" || continue
+    ln -sf "$target" "$TMP/nojq/$tool" || die "could not link $tool"
+  done
+  OUT="$(PATH="$TMP/nojq" bash "$TMP/confirm-tessl-landed.sh" ws plug 0.0.1 42 2>"$TMP/err")"
+  RC=$?
+  ERRTEXT="$(cat "$TMP/err")"
+  if [[ $RC -eq 2 && -z "$OUT" ]] && printf '%s' "$ERRTEXT" | grep -q "jq is not installed"; then
+    pass; else fail "an absent jq exits 2 naming jq, got RC=$RC ERR=$ERRTEXT"; fi
+
   echo "─────────────────────────────────────────────" >&2
   if [[ $FAIL -gt 0 ]]; then echo "FAILED: ${FAIL} failed, ${PASS} passed" >&2; exit 1; fi
   echo "PASSED: all ${PASS} checks" >&2
