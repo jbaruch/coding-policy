@@ -186,8 +186,14 @@ After merge — per `rules/ci-safety.md`'s Always Watch CI duty extended through
 
 - Verify the merge landed on main (`git pull --ff-only` succeeds; `git log -1 --oneline` shows the merge commit)
 - **GitHub tag/asset publication:** push the release tag from the fast-forwarded `main` before resolving anything. Its publish workflow fires on the tag, never on the merge. The version follows Step 3
-- **Every publication, whatever channel carries it:** resolve that publication's own run with `resolve-publish-run.sh`, watch it to a terminal state, and require its `conclusion` to be `success`. Bind the resolution to the workflow, the exact commit, the `push` event and the ref that fired it, never to "latest on main". Each channel keeps its own run id; a mixed publication holds both at once, and each confirmation below reads the id for its own channel
-- **Tessl publication:** confirm conjuncts 1 and 2 with `verify-publish-landed.sh` — the resolved run's `conclusion == success` AND the registry's `Latest Version > PRE`. Gate on its exit code and keep the emitted `current` version; a non-zero exit stops the release here, with no fall-through to moderation. Do not compare against a specific expected version
+- **Every publication, whatever channel carries it:** resolve that publication's own run with `resolve-publish-run.sh`
+- Bind that resolution to the workflow, the exact commit, the `push` event and the ref that fired it, never to "latest on main"
+- Watch the resolved run to a terminal state, and require its `conclusion` to be `success`
+- Each channel keeps its own run id; a mixed publication holds both at once, and each confirmation below reads the id for its own channel
+- **Tessl publication:** confirm conjuncts 1 and 2 with `verify-publish-landed.sh` — the resolved run's `conclusion == success` AND the registry's `Latest Version > PRE`
+- Gate on that helper's exit code and keep the emitted `current` version
+- A non-zero exit stops the release there, with no fall-through to moderation
+- Do not compare against a specific expected version
 - **Tessl publication:** confirm conjunct 3 with `verify-moderation-cleared.sh` on that `current` version. A freshly published version can be install-blocked until its moderation state reaches `pass`. Never report the release confirmed until this clears
 - **GitHub tag/asset publication:** confirm its own two conjuncts with `verify-github-release.sh` — the resolved run's `conclusion` is `success`, AND the release exists at that exact tag, is published, and carries retrievable assets. Run none of the three Tessl helpers for it
 - Report the outcome: merged PR URL, the version published, and each publication's own confirmation — registry advance plus moderation clear for a Tessl publication, the published release and its retrievable assets for a tag publication, both for a package on both channels

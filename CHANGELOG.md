@@ -15,7 +15,12 @@
   moderation clear, the tag/asset release check, and the report — so no gate
   moved out of the loaded surface. SKILL.md is ~4154 tokens and the lint
   warning is gone. The `script-as-black-box` pointers for the moved helpers
-  moved with them, one reference per concept.
+  moved with them, one reference per concept — including `SCRIPTING.md`'s
+  pointer at the resolver's invocation site, which the move would otherwise
+  have left aimed at a Step 7 that no longer carries it. The moved command
+  blocks also stopped piping a helper straight into `jq`: a non-zero helper
+  exit reached `jq` as empty input, which succeeds, leaving `PRE` or a run id
+  empty and the flow running past the gate that was supposed to stop it.
 
 ### Changed
 

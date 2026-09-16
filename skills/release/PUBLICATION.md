@@ -17,7 +17,11 @@ Read the repo's publish workflow and its manifest:
 A publication on another channel skips this gate.
 
 ```bash
-PRE=$(skills/release/capture-registry-baseline.sh <workspace> <plugin> | jq -r .version)
+# Capture first, extract second: piping the helper straight into `jq`
+# lets a non-zero helper exit reach `jq` as empty input, which succeeds
+# and leaves `PRE` empty.
+baseline=$(skills/release/capture-registry-baseline.sh <workspace> <plugin>) || exit 1
+PRE=$(jq -r .version <<<"$baseline")
 ```
 
 It emits one JSON object and exits non-zero on a parse miss or an empty registry value, so an unparseable baseline fails loudly instead of flowing into `verify-publish-landed.sh` as an empty `PRE` (which would pass conjunct 2 vacuously). The parse hardening and numeric-only output contract are the script's — see `skills/release/capture-registry-baseline.sh` header, not restated here (`rules/script-as-black-box.md`).
@@ -37,16 +41,22 @@ Bind the resolution to the workflow, the exact commit, the `push` event and the 
 Each channel keeps its own run id in its own variable. A mixed publication runs both blocks and holds both ids at once; each confirmation below reads the id for its own channel.
 
 ```bash
+# Capture the resolver's output before extracting, for the same reason
+# the baseline does: an API failure or a refused ambiguity must stop the
+# release, not reach `gh run watch` as an empty run id.
+
 # Tessl — the publish workflow fires on the merge commit.
 merge_sha=$(gh pr view <N> --json mergeCommit --jq '.mergeCommit.oid')
-tessl_run_id=$(skills/release/resolve-publish-run.sh <owner> <repo> "$merge_sha" "<tessl-publish-workflow>" | jq -r '.database_id')
+tessl_run=$(skills/release/resolve-publish-run.sh <owner> <repo> "$merge_sha" "<tessl-publish-workflow>") || exit 1
+tessl_run_id=$(jq -r '.database_id' <<<"$tessl_run")
 gh run watch "$tessl_run_id"
 
 # GitHub tag/asset — the publish workflow fires on the pushed tag, whose
 # run carries the tag name as its `headBranch`. Pass the tag as the fifth
 # argument and the commit the tag points at as the third.
 tag_sha=$(git rev-list -n 1 "<tag>")
-tag_run_id=$(skills/release/resolve-publish-run.sh <owner> <repo> "$tag_sha" "<tag-publish-workflow>" "<tag>" | jq -r '.database_id')
+tag_run=$(skills/release/resolve-publish-run.sh <owner> <repo> "$tag_sha" "<tag-publish-workflow>" "<tag>") || exit 1
+tag_run_id=$(jq -r '.database_id' <<<"$tag_run")
 gh run watch "$tag_run_id"
 ```
 
@@ -91,7 +101,7 @@ The resolved run's `conclusion` is `success`, AND the release the run was suppos
 skills/release/verify-github-release.sh <owner> <repo> "<tag>" "$tag_run_id"
 ```
 
-Exit 0 = both conjuncts hold. Exit 1 = a definitive no (the run concluded something other than `success`, or the release is absent, draft, empty, or carries an asset still uploading) — an unconfirmed release; surface it and do not report success. Exit 2 = indeterminate (run still in flight, gh absent or unreachable); an indeterminate answer is never a landing. Which conjuncts it reads is the script's decision contract — see `skills/release/verify-github-release.sh` header, not restated here (`rules/script-as-black-box.md`).
+Exit 0 = both conjuncts hold. Exit 1 = a definitive no — an unconfirmed release; surface it and do not report success. Exit 2 = indeterminate or a usage error; an indeterminate answer is never a landing. Which conjuncts it reads, and which conditions land in which exit code, are the script's decision contract — see `skills/release/verify-github-release.sh` header, not restated here (`rules/script-as-black-box.md`).
 
 ## Walkthroughs
 
