@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.240 — 2026-09-16
+
 ### Added
 
 - **One plan fills every slice of a partitioned review (#434, completing
