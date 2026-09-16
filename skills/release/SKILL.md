@@ -140,7 +140,7 @@ Run it once Step 5's poll shows every bot's latest verdict clean. It emits a JSO
 skills/release/PUBLICATION.md
 ```
 
-**Tessl publication:** capture the registry baseline into `PRE` with `capture-registry-baseline.sh` before merging. A publication on another channel skips this gate.
+**Tessl publication:** capture the registry baseline into `PRE` with `registry-baseline.sh` before merging. A publication on another channel skips this gate.
 
 Pick the right cleanup path based on where you ran the skill from.
 
@@ -191,9 +191,9 @@ After merge — per `rules/ci-safety.md`'s Always Watch CI duty extended through
 - Watch the resolved run to a terminal state
 - Require its `conclusion` to be `success`
 - Each channel keeps its own run id; a mixed publication holds both at once, and each confirmation below reads the id for its own channel
-- **Tessl publication:** confirm conjuncts 1 and 2 with `verify-publish-landed.sh` — the resolved run's `conclusion == success` AND the registry's `Latest Version > PRE`
+- **Tessl publication:** confirm conjuncts 1 and 2 with `confirm-tessl-landed.sh` — the resolved run's `conclusion == success` AND the registry's `Latest Version > PRE`
 - Gate on that helper's exit code
-- Keep the `current` version it emits for the moderation gate
+- Keep the version it prints for the moderation gate
 - A non-zero exit stops the release there, with no fall-through to moderation
 - Do not compare against a specific expected version
 - **Tessl publication:** confirm conjunct 3 with `verify-moderation-cleared.sh` on that `current` version. A freshly published version can be install-blocked until its moderation state reaches `pass`. Never report the release confirmed until this clears

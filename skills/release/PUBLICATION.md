@@ -17,18 +17,10 @@ Read the repo's publish workflow and its manifest:
 A publication on another channel skips this gate.
 
 ```bash
-# Capture first, extract second: piping the helper straight into `jq`
-# lets a non-zero helper exit reach `jq` as empty input, which succeeds
-# and leaves `PRE` empty.
-baseline=$(skills/release/capture-registry-baseline.sh <workspace> <plugin>) || exit 1
-PRE=$(jq -r .version <<<"$baseline") || exit 1
-# The extraction is checked too: an absent `jq` or a payload without
-# `.version` leaves `PRE` empty, and an empty baseline passes conjunct 2
-# vacuously — the release then reports a publish that never happened.
-[ -n "$PRE" ] && [ "$PRE" != null ] || { echo "Empty registry baseline from $baseline" >&2; exit 1; }
+PRE=$(skills/release/registry-baseline.sh <workspace> <plugin>) || exit 1
 ```
 
-It emits one JSON object and exits non-zero on a parse miss or an empty registry value, so an unparseable baseline fails loudly instead of flowing into `verify-publish-landed.sh` as an empty `PRE` (which would pass conjunct 2 vacuously). The parse hardening and numeric-only output contract are the script's — see `skills/release/capture-registry-baseline.sh` header, not restated here (`rules/script-as-black-box.md`).
+Exit 0 prints the version and nothing else. Any other exit means the baseline could not be vouched for and the release stops: an empty `PRE` passes the registry-advance conjunct vacuously, reporting a publish that never happened. Which conditions it refuses, and why it has no verdict exit, are the script's contract — see `skills/release/registry-baseline.sh` header, not restated here (`rules/script-as-black-box.md`).
 
 ## After the merge — GitHub tag/asset: push the tag
 
@@ -73,21 +65,10 @@ Omit `--exit-status` from the watch. Read the run conclusion through each channe
 Capture the emitted `current` version for the moderation gate that follows.
 
 ```bash
-# Keep the status: rc 1 is a definitive "did not land", rc 2 is "cannot
-# tell yet". Collapsing them reports a tool-state failure as a failed
-# publish, and the recovery for the two is not the same.
-landed=$(skills/release/verify-publish-landed.sh <workspace> <plugin> "$PRE" "$tessl_run_id")
-case $? in
-  0) ;;
-  1) echo "Publish did not land — $(jq -r '.reason // "see stderr"' <<<"$landed")" >&2; exit 1 ;;
-  *) echo "Publish landing indeterminate — see the diagnostic above; re-run once the run is terminal and the tools reachable." >&2; exit 1 ;;
-esac
-CURRENT=$(jq -r '.current' <<<"$landed")
+CURRENT=$(skills/release/confirm-tessl-landed.sh <workspace> <plugin> "$PRE" "$tessl_run_id") || exit 1
 ```
 
-Neither non-zero rc proceeds to moderation. They differ in what to do next, which is why the branch keeps them apart: rc 1 is an answer about the publish, and rc 2 is the absence of one.
-
-Output is exit-code-dependent: rc 0/1 emits the JSON envelope `{"ok": bool, "reason": "...", "run_conclusion": "...", "pre": "...", "current": "..."}` on stdout (parse it for the finding); rc 2 emits a stderr diagnostic and, in the missing-jq case alone, a minimal stdout envelope. Which condition lands in which rc is the script's decision contract — see `skills/release/verify-publish-landed.sh` header, not restated here (`rules/script-as-black-box.md`). Do not compare against a specific expected version. See `rules/ci-safety.md` for full release-contract semantics and failed-publish recovery.
+Exit 0 prints the landed version. Exit 1 is a definitive "did not land"; exit 2 is "cannot tell yet" — the run is not terminal, or a tool is unreachable. Neither proceeds to moderation, and the two are kept apart because their recoveries differ: a caller that collapses them reports an unreachable `gh` as a failed release. The wrapper owns that dispatch so no caller retypes it; its contract and the underlying envelope are the scripts' — see `skills/release/confirm-tessl-landed.sh` and `skills/release/verify-publish-landed.sh` headers, not restated here (`rules/script-as-black-box.md`). Do not compare against a specific expected version. See `rules/ci-safety.md` for full release-contract semantics and failed-publish recovery.
 
 ## After the merge — Tessl: conjunct 3, moderation
 
