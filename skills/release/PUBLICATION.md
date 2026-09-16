@@ -21,7 +21,11 @@ A publication on another channel skips this gate.
 # lets a non-zero helper exit reach `jq` as empty input, which succeeds
 # and leaves `PRE` empty.
 baseline=$(skills/release/capture-registry-baseline.sh <workspace> <plugin>) || exit 1
-PRE=$(jq -r .version <<<"$baseline")
+PRE=$(jq -r .version <<<"$baseline") || exit 1
+# The extraction is checked too: an absent `jq` or a payload without
+# `.version` leaves `PRE` empty, and an empty baseline passes conjunct 2
+# vacuously — the release then reports a publish that never happened.
+[ -n "$PRE" ] && [ "$PRE" != null ] || { echo "Empty registry baseline from $baseline" >&2; exit 1; }
 ```
 
 It emits one JSON object and exits non-zero on a parse miss or an empty registry value, so an unparseable baseline fails loudly instead of flowing into `verify-publish-landed.sh` as an empty `PRE` (which would pass conjunct 2 vacuously). The parse hardening and numeric-only output contract are the script's — see `skills/release/capture-registry-baseline.sh` header, not restated here (`rules/script-as-black-box.md`).
@@ -62,22 +66,28 @@ gh run watch "$tag_run_id"
 
 Omit `--exit-status` from the watch. Read the run conclusion through each channel's confirmation helper — `verify-publish-landed.sh` for Tessl, `verify-github-release.sh` for a tag publication.
 
-`gh pr view` returns the specific merge commit for this PR, unaffected by parallel merges. The four facts the resolver binds, its enqueue-latency retry, and its refusal to pick between two runs matching all four are the script's decision contract — see `skills/release/resolve-publish-run.sh` header, not restated here (`rules/script-as-black-box.md`). Output is `{"database_id": N}` per `rules/script-delegation.md` — extract with `jq -r '.database_id'`. The watch is a timing precondition for the confirmations below, not the gate.
+`gh pr view` returns the specific merge commit for this PR, unaffected by parallel merges. Exit 0 emits `{"database_id": N}` on stdout per `rules/script-delegation.md` — extract it with `jq -r '.database_id'`. A non-zero exit emits no id and a stderr diagnostic; the run is unresolved, and no watch or confirmation may proceed on a guess. The four facts the resolver binds, its enqueue-latency retry, its refusal to pick between two runs matching all four, and which condition lands in which rc are the script's decision contract — see `skills/release/resolve-publish-run.sh` header, not restated here (`rules/script-as-black-box.md`). The watch is a timing precondition for the confirmations below, not the gate.
 
 ## After the merge — Tessl: conjuncts 1 and 2
 
 Capture the emitted `current` version for the moderation gate that follows.
 
 ```bash
-# Gate on the exit code — only a clean conjunction (rc 0) may proceed to
-# the moderation step. A non-zero rc (publish did not land, or a tool
-# error) stops the release here; do not fall through to moderation.
-landed=$(skills/release/verify-publish-landed.sh <workspace> <plugin> "$PRE" "$tessl_run_id") \
-  || { echo "Publish not confirmed — $(jq -r '.reason // "see stderr"' <<<"$landed")" >&2; exit 1; }
+# Keep the status: rc 1 is a definitive "did not land", rc 2 is "cannot
+# tell yet". Collapsing them reports a tool-state failure as a failed
+# publish, and the recovery for the two is not the same.
+landed=$(skills/release/verify-publish-landed.sh <workspace> <plugin> "$PRE" "$tessl_run_id")
+case $? in
+  0) ;;
+  1) echo "Publish did not land — $(jq -r '.reason // "see stderr"' <<<"$landed")" >&2; exit 1 ;;
+  *) echo "Publish landing indeterminate — see the diagnostic above; re-run once the run is terminal and the tools reachable." >&2; exit 1 ;;
+esac
 CURRENT=$(jq -r '.current' <<<"$landed")
 ```
 
-Output is exit-code-dependent: rc 0/1 emits the JSON envelope `{"ok": bool, "reason": "...", "run_conclusion": "...", "pre": "...", "current": "..."}` on stdout (parse it for the finding); rc 2 emits the stderr diagnostic (tool-state errors: run still in flight, gh/tessl unreachable). Exception: the missing-jq guard at rc 2 emits a minimal JSON envelope on stdout (the script can't use jq to format JSON when jq itself is absent) so wrappers that always parse stdout still see a parseable failure. Do not compare against a specific expected version. See `rules/ci-safety.md` for full release-contract semantics and failed-publish recovery.
+Neither non-zero rc proceeds to moderation. They differ in what to do next, which is why the branch keeps them apart: rc 1 is an answer about the publish, and rc 2 is the absence of one.
+
+Output is exit-code-dependent: rc 0/1 emits the JSON envelope `{"ok": bool, "reason": "...", "run_conclusion": "...", "pre": "...", "current": "..."}` on stdout (parse it for the finding); rc 2 emits a stderr diagnostic and, in the missing-jq case alone, a minimal stdout envelope. Which condition lands in which rc is the script's decision contract — see `skills/release/verify-publish-landed.sh` header, not restated here (`rules/script-as-black-box.md`). Do not compare against a specific expected version. See `rules/ci-safety.md` for full release-contract semantics and failed-publish recovery.
 
 ## After the merge — Tessl: conjunct 3, moderation
 
@@ -87,7 +97,7 @@ A freshly published version can be install-blocked until its moderation state re
 skills/release/verify-moderation-cleared.sh <workspace> <plugin> "$CURRENT"
 ```
 
-Exit 0 = moderation cleared. Exit 1 = blocked or still-pending at budget exhaustion — an unconfirmed release; surface it and do not report success. Exit 2 = tool-state error (tessl unreachable, jq missing). Never report the release confirmed until this clears. See `rules/ci-safety.md` for the full three-conjunct contract. Every Tessl publication keeps this whole contract, mixed distribution included.
+Exit 0 = moderation cleared. Exit 1 = blocked or still-pending at budget exhaustion — an unconfirmed release; surface it and do not report success. Exit 2 = a usage or tool-state error, never a moderation verdict. Which condition lands in which rc is the script's decision contract — see `skills/release/verify-moderation-cleared.sh` header, not restated here (`rules/script-as-black-box.md`). Never report the release confirmed until this clears. See `rules/ci-safety.md` for the full three-conjunct contract. Every Tessl publication keeps this whole contract, mixed distribution included.
 
 ## After the merge — GitHub tag/asset: its own two conjuncts
 

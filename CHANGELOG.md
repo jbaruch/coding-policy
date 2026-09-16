@@ -9,6 +9,30 @@
   file at all. The entry text is unchanged; it moves under its own heading, in
   order.
 
+
+- **`PUBLICATION.md`'s exit-code contracts describe the helpers they name
+  (#450).** Four corrections, each one a place the reference told a reader
+  something the script does not do.
+
+  The `verify-publish-landed.sh` handler collapsed rc 2 into the rc-1 branch,
+  so a tool-state failure — a run still in flight, `gh` unreachable — reported
+  as a failed publish, often with an empty reason. The two have different
+  recoveries, so the branch keeps them apart: rc 1 is an answer about the
+  publish, rc 2 is the absence of one. Neither proceeds to moderation.
+
+  The baseline block checked the helper's status but not the extraction, so an
+  absent `jq` or a payload without `.version` left `PRE` empty — and an empty
+  baseline passes conjunct 2 vacuously, reporting a publish that never
+  happened. The extracted value is checked too.
+
+  The `verify-moderation-cleared.sh` summary listed a partial rc-2 set, and the
+  resolver section promised each helper's contract while giving none. Both now
+  state what the caller needs — the output shape and what a non-zero exit means
+  — and point at the script header for which condition lands in which code,
+  rather than enumerating a set that drifts (`rules/script-as-black-box.md`).
+
+  Three `SKILL.md` Step 7 bullets carrying two directives each are split.
+
 ### Added
 
 - **A CHANGELOG entry the publish step cannot stamp is refused on the pull
