@@ -877,6 +877,17 @@ def cmd_apply(args, client=None, warn=None, trace=None):
     agents_by_name = {agent.name: agent for agent in agents}
     document = _load_assignments(args.assignments, document=True)
     assignments = normalize_assignments(document)
+    # The ledger row records the responsibility and the DISPATCH records the
+    # seat, and a dispatch exists only under a task. Without one, a seated
+    # round would leave nothing that names the slice, so its verdict could
+    # never be read back (#434).
+    seated = sorted(role for role in assignments if SEAT_SEPARATOR in role)
+    if seated and not (isinstance(args.task, str) and args.task.strip()):
+        raise UsageError(
+            "Seats {} need --task: the slice lives on the dispatch, which a task-less "
+            "apply never records, and its verdict would have nothing to be read back "
+            "through.".format(", ".join(seated)),
+            {"roles": seated})
     requirements = composition.parse_requirements(
         {"schema_version": 1, "assignments": document["requirements"]} if "requirements" in document else None,
         list(assignments), args.task, allow_historical_architect=True,

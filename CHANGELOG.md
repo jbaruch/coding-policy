@@ -105,6 +105,11 @@
   reached the planner's exclusion parser as an unknown role once a tier table
   was configured.
 
+  And a seated `apply` needs `--task`. The seat lives on the dispatch, which a
+  task-less apply never records, so a partitioned round without one ledgered
+  the responsibility and kept nothing naming the slice — its verdict had
+  nothing to be read back through.
+
   The live retrospective guard reads the prior SEAT off the dispatch rather
   than the responsibility off the ledger row. Comparing the canonicalized row
   with the seat a dispatch names marked every retained seat as a role change,

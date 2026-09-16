@@ -828,13 +828,30 @@ class ApplyCommandTest(CliCase):
             self.base()
             + ["apply", "--composer-settle", "0",
                "--assignments", json.dumps({"reviewer#api": "grok"}),
-               "--common", str(self.common), "--now", AT]
-            + ["--brief", "reviewer#api=" + str(self.briefs["reviewer"])],
+               "--task", "t-ledger-seat", "--common", str(self.common), "--now", AT]
+            + ["--brief", "reviewer#api=" + str(self.briefs["reviewer"]),
+               "--report", "reviewer#api=" + str(self.tmp / "ledger-seat.md")],
             client=client,
         )
         self.assertEqual(code, 0, err)
         rows = json.loads(self.state.read_text())["assignments"]
         self.assertEqual([row["role"] for row in rows], ["reviewer"])
+
+    def test_a_seated_apply_without_a_task_is_refused(self):
+        # The ledger row records the responsibility and the DISPATCH records
+        # the seat, and a dispatch exists only under a task. A task-less seated
+        # apply would leave nothing naming the slice, so its verdict could
+        # never be read back (#434).
+        code, _, err = self.run_cli(
+            self.base()
+            + ["apply", "--composer-settle", "0",
+               "--assignments", json.dumps({"reviewer#api": "grok"}),
+               "--common", str(self.common), "--now", AT, "--dry-run"]
+            + ["--brief", "reviewer#api=" + str(self.briefs["reviewer"])],
+            client=self._client({}),
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("need --task", err)
 
     def test_a_live_seat_dispatch_reserves_and_records(self):
         # Not a dry run: reserving a live `reviewer#api` dispatch exercises the
