@@ -120,7 +120,9 @@ def slice_of(seat):
 def partition_role(partition):
     """The role the partition seats; `reviewer` unless the document says."""
     role = partition.get("role", "reviewer")
-    if role not in PARTITION_ROLES:
+    # A JSON document can name an unhashable role. The membership test would
+    # raise TypeError past every caller expecting this module's UsageError.
+    if not isinstance(role, str) or role not in PARTITION_ROLES:
         raise UsageError(
             "A partition seats {}; every other responsibility carries per-task gates one seat owns.".format(
                 " or ".join(sorted(PARTITION_ROLES))),

@@ -60,7 +60,10 @@
   `_contributor` resolved the ledger row's role but not the dispatch's, and a
   dispatch keeps the seat — a pending `reviewer#api` design round therefore
   read as no contribution, leaving that worker eligible for an independent seat
-  on its own task before the send even resolved.
+  on its own task before the send even resolved. And `partition_role` tested
+  membership against a frozenset before checking the type, so a document whose
+  `role` is `[]` or `{}` raised `TypeError` out of `load_partition` instead of
+  the `UsageError` every caller handles.
 
 ### Added
 

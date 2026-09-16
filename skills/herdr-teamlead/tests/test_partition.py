@@ -63,6 +63,8 @@ class LoadPartition(unittest.TestCase):
             ("slice not an object", document(slices=["api", SLICES[1]]), "non-empty name"),
             ("role with the separator", document(role="rev#iew"), "A partition seats"),
             ("a role that owns per-task gates", document(role="developer"), "A partition seats"),
+            ("an unhashable role", document(role=[]), "A partition seats"),
+            ("a role that is an object", document(role={}), "A partition seats"),
             ("slice name with the apply key separator",
              document(slices=[{"name": "api=v2", "paths": ["src/api/*"]}, SLICES[1]]), "cannot address its seat"),
             ("slice name with the seat separator",
