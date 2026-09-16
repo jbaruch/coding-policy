@@ -67,7 +67,7 @@ from pathlib import Path
 
 from .diagnostics import stderr_warn as _warn
 from .errors import ConfigError, HerdrError, StateError, UsageError
-from .tiers import canonical_role, parse_launch_args, parse_tiers, verify_argv
+from .tiers import SEAT_SEPARATOR, canonical_role, parse_launch_args, parse_tiers, verify_argv
 from .recovery import DEFAULT_FIX_LIMIT, empty_recovery, migrate_store, validate_store
 
 #: The version this build writes for the document and assignment rows.
@@ -372,6 +372,12 @@ def _validate(payload, path):
         record, row_migrated = _apply_migrations(record, RECORD_MIGRATIONS, "an assignment row")
         if "requirements" not in record:
             raise _NoUsableState("an assignment row is missing specialist requirements provenance")
+        # The ledger row holds the RESPONSIBILITY; the seat lives on the
+        # dispatch. A seat-named row loads with no matching dispatch and
+        # `role_counts` then keys history under the seat, fragmenting the
+        # per-role rotation the canonical write exists to keep (#434).
+        if isinstance(record.get("role"), str) and SEAT_SEPARATOR in record["role"]:
+            raise _NoUsableState("an assignment row names a seat where its responsibility belongs")
         scope = record.get("reviewer_scope")
         reviewer = record.get("role") == "reviewer"
         if ("reviewer_scope" not in record

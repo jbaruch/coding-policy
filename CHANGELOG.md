@@ -191,7 +191,11 @@
   does not cover, so letting a seat into it would widen the field's domain
   without versioning it — the repurpose Migration Policy forbids, in the one
   place the store bump did not reach. The seat stays on the dispatch each
-  assessment cites, and the reader compares responsibilities.
+  assessment cites, and the reader compares responsibilities. The state reader
+  refuses a persisted assignment row that names a seat, so the ledger's
+  contract is enforced on load rather than only on the canonical write: such a
+  row has no matching dispatch, and `role_counts` would key history under the
+  seat.
 
   The two halves of the role-key contract now agree. `require_seatable` refuses
   a name carrying a path separator, `=`, `,` or a control character wherever a

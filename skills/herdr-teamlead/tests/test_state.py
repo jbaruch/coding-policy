@@ -248,6 +248,42 @@ class MigrationTest(unittest.TestCase):
         self.assertEqual(self.load(), empty_state())
         self.assertEqual(self.path.read_text(encoding="utf-8"), before)
 
+    def test_a_seat_named_assignment_row_is_refused(self):
+        # The ledger row holds the responsibility and the dispatch holds the
+        # seat. A seat-named row loads with no matching dispatch, and
+        # `role_counts` then keys history under the seat, fragmenting the
+        # per-role rotation the canonical write exists to keep (#434).
+        self.write(
+            {
+                "schema_version": STATE_SCHEMA_VERSION,
+                "specialist_assessments": [],
+                "snapshots": [],
+                "assignments": [
+                    {
+                        "schema_version": STATE_SCHEMA_VERSION,
+                        "at": "2026-01-01T00:00:00+00:00",
+                        "role": "reviewer#api",
+                        "agent": "grok",
+                        "status": "applied",
+                        "cleared": None,
+                        "clear_reason": "unknown",
+                        "task": None,
+                        "fix_round": None,
+                        "context_session": None,
+                        "tier": None,
+                        "requirements": None,
+                        # Null, so the reviewer-scope provenance check passes
+                        # and the seat guard is the only thing that can refuse
+                        # this row.
+                        "reviewer_scope": None,
+                    }
+                ],
+            }
+        )
+        before = self.path.read_text(encoding="utf-8")
+        self.assertEqual(self.load(), empty_state())
+        self.assertEqual(self.path.read_text(encoding="utf-8"), before)
+
     def test_a_newer_snapshot_is_the_same_lagging_reader_case(self):
         self.write(
             {
