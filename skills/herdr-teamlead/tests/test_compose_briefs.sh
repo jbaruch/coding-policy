@@ -406,7 +406,7 @@ JSON
       || die "could not build the malformed-key fixture"
     run "$TPL" "$TMP/v17.json" "$TMP/out17"
     if [[ $RC -eq 2 && -z "$OUT" && ! -e "$TMP/out17" ]] \
-       && printf '%s' "$ERRTEXT" | grep -q "is not a role or a"; then
+       && printf '%s' "$ERRTEXT" | grep -qE "cannot name the brief it writes|cannot address it"; then
       pass; else fail "role key: '$bad_key' must refuse before writing, got RC=$RC ERR=$ERRTEXT"; fi
     rm -rf "$TMP/out17"
   done
@@ -430,7 +430,7 @@ JSON
   #     The composer accepts exactly what the planner emits, so a custom role
   #     cannot pass plan and then fail compose.
   local v19="$TMP/v19.json" o19="$TMP/out19" custom
-  for custom in role_v2 reviewer.v2 Role; do
+  for custom in role_v2 reviewer.v2 Role 'foo@bar'; do
     cp "$TPL/brief-developer.md" "$TPL/brief-${custom}.md" || die "could not add the custom template"
     jq --arg k "$custom" '.roles = {($k): .roles.developer}' "$v1" > "$v19" || die "could not build the custom-role fixture"
     rm -rf "$o19"

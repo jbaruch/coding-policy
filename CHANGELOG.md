@@ -155,6 +155,15 @@
   hand-copying the boundary, which is the one value a round cannot afford to
   retype.
 
+  Two contract edges the rule already decided. A seat costs what its
+  responsibility costs, so a `role_costs` entry keyed to one seat is refused
+  rather than silently weighing one slice apart from its siblings — slices of
+  one responsibility competing under different costs is what the rule's "a
+  seat's role decides its weight" rules out. And the composer's key check is a
+  denylist of what cannot name a file, not an allowlist: the planner accepts
+  any custom role name, so anything stricter broke the plan → compose
+  round-trip for a round the planner emits happily.
+
   The live retrospective guard reads the prior SEAT off the dispatch rather
   than the responsibility off the ledger row. Comparing the canonicalized row
   with the seat a dispatch names marked every retained seat as a role change,

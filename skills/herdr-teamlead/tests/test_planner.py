@@ -1154,5 +1154,23 @@ class SpecialistOrderingTest(unittest.TestCase):
         self.assertEqual(result["assignments"], {"advisor": "worker"})
 
 
+    def test_a_seat_costs_what_its_responsibility_costs(self):
+        # Weighing one seat apart would make slices of one responsibility
+        # compete under different costs, and the rule gives the role the
+        # weight (#434).
+        result = plan(["reviewer#api", "reviewer#core"], snapshot(a=90, b=80),
+                      role_costs={"reviewer": 40})
+        self.assertEqual(sorted(result["assignments"]), ["reviewer#api", "reviewer#core"])
+        weights = {row["role"]: row["cost"] for row in result["explanation"]} \
+            if "explanation" in result else None
+        if weights is not None:
+            self.assertEqual(weights["reviewer#api"], weights["reviewer#core"])
+
+    def test_a_seat_keyed_role_cost_is_refused(self):
+        with self.assertRaisesRegex(PlanError, "never one of its seats"):
+            plan(["reviewer#api", "reviewer#core"], snapshot(a=90, b=80),
+                 role_costs={"reviewer#api": 40})
+
+
 if __name__ == "__main__":
     unittest.main()

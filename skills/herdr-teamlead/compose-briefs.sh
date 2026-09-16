@@ -248,13 +248,21 @@ main() {
     # reviewer template and redirect the output outside `outdir` (#434). The
     # CLI's own `require_seatable` is not in the picture when this script runs
     # directly.
-    if [[ ! "$role" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*(#[A-Za-z0-9][A-Za-z0-9_.-]*)?$ ]]; then
-      warn "role key '${role}' is not a role or a <role>#<slice> seat — name each half with letters, digits, underscores, dots or hyphens, starting with a letter or digit"
+    # A denylist, not an allowlist: the planner accepts any custom role name,
+    # so rejecting more than what could reach a path would break the plan →
+    # compose round-trip for a round the planner happily emits.
+    if [[ -z "$role" || "$role" == *"/"* || "$role" == *".."* || "$role" == .* || "$role" == -*
+          || "$role" == *"="* || "$role" == *","* || "$role" == *[[:space:]]* || "$role" == *[[:cntrl:]]* ]]; then
+      warn "role key '${role}' cannot name the brief it writes — a key carrying a path separator, '..', '=', ',', whitespace or a control character, or starting with '.' or '-', does not read back"
       return 2
     fi
     # Only a responsibility whose verification a slice terminates is seated;
     # `plan`, `apply` and recovery all refuse the rest, so composing a brief
     # for one would write a round nothing downstream accepts (#434).
+    if [[ "$role" == *"#"* ]] && ! [[ "${role#*#}" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]]; then
+      warn "seat '${role}' names the slice '${role#*#}', which cannot address it: name a slice with letters, digits, underscores, dots or hyphens, starting with a letter or digit"
+      return 2
+    fi
     if [[ "$role" == *"#"* && " ${SEATABLE_ROLES} " != *" ${role%%#*} "* ]]; then
       warn "role key '${role}' seats '${role%%#*}', and only ${SEATABLE_ROLES// /, } are seated — every other responsibility holds a per-task counter one worker owns"
       return 2

@@ -58,7 +58,7 @@ import math
 
 from .diagnostics import stderr_warn
 from .errors import PlanError
-from .tiers import canonical_role
+from .tiers import SEAT_SEPARATOR, canonical_role
 
 #: Plan document version. 2 adds the optional `judge` object carrying the
 #: pinned seat's agent, model and effort. Version 3 adds round-tier data. Additive: a version-1
@@ -197,13 +197,20 @@ def _costs_for(roles, role_costs):
     """
     merged = {}
     overrides = role_costs or {}
+    # A seat costs what its RESPONSIBILITY costs. Weighing one seat apart would
+    # make slices of one responsibility compete under different costs, and
+    # `rules/agent-team-operation.md` gives the role the weight (#434).
+    seated = sorted(key for key in overrides if SEAT_SEPARATOR in key)
+    if seated:
+        raise PlanError(
+            "Role costs weigh a responsibility, never one of its seats: {}. Weigh {} instead, "
+            "so every slice of it competes under one cost.".format(
+                ", ".join(seated), ", ".join(sorted({canonical_role(key) for key in seated}))),
+            {"role_costs": seated},
+        )
     for role in roles:
-        # A seat costs what its RESPONSIBILITY costs unless the operator weighs
-        # the seat itself: `reviewer#api` is a reviewer round (#434).
         base = canonical_role(role)
-        if role in overrides:
-            merged[role] = float(overrides[role])
-        elif base in overrides:
+        if base in overrides:
             merged[role] = float(overrides[base])
         else:
             merged[role] = DEFAULT_ROLE_COSTS.get(base, DEFAULT_ROLE_COST)
