@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.236 — 2026-09-16
+
 ### Changed
 
 - **The last two publication-confirmation bullets read one directive each
