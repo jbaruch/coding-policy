@@ -395,6 +395,22 @@ JSON
       pass; else fail "seat review package: an invalid $seat_invalid must refuse, got RC=$RC ERR=$ERRTEXT"; fi
   done
 
+  # 17. The role key names the brief this run WRITES, so a key that is not a
+  #     role or a `<role>#<slice>` seat is refused before it reaches a path.
+  #     `template_for_role` resolves a seat to its role, so an unchecked key
+  #     could take the reviewer template and redirect its output out of the
+  #     output directory (#434).
+  local bad_key
+  for bad_key in 'developer#/../../outside' 'developer#' 'developer#a b' '../developer' 'Developer'; do
+    jq --arg k "$bad_key" '.roles = {($k): .roles.developer}' "$v1" > "$TMP/v17.json" \
+      || die "could not build the malformed-key fixture"
+    run "$TPL" "$TMP/v17.json" "$TMP/out17"
+    if [[ $RC -eq 2 && -z "$OUT" && ! -e "$TMP/out17" ]] \
+       && printf '%s' "$ERRTEXT" | grep -q "is not a role or a"; then
+      pass; else fail "role key: '$bad_key' must refuse before writing, got RC=$RC ERR=$ERRTEXT"; fi
+    rm -rf "$TMP/out17"
+  done
+
   echo "─────────────────────────────────────────────" >&2
   if [[ $FAIL -gt 0 ]]; then echo "FAILED: ${FAIL} failed, ${PASS} passed" >&2; exit 1; fi
   echo "PASSED: all ${PASS} checks" >&2

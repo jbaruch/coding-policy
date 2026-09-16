@@ -221,6 +221,16 @@ main() {
     return 1
   fi
   while IFS= read -r role; do
+    # The key names the brief this run WRITES (`brief-<role>.md`), so it is
+    # checked before it reaches a path. `template_for_role` resolves a seat to
+    # its role, which would otherwise let `reviewer#/../../outside` take the
+    # reviewer template and redirect the output outside `outdir` (#434). The
+    # CLI's own `require_seatable` is not in the picture when this script runs
+    # directly.
+    if [[ ! "$role" =~ ^[a-z][a-z-]*(#[A-Za-z0-9][A-Za-z0-9_.-]*)?$ ]]; then
+      warn "role key '${role}' is not a role or a <role>#<slice> seat — name a role with lowercase letters and hyphens, and a slice with letters, digits, underscores, dots or hyphens"
+      return 2
+    fi
     role_tpl="$(template_for_role "$templates" "$role")"
     if [[ ! -r "$role_tpl" ]]; then
       warn "template not found: ${role_tpl} — supply the packaged role template"

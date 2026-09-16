@@ -90,6 +90,12 @@
   `{"advisor": null}` still reaches the owner's validation instead of reading
   as an absent requirement and skipping the specialist contract.
 
+  `compose-briefs.sh` checks the role key before it reaches a path. The key
+  names the brief the run writes (`brief-<role>.md`), and `template_for_role`
+  resolves a seat to its role, so an unchecked `reviewer#/../../outside` took
+  the reviewer template and redirected its output out of the round's directory.
+  The script is invoked directly, so the CLI's own refusal never saw it.
+
   The live retrospective guard reads the prior SEAT off the dispatch rather
   than the responsibility off the ledger row. Comparing the canonicalized row
   with the seat a dispatch names marked every retained seat as a role change,
