@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.3.239 — 2026-09-16
+
+### Changed
+
+- **The judge round moved out of the team-lead execution plan (#441).**
+  `tessl plugin lint` reported `skills/herdr-teamlead/SKILL.md` at ~6022 tokens
+  against a recommended 5000. Two cuts, no contract change.
+
+  The judge round is a conditional branch most rounds never take, and it held
+  seven of the skill's twenty-two steps. Those seven now live in
+  `references/judge-round.md` with their own numbering, and SKILL.md Step 13
+  names the sequence and points at them. Steps 20–22 renumber to 14–16, and the
+  pointers in `references/round-flow.md` and `references/task-ledger.md` follow.
+  `tests/test_skill_invocations.sh` checks the new reference's command blocks
+  the way it already checks `round-setup.md`'s, so the moved bootstraps keep
+  their coverage.
+
+  Step 1's offline branch carried four command blocks that
+  `references/attention.md`, `references/working-memory.md` and
+  `references/retrospectives.md` already document in full. It now names the
+  three request kinds and the reference that owns each. The `HERDR_ENV` gate
+  and its refusal are untouched.
+
+  SKILL.md is ~4924 tokens and the lint warning is gone.
+
+  `rules/script-delegation.md`'s Herdr bootstrap carve-out names the files its
+  inline `CP=` resolver may appear in, so the new reference is added to that
+  list. Its precondition that `tests/test_skill_invocations.sh` check every
+  covered block is met by the same commit.
+
+## 0.3.237 — 2026-09-16
+
 ### Added
 
 - **One plan fills every slice of a partitioned review (#434, completing
@@ -128,6 +160,28 @@
   reason does not pass for this one.
 
 ## 0.3.236 — 2026-09-16
+
+### Changed
+
+- **The release skill's Step 7 names its publication gates and leaves the
+  mechanics to a reference file (#384).** `tessl plugin lint` reported
+  `skills/release/SKILL.md` at ~5382 tokens against a recommended 5000, and
+  Step 7 alone was ~3036 of them — mostly per-channel command blocks and
+  exit-code contracts, which a reader only needs once they know which channel
+  they are on. New `skills/release/PUBLICATION.md` carries how each channel is
+  recognized, the command for every gate, each helper's exit-code contract, and
+  a walkthrough of the Tessl-only, tag/asset-only and mixed cases. Step 7 keeps
+  the ordered execution plan and names every gate — baseline, merge, cleanup,
+  tag push, run resolution and watch, the two Tessl conjunct checks, the
+  moderation clear, the tag/asset release check, and the report — so no gate
+  moved out of the loaded surface. SKILL.md is ~4154 tokens and the lint
+  warning is gone. The `script-as-black-box` pointers for the moved helpers
+  moved with them, one reference per concept — including `SCRIPTING.md`'s
+  pointer at the resolver's invocation site, which the move would otherwise
+  have left aimed at a Step 7 that no longer carries it. The moved command
+  blocks also stopped piping a helper straight into `jq`: a non-zero helper
+  exit reached `jq` as empty input, which succeeds, leaving `PRE` or a run id
+  empty and the flow running past the gate that was supposed to stop it.
 
 ### Changed
 

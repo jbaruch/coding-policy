@@ -38,7 +38,7 @@ description: Deterministic operations → script, reasoning → LLM, the regex t
 - Code blocks in SKILL.md are for showing the agent what command to run, not for embedding logic the agent should reproduce character-by-character
 
 - Narrow exception for Herdr's installed-plugin bootstrap.
-- Applies only to command blocks in `skills/herdr-teamlead/SKILL.md`, `skills/herdr-standup/SKILL.md`, and `skills/herdr-teamlead/references/round-setup.md`.
+- Applies only to command blocks in `skills/herdr-teamlead/SKILL.md`, `skills/herdr-standup/SKILL.md`, `skills/herdr-teamlead/references/round-setup.md`, and `skills/herdr-teamlead/references/judge-round.md`.
 - Preconditions (all required):
   1. The block initializes `CP` to the literal `.tessl/plugins/jbaruch/coding-policy`; its only inline branch tests that directory and falls back to the same path under `$HOME`
   2. The block invokes only co-shipped scripts through quoted `$CP` paths with an explicit interpreter; each independent call repeats the bootstrap
