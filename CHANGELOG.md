@@ -83,8 +83,12 @@
   refused at the plan/apply boundary; `recovery` applies it too, since
   `reserve` and state loading reach the validators without passing a CLI
   parser. A seat also inherits its ROLE's requirement entry, so one
-  `{"reviewer": ...}` record covers every slice and a seat's own key overrides
-  it for that slice alone.
+  `{"reviewer": ...}` record covers every slice; `plan` still validates its
+  `--requirements` file against the role set, which is what
+  `rules/agent-team-operation.md` means by a seat's role deciding its
+  requirements. The lookup uses a sentinel rather than `None`, so an explicit
+  `{"advisor": null}` still reaches the owner's validation instead of reading
+  as an absent requirement and skipping the specialist contract.
 
   The live retrospective guard reads the prior SEAT off the dispatch rather
   than the responsibility off the ledger row. Comparing the canonicalized row

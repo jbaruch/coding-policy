@@ -17,6 +17,8 @@ CONTRIBUTOR_ROLES = frozenset({"developer", "architect", "advisor", "investigato
 CONTRIBUTOR_ROUNDS = frozenset({"architect", "reconciliation", "test_plan"})
 POSSIBLE_CONTRIBUTION = frozenset({"applied", "unknown", "sending", "sent_but_not_started"})
 REQUIREMENT_FIELDS = frozenset({"specialty", "required_capabilities", "independent", "engagement"})
+#: Distinguishes an absent requirement key from one explicitly set to null.
+_MISSING = object()
 
 
 def normalize_requirement(record, role):
@@ -74,8 +76,12 @@ def parse_requirements(payload, roles, task, *, allow_historical_architect=False
         raise UsageError("Specialist assignments require --task; preserve their task identity for independence and consultation continuity.", {})
     resolved = {}
     for role in roles:
-        record = assignments.get(role, assignments.get(canonical_role(role)))
-        if record is not None:
+        # A sentinel, never `None`: an explicit `{"advisor": null}` is a
+        # requirement the owner must reject, not an absent one to skip.
+        record = assignments.get(role, _MISSING)
+        if record is _MISSING:
+            record = assignments.get(canonical_role(role), _MISSING)
+        if record is not _MISSING:
             resolved[role] = normalize_requirement(record, role)
     return resolved
 

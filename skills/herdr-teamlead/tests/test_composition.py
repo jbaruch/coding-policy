@@ -272,6 +272,15 @@ class SeatResponsibilityTest(unittest.TestCase):
         self.assertEqual(parsed["reviewer#api"]["specialty"], "api-review")
         self.assertEqual(parsed["reviewer#core"]["specialty"], "core-review")
 
+    def test_an_explicitly_null_requirement_is_refused(self):
+        # `assignments.get(...)` returns None for an absent key and for an
+        # explicit null alike, so a sentinel keeps `{"advisor": null}` from
+        # reading as "no requirement" and bypassing the specialist contract.
+        payload = {"schema_version": REQUIREMENTS_SCHEMA_VERSION,
+                   "assignments": {"advisor": None}}
+        with self.assertRaisesRegex(UsageError, "Each specialist requirement needs"):
+            parse_requirements(payload, ["advisor"], "t1")
+
     def test_a_requirement_for_an_unassigned_role_is_still_refused(self):
         record = {"specialty": "api-review", "required_capabilities": ["review"],
                   "independent": True, "engagement": "review the slice"}
