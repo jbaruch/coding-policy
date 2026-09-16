@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.237 — 2026-09-16
+
 ### Added
 
 - **A checkpoint row missing its `id` is covered by regression (#441).** A
