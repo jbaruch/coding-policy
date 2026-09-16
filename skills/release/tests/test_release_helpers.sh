@@ -24,27 +24,14 @@ main() {
   cleanup() { rm -rf "$TMP"; return 0; }
   trap cleanup EXIT
 
-  # A stub directory shadowing the helper each wrapper calls, so the wrapper's own
-  # dispatch is what the check exercises.
-  stub() { # <name> <exit-code> <stdout> [stderr]
-    mkdir -p "$TMP/bin" || die "could not make the stub dir"
-    {
-      printf '#!/bin/sh\n'
-      printf 'printf %%s %s\n' "$(printf '%q' "$3")"
-      if [ -n "${4:-}" ]; then printf 'printf %%s %s >&2\n' "$(printf '%q' "$4")"; fi
-      printf 'exit %s\n' "$2"
-    } > "$TMP/bin/$1" || die "could not write the stub"
-    chmod +x "$TMP/bin/$1" || die "could not chmod the stub"
-  }
-
   run_baseline() { # runs registry-baseline.sh against the stubbed capture helper
-    OUT="$(PATH="$TMP/bin:$PATH" bash "$TMP/registry-baseline.sh" ws plug 2>"$TMP/err")"
+    OUT="$(bash "$TMP/registry-baseline.sh" ws plug 2>"$TMP/err")"
     RC=$?
     ERRTEXT="$(cat "$TMP/err")"
   }
 
   run_landed() {
-    OUT="$(PATH="$TMP/bin:$PATH" bash "$TMP/confirm-tessl-landed.sh" ws plug 0.0.1 42 2>"$TMP/err")"
+    OUT="$(bash "$TMP/confirm-tessl-landed.sh" ws plug 0.0.1 42 2>"$TMP/err")"
     RC=$?
     ERRTEXT="$(cat "$TMP/err")"
   }

@@ -56,7 +56,7 @@ tag_run_id=$(jq -r '.database_id' <<<"$tag_run")
 gh run watch "$tag_run_id"
 ```
 
-Omit `--exit-status` from the watch. Read the run conclusion through each channel's confirmation helper — `verify-publish-landed.sh` for Tessl, `verify-github-release.sh` for a tag publication.
+Omit `--exit-status` from the watch. Read the run conclusion through each channel's confirmation helper — `confirm-tessl-landed.sh` for Tessl, `verify-github-release.sh` for a tag publication.
 
 `gh pr view` returns the specific merge commit for this PR, unaffected by parallel merges. Exit 0 emits `{"database_id": N}` on stdout per `rules/script-delegation.md` — extract it with `jq -r '.database_id'`. A non-zero exit emits no id and a stderr diagnostic; the run is unresolved, and no watch or confirmation may proceed on a guess. The four facts the resolver binds, its enqueue-latency retry, its refusal to pick between two runs matching all four, and which condition lands in which rc are the script's decision contract — see `skills/release/resolve-publish-run.sh` header, not restated here (`rules/script-as-black-box.md`). The watch is a timing precondition for the confirmations below, not the gate.
 
