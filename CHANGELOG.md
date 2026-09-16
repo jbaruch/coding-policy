@@ -207,7 +207,10 @@
   newline-delimited list: a key carrying a newline is split into two
   pseudo-roles by the line-oriented read, so the shell test never saw the
   offending key and the script composed the wrong fragments instead of refusing
-  it.
+  it. And the rendered boundary is assigned and checked on its own line: nested
+  in the outer `jq`'s `--arg`, a failing renderer's status was discarded and the
+  seated brief composed with an empty `SLICE_SCOPE` — the one outcome the
+  placeholder exists to prevent.
 
   The live retrospective guard reads the prior SEAT off the dispatch rather
   than the responsibility off the ledger row. Comparing the canonicalized row

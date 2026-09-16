@@ -305,7 +305,7 @@ main() {
   # round behind, and no output directory either (`rules/file-hygiene.md`
   # Idempotency); the directory is created only once every check has passed.
   local -a out_paths=() out_bodies=() report_paths=()
-  local merged rendered leftovers supplied known common_known unused key report
+  local merged rendered leftovers supplied known common_known unused key report rendered_scope
   local common_body scan_rc=0
   validate_values "$shared" "the shared values" || return 2
   # Resolver-produced policy paths are explicit brief inputs. Custom templates
@@ -377,7 +377,11 @@ main() {
       return 2
     fi
     if [[ $'\n'"${known}"$'\n' == *$'\nSLICE_SCOPE\n'* ]]; then
-      merged="$(printf '%s' "$merged" | jq -c --arg s "$(slice_scope "$role" "$slice_paths")" '. + {SLICE_SCOPE:$s}')" || return 2
+      # Assigned and checked on its own line: nested in the outer jq's --arg,
+      # a failing slice_scope is discarded and the brief composes with an empty
+      # boundary -- the one outcome the placeholder exists to prevent.
+      rendered_scope="$(slice_scope "$role" "$slice_paths")" || return 3
+      merged="$(printf '%s' "$merged" | jq -c --arg s "$rendered_scope" '. + {SLICE_SCOPE:$s}')" || return 2
     elif [[ "$role" == *"#"* ]]; then
       # A custom template without the placeholder would compose a seated brief
       # carrying no boundary, and its worker would return a full-surface

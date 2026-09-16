@@ -533,6 +533,26 @@ JSON
   if [[ $RC -eq 2 && ! -e "$TMP/out21e" ]] && printf '%s' "$ERRTEXT" | grep -q "SLICE_PATHS"; then
     pass; else fail "slice paths: a shared SLICE_PATHS must refuse, got RC=$RC ERR=$ERRTEXT"; fi
 
+  # 21h. A failing slice_scope aborts instead of composing an empty boundary.
+  #      Nested in the outer jq's --arg, its non-zero status was discarded and
+  #      the seated brief rendered with no slice at all.
+  local jqshim="$TMP/jqshim"
+  mkdir -p "$jqshim" || die "could not create the jq shim dir"
+  {
+    printf '#!/bin/sh\n'
+    printf 'for a in "$@"; do\n'
+    printf '  case "$a" in *"map(\\"\\`\\""*) exit 4 ;; esac\n'
+    printf 'done\n'
+    printf 'exec %s "$@"\n' "$(command -v jq)"
+  } > "$jqshim/jq" || die "could not write the jq shim"
+  chmod +x "$jqshim/jq" || die "could not make the jq shim executable"
+  RUN_SEQ=$((RUN_SEQ+1))
+  OUT="$(PATH="$jqshim:$PATH" bash "$SCRIPT" "$TPL" "$v16" "$TMP/out21h" 2>"$TMP/err.$RUN_SEQ")"
+  RC=$?
+  ERRTEXT="$(cat "$TMP/err.$RUN_SEQ")"
+  if [[ $RC -ne 0 && -z "$OUT" && ! -e "$TMP/out21h" ]]; then
+    pass; else fail "slice scope: a failing renderer must abort, got RC=$RC OUT=$OUT"; fi
+
   # 22. The SHIPPED reviewer and tester templates carry the placeholder, so a
   #     real seated round renders the boundary rather than dropping it.
   local shipped shipped_role
