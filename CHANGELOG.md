@@ -73,7 +73,9 @@
   the two literally no longer reads the pair correctly — a silent field
   repurpose that `rules/stateful-artifacts.md` Migration Policy forbids. No
   field is added, so the migration is a stamp, and an older store carrying a
-  seat-named dispatch is refused as unowned newer data. The legacy set is
+  seat-named dispatch is refused as unowned newer data, its saved result
+  included: a non-applied row keeps its own copy of the role, and checking the
+  top-level one alone let such a store be stamped rather than preserved. The legacy set is
   derived from the constant rather than written out, so a reader pinned to an
   older version reads a newer store as newer instead of migrating it downward.
 

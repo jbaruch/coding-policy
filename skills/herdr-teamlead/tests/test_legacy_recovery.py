@@ -153,6 +153,27 @@ class SchemaNineCompatibilityTests(unittest.TestCase):
         self.assertEqual(self.path.read_bytes(), raw)
         self.assertIn("seat-named dispatch", " ".join(warnings))
 
+    def test_an_older_store_whose_saved_result_names_a_seat_refuses(self):
+        # A non-applied row keeps its own copy of the role, so checking the
+        # top-level one alone let a schema-9 store carrying
+        # `result.role = "reviewer#api"` be stamped to 10 instead of preserved.
+        self.install_receipts()
+        self.state["recovery"]["dispatches"].append({
+            "schema_version": 1, "at": AT, "id": "d-2", "task": "old-task",
+            "role": "reviewer", "agent": "worker", "fix_round": None,
+            "plan": None, "work": None, "status": "sent_but_not_started",
+            "result": {"schema_version": 1, "role": "reviewer#api", "status": "sent_but_not_started"},
+            "report": None, "assignment_index": None, "fingerprint": "f",
+        })
+        self.state["recovery"]["schema_version"] = 9
+        self.write_state()
+        raw = self.path.read_bytes()
+        warnings = []
+        _, usable = load_state_checked(self.path, warn=warnings.append, persist_migration=True)
+        self.assertFalse(usable)
+        self.assertEqual(self.path.read_bytes(), raw)
+        self.assertIn("seat-named dispatch", " ".join(warnings))
+
     def test_changed_or_new_citations_refuse_without_writes(self):
         self.install_receipts()
         raw = self.path.read_bytes()

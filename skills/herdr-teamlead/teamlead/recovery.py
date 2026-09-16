@@ -158,9 +158,13 @@ def _refuse_unowned_legacy(store, version):
     if not isinstance(dispatches, list):
         raise UsageError("Older recovery requires a dispatches array; restore the original owner-written store.", {})
     for row in dispatches:
-        # A seat reaches `dispatches[].role` only at version 10. An older
-        # store carrying one was written by a newer owner.
-        if isinstance(row, dict) and isinstance(row.get("role"), str) and SEAT_SEPARATOR in row["role"]:
+        # A seat reaches a dispatch's role only at version 10. An older store
+        # carrying one was written by a newer owner -- including on a saved
+        # result, which a non-applied row keeps its own copy of.
+        seated = [row.get("role")] if isinstance(row, dict) else []
+        if isinstance(row, dict) and isinstance(row.get("result"), dict):
+            seated.append(row["result"].get("role"))
+        if any(isinstance(value, str) and SEAT_SEPARATOR in value for value in seated):
             raise UsageError("Older recovery contains a seat-named dispatch this version never wrote; preserve it for owner recovery.", {})
         allowed = ALLOWED_AT_6 if version == 6 else REFUSAL_FIELDS if version >= 7 else frozenset()
         if not isinstance(row, dict) or REFUSAL_FIELDS.intersection(row) - allowed:
