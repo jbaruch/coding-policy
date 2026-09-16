@@ -238,6 +238,20 @@ class SeatResponsibilityTest(unittest.TestCase):
                     [role], [self.agent("alpha"), self.agent("beta")], {}, self.history(), "t1")
                 self.assertEqual(result["exclude"][role], ["alpha"])
 
+    def test_a_pending_design_seat_contributes_like_its_role(self):
+        # A dispatch keeps the SEAT while the ledger keeps the responsibility,
+        # so the contributor classifier reads `reviewer#api` on the pending row.
+        # Reading it literally leaves a design reviewer eligible for an
+        # independent seat on its own task before the send even resolves (#434).
+        for role in ("reviewer", "reviewer#api"):
+            with self.subTest(role=role):
+                dispatch = {"task": "t1", "role": role, "agent": "alpha", "status": "sending",
+                            "reviewer_scope": "design"}
+                result = selection_constraints(
+                    ["reviewer#core"], [self.agent("alpha"), self.agent("beta")], {}, [], "t1",
+                    dispatches=[dispatch])
+                self.assertEqual(result["exclude"]["reviewer#core"], ["alpha"])
+
     def test_a_seat_requirement_still_requires_independence(self):
         record = {"specialty": "api-review", "required_capabilities": ["review"],
                   "independent": False, "engagement": "review the api slice"}

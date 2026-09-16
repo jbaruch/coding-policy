@@ -57,6 +57,11 @@
   counting the literal `developer` key, splitting one task's correction
   allowance across as many seats as the lead cared to name.
 
+  `_contributor` resolved the ledger row's role but not the dispatch's, and a
+  dispatch keeps the seat — a pending `reviewer#api` design round therefore
+  read as no contribution, leaving that worker eligible for an independent seat
+  on its own task before the send even resolved.
+
 ### Added
 
 - **A judge dispatch declares which of its two modes it is for (#425).** Every

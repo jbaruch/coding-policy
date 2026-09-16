@@ -74,16 +74,19 @@ def parse_requirements(payload, roles, task, *, allow_historical_architect=False
 def _contributor(row, assessment=None):
     if row.get("status", "unknown") not in POSSIBLE_CONTRIBUTION:
         return False
-    if row.get("role") == "developer":
+    # A dispatch keeps its SEAT (`reviewer#api`); the ledger keeps the
+    # responsibility. Both reach here, so the responsibility decides (#434).
+    base = canonical_role(row.get("role"))
+    if base == "developer":
         return True
     if assessment is not None:
         return assessment["contribution"] != "none"
     tier = row.get("tier")
     if tier is None and isinstance(row.get("result"), dict):
         tier = row["result"].get("tier")
-    return (row.get("role") in CONTRIBUTOR_ROLES
+    return (base in CONTRIBUTOR_ROLES
             or isinstance(tier, dict) and tier.get("round") in CONTRIBUTOR_ROUNDS
-            or row.get("role") == "reviewer" and row.get("reviewer_scope") != "verification")
+            or base == "reviewer" and row.get("reviewer_scope") != "verification")
 
 
 def selection_constraints(roles, agents, requirements, history, task, dispatches=(), assessments=(), candidate_names=None):
