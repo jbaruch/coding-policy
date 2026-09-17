@@ -918,6 +918,30 @@ def _require_bound_slices(document, seated, briefs):
             "editing the assignments.".format(
                 ", ".join(repr(seat) for seat in sorted(map(str, malformed)))),
             {"seats": [str(seat) for seat in malformed]})
+    # A glob is rendered verbatim into the brief, so a backtick or a control
+    # character closes the code span and appends instructions of its own.
+    # `validate_document` and the composer both refuse these; a hand-written
+    # plan reaches the renderer without passing either.
+    unsafe = sorted(seat for seat, globs in slice_paths.items()
+                    if any(partition.UNSAFE_GLOB.search(glob) for glob in globs))
+    if unsafe:
+        raise UsageError(
+            "The plan's slice_paths gives {} a glob carrying a backtick or a control "
+            "character, which the brief renders verbatim; re-run `plan --partition "
+            "<validate-partition output>` rather than editing the assignments.".format(
+                ", ".join(repr(seat) for seat in unsafe)),
+            {"seats": unsafe})
+    # Exactly the seated assignments, no more and no less: a plan stripped of a
+    # seat would otherwise dispatch the remainder as if the partition still
+    # covered the change, and one stripped of all of them a full-surface role.
+    if sorted(slice_paths) != sorted(seated):
+        raise UsageError(
+            "The plan's slice_paths covers {} but this apply seats {}; the boundary and "
+            "the round no longer describe the same partition. Replan rather than editing "
+            "the assignments.".format(
+                ", ".join(repr(seat) for seat in sorted(map(str, slice_paths))) or "nothing",
+                ", ".join(repr(role) for role in sorted(seated)) or "nothing"),
+            {"slice_paths": sorted(map(str, slice_paths)), "seated": sorted(seated)})
     expected = partition.slice_digest(slice_paths)
     if expected != recorded:
         raise UsageError(
@@ -994,8 +1018,11 @@ def cmd_apply(args, client=None, warn=None, trace=None):
     if document.get("task_context") is not None and document["task_context"] != task_context:
         raise UsageError("Saved plan and apply name different task, count or correction bounds; replan from the current ledger.", {})
     paths = resolve_paths(assignments, _parse_briefs(args.briefs), args.common)
-    if seated:
-        # After the briefs resolve, since the check reads each seat's brief.
+    if seated or "slice_paths" in document or "slice_digest" in document:
+        # Keyed on the metadata, not only on the seats: a saved plan stripped
+        # of every seat would otherwise skip the check entirely and dispatch a
+        # full-surface role while still carrying the boundary it was planned
+        # against. After the briefs resolve, since the check reads each brief.
         _require_bound_slices(document, seated, paths)
     reports = _parse_reports(args.reports, assignments)
     supervised = supervision.dispatch_binding(state_path) is not None

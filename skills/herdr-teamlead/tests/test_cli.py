@@ -999,6 +999,57 @@ class ApplyCommandTest(CliCase):
         self.assertEqual(code, 1)
         self.assertIn("scope block", err)
 
+    def test_an_unsafe_glob_in_the_plan_is_refused(self):
+        # A glob renders verbatim into the brief, so a backtick closes the code
+        # span and appends instructions. validate_document and the composer
+        # both refuse these; an edited plan reaches apply without either (#453).
+        edited = {**self.seat_plan, "slice_paths": {"reviewer#api": ["src/api/`whoami`"]}}
+        code, _, err = self.run_cli(
+            self.base()
+            + ["apply", "--composer-settle", "0", "--assignments", json.dumps(edited),
+               "--task", "t-unsafe", "--common", str(self.common), "--now", AT, "--dry-run"]
+            + ["--brief", "reviewer#api=" + str(self.seat_brief)],
+            client=self._client({}),
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("backtick or a control character", err)
+
+    def test_a_plan_stripped_of_its_seats_is_refused(self):
+        # Keyed on the metadata, not the seats: dropping every seat from a
+        # saved plan would otherwise skip the check and dispatch a full-surface
+        # role while the plan still carried the boundary (#453).
+        stripped = {**self.seat_plan, "assignments": {"reviewer": "grok"}}
+        plain = self.tmp / "plain-reviewer.md"
+        plain.write_text("# reviewer\n", encoding="utf-8")
+        code, _, err = self.run_cli(
+            self.base()
+            + ["apply", "--composer-settle", "0", "--assignments", json.dumps(stripped),
+               "--task", "t-stripped", "--common", str(self.common), "--now", AT,
+               "--dry-run"]
+            + ["--brief", "reviewer=" + str(plain)],
+            client=self._client({}),
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("no longer describe the same partition", err)
+
+    def test_a_plan_missing_one_seat_is_refused(self):
+        # The remaining seat would pass on its own while the change it was
+        # partitioned over is no longer covered (#453).
+        plan = bound_seat_plan({"reviewer#api": "grok", "reviewer#core": "claude"})
+        partial = {**plan, "assignments": {"reviewer#api": "grok"}}
+        brief = self.tmp / "partial-api.md"
+        brief.write_text(seat_brief_text("reviewer#api", plan), encoding="utf-8")
+        code, _, err = self.run_cli(
+            self.base()
+            + ["apply", "--composer-settle", "0", "--assignments", json.dumps(partial),
+               "--task", "t-partial", "--common", str(self.common), "--now", AT,
+               "--dry-run"]
+            + ["--brief", "reviewer#api=" + str(brief)],
+            client=self._client({}),
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("no longer describe the same partition", err)
+
     def test_a_brief_scattering_the_facts_is_refused(self):
         # Digest, slice name and path all present, and a whole-repository pass
         # directed anyway: three substring checks pass and a full-surface

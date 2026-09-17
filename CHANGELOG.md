@@ -46,6 +46,14 @@
   round digest is not evidence that each seat's boundary was bound. An
   unpartitioned plan carries none of the three at either version.
 
+  `apply` keys the check on the boundary metadata rather than on the seats, so
+  a saved plan stripped of every seat no longer skips it and dispatches a
+  full-surface role while still carrying the partition. The slice map's seats
+  must equal the round's seats exactly — dropping one would otherwise dispatch
+  the remainder as if the change were still covered — and a glob carrying a
+  backtick or a control character is refused, which `validate_document` and the
+  composer already did and a hand-written plan reached the renderer without.
+
 ## 0.3.242 — 2026-09-16
 
 ### Fixed
