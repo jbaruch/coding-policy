@@ -1,5 +1,13 @@
 # Changelog
 
+### Fixed
+
+- **Herdr pane labels carry the model before the task.** A confirmed
+  assignment labels its pane `<role> · <model> #<task>`, so the model stays
+  visible in the sidebar ahead of a task description long enough to truncate
+  it. Labels still drop whichever parts the round did not supply and still
+  preserve a task that already carries its own hash.
+
 ## 0.3.243 — 2026-09-17
 
 ### Changed

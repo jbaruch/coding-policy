@@ -208,7 +208,7 @@ def resolve_paths(assignments, briefs, common):
 
 
 def pane_label(role, task=None, model=""):
-    """`<role> #<task> · <model>`, dropping whichever parts are absent.
+    """`<role> · <model> #<task>`, dropping whichever parts are absent.
 
     Role first, and the agent's name is deliberately NOT in it: the workspace
     row already carries the name, so repeating it in the pane row spends the
@@ -218,11 +218,11 @@ def pane_label(role, task=None, model=""):
     Pure, so the shape is testable without a herdr session.
     """
     label = str(role)
+    if model:
+        label = "{} · {}".format(label, model)
     if task:
         marker = str(task) if str(task).startswith("#") else "#{}".format(task)
         label = "{} {}".format(label, marker)
-    if model:
-        label = "{} · {}".format(label, model)
     return label
 
 
