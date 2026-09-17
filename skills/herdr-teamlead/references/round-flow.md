@@ -331,6 +331,22 @@ EVIDENCE: <the rounds, findings and diffs the diagnosis rests on>
 UNVERIFIED: <anything unconfirmed against the tree, or "none">
 ```
 
+Two further lines approve a materially different direction:
+
+```
+APPROACH: <the direction that replaces the failed one>
+VERIFICATION: <what confirming this direction looks like>
+```
+
+The allowance bounds repeated attempts at an approach already shown to fail, so
+a different direction starts its own allowance and its own ladder while the
+task's cumulative attempt numbering continues unchanged. `BOUND` then names the
+new approach's allowance and no correction plan is recorded. The cited
+investigator report carries `FAILED APPROACH`, `ROOT CAUSE` and `EXPERIMENT`. A
+new worker, a cleared context, a rewritten brief and a repeated remedy label
+leave the approach unchanged. A direction already tried is refused, and `stop`
+approves no direction at all.
+
 A `continue` or `restructure` remedy carries the attempt budget in `BOUND`,
 which is the number the operator used to supply. It is counted in developer
 attempts, justified against the cited evidence, and capped: the recording
@@ -349,8 +365,10 @@ holds nothing on the second pass they did not hold on the first. Re-entry
 moves down the ladder `continue` → `restructure` → `stop`, or repeats one rung
 once against a recorded `PROGRESS` line: a remedy that produced nothing is
 never reissued, the ladder never runs backwards, a rung already repeated is
-spent, and `stop` is terminal, so a task takes at most five diagnoses. No
-operator sits in the path of any of them.
+spent, and `stop` is terminal, so an approach takes at most five diagnoses. No
+operator sits in the path of any of them. The ladder is read per approach, so
+an approved new direction starts at `continue` rather than inheriting the rungs
+the approaches it replaced spent.
 
 `rules/agent-team-operation.md` Judge Seat carries the contract; the record
 shapes are the owner's, in `references/dispatch-recovery.md`.
@@ -455,7 +473,10 @@ authorization. A blocked ruling follows the operator-question path below.
   The change is the judge's to name and the lead's to carry out.
 - **`REMEDY: stop`** — record the diagnosis, release what is clean, and record
   the remainder as a tracked accepted defect. The remedy carries that
-  authority; do not re-escalate it. Proceed to Step 14 for what ships.
+  authority; do not re-escalate it. Proceed to Step 14 for what ships. The
+  operator overrides it with a plan over the remedy or a different approach
+  through `authorize-approach`, and the diagnosis path reopens with that
+  approach's own ladder.
 - A remedy's bound exhausting with blocking work remaining returns to Step 13
   for the next diagnosis, one rung down the ladder — or at the same rung once,
   when the spent remedy made progress the new diagnosis records in `PROGRESS`.

@@ -31,7 +31,9 @@ recommend a correction without authorizing its implementation.
 
 Return a reproduction record, facts and hypotheses separately, the strongest
 causal explanation, the counterfactual result, remaining uncertainty and the
-smallest next action. Link the actual evidence artifacts and revisions. State
+smallest next action. At an exhausted correction allowance, open the report
+with three lines — `FAILED APPROACH:`, `ROOT CAUSE:` and `EXPERIMENT:` — which
+are what the judge's approval of a different direction rests on. Link the actual evidence artifacts and revisions. State
 whether the assigned question is answered, partially answered or blocked, with
 the acceptance evidence or exact gap.
 

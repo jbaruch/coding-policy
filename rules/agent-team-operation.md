@@ -79,16 +79,21 @@ description: Running a multi-agent team — task-based specialist composition, c
 - The lead dispatches the judge in diagnosis mode at an exhausted allowance with blocking work remaining, on the investigator's assessment
 - Every judge dispatch declares which mode it is for, at plan and at apply
 - An undeclared mode is refused, never defaulted
-- A diagnosis on a task whose ladder reached `stop` is refused before the round runs, unless the operator authorized a plan over that remedy
+- A diagnosis on an approach whose ladder reached `stop` is refused before the round runs, unless the operator authorized a plan or a different approach over that remedy
 - An adjudication is never refused on that ground
 - The judge rules on that assessment; it never investigates from scratch
 - The diagnosis cites in `ASSESSMENT:` the investigator report it ruled on, and the record binds that path
 - Diagnosis asks why the loop is not converging and what must change, never who is right
 - The diagnosis returns `DIAGNOSIS:`, `REMEDY: continue | restructure | stop`, `BOUND:`, `ASSESSMENT:`, `EVIDENCE:` and `UNVERIFIED:`
+- An `APPROACH:` and `VERIFICATION:` pair approves a materially different direction
+- `BOUND` then names that approach's own allowance, and the diagnosis records no correction plan
+- A `stop` remedy approves no direction
 - A `continue` or `restructure` remedy's `BOUND` supplies the attempt budget the operator formerly supplied
 - `BOUND` counts developer attempts and justifies the number against the evidence the diagnosis cites
 - A `BOUND` above the ceiling `teamlead diagnose` enforces is refused, never silently honoured
 - A `stop` remedy ships what is clean and records the remainder as a tracked accepted defect
+- The operator overrides it with a plan over the remedy, or with a different approach
+- Either override is recordable, plannable and dispatchable without a further diagnosis
 - A `stop` remedy records a user-attention obligation the catch-up surfaces
 - That obligation gates no dispatch and waits on no answer
 - The judge's authority in diagnosis mode covers accepting a tracked defect into a release under a `stop` remedy
@@ -100,13 +105,15 @@ description: Running a multi-agent team — task-based specialist composition, c
 - An older remedy never authorizes new attempts
 - Re-enter diagnosis when a remedy's own bound exhausts with blocking work remaining
 - Re-enter before the bound is spent only for a changed scope or an operator override, naming the plan it supersedes and carrying the change it claims
-- A `stop` remedy ends implementation on its task; no unspent allowance survives it
+- A `stop` remedy ends implementation on its approach; no unspent allowance survives it
 - Each re-entry moves down the ladder `continue` → `restructure` → `stop`, or repeats one rung once
 - A repeat carries the diagnosis's `PROGRESS:` line naming what the prior remedy changed
 - A remedy that produced no progress is never reissued
 - The ladder never runs backwards
 - A rung already repeated is spent
-- `stop` is terminal and never repeats; a task takes at most five diagnoses
+- The ladder belongs to the approach, never the task lifetime
+- An approved new direction starts its ladder at `continue`
+- `stop` is terminal and never repeats; an approach takes at most five diagnoses
 - No exhausted allowance waits on an operator decision
 - The judge is read-only: it never edits a repository file, never runs a mutating git or `gh` command, never posts to GitHub, never dispatches a subagent — its only output is its report file
 - In adjudication mode the judge reads both positions and the governing rule, verifies the disputed facts against the tree, and returns `RULING: uphold A | uphold B | amend — <line> | blocked — <question>` with numbered reasons, an `ACTION:` naming the minimal step, and an `UNVERIFIED:` line
@@ -148,7 +155,21 @@ description: Running a multi-agent team — task-based specialist composition, c
 ## Fix Loops
 
 - Count fix rounds per task after its initial implementation
-- Default each task's fix allowance to five rounds
+- Preserve that cumulative count across every approach, worker, clear and retry
+- Bound corrections per approach, never per task lifetime
+- Default each approach's allowance to five rounds
+- The task's own direction is its initial approach and records nothing
+- Start a fresh allowance only for an evidenced change of approach
+- The investigator names the failed approach, its root cause and the discriminating experiment
+- The judge assesses that report and approves a materially different direction with its verification expectations
+- The operator approves a change of approach on their own recorded authorization
+- Record the transition before dispatching implementation
+- A new worker, a cleared context, a renamed task, a rewritten brief and a repeated remedy label are never a change of approach
+- Another attempt at the same approach spends that approach's existing allowance
+- A direction the task already recorded is refused
+- An authorization already spent on an earlier approach authorizes no further one
+- An approach reset grants a bounded correction opportunity alone
+- It approves no source, waives no defect, removes no contributor exclusion, and satisfies no test, independent review or release gate
 - Reserve the developer through initial and early-fix verification before assigning it another task or role
 - Fix rounds 1–3 retain the same developer's context when the retention preconditions hold
 - Narrow exception for retaining context on a same-role fix round.
@@ -179,7 +200,7 @@ description: Running a multi-agent team — task-based specialist composition, c
 - Never edit repository content while holding the release role
 - Each fresh-worker brief includes the task, prior report, and open findings
 - Frame the handoff as "a prior developer attempted this N times; you own it now"
-- At an exhausted allowance with remaining blocking work, stop the round, record the checkpoint, and consult the investigator before the judge's diagnosis
+- At an exhausted approach allowance with remaining blocking work, stop the round, record the checkpoint, and consult the investigator before the judge's diagnosis
 - The investigator asks why the loop is not converging and returns a reproduction, a causal assessment and a discriminating experiment
 - It gathers evidence and decides nothing
 - Narrow exception for a judge-diagnosed bounded correction plan.

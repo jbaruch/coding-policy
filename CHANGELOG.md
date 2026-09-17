@@ -1,5 +1,56 @@
 # Changelog
 
+### Fixed
+
+- **A different approach gets its own correction allowance.** The bounded fix
+  loop exists to stop a team from trying the same failing approach a seventh
+  time. Herdr counted those attempts over a task's whole lifetime, so the
+  bound also fell on an approach nobody had tried yet: an investigator would
+  explain why the direction was wrong, the judge would approve a different one,
+  and the developer would inherit an allowance the failed direction had already
+  spent.
+
+  `jbaruch/agentic-context-registry#62` is what it looks like from the inside.
+  The task reached a terminal `stop` after correction 7. An operator override
+  bought one more attempt; correction 8 fixed single-return callable tracking,
+  and an independent review promptly reproduced the omission for callables
+  returned alongside another value. The one-attempt allowance was gone, and
+  the owner had no way to grant another: `authorize_plan` required a diagnosis
+  at the current fix round, and `diagnose` refused to record one on a ladder
+  that had reached `stop`. Each command pointed at the other. The review was
+  right to block the release; the workflow, not the code, ended the task.
+
+  Recovery store version 11 adds an `approaches` collection, which separates
+  the two questions the fix count was answering at once. The cumulative
+  attempt number never moves — attempt 6 stays attempt 6, with its dispatch
+  receipts, base revision and review evidence intact — and the allowance,
+  the remedy ladder and the `stop` are read against the approach being tried.
+  `teamlead status` now prints both: `confirmed_fixes` for the history,
+  `approach_attempts` and `approach_allowance` for what the current direction
+  has spent.
+
+  A reset is earned, never inferred. The judge's diagnosis carries an
+  `APPROACH:` and `VERIFICATION:` pair, and the investigator report it ruled on
+  carries `FAILED APPROACH:`, `ROOT CAUSE:` and `EXPERIMENT:`. `BOUND` then
+  names the new approach's allowance rather than a correction plan's extra
+  attempts, so review findings return to the developer inside it with no
+  further operator prompt. A new worker, a cleared context, a renamed task, a
+  rewritten brief and a repeated remedy label are all the same approach; a
+  direction the task already recorded is refused outright.
+
+  `teamlead authorize-approach` is the operator's own path, and it is what
+  closes the dead end: an explicit authorization over a `stop` records a new
+  approach with its own allowance and its own empty ladder, after which
+  `diagnose` works again on that approach's exhaustion. Old authority never
+  carries a new transition — a quote already spent on an earlier approach is
+  refused. Every verification gate is unchanged: an approach reset buys
+  bounded correction opportunity and nothing else.
+
+  Existing ledgers migrate untouched. No approach record is fabricated, no
+  attempt is renumbered, and a task with no recorded transition reads as its
+  own initial approach on the same five-round allowance it always had
+  (#462).
+
 ## 0.3.245 — 2026-09-17
 
 ### Added
