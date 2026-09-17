@@ -175,6 +175,39 @@ main() {
   if [[ $RC -eq 2 ]] && printf '%s' "$OUT" | grep -qF '"ok":false'; then
     pass; else fail "an unknown flag exits 2 with a parseable envelope, got RC=$RC OUT=$OUT"; fi
 
+  # A floor that is not a whole number of hours would make every -ge comparison
+  # error, and a failed comparison reads as false -- the verdict that spares the
+  # worktree. It is refused up front instead.
+  new_repo "$TMP/badfloor"
+  run_check "$TMP/badfloor" "four"
+  if [[ $RC -eq 2 ]] && printf '%s' "$ERRTEXT" | grep -qF 'LEFTOVERS_MIN_AGE_HOURS'; then
+    pass; else fail "a non-numeric age floor exits 2, got RC=$RC ERR=$ERRTEXT"; fi
+
+  run_check "$TMP/badfloor" "-1"
+  if [[ $RC -eq 2 ]] && printf '%s' "$ERRTEXT" | grep -qF 'LEFTOVERS_MIN_AGE_HOURS'; then
+    pass; else fail "a negative age floor exits 2, got RC=$RC ERR=$ERRTEXT"; fi
+
+  # `rev-parse --abbrev-ref HEAD` prints HEAD and exits 0 on a detached HEAD, so
+  # that case is a branch name to translate, not a failure to absorb.
+  new_repo "$TMP/detached"
+  git -C "$TMP/detached" checkout -q --detach HEAD || die "detach"
+  echo lost >> "$TMP/detached/file.txt"
+  age "$TMP/detached/file.txt"
+  run_check "$TMP/detached" "$AGED_FLOOR"
+  if [[ $RC -eq 1 ]] && printf '%s' "$OUT" | grep -qF '"branch":"DETACHED"'; then
+    pass; else fail "a detached HEAD reads DETACHED, got RC=$RC OUT=$OUT"; fi
+
+  # An unreadable worktree is a tool error, never the "clean" it would otherwise
+  # be indistinguishable from.
+  new_repo "$TMP/unreadable"
+  git -C "$TMP/unreadable" worktree add -q -b broken "$TMP/unreadable-wt" HEAD || die "worktree add"
+  echo lost >> "$TMP/unreadable-wt/file.txt"
+  age "$TMP/unreadable-wt/file.txt"
+  printf 'gitdir: /nonexistent/never/here\n' > "$TMP/unreadable-wt/.git" || die "corrupt gitdir"
+  run_check "$TMP/unreadable" "$AGED_FLOOR"
+  if [[ $RC -eq 2 ]] && printf '%s' "$ERRTEXT" | grep -qF 'unreadable-wt'; then
+    pass; else fail "a worktree git cannot read exits 2, got RC=$RC ERR=$ERRTEXT"; fi
+
   echo "─────────────────────────────────────────────" >&2
   if [[ $FAIL -gt 0 ]]; then echo "FAILED: ${FAIL} failed, ${PASS} passed" >&2; exit 1; fi
   echo "PASSED: all ${PASS} checks" >&2

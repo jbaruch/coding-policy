@@ -41,7 +41,9 @@
 #        the script refuses to answer rather than answering "clean".
 #
 # LEFTOVERS_MIN_AGE_HOURS overrides the age floor an OTHER worktree must clear
-# before its dirt reads as abandoned rather than freshly started.
+# before its dirt reads as abandoned rather than freshly started. A value that is
+# not a whole number of hours exits 2 rather than silently failing every
+# comparison it is used in.
 set -euo pipefail
 
 #: An other-worktree leftover younger than this is someone still typing.
@@ -90,14 +92,20 @@ age_seconds() {
   echo $(( now - mtime ))
 }
 
-# The newest write among a worktree's changed paths, in whole hours.
-dirt_age_hours() {
-  local wt="$1" newest=999999999 rel age
+# The newest write among a worktree's changed paths, in whole hours. The paths
+# are captured before the loop, not piped in through a process substitution: a
+# substitution's exit status is unobservable, so an unreadable worktree would
+# run the loop zero times and answer 0 -- the age that reads as freshly started.
+dirt_age_hours() { # <worktree>
+  local wt="$1" newest=999999999 paths rel age
+  paths="$(changed_paths "$wt")" || return 1
   while IFS= read -r rel; do
     [ -n "$rel" ] || continue
     age="$(age_seconds "${wt}/${rel}")"
     [ "$age" -lt "$newest" ] && newest="$age"
-  done < <(changed_paths "$wt")
+  done <<EOF
+${paths}
+EOF
   [ "$newest" -eq 999999999 ] && newest=0
   echo $(( newest / 3600 ))
 }
@@ -140,6 +148,21 @@ count_matching() { # <worktree> <status-regex>
   echo "$n"
 }
 
+# A worktree's branch name, or DETACHED when HEAD points at no branch -- which
+# `--abbrev-ref` reports by printing HEAD and exiting 0. A non-zero exit is a
+# tool error and is never dressed up as a branch name.
+branch_of() { # <worktree>
+  local name err status=0
+  err="$(git -C "$1" rev-parse --abbrev-ref HEAD 2>&1)" || status=$?
+  if [ "$status" -ne 0 ]; then
+    echo "check-leftovers: cannot read the checked-out branch in ${1} (exit ${status}): ${err}" >&2
+    return 1
+  fi
+  name="$err"
+  [ "$name" = "HEAD" ] && name="DETACHED"
+  echo "$name"
+}
+
 # true when <rev> is already an ancestor of <base>. git answers 0 for yes and 1
 # for no; anything above that is a real failure (a bad object, an unreadable
 # worktree) and must not read as "carries its own commits", which is the answer
@@ -167,6 +190,11 @@ main() {
 
   command -v git >/dev/null || die "git not found on PATH -- install it, then re-run"
 
+  case "$LEFTOVERS_MIN_AGE_HOURS" in
+    ''|*[!0-9]*)
+      die "LEFTOVERS_MIN_AGE_HOURS is '${LEFTOVERS_MIN_AGE_HOURS}' -- set it to a whole number of hours (0 or more), or unset it to use the default" ;;
+  esac
+
   SCRATCH="$(mktemp -d "${TMPDIR:-/tmp}/check-leftovers.XXXXXX")" \
     || die "cannot create a temporary directory under ${TMPDIR:-/tmp} -- check it is writable, then re-run"
   trap cleanup EXIT
@@ -187,7 +215,8 @@ main() {
   local blocking=() others_json=() ok=true
 
   local self_branch staged unstaged untracked self_tip_in_main self_age self_verdict
-  self_branch="$(git -C "$self_path" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "DETACHED")"
+  self_branch="$(branch_of "$self_path")" \
+    || die "cannot read the checked-out branch in ${self_path} -- see the diagnostic above"
   staged="$(count_matching "$self_path" '^[MADRC]')" \
     || die "cannot count staged paths in ${self_path} -- see the diagnostic above"
   unstaged="$(count_matching "$self_path" '^.[MD]')" \
@@ -196,7 +225,8 @@ main() {
     || die "cannot count untracked paths in ${self_path} -- see the diagnostic above"
   self_tip_in_main="$(tip_is_in "$self_path" HEAD "$base")" \
     || die "cannot classify ${self_path} against ${base} -- see the diagnostic above"
-  self_age="$(dirt_age_hours "$self_path")"
+  self_age="$(dirt_age_hours "$self_path")" \
+    || die "cannot read the working tree at ${self_path} -- see the diagnostic above"
   self_verdict="clean"
   if [ $(( staged + unstaged + untracked )) -gt 0 ]; then
     self_verdict="in_progress"
@@ -223,10 +253,12 @@ main() {
       || die "cannot read the working tree at ${wt} -- see the diagnostic above"
     [ -n "$dirt" ] || continue
 
-    branch="$(git -C "$wt" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "DETACHED")"
+    branch="$(branch_of "$wt")" \
+    || die "cannot read the checked-out branch in ${wt} -- see the diagnostic above"
     tip_in_main="$(tip_is_in "$wt" HEAD "$base")" \
       || die "cannot classify ${wt} against ${base} -- see the diagnostic above"
-    age="$(dirt_age_hours "$wt")"
+    age="$(dirt_age_hours "$wt")" \
+      || die "cannot read the working tree at ${wt} -- see the diagnostic above"
 
     verdict="in_progress"
     if [ "$tip_in_main" = true ] && [ "$age" -ge "$LEFTOVERS_MIN_AGE_HOURS" ]; then

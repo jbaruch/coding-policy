@@ -69,6 +69,17 @@
   fields are checked before any verdict is read — an entry missing `verdict`
   would otherwise classify as not-abandoned, which is the reassuring answer and
   the one report this hook exists to rule out.
+
+  Three more of the same shape in the detector, from the third review round. A
+  process substitution's exit status is unobservable, so an unreadable worktree
+  ran the age loop zero times and answered 0, the age that reads as freshly
+  started; the paths are captured before the loop now. `rev-parse --abbrev-ref
+  HEAD` prints `HEAD` and exits 0 on a detached HEAD, so the old `|| echo
+  DETACHED` was dressing a tool error as a branch name rather than covering that
+  case — `branch_of` translates the real one and refuses the other. And a
+  `LEFTOVERS_MIN_AGE_HOURS` that is not a whole number of hours made every `-ge`
+  comparison error, which a conditional reads as false and which spares the
+  worktree; it is validated at startup instead.
 ## 0.3.244 — 2026-09-17
 
 ### Fixed
