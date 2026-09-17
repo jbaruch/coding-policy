@@ -430,6 +430,38 @@ class RecoveryCommandTests(fixture.CliCase):
         self.assertEqual(code, 0, err)
         self.assertEqual(json.loads(out)["tasks"][TASK]["status"], "checkpoint_required")
 
+    def test_an_authorized_approach_plans_and_dispatches_without_a_correction_plan(self):
+        # coding-policy#462: a fresh allowance is spent like any allowance --
+        # no `--correction-plan`, no `--work`, no repeated operator prompt.
+        self.seed_cap(skip_diagnosis=True)
+        code, _, err = self.owner("authorize-approach", {
+            "id": "approach-1", "task": TASK, "checkpoint": "cap-5",
+            "direction": "Collect callables at the return expression instead of walking the call graph.",
+            "verification": "The tuple-returning fixture reports both callables.",
+            "allowance": 2, "authorization": AUTH})
+        self.assertEqual(code, 0, err)
+        code, out, err = self.invoke(["status"])
+        self.assertEqual(code, 0, err)
+        status = json.loads(out)["tasks"][TASK]
+        self.assertEqual((status["status"], status["confirmed_fixes"], status["approach"],
+                          status["approach_attempts"], status["approach_allowance"], status["remaining_fixes"]),
+                         ("within_authorized_budget", 5, "approach-1", 0, 2, 2))
+        code, plan_text, err = self.invoke(["plan", "--roles", "developer", "--snapshot", str(self.snapshot),
+                                            "--task", TASK, "--fix-round", "6", "--now", AT])
+        self.assertEqual(code, 0, err)
+        self.assertEqual(json.loads(plan_text)["task_context"]["fix_round"], 6)
+        code, _, err = self.invoke(self.apply_args("developer", 6), self.fresh_client("fix-5", "fix-6"))
+        self.assertEqual(code, 0, err)
+        code, _, err = self.invoke(self.apply_args("developer", 7), self.fresh_client("fix-6", "fix-7"))
+        self.assertEqual(code, 0, err)
+        # The new allowance bounds the new direction exactly as the first did.
+        code, _, err = self.invoke(self.apply_args("developer", 8), self._client({}))
+        self.assertEqual(code, 1)
+        self.assertIn("correction allowance is exhausted", err)
+        code, out, err = self.invoke(["status"])
+        self.assertEqual(code, 0, err)
+        self.assertEqual(json.loads(out)["tasks"][TASK]["status"], "checkpoint_required")
+
     def test_repeated_completed_apply_never_sends_or_consumes_again(self):
         self.register()
         args = self.apply_args("developer", None, "--dispatch-id", "initial")

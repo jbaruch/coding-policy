@@ -1495,12 +1495,15 @@ def _validate_refusals(store):
         validate_receipt(row["judge_evidence"])
         rung = DIAGNOSIS_LADDER.index(row["remedy"])
         reissue = row.get("reissue") is True
-        last, repeated = seen_diagnoses.get(row["task"], (None, False))
+        # Keyed by the approach, never the task: the ladder bounds attempts at
+        # ONE direction, and an approved new direction starts its own (#462).
+        ladder = (row["task"], row["approach"])
+        last, repeated = seen_diagnoses.get(ladder, (None, False))
         if last is not None and (rung < last or rung == last and not reissue):
-            raise UsageError("A task's diagnoses must move down the remedy ladder; preserve the ledger for owner recovery.", {})
+            raise UsageError("An approach's diagnoses must move down the remedy ladder; preserve the ledger for owner recovery.", {})
         if reissue and (last is None or rung != last or repeated or row["remedy"] == "stop"):
             raise UsageError("A diagnosis records a reissue of a rung its predecessor did not take, or of one already reissued; preserve the ledger for owner recovery.", {})
-        seen_diagnoses[row["task"]] = (rung, reissue)
+        seen_diagnoses[ladder] = (rung, reissue)
         cited = row.get("investigator_report")
         if cited is not None:
             if not isinstance(cited, dict) or set(cited) != {"schema_version", "report", "evidence"}:
@@ -1515,10 +1518,20 @@ def _validate_refusals(store):
                 raise UsageError("A diagnosis records an operator override with no plan it superseded; preserve the ledger for owner recovery.", {})
             authorization(row["authorization"])
         if row["remedy"] == "stop":
-            if row["bound"] is not None or row["plan"] is not None:
-                raise UsageError("A stop remedy carries no bound and no plan; preserve the ledger for owner recovery.", {})
+            if row["bound"] is not None or row["plan"] is not None or row["approach_change"] is not None:
+                raise UsageError("A stop remedy carries no bound, no plan and no new direction; preserve the ledger for owner recovery.", {})
             continue
-        if positive(row["bound"], "diagnosis bound") and row["plan"] is None:
+        positive(row["bound"], "diagnosis bound")
+        if row["approach_change"] is not None:
+            # The bound became the new direction's own allowance, so there is
+            # no extra-correction plan to match against (#462).
+            if row["plan"] is not None:
+                raise UsageError("A diagnosis that approved a new direction records its allowance on the approach, never a second plan; preserve the ledger for owner recovery.", {})
+            approved = _item(store["approaches"], row["approach_change"], "approach")
+            if approved["allowance"] != row["bound"] or approved["from_fix"] != row["fix_round"]:
+                raise UsageError("An approved direction's allowance disagrees with the bound its diagnosis recorded; preserve the ledger for owner recovery.", {})
+            continue
+        if row["plan"] is None:
             raise UsageError("A bounded remedy records the plan its bound authorizes; preserve the ledger for owner recovery.", {})
         plan = _item(store["plans"], row["plan"], "diagnosis plan")
         # Every field `diagnose` derives for the plan, not three of them: a
