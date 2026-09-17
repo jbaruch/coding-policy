@@ -64,10 +64,14 @@ json_str() {
 
 die() { echo "check-leftovers: $*" >&2; printf '{"ok":false,"self":null,"others":[],"blocking":[]}\n'; exit 2; }
 
-# `return 0` so a failed removal cannot rewrite the verdict this script exits
-# with (rules/error-handling.md Shell Error Handling).
+# The removal is checked explicitly, not suppressed, and `return 0` is last:
+# under `set -e` a failing `rm` would abort the handler before it got there and
+# replace the verdict this script exits with (rules/error-handling.md Shell
+# Error Handling).
 cleanup() {
-  [ -z "$SCRATCH" ] || rm -rf "$SCRATCH"
+  if [ -n "$SCRATCH" ] && ! rm -rf "$SCRATCH"; then
+    echo "check-leftovers: could not remove the temporary directory ${SCRATCH} -- delete it by hand" >&2
+  fi
   return 0
 }
 

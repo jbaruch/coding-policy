@@ -99,7 +99,10 @@
   resolve, a corrupt `.git` or a permission error each say what they are. The
   exit-0 contract stopped depending on every path inside `main` honouring it —
   the entry point runs `main`, warns if it failed, and exits 0 — and the scratch
-  directory's removal is checked rather than able to rewrite that status.
+  directory's removal is checked rather than able to rewrite that status. The
+  detector's own `EXIT` handler then got the same treatment: `set -e` would
+  abort it on a failing `rm` before its `return 0`, replacing the verdict the
+  release gate reads.
 ## 0.3.244 — 2026-09-17
 
 ### Fixed
