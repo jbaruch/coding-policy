@@ -50,7 +50,13 @@ set -euo pipefail
 warn() { printf 'check-leftover-worktrees: %s\n' "$1" >&2; }
 
 main() {
-  command -v git >/dev/null || return 0
+  command -v git >/dev/null || {
+    warn "git not found on PATH — install it or restore it before session start can report abandoned worktrees"
+    return 0
+  }
+  # Silent, unlike the line above: `rev-parse --git-dir` exits 128 both for "not
+  # a repository" and for a genuine failure, and the first is an ordinary place
+  # to open a session. A hook that warns there gets turned off.
   git rev-parse --git-dir >/dev/null 2>&1 || return 0
 
   local here detector

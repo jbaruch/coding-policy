@@ -78,8 +78,14 @@ cleanup() {
 # reads as just-written, which under-reports an age rather than aging a path
 # into a refusal on a bad read.
 age_seconds() {
-  local path="$1" now mtime
-  now="$(date +%s)"
+  local path="$1" now mtime status=0
+  now="$(date +%s)" || status=$?
+  case "$now" in
+    ''|*[!0-9]*)
+      echo "check-leftovers: cannot read the system clock (date +%s exited ${status} and printed '${now}') -- no age can be computed, so no worktree can be classified" >&2
+      return 1
+      ;;
+  esac
   mtime="$(stat -c %Y "$path" 2>/dev/null)" || mtime=""
   [ -n "$mtime" ] || mtime="$(stat -f %m "$path" 2>/dev/null)" || mtime=""
   case "$mtime" in
@@ -101,7 +107,7 @@ dirt_age_hours() { # <worktree>
   paths="$(changed_paths "$wt")" || return 1
   while IFS= read -r rel; do
     [ -n "$rel" ] || continue
-    age="$(age_seconds "${wt}/${rel}")"
+    age="$(age_seconds "${wt}/${rel}")" || return 1
     [ "$age" -lt "$newest" ] && newest="$age"
   done <<EOF
 ${paths}
@@ -240,9 +246,11 @@ main() {
       "$self_branch" "$staged" "$unstaged" "$untracked")")
   fi
 
-  local worktree_list
+  local worktree_list worktree_paths
   worktree_list="$(git -C "$repo" worktree list --porcelain)" \
     || die "cannot read the worktree list for ${repo} -- run 'git -C ${repo} worktree list' to see why"
+  worktree_paths="$(printf '%s\n' "$worktree_list" | sed -n 's/^worktree //p')" \
+    || die "cannot parse the worktree list for ${repo} -- run 'git -C ${repo} worktree list --porcelain' to see what it printed"
 
   local wt branch tip_in_main age verdict dirt
   while IFS= read -r wt; do
@@ -269,7 +277,9 @@ main() {
     fi
     others_json+=("$(printf '{"path":%s,"branch":%s,"tip_in_main":%s,"age_hours":%d,"verdict":%s}' \
       "$(json_str "$wt")" "$(json_str "$branch")" "$tip_in_main" "$age" "$(json_str "$verdict")")")
-  done < <(printf '%s\n' "$worktree_list" | sed -n 's/^worktree //p')
+  done <<EOF
+${worktree_paths}
+EOF
 
   local others_out="" blocking_out="" item
   for item in ${others_json+"${others_json[@]}"}; do

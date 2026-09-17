@@ -180,6 +180,19 @@ main() {
      && printf '%s' "$ERRTEXT" | grep -qF 'detector: check-leftovers: cannot read the modification time'; then
     pass; else fail "a detector warning reaches the session's stderr, got RC=$RC ERR=$ERRTEXT"; fi
 
+  # git absent is a real problem to name, not a quiet no-op. The interpreter is
+  # named absolutely because the emptied PATH cannot find one, and `command -v
+  # git` is the hook's first line, so nothing else is needed on it.
+  new_repo "$TMP/nogit"
+  HOOKPATH="$(stage_hook "$real")"
+  local shell
+  shell="$(command -v bash)" || die "bash not on PATH"
+  mkdir -p "$TMP/emptybin"
+  OUT="$(cd "$TMP/nogit" && PATH="$TMP/emptybin" "$shell" "$HOOKPATH" 2>"$ERRFILE")"; RC=$?
+  ERRTEXT="$(cat "$ERRFILE")"
+  if [[ $RC -eq 0 && -z "$OUT" ]] && printf '%s' "$ERRTEXT" | grep -qF 'git not found on PATH'; then
+    pass; else fail "an absent git warns and no-ops, got RC=$RC ERR=$ERRTEXT"; fi
+
   echo "─────────────────────────────────────────────" >&2
   if [[ $FAIL -gt 0 ]]; then echo "FAILED: ${FAIL} failed, ${PASS} passed" >&2; exit 1; fi
   echo "PASSED: all ${PASS} checks" >&2

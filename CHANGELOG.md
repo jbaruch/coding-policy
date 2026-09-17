@@ -80,6 +80,18 @@
   `LEFTOVERS_MIN_AGE_HOURS` that is not a whole number of hours made every `-ge`
   comparison error, which a conditional reads as false and which spares the
   worktree; it is validated at startup instead.
+
+  Two last ones, and the same preemptive sweep for the shape. A failed `date
+  +%s` left `now` empty, which arithmetic reads as zero and which makes every
+  age a large negative number — freshly started again — so the clock read is
+  checked and a failure propagates to exit 2. The `sed` that extracts paths from
+  `git worktree list --porcelain` sat in a process substitution, the same
+  unobservable exit status as the age loop, and its failure would have left
+  every other worktree unseen; it is captured first. On the hook side, `git`
+  missing from PATH returned success in silence and now names itself — not being
+  in a repository stays silent, `rev-parse --git-dir` exiting 128 for that and
+  for a real failure alike, and a hook that warns in an ordinary directory gets
+  turned off.
 ## 0.3.244 — 2026-09-17
 
 ### Fixed

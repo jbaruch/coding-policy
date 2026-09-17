@@ -197,6 +197,20 @@ main() {
   if [[ $RC -eq 1 ]] && printf '%s' "$OUT" | grep -qF '"branch":"DETACHED"'; then
     pass; else fail "a detached HEAD reads DETACHED, got RC=$RC OUT=$OUT"; fi
 
+  # A clock that cannot be read is a tool error: an age of zero would classify
+  # abandoned work as freshly started.
+  new_repo "$TMP/noclock"
+  echo lost >> "$TMP/noclock/file.txt"
+  age "$TMP/noclock/file.txt"
+  mkdir -p "$TMP/noclockbin"
+  printf '#!/bin/sh\nexit 1\n' > "$TMP/noclockbin/date"
+  chmod +x "$TMP/noclockbin/date"
+  OUT="$(cd "$TMP/noclock" && PATH="$TMP/noclockbin:$PATH" LEFTOVERS_MIN_AGE_HOURS="$AGED_FLOOR" \
+    bash "$SCRIPT_UNDER_TEST" --repo . 2>"$ERRFILE")"; RC=$?
+  ERRTEXT="$(cat "$ERRFILE")"
+  if [[ $RC -eq 2 ]] && printf '%s' "$ERRTEXT" | grep -qF 'cannot read the system clock'; then
+    pass; else fail "an unreadable clock exits 2, got RC=$RC ERR=$ERRTEXT"; fi
+
   # An unreadable worktree is a tool error, never the "clean" it would otherwise
   # be indistinguishable from.
   new_repo "$TMP/unreadable"
