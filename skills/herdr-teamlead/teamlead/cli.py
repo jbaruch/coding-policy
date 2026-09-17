@@ -1018,7 +1018,7 @@ def cmd_apply(args, client=None, warn=None, trace=None):
     if document.get("task_context") is not None and document["task_context"] != task_context:
         raise UsageError("Saved plan and apply name different task, count or correction bounds; replan from the current ledger.", {})
     paths = resolve_paths(assignments, _parse_briefs(args.briefs), args.common)
-    if seated or "slice_paths" in document or "slice_digest" in document:
+    if seated or any(key in document for key in ("slice_paths", "slice_digest", "seat_digests")):
         # Keyed on the metadata, not only on the seats: a saved plan stripped
         # of every seat would otherwise skip the check entirely and dispatch a
         # full-surface role while still carrying the boundary it was planned

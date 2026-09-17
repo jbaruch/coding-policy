@@ -1054,6 +1054,24 @@ class ApplyCommandTest(CliCase):
         self.assertEqual(code, 1)
         self.assertIn("no longer describe the same partition", err)
 
+    def test_a_plan_keeping_only_seat_digests_is_refused(self):
+        # All three keys are partition metadata, so dropping two and keeping
+        # `seat_digests` must not slip past the trigger (#453).
+        stripped = {"schema_version": 1, "assignments": {"reviewer": "grok"},
+                    "seat_digests": self.seat_plan["seat_digests"]}
+        plain = self.tmp / "plain-digests.md"
+        plain.write_text("# reviewer\n", encoding="utf-8")
+        code, _, err = self.run_cli(
+            self.base()
+            + ["apply", "--composer-settle", "0", "--assignments", json.dumps(stripped),
+               "--task", "t-digests-only", "--common", str(self.common), "--now", AT,
+               "--dry-run"]
+            + ["--brief", "reviewer=" + str(plain)],
+            client=self._client({}),
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("slice_paths and slice_digest", err)
+
     def test_a_plan_missing_one_seat_is_refused(self):
         # The remaining seat would pass on its own while the change it was
         # partitioned over is no longer covered (#453).
