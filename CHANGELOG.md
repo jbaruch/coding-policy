@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.244 — 2026-09-17
+
 ### Fixed
 
 - **Herdr pane labels carry the model before the task.** A confirmed
