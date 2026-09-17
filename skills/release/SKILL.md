@@ -18,6 +18,14 @@ Structured workflow for shipping code: PR creation, automated policy review, mer
 
 ## Step 1 — Verify Readiness
 
+Nothing below runs until this exits 0:
+
+```bash
+skills/release/check-leftovers.sh
+```
+
+Exit 0 clears the release. Exit 1 blocks it, with `blocking` naming each leftover and the stderr diagnostic naming its worktree — commit, stash, or gitignore the work, then re-run. Exit 2 is a usage or tool-state error, never a verdict. Which worktree states it refuses, and why another worktree's work in progress does not trip it, are the script's decision contract — see `skills/release/check-leftovers.sh` header, not restated here (`rules/script-as-black-box.md`).
+
 - Confirm you're on a feature branch (not `main`/`master`)
 - Run the test suite — all tests must pass
 - Run the linter — no warnings or errors

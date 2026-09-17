@@ -1,5 +1,29 @@
 # Changelog
 
+### Added
+
+- **A release refuses to start while work sits uncommitted.** Every step of the
+  release flow after the pull request exists was already scripted; Step 1, which
+  decides whether the flow runs at all, was prose. A pane-label change was
+  written across four files, never committed, and sat in a worktree for nine
+  days — its branch reported as merged, the tip being a plain `main` commit, so
+  every "delete merged branches" heuristic called the worktree disposable while
+  the only copy of the work lived beside it untracked.
+
+  `skills/release/check-leftovers.sh` runs first in Step 1 and exits non-zero on
+  two shapes. The releasing worktree blocks on any staged, unstaged or untracked
+  path. Another worktree blocks only when its dirt sits on a branch whose tip is
+  already an ancestor of `origin/main`: nothing was ever committed there, so
+  nothing in git preserves it. A branch carrying its own commits is recoverable
+  and is left alone, which keeps a concurrent agent's work in progress from
+  tripping the gate (`rules/agent-worktree-isolation.md`).
+
+  That predicate needs no `gh` and no network. A branch tip already in
+  `origin/main` cannot carry an open pull request either, GitHub having no
+  commits to show, so three local git signals decide it: dirty, tip-in-main, and
+  an age floor that keeps a worktree created minutes ago from reading as
+  abandoned. `LEFTOVERS_MIN_AGE_HOURS` moves the floor.
+
 ## 0.3.243 — 2026-09-17
 
 ### Changed
