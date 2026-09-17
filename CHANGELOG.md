@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.245 — 2026-09-17
+
 ### Added
 
 - **Work that git does not hold is caught at a release and at session start.** A
