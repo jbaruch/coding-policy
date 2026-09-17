@@ -46,6 +46,12 @@
   refused. Every verification gate is unchanged: an approach reset buys
   bounded correction opportunity and nothing else.
 
+  A correction plan is retired with the approach it was bought for. Its fix
+  range is cumulative, so a five-attempt plan left active would have gone on
+  authorizing attempts 7 through 10 under a direction whose own allowance was
+  one — the policy reviewer caught that on the pull request, and
+  `authorize-approach` now refuses until the plan is named in `supersedes`.
+
   Existing ledgers migrate untouched. No approach record is fabricated, no
   attempt is renumbered, and a task with no recorded transition reads as its
   own initial approach on the same five-round allowance it always had

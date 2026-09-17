@@ -875,7 +875,7 @@ def diagnose(store, assignments, data, at, judge_agent, enrolled_report, supervi
             "task": data["task"], "checkpoint": data["checkpoint"], "base_revision": task["base_revision"],
             "from_fix": count, "allowance": bound, "direction": direction, "verification": verification,
             "origin": "diagnosis", "diagnosis": data["id"], "judge_evidence": evidence,
-            "investigator_report": binding, "authorization": None})
+            "investigator_report": binding, "authorization": None, "supersedes": None})
     if record["plan"] is not None:
         assert bound is not None
         ruling = {"source": data["judge_report"],
@@ -945,17 +945,25 @@ def authorize_approach(store, assignments, data, at):
     Old authority never carries a new transition. Each override cites the
     operator's own words for THIS change of direction, and a quote already
     spent on an earlier approach is refused.
+
+    A prior approach's unspent correction plan is named in `supersedes` and
+    retired with the direction it was bought for. Its cumulative fix range
+    outlives the approach that earned it, so leaving it active let it
+    authorize attempts past the new approach's own allowance (#462).
     """
     required = {"id", "task", "checkpoint", "direction", "verification", "allowance", "authorization"}
-    if not isinstance(data, dict) or set(data) != required:
-        raise UsageError("Approach approval requires id, task, checkpoint, direction, verification, allowance and explicit authorization.", {})
+    if not isinstance(data, dict) or not required <= set(data) or set(data) - required - {"supersedes"}:
+        raise UsageError("Approach approval requires id, task, checkpoint, direction, verification, allowance and explicit authorization, and allows a supersedes naming the plan it retires.", {})
     for key in ("id", "task", "checkpoint", "direction", "verification"):
         text(data[key], key)
+    if "supersedes" in data:
+        text(data["supersedes"], "supersedes")
     positive(data["allowance"], "allowance")
     authorization(data["authorization"])
     prior = next((row for row in store["approaches"] if row["id"] == data["id"]), None)
     if prior:
-        if any(prior.get(key) != value for key, value in data.items()):
+        if (any(prior.get(key) != value for key, value in data.items())
+                or prior.get("supersedes") != data.get("supersedes")):
             raise UsageError("This approach identity already records a different direction or allowance; record a new approach without rewriting the old one.", {})
         return prior
     if data["allowance"] > DIAGNOSIS_BOUND_CEILING:
@@ -973,11 +981,17 @@ def authorize_approach(store, assignments, data, at):
     _require_new_direction(store, data["task"], data["direction"])
     if any(row["authorization"] == data["authorization"] for row in approaches_for(store, data["task"])):
         raise UsageError("This authorization already approved an earlier approach on task {}; record the operator's decision for this change of direction.".format(data["task"]), {})
+    active = next((row for row in active_plans(store) if row["task"] == data["task"] and row["last_fix"] > count), None)
+    if active is not None and data.get("supersedes") != active["id"]:
+        raise UsageError("Plan {} still holds unspent attempts for the approach this replaces; name it in supersedes, or spend it before starting another direction.".format(active["id"]), {})
+    if data.get("supersedes") and (active is None or data["supersedes"] != active["id"]):
+        raise UsageError("Supersedes must name this task's current unexhausted plan; inspect teamlead status before recording the changed decision.", {})
     record = {"schema_version": APPROACH_RECORD_VERSION, "at": at, "id": data["id"], "task": data["task"],
               "checkpoint": data["checkpoint"], "base_revision": task["base_revision"], "from_fix": count,
               "allowance": data["allowance"], "direction": data["direction"],
               "verification": data["verification"], "origin": "operator", "diagnosis": None,
-              "judge_evidence": None, "investigator_report": None, "authorization": data["authorization"]}
+              "judge_evidence": None, "investigator_report": None, "authorization": data["authorization"],
+              "supersedes": data.get("supersedes")}
     store["approaches"].append(record)
     _event(store, at, "approach_authorized", data["task"],
            {"approach": data["id"], "from_fix": count, "allowance": data["allowance"]})
@@ -986,9 +1000,12 @@ def authorize_approach(store, assignments, data, at):
 
 def active_plans(store):
     # A diagnosis supersedes a plan too, and a `stop` remedy records no
-    # replacement, so a plan retired that way is retired here or nowhere.
+    # replacement, so a plan retired that way is retired here or nowhere. An
+    # operator-authorized approach retires one the same way: a plan's fix range
+    # is cumulative and outlives the direction it was bought for (#462).
     replaced = {row["supersedes"] for row in store["plans"] if row.get("supersedes")}
     replaced |= {row["supersedes"] for row in store.get("diagnoses", []) if row.get("supersedes")}
+    replaced |= {row["supersedes"] for row in store.get("approaches", []) if row.get("supersedes")}
     return [row for row in store["plans"] if row["id"] not in replaced]
 
 
@@ -1737,6 +1754,10 @@ def validate_store(store, assignments):
             if row["from_fix"] <= seen_bases.get(row["task"], -1):
                 raise UsageError("Approach transitions are out of order; preserve the ledger for owner recovery.", {})
             seen_bases[row["task"]] = row["from_fix"]
+            if row["supersedes"] is not None:
+                retired = _item(store["plans"], text(row["supersedes"], "approach supersedes"), "superseded plan")
+                if retired["task"] != row["task"] or retired["base_revision"] != row["base_revision"]:
+                    raise UsageError("An approach cannot supersede another task's plan or original base; preserve the ledger for owner recovery.", {})
             if row["origin"] == "operator":
                 authorization(row["authorization"])
                 if row["diagnosis"] is not None or row["judge_evidence"] is not None or row["investigator_report"] is not None:

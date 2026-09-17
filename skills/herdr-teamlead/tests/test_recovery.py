@@ -667,6 +667,9 @@ class RecoveryTests(unittest.TestCase):
             authorize_approach(self.store, self.history, {**grant, "extra": 1}, AT)
         with self.assertRaisesRegex(UsageError, "exceeds the 5-attempt ceiling"):
             authorize_approach(self.store, self.history, {**grant, "allowance": 6}, AT)
+        # With no plan holding attempts there is nothing to retire.
+        with self.assertRaisesRegex(UsageError, "must name this task's current unexhausted plan"):
+            authorize_approach(self.store, self.history, {**grant, "supersedes": "plan-1"}, AT)
         reservation = self.reservation(6, None)
         reserve(self.store, reservation, AT)
         with self.assertRaisesRegex(UsageError, "dispatch outcome is still unknown"):
@@ -692,6 +695,35 @@ class RecoveryTests(unittest.TestCase):
             authorize_approach(self.store, self.history, {**grant, "id": "approach-3", "checkpoint": second,
                 "direction": "Parse the module twice and diff the callable sets.",
                 "authorization": {"source": "operator message 2026-02-05", "quote": "And try the double parse."}}, AT)
+        validate_store(self.store, self.history)
+
+    def test_a_new_approach_retires_the_plan_the_old_one_bought(self):
+        # A plan's fix range is cumulative and outlives the direction it was
+        # bought for: left active, a 5-attempt plan authorized fixes 7-10 under
+        # an approach whose own allowance was 1 (policy reviewer on #467).
+        self.seed_checkpoint()
+        diagnosed = self.run_diagnosis(self.diagnosis("diag-1", "continue", 5), "judge")
+        grant = {"id": "approach-1", "task": TASK, "checkpoint": "checkpoint-5", "direction": DIRECTION,
+                 "verification": VERIFICATION, "allowance": 1, "authorization": OVERRIDE}
+        with self.assertRaisesRegex(UsageError, "still holds unspent attempts"):
+            authorize_approach(self.store, self.history, grant, AT)
+        # Naming something other than the plan that holds the attempts retires
+        # nothing, so the same refusal stands.
+        with self.assertRaisesRegex(UsageError, "still holds unspent attempts"):
+            authorize_approach(self.store, self.history, {**grant, "supersedes": "no-such-plan"}, AT)
+        approach = authorize_approach(self.store, self.history, {**grant, "supersedes": diagnosed["plan"]}, AT)
+        self.assertEqual(approach["supersedes"], diagnosed["plan"])
+        self.assertEqual(active_plans(self.store), [])
+        self.finish(6, None)
+        # The retired plan's remaining range no longer buys an attempt.
+        with self.assertRaisesRegex(UsageError, "correction allowance is exhausted"):
+            validate_work(self.store, self.history, TASK, 7, None, None)
+        with self.assertRaisesRegex(UsageError, "was superseded"):
+            validate_work(self.store, self.history, TASK, 7, diagnosed["plan"], WORK)
+        status = task_statuses(self.store, self.history)[TASK]
+        self.assertEqual((status["status"], status["plan"], status["remaining_fixes"],
+                          status["approach_attempts"], status["approach_allowance"]),
+                         ("checkpoint_required", None, 0, 1, 1))
         validate_store(self.store, self.history)
 
     def test_a_ledger_without_approaches_reads_as_its_own_initial_approach(self):

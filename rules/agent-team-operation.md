@@ -167,6 +167,7 @@ description: Running a multi-agent team — task-based specialist composition, c
 - Another attempt at the same approach spends that approach's existing allowance
 - A direction the task already recorded is refused
 - An authorization already spent on an earlier approach authorizes no further one
+- A prior approach's unspent correction plan is retired with the approach it was bought for
 - An approach reset grants a bounded correction opportunity alone
 - It approves no source, waives no defect, removes no contributor exclusion, and satisfies no test, independent review or release gate
 - Reserve the developer through initial and early-fix verification before assigning it another task or role
