@@ -238,6 +238,7 @@ class EngagementTest(unittest.TestCase):
         del old["recovery"]["refusal_authorizations"]
         del old["recovery"]["diagnoses"]
         del old["recovery"]["legacy_ruling_recoveries"]
+        del old["recovery"]["approaches"]
         original = old["assignments"][0]
         original["schema_version"] = 5
         original.pop("requirements")
@@ -248,7 +249,7 @@ class EngagementTest(unittest.TestCase):
         self.assertEqual(migrated["specialist_assessments"], [])
         self.assertEqual(migrated["assignments"][0], {**original, "schema_version": 6,
                                                     "requirements": None, "reviewer_scope": "unknown"})
-        self.assertEqual(migrated["recovery"]["schema_version"], 10)
+        self.assertEqual(migrated["recovery"]["schema_version"], recovery.RECOVERY_STORE_VERSION)
 
     def test_older_schema_cannot_bless_future_composition_fields(self):
         for target in ("document", "assignment"):

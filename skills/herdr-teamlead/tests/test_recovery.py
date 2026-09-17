@@ -16,7 +16,8 @@ from pathlib import Path
 
 from teamlead.errors import UsageError
 from teamlead.recovery import (
-    DIAGNOSIS_BOUND_CEILING,
+    DIAGNOSIS_BOUND_CEILING, DIAGNOSIS_RECORD_VERSION, RECOVERY_STORE_VERSION,
+    approach_ceiling, authorize_approach, current_approach,
     abort_pre_send, active_plans, authorize_context, authorize_plan, authorize_refused_dispatch, brief_identity, checkpoint, confirmed_fix,
     diagnose, require_investigation_before_judge, require_judge_mode,
     dispatch_identity, finish_dispatch, fresh_transition, mark_sending,
@@ -351,16 +352,20 @@ class RecoveryTests(unittest.TestCase):
         older = copy.deepcopy(self.store)
         row = older["diagnoses"][0]
         row.update(schema_version=1)
-        del row["reissue"], row["investigator_report"]
+        del row["reissue"], row["investigator_report"], row["approach"], row["approach_change"]
         # Both record kinds migrate in one pass; neither short-circuits the
         # other (rules/stateful-artifacts.md Migration Policy).
         older["checkpoints"][0]["schema_version"] = 1
         older["checkpoints"][0].pop("requested_by", None)
         self.assertTrue(migrate_store(older))
         self.assertEqual(older["checkpoints"][0]["schema_version"], 2)
-        self.assertEqual(older["diagnoses"][0]["schema_version"], 2)
+        self.assertEqual(older["diagnoses"][0]["schema_version"], DIAGNOSIS_RECORD_VERSION)
         self.assertIs(older["diagnoses"][0]["reissue"], False)
         self.assertIsNone(older["diagnoses"][0]["investigator_report"])
+        # coding-policy#462: a pre-approach diagnosis ruled on the initial
+        # direction and approved no transition away from it.
+        self.assertIsNone(older["diagnoses"][0]["approach"])
+        self.assertIsNone(older["diagnoses"][0]["approach_change"])
         validate_store(older, self.history)
 
     def test_an_older_diagnosis_carrying_newer_fields_is_refused(self):
@@ -368,11 +373,12 @@ class RecoveryTests(unittest.TestCase):
         # is unowned newer data; stamping it would let the value through.
         self.seed_checkpoint()
         self.run_diagnosis(self.diagnosis("diag-1", "continue", 2), "judge")
-        for field, value in (("reissue", True), ("investigator_report", None)):
+        for field, value in (("reissue", True), ("investigator_report", None),
+                             ("approach", "approach-1"), ("approach_change", None)):
             corrupt = copy.deepcopy(self.store)
             row = corrupt["diagnoses"][0]
             row.update(schema_version=1)
-            del row["reissue"], row["investigator_report"]
+            del row["reissue"], row["investigator_report"], row["approach"], row["approach_change"]
             row[field] = value
             with self.assertRaisesRegex(UsageError, "newer recorded fields"):
                 migrate_store(corrupt)
@@ -1132,20 +1138,23 @@ class RecoveryTests(unittest.TestCase):
         del old["refusal_authorizations"]
         del old["diagnoses"]
         del old["legacy_ruling_recoveries"]
+        del old["approaches"]
         for row in old["dispatches"]:
             del row["brief_identity"]
             del row["provider"]
         before = copy.deepcopy(old)
         self.assertTrue(migrate_store(old))
-        self.assertEqual(old["schema_version"], 10)
+        self.assertEqual(old["schema_version"], RECOVERY_STORE_VERSION)
         self.assertEqual(old.pop("refusal_authorizations"), [])
         self.assertEqual(old.pop("diagnoses"), [])
         self.assertEqual(old.pop("legacy_ruling_recoveries"), [])
+        self.assertEqual(old.pop("approaches"), [])
         self.assertEqual({key: value for key, value in old.items() if key != "schema_version"},
                          {key: value for key, value in before.items() if key != "schema_version"})
         old["refusal_authorizations"] = []
         old["diagnoses"] = []
         old["legacy_ruling_recoveries"] = []
+        old["approaches"] = []
         validate_store(old, self.history)
         self.assertFalse(migrate_store(old))
         stale = copy.deepcopy(self.store)
@@ -1167,10 +1176,11 @@ class RecoveryTests(unittest.TestCase):
         six["schema_version"] = 6
         del six["diagnoses"]
         del six["legacy_ruling_recoveries"]
+        del six["approaches"]
         for row in six["dispatches"]:
             del row["provider"]
         self.assertTrue(migrate_store(six))
-        self.assertEqual(six["schema_version"], 10)
+        self.assertEqual(six["schema_version"], RECOVERY_STORE_VERSION)
         self.assertEqual(six["diagnoses"], [])
         validate_store(six, self.history)
         record_refusal(self.store, {"dispatch": first, "receipt": self.refusal_receipt("codex-a")}, AT, "codex", self.REPORT)

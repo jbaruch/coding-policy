@@ -14,6 +14,7 @@ import unittest
 from unittest.mock import patch
 
 from teamlead.state import add_assignment, empty_state, save_state
+from teamlead import recovery
 from tests import test_cli as fixture
 from tests import test_recovery_cli as recovery_fixture
 from tests.fakes import FakeRunner
@@ -343,7 +344,7 @@ class HistoricalCommandsTest(fixture.CliCase):
                     "--task", TASK, "--fix-round", "7", "--now", AT]):
             code, _, err = self.invoke(args, self._client({}))
             self.assertEqual(code, 1)
-            self.assertIn("five-fix budget is exhausted", err)
+            self.assertIn("correction allowance is exhausted", err)
             self.assertEqual(self.runner.calls, [])
             self.assertEqual(self.state.read_bytes(), before)
 
@@ -670,12 +671,13 @@ class HistoricalCommandsTest(fixture.CliCase):
         del original["recovery"]["refusal_authorizations"]
         del original["recovery"]["diagnoses"]
         del original["recovery"]["legacy_ruling_recoveries"]
+        del original["recovery"]["approaches"]
         self.state.write_text(json.dumps(original))
         code, _, err = self.invoke(["state"])
         self.assertEqual(code, 0, err)
         result = self.saved()
         self.assertEqual(result["assignments"], original["assignments"])
-        expected = {**original["recovery"], "schema_version": 10, "hand_clearances": [], "historical_attempts": [], "role_clearances": [], "delivery_recoveries": [], "refusal_authorizations": [], "diagnoses": [], "legacy_ruling_recoveries": []}
+        expected = {**original["recovery"], "schema_version": recovery.RECOVERY_STORE_VERSION, "hand_clearances": [], "historical_attempts": [], "role_clearances": [], "delivery_recoveries": [], "refusal_authorizations": [], "diagnoses": [], "legacy_ruling_recoveries": [], "approaches": []}
         self.assertEqual(result["recovery"], expected)
 
 
