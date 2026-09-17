@@ -1,5 +1,63 @@
 # Changelog
 
+### Changed
+
+- **A seated round is bound to the partition `validate-partition` accepted
+  (#453).** #443 closed every path where the composer writes the brief and the
+  planner writes the boundary. These are the paths where a human artifact sat
+  between the check and the send, and nothing tied the two together: `plan
+  --partition` read the document's shape and never its ownership, `slice_paths`
+  was emitted but never verified, and `apply` accepted any brief for a seat. A
+  full-surface review could be dispatched and recorded as a slice verdict.
+
+  The proof is now the artifact. `plan --partition` takes the OUTPUT of
+  `validate-partition` — it carries the slices with their resolved paths and
+  the `changed` set they were checked against — and refuses the bare document,
+  naming the command to run. `plan` has no repo, base or head and cannot check
+  ownership itself, which is why it seats from the result rather than
+  re-deriving it. The result's verdict is not taken on faith: `load_validated`
+  re-derives ownership against the `changed` set the result carries, so an
+  edited result whose slices overlap or leave a changed file unowned is refused
+  rather than seated. A shape check alone would accept it. The re-derivation is
+  set membership rather than `fnmatch`: a result's `slices[].paths` carries the
+  resolved changed files `validate()` assigned, not the globs the document it
+  read carried, and re-matching a resolved name as a pattern reads
+  `src/api/[x].py` as a character class and reports the file it names unowned.
+
+  `plan` stamps `slice_digest` over the accepted `{seat: [glob, ...]}` map, and
+  a `seat_digests` entry over each seat and the globs it owns. Per seat matters:
+  one digest for the whole round is identical in every brief, so exchanging two
+  seats' briefs passes a check that only asks whether a digest is present.
+  `compose-briefs.sh` requires each seat's `SLICE_DIGEST` beside its
+  `SLICE_PATHS` and renders both into the brief, transporting the digest rather
+  than recomputing it in shell. `apply` renders that seat's scope block from the plan,
+  exactly as the composer does, and requires the brief to carry it verbatim —
+  the block rather than the facts inside it, since a brief that scatters the
+  digest, the slice name and a path while directing a whole-repository pass
+  satisfies three substring checks and dispatches a full-surface verdict as a
+  slice one. The block carries its own no-roaming restrictions, so requiring it
+  requires those too. A brief carrying the right digest and the wrong text is
+  refused along with a boundary edited after validation, in the plan, in the
+  values, or in a brief written by hand. `partition.slice_scope` and
+  `compose-briefs.sh`'s `slice_scope` render that block in two languages;
+  `tests/test_slice_scope_parity.py` pins them byte for byte, since one
+  character of drift would refuse every seated dispatch. An unseated round is untouched at every step.
+
+  Plan schema 7 carries the three keys — `slice_paths`, `slice_digest`,
+  `seat_digests` — and `state-schema.md` records their writer and readers. A
+  version-6 seated plan has no `seat_digests`, so briefs composed from its
+  round-level digest fail the per-seat check and the dispatch is refused: the
+  round digest is not evidence that each seat's boundary was bound. An
+  unpartitioned plan carries none of the three at either version.
+
+  `apply` keys the check on the boundary metadata rather than on the seats, so
+  a saved plan stripped of every seat no longer skips it and dispatches a
+  full-surface role while still carrying the partition. The slice map's seats
+  must equal the round's seats exactly — dropping one would otherwise dispatch
+  the remainder as if the change were still covered — and a glob carrying a
+  backtick or a control character is refused, which `validate_document` and the
+  composer already did and a hand-written plan reached the renderer without.
+
 ## 0.3.242 — 2026-09-16
 
 ### Fixed

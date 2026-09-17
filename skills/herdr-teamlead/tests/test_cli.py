@@ -31,6 +31,7 @@ from teamlead import attention, cli
 from teamlead.cli import build_parser, main
 from teamlead.errors import UsageError
 from teamlead.herdr import HerdrClient
+from teamlead.partition import slice_digest
 from teamlead.state import STATE_SCHEMA_VERSION, add_assignment, empty_state, load_state_checked, save_state
 
 from tests.fakes import (
@@ -133,6 +134,14 @@ class CliCase(unittest.TestCase):
             path = self.tmp / (role + ".md")
             path.write_text("# " + role + "\n", encoding="utf-8")
             self.briefs[role] = path
+        # The seat brief carries its partition digest the way the composer
+        # renders it, so a bound apply can read it back (#453).
+        # Its own attribute, never `self.briefs`: subclasses derive per-role
+        # fixtures from that map, and a seat is not one of the round's roles.
+        self.seat_plan = bound_seat_plan({"reviewer#api": "grok"})
+        self.seat_brief = self.tmp / "reviewer-api.md"
+        self.seat_brief.write_text(
+            seat_brief_text("reviewer#api", self.seat_plan), encoding="utf-8")
         # A stand-in herdr that always fails, for the paths that build a real
         # client instead of taking an injected one.
         self.fake_herdr = self.tmp / "herdr-stub"
@@ -632,6 +641,41 @@ class MeasureCommandTest(CliCase):
         self.assertEqual(code, 0)
         self.assertTrue(self.state.exists())
 
+def bound_seat_plan(assignments, slice_paths=None):
+    """An apply document for seats, carrying the boundary `plan` checked.
+
+    A seated apply is refused without it: the digests are what tie each brief
+    and its dispatch to the partition `validate-partition` accepted (#453).
+    """
+    from teamlead.partition import seat_digest, slice_digest
+    paths = slice_paths or {seat: ["src/{}/*".format(seat.split("#", 1)[1])] for seat in assignments}
+    return {"schema_version": 1, "assignments": dict(assignments),
+            "slice_paths": paths, "slice_digest": slice_digest(paths),
+            "seat_digests": {seat: seat_digest(seat, globs) for seat, globs in paths.items()}}
+
+
+def seat_brief_text(seat, plan):
+    """A brief carrying the canonical scope block a seated dispatch checks."""
+    from teamlead.partition import slice_scope
+    return "# {}\n\n{}\n".format(
+        seat, slice_scope(seat, plan["slice_paths"][seat], plan["seat_digests"][seat]))
+
+
+def validated_partition(slices=None, changed=None):
+    """What `validate-partition` writes: RESOLVED paths plus its `changed` set.
+
+    Not the globs the document it read carried — `validate()` replaces each
+    slice's patterns with the changed files it assigned them, so a result's
+    `slices[].paths` are literal names. `plan --partition` seats from that
+    result, never the document, so a round cannot be seated against a
+    partition nobody checked (#453).
+    """
+    slices = slices or [{"name": "api", "paths": ["src/api/routes.py"]},
+                        {"name": "core", "paths": ["src/core/db.py"]}]
+    return {"schema_version": 1, "role": "reviewer", "slices": slices,
+            "changed": changed or ["src/api/routes.py", "src/core/db.py"]}
+
+
 class ApplyCommandTest(CliCase):
     CORRUPT_STATE = '{"schema_version": 2, "snapshots": [broken'
 
@@ -716,8 +760,7 @@ class ApplyCommandTest(CliCase):
         # apply — brief templates, requirements, round tiers and the ledger all
         # resolve the responsibility a seat fills.
         partition = self.tmp / "partition.json"
-        partition.write_text(json.dumps({"schema_version": 1, "slices": [
-            {"name": "api", "paths": ["src/api/*"]}, {"name": "core", "paths": ["src/core/*"]}]}))
+        partition.write_text(json.dumps(validated_partition()))
         # With --task, which is the documented invocation and the one that
         # exercises the contribution-exclusion path.
         out = io.StringIO()
@@ -731,12 +774,18 @@ class ApplyCommandTest(CliCase):
         # The composer requires each seat's owned paths and reads no partition,
         # so the plan carries them out of the validated document (#434).
         self.assertEqual(plan["slice_paths"],
-                         {"reviewer#api": ["src/api/*"], "reviewer#core": ["src/core/*"]})
+                         {"reviewer#api": ["src/api/routes.py"],
+                          "reviewer#core": ["src/core/db.py"]})
 
-        # Each seat takes its role's brief template and dispatches.
+        # The plan stamps the digest that binds this boundary to the briefs
+        # and the dispatch (#453).
+        self.assertEqual(plan["slice_digest"], slice_digest(plan["slice_paths"]))
+
+        # Each seat takes its role's brief template, carrying the digest, and
+        # dispatches.
         for seat in plan["assignments"]:
             brief = self.tmp / (seat.replace("#", "-") + ".md")
-            brief.write_text("# " + seat + "\n", encoding="utf-8")
+            brief.write_text(seat_brief_text(seat, plan), encoding="utf-8")
             self.briefs[seat] = brief
         plan_file = self.tmp / "partitioned-plan.json"
         plan_file.write_text(json.dumps(plan), encoding="utf-8")
@@ -758,8 +807,7 @@ class ApplyCommandTest(CliCase):
         # role already carries, or the planner hands independent verification
         # of a slice to the worker that wrote the task (#434).
         partition = self.tmp / "bars.json"
-        partition.write_text(json.dumps({"schema_version": 1, "slices": [
-            {"name": "api", "paths": ["src/api/*"]}, {"name": "core", "paths": ["src/core/*"]}]}))
+        partition.write_text(json.dumps(validated_partition()))
         state = empty_state()
         add_assignment(state, AT, "developer", "grok", task="t-bar", status="applied")
         save_state(self.state, state)
@@ -795,8 +843,7 @@ class ApplyCommandTest(CliCase):
         # Tier candidacy is decided per responsibility, so a seat key would
         # reach the planner's exclusion parser as an unknown role (#434).
         partition = self.tmp / "tiers.json"
-        partition.write_text(json.dumps({"schema_version": 1, "slices": [
-            {"name": "api", "paths": ["src/api/*"]}, {"name": "core", "paths": ["src/core/*"]}]}))
+        partition.write_text(json.dumps(validated_partition()))
         out = io.StringIO()
         code = main(self.base() + ["plan", "--roles", "reviewer", "--partition", str(partition),
                                    "--task", "t-tiers", "--now", AT,
@@ -838,15 +885,278 @@ class ApplyCommandTest(CliCase):
         code, _, err = self.run_cli(
             self.base()
             + ["apply", "--composer-settle", "0",
-               "--assignments", json.dumps({"reviewer#api": "grok"}),
+               "--assignments", json.dumps(self.seat_plan),
                "--task", "t-ledger-seat", "--common", str(self.common), "--now", AT]
-            + ["--brief", "reviewer#api=" + str(self.briefs["reviewer"]),
+            + ["--brief", "reviewer#api=" + str(self.seat_brief),
                "--report", "reviewer#api=" + str(self.tmp / "ledger-seat.md")],
             client=client,
         )
         self.assertEqual(code, 0, err)
         rows = json.loads(self.state.read_text())["assignments"]
         self.assertEqual([row["role"] for row in rows], ["reviewer"])
+
+    def test_planning_from_an_unvalidated_partition_is_refused(self):
+        # `plan` has no repo, base or head, so it cannot check ownership
+        # itself. Seating from the checked RESULT is what makes the round's
+        # slices provably disjoint and exhaustive (#453).
+        raw = self.tmp / "raw-partition.json"
+        raw.write_text(json.dumps({"schema_version": 1, "slices": [
+            {"name": "api", "paths": ["src/api/*"]}, {"name": "core", "paths": ["src/core/*"]}]}))
+        code, _, err = self.run_cli(
+            self.base() + ["plan", "--roles", "reviewer", "--partition", str(raw),
+                           "--task", "t-unchecked", "--now", AT,
+                           "--snapshot", str(self.snapshot)])
+        self.assertEqual(code, 1)
+        self.assertIn("carries no `changed` set", err)
+        self.assertIn("validate-partition", err)
+
+    def test_a_resolved_path_with_glob_characters_still_seats(self):
+        # A result's paths are resolved FILENAMES, so re-matching them as
+        # patterns reads `[x]` as a character class and reports the file it
+        # names unowned — rejecting a valid result (#453).
+        tricky = self.tmp / "tricky-result.json"
+        tricky.write_text(json.dumps(validated_partition(
+            slices=[{"name": "api", "paths": ["src/api/[x].py"]},
+                    {"name": "core", "paths": ["src/core/a?b.py"]}],
+            changed=["src/api/[x].py", "src/core/a?b.py"])), encoding="utf-8")
+        code, out, err = self.run_cli(
+            self.base() + ["plan", "--roles", "reviewer", "--partition", str(tricky),
+                           "--task", "t-tricky", "--now", AT,
+                           "--snapshot", str(self.snapshot)])
+        self.assertEqual(code, 0, err)
+        self.assertEqual(json.loads(out)["slice_paths"],
+                         {"reviewer#api": ["src/api/[x].py"],
+                          "reviewer#core": ["src/core/a?b.py"]})
+
+    def test_planning_from_an_edited_validated_result_is_refused(self):
+        # The result's verdict is not taken on faith: overlapping slices and a
+        # changed file no slice owns both pass a shape check, so ownership is
+        # re-derived against the `changed` set the result carries (#453).
+        edited = self.tmp / "edited-result.json"
+        edited.write_text(json.dumps(validated_partition(
+            slices=[{"name": "api", "paths": ["src/**"]},
+                    {"name": "core", "paths": ["src/core/*"]}],
+            changed=["src/core/db.py", "docs/guide.md"])), encoding="utf-8")
+        code, _, err = self.run_cli(
+            self.base() + ["plan", "--roles", "reviewer", "--partition", str(edited),
+                           "--task", "t-edited-result", "--now", AT,
+                           "--snapshot", str(self.snapshot)])
+        self.assertEqual(code, 1)
+        self.assertIn("docs/guide.md", err)
+
+    def test_a_boundary_edited_after_planning_is_refused(self):
+        # The digest is stamped over the map the validated partition carried;
+        # editing the plan's paths afterwards no longer matches it.
+        edited = {**self.seat_plan, "slice_paths": {"reviewer#api": ["src/**"]}}
+        code, _, err = self.run_cli(
+            self.base()
+            + ["apply", "--composer-settle", "0", "--assignments", json.dumps(edited),
+               "--task", "t-edited", "--common", str(self.common), "--now", AT, "--dry-run"]
+            + ["--brief", "reviewer#api=" + str(self.seat_brief)],
+            client=self._client({}),
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("no longer match its slice_digest", err)
+
+    def test_a_malformed_slice_paths_map_is_refused_not_crashed(self):
+        # `slice_paths` rides in an editable document, and a seat mapped to a
+        # non-list reached the digest as an unhashable value — a traceback
+        # where `apply` promises a refusal (#453).
+        for broken in ({"reviewer#api": None}, {"reviewer#api": []},
+                       {"reviewer#api": ["src/api/*", 7]}):
+            with self.subTest(broken=broken):
+                edited = {**self.seat_plan, "slice_paths": broken}
+                code, _, err = self.run_cli(
+                    self.base()
+                    + ["apply", "--composer-settle", "0", "--assignments", json.dumps(edited),
+                       "--task", "t-malformed", "--common", str(self.common), "--now", AT,
+                       "--dry-run"]
+                    + ["--brief", "reviewer#api=" + str(self.seat_brief)],
+                    client=self._client({}),
+                )
+                self.assertEqual(code, 1)
+                self.assertIn("non-empty list of globs", err)
+                self.assertNotIn("Traceback", err)
+
+    def test_a_seat_brief_missing_its_boundary_is_refused(self):
+        # A hand-written or differently-composed brief carries no digest, so a
+        # full-surface brief cannot be dispatched as a slice verdict.
+        bare = self.tmp / "bare-seat.md"
+        bare.write_text("# reviewer#api\n", encoding="utf-8")
+        code, _, err = self.run_cli(
+            self.base()
+            + ["apply", "--composer-settle", "0", "--assignments", json.dumps(self.seat_plan),
+               "--task", "t-bare", "--common", str(self.common), "--now", AT, "--dry-run"]
+            + ["--brief", "reviewer#api=" + str(bare)],
+            client=self._client({}),
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("does not carry", err)
+        self.assertIn("scope block", err)
+
+    def test_a_version_6_shaped_seated_plan_is_refused(self):
+        # Plan schema 7 adds `seat_digests`. Model the pre-7 document itself —
+        # the boundary keys a version-6 plan carried and no per-seat entry —
+        # together with the brief such a plan produced, which could only carry
+        # the round-level digest. The round digest is not evidence each seat's
+        # boundary was bound, so the dispatch is refused (#453).
+        from teamlead.partition import slice_digest as _round_digest, slice_scope
+        plan = bound_seat_plan({"reviewer#api": "grok"})
+        legacy_plan = {key: value for key, value in plan.items() if key != "seat_digests"}
+        self.assertNotIn("seat_digests", legacy_plan)
+        legacy = self.tmp / "legacy-seat.md"
+        legacy.write_text(
+            "# reviewer#api\n\n{}\n".format(slice_scope(
+                "reviewer#api", legacy_plan["slice_paths"]["reviewer#api"],
+                _round_digest(legacy_plan["slice_paths"]))),
+            encoding="utf-8")
+        code, _, err = self.run_cli(
+            self.base()
+            + ["apply", "--composer-settle", "0", "--assignments", json.dumps(legacy_plan),
+               "--task", "t-legacy-seat", "--common", str(self.common), "--now", AT,
+               "--dry-run"]
+            + ["--brief", "reviewer#api=" + str(legacy)],
+            client=self._client({}),
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("scope block", err)
+
+    def test_an_unsafe_glob_in_the_plan_is_refused(self):
+        # A glob renders verbatim into the brief, so a backtick closes the code
+        # span and appends instructions. validate_document and the composer
+        # both refuse these; an edited plan reaches apply without either (#453).
+        edited = {**self.seat_plan, "slice_paths": {"reviewer#api": ["src/api/`whoami`"]}}
+        code, _, err = self.run_cli(
+            self.base()
+            + ["apply", "--composer-settle", "0", "--assignments", json.dumps(edited),
+               "--task", "t-unsafe", "--common", str(self.common), "--now", AT, "--dry-run"]
+            + ["--brief", "reviewer#api=" + str(self.seat_brief)],
+            client=self._client({}),
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("backtick or a control character", err)
+
+    def test_a_plan_stripped_of_its_seats_is_refused(self):
+        # Keyed on the metadata, not the seats: dropping every seat from a
+        # saved plan would otherwise skip the check and dispatch a full-surface
+        # role while the plan still carried the boundary (#453).
+        stripped = {**self.seat_plan, "assignments": {"reviewer": "grok"}}
+        plain = self.tmp / "plain-reviewer.md"
+        plain.write_text("# reviewer\n", encoding="utf-8")
+        code, _, err = self.run_cli(
+            self.base()
+            + ["apply", "--composer-settle", "0", "--assignments", json.dumps(stripped),
+               "--task", "t-stripped", "--common", str(self.common), "--now", AT,
+               "--dry-run"]
+            + ["--brief", "reviewer=" + str(plain)],
+            client=self._client({}),
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("no longer describe the same partition", err)
+
+    def test_a_plan_keeping_only_seat_digests_is_refused(self):
+        # All three keys are partition metadata, so dropping two and keeping
+        # `seat_digests` must not slip past the trigger (#453).
+        stripped = {"schema_version": 1, "assignments": {"reviewer": "grok"},
+                    "seat_digests": self.seat_plan["seat_digests"]}
+        plain = self.tmp / "plain-digests.md"
+        plain.write_text("# reviewer\n", encoding="utf-8")
+        code, _, err = self.run_cli(
+            self.base()
+            + ["apply", "--composer-settle", "0", "--assignments", json.dumps(stripped),
+               "--task", "t-digests-only", "--common", str(self.common), "--now", AT,
+               "--dry-run"]
+            + ["--brief", "reviewer=" + str(plain)],
+            client=self._client({}),
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("slice_paths and slice_digest", err)
+
+    def test_a_plan_missing_one_seat_is_refused(self):
+        # The remaining seat would pass on its own while the change it was
+        # partitioned over is no longer covered (#453).
+        plan = bound_seat_plan({"reviewer#api": "grok", "reviewer#core": "claude"})
+        partial = {**plan, "assignments": {"reviewer#api": "grok"}}
+        brief = self.tmp / "partial-api.md"
+        brief.write_text(seat_brief_text("reviewer#api", plan), encoding="utf-8")
+        code, _, err = self.run_cli(
+            self.base()
+            + ["apply", "--composer-settle", "0", "--assignments", json.dumps(partial),
+               "--task", "t-partial", "--common", str(self.common), "--now", AT,
+               "--dry-run"]
+            + ["--brief", "reviewer#api=" + str(brief)],
+            client=self._client({}),
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("no longer describe the same partition", err)
+
+    def test_a_brief_scattering_the_facts_is_refused(self):
+        # Digest, slice name and path all present, and a whole-repository pass
+        # directed anyway: three substring checks pass and a full-surface
+        # verdict dispatches as a slice one. The scope block carries its own
+        # restrictions, so requiring the block requires those too (#453).
+        scattered = self.tmp / "scattered-seat.md"
+        scattered.write_text(
+            "# reviewer#api\n\nPartition {}. Slice api. Paths: {}.\n\n"
+            "Review the whole repository this round.\n".format(
+                self.seat_plan["seat_digests"]["reviewer#api"],
+                self.seat_plan["slice_paths"]["reviewer#api"][0]),
+            encoding="utf-8")
+        code, _, err = self.run_cli(
+            self.base()
+            + ["apply", "--composer-settle", "0", "--assignments", json.dumps(self.seat_plan),
+               "--task", "t-scattered", "--common", str(self.common), "--now", AT,
+               "--dry-run"]
+            + ["--brief", "reviewer#api=" + str(scattered)],
+            client=self._client({}),
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("scope block", err)
+
+    def test_swapped_seat_briefs_are_refused(self):
+        # A round-level digest is identical in every brief, so a check that
+        # only asks whether the digest is present passes two seats whose briefs
+        # were exchanged. Each brief answers for its OWN seat (#453).
+        plan = bound_seat_plan({"reviewer#api": "grok", "reviewer#core": "claude"})
+        swapped = {}
+        for seat, other in (("reviewer#api", "reviewer#core"), ("reviewer#core", "reviewer#api")):
+            brief = self.tmp / (seat.replace("#", "-") + "-swapped.md")
+            brief.write_text(seat_brief_text(other, plan), encoding="utf-8")
+            swapped[seat] = brief
+        code, _, err = self.run_cli(
+            self.base()
+            + ["apply", "--composer-settle", "0", "--assignments", json.dumps(plan),
+               "--task", "t-swapped", "--common", str(self.common), "--now", AT, "--dry-run"]
+            + ["--brief", "reviewer#api=" + str(swapped["reviewer#api"]),
+               "--brief", "reviewer#core=" + str(swapped["reviewer#core"])],
+            client=self._client({}),
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("scope block", err)
+
+    def test_a_hand_written_seat_assignment_is_refused(self):
+        # A bare `{seat: agent}` map has no checked boundary at all.
+        code, _, err = self.run_cli(
+            self.base()
+            + ["apply", "--composer-settle", "0",
+               "--assignments", json.dumps({"reviewer#api": "grok"}),
+               "--task", "t-hand", "--common", str(self.common), "--now", AT, "--dry-run"]
+            + ["--brief", "reviewer#api=" + str(self.seat_brief)],
+            client=self._client({}),
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("need the plan's slice_paths and slice_digest", err)
+
+    def test_an_unseated_round_needs_no_boundary(self):
+        code, _, err = self.run_cli(
+            self.base()
+            + ["apply", "--composer-settle", "0",
+               "--assignments", json.dumps({"developer": "grok"}),
+               "--common", str(self.common), "--now", AT, "--dry-run"]
+            + self.brief_args("developer"),
+            client=self._client({}),
+        )
+        self.assertEqual(code, 0, err)
 
     def test_a_seated_apply_without_a_task_is_refused(self):
         # The ledger row records the responsibility and the DISPATCH records
@@ -856,9 +1166,9 @@ class ApplyCommandTest(CliCase):
         code, _, err = self.run_cli(
             self.base()
             + ["apply", "--composer-settle", "0",
-               "--assignments", json.dumps({"reviewer#api": "grok"}),
+               "--assignments", json.dumps(self.seat_plan),
                "--common", str(self.common), "--now", AT, "--dry-run"]
-            + ["--brief", "reviewer#api=" + str(self.briefs["reviewer"])],
+            + ["--brief", "reviewer#api=" + str(self.seat_brief)],
             client=self._client({}),
         )
         self.assertEqual(code, 1)
@@ -873,9 +1183,9 @@ class ApplyCommandTest(CliCase):
         code, _, err = self.run_cli(
             self.base()
             + ["apply", "--composer-settle", "0",
-               "--assignments", json.dumps({"reviewer#api": "grok"}),
+               "--assignments", json.dumps(self.seat_plan),
                "--task", "t-live-seat", "--common", str(self.common), "--now", AT]
-            + ["--brief", "reviewer#api=" + str(self.briefs["reviewer"]),
+            + ["--brief", "reviewer#api=" + str(self.seat_brief),
                "--report", "reviewer#api=" + str(self.tmp / "seat-report.md")],
             client=self._client({"grok": "idle"}),
         )
@@ -895,9 +1205,9 @@ class ApplyCommandTest(CliCase):
         code, _, err = self.run_cli(
             self.base()
             + ["apply", "--composer-settle", "0",
-               "--assignments", json.dumps({"reviewer#api": "grok"}),
+               "--assignments", json.dumps(self.seat_plan),
                "--task", "t-reload-seat", "--common", str(self.common), "--now", AT]
-            + ["--brief", "reviewer#api=" + str(self.briefs["reviewer"]),
+            + ["--brief", "reviewer#api=" + str(self.seat_brief),
                "--report", "reviewer#api=" + str(self.tmp / "reload-report.md")],
             client=self._client({"grok": "idle"}),
         )
@@ -920,9 +1230,9 @@ class ApplyCommandTest(CliCase):
         code, _, err = self.run_cli(
             self.base()
             + ["apply", "--composer-settle", "0",
-               "--assignments", json.dumps({"reviewer#api": "grok"}),
+               "--assignments", json.dumps(self.seat_plan),
                "--task", "t-seat", "--now", AT, "--common", str(self.common), "--dry-run"]
-            + ["--brief", "reviewer#api=" + str(self.briefs["reviewer"])],
+            + ["--brief", "reviewer#api=" + str(self.seat_brief)],
             client=self._client({}),
         )
         self.assertEqual(code, 1)

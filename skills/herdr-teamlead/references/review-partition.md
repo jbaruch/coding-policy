@@ -65,16 +65,34 @@ owns nothing. Fix the document and re-run. Dispatch only once it exits 0.
 
 ## Seating
 
-`plan --partition <partition.json>` replaces the named role with one seat per
-slice, keyed `<role>#<slice>` in the plan's `assignments`. A seat's ROLE
+`plan --partition <validated.json>`, naming the file `validate-partition` wrote,
+replaces the named role with one seat per slice, keyed `<role>#<slice>` in the plan's `assignments`. A seat's ROLE
 decides everything the responsibility governs — its cost and rotation history,
 exclusions, round type, requirements, tier qualification and the review-package
 checks its brief owes — so capability, contribution-exclusion and headroom
 ordering apply unchanged and each slice gets a distinct worker.
 
-`plan --partition` emits `slice_paths`, a `{seat: [glob, ...]}` map taken from
-the validated document, so the boundary reaches the composer without a hand
-copy. Each seat's values carry those globs as `SLICE_PATHS`. `compose-briefs.sh`
+`plan --partition` takes the OUTPUT of `validate-partition`, not the document
+it was built from. The result carries the slices with their resolved paths and
+the `changed` set they were checked against, so a seated round is seated from a
+partition proven disjoint and exhaustive over this round's change. `plan` reads
+no repo, base or head and cannot check ownership itself; passing the document
+is refused, naming the command to run.
+
+`plan` emits `slice_paths`, a `{seat: [glob, ...]}` map, `slice_digest` over it,
+and `seat_digests`, one digest per seat over that seat and the globs it owns.
+Each seat's values carry its globs as `SLICE_PATHS` and its own `seat_digests`
+entry as `SLICE_DIGEST`; `compose-briefs.sh` renders both into the brief without
+recomputing either. `apply` re-derives each seat's digest from the plan,
+renders that seat's scope block from the plan exactly as the composer does, and
+requires the brief to carry that block verbatim. The block, not the facts inside
+it: a brief that scatters the digest, the slice name and a path while directing
+a whole-repository pass satisfies three substring checks and still dispatches a
+full-surface verdict as a slice one, and the block carries the no-roaming
+restrictions with it. A boundary edited after validation — in the plan, in the
+values, or in a brief written by hand — no longer matches, and the dispatch is
+refused. Two seats' briefs exchanged are refused with it, which a round-level
+digest alone would pass. `compose-briefs.sh`
 renders the slice name and those paths into the brief's `SLICE_SCOPE` and
 refuses a seat without them: a slice name alone leaves the worker no boundary
 to resolve, and the composer never reads the partition document. `SLICE_SCOPE`

@@ -161,7 +161,9 @@ bash "$CP/skills/herdr-teamlead/teamlead.sh" validate-partition \
 ```
 
 Exit 1 names every unowned path, every overlap and every slice owning nothing,
-in one run. Fix the partition and re-run; plan only once it exits 0. The document's format, the ownership
+in one run. Fix the partition and re-run; plan only once it exits 0. Save its
+stdout — `plan --partition` takes that result, never the document
+`validate-partition` read. Format, ownership
 payload and the seating it produces:
 
 ```text
@@ -172,7 +174,7 @@ skills/herdr-teamlead/references/review-partition.md
 CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
 bash "$CP/skills/herdr-teamlead/teamlead.sh" plan \
   --roles <role[,role...]> [--requirements <requirements.json>] \
-  [--exclude <role>=<agent>[,<agent>...]]... [--partition <partition.json>] \
+  [--exclude <role>=<agent>[,<agent>...]]... [--partition <validated.json>] \
   [--judge-mode adjudication|diagnosis] \
   [--round <role>=<round-type>] [--round-context <evidence.json>] \
   --task <task-id> [--fix-round <N>] [--correction-plan <id> --work <work.json>]

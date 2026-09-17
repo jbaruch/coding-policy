@@ -683,7 +683,7 @@ def _expand_partition_seats(roles, partition_path):
     """
     if not partition_path:
         return roles, {}, {}
-    document = partition.load_partition(partition_path)
+    document = partition.load_validated(partition_path)
     role = partition.partition_role(document)
     if role not in roles:
         raise PlanError(
@@ -860,7 +860,16 @@ def cmd_plan(args, client=None, warn=None, trace=None):
     # The composer requires each seat's owned paths and reads no partition, so
     # the plan hands them over from the document `validate-partition` accepted.
     if seat_paths:
-        result["slice_paths"] = {seat: paths for seat, paths in seat_paths.items() if seat in result["assignments"]}
+        accepted = {seat: paths for seat, paths in seat_paths.items() if seat in result["assignments"]}
+        result["slice_paths"] = accepted
+        # The digest travels with the map, into each brief and back at dispatch,
+        # so an edit between the validated partition and the send is refused.
+        result["slice_digest"] = partition.slice_digest(accepted)
+        # Per seat as well: one digest for the whole round is identical in
+        # every brief, so swapping two seats' briefs would pass a check that
+        # only asks whether a digest is present.
+        result["seat_digests"] = {seat: partition.seat_digest(seat, paths)
+                                  for seat, paths in accepted.items()}
     return result, None
 
 
@@ -875,6 +884,98 @@ def _refusal_moves(store, agents_by_name, assignments, roles, args, paths, repor
             if move is not None:
                 moves[role] = move
     return moves
+
+
+def _require_bound_slices(document, seated, briefs):
+    """Refuse a seated dispatch whose boundary is not the one that was checked.
+
+    `plan` stamps `slice_digest` over the map `validate-partition` accepted and
+    `compose-briefs.sh` renders it into each seat's brief. Recomputing it here
+    catches a plan edited after planning, and reading it back out of the brief
+    catches a brief composed against a different boundary or written by hand —
+    the two places a human artifact sits between the check and the send (#453).
+    """
+    recorded = document.get("slice_digest")
+    slice_paths = document.get("slice_paths")
+    if not isinstance(recorded, str) or not isinstance(slice_paths, dict):
+        raise UsageError(
+            "Seats {} need the plan's slice_paths and slice_digest: seat them with "
+            "`plan --partition <validate-partition output>` rather than hand-writing the "
+            "assignments, so the boundary that ships is the one that was checked.".format(
+                ", ".join(seated)),
+            {"roles": seated})
+    # Shape before hashing: `slice_paths` rides in an editable `--assignments`
+    # document, and a seat mapped to a non-list — or to a list carrying a
+    # non-string — reaches the digest as an unhashable value and leaves a
+    # traceback where this function promises a refusal.
+    malformed = [seat for seat, globs in slice_paths.items()
+                 if not isinstance(seat, str) or not isinstance(globs, list) or not globs
+                 or any(not isinstance(glob, str) or not glob.strip() for glob in globs)]
+    if malformed:
+        raise UsageError(
+            "The plan's slice_paths maps {} to something other than a non-empty list of "
+            "globs; re-run `plan --partition <validate-partition output>` rather than "
+            "editing the assignments.".format(
+                ", ".join(repr(seat) for seat in sorted(map(str, malformed)))),
+            {"seats": [str(seat) for seat in malformed]})
+    # A glob is rendered verbatim into the brief, so a backtick or a control
+    # character closes the code span and appends instructions of its own.
+    # `validate_document` and the composer both refuse these; a hand-written
+    # plan reaches the renderer without passing either.
+    unsafe = sorted(seat for seat, globs in slice_paths.items()
+                    if any(partition.UNSAFE_GLOB.search(glob) for glob in globs))
+    if unsafe:
+        raise UsageError(
+            "The plan's slice_paths gives {} a glob carrying a backtick or a control "
+            "character, which the brief renders verbatim; re-run `plan --partition "
+            "<validate-partition output>` rather than editing the assignments.".format(
+                ", ".join(repr(seat) for seat in unsafe)),
+            {"seats": unsafe})
+    # Exactly the seated assignments, no more and no less: a plan stripped of a
+    # seat would otherwise dispatch the remainder as if the partition still
+    # covered the change, and one stripped of all of them a full-surface role.
+    if sorted(slice_paths) != sorted(seated):
+        raise UsageError(
+            "The plan's slice_paths covers {} but this apply seats {}; the boundary and "
+            "the round no longer describe the same partition. Replan rather than editing "
+            "the assignments.".format(
+                ", ".join(repr(seat) for seat in sorted(map(str, slice_paths))) or "nothing",
+                ", ".join(repr(role) for role in sorted(seated)) or "nothing"),
+            {"slice_paths": sorted(map(str, slice_paths)), "seated": sorted(seated)})
+    expected = partition.slice_digest(slice_paths)
+    if expected != recorded:
+        raise UsageError(
+            "The plan's slice_paths no longer match its slice_digest ({} vs {}); the "
+            "boundary changed after planning. Re-run validate-partition and plan rather "
+            "than editing either.".format(expected, recorded),
+            {"expected": expected, "recorded": recorded})
+    for role in seated:
+        if role not in slice_paths:
+            raise UsageError(
+                "Seat {!r} is not in the plan's slice_paths, so its boundary was never "
+                "checked; plan the round from the validated partition.".format(role),
+                {"role": role})
+        brief = briefs.get(role)
+        try:
+            body = Path(brief).read_text(encoding="utf-8") if brief else ""
+        except (OSError, UnicodeError) as exc:
+            raise UsageError(
+                "Cannot read the brief for seat {!r} at {}: {}.".format(role, brief, exc),
+                {"role": role}) from None
+        # The whole scope block, not the facts it contains. A brief that
+        # scatters the digest, the slice name and a path while directing a
+        # whole-repository pass satisfies three substring checks and still
+        # dispatches a full-surface verdict as a slice one; the block carries
+        # its own restrictions, so requiring it requires those too.
+        expected_seat = partition.seat_digest(role, slice_paths[role])
+        expected_scope = partition.slice_scope(role, slice_paths[role], expected_seat)
+        if expected_scope not in body:
+            raise UsageError(
+                "The brief for seat {!r} does not carry this seat's scope block, so it "
+                "was not composed against the boundary this plan checked. Compose it "
+                "with `compose-briefs.sh` from the plan's slice_paths and seat_digests; "
+                "the block it renders reads: {}".format(role, expected_scope),
+                {"role": role, "expected_scope": expected_scope})
 
 
 def cmd_apply(args, client=None, warn=None, trace=None):
@@ -917,6 +1018,12 @@ def cmd_apply(args, client=None, warn=None, trace=None):
     if document.get("task_context") is not None and document["task_context"] != task_context:
         raise UsageError("Saved plan and apply name different task, count or correction bounds; replan from the current ledger.", {})
     paths = resolve_paths(assignments, _parse_briefs(args.briefs), args.common)
+    if seated or any(key in document for key in ("slice_paths", "slice_digest", "seat_digests")):
+        # Keyed on the metadata, not only on the seats: a saved plan stripped
+        # of every seat would otherwise skip the check entirely and dispatch a
+        # full-surface role while still carrying the boundary it was planned
+        # against. After the briefs resolve, since the check reads each brief.
+        _require_bound_slices(document, seated, paths)
     reports = _parse_reports(args.reports, assignments)
     supervised = supervision.dispatch_binding(state_path) is not None
     if requirements and not args.dry_run and not supervised:

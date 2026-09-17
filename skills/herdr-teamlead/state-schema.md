@@ -84,6 +84,19 @@ require explicit requirements; the parser and selection contract live in
 `references/specialists.md`. Apply rechecks current eligibility before an unsent
 dispatch. A completed exact retry returns its original receipt.
 
+Plan schema 7 adds the partitioned round's boundary: `slice_paths`, a
+`{seat: [glob, ...]}` map of what each seat owns; `slice_digest` over that map;
+and `seat_digests`, one digest per seat over that seat and its own globs.
+Writer: `plan --partition`, from the accepted `validate-partition` result.
+Readers: `compose-briefs.sh`, which renders each seat's globs and its
+`seat_digests` entry into the brief without recomputing either, and `apply`,
+which re-derives both from the plan and checks the seat's digest, its slice
+name and every one of its globs against that seat's brief. A version-6 seated
+plan carries no `seat_digests`; briefs composed from its round-level digest
+fail that per-seat check and the dispatch is refused, rather than the round
+digest standing in as evidence each seat's boundary was bound. An unpartitioned
+plan carries none of the three keys at either version and is unaffected.
+
 The optional `role_costs` key is the second:
 `{"<role>": <number>}`, what one round in that seat is expected to
 burn out of a worker's remaining headroom percentage. It overrides the
