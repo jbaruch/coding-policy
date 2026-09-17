@@ -1379,9 +1379,9 @@ class PaneLabelTest(unittest.TestCase):
     def test_a_task_that_already_carries_a_hash_is_not_doubled(self):
         self.assertEqual(pane_label("developer", "#12"), "developer #12")
 
-    def test_the_model_label_trails_after_a_dot(self):
+    def test_the_model_label_precedes_the_task_after_a_dot(self):
         self.assertEqual(
-            pane_label("developer", "12", "gpt-5.6"), "developer #12 \u00b7 gpt-5.6"
+            pane_label("developer", "12", "gpt-5.6"), "developer \u00b7 gpt-5.6 #12"
         )
 
     def test_a_model_with_no_task_still_reads(self):

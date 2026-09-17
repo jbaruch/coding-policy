@@ -376,7 +376,7 @@ each worker's workspace after its agent, and each worker's pane after its kind.
 Run it once per team, not once per round.
 
 After a CONFIRMED hand-off, `apply` relabels the worker's pane with the work:
-`<role> #<task> · <model>`, dropping whichever parts the round did not supply.
+`<role> · <model> #<task>`, dropping whichever parts the round did not supply.
 The agent's name is deliberately absent — the workspace row above already
 carries it, and repeating it spends the sidebar's width saying the same thing
 twice. A hand-off that never started is not labelled: a pane claiming a role

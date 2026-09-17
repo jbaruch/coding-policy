@@ -60,6 +60,15 @@
   as nothing abandoned. Both suites pin every fixture's mtime to a fixed past
   literal and select the verdict with the age floor, so no case's result moves
   with the run-time clock.
+## 0.3.244 — 2026-09-17
+
+### Fixed
+
+- **Herdr pane labels carry the model before the task.** A confirmed
+  assignment labels its pane `<role> · <model> #<task>`, so the model stays
+  visible in the sidebar ahead of a task description long enough to truncate
+  it. Labels still drop whichever parts the round did not supply and still
+  preserve a task that already carries its own hash.
 
 ## 0.3.243 — 2026-09-17
 
