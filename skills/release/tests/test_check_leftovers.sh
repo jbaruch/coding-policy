@@ -43,7 +43,8 @@ PINNED_MTIME=202601010000
 #: PINNED_MTIME clears by a wide margin. Both are literals; neither moves.
 PINNED_RECENT_MTIME=202605302200
 AGED_FLOOR=1
-FRESH_FLOOR=99999999
+#: Below the script's own ceiling, and far above any age these fixtures reach.
+FRESH_FLOOR=875000
 #: Between the two: PINNED_MTIME is 3600h old and PINNED_RECENT_MTIME is 2h.
 SPLIT_FLOOR=24
 
@@ -337,6 +338,20 @@ main() {
   run_check "$TMP/badfloor" "-1"
   if [[ $RC -eq 2 ]] && printf '%s' "$ERRTEXT" | grep -qF 'LEFTOVERS_MIN_AGE_HOURS'; then
     pass; else fail "a negative age floor exits 2, got RC=$RC ERR=$ERRTEXT"; fi
+
+  # All digits, and past what the shell's arithmetic holds: every comparison
+  # using it would exit 2, and a failed comparison reads as false.
+  run_check "$TMP/badfloor" "999999999999999999999999"
+  if [[ $RC -eq 2 ]] && printf '%s' "$ERRTEXT" | grep -qF 'ceiling'; then
+    pass; else fail "an oversized age floor exits 2, got RC=$RC ERR=$ERRTEXT"; fi
+
+  # Leading zeros are a whole number written differently, not a bad value.
+  new_repo "$TMP/zeropad"
+  echo lost >> "$TMP/zeropad/file.txt"
+  age "$TMP/zeropad/file.txt"
+  run_check "$TMP/zeropad" "0001"
+  if [[ $RC -eq 1 ]] && printf '%s' "$OUT" | grep -qF '"verdict":"abandoned"'; then
+    pass; else fail "a zero-padded age floor is accepted, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
 
   # `rev-parse --abbrev-ref HEAD` prints HEAD and exits 0 on a detached HEAD, so
   # that case is a branch name to translate, not a failure to absorb.

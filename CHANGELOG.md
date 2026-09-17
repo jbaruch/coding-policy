@@ -167,6 +167,13 @@
   parse the hook's stdout as the JSON object its contract promises rather than
   greping it as text, which plain text carrying the same words would have
   passed.
+
+  The age floor's own validation had the same hole it was added to close.
+  Digits alone are not a number the shell can compare: a value past 64 bits
+  makes every `-ge` using it exit 2, and a failed comparison is false, which is
+  again the verdict that spares the worktree. A century in hours is the ceiling,
+  checked by length before by value so the numeric test never sees what it
+  cannot evaluate.
 ## 0.3.244 — 2026-09-17
 
 ### Fixed

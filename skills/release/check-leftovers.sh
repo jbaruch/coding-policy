@@ -48,12 +48,16 @@
 #
 # LEFTOVERS_MIN_AGE_HOURS overrides the age floor an OTHER worktree must clear
 # before its dirt reads as abandoned rather than freshly started. A value that is
-# not a whole number of hours exits 2 rather than silently failing every
-# comparison it is used in.
+# not a whole number of hours, or is past FLOOR_CEILING, exits 2 rather than
+# silently failing every comparison it is used in.
 set -euo pipefail
 
 #: An other-worktree leftover younger than this is someone still typing.
 LEFTOVERS_MIN_AGE_HOURS="${LEFTOVERS_MIN_AGE_HOURS:-4}"
+#: A century in hours, and the largest floor this accepts. Anything above it is
+#: unreachable by a real mtime, and a digit string past the shell's arithmetic
+#: would break every comparison that used it.
+FLOOR_CEILING=876000
 
 #: Where a git command's stderr lands while its stdout carries NUL-separated
 #: records. Set once the scratch directory exists.
@@ -285,6 +289,18 @@ main() {
     ''|*[!0-9]*)
       die "LEFTOVERS_MIN_AGE_HOURS is '${LEFTOVERS_MIN_AGE_HOURS}' -- set it to a whole number of hours (0 or more), or unset it to use the default" ;;
   esac
+  # Digits alone are not enough. A value past what the shell's arithmetic holds
+  # makes every comparison using it exit 2, and a failed comparison is false --
+  # the verdict that spares the worktree. The length test runs first so the
+  # numeric one never sees a value it cannot evaluate. FLOOR_CEILING is a
+  # century in hours: a floor above it can never be reached by a real mtime,
+  # so rejecting it costs nothing and catches a fat-fingered value.
+  LEFTOVERS_MIN_AGE_HOURS="${LEFTOVERS_MIN_AGE_HOURS#"${LEFTOVERS_MIN_AGE_HOURS%%[!0]*}"}"
+  [ -n "$LEFTOVERS_MIN_AGE_HOURS" ] || LEFTOVERS_MIN_AGE_HOURS=0
+  if [ "${#LEFTOVERS_MIN_AGE_HOURS}" -gt "${#FLOOR_CEILING}" ] \
+     || [ "$LEFTOVERS_MIN_AGE_HOURS" -gt "$FLOOR_CEILING" ]; then
+    die "LEFTOVERS_MIN_AGE_HOURS is '${LEFTOVERS_MIN_AGE_HOURS}', past the ${FLOOR_CEILING}-hour ceiling -- set it to a whole number of hours between 0 and ${FLOOR_CEILING}, or unset it to use the default"
+  fi
 
   SCRATCH="$(mktemp -d "${TMPDIR:-/tmp}/check-leftovers.XXXXXX")" \
     || die "cannot create a temporary directory under ${TMPDIR:-/tmp} -- check it is writable, then re-run"
