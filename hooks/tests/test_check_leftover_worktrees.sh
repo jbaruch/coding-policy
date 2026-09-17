@@ -59,8 +59,34 @@ AGED_FLOOR=1
 
 age() { touch -t "$PINNED_MTIME" "$@" || die "touch $*"; }
 
+# A frozen "now" for every case that reads an age. Fixture mtimes alone leave
+# the other half of the subtraction on the runtime clock, and Determinism asks
+# for the clock itself to be injected (rules/testing-standards.md). The detector
+# calls `date +%s` and nothing else, so the shim answers that and fails loudly on
+# anything else rather than letting a changed call quietly reach the real clock.
+FROZEN_NOW=1780185600
+# TZ is pinned with it: `touch -t` reads local time, so without this the age is
+# the frozen clock minus a mtime that moves with the runner's zone. Pinned, the
+# gap between FROZEN_NOW and PINNED_MTIME is the same everywhere, and
+# skills/release/tests/test_check_leftovers.sh asserts that constant outright.
+export TZ=UTC
+
+freeze_clock() { # <bin-dir>
+  mkdir -p "$1" || die "mkdir $1"
+  {
+    printf '#!/bin/sh\n'
+    # shellcheck disable=SC2016  # The single quotes are the point: $1 and $*
+    # belong to the shim being written, not to this shell.
+    printf 'if [ "$1" = "+%%s" ]; then echo %s; exit 0; fi\n' "$FROZEN_NOW"
+    printf 'echo "frozen-clock shim: unexpected date invocation: $*" >&2\n'
+    printf 'exit 2\n'
+  } > "$1/date" || die "write clock shim"
+  chmod +x "$1/date" || die "chmod clock shim"
+}
+
 run_hook() { # <cwd> <hook-path>
-  OUT="$(cd "$1" && LEFTOVERS_MIN_AGE_HOURS="$AGED_FLOOR" bash "$2" 2>"$ERRFILE")"
+  OUT="$(cd "$1" && PATH="$CLOCKBIN:$PATH" LEFTOVERS_MIN_AGE_HOURS="$AGED_FLOOR" \
+    bash "$2" 2>"$ERRFILE")"
   RC=$?
   ERRTEXT="$(cat "$ERRFILE")"
 }
@@ -70,6 +96,8 @@ main() {
   ERRFILE="$TMP/err"
   cleanup() { rm -rf "$TMP"; return 0; }
   trap cleanup EXIT
+  CLOCKBIN="$TMP/clockbin"
+  freeze_clock "$CLOCKBIN"
 
   local real="${HERE}/../../skills/release/check-leftovers.sh"
   [ -r "$real" ] || die "detector not found beside the hook at $real"
@@ -196,7 +224,8 @@ main() {
   # A repository git cannot read is not the same answer as standing outside one.
   new_repo "$TMP/badgitdir"
   HOOKPATH="$(stage_hook "$real")"
-  OUT="$(cd "$TMP/badgitdir" && GIT_DIR=/nonexistent/not-a-gitdir bash "$HOOKPATH" 2>"$ERRFILE")"; RC=$?
+  OUT="$(cd "$TMP/badgitdir" && PATH="$CLOCKBIN:$PATH" GIT_DIR=/nonexistent/not-a-gitdir \
+    bash "$HOOKPATH" 2>"$ERRFILE")"; RC=$?
   ERRTEXT="$(cat "$ERRFILE")"
   if [[ $RC -eq 0 && -z "$OUT" ]] \
      && printf '%s' "$ERRTEXT" | grep -qF 'cannot read this repository'; then

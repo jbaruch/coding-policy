@@ -44,8 +44,36 @@ FRESH_FLOOR=99999999
 
 age() { touch -t "$PINNED_MTIME" "$@" || die "touch $*"; }
 
+# A frozen "now" for every case that reads an age. Fixture mtimes alone leave
+# the other half of the subtraction on the runtime clock, and Determinism asks
+# for the clock itself to be injected (rules/testing-standards.md). The detector
+# calls `date +%s` and nothing else, so the shim answers that and fails loudly on
+# anything else rather than letting a changed call quietly reach the real clock.
+FROZEN_NOW=1780185600
+# TZ is pinned with it: `touch -t` reads local time, so without this the age is
+# the frozen clock minus a mtime that moves with the runner's zone. Pinned, the
+# gap between FROZEN_NOW and PINNED_MTIME is exactly FROZEN_AGE_HOURS everywhere,
+# which one case asserts outright -- the check that the shim is really in use and
+# has not been quietly bypassed.
+export TZ=UTC
+FROZEN_AGE_HOURS=3600
+
+freeze_clock() { # <bin-dir>
+  mkdir -p "$1" || die "mkdir $1"
+  {
+    printf '#!/bin/sh\n'
+    # shellcheck disable=SC2016  # The single quotes are the point: $1 and $*
+    # belong to the shim being written, not to this shell.
+    printf 'if [ "$1" = "+%%s" ]; then echo %s; exit 0; fi\n' "$FROZEN_NOW"
+    printf 'echo "frozen-clock shim: unexpected date invocation: $*" >&2\n'
+    printf 'exit 2\n'
+  } > "$1/date" || die "write clock shim"
+  chmod +x "$1/date" || die "chmod clock shim"
+}
+
 run_check() { # <repo-dir> <min-age-hours>
-  OUT="$(cd "$1" && LEFTOVERS_MIN_AGE_HOURS="$2" bash "$SCRIPT_UNDER_TEST" --repo . 2>"$ERRFILE")"
+  OUT="$(cd "$1" && PATH="$CLOCKBIN:$PATH" LEFTOVERS_MIN_AGE_HOURS="$2" \
+    bash "$SCRIPT_UNDER_TEST" --repo . 2>"$ERRFILE")"
   RC=$?
   ERRTEXT="$(cat "$ERRFILE")"
 }
@@ -67,6 +95,8 @@ main() {
   ERRFILE="$TMP/err"
   cleanup() { rm -rf "$TMP"; return 0; }
   trap cleanup EXIT
+  CLOCKBIN="$TMP/clockbin"
+  freeze_clock "$CLOCKBIN"
 
   echo "▶ the releasing worktree" >&2
 
@@ -130,8 +160,9 @@ main() {
   run_check "$TMP/aband" "$AGED_FLOOR"
   if [[ $RC -eq 1 ]] \
      && [[ "$(verdict_for "$OUT" aband-wt)" == "abandoned" ]] \
+     && printf '%s' "$OUT" | grep -qF "\"age_hours\":${FROZEN_AGE_HOURS}" \
      && printf '%s' "$ERRTEXT" | grep -qF 'carrying no commits of its own'; then
-    pass; else fail "an aged leftover on a never-committed branch blocks, got RC=$RC OUT=$OUT"; fi
+    pass; else fail "an aged leftover on a never-committed branch blocks at the frozen age, got RC=$RC OUT=$OUT"; fi
 
   # Same shape, but the branch carries its own commit: git preserves it.
   new_repo "$TMP/ahead"
@@ -217,7 +248,7 @@ main() {
   mkdir -p "$TMP/noclockbin"
   printf '#!/bin/sh\necho 1700000000\nexit 1\n' > "$TMP/noclockbin/date"
   chmod +x "$TMP/noclockbin/date"
-  OUT="$(cd "$TMP/noclock" && PATH="$TMP/noclockbin:$PATH" LEFTOVERS_MIN_AGE_HOURS="$AGED_FLOOR" \
+  OUT="$(cd "$TMP/noclock" && PATH="$TMP/noclockbin:$CLOCKBIN:$PATH" LEFTOVERS_MIN_AGE_HOURS="$AGED_FLOOR" \
     bash "$SCRIPT_UNDER_TEST" --repo . 2>"$ERRFILE")"; RC=$?
   ERRTEXT="$(cat "$ERRFILE")"
   if [[ $RC -eq 2 ]] && printf '%s' "$ERRTEXT" | grep -qF 'cannot read the system clock'; then

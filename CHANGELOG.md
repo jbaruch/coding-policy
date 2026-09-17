@@ -112,6 +112,15 @@
   worktree path made the whole envelope unparseable and the hook blind. They
   become `\u` escapes, in shell rather than through a new interpreter
   dependency, so the detector still needs nothing but git.
+
+  Determinism then went the rest of the way. Pinned fixture mtimes left the
+  other half of the subtraction on the runner's clock, and selecting the verdict
+  with the age floor hid that rather than fixing it. Both suites now inject a
+  `date` shim answering a fixed epoch — and failing loudly on any invocation
+  other than the `date +%s` the detector makes, so a changed call cannot quietly
+  reach the real clock — with `TZ` pinned beside it, `touch -t` reading local
+  time. The gap is then the same constant on every runner, which one case
+  asserts outright: the check that the shim is in use and has not been bypassed.
 ## 0.3.244 — 2026-09-17
 
 ### Fixed
