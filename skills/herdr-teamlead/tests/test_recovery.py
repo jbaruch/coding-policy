@@ -90,11 +90,11 @@ class RecoveryTests(unittest.TestCase):
             "scope": WORK["scope"], "allowed_paths": ["src/*"], "additional_fixes": 2, "authorization": AUTH,
             "supersedes": diag["plan"]}, AT)
 
-    def reservation(self, number, plan="plan-1"):
+    def reservation(self, number, plan: "str | None" = "plan-1"):
         return {"id": f"fix-{number}", "task": TASK, "role": "developer", "agent": "worker", "fix_round": number,
                 "fingerprint": "c" * 64, "plan": plan, "work": copy.deepcopy(WORK)}
 
-    def finish(self, number, plan="plan-1"):
+    def finish(self, number, plan: "str | None" = "plan-1"):
         record = self.reservation(number, plan)
         reserve(self.store, record, AT)
         mark_sending(self.store, record["id"], AT, {"cleared": True})
@@ -175,7 +175,7 @@ class RecoveryTests(unittest.TestCase):
         return self.run_diagnosis(data, "judge",
                                   investigations=self.investigated(report=report or self.assessed))
 
-    def spend(self, first, last, plan=None):
+    def spend(self, first, last, plan: "str | None" = None):
         """Confirm every developer attempt from `first` through `last`."""
         for number in range(first, last + 1):
             self.finish(number, plan)
@@ -548,7 +548,8 @@ class RecoveryTests(unittest.TestCase):
         # The allowance is the approach's, so no extra-correction plan is minted.
         self.assertIsNone(record["plan"])
         self.assertIsNone(record["approach"])
-        approach = current_approach(self.store, TASK)
+        approach = self.store["approaches"][-1]
+        self.assertEqual(current_approach(self.store, TASK), approach)
         self.assertEqual((approach["from_fix"], approach["allowance"], approach["origin"], approach["direction"]),
                          (5, 5, "diagnosis", DIRECTION))
         self.assertEqual(approach_ceiling(self.store, TASK), 10)

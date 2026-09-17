@@ -155,10 +155,9 @@ description: Running a multi-agent team — task-based specialist composition, c
 ## Fix Loops
 
 - Count fix rounds per task after its initial implementation
-- Preserve that cumulative count across every approach, worker, clear and retry
 - Bound corrections per approach, never per task lifetime
 - Default each approach's allowance to five rounds
-- The task's own direction is its initial approach and records nothing
+- A task's original direction is its initial approach
 - Start a fresh allowance only for an evidenced change of approach
 - The investigator names the failed approach, its root cause and the discriminating experiment
 - The judge assesses that report and approves a materially different direction with its verification expectations
@@ -185,7 +184,7 @@ description: Running a multi-agent team — task-based specialist composition, c
 - Preconditions (all required):
   1. The owner ledger preserves the original task, base, preceding developer assignment, and actual next fix number
   2. The recorded cause is a confirmed release clear, an explicit operator recovery decision for the preserved missing-session assignment, a verified historical import of a completed operator-authorized manual correction, or an owner-verified automatic clear into another authorized role
-  3. The next fix remains within the task's existing allowance and scope
+  3. The next fix remains within the current approach's existing allowance and the task's scope
   4. The lead dispatches a fresh developer brief through the normal readiness, clear, tier, and qualification checks
   5. For a historical import, the owner verifies original task/scope/budget authorization, archived transport and report bytes, and the actual VCS base, head and diff
   6. For a historical import, the owner appends the actual count with null native-session proof
@@ -210,11 +209,11 @@ description: Running a multi-agent team — task-based specialist composition, c
   3. An assessed investigator consultation for the task follows its latest developer attempt
   4. The pinned judge returns a completed diagnosis whose remedy is `continue` or `restructure`, with its bound
   5. The owner utility records the diagnosis and its derived plan under the original task and base
-- Every other exhausted loop takes its diagnosis first; never dispatch an automatic sixth fix
+- Every other exhausted loop takes its diagnosis first; never dispatch an unbounded further fix
 - Reuse that plan across attempts within its bounds
 - Re-enter diagnosis when the bound exhausts, scope changes, or the operator overrides the remedy
 - Record an explicit superseding decision without rewriting the prior plan
-- Preserve cumulative counts across clears, worker changes, retries, and interrupted dispatch
+- Preserve cumulative counts across approaches, clears, worker changes, retries, and interrupted dispatch
 - Reconcile an unknown send outcome before retrying; never charge or send the same attempt twice
 - Record `awaiting_diagnosis` when implementation awaits the judge's remedy
 - An active audit worker never establishes implementation progress

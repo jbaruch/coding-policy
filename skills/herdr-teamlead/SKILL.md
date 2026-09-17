@@ -388,7 +388,7 @@ Step 16. No implementation or release is inferred from the diagnostic result.
 - **Any blocking finding** — apply the round-flow reference's Blocking Gate
   contract and `rules/agent-team-operation.md` Fix Loops. Return to Step 4 for
   an authorized correction or Step 13 for a required judge ruling. At an
-  exhausted allowance, record the checkpoint through
+  exhausted approach allowance, record the checkpoint through
   `references/dispatch-recovery.md`, consult the investigator under
   `references/specialists.md`, and take its assessed report to Step 13 for the
   diagnosis; no operator decision is awaited.

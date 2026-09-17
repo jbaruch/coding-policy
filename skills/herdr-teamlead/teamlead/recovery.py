@@ -677,10 +677,12 @@ def _approach_lines(body, remedy, store, task, assessment, assessed_body):
     if missing:
         raise UsageError("The assessed investigator report {} must carry {} before a change of approach is approved; a consultation alone never resets an allowance.".format(
             assessment["report"], ", ".join(missing)), {})
-    text(direction.group(1), "APPROACH")
-    text(verification.group(1), "VERIFICATION")
-    _require_new_direction(store, task, direction.group(1))
-    return direction.group(1), verification.group(1)
+    # Trailing whitespace on a report line is a typo, not a different
+    # direction, so it is stripped the way `ASSESSMENT` already is.
+    approved = text(direction.group(1).strip(), "APPROACH")
+    expected = text(verification.group(1).strip(), "VERIFICATION")
+    _require_new_direction(store, task, approved)
+    return approved, expected
 
 
 def _require_new_direction(store, task, direction):
