@@ -1,5 +1,179 @@
 # Changelog
 
+### Added
+
+- **Work that git does not hold is caught at a release and at session start.** A
+  pane-label change was written across four files, never committed, and sat in a
+  worktree for nine days. Its branch reported as merged — the tip was a plain
+  `main` commit — so every "delete merged branches" heuristic called the worktree
+  disposable while the only copy of the work lived beside it, untracked. Every
+  step of the release flow after the pull request exists was already scripted;
+  Step 1, which decides whether the flow runs at all, was prose, so the one check
+  that would have caught this rested on the agent remembering to look.
+
+  `skills/release/check-leftovers.sh` now runs first in Step 1 and exits non-zero
+  on two shapes. The releasing worktree blocks on any staged, unstaged or
+  untracked path. Another worktree blocks only when its dirt sits on a branch
+  whose tip is already an ancestor of `origin/main`: nothing was ever committed
+  there, so nothing in git preserves it. A branch carrying its own commits is
+  recoverable and is left alone, which keeps a concurrent agent's work in
+  progress from tripping the gate (`rules/agent-worktree-isolation.md`).
+
+  That predicate needs no `gh` and no network. A branch tip already in
+  `origin/main` cannot carry an open pull request either, GitHub having no
+  commits to show, so three local git signals decide it: dirty, tip-in-main, and
+  an age floor that keeps a worktree created minutes ago from reading as
+  abandoned. `LEFTOVERS_MIN_AGE_HOURS` moves the floor.
+
+  `hooks/check-leftover-worktrees.sh` is the same net at the other end of the
+  window: the gate catches a leftover the next time someone ships, the hook the
+  next time someone opens a session, whichever comes first. It reads the release
+  script's JSON rather than reimplementing the predicate, so the two cannot
+  drift into disagreeing about what a leftover is, and reports only the
+  abandoned verdict — work in progress is what a session is for, and a hook that
+  nags about it gets turned off. Reporting the releasing worktree's own verdict
+  is why that entry carries `tip_in_main`, `age_hours` and `verdict` alongside
+  its counts; the gate still blocks on any self dirt whatever the verdict.
+
+  This is the state `hooks/stop-handoff-hygiene.sh` deliberately omits, and the
+  two must stay separate. That hook lists worktrees safe to REMOVE, so
+  `worktree_is_spent` returns early with `SPENT_REASON="dirty"`: a dirty
+  worktree is left out of its report, which is right for a list of things to
+  delete. Its separate dirty-tree line runs a bare `git status` and sees the
+  current worktree alone. A dirty OTHER worktree fell between them — the one
+  state neither reported, and the only one where work exists that git does not
+  hold.
+
+  Two defects the first CI round and PR #463's review turned up, both of which
+  made the detector answer "nothing here" instead of refusing to answer. BSD's
+  `stat -f` is GNU's `--file-system`, which answers an unrelated question and
+  SUCCEEDS while doing it, so probing BSD-first read every mtime as a non-time on
+  Linux and every age as zero; GNU's `-c %Y` is probed first and a result that is
+  not a whole number of seconds warns rather than silently standing in for the
+  current time. Command substitution discards NUL bytes, so capturing
+  `git status --porcelain -z` before converting them fused every record into one
+  line; `tr` now runs inside the substitution. Alongside those, git's own
+  failures stopped collapsing into verdicts: an unreadable `git status`, a
+  `merge-base --is-ancestor` exit above 1, an unreadable worktree list and a
+  `grep` error are each a tool error (exit 2) rather than "clean", and the hook
+  warns on detector output that is not the documented JSON rather than reading it
+  as nothing abandoned. Both suites pin every fixture's mtime to a fixed past
+  literal and select the verdict with the age floor, so no case's result moves
+  with the run-time clock.
+
+  The hook's own two, from the same review: it discarded the detector's stderr,
+  so the warning about a path whose age could not be read vanished behind the
+  hook's silence, and it classified the envelope without validating it, so `{}`
+  and `{"self":{},"others":[{}]}` both exited clean. Every detector line is now
+  relayed with a `detector: ` prefix, and the documented envelope and entry
+  fields are checked before any verdict is read — an entry missing `verdict`
+  would otherwise classify as not-abandoned, which is the reassuring answer and
+  the one report this hook exists to rule out.
+
+  Three more of the same shape in the detector, from the third review round. A
+  process substitution's exit status is unobservable, so an unreadable worktree
+  ran the age loop zero times and answered 0, the age that reads as freshly
+  started; the paths are captured before the loop now. `rev-parse --abbrev-ref
+  HEAD` prints `HEAD` and exits 0 on a detached HEAD, so the old `|| echo
+  DETACHED` was dressing a tool error as a branch name rather than covering that
+  case — `branch_of` translates the real one and refuses the other. And a
+  `LEFTOVERS_MIN_AGE_HOURS` that is not a whole number of hours made every `-ge`
+  comparison error, which a conditional reads as false and which spares the
+  worktree; it is validated at startup instead.
+
+  Two last ones, and the same preemptive sweep for the shape. A failed `date
+  +%s` left `now` empty, which arithmetic reads as zero and which makes every
+  age a large negative number — freshly started again — so the clock read is
+  checked and a failure propagates to exit 2. The `sed` that extracts paths from
+  `git worktree list --porcelain` sat in a process substitution, the same
+  unobservable exit status as the age loop, and its failure would have left
+  every other worktree unseen; it is captured first. On the hook side, `git`
+  missing from PATH returned success in silence and now names itself — not being
+  in a repository stays silent, and a hook that warns in an ordinary directory
+  gets turned off.
+
+  That silence then narrowed to what it was meant to cover. `rev-parse
+  --git-dir` exits 128 for standing outside a repository and for a repository it
+  cannot read, so the message is the only signal that separates them: only the
+  walked-up-and-found-nothing text is silent now, and a GIT_DIR that does not
+  resolve, a corrupt `.git` or a permission error each say what they are. The
+  exit-0 contract stopped depending on every path inside `main` honouring it —
+  the entry point runs `main`, warns if it failed, and exits 0 — and the scratch
+  directory's removal is checked rather than able to rewrite that status. The
+  detector's own `EXIT` handler then got the same treatment: `set -e` would
+  abort it on a failing `rm` before its `return 0`, replacing the verdict the
+  release gate reads.
+
+  Last two. A `date +%s` that exits non-zero while still printing digits was
+  read as a clock, the status being captured and never checked; it is checked
+  before the output now. And `json_str` escaped backslash, quote, tab, newline
+  and carriage return, leaving every other C0 control character raw — each one
+  legal in a path and illegal inside a JSON string, so a single backspace in a
+  worktree path made the whole envelope unparseable and the hook blind. They
+  become `\u` escapes, in shell rather than through a new interpreter
+  dependency, so the detector still needs nothing but git.
+
+  Determinism then went the rest of the way. Pinned fixture mtimes left the
+  other half of the subtraction on the runner's clock, and selecting the verdict
+  with the age floor hid that rather than fixing it. Both suites now inject a
+  `date` shim answering a fixed epoch — and failing loudly on any invocation
+  other than the `date +%s` the detector makes, so a changed call cannot quietly
+  reach the real clock — with `TZ` pinned beside it, `touch -t` reading local
+  time. The gap is then the same constant on every runner, which one case
+  asserts outright: the check that the shim is in use and has not been bypassed.
+
+  One last acceptance gap: the hook treated only exit 2 as a detector failure,
+  so any other unexpected status carrying a payload that happened to parse was
+  accepted, and a crashed detector could read as a clean session. Only 0 and 1
+  are verdicts.
+
+  Copilot's review then found nine more ways the gate answered "clean" without
+  having looked, all folded into the same round (`rules/boy-scout.md`). The
+  status counts matched `M/A/D/R/C` only, so a worktree holding nothing but an
+  unmerged `UU` or a type-change `T` counted three zeroes and the release ran.
+  NUL records were converted to lines before parsing, which loses a path
+  containing a newline and turns a rename's second field — the original path,
+  carrying no status prefix — into a phantom record; the records are parsed as
+  records now, rename fields consumed. `--untracked-files=normal` collapsed an
+  untracked directory into one entry whose mtime does not move when a file
+  already inside it is edited, so fresh work read as abandoned; `all` reports
+  the files. A deleted path stats nothing, read as just-written, and left the
+  one change git cannot recover as the one that did not block — its parent
+  directory answers for it, deleting the file being exactly what set that
+  mtime. `git worktree list` was read newline-delimited, splitting a worktree
+  path containing a newline; `-z`. A base ref that exists but does not resolve
+  fell back to local `main` and judged against the wrong base, which
+  `for-each-ref` now separates from a ref that is simply absent. The hook's
+  envelope guard checked key presence and not types or values, so `verdict:
+  null` passed as not-abandoned, and `tip_in_main` was missing from the entry
+  contract. And its `RETURN` trap interpolated the scratch path into shell
+  source, where a `TMPDIR` carrying a quote would have run as commands.
+
+  One fixture still had a foot in the real clock: the untracked-directory case
+  pinned the directory and left the file inside it at its creation time, which
+  is the input the detector actually reads. Both are literals now, with the
+  floor between them, and the case asserts the exact age — reading the directory
+  instead of the file would say abandoned rather than two hours old.
+
+  Copilot's second pass closed the last fail-open paths. An mtime the detector
+  could not read returned age zero, so a dirty worktree whose tip is in
+  `origin/main` exited 0 on a verdict the script had to guess — it refuses now,
+  which is the whole contract. A registered worktree that is not a readable
+  directory is a refusal for the same reason, where one whose directory is gone
+  took its files with it and holds nothing to lose. The envelope guard
+  type-checks `ok` and `blocking` alongside the rest. And the clock moved out of
+  the per-path helper: with `--untracked-files=all` a large tree spawned one
+  `date` per file, inside a hook that runs at session start. The success cases
+  parse the hook's stdout as the JSON object its contract promises rather than
+  greping it as text, which plain text carrying the same words would have
+  passed.
+
+  The age floor's own validation had the same hole it was added to close.
+  Digits alone are not a number the shell can compare: a value past 64 bits
+  makes every `-ge` using it exit 2, and a failed comparison is false, which is
+  again the verdict that spares the worktree. A century in hours is the ceiling,
+  checked by length before by value so the numeric test never sees what it
+  cannot evaluate.
 ## 0.3.244 — 2026-09-17
 
 ### Fixed
