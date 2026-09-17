@@ -39,8 +39,9 @@
 #   stderr: every line the detector wrote, relayed with a `detector: ` prefix, so
 #           a path whose age it could not read stays visible here too.
 #   exit  : always 0. A missing detector, an unresolvable repo, a detector
-#           tool-error (rc 2), or output missing any documented envelope or entry
-#           field emits an actionable stderr warning and no-ops. A broken
+#           exit other than the detector's own 0 or 1, or output missing any
+#           documented envelope or entry field emits an actionable stderr warning
+#           and no-ops. A broken
 #           detector stays visible rather than reading as "nothing abandoned",
 #           which is the reassuring answer and the one report this hook exists to
 #           rule out (rules/error-handling.md Shell Error Handling).
@@ -111,8 +112,11 @@ main() {
       [[ -n "$line" ]] && warn "detector: ${line}"
     done < "${scratch}/detector-stderr"
   fi
-  if [[ "$status" -eq 2 || -z "$payload" ]]; then
-    warn "detector could not read this repository's worktrees — run 'bash ${detector}' directly to see why"
+  # 0 and 1 are the detector's two verdicts; everything else is a failure,
+  # including an unexpected status carrying a payload that happens to parse.
+  # Accepting one of those would make a crashed detector read as a clean session.
+  if [[ "$status" -gt 1 || -z "$payload" ]]; then
+    warn "detector exited ${status} instead of reporting a verdict — run 'bash ${detector}' directly to see why"
     return 0
   fi
 

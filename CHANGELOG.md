@@ -121,6 +121,11 @@
   reach the real clock — with `TZ` pinned beside it, `touch -t` reading local
   time. The gap is then the same constant on every runner, which one case
   asserts outright: the check that the shim is in use and has not been bypassed.
+
+  One last acceptance gap: the hook treated only exit 2 as a detector failure,
+  so any other unexpected status carrying a payload that happened to parse was
+  accepted, and a crashed detector could read as a clean session. Only 0 and 1
+  are verdicts.
 ## 0.3.244 — 2026-09-17
 
 ### Fixed

@@ -165,8 +165,21 @@ main() {
   HOOKPATH="$(stage_hook "$real")"
   printf '#!/bin/sh\necho "{}"\nexit 2\n' > "$(dirname "$HOOKPATH")/../skills/release/check-leftovers.sh"
   run_hook "$TMP/broken" "$HOOKPATH"
-  if [[ $RC -eq 0 && -z "$OUT" ]] && printf '%s' "$ERRTEXT" | grep -qF 'could not read'; then
+  if [[ $RC -eq 0 && -z "$OUT" ]] \
+     && printf '%s' "$ERRTEXT" | grep -qF 'exited 2 instead of reporting a verdict'; then
     pass; else fail "a detector tool-error warns and no-ops, got RC=$RC ERR=$ERRTEXT"; fi
+
+  # A detector exiting outside its two verdicts is a failure even when what it
+  # printed happens to parse: a crash must not read as a clean session.
+  new_repo "$TMP/oddexit"
+  HOOKPATH="$(stage_hook "$real")"
+  printf '#!/bin/sh\necho %s\nexit 9\n' \
+    "'{\"ok\":true,\"self\":null,\"others\":[],\"blocking\":[]}'" \
+    > "$(dirname "$HOOKPATH")/../skills/release/check-leftovers.sh"
+  run_hook "$TMP/oddexit" "$HOOKPATH"
+  if [[ $RC -eq 0 && -z "$OUT" ]] \
+     && printf '%s' "$ERRTEXT" | grep -qF 'exited 9 instead of reporting a verdict'; then
+    pass; else fail "an unexpected detector exit warns and no-ops, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
 
   # Unparseable detector output must not crash session start, and must not pass
   # for "nothing abandoned" either: a broken detector stays visible on stderr.
