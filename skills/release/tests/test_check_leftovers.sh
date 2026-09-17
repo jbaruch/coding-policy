@@ -269,6 +269,43 @@ main() {
      && printf '%s' "$OUT" | grep -qF '"verdict":"in_progress"'; then
     pass; else fail "the file is aged, not its directory, got RC=$RC OUT=$OUT"; fi
 
+  # An mtime the detector cannot read would decide a verdict it had to guess.
+  # Reading it as just-written let a dirty worktree whose tip is in main exit 0.
+  # `stat` is shimmed rather than a path made unreadable: git walks the tree
+  # itself and would simply report nothing, testing a different thing.
+  new_repo "$TMP/nomtime"
+  echo lost >> "$TMP/nomtime/file.txt"
+  age "$TMP/nomtime/file.txt"
+  mkdir -p "$TMP/nostatbin"
+  printf '#!/bin/sh\nexit 1\n' > "$TMP/nostatbin/stat"
+  chmod +x "$TMP/nostatbin/stat"
+  OUT="$(cd "$TMP/nomtime" && PATH="$TMP/nostatbin:$CLOCKBIN:$PATH" LEFTOVERS_MIN_AGE_HOURS="$AGED_FLOOR" \
+    bash "$SCRIPT_UNDER_TEST" --repo . 2>"$ERRFILE")"; RC=$?
+  ERRTEXT="$(cat "$ERRFILE")"
+  if [[ $RC -eq 2 ]] && printf '%s' "$ERRTEXT" | grep -qF 'cannot read the modification time'; then
+    pass; else fail "an unreadable mtime exits 2, got RC=$RC ERR=$ERRTEXT"; fi
+
+  # A registered worktree git cannot enter may hold the only copy of the work.
+  new_repo "$TMP/unsearchable"
+  git -C "$TMP/unsearchable" worktree add -q -b shut "$TMP/unsearchable-wt" HEAD || die "worktree add"
+  echo lost >> "$TMP/unsearchable-wt/file.txt"
+  age "$TMP/unsearchable-wt/file.txt"
+  chmod 000 "$TMP/unsearchable-wt" || die "chmod"
+  run_check "$TMP/unsearchable" "$AGED_FLOOR"
+  chmod 755 "$TMP/unsearchable-wt" || die "chmod back"
+  if [[ $RC -eq 2 ]] && printf '%s' "$ERRTEXT" | grep -qF 'cannot read git status'; then
+    pass; else fail "an unsearchable registered worktree exits 2, got RC=$RC ERR=$ERRTEXT"; fi
+
+  # A registered path that is not a directory at all: `-d` is false here, where
+  # the case above it is true, so the two reach different branches.
+  new_repo "$TMP/notadir"
+  git -C "$TMP/notadir" worktree add -q -b flat "$TMP/notadir-wt" HEAD || die "worktree add"
+  rm -rf "$TMP/notadir-wt" || die "rm"
+  echo "not a worktree" > "$TMP/notadir-wt"
+  run_check "$TMP/notadir" "$AGED_FLOOR"
+  if [[ $RC -eq 2 ]] && printf '%s' "$ERRTEXT" | grep -qF 'not a readable directory'; then
+    pass; else fail "a registered path that is not a directory exits 2, got RC=$RC ERR=$ERRTEXT"; fi
+
   # A base ref that exists but does not resolve is damage, not absence: judging
   # against local main instead would answer the wrong question.
   new_repo "$TMP/badref"

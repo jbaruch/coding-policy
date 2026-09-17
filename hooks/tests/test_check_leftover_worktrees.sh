@@ -84,6 +84,25 @@ freeze_clock() { # <bin-dir>
   chmod +x "$1/date" || die "chmod clock shim"
 }
 
+# The hook's stdout contract is a JSON object whose additionalContext begins
+# with the marker (rules/hook-action-reporting.md). Greping the raw stdout would
+# pass for plain text carrying the same words, which is not the contract.
+context_of() { # <hook-stdout>
+  printf '%s' "$1" | python3 -c '
+import json, sys
+doc = json.load(sys.stdin)
+if not isinstance(doc, dict):
+    sys.exit("stdout is not a JSON object")
+context = doc["additionalContext"]
+if not isinstance(context, str):
+    sys.exit("additionalContext is not a string")
+marker = "Session-start status \u2014 "
+if not context.startswith(marker):
+    sys.exit("additionalContext does not start with the marker: {!r}".format(context[:60]))
+print(context)
+'
+}
+
 run_hook() { # <cwd> <hook-path>
   OUT="$(cd "$1" && PATH="$CLOCKBIN:$PATH" LEFTOVERS_MIN_AGE_HOURS="$AGED_FLOOR" \
     bash "$2" 2>"$ERRFILE")"
@@ -111,9 +130,7 @@ main() {
   age "$TMP/aband-wt/file.txt"
   HOOKPATH="$(stage_hook "$real")"
   run_hook "$TMP/aband" "$HOOKPATH"
-  if [[ $RC -eq 0 ]] \
-     && printf '%s' "$OUT" | grep -qF 'Session-start status — ' \
-     && printf '%s' "$OUT" | grep -qF 'aband-wt'; then
+  if [[ $RC -eq 0 ]] && context_of "$OUT" | grep -qF 'aband-wt'; then
     pass; else fail "an abandoned worktree is reported with the marker, got RC=$RC OUT=$OUT"; fi
 
   # Work in progress is what a session is for.
@@ -134,7 +151,7 @@ main() {
   age "$TMP/selfaband/file.txt"
   HOOKPATH="$(stage_hook "$real")"
   run_hook "$TMP/selfaband" "$HOOKPATH"
-  if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | grep -qF '(this session)'; then
+  if [[ $RC -eq 0 ]] && context_of "$OUT" | grep -qF '(this session)'; then
     pass; else fail "an abandoned self worktree is marked as this session, got RC=$RC OUT=$OUT"; fi
 
   echo "▶ when it stays quiet" >&2
@@ -177,7 +194,9 @@ main() {
     '{"ok":true,"self":null,"others":[{"path":"/x","branch":"b","age_hours":9,"tip_in_main":true,"verdict":"unknown"}],"blocking":[]}' \
     '{"ok":true,"self":null,"others":[{"path":"/x","branch":"b","age_hours":"9","tip_in_main":true,"verdict":"in_progress"}],"blocking":[]}' \
     '{"ok":true,"self":null,"others":[{"path":"/x","branch":"b","age_hours":9,"tip_in_main":"yes","verdict":"in_progress"}],"blocking":[]}' \
-    '{"ok":true,"self":null,"others":[{"path":"/x","branch":"b","age_hours":9,"verdict":"in_progress"}],"blocking":[]}'; do
+    '{"ok":true,"self":null,"others":[{"path":"/x","branch":"b","age_hours":9,"verdict":"in_progress"}],"blocking":[]}' \
+    '{"ok":"yes","self":null,"others":[],"blocking":[]}' \
+    '{"ok":true,"self":null,"others":[],"blocking":{}}'; do
     new_repo "$TMP/typed"
     HOOKPATH="$(stage_hook "$real")"
     printf '#!/bin/sh\ncat <<JSON\n%s\nJSON\n' "$payload" \

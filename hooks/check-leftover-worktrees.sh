@@ -156,6 +156,10 @@ if not isinstance(doc, dict):
 missing = [k for k in ENVELOPE if k not in doc]
 if missing:
     reject("envelope is missing {}".format(", ".join(missing)))
+if not isinstance(doc["ok"], bool):
+    reject("the ok field is not a boolean")
+if not isinstance(doc["blocking"], list):
+    reject("the blocking field is not a list")
 if not isinstance(doc["others"], list):
     reject("the others field is not a list")
 if doc["self"] is not None and not isinstance(doc["self"], dict):

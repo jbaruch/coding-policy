@@ -154,6 +154,19 @@
   is the input the detector actually reads. Both are literals now, with the
   floor between them, and the case asserts the exact age — reading the directory
   instead of the file would say abandoned rather than two hours old.
+
+  Copilot's second pass closed the last fail-open paths. An mtime the detector
+  could not read returned age zero, so a dirty worktree whose tip is in
+  `origin/main` exited 0 on a verdict the script had to guess — it refuses now,
+  which is the whole contract. A registered worktree that is not a readable
+  directory is a refusal for the same reason, where one whose directory is gone
+  took its files with it and holds nothing to lose. The envelope guard
+  type-checks `ok` and `blocking` alongside the rest. And the clock moved out of
+  the per-path helper: with `--untracked-files=all` a large tree spawned one
+  `date` per file, inside a hook that runs at session start. The success cases
+  parse the hook's stdout as the JSON object its contract promises rather than
+  greping it as text, which plain text carrying the same words would have
+  passed.
 ## 0.3.244 — 2026-09-17
 
 ### Fixed

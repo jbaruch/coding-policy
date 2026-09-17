@@ -42,7 +42,9 @@
 # Exit:  0 nothing blocks the release; 1 leftovers block it, each named in
 #        `blocking` with the diagnostic on stderr; 2 usage or tool error (not a
 #        git repository, git absent, an unreadable worktree list or status, an
-#        unreadable clock, a base ref that exists but does not resolve).
+#        unreadable clock, an unreadable modification time, a registered
+#        worktree that is not a readable directory, a base ref that exists but
+#        does not resolve).
 #
 # LEFTOVERS_MIN_AGE_HOURS overrides the age floor an OTHER worktree must clear
 # before its dirt reads as abandoned rather than freshly started. A value that is
@@ -113,8 +115,10 @@ cleanup() {
 # updated its parent directory's mtime -- so the parent answers for it. Without
 # that, an uncommitted deletion stats nothing, reads as just-written, and the
 # one change git cannot recover would be the one that does not block.
-age_seconds() {
-  local path="$1" target now mtime status=0
+# The clock, read once. Non-zero when it cannot be: an unread clock is not a
+# time to work from.
+clock_now() {
+  local now status=0
   now="$(date +%s)" || status=$?
   # The status is checked before the output: a non-zero `date` that still prints
   # digits is a failed clock read, not a reading to accept.
@@ -128,18 +132,33 @@ age_seconds() {
       return 1
       ;;
   esac
+  echo "$now"
+}
 
+# Seconds since a path was last written, against a clock the caller already
+# read. Non-zero when the mtime cannot be read at all: an age this script had to
+# guess would decide a verdict, and a gate that cannot tell must refuse rather
+# than answer the reassuring way.
+#
+# A path that no longer exists is a deletion, and deleting it is exactly what
+# updated its parent directory's mtime -- so the parent answers for it. Without
+# that, an uncommitted deletion stats nothing and the one change git cannot
+# recover would be the one that does not block.
+age_seconds() { # <now> <path>
+  local now="$1" path="$2" target mtime
   target="$path"
   if [ ! -e "$target" ] && [ ! -L "$target" ]; then
     target="$(dirname -- "$path")"
   fi
+  # GNU `stat` is probed first: BSD's `-f` is GNU's --file-system, which answers
+  # an unrelated question and SUCCEEDS while doing it, so probing the other way
+  # round yields a non-time on Linux and every age reads as zero.
   mtime="$(stat -c %Y "$target" 2>/dev/null)" || mtime=""
   [ -n "$mtime" ] || mtime="$(stat -f %m "$target" 2>/dev/null)" || mtime=""
   case "$mtime" in
     ''|*[!0-9]*)
-      echo "check-leftovers: cannot read the modification time of ${target} -- treating it as just written, so its age alone will not block; check the path is readable" >&2
-      echo 0
-      return 0
+      echo "check-leftovers: cannot read the modification time of ${target} -- check the path is readable, then re-run" >&2
+      return 1
       ;;
   esac
   echo $(( now - mtime ))
@@ -203,9 +222,10 @@ read_status() { # <worktree>
 # paths are relative to the worktree git read them from, so that root is an
 # argument rather than something this function could guess.
 dirt_age_hours() { # <worktree>
-  local wt="$1" newest=999999999 rel age
+  local wt="$1" newest=999999999 rel age now
+  now="$(clock_now)" || return 1
   for rel in ${WT_PATHS+"${WT_PATHS[@]}"}; do
-    age="$(age_seconds "${wt}/${rel}")" || return 1
+    age="$(age_seconds "$now" "${wt}/${rel}")" || return 1
     [ "$age" -lt "$newest" ] && newest="$age"
   done
   [ "$newest" -eq 999999999 ] && newest=0
@@ -338,7 +358,16 @@ main() {
     esac
     [ -n "$wt" ] || continue
     [ "$wt" = "$self_path" ] && continue
-    [ -d "$wt" ] || continue
+    if [ ! -d "$wt" ]; then
+      # A registered worktree whose directory is gone took its files with it and
+      # holds nothing to lose. One that exists and is not a searchable directory
+      # may hold the only copy of the work, and skipping it silently is the
+      # fail-open this gate exists to close.
+      if [ -e "$wt" ] || [ -L "$wt" ]; then
+        die "${wt} is registered as a worktree but is not a readable directory -- fix its permissions, or run 'git -C ${repo} worktree prune', then re-run"
+      fi
+      continue
+    fi
     read_status "$wt" \
       || die "cannot read the working tree at ${wt} -- see the diagnostic above"
     [ "${#WT_PATHS[@]}" -gt 0 ] || continue
