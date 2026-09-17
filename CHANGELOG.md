@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.246 — 2026-09-17
+
 ### Fixed
 
 - **A different approach gets its own correction allowance.** The bounded fix
