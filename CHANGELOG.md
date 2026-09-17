@@ -148,6 +148,12 @@
   null` passed as not-abandoned, and `tip_in_main` was missing from the entry
   contract. And its `RETURN` trap interpolated the scratch path into shell
   source, where a `TMPDIR` carrying a quote would have run as commands.
+
+  One fixture still had a foot in the real clock: the untracked-directory case
+  pinned the directory and left the file inside it at its creation time, which
+  is the input the detector actually reads. Both are literals now, with the
+  floor between them, and the case asserts the exact age — reading the directory
+  instead of the file would say abandoned rather than two hours old.
 ## 0.3.244 — 2026-09-17
 
 ### Fixed

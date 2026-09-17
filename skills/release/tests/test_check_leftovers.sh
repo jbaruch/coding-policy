@@ -39,10 +39,16 @@ new_repo() { # <dir>
 # happens to be: AGED reads it as abandoned, FRESH is larger than any age the
 # literal can reach and reads it as work in progress.
 PINNED_MTIME=202601010000
+#: Two hours before FROZEN_NOW, so a fixture pinned here is fresh under a floor
+#: PINNED_MTIME clears by a wide margin. Both are literals; neither moves.
+PINNED_RECENT_MTIME=202605302200
 AGED_FLOOR=1
 FRESH_FLOOR=99999999
+#: Between the two: PINNED_MTIME is 3600h old and PINNED_RECENT_MTIME is 2h.
+SPLIT_FLOOR=24
 
 age() { touch -t "$PINNED_MTIME" "$@" || die "touch $*"; }
+recent() { touch -t "$PINNED_RECENT_MTIME" "$@" || die "touch $*"; }
 
 # A frozen "now" for every case that reads an age. Fixture mtimes alone leave
 # the other half of the subtraction on the runtime clock, and Determinism asks
@@ -254,10 +260,14 @@ main() {
   new_repo "$TMP/untrackeddir"
   mkdir -p "$TMP/untrackeddir/scratch" || die "mkdir"
   echo fresh > "$TMP/untrackeddir/scratch/note.txt"
+  recent "$TMP/untrackeddir/scratch/note.txt"
   age "$TMP/untrackeddir/scratch"
-  run_check "$TMP/untrackeddir" "$FRESH_FLOOR"
-  if [[ $RC -eq 1 ]] && printf '%s' "$OUT" | grep -qF '"verdict":"in_progress"'; then
-    pass; else fail "a fresh file under an aged untracked dir reads in_progress, got RC=$RC OUT=$OUT"; fi
+  run_check "$TMP/untrackeddir" "$SPLIT_FLOOR"
+  if [[ $RC -eq 1 ]] \
+     && printf '%s' "$OUT" | grep -qF '"untracked":1' \
+     && printf '%s' "$OUT" | grep -qF '"age_hours":2' \
+     && printf '%s' "$OUT" | grep -qF '"verdict":"in_progress"'; then
+    pass; else fail "the file is aged, not its directory, got RC=$RC OUT=$OUT"; fi
 
   # A base ref that exists but does not resolve is damage, not absence: judging
   # against local main instead would answer the wrong question.
