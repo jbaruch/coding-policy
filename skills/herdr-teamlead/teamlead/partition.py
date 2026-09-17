@@ -207,12 +207,50 @@ def load_validated(path):
     # `changed` set it carries. Reading the result's shape and trusting its
     # verdict would accept an edited result: overlapping slices and an
     # uncovered file pass a shape check, and the round seats against them.
-    # Re-running `validate` costs nothing and re-proves the property rather
-    # than taking the artifact's word for it (#453).
+    # Re-deriving costs nothing and re-proves the property rather than taking
+    # the artifact's word for it (#453).
     inner = {key: value for key, value in document.items() if key != "changed"}
     accepted = validate_document(inner, str(path))
-    validate(set(changed), accepted)
+    validate_resolved(set(changed), accepted, str(path))
     return accepted
+
+
+def validate_resolved(changed, partition, source):
+    """Re-prove a VALIDATED result disjoint and exhaustive over `changed`.
+
+    Set membership, not `fnmatch`. A result's `slices[].paths` carries the
+    resolved changed files `validate()` assigned, not the globs the document
+    it read carried, and a resolved name is a literal: re-matching it as a
+    pattern reads `src/api/[x].py` as a character class and reports the file
+    it names unowned, rejecting a valid result (#453).
+    """
+    owners_of = {}
+    for entry in partition["slices"]:
+        for resolved in entry["paths"]:
+            owners_of.setdefault(resolved, []).append(entry["name"])
+    unowned = sorted(changed - set(owners_of))
+    overlaps = sorted(path for path, names in owners_of.items() if len(names) > 1)
+    stray = sorted(set(owners_of) - changed)
+    empty = sorted(entry["name"] for entry in partition["slices"] if not entry["paths"])
+    if unowned or overlaps or stray or empty:
+        parts = []
+        if unowned:
+            parts.append("leaves {} changed path(s) unowned, starting with {}".format(
+                len(unowned), unowned[0]))
+        if overlaps:
+            parts.append("gives {} path(s) more than one owner, starting with {}".format(
+                len(overlaps), overlaps[0]))
+        if stray:
+            parts.append("assigns {} path(s) the `changed` set does not carry, starting "
+                         "with {}".format(len(stray), stray[0]))
+        if empty:
+            parts.append("leaves slice(s) {} owning nothing".format(", ".join(empty)))
+        raise UsageError(
+            "The validated partition at {} does not cover its own `changed` set: it {}. "
+            "Re-run `validate-partition` rather than editing its result.".format(
+                source, "; and it ".join(parts)),
+            {"unowned": unowned, "overlaps": overlaps, "stray": stray, "empty": empty})
+    return partition
 
 
 def seat_paths(partition, role):

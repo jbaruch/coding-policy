@@ -662,13 +662,16 @@ def seat_brief_text(seat, plan):
 
 
 def validated_partition(slices=None, changed=None):
-    """What `validate-partition` writes: the document plus its `changed` set.
+    """What `validate-partition` writes: RESOLVED paths plus its `changed` set.
 
-    `plan --partition` seats from the checked RESULT, never the document, so a
-    round cannot be seated against a partition nobody checked (#453).
+    Not the globs the document it read carried — `validate()` replaces each
+    slice's patterns with the changed files it assigned them, so a result's
+    `slices[].paths` are literal names. `plan --partition` seats from that
+    result, never the document, so a round cannot be seated against a
+    partition nobody checked (#453).
     """
-    slices = slices or [{"name": "api", "paths": ["src/api/*"]},
-                        {"name": "core", "paths": ["src/core/*"]}]
+    slices = slices or [{"name": "api", "paths": ["src/api/routes.py"]},
+                        {"name": "core", "paths": ["src/core/db.py"]}]
     return {"schema_version": 1, "role": "reviewer", "slices": slices,
             "changed": changed or ["src/api/routes.py", "src/core/db.py"]}
 
@@ -771,7 +774,8 @@ class ApplyCommandTest(CliCase):
         # The composer requires each seat's owned paths and reads no partition,
         # so the plan carries them out of the validated document (#434).
         self.assertEqual(plan["slice_paths"],
-                         {"reviewer#api": ["src/api/*"], "reviewer#core": ["src/core/*"]})
+                         {"reviewer#api": ["src/api/routes.py"],
+                          "reviewer#core": ["src/core/db.py"]})
 
         # The plan stamps the digest that binds this boundary to the briefs
         # and the dispatch (#453).
@@ -905,6 +909,24 @@ class ApplyCommandTest(CliCase):
         self.assertEqual(code, 1)
         self.assertIn("carries no `changed` set", err)
         self.assertIn("validate-partition", err)
+
+    def test_a_resolved_path_with_glob_characters_still_seats(self):
+        # A result's paths are resolved FILENAMES, so re-matching them as
+        # patterns reads `[x]` as a character class and reports the file it
+        # names unowned — rejecting a valid result (#453).
+        tricky = self.tmp / "tricky-result.json"
+        tricky.write_text(json.dumps(validated_partition(
+            slices=[{"name": "api", "paths": ["src/api/[x].py"]},
+                    {"name": "core", "paths": ["src/core/a?b.py"]}],
+            changed=["src/api/[x].py", "src/core/a?b.py"])), encoding="utf-8")
+        code, out, err = self.run_cli(
+            self.base() + ["plan", "--roles", "reviewer", "--partition", str(tricky),
+                           "--task", "t-tricky", "--now", AT,
+                           "--snapshot", str(self.snapshot)])
+        self.assertEqual(code, 0, err)
+        self.assertEqual(json.loads(out)["slice_paths"],
+                         {"reviewer#api": ["src/api/[x].py"],
+                          "reviewer#core": ["src/core/a?b.py"]})
 
     def test_planning_from_an_edited_validated_result_is_refused(self):
         # The result's verdict is not taken on faith: overlapping slices and a

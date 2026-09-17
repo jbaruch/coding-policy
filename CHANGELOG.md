@@ -18,7 +18,11 @@
   re-deriving it. The result's verdict is not taken on faith: `load_validated`
   re-derives ownership against the `changed` set the result carries, so an
   edited result whose slices overlap or leave a changed file unowned is refused
-  rather than seated. A shape check alone would accept it.
+  rather than seated. A shape check alone would accept it. The re-derivation is
+  set membership rather than `fnmatch`: a result's `slices[].paths` carries the
+  resolved changed files `validate()` assigned, not the globs the document it
+  read carried, and re-matching a resolved name as a pattern reads
+  `src/api/[x].py` as a character class and reports the file it names unowned.
 
   `plan` stamps `slice_digest` over the accepted `{seat: [glob, ...]}` map, and
   a `seat_digests` entry over each seat and the globs it owns. Per seat matters:
