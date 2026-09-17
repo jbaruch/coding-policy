@@ -147,8 +147,38 @@ main() {
   printf '#!/bin/sh\necho "not json"\nexit 1\n' > "$(dirname "$HOOKPATH")/../skills/release/check-leftovers.sh"
   run_hook "$TMP/garbage" "$HOOKPATH"
   if [[ $RC -eq 0 && -z "$OUT" ]] \
-     && printf '%s' "$ERRTEXT" | grep -qF 'cannot read'; then
+     && printf '%s' "$ERRTEXT" | grep -qF 'not the JSON envelope'; then
     pass; else fail "unparseable detector output warns and no-ops, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
+
+  # An envelope whose fields are absent must not classify as "nothing
+  # abandoned": that is the reassuring answer, and the one this hook exists to
+  # rule out.
+  local shape
+  for shape in '{}' '{"self":{},"others":[{}],"ok":true,"blocking":[]}' \
+               '{"ok":true,"self":null,"others":[{"path":"/x"}],"blocking":[]}' \
+               '[]'; do
+    new_repo "$TMP/shape"
+    HOOKPATH="$(stage_hook "$real")"
+    printf '#!/bin/sh\ncat <<JSON\n%s\nJSON\n' "$shape" \
+      > "$(dirname "$HOOKPATH")/../skills/release/check-leftovers.sh"
+    run_hook "$TMP/shape" "$HOOKPATH"
+    if [[ $RC -eq 0 && -z "$OUT" ]] \
+       && printf '%s' "$ERRTEXT" | grep -qF 'not the JSON envelope'; then
+      pass; else fail "the envelope ${shape} warns and no-ops, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
+    rm -rf "$TMP/shape"
+  done
+
+  # The detector's own stderr is the hook's too: a warning it emits about a path
+  # it could not read must not vanish behind the hook's silence.
+  new_repo "$TMP/relay"
+  HOOKPATH="$(stage_hook "$real")"
+  printf '#!/bin/sh\necho "check-leftovers: cannot read the modification time of /x" >&2\necho %s\n' \
+    "'{\"ok\":true,\"self\":null,\"others\":[],\"blocking\":[]}'" \
+    > "$(dirname "$HOOKPATH")/../skills/release/check-leftovers.sh"
+  run_hook "$TMP/relay" "$HOOKPATH"
+  if [[ $RC -eq 0 && -z "$OUT" ]] \
+     && printf '%s' "$ERRTEXT" | grep -qF 'detector: check-leftovers: cannot read the modification time'; then
+    pass; else fail "a detector warning reaches the session's stderr, got RC=$RC ERR=$ERRTEXT"; fi
 
   echo "─────────────────────────────────────────────" >&2
   if [[ $FAIL -gt 0 ]]; then echo "FAILED: ${FAIL} failed, ${PASS} passed" >&2; exit 1; fi

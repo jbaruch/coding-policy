@@ -36,11 +36,14 @@
 #           worktree carries the abandoned verdict. Silent otherwise, which
 #           covers the common cases: a clean tree, work in progress, a
 #           non-repository, and a checkout with no worktrees but its own.
+#   stderr: every line the detector wrote, relayed with a `detector: ` prefix, so
+#           a path whose age it could not read stays visible here too.
 #   exit  : always 0. A missing detector, an unresolvable repo, a detector
-#           tool-error (rc 2) or output that is not the documented JSON emits an
-#           actionable stderr warning and no-ops. A broken detector stays visible
-#           rather than reading as "nothing abandoned", which is the report this
-#           hook exists to produce (rules/error-handling.md Shell Error Handling).
+#           tool-error (rc 2), or output missing any documented envelope or entry
+#           field emits an actionable stderr warning and no-ops. A broken
+#           detector stays visible rather than reading as "nothing abandoned",
+#           which is the reassuring answer and the one report this hook exists to
+#           rule out (rules/error-handling.md Shell Error Handling).
 #   env   : LEFTOVERS_MIN_AGE_HOURS passes through to the detector.
 set -euo pipefail
 
@@ -58,10 +61,28 @@ main() {
     return 0
   fi
 
-  # rc 1 is the detector's finding, not a failure: the `if` keeps `set -e` from
-  # aborting on the very outcome this hook exists to report.
-  local payload status=0
-  payload="$(bash "$detector" 2>/dev/null)" || status=$?
+  local scratch
+  scratch="$(mktemp -d "${TMPDIR:-/tmp}/leftover-hook.XXXXXX")" || {
+    warn "cannot create a temporary directory under ${TMPDIR:-/tmp} — session start cannot report abandoned worktrees until it is writable"
+    return 0
+  }
+  # shellcheck disable=SC2064  # $scratch is expanded now, on purpose: the trap
+  # must name the directory this call created, not whatever the variable holds
+  # when it fires.
+  trap "rm -rf '$scratch'" RETURN
+
+  # rc 1 is the detector's finding, not a failure: `|| status=$?` keeps `set -e`
+  # from aborting on the very outcome this hook exists to report. The detector's
+  # stderr is captured rather than discarded, and relayed: it warns on a path
+  # whose age it could not read, and that warning is the difference between an
+  # under-reported age and a hook that looks like it found nothing.
+  local payload status=0 line
+  payload="$(bash "$detector" 2>"${scratch}/detector-stderr")" || status=$?
+  if [[ -s "${scratch}/detector-stderr" ]]; then
+    while IFS= read -r line; do
+      [[ -n "$line" ]] && warn "detector: ${line}"
+    done < "${scratch}/detector-stderr"
+  fi
   if [[ "$status" -eq 2 || -z "$payload" ]]; then
     warn "detector could not read this repository's worktrees — run 'bash ${detector}' directly to see why"
     return 0
@@ -76,19 +97,48 @@ main() {
   notice="$(printf '%s' "$payload" | python3 -c '
 import json, sys
 
+MALFORMED = 3
+ENVELOPE = ("ok", "self", "others", "blocking")
+ENTRY = ("path", "branch", "age_hours", "verdict")
+
+
+def reject(why):
+    sys.stderr.write("{}\n".format(why))
+    sys.exit(MALFORMED)
+
+
 try:
     doc = json.load(sys.stdin)
 except ValueError as exc:
-    sys.stderr.write("not JSON: {}\n".format(exc))
-    sys.exit(3)
+    reject("not JSON: {}".format(exc))
+
+# Validated before classification, never after. An entry missing "verdict" would
+# otherwise read as not-abandoned, and "nothing abandoned" is the reassuring
+# answer a broken detector must never be able to give.
+if not isinstance(doc, dict):
+    reject("expected a JSON object, got {}".format(type(doc).__name__))
+missing = [k for k in ENVELOPE if k not in doc]
+if missing:
+    reject("envelope is missing {}".format(", ".join(missing)))
+if not isinstance(doc["others"], list):
+    reject("the others field is not a list")
+if doc["self"] is not None and not isinstance(doc["self"], dict):
+    reject("the self field is neither an object nor null")
+
+for entry in list(doc["others"]) + ([doc["self"]] if doc["self"] is not None else []):
+    if not isinstance(entry, dict):
+        reject("a worktree entry is not an object")
+    absent = [k for k in ENTRY if k not in entry]
+    if absent:
+        reject("a worktree entry is missing {}".format(", ".join(absent)))
 
 rows = []
-me = doc.get("self") or {}
-if me.get("verdict") == "abandoned":
-    rows.append((me.get("path", "?"), me.get("branch", "?"), me.get("age_hours", 0), True))
-for row in doc.get("others") or []:
-    if row.get("verdict") == "abandoned":
-        rows.append((row.get("path", "?"), row.get("branch", "?"), row.get("age_hours", 0), False))
+me = doc["self"]
+if me is not None and me["verdict"] == "abandoned":
+    rows.append((me["path"], me["branch"], me["age_hours"], True))
+for row in doc["others"]:
+    if row["verdict"] == "abandoned":
+        rows.append((row["path"], row["branch"], row["age_hours"], False))
 if not rows:
     sys.exit(0)
 
@@ -100,7 +150,7 @@ for path, branch, age, is_self in sorted(rows, key=lambda r: -r[2]):
 lines.append("Inspect with `git -C <path> status`, then commit, stash or gitignore it. "
              "`skills/release/check-leftovers.sh` refuses to start a release until this clears.")
 print("\n".join(lines))
-')" || { warn "the detector emitted output this hook cannot read (see above) -- run 'bash ${detector}' directly to see what it printed"; return 0; }
+')" || { warn "the detector's output is not the JSON envelope this hook reads (see above) — run 'bash ${detector}' directly to see what it printed"; return 0; }
 
   [[ -n "$notice" ]] || return 0
 

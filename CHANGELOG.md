@@ -60,6 +60,15 @@
   as nothing abandoned. Both suites pin every fixture's mtime to a fixed past
   literal and select the verdict with the age floor, so no case's result moves
   with the run-time clock.
+
+  The hook's own two, from the same review: it discarded the detector's stderr,
+  so the warning about a path whose age could not be read vanished behind the
+  hook's silence, and it classified the envelope without validating it, so `{}`
+  and `{"self":{},"others":[{}]}` both exited clean. Every detector line is now
+  relayed with a `detector: ` prefix, and the documented envelope and entry
+  fields are checked before any verdict is read — an entry missing `verdict`
+  would otherwise classify as not-abandoned, which is the reassuring answer and
+  the one report this hook exists to rule out.
 ## 0.3.244 — 2026-09-17
 
 ### Fixed
