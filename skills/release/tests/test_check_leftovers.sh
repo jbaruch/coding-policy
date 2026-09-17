@@ -87,6 +87,24 @@ main() {
   run_check "$TMP/ignored"
   if [[ $RC -eq 0 ]]; then pass; else fail "a gitignored path does not block, got RC=$RC OUT=$OUT"; fi
 
+  # The releasing worktree gets the same verdict the others do, for a caller
+  # that wants only the abandoned shape. The gate itself ignores it.
+  new_repo "$TMP/selfverdict"
+  echo lost >> "$TMP/selfverdict/file.txt"
+  touch -t 202601010000 "$TMP/selfverdict/file.txt"
+  run_check "$TMP/selfverdict"
+  if [[ $RC -eq 1 ]] && printf '%s' "$OUT" | grep -qF '"verdict":"abandoned"'; then
+    pass; else fail "an aged self leftover on a never-committed branch reads abandoned, got RC=$RC OUT=$OUT"; fi
+
+  new_repo "$TMP/selffresh"; echo typing >> "$TMP/selffresh/file.txt"
+  run_check "$TMP/selffresh"
+  if [[ $RC -eq 1 ]] && printf '%s' "$OUT" | grep -qF '"verdict":"in_progress"'; then
+    pass; else fail "fresh self dirt still blocks but reads in_progress, got RC=$RC OUT=$OUT"; fi
+
+  run_check "$TMP/clean"
+  if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | grep -qF '"verdict":"clean"'; then
+    pass; else fail "a clean self reads clean, got RC=$RC OUT=$OUT"; fi
+
   echo "▶ every other worktree" >&2
 
   # The pane-model shape: dirty, on a branch whose tip is already in main, aged.

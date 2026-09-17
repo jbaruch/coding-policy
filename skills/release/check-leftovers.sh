@@ -29,9 +29,11 @@
 # Usage: check-leftovers.sh [--repo <path>]
 # Out:   one JSON object on stdout, on every exit code below:
 #          {"ok":bool,"self":{...},"others":[{...}],"blocking":["<reason>",...]}
-#        `self` carries path, branch, staged/unstaged/untracked counts.
-#        Each `others` entry carries path, branch, tip_in_main, age_hours and a
-#        verdict of "abandoned" (blocks) or "in_progress" (does not).
+#        `self` carries path, branch, staged/unstaged/untracked counts, and the
+#        same tip_in_main/age_hours/verdict the other entries carry. The release
+#        gate blocks on any `self` dirt whatever its verdict; the verdict is
+#        there for a caller that only wants the abandoned shape, such as the
+#        session-start hook, which has no reason to nag about work in progress.
 # Exit:  0 nothing blocks the release; 1 leftovers block it, each named in
 #        `blocking` with the diagnostic on stderr; 2 usage or tool error
 #        (not a git repository, git absent, unreadable worktree list).
@@ -110,11 +112,21 @@ main() {
 
   local blocking=() others_json=() ok=true
 
-  local self_branch staged unstaged untracked
+  local self_branch staged unstaged untracked self_tip_in_main self_age self_verdict
   self_branch="$(git -C "$self_path" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "DETACHED")"
   staged="$(count_matching "$self_path" '^[MADRC]')"
   unstaged="$(count_matching "$self_path" '^.[MD]')"
   untracked="$(count_matching "$self_path" '^??')"
+  self_tip_in_main=false
+  if git -C "$self_path" merge-base --is-ancestor HEAD "$base" 2>/dev/null; then self_tip_in_main=true; fi
+  self_age="$(dirt_age_hours "$self_path")"
+  self_verdict="clean"
+  if [ $(( staged + unstaged + untracked )) -gt 0 ]; then
+    self_verdict="in_progress"
+    if [ "$self_tip_in_main" = true ] && [ "$self_age" -ge "$LEFTOVERS_MIN_AGE_HOURS" ]; then
+      self_verdict="abandoned"
+    fi
+  fi
   if [ $(( staged + unstaged + untracked )) -gt 0 ]; then
     ok=false
     blocking+=("$(printf 'this worktree (%s) has %d staged, %d unstaged and %d untracked path(s); a release publishes only what is committed' \
@@ -152,9 +164,10 @@ main() {
     blocking_out="${blocking_out:+${blocking_out},}$(json_str "$item")"
   done
 
-  printf '{"ok":%s,"self":{"path":%s,"branch":%s,"staged":%d,"unstaged":%d,"untracked":%d},"others":[%s],"blocking":[%s]}\n' \
+  printf '{"ok":%s,"self":{"path":%s,"branch":%s,"staged":%d,"unstaged":%d,"untracked":%d,"tip_in_main":%s,"age_hours":%d,"verdict":%s},"others":[%s],"blocking":[%s]}\n' \
     "$ok" "$(json_str "$self_path")" "$(json_str "$self_branch")" \
-    "$staged" "$unstaged" "$untracked" "$others_out" "$blocking_out"
+    "$staged" "$unstaged" "$untracked" "$self_tip_in_main" "$self_age" \
+    "$(json_str "$self_verdict")" "$others_out" "$blocking_out"
 
   if [ "$ok" = false ]; then
     echo "check-leftovers: the release cannot start -- uncommitted work would be left behind:" >&2
