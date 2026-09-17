@@ -70,6 +70,13 @@
             "args": [
               "${TESSL_PLUGIN_DIR}/hooks/herdr-team-status.sh"
             ]
+          },
+          {
+            "type": "command",
+            "command": "bash",
+            "args": [
+              "${TESSL_PLUGIN_DIR}/hooks/check-leftover-worktrees.sh"
+            ]
           }
         ]
       }

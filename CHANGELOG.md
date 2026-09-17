@@ -2,6 +2,26 @@
 
 ### Added
 
+- **Session start reports worktrees holding work that git does not.** The
+  release gate catches a leftover the next time someone ships;
+  `hooks/check-leftover-worktrees.sh` catches it the next time someone opens a
+  session, whichever comes first. It reads
+  `skills/release/check-leftovers.sh`'s JSON rather than reimplementing the
+  predicate, so the gate and the hook cannot drift into disagreeing about what a
+  leftover is, and reports only the abandoned verdict — work in progress is what
+  a session is for.
+
+  This is the state `hooks/stop-handoff-hygiene.sh` deliberately omits, and the
+  two must stay separate. That hook lists worktrees safe to REMOVE, so
+  `worktree_is_spent` returns early with `SPENT_REASON="dirty"`: a dirty
+  worktree is left out of its report, which is right for a list of things to
+  delete. Its separate dirty-tree line runs a bare `git status` and sees the
+  current worktree alone. A dirty OTHER worktree fell between them — the one
+  state neither reported, and the only one where work exists that git does not
+  hold. The pane-label change spent nine days there.
+
+### Added
+
 - **A release refuses to start while work sits uncommitted.** Every step of the
   release flow after the pull request exists was already scripted; Step 1, which
   decides whether the flow runs at all, was prose. A pane-label change was
