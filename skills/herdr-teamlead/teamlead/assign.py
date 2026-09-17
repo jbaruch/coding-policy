@@ -55,7 +55,6 @@ from .herdr import (
 from .composer import COMPOSER_READ_LINES, COMPOSER_READ_SOURCE, checkable
 from .probe import PROBE_READ_LINES, PROBE_READ_SOURCE, resolve_status, stderr_warn
 from .chronology import latest_assignment
-from .state import MAX_FIX_ROUNDS
 from .recovery import empty_recovery, fresh_transition, task_record, validate_work
 from .launch import restart_worker, verify_running, verify_running_permissions
 from .tiers import launch_flags, require_seatable, worker_launch_args
@@ -274,7 +273,12 @@ def validate_context_mode(assignments, no_clear, retain_context, task, fix_round
         or fix_round < 1
     ):
         raise UsageError(
-            "Fix rounds must be 1–{}; after the cap, dispatch the judge.".format(MAX_FIX_ROUNDS), {}
+            # The number is the task's CUMULATIVE attempt, and the allowance
+            # it has to fit inside belongs to the current approach, which
+            # `validate_work` reads (#462). A fixed upper bound here named a
+            # cap that stopped being the whole rule once a bounded plan or an
+            # approved new direction could raise it.
+            "A fix round is a positive integer naming this task's cumulative attempt; the allowance it spends is checked against the current approach.", {}
         )
     if fix_round is not None and (not isinstance(task, str) or not task.strip()):
         raise UsageError("Pass --task with --fix-round to identify the task.", {})

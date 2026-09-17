@@ -65,6 +65,21 @@ UNVERIFIED: <anything you could not confirm against the tree, or "none">
 `ASSESSMENT` names the investigator report you ruled on, and the recorded
 diagnosis binds that path. Cite the file you read, never another.
 
+When the assessment shows the direction itself is what failed, approve a
+different one by adding two more lines:
+
+```
+APPROACH: <the direction that replaces the failed one>
+VERIFICATION: <what confirming this direction looks like>
+```
+
+The allowance bounds repeated attempts at an approach already shown to fail, so
+an approved different direction starts a fresh allowance, and `BOUND` then names
+that allowance. Name the direction precisely enough that the lead applies it
+without asking you a question, and name the verification the team owes it. A
+direction this task already tried is refused, `stop` approves none, and a new
+worker or a rewritten brief is not a different approach.
+
 `continue` is a legitimate remedy: the approach is right and it needs a stated
 number of further rounds. `BOUND` then carries that number, counted in
 developer attempts and justified against the evidence. It has a ceiling the

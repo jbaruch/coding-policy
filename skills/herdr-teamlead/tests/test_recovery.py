@@ -16,7 +16,8 @@ from pathlib import Path
 
 from teamlead.errors import UsageError
 from teamlead.recovery import (
-    DIAGNOSIS_BOUND_CEILING,
+    DIAGNOSIS_BOUND_CEILING, DIAGNOSIS_RECORD_VERSION, RECOVERY_STORE_VERSION,
+    approach_ceiling, authorize_approach, current_approach,
     abort_pre_send, active_plans, authorize_context, authorize_plan, authorize_refused_dispatch, brief_identity, checkpoint, confirmed_fix,
     diagnose, require_investigation_before_judge, require_judge_mode,
     dispatch_identity, finish_dispatch, fresh_transition, mark_sending,
@@ -34,6 +35,9 @@ AUTH = {"source": "fixture operator message", "quote": "Approve this task and it
 REQUEST = {"source": "fixture operator message", "quote": "Ask the judge to rule on this exhaustion."}
 WORK = {"base_revision": BASE, "scope": "Correct parser findings", "paths": ["src/parser.py"], "findings": ["F1"]}
 PROGRESS = "PROGRESS: two of the three findings closed under the prior remedy.\n"
+DIRECTION = "Collect callables at the return-expression level instead of walking the call graph."
+VERIFICATION = "The tuple-returning fixture reports both callables, and the existing suite stays green."
+OVERRIDE = {"source": "operator message 2026-02-03", "quote": "Try the visitor rewrite; I am authorizing a fresh allowance for it."}
 
 
 class RecoveryTests(unittest.TestCase):
@@ -54,6 +58,14 @@ class RecoveryTests(unittest.TestCase):
         self.investigation_sha = hashlib.sha256(investigation.read_bytes()).hexdigest()
         self.review = self.root / "review.md"
         self.review.write_text("Reviewed head: " + HEAD + "\nBlocking finding F1: quoted input is still accepted as a completion signal.\n")
+        # The assessment a change of direction rests on: what was tried, why it
+        # failed, and the experiment that discriminates (#462).
+        assessed = self.root / "assessed.md"
+        assessed.write_text(
+            "FAILED APPROACH: tracking single-return callables through the existing walker.\n"
+            "ROOT CAUSE: the walker never visits a callable returned alongside another value.\n"
+            "EXPERIMENT: a tuple-returning fixture reproduces the omission in one run.\n")
+        self.assessed = str(assessed)
 
     def exhaust(self):
         for fix in (None, 1, 2, 3, 4, 5):
@@ -78,11 +90,11 @@ class RecoveryTests(unittest.TestCase):
             "scope": WORK["scope"], "allowed_paths": ["src/*"], "additional_fixes": 2, "authorization": AUTH,
             "supersedes": diag["plan"]}, AT)
 
-    def reservation(self, number, plan="plan-1"):
+    def reservation(self, number, plan: "str | None" = "plan-1"):
         return {"id": f"fix-{number}", "task": TASK, "role": "developer", "agent": "worker", "fix_round": number,
                 "fingerprint": "c" * 64, "plan": plan, "work": copy.deepcopy(WORK)}
 
-    def finish(self, number, plan="plan-1"):
+    def finish(self, number, plan: "str | None" = "plan-1"):
         record = self.reservation(number, plan)
         reserve(self.store, record, AT)
         mark_sending(self.store, record["id"], AT, {"cleared": True})
@@ -150,6 +162,23 @@ class RecoveryTests(unittest.TestCase):
         return {"id": name, "task": TASK, "checkpoint": checkpoint_id,
                 "judge_report": self.diagnosis_report(remedy, bound, name + ".md", extra, assessment),
                 "scope": WORK["scope"], "allowed_paths": ["src/*"]}
+
+    def approach_lines(self, direction=DIRECTION, verification=VERIFICATION):
+        return "APPROACH: {}\nVERIFICATION: {}\n".format(direction, verification)
+
+    def approach_diagnosis(self, name, bound, checkpoint_id="checkpoint-5", **lines):
+        """A diagnosis that approves a materially different direction."""
+        return self.diagnosis(name, "restructure", bound, checkpoint_id,
+                              extra=self.approach_lines(**lines), assessment=self.assessed)
+
+    def run_approach_diagnosis(self, data, report=None):
+        return self.run_diagnosis(data, "judge",
+                                  investigations=self.investigated(report=report or self.assessed))
+
+    def spend(self, first, last, plan: "str | None" = None):
+        """Confirm every developer attempt from `first` through `last`."""
+        for number in range(first, last + 1):
+            self.finish(number, plan)
 
     def test_a_bounded_remedy_records_the_plan_its_bound_authorizes(self):
         # coding-policy#407: the judge supplies the budget the operator used to.
@@ -351,16 +380,20 @@ class RecoveryTests(unittest.TestCase):
         older = copy.deepcopy(self.store)
         row = older["diagnoses"][0]
         row.update(schema_version=1)
-        del row["reissue"], row["investigator_report"]
+        del row["reissue"], row["investigator_report"], row["approach"], row["approach_change"]
         # Both record kinds migrate in one pass; neither short-circuits the
         # other (rules/stateful-artifacts.md Migration Policy).
         older["checkpoints"][0]["schema_version"] = 1
         older["checkpoints"][0].pop("requested_by", None)
         self.assertTrue(migrate_store(older))
         self.assertEqual(older["checkpoints"][0]["schema_version"], 2)
-        self.assertEqual(older["diagnoses"][0]["schema_version"], 2)
+        self.assertEqual(older["diagnoses"][0]["schema_version"], DIAGNOSIS_RECORD_VERSION)
         self.assertIs(older["diagnoses"][0]["reissue"], False)
         self.assertIsNone(older["diagnoses"][0]["investigator_report"])
+        # coding-policy#462: a pre-approach diagnosis ruled on the initial
+        # direction and approved no transition away from it.
+        self.assertIsNone(older["diagnoses"][0]["approach"])
+        self.assertIsNone(older["diagnoses"][0]["approach_change"])
         validate_store(older, self.history)
 
     def test_an_older_diagnosis_carrying_newer_fields_is_refused(self):
@@ -368,11 +401,12 @@ class RecoveryTests(unittest.TestCase):
         # is unowned newer data; stamping it would let the value through.
         self.seed_checkpoint()
         self.run_diagnosis(self.diagnosis("diag-1", "continue", 2), "judge")
-        for field, value in (("reissue", True), ("investigator_report", None)):
+        for field, value in (("reissue", True), ("investigator_report", None),
+                             ("approach", "approach-1"), ("approach_change", None)):
             corrupt = copy.deepcopy(self.store)
             row = corrupt["diagnoses"][0]
             row.update(schema_version=1)
-            del row["reissue"], row["investigator_report"]
+            del row["reissue"], row["investigator_report"], row["approach"], row["approach_change"]
             row[field] = value
             with self.assertRaisesRegex(UsageError, "newer recorded fields"):
                 migrate_store(corrupt)
@@ -503,6 +537,205 @@ class RecoveryTests(unittest.TestCase):
             mutate(corrupt["diagnoses"][0])
             with self.assertRaisesRegex(UsageError, "another task, base or fix round"):
                 validate_store(corrupt, self.history)
+
+    def test_an_evidenced_change_of_approach_starts_a_fresh_allowance(self):
+        # coding-policy#462: the bound exists to stop repeated attempts at a
+        # failing approach. A different direction is not that repetition, so it
+        # gets its own allowance while the cumulative history stays intact.
+        self.seed_checkpoint()
+        record = self.run_approach_diagnosis(self.approach_diagnosis("diag-1", 5))
+        self.assertEqual(record["approach_change"], "diag-1:approach")
+        # The allowance is the approach's, so no extra-correction plan is minted.
+        self.assertIsNone(record["plan"])
+        self.assertIsNone(record["approach"])
+        approach = self.store["approaches"][-1]
+        self.assertEqual(current_approach(self.store, TASK), approach)
+        self.assertEqual((approach["from_fix"], approach["allowance"], approach["origin"], approach["direction"]),
+                         (5, 5, "diagnosis", DIRECTION))
+        self.assertEqual(approach_ceiling(self.store, TASK), 10)
+        status = task_statuses(self.store, self.history)[TASK]
+        self.assertEqual((status["status"], status["confirmed_fixes"], status["approach_attempts"],
+                          status["approach_allowance"], status["remaining_fixes"]),
+                         ("within_authorized_budget", 5, 0, 5, 5))
+        # Cumulative attempt 6 is approach attempt 1: no plan, no operator prompt.
+        self.assertIsNone(validate_work(self.store, self.history, TASK, 6, None, None))
+        with self.assertRaisesRegex(UsageError, "cannot relabel a fix inside the current approach"):
+            validate_work(self.store, self.history, TASK, 6, "diag-1:plan", WORK)
+        self.finish(6, None)
+        # Review feedback returns to the developer inside the fresh allowance.
+        self.assertIsNone(validate_work(self.store, self.history, TASK, 7, None, None))
+        self.spend(7, 10)
+        self.assertEqual(task_statuses(self.store, self.history)[TASK]["approach_attempts"], 5)
+        with self.assertRaisesRegex(UsageError, "correction allowance is exhausted"):
+            validate_work(self.store, self.history, TASK, 11, None, None)
+        validate_store(self.store, self.history)
+
+    def test_a_new_approach_starts_its_ladder_rather_than_inheriting_one(self):
+        # An earlier approach's exhausted rungs never force a newly approved
+        # direction down a lifetime ladder to permanent stop (#462).
+        self.seed_checkpoint()
+        self.run_diagnosis(self.diagnosis("diag-1", "continue", 1), "judge")
+        self.finish(6, "diag-1:plan")
+        self.judge_after_developer(6)
+        second = self.next_checkpoint("checkpoint-6")
+        self.run_approach_diagnosis(self.approach_diagnosis("diag-2", 4, second))
+        self.spend(7, 10)
+        self.judge_after_developer(10)
+        third = self.next_checkpoint("checkpoint-7")
+        # `continue` is available again although the task's lifetime already
+        # spent that rung under the previous approach.
+        fresh = self.run_diagnosis(self.diagnosis("diag-3", "continue", 1, third), "judge")
+        self.assertEqual((fresh["remedy"], fresh["reissue"], fresh["approach"]), ("continue", False, "diag-2:approach"))
+        self.assertEqual(fresh["fix_round"], 10)
+        validate_store(self.store, self.history)
+
+    def test_a_reset_needs_its_investigator_and_judge_evidence(self):
+        self.seed_checkpoint()
+        # The assessment must explain the failed approach, its cause and the
+        # discriminating experiment; a consultation alone resets nothing.
+        with self.assertRaisesRegex(UsageError, "FAILED APPROACH"):
+            self.run_diagnosis(self.diagnosis("diag-1", "restructure", 3, extra=self.approach_lines()), "judge")
+        # Both judge lines are required; one alone is an incomplete transition.
+        for extra in ("APPROACH: {}\n".format(DIRECTION), "VERIFICATION: {}\n".format(VERIFICATION)):
+            with self.assertRaisesRegex(UsageError, "carries both APPROACH"):
+                self.run_approach_diagnosis({**self.approach_diagnosis("diag-1", 3), "judge_report":
+                    self.diagnosis_report("restructure", 3, "partial.md", extra, self.assessed)})
+        # `stop` ends implementation; it approves no direction.
+        with self.assertRaisesRegex(UsageError, "approves no new direction"):
+            self.run_approach_diagnosis({**self.approach_diagnosis("diag-1", 3), "judge_report":
+                self.diagnosis_report("stop", "none", "stopped.md", self.approach_lines(), self.assessed)})
+        self.assertEqual(self.store["approaches"], [])
+
+    def test_the_same_direction_and_a_replayed_transition_grant_no_second_allowance(self):
+        self.seed_checkpoint()
+        first = self.run_approach_diagnosis(self.approach_diagnosis("diag-1", 3))
+        # A retry of the recorded transition returns it; it never mints another.
+        self.assertEqual(self.run_approach_diagnosis(self.approach_diagnosis("diag-1", 3)), first)
+        self.assertEqual(len(self.store["approaches"]), 1)
+        self.spend(6, 8)
+        self.judge_after_developer(8)
+        second = self.next_checkpoint("checkpoint-8")
+        # Another attempt at the same direction spends the existing allowance.
+        with self.assertRaisesRegex(UsageError, "already recorded this direction"):
+            self.run_approach_diagnosis(self.approach_diagnosis("diag-2", 3, second))
+        with self.assertRaisesRegex(UsageError, "already recorded this direction"):
+            authorize_approach(self.store, self.history, {
+                "id": "approach-2", "task": TASK, "checkpoint": second, "direction": DIRECTION.upper(),
+                "verification": VERIFICATION, "allowance": 2, "authorization": OVERRIDE}, AT)
+        self.assertEqual(len(self.store["approaches"]), 1)
+        validate_store(self.store, self.history)
+
+    def test_an_overridden_stop_is_recordable_plannable_and_diagnosable(self):
+        # coding-policy#462: `authorize_plan` needed a diagnosis at the current
+        # count while `diagnose` refused one on a stopped ladder, so an
+        # authorized continuation had nowhere to land.
+        self.seed_checkpoint()
+        self.run_diagnosis(self.diagnosis("diag-1", "stop", "none"), "judge")
+        authorize_plan(self.store, self.history, {"id": "plan-1", "task": TASK, "checkpoint": "checkpoint-5",
+            "scope": WORK["scope"], "allowed_paths": ["src/*"], "additional_fixes": 1, "authorization": AUTH}, AT)
+        self.finish(6, "plan-1")
+        self.judge_after_developer(6)
+        second = self.next_checkpoint("checkpoint-6")
+        with self.assertRaisesRegex(UsageError, "terminal"):
+            self.run_diagnosis(self.diagnosis("diag-2", "continue", 1, second), "judge")
+        with self.assertRaisesRegex(UsageError, "no diagnosis at fix round 6"):
+            authorize_plan(self.store, self.history, {"id": "plan-2", "task": TASK, "checkpoint": second,
+                "scope": WORK["scope"], "allowed_paths": ["src/*"], "additional_fixes": 1, "authorization": OVERRIDE}, AT)
+        approach = authorize_approach(self.store, self.history, {
+            "id": "approach-1", "task": TASK, "checkpoint": second, "direction": DIRECTION,
+            "verification": VERIFICATION, "allowance": 3, "authorization": OVERRIDE}, AT)
+        self.assertEqual((approach["from_fix"], approach["allowance"], approach["origin"]), (6, 3, "operator"))
+        status = task_statuses(self.store, self.history)[TASK]
+        self.assertEqual((status["status"], status["confirmed_fixes"], status["approach_attempts"], status["approach"]),
+                         ("within_authorized_budget", 6, 0, "approach-1"))
+        self.assertIsNone(validate_work(self.store, self.history, TASK, 7, None, None))
+        self.spend(7, 9)
+        self.judge_after_developer(9)
+        third = self.next_checkpoint("checkpoint-9")
+        # The diagnosis path reopens with the new approach's own fresh ladder.
+        self.assertIsNone(require_investigation_before_judge(
+            self.store, self.history, TASK, self.investigated(), "diagnosis"))
+        later = self.run_diagnosis(self.diagnosis("diag-2", "continue", 1, third), "judge")
+        self.assertEqual((later["remedy"], later["approach"]), ("continue", "approach-1"))
+        validate_store(self.store, self.history)
+
+    def test_an_operator_approach_needs_a_current_exhaustion_and_its_own_authority(self):
+        self.seed_checkpoint()
+        grant = {"id": "approach-1", "task": TASK, "checkpoint": "checkpoint-5", "direction": DIRECTION,
+                 "verification": VERIFICATION, "allowance": 2, "authorization": OVERRIDE}
+        with self.assertRaisesRegex(UsageError, "requires id, task, checkpoint"):
+            authorize_approach(self.store, self.history, {**grant, "extra": 1}, AT)
+        with self.assertRaisesRegex(UsageError, "exceeds the 5-attempt ceiling"):
+            authorize_approach(self.store, self.history, {**grant, "allowance": 6}, AT)
+        # With no plan holding attempts there is nothing to retire.
+        with self.assertRaisesRegex(UsageError, "must name this task's current unexhausted plan"):
+            authorize_approach(self.store, self.history, {**grant, "supersedes": "plan-1"}, AT)
+        reservation = self.reservation(6, None)
+        reserve(self.store, reservation, AT)
+        with self.assertRaisesRegex(UsageError, "dispatch outcome is still unknown"):
+            authorize_approach(self.store, self.history, grant, AT)
+        abort_pre_send(self.store, reservation["id"], AT, "reconciled before approval")
+        first = authorize_approach(self.store, self.history, grant, AT)
+        self.assertEqual(authorize_approach(self.store, self.history, grant, AT), first)
+        with self.assertRaisesRegex(UsageError, "already records a different direction"):
+            authorize_approach(self.store, self.history, {**grant, "allowance": 3}, AT)
+        self.spend(6, 7)
+        self.judge_after_developer(7)
+        second = self.next_checkpoint("checkpoint-7")
+        # Old authority never carries a new transition.
+        with self.assertRaisesRegex(UsageError, "already approved an earlier approach"):
+            authorize_approach(self.store, self.history, {**grant, "id": "approach-2", "checkpoint": second,
+                "direction": "Rewrite the walker as a visitor over return expressions."}, AT)
+        fresh = authorize_approach(self.store, self.history, {**grant, "id": "approach-2", "checkpoint": second,
+            "direction": "Rewrite the walker as a visitor over return expressions.",
+            "authorization": {"source": "operator message 2026-02-04", "quote": "Take the visitor rewrite next."}}, AT)
+        self.assertEqual(fresh["from_fix"], 7)
+        # An unexhausted approach continues; it does not start another.
+        with self.assertRaisesRegex(UsageError, "allowance is not exhausted"):
+            authorize_approach(self.store, self.history, {**grant, "id": "approach-3", "checkpoint": second,
+                "direction": "Parse the module twice and diff the callable sets.",
+                "authorization": {"source": "operator message 2026-02-05", "quote": "And try the double parse."}}, AT)
+        validate_store(self.store, self.history)
+
+    def test_a_new_approach_retires_the_plan_the_old_one_bought(self):
+        # A plan's fix range is cumulative and outlives the direction it was
+        # bought for: left active, a 5-attempt plan authorized fixes 7-10 under
+        # an approach whose own allowance was 1 (policy reviewer on #467).
+        self.seed_checkpoint()
+        diagnosed = self.run_diagnosis(self.diagnosis("diag-1", "continue", 5), "judge")
+        grant = {"id": "approach-1", "task": TASK, "checkpoint": "checkpoint-5", "direction": DIRECTION,
+                 "verification": VERIFICATION, "allowance": 1, "authorization": OVERRIDE}
+        with self.assertRaisesRegex(UsageError, "still holds unspent attempts"):
+            authorize_approach(self.store, self.history, grant, AT)
+        # Naming something other than the plan that holds the attempts retires
+        # nothing, so the same refusal stands.
+        with self.assertRaisesRegex(UsageError, "still holds unspent attempts"):
+            authorize_approach(self.store, self.history, {**grant, "supersedes": "no-such-plan"}, AT)
+        approach = authorize_approach(self.store, self.history, {**grant, "supersedes": diagnosed["plan"]}, AT)
+        self.assertEqual(approach["supersedes"], diagnosed["plan"])
+        self.assertEqual(active_plans(self.store), [])
+        self.finish(6, None)
+        # The retired plan's remaining range no longer buys an attempt.
+        with self.assertRaisesRegex(UsageError, "correction allowance is exhausted"):
+            validate_work(self.store, self.history, TASK, 7, None, None)
+        with self.assertRaisesRegex(UsageError, "was superseded"):
+            validate_work(self.store, self.history, TASK, 7, diagnosed["plan"], WORK)
+        status = task_statuses(self.store, self.history)[TASK]
+        self.assertEqual((status["status"], status["plan"], status["remaining_fixes"],
+                          status["approach_attempts"], status["approach_allowance"]),
+                         ("checkpoint_required", None, 0, 1, 1))
+        validate_store(self.store, self.history)
+
+    def test_a_ledger_without_approaches_reads_as_its_own_initial_approach(self):
+        # Existing history migrates with no transition invented and no attempt
+        # renumbered (rules/stateful-artifacts.md Migration Policy).
+        self.seed_checkpoint()
+        self.assertEqual(self.store["approaches"], [])
+        self.assertIsNone(current_approach(self.store, TASK))
+        status = task_statuses(self.store, self.history)[TASK]
+        self.assertEqual((status["approach"], status["approach_attempts"], status["approach_allowance"],
+                          status["confirmed_fixes"]), (None, 5, 5, 5))
+        self.assertEqual(approach_ceiling(self.store, TASK), 5)
 
     def test_a_diagnosis_plan_is_matched_on_every_field_the_remedy_derives(self):
         # coding-policy#412: the check compared task, bound and authorization
@@ -1132,20 +1365,23 @@ class RecoveryTests(unittest.TestCase):
         del old["refusal_authorizations"]
         del old["diagnoses"]
         del old["legacy_ruling_recoveries"]
+        del old["approaches"]
         for row in old["dispatches"]:
             del row["brief_identity"]
             del row["provider"]
         before = copy.deepcopy(old)
         self.assertTrue(migrate_store(old))
-        self.assertEqual(old["schema_version"], 10)
+        self.assertEqual(old["schema_version"], RECOVERY_STORE_VERSION)
         self.assertEqual(old.pop("refusal_authorizations"), [])
         self.assertEqual(old.pop("diagnoses"), [])
         self.assertEqual(old.pop("legacy_ruling_recoveries"), [])
+        self.assertEqual(old.pop("approaches"), [])
         self.assertEqual({key: value for key, value in old.items() if key != "schema_version"},
                          {key: value for key, value in before.items() if key != "schema_version"})
         old["refusal_authorizations"] = []
         old["diagnoses"] = []
         old["legacy_ruling_recoveries"] = []
+        old["approaches"] = []
         validate_store(old, self.history)
         self.assertFalse(migrate_store(old))
         stale = copy.deepcopy(self.store)
@@ -1167,10 +1403,11 @@ class RecoveryTests(unittest.TestCase):
         six["schema_version"] = 6
         del six["diagnoses"]
         del six["legacy_ruling_recoveries"]
+        del six["approaches"]
         for row in six["dispatches"]:
             del row["provider"]
         self.assertTrue(migrate_store(six))
-        self.assertEqual(six["schema_version"], 10)
+        self.assertEqual(six["schema_version"], RECOVERY_STORE_VERSION)
         self.assertEqual(six["diagnoses"], [])
         validate_store(six, self.history)
         record_refusal(self.store, {"dispatch": first, "receipt": self.refusal_receipt("codex-a")}, AT, "codex", self.REPORT)

@@ -68,14 +68,12 @@ from pathlib import Path
 from .diagnostics import stderr_warn as _warn
 from .errors import ConfigError, HerdrError, StateError, UsageError
 from .tiers import SEAT_SEPARATOR, canonical_role, parse_launch_args, parse_tiers, verify_argv
-from .recovery import DEFAULT_FIX_LIMIT, empty_recovery, migrate_store, validate_store
+from .recovery import empty_recovery, migrate_store, validate_store
 
 #: The version this build writes for the document and assignment rows.
 #: Snapshots have their own version and migration chain below.
 STATE_SCHEMA_VERSION = 6
 
-#: Default checkpoint, not a global permission to exceed an approved budget.
-MAX_FIX_ROUNDS = DEFAULT_FIX_LIMIT
 CLEAR_REASONS = frozenset({"automatic", "hand", "retained", "unknown"})
 
 #: An assignment row records what teamlead did, including what did not work.

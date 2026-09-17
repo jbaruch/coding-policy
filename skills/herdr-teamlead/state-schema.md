@@ -281,7 +281,7 @@ skills/herdr-teamlead/references/retrospectives.md
   ],
   "specialist_assessments": [],
   "recovery": {
-    "schema_version": 10,
+    "schema_version": 11,
     "tasks": {},
     "checkpoints": [],
     "plans": [],
@@ -291,6 +291,7 @@ skills/herdr-teamlead/references/retrospectives.md
     "refusal_authorizations": [],
     "diagnoses": [],
     "legacy_ruling_recoveries": [],
+    "approaches": [],
     "hand_clearances": [],
     "historical_attempts": [],
     "role_clearances": [],
@@ -345,12 +346,13 @@ document and arrives already stamped.
 
 ## Recovery records
 
-The recovery document uses `schema_version: 10`; individual records retain their
+The recovery document uses `schema_version: 11`; individual records retain their
 independent versions. Version 6 adds the dispatch fields `brief_identity`, `refusal` and
 `refusal_move` and the `refusal_authorizations` collection; version 7 adds the
 dispatch's send-time `provider`; version 8 adds the `diagnoses` collection;
 version 9 adds `legacy_ruling_recoveries`; version 10 widens `dispatches[].role`
-to a seat, per Seat vs responsibility above. The
+to a seat, per Seat vs responsibility above; version 11 adds the `approaches`
+collection. The
 owner stamps an older store on load, adds the empty collections, and refuses one
 already carrying a field — or a seat-named dispatch — its version did not own. Generic records remain version 1; stale-Grok delivery and
 composition-bearing dispatch/result records use version 2. Checkpoints are at
@@ -379,7 +381,8 @@ replacement for live readiness, source review, or release gates.
 | `hand_clearances` | Unique `id`, original release `assignment_index`, `previous_developer`, complete owner `input`, clear byte `receipts`, later `observed_session` or null, and `basis: verified_required_release_clear`. Both indices retain their original rows. The later observation never substitutes for historical proof; changed or missing current IDs do not invalidate archived clear evidence. |
 | `role_clearances` | Unique `id`, original `task`/`base_revision`, developer `assignment_index`, actual `clearing_assignment_index` and `clearing_dispatch`, `next_fix`, complete owner `input`, clear/authorization byte `receipts`, reused or explicit `clear_authority`, later `observed_session`, `basis: verified_authorized_role_clear`, and `grants_future_attempts: false`. The input fixes the same work and correction plan used for dispatch. Original known native proof and every earlier row remain unchanged. |
 | `historical_attempts` | Unique `id`, actual `fix_round`, `previous_developer`, appended `assignment_index`, original owner `input`, authorization/transport/report byte `receipts`, inspected `vcs` checkout/head/diff evidence, `basis: completed_authorized_manual_correction`, null `native_session_proof`, `grants_future_attempts: false`, and append-only `reviews`. |
-| `diagnoses` | Record schema 2. Unique `id`, `task`, `checkpoint`, `fix_round`, original `base_revision`, `remedy` (`continue`, `restructure` or `stop`), `bound` or null, `reissue` (whether this diagnosis repeats its predecessor's rung), `judge_agent`, `judge_evidence`, `investigator_report` binding the assessed report the judge ruled on or null on a migrated row, `scope`, `allowed_paths`, the `plan` a bounded remedy authorized or null, `supersedes` naming a replaced plan or null, and the operator `authorization` that permitted an early supersession or null. A task's diagnoses move down the remedy ladder, each nonterminal rung repeating at most once, and `stop` is terminal and never repeats. Version-1 rows migrate to 2 with `reissue: false` and `investigator_report: null`. |
+| `diagnoses` | Record schema 3. Unique `id`, `task`, `checkpoint`, `fix_round`, original `base_revision`, `remedy` (`continue`, `restructure` or `stop`), `bound` or null, `reissue` (whether this diagnosis repeats its predecessor's rung), `approach` naming the approach it was recorded under or null for the initial one, `approach_change` naming the approach it approved or null, `judge_agent`, `judge_evidence`, `investigator_report` binding the assessed report the judge ruled on or null on a migrated row, `scope`, `allowed_paths`, the `plan` a bounded remedy authorized or null, `supersedes` naming a replaced plan or null, and the operator `authorization` that permitted an early supersession or null. The remedy ladder is read per approach: within one approach the diagnoses move down it, each nonterminal rung repeating at most once, and `stop` is terminal there and never repeats. A diagnosis approving a new direction records its `bound` as that approach's allowance and no `plan`. Version-1 rows migrate with `reissue: false` and `investigator_report: null`; version-1 and version-2 rows migrate to 3 with `approach: null` and `approach_change: null`. |
+| `approaches` | Record schema 1. Unique `id`, `task`, `checkpoint`, original `base_revision`, `from_fix` (the cumulative attempts spent before this direction started), `allowance`, `direction`, `verification`, `origin` (`diagnosis` or `operator`), `diagnosis`, `judge_evidence` and `investigator_report` on a diagnosed reset, `authorization` on an operator override, and `supersedes` naming a retired prior-approach plan or null. `from_fix` equals its checkpoint's `fix_round` and increases across a task's approaches; a direction is recorded once per task. A superseded plan belongs to the same task and base, and no longer authorizes attempts. The task's cumulative attempt numbering is never renumbered. |
 | `refusal_authorizations` | Unique `id`, `task`, `role`, `fix_round` or null, approved `provider`, `brief` (`unchanged` or `revised`), the operator's `decision`, `authorization`. Permits one dispatch on its key to that provider after two recorded refusals, the brief held to the refused identity unless `revised`; the consuming dispatch names it in `refusal_move.authorization`. |
 | `delivery_recoveries` | Unique `id`, original `dispatch` and `assignment_index`, owner `input`, byte `receipts` for report/negative wait/pane/visible/native source/common/brief, archived `native_session`, `found: true`, `basis: archived_native_final_source`, null `native_session_proof`, and `grants_review_approval: false`. Original null session evidence is preserved; the archived user prompt binds its delivery to the saved dispatch. |
 | `legacy_ruling_recoveries` | Schema-1 receipts already written for historical version-2 citations. Unique `id`, `task`, `at`, operator `authorization` source/quote, `backup` path/SHA-256, `checkpoints` mapping original IDs to canonical JSON SHA-256 digests, and `grants_future_attempts: false`. Reading validates these bindings without fetching historical files. Altered, new or overlapping citations do not inherit a receipt. Empty after a schema-8 migration. |
@@ -643,7 +646,7 @@ Only the owner migrates, and it reads a version in one of three directions.
   cannot lose it.
 - **Corrupt** — unparseable JSON, a non-object document, a non-array field, a
   non-object row, invalid context or tier evidence, inconsistent recovery
-  relationships, or an extra fix without its recorded allowance: no usable
+  relationships, a duplicated or out-of-order approach, or an extra fix without its recorded allowance: no usable
   prior state, treated like the newer case.
   The file is never deleted, and the warning never instructs the operator to
   discard it. Losing a snapshot ring costs one re-measure; overwriting an

@@ -19,7 +19,7 @@ from unittest.mock import patch
 
 from teamlead.cli import COMMANDS, build_parser, main
 from teamlead.errors import UsageError
-from teamlead.recovery import checkpoint, register_task, validate_store, validate_work
+from teamlead.recovery import RECOVERY_STORE_VERSION, checkpoint, register_task, validate_store, validate_work
 from teamlead.state import add_assignment, empty_state, load_state_checked
 
 AT = "2026-02-03T12:00:00+00:00"
@@ -58,6 +58,7 @@ class SchemaNineCompatibilityTests(unittest.TestCase):
             })
         store["schema_version"] = 8
         del store["legacy_ruling_recoveries"]
+        del store["approaches"]
         self.write_state()
 
     def write_state(self):
@@ -92,8 +93,9 @@ class SchemaNineCompatibilityTests(unittest.TestCase):
         restored, usable = load_state_checked(self.path)
         self.assertTrue(usable)
         expected = copy.deepcopy(before)
-        expected["recovery"]["schema_version"] = 10
+        expected["recovery"]["schema_version"] = RECOVERY_STORE_VERSION
         expected["recovery"]["legacy_ruling_recoveries"] = []
+        expected["recovery"]["approaches"] = []
         self.assertEqual(restored, expected)
         self.assertEqual(restored["recovery"]["checkpoints"], before["recovery"]["checkpoints"])
         self.assertEqual(restored["assignments"], before["assignments"])
@@ -110,7 +112,8 @@ class SchemaNineCompatibilityTests(unittest.TestCase):
         restored, usable = load_state_checked(self.path)
         self.assertTrue(usable)
         expected = copy.deepcopy(before)
-        expected["recovery"]["schema_version"] = 10
+        expected["recovery"]["schema_version"] = RECOVERY_STORE_VERSION
+        expected["recovery"]["approaches"] = []
         self.assertEqual(restored, expected)
         self.assertEqual(len(restored["recovery"]["legacy_ruling_recoveries"]), 1)
         self.assertEqual(restored["recovery"]["legacy_ruling_recoveries"][0]["checkpoints"],
@@ -123,13 +126,14 @@ class SchemaNineCompatibilityTests(unittest.TestCase):
 
     def test_a_current_store_reads_without_a_rewrite(self):
         self.install_receipts()
-        self.state["recovery"]["schema_version"] = 10
+        self.state["recovery"]["schema_version"] = RECOVERY_STORE_VERSION
+        self.state["recovery"]["approaches"] = []
         self.write_state()
         raw = self.path.read_bytes()
         restored, usable = load_state_checked(self.path)
         self.assertTrue(usable)
         self.assertEqual(self.path.read_bytes(), raw)
-        self.assertEqual(restored["recovery"]["schema_version"], 10)
+        self.assertEqual(restored["recovery"]["schema_version"], RECOVERY_STORE_VERSION)
         code, _, error = self.run_status()
         self.assertEqual(code, 0, error)
         self.assertEqual(self.path.read_bytes(), raw)
@@ -274,7 +278,7 @@ class SchemaNineCompatibilityTests(unittest.TestCase):
         del payload["recovery"]["legacy_ruling_recoveries"]
         cases.append(payload)
         payload = json.loads(self.path.read_bytes())
-        payload["recovery"]["schema_version"] = 11
+        payload["recovery"]["schema_version"] = RECOVERY_STORE_VERSION + 1
         cases.append(payload)
         for case in cases:
             encoded = json.dumps(case, indent=2).encode()

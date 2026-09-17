@@ -137,6 +137,7 @@ instruction into permission to exceed an exhausted correction budget.
 | `checkpoint` | unique `id`, `task`, concrete `defect`, `previous_attempts`, `progress`, `change_in_approach`; optional absolute `judge_report` | Records the exhausted allowance and the evidence the diagnosis brief is built from. A cited `judge_report` is legacy: it replays a checkpoint recorded before diagnosis mode and requires the configured pinned judge's completed ruling after the latest developer attempt, one per task. A new checkpoint omits it and takes the diagnosis instead. Implementation waits for the judge's remedy, never for an operator. |
 | `diagnose` | unique `id`, `task`, `checkpoint`, absolute `judge_report`, `scope`, `allowed_paths`; optional `supersedes` with `authorization` | Record the judge's diagnosis of a non-converging loop. The report supplies `REMEDY`, `BOUND` and `ASSESSMENT`; a `continue` or `restructure` remedy records the bounded plan its bound names, and `stop` records the terminal remedy and files a user-attention obligation. `BOUND` counts developer attempts, carries its justification, and is refused above the command's ceiling. `ASSESSMENT` must name the assessed investigator report this diagnosis ruled on, and that report is bound into the record. Each re-entry moves down `continue` → `restructure` → `stop`, or repeats the last rung once when the report carries a `PROGRESS` line; a rung already repeated is spent and `stop` never repeats. A re-entry before its bound is spent names the plan it supersedes and carries the change it claims — different `scope` or `allowed_paths`, or the operator's `authorization` — and the superseded plan is preserved. A bound lead's cited report must be the one supervision enrolled for the pinned judge on that task, and the task needs an assessed investigator consultation after its latest developer attempt. |
 | `authorize-corrections` | unique `id`, `task`, `checkpoint`, `scope`, `allowed_paths`, positive `additional_fixes`, `authorization`; optional `supersedes` | The operator's override of this exhaustion's recorded remedy; the task needs a diagnosis at the current fix round first. Store an explicit bounded approval once. Continue while it covers the next attempt; do not ask again within those bounds. A changed decision names the active plan in `supersedes`. |
+| `authorize-approach` | unique `id`, `task`, `checkpoint`, `direction`, `verification`, positive `allowance`, `authorization`; optional `supersedes` | The operator's own approval of a materially different direction, and the path that reopens a task diagnosed `stop`. Requires this task's current exhausted checkpoint, no unknown dispatch outcome, and an allowance at or below the command's ceiling. The new approach starts its own allowance and its own remedy ladder; the cumulative fix numbering continues unchanged. A plan still holding unspent attempts is named in `supersedes` and retired with the approach it was bought for; its cumulative fix range would otherwise outlive that approach. A direction already recorded on the task is refused, and so is an authorization already spent on an earlier approach. |
 | `record-report` | `dispatch`, full `head_revision`, `verdict` (`blocking` or `approved`), `review_mode` (`full` or `scoped`), independent `reviewer`, absolute `report`, `changed_paths` | Read the report in full and verify the VCS diff first. The command binds its bytes and stated head to the dispatch; it does not establish the tester, CI, external-review, or release gates. |
 | `authorize-refused-dispatch` | unique `id`, `task`, `role`, `fix_round` or null, approved `provider`, `brief` (`unchanged` or `revised`), `decision`, `authorization` | Record the operator's decision after two independent refusals; fewer is refused, since one refusal is a move. One authorization permits one further dispatch on that task, role and round to the approved provider, with the refused brief unchanged unless the operator approved a revision, carried on the dispatch's `refusal_move.authorization`. |
 | `record-refusal` | `dispatch`, absolute `receipt` | Bind a saved `wait-report` exit-5 JSON to the applied dispatch it stopped. The receipt's `report_path` must equal the report its supervision enrollment bound; an unenrolled dispatch is refused. The refusing provider is the worker's config `kind`. Same receipt replays; a second receipt for the same dispatch is refused. |
@@ -164,6 +165,11 @@ requires the preceding attempt's actual blocking review, recorded through
 `record-report`. Approved or absent findings do not justify another attempt.
 
 At budget exhaustion, record a new concrete checkpoint and take the judge's diagnosis through `diagnose`; its remedy supplies the bound under `rules/agent-team-operation.md` Judge Seat.
+A diagnosis whose report carries `APPROACH` and `VERIFICATION` approves a
+different direction: `BOUND` becomes that approach's allowance, no correction
+plan is recorded, and attempts inside the new allowance are dispatched with the
+ordinary `--task` and `--fix-round` alone. The cited investigator report must
+carry `FAILED APPROACH`, `ROOT CAUSE` and `EXPERIMENT`.
 Changed scope or a changed operator decision requires new explicit bounds;
 unchanged in-scope work reuses its approval. Do not rename the task or reset
 the counter. Every changed tip still needs full independent reviewer and
@@ -204,10 +210,14 @@ to work around uncertainty. Reconciliation records its later observations
 separately and preserves any original unconfirmed assignment row.
 
 `teamlead status` prints implementation state, confirmed fixes, active plan,
-and remaining allowance. `awaiting_diagnosis` pauses implementation while its
+and remaining allowance, plus the current `approach`, its `approach_attempts`
+and its `approach_allowance`. `confirmed_fixes` is the task's cumulative
+history; `approach_attempts` is what the direction being tried has spent. `awaiting_diagnosis` pauses implementation while its
 checkpoint awaits the judge's remedy, which the lead takes without an operator;
-an audit worker may still be active. `diagnosed_stop` is terminal: the task
-ships what is clean and tracks the remainder.
+an audit worker may still be active. `diagnosed_stop` is terminal for the current approach: the task
+ships what is clean and tracks the remainder, and only the operator overrides
+it — with a plan over the remedy, or a different approach through
+`authorize-approach`.
 `dispatch_outcome_unknown` requires reconciliation, and
 `checkpoint_required` requires the next exhausted-budget checkpoint.
 Neither an active worker nor a dispatch receipt proves that implementation or

@@ -365,7 +365,7 @@ def build_parser():
     report_parser.add_argument("--report", required=True)
     report_parser.add_argument("--lines", type=int, required=True)
 
-    for command in ("task", "checkpoint", "authorize-corrections", "recover-context", "recover-role-clear", "record-report", "record-refusal", "authorize-refused-dispatch", "diagnose", "reconcile", "record-release-clear", "import-correction", "record-historical-review", "recover-report", "assess-specialist"):
+    for command in ("task", "checkpoint", "authorize-corrections", "authorize-approach", "recover-context", "recover-role-clear", "record-report", "record-refusal", "authorize-refused-dispatch", "diagnose", "reconcile", "record-release-clear", "import-correction", "record-historical-review", "recover-report", "assess-specialist"):
         record_parser = sub.add_parser(command, parents=[common], help="Record owner-managed {} evidence.".format(command))
         record_parser.add_argument("--record", required=True, metavar="FILE", help="Structured evidence JSON; see dispatch-recovery.md.")
         record_parser.add_argument("--now", metavar="ISO8601")
@@ -1307,7 +1307,7 @@ def _record_stopped_task(state_path, diagnosis, at):
         "context": "Diagnosis {} returned REMEDY: stop at fix round {}, ruling on the investigator's assessment.".format(
             diagnosis["id"], diagnosis["fix_round"]),
         "consequence": "Implementation on this task has ended. What is clean ships; the remainder is a tracked accepted defect under rules/review-severity.md Judge-Accepted Defect Carve-Out.",
-        "resolution_condition": "Record the acknowledgement, or authorize a plan over this remedy to override it.",
+        "resolution_condition": "Record the acknowledgement, authorize a plan over this remedy, or approve a different approach with `teamlead authorize-approach` to override it.",
         "sources": [{"schema_version": attention.SCHEMA_VERSION, "kind": "artifact",
                      "ref": diagnosis["judge_evidence"]["path"]}],
     }, at)
@@ -1325,6 +1325,8 @@ def cmd_recovery(args, client=None, warn=None, trace=None):
         result = recovery.checkpoint(store, history, data, at, judge.agent if judge else None)
     elif args.command == "authorize-corrections":
         result = recovery.authorize_plan(store, history, data, at)
+    elif args.command == "authorize-approach":
+        result = recovery.authorize_approach(store, history, data, at)
     elif args.command == "diagnose":
         judge = load_judge(_config_path(args))
         # Supervision knows where the pinned judge's report was meant to land;
@@ -1557,7 +1559,7 @@ COMMANDS = {
     "apply": cmd_apply,
     "state": cmd_state,
     "status": cmd_status,
-    **{command: cmd_recovery for command in ("task", "checkpoint", "authorize-corrections", "recover-context", "recover-role-clear", "record-report", "record-refusal", "authorize-refused-dispatch", "diagnose", "reconcile", "record-release-clear", "import-correction", "record-historical-review", "recover-report", "assess-specialist")},
+    **{command: cmd_recovery for command in ("task", "checkpoint", "authorize-corrections", "authorize-approach", "recover-context", "recover-role-clear", "record-report", "record-refusal", "authorize-refused-dispatch", "diagnose", "reconcile", "record-release-clear", "import-correction", "record-historical-review", "recover-report", "assess-specialist")},
     "detect-triggers": cmd_detect_triggers,
     "validate-partition": cmd_validate_partition,
     "start-judge": cmd_start_judge,

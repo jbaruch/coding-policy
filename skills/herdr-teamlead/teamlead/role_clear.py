@@ -26,7 +26,7 @@ def _assignment(assignments, index):
 def _bounds(store, task, fix_round, plan_id, work):
     original = ledger.task_record(store, task)
     bounds = original
-    if fix_round > ledger.DEFAULT_FIX_LIMIT:
+    if fix_round > ledger.ceiling_at(store, task, fix_round):
         bounds = ledger._item(store["plans"], plan_id, "correction plan")
         if (bounds["task"] != task or bounds["base_revision"] != original["base_revision"]
                 or not bounds["first_fix"] <= fix_round <= bounds["last_fix"]):
