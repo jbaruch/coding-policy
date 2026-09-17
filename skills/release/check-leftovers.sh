@@ -26,6 +26,11 @@
 #   and no network. An age floor keeps a worktree created minutes ago from
 #   tripping it.
 #
+# Every read here fails closed. A gate that answers "clean" when it could not
+# look is worse than one that refuses to answer, so a git command that fails,
+# a clock that cannot be read and a path whose status cannot be parsed all exit
+# 2 rather than producing a verdict.
+#
 # Usage: check-leftovers.sh [--repo <path>]
 # Out:   one JSON object on stdout, on every exit code below:
 #          {"ok":bool,"self":{...},"others":[{...}],"blocking":["<reason>",...]}
@@ -36,9 +41,8 @@
 #        session-start hook, which has no reason to nag about work in progress.
 # Exit:  0 nothing blocks the release; 1 leftovers block it, each named in
 #        `blocking` with the diagnostic on stderr; 2 usage or tool error (not a
-#        git repository, git absent, unreadable worktree list, a worktree whose
-#        status or ancestry git cannot read). A tool error is never a verdict:
-#        the script refuses to answer rather than answering "clean".
+#        git repository, git absent, an unreadable worktree list or status, an
+#        unreadable clock, a base ref that exists but does not resolve).
 #
 # LEFTOVERS_MIN_AGE_HOURS overrides the age floor an OTHER worktree must clear
 # before its dirt reads as abandoned rather than freshly started. A value that is
@@ -49,21 +53,30 @@ set -euo pipefail
 #: An other-worktree leftover younger than this is someone still typing.
 LEFTOVERS_MIN_AGE_HOURS="${LEFTOVERS_MIN_AGE_HOURS:-4}"
 
-#: Where git's stderr lands while its stdout is carrying NUL-separated records.
+#: Where a git command's stderr lands while its stdout carries NUL-separated
+#: records. Set once the scratch directory exists.
 ERR_SINK=/dev/null
-#: The directory holding it. Global, not a local of main(): the EXIT trap runs
-#: after main() returns, when a local would already be unset.
+#: That directory. Global, not a local of main(): the EXIT trap runs after
+#: main() returns, when a local would already be unset. The trap names this
+#: function rather than an interpolated path, so nothing in TMPDIR reaches the
+#: trap as shell source.
 SCRATCH=""
 
-# A JSON string literal. Backslash, quote and the three control characters with
-# short escapes go first; every remaining C0 control character becomes its \u
-# escape. A path may legally hold one, and raw it makes the whole envelope
-# unparseable -- the shape every reader of this script depends on
-# (rules/script-delegation.md Script Requirements).
+#: read_status() fills these. Arrays and counters rather than a parsed string:
+#: a path may contain a newline, which no line-oriented carrier survives.
+WT_PATHS=()
+WT_STAGED=0
+WT_UNSTAGED=0
+WT_UNTRACKED=0
+
 json_str() {
   local s="$1" out="" i ch esc
   s="${s//\\/\\\\}"; s="${s//\"/\\\"}"
   s="${s//$'\t'/\\t}"; s="${s//$'\n'/\\n}"; s="${s//$'\r'/\\r}"
+  # Every remaining C0 control character is legal in a path and illegal raw in
+  # a JSON string, so each becomes its \u escape. Raw, one of them makes the
+  # whole envelope unparseable -- the shape every reader of this script
+  # depends on (rules/script-delegation.md Script Requirements).
   case "$s" in
     *[[:cntrl:]]*) ;;
     *) printf '"%s"' "$s"; return 0 ;;
@@ -71,10 +84,7 @@ json_str() {
   for (( i = 0; i < ${#s}; i++ )); do
     ch="${s:i:1}"
     case "$ch" in
-      [[:cntrl:]])
-        printf -v esc '\\u%04x' "'$ch"
-        out+="$esc"
-        ;;
+      [[:cntrl:]]) printf -v esc '\\u%04x' "'$ch"; out+="$esc" ;;
       *) out+="$ch" ;;
     esac
   done
@@ -97,11 +107,14 @@ cleanup() {
 # Seconds since a path was last written. GNU `stat` is probed first: BSD's `-f`
 # is GNU's --file-system, which answers an unrelated question and SUCCEEDS while
 # doing it, so probing the other way round yields a non-time on Linux and every
-# age reads as zero. A result that is not a whole number of seconds warns and
-# reads as just-written, which under-reports an age rather than aging a path
-# into a refusal on a bad read.
+# age reads as zero.
+#
+# A path that no longer exists is a deletion, and deleting it is exactly what
+# updated its parent directory's mtime -- so the parent answers for it. Without
+# that, an uncommitted deletion stats nothing, reads as just-written, and the
+# one change git cannot recover would be the one that does not block.
 age_seconds() {
-  local path="$1" now mtime status=0
+  local path="$1" target now mtime status=0
   now="$(date +%s)" || status=$?
   # The status is checked before the output: a non-zero `date` that still prints
   # digits is a failed clock read, not a reading to accept.
@@ -115,11 +128,16 @@ age_seconds() {
       return 1
       ;;
   esac
-  mtime="$(stat -c %Y "$path" 2>/dev/null)" || mtime=""
-  [ -n "$mtime" ] || mtime="$(stat -f %m "$path" 2>/dev/null)" || mtime=""
+
+  target="$path"
+  if [ ! -e "$target" ] && [ ! -L "$target" ]; then
+    target="$(dirname -- "$path")"
+  fi
+  mtime="$(stat -c %Y "$target" 2>/dev/null)" || mtime=""
+  [ -n "$mtime" ] || mtime="$(stat -f %m "$target" 2>/dev/null)" || mtime=""
   case "$mtime" in
     ''|*[!0-9]*)
-      echo "check-leftovers: cannot read the modification time of ${path} -- treating it as just written, so its age alone will not block; check the path is readable" >&2
+      echo "check-leftovers: cannot read the modification time of ${target} -- treating it as just written, so its age alone will not block; check the path is readable" >&2
       echo 0
       return 0
       ;;
@@ -127,60 +145,78 @@ age_seconds() {
   echo $(( now - mtime ))
 }
 
-# The newest write among a worktree's changed paths, in whole hours. The paths
-# are captured before the loop, not piped in through a process substitution: a
-# substitution's exit status is unobservable, so an unreadable worktree would
-# run the loop zero times and answer 0 -- the age that reads as freshly started.
+# Every path git reports as changed, with its staged/unstaged/untracked counts,
+# read into the WT_* globals. Non-zero, naming git's own message, when git could
+# not read the worktree: an unreadable worktree and a clean one are opposite
+# answers and must not collapse into the same zero.
+#
+# Parsed from the NUL-separated records directly, never through a line-oriented
+# intermediate, because a path may legally contain a newline. A rename or copy
+# record is followed by a second NUL field holding the ORIGINAL path with no
+# status prefix; it is consumed here so it cannot be mistaken for a record of
+# its own. `--untracked-files=all` rather than `normal`: normal collapses an
+# untracked directory to a single entry, and a directory's mtime does not move
+# when a file already inside it is edited, so a fresh edit under an old
+# directory would read as abandoned.
+read_status() { # <worktree>
+  local wt="$1" file="${SCRATCH}/status" record x y path origin
+  WT_PATHS=(); WT_STAGED=0; WT_UNSTAGED=0; WT_UNTRACKED=0
+
+  if ! git -C "$wt" status --porcelain -z --untracked-files=all >"$file" 2>"$ERR_SINK"; then
+    echo "check-leftovers: cannot read git status in ${wt}: $(cat "$ERR_SINK")" >&2
+    return 1
+  fi
+
+  while IFS= read -r -d '' record; do
+    [ ${#record} -ge 3 ] || {
+      echo "check-leftovers: ${wt} reported a status record shorter than its own prefix -- run 'git -C ${wt} status --porcelain -z' to see it" >&2
+      return 1
+    }
+    x="${record:0:1}"; y="${record:1:1}"; path="${record:3}"
+
+    if [ "$x$y" = '??' ]; then
+      WT_UNTRACKED=$(( WT_UNTRACKED + 1 ))
+    else
+      # Every code other than a space counts, not a hand-picked set: `T` for a
+      # type change and `U` for an unmerged path are dirt too, and a worktree
+      # holding only those would otherwise count zero and let the release run.
+      [ "$x" = ' ' ] || WT_STAGED=$(( WT_STAGED + 1 ))
+      [ "$y" = ' ' ] || WT_UNSTAGED=$(( WT_UNSTAGED + 1 ))
+    fi
+    WT_PATHS+=("$path")
+
+    case "$x$y" in
+      R?|C?|?R|?C)
+        # shellcheck disable=SC2034  # Read to consume the field, not to use
+        # it: the original path of a rename is gone from disk and has no age.
+        if ! IFS= read -r -d '' origin; then
+          echo "check-leftovers: ${wt}'s status ended part-way through a rename record -- run 'git -C ${wt} status --porcelain -z' to see it" >&2
+          return 1
+        fi
+        ;;
+    esac
+  done < "$file"
+  return 0
+}
+
+# The newest write among the paths read_status collected, in whole hours. The
+# paths are relative to the worktree git read them from, so that root is an
+# argument rather than something this function could guess.
 dirt_age_hours() { # <worktree>
-  local wt="$1" newest=999999999 paths rel age
-  paths="$(changed_paths "$wt")" || return 1
-  while IFS= read -r rel; do
-    [ -n "$rel" ] || continue
+  local wt="$1" newest=999999999 rel age
+  for rel in ${WT_PATHS+"${WT_PATHS[@]}"}; do
     age="$(age_seconds "${wt}/${rel}")" || return 1
     [ "$age" -lt "$newest" ] && newest="$age"
-  done <<EOF
-${paths}
-EOF
+  done
   [ "$newest" -eq 999999999 ] && newest=0
+  # A path dated in the future is a skewed clock or a skewed mtime, never an old
+  # one. It reads as just-written, and says so rather than producing the
+  # negative age that would sort ahead of every real one.
+  if [ "$newest" -lt 0 ]; then
+    echo "check-leftovers: a changed path in ${wt} is dated in the future -- treating it as just written; check the system clock and the file's timestamp" >&2
+    newest=0
+  fi
   echo $(( newest / 3600 ))
-}
-
-# Every `git status --porcelain` record for a worktree, one per line. `-z` keeps
-# a path with a space or a newline in one field. Exits non-zero, naming git's own
-# message, when git could not read the worktree -- an unreadable worktree and a
-# clean one are opposite answers and must not collapse into the same zero.
-#
-# `tr` runs INSIDE the substitution, not after it: command substitution discards
-# NUL bytes, so capturing first would fuse every record into one line. Under
-# `pipefail` git's failure still reaches $?, and its stderr goes to a file
-# because the pipe is already carrying the records.
-porcelain_lines() { # <worktree>
-  local out status=0
-  out="$(git -C "$1" status --porcelain -z --untracked-files=normal 2>"$ERR_SINK" | tr '\0' '\n')" || status=$?
-  if [ "$status" -ne 0 ]; then
-    echo "check-leftovers: cannot read git status in ${1} (exit ${status}): $(cat "$ERR_SINK")" >&2
-    return 1
-  fi
-  [ -z "$out" ] || printf '%s\n' "$out"
-}
-
-# The changed paths alone: the porcelain record minus its two status characters
-# and the space after them.
-changed_paths() { # <worktree>
-  porcelain_lines "$1" | sed -n 's/^.\{3\}//p'
-}
-
-# How many records match a porcelain status pattern. grep exits 1 on no match
-# and 2 on a real error, so only 1 is read as none.
-count_matching() { # <worktree> <status-regex>
-  local lines n status=0
-  lines="$(porcelain_lines "$1")" || return 1
-  n="$(printf '%s\n' "$lines" | grep -c "$2")" || status=$?
-  if [ "$status" -gt 1 ]; then
-    echo "check-leftovers: grep failed reading ${1}'s status (exit ${status})" >&2
-    return 1
-  fi
-  echo "$n"
 }
 
 # A worktree's branch name, or DETACHED when HEAD points at no branch -- which
@@ -235,6 +271,7 @@ main() {
   trap cleanup EXIT
   ERR_SINK="${SCRATCH}/git-stderr"
   : > "$ERR_SINK" || die "cannot write to ${ERR_SINK} -- check ${TMPDIR:-/tmp} is writable, then re-run"
+
   git -C "$repo" rev-parse --git-dir >/dev/null 2>&1 \
     || die "${repo} is not a git repository -- run this from the worktree you are releasing from"
 
@@ -242,60 +279,76 @@ main() {
   self_path="$(git -C "$repo" rev-parse --show-toplevel)" \
     || die "cannot resolve the worktree root of ${repo}"
 
-  local base="origin/main"
-  git -C "$repo" rev-parse --verify --quiet "$base" >/dev/null || base="main"
-  git -C "$repo" rev-parse --verify --quiet "$base" >/dev/null \
-    || die "neither origin/main nor main resolves -- fetch the remote, then re-run"
+  # A ref that does not resolve is not the same as a ref that is not there. If
+  # origin/main exists in the ref store but will not resolve to a commit, the
+  # repository is damaged, and judging a worktree against local `main` instead
+  # would answer the wrong question rather than refuse to answer.
+  local base="origin/main" present
+  if ! git -C "$repo" rev-parse --verify --quiet "${base}^{commit}" >/dev/null; then
+    # `for-each-ref` answers existence alone: it exits 0 either way and prints
+    # the name only when the ref is there. `show-ref --verify` cannot be asked
+    # this -- it exits non-zero for a damaged ref and for an absent one alike,
+    # which is the distinction being drawn.
+    present="$(git -C "$repo" for-each-ref --format='%(refname)' "refs/remotes/${base}" 2>"$ERR_SINK")" \
+      || die "cannot read ${base} in ${repo}: $(cat "$ERR_SINK")"
+    if [ -n "$present" ]; then
+      die "${base} exists but does not resolve to a commit -- the ref is damaged; run 'git -C ${repo} fsck', then re-run"
+    fi
+    base="main"
+    if ! git -C "$repo" rev-parse --verify --quiet "${base}^{commit}" >/dev/null; then
+      die "neither origin/main nor main resolves -- fetch the remote, then re-run"
+    fi
+  fi
 
   local blocking=() others_json=() ok=true
 
   local self_branch staged unstaged untracked self_tip_in_main self_age self_verdict
   self_branch="$(branch_of "$self_path")" \
     || die "cannot read the checked-out branch in ${self_path} -- see the diagnostic above"
-  staged="$(count_matching "$self_path" '^[MADRC]')" \
-    || die "cannot count staged paths in ${self_path} -- see the diagnostic above"
-  unstaged="$(count_matching "$self_path" '^.[MD]')" \
-    || die "cannot count unstaged paths in ${self_path} -- see the diagnostic above"
-  untracked="$(count_matching "$self_path" '^??')" \
-    || die "cannot count untracked paths in ${self_path} -- see the diagnostic above"
+  read_status "$self_path" \
+    || die "cannot read the working tree at ${self_path} -- see the diagnostic above"
+  staged="$WT_STAGED"; unstaged="$WT_UNSTAGED"; untracked="$WT_UNTRACKED"
   self_tip_in_main="$(tip_is_in "$self_path" HEAD "$base")" \
     || die "cannot classify ${self_path} against ${base} -- see the diagnostic above"
   self_age="$(dirt_age_hours "$self_path")" \
-    || die "cannot read the working tree at ${self_path} -- see the diagnostic above"
+    || die "cannot age the changes in ${self_path} -- see the diagnostic above"
   self_verdict="clean"
   if [ $(( staged + unstaged + untracked )) -gt 0 ]; then
     self_verdict="in_progress"
     if [ "$self_tip_in_main" = true ] && [ "$self_age" -ge "$LEFTOVERS_MIN_AGE_HOURS" ]; then
       self_verdict="abandoned"
     fi
-  fi
-  if [ $(( staged + unstaged + untracked )) -gt 0 ]; then
     ok=false
     blocking+=("$(printf 'this worktree (%s) has %d staged, %d unstaged and %d untracked path(s); a release publishes only what is committed' \
       "$self_branch" "$staged" "$unstaged" "$untracked")")
   fi
 
-  local worktree_list worktree_paths
-  worktree_list="$(git -C "$repo" worktree list --porcelain)" \
-    || die "cannot read the worktree list for ${repo} -- run 'git -C ${repo} worktree list' to see why"
-  worktree_paths="$(printf '%s\n' "$worktree_list" | sed -n 's/^worktree //p')" \
-    || die "cannot parse the worktree list for ${repo} -- run 'git -C ${repo} worktree list --porcelain' to see what it printed"
+  # `--porcelain -z`, and read as NUL records: a worktree path may contain a
+  # newline, and the newline-delimited form would split it into two worktrees
+  # that are each neither.
+  local inventory="${SCRATCH}/worktrees"
+  git -C "$repo" worktree list --porcelain -z >"$inventory" 2>"$ERR_SINK" \
+    || die "cannot read the worktree list for ${repo}: $(cat "$ERR_SINK")"
 
-  local wt branch tip_in_main age verdict dirt
-  while IFS= read -r wt; do
+  local field wt branch tip_in_main age verdict
+  while IFS= read -r -d '' field; do
+    case "$field" in
+      'worktree '*) wt="${field#worktree }" ;;
+      *) continue ;;
+    esac
     [ -n "$wt" ] || continue
     [ "$wt" = "$self_path" ] && continue
     [ -d "$wt" ] || continue
-    dirt="$(changed_paths "$wt")" \
+    read_status "$wt" \
       || die "cannot read the working tree at ${wt} -- see the diagnostic above"
-    [ -n "$dirt" ] || continue
+    [ "${#WT_PATHS[@]}" -gt 0 ] || continue
 
     branch="$(branch_of "$wt")" \
-    || die "cannot read the checked-out branch in ${wt} -- see the diagnostic above"
+      || die "cannot read the checked-out branch in ${wt} -- see the diagnostic above"
     tip_in_main="$(tip_is_in "$wt" HEAD "$base")" \
       || die "cannot classify ${wt} against ${base} -- see the diagnostic above"
     age="$(dirt_age_hours "$wt")" \
-      || die "cannot read the working tree at ${wt} -- see the diagnostic above"
+      || die "cannot age the changes in ${wt} -- see the diagnostic above"
 
     verdict="in_progress"
     if [ "$tip_in_main" = true ] && [ "$age" -ge "$LEFTOVERS_MIN_AGE_HOURS" ]; then
@@ -306,9 +359,7 @@ main() {
     fi
     others_json+=("$(printf '{"path":%s,"branch":%s,"tip_in_main":%s,"age_hours":%d,"verdict":%s}' \
       "$(json_str "$wt")" "$(json_str "$branch")" "$tip_in_main" "$age" "$(json_str "$verdict")")")
-  done <<EOF
-${worktree_paths}
-EOF
+  done < "$inventory"
 
   local others_out="" blocking_out="" item
   for item in ${others_json+"${others_json[@]}"}; do

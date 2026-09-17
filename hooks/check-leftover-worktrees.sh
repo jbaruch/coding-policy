@@ -50,12 +50,16 @@ set -euo pipefail
 
 warn() { printf 'check-leftover-worktrees: %s\n' "$1" >&2; }
 
+#: The scratch directory, global so the RETURN trap can name a function instead
+#: of interpolating a path into shell source.
+SCRATCH=""
+
 # `return 0` last, and the removal checked explicitly rather than suppressed, so
 # neither a failed cleanup nor `set -e` can turn this hook's exit-0 contract into
 # a failed session start (rules/error-handling.md Shell Error Handling).
-discard() { # <dir>
-  if ! rm -rf "$1"; then
-    warn "could not remove the temporary directory ${1} — delete it by hand"
+discard() {
+  if [[ -n "$SCRATCH" ]] && ! rm -rf "$SCRATCH"; then
+    warn "could not remove the temporary directory ${SCRATCH} — delete it by hand"
   fi
   return 0
 }
@@ -90,15 +94,14 @@ main() {
     return 0
   fi
 
-  local scratch
-  scratch="$(mktemp -d "${TMPDIR:-/tmp}/leftover-hook.XXXXXX")" || {
+  SCRATCH="$(mktemp -d "${TMPDIR:-/tmp}/leftover-hook.XXXXXX")" || {
     warn "cannot create a temporary directory under ${TMPDIR:-/tmp} — session start cannot report abandoned worktrees until it is writable"
     return 0
   }
-  # shellcheck disable=SC2064  # $scratch is expanded now, on purpose: the trap
-  # must name the directory this call created, not whatever the variable holds
-  # when it fires.
-  trap "discard '$scratch'" RETURN
+  # The trap names a function and interpolates nothing: a path spliced into a
+  # trap string is shell source, so a TMPDIR carrying a quote and a separator
+  # would run as commands when RETURN fires.
+  trap discard RETURN
 
   # rc 1 is the detector's finding, not a failure: `|| status=$?` keeps `set -e`
   # from aborting on the very outcome this hook exists to report. The detector's
@@ -106,11 +109,11 @@ main() {
   # whose age it could not read, and that warning is the difference between an
   # under-reported age and a hook that looks like it found nothing.
   local payload status=0 line
-  payload="$(bash "$detector" 2>"${scratch}/detector-stderr")" || status=$?
-  if [[ -s "${scratch}/detector-stderr" ]]; then
+  payload="$(bash "$detector" 2>"${SCRATCH}/detector-stderr")" || status=$?
+  if [[ -s "${SCRATCH}/detector-stderr" ]]; then
     while IFS= read -r line; do
       [[ -n "$line" ]] && warn "detector: ${line}"
-    done < "${scratch}/detector-stderr"
+    done < "${SCRATCH}/detector-stderr"
   fi
   # 0 and 1 are the detector's two verdicts; everything else is a failure,
   # including an unexpected status carrying a payload that happens to parse.
@@ -131,7 +134,8 @@ import json, sys
 
 MALFORMED = 3
 ENVELOPE = ("ok", "self", "others", "blocking")
-ENTRY = ("path", "branch", "age_hours", "verdict")
+ENTRY = ("path", "branch", "age_hours", "tip_in_main", "verdict")
+VERDICTS = ("clean", "in_progress", "abandoned")
 
 
 def reject(why):
@@ -163,6 +167,17 @@ for entry in list(doc["others"]) + ([doc["self"]] if doc["self"] is not None els
     absent = [k for k in ENTRY if k not in entry]
     if absent:
         reject("a worktree entry is missing {}".format(", ".join(absent)))
+    # Types and values, not just presence: a null or unknown verdict compares
+    # unequal to abandoned and would pass as the reassuring answer.
+    if not isinstance(entry["path"], str) or not isinstance(entry["branch"], str):
+        reject("a worktree entry has a non-string path or branch")
+    if not isinstance(entry["age_hours"], int) or isinstance(entry["age_hours"], bool):
+        reject("a worktree entry has a non-integer age_hours")
+    if not isinstance(entry["tip_in_main"], bool):
+        reject("a worktree entry has a non-boolean tip_in_main")
+    if entry["verdict"] not in VERDICTS:
+        reject("a worktree entry has the verdict {!r}, which is not one of {}".format(
+            entry["verdict"], ", ".join(VERDICTS)))
 
 rows = []
 me = doc["self"]

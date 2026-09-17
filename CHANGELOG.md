@@ -126,6 +126,28 @@
   so any other unexpected status carrying a payload that happened to parse was
   accepted, and a crashed detector could read as a clean session. Only 0 and 1
   are verdicts.
+
+  Copilot's review then found nine more ways the gate answered "clean" without
+  having looked, all folded into the same round (`rules/boy-scout.md`). The
+  status counts matched `M/A/D/R/C` only, so a worktree holding nothing but an
+  unmerged `UU` or a type-change `T` counted three zeroes and the release ran.
+  NUL records were converted to lines before parsing, which loses a path
+  containing a newline and turns a rename's second field — the original path,
+  carrying no status prefix — into a phantom record; the records are parsed as
+  records now, rename fields consumed. `--untracked-files=normal` collapsed an
+  untracked directory into one entry whose mtime does not move when a file
+  already inside it is edited, so fresh work read as abandoned; `all` reports
+  the files. A deleted path stats nothing, read as just-written, and left the
+  one change git cannot recover as the one that did not block — its parent
+  directory answers for it, deleting the file being exactly what set that
+  mtime. `git worktree list` was read newline-delimited, splitting a worktree
+  path containing a newline; `-z`. A base ref that exists but does not resolve
+  fell back to local `main` and judged against the wrong base, which
+  `for-each-ref` now separates from a ref that is simply absent. The hook's
+  envelope guard checked key presence and not types or values, so `verdict:
+  null` passed as not-abandoned, and `tip_in_main` was missing from the entry
+  contract. And its `RETURN` trap interpolated the scratch path into shell
+  source, where a `TMPDIR` carrying a quote would have run as commands.
 ## 0.3.244 — 2026-09-17
 
 ### Fixed

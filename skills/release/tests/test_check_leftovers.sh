@@ -195,6 +195,79 @@ main() {
   if [[ $RC -eq 0 ]] && [[ "$(verdict_for "$OUT" otherclean-wt)" == "absent" ]]; then
     pass; else fail "a clean other worktree is not reported, got RC=$RC OUT=$OUT"; fi
 
+  echo "▶ shapes that used to slip past" >&2
+
+  # An unmerged path carries U codes, a type change carries T. Counting only
+  # M/A/D/R/C left a worktree holding nothing else at three zeroes, and the
+  # release ran.
+  new_repo "$TMP/unmerged"
+  git -C "$TMP/unmerged" checkout -q -b side || die "branch"
+  echo side > "$TMP/unmerged/file.txt"
+  git -C "$TMP/unmerged" commit -q -am side || die "commit side"
+  git -C "$TMP/unmerged" checkout -q main || die "checkout main"
+  echo mainline > "$TMP/unmerged/file.txt"
+  git -C "$TMP/unmerged" commit -q -am mainline || die "commit main"
+  # The conflict is the fixture; its report is noise this suite does not own.
+  if git -C "$TMP/unmerged" merge -q side >/dev/null 2>&1; then die "expected a conflict"; fi
+  age "$TMP/unmerged/file.txt"
+  run_check "$TMP/unmerged" "$AGED_FLOOR"
+  if [[ $RC -eq 1 ]] && printf '%s' "$ERRTEXT" | grep -qF 'publishes only what is committed'; then
+    pass; else fail "an unmerged path blocks, got RC=$RC OUT=$OUT"; fi
+
+  # A deletion has no mtime of its own. Reading it as just-written made the one
+  # change git cannot recover the one that did not block.
+  new_repo "$TMP/deleted"
+  git -C "$TMP/deleted" worktree add -q -b gone "$TMP/deleted-wt" HEAD || die "worktree add"
+  rm "$TMP/deleted-wt/file.txt" || die "rm"
+  age "$TMP/deleted-wt"
+  run_check "$TMP/deleted" "$AGED_FLOOR"
+  if [[ $RC -eq 1 ]] && [[ "$(verdict_for "$OUT" deleted-wt)" == "abandoned" ]]; then
+    pass; else fail "an aged deletion blocks, got RC=$RC OUT=$OUT"; fi
+
+  # A newline in a path: any line-oriented carrier splits it into two paths that
+  # are each neither.
+  new_repo "$TMP/newline"
+  git -C "$TMP/newline" worktree add -q -b nl "$TMP/newline-wt" HEAD || die "worktree add"
+  printf 'lost\n' > "$TMP/newline-wt/two$(printf '\n')lines.txt" || die "write"
+  age "$TMP/newline-wt/two$(printf '\n')lines.txt"
+  run_check "$TMP/newline" "$AGED_FLOOR"
+  if [[ $RC -eq 1 ]] \
+     && [[ "$(verdict_for "$OUT" newline-wt)" == "abandoned" ]] \
+     && printf '%s' "$OUT" | python3 -c 'import json,sys; json.load(sys.stdin)'; then
+    pass; else fail "a newline in a path is one path, got RC=$RC OUT=$OUT"; fi
+
+  # A staged rename emits a second NUL field holding the original path, with no
+  # status prefix. Read as a record of its own it becomes a phantom path.
+  new_repo "$TMP/renamed"
+  git -C "$TMP/renamed" worktree add -q -b ren "$TMP/renamed-wt" HEAD || die "worktree add"
+  git -C "$TMP/renamed-wt" mv file.txt moved.txt || die "git mv"
+  age "$TMP/renamed-wt/moved.txt"
+  run_check "$TMP/renamed" "$AGED_FLOOR"
+  if [[ $RC -eq 1 ]] \
+     && [[ "$(verdict_for "$OUT" renamed-wt)" == "abandoned" ]] \
+     && printf '%s' "$ERRTEXT" | grep -qvF 'cannot read the modification time'; then
+    pass; else fail "a rename record is one path, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
+
+  # A file edited under an old untracked directory. `--untracked-files=normal`
+  # reported the directory, whose mtime does not move when a file already inside
+  # it changes, so fresh work read as abandoned.
+  new_repo "$TMP/untrackeddir"
+  mkdir -p "$TMP/untrackeddir/scratch" || die "mkdir"
+  echo fresh > "$TMP/untrackeddir/scratch/note.txt"
+  age "$TMP/untrackeddir/scratch"
+  run_check "$TMP/untrackeddir" "$FRESH_FLOOR"
+  if [[ $RC -eq 1 ]] && printf '%s' "$OUT" | grep -qF '"verdict":"in_progress"'; then
+    pass; else fail "a fresh file under an aged untracked dir reads in_progress, got RC=$RC OUT=$OUT"; fi
+
+  # A base ref that exists but does not resolve is damage, not absence: judging
+  # against local main instead would answer the wrong question.
+  new_repo "$TMP/badref"
+  printf '%s\n' "0000000000000000000000000000000000000001" \
+    > "$TMP/badref/.git/refs/remotes/origin/main" || die "write bad ref"
+  run_check "$TMP/badref" "$AGED_FLOOR"
+  if [[ $RC -eq 2 ]] && printf '%s' "$ERRTEXT" | grep -qF 'does not resolve to a commit'; then
+    pass; else fail "a damaged origin/main exits 2, got RC=$RC ERR=$ERRTEXT"; fi
+
   echo "▶ usage and tool state" >&2
 
   mkdir -p "$TMP/notrepo"

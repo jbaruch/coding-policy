@@ -169,6 +169,26 @@ main() {
      && printf '%s' "$ERRTEXT" | grep -qF 'exited 2 instead of reporting a verdict'; then
     pass; else fail "a detector tool-error warns and no-ops, got RC=$RC ERR=$ERRTEXT"; fi
 
+  # Types and values, not just key presence. Each of these parses, carries every
+  # documented key, and would have classified as "nothing abandoned".
+  local payload
+  for payload in \
+    '{"ok":true,"self":null,"others":[{"path":"/x","branch":"b","age_hours":9,"tip_in_main":true,"verdict":null}],"blocking":[]}' \
+    '{"ok":true,"self":null,"others":[{"path":"/x","branch":"b","age_hours":9,"tip_in_main":true,"verdict":"unknown"}],"blocking":[]}' \
+    '{"ok":true,"self":null,"others":[{"path":"/x","branch":"b","age_hours":"9","tip_in_main":true,"verdict":"in_progress"}],"blocking":[]}' \
+    '{"ok":true,"self":null,"others":[{"path":"/x","branch":"b","age_hours":9,"tip_in_main":"yes","verdict":"in_progress"}],"blocking":[]}' \
+    '{"ok":true,"self":null,"others":[{"path":"/x","branch":"b","age_hours":9,"verdict":"in_progress"}],"blocking":[]}'; do
+    new_repo "$TMP/typed"
+    HOOKPATH="$(stage_hook "$real")"
+    printf '#!/bin/sh\ncat <<JSON\n%s\nJSON\n' "$payload" \
+      > "$(dirname "$HOOKPATH")/../skills/release/check-leftovers.sh"
+    run_hook "$TMP/typed" "$HOOKPATH"
+    if [[ $RC -eq 0 && -z "$OUT" ]] \
+       && printf '%s' "$ERRTEXT" | grep -qF 'not the JSON envelope'; then
+      pass; else fail "the payload ${payload} warns and no-ops, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
+    rm -rf "$TMP/typed"
+  done
+
   # A detector exiting outside its two verdicts is a failure even when what it
   # printed happens to parse: a crash must not read as a clean session.
   new_repo "$TMP/oddexit"
