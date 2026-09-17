@@ -55,11 +55,30 @@ ERR_SINK=/dev/null
 #: after main() returns, when a local would already be unset.
 SCRATCH=""
 
+# A JSON string literal. Backslash, quote and the three control characters with
+# short escapes go first; every remaining C0 control character becomes its \u
+# escape. A path may legally hold one, and raw it makes the whole envelope
+# unparseable -- the shape every reader of this script depends on
+# (rules/script-delegation.md Script Requirements).
 json_str() {
-  local s="$1"
+  local s="$1" out="" i ch esc
   s="${s//\\/\\\\}"; s="${s//\"/\\\"}"
   s="${s//$'\t'/\\t}"; s="${s//$'\n'/\\n}"; s="${s//$'\r'/\\r}"
-  printf '"%s"' "$s"
+  case "$s" in
+    *[[:cntrl:]]*) ;;
+    *) printf '"%s"' "$s"; return 0 ;;
+  esac
+  for (( i = 0; i < ${#s}; i++ )); do
+    ch="${s:i:1}"
+    case "$ch" in
+      [[:cntrl:]])
+        printf -v esc '\\u%04x' "'$ch"
+        out+="$esc"
+        ;;
+      *) out+="$ch" ;;
+    esac
+  done
+  printf '"%s"' "$out"
 }
 
 die() { echo "check-leftovers: $*" >&2; printf '{"ok":false,"self":null,"others":[],"blocking":[]}\n'; exit 2; }
@@ -84,9 +103,15 @@ cleanup() {
 age_seconds() {
   local path="$1" now mtime status=0
   now="$(date +%s)" || status=$?
+  # The status is checked before the output: a non-zero `date` that still prints
+  # digits is a failed clock read, not a reading to accept.
+  if [ "$status" -ne 0 ]; then
+    echo "check-leftovers: cannot read the system clock (date +%s exited ${status}) -- no age can be computed, so no worktree can be classified" >&2
+    return 1
+  fi
   case "$now" in
     ''|*[!0-9]*)
-      echo "check-leftovers: cannot read the system clock (date +%s exited ${status} and printed '${now}') -- no age can be computed, so no worktree can be classified" >&2
+      echo "check-leftovers: the system clock reported '${now}', which is not a whole number of seconds -- no age can be computed, so no worktree can be classified" >&2
       return 1
       ;;
   esac

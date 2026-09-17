@@ -103,6 +103,15 @@
   detector's own `EXIT` handler then got the same treatment: `set -e` would
   abort it on a failing `rm` before its `return 0`, replacing the verdict the
   release gate reads.
+
+  Last two. A `date +%s` that exits non-zero while still printing digits was
+  read as a clock, the status being captured and never checked; it is checked
+  before the output now. And `json_str` escaped backslash, quote, tab, newline
+  and carriage return, leaving every other C0 control character raw — each one
+  legal in a path and illegal inside a JSON string, so a single backspace in a
+  worktree path made the whole envelope unparseable and the hook blind. They
+  become `\u` escapes, in shell rather than through a new interpreter
+  dependency, so the detector still needs nothing but git.
 ## 0.3.244 — 2026-09-17
 
 ### Fixed

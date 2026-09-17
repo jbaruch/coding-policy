@@ -197,13 +197,25 @@ main() {
   if [[ $RC -eq 1 ]] && printf '%s' "$OUT" | grep -qF '"branch":"DETACHED"'; then
     pass; else fail "a detached HEAD reads DETACHED, got RC=$RC OUT=$OUT"; fi
 
+  # A control character is legal in a path and illegal raw inside a JSON string,
+  # so the whole envelope turns unparseable if it is not escaped -- and the
+  # envelope is the shape every reader of this script depends on.
+  new_repo "$TMP/ctl"
+  CTLWT="$TMP/ctl-$(printf '\b')-wt"
+  git -C "$TMP/ctl" worktree add -q -b ctlbranch "$CTLWT" HEAD || die "worktree add"
+  echo lost >> "$CTLWT/file.txt"
+  age "$CTLWT/file.txt"
+  run_check "$TMP/ctl" "$AGED_FLOOR"
+  if [[ $RC -eq 1 ]] && printf '%s' "$OUT" | python3 -c 'import json,sys; json.load(sys.stdin)'; then
+    pass; else fail "a control character in a path keeps the envelope parseable, got RC=$RC OUT=$OUT"; fi
+
   # A clock that cannot be read is a tool error: an age of zero would classify
   # abandoned work as freshly started.
   new_repo "$TMP/noclock"
   echo lost >> "$TMP/noclock/file.txt"
   age "$TMP/noclock/file.txt"
   mkdir -p "$TMP/noclockbin"
-  printf '#!/bin/sh\nexit 1\n' > "$TMP/noclockbin/date"
+  printf '#!/bin/sh\necho 1700000000\nexit 1\n' > "$TMP/noclockbin/date"
   chmod +x "$TMP/noclockbin/date"
   OUT="$(cd "$TMP/noclock" && PATH="$TMP/noclockbin:$PATH" LEFTOVERS_MIN_AGE_HOURS="$AGED_FLOOR" \
     bash "$SCRIPT_UNDER_TEST" --repo . 2>"$ERRFILE")"; RC=$?
