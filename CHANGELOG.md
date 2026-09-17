@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.243 — 2026-09-17
+
 ### Changed
 
 - **A seated round is bound to the partition `validate-partition` accepted
