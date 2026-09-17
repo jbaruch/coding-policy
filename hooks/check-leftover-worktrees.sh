@@ -36,9 +36,11 @@
 #           worktree carries the abandoned verdict. Silent otherwise, which
 #           covers the common cases: a clean tree, work in progress, a
 #           non-repository, and a checkout with no worktrees but its own.
-#   exit  : always 0. A missing detector, an unresolvable repo or a detector
-#           tool-error (rc 2) emits an actionable stderr warning and no-ops
-#           (rules/error-handling.md Shell Error Handling).
+#   exit  : always 0. A missing detector, an unresolvable repo, a detector
+#           tool-error (rc 2) or output that is not the documented JSON emits an
+#           actionable stderr warning and no-ops. A broken detector stays visible
+#           rather than reading as "nothing abandoned", which is the report this
+#           hook exists to produce (rules/error-handling.md Shell Error Handling).
 #   env   : LEFTOVERS_MIN_AGE_HOURS passes through to the detector.
 set -euo pipefail
 
@@ -76,8 +78,9 @@ import json, sys
 
 try:
     doc = json.load(sys.stdin)
-except ValueError:
-    sys.exit(0)
+except ValueError as exc:
+    sys.stderr.write("not JSON: {}\n".format(exc))
+    sys.exit(3)
 
 rows = []
 me = doc.get("self") or {}
@@ -97,7 +100,7 @@ for path, branch, age, is_self in sorted(rows, key=lambda r: -r[2]):
 lines.append("Inspect with `git -C <path> status`, then commit, stash or gitignore it. "
              "`skills/release/check-leftovers.sh` refuses to start a release until this clears.")
 print("\n".join(lines))
-')" || { warn "could not summarize the detector output"; return 0; }
+')" || { warn "the detector emitted output this hook cannot read (see above) -- run 'bash ${detector}' directly to see what it printed"; return 0; }
 
   [[ -n "$notice" ]] || return 0
 

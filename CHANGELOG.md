@@ -2,14 +2,38 @@
 
 ### Added
 
-- **Session start reports worktrees holding work that git does not.** The
-  release gate catches a leftover the next time someone ships;
-  `hooks/check-leftover-worktrees.sh` catches it the next time someone opens a
-  session, whichever comes first. It reads
-  `skills/release/check-leftovers.sh`'s JSON rather than reimplementing the
-  predicate, so the gate and the hook cannot drift into disagreeing about what a
-  leftover is, and reports only the abandoned verdict — work in progress is what
-  a session is for.
+- **Work that git does not hold is caught at a release and at session start.** A
+  pane-label change was written across four files, never committed, and sat in a
+  worktree for nine days. Its branch reported as merged — the tip was a plain
+  `main` commit — so every "delete merged branches" heuristic called the worktree
+  disposable while the only copy of the work lived beside it, untracked. Every
+  step of the release flow after the pull request exists was already scripted;
+  Step 1, which decides whether the flow runs at all, was prose, so the one check
+  that would have caught this rested on the agent remembering to look.
+
+  `skills/release/check-leftovers.sh` now runs first in Step 1 and exits non-zero
+  on two shapes. The releasing worktree blocks on any staged, unstaged or
+  untracked path. Another worktree blocks only when its dirt sits on a branch
+  whose tip is already an ancestor of `origin/main`: nothing was ever committed
+  there, so nothing in git preserves it. A branch carrying its own commits is
+  recoverable and is left alone, which keeps a concurrent agent's work in
+  progress from tripping the gate (`rules/agent-worktree-isolation.md`).
+
+  That predicate needs no `gh` and no network. A branch tip already in
+  `origin/main` cannot carry an open pull request either, GitHub having no
+  commits to show, so three local git signals decide it: dirty, tip-in-main, and
+  an age floor that keeps a worktree created minutes ago from reading as
+  abandoned. `LEFTOVERS_MIN_AGE_HOURS` moves the floor.
+
+  `hooks/check-leftover-worktrees.sh` is the same net at the other end of the
+  window: the gate catches a leftover the next time someone ships, the hook the
+  next time someone opens a session, whichever comes first. It reads the release
+  script's JSON rather than reimplementing the predicate, so the two cannot
+  drift into disagreeing about what a leftover is, and reports only the
+  abandoned verdict — work in progress is what a session is for, and a hook that
+  nags about it gets turned off. Reporting the releasing worktree's own verdict
+  is why that entry carries `tip_in_main`, `age_hours` and `verdict` alongside
+  its counts; the gate still blocks on any self dirt whatever the verdict.
 
   This is the state `hooks/stop-handoff-hygiene.sh` deliberately omits, and the
   two must stay separate. That hook lists worktrees safe to REMOVE, so
@@ -18,31 +42,24 @@
   delete. Its separate dirty-tree line runs a bare `git status` and sees the
   current worktree alone. A dirty OTHER worktree fell between them — the one
   state neither reported, and the only one where work exists that git does not
-  hold. The pane-label change spent nine days there.
+  hold.
 
-### Added
-
-- **A release refuses to start while work sits uncommitted.** Every step of the
-  release flow after the pull request exists was already scripted; Step 1, which
-  decides whether the flow runs at all, was prose. A pane-label change was
-  written across four files, never committed, and sat in a worktree for nine
-  days — its branch reported as merged, the tip being a plain `main` commit, so
-  every "delete merged branches" heuristic called the worktree disposable while
-  the only copy of the work lived beside it untracked.
-
-  `skills/release/check-leftovers.sh` runs first in Step 1 and exits non-zero on
-  two shapes. The releasing worktree blocks on any staged, unstaged or untracked
-  path. Another worktree blocks only when its dirt sits on a branch whose tip is
-  already an ancestor of `origin/main`: nothing was ever committed there, so
-  nothing in git preserves it. A branch carrying its own commits is recoverable
-  and is left alone, which keeps a concurrent agent's work in progress from
-  tripping the gate (`rules/agent-worktree-isolation.md`).
-
-  That predicate needs no `gh` and no network. A branch tip already in
-  `origin/main` cannot carry an open pull request either, GitHub having no
-  commits to show, so three local git signals decide it: dirty, tip-in-main, and
-  an age floor that keeps a worktree created minutes ago from reading as
-  abandoned. `LEFTOVERS_MIN_AGE_HOURS` moves the floor.
+  Two defects the first CI round and PR #463's review turned up, both of which
+  made the detector answer "nothing here" instead of refusing to answer. BSD's
+  `stat -f` is GNU's `--file-system`, which answers an unrelated question and
+  SUCCEEDS while doing it, so probing BSD-first read every mtime as a non-time on
+  Linux and every age as zero; GNU's `-c %Y` is probed first and a result that is
+  not a whole number of seconds warns rather than silently standing in for the
+  current time. Command substitution discards NUL bytes, so capturing
+  `git status --porcelain -z` before converting them fused every record into one
+  line; `tr` now runs inside the substitution. Alongside those, git's own
+  failures stopped collapsing into verdicts: an unreadable `git status`, a
+  `merge-base --is-ancestor` exit above 1, an unreadable worktree list and a
+  `grep` error are each a tool error (exit 2) rather than "clean", and the hook
+  warns on detector output that is not the documented JSON rather than reading it
+  as nothing abandoned. Both suites pin every fixture's mtime to a fixed past
+  literal and select the verdict with the age floor, so no case's result moves
+  with the run-time clock.
 
 ## 0.3.243 — 2026-09-17
 

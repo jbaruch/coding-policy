@@ -33,8 +33,19 @@ new_repo() { # <dir>
   git -C "$d" update-ref refs/remotes/origin/main HEAD || die "update-ref"
 }
 
-run_check() { # <repo-dir> [env assignments...]
-  OUT="$(cd "$1" && shift; bash "$SCRIPT_UNDER_TEST" --repo . 2>"$ERRFILE")"
+# Every fixture's mtime is this fixed past literal, so no case's verdict moves
+# with the run-time clock (rules/testing-standards.md Determinism). The two
+# verdicts are then selected by the age floor rather than by how old the file
+# happens to be: AGED reads it as abandoned, FRESH is larger than any age the
+# literal can reach and reads it as work in progress.
+PINNED_MTIME=202601010000
+AGED_FLOOR=1
+FRESH_FLOOR=99999999
+
+age() { touch -t "$PINNED_MTIME" "$@" || die "touch $*"; }
+
+run_check() { # <repo-dir> <min-age-hours>
+  OUT="$(cd "$1" && LEFTOVERS_MIN_AGE_HOURS="$2" bash "$SCRIPT_UNDER_TEST" --repo . 2>"$ERRFILE")"
   RC=$?
   ERRTEXT="$(cat "$ERRFILE")"
 }
@@ -60,22 +71,24 @@ main() {
   echo "▶ the releasing worktree" >&2
 
   new_repo "$TMP/clean"
-  run_check "$TMP/clean"
+  run_check "$TMP/clean" "$AGED_FLOOR"
   if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | grep -qF '"ok":true'; then
     pass; else fail "a clean repo with no other worktrees exits 0, got RC=$RC OUT=$OUT"; fi
 
-  new_repo "$TMP/unstaged"; echo edit >> "$TMP/unstaged/file.txt"
-  run_check "$TMP/unstaged"
+  new_repo "$TMP/unstaged"; echo edit >> "$TMP/unstaged/file.txt"; age "$TMP/unstaged/file.txt"
+  run_check "$TMP/unstaged" "$AGED_FLOOR"
   if [[ $RC -eq 1 ]] && printf '%s' "$ERRTEXT" | grep -qF 'publishes only what is committed'; then
     pass; else fail "an unstaged edit blocks, got RC=$RC ERR=$ERRTEXT"; fi
 
   new_repo "$TMP/staged"; echo edit >> "$TMP/staged/file.txt"; git -C "$TMP/staged" add file.txt
-  run_check "$TMP/staged"
+  age "$TMP/staged/file.txt"
+  run_check "$TMP/staged" "$AGED_FLOOR"
   if [[ $RC -eq 1 ]] && printf '%s' "$OUT" | grep -qF '"staged":1'; then
     pass; else fail "a staged edit blocks and is counted, got RC=$RC OUT=$OUT"; fi
 
   new_repo "$TMP/untracked"; echo scratch > "$TMP/untracked/leftover.txt"
-  run_check "$TMP/untracked"
+  age "$TMP/untracked/leftover.txt"
+  run_check "$TMP/untracked" "$AGED_FLOOR"
   if [[ $RC -eq 1 ]] && printf '%s' "$OUT" | grep -qF '"untracked":1'; then
     pass; else fail "an untracked file blocks and is counted, got RC=$RC OUT=$OUT"; fi
 
@@ -84,24 +97,26 @@ main() {
   printf 'tester-data/\n' > "$TMP/ignored/.gitignore"
   git -C "$TMP/ignored" add .gitignore && git -C "$TMP/ignored" commit -q -m ignore
   mkdir -p "$TMP/ignored/tester-data" && echo out > "$TMP/ignored/tester-data/probe.json"
-  run_check "$TMP/ignored"
+  age "$TMP/ignored/tester-data/probe.json"
+  run_check "$TMP/ignored" "$AGED_FLOOR"
   if [[ $RC -eq 0 ]]; then pass; else fail "a gitignored path does not block, got RC=$RC OUT=$OUT"; fi
 
   # The releasing worktree gets the same verdict the others do, for a caller
   # that wants only the abandoned shape. The gate itself ignores it.
   new_repo "$TMP/selfverdict"
   echo lost >> "$TMP/selfverdict/file.txt"
-  touch -t 202601010000 "$TMP/selfverdict/file.txt"
-  run_check "$TMP/selfverdict"
+  age "$TMP/selfverdict/file.txt"
+  run_check "$TMP/selfverdict" "$AGED_FLOOR"
   if [[ $RC -eq 1 ]] && printf '%s' "$OUT" | grep -qF '"verdict":"abandoned"'; then
     pass; else fail "an aged self leftover on a never-committed branch reads abandoned, got RC=$RC OUT=$OUT"; fi
 
   new_repo "$TMP/selffresh"; echo typing >> "$TMP/selffresh/file.txt"
-  run_check "$TMP/selffresh"
+  age "$TMP/selffresh/file.txt"
+  run_check "$TMP/selffresh" "$FRESH_FLOOR"
   if [[ $RC -eq 1 ]] && printf '%s' "$OUT" | grep -qF '"verdict":"in_progress"'; then
     pass; else fail "fresh self dirt still blocks but reads in_progress, got RC=$RC OUT=$OUT"; fi
 
-  run_check "$TMP/clean"
+  run_check "$TMP/clean" "$AGED_FLOOR"
   if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | grep -qF '"verdict":"clean"'; then
     pass; else fail "a clean self reads clean, got RC=$RC OUT=$OUT"; fi
 
@@ -111,8 +126,8 @@ main() {
   new_repo "$TMP/aband"
   git -C "$TMP/aband" worktree add -q -b stale "$TMP/aband-wt" HEAD || die "worktree add"
   echo lost >> "$TMP/aband-wt/file.txt"
-  touch -t 202601010000 "$TMP/aband-wt/file.txt"
-  run_check "$TMP/aband"
+  age "$TMP/aband-wt/file.txt"
+  run_check "$TMP/aband" "$AGED_FLOOR"
   if [[ $RC -eq 1 ]] \
      && [[ "$(verdict_for "$OUT" aband-wt)" == "abandoned" ]] \
      && printf '%s' "$ERRTEXT" | grep -qF 'carrying no commits of its own'; then
@@ -124,37 +139,35 @@ main() {
   echo work >> "$TMP/ahead-wt/file.txt"
   git -C "$TMP/ahead-wt" commit -q -am progress || die "commit in worktree"
   echo more >> "$TMP/ahead-wt/file.txt"
-  touch -t 202601010000 "$TMP/ahead-wt/file.txt"
-  run_check "$TMP/ahead"
+  age "$TMP/ahead-wt/file.txt"
+  run_check "$TMP/ahead" "$AGED_FLOOR"
   if [[ $RC -eq 0 ]] && [[ "$(verdict_for "$OUT" ahead-wt)" == "in_progress" ]]; then
     pass; else fail "a branch with its own commits does not block, got RC=$RC OUT=$OUT"; fi
 
-  # Same shape, but written moments ago: someone is still typing.
+  # Same shape, but younger than the floor: someone is still typing.
   new_repo "$TMP/fresh"
   git -C "$TMP/fresh" worktree add -q -b justnow "$TMP/fresh-wt" HEAD || die "worktree add"
   echo typing >> "$TMP/fresh-wt/file.txt"
-  run_check "$TMP/fresh"
+  age "$TMP/fresh-wt/file.txt"
+  run_check "$TMP/fresh" "$FRESH_FLOOR"
   if [[ $RC -eq 0 ]] && [[ "$(verdict_for "$OUT" fresh-wt)" == "in_progress" ]]; then
     pass; else fail "a leftover younger than the age floor does not block, got RC=$RC OUT=$OUT"; fi
 
-  # The age floor is the caller's to move.
-  LEFTOVERS_MIN_AGE_HOURS=0
-  export LEFTOVERS_MIN_AGE_HOURS
-  run_check "$TMP/fresh"
-  unset LEFTOVERS_MIN_AGE_HOURS
+  # The same fixture, same mtime: only the floor moved, and the verdict flips.
+  run_check "$TMP/fresh" 0
   if [[ $RC -eq 1 ]] && [[ "$(verdict_for "$OUT" fresh-wt)" == "abandoned" ]]; then
-    pass; else fail "LEFTOVERS_MIN_AGE_HOURS=0 blocks the fresh leftover, got RC=$RC OUT=$OUT"; fi
+    pass; else fail "LEFTOVERS_MIN_AGE_HOURS=0 blocks the same leftover, got RC=$RC OUT=$OUT"; fi
 
   new_repo "$TMP/otherclean"
   git -C "$TMP/otherclean" worktree add -q -b tidy "$TMP/otherclean-wt" HEAD || die "worktree add"
-  run_check "$TMP/otherclean"
+  run_check "$TMP/otherclean" "$AGED_FLOOR"
   if [[ $RC -eq 0 ]] && [[ "$(verdict_for "$OUT" otherclean-wt)" == "absent" ]]; then
     pass; else fail "a clean other worktree is not reported, got RC=$RC OUT=$OUT"; fi
 
   echo "▶ usage and tool state" >&2
 
   mkdir -p "$TMP/notrepo"
-  run_check "$TMP/notrepo"
+  run_check "$TMP/notrepo" "$AGED_FLOOR"
   if [[ $RC -eq 2 ]] && printf '%s' "$ERRTEXT" | grep -qF 'not a git repository'; then
     pass; else fail "a non-repository exits 2, got RC=$RC ERR=$ERRTEXT"; fi
 

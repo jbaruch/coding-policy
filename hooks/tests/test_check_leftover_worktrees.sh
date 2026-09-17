@@ -51,8 +51,16 @@ stage_hook() { # <detector-source-or-empty>
   printf '%s\n' "$root/hooks/$(basename "$HOOK")"
 }
 
+# Every fixture's mtime is this fixed past literal and the age floor is passed
+# explicitly, so no case's verdict moves with the run-time clock
+# (rules/testing-standards.md Determinism).
+PINNED_MTIME=202601010000
+AGED_FLOOR=1
+
+age() { touch -t "$PINNED_MTIME" "$@" || die "touch $*"; }
+
 run_hook() { # <cwd> <hook-path>
-  OUT="$(cd "$1" && bash "$2" 2>"$ERRFILE")"
+  OUT="$(cd "$1" && LEFTOVERS_MIN_AGE_HOURS="$AGED_FLOOR" bash "$2" 2>"$ERRFILE")"
   RC=$?
   ERRTEXT="$(cat "$ERRFILE")"
 }
@@ -72,7 +80,7 @@ main() {
   new_repo "$TMP/aband"
   git -C "$TMP/aband" worktree add -q -b stale "$TMP/aband-wt" HEAD || die "worktree add"
   echo lost >> "$TMP/aband-wt/file.txt"
-  touch -t 202601010000 "$TMP/aband-wt/file.txt"
+  age "$TMP/aband-wt/file.txt"
   HOOKPATH="$(stage_hook "$real")"
   run_hook "$TMP/aband" "$HOOKPATH"
   if [[ $RC -eq 0 ]] \
@@ -86,7 +94,7 @@ main() {
   echo work >> "$TMP/busy-wt/file.txt"
   git -C "$TMP/busy-wt" commit -q -am progress || die "commit"
   echo more >> "$TMP/busy-wt/file.txt"
-  touch -t 202601010000 "$TMP/busy-wt/file.txt"
+  age "$TMP/busy-wt/file.txt"
   HOOKPATH="$(stage_hook "$real")"
   run_hook "$TMP/busy" "$HOOKPATH"
   if [[ $RC -eq 0 && -z "$OUT" ]]; then
@@ -95,7 +103,7 @@ main() {
   # Dirt in the session's own worktree, aged, on a never-committed branch.
   new_repo "$TMP/selfaband"
   echo lost >> "$TMP/selfaband/file.txt"
-  touch -t 202601010000 "$TMP/selfaband/file.txt"
+  age "$TMP/selfaband/file.txt"
   HOOKPATH="$(stage_hook "$real")"
   run_hook "$TMP/selfaband" "$HOOKPATH"
   if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | grep -qF '(this session)'; then
@@ -132,13 +140,15 @@ main() {
   if [[ $RC -eq 0 && -z "$OUT" ]] && printf '%s' "$ERRTEXT" | grep -qF 'could not read'; then
     pass; else fail "a detector tool-error warns and no-ops, got RC=$RC ERR=$ERRTEXT"; fi
 
-  # Unparseable detector output must not crash session start.
+  # Unparseable detector output must not crash session start, and must not pass
+  # for "nothing abandoned" either: a broken detector stays visible on stderr.
   new_repo "$TMP/garbage"
   HOOKPATH="$(stage_hook "$real")"
   printf '#!/bin/sh\necho "not json"\nexit 1\n' > "$(dirname "$HOOKPATH")/../skills/release/check-leftovers.sh"
   run_hook "$TMP/garbage" "$HOOKPATH"
-  if [[ $RC -eq 0 && -z "$OUT" ]]; then
-    pass; else fail "unparseable detector output is a silent no-op, got RC=$RC OUT=$OUT"; fi
+  if [[ $RC -eq 0 && -z "$OUT" ]] \
+     && printf '%s' "$ERRTEXT" | grep -qF 'cannot read'; then
+    pass; else fail "unparseable detector output warns and no-ops, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
 
   echo "─────────────────────────────────────────────" >&2
   if [[ $FAIL -gt 0 ]]; then echo "FAILED: ${FAIL} failed, ${PASS} passed" >&2; exit 1; fi
