@@ -89,9 +89,17 @@
   unobservable exit status as the age loop, and its failure would have left
   every other worktree unseen; it is captured first. On the hook side, `git`
   missing from PATH returned success in silence and now names itself — not being
-  in a repository stays silent, `rev-parse --git-dir` exiting 128 for that and
-  for a real failure alike, and a hook that warns in an ordinary directory gets
-  turned off.
+  in a repository stays silent, and a hook that warns in an ordinary directory
+  gets turned off.
+
+  That silence then narrowed to what it was meant to cover. `rev-parse
+  --git-dir` exits 128 for standing outside a repository and for a repository it
+  cannot read, so the message is the only signal that separates them: only the
+  walked-up-and-found-nothing text is silent now, and a GIT_DIR that does not
+  resolve, a corrupt `.git` or a permission error each say what they are. The
+  exit-0 contract stopped depending on every path inside `main` honouring it —
+  the entry point runs `main`, warns if it failed, and exits 0 — and the scratch
+  directory's removal is checked rather than able to rewrite that status.
 ## 0.3.244 — 2026-09-17
 
 ### Fixed

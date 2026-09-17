@@ -193,6 +193,21 @@ main() {
   if [[ $RC -eq 0 && -z "$OUT" ]] && printf '%s' "$ERRTEXT" | grep -qF 'git not found on PATH'; then
     pass; else fail "an absent git warns and no-ops, got RC=$RC ERR=$ERRTEXT"; fi
 
+  # A repository git cannot read is not the same answer as standing outside one.
+  new_repo "$TMP/badgitdir"
+  HOOKPATH="$(stage_hook "$real")"
+  OUT="$(cd "$TMP/badgitdir" && GIT_DIR=/nonexistent/not-a-gitdir bash "$HOOKPATH" 2>"$ERRFILE")"; RC=$?
+  ERRTEXT="$(cat "$ERRFILE")"
+  if [[ $RC -eq 0 && -z "$OUT" ]] \
+     && printf '%s' "$ERRTEXT" | grep -qF 'cannot read this repository'; then
+    pass; else fail "an unreadable repository warns and no-ops, got RC=$RC ERR=$ERRTEXT"; fi
+
+  # ...and standing outside one still says nothing, which is the case above it.
+  HOOKPATH="$(stage_hook "$real")"
+  run_hook "$TMP/notrepo" "$HOOKPATH"
+  if [[ $RC -eq 0 && -z "$OUT" && -z "$ERRTEXT" ]]; then
+    pass; else fail "a non-repository warns about nothing, got RC=$RC ERR=$ERRTEXT"; fi
+
   echo "─────────────────────────────────────────────" >&2
   if [[ $FAIL -gt 0 ]]; then echo "FAILED: ${FAIL} failed, ${PASS} passed" >&2; exit 1; fi
   echo "PASSED: all ${PASS} checks" >&2

@@ -49,15 +49,37 @@ set -euo pipefail
 
 warn() { printf 'check-leftover-worktrees: %s\n' "$1" >&2; }
 
+# `return 0` last, and the removal checked explicitly rather than suppressed, so
+# neither a failed cleanup nor `set -e` can turn this hook's exit-0 contract into
+# a failed session start (rules/error-handling.md Shell Error Handling).
+discard() { # <dir>
+  if ! rm -rf "$1"; then
+    warn "could not remove the temporary directory ${1} — delete it by hand"
+  fi
+  return 0
+}
+
 main() {
   command -v git >/dev/null || {
     warn "git not found on PATH — install it or restore it before session start can report abandoned worktrees"
     return 0
   }
-  # Silent, unlike the line above: `rev-parse --git-dir` exits 128 both for "not
-  # a repository" and for a genuine failure, and the first is an ordinary place
-  # to open a session. A hook that warns there gets turned off.
-  git rev-parse --git-dir >/dev/null 2>&1 || return 0
+  # `rev-parse --git-dir` exits 128 for standing outside a repository and for a
+  # repository it cannot read, so the exit code cannot separate them and the
+  # message is the only signal that can. Only the walked-up-and-found-nothing
+  # message is silent -- that is where sessions get opened, and a hook that warns
+  # in an ordinary directory gets turned off. A named GIT_DIR that does not
+  # resolve, a corrupt .git, a permission error: each says something else, and
+  # each is worth saying out loud.
+  local repo_err repo_status=0
+  repo_err="$(git rev-parse --git-dir 2>&1 >/dev/null)" || repo_status=$?
+  if [[ "$repo_status" -ne 0 ]]; then
+    case "$repo_err" in
+      *"or any of the parent directories"*) : ;;
+      *) warn "cannot read this repository (${repo_err:-git exited ${repo_status} silently}) — session start cannot report abandoned worktrees until that resolves" ;;
+    esac
+    return 0
+  fi
 
   local here detector
   here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -75,7 +97,7 @@ main() {
   # shellcheck disable=SC2064  # $scratch is expanded now, on purpose: the trap
   # must name the directory this call created, not whatever the variable holds
   # when it fires.
-  trap "rm -rf '$scratch'" RETURN
+  trap "discard '$scratch'" RETURN
 
   # rc 1 is the detector's finding, not a failure: `|| status=$?` keeps `set -e`
   # from aborting on the very outcome this hook exists to report. The detector's
@@ -169,4 +191,9 @@ print("\n".join(lines))
   return 0
 }
 
-[[ "${BASH_SOURCE[0]}" == "${0}" ]] && main "$@"
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  if ! main "$@"; then
+    warn "internal error — session start has no worktree report; run 'bash ${BASH_SOURCE[0]}' directly to see why"
+  fi
+  exit 0
+fi
