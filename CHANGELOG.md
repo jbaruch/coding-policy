@@ -1,5 +1,79 @@
 # Changelog
 
+### Fixed
+
+- **The lead dispatches the work instead of doing it.** Herdr's Step 1 let the
+  lead answer "a single edit, question, lookup, or existing-code review"
+  itself and finish there. In practice that swallowed real rounds: asked how
+  to run integration tests against a Codex subscription, the lead went and
+  researched it — a bounded question that `rules/agent-team-operation.md` Team
+  Composition routes to a specialist consultation, and that the skill already
+  has a whole investigation-only path for: the developer template's
+  investigation branch, `references/assignment-reasoning.md`'s knowledge
+  deliverable, Step 12's knowledge gate. None of it was reachable, because
+  Step 1 finished before Step 2 ever ran.
+
+  The wording was sized for a team that no longer exists. `git log -S` traces
+  it to `e30c74b`, carried forward verbatim from a draft that read "a task
+  with nothing to hand to *three workers* is not a round". When the specialist
+  bench, the composition triggers and the investigation-only round landed,
+  nobody went back and narrowed the hatch, so it kept matching the exact class
+  of work those additions were built to dispatch.
+
+  Two of the four nouns were also straight rule violations. "A single edit"
+  told the lead to edit, against Writers and Checkouts ("The lead reads the
+  shared checkout and never edits it") — and the lead has no worktree to edit
+  in. "Existing-code review" put planning, reviewing and accepting in one
+  seat, against Review Before PR's independence requirement.
+
+  The underlying gap was in the rule: Two Modes constrained the standalone
+  agent in seven bullets and said nothing about what the lead may execute
+  inside a team round. The skill filled the silence with its own answer. Two
+  Modes now carries the boundary — the lead's own execution is reading the
+  shared checkout, running the owner scripts, and writing the records those
+  scripts own; anything whose answer is a task deliverable gets dispatched,
+  whatever its size; and a shortfall of eligible workers is a staffing
+  decision to record, never permission for the lead to do the work.
+
+  The boundary is task work, not everything the lead types. The task ledger,
+  retrospective notes, attention items and working memory stay lead-owned —
+  `references/retrospectives.md` requires the lead to complete a retrospective
+  itself, and a rule that dispatched every written assessment would have
+  forbidden it. And "the lead already knows the answer" is not a branch: it
+  was the shape of the original hatch, so the dispatch rule holds whether or
+  not the answer is already in context. The lead answers only what its context
+  already holds and that needs no deliverable; a lookup, a file inspection or
+  any research is a round.
+
+  Routing a review of existing code needed splitting too. The reviewer
+  responsibility is post-push verification: `templates/brief-reviewer.md` hands
+  it a review package and BASE/HEAD SHAs and forbids it the shared checkout, so
+  a review request with no pushed branch composes no valid assignment. Code
+  already pushed for the task goes to the reviewer; any other existing code
+  goes to a read-only consultation.
+
+  `tests/test_skill_invocations.sh` now covers the routing itself. Its mode
+  gate checked only that `HERDR_ENV` sat between Step 1 and Step 2 and that a
+  standalone agent is turned away — both pass with the old hatch restored, so
+  nothing tested the branch the lead actually acts on. Two assertions close
+  that, by reading each Herdr-mode branch's disposition rather than its prose.
+  Inferring routing from wording is the regex trap: "must not proceed to Step
+  2" reads as routing to a pattern and as its opposite to a human, and "not
+  already in the lead's context" satisfies a substring check for the residual
+  condition. So each branch now states its disposition verbatim — `Proceed to
+  Step 2.` or `Finish here.`, a closed set of two — and the check compares
+  literals, requiring the sentence to open its own clause and pinning the
+  residual branch's condition whole. Five mutations red it: the original
+  hatch, `Do not Proceed to Step 2.`, a dropped round-work term, a negated
+  residual condition, and a second branch that ends the round.
+
+  One consequence is tracked rather than fixed here. A pure investigation
+  touches no repository surface, and `teamlead/triggers.py` refuses a round
+  whose diff and plan are both empty — a guard #415 added so a vacuous plan
+  could not pass as "nothing fired". Routing research to a round therefore
+  walks it into that refusal at Step 5. Telling "writes nothing" apart from
+  silence needs a schema or flag decision, so it is #471.
+
 ## 0.3.246 — 2026-09-17
 
 ### Fixed

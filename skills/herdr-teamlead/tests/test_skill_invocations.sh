@@ -17,6 +17,11 @@
 # Mode-gate conventions, checked against MODE_GATE_SKILL only:
 # 4. The first step gates on HERDR_ENV before any script, and the gate turns a
 #    standalone agent away by reading rather than by running a script.
+# 5. Inside a Herdr round, round work reaches Step 2 and the lead's own
+#    finish-here branch stays residual. Checks 4a/4b pass with the old
+#    direct-execution hatch restored, so they do not cover the routing the
+#    lead actually acts on: a lead that answers a bounded question or writes a
+#    deliverable itself never dispatches the round (#470).
 #
 # `set -e` is dropped so every check runs and the suite reports an aggregate;
 # each check captures its own status (rules/error-handling.md
@@ -168,6 +173,73 @@ check_mode_gate() { # <skill-name> <skill-file>
     | tr '[:upper:]' '[:lower:]')" || die "could not flatten the preamble"
   if [[ "$flat" == *"this skill does not apply"* ]]; then pass
   else fail "${name}: Step 1 does not tell a non-Herdr agent the skill does not apply"; fi
+
+  # 5. Read each Herdr-mode branch of Step 1 by its disposition, which is a
+  # closed set of two literal sentences. Inferring routing from prose is the
+  # regex trap (rules/script-delegation.md): "must not proceed to Step 2"
+  # reads as routing to a pattern and as its opposite to a human. The branch
+  # states its disposition verbatim instead, and this check compares literals.
+  local disp_proceed="Proceed to Step 2." disp_finish="Finish here."
+  # The residual branch's condition IS the contract, so it is pinned whole.
+  # A substring would accept "not already in the lead's context".
+  local residual_label="Set, none of the above applies, and the answer is already in the lead's context"
+  local round_work=("lookup" "file inspection" "research" "bounded question" \
+                    "review of existing code" "repository edit" "task deliverable")
+
+  local branches
+  branches="$(printf '%s\n' "$head" | awk '
+    function flush(   b, label) {
+      if (bullet == "") return
+      b = bullet
+      bullet = ""
+      gsub(/[[:space:]]+/, " ", b)
+      if (b !~ /^- \*\*Set[,*]/) return
+      label = b
+      sub(/^- \*\*/, "", label)
+      sub(/\*\*.*$/, "", label)
+      print label "\t" b
+    }
+    /^- \*\*/ { flush(); bullet = $0; next }
+    /^[[:space:]]+[^[:space:]]/ { if (bullet != "") bullet = bullet " " $0; next }
+    { flush() }
+    END { flush() }')" || die "could not read the Step 1 branches"
+
+  # A branch ends in one disposition or the other. The literal must open its
+  # own sentence, so "Do not Proceed to Step 2." is not routing.
+  local label text verdict routing_labels="" terminals=0 stray=""
+  while IFS=$'\t' read -r label text; do
+    [[ -n "$label" ]] || continue
+    case "$text" in
+      *". ${disp_proceed}"|*"— ${disp_proceed}") verdict=proceed ;;
+      *". ${disp_finish}"|*"— ${disp_finish}") verdict=finish ;;
+      *) verdict=none ;;
+    esac
+    case "$verdict" in
+      proceed) routing_labels+="${label}"$'\n' ;;
+      finish)
+        terminals=$(( terminals + 1 ))
+        [[ "$label" == "$residual_label" ]] || stray="$label"
+        ;;
+      *) stray="$label" ;;
+    esac
+  done <<< "$branches"
+
+  # 5a. Every branch disposes of its request, and only the residual one ends
+  # the round. The old hatch was a branch that did neither.
+  if [[ -n "$stray" ]]; then
+    fail "${name}: Step 1 branch '${stray}' neither ends in '${disp_proceed}' nor is the residual branch ending in '${disp_finish}'"
+  elif (( terminals == 1 )); then pass
+  else fail "${name}: Step 1 has ${terminals} Herdr-mode branches ending in '${disp_finish}'; exactly the residual one may"; fi
+
+  # 5b. Each kind of round work is named by a branch that routes. Dropping one
+  # returns it to the lead.
+  local term missing=()
+  for term in "${round_work[@]}"; do
+    [[ "$routing_labels" == *"$term"* ]] || missing+=("$term")
+  done
+  if (( ${#missing[@]} > 0 )); then
+    fail "${name}: no Step 1 branch ending in '${disp_proceed}' names: ${missing[*]}"
+  else pass; fi
 
   rm -f "$body_file" || warn_cleanup "$body_file"
 }

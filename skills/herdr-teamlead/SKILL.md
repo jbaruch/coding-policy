@@ -60,9 +60,13 @@ For every other request, read `HERDR_ENV` before running scripts.
 - **Unset or empty** — this skill does not apply. Say so and do the task
   directly, without roster calls, briefs, provisioning, reports, or simulated
   worker roles. Finish here.
-- **Set, with a team task or new retrospective** — proceed immediately to Step 2.
-- **Set, with a single edit, question, lookup, or existing-code review** — do
-  it directly. Finish here.
+- **Set, with a team task or new retrospective** — Proceed to Step 2.
+- **Set, with a lookup, a file inspection, research, a bounded question, a
+  review of existing code, a repository edit, or any other task deliverable** —
+  a round, whatever its size. None of it is lead work. Staff it in Step 5.
+  Proceed to Step 2.
+- **Set, none of the above applies, and the answer is already in the lead's
+  context** — say it. Finish here.
 
 ## Step 2 — Verify Herdr and the Roster
 
