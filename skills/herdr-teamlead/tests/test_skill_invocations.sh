@@ -174,36 +174,59 @@ check_mode_gate() { # <skill-name> <skill-file>
   if [[ "$flat" == *"this skill does not apply"* ]]; then pass
   else fail "${name}: Step 1 does not tell a non-Herdr agent the skill does not apply"; fi
 
-  # 5a. Round work routes to Step 2. Each term names work the lead once did
-  # itself under the old hatch; dropping one silently reopens that path.
+  # 5. Classify every Herdr-mode branch of Step 1 by what it DOES. A branch
+  # either routes its request to Step 2 or ends the skill on the residual
+  # condition; there is no third kind, and the old hatch was that third kind.
+  # Matching the round-work words alone would pass "do it directly; do not
+  # proceed to Step 2", so routing is read per branch, negation included.
+  local round_work=("lookup" "file inspection" "research" "bounded question" \
+                    "review of existing code" "repository edit" "task deliverable")
+  local termlist
+  printf -v termlist '%s|' "${round_work[@]}"
+  termlist="${termlist%|}"
+  local scan
+  scan="$(printf '%s\n' "$head" | awk -v termlist="$termlist" '
+    function flush(   b, label, routes, terminal, residual, i, n, arr) {
+      if (bullet == "") return
+      b = tolower(bullet)
+      gsub(/[[:space:]]+/, " ", b)
+      bullet = ""
+      label = b
+      sub(/^- \*\*/, "", label)
+      # Herdr-mode branches only. The standalone branch and the offline ones
+      # end the skill because no round exists, not because the lead answered.
+      if (label !~ /^set[,*]/) return
+      routes = (b ~ /proceed (immediately )?to step 2/) \
+               && (b !~ /(do not|never|rather than|instead of|without) proceed/)
+      terminal = (b ~ /finish here/)
+      residual = (b ~ /already in the lead.s context/)
+      if (routes && !terminal) {
+        n = split(termlist, arr, "|")
+        for (i = 1; i <= n; i++) if (index(b, arr[i]) > 0) print "TERM:" arr[i]
+        return
+      }
+      if (terminal && !routes && residual) return
+      print "BAD:" substr(b, 1, 90)
+    }
+    /^- \*\*/ { flush(); bullet = $0; next }
+    /^[[:space:]]+[^[:space:]]/ { if (bullet != "") bullet = bullet " " $0; next }
+    { flush() }
+    END { flush() }')" || die "could not classify the Step 1 branches"
+
+  # 5a. No branch does the work itself or stops without the residual condition.
+  if printf '%s\n' "$scan" | grep -q '^BAD:'; then
+    fail "${name}: a Step 1 Herdr-mode branch neither routes to Step 2 nor ends on an answer already in the lead's context: $(printf '%s\n' "$scan" | grep '^BAD:' | head -1)"
+  else pass; fi
+
+  # 5b. Each kind of round work reaches Step 2 through a branch that routes.
+  # Dropping one silently returns it to the lead.
   local term missing=()
-  for term in "lookup" "file inspection" "research" "bounded question" \
-              "review of existing code" "repository edit" "task deliverable"; do
-    [[ "$flat" == *"$term"* ]] || missing+=("$term")
+  for term in "${round_work[@]}"; do
+    if ! printf '%s\n' "$scan" | grep -qxF "TERM:${term}"; then missing+=("$term"); fi
   done
   if (( ${#missing[@]} > 0 )); then
-    fail "${name}: Step 1 routes none of these to a round: ${missing[*]}"
-  elif [[ "$flat" == *"proceed to step 2"* ]]; then pass
-  else fail "${name}: Step 1 names round work but never sends it to Step 2"; fi
-
-  # 5b. Every Step 1 branch that ends the skill inside a Herdr round carries
-  # the residual condition. The standalone branch is the one exemption: it
-  # ends the skill because no round exists, not because the lead answered.
-  local offenders
-  offenders="$(printf '%s\n' "$head" | awk '
-    /^- \*\*/ { if (bullet != "") process(); bullet = tolower($0); next }
-    /^[[:space:]]+[^[:space:]]/ { if (bullet != "") bullet = bullet " " tolower($0); next }
-    { if (bullet != "") process(); bullet = "" }
-    END { if (bullet != "") process() }
-    function process(   flat) {
-      gsub(/[[:space:]]+/, " ", bullet)
-      if (bullet !~ /finish here/) { bullet = ""; return }
-      if (bullet ~ /unset or empty/) { bullet = ""; return }
-      if (bullet !~ /already in the lead.s context/) print substr(bullet, 1, 80)
-      bullet = ""
-    }')" || die "could not scan the Step 1 branches"
-  if [[ -z "$offenders" ]]; then pass
-  else fail "${name}: a Step 1 branch ends a Herdr round without requiring the answer already in the lead's context: ${offenders}"; fi
+    fail "${name}: Step 1 routes none of these to Step 2: ${missing[*]}"
+  else pass; fi
 
   rm -f "$body_file" || warn_cleanup "$body_file"
 }

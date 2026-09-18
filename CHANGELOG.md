@@ -56,9 +56,14 @@
   gate checked only that `HERDR_ENV` sat between Step 1 and Step 2 and that a
   standalone agent is turned away — both pass with the old hatch restored, so
   nothing tested the branch the lead actually acts on. Two assertions close
-  that: round work reaches Step 2, and a Step 1 branch may end a Herdr round
-  only on an answer already in the lead's context. Restoring the old bullet
-  reds them.
+  that by classifying each Herdr-mode branch by what it does: a branch either
+  routes its request to Step 2 or ends the skill on the residual condition,
+  and there is no third kind — the old hatch was the third kind. Routing is
+  read per branch and negation-aware, so matching the round-work words is not
+  enough to pass. Four mutations red it: the original hatch, a branch that
+  names the round work and then says "do it directly; do not proceed to Step
+  2", a dropped round-work term, and a finish-here branch without the
+  in-context condition.
 
 ## 0.3.246 — 2026-09-17
 
