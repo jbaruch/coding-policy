@@ -52,6 +52,14 @@
   already pushed for the task goes to the reviewer; any other existing code
   goes to a read-only consultation.
 
+  `tests/test_skill_invocations.sh` now covers the routing itself. Its mode
+  gate checked only that `HERDR_ENV` sat between Step 1 and Step 2 and that a
+  standalone agent is turned away — both pass with the old hatch restored, so
+  nothing tested the branch the lead actually acts on. Two assertions close
+  that: round work reaches Step 2, and a Step 1 branch may end a Herdr round
+  only on an answer already in the lead's context. Restoring the old bullet
+  reds them.
+
 ## 0.3.246 — 2026-09-17
 
 ### Fixed

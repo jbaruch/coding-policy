@@ -17,6 +17,11 @@
 # Mode-gate conventions, checked against MODE_GATE_SKILL only:
 # 4. The first step gates on HERDR_ENV before any script, and the gate turns a
 #    standalone agent away by reading rather than by running a script.
+# 5. Inside a Herdr round, round work reaches Step 2 and the lead's own
+#    finish-here branch stays residual. Checks 4a/4b pass with the old
+#    direct-execution hatch restored, so they do not cover the routing the
+#    lead actually acts on: a lead that answers a bounded question or writes a
+#    deliverable itself never dispatches the round (#470).
 #
 # `set -e` is dropped so every check runs and the suite reports an aggregate;
 # each check captures its own status (rules/error-handling.md
@@ -168,6 +173,37 @@ check_mode_gate() { # <skill-name> <skill-file>
     | tr '[:upper:]' '[:lower:]')" || die "could not flatten the preamble"
   if [[ "$flat" == *"this skill does not apply"* ]]; then pass
   else fail "${name}: Step 1 does not tell a non-Herdr agent the skill does not apply"; fi
+
+  # 5a. Round work routes to Step 2. Each term names work the lead once did
+  # itself under the old hatch; dropping one silently reopens that path.
+  local term missing=()
+  for term in "lookup" "file inspection" "research" "bounded question" \
+              "review of existing code" "repository edit" "task deliverable"; do
+    [[ "$flat" == *"$term"* ]] || missing+=("$term")
+  done
+  if (( ${#missing[@]} > 0 )); then
+    fail "${name}: Step 1 routes none of these to a round: ${missing[*]}"
+  elif [[ "$flat" == *"proceed to step 2"* ]]; then pass
+  else fail "${name}: Step 1 names round work but never sends it to Step 2"; fi
+
+  # 5b. Every Step 1 branch that ends the skill inside a Herdr round carries
+  # the residual condition. The standalone branch is the one exemption: it
+  # ends the skill because no round exists, not because the lead answered.
+  local offenders
+  offenders="$(printf '%s\n' "$head" | awk '
+    /^- \*\*/ { if (bullet != "") process(); bullet = tolower($0); next }
+    /^[[:space:]]+[^[:space:]]/ { if (bullet != "") bullet = bullet " " tolower($0); next }
+    { if (bullet != "") process(); bullet = "" }
+    END { if (bullet != "") process() }
+    function process(   flat) {
+      gsub(/[[:space:]]+/, " ", bullet)
+      if (bullet !~ /finish here/) { bullet = ""; return }
+      if (bullet ~ /unset or empty/) { bullet = ""; return }
+      if (bullet !~ /already in the lead.s context/) print substr(bullet, 1, 80)
+      bullet = ""
+    }')" || die "could not scan the Step 1 branches"
+  if [[ -z "$offenders" ]]; then pass
+  else fail "${name}: a Step 1 branch ends a Herdr round without requiring the answer already in the lead's context: ${offenders}"; fi
 
   rm -f "$body_file" || warn_cleanup "$body_file"
 }
