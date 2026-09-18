@@ -56,14 +56,23 @@
   gate checked only that `HERDR_ENV` sat between Step 1 and Step 2 and that a
   standalone agent is turned away — both pass with the old hatch restored, so
   nothing tested the branch the lead actually acts on. Two assertions close
-  that by classifying each Herdr-mode branch by what it does: a branch either
-  routes its request to Step 2 or ends the skill on the residual condition,
-  and there is no third kind — the old hatch was the third kind. Routing is
-  read per branch and negation-aware, so matching the round-work words is not
-  enough to pass. Four mutations red it: the original hatch, a branch that
-  names the round work and then says "do it directly; do not proceed to Step
-  2", a dropped round-work term, and a finish-here branch without the
-  in-context condition.
+  that, by reading each Herdr-mode branch's disposition rather than its prose.
+  Inferring routing from wording is the regex trap: "must not proceed to Step
+  2" reads as routing to a pattern and as its opposite to a human, and "not
+  already in the lead's context" satisfies a substring check for the residual
+  condition. So each branch now states its disposition verbatim — `Proceed to
+  Step 2.` or `Finish here.`, a closed set of two — and the check compares
+  literals, requiring the sentence to open its own clause and pinning the
+  residual branch's condition whole. Five mutations red it: the original
+  hatch, `Do not Proceed to Step 2.`, a dropped round-work term, a negated
+  residual condition, and a second branch that ends the round.
+
+  One consequence is tracked rather than fixed here. A pure investigation
+  touches no repository surface, and `teamlead/triggers.py` refuses a round
+  whose diff and plan are both empty — a guard #415 added so a vacuous plan
+  could not pass as "nothing fired". Routing research to a round therefore
+  walks it into that refusal at Step 5. Telling "writes nothing" apart from
+  silence needs a schema or flag decision, so it is #471.
 
 ## 0.3.246 — 2026-09-17
 
