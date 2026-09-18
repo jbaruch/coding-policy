@@ -41,7 +41,16 @@
   itself, and a rule that dispatched every written assessment would have
   forbidden it. And "the lead already knows the answer" is not a branch: it
   was the shape of the original hatch, so the dispatch rule holds whether or
-  not the answer is already in context.
+  not the answer is already in context. The lead answers only what its context
+  already holds and that needs no deliverable; a lookup, a file inspection or
+  any research is a round.
+
+  Routing a review of existing code needed splitting too. The reviewer
+  responsibility is post-push verification: `templates/brief-reviewer.md` hands
+  it a review package and BASE/HEAD SHAs and forbids it the shared checkout, so
+  a review request with no pushed branch composes no valid assignment. Code
+  already pushed for the task goes to the reviewer; any other existing code
+  goes to a read-only consultation.
 
 ## 0.3.246 — 2026-09-17
 

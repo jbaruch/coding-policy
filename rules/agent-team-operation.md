@@ -20,11 +20,13 @@ description: Running a multi-agent team — task-based specialist composition, c
 - The lead's own execution covers reading the shared checkout, this plugin's owner scripts, and the lead-owned records those scripts write
 - Lead-owned records are the task ledger, retrospective notes, attention items, and working memory
 - A request whose answer is a task deliverable is dispatched, whatever its size, and whether or not the lead already knows the answer
-- A task deliverable is a written artifact, a recommendation, an assessment, or a repository edit
+- A task deliverable is a written artifact, a recommendation, an assessment, or a repository edit, other than a lead-owned record
+- A request needing a lookup, a file inspection, or any research is dispatched
 - A bounded question routes to a specialist consultation under Team Composition
-- A review of existing code routes to the reviewer responsibility under Review Before PR
+- A review of code already pushed for the task routes to the reviewer responsibility under Review Before PR
+- A review of any other existing code routes to a read-only consultation under Specialist Consultations
 - A repository edit routes to the developer responsibility under Writers and Checkouts
-- A shortfall of eligible workers is a staffing decision to record, never authorization for the lead to execute
+- A shortfall of eligible workers is a staffing decision to record under Team Composition, never authorization for the lead to execute
 
 ## Team Composition
 
