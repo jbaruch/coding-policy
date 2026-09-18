@@ -8,9 +8,9 @@
   to run integration tests against a Codex subscription, the lead went and
   researched it — a bounded question that `rules/agent-team-operation.md` Team
   Composition routes to a specialist consultation, and that the skill already
-  has a whole investigation-only path for (the developer template's
+  has a whole investigation-only path for: the developer template's
   investigation branch, `references/assignment-reasoning.md`'s knowledge
-  deliverable, Step 12's knowledge gate). None of it was reachable, because
+  deliverable, Step 12's knowledge gate. None of it was reachable, because
   Step 1 finished before Step 2 ever ran.
 
   The wording was sized for a team that no longer exists. `git log -S` traces

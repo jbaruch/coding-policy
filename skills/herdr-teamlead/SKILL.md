@@ -61,11 +61,11 @@ For every other request, read `HERDR_ENV` before running scripts.
   directly, without roster calls, briefs, provisioning, reports, or simulated
   worker roles. Finish here.
 - **Set, with a team task or new retrospective** — proceed immediately to Step 2.
-- **Set, and the answer is already in the lead's context and needs no task
-  deliverable** — say it and finish here. Every other request is a round.
-  Proceed to Step 2 and staff it in Step 5, whatever the size. A lookup, a file
-  inspection, any research, a bounded question, a review of existing code and a
-  repository edit are all round work. None is lead work.
+- **Set, with a lookup, a file inspection, research, a bounded question, a
+  review of existing code, or a repository edit** — a round, whatever its size.
+  Proceed to Step 2 and staff it in Step 5. None of it is lead work.
+- **Set, none of the above applies, and the answer is already in the lead's
+  context** — say it and finish here.
 
 ## Step 2 — Verify Herdr and the Roster
 
