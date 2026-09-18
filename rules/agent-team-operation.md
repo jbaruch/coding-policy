@@ -16,10 +16,11 @@ description: Running a multi-agent team — task-based specialist composition, c
 - A standalone agent does the task directly
 - A standalone agent never simulates the roles, the briefs, or the reports
 - Standalone work is still governed by every other rule in this plugin
-- In a team round the lead dispatches the work and never executes the task itself
-- The lead's own execution covers reading the shared checkout, this plugin's owner scripts, and answers its context already holds
-- A request whose answer is a deliverable is dispatched, whatever its size
-- A deliverable is a written artifact, a recommendation, an assessment, or a repository edit
+- In a team round the lead dispatches the task work and never executes it itself
+- The lead's own execution covers reading the shared checkout, this plugin's owner scripts, and the lead-owned records those scripts write
+- Lead-owned records are the task ledger, retrospective notes, attention items, and working memory
+- A request whose answer is a task deliverable is dispatched, whatever its size, and whether or not the lead already knows the answer
+- A task deliverable is a written artifact, a recommendation, an assessment, or a repository edit
 - A bounded question routes to a specialist consultation under Team Composition
 - A review of existing code routes to the reviewer responsibility under Review Before PR
 - A repository edit routes to the developer responsibility under Writers and Checkouts

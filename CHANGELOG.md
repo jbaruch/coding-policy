@@ -30,10 +30,18 @@
   agent in seven bullets and said nothing about what the lead may execute
   inside a team round. The skill filled the silence with its own answer. Two
   Modes now carries the boundary — the lead's own execution is reading the
-  shared checkout, running the owner scripts, and answering from what its
-  context already holds; anything whose answer is a deliverable gets
-  dispatched, whatever its size; and a shortfall of eligible workers is a
-  staffing decision to record, never permission for the lead to do the work.
+  shared checkout, running the owner scripts, and writing the records those
+  scripts own; anything whose answer is a task deliverable gets dispatched,
+  whatever its size; and a shortfall of eligible workers is a staffing
+  decision to record, never permission for the lead to do the work.
+
+  The boundary is task work, not everything the lead types. The task ledger,
+  retrospective notes, attention items and working memory stay lead-owned —
+  `references/retrospectives.md` requires the lead to complete a retrospective
+  itself, and a rule that dispatched every written assessment would have
+  forbidden it. And "the lead already knows the answer" is not a branch: it
+  was the shape of the original hatch, so the dispatch rule holds whether or
+  not the answer is already in context.
 
 ## 0.3.246 — 2026-09-17
 
