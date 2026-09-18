@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.247 — 2026-09-18
+
 ### Fixed
 
 - **The lead dispatches the work instead of doing it.** Herdr's Step 1 let the
