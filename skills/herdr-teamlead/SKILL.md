@@ -61,8 +61,11 @@ For every other request, read `HERDR_ENV` before running scripts.
   directly, without roster calls, briefs, provisioning, reports, or simulated
   worker roles. Finish here.
 - **Set, with a team task or new retrospective** — proceed immediately to Step 2.
-- **Set, with a single edit, question, lookup, or existing-code review** — do
-  it directly. Finish here.
+- **Set, and the whole answer already sits in the lead's context** — say it and
+  finish here. A request needing any deliverable is a round, whatever its size.
+  Proceed to Step 2 and staff it in Step 5. A bounded question, a review of
+  existing code and a repository edit each name a responsibility. None is lead
+  work.
 
 ## Step 2 — Verify Herdr and the Roster
 

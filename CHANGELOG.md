@@ -1,5 +1,40 @@
 # Changelog
 
+### Fixed
+
+- **The lead dispatches the work instead of doing it.** Herdr's Step 1 let the
+  lead answer "a single edit, question, lookup, or existing-code review"
+  itself and finish there. In practice that swallowed real rounds: asked how
+  to run integration tests against a Codex subscription, the lead went and
+  researched it — a bounded question that `rules/agent-team-operation.md` Team
+  Composition routes to a specialist consultation, and that the skill already
+  has a whole investigation-only path for (the developer template's
+  investigation branch, `references/assignment-reasoning.md`'s knowledge
+  deliverable, Step 12's knowledge gate). None of it was reachable, because
+  Step 1 finished before Step 2 ever ran.
+
+  The wording was sized for a team that no longer exists. `git log -S` traces
+  it to `e30c74b`, carried forward verbatim from a draft that read "a task
+  with nothing to hand to *three workers* is not a round". When the specialist
+  bench, the composition triggers and the investigation-only round landed,
+  nobody went back and narrowed the hatch, so it kept matching the exact class
+  of work those additions were built to dispatch.
+
+  Two of the four nouns were also straight rule violations. "A single edit"
+  told the lead to edit, against Writers and Checkouts ("The lead reads the
+  shared checkout and never edits it") — and the lead has no worktree to edit
+  in. "Existing-code review" put planning, reviewing and accepting in one
+  seat, against Review Before PR's independence requirement.
+
+  The underlying gap was in the rule: Two Modes constrained the standalone
+  agent in seven bullets and said nothing about what the lead may execute
+  inside a team round. The skill filled the silence with its own answer. Two
+  Modes now carries the boundary — the lead's own execution is reading the
+  shared checkout, running the owner scripts, and answering from what its
+  context already holds; anything whose answer is a deliverable gets
+  dispatched, whatever its size; and a shortfall of eligible workers is a
+  staffing decision to record, never permission for the lead to do the work.
+
 ## 0.3.246 — 2026-09-17
 
 ### Fixed
