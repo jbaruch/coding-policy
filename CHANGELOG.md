@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.248 — 2026-09-19
+
 ### Fixed
 
 - Codex report recovery preserves the dispatched prompt when compaction adds
