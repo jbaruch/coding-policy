@@ -357,6 +357,305 @@ class NativeDeliveryTests(unittest.TestCase):
         self.assertEqual(cli.main(args, stdout=io.StringIO(), stderr=io.StringIO()), 1)
         self.assertEqual(ledger_path.read_bytes(), before_replay)
 
+    def metadata_recovery_fixture(self):
+        document, data = self.recovery_fixture()
+        rows = [json.loads(line) for line in Path(data["source"]).read_text().splitlines()]
+        rows[2]["payload"]["internal_chat_message_metadata_passthrough"] = {
+            "turn_id": "turn-1", "content_item_kinds": ["user.text"]}
+        environment = {"type": "response_item", "payload": {"type": "message", "role": "user",
+            "content": [{"type": "input_text", "text": "<environment_context>runtime</environment_context>"}],
+            "internal_chat_message_metadata_passthrough": {
+                "turn_id": "turn-1", "content_item_kinds": ["environments.environment_context"]}}}
+        rows[3:3] = [{"type": "compacted", "payload": {}},
+                     {"type": "turn_context", "payload": {"turn_id": "turn-1"}}, environment]
+        return document, data, rows
+
+    def test_owner_cli_retains_verified_prompt_across_same_turn_environment(self):
+        document, data, rows = self.metadata_recovery_fixture()
+        Path(data["source"]).write_text(encode(rows))
+        original = copy.deepcopy(document)
+        artifacts = {key: Path(data[key]).read_bytes()
+                     for key in ("report", "wait_receipt", "source", "pane", "visible")}
+        ledger_path, record = self.tmp / "state.json", self.tmp / "record.json"
+        state.save_state(ledger_path, document)
+        record.write_text(json.dumps(data))
+        runner = FakeRunner()
+        output, errors = io.StringIO(), io.StringIO()
+        result = cli.main(["recover-report", "--state", str(ledger_path), "--record", str(record), "--now", AT],
+                          stdout=output, stderr=errors, client=HerdrClient(runner=runner))
+        self.assertEqual(result, 0, errors.getvalue())
+        saved = json.loads(ledger_path.read_text())
+        receipt = json.loads(output.getvalue())
+        self.assertTrue(receipt["found"])
+        self.assertFalse(receipt["grants_review_approval"])
+        self.assertEqual(saved["recovery"]["delivery_recoveries"], [receipt])
+        self.assertEqual(len(saved["recovery"]["events"]), len(original["recovery"]["events"]) + 1)
+        saved["recovery"]["delivery_recoveries"] = original["recovery"]["delivery_recoveries"]
+        saved["recovery"]["events"] = original["recovery"]["events"]
+        self.assertEqual(saved, original)
+        self.assertEqual(runner.calls, [])
+        for key, body in artifacts.items():
+            self.assertEqual(Path(data[key]).read_bytes(), body)
+
+    def test_owner_cli_requires_new_start_to_retain_context_after_termination(self):
+        for terminal in ("task_complete", "turn_aborted", "error"):
+            for new_start in (False, True):
+                with self.subTest(terminal=terminal, new_start=new_start):
+                    document, data, rows = self.metadata_recovery_fixture()
+                    ended = rows[:3]
+                    if terminal == "task_complete":
+                        ended.append(copy.deepcopy(rows[-2]))
+                    ended.append({"type": "event_msg", "payload": {"type": terminal,
+                        "turn_id": "turn-1", "last_agent_message": self.marker}})
+                    following = copy.deepcopy(rows[2:])
+                    if new_start:
+                        ended.append({"type": "event_msg", "payload": {
+                            "type": "task_started", "turn_id": "turn-2"}})
+                        for row in following:
+                            payload = row["payload"]
+                            if "turn_id" in payload:
+                                payload["turn_id"] = "turn-2"
+                            if "internal_chat_message_metadata_passthrough" in payload:
+                                payload["internal_chat_message_metadata_passthrough"]["turn_id"] = "turn-2"
+                    Path(data["source"]).write_text(encode(ended + following))
+                    ledger_path, record = self.tmp / "state.json", self.tmp / "record.json"
+                    state.save_state(ledger_path, document)
+                    record.write_text(json.dumps(data))
+                    before = ledger_path.read_bytes()
+                    artifacts = {key: Path(data[key]).read_bytes()
+                                 for key in ("report", "wait_receipt", "source", "pane", "visible")}
+                    output, errors, runner = io.StringIO(), io.StringIO(), FakeRunner()
+                    result = cli.main(["recover-report", "--state", str(ledger_path),
+                                       "--record", str(record), "--now", AT], stdout=output,
+                                      stderr=errors, client=HerdrClient(runner=runner))
+                    self.assertEqual(result, 0 if new_start else 1, errors.getvalue())
+                    self.assertEqual(runner.calls, [])
+                    for key, body in artifacts.items():
+                        self.assertEqual(Path(data[key]).read_bytes(), body)
+                    if new_start:
+                        saved, receipt = json.loads(ledger_path.read_bytes()), json.loads(output.getvalue())
+                        self.assertTrue(receipt["found"])
+                        self.assertFalse(receipt["grants_review_approval"])
+                        self.assertEqual(saved["recovery"]["delivery_recoveries"], [receipt])
+                        self.assertEqual(saved["recovery"]["events"][:-1], document["recovery"]["events"])
+                        self.assertEqual(saved["recovery"]["events"][-1]["kind"], "report_delivery_recovered")
+                        for key in ("delivery_recoveries", "events"):
+                            saved["recovery"][key] = document["recovery"][key]
+                        self.assertEqual(saved, document)
+                    else:
+                        self.assertEqual(output.getvalue(), "")
+                        self.assertIn("do not prove", errors.getvalue())
+                        self.assertEqual(ledger_path.read_bytes(), before)
+
+    def assert_owner_recovery(self, document, data, rows, accepted):
+        Path(data["source"]).write_text(encode(rows))
+        ledger_path, record = self.tmp / "state.json", self.tmp / "record.json"
+        state.save_state(ledger_path, document)
+        record.write_text(json.dumps(data))
+        before = ledger_path.read_bytes()
+        dispatch = document["recovery"]["dispatches"][0]
+        paths = [Path(data[key]) for key in ("report", "wait_receipt", "source", "pane", "visible")]
+        paths += [record, Path(dispatch["brief"]), Path(dispatch["common"])]
+        artifacts = {path: path.read_bytes() for path in paths}
+        result = subprocess.run(["bash", str(ROOT / "teamlead.sh"), "recover-report",
+                                 "--state", str(ledger_path), "--record", str(record), "--now", AT],
+                                capture_output=True, text=True, check=False)
+        self.assertEqual(result.returncode, 0 if accepted else 1, result.stderr)
+        self.assertEqual({path: path.read_bytes() for path in paths}, artifacts)
+        if not accepted:
+            self.assertEqual(result.stdout, "")
+            self.assertIn("do not prove", result.stderr)
+            self.assertEqual(ledger_path.read_bytes(), before)
+            return
+        saved, receipt = json.loads(ledger_path.read_bytes()), json.loads(result.stdout)
+        self.assertTrue(receipt["found"])
+        self.assertFalse(receipt["grants_review_approval"])
+        self.assertEqual(receipt["dispatch"], data["dispatch"])
+        self.assertEqual(saved["recovery"]["delivery_recoveries"], [receipt])
+        self.assertEqual(saved["recovery"]["events"], document["recovery"]["events"] + [{
+            "schema_version": 1, "sequence": len(document["recovery"]["events"]) + 1,
+            "at": AT, "kind": "report_delivery_recovered", "task": dispatch["task"],
+            "details": {"recovery": data["id"], "dispatch": data["dispatch"]}}])
+        for key in ("delivery_recoveries", "events"):
+            saved["recovery"][key] = document["recovery"][key]
+        self.assertEqual(saved, document)
+
+    def test_owner_closes_modern_turn_across_unmarked_responses(self):
+        metadata = "internal_chat_message_metadata_passthrough"
+        for terminal in ("task_complete", "turn_aborted", "error"):
+            for variation in ("user-tail", "assistant-tail", "unmarked-before-terminal",
+                              "fresh-modern", "fresh-legacy", "wholly-legacy"):
+                with self.subTest(terminal=terminal, variation=variation):
+                    document, data, rows = self.metadata_recovery_fixture()
+                    user = copy.deepcopy(rows[2])
+                    del user["payload"][metadata]
+                    ended = copy.deepcopy(rows[:3])
+                    if variation == "wholly-legacy":
+                        del ended[2]["payload"][metadata]
+                    if variation == "unmarked-before-terminal":
+                        ended.append(copy.deepcopy(user))
+                    if terminal == "task_complete":
+                        ended.append(copy.deepcopy(rows[-2]))
+                    ended.append({"type": "event_msg", "payload": {
+                        "type": terminal, "turn_id": "turn-1", "last_agent_message": self.marker}})
+                    tail = [user] + copy.deepcopy(rows[-2:])
+                    if variation == "assistant-tail":
+                        del tail[0]
+                    fresh = variation in ("fresh-modern", "fresh-legacy")
+                    if fresh:
+                        ended.append({"type": "event_msg", "payload": {
+                            "type": "task_started", "turn_id": "turn-2"}})
+                        tail[-1]["payload"]["turn_id"] = "turn-2"
+                        if variation == "fresh-modern":
+                            tail[0]["payload"][metadata] = {
+                                "turn_id": "turn-2", "content_item_kinds": ["user.text"]}
+                    self.assert_owner_recovery(document, data, ended + tail,
+                                               fresh or variation == "wholly-legacy")
+
+    def test_owner_reconciles_duplicate_and_contradictory_user_events(self):
+        for modern in (False, True):
+            for placement in ("before-response", "before-context", "after-context", "no-context"):
+                if not modern and placement in ("before-context", "after-context"):
+                    continue
+                for matching in (False, True):
+                    if placement == "before-response" and not matching:
+                        continue
+                    with self.subTest(modern=modern, placement=placement, matching=matching):
+                        document, data, rows = self.metadata_recovery_fixture()
+                        prompt = rows[2]["payload"]["content"][0]["text"]
+                        if not modern or placement == "no-context":
+                            rows = rows[:3] + rows[-2:]
+                        if not modern:
+                            del rows[2]["payload"]["internal_chat_message_metadata_passthrough"]
+                        event = {"type": "event_msg", "payload": {
+                            "type": "user_message", "message": prompt if matching else "Different assignment",
+                            "images": [], "audio": [], "local_images": [], "text_elements": []}}
+                        index = 2 if placement == "before-response" else 3 if placement == "before-context" else len(rows) - 2
+                        rows.insert(index, event)
+                        self.assert_owner_recovery(document, data, rows, matching)
+
+    def test_owner_user_event_cannot_establish_or_rehabilitate_prompt_proof(self):
+        for variation in ("event-only", "invalid-metadata", "missing-start", "legacy-context", "fresh-missing"):
+            with self.subTest(variation=variation):
+                document, data, rows = self.metadata_recovery_fixture()
+                rows.insert(-2, {"type": "event_msg", "payload": {
+                    "type": "user_message", "message": rows[2]["payload"]["content"][0]["text"]}})
+                if variation == "event-only":
+                    del rows[2]
+                elif variation == "invalid-metadata":
+                    rows[2]["payload"]["internal_chat_message_metadata_passthrough"] = None
+                elif variation == "missing-start":
+                    del rows[1]
+                elif variation == "legacy-context":
+                    del rows[2]["payload"]["internal_chat_message_metadata_passthrough"]
+                else:
+                    rows[3:-3] = [{"type": "event_msg", "payload": {
+                        "type": "task_started", "turn_id": "turn-2"}}]
+                    rows[-1]["payload"]["turn_id"] = "turn-2"
+                self.assert_owner_recovery(document, data, rows, False)
+
+    def test_codex_prior_turn_metadata_cannot_poison_or_supply_current_prompt(self):
+        for valid_prior in (False, True):
+            for missing_current in (False, True):
+                with self.subTest(valid_prior=valid_prior, missing_current=missing_current):
+                    document, data, rows = self.metadata_recovery_fixture()
+                    prior = copy.deepcopy(rows[1:3])
+                    prior[0]["payload"]["turn_id"] = "prior-turn"
+                    metadata = prior[1]["payload"]["internal_chat_message_metadata_passthrough"]
+                    metadata["turn_id"] = "prior-turn"
+                    if not valid_prior:
+                        metadata["content_item_kinds"] = ["agents_md.instructions", "environments.environment_context"]
+                    if missing_current:
+                        del rows[2]
+                    rows[1:1] = prior
+                    self.assert_owner_recovery(document, data, rows, not missing_current)
+
+    def test_codex_later_user_text_replaces_prompt_even_when_it_looks_like_context(self):
+        for native in (False, True):
+            for text in ("New assignment", "<environment_context>user instruction</environment_context>"):
+                document, data, rows = self.metadata_recovery_fixture()
+                later = copy.deepcopy(rows[2])
+                later["payload"]["content"][0]["text"] = text
+                if not native:
+                    del later["payload"]["internal_chat_message_metadata_passthrough"]
+                rows.insert(-2, later)
+                Path(data["source"]).write_text(encode(rows))
+                with self.subTest(native=native, text=text):
+                    self.assertEqual(delivery.source_prompt(encode(rows), "codex", SESSION), text)
+                    before = copy.deepcopy(document)
+                    with self.assertRaises(UsageError):
+                        delivery.recover(document["recovery"], document["assignments"], data, AT)
+                    self.assertEqual(document, before)
+
+    def test_codex_environment_requires_unambiguous_metadata_and_verified_prompt_turn(self):
+        metadata_key = "internal_chat_message_metadata_passthrough"
+        bad_metadata = [None, [], "metadata", {}, {"turn_id": "turn-1"}]
+        bad_metadata += [{"turn_id": "turn-1", "content_item_kinds": value} for value in (
+            None, [], "environments.environment_context", {}, [None], [{}],
+            ["unknown"], ["environments.environment_context", "user.text"],
+            ["environments.environment_context", "unknown"],
+            ["environments.environment_context", "environments.environment_context"])]
+        bad_metadata += [{"turn_id": value, "content_item_kinds": ["environments.environment_context"]}
+                         for value in (None, "", [], {}, "other-turn")]
+        bad_metadata.append({"content_item_kinds": ["environments.environment_context"]})
+        for index in (2, 5):
+            for metadata in bad_metadata:
+                document, data, rows = self.metadata_recovery_fixture()
+                rows[index]["payload"][metadata_key] = metadata
+                # Even matching text cannot authenticate unknown/malformed kinds.
+                rows[5]["payload"]["content"] = copy.deepcopy(rows[2]["payload"]["content"])
+                Path(data["source"]).write_text(encode(rows))
+                before = copy.deepcopy(document)
+                with self.subTest(index=index, metadata=metadata), self.assertRaises(UsageError):
+                    delivery.recover(document["recovery"], document["assignments"], data, AT)
+                self.assertEqual(document, before)
+
+    def test_codex_environment_never_relaxes_other_recovery_proofs(self):
+        for variation in ("legacy-prompt", "no-prompt", "new-turn", "missing-start", "context-turn",
+                          "prompt-turn", "completion-turn", "session", "later-user-before-context",
+                          "bad-content", "changed-prompt", "brief-path", "report-path", "no-completion",
+                          "quoted-final", "wrapped-final"):
+            document, data, rows = self.metadata_recovery_fixture()
+            if variation == "legacy-prompt":
+                del rows[2]["payload"]["internal_chat_message_metadata_passthrough"]
+            elif variation == "no-prompt":
+                del rows[2]
+            elif variation == "new-turn":
+                rows.insert(3, {"type": "event_msg", "payload": {"type": "task_started", "turn_id": "turn-2"}})
+            elif variation == "missing-start":
+                del rows[1]
+            elif variation == "context-turn":
+                rows[4]["payload"]["turn_id"] = "other-turn"
+            elif variation == "prompt-turn":
+                rows[2]["payload"]["internal_chat_message_metadata_passthrough"]["turn_id"] = "other-turn"
+            elif variation == "completion-turn":
+                rows[-1]["payload"]["turn_id"] = "other-turn"
+            elif variation == "session":
+                rows[0]["payload"]["id"] = "other-session"
+            elif variation == "later-user-before-context":
+                later = copy.deepcopy(rows[2])
+                later["payload"]["content"][0]["text"] = "Later assignment"
+                rows.insert(3, later)
+            elif variation == "bad-content":
+                rows[5]["payload"]["content"] = [{"type": "image", "text": "runtime"}]
+            elif variation == "changed-prompt":
+                rows[2]["payload"]["content"][0]["text"] += " changed"
+            elif variation == "brief-path":
+                document["recovery"]["dispatches"][0]["brief"] = str(self.report)
+            elif variation == "report-path":
+                data["report"] = document["recovery"]["dispatches"][0]["brief"]
+            elif variation == "no-completion":
+                rows.pop()
+            else:
+                final = "> " + self.marker if variation == "quoted-final" else "```\n" + self.marker
+                rows[-2]["payload"]["content"][0]["text"] = final
+                rows[-1]["payload"]["last_agent_message"] = final
+            Path(data["source"]).write_text(encode(rows))
+            before = copy.deepcopy(document)
+            with self.subTest(variation=variation), self.assertRaises(UsageError):
+                delivery.recover(document["recovery"], document["assignments"], data, AT)
+            self.assertEqual(document, before)
+
     def test_recovery_accepts_actual_public_apply_output_with_null_reviewer_session(self):
         case = owner_fixture.RecoveryCommandTests()
         case.setUp()
