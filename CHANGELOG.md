@@ -10,6 +10,7 @@
   pending; the lane refuses candidates missing that interface.
 - Authenticate supplied local producer files against the immutable remote
   artifact before verification or consumption.
+- Preserve FFA's original Pyright configuration as an unchanged gate input.
 
 ## 0.3.247 — 2026-09-18
 

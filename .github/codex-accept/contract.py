@@ -510,7 +510,8 @@ def validate_inventories(repo: Path, key: str, receipt: dict[str, Any], files: d
         require(entries == inventory(repo, revision), "Inventory differs from actual retained Git tree")
         recorded[phase] = {item["path"]: item for item in entries}
     protected = [p for p in recorded["baseline"] if p.startswith("tests/") or "/tests/" in p or
-                 p.startswith(".github/scripts/") or p == ".github/requirements.txt"]
+                 p.startswith(".github/scripts/") or p == ".github/requirements.txt" or
+                 (key == "ffa" and p == "pyrightconfig.json")]
     require(protected, "Original test inventory is empty")
     require(all(recorded["converted"].get(path) == recorded["baseline"][path] for path in protected), "Original tests/gates changed bytes or modes")
 

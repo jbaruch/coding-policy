@@ -158,7 +158,9 @@ The fixture-result fields are exclusive: `schema_version:1`, `key` (`GOC` or
 hashes cover decoded blob bytes. `inventories` has `baseline` and `converted`,
 each `{path:"evidence/<key>/<phase>-inventory.json",sha256}`. The helper compares
 them to actual Git objects and preserves original tests, `.github/scripts/`
-and `.github/requirements.txt` bytes/modes across conversion.
+and `.github/requirements.txt` bytes/modes across conversion. FFA's root
+`pyrightconfig.json` is also an original gate input: its bytes and mode must
+remain unchanged. Publishing workflows remain conversion-owned.
 
 `checks` has exactly `deterministic_refusal`, `source_preserved`,
 `delta_validated`, `validate`, `rerun`, `clean`, all true. The harness sets them

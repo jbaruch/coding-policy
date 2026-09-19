@@ -221,6 +221,10 @@ class ExportTests(unittest.TestCase):
             git(repo, "init", "-q")
             for argv in spec["commands"]:
                 path = repo / argv[1]; path.parent.mkdir(parents=True, exist_ok=True); path.write_text("fixed original test\n")
+            if key == "ffa":
+                (repo / "pyrightconfig.json").write_bytes(c.encoded({
+                    "include": [".github/scripts", "skills/frequent-flyer-advocate/scripts", "skills/frequent-flyer-advocate/tests"],
+                    "pythonVersion": "3.12", "typeCheckingMode": "standard", "reportMissingImports": "error"}))
             spec["upstream_sha"] = ""  # Replaced by the real synthetic ancestor, never a production bypass.
             commit(repo, "untouched upstream")
             spec["upstream_sha"] = git(repo, "rev-parse", "HEAD")
@@ -338,6 +342,28 @@ class ExportTests(unittest.TestCase):
         self.put(name, c.inventory(repo, "HEAD"))
         item["inventories"]["converted"]["sha256"] = c.sha((self.evidence / name).read_bytes())
         self.put(key + "/fixture-result.json", item)
+
+    def test_original_ffa_diagnostics_bytes_and_mode_are_gate_inputs(self):
+        repo = self.root / "fixtures/ffa"
+        config = repo / "pyrightconfig.json"
+        original = config.read_bytes()
+        self.seal()  # Untouched configuration has a real retained Git inventory.
+        self.output = self.base / "weakened-export"
+        changed = json.loads(original)
+        changed.update(typeCheckingMode="off", reportMissingImports="none")
+        config.write_bytes(c.encoded(changed))
+        commit(repo, "disable original diagnostic checks")
+        self.update_producer("ffa")
+        self.assert_refused()
+        config.write_bytes(original)
+        config.chmod(0o755)
+        commit(repo, "change diagnostic configuration mode")
+        self.update_producer("ffa")
+        self.assert_refused()
+        config.chmod(0o644)
+        commit(repo, "restore original diagnostic input")
+        self.update_producer("ffa")
+        self.seal()
 
     def archive_bytes(self, root):
         buffer = io.BytesIO()
