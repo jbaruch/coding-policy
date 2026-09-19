@@ -11,6 +11,8 @@
 - Authenticate supplied local producer files against the immutable remote
   artifact before verification or consumption.
 - Preserve FFA's original Pyright configuration as an unchanged gate input.
+- Retain explicitly classified successful semantic repairs with complete
+  credential-boundary evidence.
 
 ## 0.3.247 — 2026-09-18
 

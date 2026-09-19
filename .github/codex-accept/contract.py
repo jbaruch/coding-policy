@@ -457,8 +457,18 @@ def fixture_receipt(key: str, receipt: Any, files: dict[str, bytes], context: di
         require(type(runs) is list and runs, "Fixture has no genuine agent runs")
         for index, agent in enumerate(runs):
             require(type(agent) is dict and agent.get("provider") == "codex" and
-                    agent.get("runtimeVersion") and agent.get("isolation") and
-                    not agent.get("failure"), "Incomplete or failed agent run")
+                    agent.get("runtimeVersion") and agent.get("isolation"), "Incomplete agent run")
+            failure = agent.get("failure", "")
+            require(type(failure) is str, "Invalid agent failure record")
+            if failure:
+                # Only ACR's semantic validator may classify repair feedback.
+                # A completed turn alone does not prove process/protocol success.
+                require(agent.get("failureKind") == "semantic_validation" and
+                        any(type(later) is dict and later.get("scope", "") == agent.get("scope", "") and
+                            not later.get("failure") for later in runs[index + 1:]),
+                        "Agent failure is not a repaired semantic validation result")
+            else:
+                require(agent.get("failureKind", "") == "", "Failure classification lacks feedback")
             require(type(agent.get("arguments")) is list and agent["arguments"] and
                     all(type(arg) is str for arg in agent["arguments"]) and type(agent.get("stdout")) is str,
                     "Agent invocation or completion evidence is absent")

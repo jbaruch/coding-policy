@@ -203,13 +203,33 @@ Arbitrary PASS-line counts are not accepted. Original fixture API coordinates
 stay upstream; publication-target coordinates do not replace them.
 
 `dry-run.json`/`apply.json` are successful CLI JSON envelopes. The result must
-have `wrote:false`/`true`, complete nonempty successful `agentRuns` with Codex
+have `wrote:false`/`true`, complete nonempty `agentRuns` with Codex
 version/isolation/argv/request digest and started/completed turn evidence, and
 `credentialBoundary:{contract,planChecked:true,applicationChecked:false|true,
 reportSanitized:true}`. Each AgentRun boundary has exactly `contract`,
 `authInspected:true`, `proposalChecked:true`, `reportSanitized:true`,
 `isolatedHomeRemoved:true`, and boolean `refreshObserved`. Either observation
 value is valid; rotation alone is not failure.
+
+A successful report may retain earlier semantic-validation repair feedback in
+`AgentRun.failure`. A nonempty failure requires `failureKind:"semantic_validation"`
+and a later run in the same phase and scope with no failure. Clean runs omit
+`failure`/`failureKind` or use empty strings. Every run still requires completed
+turn evidence, no failed/error event, and all credential checks; the final CLI
+report must pass its plan/application guards. Unclassified failures and process,
+protocol or credential failure kinds refuse, even with a completed turn.
+
+**Serialization handoff remains pending in ACR.** Add the optional string
+`failureKind` to AgentRun. Only the trusted semantic validator, after a successful
+provider return and passed credential checks, may set `semantic_validation` when
+it appends attributable ordinary validation feedback to an earlier run's
+`failure`. Preserve the sanitized feedback and every scope/repair record. Never
+infer this kind from diagnostic text or set it for provider errors, protocol
+failures, uninspectable auth or credential-bearing proposals. Those remain fatal;
+missing/unknown classifications refuse centrally. Final success still comes from
+actual combined validation and guard checks. The frozen runtime does not yet
+serialize this distinction or the credential boundaries; central synthetic
+receipt controls do not establish that integration.
 
 The fixture's `credential_boundary` is exactly `{contract,plan_checked:true,
 runs:[...]}`. Each run is `{phase:"dry-run"|"apply",index:<zero-based>,boundary}`.

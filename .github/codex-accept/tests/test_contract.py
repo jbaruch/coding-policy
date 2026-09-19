@@ -365,6 +365,77 @@ class ExportTests(unittest.TestCase):
         self.update_producer("ffa")
         self.seal()
 
+    def repair_runs(self, feedback=True):
+        for phase in ("dry-run", "apply"):
+            report = self.get("goc/" + phase + ".json")
+            first = report["result"]["agentRuns"][0]
+            first["scope"] = "runtime"
+            second = copy.deepcopy(first)
+            second["requestDigest"] = "sha256:" + "c" * 64
+            if feedback:
+                first.update(failure="ACR combined validation attempt 1: invalid generated reference",
+                             failureKind="semantic_validation")
+            report["result"]["agentRuns"] = [first, second]
+            self.put("goc/" + phase + ".json", report)
+        item = self.get("goc/fixture-result.json")
+        item["credential_boundary"]["runs"] = [
+            {"phase": phase, "index": index, "boundary": live_boundary()}
+            for phase in ("dry-run", "apply") for index in range(2)]
+        self.put("goc/fixture-result.json", item)
+
+    def test_completed_multi_run_and_semantic_repair_success(self):
+        self.repair_runs(feedback=False)
+        self.seal()
+        self.output = self.base / "repaired-export"
+        self.repair_runs()
+        manifest = self.seal()
+        c.verify_artifact(self.output, CONTEXT)
+        self.assertEqual(manifest["fixtures"][0]["producer_sha"], self.get("goc/fixture-result.json")["producer_sha"])
+        report = json.loads((self.output / "evidence/goc/apply.json").read_bytes())
+        self.assertEqual(len(report["result"]["agentRuns"]), 2)
+        self.assertEqual(report["result"]["agentRuns"][0]["failureKind"], "semantic_validation")
+
+    def test_repairs_do_not_hide_runtime_protocol_or_credential_failures(self):
+        self.repair_runs()
+        original = self.get("goc/apply.json")
+        for kind in (None, "process", "protocol", "credential", "unknown"):
+            with self.subTest(kind=kind):
+                report = copy.deepcopy(original)
+                first = report["result"]["agentRuns"][0]
+                if kind is None:
+                    del first["failureKind"]
+                else:
+                    first["failureKind"] = kind
+                self.put("goc/apply.json", report)
+                self.assert_refused()
+        for mutation in ("failed-turn", "missing-completion", "credential", "last-run", "other-scope"):
+            with self.subTest(mutation=mutation):
+                report = copy.deepcopy(original)
+                first, last = report["result"]["agentRuns"]
+                if mutation == "failed-turn":
+                    first["stdout"] += '{"type":"turn.failed"}\n'
+                elif mutation == "missing-completion":
+                    first["stdout"] = '{"type":"turn.started"}\n'
+                elif mutation == "credential":
+                    first["credentialBoundary"]["proposalChecked"] = False
+                elif mutation == "last-run":
+                    last.update(failure=first["failure"], failureKind=first["failureKind"])
+                else:
+                    last["scope"] = "delivery"
+                self.put("goc/apply.json", report)
+                self.assert_refused()
+
+    def test_repair_mapping_must_retain_every_run_in_each_phase(self):
+        self.repair_runs()
+        original = self.get("goc/fixture-result.json")
+        for index in range(4):
+            item = copy.deepcopy(original)
+            del item["credential_boundary"]["runs"][index]
+            self.put("goc/fixture-result.json", item)
+            self.assert_refused()
+        self.put("goc/fixture-result.json", original)
+        self.seal()
+
     def archive_bytes(self, root):
         buffer = io.BytesIO()
         with zipfile.ZipFile(buffer, "w") as archive:
