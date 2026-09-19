@@ -2,7 +2,7 @@
 """Deterministic central parser/scanner controls, not ACR runtime acceptance."""
 from __future__ import annotations
 
-from contextlib import contextmanager, redirect_stderr, redirect_stdout
+from contextlib import ExitStack, contextmanager, redirect_stderr, redirect_stdout
 import copy
 import importlib.util
 import io
@@ -271,6 +271,261 @@ class CleanupTests(unittest.TestCase):
         self.base = Path(self.temp.name).resolve()
         env = mock.patch.dict(os.environ, {"RUNNER_TEMP": str(self.base)})
         env.start(); self.addCleanup(env.stop)
+
+    @contextmanager
+    def setup_caller(self, command, root):
+        # Exercise both public callers, isolating only external work and the
+        # unrelated consumer receipt protocol. No credentials or child runs.
+        with ExitStack() as stack:
+            clone = stack.enter_context(mock.patch.object(c, "run", return_value=b""))
+            stack.enter_context(mock.patch.object(c, "git"))
+            stack.enter_context(mock.patch.object(c, "checkout"))
+            stack.enter_context(mock.patch.object(c, "inputs", return_value={
+                "acr-sha": CONTEXT["acr_sha"], "producer-run-id": "123",
+                "producer-run-attempt": "2", "goc-source": "synthetic-goc",
+                "ffa-source": "synthetic-ffa"}))
+            @contextmanager
+            def authenticated(*args):
+                yield self.base, {}, CONTEXT
+            stack.enter_context(mock.patch.object(c, "authenticated_artifact", authenticated))
+            def child(*args, **kwargs):
+                (root / "evidence/consumer-result.json").write_text("{}")
+                return subprocess.CompletedProcess(args[0], 0)
+            consumer = stack.enter_context(mock.patch.object(c.subprocess, "run", side_effect=child))
+            stack.enter_context(mock.patch.object(c, "parse_events"))
+            stack.enter_context(mock.patch.object(c, "consumer_receipt"))
+            operation = (lambda: c.prepare(root)) if command == "prepare" else (lambda: c.consume(self.base, self.base, root))
+            yield operation, clone, consumer
+
+    @contextmanager
+    def marker_write_fault(self, partial=False, intervene=None):
+        original_open = Path.open
+        fault = OSError("synthetic one-shot marker write failure")
+        fired = False
+        @contextmanager
+        def opening(path, *args, **kwargs):
+            nonlocal fired
+            with original_open(path, *args, **kwargs) as handle:
+                if path.name != ".acr-owned.json" or not args or args[0] != "xb" or fired:
+                    yield handle
+                    return
+                writer = mock.Mock(wraps=handle)
+                def write(value):
+                    nonlocal fired
+                    fired = True
+                    if partial:
+                        handle.write(value[:1])
+                        handle.flush()
+                    if intervene is not None:
+                        intervene(path)
+                    raise fault
+                writer.write.side_effect = write
+                yield writer
+        with mock.patch.object(Path, "open", opening):
+            yield fault
+        self.assertTrue(fired)
+
+    def test_marker_write_failure_rolls_back_both_callers_and_allows_retry(self):
+        for command, basename in (("prepare", "acr-accept"), ("consume", "acr-consume")):
+            for partial in (False, True):
+                parent = self.base / (command + str(partial)); parent.mkdir()
+                with self.subTest(command=command, partial=partial), mock.patch.dict(os.environ, {"RUNNER_TEMP": str(parent)}):
+                    root = parent / basename
+                    with self.setup_caller(command, root) as (operation, clone, consumer):
+                        with self.marker_write_fault(partial) as fault:
+                            with self.assertRaises(OSError) as caught:
+                                operation()
+                        self.assertIs(caught.exception, fault)
+                        clone.assert_not_called(); consumer.assert_not_called()
+                        self.assertFalse(root.exists())
+                        c.clean(root)
+                        operation()  # Same path, original failure removed.
+                        marker = json.loads((root / ".acr-owned.json").read_bytes())
+                        self.assertEqual(marker, {"schema_version": 1, "root": str(root),
+                                                 "device": root.stat().st_dev, "inode": root.stat().st_ino})
+                        self.assertEqual((root / ".acr-owned.json").stat().st_mode & 0o777, 0o600)
+                        self.assertEqual(root.stat().st_mode & 0o777, 0o700)
+                        self.assertEqual(clone.call_count if command == "prepare" else consumer.call_count,
+                                         len(c.FIXTURES) if command == "prepare" else 1)
+                        c.clean(root)
+                        self.assertFalse(root.exists())
+
+    def test_marker_open_failure_removes_only_the_exclusively_created_empty_root(self):
+        for command, basename in (("prepare", "acr-accept"), ("consume", "acr-consume")):
+            for foreign in (False, True):
+                parent = self.base / (command + str(foreign)); parent.mkdir()
+                root = parent / basename
+                original_open = Path.open
+                fault = OSError("synthetic exclusive open failure")
+                def opening(path, *args, **kwargs):
+                    if path == root / ".acr-owned.json":
+                        if foreign:
+                            with original_open(path, "wb") as handle:
+                                handle.write(b"foreign marker")
+                        raise fault
+                    return original_open(path, *args, **kwargs)
+                with self.subTest(command=command, foreign=foreign), mock.patch.dict(os.environ, {"RUNNER_TEMP": str(parent)}):
+                    with self.setup_caller(command, root) as (operation, clone, consumer):
+                        with mock.patch.object(Path, "open", opening), self.assertRaises((OSError, c.Refusal)):
+                            operation()
+                        clone.assert_not_called(); consumer.assert_not_called()
+                        if foreign:
+                            self.assertEqual((root / ".acr-owned.json").read_bytes(), b"foreign marker")
+                            with self.assertRaises(c.Refusal):
+                                c.clean(root)
+                        else:
+                            self.assertFalse(root.exists())
+                            operation()
+                            c.clean(root)
+
+    def test_uncertain_creation_identity_preserves_residue(self):
+        for command, basename in (("prepare", "acr-accept"), ("consume", "acr-consume")):
+            for identity in ("root", "marker"):
+                parent = self.base / (command + identity); parent.mkdir()
+                root = parent / basename
+                original_lstat = Path.lstat
+                def lstat(path, *args, **kwargs):
+                    if path == root and path.is_dir():
+                        raise OSError("synthetic unreadable root identity")
+                    return original_lstat(path, *args, **kwargs)
+                patch = (mock.patch.object(Path, "lstat", lstat) if identity == "root" else
+                         mock.patch.object(c.os, "fstat", side_effect=OSError("synthetic unreadable marker identity")))
+                with self.subTest(command=command, identity=identity), mock.patch.dict(os.environ, {"RUNNER_TEMP": str(parent)}):
+                    with self.setup_caller(command, root) as (operation, clone, consumer):
+                        with patch, self.assertRaises((OSError, c.Refusal)):
+                            operation()
+                        clone.assert_not_called(); consumer.assert_not_called()
+                    self.assertTrue(root.is_dir())
+                    self.assertEqual(sorted(p.name for p in root.iterdir()), [] if identity == "root" else [".acr-owned.json"])
+                    with self.assertRaises((OSError, c.Refusal)):
+                        c.clean(root)
+
+    def test_rollback_preserves_replacements_links_foreign_entries_and_io_failures(self):
+        cases = ("root-replaced", "root-link", "ancestor-link", "marker-replaced", "marker-link",
+                 "marker-hardlink", "marker-missing", "foreign-entry", "unreadable-root", "unlink-failed", "rmdir-failed")
+        for command, basename in (("prepare", "acr-accept"), ("consume", "acr-consume")):
+            for case in cases:
+                parent = self.base / (command + case); parent.mkdir()
+                root = parent / basename
+                moved = self.base / (command + case + "-saved")
+                outside = self.base / (command + case + "-outside"); outside.write_bytes(b"preserve outside")
+                original_lstat = Path.lstat
+                original_unlink = Path.unlink
+                original_rmdir = Path.rmdir
+                active = False
+                def intervene(marker):
+                    nonlocal active
+                    active = True
+                    if case == "root-replaced":
+                        root.rename(moved); root.mkdir()
+                    elif case == "root-link":
+                        root.rename(moved); root.symlink_to(moved, target_is_directory=True)
+                    elif case == "ancestor-link":
+                        parent.rename(moved); parent.symlink_to(moved, target_is_directory=True)
+                    elif case == "marker-replaced":
+                        marker.rename(moved); marker.write_bytes(b"replacement marker")
+                    elif case == "marker-link":
+                        marker.rename(moved); marker.symlink_to(outside)
+                    elif case == "marker-hardlink":
+                        os.link(marker, moved)
+                    elif case == "marker-missing":
+                        marker.rename(moved)
+                    elif case == "foreign-entry":
+                        (root / "foreign").write_bytes(b"preserve foreign")
+                def lstat(path, *args, **kwargs):
+                    if active and case == "unreadable-root" and path == root:
+                        raise OSError("synthetic rollback identity failure")
+                    return original_lstat(path, *args, **kwargs)
+                def unlink(path, *args, **kwargs):
+                    if active and case == "unlink-failed" and path == root / ".acr-owned.json":
+                        raise OSError("synthetic rollback unlink failure")
+                    return original_unlink(path, *args, **kwargs)
+                def rmdir(path, *args, **kwargs):
+                    if active and case == "rmdir-failed" and path == root:
+                        raise OSError("synthetic rollback rmdir failure")
+                    return original_rmdir(path, *args, **kwargs)
+                with self.subTest(command=command, case=case), mock.patch.dict(os.environ, {"RUNNER_TEMP": str(parent)}):
+                    with self.setup_caller(command, root) as (operation, clone, consumer):
+                        with self.marker_write_fault(True, intervene) as fault, \
+                                mock.patch.object(Path, "lstat", lstat), mock.patch.object(Path, "unlink", unlink), \
+                                mock.patch.object(Path, "rmdir", rmdir), self.assertRaises((OSError, c.Refusal)) as caught:
+                            operation()
+                        self.assertIs(caught.exception.__context__, fault)
+                        clone.assert_not_called(); consumer.assert_not_called()
+                    self.assertTrue(root.is_dir())
+                    self.assertEqual(outside.read_bytes(), b"preserve outside")
+                    if case == "root-replaced":
+                        self.assertEqual(list(root.iterdir()), [])
+                        self.assertEqual((moved / ".acr-owned.json").read_bytes(), b"{")
+                    elif case in ("root-link", "ancestor-link"):
+                        self.assertTrue((root if case == "root-link" else parent).is_symlink())
+                        self.assertEqual((root / ".acr-owned.json").read_bytes(), b"{")
+                    elif case in ("marker-replaced", "marker-link", "marker-missing"):
+                        self.assertEqual(moved.read_bytes(), b"{")
+                        marker = root / ".acr-owned.json"
+                        if case == "marker-replaced":
+                            self.assertEqual(marker.read_bytes(), b"replacement marker")
+                        elif case == "marker-link":
+                            self.assertTrue(marker.is_symlink())
+                        else:
+                            self.assertFalse(marker.exists())
+                    elif case == "rmdir-failed":
+                        self.assertEqual(list(root.iterdir()), [])
+                    else:
+                        self.assertEqual((root / ".acr-owned.json").read_bytes(), b"{")
+                        if case == "foreign-entry":
+                            self.assertEqual((root / "foreign").read_bytes(), b"preserve foreign")
+                        if case == "marker-hardlink":
+                            self.assertEqual(moved.read_bytes(), b"{")
+                    with self.assertRaises((OSError, c.Refusal)):
+                        c.clean(root)  # Removing the fault does not manufacture ownership.
+                    self.assertTrue(root.is_dir())
+
+    def test_post_marker_setup_failure_still_cleans_for_both_callers(self):
+        for command, basename in (("prepare", "acr-accept"), ("consume", "acr-consume")):
+            root = self.base / basename
+            original_mkdir = Path.mkdir
+            def mkdir(path, *args, **kwargs):
+                if path.parent == root:
+                    raise OSError("synthetic first child mkdir failure")
+                return original_mkdir(path, *args, **kwargs)
+            with self.subTest(command=command), self.setup_caller(command, root) as (operation, clone, consumer):
+                with mock.patch.object(Path, "mkdir", mkdir), self.assertRaises(OSError):
+                    operation()
+                clone.assert_not_called(); consumer.assert_not_called()
+                self.assertEqual(json.loads((root / ".acr-owned.json").read_bytes())["inode"], root.stat().st_ino)
+                c.clean(root)
+                self.assertFalse(root.exists())
+                operation()
+                c.clean(root)
+
+    def test_rolled_back_setup_has_nonzero_cli_exit_and_no_success_payload(self):
+        for command, basename in (("prepare", "acr-accept"), ("consume", "acr-consume")):
+            root = self.base / basename
+            argv = [str(HELPER), command, "--run-root", str(root)]
+            if command == "consume":
+                argv += ["--acr-root", str(self.base), "--artifact", str(self.base)]
+            output, errors = io.StringIO(), io.StringIO()
+            with self.subTest(command=command), self.setup_caller(command, root) as (_, clone, consumer):
+                with self.marker_write_fault(True), mock.patch.object(sys, "argv", argv), \
+                        redirect_stdout(output), redirect_stderr(errors):
+                    self.assertEqual(c.main(), 2)
+                self.assertEqual(output.getvalue(), "")
+                self.assertIn("ACR acceptance tool failure (OSError)", errors.getvalue())
+                clone.assert_not_called(); consumer.assert_not_called()
+                self.assertFalse(root.exists())
+
+    def test_initialization_rollback_supports_local_system_temporary_alias(self):
+        root = Path(self.temp.name) / "acr-accept"
+        if sys.platform == "darwin" and str(root).startswith("/private/var/"):
+            root = Path(str(root).removeprefix("/private"))
+        with mock.patch.dict(os.environ):
+            del os.environ["RUNNER_TEMP"]
+            with self.marker_write_fault(True), self.assertRaises(OSError):
+                c.prepare(root)
+            self.assertFalse(root.exists())
+            c.create_run_root(root)
+            c.clean(root)
 
     def test_prepare_and_partial_prepare_are_owned_before_fallible_setup(self):
         root = self.base / "acr-accept"

@@ -840,14 +840,50 @@ def run_root_path(root: Path) -> Path:
     return resolved
 
 
+def rollback_run_root(root: Path, created: os.stat_result, marker_created: os.stat_result | None) -> None:
+    # Only the still-running creator has this evidence. Never use standalone
+    # clean for an incomplete record or recursively remove initialization residue.
+    def same_root() -> None:
+        require(run_root_path(root) == root, "Run root moved; preserve failed setup for inspection")
+        current = root.lstat()
+        require(stat.S_ISDIR(current.st_mode) and
+                (current.st_dev, current.st_ino) == (created.st_dev, created.st_ino),
+                "Run root identity changed; preserve failed setup for inspection")
+
+    same_root()
+    marker = root / ".acr-owned.json"
+    entries = set(root.iterdir())
+    require(entries <= {marker}, "Unexpected run root contents; preserve failed setup for inspection")
+    if marker_created is None:
+        require(not entries, "Marker ownership is unknown; preserve failed setup for inspection")
+    else:
+        current = marker.lstat()
+        require(stat.S_ISREG(current.st_mode) and current.st_nlink == 1 and
+                (current.st_dev, current.st_ino) == (marker_created.st_dev, marker_created.st_ino),
+                "Marker identity changed; preserve failed setup for inspection")
+        marker.unlink()
+    same_root()
+    root.rmdir()  # Refuses any contents introduced since the inventory above.
+
+
 def create_run_root(root: Path) -> Path:
     root = run_root_path(root)
     require(not root.exists(), "Run root must be fresh")
     root.mkdir(mode=0o700)
-    info = root.stat()
-    # Record creation before clones, child setup or any candidate execution.
-    write_new(root / ".acr-owned.json", encoded({"schema_version": 1,
-              "root": str(root), "device": info.st_dev, "inode": info.st_ino}))
+    info = root.lstat()
+    require(stat.S_ISDIR(info.st_mode), "Run root changed; preserve failed setup for inspection")
+    marker_created = None
+    try:
+        # Retain exclusive marker identity before fallible writes/close. A
+        # pathname observed only after failure cannot prove residue ownership.
+        with (root / ".acr-owned.json").open("xb") as handle:
+            marker_created = os.fstat(handle.fileno())
+            os.fchmod(handle.fileno(), 0o600)
+            handle.write(encoded({"schema_version": 1, "root": str(root),
+                                  "device": info.st_dev, "inode": info.st_ino}))
+    except OSError:
+        rollback_run_root(root, info, marker_created)
+        raise  # Successful rollback still means setup failed; never run children.
     return root
 
 

@@ -25,6 +25,11 @@
   fixture timestamps. Real ACR/Linux integration remains pending; reviewed
   candidate trust and post-capture output limits are unchanged.
 
+- Roll back safely identifiable run-root initialization residue when ownership
+  record creation fails in prepare or consume, allowing same-path retry while
+  still failing setup. Preserve uncertain or replaced state and foreign contents;
+  standalone cleanup continues refusing unmarked roots.
+
 ## 0.3.248 — 2026-09-19
 
 ### Fixed

@@ -295,7 +295,13 @@ also required, with file-presence checks. Scanner failure produces no export.
 
 An always-run cleanup removes seed, oracle, private proof/live output and runtime
 state. `prepare` and `consume` record helper ownership immediately after creating
-the fresh run root, before fallible setup. Cleanup validates that record against
+the fresh run root, before child setup. If record initialization fails, the
+creator revalidates its retained directory and marker identities, removes only
+its known initialization residue and empty root when safe, then propagates the
+setup failure. Uncertain identity, replacements, unsafe links, unrelated entries
+or rollback I/O failures preserve the remaining state for inspection. Standalone
+cleanup still refuses unmarked or unproven roots; it cannot recover a crash in
+initialization. Cleanup validates a completed record against
 the canonical path and directory identity, requires a direct child of
 `RUNNER_TEMP` when set, and refuses unowned same-basename directories and unsafe
 symlink paths. Standard macOS `/var` and `/tmp` aliases to their `/private/`
