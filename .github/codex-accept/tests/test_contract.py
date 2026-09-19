@@ -2,6 +2,7 @@
 """Deterministic central parser/scanner controls, not ACR runtime acceptance."""
 from __future__ import annotations
 
+from contextlib import contextmanager, redirect_stderr, redirect_stdout
 import copy
 import importlib.util
 import io
@@ -12,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import urllib.error
 from unittest import mock
 import zipfile
 
@@ -327,6 +329,123 @@ class ExportTests(unittest.TestCase):
         self.put("ffa/converted-inventory.json", c.inventory(repo, "HEAD"))
         item["inventories"]["converted"]["sha256"] = c.sha((self.evidence / "ffa/converted-inventory.json").read_bytes())
         self.put("ffa/fixture-result.json", item); self.assert_refused()
+
+    def update_producer(self, key):
+        repo = self.root / "fixtures" / key
+        item = self.get(key + "/fixture-result.json")
+        item.update(producer_sha=git(repo, "rev-parse", "HEAD"), tree_sha=git(repo, "rev-parse", "HEAD^{tree}"))
+        name = key + "/converted-inventory.json"
+        self.put(name, c.inventory(repo, "HEAD"))
+        item["inventories"]["converted"]["sha256"] = c.sha((self.evidence / name).read_bytes())
+        self.put(key + "/fixture-result.json", item)
+
+    def archive_bytes(self, root):
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w") as archive:
+            for name, data in sorted(c.members(root).items()):
+                archive.writestr(zipfile.ZipInfo(name, date_time=(2001, 1, 1, 0, 0, 0)), data)
+        return buffer.getvalue()
+
+    @contextmanager
+    def remote_archive(self, data, expected_digest=None):
+        run, jobs, artifacts, workflow = ProvenanceTests().record()
+        artifacts[0].update(digest=expected_digest or "sha256:" + c.sha(data), size_in_bytes=len(data))
+        responses = {
+            "/actions/runs/123/attempts/2": run,
+            "/actions/runs/123/attempts/2/jobs?per_page=100&page=1": {"jobs": jobs, "total_count": 1},
+            "/actions/runs/123/artifacts?per_page=100&page=1": {"artifacts": artifacts, "total_count": 1},
+            "/actions/workflows/acr-codex-accept.yml": workflow,
+        }
+        def api_download(request, timeout):
+            self.assertEqual(request.full_url, "https://api.github.com/repos/" + c.CENTRAL + "/actions/artifacts/77/zip")
+            self.assertEqual(request.get_header("Authorization"), "Bearer " + SUITE)
+            raise urllib.error.HTTPError(request.full_url, 302, "redirect", {"Location": "https://storage.example.invalid/artifact"}, None)
+        def storage_download(location, timeout):
+            # A plain URL, with no request headers, cannot forward the API token.
+            self.assertEqual(location, "https://storage.example.invalid/artifact")
+            return io.BytesIO(data)
+        opener = mock.Mock()
+        opener.open.side_effect = api_download
+        with mock.patch.object(c, "api", side_effect=lambda path: copy.deepcopy(responses[path])), \
+                mock.patch.object(c.urllib.request, "build_opener", return_value=opener), \
+                mock.patch.object(c.urllib.request, "urlopen", side_effect=storage_download) as storage:
+            yield storage
+
+    def verify_cli(self, root):
+        argv = [str(HELPER), "verify", "--artifact", str(root), "--acr-sha", CONTEXT["acr_sha"],
+                "--run-id", "123", "--run-attempt", "2"]
+        with mock.patch.object(sys, "argv", argv), redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            return c.main()
+
+    def consume_local(self, artifact, root, mutate_caller=False):
+        original_run = c.subprocess.run
+        called = []
+        def child(argv, **kwargs):
+            if argv[0] != "go":
+                return original_run(argv, **kwargs)
+            called.append(argv)
+            env = kwargs["env"]
+            for name in ("GH_TOKEN", "GITHUB_TOKEN", "CODEX_AUTH_JSON", "OPENAI_API_KEY"):
+                self.assertNotIn(name, env)
+            caller_manifest = artifact / "manifest.json"
+            original = caller_manifest.read_bytes()
+            if mutate_caller:
+                caller_manifest.write_bytes(b"changed after authentication")
+            try:
+                manifest = json.loads(Path(env["ACR_CODEX_CONSUME_MANIFEST"]).read_bytes())
+            finally:
+                caller_manifest.write_bytes(original)
+            c.write_new(Path(env["ACR_CODEX_CONSUME_EVIDENCE"]) / "consumer-result.json", c.encoded(consumer(manifest)))
+            top = "TestCodexLivePublishedConsumption"
+            rows = [{"Action": "start", "Package": c.CLI_PACKAGE}]
+            for name in (top, top + "/GOC", top + "/FFA"):
+                rows.append({"Action": "run", "Package": c.CLI_PACKAGE, "Test": name})
+            for name in (top + "/GOC", top + "/FFA", top):
+                rows.append({"Action": "pass", "Package": c.CLI_PACKAGE, "Test": name})
+            rows.append({"Action": "pass", "Package": c.CLI_PACKAGE})
+            kwargs["stdout"].write(event_bytes(rows))
+            return subprocess.CompletedProcess(argv, 0)
+        with mock.patch.dict(os.environ, {**InputTests().values("consume"), "ACR_ACCEPT_RUN_ID": "999"}), \
+                mock.patch.object(c, "checkout"), mock.patch.object(c.subprocess, "run", side_effect=child):
+            c.consume(self.base, artifact, root)
+        self.assertEqual(len(called), 1)
+
+    def test_authenticated_download_verify_and_standalone_consume(self):
+        self.seal()
+        data = self.archive_bytes(self.output)
+        with self.remote_archive(data):
+            destination = self.base / "download"
+            c.download(CONTEXT["acr_sha"], "123", "2", destination)
+            self.assertEqual(self.verify_cli(destination), 0)
+            self.consume_local(destination, self.base / "acr-consume", mutate_caller=True)
+        with self.remote_archive(data + b"changed", expected_digest="sha256:" + c.sha(data)), self.assertRaises(c.Refusal):
+            c.download(CONTEXT["acr_sha"], "123", "2", self.base / "bad-download")
+        self.assertFalse((self.base / "bad-download").exists())
+
+    def test_authenticated_identity_refuses_self_consistent_substitutes(self):
+        original_manifest = self.seal()
+        remote = self.archive_bytes(self.output)
+        repo = self.root / "fixtures/goc"
+        # Amend only commit metadata: exactly the same tree, distinct commit.
+        with mock.patch.dict(os.environ, {"GIT_COMMITTER_NAME": "Fixture", "GIT_COMMITTER_EMAIL": "fixture@example.invalid",
+                                         "GIT_COMMITTER_DATE": "2001-01-01T00:00:00Z"}):
+            git(repo, "commit", "--amend", "-qm", "substitute producer identity")
+        for changed_tree in (False, True):
+            with self.subTest(changed_tree=changed_tree):
+                if changed_tree:
+                    (repo / "agent-plugin.yaml").write_text("different generated plugin\n")
+                    commit(repo, "substitute generated content")
+                self.update_producer("goc")
+                self.output = self.base / ("different-tree" if changed_tree else "same-tree")
+                replacement = self.seal()
+                self.assertNotEqual(replacement["fixtures"][0]["producer_sha"], original_manifest["fixtures"][0]["producer_sha"])
+                self.assertEqual(replacement["fixtures"][0]["tree_sha"] == original_manifest["fixtures"][0]["tree_sha"], not changed_tree)
+                # Internal consistency is deliberately insufficient as provenance.
+                c.verify_artifact(self.output, CONTEXT)
+                with self.subTest(interface="verify"), self.remote_archive(remote):
+                    self.assertEqual(self.verify_cli(self.output), 1)
+                with self.subTest(interface="consume"), self.remote_archive(remote), self.assertRaises(c.Refusal):
+                    self.consume_local(self.output, self.base / ("consume-changed" if changed_tree else "consume-same"))
 
     def test_live_boundary_missing_false_or_non_boolean_refuses(self):
         for field in ("authInspected", "proposalChecked", "reportSanitized", "isolatedHomeRemoved"):

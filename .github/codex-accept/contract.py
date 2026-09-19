@@ -8,6 +8,7 @@ never include subprocess output, untrusted JSON, or credential values. See
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
 import hashlib
 import io
 import json
@@ -19,7 +20,7 @@ import stat
 import subprocess
 import sys
 import tempfile
-from typing import Any
+from typing import Any, Iterator
 import urllib.error
 import urllib.request
 import zipfile
@@ -791,6 +792,20 @@ def download(acr_sha: str, run_id: str, attempt: str, destination: Path) -> dict
             "artifact_digest": artifact["digest"], "manifest_sha256": sha(encoded(manifest)), **context}
 
 
+@contextmanager
+def authenticated_artifact(root: Path, acr_sha: str, run_id: str, attempt: str
+                           ) -> Iterator[tuple[Path, dict[str, Any], dict[str, str]]]:
+    # Caller-owned manifests/hashes are consistency evidence, never authority.
+    # Re-fetch the immutable archive, verify its API digest, and compare every
+    # local member including the manifest. Consumers use the private snapshot.
+    with tempfile.TemporaryDirectory(prefix="acr-authenticated-", dir=root.parent) as name:
+        snapshot = Path(name) / "artifact"
+        receipt = download(acr_sha, run_id, attempt, snapshot)
+        require(members(root) == members(snapshot), "Local artifact differs from authenticated producer content")
+        context = {key: receipt[key] for key in ("acr_sha", "central_sha", "run_id", "run_attempt", "host")}
+        yield snapshot, parse(regular(snapshot / "manifest.json")), context
+
+
 def prepare(root: Path) -> None:
     require(not root.exists() and not root.is_symlink(), "Run root must be fresh")
     root.mkdir(mode=0o700)
@@ -881,25 +896,25 @@ def consumer_receipt(value: Any, manifest: dict[str, Any], context: dict[str, st
 
 def consume(acr_root: Path, artifact: Path, root: Path) -> None:
     values = inputs(acr_root)
-    context, _ = producer_context(values["acr-sha"], values["producer-run-id"], values["producer-run-attempt"])
-    manifest = verify_artifact(artifact, context)
-    checkout(acr_root, context["acr_sha"])
-    root.mkdir(mode=0o700)
-    for name in ("home", "tmp", "state", "evidence"):
-        (root / name).mkdir(mode=0o700)
-    env = {k: v for k, v in os.environ.items() if not k.startswith(("CODEX_", "OPENAI_", "ACR_CODEX_")) and k not in ("GH_TOKEN", "GITHUB_TOKEN")}
-    env.update(HOME=str(root / "home"), TMPDIR=str(root / "tmp"), ACR_STATE_HOME=str(root / "state"),
-               ACR_CODEX_CONSUME_REQUIRED="1", ACR_CODEX_CONSUME_MANIFEST=str(artifact / "manifest.json"),
-               ACR_CODEX_CONSUME_EVIDENCE=str(root / "evidence"),
-               ACR_CODEX_CONSUME_GOC_SOURCE=values["goc-source"], ACR_CODEX_CONSUME_FFA_SOURCE=values["ffa-source"])
-    events = root / "events.jsonl"
-    with events.open("xb") as handle:
-        result = subprocess.run(["go", "test", "-race", "-count=1", "-json", "-timeout", "25m", "-run",
-                                 "^TestCodexLivePublishedConsumption$", "./cmd/acr"], cwd=acr_root, env=env,
-                                stdout=handle, stderr=subprocess.PIPE, check=False)
-    parse_events(regular(events, MAX_TEXT_TOTAL), {CLI_PACKAGE: {"TestCodexLivePublishedConsumption/" + key.upper() for key in FIXTURES}}, result.returncode)
-    checkout(acr_root, context["acr_sha"])
-    consumer_receipt(parse(regular(root / "evidence/consumer-result.json")), manifest, context)
+    with authenticated_artifact(artifact, values["acr-sha"], values["producer-run-id"],
+                                values["producer-run-attempt"]) as (snapshot, manifest, context):
+        checkout(acr_root, context["acr_sha"])
+        root.mkdir(mode=0o700)
+        for name in ("home", "tmp", "state", "evidence"):
+            (root / name).mkdir(mode=0o700)
+        env = {k: v for k, v in os.environ.items() if not k.startswith(("CODEX_", "OPENAI_", "ACR_CODEX_")) and k not in ("GH_TOKEN", "GITHUB_TOKEN")}
+        env.update(HOME=str(root / "home"), TMPDIR=str(root / "tmp"), ACR_STATE_HOME=str(root / "state"),
+                   ACR_CODEX_CONSUME_REQUIRED="1", ACR_CODEX_CONSUME_MANIFEST=str(snapshot / "manifest.json"),
+                   ACR_CODEX_CONSUME_EVIDENCE=str(root / "evidence"),
+                   ACR_CODEX_CONSUME_GOC_SOURCE=values["goc-source"], ACR_CODEX_CONSUME_FFA_SOURCE=values["ffa-source"])
+        events = root / "events.jsonl"
+        with events.open("xb") as handle:
+            result = subprocess.run(["go", "test", "-race", "-count=1", "-json", "-timeout", "25m", "-run",
+                                     "^TestCodexLivePublishedConsumption$", "./cmd/acr"], cwd=acr_root, env=env,
+                                    stdout=handle, stderr=subprocess.PIPE, check=False)
+        parse_events(regular(events, MAX_TEXT_TOTAL), {CLI_PACKAGE: {"TestCodexLivePublishedConsumption/" + key.upper() for key in FIXTURES}}, result.returncode)
+        checkout(acr_root, context["acr_sha"])
+        consumer_receipt(parse(regular(root / "evidence/consumer-result.json")), manifest, context)
 
 
 def clean(root: Path) -> None:
@@ -952,8 +967,8 @@ def main() -> int:
         elif args.command == "download":
             result = download(args.acr_sha, args.run_id, args.run_attempt, args.artifact)
         elif args.command == "verify":
-            context, _ = producer_context(args.acr_sha, args.run_id, args.run_attempt)
-            result = verify_artifact(args.artifact, context)
+            with authenticated_artifact(args.artifact, args.acr_sha, args.run_id, args.run_attempt) as (_, manifest, _context):
+                result = manifest
         elif args.command == "consume":
             consume(args.acr_root, args.artifact, args.run_root)
         elif args.command == "clean":

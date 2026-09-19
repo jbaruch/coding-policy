@@ -260,9 +260,31 @@ central GitHub API using existing Actions-read access. They require this workflo
 ID/path, dispatch event, completed successful run and convert job, central head
 SHA, a unique unexpired exact-named artifact, its run/head linkage and digest.
 Downloads validate the digest and all ZIP members before extraction; redirected
-artifact storage receives no GitHub token. Verification imports and checks the
-same producer bundles before any install. Operator-entered expected SHAs alone
-are not provenance.
+artifact storage receives no GitHub token. Both `verify` and standalone `consume`
+fetch that authenticated archive again and compare every supplied file's exact
+bytes, including `manifest.json`, against the verified download. No local hash
+file or saved success receipt substitutes for the API/archive check. Consumption
+passes the private authenticated snapshot to the candidate, retaining it until
+the consumer exits; later changes to the caller's directory cannot change that
+input. Verification imports and checks the authenticated producer bundles before
+any install. Operator-entered expected SHAs alone are not provenance.
+
+For local publication, use existing Actions-read authentication in `GH_TOKEN`:
+
+```sh
+python3 .github/codex-accept/contract.py download --acr-sha "$ACR_SHA" --run-id "$PRODUCER_RUN" --run-attempt "$PRODUCER_ATTEMPT" --artifact "$DOWNLOAD"
+python3 .github/codex-accept/contract.py verify --acr-sha "$ACR_SHA" --run-id "$PRODUCER_RUN" --run-attempt "$PRODUCER_ATTEMPT" --artifact "$DOWNLOAD"
+```
+
+`$DOWNLOAD` must be fresh for download. Verification requires network access and
+an unexpired remote artifact; there is no offline local-directory certification.
+It leaves the directory unchanged and returns success only for byte-identical
+content. Import/publish from that verified directory without modifying it. A
+self-consistent new commit or replacement bundle requires its own producer run;
+rewriting all local hashes cannot attach it to a previous successful run. The
+internal `verify_artifact` function checks consistency only; callers must use the
+authenticated CLI interface for publication. Hosted consume retains its explicit
+download step and deliberately repeats authentication before candidate execution.
 
 A later authorized publisher uses `download`/`verify`, imports those exact
 producer objects, and publishes each once under the publication runbook. For

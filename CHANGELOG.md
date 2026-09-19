@@ -8,6 +8,8 @@
   secret-free consumption to the exact successful producer run and artifact.
   ACR integration and real conversion/publication/consumer acceptance remain
   pending; the lane refuses candidates missing that interface.
+- Authenticate supplied local producer files against the immutable remote
+  artifact before verification or consumption.
 
 ## 0.3.247 — 2026-09-18
 
