@@ -1,5 +1,14 @@
 # Changelog
 
+### Added
+
+- Add a separate central subscription acceptance workflow for ACR #156. Require
+  fresh exact-candidate credential-boundary proof before authentication, retain
+  validated producer Git bundles, scan seed/suite credential values, and bind
+  secret-free consumption to the exact successful producer run and artifact.
+  ACR integration and real conversion/publication/consumer acceptance remain
+  pending; the lane refuses candidates missing that interface.
+
 ## 0.3.247 — 2026-09-18
 
 ### Fixed
