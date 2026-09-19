@@ -157,7 +157,7 @@
         },
         {
           "name": "Install native boundary prerequisites",
-          "run": "set -euo pipefail\nsudo apt-get update\nsudo apt-get install -y bubblewrap\ncommand -v bwrap git jq python3 go"
+          "run": "set -euo pipefail\nsudo apt-get update\n# Review monthly and on Ubuntu bubblewrap security updates: verify Noble amd64\n# metadata and archive availability, make a focused bump, and repeat native boundary proof.\nsudo apt-get install -y bubblewrap=0.9.0-1ubuntu0.3\ninstalled=\"$(dpkg-query -W -f='${Version} ${Architecture} ${db:Status-Status}\\n' bubblewrap)\"\nif [[ \"$installed\" != '0.9.0-1ubuntu0.3 amd64 installed' ]]; then\n  printf 'Expected installed bubblewrap 0.9.0-1ubuntu0.3 amd64; got %s. Verify Noble metadata and renew the pin before retrying.\\n' \"$installed\" >&2\n  exit 1\nfi\nprintf 'Verified bubblewrap: %s\\n' \"$installed\"\ncommand -v bwrap git jq python3 go"
         },
         {
           "name": "Install pinned native Codex",

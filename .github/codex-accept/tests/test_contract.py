@@ -1416,5 +1416,140 @@ class WorkflowTests(unittest.TestCase):
             self.assertFalse(root.exists())
 
 
+class NativePrerequisiteTests(unittest.TestCase):
+    """Execute the actual prerequisite shell with inert, isolated command fixtures."""
+
+    def setUp(self):
+        self.workflow = json.loads((HELPER.parents[1] / "workflows/acr-codex-accept.yml").read_text())
+
+    def prerequisite(self):
+        steps = self.workflow["jobs"]["convert"]["steps"]
+        matches = [s for s in steps if s.get("name") == "Install native boundary prerequisites"]
+        self.assertEqual(len(matches), 1, "native prerequisite step must exist exactly once")
+        return matches[0]["run"]
+
+    def execute_prerequisite(self, script, *, apt_failure="", installed="0.9.0-1ubuntu0.3 amd64 installed",
+                             query_exit="0"):
+        with tempfile.TemporaryDirectory() as name:
+            root = Path(name).resolve()
+            log = root / "commands.jsonl"
+            log.write_text("")
+            # No host PATH, credentials, shell startup files or real package commands.
+            stub = f"#!{sys.executable}\n" + r"""
+import json
+import os
+from pathlib import Path
+import sys
+name = Path(sys.argv[0]).name
+with Path(os.environ["COMMAND_LOG"]).open("a") as stream:
+    stream.write(json.dumps([name, *sys.argv[1:]]) + "\n")
+if name == "sudo":
+    if sys.argv[1:2] != ["apt-get"]:
+        sys.exit(90)
+    executable = str(Path(sys.argv[0]).with_name("apt-get"))
+    os.execv(executable, [executable, *sys.argv[2:]])
+if name == "apt-get" and sys.argv[1:2] == [os.environ["APT_FAILURE"]]:
+    print("synthetic apt failure", file=sys.stderr)
+    sys.exit(100)
+if name == "dpkg-query":
+    print(os.environ["INSTALLED"])
+    sys.exit(int(os.environ["QUERY_EXIT"]))
+"""
+            for command in ("sudo", "apt-get", "dpkg-query", "bwrap", "git", "jq", "python3", "go"):
+                path = root / command
+                path.write_text(stub)
+                path.chmod(0o755)
+            result = subprocess.run(["/bin/bash", "--noprofile", "--norc", "-c", script], cwd=root,
+                                    env={"PATH": str(root), "COMMAND_LOG": str(log), "APT_FAILURE": apt_failure,
+                                         "INSTALLED": installed, "QUERY_EXIT": query_exit},
+                                    capture_output=True, text=True)
+            return result, [json.loads(line) for line in log.read_text().splitlines()]
+
+    def assert_package_contract(self, script):
+        expected = [["apt-get", "update"], ["apt-get", "install", "-y", "bubblewrap=0.9.0-1ubuntu0.3"]]
+        result, calls = self.execute_prerequisite(script)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual([call for call in calls if call[0] == "apt-get"], expected)
+        self.assertEqual([call for call in calls if call[0] == "dpkg-query"],
+                         [["dpkg-query", "-W", "-f=${Version} ${Architecture} ${db:Status-Status}\\n", "bubblewrap"]])
+        for prerequisite in ("bwrap", "git", "jq", "python3", "go"):
+            self.assertIn("/" + prerequisite + "\n", result.stdout)
+        for operation, count in (("update", 1), ("install", 2)):
+            result, calls = self.execute_prerequisite(script, apt_failure=operation)
+            self.assertEqual(result.returncode, 100, (operation, result.stderr))
+            self.assertEqual([call for call in calls if call[0] == "apt-get"], expected[:count])
+            self.assertFalse(any(call[0] == "dpkg-query" for call in calls))
+            self.assertIn("synthetic apt failure", result.stderr)
+        result, _ = self.execute_prerequisite(script, query_exit="7")
+        self.assertEqual(result.returncode, 7, result.stderr)
+
+    def assert_adjacent_renewal(self, script):
+        lines = script.splitlines()
+        installs = [i for i, line in enumerate(lines) if line.startswith("sudo apt-get install ")]
+        self.assertEqual(len(installs), 1, "one explicit install target required")
+        comments = []
+        index = installs[0] - 1
+        while index >= 0 and lines[index].startswith("#"):
+            comments.insert(0, lines[index][1:].strip().lower())
+            index -= 1
+        renewal = " ".join(comments)
+        for requirement in ("monthly", "ubuntu bubblewrap security updates", "noble amd64", "metadata",
+                            "archive availability", "focused bump", "native boundary proof"):
+            self.assertIn(requirement, renewal)
+
+    def test_committed_package_selection_and_failures(self):
+        self.assert_package_contract(self.prerequisite())
+
+    def test_committed_adjacent_renewal(self):
+        self.assert_adjacent_renewal(self.prerequisite())
+
+    def test_installed_version_architecture_and_status_must_match(self):
+        for installed in ("0.9.0-1ubuntu0.1 amd64 installed", "0.9.0-1ubuntu0.3 arm64 installed",
+                          "0.9.0-1ubuntu0.3 amd64 config-files", "", "0.9.0-1ubuntu0.3 amd64 installed\nextra"):
+            with self.subTest(installed=installed):
+                result, _ = self.execute_prerequisite(self.prerequisite(), installed=installed)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("bubblewrap", result.stderr)
+                self.assertIn("renew", result.stderr)
+
+    def test_package_controls_reject_unpinned_floating_missing_and_fallback(self):
+        script = self.prerequisite()
+        pin = "bubblewrap=0.9.0-1ubuntu0.3"
+        for operand in ("bubblewrap", "bubblewrap=latest", "bubblewrap=0.9.*", "", "firejail"):
+            with self.subTest(operand=operand), self.assertRaises(AssertionError):
+                self.assert_package_contract(script.replace(pin, operand))
+        install = "sudo apt-get install -y " + pin
+        for changed in (script.replace(install, install + " || sudo apt-get install -y bubblewrap"),
+                        script.replace(install, "# install removed"), script.replace("set -euo pipefail", "set -uo pipefail")):
+            with self.subTest(script=changed), self.assertRaises(AssertionError):
+                self.assert_package_contract(changed)
+        # Equivalent shell quoting still selects the same effective package argument.
+        self.assert_package_contract(script.replace(pin, "'" + pin + "'"))
+
+    def test_renewal_controls_reject_missing_incomplete_and_nonadjacent_comments(self):
+        script = self.prerequisite()
+        self.assert_adjacent_renewal(script)
+        for word in ("monthly", "Ubuntu bubblewrap security updates", "Noble amd64", "metadata",
+                     "archive availability", "focused bump", "native boundary proof"):
+            with self.subTest(word=word), self.assertRaises(AssertionError):
+                self.assert_adjacent_renewal(script.replace(word, ""))
+        no_comments = "\n".join(line for line in script.splitlines() if not line.startswith("#"))
+        with self.assertRaises(AssertionError):
+            self.assert_adjacent_renewal(no_comments)
+        with self.assertRaises(AssertionError):
+            self.assert_adjacent_renewal(script.replace("sudo apt-get install", "\nsudo apt-get install"))
+
+    def test_native_host_and_installation_precede_proof_and_seed(self):
+        job = self.workflow["jobs"]["convert"]
+        self.assertEqual(job["runs-on"], "ubuntu-24.04")
+        self.assertNotIn("container", job)
+        names = [step.get("id", step.get("name")) for step in job["steps"]]
+        self.assertLess(names.index("Install native boundary prerequisites"), names.index("proof"))
+        self.assertLess(names.index("proof"), names.index("seed"))
+        job["steps"] = [s for s in job["steps"] if s.get("name") != "Install native boundary prerequisites"]
+        with self.assertRaises(AssertionError):
+            self.prerequisite()
+
+
 if __name__ == "__main__":
     unittest.main()

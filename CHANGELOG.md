@@ -30,6 +30,13 @@
   still failing setup. Preserve uncertain or replaced state and foreign contents;
   standalone cleanup continues refusing unmarked roots.
 
+- Pin the acceptance runner's bubblewrap package to the reviewed Noble amd64
+  version, verify its installed Debian version, architecture and status before
+  native proof or subscription seeding, and document monthly/security-update
+  renewal beside the pin. Deterministic command fixtures cover exact selection
+  and failure propagation; actual hosted installation and native proof remain
+  required for Linux acceptance.
+
 ## 0.3.248 — 2026-09-19
 
 ### Fixed
