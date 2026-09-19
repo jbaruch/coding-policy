@@ -447,21 +447,128 @@ class NativeDeliveryTests(unittest.TestCase):
                         self.assertIn("do not prove", errors.getvalue())
                         self.assertEqual(ledger_path.read_bytes(), before)
 
-    def test_codex_prior_turn_metadata_cannot_poison_or_supply_current_prompt(self):
-        document, data, rows = self.metadata_recovery_fixture()
-        prior = copy.deepcopy(rows[1:3])
-        prior[1]["payload"]["internal_chat_message_metadata_passthrough"]["content_item_kinds"] = [
-            "agents_md.instructions", "environments.environment_context"]
-        rows[1:1] = prior
+    def assert_owner_recovery(self, document, data, rows, accepted):
         Path(data["source"]).write_text(encode(rows))
-        self.assertTrue(delivery.recover(document["recovery"], document["assignments"], data, AT)["found"])
-        # Without the fresh prompt, the earlier turn cannot supply provenance.
-        document, data, current = self.metadata_recovery_fixture()
-        del current[2]
-        current[1:1] = rows[1:3]
-        Path(data["source"]).write_text(encode(current))
-        with self.assertRaises(UsageError):
-            delivery.recover(document["recovery"], document["assignments"], data, AT)
+        ledger_path, record = self.tmp / "state.json", self.tmp / "record.json"
+        state.save_state(ledger_path, document)
+        record.write_text(json.dumps(data))
+        before = ledger_path.read_bytes()
+        dispatch = document["recovery"]["dispatches"][0]
+        paths = [Path(data[key]) for key in ("report", "wait_receipt", "source", "pane", "visible")]
+        paths += [record, Path(dispatch["brief"]), Path(dispatch["common"])]
+        artifacts = {path: path.read_bytes() for path in paths}
+        result = subprocess.run(["bash", str(ROOT / "teamlead.sh"), "recover-report",
+                                 "--state", str(ledger_path), "--record", str(record), "--now", AT],
+                                capture_output=True, text=True, check=False)
+        self.assertEqual(result.returncode, 0 if accepted else 1, result.stderr)
+        self.assertEqual({path: path.read_bytes() for path in paths}, artifacts)
+        if not accepted:
+            self.assertEqual(result.stdout, "")
+            self.assertIn("do not prove", result.stderr)
+            self.assertEqual(ledger_path.read_bytes(), before)
+            return
+        saved, receipt = json.loads(ledger_path.read_bytes()), json.loads(result.stdout)
+        self.assertTrue(receipt["found"])
+        self.assertFalse(receipt["grants_review_approval"])
+        self.assertEqual(receipt["dispatch"], data["dispatch"])
+        self.assertEqual(saved["recovery"]["delivery_recoveries"], [receipt])
+        self.assertEqual(saved["recovery"]["events"], document["recovery"]["events"] + [{
+            "schema_version": 1, "sequence": len(document["recovery"]["events"]) + 1,
+            "at": AT, "kind": "report_delivery_recovered", "task": dispatch["task"],
+            "details": {"recovery": data["id"], "dispatch": data["dispatch"]}}])
+        for key in ("delivery_recoveries", "events"):
+            saved["recovery"][key] = document["recovery"][key]
+        self.assertEqual(saved, document)
+
+    def test_owner_closes_modern_turn_across_unmarked_responses(self):
+        metadata = "internal_chat_message_metadata_passthrough"
+        for terminal in ("task_complete", "turn_aborted", "error"):
+            for variation in ("user-tail", "assistant-tail", "unmarked-before-terminal",
+                              "fresh-modern", "fresh-legacy", "wholly-legacy"):
+                with self.subTest(terminal=terminal, variation=variation):
+                    document, data, rows = self.metadata_recovery_fixture()
+                    user = copy.deepcopy(rows[2])
+                    del user["payload"][metadata]
+                    ended = copy.deepcopy(rows[:3])
+                    if variation == "wholly-legacy":
+                        del ended[2]["payload"][metadata]
+                    if variation == "unmarked-before-terminal":
+                        ended.append(copy.deepcopy(user))
+                    if terminal == "task_complete":
+                        ended.append(copy.deepcopy(rows[-2]))
+                    ended.append({"type": "event_msg", "payload": {
+                        "type": terminal, "turn_id": "turn-1", "last_agent_message": self.marker}})
+                    tail = [user] + copy.deepcopy(rows[-2:])
+                    if variation == "assistant-tail":
+                        del tail[0]
+                    fresh = variation in ("fresh-modern", "fresh-legacy")
+                    if fresh:
+                        ended.append({"type": "event_msg", "payload": {
+                            "type": "task_started", "turn_id": "turn-2"}})
+                        tail[-1]["payload"]["turn_id"] = "turn-2"
+                        if variation == "fresh-modern":
+                            tail[0]["payload"][metadata] = {
+                                "turn_id": "turn-2", "content_item_kinds": ["user.text"]}
+                    self.assert_owner_recovery(document, data, ended + tail,
+                                               fresh or variation == "wholly-legacy")
+
+    def test_owner_reconciles_duplicate_and_contradictory_user_events(self):
+        for modern in (False, True):
+            for placement in ("before-response", "before-context", "after-context", "no-context"):
+                if not modern and placement in ("before-context", "after-context"):
+                    continue
+                for matching in (False, True):
+                    if placement == "before-response" and not matching:
+                        continue
+                    with self.subTest(modern=modern, placement=placement, matching=matching):
+                        document, data, rows = self.metadata_recovery_fixture()
+                        prompt = rows[2]["payload"]["content"][0]["text"]
+                        if not modern or placement == "no-context":
+                            rows = rows[:3] + rows[-2:]
+                        if not modern:
+                            del rows[2]["payload"]["internal_chat_message_metadata_passthrough"]
+                        event = {"type": "event_msg", "payload": {
+                            "type": "user_message", "message": prompt if matching else "Different assignment",
+                            "images": [], "audio": [], "local_images": [], "text_elements": []}}
+                        index = 2 if placement == "before-response" else 3 if placement == "before-context" else len(rows) - 2
+                        rows.insert(index, event)
+                        self.assert_owner_recovery(document, data, rows, matching)
+
+    def test_owner_user_event_cannot_establish_or_rehabilitate_prompt_proof(self):
+        for variation in ("event-only", "invalid-metadata", "missing-start", "legacy-context", "fresh-missing"):
+            with self.subTest(variation=variation):
+                document, data, rows = self.metadata_recovery_fixture()
+                rows.insert(-2, {"type": "event_msg", "payload": {
+                    "type": "user_message", "message": rows[2]["payload"]["content"][0]["text"]}})
+                if variation == "event-only":
+                    del rows[2]
+                elif variation == "invalid-metadata":
+                    rows[2]["payload"]["internal_chat_message_metadata_passthrough"] = None
+                elif variation == "missing-start":
+                    del rows[1]
+                elif variation == "legacy-context":
+                    del rows[2]["payload"]["internal_chat_message_metadata_passthrough"]
+                else:
+                    rows[3:-3] = [{"type": "event_msg", "payload": {
+                        "type": "task_started", "turn_id": "turn-2"}}]
+                    rows[-1]["payload"]["turn_id"] = "turn-2"
+                self.assert_owner_recovery(document, data, rows, False)
+
+    def test_codex_prior_turn_metadata_cannot_poison_or_supply_current_prompt(self):
+        for valid_prior in (False, True):
+            for missing_current in (False, True):
+                with self.subTest(valid_prior=valid_prior, missing_current=missing_current):
+                    document, data, rows = self.metadata_recovery_fixture()
+                    prior = copy.deepcopy(rows[1:3])
+                    prior[0]["payload"]["turn_id"] = "prior-turn"
+                    metadata = prior[1]["payload"]["internal_chat_message_metadata_passthrough"]
+                    metadata["turn_id"] = "prior-turn"
+                    if not valid_prior:
+                        metadata["content_item_kinds"] = ["agents_md.instructions", "environments.environment_context"]
+                    if missing_current:
+                        del rows[2]
+                    rows[1:1] = prior
+                    self.assert_owner_recovery(document, data, rows, not missing_current)
 
     def test_codex_later_user_text_replaces_prompt_even_when_it_looks_like_context(self):
         for native in (False, True):

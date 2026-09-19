@@ -224,6 +224,7 @@ def source_prompt(body, kind, session=None):
         return claude_native.prompt_text(rows, session)
     prompt, in_chunks = None, False
     turn, prompt_turn, invalid_turn = None, None, False
+    modern_turn = False
     for row in rows:
         if kind == "codex":
             payload = row.get("payload", {})
@@ -231,10 +232,20 @@ def source_prompt(body, kind, session=None):
                 return None
             if row.get("type") == "event_msg" and payload.get("type") == "task_started":
                 turn, prompt, prompt_turn, invalid_turn = payload.get("turn_id"), None, None, False
+                modern_turn = False
             elif row.get("type") == "turn_context" and "turn_id" in payload and payload["turn_id"] != turn:
                 invalid_turn = True
             elif row.get("type") == "event_msg" and payload.get("type") in ("task_complete", "turn_aborted", "error"):
                 turn, prompt_turn = None, None
+            elif row.get("type") == "event_msg" and payload.get("type") == "user_message":
+                # A duplicate may preserve response proof, never create it.
+                if payload.get("message") != prompt:
+                    prompt, prompt_turn = None, None
+            if row.get("type") == "response_item" and modern_turn and turn is None:
+                # Metadata belongs to the started interval, even when later
+                # rows omit it. Only an actual start reopens a modern turn.
+                invalid_turn = True
+                continue
             if row.get("type") == "response_item" and payload.get("role") == "user":
                 content = payload.get("content")
                 if not isinstance(content, list) or not all(isinstance(item, dict) and item.get("type") == "input_text"
@@ -246,6 +257,7 @@ def source_prompt(body, kind, session=None):
                 # text; XML-looking genuine user text still replaces the prompt.
                 # Ambiguity invalidates this turn, not later task_started turns.
                 if "internal_chat_message_metadata_passthrough" in payload:
+                    modern_turn = True
                     metadata = payload["internal_chat_message_metadata_passthrough"]
                     if (not isinstance(metadata, dict) or not isinstance(turn, str) or not turn
                             or metadata.get("turn_id") != turn):

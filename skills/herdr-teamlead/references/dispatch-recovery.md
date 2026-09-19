@@ -618,6 +618,12 @@ Codex recovery retains the dispatched prompt across verified same-turn runtime
 context after compaction. The metadata and turn checks belong to `source_prompt`
 in `skills/herdr-teamlead/teamlead/report_delivery.py`; later genuine user text
 still replaces the prompt, and ambiguous metadata leaves that turn unconfirmed.
+Once a turn supplies native prompt/context metadata, its terminal event closes
+it to subsequent response items until an actual new start, including unmarked
+items. Normal completed extraction and wholly metadata-free legacy extraction
+remain supported. Contradictory known user-event text clears the old prompt and
+retention proof; matching duplicates preserve response-established proof only.
+A user event alone cannot establish that proof or clear metadata invalidity.
 Use the complete unchanged native transcript, including earlier turns. A private
 ledger-copy replay proves the adapter only; it is not the actual delivery receipt.
 
