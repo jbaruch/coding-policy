@@ -5,7 +5,8 @@
     "hooks",
     "scripts",
     ".github/actions/*",
-    ".github/codex-review"
+    ".github/codex-review",
+    ".github/codex-accept"
   ],
   "package_change_lines": 400,
   "trust_boundary_paths": [
@@ -20,14 +21,16 @@
     "skills/herdr-teamlead/*.sh",
     "skills/herdr-teamlead/teamlead/*.py",
     "skills/herdr-teamlead/verify-authority.sh",
-    "skills/release/*"
+    "skills/release/*",
+    ".github/codex-accept/*"
   ],
   "cli_spec_paths": [
     "skills/herdr-teamlead/teamlead/*.py",
     "skills/*/*.sh",
     "skills/*/*.py",
     "scripts/*.sh",
-    "hooks/*.sh"
+    "hooks/*.sh",
+    ".github/codex-accept/*.py"
   ],
   "cli_surface_markers": [
     "add_parser(",

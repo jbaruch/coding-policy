@@ -1,5 +1,7 @@
 {
   "include": [
+    ".github/codex-accept/contract.py",
+    ".github/codex-accept/tests/test_contract.py",
     "skills/release/stamp-changelog.py",
     "skills/release/tests/test_stamp_changelog.py",
     "skills/release/check-changelog-placement.py",

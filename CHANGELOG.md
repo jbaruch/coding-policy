@@ -1,5 +1,42 @@
 # Changelog
 
+### Added
+
+- Add a separate central subscription acceptance workflow for ACR #156. Require
+  fresh exact-candidate credential-boundary proof before authentication, retain
+  validated producer Git bundles, scan seed/suite credential values, and bind
+  secret-free consumption to the exact successful producer run and artifact.
+  ACR integration and real conversion/publication/consumer acceptance remain
+  pending; the lane refuses candidates missing that interface.
+- Authenticate supplied local producer files against the immutable remote
+  artifact before verification or consumption.
+- Preserve FFA's original Pyright configuration as an unchanged gate input.
+- Retain explicitly classified successful semantic repairs with complete
+  credential-boundary evidence.
+
+### Fixed
+
+- Require helper-created acceptance roots and safe directory identity before
+  cleanup, retaining partial-setup and consumer cleanup. Keep initial subscription
+  values in a private oracle and refuse central seed mutation or loss before
+  export; isolated-copy refresh remains valid. Document the existing installer
+  step handoff and cover its digest, ELF, version and fresh-attestation behavior
+  without native downloads. Add local Actions-read GH_TOKEN setup and fixed ZIP
+  fixture timestamps. Real ACR/Linux integration remains pending; reviewed
+  candidate trust and post-capture output limits are unchanged.
+
+- Roll back safely identifiable run-root initialization residue when ownership
+  record creation fails in prepare or consume, allowing same-path retry while
+  still failing setup. Preserve uncertain or replaced state and foreign contents;
+  standalone cleanup continues refusing unmarked roots.
+
+- Pin the acceptance runner's bubblewrap package to the reviewed Noble amd64
+  version, verify its installed Debian version, architecture and status before
+  native proof or subscription seeding, and document monthly/security-update
+  renewal beside the pin. Deterministic command fixtures cover exact selection
+  and failure propagation; actual hosted installation and native proof remain
+  required for Linux acceptance.
+
 ## 0.3.248 — 2026-09-19
 
 ### Fixed

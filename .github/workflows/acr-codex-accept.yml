@@ -1,0 +1,286 @@
+{
+  "name": "ACR Codex acceptance",
+  "on": {
+    "workflow_dispatch": {
+      "inputs": {
+        "phase": {
+          "description": "Acceptance phase",
+          "required": true,
+          "type": "choice",
+          "options": [
+            "convert",
+            "consume"
+          ]
+        },
+        "acr-sha": {
+          "description": "Reviewed exact ACR commit (40 lowercase hex)",
+          "required": true,
+          "type": "string"
+        },
+        "codex-version": {
+          "description": "Candidate installer release pin (convert only; renew with candidate table monthly)",
+          "default": "0.154.0",
+          "required": false,
+          "type": "string"
+        },
+        "producer-run-id": {
+          "description": "Exact successful central producer run (consume)",
+          "required": false,
+          "type": "string"
+        },
+        "producer-run-attempt": {
+          "description": "Exact successful producer attempt (consume)",
+          "required": false,
+          "type": "string"
+        },
+        "goc-source": {
+          "description": "github:jbaruch/acr-156-goc-validation@v1.1.11 (consume)",
+          "required": false,
+          "type": "string"
+        },
+        "ffa-source": {
+          "description": "github:jbaruch/acr-156-ffa-validation@v0.9.38 (consume)",
+          "required": false,
+          "type": "string"
+        }
+      }
+    }
+  },
+  "permissions": {
+    "contents": "read"
+  },
+  "concurrency": {
+    "group": "acr-codex-accept-${{ inputs.phase }}-${{ inputs.acr-sha }}",
+    "cancel-in-progress": false
+  },
+  "env": {
+    "INPUT_PHASE": "${{ inputs.phase }}",
+    "INPUT_ACR_SHA": "${{ inputs.acr-sha }}",
+    "INPUT_CODEX_VERSION": "${{ inputs.codex-version }}",
+    "INPUT_PRODUCER_RUN_ID": "${{ inputs.producer-run-id }}",
+    "INPUT_PRODUCER_RUN_ATTEMPT": "${{ inputs.producer-run-attempt }}",
+    "INPUT_GOC_SOURCE": "${{ inputs.goc-source }}",
+    "INPUT_FFA_SOURCE": "${{ inputs.ffa-source }}",
+    "ACR_ACCEPT_ACR_SHA": "${{ inputs.acr-sha }}",
+    "ACR_ACCEPT_CENTRAL_SHA": "${{ github.sha }}",
+    "ACR_ACCEPT_RUN_ID": "${{ github.run_id }}",
+    "ACR_ACCEPT_RUN_ATTEMPT": "${{ github.run_attempt }}",
+    "ACR_ACCEPT_HOST": "linux-amd64",
+    "PYTHONDONTWRITEBYTECODE": "1"
+  },
+  "defaults": {
+    "run": {
+      "shell": "bash"
+    }
+  },
+  "jobs": {
+    "preflight": {
+      "runs-on": "ubuntu-24.04",
+      "timeout-minutes": 10,
+      "steps": [
+        {
+          "uses": "actions/checkout@v7",
+          "with": {
+            "ref": "${{ github.sha }}",
+            "persist-credentials": false
+          }
+        },
+        {
+          "name": "Validate dispatch before candidate execution",
+          "run": "set -euo pipefail\npython3 .github/codex-accept/contract.py inputs"
+        },
+        {
+          "uses": "actions/checkout@v7",
+          "with": {
+            "repository": "jbaruch/agentic-context-registry",
+            "ref": "${{ inputs.acr-sha }}",
+            "path": "acr",
+            "persist-credentials": false
+          }
+        },
+        {
+          "name": "Validate exact candidate and installer table",
+          "run": "set -euo pipefail\npython3 .github/codex-accept/contract.py inputs --acr-root \"$GITHUB_WORKSPACE/acr\""
+        }
+      ]
+    },
+    "convert": {
+      "name": "convert",
+      "needs": [
+        "preflight"
+      ],
+      "if": "needs.preflight.result == 'success' && inputs.phase == 'convert'",
+      "runs-on": "ubuntu-24.04",
+      "timeout-minutes": 150,
+      "permissions": {
+        "contents": "read",
+        "issues": "read",
+        "pull-requests": "read"
+      },
+      "steps": [
+        {
+          "uses": "actions/checkout@v7",
+          "with": {
+            "ref": "${{ github.sha }}",
+            "persist-credentials": false
+          }
+        },
+        {
+          "uses": "actions/checkout@v7",
+          "with": {
+            "repository": "jbaruch/agentic-context-registry",
+            "ref": "${{ inputs.acr-sha }}",
+            "path": "acr",
+            "persist-credentials": false
+          }
+        },
+        {
+          "uses": "actions/setup-python@v6",
+          "with": {
+            "python-version": "3.12"
+          }
+        },
+        {
+          "uses": "actions/setup-go@v6",
+          "with": {
+            "go-version-file": "acr/go.mod",
+            "cache": false
+          }
+        },
+        {
+          "name": "Validate candidate",
+          "run": "set -euo pipefail\npython3 .github/codex-accept/contract.py inputs --acr-root \"$GITHUB_WORKSPACE/acr\""
+        },
+        {
+          "name": "Prepare fresh full upstream repositories",
+          "run": "set -euo pipefail\npython3 .github/codex-accept/contract.py prepare --run-root \"$RUNNER_TEMP/acr-accept\""
+        },
+        {
+          "name": "Install native boundary prerequisites",
+          "run": "set -euo pipefail\nsudo apt-get update\n# Review monthly and on Ubuntu bubblewrap security updates: verify Noble amd64\n# metadata and archive availability, make a focused bump, and repeat native boundary proof.\nsudo apt-get install -y bubblewrap=0.9.0-1ubuntu0.3\ninstalled=\"$(dpkg-query -W -f='${Version} ${Architecture} ${db:Status-Status}\\n' bubblewrap)\"\nif [[ \"$installed\" != '0.9.0-1ubuntu0.3 amd64 installed' ]]; then\n  printf 'Expected installed bubblewrap 0.9.0-1ubuntu0.3 amd64; got %s. Verify Noble metadata and renew the pin before retrying.\\n' \"$installed\" >&2\n  exit 1\nfi\nprintf 'Verified bubblewrap: %s\\n' \"$installed\"\ncommand -v bwrap git jq python3 go"
+        },
+        {
+          "name": "Install pinned native Codex",
+          "run": "set -euo pipefail\nbash acr/.github/scripts/install-codex.sh \"$INPUT_CODEX_VERSION\""
+        },
+        {
+          "name": "Record verified native installation",
+          "run": "set -euo pipefail\npython3 .github/codex-accept/contract.py installed --acr-root \"$GITHUB_WORKSPACE/acr\" --run-root \"$RUNNER_TEMP/acr-accept\""
+        },
+        {
+          "name": "Require fresh runtime and CLI proof before authentication",
+          "run": "set -euo pipefail\npython3 .github/codex-accept/contract.py proof-run --acr-root \"$GITHUB_WORKSPACE/acr\" --run-root \"$RUNNER_TEMP/acr-accept\"",
+          "id": "proof"
+        },
+        {
+          "name": "Seed and mask existing central subscription",
+          "run": "set -euo pipefail\npython3 .github/codex-accept/contract.py seed --run-root \"$RUNNER_TEMP/acr-accept\"",
+          "id": "seed",
+          "env": {
+            "CODEX_AUTH_JSON": "${{ secrets.CODEX_AUTH_JSON }}"
+          }
+        },
+        {
+          "name": "Run both original upstream conversion lanes",
+          "run": "set -euo pipefail\npython3 .github/codex-accept/contract.py convert --acr-root \"$GITHUB_WORKSPACE/acr\" --run-root \"$RUNNER_TEMP/acr-accept\"",
+          "id": "conversion",
+          "env": {
+            "GH_TOKEN": "${{ github.token }}"
+          }
+        },
+        {
+          "name": "Seal, import and scan exact producer objects",
+          "run": "set -euo pipefail\npython3 .github/codex-accept/contract.py seal --run-root \"$RUNNER_TEMP/acr-accept\" --evidence \"$RUNNER_TEMP/acr-accept/evidence\" --output \"$RUNNER_TEMP/acr-accept-export\"",
+          "id": "seal",
+          "env": {
+            "GH_TOKEN": "${{ github.token }}"
+          }
+        },
+        {
+          "name": "Remove runtime credentials and private evidence",
+          "run": "set -euo pipefail\npython3 .github/codex-accept/contract.py clean --run-root \"$RUNNER_TEMP/acr-accept\"",
+          "id": "cleanup",
+          "if": "always()"
+        },
+        {
+          "name": "Upload only sealed evidence after cleanup",
+          "id": "upload",
+          "if": "success() && steps.seal.outcome == 'success' && steps.cleanup.outcome == 'success'",
+          "uses": "actions/upload-artifact@v4",
+          "with": {
+            "name": "acr-accept-convert-${{ inputs.acr-sha }}-${{ github.run_id }}-${{ github.run_attempt }}",
+            "path": "${{ runner.temp }}/acr-accept-export/",
+            "retention-days": 14,
+            "if-no-files-found": "error",
+            "include-hidden-files": false
+          }
+        },
+        {
+          "name": "Record immutable artifact identity",
+          "run": "set -euo pipefail\nprintf 'Artifact ID: %s\\nArtifact digest: %s\\n' \"$ARTIFACT_ID\" \"$ARTIFACT_DIGEST\" >> \"$GITHUB_STEP_SUMMARY\"",
+          "env": {
+            "ARTIFACT_ID": "${{ steps.upload.outputs.artifact-id }}",
+            "ARTIFACT_DIGEST": "${{ steps.upload.outputs.artifact-digest }}"
+          }
+        }
+      ]
+    },
+    "consume": {
+      "name": "consume",
+      "needs": [
+        "preflight"
+      ],
+      "if": "needs.preflight.result == 'success' && inputs.phase == 'consume'",
+      "runs-on": "ubuntu-24.04",
+      "timeout-minutes": 30,
+      "permissions": {
+        "contents": "read",
+        "actions": "read"
+      },
+      "steps": [
+        {
+          "uses": "actions/checkout@v7",
+          "with": {
+            "ref": "${{ github.sha }}",
+            "persist-credentials": false
+          }
+        },
+        {
+          "uses": "actions/checkout@v7",
+          "with": {
+            "repository": "jbaruch/agentic-context-registry",
+            "ref": "${{ inputs.acr-sha }}",
+            "path": "acr",
+            "persist-credentials": false
+          }
+        },
+        {
+          "uses": "actions/setup-go@v6",
+          "with": {
+            "go-version-file": "acr/go.mod",
+            "cache": false
+          }
+        },
+        {
+          "name": "Download and verify exact producer attempt",
+          "run": "set -euo pipefail\npython3 .github/codex-accept/contract.py download --acr-sha \"$INPUT_ACR_SHA\" --run-id \"$INPUT_PRODUCER_RUN_ID\" --run-attempt \"$INPUT_PRODUCER_RUN_ATTEMPT\" --artifact \"$RUNNER_TEMP/producer-artifact\"",
+          "env": {
+            "GH_TOKEN": "${{ github.token }}"
+          }
+        },
+        {
+          "name": "Exercise real published consumers without Codex authentication",
+          "run": "set -euo pipefail\npython3 .github/codex-accept/contract.py consume --acr-root \"$GITHUB_WORKSPACE/acr\" --artifact \"$RUNNER_TEMP/producer-artifact\" --run-root \"$RUNNER_TEMP/acr-consume\"",
+          "env": {
+            "GH_TOKEN": "${{ github.token }}"
+          }
+        },
+        {
+          "name": "Remove isolated consumer state",
+          "run": "set -euo pipefail\npython3 .github/codex-accept/contract.py clean --run-root \"$RUNNER_TEMP/acr-consume\"",
+          "if": "always()"
+        }
+      ]
+    }
+  }
+}
