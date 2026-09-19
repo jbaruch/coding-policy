@@ -14,6 +14,17 @@
 - Retain explicitly classified successful semantic repairs with complete
   credential-boundary evidence.
 
+### Fixed
+
+- Require helper-created acceptance roots and safe directory identity before
+  cleanup, retaining partial-setup and consumer cleanup. Keep initial subscription
+  values in a private oracle and refuse central seed mutation or loss before
+  export; isolated-copy refresh remains valid. Document the existing installer
+  step handoff and cover its digest, ELF, version and fresh-attestation behavior
+  without native downloads. Add local Actions-read GH_TOKEN setup and fixed ZIP
+  fixture timestamps. Real ACR/Linux integration remains pending; reviewed
+  candidate trust and post-capture output limits are unchanged.
+
 ## 0.3.248 — 2026-09-19
 
 ### Fixed

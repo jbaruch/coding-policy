@@ -18,6 +18,8 @@ and receipt fixtures; they prove central validation behavior only.
 
 A central maintainer supplies a reviewed exact ACR commit with completed code
 gates. SHA syntax establishes identity, not that an executable is trustworthy.
+The exact candidate runs as the job user in the writable checkout; this is not
+filesystem isolation from central code or coordinated attestation rewrites.
 The only executable source is `jbaruch/agentic-context-registry`; central and
 candidate checkouts use their exact SHAs with credential persistence disabled.
 There are exactly seven inputs:
@@ -52,6 +54,15 @@ reviewed contract change. Codex archive pins come from the exact candidate's
 The actual archive, ELF binary digest and native version are recorded. The
 upstream FFA gate runs with Python 3.12 and its own hash-locked Pyright 1.1.411;
 central diagnostics retain their separate 1.1.414 pin.
+
+The ACR installer appends `ACR_CODEX_RELEASE_BIN=<absolute ELF path>` to
+`GITHUB_ENV` and retains `$RUNNER_TEMP/codex-<version>.tar.gz` as a regular file.
+The later `installed` step reads those two inputs and verifies the pinned archive
+digest, native ELF bytes and `codex-cli <version>` output before writing a fresh
+`codex.json`. An export inside the installer shell alone does not cross the
+Actions step boundary. Current ACR installer source implements this handoff;
+real Linux installation and integration remain pending. Hermetic central tests
+mock only native `--version` for an inert ELF fixture and perform no download.
 
 ## Credential ownership and pre-auth proof
 
@@ -124,7 +135,15 @@ not an independent attestation of an arbitrary executable.
 
 Only after proof passes does `seed` write valid subscription JSON under the
 private run root, with directory/file modes 0700/0600, and invoke the existing
-central masking helper. There is no API-key fallback. `CODEX_AUTH_JSON` is scoped
+central masking helper. It retains identical initial bytes privately at
+`central/seed-oracle.json`, outside the seed `CODEX_HOME` and under the same
+owned run root. ACR copies seed auth into isolated homes; refresh may change
+those copies only. Seal requires the central seed to remain present, readable,
+regular, valid and byte-identical to the retained oracle. Missing, malformed or
+unreadable oracle also refuses export. This detects accidental seed mutation;
+it does not authenticate files against a hostile process running as the same
+user. The snapshot is never exported and cleanup removes it on every path.
+There is no API-key fallback. `CODEX_AUTH_JSON` is scoped
 to that single step. The suite token is scoped to conversion and sealing.
 The future ACR harness must capture it before journey setup, pass it solely to
 original-test children, clear `GITHUB_TOKEN` there, and exclude both tokens from
@@ -260,17 +279,29 @@ Bounds are 1,000 files, 8 MiB per text member, 64 MiB total text, 128 MiB per
 bundle, 100,000 Git objects, 512 MiB combined decoded objects. Duplicate JSON
 keys, unknown/missing schema fields, unexpected archive members, unsafe paths,
 symlinks, extra refs/objects and hash/size differences refuse. Bounds never
-truncate evidence into success. A legitimate oversized fixture needs a focused
+truncate evidence into success. Event-parser and export byte limits apply after
+process capture; they do not kill a running child at a stdout/stderr byte limit.
+Existing job/test deadlines govern execution; runner disk and memory limits
+remain operational limits. A legitimate oversized fixture needs a focused
 contract update after its measured size is reported.
 
 The scanner requires regular readable valid seed auth with nonempty initial
-values and the actual suite token. It literal-matches those values against all
-decoded Git objects and export text. Compressed bundle scanning alone is
+values, its unchanged private oracle and the actual suite token. It takes the
+initial values from the retained oracle and literal-matches those plus the suite
+token against all decoded Git objects and export text. The existing shell text
+scanner also reads the retained oracle. Compressed bundle scanning alone is
 insufficient. Git objects are never redacted. Existing central text scanning is
 also required, with file-presence checks. Scanner failure produces no export.
 
-An always-run cleanup removes seed, private proof/live output and runtime
-state. Upload requires successful sealing **and** successful cleanup and overall
+An always-run cleanup removes seed, oracle, private proof/live output and runtime
+state. `prepare` and `consume` record helper ownership immediately after creating
+the fresh run root, before fallible setup. Cleanup validates that record against
+the canonical path and directory identity, requires a direct child of
+`RUNNER_TEMP` when set, and refuses unowned same-basename directories and unsafe
+symlink paths. Standard macOS `/var` and `/tmp` aliases to their `/private/`
+locations are supported; arbitrary symlink ancestors are refused. Absent safe
+roots succeed, including cleanup after partial preparation. Ownership records
+protect against mistaken paths, not hostile same-user forgery. Upload requires successful sealing **and** successful cleanup and overall
 job success. Failure artifacts are not uploaded. Hard runner termination relies
 on hosted-runner disposal; shell cleanup is not claimed to survive it. Immutable
 artifact ID and upload digest are written to the workflow summary.

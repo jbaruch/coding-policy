@@ -343,7 +343,9 @@ def seed(root: Path) -> None:
             any(type(v) is str and len(v) >= 16 for v in document["tokens"].values()) and
             not document.get("OPENAI_API_KEY"), "Valid subscription auth is required")
     auth = root / "seed/auth.json"
-    write_new(auth, encoded(document))
+    data = encoded(document)
+    write_new(auth, data)
+    write_new(root / "central/seed-oracle.json", data)
     # Existing central masking helper; it emits only Actions mask commands.
     subprocess.run(["bash", str(Path(__file__).resolve().parents[1] / "codex-review/mask-secrets.sh"), str(auth)], check=True)
 
@@ -637,7 +639,10 @@ def verify_artifact(root: Path, context: dict[str, str], known: list[bytes] | No
 
 def seal(root: Path, evidence: Path, output: Path) -> dict[str, Any]:
     context = binding()
-    known = credentials(root / "seed/auth.json", os.environ.get("GH_TOKEN", ""))
+    oracle = root / "central/seed-oracle.json"
+    known = credentials(oracle, os.environ.get("GH_TOKEN", ""))
+    require(regular(root / "seed/auth.json") == regular(oracle),
+            "Central seed changed; refuse export and inspect isolated auth handling")
     require(not output.exists() and not output.is_symlink(), "Export destination must be fresh")
     validate_proof(parse(regular(evidence / "credential-boundary.json")), context)
     # Only an explicit fixed projection is copied, never raw evidence recursion.
@@ -680,7 +685,7 @@ def seal(root: Path, evidence: Path, output: Path) -> dict[str, Any]:
         scanner = Path(__file__).resolve().parents[1] / "codex-review/assert-no-secret-leak.sh"
         for path in sorted(evidence_names() | {"manifest.json"}):
             # Presence already enforced. A scanner exception/nonzero aborts export.
-            run(["bash", str(scanner), str(root / "seed/auth.json"), str(staging / path)])
+            run(["bash", str(scanner), str(oracle), str(staging / path)])
         staging.rename(output)
     return manifest
 
@@ -817,9 +822,37 @@ def authenticated_artifact(root: Path, acr_sha: str, run_id: str, attempt: str
         yield snapshot, parse(regular(snapshot / "manifest.json")), context
 
 
-def prepare(root: Path) -> None:
-    require(not root.exists() and not root.is_symlink(), "Run root must be fresh")
+def run_root_path(root: Path) -> Path:
+    require(root.name in ("acr-accept", "acr-consume") and ".." not in root.parts,
+            "Use a dedicated acr-accept or acr-consume temporary root")
+    absolute = root.absolute()
+    for entry in (absolute, *absolute.parents):
+        if entry.is_symlink():
+            # macOS's system temporary-directory aliases are not user links.
+            aliases = {Path("/var"): Path("/private/var"), Path("/tmp"): Path("/private/tmp")}
+            require(sys.platform == "darwin" and entry in aliases and
+                    entry.resolve() == aliases[entry], "Unsafe symlink in run root; use its real temporary parent")
+    resolved = absolute.resolve()
+    runner_temp = os.environ.get("RUNNER_TEMP")
+    if runner_temp is not None:
+        require(runner_temp and resolved.parent == Path(runner_temp).resolve(),
+                "Run root must be a direct child of RUNNER_TEMP")
+    return resolved
+
+
+def create_run_root(root: Path) -> Path:
+    root = run_root_path(root)
+    require(not root.exists(), "Run root must be fresh")
     root.mkdir(mode=0o700)
+    info = root.stat()
+    # Record creation before clones, child setup or any candidate execution.
+    write_new(root / ".acr-owned.json", encoded({"schema_version": 1,
+              "root": str(root), "device": info.st_dev, "inode": info.st_ino}))
+    return root
+
+
+def prepare(root: Path) -> None:
+    root = create_run_root(root)
     for name in ("fixtures", "evidence", "tmp", "homes"):
         (root / name).mkdir(mode=0o700)
     for key, fixture in FIXTURES.items():
@@ -834,7 +867,10 @@ def prepare(root: Path) -> None:
 def installed(acr_root: Path, root: Path) -> None:
     values = inputs(acr_root)
     version = values["codex-version"]
-    binary = Path(os.environ.get("ACR_CODEX_RELEASE_BIN", ""))
+    binary_name = os.environ.get("ACR_CODEX_RELEASE_BIN", "")
+    require(binary_name and Path(binary_name).is_absolute(),
+            "Installer must set absolute ACR_CODEX_RELEASE_BIN through GITHUB_ENV")
+    binary = Path(binary_name)
     archive = Path(os.environ["RUNNER_TEMP"]) / ("codex-" + version + ".tar.gz")
     require(sha(regular(archive, MAX_BUNDLE)) == values["archive_sha256"], "Installed archive digest differs from candidate pin")
     binary_data = regular(binary, MAX_DECODED)
@@ -910,7 +946,7 @@ def consume(acr_root: Path, artifact: Path, root: Path) -> None:
     with authenticated_artifact(artifact, values["acr-sha"], values["producer-run-id"],
                                 values["producer-run-attempt"]) as (snapshot, manifest, context):
         checkout(acr_root, context["acr_sha"])
-        root.mkdir(mode=0o700)
+        root = create_run_root(root)
         for name in ("home", "tmp", "state", "evidence"):
             (root / name).mkdir(mode=0o700)
         env = {k: v for k, v in os.environ.items() if not k.startswith(("CODEX_", "OPENAI_", "ACR_CODEX_")) and k not in ("GH_TOKEN", "GITHUB_TOKEN")}
@@ -929,8 +965,15 @@ def consume(acr_root: Path, artifact: Path, root: Path) -> None:
 
 
 def clean(root: Path) -> None:
-    require(root.name in ("acr-accept", "acr-consume") and not root.is_symlink(), "Cleanup root is not an owned acceptance directory")
+    root = run_root_path(root)
     if root.exists():
+        require(root.is_dir(), "Cleanup root must be a helper-created directory")
+        marker = exact(parse(regular(root / ".acr-owned.json")), "schema_version root device inode")
+        info = root.stat()
+        require(type(marker["schema_version"]) is int and marker["schema_version"] == 1 and
+                marker["root"] == str(root) and type(marker["device"]) is int and
+                type(marker["inode"]) is int and marker["device"] == info.st_dev and
+                marker["inode"] == info.st_ino, "Cleanup ownership differs; preserve the directory for inspection")
         shutil.rmtree(root)
     require(not root.exists(), "Cleanup did not remove private runtime files; refuse upload")
 

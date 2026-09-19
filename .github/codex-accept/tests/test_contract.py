@@ -119,7 +119,7 @@ class ProofTests(unittest.TestCase):
 
     def test_cli_exact_clean_checkout_and_private_projection(self):
         with tempfile.TemporaryDirectory() as name:
-            root = Path(name); repo = root / "candidate"; repo.mkdir()
+            root = Path(name).resolve(); repo = root / "candidate"; repo.mkdir()
             git(repo, "init", "-q")
             (repo / "source").write_text("candidate\n")
             commit(repo, "candidate")
@@ -141,7 +141,7 @@ class ProofTests(unittest.TestCase):
 
     def test_failed_proof_prevents_seed_even_with_present_secret(self):
         with tempfile.TemporaryDirectory() as name, mock.patch.dict(os.environ, {**ENV, "CODEX_AUTH_JSON": json.dumps({"tokens": {"access_token": SEED}})}):
-            root = Path(name)
+            root = Path(name).resolve()
             c.write_new(root / "evidence/credential-boundary.json", c.encoded({**proof(), "run_attempt": "1"}))
             with self.assertRaises(c.Refusal):
                 c.seed(root)
@@ -165,7 +165,7 @@ class InputTests(unittest.TestCase):
 
     def test_candidate_installer_table_is_required(self):
         with tempfile.TemporaryDirectory() as name:
-            repo = Path(name)
+            repo = Path(name).resolve()
             git(repo, "init", "-q")
             installer = repo / ".github/scripts/install-codex.sh"
             installer.parent.mkdir(parents=True)
@@ -192,6 +192,178 @@ class InputTests(unittest.TestCase):
                 c.inputs()
 
 
+class InstalledTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.base = Path(self.temp.name).resolve()
+        self.repo = self.base / "candidate"; self.repo.mkdir()
+        git(self.repo, "init", "-q")
+        self.archive = self.base / "codex-0.154.0.tar.gz"
+        self.archive.write_bytes(b"fixed synthetic archive")
+        self.binary = self.base / "codex"
+        self.binary.write_bytes(b"\x7fELFfixed inert native fixture")
+        installer = self.repo / ".github/scripts/install-codex.sh"
+        installer.parent.mkdir(parents=True)
+        installer.write_text("  0.154.0/codex-x86_64-unknown-linux-musl) sha256=" + c.sha(self.archive.read_bytes()) + " ;;\n")
+        commit(self.repo, "pinned installer")
+        self.root = self.base / "acr-accept"; self.root.mkdir()
+        env = mock.patch.dict(os.environ, {**InputTests().values(), "INPUT_ACR_SHA": git(self.repo, "rev-parse", "HEAD"),
+                                          "RUNNER_TEMP": str(self.base), "ACR_CODEX_RELEASE_BIN": str(self.binary)})
+        env.start(); self.addCleanup(env.stop)
+        original = c.subprocess.run
+        self.version_result = subprocess.CompletedProcess([str(self.binary), "--version"], 0, b"codex-cli 0.154.0\n", b"")
+        def native_version(argv, **kwargs):
+            if argv == [str(self.binary), "--version"]:
+                return self.version_result
+            return original(argv, **kwargs)
+        patch = mock.patch.object(c.subprocess, "run", side_effect=native_version)
+        patch.start(); self.addCleanup(patch.stop)
+
+    def assert_install_refused(self):
+        with self.assertRaises((c.Refusal, c.ToolFailure, OSError, KeyError)):
+            c.installed(self.repo, self.root)
+        self.assertFalse((self.root / "codex.json").exists())
+
+    def test_valid_install_records_native_identity_once(self):
+        c.installed(self.repo, self.root)
+        record = self.root / "codex.json"
+        expected = {"version": "0.154.0", "archive_sha256": c.sha(self.archive.read_bytes()),
+                    "binary_sha256": c.sha(self.binary.read_bytes())}
+        self.assertEqual(json.loads(record.read_bytes()), expected)
+        self.assertEqual(record.stat().st_mode & 0o777, 0o600)
+        with self.assertRaises(FileExistsError):
+            c.installed(self.repo, self.root)
+        self.assertEqual(json.loads(record.read_bytes()), expected)
+
+    def test_missing_step_environment_or_archive_refuses(self):
+        for key in ("ACR_CODEX_RELEASE_BIN", "RUNNER_TEMP"):
+            with self.subTest(key=key), mock.patch.dict(os.environ):
+                del os.environ[key]
+                self.assert_install_refused()
+        with mock.patch.dict(os.environ, {"ACR_CODEX_RELEASE_BIN": "codex"}):
+            self.assert_install_refused()
+        self.archive.unlink()
+        self.assert_install_refused()
+
+    def test_wrong_archive_digest_refuses(self):
+        self.archive.write_bytes(b"different archive")
+        self.assert_install_refused()
+
+    def test_nonregular_and_non_elf_binary_refuse(self):
+        self.binary.write_bytes(b"shell wrapper")
+        self.assert_install_refused()
+        self.binary.unlink(); self.binary.mkdir()
+        self.assert_install_refused()
+        self.binary.rmdir(); self.binary.symlink_to(self.archive)
+        self.assert_install_refused()
+
+    def test_wrong_or_failed_native_version_refuses(self):
+        for code, text in ((0, b"codex-cli 0.153.2"), (1, b"codex-cli 0.154.0")):
+            self.version_result = subprocess.CompletedProcess([str(self.binary), "--version"], code, text, b"private diagnostic")
+            self.assert_install_refused()
+
+
+class CleanupTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.base = Path(self.temp.name).resolve()
+        env = mock.patch.dict(os.environ, {"RUNNER_TEMP": str(self.base)})
+        env.start(); self.addCleanup(env.stop)
+
+    def test_prepare_and_partial_prepare_are_owned_before_fallible_setup(self):
+        root = self.base / "acr-accept"
+        for fail in (False, True):
+            with self.subTest(fail=fail):
+                def clone(argv, **kwargs):
+                    if fail:
+                        raise c.ToolFailure("synthetic clone failure")
+                    Path(argv[-1]).mkdir()
+                    return b""
+                with mock.patch.object(c, "run", side_effect=clone), mock.patch.object(c, "git"), mock.patch.object(c, "checkout"):
+                    if fail:
+                        with self.assertRaises(c.ToolFailure):
+                            c.prepare(root)
+                    else:
+                        c.prepare(root)
+                        self.assertTrue((root / "fixtures/ffa").is_dir())
+                c.clean(root)
+                self.assertFalse(root.exists())
+                c.clean(root)  # Also covers absent-path idempotence after deletion.
+
+    def test_absent_and_unowned_roots(self):
+        root = self.base / "acr-accept"
+        c.clean(root)
+        root.mkdir(); keep = root / "keep"; keep.write_text("unowned data")
+        with self.assertRaises((c.Refusal, OSError)):
+            c.clean(root)
+        self.assertEqual(keep.read_text(), "unowned data")
+        with self.assertRaises(c.Refusal):
+            c.clean(self.base / "other")
+
+    def test_invalid_or_transplanted_ownership_record_preserves_directory(self):
+        root = c.create_run_root(self.base / "acr-accept")
+        marker = root / ".acr-owned.json"
+        original = marker.read_bytes()
+        for data in (b"invalid", c.encoded({}), c.encoded({**json.loads(original), "inode": -1})):
+            marker.write_bytes(data)
+            with self.assertRaises(c.Refusal):
+                c.clean(root)
+            self.assertTrue(root.is_dir())
+        marker.write_bytes(original)
+        marker.unlink(); marker.symlink_to(self.base / "outside-marker")
+        with self.assertRaises(c.Refusal):
+            c.clean(root)
+        marker.unlink(); marker.write_bytes(original)
+        relocated = self.base / "acr-consume"
+        root.rename(relocated)
+        with self.assertRaises(c.Refusal):
+            c.clean(relocated)
+        relocated.rename(root); c.clean(root)
+
+    def test_runner_temp_bind_and_local_root(self):
+        root = c.create_run_root(self.base / "acr-accept")
+        with mock.patch.dict(os.environ, {"RUNNER_TEMP": str(self.base / "other")}):
+            with self.assertRaises(c.Refusal):
+                c.clean(root)
+            with self.assertRaises(c.Refusal):
+                c.clean(self.base / "acr-consume")
+        self.assertTrue(root.exists())
+        c.clean(root)
+        with mock.patch.dict(os.environ):
+            del os.environ["RUNNER_TEMP"]
+            local = c.create_run_root(self.base / "acr-consume")
+            c.clean(local)
+            self.assertFalse(local.exists())
+
+    def test_symlink_root_or_ancestor_never_deletes_target(self):
+        target = c.create_run_root(self.base / "acr-accept")
+        keep = target / "keep"; keep.write_text("owned target")
+        link = self.base / "acr-consume"; link.symlink_to(target, target_is_directory=True)
+        parent_link = self.base / "alias"; parent_link.symlink_to(self.base, target_is_directory=True)
+        for root in (link, parent_link / "acr-accept", parent_link / "acr-consume", parent_link / "missing/acr-accept"):
+            with self.subTest(root=str(root)), self.assertRaises(c.Refusal):
+                c.clean(root)
+            self.assertEqual(keep.read_text(), "owned target")
+        link.unlink(); link.symlink_to(self.base / "missing")
+        with self.assertRaises(c.Refusal):
+            c.clean(link)
+        c.clean(target)
+
+    def test_standard_system_temporary_parent_is_supported(self):
+        # On macOS gettempdir commonly spells /private/var through /var.
+        # Use that actual OS alias; never create or replace a system link.
+        with mock.patch.dict(os.environ):
+            del os.environ["RUNNER_TEMP"]
+            root = Path(self.temp.name) / "acr-accept"
+            if sys.platform == "darwin" and str(root).startswith("/private/var/"):
+                root = Path(str(root).removeprefix("/private"))
+            c.create_run_root(root)
+            c.clean(root)
+            self.assertFalse(root.exists())
+
+
 def commit(repo, message):
     git(repo, "add", "-A")
     with mock.patch.dict(os.environ, {"GIT_AUTHOR_DATE": "2001-01-01T00:00:00Z", "GIT_COMMITTER_DATE": "2001-01-01T00:00:00Z",
@@ -204,18 +376,21 @@ class ExportTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        self.base = Path(self.temp.name)
-        self.root = self.base / "acr-accept"; self.root.mkdir()
+        self.base = Path(self.temp.name).resolve()
+        self.env = mock.patch.dict(os.environ, {**ENV, "GH_TOKEN": SUITE, "RUNNER_TEMP": str(self.base)})
+        self.env.start(); self.addCleanup(self.env.stop)
+        self.root = c.create_run_root(self.base / "acr-accept")
         self.evidence = self.root / "evidence"; self.evidence.mkdir()
         self.output = self.base / "export"
         self.specs = copy.deepcopy(c.FIXTURES)
         self.patch = mock.patch.dict(c.FIXTURES, self.specs)
         self.patch.start(); self.addCleanup(self.patch.stop)
-        self.env = mock.patch.dict(os.environ, {**ENV, "GH_TOKEN": SUITE})
-        self.env.start(); self.addCleanup(self.env.stop)
-        c.write_new(self.root / "seed/auth.json", c.encoded({"tokens": {"access_token": SEED}}))
-        c.write_new(self.root / "codex.json", c.encoded({"version": "0.154.0", "archive_sha256": "d" * 64, "binary_sha256": "e" * 64}))
         c.write_new(self.evidence / "credential-boundary.json", c.encoded(proof()))
+        original_run = c.subprocess.run
+        with mock.patch.dict(os.environ, {"CODEX_AUTH_JSON": json.dumps({"tokens": {"access_token": SEED}})}), \
+                mock.patch.object(c.subprocess, "run", side_effect=lambda *a, **kw: original_run(*a, **kw, capture_output=True)):
+            c.seed(self.root)
+        c.write_new(self.root / "codex.json", c.encoded({"version": "0.154.0", "archive_sha256": "d" * 64, "binary_sha256": "e" * 64}))
         for key, spec in self.specs.items():
             repo = self.root / "fixtures" / key; repo.mkdir(parents=True)
             git(repo, "init", "-q")
@@ -514,10 +689,24 @@ class ExportTests(unittest.TestCase):
             destination = self.base / "download"
             c.download(CONTEXT["acr_sha"], "123", "2", destination)
             self.assertEqual(self.verify_cli(destination), 0)
-            self.consume_local(destination, self.base / "acr-consume", mutate_caller=True)
+            consume_root = self.base / "acr-consume"
+            self.consume_local(destination, consume_root, mutate_caller=True)
+            c.clean(consume_root)
+            self.assertFalse(consume_root.exists())
         with self.remote_archive(data + b"changed", expected_digest="sha256:" + c.sha(data)), self.assertRaises(c.Refusal):
             c.download(CONTEXT["acr_sha"], "123", "2", self.base / "bad-download")
         self.assertFalse((self.base / "bad-download").exists())
+
+    def test_failed_consumer_keeps_owned_root_for_cleanup(self):
+        self.seal()
+        data = self.archive_bytes(self.output)
+        root = self.base / "acr-consume"
+        with self.remote_archive(data), mock.patch.object(c, "parse_events", side_effect=c.Refusal("synthetic child failure")):
+            with self.assertRaises(c.Refusal):
+                self.consume_local(self.output, root)
+        self.assertTrue((root / "events.jsonl").is_file())
+        c.clean(root)
+        self.assertFalse(root.exists())
 
     def test_authenticated_identity_refuses_self_consistent_substitutes(self):
         original_manifest = self.seal()
@@ -614,6 +803,84 @@ class ExportTests(unittest.TestCase):
     def test_malformed_auth_refuses(self):
         (self.root / "seed/auth.json").write_text("invalid"); self.assert_refused()
 
+    def test_seed_oracle_is_private_and_isolated_rotation_still_seals(self):
+        auth = self.root / "seed/auth.json"
+        oracle = self.root / "central/seed-oracle.json"
+        initial = auth.read_bytes()
+        self.assertEqual(oracle.read_bytes(), initial)
+        for path in (auth, oracle):
+            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+            self.assertEqual(path.parent.stat().st_mode & 0o777, 0o700)
+        isolated = self.root / "homes/isolated/auth.json"
+        c.write_new(isolated, initial)
+        isolated.write_bytes(c.encoded({"tokens": {"access_token": "synthetic-isolated-rotation-value"}}))
+        manifest = self.seal()
+        self.assertEqual(auth.read_bytes(), initial)
+        self.assertEqual(oracle.read_bytes(), initial)
+        self.assertEqual({row["path"] for row in manifest["files"]}, c.evidence_names() | {"goc.bundle", "ffa.bundle"})
+        c.clean(self.root)
+        self.assertFalse(oracle.exists())
+        c.verify_artifact(self.output, CONTEXT)
+
+    def test_changed_central_seed_refuses_even_with_original_leak(self):
+        auth = self.root / "seed/auth.json"
+        initial = auth.read_bytes()
+        auth.write_bytes(c.encoded({"tokens": {"access_token": "synthetic-replacement-not-a-credential"}}))
+        self.assert_refused()  # Mutation alone must refuse even a clean export.
+        report = self.get("goc/apply.json"); report["result"]["notes"] = SEED
+        self.put("goc/apply.json", report)
+        self.assert_refused()
+        auth.write_bytes(initial)
+        self.assert_refused()  # Original-token leak still refuses with a valid seed.
+        del report["result"]["notes"]; self.put("goc/apply.json", report)
+        self.seal()
+
+    def test_missing_malformed_nonregular_or_unreadable_oracle_refuses(self):
+        oracle = self.root / "central/seed-oracle.json"
+        initial = oracle.read_bytes()
+        oracle.unlink(); self.assert_refused()
+        oracle.write_bytes(b"invalid"); self.assert_refused()
+        oracle.write_bytes(c.encoded({"tokens": {}})); self.assert_refused()
+        oracle.unlink(); oracle.mkdir(); self.assert_refused(); oracle.rmdir()
+        oracle.symlink_to(self.root / "seed/auth.json"); self.assert_refused(); oracle.unlink()
+        oracle.write_bytes(initial)
+        original = c.regular
+        def unreadable(path, *args):
+            if path == oracle:
+                raise PermissionError("synthetic unreadable oracle")
+            return original(path, *args)
+        with mock.patch.object(c, "regular", side_effect=unreadable):
+            self.assert_refused()
+        self.seal()
+
+    def test_nonregular_or_unreadable_seed_refuses_despite_oracle(self):
+        auth = self.root / "seed/auth.json"
+        initial = auth.read_bytes()
+        auth.unlink(); auth.mkdir(); self.assert_refused(); auth.rmdir()
+        auth.symlink_to(self.root / "central/seed-oracle.json"); self.assert_refused(); auth.unlink()
+        auth.write_bytes(initial)
+        original = c.regular
+        def unreadable(path, *args):
+            if path == auth:
+                raise PermissionError("synthetic unreadable seed")
+            return original(path, *args)
+        with mock.patch.object(c, "regular", side_effect=unreadable):
+            self.assert_refused()
+        self.seal()
+
+    def test_shell_scanner_uses_retained_initial_oracle(self):
+        original = c.run
+        scanned = []
+        def inspect(argv, *args, **kwargs):
+            if "assert-no-secret-leak.sh" in str(argv):
+                scanned.append(Path(argv[2]).read_bytes())
+                self.assertEqual(Path(argv[2]), self.root / "central/seed-oracle.json")
+            return original(argv, *args, **kwargs)
+        with mock.patch.object(c, "run", side_effect=inspect):
+            self.seal()
+        self.assertEqual(len(scanned), len(c.evidence_names()) + 1)
+        self.assertTrue(all(SEED.encode() in data for data in scanned))
+
     def test_suite_token_cannot_be_missing_or_journey_fake(self):
         for value in ("", "journey-fixture-token"):
             with mock.patch.dict(os.environ, {"GH_TOKEN": value}):
@@ -698,16 +965,16 @@ class ExportTests(unittest.TestCase):
                     if mutate == "unsafe" and name == "manifest.json":
                         name = "../manifest.json"
                     if mutate == "symlink" and name == "manifest.json":
-                        info = zipfile.ZipInfo(name); info.external_attr = (0o120777 << 16); archive.writestr(info, data)
+                        info = zipfile.ZipInfo(name, date_time=(2001, 1, 1, 0, 0, 0)); info.external_attr = (0o120777 << 16); archive.writestr(info, data)
                     else:
-                        archive.writestr(name, data)
+                        archive.writestr(zipfile.ZipInfo(name, date_time=(2001, 1, 1, 0, 0, 0)), data)
                 if mutate == "extra":
-                    archive.writestr("extra.json", b"{}")
+                    archive.writestr(zipfile.ZipInfo("extra.json", date_time=(2001, 1, 1, 0, 0, 0)), b"{}")
                 if mutate == "duplicate":
                     import warnings
                     with warnings.catch_warnings():
                         warnings.simplefilter("ignore", UserWarning)  # The deliberate duplicate is the refusal fixture.
-                        archive.writestr("manifest.json", files["manifest.json"])
+                        archive.writestr(zipfile.ZipInfo("manifest.json", date_time=(2001, 1, 1, 0, 0, 0)), files["manifest.json"])
             with self.subTest(mutate=mutate):
                 if mutate == "oversize":
                     with mock.patch.object(c, "MAX_TEXT", 1), self.assertRaises(c.Refusal):
@@ -721,7 +988,7 @@ class ExportTests(unittest.TestCase):
         self.seal(); buffer = io.BytesIO()
         with zipfile.ZipFile(buffer, "w") as archive:
             for name, data in c.members(self.output).items():
-                archive.writestr(name, data)
+                archive.writestr(zipfile.ZipInfo(name, date_time=(2001, 1, 1, 0, 0, 0)), data)
         destination = self.base / "download"
         c.extract_archive(buffer.getvalue(), destination)
         self.assertEqual(c.verify_artifact(destination, CONTEXT), c.verify_artifact(self.output, CONTEXT))
@@ -882,12 +1149,15 @@ class WorkflowTests(unittest.TestCase):
 
     def test_cleanup_failure_is_observable(self):
         with tempfile.TemporaryDirectory() as name:
-            root = Path(name) / "acr-accept"; root.mkdir()
-            with mock.patch.object(c.shutil, "rmtree", side_effect=OSError("synthetic removal fault")):
+            root = Path(name).resolve() / "acr-accept"
+            with mock.patch.dict(os.environ, {"RUNNER_TEMP": str(root.parent)}):
+                c.create_run_root(root)
+            with mock.patch.dict(os.environ, {"RUNNER_TEMP": str(root.parent)}), mock.patch.object(c.shutil, "rmtree", side_effect=OSError("synthetic removal fault")):
                 with self.assertRaises(OSError):
                     c.clean(root)
             self.assertTrue(root.exists())
-            c.clean(root)
+            with mock.patch.dict(os.environ, {"RUNNER_TEMP": str(root.parent)}):
+                c.clean(root)
             self.assertFalse(root.exists())
 
 
