@@ -397,6 +397,56 @@ class NativeDeliveryTests(unittest.TestCase):
         for key, body in artifacts.items():
             self.assertEqual(Path(data[key]).read_bytes(), body)
 
+    def test_owner_cli_requires_new_start_to_retain_context_after_termination(self):
+        for terminal in ("task_complete", "turn_aborted", "error"):
+            for new_start in (False, True):
+                with self.subTest(terminal=terminal, new_start=new_start):
+                    document, data, rows = self.metadata_recovery_fixture()
+                    ended = rows[:3]
+                    if terminal == "task_complete":
+                        ended.append(copy.deepcopy(rows[-2]))
+                    ended.append({"type": "event_msg", "payload": {"type": terminal,
+                        "turn_id": "turn-1", "last_agent_message": self.marker}})
+                    following = copy.deepcopy(rows[2:])
+                    if new_start:
+                        ended.append({"type": "event_msg", "payload": {
+                            "type": "task_started", "turn_id": "turn-2"}})
+                        for row in following:
+                            payload = row["payload"]
+                            if "turn_id" in payload:
+                                payload["turn_id"] = "turn-2"
+                            if "internal_chat_message_metadata_passthrough" in payload:
+                                payload["internal_chat_message_metadata_passthrough"]["turn_id"] = "turn-2"
+                    Path(data["source"]).write_text(encode(ended + following))
+                    ledger_path, record = self.tmp / "state.json", self.tmp / "record.json"
+                    state.save_state(ledger_path, document)
+                    record.write_text(json.dumps(data))
+                    before = ledger_path.read_bytes()
+                    artifacts = {key: Path(data[key]).read_bytes()
+                                 for key in ("report", "wait_receipt", "source", "pane", "visible")}
+                    output, errors, runner = io.StringIO(), io.StringIO(), FakeRunner()
+                    result = cli.main(["recover-report", "--state", str(ledger_path),
+                                       "--record", str(record), "--now", AT], stdout=output,
+                                      stderr=errors, client=HerdrClient(runner=runner))
+                    self.assertEqual(result, 0 if new_start else 1, errors.getvalue())
+                    self.assertEqual(runner.calls, [])
+                    for key, body in artifacts.items():
+                        self.assertEqual(Path(data[key]).read_bytes(), body)
+                    if new_start:
+                        saved, receipt = json.loads(ledger_path.read_bytes()), json.loads(output.getvalue())
+                        self.assertTrue(receipt["found"])
+                        self.assertFalse(receipt["grants_review_approval"])
+                        self.assertEqual(saved["recovery"]["delivery_recoveries"], [receipt])
+                        self.assertEqual(saved["recovery"]["events"][:-1], document["recovery"]["events"])
+                        self.assertEqual(saved["recovery"]["events"][-1]["kind"], "report_delivery_recovered")
+                        for key in ("delivery_recoveries", "events"):
+                            saved["recovery"][key] = document["recovery"][key]
+                        self.assertEqual(saved, document)
+                    else:
+                        self.assertEqual(output.getvalue(), "")
+                        self.assertIn("do not prove", errors.getvalue())
+                        self.assertEqual(ledger_path.read_bytes(), before)
+
     def test_codex_prior_turn_metadata_cannot_poison_or_supply_current_prompt(self):
         document, data, rows = self.metadata_recovery_fixture()
         prior = copy.deepcopy(rows[1:3])

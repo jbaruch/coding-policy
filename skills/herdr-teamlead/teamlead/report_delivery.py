@@ -234,7 +234,7 @@ def source_prompt(body, kind, session=None):
             elif row.get("type") == "turn_context" and "turn_id" in payload and payload["turn_id"] != turn:
                 invalid_turn = True
             elif row.get("type") == "event_msg" and payload.get("type") in ("task_complete", "turn_aborted", "error"):
-                prompt_turn = None
+                turn, prompt_turn = None, None
             if row.get("type") == "response_item" and payload.get("role") == "user":
                 content = payload.get("content")
                 if not isinstance(content, list) or not all(isinstance(item, dict) and item.get("type") == "input_text"

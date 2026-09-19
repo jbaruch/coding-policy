@@ -7,8 +7,10 @@
   context previously replaced the prompt and rejected completed reports. Genuine
   later user text still replaces it, including XML-looking text; mixed, unknown
   or malformed metadata invalidates its turn. Earlier turns cannot supply the
-  current prompt or invalidate a fresh turn. Session, completion, report and
-  watcher stability checks remain unchanged. Deterministic recovery controls and
+  current prompt or invalidate a fresh turn. Completion, abort and error end
+  retention eligibility until a new task starts; a later user message alone
+  cannot reopen the ended turn. Session, completion, report and watcher
+  stability checks remain unchanged. Deterministic recovery controls and
   a private owner-ledger replay against unchanged original artifacts cover the fix.
 
 ## 0.3.247 — 2026-09-18
