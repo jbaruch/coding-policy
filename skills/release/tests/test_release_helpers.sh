@@ -62,7 +62,7 @@ main() {
 
   install_wrapper registry-baseline.sh capture-registry-baseline.sh 0 '{"other":"field"}'
   run_baseline
-  if [[ $RC -eq 2 && -z "$OUT" ]] && printf '%s' "$ERRTEXT" | grep -q "carries no .version"; then
+  if [[ $RC -eq 2 && -z "$OUT" ]] && printf '%s' "$ERRTEXT" | grep -qF "carries no .version"; then
     pass; else fail "a payload without .version exits 2, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
 
   install_wrapper registry-baseline.sh capture-registry-baseline.sh 0 'not json'
@@ -87,7 +87,7 @@ main() {
 
   install_wrapper confirm-tessl-landed.sh verify-publish-landed.sh 0 '{"ok":true}'
   run_landed
-  if [[ $RC -eq 2 && -z "$OUT" ]] && printf '%s' "$ERRTEXT" | grep -q "carries no .current"; then
+  if [[ $RC -eq 2 && -z "$OUT" ]] && printf '%s' "$ERRTEXT" | grep -qF "carries no .current"; then
     pass; else fail "a payload without .current exits 2, got RC=$RC ERR=$ERRTEXT"; fi
 
   install_wrapper confirm-tessl-landed.sh verify-publish-landed.sh 0 'not json'
@@ -108,6 +108,15 @@ main() {
   ERRTEXT="$(cat "$TMP/err")"
   if [[ $RC -eq 2 && -z "$OUT" ]] && printf '%s' "$ERRTEXT" | grep -q "jq is not installed"; then
     pass; else fail "an absent jq exits 2 naming jq, got RC=$RC ERR=$ERRTEXT"; fi
+
+  # `registry-baseline.sh` carries the same guard and was uncovered: the suite
+  # proved the absent-jq path for one wrapper and assumed it for the other.
+  install_wrapper registry-baseline.sh capture-registry-baseline.sh 0 '{"version":"0.3.9"}'
+  OUT="$(PATH="$TMP/nojq" bash "$TMP/registry-baseline.sh" ws plug 2>"$TMP/err")"
+  RC=$?
+  ERRTEXT="$(cat "$TMP/err")"
+  if [[ $RC -eq 2 && -z "$OUT" ]] && printf '%s' "$ERRTEXT" | grep -qF "jq is not installed"; then
+    pass; else fail "an absent jq exits 2 naming jq for the baseline, got RC=$RC ERR=$ERRTEXT"; fi
 
   echo "─────────────────────────────────────────────" >&2
   if [[ $FAIL -gt 0 ]]; then echo "FAILED: ${FAIL} failed, ${PASS} passed" >&2; exit 1; fi
