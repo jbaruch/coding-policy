@@ -190,13 +190,14 @@ main() {
   # documented key, and would have classified as "nothing abandoned".
   local payload
   for payload in \
-    '{"ok":true,"self":null,"others":[{"path":"/x","branch":"b","age_hours":9,"tip_in_main":true,"verdict":null}],"blocking":[]}' \
-    '{"ok":true,"self":null,"others":[{"path":"/x","branch":"b","age_hours":9,"tip_in_main":true,"verdict":"unknown"}],"blocking":[]}' \
-    '{"ok":true,"self":null,"others":[{"path":"/x","branch":"b","age_hours":"9","tip_in_main":true,"verdict":"in_progress"}],"blocking":[]}' \
-    '{"ok":true,"self":null,"others":[{"path":"/x","branch":"b","age_hours":9,"tip_in_main":"yes","verdict":"in_progress"}],"blocking":[]}' \
-    '{"ok":true,"self":null,"others":[{"path":"/x","branch":"b","age_hours":9,"verdict":"in_progress"}],"blocking":[]}' \
-    '{"ok":"yes","self":null,"others":[],"blocking":[]}' \
-    '{"ok":true,"self":null,"others":[],"blocking":{}}'; do
+    '{"ok":true,"self":{"path":"/s","branch":"main","age_hours":0,"tip_in_main":true,"verdict":"clean"},"others":[{"path":"/x","branch":"b","age_hours":9,"tip_in_main":true,"verdict":null}],"blocking":[]}' \
+    '{"ok":true,"self":{"path":"/s","branch":"main","age_hours":0,"tip_in_main":true,"verdict":"clean"},"others":[{"path":"/x","branch":"b","age_hours":9,"tip_in_main":true,"verdict":"unknown"}],"blocking":[]}' \
+    '{"ok":true,"self":{"path":"/s","branch":"main","age_hours":0,"tip_in_main":true,"verdict":"clean"},"others":[{"path":"/x","branch":"b","age_hours":"9","tip_in_main":true,"verdict":"in_progress"}],"blocking":[]}' \
+    '{"ok":true,"self":{"path":"/s","branch":"main","age_hours":0,"tip_in_main":true,"verdict":"clean"},"others":[{"path":"/x","branch":"b","age_hours":9,"tip_in_main":"yes","verdict":"in_progress"}],"blocking":[]}' \
+    '{"ok":true,"self":{"path":"/s","branch":"main","age_hours":0,"tip_in_main":true,"verdict":"clean"},"others":[{"path":"/x","branch":"b","age_hours":9,"verdict":"in_progress"}],"blocking":[]}' \
+    '{"ok":"yes","self":{"path":"/s","branch":"main","age_hours":0,"tip_in_main":true,"verdict":"clean"},"others":[],"blocking":[]}' \
+    '{"ok":true,"self":{"path":"/s","branch":"main","age_hours":0,"tip_in_main":true,"verdict":"clean"},"others":[],"blocking":{}}' \
+    '{"ok":true,"self":null,"others":[],"blocking":[]}'; do
     new_repo "$TMP/typed"
     HOOKPATH="$(stage_hook "$real")"
     printf '#!/bin/sh\ncat <<JSON\n%s\nJSON\n' "$payload" \
@@ -213,7 +214,7 @@ main() {
   new_repo "$TMP/oddexit"
   HOOKPATH="$(stage_hook "$real")"
   printf '#!/bin/sh\necho %s\nexit 9\n' \
-    "'{\"ok\":true,\"self\":null,\"others\":[],\"blocking\":[]}'" \
+    "'{\"ok\":true,\"self\":{\"path\":\"/s\",\"branch\":\"main\",\"age_hours\":0,\"tip_in_main\":true,\"verdict\":\"clean\"},\"others\":[],\"blocking\":[]}'" \
     > "$(dirname "$HOOKPATH")/../skills/release/check-leftovers.sh"
   run_hook "$TMP/oddexit" "$HOOKPATH"
   if [[ $RC -eq 0 && -z "$OUT" ]] \
@@ -235,7 +236,7 @@ main() {
   # rule out.
   local shape
   for shape in '{}' '{"self":{},"others":[{}],"ok":true,"blocking":[]}' \
-               '{"ok":true,"self":null,"others":[{"path":"/x"}],"blocking":[]}' \
+               '{"ok":true,"self":{"path":"/s","branch":"main","age_hours":0,"tip_in_main":true,"verdict":"clean"},"others":[{"path":"/x"}],"blocking":[]}' \
                '[]'; do
     new_repo "$TMP/shape"
     HOOKPATH="$(stage_hook "$real")"
@@ -253,7 +254,7 @@ main() {
   new_repo "$TMP/relay"
   HOOKPATH="$(stage_hook "$real")"
   printf '#!/bin/sh\necho "check-leftovers: cannot read the modification time of /x" >&2\necho %s\n' \
-    "'{\"ok\":true,\"self\":null,\"others\":[],\"blocking\":[]}'" \
+    "'{\"ok\":true,\"self\":{\"path\":\"/s\",\"branch\":\"main\",\"age_hours\":0,\"tip_in_main\":true,\"verdict\":\"clean\"},\"others\":[],\"blocking\":[]}'" \
     > "$(dirname "$HOOKPATH")/../skills/release/check-leftovers.sh"
   run_hook "$TMP/relay" "$HOOKPATH"
   if [[ $RC -eq 0 && -z "$OUT" ]] \
