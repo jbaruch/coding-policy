@@ -1797,10 +1797,15 @@ def validate_store(store, assignments):
             validate_receipt(row["judge_evidence"])
             validate_receipt(row["investigator_report"]["evidence"])
         for row in store["diagnoses"]:
-            if row["approach"] is not None:
-                _item(store["approaches"], row["approach"], "approach")
-            if row["approach_change"] is not None:
-                _item(store["approaches"], row["approach_change"], "approach")
+            for field in ("approach", "approach_change"):
+                if row[field] is None:
+                    continue
+                approach = _item(store["approaches"], row[field], "approach")
+                if approach["task"] != row["task"]:
+                    raise UsageError(
+                        "Diagnosis {} cites approach {}, which belongs to task {} rather than {}; "
+                        "a diagnosis rules on its own task's approach.".format(
+                            row["id"], row[field], approach["task"], row["task"]), {})
         for row in store["plans"]:
             source = _item(store["checkpoints"], row["checkpoint"], "checkpoint")
             authorization(row["authorization"])

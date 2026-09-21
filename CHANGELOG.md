@@ -1,5 +1,61 @@
 # Changelog
 
+### Changed
+
+- **`seat_paths` describes what it returns.** Its docstring promised
+  `{seat_name: [glob, ...]}`. The values come from `load_validated`, whose
+  slices carry the RESOLVED changed files `validate()` assigned — literals, not
+  patterns — and calling them globs is what made two reviewers read the
+  boundary as broader than it is. #460 raised this against `load_validated`'s
+  docstring instead, reporting that the loader "discards" the resolved paths.
+  It does not: a direct run confirms `load_validated` returns them and
+  `seat_paths` hands them straight on, so that docstring was already correct
+  and the drift was one function down (#460).
+
+- **Codex recovery prose stops at the external contract.** A paragraph in
+  `references/dispatch-recovery.md` walked through `source_prompt`'s internal
+  prompt, metadata and turn transitions, which `rules/script-as-black-box.md`
+  reserves for the script. It now states what the caller supplies and what does
+  not count as a receipt, and points at the script for the rest. The complete
+  unchanged transcript requirement, the private-copy versus actual-delivery
+  distinction, and the modern/legacy compatibility boundary are preserved; no
+  parser, test, recovery behavior or authority changes (#474).
+
+- **The judge brief says the original direction counts as tried.**
+  `_require_new_direction` compares an approved direction against recorded
+  `approaches` rows, and a task's ORIGINAL direction has none — nothing
+  approved it, and registering one at task creation would make every existing
+  ledger claim a transition that never happened. So re-approving the direction
+  the task started from is refused by the judge reading the checkpoint, not by
+  the recording command, and the brief now says so and names where the original
+  direction is written down. A task-record `direction` field, and the schema
+  bump it needs, stays open (#468).
+
+### Fixed
+
+- **A diagnosis cannot cite another task's approach.** `validate_store`
+  confirmed a diagnosis's `approach` and `approach_change` resolved to SOME
+  recorded approach, never that the approach belonged to the same task.
+  `current_diagnoses` filters the ladder by task, so a hand-edited ledger
+  pointing a diagnosis at another task's approach dropped that row out of its
+  own ladder, and the per-approach `stop` and rung checks skipped it. Both
+  fields now reject a cross-task reference by name (#468).
+
+- **A shared `SLICE_DIGEST` is refused.** `SLICE_SCOPE` and `SLICE_PATHS` are
+  both rejected under `.shared`, since each belongs to one seat. `SLICE_DIGEST`
+  is the same kind of per-seat derived value, and it was deleted from the
+  merged values before the unused-key check with no `.shared` guard — so a
+  values file carrying it there was accepted by being silently discarded rather
+  than refused as misplaced boundary metadata (#461).
+
+- **The unreadable-brief diagnostic names its repair.** The handler reported
+  the `OSError`/`UnicodeError` and stopped; `rules/error-handling.md`
+  Actionable Messages wants the next step. It now names both: restore a
+  readable UTF-8 brief at that path, or regenerate the round's briefs with
+  `compose-briefs.sh`. A brief that does not exist is still caught earlier, by
+  the existence check with its own repair, so this answers the case that
+  reaches it — a file that exists and cannot be decoded (#461).
+
 ## 0.3.254 — 2026-09-23
 
 ### Fixed

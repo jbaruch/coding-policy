@@ -80,6 +80,13 @@ without asking you a question, and name the verification the team owes it. A
 direction this task already tried is refused, `stop` approves none, and a new
 worker or a rewritten brief is not a different approach.
 
+The task's ORIGINAL direction is one of the directions it already tried. The
+recorded refusal cannot see it — it compares against approved transitions, and
+nothing approved the direction the task started from — so re-approving the
+original direction is refused by you reading the checkpoint, not by the
+recording command. The checkpoint's `previous_attempts` and the assessment's
+`FAILED APPROACH` both name it.
+
 `continue` is a legitimate remedy: the approach is right and it needs a stated
 number of further rounds. `BOUND` then carries that number, counted in
 developer attempts and justified against the evidence. It has a ceiling the

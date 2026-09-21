@@ -958,6 +958,22 @@ class ApplyCommandTest(CliCase):
         self.assertEqual(code, 1)
         self.assertIn("no longer match its slice_digest", err)
 
+    def test_an_unreadable_seat_brief_names_its_repair(self):
+        # coding-policy#461: the handler reported the OSError and stopped.
+        # rules/error-handling.md Actionable Messages wants the next step.
+        unreadable = self.tmp / "undecodable-brief.md"
+        unreadable.write_bytes(b"# reviewer\n\xff\xfe not utf-8\n")
+        code, _, err = self.run_cli(
+            self.base()
+            + ["apply", "--composer-settle", "0", "--assignments", json.dumps(self.seat_plan),
+               "--task", "t-unreadable", "--common", str(self.common), "--now", AT, "--dry-run"]
+            + ["--brief", "reviewer#api=" + str(unreadable)],
+            client=self._client({}),
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("Cannot read the brief for seat", err)
+        self.assertIn("compose-briefs.sh", err)
+
     def test_a_malformed_slice_paths_map_is_refused_not_crashed(self):
         # `slice_paths` rides in an editable document, and a seat mapped to a
         # non-list reached the digest as an unhashable value — a traceback

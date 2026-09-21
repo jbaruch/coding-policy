@@ -254,11 +254,14 @@ def validate_resolved(changed, partition, source):
 
 
 def seat_paths(partition, role):
-    """`{seat_name: [glob, ...]}` — the paths each seat's slice owns.
+    """`{seat_name: [path, ...]}` — the paths each seat's slice owns.
 
-    The composer requires a seat's paths and reads no partition document, so
-    the plan carries them out of the validated partition rather than leaving
-    the lead to copy the boundary by hand (#434).
+    Resolved literals, not patterns: they come from a `validate-partition`
+    RESULT, whose `slices[].paths` carry the changed files `validate()`
+    assigned rather than the globs the document it read carried. The composer
+    requires a seat's paths and reads no partition document, so the plan
+    carries them out of the validated partition rather than leaving the lead
+    to copy the boundary by hand (#434).
     """
     return {seat_name(role, entry["name"]): list(entry["paths"]) for entry in partition["slices"]}
 
