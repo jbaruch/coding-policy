@@ -110,13 +110,28 @@ class SelectionTest(unittest.TestCase):
             self.assertEqual(tier["round"], requested)
             self.assertEqual(tier["tier_row"], "review" if context or fix_round else "build")
 
-    def test_risk_and_hostile_verification_select_top_xhigh(self):
+    def test_recorded_risk_evidence_selects_top_xhigh(self):
         for context in ({"risk_flags": ["network", "persistence"]}, {"input_bytes": 250001}, {"prior_high_miss": True}):
             with self.subTest(context=context):
                 tier = select_tier(agent(), "developer", context=context)
                 self.assertEqual((tier["model"], tier["effort"]), ("opus-5", "xhigh"))
-        self.assertEqual(select_tier(agent("codex"), "tester")["effort"], "xhigh")
-        self.assertEqual(select_tier(agent("grok"), "tester")["effort"], "high")
+
+    def test_a_tester_round_escalates_on_evidence_not_on_its_name(self):
+        # coding-policy#477: `hostile_verify` is the tester's DEFAULT round, so
+        # escalating on the round name pinned every tester round in the fleet to
+        # the top model at xhigh whatever the surface. The round's name is not
+        # evidence; its floor is the operator's configured row.
+        for kind in ("claude", "codex", "grok"):
+            with self.subTest(kind=kind):
+                tier = select_tier(agent(kind), "tester")
+                self.assertEqual(tier["round"], "hostile_verify")
+                self.assertEqual(tier["effort"], "high")
+
+    def test_a_tester_round_still_escalates_when_the_evidence_says_so(self):
+        for context in ({"risk_flags": ["network", "persistence"]}, {"input_bytes": 250001},
+                        {"prior_high_miss": True}):
+            with self.subTest(context=context):
+                self.assertEqual(select_tier(agent("codex"), "tester", context=context)["effort"], "xhigh")
 
     def test_a_recorded_whole_result_oracle_licenses_the_cheap_round(self):
         # coding-policy#480: the retired predicate wanted a task named in a
