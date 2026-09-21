@@ -541,7 +541,7 @@ def _round_inputs(args, roles):
     return rounds
 
 
-def _candidate_tiers(roles, agents, rounds, fix_round=None, judge=None, qualified_at=None, excludes=None):
+def _candidate_tiers(roles, agents, rounds, fix_round=None, judge=None, qualified_at=None, excludes=None, headroom=None):
     tiered = any(agent.tiers for agent in agents)
     if not tiered and not (judge and "judge" in roles):
         if rounds:
@@ -566,7 +566,8 @@ def _candidate_tiers(roles, agents, rounds, fix_round=None, judge=None, qualifie
                     candidates[role][agent.name] = None
                 continue
             try:
-                tier = select_tier(agent, role, inputs.get("type"), inputs.get("context"), fix_round)
+                tier = select_tier(agent, role, inputs.get("type"), inputs.get("context"), fix_round,
+                                   headroom=(headroom or {}).get(agent.name))
             except MissingTierError:
                 # A valid round can lack a configured row on one candidate.
                 continue
@@ -580,7 +581,8 @@ def _candidate_tiers(roles, agents, rounds, fix_round=None, judge=None, qualifie
                     # This candidate is ineligible; another qualified worker may fill the seat.
                     continue
             candidates[role][agent.name] = {key: tier[key] for key in (
-                "round", "tier_row", "kind", "model", "effort", "multiplier", "billing_window", "effective_multiplier"
+                "round", "tier_row", "kind", "model", "effort", "multiplier", "billing_window",
+                "effective_multiplier", "pressure_headroom", "de_escalated",
             )}
     return candidates
 
@@ -815,9 +817,18 @@ def cmd_plan(args, client=None, warn=None, trace=None):
     # Tier candidacy is decided per RESPONSIBILITY, so it reads the role-keyed
     # bars alone: a seat key would reach the planner's exclusion parser as an
     # unknown role (#434).
+    # The SAME measurement the planner ranks workers with also resolves each
+    # seat's round, so headroom can buy a cheaper round and not only a cheaper
+    # pair. `apply` re-reads it off the plan rather than re-measuring, which is
+    # what keeps its recomputed tiers equal to the planned ones (#477).
+    measured_headroom = {
+        name: record.get("headroom_pct") if isinstance(record, dict) else None
+        for name, record in (snapshot.get("agents", {}) if isinstance(snapshot.get("agents"), dict) else {}).items()
+    }
     tier_candidates = _candidate_tiers(canonical, agents, rounds, args.fix_round, judge,
                                       None if args.preview_tiers else (args.now or now_iso()),
-                                      excludes={role: names for role, names in excludes.items() if role in set(canonical)})
+                                      excludes={role: names for role, names in excludes.items() if role in set(canonical)},
+                                      headroom=measured_headroom)
     # Each seat inherits its role's bars, tiers, round type and requirements.
     # `role_costs` is not fanned out: the planner resolves a seat's default
     # weight and rotation history through its role (#434).
@@ -1121,7 +1132,17 @@ def cmd_apply(args, client=None, warn=None, trace=None):
     for role, name in assignments.items():
         if name in constraints["exclude"].get(role, []):
             raise UsageError("Assigned worker {} is ineligible for {} under current capabilities or contribution history; replan an independent capable worker.".format(name, role), {})
-    candidates = _candidate_tiers(list(assignments), agents, rounds, args.fix_round, judge, excludes=constraints["exclude"])
+    # `apply` measures nothing -- it re-reads the headroom the PLAN resolved its
+    # tiers against, so a recomputed tier differs only when the config or the
+    # fix context actually drifted, which is what the comparison below is for.
+    planned_tiers = document.get("tiers", {}) if isinstance(document.get("tiers"), dict) else {}
+    planned_headroom = {}
+    for role, name in assignments.items():
+        row = planned_tiers.get(role)
+        if isinstance(row, dict) and "pressure_headroom" in row:
+            planned_headroom[name] = row["pressure_headroom"]
+    candidates = _candidate_tiers(list(assignments), agents, rounds, args.fix_round, judge,
+                                  excludes=constraints["exclude"], headroom=planned_headroom)
     tiers = {}
     if candidates is not None:
         for role, name in assignments.items():

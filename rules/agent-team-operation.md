@@ -155,6 +155,12 @@ description: Running a multi-agent team — task-based specialist composition, c
 - A worker's `tiers` table maps round types to model, effort, and cost data
 - Judgment rounds use the pinned top model; no per-round override lowers it
 - Apply mechanical eligibility and risk escalation through `skills/herdr-teamlead/teamlead/tiers.py`
+- A round escalates on recorded evidence, never on its own round type or role name
+- Measured headroom resolves a seat's round, not only which worker fills it
+- Under measured scarcity a non-judgment round declines a discretionary escalation and records the round de-escalated
+- De-escalation never selects below the operator's configured row
+- Unmeasured headroom reads as neither scarcity nor capacity
+- The scarcity threshold is a script-owned constant, never a number the lead picks per round
 - A tier switch requires a worker relaunch at a cleared-round boundary
 - Retained fixes never change model or raise effort; preserve a verified compatible higher effort
 - Before relaunch, verify the idle worker, empty composer, pane occupant, and foreground PID

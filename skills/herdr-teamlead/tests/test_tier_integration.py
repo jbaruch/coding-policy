@@ -45,6 +45,29 @@ class TierIntegrationTest(CliCase):
         self.assertEqual(rc, 0, error)
         self.assertEqual(json.loads(output)["assignments"], {"developer": "claude"})
 
+    def test_a_scarce_plan_records_its_pressure_and_apply_agrees_with_it(self):
+        # coding-policy#477: `apply` measures nothing, so it re-reads the
+        # headroom the PLAN resolved against. Without that, a de-escalated plan
+        # would recompute un-de-escalated at dispatch and refuse itself with
+        # "Plan tiers differ from current config or fix context".
+        self.snapshot.write_text(json.dumps({"agents": {"claude": {"headroom_pct": 8}}}))
+        context = self.tmp / "round-context.json"
+        context.write_text(json.dumps({"developer": {"risk_flags": ["network", "persistence"]}}))
+        rc, output, error = self.run_cli(["plan", *self.base(), "--roles", "developer",
+                                          "--snapshot", str(self.snapshot),
+                                          "--round-context", str(context), "--now", AT])
+        self.assertEqual(rc, 0, error)
+        document = json.loads(output)
+        tier = document["tiers"]["developer"]
+        self.assertTrue(tier["de_escalated"])
+        self.assertEqual(tier["pressure_headroom"], 8)
+        self.assertEqual((tier["tier_row"], tier["effort"]), ("build", "high"))
+
+        rc, _output, error = self.run_cli(self.apply_args(document) + ["--dry-run"],
+                                          client=HerdrClient("herdr", FakeRunner()))
+        self.assertEqual(rc, 0, error)
+        self.assertNotIn("Plan tiers differ", error)
+
     def test_unqualified_live_dispatch_refuses_before_any_herdr_call(self):
         self.settings["agents"][0]["tiers"]["build"]["qualification"] = []
         self.write_config()

@@ -79,9 +79,13 @@ from .tiers import SEAT_SEPARATOR, canonical_role
 #: (#480). A version-7 plan carrying the retired fields is refused by name at
 #: apply, which recomputes each tier from the plan's context; one without them
 #: reads unchanged, and no oracle evidence is ever inferred for it.
+#: Version 9 adds `pressure_headroom` and `de_escalated` to each entry in
+#: `tiers` (#477), so `apply` recomputes against the headroom the plan
+#: resolved with. Additive: an older plan carries neither, reads as unmeasured
+#: pressure, and resolves the tier exactly as it did before.
 #: A plan is a round's instruction, not stored state -- it is produced and
 #: consumed inside one round and never migrated (rules/stateful-artifacts.md).
-PLAN_SCHEMA_VERSION = 8
+PLAN_SCHEMA_VERSION = 9
 
 #: What one round in each seat is expected to burn, in points of the agent's
 #: remaining headroom percentage. The ORDER is what the planner acts on:

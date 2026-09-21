@@ -105,6 +105,12 @@ from its caller. A version-7 plan carrying the retired context fields is
 refused by name at apply; one without them reads unchanged, and no oracle is
 ever inferred for it.
 
+Plan schema 9 adds `pressure_headroom` and `de_escalated` to each entry in
+`tiers` (#477). Writer: `plan`, from the measured snapshot. Reader: `apply`,
+which recomputes each tier against the headroom the plan resolved with rather
+than measuring again. An older plan carries neither field, reads as unmeasured
+pressure, and resolves as it always did.
+
 The optional `role_costs` key is the second:
 `{"<role>": <number>}`, what one round in that seat is expected to
 burn out of a worker's remaining headroom percentage. It overrides the
@@ -327,7 +333,7 @@ skills/herdr-teamlead/references/retrospectives.md
 | `assignments[].context_session` | object or null | Verified native session reference scoped to a pane: `pane_id`, `source`, `agent`, `kind`, `value`, all non-empty strings; kind is `id` or `path`. Null means continuity was not established |
 
 | `snapshots[].agents[].tier_billing` | object | Round → `{model, effort, window}` for configured tiers; unmeasured attribution is `unknown`. Empty for older snapshots |
-| `assignments[].tier` | object or null | Requested `round`, selected config `tier_row`, `kind`, `model`, `effort`, declared/effective multipliers, billing window, launch options, input `prompt_hash`, accepted qualification summary, and `verified` proof. Null for old or non-tiered dispatches |
+| `assignments[].tier` | object or null | Requested `round`, selected config `tier_row`, `kind`, `model`, `effort`, declared/effective multipliers, billing window, launch options, input `prompt_hash`, accepted qualification summary, `pressure_headroom` and `de_escalated` (the measured headroom the selection used, and whether it declined a discretionary escalation), and `verified` proof. Null for old or non-tiered dispatches |
 | `assignments[].requirements` | object or null | Normalized requirement object from the assigned role in the plan; null for legacy assignments |
 | `assignments[].reviewer_scope` | string or null | Reviewer participation recorded as `verification`, `design`, or `unknown`; null for other roles. Older reviewers migrate to `unknown` |
 | `specialist_assessments` | array | Append-only lead assessments with original dispatch and byte receipts; each record has its own schema version |

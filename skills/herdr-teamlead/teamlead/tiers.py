@@ -146,6 +146,13 @@ ORACLE_DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 XHIGH_MIN_RISKS = 2
 XHIGH_CONTEXT_BYTES = 250000
 BUILD_FAILED_GATES = 2
+#: Measured remaining headroom, in percent, at or below which a DISCRETIONARY
+#: escalation is declined on a non-judgment round. The audited fleet spent a
+#: weekly Codex window at roughly 0.75 points per round, so twenty points is
+#: about twenty-five rounds of runway -- enough to finish a task, not enough to
+#: spend on an escalation the configured row already covers. A judgment round
+#: is never de-escalated, whatever the pressure (#477).
+PRESSURE_HEADROOM_PCT = 20.0
 TIER_FIELDS = frozenset({"model", "effort", "multiplier", "billing_evidence", "qualification"})
 MODEL_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/-]*\Z")
 LAUNCH_SWITCHES = {
@@ -410,8 +417,28 @@ def mechanical_allowed(context):
     return False
 
 
-def select_tier(agent, role, round_type=None, context=None, fix_round=None):
-    """Resolve one candidate from configuration; no per-call model override."""
+def measured_pressure(headroom):
+    """Headroom as a float when it is a usable measurement, else None.
+
+    A snapshot is a file on disk and its headroom can be absent, null or
+    garbage. Unknown pressure must never READ as abundant capacity, and it must
+    never read as scarcity either: it resolves the tier exactly as an
+    unmeasured fleet always has.
+    """
+    if headroom is None or isinstance(headroom, bool) or not isinstance(headroom, (int, float)):
+        return None
+    value = float(headroom)
+    return value if math.isfinite(value) else None
+
+
+def select_tier(agent, role, round_type=None, context=None, fix_round=None, headroom=None):
+    """Resolve one candidate from configuration; no per-call model override.
+
+    `headroom` is the worker's measured remaining percentage. It can only
+    DECLINE a discretionary escalation on a non-judgment round -- it never
+    lowers a configured row, and never touches a judgment round, whose pinned
+    model and effort no per-round input lowers (#477).
+    """
     if not agent.tiers:
         if round_type is not None:
             raise UsageError("Agent {} has no tier table; configure it before selecting a round.".format(agent.name), {})
@@ -458,6 +485,19 @@ def select_tier(agent, role, round_type=None, context=None, fix_round=None):
         or _nonnegative_int(context, "input_bytes") > XHIGH_CONTEXT_BYTES
         or context.get("prior_high_miss") is True
     )
+    # Pressure reaches tier RESOLUTION, not only the planner's worker ranking:
+    # a cheaper pair was the only thing headroom could buy before, and a seat's
+    # own round was always resolved at full price (#477).
+    pressure = measured_pressure(headroom)
+    de_escalated = bool(
+        needs_xhigh and pressure is not None and pressure <= PRESSURE_HEADROOM_PCT
+        and round_type not in JUDGMENT_ROUNDS
+    )
+    if de_escalated:
+        # The configured row is the floor and it still runs. What is declined is
+        # the discretionary step ABOVE it, which is the only part of the
+        # selection the operator did not write down.
+        needs_xhigh = False
     if needs_xhigh:
         # High risk also excludes a lower build/fix model, not only low effort.
         if tier["model"] not in TOP_MODELS[agent.kind]:
@@ -469,6 +509,7 @@ def select_tier(agent, role, round_type=None, context=None, fix_round=None):
             tier["effort"] = "xhigh"
     return {
         **tier, "round": round_type, "tier_row": chosen_round, "kind": agent.kind,
+        "pressure_headroom": pressure, "de_escalated": de_escalated,
         "billing_window": billing_window(tier), "effective_multiplier": effective_multiplier(tier),
     }
 
