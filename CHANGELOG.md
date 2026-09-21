@@ -1,5 +1,30 @@
 # Changelog
 
+### Fixed
+
+- **An investigation-only round can be dispatched again.** `detect-triggers`
+  refuses a round whose diff is empty and whose plan declares no surface —
+  the guard #415 added so a vacuous empty plan could not pass as "nothing
+  fired." An investigation touches no repository surface by definition: no
+  diff, no paths, no package sizes, no CLI surface. It had nothing to declare,
+  so the guard refused it, and `SKILL.md` Step 5 makes the call mandatory
+  before `plan`. The round could be routed and then could not be run (#471,
+  found by the Copilot review on #470).
+
+  The `--planned` file gains `writes_repository`. An explicit `false` opens the
+  no-surface path; omitting the field reads as `true`, so every plan written
+  before it keeps exactly its old meaning and the schema stays at version 1 —
+  the same explicit-versus-omitted distinction `.herdr/triggers.json` already
+  draws. Every trigger is quiet on such a round by construction: each
+  classifies a repository surface and this round touches none.
+
+  The claim is checked, not taken. `--roles` must name only the
+  responsibilities `rules/agent-team-operation.md` declares read-only on
+  repository content (`advisor`, `investigator`, `architect`); every other
+  planned field must be empty; and a tracked diff against the base refuses it,
+  since evidence outranks intent. Untracked files do not, so scratch in the
+  lead's shared checkout cannot spuriously block a consultation.
+
 ## 0.3.255 — 2026-09-23
 
 ### Changed

@@ -180,8 +180,11 @@ through early fixes; schedule consultation and verification as the task needs th
 
 The composition triggers decide part of that roster. Classify this round
 against the repo's declaration first. For a pre-implementation round, pass
-`--planned` naming the surfaces the work will touch. A round with work already
-written classifies that work:
+`--planned` naming the surfaces the work will touch. A round that writes no
+repository content — an investigation, an architecture or advisory consultation
+— declares `writes_repository: false` in that file instead
+(`references/specialists.md`). A round with work already written classifies
+that work:
 
 ```bash
 CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"

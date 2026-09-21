@@ -426,6 +426,79 @@ class PlannedSurfacesTest(TempCase):
             triggers.run_command(namespace(repo=self.tmp, planned=self.write()), runner=self.runner())
         self.assertIn("classifies nothing", caught.exception.message)
 
+    def test_a_round_that_writes_nothing_classifies_and_fires_nothing(self):
+        # coding-policy#471: an investigation touches no repository surface,
+        # so it has nothing to declare and Step 5 must not refuse it.
+        payload, failure = triggers.run_command(
+            namespace(repo=self.tmp, roles="investigator",
+                      planned=self.write(writes_repository=False)),
+            runner=self.runner())
+        self.assertIsNone(failure)
+        self.assertEqual(payload["fired"], [])
+        self.assertEqual(payload["unaddressed"], [])
+        self.assertTrue(all(row["fired"] is False for row in payload["triggers"]))
+
+    def test_every_read_only_responsibility_may_declare_it(self):
+        for role in sorted(triggers.READ_ONLY_ROLES):
+            with self.subTest(role=role):
+                _payload, failure = triggers.run_command(
+                    namespace(repo=self.tmp, roles=role,
+                              planned=self.write(writes_repository=False)),
+                    runner=self.runner())
+                self.assertIsNone(failure)
+
+    def test_a_writing_responsibility_cannot_declare_it(self):
+        for roles in ("developer", "release", "investigator,developer"):
+            with self.subTest(roles=roles):
+                with self.assertRaises(UsageError) as caught:
+                    triggers.run_command(
+                        namespace(repo=self.tmp, roles=roles,
+                                  planned=self.write(writes_repository=False)),
+                        runner=self.runner())
+                self.assertIn("write no repository content", caught.exception.message)
+
+    def test_the_read_only_claim_needs_the_roles_that_make_it_checkable(self):
+        with self.assertRaises(UsageError) as caught:
+            triggers.run_command(
+                namespace(repo=self.tmp, planned=self.write(writes_repository=False)),
+                runner=self.runner())
+        self.assertIn("--roles", caught.exception.message)
+
+    def test_a_tracked_diff_contradicts_the_no_write_claim(self):
+        with self.assertRaises(UsageError) as caught:
+            triggers.run_command(
+                namespace(repo=self.tmp, roles="investigator", head="HEAD",
+                          planned=self.write(writes_repository=False)),
+                runner=self.runner({"--name-status": "M\0src/old/a.py\0"}))
+        self.assertIn("tracked diff is not empty", caught.exception.message)
+
+    def test_a_no_write_plan_naming_a_surface_is_refused(self):
+        for overrides in ({"added": ["src/new/mod.py"]}, {"changed": ["src/old/a.py"]},
+                          {"cli_surface": ["src/cli/main.py"]}, {"package_lines": {"src/old": 5}}):
+            with self.subTest(**overrides):
+                with self.assertRaises(UsageError) as caught:
+                    triggers.run_command(
+                        namespace(repo=self.tmp, roles="investigator",
+                                  planned=self.write(writes_repository=False, **overrides)),
+                        runner=self.runner())
+                self.assertIn("names no surface", caught.exception.message)
+
+    def test_writes_repository_must_be_a_boolean(self):
+        with self.assertRaises(UsageError) as caught:
+            triggers.run_command(
+                namespace(repo=self.tmp, roles="investigator",
+                          planned=self.write(writes_repository="false")),
+                runner=self.runner())
+        self.assertIn("JSON boolean", caught.exception.message)
+
+    def test_an_omitted_writes_repository_still_classifies_nothing(self):
+        # Omission keeps every plan written before the field meaning what it
+        # meant: only an explicit false opens the no-surface path.
+        with self.assertRaises(UsageError) as caught:
+            triggers.run_command(namespace(repo=self.tmp, roles="investigator", planned=self.write()),
+                                 runner=self.runner())
+        self.assertIn("classifies nothing", caught.exception.message)
+
     def test_a_plan_declaring_only_a_package_size_classifies(self):
         payload, _failure = triggers.run_command(
             namespace(repo=self.tmp, planned=self.write(package_lines={"src/old": 51})),
