@@ -21,7 +21,7 @@ Structured workflow for shipping code: PR creation, automated policy review, mer
 Nothing below runs until this exits 0:
 
 ```bash
-skills/release/check-leftovers.sh
+bash skills/release/check-leftovers.sh
 ```
 
 Exit 0 clears the release. Exit 1 blocks it, with `blocking` naming each leftover and the stderr diagnostic naming its worktree — commit, stash, or gitignore the work, then re-run. Exit 2 is a usage or tool-state error, never a verdict. Which worktree states it refuses, and why another worktree's work in progress does not trip it, are the script's decision contract — see `skills/release/check-leftovers.sh` header, not restated here (`rules/script-as-black-box.md`).
@@ -86,7 +86,7 @@ skills/release/REVIEW_DETAILS.md
 **Also request Copilot.** Copilot is a deliberate second reviewer with a different lens — the policy reviewer enforces `rules/*.md` compliance, Copilot reads for correctness, bugs, security, and test gaps. The policy reviewer gates the merge only on **blocking** findings; advisory-only reviews post `COMMENT` and never gate, and Copilot is always advisory (read it, never gate on it) — see `rules/review-severity.md`:
 
 ```bash
-skills/release/request-copilot-review.sh <owner> <repo> <pr-number>
+bash skills/release/request-copilot-review.sh <owner> <repo> <pr-number>
 ```
 
 Proceed immediately to Step 5.
@@ -96,7 +96,7 @@ Proceed immediately to Step 5.
 Block until the PR reaches a merge-gate-relevant terminal state. The watcher polls `poll-pr-reviews.sh` at a script-owned interval up to a script-owned budget and watches exactly the fields the Step 7 merge gate reads — each gating bot's latest review state (resolved by bot login), CI status, and merge state. Do not hand-roll a poll loop, and do not wrap the watch in an invented wall-clock `timeout` (see `rules/ci-safety.md` "Always Watch CI"):
 
 ```bash
-skills/release/watch-pr-reviews.sh <owner> <repo> <pr-number>
+bash skills/release/watch-pr-reviews.sh <owner> <repo> <pr-number>
 ```
 
 It returns the full `poll-pr-reviews.sh` snapshot plus a `watch` object — `{"result": ..., "attempts": N, "elapsed_seconds": N}`. The interval/budget constants and the result contract are the script's, not restated here (`rules/script-as-black-box.md` — see the header's result matrix). Branch on `.watch.result`:
@@ -137,7 +137,7 @@ Once these conditions hold, merge automatically per `rules/ship-on-green.md` —
 **Clear superseded review gates first.** This applies to coding-policy's OWN releases, where the policy reviewer posts as `github-actions[bot]`, which cannot `APPROVE` (GitHub returns HTTP 422), so a clean re-review lands as a `COMMENT` that does NOT supersede the bot's earlier `CHANGES_REQUESTED` — the stale request keeps `merge_state.status` at `BLOCKED`. On consumer repos the reviewer is the central fleet App `coding-policy-fleet-reviewer[bot]` (coding-policy#202), which CAN `APPROVE` and supersedes its own earlier `CHANGES_REQUESTED` directly — no dismissal needed there. Dismiss every superseded `github-actions[bot]` review before merging:
 
 ```bash
-skills/release/dismiss-stale-reviews.sh <owner> <repo> <pr-number>
+bash skills/release/dismiss-stale-reviews.sh <owner> <repo> <pr-number>
 ```
 
 Run it once Step 5's poll shows every bot's latest verdict clean. It emits a JSON summary of what it dismissed and what it left active, exits non-zero on API failure, and is idempotent on re-run. Which reviews it dismisses and which it leaves is the script's decision contract — see `skills/release/dismiss-stale-reviews.sh` header, not restated here (`rules/script-as-black-box.md`).

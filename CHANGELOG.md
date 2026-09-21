@@ -1,5 +1,64 @@
 # Changelog
 
+### Fixed
+
+- **Every skill invokes its scripts through an interpreter.** Seventeen command
+  blocks across four skills named a script by bare path. That works from a
+  clone of this repo, where git preserves mode 0755. It does not work from an
+  installed plugin: tessl packaging normalizes plugin files to 0644, so a bare
+  invocation is `permission denied` before the script runs. `skills/release` is
+  declared in `.tessl-plugin/plugin.json` and ships to consumers, which settles
+  the question #465 left open — it does run installed. `onboard-repo` (11),
+  `release` (4), `adopt-fork-pr` (1) and `migrate-to-plugin` (1) are converted
+  whole-file, since `rules/skill-authoring.md` Script References forbids mixing
+  the two conventions inside one SKILL.md. Prose references to a script's
+  contract are unchanged; only invocations gained the prefix (#465).
+
+- **The leftover-worktree detector reports an ancient path's real age.**
+  `dirt_age_hours` started from a 999999999-second sentinel and took the
+  minimum, so the sentinel doubled as a ceiling: a path older than about 31.7
+  years never won the comparison, and the reset then read the untouched
+  sentinel as "no path seen" and reported age 0. The oldest possible leftover
+  read as the freshest, and an abandoned worktree reported `in_progress`.
+  "No age seen yet" is now its own state (#466).
+
+- **Two path captures survive a trailing newline.** Command substitution strips
+  every trailing newline, so the detector's `rev-parse --show-toplevel` and the
+  hook's `pwd` truncated a worktree root or plugin directory whose name ends in
+  one, and everything downstream compared against a path that does not exist.
+  A sentinel character survives the strip (#466).
+
+- **The hook's envelope guard refuses `self: null`.** A successful detector
+  envelope always carries a `self` object; `null` appears only in the two
+  exit-2 error envelopes, which the status guard rejects before parsing. Eight
+  envelope fixtures had used `"self":null` as filler while naming a different
+  defect, so each now carries a valid object and still proves what it names
+  (#466).
+
+- **The CHANGELOG placement guard matches parked blocks as a multiset.**
+  `newly_parked` used a `set`, which answers "is this text anywhere on the
+  base" rather than "does the base still have an occurrence left". A branch
+  parking a second identical copy of a one-occurrence entry passed on the same
+  evidence twice. Its docstring and remediation diagnostic still described the
+  retired NET COUNT rule, so a reader scripting against the documented contract
+  got the wrong predicate; both now describe block-content identity (#457).
+
+### Changed
+
+- **Two release helpers' predicates live only in the scripts.** SKILL.md Step 7
+  spelled out `confirm-tessl-landed.sh`'s and `verify-github-release.sh`'s
+  Boolean conjunctions, which `rules/script-as-black-box.md` reserves for the
+  script. Both bullets keep the invocation and the exit-code gate and point
+  through `PUBLICATION.md`. `rules/ci-safety.md` still states the conjunction:
+  rules state the contract, skills carry the executable form (#458).
+
+- **Two helper assertions take their field names literally.** The suite matched
+  `carries no .version` and `carries no .current` with `grep -q`, where `.` is
+  a wildcard, so both still matched if the diagnostic stopped naming the field
+  the caller repairs. `grep -qF` now takes them literally, and
+  `registry-baseline.sh`'s absent-jq guard — previously assumed from its
+  sibling's coverage — is exercised directly (#459).
+
 ## 0.3.248 — 2026-09-19
 
 ### Fixed
