@@ -1323,6 +1323,7 @@ class ApplyTest(unittest.TestCase):
                     "clear_reason": "automatic",
                     "task": None,
                     "fix_round": None,
+                    "judge_mode": None,
                     "context_session": None,
                     "tier": None,
                     "landed": True,

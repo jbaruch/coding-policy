@@ -1276,6 +1276,7 @@ class ApplyCommandTest(CliCase):
                     "tier": None,
                     "requirements": None,
                     "reviewer_scope": None,
+                    "judge_mode": None,
                 },
                 {
                     "schema_version": STATE_SCHEMA_VERSION,
@@ -1291,6 +1292,7 @@ class ApplyCommandTest(CliCase):
                     "tier": None,
                     "requirements": None,
                     "reviewer_scope": None,
+                    "judge_mode": None,
                 },
             ],
         )

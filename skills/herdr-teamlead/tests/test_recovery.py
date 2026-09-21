@@ -74,7 +74,7 @@ class RecoveryTests(unittest.TestCase):
     def seed_checkpoint(self):
         self.exhaust()
         self.consult_investigator("2026-02-03T09:30:00+00:00", "2026-02-03T09:45:00+00:00")
-        add_assignment(self.state, AT, "judge", "judge", task=TASK)
+        add_assignment(self.state, AT, "judge", "judge", task=TASK, judge_mode="diagnosis")
         return checkpoint(self.store, self.history, {
             "id": "checkpoint-5", "task": TASK, "defect": "F1 remains open", "previous_attempts": "Five attempts changed parsing and quoting",
             "progress": "Some counterexamples now pass; the quoted case remains red", "change_in_approach": "Use one canonical parser",
@@ -119,7 +119,7 @@ class RecoveryTests(unittest.TestCase):
         # latest developer attempt, and the consultation it rules on before
         # that dispatch.
         self.consult_investigator("2026-02-03T11:30:0{}+00:00".format(number), "2026-02-03T11:45:0{}+00:00".format(number))
-        add_assignment(self.state, "2026-02-03T12:00:0{}+00:00".format(number), "judge", "judge", task=TASK)
+        add_assignment(self.state, "2026-02-03T12:00:0{}+00:00".format(number), "judge", "judge", task=TASK, judge_mode="diagnosis")
 
     def next_checkpoint(self, name):
         # Each exhaustion records its own checkpoint; a plan's first fix is
@@ -828,7 +828,7 @@ class RecoveryTests(unittest.TestCase):
     def test_that_checkpoint_carries_the_operator_bounded_approval_through(self):
         self.exhaust()
         self.consult_investigator("2026-02-03T09:30:00+00:00", "2026-02-03T09:45:00+00:00")
-        add_assignment(self.state, AT, "judge", "judge", task=TASK)
+        add_assignment(self.state, AT, "judge", "judge", task=TASK, judge_mode="diagnosis")
         checkpoint(self.store, self.history, {"id": "cp", "task": TASK, "defect": "F1",
             "previous_attempts": "Five fixes", "progress": "Still blocked",
             "change_in_approach": "Reassess"}, AT, "judge")
@@ -963,7 +963,7 @@ class RecoveryTests(unittest.TestCase):
         # while recording nothing of the request.
         self.exhaust()
         self.consult_investigator("2026-02-03T09:30:00+00:00", "2026-02-03T09:45:00+00:00")
-        add_assignment(self.state, AT, "judge", "judge", task=TASK)
+        add_assignment(self.state, AT, "judge", "judge", task=TASK, judge_mode="diagnosis")
         base = {"id": "cp", "task": TASK, "defect": "F1 remains open",
                 "previous_attempts": "Five attempts", "progress": "Partly",
                 "change_in_approach": "One parser"}

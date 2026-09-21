@@ -124,7 +124,7 @@ class RecoveryCommandTests(fixture.CliCase):
         # The consultation precedes the judge dispatch that rules on it (#408).
         self.record_investigation()
         state = self.saved()
-        add_assignment(state, "2026-02-03T15:00:00+00:00", "judge", "claude", task=TASK)
+        add_assignment(state, "2026-02-03T15:00:00+00:00", "judge", "claude", task=TASK, judge_mode="diagnosis")
         # The dispatch the enrollment is keyed to: #412 resolves the judge's
         # enrollment by this identity, not by newest-for-task-and-agent.
         judge_index = len(state["assignments"]) - 1
@@ -230,6 +230,36 @@ class RecoveryCommandTests(fixture.CliCase):
         self.record_investigation()
         code, out, err = self.invoke(args + ["--dry-run"], self._client({}))
         self.assertEqual(code, 0, err)
+
+    def test_a_live_judge_dispatch_records_its_declared_mode_on_the_assignment(self):
+        # coding-policy#478: 51 recorded judge rounds, none of them saying
+        # which mode they ran. The ledger is where an adjudication and a
+        # diagnosis stay distinguishable after the fact.
+        state = empty_state()
+        for fix in (None, 1, 2, 3, 4, 5):
+            add_assignment(state, "2026-02-03T09:00:0{}+00:00".format(fix or 0), "developer", "grok", task=TASK, fix_round=fix)
+        save_state(self.state, state)
+        self.register()
+        config = json.loads(self.config.read_text())
+        config["judge"] = {"agent": "claude", "model": "claude-opus-4-6", "effort": "high"}
+        self.config.write_text(json.dumps(config))
+        self.briefs["judge"] = self.tmp / "judge-brief.md"
+        self.briefs["judge"].write_text("# judge\n")
+        self.record_investigation()
+        client = self._client({"claude": "idle"}, sessions={"claude": "judge-native"})
+        self.runner.set("pane process-info --pane w2:p1", json.dumps({"result": {"process_info": {
+            "pane_id": "w2:p1", "foreground_processes": [{"name": "claude", "pid": 200,
+            "argv": ["claude", "--dangerously-skip-permissions", "--model", "claude-opus-4-6",
+                     "--effort", "high"]}]}}}))
+        code, out, err = self.invoke(
+            ["apply", "--assignments", json.dumps({"judge": "claude"}), "--common", str(self.common),
+             "--brief", "judge=" + str(self.briefs["judge"]), "--task", TASK, "--now", AT,
+             "--judge-mode", "diagnosis", "--composer-settle", "0", "--no-clear"],
+            client)
+        self.assertEqual(code, 0, err)
+        self.assertEqual(json.loads(out)["applied"][0]["judge_mode"], "diagnosis")
+        row = self.saved()["assignments"][-1]
+        self.assertEqual((row["role"], row["judge_mode"]), ("judge", "diagnosis"))
 
     def test_diagnose_wires_the_pinned_judge_and_its_enrolled_report(self):
         # coding-policy#407: the public command, not just the owner function —

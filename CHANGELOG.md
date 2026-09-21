@@ -1,5 +1,38 @@
 # Changelog
 
+### Fixed
+
+- **A judge round records which mode it ran in.** `rules/agent-team-operation.md`
+  Judge Seat requires every judge dispatch to declare its mode at plan and at
+  apply, and says an undeclared mode is refused rather than defaulted. The CLI
+  enforced that on the way in — `require_judge_mode` at `plan` and at `apply`,
+  with the plan document carrying `judge["mode"]` — and then threw it away: the
+  assignment ledger had no field for it. Measured over the live ledger
+  (`~/.local/state/teamlead/state.json`, 702 assignments, 2026-09-01 →
+  2026-09-19): 52 judge assignments, **none** carrying a mode. An adjudication
+  and a diagnosis were indistinguishable after the fact, which is what made
+  `acr-cli-producer-migration`'s 16 judge rounds against 0 recorded diagnoses
+  unreadable — the ledger could not say whether diagnoses ran unrecorded or
+  adjudications were dispatched on an exhausted loop, and those are different
+  defects (#478).
+
+  Assignment rows gain `judge_mode`, stamped from the resolved mode the apply
+  path already computes, and state schema 8 → 9 migrates existing rows. A judge
+  row records `adjudication` or `diagnosis`; every other role records null; the
+  owner utility refuses a judge row with no declared mode rather than defaulting
+  one, so the rule's refusal now holds at the write, not only at the CLI flag.
+  History that cannot prove a mode reads `unknown` — a migrated row, or a
+  dispatch reconciled from a receipt written before the field — never a guessed
+  value.
+
+  The other half of #478, refusing a developer dispatch past its approach's
+  correction allowance, was already shipped by #467 (2026-09-17): `validate_work`
+  checks `ceiling_at` on both the `plan` and `apply` paths, and
+  `validate_fix_history` closes the omit-the-number bypass. The issue's four
+  runaway tasks all ran 2026-09-05 → 2026-09-13, before that gate and before the
+  judge-diagnosis machinery landed on 2026-09-14. The three tasks that ran after
+  it land exactly on their computed allowance. Nothing is backfilled.
+
 ## 0.3.253 — 2026-09-23
 
 ### Added

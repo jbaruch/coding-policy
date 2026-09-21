@@ -303,7 +303,7 @@ class NativeDeliveryTests(unittest.TestCase):
 
     def recovery_fixture(self):
         document = state.empty_state()
-        state.add_assignment(document, AT, "judge", "worker", task="task-361", context_session={"pane_id": PANE, **identity("codex")})
+        state.add_assignment(document, AT, "judge", "worker", task="task-361", judge_mode="adjudication", context_session={"pane_id": PANE, **identity("codex")})
         brief = self.tmp / "brief.md"
         brief.write_text("Judge the original dispute.\n" + self.marker + "\n")
         common = self.tmp / "common.md"

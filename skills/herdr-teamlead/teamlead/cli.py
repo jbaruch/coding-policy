@@ -1250,6 +1250,7 @@ def cmd_apply(args, client=None, warn=None, trace=None):
         context = {key: result[key] for key in ("cleared", "clear_reason", "task", "fix_round", "context_session", "tier")}
         context["requirements"] = result.get("requirements")
         context["reviewer_scope"] = result.get("reviewer_scope")
+        context["judge_mode"] = result.get("judge_mode") if base == "judge" else None
         # `add_assignment` records the RESPONSIBILITY a seat fills; the seat
         # stays on the dispatch, which is what a slice's verdict is read back
         # through (#434).
@@ -1275,6 +1276,7 @@ def cmd_apply(args, client=None, warn=None, trace=None):
             no_clear=args.no_clear,
             retain_context=args.retain_context,
             fix_round=args.fix_round,
+            judge_mode=judge_mode,
             history=state["assignments"],
             settle_timeout_ms=args.settle_timeout,
             on_prepare=prepare, on_before_send=before_send, on_result=record,
@@ -1464,12 +1466,15 @@ def cmd_recovery(args, client=None, warn=None, trace=None):
                     recovered["requirements"] = result["requirements"]
                 if result.get("reviewer_scope") is not None:
                     recovered["reviewer_scope"] = result["reviewer_scope"]
+                if canonical_role(recovered["role"]) == "judge":
+                    recovered["judge_mode"] = context.get("judge_mode") or "unknown"
                 add_assignment(
                     state, at, recovered["role"], name, status="applied",
                     cleared=recovered["cleared"], clear_reason=recovered["clear_reason"],
                     task=recovered["task"], fix_round=recovered["fix_round"],
                     context_session=recovered["context_session"], tier=recovered["tier"],
                     requirements=recovered.get("requirements"), reviewer_scope=recovered.get("reviewer_scope"),
+                    judge_mode=recovered.get("judge_mode"),
                 )
                 recovery.finish_dispatch(store, result["id"], recovered, len(history) - 1, at)
     recovery.validate_store(store, history)

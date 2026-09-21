@@ -57,7 +57,7 @@ from .probe import PROBE_READ_LINES, PROBE_READ_SOURCE, resolve_status, stderr_w
 from .chronology import latest_assignment
 from .recovery import empty_recovery, fresh_transition, task_record, validate_work
 from .launch import restart_worker, verify_running, verify_running_permissions
-from .tiers import launch_flags, require_seatable, worker_launch_args
+from .tiers import canonical_role, launch_flags, require_seatable, worker_launch_args
 from .composition import normalize_requirement, parse_requirements
 
 # Version 3 adds verified model-tier metadata to context and task/fix evidence.
@@ -582,7 +582,7 @@ def check_all_ready(client, assignments, agents_by_name, warn=None):
     return statuses
 
 
-def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle_timeout_ms=DEFAULT_SETTLE_TIMEOUT_MS, on_assigned=None, warn=None, sleep=time.sleep, settle_sec=COMPOSER_SETTLE_SEC, landing_attempts=LANDING_ATTEMPTS, start_timeout_ms=DEFAULT_START_TIMEOUT_MS, allow_recovery=False, task=None, retain_context=False, fix_round=None, history=None, tiers=None, recovery=None, plan_id=None, work=None, on_prepare=None, on_before_send=None, on_result=None, retrospective_guard=None, retain_specialist=False, requirements=None):
+def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle_timeout_ms=DEFAULT_SETTLE_TIMEOUT_MS, on_assigned=None, warn=None, sleep=time.sleep, settle_sec=COMPOSER_SETTLE_SEC, landing_attempts=LANDING_ATTEMPTS, start_timeout_ms=DEFAULT_START_TIMEOUT_MS, allow_recovery=False, task=None, retain_context=False, fix_round=None, judge_mode=None, history=None, tiers=None, recovery=None, plan_id=None, work=None, on_prepare=None, on_before_send=None, on_result=None, retrospective_guard=None, retain_specialist=False, requirements=None):
     """Hand each agent its brief using the selected context mode.
 
     `on_assigned(role, agent, at, status, context)` is called after each hand-off so the
@@ -796,6 +796,10 @@ def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle
             "clear_reason": clear_reason,
             "task": task,
             "fix_round": fix_round,
+            # The mode belongs to the judge seat alone, and the ledger is where
+            # an adjudication and a diagnosis stay distinguishable afterwards
+            # (#478).
+            "judge_mode": judge_mode if canonical_role(step["role"]) == "judge" else None,
             "context_session": context_session,
             "tier": tier_record,
             "landed": landing["landed"],
@@ -813,7 +817,7 @@ def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle
         # Persist the dispatch outcome before optional UI work. A broken pipe
         # during pane relabeling must never erase a confirmed handoff.
         if on_assigned is not None:
-            context = {key: record[key] for key in ("cleared", "clear_reason", "task", "fix_round", "context_session", "tier")}
+            context = {key: record[key] for key in ("cleared", "clear_reason", "task", "fix_round", "judge_mode", "context_session", "tier")}
             on_assigned(step["role"], name, at, record["status"], context)
         if on_result is not None:
             on_result(record)
