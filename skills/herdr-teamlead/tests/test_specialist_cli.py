@@ -318,7 +318,8 @@ class SpecialistCliTest(fixture.CliCase):
         policy.write_text("Verified policy index and release entrypoint fixture.")
         values = {"shared": {"SHARED_CHECKOUT": "/repo", "AUTHORITY_STATEMENT": "Owned fixture repository",
             "TASK_AUTHORIZATION": "Read-only consultation on onboarding", "AUTHORIZED_ACTIONS": "Read and report",
-            "EXTERNAL_PERMISSION": "No external actions", "POLICY_INDEX": str(policy), "RELEASE_SKILL": str(policy)}, "roles": {}}
+            "EXTERNAL_PERMISSION": "No external actions", "POLICY_INDEX": str(policy), "RELEASE_SKILL": str(policy),
+            "GATES": "- AGENTS.md\n- scripts/run-tests.sh"}, "roles": {}}
         for role in ("advisor", "investigator", "architect"):
             values["roles"][role] = {"RESPONSIBILITY": role, "SPECIALTY": "ux", "TASK": "task-1", "ISSUE": "Onboarding",
                 "BRANCH": "feat/onboarding", "OBJECTIVE": "Assess the account setup interaction",

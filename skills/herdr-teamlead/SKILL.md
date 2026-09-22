@@ -68,26 +68,63 @@ For every other request, read `HERDR_ENV` before running scripts.
 - **Set, none of the above applies, and the answer is already in the lead's
   context** — say it. Finish here.
 
-## Step 2 — Verify Herdr and the Roster
+## Step 2 — Run the Round Preflight
+
+One call answers every deterministic check a round start owes: Herdr and the
+roster, authority for the repo, measured headroom, the capability table's
+cadence, and worktree hygiene.
+
+```bash
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
+bash "$CP/skills/herdr-teamlead/round-preflight.sh" \
+  --repo <owner/repo> --checkout <shared-checkout>
+```
+
+Emits one JSON object: `ready`, the `blocking` reasons, the cadences that are
+`due`, and each check's own payload under `checks`. Exit 1 is a verdict, not a
+failure — something blocks the round. Exit 2 means the preflight could not
+answer.
+
+- **Exit 0** — read `due`, satisfy any cadence it names, and proceed to Step 5.
+- **Exit 1** — report the `blocking` reasons verbatim. Each names the command
+  that produced it; re-run that one, not the preflight.
+- **Exit 2** — report the diagnostic and finish here.
+
+Which checks run, and which exit codes they fold into `blocking`, are the
+script's decision contract — see `skills/herdr-teamlead/round-preflight.sh`, not
+restated here (`rules/script-as-black-box.md`).
+
+Steps 3 and 4 remain the individual commands, for a caller that needs one on its
+own. A round start runs this instead of all of them. The roster has no step of
+its own; inspect it directly when only the live workers are wanted:
 
 ```bash
 CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
 bash "$CP/skills/herdr-teamlead/roster.sh"
 ```
 
-Emits the caller and live workers with kind, pane, and state.
-
-- **Exit 0, agents present** — proceed to Step 3.
-- **Exit 0, empty roster** — report unnamed panes from `herdr agent list` and
-  the correcting `herdr agent rename <pane-id> <name>` command. Finish here.
-- **Exit 1 or 2** — report the diagnostic verbatim and finish here.
+Emits the caller and live workers with kind, pane, and state. An empty roster on
+exit 0 means unnamed panes: report them from `herdr agent list` with the
+correcting `herdr agent rename <pane-id> <name>` command.
 
 Record staffing gaps under `references/round-setup.md`. Leave unused specialist
-profiles unlaunched. Never duplicate targets or fold verification onto a contributor.
-Start workers in YOLO mode under `references/model-tiers.md`; preserve it on
-relaunch. Verify live permission flags before dispatch, including existing workers.
+profiles unlaunched. Never duplicate targets or fold verification onto a
+contributor. Start workers in YOLO mode under `references/model-tiers.md`;
+preserve it on relaunch. Verify live permission flags before dispatch, including
+existing workers. Record task authorization and permitted actions under the
+round-setup reference. Create or resume the stable ledger under
+`references/task-ledger.md`; record its absolute path before dispatch. Apply the
+round-setup accepted-behavior, resume and supervision binding requirements.
+
+Run `references/retrospectives.md` on resume, before planning, or for an
+explicit retrospective request. For an explicit request, complete a new
+retrospective and finish here.
+
+Proceed immediately to Step 5.
 
 ## Step 3 — Verify Authority for the Repo
+
+Step 2 runs this. Use it alone when only the authority answer is wanted.
 
 ```bash
 CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
@@ -99,17 +136,11 @@ Record the emitted namespace ownership evidence using Step 3 of
 operator permission; absent permission, remain read-only or finish here.
 On non-zero, report the diagnostic and finish here.
 
-Record task authorization and permitted actions under the round-setup reference.
-Create or resume the stable ledger under `references/task-ledger.md`; record its
-absolute path before dispatch. Apply the round-setup accepted-behavior, resume
-and supervision binding requirements.
 Proceed immediately to Step 4.
 
 ## Step 4 — Measure Headroom
 
-Run `references/retrospectives.md` on resume, before planning, or for an explicit
-retrospective request. For an explicit request, complete a new retrospective and
-finish here; otherwise continue below.
+Step 2 runs this. Use it alone to re-measure, which the judge round does.
 
 ```bash
 CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
@@ -223,6 +254,14 @@ Proceed immediately to Step 7.
 Resolve policy paths through the Step 7 reference first. Write its outputs in
 `shared` within `{"shared": {...}, "roles": {"<role>": {...}}}` and run:
 
+`GATES` is shared and comes from Step 2's `checks.gates` payload: render its
+`instructions`, `workflows`, `runners` and `notes` as a Markdown list. Resolved
+once so five workers do not each spend turns finding the same files. On
+`declared: false`, write `undeclared` — the workers then report what they find,
+which is what the repo owner writes `.herdr/gates.json` from. On a non-empty
+`missing`, the declaration has rotted: name those paths in the round's report
+rather than passing them to a worker.
+
 ```bash
 CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
 bash "$CP/skills/herdr-teamlead/compose-briefs.sh" \
@@ -240,7 +279,10 @@ Proceed immediately to Step 8.
 
 ## Step 8 — Provision the Worktrees
 
-Prune first, every round:
+Step 2's preflight pruned, every round, and reported the result under
+`checks.worktrees`. Report every kept `dirty`, `unmerged`, `locked` and
+`detached` entry to the operator; never remove them by hand. Run it alone only
+to re-prune:
 
 ```bash
 CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
@@ -249,9 +291,7 @@ bash "$CP/skills/herdr-teamlead/prune-worktrees.sh" <shared-checkout>
 
 Emits the worktrees and branches removed, each kept one with its reason, and
 `failed`; exit 2 lists every check or removal git refused. Exit 1 decided
-nothing: fix its diagnostic and re-run before provisioning. Report every kept
-`dirty`, `unmerged`, `locked` and `detached` entry to the operator; never
-remove them by hand.
+nothing: fix its diagnostic and re-run before provisioning.
 
 Then run once per writing worker and every worktree named in a brief:
 

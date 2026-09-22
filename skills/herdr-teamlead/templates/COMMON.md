@@ -75,8 +75,16 @@ to know goes in the report.
 - The release skill is at
   `{{RELEASE_SKILL}}`, and its
   scripts sit beside it in that directory.
-- Read the repo's contributor instructions and configured checks to identify
-  its gates. Run the checks required for your assignment and report their results.
+- This repo's gates are below, from its own declaration. Read those; do not go
+  looking for them. Run the checks your assignment requires and report their
+  results. A declaration is where to look, not a claim about what matters — if
+  your assignment needs a check none of them names, find it and name it in your
+  report so the owner can declare it.
+- `GATES: undeclared` means this repo has not declared them. Find them, run what
+  your assignment requires, and list what you found in your report; that is what
+  the owner writes the declaration from.
+
+{{GATES}}
 - Never suppress an error. No `|| true`, no `2>/dev/null` standing in for a
   handler, no empty catch.
 - Every shipped module gets deterministic, outcome-based tests. No wall-clock

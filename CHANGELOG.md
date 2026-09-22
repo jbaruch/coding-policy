@@ -40,6 +40,76 @@
 
 ### Added
 
+- **One preflight call replaces a round's opening nine steps.** Dispatch is
+  Step 10 of 16, and Steps 2, 3, 4 and 8's prune were each a separate lead turn
+  that shipped the lead's whole accumulated context to run a script and read its
+  exit code. On top of them, `rules/agent-team-operation.md` puts seven more
+  obligations before planning or dispatch — measure the roster, consult lessons,
+  check the cadence, bind supervision, classify each assignment, verify
+  permission flags. None of those checks needs a lead. They are deterministic,
+  they were already scripts, and `rules/script-delegation.md` Precheck Gating
+  already names the shape: one payload saying whether the agent is needed and
+  what it needs (#445 §1).
+
+  `round-preflight.sh` composes the existing owner scripts — `roster.sh`,
+  `verify-authority.sh`, `teamlead measure`, `capability-check`,
+  `prune-worktrees.sh` — and emits one object: `ready`, the `blocking` reasons,
+  the cadences that are `due`, and each check's own payload under `checks`. It
+  reimplements none of them; each contract stays its own.
+
+  Exit 1 is a verdict, not a failure. A blocking reason names the command that
+  produced it, so the lead re-runs that one rather than the whole preflight, and
+  one failing check never hides another's result.
+
+  SKILL.md Step 2 is now the preflight. Steps 3 and 4 stay addressable for
+  callers that need one alone — `references/judge-round.md` re-runs Step 4's
+  `measure` by name — and the numbering is unchanged, since roughly 120
+  cross-references across the references cite these steps and some "Step N"
+  strings belong to other documents' own numbering. Renumbering for tidiness
+  would risk silently misrouting the lead.
+
+  What is left for the lead is the part that needs one: decomposing a request
+  into rounds, gating a report against task history, judging which lessons
+  apply, and handling what nobody anticipated.
+
+- **Briefs point at a repo's gates instead of sending every worker to find
+  them.** `COMMON.md` told each worker to *"read the repo's contributor
+  instructions and configured checks to identify its gates"*. Five workers in a
+  round each spent turns finding the same answer, every round, for something
+  identical across them and rarely changed.
+
+  Discovery splits in two: FINDING a file and READING it. Reading is the work.
+  Finding is waste, and a pointer removes it without putting any file's contents
+  into a worker's context.
+
+  **The repo declares its gates.** It already declares its trigger surfaces the
+  same way — `rules/agent-team-operation.md`: *"The repo states each trigger
+  surface and its package size in its own trigger declaration"* — so
+  `resolve-gates.sh` reads `.herdr/gates.json` and reports what it holds:
+  instruction files, runner entry points, and one line of notes. It parses no
+  YAML and decides nothing about which check matters; that judgment stays with
+  whoever reads the files. The preflight runs it, and the briefs carry the
+  result as the shared `GATES` value. This repo's own declaration ships here.
+
+  An earlier draft of this change matched a hardcoded list of filenames —
+  `AGENTS.md`, `Makefile`, `pyproject.toml` — and defended the list as hints
+  rather than an allow-list. That is the enumerated-name failure #480 retired in
+  this same release, written one layer down and in the same session: the set of
+  filenames meaning "runner" is not enumerable, and `justfile`, `Taskfile.yml`,
+  `Earthfile` and `bin/check` are all invisible to it. A declaration needs no
+  such set, and unlike a classifier it needs no inference either — the owner
+  states the truth once.
+
+  Undeclared is a first-class answer. `.github/workflows` is a location GitHub
+  defines rather than a name anyone guessed, so it is still reported; everything
+  else comes back `declared: false`, and the brief tells the worker to find the
+  gates and name them in its report, which is what the owner writes the
+  declaration from. A declared path that no longer exists lands in `missing`
+  rather than pointing a worker at nothing, and a declaration that cannot be
+  parsed is a repair, never an empty map.
+
+### Added
+
 - **A model-capability table, refreshed on a cadence.** Routing work by how hard
   it is needs a written-down answer to "what can this model do", and nothing
   held one. #480 names it as a dependency the project imports, not a measurement
