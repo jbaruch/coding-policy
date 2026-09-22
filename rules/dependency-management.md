@@ -23,7 +23,7 @@ alwaysApply: true
 
 - Every pinned dependency needs a stated renewal mechanism
 - Automate it where a scanner supports the ecosystem: a committed Dependabot or Renovate config
-- Where no scanner tracks the pin — a version baked into a script or action step — document the renewal cadence beside the pin
+- Where no scanner tracks the pin — a version baked into a script or action step, a pinned model version behind a bounded classification — document the renewal cadence beside the pin
 - A version bump is its own focused change, never bundled with feature work
 - Formatter and linter bumps especially (see `rules/code-formatting.md` Separation of Concerns)
 - Match a stale pin locally to ship the current task; bump it in a separate change
@@ -63,7 +63,7 @@ alwaysApply: true
 - Preconditions (each covered reference, all required):
   1. The project documents an authority-of-record rule in its own plugin naming every covered reference, the adversary being tracked, and why a pin degrades rather than stabilizes
   2. A deploy-time check fails the deployment when the committed reference is anything other than the permitted floating form, and fails when it can no longer locate the reference (a moved or renamed target fails loudly, never passes vacuously)
-  3. The check runs as a deterministic script per `rules/script-delegation.md`, not agent judgment
+  3. The check runs as a deterministic script per `rules/script-delegation.md`, never agent judgment and never a bounded classification
   4. A per-install override lets an operator pin for reproducibility, documented in the authority-of-record rule and explicitly outside the deploy check's scope — environment configuration is not a committed dependency
 - "The upstream releases often" does NOT qualify. See Freshness
 - "Pinning is inconvenient" does NOT qualify
@@ -81,7 +81,7 @@ alwaysApply: true
   2. The dependency's own default branch is CI-gated: its test suite runs on every merge
   3. The consumer's build refetches on every rebuild — any build-cache layer that would freeze the floating reference carries an explicit upstream-change trigger, bound to the covered reference
   4. A deploy-time check fails the deployment when the committed reference carries any specifier, when the refetch trigger is absent or not bound to that reference, and when it can no longer locate the reference (a moved or renamed target fails loudly, never passes vacuously)
-  5. The check runs as a deterministic script per `rules/script-delegation.md`, not agent judgment
+  5. The check runs as a deterministic script per `rules/script-delegation.md`, never agent judgment and never a bounded classification
 - "We wrote it" alone does NOT qualify — a dependency with its own release train, or with consumers outside the owner, still pins
 - "The bump PRs are noise" does NOT qualify. See Freshness
 - A consumed surface the owner does not control end-to-end does NOT qualify
@@ -99,7 +99,7 @@ alwaysApply: true
   2. The image's base is pinned to a specific tag or digest and scanner-tracked
   3. The image is rebuilt on a stated recurring cadence
   4. A deploy-time check fails the deployment when a covered image's base is unpinned, and when a package the image EXPLICITLY installs (an operand of its package-manager install command) falls outside the recorded set. Packages already present in the base image, and transitive dependencies the package manager resolves, are out of scope
-  5. The check runs as a deterministic script per `rules/script-delegation.md`, not agent judgment
+  5. The check runs as a deterministic script per `rules/script-delegation.md`, never agent judgment and never a bounded classification
 - "Pinning apt is annoying" does NOT qualify — the archive-retention failure mode is the test, and a distro that serves historical versions does not meet it
 - A language-ecosystem dependency does NOT qualify, whatever installs it
 - Every other dependency in the repo still pins with a stated renewal mechanism

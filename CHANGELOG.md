@@ -1,5 +1,82 @@
 # Changelog
 
+### Added
+
+- **A third destination in the reasoning/scripting split: bounded
+  classification.** `rules/script-delegation.md` offered exactly two —
+  everything deterministic to a script, everything requiring reasoning to the
+  skill. Some decisions fit neither. They are semantic, so a pure function
+  cannot answer them, and they gate work so cheap or so frequent that spending
+  a reasoning round to decide costs more than the decision saves. With two
+  boxes available those get forced into the script box by enumeration, which
+  the same rule already forbids under The Regex Trap: *"A script should only
+  handle patterns that are fully enumerable."* `tiers.py`'s eight-name
+  `MECHANICAL_TASKS` frozenset is the live instance — the ninth kind of
+  mechanical work is permanently ineligible however completely its plan is
+  specified (#479, #480).
+
+  Four bullets: two definitional, one safety valve, one constraint. The
+  insufficient-evidence answer hands the question back to the reasoning round,
+  which keeps a classifier that cannot tell from becoming a cheap default. The
+  label never triggers an action `rules/ship-on-green.md` calls un-undoable.
+
+  It is written as a peer of the other two destinations, not as a carve-out. An
+  earlier draft gave it five preconditions and three disqualifiers, which made
+  a peer read as a narrow exception and restated the definition as hurdles.
+
+  Five provisions were drafted and cut under review, each for a stated reason.
+  Logging "the behavior taken without it" is self-defeating: the old path for a
+  bounded classification is always the reasoning round, so recording it spends
+  the round the destination exists to avoid. It is free only in the
+  advisory-and-additive shape #482 describes, where the expensive path runs
+  regardless, and that does not generalize. A bullet repeating that the four
+  gate carve-outs exclude a classifier duplicated what those four now say
+  themselves. Logging a label's inputs and the action taken had no named
+  decision reading them, unlike every Herdr record, each of which exists
+  because a specific later step is unable to decide without it. Stamping every
+  label with its question version and model went the same way: the pin is
+  already the record under Pinning, a bump is attributable by timestamp, and
+  per-label stamping buys something only where two versions run concurrently.
+  A log with no reader and no gate also fails this repo's own standard —
+  `rules/language-diagnostics.md`: *"a deterministic check nobody runs does not
+  exist."* And a blanket "never decides a gate" is contradicted by the repo:
+  `rules/review-severity.md` classifies every finding blocking or advisory — a
+  two-value set picked by reading meaning, with no procedure that computes it —
+  and that call gates the merge today.
+
+  The surviving bullets each name what breaks without them. That was the test
+  the cut five could not pass.
+
+### Changed
+
+- **Four gate carve-outs say explicitly that a classifier does not qualify.**
+  `rules/dependency-management.md:66`, `:84`, `:102` and
+  `rules/ci-safety.md:187` each required their check to run "as a deterministic
+  script per `rules/script-delegation.md`, not agent judgment". That phrase
+  read as "not the second box", and a third box made all four ambiguous the
+  moment anyone asked whether a bounded classification counts — putting any
+  consumer that wired one up in violation of four carve-outs by accident. Those
+  four positions require a DETERMINISTIC check, which already excluded
+  reasoning; naming classification alongside it makes the existing scope
+  explicit rather than adding a new restriction (#479).
+
+- **Three consequential rules absorb the new destination.**
+  `rules/testing-standards.md` Determinism: a shipped classifier is stubbed or
+  replayed from recorded fixtures, never called live, since a live call puts
+  runtime nondeterminism back into the suite that section exists to keep out.
+  `rules/dependency-management.md` Freshness: a pinned model version is a
+  pinned dependency no scanner tracks, so it takes the documented-cadence
+  branch already there for a version baked into a script. The pin is the
+  record; nothing stamps it onto each output.
+  `rules/script-as-black-box.md`: a classification's question text, version and
+  answer space are that destination's analog of a script's constants, so skill
+  prose references them by anchor rather than restating them. The README rules
+  table and the rule's own `description:` and `applyTo:` follow (#479).
+
+  No classifier ships in this change. The category is settled in `rules/` first
+  so a consumer wiring one up does not contradict the rules it ships under.
+
+
 ## 0.3.249 — 2026-09-23
 
 ### Fixed
