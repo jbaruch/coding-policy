@@ -40,6 +40,50 @@
 
 ### Added
 
+- **The first bounded classification, and the labelled corpus that scores it.**
+  `rules/script-delegation.md` gained the destination in this release; nothing
+  used it. This does, at the one point in a round where the destination is
+  right: a worker report is prose whose meaning has to be read, and the answer
+  is one of a fixed set (#482, #479).
+
+  **The measurement that says it is a classifier and not a script:** across 90
+  recorded reports the lead marked 63 `blocking` and 27 `approved`, while only 7
+  carry an explicit `## BLOCKED` heading. A grep scores about 8% recall. The
+  verdict is in the prose or it is nowhere — which is the test this release
+  settled on, where the information lives rather than how the question feels.
+
+  `classify/classify-report.sh` calls a pinned model through `codex exec
+  --output-schema`, the schema-constrained pattern `.github/codex-review`
+  already ships. Every label carries the report's hash, the question's hash and
+  the model id, so a prompt edit or a model bump is attributable — the pin takes
+  `rules/dependency-management.md` Freshness's documented-cadence branch. The
+  answer set carries `insufficient_evidence`, which routes the question back to
+  the lead reading the report as it always has. Nothing is suppressed: this
+  annotates so the lead can gate several reports in one turn instead of one turn
+  each.
+
+  **The labels were not invented for this.** The lead recorded a verdict against
+  every delivered report at the time it gated the round, and those verdicts sit
+  in the recovery store — written by a different agent, on a different day, for
+  a different purpose. `classify/evaluate.sh` builds the corpus from them and
+  scores the classifier against it, reporting accuracy, a confusion map, and the
+  disagreements, which are the useful half: a label the classifier and the lead
+  differ on is either a classifier error or a report whose verdict was never
+  legible from its own text, and only reading it says which.
+
+  **No accuracy number ships with this.** Producing one costs one model call per
+  report and the Codex subscription is exhausted until 2026-09-25 — the same
+  outage that blocks PR review. The failure path is verified live against it: a
+  call that hits the usage limit exits 2 with no verdict. A failed call is never
+  a label. `--corpus-only` builds and prints the corpus without spending
+  anything.
+
+  No test calls a model. The classifier is stubbed on PATH, per the
+  `rules/testing-standards.md` Determinism clause this release added for exactly
+  this case.
+
+### Added
+
 - **A gate on supervision events: 44% of the lead's interruptions carry nothing
   it can act on.** Herdr records every change it observes in a worker, and the
   lead acknowledges all of them. Over 1790 recorded events it acknowledged 1790,

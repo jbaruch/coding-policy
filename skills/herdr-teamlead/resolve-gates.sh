@@ -60,7 +60,7 @@ main() {
   local workflows=() found
   # A location the platform defines, not a filename anyone guessed.
   while IFS= read -r found; do
-    [ -n "$found" ] && workflows+=("${found#"${checkout}/"}")
+    if [ -n "$found" ]; then workflows+=("${found#"${checkout}/"}"); fi
   done < <(find "${checkout}/.github/workflows" -maxdepth 1 -type f \
              \( -name '*.yml' -o -name '*.yaml' \) -print 2>/dev/null | sort)
 
