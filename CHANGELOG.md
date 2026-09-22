@@ -40,6 +40,51 @@
 
 ### Added
 
+- **A gate on supervision events: 44% of the lead's interruptions carry nothing
+  it can act on.** Herdr records every change it observes in a worker, and the
+  lead acknowledges all of them. Over 1790 recorded events it acknowledged 1790,
+  each one a full lead turn shipping the lead's whole conversation (#445).
+
+  `supervision_gate.py` decides which need the lead. Replayed against those
+  1790: **800 suppressed, 990 woken.** 495 `visible_observed` (a sha256 of a
+  worker's pane) and 305 `recheck_due` whose observed state had not moved since
+  the deferral.
+
+  **It is a script, not a classifier, and the reason is where the information
+  lives** rather than how the question feels. `{"kind": "visible_observed",
+  "data": {"sha256": "5f084..."}}` has no meaning to read; deciding whether the
+  lead is needed means joining it against other state — has a report landed, is
+  the worker working, has anything moved since the deferral. A join is a script.
+
+  **Default-wake is the safety property.** Only two kinds are suppressible and
+  everything else wakes the lead, including a kind the module has never seen.
+  That matters more than it looks: `<key>_observed` kinds are generated from
+  whatever an observation samples, and the 1790 recorded events contain none of
+  the failure kinds — `watcher_lost`, `observation_error_observed`,
+  `report_error_observed`, `unavailable_observed`. A gate enumerating what to
+  WAKE on would have been silent for exactly those. Enumerating what to SUPPRESS
+  puts an unknown kind on the cheap side: one lead turn, never a missed failure.
+  It is the inverse of the enumerated lane #480 retired, where the list sat on
+  the permit side and a miss was permanent.
+
+  A screen hash is suppressed unconditionally. There is no state in which it is
+  the only signal: a landed report has its own event, a worker that stopped
+  working has its own event, and no lead can act on a hash without going to read
+  the pane, which this changes nothing about. Liveness stays the watcher
+  heartbeat and `wait-report.sh`'s budget.
+
+  A deferral is suppressed only while the observed state is unchanged, and never
+  more than `MAX_QUIET_RECHECKS` times in a row: a worker whose state never moves
+  is indistinguishable from a stalled one, and a stall is the lead's to judge.
+  Only a genuine state change resets that run — resetting on the stall wake too
+  would let it go quiet again immediately and the bound would never hold.
+
+  Read-only: it decides nothing and writes nothing. Verdicts are computed
+  against recorded history first, which is how the 800 figure exists before
+  anything is suppressed live.
+
+### Added
+
 - **One preflight call replaces a round's opening nine steps.** Dispatch is
   Step 10 of 16, and Steps 2, 3, 4 and 8's prune were each a separate lead turn
   that shipped the lead's whole accumulated context to run a script and read its
