@@ -44,7 +44,6 @@ from .measure import (
 from .planner import plan as build_plan
 from .planner import headroom_of
 from .tiers import MissingTierError, parse_launch_args, parse_tiers, select_tier
-from .qualification import require_qualification
 from .launch import start_worker, verify_running
 from .state import (
     add_assignment,
@@ -261,9 +260,7 @@ def build_parser():
     plan_parser.add_argument("--task", help="Original task identity; preserve it through every correction.")
     plan_parser.add_argument("--requirements", metavar="FILE",
                              help="Versioned per-role specialty, capabilities, independence and engagement requirements.")
-    plan_parser.add_argument("--preview-tiers", action="store_true",
-                             help="Preview unqualified tiers. Live apply still requires complete qualification evidence.")
-    plan_parser.add_argument("--now", metavar="ISO-8601", help="Reference time for qualification expiry (default: current UTC time).")
+    plan_parser.add_argument("--now", metavar="ISO-8601", help="Reference time for the plan (default: current UTC time).")
 
     apply_parser = sub.add_parser(
         "apply",
@@ -590,7 +587,7 @@ def _planned_snapshot_headroom(document, state, state_path):
     return _snapshot_headroom(snapshot)
 
 
-def _candidate_tiers(roles, agents, rounds, fix_round=None, judge=None, qualified_at=None, excludes=None, headroom=None):
+def _candidate_tiers(roles, agents, rounds, fix_round=None, judge=None, excludes=None, headroom=None):
     tiered = any(agent.tiers for agent in agents)
     if not tiered and not (judge and "judge" in roles):
         if rounds:
@@ -622,13 +619,6 @@ def _candidate_tiers(roles, agents, rounds, fix_round=None, judge=None, qualifie
                 continue
             if tier is None:
                 continue
-            if qualified_at is not None:
-                evidence = [record for entry in agent.tiers.values() for record in entry.get("qualification", [])]
-                try:
-                    require_qualification({**tier, "qualification": evidence}, role, qualified_at)
-                except UsageError:
-                    # This candidate is ineligible; another qualified worker may fill the seat.
-                    continue
             candidates[role][agent.name] = {key: tier[key] for key in (
                 "round", "tier_row", "kind", "model", "effort", "multiplier", "billing_window",
                 "effective_multiplier", "pressure_headroom", "de_escalated",
@@ -872,7 +862,6 @@ def cmd_plan(args, client=None, warn=None, trace=None):
     # what keeps its recomputed tiers equal to the planned ones (#477).
     measured_headroom = _snapshot_headroom(snapshot)
     tier_candidates = _candidate_tiers(canonical, agents, rounds, args.fix_round, judge,
-                                      None if args.preview_tiers else (args.now or now_iso()),
                                       excludes={role: names for role, names in excludes.items() if role in set(canonical)},
                                       headroom=measured_headroom)
     # Each seat inherits its role's bars, tiers, round type and requirements.
@@ -1299,9 +1288,6 @@ def cmd_apply(args, client=None, warn=None, trace=None):
             tiers=tiers,
             retrospective_guard=retrospective_runtime.Guard(state_path, state, client, agents_by_name, at,
                                                           task=args.task, retain=args.retain_context or args.retain_specialist, no_clear=args.no_clear),
-            qualifications={role: [record for entry in agents_by_name[name].tiers.values()
-                                   for record in entry.get("qualification", [])]
-                            for role, name in assignments.items()},
         )
     except TeamLeadError as exc:
         for identifier in prepared:

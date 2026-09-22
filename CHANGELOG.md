@@ -38,6 +38,30 @@
   so `select_tier` has never resolved a non-judge round. It lands before the
   tables do.
 
+### Removed
+
+- **The tier qualification battery.** A tier row no longer needs a paired,
+  blinded screen of 5 cases, a promotion battery of 20 and a weekly canary of 5
+  per model, effort and role before live dispatch. `teamlead/qualification.py`,
+  its tests, the `qualification` tier field and `plan --preview-tiers` are gone;
+  a config still carrying `qualification` is refused with the list of allowed
+  fields (#445 §3).
+
+  **Why it could go:** it guarded against a cheap model quietly missing
+  defects, and three things already cover that. Judgment rounds are pinned to
+  the top model by `parse_tiers`, so the battery never applied where a miss
+  costs most. Every other round is independently reviewed and tested before
+  release, which catches a bad build whatever model wrote it. And which model
+  suits which job is now the capability table, sourced and dated, instead of a
+  battery nobody ran. Nobody had: 0 configured workers carry a `tiers` table
+  and 0 qualification records exist in any config, so removing it changes no
+  live dispatch. Left in, it was the first thing to fail the day a tier table
+  was wired in (#481).
+
+  Ledger rows written earlier may carry a `qualification` summary inside
+  `tier`; readers ignore it and no migration runs.
+
+
 ### Added
 
 - **The first bounded classification, and the labelled corpus that scores it.**
