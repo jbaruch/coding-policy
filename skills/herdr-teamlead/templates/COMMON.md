@@ -72,6 +72,12 @@ to know goes in the report.
 - The resolved rule index is `{{POLICY_INDEX}}`; it links every rule file. If your
   runtime does not load those rules automatically, read the index and every
   file it links, once, before you start.
+- Your runtime may have inherited a parent rule reference — a `.tessl/RULES.md`
+  or similar — that does not resolve from your worktree. Expected. The index
+  above is authoritative and complete. Do not chase the broken reference, do not
+  try to install or reconstruct what it pointed at, and do not report its
+  absence: 22 of the last 52 reports recorded that same dead pointer, each after
+  recovering from it exactly as you will.
 - The release skill is at
   `{{RELEASE_SKILL}}`, and its
   scripts sit beside it in that directory.
@@ -92,6 +98,17 @@ to know goes in the report.
 - One logical change per commit. Imperative subject, body says why.
 - PR title is `<type>(<scope>): <imperative summary>`. The PR body follows the
   repo's template and carries the AI disclosure.
+
+## Reading
+
+- Large reads truncate. Read a big file in bounded sections the first time
+  rather than discovering the limit by hitting it and re-reading — 24 of the
+  last 52 reports recorded that round trip.
+- Confirm a filename before reading it. `ls` or `find` the directory first; a
+  guessed path that does not exist costs a round trip, and 9 of those 52 reports
+  recorded one.
+- Both of those are avoidable friction, not findings. Report what you learned
+  about the work, not the fact that you paged through a file.
 
 ## Reporting
 

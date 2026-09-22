@@ -72,6 +72,30 @@
   into rounds, gating a report against task history, judging which lessons
   apply, and handling what nobody anticipated.
 
+- **Briefs preempt the three frictions workers kept reporting.** 52 saved worker
+  reports carry the `## Handoff observations` section COMMON.md mandates —
+  *"unresolved assumptions, avoidable friction or repeated work"* — written at
+  the time by the workers who hit it. Read together for the first time, three
+  observations dominate, and none of them had ever been acted on because each
+  individual worker recovered fine and the cost was only visible in aggregate:
+
+  **22 of 52** recorded the same dead pointer: *"`tessl/RULES.md` is absent;
+  COMMON's resolved index was used."* An inherited parent rule reference that
+  does not resolve from a worktree. Every worker followed it, found it gone,
+  recovered through the resolved index, and wrote it up. COMMON.md now says it
+  up front, with the count, so nobody chases it and nobody reports it.
+
+  **24 of 52** recorded reading a file, truncating, and reading it again in
+  chunks: *"Initial large reads truncated; required content was reread in
+  smaller sections."* Nothing warned them. COMMON.md now does.
+
+  **9 of 52** recorded a guessed path that did not exist. COMMON.md now says to
+  confirm a filename before reading it.
+
+  The counts ride in the brief text on purpose: a worker told "24 of the last 52
+  reports recorded that round trip" reads it as a measured cost, not a style
+  preference.
+
 - **Briefs point at a repo's gates instead of sending every worker to find
   them.** `COMMON.md` told each worker to *"read the repo's contributor
   instructions and configured checks to identify its gates"*. Five workers in a
