@@ -3,6 +3,7 @@
     "scripts/tests/test_source_index.py",
     "skills/herdr-standup/standup-render.py",
     "skills/herdr-standup/tests/test_standup_render.py",
+    "skills/herdr-teamlead/classify/extract-answer.py",
     "skills/herdr-teamlead/teamlead/__init__.py",
     "skills/herdr-teamlead/teamlead/__main__.py",
     "skills/herdr-teamlead/teamlead/assign.py",

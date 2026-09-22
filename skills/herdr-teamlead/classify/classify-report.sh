@@ -16,12 +16,24 @@
 # always has. This never suppresses that read (#482): it annotates, so the lead
 # can gate several reports in one turn instead of one turn each.
 #
-# Usage: classify-report.sh <report-path> [--model <id>] [--out <file>]
+# One adapter per kind the fleet already runs. A classifier pinned to one vendor
+# is useless exactly when that vendor's subscription is spent, which is the
+# condition the fleet spends most of its time managing. All three constrain the
+# answer to the schema -- `codex exec --output-schema`, `claude --json-schema`,
+# `grok --json-schema` -- and every adapter's answer then passes the same enum
+# check, which is the actual guarantee.
+#
+# Every adapter runs from an empty directory, with no tools, for one turn. The
+# classifier judges the report's own text: an adapter left free to search the
+# workspace read this repository's tests and answered from them.
+#
+# Usage: classify-report.sh <report-path> [--agent codex|claude|grok]
+#                           [--model <id>] [--out <file>]
 #
 # Output contract (rules/script-delegation.md -- structured stdout):
 #   stdout: one JSON object --
 #     {"schema_version": 1, "report": "<path>", "sha256": "<of the report>",
-#      "question": "<sha256 of the prompt>", "model": "<id>",
+#      "question": "<sha256 of the prompt>", "agent": "<kind>", "model": "<id>",
 #      "verdict": "blocking"|"approved"|"insufficient_evidence",
 #      "evidence": "<the deciding sentence, verbatim>"}
 #   The report hash, question hash and model id travel with every label, so a
@@ -44,9 +56,19 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd && printf x)"
 HERE="${HERE%x}"
 HERE="${HERE%$'\n'}"
 
-#: The pinned model. A bump is a dependency bump: change it here, and every
-#: label recorded afterwards carries the new id.
-MODEL="gpt-5.6-sol"
+#: The pinned model per kind. A bump is a dependency bump: change it here, and
+#: every label recorded afterwards carries the new id. These are classification
+#: pins, not the fleet's frontier seats: reading one report for one verdict does
+#: not need the most expensive model a vendor sells.
+DEFAULT_AGENT="codex"
+model_for() { # <kind>
+  case "$1" in
+    codex) echo "gpt-5.6-sol" ;;
+    claude) echo "claude-sonnet-5" ;;
+    grok) echo "grok-4.6" ;;
+    *) return 1 ;;
+  esac
+}
 
 SCRATCH=""
 cleanup() { if [ -n "$SCRATCH" ]; then rm -rf "$SCRATCH"; fi; return 0; }
@@ -54,59 +76,66 @@ trap cleanup EXIT
 
 die() { echo "classify-report: $*" >&2; exit 2; }
 
+# Each adapter reads the whole question on stdin, writes the model's answer
+# object to <answer>, and returns non-zero when the vendor call failed.
+ask_codex() { # <model> <schema> <answer> <log>
+  codex exec --json --skip-git-repo-check --sandbox read-only \
+    --model "$1" --output-schema "$2" --output-last-message "$3" - >"$4" 2>&1
+}
+
+ask_claude() { # <model> <schema> <answer> <log>
+  local raw="${3}.raw"
+  claude -p --model "$1" --output-format json --json-schema "$(cat "$2")" \
+    --tools "" --strict-mcp-config >"$raw" 2>"$4" || return 1
+  python3 "${HERE}/extract-answer.py" claude "$raw" "$3" 2>>"$4"
+}
+
+ask_grok() { # <model> <schema> <answer> <log>
+  local raw="${3}.raw" question
+  question="$(cat)"
+  grok -m "$1" --json-schema "$(cat "$2")" --max-turns 1 --no-subagents \
+    --disable-web-search --tools "" -p "$question" </dev/null >"$raw" 2>"$4" || return 1
+  python3 "${HERE}/extract-answer.py" grok "$raw" "$3" 2>>"$4"
+}
+
 main() {
-  local report="" out="" model="$MODEL"
-  [ $# -gt 0 ] || die "usage: classify-report.sh <report-path> [--model <id>] [--out <file>]"
+  local report="" out="" agent="$DEFAULT_AGENT" model=""
+  [ $# -gt 0 ] || die "usage: classify-report.sh <report-path> [--agent codex|claude|grok] [--model <id>] [--out <file>]"
   report="$1"; shift
   while [ $# -gt 0 ]; do
     case "$1" in
+      --agent) agent="${2-}"; shift 2 || die "--agent needs codex, claude or grok" ;;
       --model) model="${2-}"; shift 2 || die "--model needs an id" ;;
       --out) out="${2-}"; shift 2 || die "--out needs a file" ;;
       *) die "unknown argument '$1'" ;;
     esac
   done
   [ -f "$report" ] && [ -r "$report" ] || die "'${report}' is not a readable file"
+  local pinned
+  pinned="$(model_for "$agent")" || die "--agent '${agent}' is not one of codex, claude, grok"
+  [ -n "$model" ] || model="$pinned"
 
   local schema="${HERE}/report-verdict.schema.json" prompt="${HERE}/report-verdict.prompt.md"
   [ -r "$schema" ] || die "missing answer schema at ${schema}"
   [ -r "$prompt" ] || die "missing question at ${prompt}"
-
-  command -v codex >/dev/null || die "codex is not on PATH; the classifier calls it with --output-schema"
+  command -v "$agent" >/dev/null || die "${agent} is not on PATH"
 
   local work
   work="$(mktemp -d "${TMPDIR:-/tmp}/classify-report.XXXXXX")" || die "cannot create a temporary directory"
   SCRATCH="$work"
+  local answer="${work}/answer.json" log="${work}/run.log" room="${work}/room"
+  mkdir "$room" || die "cannot create the empty working directory"
 
-  local answer="${work}/answer.json"
-  if ! { cat "$prompt"; printf '\n\n----- REPORT BEGINS -----\n'; cat "$report"; } \
-      | codex exec --json --skip-git-repo-check --sandbox read-only \
-          --model "$model" --output-schema "$schema" --output-last-message "$answer" - \
-          >"${work}/run.log" 2>&1; then
-    cat "${work}/run.log" >&2
-    die "the model call failed; a failed call is never a verdict"
+  if ! ( cd "$room" && { cat "$prompt"; printf '\n\n----- REPORT BEGINS -----\n'; cat "$report"; } \
+           | "ask_${agent}" "$model" "$schema" "$answer" "$log" ); then
+    cat "$log" >&2
+    die "the ${agent} call failed; a failed call is never a verdict"
   fi
-  [ -s "$answer" ] || { cat "${work}/run.log" >&2; die "the model wrote no schema-conforming answer"; }
+  [ -s "$answer" ] || { cat "$log" >&2; die "${agent} wrote no schema-conforming answer"; }
 
   local payload
-  payload="$(python3 - "$answer" "$report" "$prompt" "$model" <<'PY'
-import hashlib, json, sys
-answer, report, prompt, model = sys.argv[1:5]
-with open(answer, encoding="utf-8") as handle:
-    label = json.load(handle)
-if label.get("verdict") not in {"blocking", "approved", "insufficient_evidence"}:
-    sys.stderr.write("classify-report: the answer is outside the schema's enum\n")
-    raise SystemExit(2)
-
-def digest(path):
-    with open(path, "rb") as handle:
-        return hashlib.sha256(handle.read()).hexdigest()
-
-print(json.dumps({"schema_version": 1, "report": report, "sha256": digest(report),
-                  "question": digest(prompt), "model": model,
-                  "verdict": label["verdict"], "evidence": label.get("evidence", "")},
-                 sort_keys=True))
-PY
-  )" || die "the model's answer did not conform to the schema"
+  payload="$(python3 "${HERE}/extract-answer.py" label "$answer" "$report" "$prompt" "$agent" "$model")" \
+    || die "the ${agent} answer did not conform to the schema"
 
   printf '%s\n' "$payload"
   if [ -n "$out" ]; then

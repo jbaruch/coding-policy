@@ -11,7 +11,8 @@
 # recall, which is the measurement that says this destination is a classifier
 # and not a script.
 #
-# Usage: evaluate.sh [--limit N] [--model <id>] [--state FILE] [--corpus-only]
+# Usage: evaluate.sh [--agent codex|claude|grok] [--limit N] [--model <id>]
+#                    [--state FILE] [--corpus-only]
 #
 #   --corpus-only  build and print the labelled corpus, call no model, spend no
 #                  quota. Use it to see what would be scored.
@@ -19,7 +20,7 @@
 #
 # Output contract (rules/script-delegation.md -- structured stdout):
 #   stdout: one JSON object --
-#     {"schema_version": 1, "model": "<id>", "scored": N,
+#     {"schema_version": 1, "agent": "<kind>", "model": "<id>", "scored": N,
 #      "accuracy": <float>, "confusion": {"<recorded>__<predicted>": N},
 #      "disagreements": [{"report", "recorded", "predicted", "evidence"}, ...]}
 #   `disagreements` is the useful half: a label the classifier and the lead
@@ -73,11 +74,12 @@ PY
 }
 
 main() {
-  local limit=0 model="" state="${HOME}/.local/state/teamlead/state.json" corpus_only=0
+  local limit=0 model="" agent="codex" state="${HOME}/.local/state/teamlead/state.json" corpus_only=0
   while [ $# -gt 0 ]; do
     case "$1" in
       --limit) limit="${2-}"; shift 2 || die "--limit needs a count" ;;
       --model) model="${2-}"; shift 2 || die "--model needs an id" ;;
+      --agent) agent="${2-}"; shift 2 || die "--agent needs codex, claude or grok" ;;
       --state) state="${2-}"; shift 2 || die "--state needs a file" ;;
       --corpus-only) corpus_only=1; shift ;;
       -h|--help) sed -n '2,33p' "${BASH_SOURCE[0]}"; exit 0 ;;
@@ -101,14 +103,14 @@ main() {
     return 0
   fi
 
-  echo "evaluate: scoring ${total} report(s); this spends one model call each" >&2
+  echo "evaluate: scoring ${total} report(s) on ${agent}; this spends one model call each" >&2
   local results="${work}/results.json" failures=0 index=0 report recorded answer
   printf '[]' > "$results"
   while IFS=$'\t' read -r report recorded; do
     index=$((index + 1))
     echo "  [${index}/${total}] ${report}" >&2
     answer="${work}/answer-${index}.json"
-    if bash "${HERE}/classify-report.sh" "$report" ${model:+--model "$model"} --out "$answer" >/dev/null 2>"${work}/err-${index}"; then
+    if bash "${HERE}/classify-report.sh" "$report" --agent "$agent" ${model:+--model "$model"} --out "$answer" >/dev/null 2>"${work}/err-${index}"; then
       python3 - "$results" "$answer" "$recorded" <<'PY'
 import json, sys
 results, answer, recorded = sys.argv[1:4]
@@ -128,14 +130,14 @@ PY
 for row in json.load(open(sys.argv[1])):
     print(row["report"] + "\t" + row["recorded"])' "$selected")
 
-  python3 - "$results" "$failures" "${model:-pinned}" <<'PY'
+  python3 - "$results" "$failures" "${model:-pinned}" "$agent" <<'PY'
 import collections, json, sys
-results, failures, model = sys.argv[1], int(sys.argv[2]), sys.argv[3]
+results, failures, model, agent = sys.argv[1], int(sys.argv[2]), sys.argv[3], sys.argv[4]
 with open(results, encoding="utf-8") as handle:
     rows = json.load(handle)
 confusion = collections.Counter("{}__{}".format(r["recorded"], r["verdict"]) for r in rows)
 agree = sum(n for key, n in confusion.items() if key.split("__")[0] == key.split("__")[1])
-print(json.dumps({"schema_version": 1, "model": rows[0]["model"] if rows else model,
+print(json.dumps({"schema_version": 1, "agent": agent, "model": rows[0]["model"] if rows else model,
                   "scored": len(rows), "failed": failures,
                   "accuracy": round(agree / len(rows), 4) if rows else None,
                   "confusion": dict(confusion),

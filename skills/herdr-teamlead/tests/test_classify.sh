@@ -22,6 +22,10 @@
 #   9. Scoring                  -> accuracy, confusion, disagreements.
 #  10. A failed classification  -> exit 1 with a partial score, never averaged
 #                                 over the ones that worked.
+#  11. Claude and Grok adapters -> each vendor's envelope unwrapped to the same
+#                                 label; an errored or multi-answer run refused.
+#  12. The empty room           -> every adapter runs where it can read nothing
+#                                 but the question.
 
 set -uo pipefail
 
@@ -117,6 +121,70 @@ main() {
   classify "$TMP/abstain" "$report"
   if [[ $RC -eq 0 ]] && [[ "$(field "$OUT" verdict)" == "insufficient_evidence" ]]; then
     pass; else fail "an honest abstention is an answer, not a failure, got RC=$RC OUT=$OUT"; fi
+
+  echo "▶ one adapter per kind" >&2
+
+  # Claude wraps the answer in a stream of events; the last `result` holds it.
+  mkdir -p "$TMP/cl" || die "mkdir cl"
+  cat > "$TMP/cl/claude" <<'STUB' || die "write claude stub"
+#!/bin/sh
+cat > /dev/null
+ls -A > "$ROOM_PROBE"
+printf '%s' '[{"type":"system"},{"type":"result","is_error":false,"structured_output":{"verdict":"approved","evidence":"No blocking findings."}}]'
+STUB
+  chmod +x "$TMP/cl/claude" || die "chmod claude stub"
+  OUT="$(ROOM_PROBE="$TMP/cl-room" PATH="$TMP/cl:$PATH" bash "$DIR/classify-report.sh" "$report" --agent claude 2>"$ERRFILE")"
+  RC=$?
+  if [[ $RC -eq 0 ]] && [[ "$(field "$OUT" verdict)" == "approved" ]] \
+     && [[ "$(field "$OUT" agent)" == "claude" ]] && [[ "$(field "$OUT" model)" == "claude-sonnet-5" ]]; then
+    pass; else fail "claude's envelope unwraps to a label with its pinned model, got RC=$RC OUT=$OUT"; fi
+  # The adapter ran somewhere it could read nothing but the question.
+  if [[ -f "$TMP/cl-room" && ! -s "$TMP/cl-room" ]]; then
+    pass; else fail "the claude adapter must run in an empty directory, saw: $(cat "$TMP/cl-room" 2>/dev/null)"; fi
+
+  cat > "$TMP/cl/claude" <<'STUB' || die "write erroring claude stub"
+#!/bin/sh
+cat > /dev/null
+printf '%s' '[{"type":"result","is_error":true,"result":"usage limit reached"}]'
+STUB
+  OUT="$(PATH="$TMP/cl:$PATH" bash "$DIR/classify-report.sh" "$report" --agent claude 2>"$ERRFILE")"
+  RC=$?
+  ERRTEXT="$(cat "$ERRFILE")"
+  if [[ $RC -eq 2 && -z "$OUT" ]] && printf '%s' "$ERRTEXT" | grep -q 'never a verdict'; then
+    pass; else fail "an errored claude run is never a verdict, got RC=$RC OUT=$OUT"; fi
+
+  # Grok puts the answer in `text`, and one turn gives exactly one object.
+  mkdir -p "$TMP/gk" || die "mkdir gk"
+  cat > "$TMP/gk/grok" <<'STUB' || die "write grok stub"
+#!/bin/sh
+ls -A > "$ROOM_PROBE"
+printf '%s' '{"text":"{\"verdict\":\"blocking\",\"evidence\":\"B1\"}","stopReason":"end_turn"}'
+STUB
+  chmod +x "$TMP/gk/grok" || die "chmod grok stub"
+  OUT="$(ROOM_PROBE="$TMP/gk-room" PATH="$TMP/gk:$PATH" bash "$DIR/classify-report.sh" "$report" --agent grok 2>"$ERRFILE")"
+  RC=$?
+  if [[ $RC -eq 0 ]] && [[ "$(field "$OUT" verdict)" == "blocking" ]] && [[ "$(field "$OUT" agent)" == "grok" ]]; then
+    pass; else fail "grok's envelope unwraps to a label, got RC=$RC OUT=$OUT"; fi
+  if [[ -f "$TMP/gk-room" && ! -s "$TMP/gk-room" ]]; then
+    pass; else fail "the grok adapter must run in an empty directory, saw: $(cat "$TMP/gk-room" 2>/dev/null)"; fi
+
+  # A live probe before these adapters existed: free to roam, grok searched the
+  # workspace and emitted four concatenated answers. Picking one out is not the
+  # answer to the question asked.
+  cat > "$TMP/gk/grok" <<'STUB' || die "write chatty grok stub"
+#!/bin/sh
+printf '%s' '{"text":"{\"verdict\":\"insufficient_evidence\",\"evidence\":\"a\"}{\"verdict\":\"blocking\",\"evidence\":\"b\"}"}'
+STUB
+  OUT="$(PATH="$TMP/gk:$PATH" bash "$DIR/classify-report.sh" "$report" --agent grok 2>"$ERRFILE")"
+  RC=$?
+  ERRTEXT="$(cat "$ERRFILE")"
+  if [[ $RC -eq 2 && -z "$OUT" ]] && printf '%s' "$ERRTEXT" | grep -q 'more than one answer'; then
+    pass; else fail "more than one grok answer is refused, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
+
+  OUT="$(bash "$DIR/classify-report.sh" "$report" --agent gemini 2>"$ERRFILE")"
+  RC=$?
+  if [[ $RC -eq 2 && -z "$OUT" ]]; then
+    pass; else fail "an unknown agent is a usage error, got RC=$RC OUT=$OUT"; fi
 
   echo "▶ the labelled corpus" >&2
 

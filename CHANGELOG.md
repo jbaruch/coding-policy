@@ -82,6 +82,36 @@
   `rules/testing-standards.md` Determinism clause this release added for exactly
   this case.
 
+- **The classifier runs on any of the fleet's three vendors.** The first cut
+  called `codex exec` and nothing else, in a plugin whose purpose is running
+  `claude`, `codex` and `grok` as interchangeable workers — and pinned to the one
+  subscription that was exhausted. A classifier tied to one vendor is useless
+  exactly when that vendor is spent, which is the condition the fleet spends most
+  of its time managing.
+
+  `--agent codex|claude|grok` selects an adapter. All three constrain generation
+  to the schema — `codex exec --output-schema`, `claude --json-schema`,
+  `grok --json-schema` — and every answer then passes the same enum check, which
+  was always the real guarantee: an off-enum answer is never a label, whichever
+  vendor produced it. An earlier note in this entry's thread claimed only Codex
+  could constrain to a schema; the search that concluded it looked for Codex's
+  flag name and missed the other two.
+
+  Each vendor wraps its answer differently. Claude emits a stream of events and
+  the answer sits in the last `result` event's `structured_output`; Grok puts it
+  in `text`. `classify/extract-answer.py` unwraps both, refuses a Claude run that
+  reported an error, and refuses a Grok run that returned more than one object.
+
+  **Every adapter runs in an empty directory, with no tools, for one turn.** The
+  classifier judges the report's own text. A live probe before that constraint
+  existed let Grok search the workspace: it found this repository's own tests,
+  reasoned from them, and emitted four concatenated answers. The tests now
+  assert the room is empty when each adapter runs.
+
+  Each kind pins a classification model rather than its vendor's frontier seat
+  (`claude-sonnet-5`, `grok-4.6`, `gpt-5.6-sol`); reading one report for one
+  verdict does not need the most expensive model a vendor sells.
+
 ### Added
 
 - **A gate on supervision events: 44% of the lead's interruptions carry nothing
