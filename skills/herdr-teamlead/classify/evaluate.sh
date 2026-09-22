@@ -17,6 +17,8 @@
 #   --corpus-only  build and print the labelled corpus, call no model, spend no
 #                  quota. Use it to see what would be scored.
 #   --limit N      score the N most recent reports instead of all of them.
+#   --since DATE   score only reports recorded on or after DATE (ISO). Use it to
+#                  measure a prompt change on reports it was not written against.
 #
 # Output contract (rules/script-delegation.md -- structured stdout):
 #   stdout: one JSON object --
@@ -46,10 +48,10 @@ trap cleanup EXIT
 
 die() { echo "evaluate: $*" >&2; exit 2; }
 
-corpus() { # <state-file> <limit>
-  python3 - "$1" "$2" <<'PY'
+corpus() { # <state-file> <limit> <since-or-empty>
+  python3 - "$1" "$2" "${3-}" <<'PY'
 import json, pathlib, sys
-state, limit = pathlib.Path(sys.argv[1]).expanduser(), int(sys.argv[2])
+state, limit, since = pathlib.Path(sys.argv[1]).expanduser(), int(sys.argv[2]), sys.argv[3]
 try:
     data = json.loads(state.read_text(encoding="utf-8"))
 except (OSError, ValueError) as exc:
@@ -63,6 +65,10 @@ for dispatch in data.get("recovery", {}).get("dispatches", []):
     if not (isinstance(evidence, dict) and evidence.get("path")) or verdict not in {"blocking", "approved"}:
         continue
     path = pathlib.Path(evidence["path"])
+    # ISO timestamps order as strings, so a date prefix selects everything
+    # recorded on or after it.
+    if since and dispatch.get("at", "") < since:
+        continue
     if path in seen or not path.is_file():
         continue
     seen.add(path)
@@ -74,10 +80,11 @@ PY
 }
 
 main() {
-  local limit=0 model="" agent="codex" state="${HOME}/.local/state/teamlead/state.json" corpus_only=0
+  local limit=0 since="" model="" agent="codex" state="${HOME}/.local/state/teamlead/state.json" corpus_only=0
   while [ $# -gt 0 ]; do
     case "$1" in
       --limit) limit="${2-}"; shift 2 || die "--limit needs a count" ;;
+      --since) since="${2-}"; shift 2 || die "--since needs an ISO date" ;;
       --model) model="${2-}"; shift 2 || die "--model needs an id" ;;
       --agent) agent="${2-}"; shift 2 || die "--agent needs codex, claude or grok" ;;
       --state) state="${2-}"; shift 2 || die "--state needs a file" ;;
@@ -93,10 +100,15 @@ main() {
   SCRATCH="$work"
 
   local selected="${work}/corpus.json"
-  corpus "$state" "$limit" > "$selected" || die "cannot build the labelled corpus"
+  corpus "$state" "$limit" "$since" > "$selected" || die "cannot build the labelled corpus"
   local total
   total="$(python3 -c 'import json,sys; print(len(json.load(open(sys.argv[1]))))' "$selected")"
-  [ "$total" -gt 0 ] || die "the corpus is empty: no delivered report carries a recorded verdict"
+  if [ "$total" -eq 0 ]; then
+    if [ -n "$since" ]; then
+      die "no labelled report was recorded on or after ${since}; run more rounds, or pass an earlier date"
+    fi
+    die "the corpus is empty: no delivered report carries a recorded verdict"
+  fi
 
   if [ "$corpus_only" -eq 1 ]; then
     python3 -c 'import json,sys; rows=json.load(open(sys.argv[1])); import collections; print(json.dumps({"schema_version":1,"scored":0,"corpus":len(rows),"recorded":dict(collections.Counter(r["recorded"] for r in rows)),"reports":rows}, sort_keys=True))' "$selected"

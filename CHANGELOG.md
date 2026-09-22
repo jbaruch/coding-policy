@@ -93,10 +93,19 @@
   Both false `blocking` labels share a cause in the question rather than the
   model. One report named defects the judge had already accepted for the
   shipment; the other named a prerequisite outside the reviewer's scope. Each
-  says "blocking" about something that does not block this round. Adding that
-  distinction to the prompt is principled — both are named policy concepts — but
-  re-scoring on the same 90 reports would tune on the answer key, so it waits
-  for reports this corpus does not contain.
+  says "blocking" about something that does not block this round. The prompt now
+  says so: a defect accepted for this shipment, or a finding the report places
+  outside its own scope, is not blocking.
+
+  Re-scoring that change on the same 90 reports cannot measure its benefit,
+  since it was written against two of them. It can measure its harm, which is
+  the risk that matters: a line telling the model when something is *not*
+  blocking could make it lenient. On the rerun Claude still caught 63 of 63 real
+  blockers, so it did not. The accepted-defect report flipped to `approved`; the
+  out-of-scope one still reads as blocking, now quoting an open obligation that
+  belongs to other gates, which is closer to a judgement call than an error.
+  The benefit is measured by `evaluate.sh --since <date>`, which scores only
+  reports recorded after the change.
 
   The failure path is also verified live: a Codex call against the exhausted
   subscription exits 2 with no verdict. A failed call is never a label.

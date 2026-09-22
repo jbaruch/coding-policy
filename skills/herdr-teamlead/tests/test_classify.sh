@@ -213,6 +213,18 @@ PY
   if [[ $RC -eq 0 ]] && [[ "$(field "$OUT" corpus)" == "1" ]]; then
     pass; else fail "the corpus keeps recorded verdicts with readable files only, got RC=$RC OUT=$OUT"; fi
 
+  # --since keeps only reports recorded on or after the date, so a prompt change
+  # can be measured on reports it was not written against.
+  OUT="$(bash "$DIR/evaluate.sh" --corpus-only --state "$state" --since 2026-09-03 2>"$ERRFILE")"
+  RC=$?
+  if [[ $RC -eq 0 ]] && [[ "$(field "$OUT" corpus)" == "1" ]]; then
+    pass; else fail "--since keeps a report recorded on the date, got RC=$RC OUT=$OUT"; fi
+  OUT="$(bash "$DIR/evaluate.sh" --corpus-only --state "$state" --since 2026-09-04 2>"$ERRFILE")"
+  RC=$?
+  ERRTEXT="$(cat "$ERRFILE")"
+  if [[ $RC -eq 2 && -z "$OUT" ]] && printf '%s' "$ERRTEXT" | grep -q 'on or after 2026-09-04'; then
+    pass; else fail "--since past every report names the date, got RC=$RC ERR=$ERRTEXT"; fi
+
   echo "▶ scoring" >&2
 
   stub_codex "$TMP/score" 0 '{"verdict":"blocking","evidence":"B1"}'
