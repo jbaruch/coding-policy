@@ -114,6 +114,18 @@
   `rules/testing-standards.md` Determinism clause this release added for exactly
   this case.
 
+- **The lead annotates a round's reports in one call, then gates them
+  together.** The classifier existed and the skill never mentioned it.
+  `classify/classify-reports.sh` labels every delivered report in one call, and
+  SKILL.md Step 12 runs it before the reads, so the lead gates a round's reports
+  in one turn instead of a full-context turn per report — the saving #482 asked
+  for. The full read of every body is unchanged: a label is advisory, and a
+  report whose annotation failed lands in `unannotated` and is read as it always
+  was. A failed annotation never blocks gating.
+
+  The default adapter is now Claude, the only vendor measured adequate for the
+  job: 63 of 63 real blockers caught, against Grok's 62 and an unmeasured Codex.
+
 - **The classifier runs on any of the fleet's three vendors.** The first cut
   called `codex exec` and nothing else, in a plugin whose purpose is running
   `claude`, `codex` and `grok` as interchangeable workers — and pinned to the one

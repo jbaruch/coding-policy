@@ -426,6 +426,21 @@ or their unavailability and recovery are recorded.
 
 ## Step 12 — Gate the Round
 
+Annotate every delivered report in one call before reading any of them:
+
+```bash
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
+bash "$CP/skills/herdr-teamlead/classify/classify-reports.sh" <report>...
+```
+
+Each label is `blocking`, `approved` or `insufficient_evidence`, with the
+sentence that decided it. Read the reports together and gate them in one turn,
+not one turn per report. A label is advisory. It never replaces the full read,
+and a report in `unannotated` is read exactly as it would have been. Look twice
+where a label disagrees with your own reading: that is where the classifier or
+the report is wrong. Which vendor and model it uses, and its measured accuracy,
+are the script's contract — see `skills/herdr-teamlead/classify/classify-report.sh`.
+
 Read every report file in full, including a report whose worker exited cleanly.
 A `## BLOCKED` section can sit under a report that otherwise reads as finished.
 Classify each finding blocking or advisory per `rules/review-severity.md`.

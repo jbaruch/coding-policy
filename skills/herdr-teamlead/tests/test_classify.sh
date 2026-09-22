@@ -26,6 +26,8 @@
 #                                 label; an errored or multi-answer run refused.
 #  12. The empty room           -> every adapter runs where it can read nothing
 #                                 but the question.
+#  13. A round's batch          -> one call annotates every report; a failed
+#                                 annotation is reported, never fatal.
 
 set -uo pipefail
 
@@ -75,7 +77,7 @@ main() {
   echo "▶ the answer contract" >&2
 
   stub_codex "$TMP/ok" 0 '{"verdict":"blocking","evidence":"B1: the parser accepts a quoted completion marker."}'
-  classify "$TMP/ok" "$report"
+  classify "$TMP/ok" "$report" --agent codex
   if [[ $RC -eq 0 ]] && [[ "$(field "$OUT" verdict)" == "blocking" ]] \
      && [[ "$(field "$OUT" model)" == "gpt-5.6-sol" ]]; then
     pass; else fail "a conforming answer returns its verdict and the pinned model, got RC=$RC OUT=$OUT"; fi
@@ -88,37 +90,37 @@ main() {
      && [[ "$(field "$OUT" question)" == "$expected_question" ]]; then
     pass; else fail "the label must carry the report and question hashes, got OUT=$OUT"; fi
 
-  classify "$TMP/ok" "$report" --model "some-other-model"
+  classify "$TMP/ok" "$report" --agent codex --model "some-other-model"
   if [[ $RC -eq 0 ]] && [[ "$(field "$OUT" model)" == "some-other-model" ]]; then
     pass; else fail "--model overrides the pin and travels with the label, got RC=$RC OUT=$OUT"; fi
 
-  classify "$TMP/ok" "$report" --out "$TMP/label.json"
+  classify "$TMP/ok" "$report" --agent codex --out "$TMP/label.json"
   if [[ $RC -eq 0 ]] && [[ "$(cat "$TMP/label.json")" == "$OUT" ]]; then
     pass; else fail "--out writes the same payload, got RC=$RC"; fi
 
   echo "▶ a failed call is never a verdict" >&2
 
   stub_codex "$TMP/down" 1 ''
-  classify "$TMP/down" "$report"
+  classify "$TMP/down" "$report" --agent codex
   if [[ $RC -eq 2 && -z "$OUT" ]] && printf '%s' "$ERRTEXT" | grep -q 'never a verdict'; then
     pass; else fail "a failed model call exits 2 with no verdict, got RC=$RC OUT=$OUT"; fi
 
   stub_codex "$TMP/offenum" 0 '{"verdict":"probably fine","evidence":"x"}'
-  classify "$TMP/offenum" "$report"
+  classify "$TMP/offenum" "$report" --agent codex
   if [[ $RC -eq 2 && -z "$OUT" ]]; then
     pass; else fail "an answer outside the enum exits 2, got RC=$RC OUT=$OUT"; fi
 
   stub_codex "$TMP/empty" 0 ''
-  classify "$TMP/empty" "$report"
+  classify "$TMP/empty" "$report" --agent codex
   if [[ $RC -eq 2 && -z "$OUT" ]] && printf '%s' "$ERRTEXT" | grep -q 'no schema-conforming answer'; then
     pass; else fail "an empty answer exits 2, got RC=$RC OUT=$OUT"; fi
 
-  classify "$TMP/ok" "$TMP/absent.md"
+  classify "$TMP/ok" "$TMP/absent.md" --agent codex
   if [[ $RC -eq 2 && -z "$OUT" ]] && printf '%s' "$ERRTEXT" | grep -q 'not a readable file'; then
     pass; else fail "an unreadable report exits 2 before any call, got RC=$RC OUT=$OUT"; fi
 
   stub_codex "$TMP/abstain" 0 '{"verdict":"insufficient_evidence","evidence":""}'
-  classify "$TMP/abstain" "$report"
+  classify "$TMP/abstain" "$report" --agent codex
   if [[ $RC -eq 0 ]] && [[ "$(field "$OUT" verdict)" == "insufficient_evidence" ]]; then
     pass; else fail "an honest abstention is an answer, not a failure, got RC=$RC OUT=$OUT"; fi
 
@@ -186,6 +188,45 @@ STUB
   if [[ $RC -eq 2 && -z "$OUT" ]]; then
     pass; else fail "an unknown agent is a usage error, got RC=$RC OUT=$OUT"; fi
 
+  echo "▶ a round's batch" >&2
+
+  # Claude is the default adapter: the only vendor measured adequate.
+  local second="$TMP/second.md"
+  printf '# Tester report\n\nNo blocking findings.\n' > "$second" || die "write second report"
+  mkdir -p "$TMP/batch" || die "mkdir batch"
+  cat > "$TMP/batch/claude" <<'STUB' || die "write batch claude stub"
+#!/bin/sh
+cat > /dev/null
+printf '%s' '[{"type":"result","is_error":false,"structured_output":{"verdict":"approved","evidence":"No blocking findings."}}]'
+STUB
+  chmod +x "$TMP/batch/claude" || die "chmod batch claude stub"
+  OUT="$(PATH="$TMP/batch:$PATH" bash "$DIR/classify-reports.sh" "$report" "$second" 2>"$ERRFILE")"
+  RC=$?
+  if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+assert d["agent"] == "claude", d
+assert len(d["labels"]) == 2 and d["unannotated"] == [], d
+'; then
+    pass; else fail "one call annotates every report with the default adapter, got RC=$RC OUT=$OUT"; fi
+
+  # An annotation that fails never blocks gating: the lead reads that report as
+  # it always has.
+  OUT="$(PATH="$TMP/down:$PATH" bash "$DIR/classify-reports.sh" --agent codex "$report" "$second" 2>"$ERRFILE")"
+  RC=$?
+  if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+assert d["labels"] == [] and len(d["unannotated"]) == 2, d
+assert all("never a verdict" in row["reason"] for row in d["unannotated"]), d
+'; then
+    pass; else fail "failed annotations are reported with their reason, never fatal, got RC=$RC OUT=$OUT"; fi
+
+  OUT="$(bash "$DIR/classify-reports.sh" 2>"$ERRFILE")"
+  RC=$?
+  if [[ $RC -eq 2 && -z "$OUT" ]]; then
+    pass; else fail "no reports is a usage error, got RC=$RC OUT=$OUT"; fi
+
   echo "▶ the labelled corpus" >&2
 
   local kept="$TMP/kept.md" state="$TMP/state.json"
@@ -228,14 +269,14 @@ PY
   echo "▶ scoring" >&2
 
   stub_codex "$TMP/score" 0 '{"verdict":"blocking","evidence":"B1"}'
-  OUT="$(PATH="$TMP/score:$PATH" bash "$DIR/evaluate.sh" --state "$state" 2>"$ERRFILE")"
+  OUT="$(PATH="$TMP/score:$PATH" bash "$DIR/evaluate.sh" --agent codex --state "$state" 2>"$ERRFILE")"
   RC=$?
   if [[ $RC -eq 0 ]] && [[ "$(field "$OUT" scored)" == "1" ]] \
      && [[ "$(field "$OUT" accuracy)" == "1.0" ]]; then
     pass; else fail "a correct prediction scores 1.0, got RC=$RC OUT=$OUT"; fi
 
   stub_codex "$TMP/wrong" 0 '{"verdict":"approved","evidence":"nothing blocks"}'
-  OUT="$(PATH="$TMP/wrong:$PATH" bash "$DIR/evaluate.sh" --state "$state" 2>"$ERRFILE")"
+  OUT="$(PATH="$TMP/wrong:$PATH" bash "$DIR/evaluate.sh" --agent codex --state "$state" 2>"$ERRFILE")"
   RC=$?
   if [[ $RC -eq 0 ]] && [[ "$(field "$OUT" accuracy)" == "0.0" ]] \
      && printf '%s' "$OUT" | grep -q '"recorded": "blocking"' \
@@ -243,7 +284,7 @@ PY
     pass; else fail "a disagreement is reported with both sides, got RC=$RC OUT=$OUT"; fi
 
   stub_codex "$TMP/broken" 1 ''
-  OUT="$(PATH="$TMP/broken:$PATH" bash "$DIR/evaluate.sh" --state "$state" 2>"$ERRFILE")"
+  OUT="$(PATH="$TMP/broken:$PATH" bash "$DIR/evaluate.sh" --agent codex --state "$state" 2>"$ERRFILE")"
   RC=$?
   # A partial score, never an accuracy averaged over only the calls that worked.
   if [[ $RC -eq 1 ]] && [[ "$(field "$OUT" failed)" == "1" ]] \

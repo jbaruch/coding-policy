@@ -60,7 +60,10 @@ HERE="${HERE%$'\n'}"
 #: every label recorded afterwards carries the new id. These are classification
 #: pins, not the fleet's frontier seats: reading one report for one verdict does
 #: not need the most expensive model a vendor sells.
-DEFAULT_AGENT="codex"
+#: The default is the vendor measured adequate for this job: against 90
+#: lead-labelled reports claude-sonnet-5 caught 63 of 63 real blockers, grok-4.6
+#: caught 62, and codex was unmeasured (its subscription was exhausted).
+DEFAULT_AGENT="claude"
 model_for() { # <kind>
   case "$1" in
     codex) echo "gpt-5.6-sol" ;;
