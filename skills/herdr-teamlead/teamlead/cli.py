@@ -23,7 +23,7 @@ from types import SimpleNamespace
 from . import __version__
 from .assign import apply as apply_assignments
 from .assign import APPLY_SCHEMA_VERSION, dry_run, native_context_session, normalize_assignments, resolve_paths, validate_fix_history
-from . import attention, capabilities, composition, engagement, historical, memory, oracle, partition, recovery, report_delivery, restoration, role_clear, retrospective, retrospective_runtime, supervision, supervision_runtime, triggers
+from . import attention, capabilities, composition, engagement, historical, memory, oracle, partition, recovery, report_delivery, restoration, role_clear, retrospective, retrospective_runtime, supervision, supervision_gate, supervision_runtime, triggers
 from .config import default_config_path, load_config, load_judge, load_role_costs, select_agents
 from .errors import PlanError, StateError, TeamLeadError, UsageError
 from .herdr import (
@@ -134,6 +134,8 @@ def build_parser():
     capability_record.add_argument("--now", metavar="ISO")
     capability_show = sub.add_parser("capability-show", parents=[common],
                                      help="Read the saved capability table without contacting Herdr.")
+    sub.add_parser("supervision-gate", parents=[common],
+                   help="Which pending supervision events need the lead. Read-only.")
 
     retro_list = sub.add_parser("retro-list", parents=[common], help="List saved retrospective notes without contacting Herdr.")
     retro_list.add_argument("--task")
@@ -1639,6 +1641,11 @@ def cmd_supervision(args, client=None, warn=None, trace=None):
                                            client=client, clock=now_iso, sleeper=time.sleep), None
 
 
+def cmd_supervision_gate(args, client=None, warn=None, trace=None):
+    """Which pending supervision events need the lead; see supervision_gate.py."""
+    return supervision_gate.pending(supervision.load(_state_path(args))), None
+
+
 def cmd_restoration(args, client=None, warn=None, trace=None):
     client = client if client is not None else _client(args, trace=trace)
     return restoration.run_command(args, client, sleep=time.sleep), None
@@ -1658,6 +1665,7 @@ COMMANDS = {
     "probe-report": cmd_probe_report,
     **{command: cmd_retrospective for command in ("retro-check", "retro-record", "retro-list", "retro-show")},
     **{command: cmd_capability for command in ("capability-check", "capability-record", "capability-show")},
+    "supervision-gate": cmd_supervision_gate,
     **{command: cmd_memory for command in memory.COMMANDS},
     **{command: cmd_attention for command in attention.COMMANDS},
     **{command: cmd_supervision for command in SUPERVISION_COMMANDS},
@@ -1681,7 +1689,7 @@ def main(argv=None, stdout=None, stderr=None, client=None):
     try:
         # Commands that may migrate or write state share its canonical lock.
         # Dry runs, probes, and retrospective reads remain read-only.
-        readonly = args.command in {"probe-report", "detect-triggers", "validate-partition", "verify-oracle", "retro-check", "retro-list", "retro-show", "capability-check", "capability-show"} or getattr(args, "dry_run", False)
+        readonly = args.command in {"probe-report", "detect-triggers", "validate-partition", "verify-oracle", "retro-check", "retro-list", "retro-show", "capability-check", "capability-show", "supervision-gate"} or getattr(args, "dry_run", False)
         separate_owner = args.command in memory.COMMANDS | attention.COMMANDS | SUPERVISION_COMMANDS | restoration.COMMANDS
         lock = nullcontext() if readonly or separate_owner else state_lock(retrospective.canonical_state(_state_path(args)))
         with lock:

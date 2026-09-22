@@ -371,7 +371,23 @@ bash "$CP/skills/herdr-teamlead/teamlead.sh" supervision-watch [--state <state-f
 
 Retain and await its real execution handle. The JSON result gives `reason`,
 `through`, and durable `events`; a quiet deadline completes only that checkpoint.
-For each event or pending recheck, verify report delivery:
+
+Then ask which of those events need you:
+
+```bash
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
+bash "$CP/skills/herdr-teamlead/teamlead.sh" supervision-gate [--state <state-file>]
+```
+
+It returns `wake` and `suppressed`, each event with its `reason`. Acknowledge
+every `suppressed` event with that reason as its outcome, without reading
+anything. Only named, information-poor cases are suppressed and every other
+event wakes you, including a kind the gate has never seen; which cases, and
+why, is the script's decision contract — see
+`skills/herdr-teamlead/teamlead/supervision_gate.py`, not restated here
+(`rules/script-as-black-box.md`).
+
+For each `wake` event, verify report delivery:
 
 ```bash
 CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"

@@ -4,9 +4,9 @@ Herdr records every change it observes in a worker, and the lead acknowledges
 all of them. Over 1790 recorded events it acknowledged 1790: every one cost a
 full lead turn, and a lead turn ships the lead's whole conversation.
 
-Most carry nothing a lead can act on. `visible_observed` is a sha256 of the
-worker's screen; `recheck_due` is the lead's own deferral coming back. Together
-they are 65% of the traffic.
+Much of it carries nothing a lead can act on. `visible_observed` is a sha256 of
+the worker's screen, and before any report file exists it says only that a
+worker is working; `recheck_due` is the lead's own deferral coming back.
 
 This is a SCRIPT, not a classifier, and the reason is where the information
 lives rather than how the question feels. `{"kind": "visible_observed", "data":
@@ -66,12 +66,17 @@ def _verdict(event, member, state, quiet_rechecks):
         return True, "event has no member to join against"
 
     if kind == "visible_observed":
-        # A sha256 of a pane. There is no state in which it is the only signal:
-        # a landed report has its own event, a worker that stopped working has
-        # its own event, and a lead cannot act on a hash without going to read
-        # the pane -- which this suppresses nothing about. Liveness is the
-        # watcher heartbeat and `wait-report.sh`'s budget, not this.
-        return False, "a screen hash carries no signal a lead can act on"
+        # Before any report file exists, a screen hash is a worker working.
+        # After one exists it is not noise: a report FILE is not delivery.
+        # Delivery is the file plus the `REPORT: <path>` marker in the worker's
+        # final message, and that marker reaches the supervisor only as a screen
+        # change. Replayed on 1790 recorded events, suppressing screen hashes
+        # unconditionally lost 3 deliveries outright and delayed 5 more by 5 to
+        # 49 minutes, because `report_observed` had already fired for the file
+        # and nothing fires again for the marker.
+        if (state.get("report") or {}).get("present"):
+            return True, "a report file exists; its delivery marker arrives as a screen change"
+        return False, "screen changed before any report file exists"
 
     # `recheck_due`: the lead deferred an event to a later time. If nothing the
     # supervisor observes has moved since, looking again reads the same state.
@@ -128,6 +133,21 @@ def evaluate(data):
     return {"schema_version": SCHEMA_VERSION, "wake": wake, "suppressed": suppressed,
             "counts": {"total": total, "wake": len(wake), "suppressed": len(suppressed),
                        "acknowledged": sum(1 for row in data["events"] if row["id"] in acknowledged)}}
+
+
+def pending(data):
+    """Verdicts for the events the lead has not acknowledged yet.
+
+    The whole store is replayed, since each verdict reads the state as of its
+    own event; only the unacknowledged ones are reported.
+    """
+    result = evaluate(data)
+    done = set(_acknowledged(data))
+    open_ids = {row["id"] for row in data["events"] if row["id"] not in done}
+    wake = [row for row in result["wake"] if row["event"] in open_ids]
+    suppressed = [row for row in result["suppressed"] if row["event"] in open_ids]
+    return {"schema_version": SCHEMA_VERSION, "wake": wake, "suppressed": suppressed,
+            "counts": {"pending": len(open_ids), "wake": len(wake), "suppressed": len(suppressed)}}
 
 
 def load(path):

@@ -56,9 +56,9 @@ class DefaultWakeTest(unittest.TestCase):
 
 
 class ScreenHashTest(unittest.TestCase):
-    """A sha256 of a pane is never the only signal."""
+    """A screen hash is noise until a report file exists, and signal after."""
 
-    def test_a_screen_hash_is_suppressed_whatever_the_worker_is_doing(self):
+    def test_a_screen_hash_before_any_report_is_suppressed(self):
         for lifecycle in ({"status": "working"}, {"status": "idle"}, {"status": "blocked"}):
             with self.subTest(lifecycle=lifecycle):
                 result = gate.evaluate(store([
@@ -67,14 +67,25 @@ class ScreenHashTest(unittest.TestCase):
                 ]))
                 self.assertEqual([row["kind"] for row in result["suppressed"]], ["visible_observed"])
 
-    def test_a_landed_report_still_wakes_on_its_own_event(self):
-        # The report's event is what wakes the lead; the screen change after it
-        # adds nothing, which is why suppressing the latter loses nothing.
+    def test_a_screen_hash_after_a_report_file_wakes_the_lead(self):
+        # A report FILE is not delivery. Delivery is the file plus the
+        # `REPORT: <path>` marker in the worker's final message, and the marker
+        # reaches the supervisor only as a screen change. Suppressing these on
+        # the recorded history lost 3 deliveries and delayed 5 more.
         result = gate.evaluate(store([
             ("m1", "report_observed", {"present": True, "path": "/r.md"}),
             ("m1", "visible_observed", {"sha256": "b" * 64}),
+            ("m1", "visible_observed", {"sha256": "c" * 64}),
         ]))
-        self.assertEqual([row["kind"] for row in result["wake"]], ["report_observed"])
+        self.assertEqual(result["counts"]["suppressed"], 0)
+        self.assertEqual([row["kind"] for row in result["wake"]],
+                         ["report_observed", "visible_observed", "visible_observed"])
+
+    def test_a_report_that_is_not_present_does_not_count(self):
+        result = gate.evaluate(store([
+            ("m1", "report_observed", {"present": False, "path": "/r.md"}),
+            ("m1", "visible_observed", {"sha256": "d" * 64}),
+        ]))
         self.assertEqual([row["kind"] for row in result["suppressed"]], ["visible_observed"])
 
 
@@ -149,6 +160,27 @@ class ReplayTest(unittest.TestCase):
         ], members=("m1", "m2")))
         # m2 never observed anything, so m1's sample must not answer for it.
         self.assertEqual(result["counts"]["suppressed"], 0)
+
+
+class PendingTest(unittest.TestCase):
+    """What the lead is shown: verdicts for unacknowledged events only."""
+
+    def test_only_unacknowledged_events_are_reported(self):
+        data = store([("m1", "lifecycle_observed", {"status": "working"}),
+                      ("m1", "visible_observed", {"sha256": "a" * 64}),
+                      ("m1", "visible_observed", {"sha256": "b" * 64})],
+                     acknowledgements=[{"event": "e1"}, {"event": "e2"}])
+        result = gate.pending(data)
+        self.assertEqual(result["counts"], {"pending": 1, "wake": 0, "suppressed": 1})
+        self.assertEqual([row["event"] for row in result["suppressed"]], ["e3"])
+
+    def test_an_acknowledged_event_still_shapes_the_state_a_pending_one_reads(self):
+        # e1 is handled, but the report it observed is why e2 must wake.
+        data = store([("m1", "report_observed", {"present": True, "path": "/r.md"}),
+                      ("m1", "visible_observed", {"sha256": "a" * 64})],
+                     acknowledgements=[{"event": "e1"}])
+        result = gate.pending(data)
+        self.assertEqual([row["event"] for row in result["wake"]], ["e2"])
 
 
 class InputTest(unittest.TestCase):
