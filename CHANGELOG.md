@@ -71,12 +71,35 @@
   differ on is either a classifier error or a report whose verdict was never
   legible from its own text, and only reading it says which.
 
-  **No accuracy number ships with this.** Producing one costs one model call per
-  report and the Codex subscription is exhausted until 2026-09-25 — the same
-  outage that blocks PR review. The failure path is verified live against it: a
-  call that hits the usage limit exits 2 with no verdict. A failed call is never
-  a label. `--corpus-only` builds and prints the corpus without spending
-  anything.
+  **Measured on both reachable vendors, against all 90 lead-labelled reports.**
+  The Codex subscription was exhausted until 2026-09-25, so the first run used
+  the other two adapters:
+
+  | | `claude-sonnet-5` | `grok-4.6` |
+  | --- | --- | --- |
+  | Accuracy | 97.8% | 97.8% |
+  | Real blockers caught | **63 / 63** | 62 / 63 |
+  | False `blocking` | 2 | 1 |
+  | Failed calls | 0 | 0 |
+
+  The identical headline is the finding: accuracy alone ranks them equal, and
+  the confusion matrix does not. A false `blocking` makes the lead read a report
+  it reads anyway. A false `approved` waves a real blocker through. Claude made
+  none of the second kind; Grok made one, on a judge ruling that ordered a
+  further correction round — it read *"No further operator confirmation is
+  needed"*, which concerns who authorises the next attempt, as the absence of
+  one.
+
+  Both false `blocking` labels share a cause in the question rather than the
+  model. One report named defects the judge had already accepted for the
+  shipment; the other named a prerequisite outside the reviewer's scope. Each
+  says "blocking" about something that does not block this round. Adding that
+  distinction to the prompt is principled — both are named policy concepts — but
+  re-scoring on the same 90 reports would tune on the answer key, so it waits
+  for reports this corpus does not contain.
+
+  The failure path is also verified live: a Codex call against the exhausted
+  subscription exits 2 with no verdict. A failed call is never a label.
 
   No test calls a model. The classifier is stubbed on PATH, per the
   `rules/testing-standards.md` Determinism clause this release added for exactly
