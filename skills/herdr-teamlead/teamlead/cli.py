@@ -23,7 +23,7 @@ from types import SimpleNamespace
 from . import __version__
 from .assign import apply as apply_assignments
 from .assign import APPLY_SCHEMA_VERSION, dry_run, native_context_session, normalize_assignments, resolve_paths, validate_fix_history
-from . import attention, composition, engagement, historical, memory, oracle, partition, recovery, report_delivery, restoration, role_clear, retrospective, retrospective_runtime, supervision, supervision_runtime, triggers
+from . import attention, capabilities, composition, engagement, historical, memory, oracle, partition, recovery, report_delivery, restoration, role_clear, retrospective, retrospective_runtime, supervision, supervision_runtime, triggers
 from .config import default_config_path, load_config, load_judge, load_role_costs, select_agents
 from .errors import PlanError, StateError, TeamLeadError, UsageError
 from .herdr import (
@@ -125,6 +125,16 @@ def build_parser():
         retro_parser = sub.add_parser(command, parents=[common], help="Check or record a lead-authored retrospective.")
         retro_parser.add_argument("--record", required=True, metavar="FILE")
         retro_parser.add_argument("--now", metavar="ISO")
+    capability_check = sub.add_parser("capability-check", parents=[common],
+                                      help="Whether the model-capability table is due a refresh. Read-only.")
+    capability_check.add_argument("--now", metavar="ISO")
+    capability_record = sub.add_parser("capability-record", parents=[common],
+                                       help="Record a capability consultation's report into the table.")
+    capability_record.add_argument("--record", required=True, metavar="FILE")
+    capability_record.add_argument("--now", metavar="ISO")
+    capability_show = sub.add_parser("capability-show", parents=[common],
+                                     help="Read the saved capability table without contacting Herdr.")
+
     retro_list = sub.add_parser("retro-list", parents=[common], help="List saved retrospective notes without contacting Herdr.")
     retro_list.add_argument("--task")
     retro_list.add_argument("--since", metavar="ISO")
@@ -1517,6 +1527,29 @@ def cmd_start_judge(args, client=None, warn=None, trace=None):
             "pane": args.pane, "argv_verified": True, "verified": proof}, None
 
 
+def cmd_capability(args, client=None, warn=None, trace=None):
+    """The capability table's cadence, its refresh, and a read of what it holds.
+
+    `capability-check` is read-only and answers one question: is the table due.
+    A table never refreshed comes due as soon as the ledger holds any work, and
+    stays quiet on a fleet that has dispatched nothing (#481).
+    """
+    path = _state_path(args)
+    document = capabilities.load(path)
+    if args.command == "capability-show":
+        return document, None
+    at = args.now or now_iso()
+    if args.command == "capability-check":
+        state, _usable = load_state_checked(path, warn=warn, persist_migration=False)
+        result = capabilities.cadence(document, at, existing_work=bool(state["assignments"]))
+        return {"schema_version": capabilities.SCHEMA_VERSION, **result,
+                "entries": len(document["entries"])}, None
+    refreshed = capabilities.record(path, _read_record(args.record), at)
+    return {"schema_version": capabilities.SCHEMA_VERSION,
+            "refreshed_at": refreshed["refreshed_at"],
+            "entries": len(refreshed["entries"])}, None
+
+
 def cmd_retrospective(args, client=None, warn=None, trace=None):
     path = _state_path(args)
     if args.command == "retro-list":
@@ -1624,6 +1657,7 @@ COMMANDS = {
     "start-judge": cmd_start_judge,
     "probe-report": cmd_probe_report,
     **{command: cmd_retrospective for command in ("retro-check", "retro-record", "retro-list", "retro-show")},
+    **{command: cmd_capability for command in ("capability-check", "capability-record", "capability-show")},
     **{command: cmd_memory for command in memory.COMMANDS},
     **{command: cmd_attention for command in attention.COMMANDS},
     **{command: cmd_supervision for command in SUPERVISION_COMMANDS},
@@ -1647,7 +1681,7 @@ def main(argv=None, stdout=None, stderr=None, client=None):
     try:
         # Commands that may migrate or write state share its canonical lock.
         # Dry runs, probes, and retrospective reads remain read-only.
-        readonly = args.command in {"probe-report", "detect-triggers", "validate-partition", "verify-oracle", "retro-check", "retro-list", "retro-show"} or getattr(args, "dry_run", False)
+        readonly = args.command in {"probe-report", "detect-triggers", "validate-partition", "verify-oracle", "retro-check", "retro-list", "retro-show", "capability-check", "capability-show"} or getattr(args, "dry_run", False)
         separate_owner = args.command in memory.COMMANDS | attention.COMMANDS | SUPERVISION_COMMANDS | restoration.COMMANDS
         lock = nullcontext() if readonly or separate_owner else state_lock(retrospective.canonical_state(_state_path(args)))
         with lock:

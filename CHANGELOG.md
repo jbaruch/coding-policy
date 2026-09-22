@@ -38,6 +38,50 @@
   so `select_tier` has never resolved a non-judge round. It lands before the
   tables do.
 
+### Added
+
+- **A model-capability table, refreshed on a cadence.** Routing work by how hard
+  it is needs a written-down answer to "what can this model do", and nothing
+  held one. #480 names it as a dependency the project imports, not a measurement
+  it takes: published knowledge, read and recorded with its source and the date
+  it was read (#481).
+
+  Saved at `<selected-state>.capabilities.json`, schema 1, written only by
+  `capability-record`. One entry owns one model, effort and capability, and
+  carries a verdict of `adequate`, `inadequate` or `unknown` plus the source
+  supporting it. Three commands: `capability-check` answers whether a refresh is
+  due and writes nothing, `capability-record` files a consultation's report, and
+  `capability-show` reads the table.
+
+  Staleness here is silent. Models ship monthly, a retired entry keeps routing
+  work to a model that stopped being the right choice, and nothing errors. So
+  the table comes due weekly, on the pattern the retrospective cadence already
+  uses. A table never refreshed comes due as soon as the ledger holds any work,
+  and a fleet that dispatched nothing never comes due — the table is read at
+  dispatch time, so a week with no rounds is a week where a stale table is never
+  consulted.
+
+  A refresh replaces the rows it covers and leaves the rest alone, so one report
+  about two models never retires the table.
+
+  **The source hierarchy is what keeps vendor claims out.** `benchmark`,
+  `evaluation`, `project` and `vendor`, strongest first, each entry dated so a
+  stale reading is visible. An `adequate` verdict needs a source above `vendor`,
+  because a vendor's claim about its own model would route real work on
+  marketing. A `vendor` source still records availability, deprecation, and the
+  verdicts `inadequate` and `unknown`.
+
+  **Defect detection is one capability in the table, not a separate regime.**
+  The per-model, per-effort, per-role qualification battery — a 5-case screen, a
+  20-case promotion and a weekly 5-case canary — measures in-house what
+  publication already states, and #480 rules out the reference-class objection
+  that would justify measuring it locally: this codebase is shell, Python, Go,
+  Actions and JSON manifests, inside the distribution benchmarks measure. Where
+  a model did fail here, that failure is itself a `project` source and cites its
+  issue, which is how #324's result enters the table rather than standing beside
+  it as a separate protocol.
+
+
 ## 0.3.251 — 2026-09-23
 
 ### Changed

@@ -559,6 +559,7 @@ The independent continuity stores do not change this dispatch-state schema.
 | Working lessons and lead handoffs | `<selected-state>.memory/index.json` | `skills/herdr-teamlead/references/working-memory.md`, Persistence contract |
 | User attention and recorded progress | `<selected-state>.attention.json` | `skills/herdr-teamlead/references/attention.md`, Commands and files |
 | Fleet observations and supervision | `<selected-state>.supervision.json` | `skills/herdr-teamlead/references/supervision.md` |
+| Model capabilities, sourced and dated | `<selected-state>.capabilities.json` | `skills/herdr-teamlead/references/model-tiers.md`, Capability table |
 
 Resolve the selected state path before deriving these locations. Each store and
 its records have their own schema version and lock. Their offline readers never
