@@ -6,7 +6,7 @@
 per-agent `tiers` and `launch_args`; schema 1 remains readable without tiers.
 The utility never rewrites the operator's config. Copy the example into a new
 file, preserve local agent names and UI options, then validate it with
-`teamlead.sh plan --preview-tiers` before replacing a working configuration.
+`teamlead.sh plan` before replacing a working configuration.
 
 Each `tiers` entry maps a round type to:
 
@@ -15,15 +15,13 @@ Each `tiers` entry maps a round type to:
   "model": "opus-5",
   "effort": "high",
   "multiplier": 1.0,
-  "billing_evidence": null,
-  "qualification": []
+  "billing_evidence": null
 }
 ```
 
 Omit `effort` for a model that accepts no effort control. Omit
-`billing_evidence` until measurements exist. An empty qualification array is
-unqualified, never a passing trial. The example carries no invented live
-measurement or qualification results.
+`billing_evidence` until measurements exist. The example carries no invented
+live measurement.
 
 Accepted round names, role mappings, model pins, effort enums, mechanical
 eligibility, risk escalation, and supported launch options are the constants
@@ -68,8 +66,7 @@ same-session restoration in `references/dispatch-recovery.md` when the
 operator expressly requires YOLO for that retained developer.
 
 Recheck model availability and CLI flag spellings when upgrading a worker's
-CLI or changing a model pin. Refresh the qualification for every changed
-model/effort/role configuration before using it live.
+CLI or changing a model pin.
 
 ## Planning and dispatch
 
@@ -109,21 +106,18 @@ both plan and apply for a fix; a plan made for a different fix context is
 refused. A new tiered role requires an explicit cost instead of inheriting an
 unrelated fallback weight.
 
-Default planning ranks only qualified candidates. `plan --preview-tiers` allows
-inspection before commissioning; it does not authorize live dispatch.
-
 Plan schema 4 carries `tiers`, `rounds`, and the task's `task_context` alongside `assignments`. Apply
 records the requested task phase as `round` and the selected config row as
 `tier_row`; escalation may select a stronger row and raise its effort. Apply
 recomputes the tier from current config and round inputs, refusing a stale or
 edited pair. `apply --dry-run` prints the requested tier and relaunch argv
 without contacting Herdr or writing state. It does not establish live
-qualification, readiness, process identity, or session continuity.
+readiness, process identity, or session continuity.
 
 The owner validates correction allowance before selecting tiers. A bounded
 approval does not lower a late correction's tier or reset its cumulative
 number. A fresh developer handoff after a required release clear uses the
-normal relaunch and qualification checks; verified retained fixes keep their
+normal relaunch checks; verified retained fixes keep their
 existing compatible model and effort.
 
 Fresh tiered dispatch verifies the worker is idle in the expected pane and
@@ -154,6 +148,77 @@ The executable launch and verification contracts live in
 the [socket API](https://herdr.dev/docs/socket-api/) describe the start and
 foreground-process response shapes. Banner or transcript text is never a
 verification source.
+
+## Capability table
+
+What each model at each effort can do, sourced and dated. Published knowledge
+the project imports, not a measurement it takes: routing reads it to pick a
+model, and a capability nobody has evidence for is recorded `unknown` rather
+than assumed.
+
+Saved at `<selected-state>.capabilities.json`. Owner:
+`skills/herdr-teamlead/teamlead/capabilities.py`. Writer: `capability-record`,
+alone. Readers: `capability-check`, `capability-show` and the round preflight.
+
+```json
+{
+  "schema_version": 1,
+  "refreshed_at": "2026-09-01T00:00:00+00:00",
+  "entries": [
+    {
+      "schema_version": 1,
+      "model": "opus-5", "effort": "high",
+      "capability": "independent-defect-detection",
+      "verdict": "adequate",
+      "source": {"kind": "benchmark", "ref": "SWE-bench Verified", "dated": "2026-09-01"},
+      "recorded_at": "2026-09-01T00:00:00+00:00"
+    }
+  ]
+}
+```
+
+| Field | Presence | Meaning |
+| ----- | -------- | ------- |
+| `schema_version` | required | The document's version; each entry carries its own |
+| `refreshed_at` | required, UTC or `null` | The last `capability-record`; `null` until the first one |
+| `entries` | required array | One entry per model, effort and capability, sorted by those three |
+| `entries[].model`, `effort`, `capability` | required | The key; no two entries share one |
+| `entries[].verdict` | required | `adequate`, `inadequate` or `unknown` |
+| `entries[].source` | required | `kind`, `ref` (where it was read) and `dated` (`YYYY-MM-DD`, when it was read) |
+| `entries[].recorded_at` | required, UTC | Stamped by the writer, never supplied by the report |
+
+An absent file reads as an empty table: `refreshed_at: null`, no entries. A
+file stamped with a newer schema than the reader owns reads as no prior state,
+with a diagnostic to update the plugin; `capability-record` refuses to write
+over it. An older or malformed file is refused with its repair. No field has a
+default: an entry missing one is refused, never filled in.
+
+`capability-record --record <report.json>` reads the consultation's report,
+shaped `{"entries": [...]}`: each entry carries `model`, `effort`,
+`capability`, `verdict` and `source`, and nothing else. The writer stamps
+`schema_version` and `recorded_at`, replaces the entries whose key the report
+covers, keeps every other entry, and sets `refreshed_at`. A report with no
+entries refreshes nothing and is refused. A result this project recorded is a
+`project` source and cites its issue.
+
+Which source kinds exist, and which of them can support an `adequate` verdict,
+are `SOURCE_KINDS` and `SUPPORTING_SOURCES` in
+`skills/herdr-teamlead/teamlead/capabilities.py`, not restated here
+(`rules/script-as-black-box.md`).
+
+Staleness is silent — a retired entry keeps routing work with no error and no
+failing check — so the table comes due on a cadence. The round preflight
+reports it under `due`, and SKILL.md Step 2 carries the refresh commands:
+`capability-check` (read-only, whether a refresh is due), `capability-record`
+and `capability-show`. A table never refreshed comes due as
+soon as the ledger holds any work, and a fleet that dispatched nothing never
+comes due. The interval and the source hierarchy are `capabilities.py`'s
+decision contract, not restated here (`rules/script-as-black-box.md`).
+
+The consultation that gathers the evidence is read-only on repository content
+and returns a report at the path its brief names; the lead records it. A refresh
+replaces the rows it covers and leaves every other row untouched, so one report
+about two models never retires the rest of the table.
 
 ## Billing-window evidence
 
@@ -193,55 +258,19 @@ Herdr team session. The shipped example therefore uses unknown attribution;
 its deterministic tests are synthetic evidence of behavior, not observations
 about provider billing. Do not copy test evidence into a live configuration.
 
-## Validation before live use
+## What stands in for a validation battery
 
-The lead collects a paired, blinded screen for each model/effort/role and then
-a separate promotion battery for finalists. Keep planted defects and expected
-severity out of both workers' prompts. Use the same prompt for the baseline
-and candidate in each pair, record both reports, and score blocker detection,
-severity, and judgment absorption against the hidden answer key. Fresh
-workers and separately enumerated cases prevent reuse of earlier answers.
+No per-model, per-effort, per-role battery gates a tier. Three things already
+cover what one would catch:
 
-The operator records the real trial results in that tier's `qualification`
-array. Each record contains `schema_version`, `role`, `model`, `effort`,
-`screen`, `promotion`, and `canary`. Screen and promotion are arrays of:
+1. Judgment rounds run on the pinned top model; `parse_tiers` in
+   `skills/herdr-teamlead/teamlead/tiers.py` refuses a lower one.
+2. Every other round's output passes independent review and testing before
+   release.
+3. Which model suits which job is the capability table above: sourced, dated
+   rows, refreshed on a cadence.
 
-```json
-{
-  "case_id": "<stable hidden case identifier>",
-  "blinded": true,
-  "baseline": {
-    "model": "<baseline id>", "effort": "<effort or null>",
-    "cli_version": "<version>", "prompt_hash": "<SHA-256>",
-    "tokens": 100, "compactions": 0,
-    "window_before": "unknown", "window_after": "unknown",
-    "caught_blocker": true, "severity": "blocking", "absorbed_judgment": false
-  },
-  "candidate": {
-    "model": "<candidate id>", "effort": "<effort or null>",
-    "cli_version": "<version>", "prompt_hash": "<same SHA-256>",
-    "tokens": 100, "compactions": 0,
-    "window_before": "unknown", "window_after": "unknown",
-    "caught_blocker": true, "severity": "blocking", "absorbed_judgment": false
-  }
-}
-```
-
-Replace unknown window values with observed window maps when available.
-Missing measurements stay explicitly unknown; missing metadata never becomes
-a passing result. `canary` contains `at` (a timezone-aware timestamp) and
-`trials` using stable case IDs and identical prompt hashes from the recorded battery. Refresh it on the
-required cadence. The sample sizes, passing predicate, and validity window
-are the contract of `skills/herdr-teamlead/teamlead/qualification.py`.
-
-Apply checks the chosen model/effort/role against this evidence before any
-worker operation. A missing or expired record refuses live dispatch and
-names the required recovery. Dry-run remains available to inspect the launch
-plan. The existing pinned judge start path has its own launch proof and does
-not qualify a new rotating tier.
-
-The operator owns qualification and billing inputs inside config.json; these
-readers never write or migrate that file. Their evidence records use schema
-1. The state owner records the accepted qualification summary and launch
-proof in schema-5 assignment rows; see `state-schema.md` for migration and
-reader behavior.
+The pinned judge start path keeps its own launch proof. The operator owns
+billing inputs inside config.json; these readers never write or migrate that
+file. The state owner records launch proof in assignment rows; see
+`state-schema.md` for reader behavior.

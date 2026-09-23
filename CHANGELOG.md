@@ -1,5 +1,327 @@
 # Changelog
 
+### Added
+
+- **The first bounded classification, and the labelled corpus that scores it.**
+  `rules/script-delegation.md` gained the destination in this release; nothing
+  used it. This does, at the one point in a round where the destination is
+  right: a worker report is prose whose meaning has to be read, and the answer
+  is one of a fixed set (#482, #479).
+
+  **The measurement that says it is a classifier and not a script:** across 90
+  recorded reports the lead marked 63 `blocking` and 27 `approved`, while only 7
+  carry an explicit `## BLOCKED` heading. A grep scores about 8% recall. The
+  verdict is in the prose or it is nowhere — which is the test this release
+  settled on, where the information lives rather than how the question feels.
+
+  `classify/classify-report.sh` calls a pinned model through `codex exec
+  --output-schema`, the schema-constrained pattern `.github/codex-review`
+  already ships. Every label carries the report's hash, the question's hash and
+  the model id, so a prompt edit or a model bump is attributable — the pin takes
+  `rules/dependency-management.md` Freshness's documented-cadence branch. The
+  answer set carries `insufficient_evidence`, which routes the question back to
+  the lead reading the report as it always has. Nothing is suppressed: this
+  annotates so the lead can gate several reports in one turn instead of one turn
+  each.
+
+  **The labels were not invented for this.** The lead recorded a verdict against
+  every delivered report at the time it gated the round, and those verdicts sit
+  in the recovery store — written by a different agent, on a different day, for
+  a different purpose. `classify/evaluate.sh` builds the corpus from them and
+  scores the classifier against it, reporting accuracy, a confusion map, and the
+  disagreements, which are the useful half: a label the classifier and the lead
+  differ on is either a classifier error or a report whose verdict was never
+  legible from its own text, and only reading it says which.
+
+  **Measured on both reachable vendors, against all 90 lead-labelled reports.**
+  The Codex subscription was exhausted until 2026-09-25, so the first run used
+  the other two adapters:
+
+  | | `claude-sonnet-5` | `grok-4.6` |
+  | --- | --- | --- |
+  | Accuracy | 97.8% | 97.8% |
+  | Real blockers caught | **63 / 63** | 62 / 63 |
+  | False `blocking` | 2 | 1 |
+  | Failed calls | 0 | 0 |
+
+  The identical headline is the finding: accuracy alone ranks them equal, and
+  the confusion matrix does not. A false `blocking` makes the lead read a report
+  it reads anyway. A false `approved` waves a real blocker through. Claude made
+  none of the second kind; Grok made one, on a judge ruling that ordered a
+  further correction round — it read *"No further operator confirmation is
+  needed"*, which concerns who authorises the next attempt, as the absence of
+  one.
+
+  Both false `blocking` labels share a cause in the question rather than the
+  model. One report named defects the judge had already accepted for the
+  shipment; the other named a prerequisite outside the reviewer's scope. Each
+  says "blocking" about something that does not block this round. The prompt now
+  says so: a defect accepted for this shipment, or a finding the report places
+  outside its own scope, is not blocking.
+
+  Re-scoring that change on the same 90 reports cannot measure its benefit,
+  since it was written against two of them. It can measure its harm, which is
+  the risk that matters: a line telling the model when something is *not*
+  blocking could make it lenient. On the rerun Claude still caught 63 of 63 real
+  blockers, so it did not. The accepted-defect report flipped to `approved`; the
+  out-of-scope one still reads as blocking, now quoting an open obligation that
+  belongs to other gates, which is closer to a judgement call than an error.
+  The benefit is measured by `evaluate.sh --since <date>`, which scores only
+  reports recorded after the change.
+
+  The failure path is also verified live: a Codex call against the exhausted
+  subscription exits 2 with no verdict. A failed call is never a label.
+
+  No test calls a model. The classifier is stubbed on PATH, per the
+  `rules/testing-standards.md` Determinism clause this release added for exactly
+  this case.
+
+- **The lead annotates a round's reports in one call, then gates them
+  together.** The classifier existed and the skill never mentioned it.
+  `classify/classify-reports.sh` labels every delivered report in one call, and
+  SKILL.md Step 12 runs it before the reads, so the lead gates a round's reports
+  in one turn instead of a full-context turn per report — the saving #482 asked
+  for. The full read of every body is unchanged: a label is advisory, and a
+  report whose annotation failed lands in `unannotated` and is read as it always
+  was. A failed annotation never blocks gating.
+
+  The default adapter is now Claude, the only vendor measured adequate for the
+  job: 63 of 63 real blockers caught, against Grok's 62 and an unmeasured Codex.
+
+- **The classifier runs on any of the fleet's three vendors.** The first cut
+  called `codex exec` and nothing else, in a plugin whose purpose is running
+  `claude`, `codex` and `grok` as interchangeable workers — and pinned to the one
+  subscription that was exhausted. A classifier tied to one vendor is useless
+  exactly when that vendor is spent, which is the condition the fleet spends most
+  of its time managing.
+
+  `--agent codex|claude|grok` selects an adapter. All three constrain generation
+  to the schema — `codex exec --output-schema`, `claude --json-schema`,
+  `grok --json-schema` — and every answer then passes the same enum check, which
+  was always the real guarantee: an off-enum answer is never a label, whichever
+  vendor produced it. An earlier note in this entry's thread claimed only Codex
+  could constrain to a schema; the search that concluded it looked for Codex's
+  flag name and missed the other two.
+
+  Each vendor wraps its answer differently. Claude emits a stream of events and
+  the answer sits in the last `result` event's `structured_output`; Grok puts it
+  in `text`. `classify/extract-answer.py` unwraps both, refuses a Claude run that
+  reported an error, and refuses a Grok run that returned more than one object.
+
+  **Every adapter runs in an empty directory, with no tools, for one turn.** The
+  classifier judges the report's own text. A live probe before that constraint
+  existed let Grok search the workspace: it found this repository's own tests,
+  reasoned from them, and emitted four concatenated answers. The tests now
+  assert the room is empty when each adapter runs.
+
+  Each kind pins a classification model rather than its vendor's frontier seat
+  (`claude-sonnet-5`, `grok-4.6`, `gpt-5.6-sol`); reading one report for one
+  verdict does not need the most expensive model a vendor sells.
+
+- **A gate on supervision events, measured and then audited: 17% of the lead's
+  wakeups carry nothing it can act on.** Herdr records every change it observes
+  in a worker, and the lead acknowledges all of them. Over 1790 recorded events
+  it acknowledged 1790, each a full lead turn shipping the lead's whole
+  conversation (#445). `supervision_gate.py` decides which need the lead, and
+  `teamlead supervision-gate` reports verdicts for the ones still pending. SKILL.md
+  Step 11 now calls it between the fleet watch and the per-event delivery check,
+  and the lead acknowledges suppressed events with the gate's reason.
+
+  **It is a script, not a classifier,** and the reason is where the information
+  lives. `{"kind": "visible_observed", "data": {"sha256": "5f084..."}}` has no
+  meaning to read; deciding whether the lead is needed means joining it against
+  other state. A join is a script.
+
+  **Default-wake is the safety property.** Only named cases are suppressed, and
+  every other event wakes the lead, including a kind the module has never seen.
+  The 1790 recorded events contain none of the failure kinds (`watcher_lost`,
+  `observation_error_observed`, `report_error_observed`,
+  `unavailable_observed`), so a gate listing what to WAKE on would have been
+  silent for exactly those.
+
+  **The first version claimed 44% and was wrong, and the audit that caught it
+  is worth keeping.** It suppressed every screen hash, on the argument that no
+  state makes one the only signal. The lead's own acknowledgement outcomes said
+  otherwise. Grouping acknowledgements into the batches the lead handled them
+  in, 8 batches consisted only of would-be-suppressed events and still recorded
+  a delivery: 3 deliveries would have been lost outright and 5 delayed by 5 to
+  49 minutes. The mechanism is that a report FILE is not delivery. Delivery is
+  the file plus the `REPORT: <path>` marker in the worker's final message.
+  `report_observed` fires once, for the file, and the marker reaches the
+  supervisor only as a screen change. So a screen hash is noise before any
+  report file exists and signal after one does, which is the rule the first
+  draft had before it was "simplified" away.
+
+  With that rule restored, the same audit finds no lost delivery and one delay:
+  a judge ruling found through native recovery, whose `report_observed` arrives
+  289 seconds later, one sampling interval. Suppression falls to 307 events,
+  17%. Nearly all are rechecks, deferrals whose observed state has not moved;
+  only 2 are screen hashes, because workers mostly write a draft report before
+  their screen stops changing. A deferral is suppressed at most
+  `MAX_QUIET_RECHECKS` times in a row, since a worker whose state never moves is
+  indistinguishable from a stalled one, and only a genuine change resets that
+  run.
+
+- **One preflight call replaces a round's opening nine steps.** Dispatch is
+  Step 10 of 16, and Steps 2, 3, 4 and 8's prune were each a separate lead turn
+  that shipped the lead's whole accumulated context to run a script and read its
+  exit code. On top of them, `rules/agent-team-operation.md` puts seven more
+  obligations before planning or dispatch — measure the roster, consult lessons,
+  check the cadence, bind supervision, classify each assignment, verify
+  permission flags. None of those checks needs a lead. They are deterministic,
+  they were already scripts, and `rules/script-delegation.md` Precheck Gating
+  already names the shape: one payload saying whether the agent is needed and
+  what it needs (#445 §1).
+
+  `round-preflight.sh` composes the existing owner scripts — `roster.sh`,
+  `verify-authority.sh`, `teamlead measure`, `capability-check`,
+  `prune-worktrees.sh` — and emits one object: `ready`, the `blocking` reasons,
+  the cadences that are `due`, and each check's own payload under `checks`. It
+  reimplements none of them; each contract stays its own.
+
+  Exit 1 is a verdict, not a failure. A blocking reason names the command that
+  produced it, so the lead re-runs that one rather than the whole preflight, and
+  one failing check never hides another's result.
+
+  SKILL.md Step 2 is now the preflight. Steps 3 and 4 stay addressable for
+  callers that need one alone — `references/judge-round.md` re-runs Step 4's
+  `measure` by name — and the numbering is unchanged, since roughly 120
+  cross-references across the references cite these steps and some "Step N"
+  strings belong to other documents' own numbering. Renumbering for tidiness
+  would risk silently misrouting the lead.
+
+  What is left for the lead is the part that needs one: decomposing a request
+  into rounds, gating a report against task history, judging which lessons
+  apply, and handling what nobody anticipated.
+
+- **Briefs preempt the three frictions workers kept reporting.** 52 saved worker
+  reports carry the `## Handoff observations` section COMMON.md mandates —
+  *"unresolved assumptions, avoidable friction or repeated work"* — written at
+  the time by the workers who hit it. Read together for the first time, three
+  observations dominate, and none of them had ever been acted on because each
+  individual worker recovered fine and the cost was only visible in aggregate:
+
+  **22 of 52** recorded the same dead pointer: *"`tessl/RULES.md` is absent;
+  COMMON's resolved index was used."* An inherited parent rule reference that
+  does not resolve from a worktree. Every worker followed it, found it gone,
+  recovered through the resolved index, and wrote it up. COMMON.md now says it
+  up front, with the count, so nobody chases it and nobody reports it.
+
+  **24 of 52** recorded reading a file, truncating, and reading it again in
+  chunks: *"Initial large reads truncated; required content was reread in
+  smaller sections."* Nothing warned them. COMMON.md now does.
+
+  **9 of 52** recorded a guessed path that did not exist. COMMON.md now says to
+  confirm a filename before reading it.
+
+  The counts ride in the brief text on purpose: a worker told "24 of the last 52
+  reports recorded that round trip" reads it as a measured cost, not a style
+  preference.
+
+- **Briefs point at a repo's gates instead of sending every worker to find
+  them.** `COMMON.md` told each worker to *"read the repo's contributor
+  instructions and configured checks to identify its gates"*. Five workers in a
+  round each spent turns finding the same answer, every round, for something
+  identical across them and rarely changed.
+
+  Discovery splits in two: FINDING a file and READING it. Reading is the work.
+  Finding is waste, and a pointer removes it without putting any file's contents
+  into a worker's context.
+
+  **The repo declares its gates.** It already declares its trigger surfaces the
+  same way — `rules/agent-team-operation.md`: *"The repo states each trigger
+  surface and its package size in its own trigger declaration"* — so
+  `resolve-gates.sh` reads `.herdr/gates.json` and reports what it holds:
+  instruction files, runner entry points, and one line of notes. It parses no
+  YAML and decides nothing about which check matters; that judgment stays with
+  whoever reads the files. The preflight runs it, and the briefs carry the
+  result as the shared `GATES` value, already rendered in its `brief` field, so
+  the lead copies it rather than building a Markdown list by hand. A path the
+  declaration names but the checkout lacks is reported in `missing` and never
+  reaches a worker. This repo's own declaration ships here.
+
+  An earlier draft of this change matched a hardcoded list of filenames —
+  `AGENTS.md`, `Makefile`, `pyproject.toml` — and defended the list as hints
+  rather than an allow-list. That is the enumerated-name failure #480 retired in
+  this same release, written one layer down and in the same session: the set of
+  filenames meaning "runner" is not enumerable, and `justfile`, `Taskfile.yml`,
+  `Earthfile` and `bin/check` are all invisible to it. A declaration needs no
+  such set, and unlike a classifier it needs no inference either — the owner
+  states the truth once.
+
+  Undeclared is a first-class answer. `.github/workflows` is a location GitHub
+  defines rather than a name anyone guessed, so it is still reported; everything
+  else comes back `declared: false`, and the brief tells the worker to find the
+  gates and name them in its report, which is what the owner writes the
+  declaration from. A declared path that no longer exists lands in `missing`
+  rather than pointing a worker at nothing, and a declaration that cannot be
+  parsed is a repair, never an empty map.
+
+- **A model-capability table, refreshed on a cadence.** Routing work by how hard
+  it is needs a written-down answer to "what can this model do", and nothing
+  held one. #480 names it as a dependency the project imports, not a measurement
+  it takes: published knowledge, read and recorded with its source and the date
+  it was read (#481).
+
+  Saved at `<selected-state>.capabilities.json`, schema 1, written only by
+  `capability-record`. One entry owns one model, effort and capability, and
+  carries a verdict of `adequate`, `inadequate` or `unknown` plus the source
+  supporting it. Three commands: `capability-check` answers whether a refresh is
+  due and writes nothing, `capability-record` files a consultation's report, and
+  `capability-show` reads the table.
+
+  Staleness here is silent. Models ship monthly, a retired entry keeps routing
+  work to a model that stopped being the right choice, and nothing errors. So
+  the table comes due weekly, on the pattern the retrospective cadence already
+  uses. A table never refreshed comes due as soon as the ledger holds any work,
+  and a fleet that dispatched nothing never comes due — the table is read at
+  dispatch time, so a week with no rounds is a week where a stale table is never
+  consulted.
+
+  A refresh replaces the rows it covers and leaves the rest alone, so one report
+  about two models never retires the table.
+
+  **The source hierarchy is what keeps vendor claims out.** `benchmark`,
+  `evaluation`, `project` and `vendor`, strongest first, each entry dated so a
+  stale reading is visible. An `adequate` verdict needs a source above `vendor`,
+  because a vendor's claim about its own model would route real work on
+  marketing. A `vendor` source still records availability, deprecation, and the
+  verdicts `inadequate` and `unknown`.
+
+  **Defect detection is one capability in the table, not a separate regime.**
+  The per-model, per-effort, per-role qualification battery — a 5-case screen, a
+  20-case promotion and a weekly 5-case canary — measures in-house what
+  publication already states, and #480 rules out the reference-class objection
+  that would justify measuring it locally: this codebase is shell, Python, Go,
+  Actions and JSON manifests, inside the distribution benchmarks measure. Where
+  a model did fail here, that failure is itself a `project` source and cites its
+  issue, which is how #324's result enters the table rather than standing beside
+  it as a separate protocol.
+
+### Removed
+
+- **The tier qualification battery.** A tier row no longer needs a paired,
+  blinded screen of 5 cases, a promotion battery of 20 and a weekly canary of 5
+  per model, effort and role before live dispatch. `teamlead/qualification.py`,
+  its tests, the `qualification` tier field and `plan --preview-tiers` are gone;
+  a config still carrying `qualification` is refused with the list of allowed
+  fields (#445 §3).
+
+  **Why it could go:** it guarded against a cheap model quietly missing
+  defects, and three things already cover that. Judgment rounds are pinned to
+  the top model by `parse_tiers`, so the battery never applied where a miss
+  costs most. Every other round is independently reviewed and tested before
+  release, which catches a bad build whatever model wrote it. And which model
+  suits which job is now the capability table, sourced and dated, instead of a
+  battery nobody ran. Nobody had: 0 configured workers carry a `tiers` table
+  and 0 qualification records exist in any config, so removing it changes no
+  live dispatch. Left in, it was the first thing to fail the day a tier table
+  was wired in (#481).
+
+  Ledger rows written earlier carried a `qualification` summary inside
+  `tier`. Ledger schema 7 → 8 removes it through the owner migration, so every
+  row reads one shape, and a current row carrying one is refused.
+
 ## 0.3.252 — 2026-09-23
 
 ### Changed

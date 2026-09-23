@@ -166,7 +166,7 @@ JSON
 }
 JSON
   jq --arg p "$TMP/package.diff" \
-    '.shared += {POLICY_INDEX: $p, RELEASE_SKILL: $p}
+    '.shared += {POLICY_INDEX: $p, RELEASE_SKILL: $p, GATES: "- AGENTS.md\n- scripts/run-tests.sh"}
      | .roles.reviewer += {REVIEW_PACKAGE: $p, REVIEW_BASE: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", REVIEW_HEAD: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}
      | .roles.tester += {REVIEW_PACKAGE: $p, REVIEW_BASE: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", REVIEW_HEAD: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}' \
     "$v6b" > "$TMP/packaged-values.json" || die "could not add packaged review paths"

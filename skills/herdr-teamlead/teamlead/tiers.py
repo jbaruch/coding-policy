@@ -153,7 +153,7 @@ BUILD_FAILED_GATES = 2
 #: spend on an escalation the configured row already covers. A judgment round
 #: is never de-escalated, whatever the pressure (#477).
 PRESSURE_HEADROOM_PCT = 20.0
-TIER_FIELDS = frozenset({"model", "effort", "multiplier", "billing_evidence", "qualification"})
+TIER_FIELDS = frozenset({"model", "effort", "multiplier", "billing_evidence"})
 MODEL_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/-]*\Z")
 LAUNCH_SWITCHES = {
     "claude": frozenset({"--dangerously-skip-permissions"}),
@@ -346,8 +346,6 @@ def parse_tiers(raw, kind):
             _error("Unknown round {!r}; use one of {}.".format(round_type, ", ".join(sorted(ROUNDS))))
         if not isinstance(entry, dict) or set(entry) - TIER_FIELDS:
             _error("Tier {!r} must contain only {}.".format(round_type, ", ".join(sorted(TIER_FIELDS))))
-        if not isinstance(entry.get("qualification", []), list):
-            _error("Tier qualification must be an array of recorded battery results.")
         model = entry.get("model")
         if not isinstance(model, str) or not MODEL_ID.fullmatch(model):
             _error("Tier {!r} needs a model identifier, not a flag or command.".format(round_type))

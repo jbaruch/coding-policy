@@ -5,12 +5,12 @@ looked like when it was measured; it never substitutes for reading the agent's
 live status before writing to it. `plan` may run off a stale snapshot on
 purpose (planning has no side effects); `apply` always re-checks live status.
 
-Schema (schema_version 7)::
+Schema (schema_version 8)::
 
     {
-      "schema_version": 7,
+      "schema_version": 8,
       "snapshots":  [ <measure output>, ... ],   # newest last, capped at 20
-      "assignments":[ {"schema_version": 7, "at": <ISO-8601>,
+      "assignments":[ {"schema_version": 8, "at": <ISO-8601>,
                        "role": <str>, "agent": <str>,
                        "status": "applied" | "sent_but_not_started"
                                  | "unknown",
@@ -31,6 +31,8 @@ UNCOUNTED_STATUSES), and `unknown` marks a version-1 row migrated without the
 information. Version 1 documents and rows carry no `status`; the 1 -> 2
 migration below stamps them `unknown`.
 
+Version 8 drops the retired qualification battery's summary from a row's
+`tier`; migration removes it from older rows, which no reader consults.
 Version 7 adds `pressure_headroom` and `de_escalated` to a row's `tier`, so a
 declined escalation is countable after the fact (#477). An older tier row
 never de-escalated, since nothing could: migration stamps null headroom and
@@ -77,7 +79,7 @@ from .recovery import empty_recovery, migrate_store, validate_store
 
 #: The version this build writes for the document and assignment rows.
 #: Snapshots have their own version and migration chain below.
-STATE_SCHEMA_VERSION = 7
+STATE_SCHEMA_VERSION = 8
 
 CLEAR_REASONS = frozenset({"automatic", "hand", "retained", "unknown"})
 
@@ -263,6 +265,20 @@ def _migrate_document_6_to_7(payload):
     return payload
 
 
+def _migrate_record_7_to_8(record):
+    """The qualification battery is retired; its summary proves nothing now."""
+    tier = record.get("tier")
+    if isinstance(tier, dict):
+        tier.pop("qualification", None)
+    record["schema_version"] = 8
+    return record
+
+
+def _migrate_document_7_to_8(payload):
+    payload["schema_version"] = 8
+    return payload
+
+
 def _migrate_snapshot_2_to_3(snapshot):
     """An older snapshot has no measured per-tier billing attribution."""
     snapshot["schema_version"] = 3
@@ -315,6 +331,7 @@ MIGRATIONS = {
     4: (5, _migrate_document_4_to_5),
     5: (6, _migrate_document_5_to_6),
     6: (7, _migrate_document_6_to_7),
+    7: (8, _migrate_document_7_to_8),
 }
 
 #: The same table for one assignment record, walked the same way.
@@ -326,6 +343,7 @@ RECORD_MIGRATIONS = {
     4: (5, _migrate_record_4_to_5),
     5: (6, _migrate_record_5_to_6),
     6: (7, _migrate_record_6_to_7),
+    7: (8, _migrate_record_7_to_8),
 }
 
 
@@ -445,6 +463,8 @@ def _validate(payload, path):
                     or pressure is not None and (isinstance(pressure, bool) or not isinstance(pressure, (int, float))
                                                  or not math.isfinite(pressure))):
                 raise _NoUsableState("an assignment row's tier lacks its pressure fields")
+            if "qualification" in tier:
+                raise _NoUsableState("an assignment row's tier carries the retired qualification summary")
             try:
                 parse_tiers({"build": {"model": tier["model"], "effort": tier.get("effort")}}, tier["kind"])
                 launch_args = parse_launch_args(tier.get("launch_args", []), tier["kind"])

@@ -20,7 +20,7 @@ from tests import test_cli as fixture
 from tests import test_historical as historical_fixture
 from tests.fakes import FakeRunner, ScriptedReads, agent_json
 from tests.test_engagement import REQUIREMENT
-from tests.test_qualification import AT, qualified_tier
+from tests.tier_fixture import AT, tier_row
 
 SKILL = Path(__file__).resolve().parents[1]
 
@@ -213,8 +213,7 @@ class SpecialistCliTest(fixture.CliCase):
 
     def seed_warm_consultation(self, *, assess=True, retire=True):
         self.bind()
-        tier = json.loads(json.dumps(qualified_tier()).replace("sonnet-5", "opus-5"))
-        tier["qualification"][0]["role"] = "advisor"
+        tier = {**tier_row(), "model": "opus-5"}
         self.settings["agents"] = self.settings["agents"][:1]
         self.settings["agents"][0]["tiers"] = {"architect": tier}
         self.config.write_text(json.dumps(self.settings))
@@ -318,7 +317,8 @@ class SpecialistCliTest(fixture.CliCase):
         policy.write_text("Verified policy index and release entrypoint fixture.")
         values = {"shared": {"SHARED_CHECKOUT": "/repo", "AUTHORITY_STATEMENT": "Owned fixture repository",
             "TASK_AUTHORIZATION": "Read-only consultation on onboarding", "AUTHORIZED_ACTIONS": "Read and report",
-            "EXTERNAL_PERMISSION": "No external actions", "POLICY_INDEX": str(policy), "RELEASE_SKILL": str(policy)}, "roles": {}}
+            "EXTERNAL_PERMISSION": "No external actions", "POLICY_INDEX": str(policy), "RELEASE_SKILL": str(policy),
+            "GATES": "- AGENTS.md\n- scripts/run-tests.sh"}, "roles": {}}
         for role in ("advisor", "investigator", "architect"):
             values["roles"][role] = {"RESPONSIBILITY": role, "SPECIALTY": "ux", "TASK": "task-1", "ISSUE": "Onboarding",
                 "BRANCH": "feat/onboarding", "OBJECTIVE": "Assess the account setup interaction",

@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "instructions": [
+    "AGENTS.md",
+    ".claude/CLAUDE.md"
+  ],
+  "runners": [
+    "scripts/run-diagnostics.sh",
+    "scripts/run-tests.sh",
+    "skills/release/check-changelog-placement.py"
+  ],
+  "notes": "run-diagnostics before run-tests; the changelog placement check needs --base origin/main"
+}

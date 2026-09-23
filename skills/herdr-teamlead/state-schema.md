@@ -29,7 +29,7 @@ expertise. Capability entries are unique lowercase identifiers validated by
 `teamlead/config.py` (`parse_capabilities`). Declare them from available skills,
 tools and inspected evidence. The example leaves every capability list empty.
 Config schema 2 added per-agent `tiers` and `launch_args`.
-See `skills/herdr-teamlead/references/model-tiers.md` for qualification and billing evidence. A missing config is refused with the exact `cp` command to run. The
+See `skills/herdr-teamlead/references/model-tiers.md` for billing evidence. A missing config is refused with the exact `cp` command to run. The
 optional `idle_markers` / `working_markers` per-agent keys carry the footer
 signatures the stale-state probe reads; an agent with neither is never probed.
 `slash_delivery` picks how that worker's slash commands go out, `paste` or
@@ -58,16 +58,13 @@ values are ignored: proof comes from launch or live process argv. The planner
 never ranks the judge seat or gives its pinned worker another role.
 
 Plan schema 5 also carries `tiers` keyed by role and `rounds` with the lead's
-round type and context inputs. Default planning excludes unqualified tiers;
-`--preview-tiers` inspects candidates before qualification. Live apply always
-checks current qualification. Legacy non-tiered assignments have no tier
-metadata. The operator's tier table, supported flags, qualification schema,
-and billing evidence are documented in `references/model-tiers.md`.
+round type and context inputs. Legacy non-tiered assignments have no tier
+metadata. The operator's tier table, supported flags, and billing evidence are documented in `references/model-tiers.md`.
 `task_context` is null for an unlabelled plan, otherwise an object containing
 `task`, cumulative `fix_round`, correction `plan` identity or null, and `work`
 bounds or null. Apply refuses different task context. Earlier plan shapes and
 plain role mappings remain accepted; live apply still checks current history,
-allowance, tiers, qualification, and readiness. Apply output schema 7 includes
+allowance, tiers, and readiness. Apply output schema 7 includes
 `context_transition`, persistent `dispatch_id` for labelled assignments, and
 `replayed: true` when returning an existing completed result.
 Version 7 adds optional per-assignment specialist `requirements` and retained
@@ -274,11 +271,11 @@ skills/herdr-teamlead/references/retrospectives.md
 
 ```json
 {
-  "schema_version": 7,
+  "schema_version": 8,
   "snapshots": ["<measure output>, oldest first, ring capped at 20"],
   "assignments": [
     {
-      "schema_version": 7,
+      "schema_version": 8,
       "at": "2026-09-01T21:00:00+00:00",
       "role": "developer",
       "agent": "grok",
@@ -316,7 +313,7 @@ skills/herdr-teamlead/references/retrospectives.md
 
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
-| `schema_version` | integer | Currently `7`. Version 7 adds `pressure_headroom` and `de_escalated` to a row's `tier`; an older tier row migrates to null headroom and `de_escalated: false`, since nothing could de-escalate before it. Bumped on any shape change |
+| `schema_version` | integer | Currently `8`. Version 8 drops the retired qualification battery's summary from `tier`; migration removes it from older rows. Version 7 adds `pressure_headroom` and `de_escalated` to a row's `tier`; an older tier row migrates to null headroom and `de_escalated: false`, since nothing could de-escalate before it. Bumped on any shape change |
 | `snapshots` | array | Whole `measure` documents, oldest first; the ring holds the last 20 |
 | `assignments` | array | Append-only ledger of who held which role |
 | `snapshots[].schema_version` | integer | Currently `3`. Version 2 added `window_group`; version 3 adds per-round `tier_billing`. Older snapshots migrate on read, preserving headroom and shared-window membership |
@@ -333,7 +330,7 @@ skills/herdr-teamlead/references/retrospectives.md
 | `assignments[].context_session` | object or null | Verified native session reference scoped to a pane: `pane_id`, `source`, `agent`, `kind`, `value`, all non-empty strings; kind is `id` or `path`. Null means continuity was not established |
 
 | `snapshots[].agents[].tier_billing` | object | Round → `{model, effort, window}` for configured tiers; unmeasured attribution is `unknown`. Empty for older snapshots |
-| `assignments[].tier` | object or null | Requested `round`, selected config `tier_row`, `kind`, `model`, `effort`, declared/effective multipliers, billing window, launch options, input `prompt_hash`, accepted qualification summary, `pressure_headroom` and `de_escalated` (the measured headroom the selection used, and whether it declined a discretionary escalation), and `verified` proof. Null for old or non-tiered dispatches |
+| `assignments[].tier` | object or null | Requested `round`, selected config `tier_row`, `kind`, `model`, `effort`, declared/effective multipliers, billing window, launch options, input `prompt_hash`, `pressure_headroom` and `de_escalated` (the measured headroom the selection used, and whether it declined a discretionary escalation), and `verified` proof. Null for old or non-tiered dispatches |
 | `assignments[].requirements` | object or null | Normalized requirement object from the assigned role in the plan; null for legacy assignments |
 | `assignments[].reviewer_scope` | string or null | Reviewer participation recorded as `verification`, `design`, or `unknown`; null for other roles. Older reviewers migrate to `unknown` |
 | `specialist_assessments` | array | Append-only lead assessments with original dispatch and byte receipts; each record has its own schema version |
@@ -508,7 +505,7 @@ informational plan name and never feeds headroom.
   documents the retained-dispatch contract. `status` derives budgets and paused
   implementation separately from active audit work. `apply --dry-run` reads
   current recovery bounds without writes; an older ledger requires an owner
-  `state` command first. Dry-run never proves live continuity or qualification.
+  `state` command first. Dry-run never proves live continuity.
 - **Seat vs responsibility** — a partitioned round plans several seats of one
   role (`reviewer#api`, `reviewer#core`). `assignments[].role` holds the
   RESPONSIBILITY (`reviewer`), so per-role history, independence and rotation
@@ -559,6 +556,7 @@ The independent continuity stores do not change this dispatch-state schema.
 | Working lessons and lead handoffs | `<selected-state>.memory/index.json` | `skills/herdr-teamlead/references/working-memory.md`, Persistence contract |
 | User attention and recorded progress | `<selected-state>.attention.json` | `skills/herdr-teamlead/references/attention.md`, Commands and files |
 | Fleet observations and supervision | `<selected-state>.supervision.json` | `skills/herdr-teamlead/references/supervision.md` |
+| Model capabilities, sourced and dated | `<selected-state>.capabilities.json` | `skills/herdr-teamlead/references/model-tiers.md`, Capability table |
 
 Resolve the selected state path before deriving these locations. Each store and
 its records have their own schema version and lock. Their offline readers never

@@ -23,7 +23,7 @@ from types import SimpleNamespace
 from . import __version__
 from .assign import apply as apply_assignments
 from .assign import APPLY_SCHEMA_VERSION, dry_run, native_context_session, normalize_assignments, resolve_paths, validate_fix_history
-from . import attention, composition, engagement, historical, memory, oracle, partition, recovery, report_delivery, restoration, role_clear, retrospective, retrospective_runtime, supervision, supervision_runtime, triggers
+from . import attention, capabilities, composition, engagement, historical, memory, oracle, partition, recovery, report_delivery, restoration, role_clear, retrospective, retrospective_runtime, supervision, supervision_gate, supervision_runtime, triggers
 from .config import default_config_path, load_config, load_judge, load_role_costs, select_agents
 from .errors import PlanError, StateError, TeamLeadError, UsageError
 from .herdr import (
@@ -44,7 +44,6 @@ from .measure import (
 from .planner import plan as build_plan
 from .planner import headroom_of
 from .tiers import MissingTierError, parse_launch_args, parse_tiers, select_tier
-from .qualification import require_qualification
 from .launch import start_worker, verify_running
 from .state import (
     add_assignment,
@@ -125,6 +124,18 @@ def build_parser():
         retro_parser = sub.add_parser(command, parents=[common], help="Check or record a lead-authored retrospective.")
         retro_parser.add_argument("--record", required=True, metavar="FILE")
         retro_parser.add_argument("--now", metavar="ISO")
+    capability_check = sub.add_parser("capability-check", parents=[common],
+                                      help="Whether the model-capability table is due a refresh. Read-only.")
+    capability_check.add_argument("--now", metavar="ISO")
+    capability_record = sub.add_parser("capability-record", parents=[common],
+                                       help="Record a capability consultation's report into the table.")
+    capability_record.add_argument("--record", required=True, metavar="FILE")
+    capability_record.add_argument("--now", metavar="ISO")
+    capability_show = sub.add_parser("capability-show", parents=[common],
+                                     help="Read the saved capability table without contacting Herdr.")
+    sub.add_parser("supervision-gate", parents=[common],
+                   help="Which pending supervision events need the lead. Read-only.")
+
     retro_list = sub.add_parser("retro-list", parents=[common], help="List saved retrospective notes without contacting Herdr.")
     retro_list.add_argument("--task")
     retro_list.add_argument("--since", metavar="ISO")
@@ -249,9 +260,7 @@ def build_parser():
     plan_parser.add_argument("--task", help="Original task identity; preserve it through every correction.")
     plan_parser.add_argument("--requirements", metavar="FILE",
                              help="Versioned per-role specialty, capabilities, independence and engagement requirements.")
-    plan_parser.add_argument("--preview-tiers", action="store_true",
-                             help="Preview unqualified tiers. Live apply still requires complete qualification evidence.")
-    plan_parser.add_argument("--now", metavar="ISO-8601", help="Reference time for qualification expiry (default: current UTC time).")
+    plan_parser.add_argument("--now", metavar="ISO-8601", help="Reference time for the plan (default: current UTC time).")
 
     apply_parser = sub.add_parser(
         "apply",
@@ -578,7 +587,7 @@ def _planned_snapshot_headroom(document, state, state_path):
     return _snapshot_headroom(snapshot)
 
 
-def _candidate_tiers(roles, agents, rounds, fix_round=None, judge=None, qualified_at=None, excludes=None, headroom=None):
+def _candidate_tiers(roles, agents, rounds, fix_round=None, judge=None, excludes=None, headroom=None):
     tiered = any(agent.tiers for agent in agents)
     if not tiered and not (judge and "judge" in roles):
         if rounds:
@@ -610,13 +619,6 @@ def _candidate_tiers(roles, agents, rounds, fix_round=None, judge=None, qualifie
                 continue
             if tier is None:
                 continue
-            if qualified_at is not None:
-                evidence = [record for entry in agent.tiers.values() for record in entry.get("qualification", [])]
-                try:
-                    require_qualification({**tier, "qualification": evidence}, role, qualified_at)
-                except UsageError:
-                    # This candidate is ineligible; another qualified worker may fill the seat.
-                    continue
             candidates[role][agent.name] = {key: tier[key] for key in (
                 "round", "tier_row", "kind", "model", "effort", "multiplier", "billing_window",
                 "effective_multiplier", "pressure_headroom", "de_escalated",
@@ -860,7 +862,6 @@ def cmd_plan(args, client=None, warn=None, trace=None):
     # what keeps its recomputed tiers equal to the planned ones (#477).
     measured_headroom = _snapshot_headroom(snapshot)
     tier_candidates = _candidate_tiers(canonical, agents, rounds, args.fix_round, judge,
-                                      None if args.preview_tiers else (args.now or now_iso()),
                                       excludes={role: names for role, names in excludes.items() if role in set(canonical)},
                                       headroom=measured_headroom)
     # Each seat inherits its role's bars, tiers, round type and requirements.
@@ -1287,9 +1288,6 @@ def cmd_apply(args, client=None, warn=None, trace=None):
             tiers=tiers,
             retrospective_guard=retrospective_runtime.Guard(state_path, state, client, agents_by_name, at,
                                                           task=args.task, retain=args.retain_context or args.retain_specialist, no_clear=args.no_clear),
-            qualifications={role: [record for entry in agents_by_name[name].tiers.values()
-                                   for record in entry.get("qualification", [])]
-                            for role, name in assignments.items()},
         )
     except TeamLeadError as exc:
         for identifier in prepared:
@@ -1517,6 +1515,35 @@ def cmd_start_judge(args, client=None, warn=None, trace=None):
             "pane": args.pane, "argv_verified": True, "verified": proof}, None
 
 
+def cmd_capability(args, client=None, warn=None, trace=None):
+    """The capability table's cadence, its refresh, and a read of what it holds.
+
+    `capability-check` is read-only and answers one question: is the table due.
+    A table never refreshed comes due as soon as the ledger holds any work, and
+    stays quiet on a fleet that has dispatched nothing (#481).
+    """
+    path = _state_path(args)
+    document = capabilities.load(path)
+    if args.command == "capability-show":
+        return document, None
+    at = args.now or now_iso()
+    if args.command == "capability-check":
+        state, usable = load_state_checked(path, warn=warn, persist_migration=False)
+        if not usable:
+            # An unreadable ledger is not an empty one: whether work exists, and
+            # so whether a refresh is due, is unknown.
+            raise StateError("The ledger at {} exists but cannot be read, so whether the capability "
+                             "table is due is unknown. Repair or migrate it with `teamlead state`, "
+                             "then re-run capability-check.".format(path), {"path": str(path)})
+        result = capabilities.cadence(document, at, existing_work=bool(state["assignments"]))
+        return {"schema_version": capabilities.SCHEMA_VERSION, **result,
+                "entries": len(document["entries"])}, None
+    refreshed = capabilities.record(path, _read_record(args.record), at)
+    return {"schema_version": capabilities.SCHEMA_VERSION,
+            "refreshed_at": refreshed["refreshed_at"],
+            "entries": len(refreshed["entries"])}, None
+
+
 def cmd_retrospective(args, client=None, warn=None, trace=None):
     path = _state_path(args)
     if args.command == "retro-list":
@@ -1606,6 +1633,11 @@ def cmd_supervision(args, client=None, warn=None, trace=None):
                                            client=client, clock=now_iso, sleeper=time.sleep), None
 
 
+def cmd_supervision_gate(args, client=None, warn=None, trace=None):
+    """Which pending supervision events need the lead; see supervision_gate.py."""
+    return supervision_gate.pending(supervision.load(_state_path(args))), None
+
+
 def cmd_restoration(args, client=None, warn=None, trace=None):
     client = client if client is not None else _client(args, trace=trace)
     return restoration.run_command(args, client, sleep=time.sleep), None
@@ -1624,6 +1656,8 @@ COMMANDS = {
     "start-judge": cmd_start_judge,
     "probe-report": cmd_probe_report,
     **{command: cmd_retrospective for command in ("retro-check", "retro-record", "retro-list", "retro-show")},
+    **{command: cmd_capability for command in ("capability-check", "capability-record", "capability-show")},
+    "supervision-gate": cmd_supervision_gate,
     **{command: cmd_memory for command in memory.COMMANDS},
     **{command: cmd_attention for command in attention.COMMANDS},
     **{command: cmd_supervision for command in SUPERVISION_COMMANDS},
@@ -1647,7 +1681,7 @@ def main(argv=None, stdout=None, stderr=None, client=None):
     try:
         # Commands that may migrate or write state share its canonical lock.
         # Dry runs, probes, and retrospective reads remain read-only.
-        readonly = args.command in {"probe-report", "detect-triggers", "validate-partition", "verify-oracle", "retro-check", "retro-list", "retro-show"} or getattr(args, "dry_run", False)
+        readonly = args.command in {"probe-report", "detect-triggers", "validate-partition", "verify-oracle", "retro-check", "retro-list", "retro-show", "capability-check", "capability-show", "supervision-gate"} or getattr(args, "dry_run", False)
         separate_owner = args.command in memory.COMMANDS | attention.COMMANDS | SUPERVISION_COMMANDS | restoration.COMMANDS
         lock = nullcontext() if readonly or separate_owner else state_lock(retrospective.canonical_state(_state_path(args)))
         with lock:

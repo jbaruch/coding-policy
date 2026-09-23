@@ -68,7 +68,7 @@ owns nothing. Fix the document and re-run. Dispatch only once it exits 0.
 `plan --partition <validated.json>`, naming the file `validate-partition` wrote,
 replaces the named role with one seat per slice, keyed `<role>#<slice>` in the plan's `assignments`. A seat's ROLE
 decides everything the responsibility governs — its cost and rotation history,
-exclusions, round type, requirements, tier qualification and the review-package
+exclusions, round type, requirements, tier and the review-package
 checks its brief owes — so capability, contribution-exclusion and headroom
 ordering apply unchanged and each slice gets a distinct worker.
 

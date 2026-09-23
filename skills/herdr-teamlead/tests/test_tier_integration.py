@@ -14,7 +14,7 @@ from teamlead.planner import plan
 from teamlead.state import STATE_SCHEMA_VERSION, add_assignment, empty_state, load_state_checked, role_counts
 from tests.fakes import FakeRunner, ScriptedReads, agent_json, composer_reads, composer_screen, ok_json
 from tests.test_cli import CliCase, CONFIG
-from tests.test_qualification import AT, qualified_tier
+from tests.tier_fixture import AT, tier_row
 
 
 class TierIntegrationTest(CliCase):
@@ -23,7 +23,7 @@ class TierIntegrationTest(CliCase):
         self.settings = copy.deepcopy(CONFIG)
         self.settings["schema_version"] = 2
         self.settings["agents"] = self.settings["agents"][:1]
-        self.settings["agents"][0]["tiers"] = {"build": qualified_tier()}
+        self.settings["agents"][0]["tiers"] = {"build": tier_row()}
         self.write_config()
 
     def write_config(self):
@@ -33,17 +33,16 @@ class TierIntegrationTest(CliCase):
         return ["apply", *self.base(), "--assignments", json.dumps(document or {"developer": "claude"}),
                 "--common", str(self.common), *self.brief_args("developer"), "--now", AT, "--composer-settle", "0"]
 
-    def test_planner_skips_unqualified_seat_with_more_headroom(self):
+    def test_planner_ranks_tiered_seats_by_headroom(self):
         other = copy.deepcopy(self.settings["agents"][0])
         other["name"] = "spare"
-        other["tiers"]["build"]["qualification"] = []
         self.settings["agents"].append(other)
         self.write_config()
         self.snapshot.write_text(json.dumps({"agents": {"claude": {"headroom_pct": 50}, "spare": {"headroom_pct": 99}}}))
         rc, output, error = self.run_cli(["plan", *self.base(), "--roles", "developer",
                                         "--snapshot", str(self.snapshot), "--now", AT])
         self.assertEqual(rc, 0, error)
-        self.assertEqual(json.loads(output)["assignments"], {"developer": "claude"})
+        self.assertEqual(json.loads(output)["assignments"], {"developer": "spare"})
 
     def test_a_scarce_plan_records_its_pressure_and_apply_agrees_with_it(self):
         # coding-policy#477: `apply` measures nothing, so it re-reads the
@@ -68,24 +67,13 @@ class TierIntegrationTest(CliCase):
         self.assertEqual(rc, 0, error)
         self.assertNotIn("Plan tiers differ", error)
 
-    def test_unqualified_live_dispatch_refuses_before_any_herdr_call(self):
-        self.settings["agents"][0]["tiers"]["build"]["qualification"] = []
-        self.write_config()
-        runner = FakeRunner()
-        rc, output, error = self.run_cli(self.apply_args(), client=HerdrClient("herdr", runner))
-        self.assertEqual(rc, 1)
-        self.assertIn("paired promotion", error)
-        self.assertEqual(output, "")
-        self.assertEqual(runner.calls, [])
-        self.assertFalse(self.state.exists())
-
-    def test_unqualified_default_plan_refuses_with_preview_recovery(self):
+    def test_a_retired_qualification_field_is_refused_with_the_allowed_fields(self):
         self.settings["agents"][0]["tiers"]["build"]["qualification"] = []
         self.write_config()
         rc, _, error = self.run_cli(["plan", *self.base(), "--roles", "developer",
                                     "--snapshot", str(self.snapshot), "--now", AT])
         self.assertEqual(rc, 1)
-        self.assertIn("--preview-tiers", error)
+        self.assertIn("must contain only", error)
 
     def test_invalid_utf8_json_inputs_report_the_path_without_worker_calls(self):
         invalid = self.tmp / "invalid.json"
@@ -118,17 +106,13 @@ class TierIntegrationTest(CliCase):
         self.assertIn("UTF-8 JSON", warnings[0])
         self.assertEqual(invalid.read_bytes(), b"\xff\xfe")
 
-    def test_preview_plan_can_inspect_an_unqualified_table(self):
-        self.settings["agents"][0]["tiers"]["build"]["qualification"] = []
-        self.write_config()
+    def test_default_plan_selects_a_configured_tier_row(self):
         rc, output, error = self.run_cli(["plan", *self.base(), "--roles", "developer",
-                                        "--snapshot", str(self.snapshot), "--now", AT, "--preview-tiers"])
+                                        "--snapshot", str(self.snapshot), "--now", AT])
         self.assertEqual(rc, 0, error)
         self.assertEqual(json.loads(output)["tiers"]["developer"]["model"], "sonnet-5")
 
-    def test_dry_run_prints_flags_without_herdr_or_qualification(self):
-        self.settings["agents"][0]["tiers"]["build"]["qualification"] = []
-        self.write_config()
+    def test_dry_run_prints_flags_without_herdr(self):
         runner = FakeRunner()
         rc, output, error = self.run_cli(self.apply_args() + ["--dry-run"], client=HerdrClient("herdr", runner))
         self.assertEqual(rc, 0, error)
@@ -297,6 +281,22 @@ class TierIntegrationTest(CliCase):
         self.assertTrue(usable)
         tier = migrated["assignments"][0]["tier"]
         self.assertEqual((tier["pressure_headroom"], tier["de_escalated"]), (None, False))
+        self.assertEqual(migrated["assignments"][0]["schema_version"], STATE_SCHEMA_VERSION)
+
+    def test_a_schema_seven_row_loses_the_retired_qualification_summary(self):
+        state = empty_state()
+        argv = ["claude", "--model", "sonnet-5", "--effort", "high"]
+        add_assignment(state, AT, "developer", "claude", tier={
+            "kind": "claude", "model": "sonnet-5", "effort": "high", "launch_args": [],
+            "verified": {"source": "launch_argv", "model": "sonnet-5", "effort": "high", "pane_id": "w1:p2", "argv": argv}})
+        state["schema_version"] = 7
+        row = state["assignments"][0]
+        row["schema_version"] = 7
+        row["tier"]["qualification"] = {"role": "developer", "promotion_cases": 20}
+        self.state.write_text(json.dumps(state))
+        migrated, usable = load_state_checked(self.state)
+        self.assertTrue(usable)
+        self.assertNotIn("qualification", migrated["assignments"][0]["tier"])
         self.assertEqual(migrated["assignments"][0]["schema_version"], STATE_SCHEMA_VERSION)
 
     def test_historical_permission_modes_stay_readable_without_becoming_live_proof(self):

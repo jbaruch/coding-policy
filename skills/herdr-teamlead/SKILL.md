@@ -1,7 +1,7 @@
 ---
 name: herdr-teamlead
 description: >
-  Run Herdr rounds with on-demand specialists, qualified tiers, bounded briefs,
+  Run Herdr rounds with on-demand specialists, model tiers, bounded briefs,
   report verification, and release gates. Use for requests to dispatch the Herdr
   team, balance worker usage, collect reports, run or retrieve retrospectives,
   catch up on outstanding user attention, curate team lessons, or save and resume
@@ -68,26 +68,76 @@ For every other request, read `HERDR_ENV` before running scripts.
 - **Set, none of the above applies, and the answer is already in the lead's
   context** — say it. Finish here.
 
-## Step 2 — Verify Herdr and the Roster
+## Step 2 — Run the Round Preflight
+
+One call answers every deterministic check a round start owes: Herdr and the
+roster, authority for the repo, measured headroom, the capability table's
+cadence, and worktree hygiene.
+
+```bash
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
+bash "$CP/skills/herdr-teamlead/round-preflight.sh" \
+  --repo <owner/repo> --checkout <shared-checkout>
+```
+
+Emits one JSON object: `ready`, the `blocking` reasons, the cadences that are
+`due`, and each check's own payload under `checks`. Exit 1 is a verdict, not a
+failure — something blocks the round. Exit 2 means the preflight could not
+answer.
+
+- **Exit 0** — read `due`, satisfy any cadence it names, and proceed to Step 5.
+  When `due` names the capability table, dispatch the refresh consultation under
+  `references/model-tiers.md`, then record its report and show the result:
+
+```bash
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
+bash "$CP/skills/herdr-teamlead/teamlead.sh" capability-record --record <report.json>
+```
+
+```bash
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
+bash "$CP/skills/herdr-teamlead/teamlead.sh" capability-show
+```
+
+- **Exit 1** — report the `blocking` reasons verbatim. Each names the command
+  that produced it; re-run that one, not the preflight.
+- **Exit 2** — report the diagnostic and finish here.
+
+Which checks run, and which exit codes they fold into `blocking`, are the
+script's decision contract — see `skills/herdr-teamlead/round-preflight.sh`, not
+restated here (`rules/script-as-black-box.md`).
+
+Steps 3 and 4 remain the individual commands, for a caller that needs one on its
+own. A round start runs this instead of all of them. The roster has no step of
+its own; inspect it directly when only the live workers are wanted:
 
 ```bash
 CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
 bash "$CP/skills/herdr-teamlead/roster.sh"
 ```
 
-Emits the caller and live workers with kind, pane, and state.
-
-- **Exit 0, agents present** — proceed to Step 3.
-- **Exit 0, empty roster** — report unnamed panes from `herdr agent list` and
-  the correcting `herdr agent rename <pane-id> <name>` command. Finish here.
-- **Exit 1 or 2** — report the diagnostic verbatim and finish here.
+Emits the caller and live workers with kind, pane, and state. An empty roster on
+exit 0 means unnamed panes: report them from `herdr agent list` with the
+correcting `herdr agent rename <pane-id> <name>` command.
 
 Record staffing gaps under `references/round-setup.md`. Leave unused specialist
-profiles unlaunched. Never duplicate targets or fold verification onto a contributor.
-Start workers in YOLO mode under `references/model-tiers.md`; preserve it on
-relaunch. Verify live permission flags before dispatch, including existing workers.
+profiles unlaunched. Never duplicate targets or fold verification onto a
+contributor. Start workers in YOLO mode under `references/model-tiers.md`;
+preserve it on relaunch. Verify live permission flags before dispatch, including
+existing workers. Record task authorization and permitted actions under the
+round-setup reference. Create or resume the stable ledger under
+`references/task-ledger.md`; record its absolute path before dispatch. Apply the
+round-setup accepted-behavior, resume and supervision binding requirements.
+
+Run `references/retrospectives.md` on resume, before planning, or for an
+explicit retrospective request. For an explicit request, complete a new
+retrospective and finish here.
+
+Proceed immediately to Step 5.
 
 ## Step 3 — Verify Authority for the Repo
+
+Step 2 runs this. Use it alone when only the authority answer is wanted.
 
 ```bash
 CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
@@ -99,17 +149,11 @@ Record the emitted namespace ownership evidence using Step 3 of
 operator permission; absent permission, remain read-only or finish here.
 On non-zero, report the diagnostic and finish here.
 
-Record task authorization and permitted actions under the round-setup reference.
-Create or resume the stable ledger under `references/task-ledger.md`; record its
-absolute path before dispatch. Apply the round-setup accepted-behavior, resume
-and supervision binding requirements.
 Proceed immediately to Step 4.
 
 ## Step 4 — Measure Headroom
 
-Run `references/retrospectives.md` on resume, before planning, or for an explicit
-retrospective request. For an explicit request, complete a new retrospective and
-finish here; otherwise continue below.
+Step 2 runs this. Use it alone to re-measure, which the judge round does.
 
 ```bash
 CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
@@ -192,14 +236,14 @@ assessment at an exhausted allowance. Pass the same `--judge-mode` to `apply`.
 On exit 1, resolve the diagnostic before continuing. Apply the Step 5 constraints in `references/round-setup.md`:
 exclude contributors from verification, reserve the developer through early fixes,
 preserve task identity and fix count, and reuse recorded correction bounds.
-Tier and qualification contracts:
+Tier contracts:
 
 ```text
 skills/herdr-teamlead/references/model-tiers.md
 skills/herdr-teamlead/references/dispatch-recovery.md
 ```
 
-`--preview-tiers` authorizes no dispatch. Save the plan and rationale.
+Save the plan and rationale.
 Proceed immediately to Step 6.
 
 ## Step 6 — Build the Review Package
@@ -223,6 +267,9 @@ Proceed immediately to Step 7.
 Resolve policy paths through the Step 7 reference first. Write its outputs in
 `shared` within `{"shared": {...}, "roles": {"<role>": {...}}}` and run:
 
+`GATES` is shared: Step 2's `checks.gates.detail.brief`, verbatim. On a
+non-empty `checks.gates.detail.missing`, name those paths in the round's report.
+
 ```bash
 CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
 bash "$CP/skills/herdr-teamlead/compose-briefs.sh" \
@@ -240,7 +287,10 @@ Proceed immediately to Step 8.
 
 ## Step 8 — Provision the Worktrees
 
-Prune first, every round:
+Step 2's preflight pruned, every round, and reported the result under
+`checks.worktrees`. Report every kept `dirty`, `unmerged`, `locked` and
+`detached` entry to the operator; never remove them by hand. Run it alone only
+to re-prune:
 
 ```bash
 CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
@@ -249,9 +299,7 @@ bash "$CP/skills/herdr-teamlead/prune-worktrees.sh" <shared-checkout>
 
 Emits the worktrees and branches removed, each kept one with its reason, and
 `failed`; exit 2 lists every check or removal git refused. Exit 1 decided
-nothing: fix its diagnostic and re-run before provisioning. Report every kept
-`dirty`, `unmerged`, `locked` and `detached` entry to the operator; never
-remove them by hand.
+nothing: fix its diagnostic and re-run before provisioning.
 
 Then run once per writing worker and every worktree named in a brief:
 
@@ -331,7 +379,23 @@ bash "$CP/skills/herdr-teamlead/teamlead.sh" supervision-watch [--state <state-f
 
 Retain and await its real execution handle. The JSON result gives `reason`,
 `through`, and durable `events`; a quiet deadline completes only that checkpoint.
-For each event or pending recheck, verify report delivery:
+
+Then ask which of those events need you:
+
+```bash
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
+bash "$CP/skills/herdr-teamlead/teamlead.sh" supervision-gate [--state <state-file>]
+```
+
+It returns `wake` and `suppressed`, each event with its `reason`. Acknowledge
+every `suppressed` event with that reason as its outcome, without reading
+anything. Only named, information-poor cases are suppressed and every other
+event wakes you, including a kind the gate has never seen; which cases, and
+why, is the script's decision contract — see
+`skills/herdr-teamlead/teamlead/supervision_gate.py`, not restated here
+(`rules/script-as-black-box.md`).
+
+For each `wake` event, verify report delivery:
 
 ```bash
 CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
@@ -369,6 +433,21 @@ another worker's report. Proceed to Step 12 when the required reports are delive
 or their unavailability and recovery are recorded.
 
 ## Step 12 — Gate the Round
+
+Annotate every delivered report in one call before reading any of them:
+
+```bash
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
+bash "$CP/skills/herdr-teamlead/classify/classify-reports.sh" <report>...
+```
+
+Each label carries a verdict from the answer set in
+`skills/herdr-teamlead/classify/report-verdict.schema.json` and the sentence
+that decided it. Read the reports together and gate them in one turn,
+not one turn per report. A label is advisory. It never replaces the full read,
+and a report in `unannotated` is read exactly as it would have been. Look twice
+where a label disagrees with your own reading. Which vendor and model it uses, and its measured accuracy,
+are the script's contract — see `skills/herdr-teamlead/classify/classify-report.sh`.
 
 Read every report file in full, including a report whose worker exited cleanly.
 A `## BLOCKED` section can sit under a report that otherwise reads as finished.
