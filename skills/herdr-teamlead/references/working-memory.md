@@ -73,7 +73,7 @@ Record a stow containing:
 
 - A substantive capture of the remaining context the next foreman needs.
 - Unresolved work, including where each item is now recorded or what the replacement must recover.
-- Explicit gaps, including missing evidence and work the foreman could not persist. Use an empty list only after checking for gaps.
+- Explicit gaps, including missing evidence and work the foreman could not persist. Use an empty list only after checking for gaps. Each gap is `{"missing", "task", "recovery"}`: what is missing, the task it affects, and exactly one recovery — `{"reread": "/absolute/path"}`, `{"ask": "<question for the operator>"}` or `{"accept": "<why the loss is safe>"}`. A gap without a recovery is refused, and so is a new gap naming the task `unrecorded`, which is reserved for migrated version-1 gaps.
 - Ordered, absolute paths to the durable files the replacement must read, such as the task ledger, attention queue, active assignment state, relevant retrospective notes and task context. Use actual files, not directories or a vague instruction to inspect the workspace.
 
 ```text
@@ -88,25 +88,26 @@ Minimal stow input:
   "id": "lead-handoff-1",
   "capture": "The user asked to review the final artifact before publication. Attention item publish-review preserves that decision.",
   "unresolved_work": ["Finish the artifact, then surface attention item publish-review."],
-  "gaps": [],
+  "gaps": [{"missing": "Why the reviewer downgraded finding 4", "task": "nanoclaw-965",
+            "recovery": {"ask": "Was finding 4 on nanoclaw-965 accepted as advisory?"}}],
   "required_reads": ["/durable/team/TASK-LEDGER.md", "/durable/team/state.json.attention.json"]
 }
 ```
 
 The output supplies `memory_path`, the stow record and receipts for each required read. Preserve that exact `memory_path` in the foreman handoff. Do not list the memory index as a source or required read: its path is included automatically, and writing the stow changes its bytes. The replacement first reads this index through `memory-show`, then the stow's required files in order, then the relevant lessons through `memory-list`. `memory-show` defaults to the latest stow; `--id` retrieves an earlier capture.
 
-`reset_ready` is false if the stow has gaps or any required file has changed or become unavailable. A true value covers only the saved local capture and its unchanged required files. It does not prove that the foreman captured every conversation fact, reconcile a fleet, satisfy the supervision gate, authorize interruption, or accept tasks. The foreman must still apply the separate handoff and supervision rules. New unresolved knowledge after the stow requires a new stow id.
+`reset_ready` is false if any required file has changed or become unavailable, or if a gap names the task `unrecorded`. Any other gap names its own recovery and does not block a reset. A true value covers only the saved local capture and its unchanged required files. It does not prove that the foreman captured every conversation fact, reconcile a fleet, satisfy the supervision gate, authorize interruption, or accept tasks. The foreman must still apply the separate handoff and supervision rules. New unresolved knowledge after the stow requires a new stow id.
 
 ## Persistence contract
 
-Owner and sole writer: `herdr-teamlead`. Its memory commands work without configuration, Herdr, dispatch-state reads or worker contact. Other readers may read the documented schema but never migrate or edit it. Memory reads create no files, take no lock, and never refresh evidence or verification timestamps.
+Owner and sole writer: `herdr-teamlead`. Its memory commands work without configuration, Herdr, dispatch-state reads or worker contact. Other readers may read the documented schema but never migrate or edit it. Memory reads create no files and never refresh evidence or verification timestamps. A read takes no lock and writes nothing, except the one read that finds a version-1 stow: it rewrites the upgraded document under the lock.
 
-Storage is `<canonical-selected-state-path>.memory/index.json`; the selected `--state` path is expanded and resolved before deriving the sidecar. Symlink aliases therefore share a history. The owner appends immutable records under the existing OS-backed state lock and atomically replaces the index. A failed replacement preserves the previous committed document. Exact retry is idempotent. Conflicting ids, stale revision parents, unsupported schemas and corrupt history fail visibly without overwriting existing records. No old schema exists yet; any future shape change needs an owner migration and version bump.
+Storage is `<canonical-selected-state-path>.memory/index.json`; the selected `--state` path is expanded and resolved before deriving the sidecar. Symlink aliases therefore share a history. The owner appends immutable records under the existing OS-backed state lock and atomically replaces the index. A failed replacement preserves the previous committed document. Exact retry is idempotent. Conflicting ids, stale revision parents, unsupported schemas and corrupt history fail visibly without overwriting existing records. Stow records moved to version 2 through the owner migration above; any further shape change needs a version bump and migration.
 
-The index has `schema_version`, `state_path` and ordered `records`. Both its schema and every record's schema are version 1. All record kinds share `id`, `kind`, `recorded_at` and `input_digest`; `recorded_at` is an injected UTC timestamp and `input_digest` binds the original JSON input. Record ids are unique across kinds.
+The index has `schema_version`, `state_path` and ordered `records`. The index schema and lesson records are version 1; stow records are version 2. All record kinds share `id`, `kind`, `recorded_at` and `input_digest`; `recorded_at` is an injected UTC timestamp and `input_digest` binds the original JSON input. Record ids are unique across kinds.
 
 Lesson records have `kind: "lesson"` and the lesson input fields above, replacing `sources` with captured source records. A file source has `schema_version`, `kind: "file"`, canonical absolute `path`, `sha256` and byte `size`. An HTTPS source has `schema_version`, `kind: "url"` and `url`. Each lesson's `supersedes` chain points to its prior revision. Its first revision is active. Verification times cannot follow recording; an optional expiry must follow verification.
 
-Stow records have `kind: "stow"` and the stow input fields above, replacing `required_reads` with file receipts in the supplied order. Captures and unresolved knowledge remain in the index even if those source files later disappear.
+Stow records have `kind: "stow"` and the stow input fields above, replacing `required_reads` with file receipts in the supplied order. Stow records are version 2. A version-1 stow upgrades on read: each free-text gap becomes `{"missing": <text>, "task": "unrecorded", "recovery": {"ask": <a question quoting the text>}}`, since it never recorded a task or recovery. Such a gap names no task, so it keeps `reset_ready` false until a new stow records the gap with its actual task. `input_digest` keeps binding the original input. The owner's first read or write of a document holding a version-1 stow persists the upgrade under its lock; other readers never migrate. Captures and unresolved knowledge remain in the index even if those source files later disappear.
 
 Reader output adds observations to copies of saved sources: `same_bytes`, `changed`, `unavailable`, or `not_checked_offline` for URLs. Lesson views add `expired` and `use_requires_live_verification: true`. Stow views add `reset_ready` and `readiness_scope: "local_capture_only"`. These are computed views, never saved fields. Read commands return `memory_path` and `checked_at`; write commands return `memory_path` and `replayed` alongside the record. None of these fields is task acceptance evidence.

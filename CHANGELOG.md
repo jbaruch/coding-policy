@@ -1,5 +1,28 @@
 # Changelog
 
+### Changed
+
+- **Foreman handoff gaps are structured, and each one says how to recover.**
+  A stow's `gaps` used to be free text, and any gap made `reset_ready` false.
+  #483 resets the foreman at every round boundary, so gaps arrive every round
+  instead of once per session. A gap that only says "something got lost"
+  gives the next foreman nothing to act on, and blocking the reset on every
+  gap would block every round.
+
+  Stow records move to version 2. Each gap is `{"missing", "task",
+  "recovery"}`, and `recovery` is exactly one of `{"reread": "/absolute/path"}`,
+  `{"ask": "<question>"}` or `{"accept": "<why the loss is safe>"}`. Anything
+  else is refused. Gaps no longer block `reset_ready`, since each one carries
+  its own recovery. A version-1 stow upgrades on read. Each free-text gap
+  becomes `{"missing": <text>, "task": "unrecorded", "recovery": {"ask":
+  <a question quoting it>}}`, because the old gap recorded no task or
+  recovery, and asking the operator is the only honest one. A migrated gap
+  names no task, so it keeps `reset_ready` false until a new stow records it
+  with its actual task. The owner's
+  first read or write of such a document persists the upgrade under its
+  lock. A document with nothing to migrate is still read with no lock and no
+  write. Lesson and source records stay at version 1.
+
 ## 0.3.261 — 2026-09-23
 
 ### Changed
