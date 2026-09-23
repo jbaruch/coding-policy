@@ -1,6 +1,6 @@
 # Fleet supervision
 
-The lead owns fleet observation separately from assignment acceptance and task
+The foreman owns fleet observation separately from assignment acceptance and task
 completion. The watcher never sends worker input. Herdr status, a report-file
 change, and a visible marker candidate are observations to reconcile through
 the report-delivery contract and task ledger.
@@ -11,7 +11,7 @@ Run the installed `skills/herdr-teamlead/teamlead.sh` with explicit `bash` and
 the plugin root resolved by the skill. The examples below name subcommands and
 arguments; nonzero exits require handling the diagnostic.
 
-Run `supervision-bind --state <owner-state>` from the lead's own
+Run `supervision-bind --state <owner-state>` from the foreman's own
 Herdr pane. It discovers `HERDR_PANE_ID` through a read-only pane lookup and
 binds that pane's native Claude or Codex session identity. It refuses missing or
 unsupported native proof. Do not bind from a worker pane or substitute a guessed
@@ -25,7 +25,7 @@ native Stop hook. `--record <file>` accepts an explicitly verified binding with
 Enroll every dispatched assignment, including reviewer, tester, judge, and
 release. Supply `apply --report <role>=<absolute-report-path>` for every role
 alongside `--task`; use the exact fresh path from that role's brief. A bound
-lead's apply refuses incomplete mappings before worker input. The dispatch integration records enrollment before sending input, so
+foreman's apply refuses incomplete mappings before worker input. The dispatch integration records enrollment before sending input, so
 an interrupted or unknown send remains visible. Manual/imported assignments use
 `supervision-enroll --record <file>` with the following contract:
 
@@ -83,7 +83,7 @@ a durable loss event. Handle it before resuming observation.
 ## Handle and acknowledge
 
 `supervision-drain` reads a snapshot without changing anything. Its `through`
-sequence bounds subsequent acknowledgements. Save each lead outcome with its
+sequence bounds subsequent acknowledgements. Save each foreman outcome with its
 report checkpoint, task-ledger entry, or attention-queue handoff evidence, then
 run `supervision-ack --record <file>`:
 
@@ -114,7 +114,7 @@ question, or consume an event that arrived after `through`. Replaying an
 identical acknowledgement preserves its original receipt and schedule.
 Conflicting outcomes refuse without rewriting history.
 
-Once the lead has reconciled an assignment's actual outcome in the task ledger,
+Once the foreman has reconciled an assignment's actual outcome in the task ledger,
 run `supervision-resolve --record <file>` with `id`, `outcome`, and `evidence`
 paths. It ends that enrollment's observation obligation only. Pending events
 for the enrollment must already have handled outcomes. A missing worker can be
@@ -123,18 +123,18 @@ resolution is never a substitute for the task's acceptance and release gates.
 
 ## Pause, hand off, and resume
 
-Native Claude and Codex Stop hooks gate only the exact bound lead identity,
+Native Claude and Codex Stop hooks gate only the exact bound foreman identity,
 Herdr environment, pane, and working directory. Workers and unrelated sessions
 receive no supervision gate. The hook performs read-only local checks and
 never contacts or interrupts workers. Gating uses structured JSON, never shell
 exit status. A missing interpreter or failed module startup emits an installation
 diagnostic without inventing a binding; restore the installation before relying
-on the backstop. Once the evaluator identifies a bound lead, unreadable state or
-evaluation failures block that lead through the structured result.
+on the backstop. Once the evaluator identifies a bound foreman, unreadable state or
+evaluation failures block that foreman through the structured result.
 
 Active enrollments or unhandled events block a blind stop, even when a
 foreground watcher is currently alive. That foreground process cannot promise
-supervision after the lead's turn ends. The hook's `stop_hook_active` value does
+supervision after the foreman's turn ends. The hook's `stop_hook_active` value does
 not waive this obligation.
 
 For an actual user-held pause or an explicit handoff, first handle outstanding
@@ -159,16 +159,16 @@ events. Persist the user's decision or recipient/continuation handoff, then run
 
 Use `kind: handoff` for a saved transfer. Every active enrollment needs its own
 named disposition and evidence; a global pause cannot hide unrelated work.
-The lead judges whether the saved authority and handoff are real. The utility
+The foreman judges whether the saved authority and handoff are real. The utility
 checks coverage and evidence receipts, not the meaning of the prose. A hold
 changes no task state, worker state, acceptance, or user-question resolution.
 New assignments or events invalidate its covered boundary.
 
-If the lead changes its native working directory, rebind from that directory
+If the foreman changes its native working directory, rebind from that directory
 before continuing supervision; the prior exact-directory binding does not gate
 that new identity. Keep the same owner-state path.
 
-On active resume, run `supervision-bind` for the current native lead, then
+On active resume, run `supervision-bind` for the current native foreman, then
 `supervision-resume`, `supervision-status`, and `supervision-drain`. Reconcile
 sources and pending events before continuing the watch loop. Retain the
 supervision document and binding records during worktree cleanup. Corrupt,

@@ -1,6 +1,6 @@
 # Team Retrospectives
 
-The lead owns the retrospective. It synthesizes saved evidence; it does not
+The foreman owns the retrospective. It synthesizes saved evidence; it does not
 dispatch a retrospective role or spend a correction attempt. A routine standup,
 usage measurement, status table, or dispatch dump is source material, not the
 completed retrospective.
@@ -40,7 +40,7 @@ findings, test and publish results, and measured headroom where available. Read
 the previous retrospective and its open actions. Workers' normal reports include
 handoff observations; use them without sending another prompt or clearing context.
 Read-only status and process inspection may establish transition evidence.
-Include saved specialist requirements, lead contribution assessments, and the
+Include saved specialist requirements, foreman contribution assessments, and the
 decisions that used or declined their output. An unused profile has no missing
 report; distinguish unneeded expertise from expertise the task lacked.
 
@@ -58,9 +58,9 @@ restoring the file changes the evidence and requires refreshed transition covera
 
 Use a title and five nonempty H2 sections named `Outcomes`, `Quality`,
 `Coordination`, `Seats and models`, and `Improvements`. The utility adds the saved
-note's schema metadata; the lead supplies the synthesis under these headings.
+note's schema metadata; the foreman supplies the synthesis under these headings.
 
-Address these five questions with evidence and the lead's reasoning:
+Address these five questions with evidence and the foreman's reasoning:
 
 1. **Outcomes:** What did the team intend to achieve, what is verified, and what
    remains unresolved? Distinguish worker claims from accepted work and completed
@@ -86,7 +86,7 @@ Address these five questions with evidence and the lead's reasoning:
 Do not pad a quiet interval with invented incidents or speculative failures.
 Record what the evidence supports, even when the result is a short no-change
 conclusion. Keep facts, explanations, and proposed actions distinct. A populated
-template alone is insufficient: the lead checks that the notes contain useful
+template alone is insufficient: the foreman checks that the notes contain useful
 lessons or an evidence-backed no-change conclusion before recording them.
 
 Retrospective actions do not modify policy automatically, expand the task, grant
@@ -110,7 +110,7 @@ automatic model promotion or new standing seat.
 
 Use the same canonical `--state` path across the team's invocations. The utility
 saves notes and the index in the adjacent `.retrospectives` directory documented
-in `skills/herdr-teamlead/state-schema.md`. Record that directory in the lead's
+in `skills/herdr-teamlead/state-schema.md`. Record that directory in the foreman's
 handoff, and link relevant notes from the task ledger. Preserve it when removing
 worktrees and task report staging. Do not edit a saved note or hand-write a receipt;
 record a new retrospective when the analysis changes.
@@ -156,7 +156,7 @@ the exact output envelope; the state schema documents persisted fields.
    `transition` when any checked worker requires transition coverage.
    Daily notes cite a ledger, previous note, or other evidence source. An empty
    source list is usable only when transition coverage supplies concrete evidence.
-   Completion asserts the lead has reviewed the substance; the boolean alone
+   Completion asserts the foreman has reviewed the substance; the boolean alone
    never establishes it.
 5. Run `retro-record --record <metadata.json>`. The utility revalidates evidence,
    preserves the completed note, and records its digest and coverage. Inspect the

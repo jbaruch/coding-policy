@@ -1,14 +1,14 @@
 # Assignment Reasoning
 
-The lead applies this reference at intake, when composing a bug-fix brief, and
+The foreman applies this reference at intake, when composing a bug-fix brief, and
 when assessing findings before a correction. The worker receives the relevant
-questions in its self-contained brief. Reasoning stays with the lead and workers;
+questions in its self-contained brief. Reasoning stays with the foreman and workers;
 the dispatch utility does not infer intent or causality from prose.
 
 ## Preserve the Accepted Behavior
 
 Record the operator's actual request and later decisions separately from the
-lead's proposed implementation. Name the observable behavior or deliverable the
+foreman's proposed implementation. Name the observable behavior or deliverable the
 task must provide, its acceptance criteria, and any explicit limits. Use the
 existing task identity and authorization record throughout corrections.
 
@@ -43,8 +43,8 @@ the proposed change as one of:
 
 A reviewer's label or confidence does not amend the accepted contract. Scope
 classification also does not dismiss a blocking finding: a contested verdict,
-lead override, or bot disagreement follows the existing judge path in
-`rules/agent-team-operation.md`. The lead cannot waive a finding by calling it
+foreman override, or bot disagreement follows the existing judge path in
+`rules/agent-team-operation.md`. The foreman cannot waive a finding by calling it
 an expansion. An agreed correction still obeys the fix allowance and release
 gates; this reference adds no attempts or substitute judge trigger.
 
@@ -79,7 +79,7 @@ both paths. Label facts, hypotheses, and unresolved uncertainties separately.
 
 ## Use the Evidence
 
-Before accepting a diagnosis, the lead checks that its cause explains the
+Before accepting a diagnosis, the foreman checks that its cause explains the
 reproduction and comparison evidence. A missing experiment is an explicit gap,
 not an invented pass. Obtain a focused investigation when the gap could change
 what should be fixed. Keep bounded research inside an already authorized bug

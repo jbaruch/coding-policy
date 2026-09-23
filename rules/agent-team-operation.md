@@ -8,7 +8,7 @@ description: Running a multi-agent team — task-based specialist composition, c
 ## Two Modes
 
 - **Standalone** — one agent working a task on its own, with no Herdr session around it. `HERDR_ENV` is unset
-- **Herdr team round** — a lead dispatching work across separate Herdr worker panes. `HERDR_ENV` is set
+- **Herdr team round** — a nonworking foreman dispatching work across separate Herdr worker panes. `HERDR_ENV` is set
 - Read `HERDR_ENV` to tell the modes apart
 - Never infer the mode from how large or careful the task is
 - **Every section below governs a Herdr team round only**
@@ -16,21 +16,24 @@ description: Running a multi-agent team — task-based specialist composition, c
 - A standalone agent does the task directly
 - A standalone agent never simulates the roles, the briefs, or the reports
 - Standalone work is still governed by every other rule in this plugin
-- In a team round the lead dispatches the task work and never executes it itself
-- The lead's own execution covers reading the shared checkout, this plugin's owner scripts, and the lead-owned records those scripts write
-- Lead-owned records are the task ledger, retrospective notes, attention items, and working memory
-- A request whose answer is a task deliverable is dispatched, whatever its size, and whether or not the lead already knows the answer
-- A task deliverable is a written artifact, a recommendation, an assessment, or a repository edit, other than a lead-owned record
-- A request the lead could answer only after a lookup, a file inspection, or research is dispatched
+- The foreman is a nonworking foreman
+- It assigns the work, supervises the crew, and accepts or rejects what the crew delivers
+- The foreman does none of the crew's work, whatever its size
+- In a team round the foreman dispatches the task work and never executes it itself
+- The foreman's own execution covers reading the shared checkout, this plugin's owner scripts, and the foreman-owned records those scripts write
+- Foreman-owned records are the task ledger, retrospective notes, attention items, and working memory
+- A request whose answer is a task deliverable is dispatched, whatever its size, and whether or not the foreman already knows the answer
+- A task deliverable is a written artifact, a recommendation, an assessment, or a repository edit, other than a foreman-owned record
+- A request the foreman could answer only after a lookup, a file inspection, or research is dispatched
 - A bounded question routes to a specialist consultation under Team Composition
 - A review of code already pushed for the task routes to the reviewer responsibility under Review Before PR
 - A review of any other existing code routes to a read-only consultation under Specialist Consultations
 - A repository edit routes to the developer responsibility under Writers and Checkouts
-- A shortfall of eligible workers is a staffing decision to record under Team Composition, never authorization for the lead to execute
+- A shortfall of eligible workers is a staffing decision to record under Team Composition, never authorization for the foreman to execute
 
 ## Team Composition
 
-- The lead selects the responsibilities needed at each stage of the task
+- The foreman selects the responsibilities needed at each stage of the task
 - Preserve developer, reviewer, tester and release responsibilities for implementation delivery
 - Activate a specialist consultation for a bounded question or deliverable the task needs, and whenever a trigger below fires
 - A new or substantially changed package above the size the repo states triggers the architect, before implementation
@@ -48,7 +51,7 @@ description: Running a multi-agent team — task-based specialist composition, c
 - Such a round fires no trigger
 - A tracked diff refuses that declaration
 - A round that classifies neither is refused, never read as no trigger fired
-- The four non-exhaustion triggers fire from that detection, never from the lead's reading of the diff
+- The four non-exhaustion triggers fire from that detection, never from the foreman's reading of the diff
 - An absent or incomplete declaration is refused, never read as no trigger fired
 - A fired trigger is consulted, or recorded as a staffing decision with its reason the detector reads
 - Silence is never that decision
@@ -75,13 +78,13 @@ description: Running a multi-agent team — task-based specialist composition, c
 - An available profile reserves no worker and creates no active assignment
 - Preserve useful specialist sessions for likely follow-up work
 - Persist specialist lessons through the existing scoped memory owner
-- Record delivered report evidence and the lead's contribution assessment before relying on a consultation outcome
+- Record delivered report evidence and the foreman's contribution assessment before relying on a consultation outcome
 - Narrow exception for retaining an assessed consultation's context.
 - Preconditions (all required):
-  1. The lead requests `--retain-specialist` for one advisor, investigator or architect assignment
+  1. The foreman requests `--retain-specialist` for one advisor, investigator or architect assignment
   2. The worker's latest assignment has the same task, responsibility and engagement requirements
   3. Live pane, native session and verified model tier match the preceding assignment
-  4. The prior report and delivery receipts match their saved lead assessment
+  4. The prior report and delivery receipts match their saved foreman assessment
   5. The prior supervision enrollment is resolved with no pending observations
   6. No correction count, correction plan or implementation work is carried through this mode
 - Every other consultation clears context under the normal retrospective and dispatch gates
@@ -90,8 +93,8 @@ description: Running a multi-agent team — task-based specialist composition, c
 ## Judge Seat
 
 - The reserved `judge` seat runs on the most capable model available and holds no other responsibility
-- The lead dispatches the judge in adjudication mode for one of three triggers: a contested reviewer or tester verdict, a lead override of a blocking finding, or a bot finding the team disagrees with
-- The lead dispatches the judge in diagnosis mode at an exhausted allowance with blocking work remaining, on the investigator's assessment
+- The foreman dispatches the judge in adjudication mode for one of three triggers: a contested reviewer or tester verdict, a foreman override of a blocking finding, or a bot finding the team disagrees with
+- The foreman dispatches the judge in diagnosis mode at an exhausted allowance with blocking work remaining, on the investigator's assessment
 - Every judge dispatch declares which mode it is for, at plan and at apply
 - An undeclared mode is refused, never defaulted
 - A diagnosis on an approach whose ladder reached `stop` is refused before the round runs, unless the operator authorized a plan or a different approach over that remedy
@@ -114,7 +117,7 @@ description: Running a multi-agent team — task-based specialist composition, c
 - The judge's authority in diagnosis mode covers accepting a tracked defect into a release under a `stop` remedy
 - That acceptance follows `rules/review-severity.md` Judge-Accepted Defect Carve-Out; every other release gate holds
 - Record the diagnosis through `teamlead diagnose` under the original task and base before acting on its remedy
-- A bound lead cites the report supervision enrolled for the pinned judge, never another file
+- A bound foreman cites the report supervision enrolled for the pinned judge, never another file
 - The operator overrides this exhaustion's recorded remedy
 - An approved budget never stands in for a diagnosis
 - An older remedy never authorizes new attempts
@@ -152,7 +155,7 @@ description: Running a multi-agent team — task-based specialist composition, c
 - The pinned judge worker never holds another seat
 - No exclusion bars the judge from a dispute involving its own model
 - A judge round the pinned worker's window cannot cover halts the round — no substitution, no fallback to another vendor's flagship, no degraded ruling
-- The lead runs on the strongest generally-available model at high effort; the most capable model is reserved for the judge
+- The foreman runs on the strongest generally-available model at high effort; the most capable model is reserved for the judge
 
 ## Round Tiers
 
@@ -164,7 +167,7 @@ description: Running a multi-agent team — task-based specialist composition, c
 - Under measured scarcity a non-judgment round declines a discretionary escalation and records the round de-escalated
 - De-escalation never selects below the operator's configured row
 - Unmeasured headroom reads as neither scarcity nor capacity
-- The scarcity threshold is a script-owned constant, never a number the lead picks per round
+- The scarcity threshold is a script-owned constant, never a number the foreman picks per round
 - A tier switch requires a worker relaunch at a cleared-round boundary
 - Retained fixes never change model or raise effort; preserve a verified compatible higher effort
 - Before relaunch, verify the idle worker, empty composer, pane occupant, and foreground PID
@@ -197,7 +200,7 @@ description: Running a multi-agent team — task-based specialist composition, c
   1. The worker remains the developer for the same task
   2. The assignment follows that worker's confirmed preceding developer round
   3. Live native session identity matches the preceding assignment's recorded identity
-  4. The lead uses `--retain-context` with the task identifier and fix-round number
+  4. The foreman uses `--retain-context` with the task identifier and fix-round number
 - Every other developer assignment clears context
 - `--no-clear` records a hand-cleared pane, never retained context
 - Fix rounds 4 and later use a freshly cleared worker
@@ -206,7 +209,7 @@ description: Running a multi-agent team — task-based specialist composition, c
   1. The owner ledger preserves the original task, base, preceding developer assignment, and actual next fix number
   2. The recorded cause is a confirmed release clear, an explicit operator recovery decision for the preserved missing-session assignment, a verified historical import of a completed operator-authorized manual correction, or an owner-verified automatic clear into another authorized role
   3. The next fix remains within the current approach's existing allowance and the task's scope
-  4. The lead dispatches a fresh developer brief through the normal readiness, clear, and tier checks
+  4. The foreman dispatches a fresh developer brief through the normal readiness, clear, and tier checks
   5. For a historical import, the owner verifies original task/scope/budget authorization, archived transport and report bytes, and the actual VCS base, head and diff
   6. For a historical import, the owner appends the actual count with null native-session proof
   7. For a historical import, the owner preserves prior rows
@@ -251,8 +254,8 @@ description: Running a multi-agent team — task-based specialist composition, c
 
 - One writer per worktree
 - The shared checkout stays on the default branch
-- The lead reads the shared checkout and never edits it
-- The lead provisions every worktree a brief names, before dispatch
+- The foreman reads the shared checkout and never edits it
+- The foreman provisions every worktree a brief names, before dispatch
 - A read-only role that writes no repository content needs no worktree
 - A worker never creates, moves, or removes a worktree
 - A worker runs no git command against the shared checkout, mutating or otherwise
@@ -260,9 +263,9 @@ description: Running a multi-agent team — task-based specialist composition, c
 - The worker names that drift in its report
 - The worker acts on none of it
 - A worker's repository writes happen only in the worktree its brief names, under `~/.worktrees/`
-- The lead prunes merged, clean worktrees and merged local branches every round, before provisioning and after the merge
+- The foreman prunes merged, clean worktrees and merged local branches every round, before provisioning and after the merge
 - A dirty, unmerged, locked or detached worktree is reported to the operator
-- The lead never removes a dirty, unmerged, locked or detached worktree
+- The foreman never removes a dirty, unmerged, locked or detached worktree
 - A worker's report, plan, and patch artifacts go only under the reports directory its brief names
 - A worker writes nowhere else
 - Narrow exception for a task-owned fixture root outside the reports directory
@@ -289,12 +292,12 @@ description: Running a multi-agent team — task-based specialist composition, c
 - A worker's report is a file at the path its brief names
 - The final chat message's last line is exactly `REPORT: <path>`
 - Substantive output never travels through pane text
-- A worker never blocks on a question to the lead
+- A worker never blocks on a question to the foreman
 - A worker decides the question itself
 - A worker records the decision in its report
 - A worker continues after recording it
 - A genuine block goes in a `## BLOCKED` section, then the worker stops
-- The lead reads every report body in full before gating the round
+- The foreman reads every report body in full before gating the round
 
 ## Dispatch Safety
 
@@ -304,7 +307,7 @@ description: Running a multi-agent team — task-based specialist composition, c
 - Wait on the report marker plus the report file, never on a single idle or done observation
 - Every report wait runs through `skills/herdr-teamlead/wait-report.sh`, never a hand-rolled loop
 - Each interval a wait reads the report file, the worker's status and the remaining budget, and ends on whichever settles first
-- The poll interval and the give-up budget are script-owned constants, never numbers the lead picks per round
+- The poll interval and the give-up budget are script-owned constants, never numbers the foreman picks per round
 - Confirm a `blocked` verdict across two reads and the pane before acting on it
 - A blocked worker is surfaced to the operator, never answered on the operator's behalf beyond its brief
 - Record a terminal provider refusal against its dispatch before any replacement
@@ -335,7 +338,7 @@ description: Running a multi-agent team — task-based specialist composition, c
 
 ## Assignment Reasoning
 
-- Preserve the operator's accepted behavior separately from the lead's implementation proposal
+- Preserve the operator's accepted behavior separately from the foreman's implementation proposal
 - Classify proposed corrections against that accepted behavior before dispatch
 - Resolve required corrections within existing authority and correction allowances
 - Record a new contract obligation or unsettled operator choice before requesting its decision
@@ -355,7 +358,7 @@ description: Running a multi-agent team — task-based specialist composition, c
 ## Task Ledger
 
 - Herdr lifecycle and completion statuses are unreliable observations, never task-completion evidence
-- Maintain the lead-owned task ledger outside Herdr throughout the task
+- Maintain the foreman-owned task ledger outside Herdr throughout the task
 - Record each dispatch outcome and each assessed worker outcome before continuing the round
 - Distinguish report delivery, accepted assignment work, and completion of the whole task
 - Bind acceptance to the actual report and the required artifact, VCS, and gate evidence
@@ -365,12 +368,12 @@ description: Running a multi-agent team — task-based specialist composition, c
 
 ## Working Memory
 
-- Curate applicable lessons with their scope and evidence through the lead-owned memory commands
+- Curate applicable lessons with their scope and evidence through the foreman-owned memory commands
 - Consult relevant lessons before composing assignments
 - Revalidate a lesson before relying on recalled operational facts
 - Preserve superseded lessons and immutable retrospective notes
-- Save conversation-only knowledge and open work before a planned lead reset, compaction, or replacement
-- Give the next lead an ordered list of durable files to read
+- Save conversation-only knowledge and open work before a planned foreman reset, compaction, or replacement
+- Give the next foreman an ordered list of durable files to read
 - Record uncaptured or unavailable context as an explicit handoff gap
 - Working memory grants no authority, acceptance, or gate waiver
 - Follow `skills/herdr-teamlead/references/working-memory.md`
@@ -391,18 +394,18 @@ description: Running a multi-agent team — task-based specialist composition, c
 
 ## Fleet Supervision
 
-- Bind supervision to the lead's actual session before dispatching a team round
+- Bind supervision to the foreman's actual session before dispatching a team round
 - Enroll every dispatched assignment before sending its brief
 - Observe all enrolled workers while awaiting reports
-- Preserve wake events until the lead records their handling
+- Preserve wake events until the foreman records their handling
 - Acknowledging an observation never accepts the assignment or completes the task
 - Reconcile interrupted supervision against its saved events and live process evidence
-- Never finish a lead turn with active work lacking continued supervision or an explicit recorded pause or handoff
+- Never finish a foreman turn with active work lacking continued supervision or an explicit recorded pause or handoff
 - Follow `skills/herdr-teamlead/references/supervision.md`
 
 ## Retrospectives
 
-- The lead completes a retrospective at least every 24 hours during active team work
+- The foreman completes a retrospective at least every 24 hours during active team work
 - Check the cadence on active resume, before planning or dispatch, and between report waits
 - Complete a retrospective before clearing or relaunching an existing worker, or changing its seat, model, or effort
 - Bind transition coverage to the outgoing work and session, source evidence, and proposed assignment
@@ -471,13 +474,13 @@ description: Running a multi-agent team — task-based specialist composition, c
 - Waiting on a review the role cannot request follows `rules/ci-safety.md` Always Watch CI
 - The developer pushes the branch and stops
 - A shared GitHub account posts internal reviews as COMMENT reviews
-- The lead enforces the blocking findings a COMMENT review carries
+- The foreman enforces the blocking findings a COMMENT review carries
 - Severity classification follows `rules/review-severity.md`
 - The developer then runs the release skill for the PR, the merge, and the cleanup
 
 ## Authority and Policy
 
-- The lead verifies repo authority through a script before composing briefs
+- The foreman verifies repo authority through a script before composing briefs
 - Ownership is namespace ownership; write permission is not ownership
 - A brief states the authority as a verified fact, never as a standing claim
 - A repo the operator does not own gets explicit per-repo, per-action permission recorded in the brief, or the round stays read-only

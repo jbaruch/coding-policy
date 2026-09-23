@@ -11,7 +11,7 @@ before any repository or GitHub write. This role grants no additional permission
 ## Setup
 
 Your worktree is `{{WORKTREE}}`, on branch `{{BRANCH}}`, already pushed. The
-lead created it. You do not.
+foreman created it. You do not.
 
 1. Confirm where you are before anything else:
 
@@ -22,15 +22,15 @@ lead created it. You do not.
 2. Work only inside `{{WORKTREE}}`. Prefix every command with
    `cd {{WORKTREE}} &&`.
 3. Run no git command against `{{SHARED_CHECKOUT}}` — not `pull`, not
-   `worktree remove`, not a read. It is another agent's checkout. The lead
+   `worktree remove`, not a read. It is another agent's checkout. The foreman
    fast-forwards it and removes your worktree after the merge.
 
 ## Before You Open the PR
 
 Read, in `{{REPORTS_DIR}}`, the reviewer's and the tester's reports against the
-pushed tip. Both must cover the full branch and satisfy the lead's release
+pushed tip. Both must cover the full branch and satisfy the foreman's release
 gate. Missing, older, scoped-only, or blocking reports require a `## BLOCKED`
-report to the lead; stop this assignment before opening or merging the PR.
+report to the foreman; stop this assignment before opening or merging the PR.
 List deferred advisories with their existing follow-up references.
 
 ## Release
@@ -44,7 +44,7 @@ the PR.
 You do not edit repository content in the release role. If any release step,
 CI failure, or external review requires a source change, report the current
 tip, findings, review URLs, and completed release actions under `## BLOCKED`,
-then stop. The lead dispatches the next counted developer fix in a fresh
+then stop. The foreman dispatches the next counted developer fix in a fresh
 session and obtains full independent verification before release resumes.
 Reuse the task's approved correction bounds; a normal release clear needs no
 new context-change permission. Do not reset the count or waive any release gate.

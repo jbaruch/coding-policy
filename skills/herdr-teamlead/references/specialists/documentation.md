@@ -32,4 +32,4 @@ in the authorized report-artifact area unless assigned the developer
 responsibility with a provisioned writing worktree.
 
 Record authored material and behavior decisions as contributions. Suggest
-evidence-linked terminology or workflow lessons to the lead for reuse.
+evidence-linked terminology or workflow lessons to the foreman for reuse.

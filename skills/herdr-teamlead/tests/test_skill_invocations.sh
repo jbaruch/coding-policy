@@ -181,8 +181,8 @@ check_mode_gate() { # <skill-name> <skill-file>
   # states its disposition verbatim instead, and this check compares literals.
   local disp_proceed="Proceed to Step 2." disp_finish="Finish here."
   # The residual branch's condition IS the contract, so it is pinned whole.
-  # A substring would accept "not already in the lead's context".
-  local residual_label="Set, none of the above applies, and the answer is already in the lead's context"
+  # A substring would accept "not already in the foreman's context".
+  local residual_label="Set, none of the above applies, and the answer is already in the foreman's context"
   local round_work=("lookup" "file inspection" "research" "bounded question" \
                     "review of existing code" "repository edit" "task deliverable")
 

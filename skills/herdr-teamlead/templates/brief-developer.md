@@ -12,7 +12,7 @@ Complete `{{ISSUE}}` within the task authorization in COMMON.md.
 ## Setup
 
 Your worktree already exists at `{{WORKTREE}}`, on branch `{{BRANCH}}`, cut
-from the fresh remote default. The lead created it. You do not.
+from the fresh remote default. The foreman created it. You do not.
 
 1. Confirm where you are before anything else:
 
@@ -33,7 +33,7 @@ Read, in this order:
 1. The issue `{{ISSUE}}` and every comment on it.
 2. The consumers of the code you are about to change — who calls it, what they
    expect.
-3. Any design or specialist reports the lead assigned to this task, named in
+3. Any design or specialist reports the foreman assigned to this task, named in
    this brief or the issue comments.
 4. Any assigned tester plan in `{{REPORTS_DIR}}`; otherwise derive tests from
    the task's acceptance criteria.
@@ -74,7 +74,7 @@ cd {{WORKTREE}} && git push -u origin {{BRANCH}}
 which is the point: the tester and the reviewer run against your pushed branch
 first, and you fold their blocking findings in before any bot sees the diff.
 
-The lead will send you a follow-up round to open the PR and run the release
+The foreman will send you a follow-up round to open the PR and run the release
 skill. Until then your branch is finished work waiting for internal review.
 
 ## Report

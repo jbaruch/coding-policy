@@ -231,7 +231,7 @@ requirements with its assignment; dispatch rechecks them from that saved plan.
 Use that plan through the normal apply contract. On a refusal, resolve the
 reported capability, independence or evidence gap before replanning. Do not
 hand-edit the plan to substitute a worker or bypass its requirements.
-Live specialized dispatch requires the lead's existing supervision binding and
+Live specialized dispatch requires the foreman's existing supervision binding and
 one enrolled report path per responsibility. Use the same state selection across
 plan, apply, assessment, observation and follow-up.
 
@@ -239,7 +239,7 @@ plan, apply, assessment, observation and follow-up.
 
 State the question the specialist must settle, why its answer matters now, the
 accepted behavior, scope, relevant prior decisions, available inputs, permitted
-actions and stopping condition. Define what the lead will inspect to accept
+actions and stopping condition. Define what the foreman will inspect to accept
 the result. Supply the source paths and revisions, useful project lessons, and
 the selected profile's applicable questions in the brief. The worker should
 not need an earlier conversation to reconstruct its assignment.
@@ -297,7 +297,7 @@ the supervision member, the worker's report path, and the saved delivery path:
 }
 ```
 
-`outcome` and `summary` record the lead's actual assessment and rationale.
+`outcome` and `summary` record the foreman's actual assessment and rationale.
 `contribution` is `none`, `design` or `implementation`; classify the substantive
 work rather than its current role. The delivery file must be the successful
 `wait-report.sh` JSON receipt for that worker and report, with `found: true`, or
@@ -343,7 +343,7 @@ context. Obtain another qualified worker for independent assessment of a
 contributor's work. Keep the ordinary reviewer and tester gates intact.
 
 An unassessed consultation is unresolved contribution history. Assess it before
-relying on that worker's independence. A `none` assessment records that the lead
+relying on that worker's independence. A `none` assessment records that the foreman
 verified no contributing work; a design or implementation contribution remains
 part of the task history across role, model and session changes. Obtain a
 different qualified worker for the independent gate when the subject includes
@@ -353,7 +353,7 @@ New reviewer assignments carry an explicit verification scope. Migrated reviewer
 history retains unknown scope, and architecture work remains a possible
 contribution until assessed against actual output. The owner never infers
 independence from a newer schema stamp. External authors and work without usable
-task provenance still need the lead's explicit exclusions. Follow the planning
+task provenance still need the foreman's explicit exclusions. Follow the planning
 contract in `references/round-setup.md` Step 5 rather than reclassifying history
 from a worker's current label.
 
@@ -367,11 +367,11 @@ clearing, relaunching or changing a seat or tier, complete the required
 retrospective and capture useful outgoing knowledge.
 
 Use `skills/herdr-teamlead/references/working-memory.md` for project lessons and
-lead handoffs. Keep a specialty label consistent, such as `specialty:ux-product`,
+foreman handoffs. Keep a specialty label consistent, such as `specialty:ux-product`,
 alongside the project and task labels. The memory owner's scope selection is a
 union; inspect each returned lesson's scope before applying it to a different
 project. Revalidate source evidence before including a lesson in a fresh brief.
-Workers propose lessons in their reports; the lead curates them through the
+Workers propose lessons in their reports; the foreman curates them through the
 existing owner. Keep task outcomes, user attention and immutable retrospective
 notes in their existing owner artifacts.
 

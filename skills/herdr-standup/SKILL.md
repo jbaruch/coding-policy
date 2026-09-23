@@ -118,7 +118,7 @@ file for the renderer:
 `grok (busy: refactor)`. Every field is optional. Take the content from the
 round log or the assignment ledger — never from a pane read, and never from a
 guess about what a worker is probably doing.
-Use the lead's schema-1 task ledger under
+Use the foreman's schema-1 task ledger under
 `skills/herdr-teamlead/state-schema.md` for accepted completion. Read it without
 writing or migrating it. Missing or unsupported records mean unknown completion;
 dispatch status alone establishes none. Worker `DONE` answers remain self-reports.

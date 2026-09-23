@@ -1,20 +1,20 @@
 # Team Protocol — Read This First
 
-The lead composes each task from delivery responsibilities and an on-demand
+The foreman composes each task from delivery responsibilities and an on-demand
 specialist bench. Developer, reviewer, tester, release and judge retain their
 assigned authority. Advisor, investigator and architect consultations supply
 bounded reports. Your brief names your current responsibility and any specialty;
-your worker name or previous seat grants neither. The lead reads reports and
+your worker name or previous seat grants neither. The foreman reads reports and
 gates the work.
 
-You cannot message the lead. Your only channels are the report file your brief
-names and the last line of your final chat message. Anything you want the lead
+You cannot message the foreman. Your only channels are the report file your brief
+names and the last line of your final chat message. Anything you want the foreman
 to know goes in the report.
 
 ## Authority
 
 - Verified repo ownership: **{{AUTHORITY_STATEMENT}}**
-- The lead verified ownership with `gh`. Ownership grants no additional task
+- The foreman verified ownership with `gh`. Ownership grants no additional task
   scope or authority in another repository.
 - Operator task authorization, source and words: **{{TASK_AUTHORIZATION}}**
 - Authorized task actions and target repo this round: **{{AUTHORIZED_ACTIONS}}**
@@ -35,13 +35,13 @@ to know goes in the report.
   what you would have sent, and stop there.
 - The team shares one GitHub account. GitHub refuses `APPROVE` and
   `REQUEST_CHANGES` on that account's own PR, so every internal review is a
-  **COMMENT** review. Label each finding `blocking` or `advisory`; the lead
+  **COMMENT** review. Label each finding `blocking` or `advisory`; the foreman
   enforces the blocking ones.
 
 ## Checkouts
 
 - The shared checkout is `{{SHARED_CHECKOUT}}`. It stays on the default branch,
-  and the lead alone touches it.
+  and the foreman alone touches it.
 - Run NO git command against it. Not `worktree add`, not `stash`, not `fetch`,
   not `log` — a `fetch` writes to its `.git` too, and another agent is working
   in there. Reading its files with `cat`, `grep`, or an editor is fine.
@@ -113,8 +113,8 @@ to know goes in the report.
 ## Reporting
 
 - YOLO mode changes runtime permission prompts, not this brief's authority,
-  role, or path limits. The lead classifies assignments before dispatch.
-- The lead owns the task ledger and accepts work from evidence. Your Herdr
+  role, or path limits. The foreman classifies assignments before dispatch.
+- The foreman owns the task ledger and accepts work from evidence. Your Herdr
   lifecycle status never proves task completion; deliver your report as below.
 - For a tiered dispatch, record the launch message's `model`, `effort`, and
   `prompt_hash`, plus the observed CLI version, token usage, compaction count,
@@ -122,19 +122,19 @@ to know goes in the report.
   `unknown`; never invent a measurement or use a transcript as launch proof.
 - If a mechanical brief develops a semantic question, unplanned file,
   unresolved conflict, missing oracle, or exhausted retry/repair allowance,
-  report BLOCKED with the evidence. The lead selects a fresh judgment round.
+  report BLOCKED with the evidence. The foreman selects a fresh judgment round.
 - Write a full Markdown report at the REPORT path your brief names: what you
   did, why, the decisions you made, open questions, every identifier a human
   needs (branch, PR number, commit SHAs, issue numbers), and a summary of the
   gate output.
 - Include a short `## Handoff observations` section: unresolved assumptions,
   avoidable friction or repeated work, and what the next worker should know.
-  Cite concrete evidence; mark unavailable observations `unknown`. The lead
+  Cite concrete evidence; mark unavailable observations `unknown`. The foreman
   uses these saved observations for retrospectives without interrupting workers.
 - Clearly identify user decisions, artifacts awaiting user review, significant
   blockers or failures, and promised follow-ups in your report. Include enough
-  context and evidence for the lead to persist each outstanding obligation.
-  The lead owns the attention queue; workers never write or close its records.
+  context and evidence for the foreman to persist each outstanding obligation.
+  The foreman owns the attention queue; workers never write or close its records.
 - The **last line** of your final chat message is exactly:
 
   ```
@@ -144,13 +144,13 @@ to know goes in the report.
   Emit that line as plain text, outside quotes, lists, and code fences. Use
   the complete absolute path from your brief, on one line. Nothing after it.
   Never quote another attempt's completion marker in your final message.
-- Never ask the lead a question and wait. Decide, record the decision and its
+- Never ask the foreman a question and wait. Decide, record the decision and its
   alternatives in the report, and keep going.
 - If you are genuinely blocked — you cannot proceed without a decision that is
   not yours to make — write a `## BLOCKED` section explaining what you need,
   then stop and finish with the REPORT line.
 - Never start work outside your brief.
 - Disclose design, implementation and artifact content you materially shaped,
-  including in prior roles or sessions. The lead records contribution history
+  including in prior roles or sessions. The foreman records contribution history
   before assigning independent verification.
 - Never merge anything unless your brief says to.

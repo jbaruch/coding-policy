@@ -21,7 +21,7 @@ from access to their credentials or URLs.
 - Is the concern a demonstrated defect, a supported exploit path, or a
   hypothesis? State prerequisites and realistic impact without inflating them.
 - Does the proposed correction restore accepted behavior or add a new
-  obligation? Preserve that distinction in findings for the lead.
+  obligation? Preserve that distinction in findings for the foreman.
 
 ## Deliverable
 
@@ -32,4 +32,4 @@ coverage and uncertainty. A clean focused report establishes only the checked
 scope, not whole-system security.
 
 Record any security design or implementation you contributed. Recommend durable
-trust-boundary lessons through the lead's existing memory workflow.
+trust-boundary lessons through the foreman's existing memory workflow.

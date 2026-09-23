@@ -1,5 +1,29 @@
 # Changelog
 
+### Changed
+
+- **The Herdr lead is now a nonworking foreman.** The role was called the
+  lead, and the name was winning arguments the rules kept losing. "Team lead"
+  brings in a senior engineer who reviews, investigates and fixes things
+  personally. The 0.3.247 rule "the lead dispatches the work instead of doing
+  it", and the list of lookups it had to name as work, were patches on that
+  picture, and the token audit (#445) showed the picture winning: the lead
+  spent its context doing crew work.
+
+  A foreman assigns the crew, watches the job, and accepts or rejects what the
+  crew delivers. The rule and the skill say *nonworking* foreman, since a
+  "working foreman" is a real construction term for one who also lays bricks.
+  `rules/agent-team-operation.md` states the role in its Two Modes section,
+  and every prose mention of the lead in the rule, `herdr-teamlead`,
+  `herdr-standup`, their references and the worker brief templates now says
+  foreman.
+
+  Unchanged on purpose: the skill name `herdr-teamlead`, the `teamlead` CLI and
+  package, state and ledger field names, and code literals such as
+  `<lead-label>` and the `lead` workspace label. Renaming a state field forces
+  a migration for no reader's benefit. The skill and CLI rename is a separate
+  change, with an alias for existing callers.
+
 ## 0.3.256 — 2026-09-23
 
 ### Fixed

@@ -1,6 +1,6 @@
 # Round Flow
 
-The shape of one task round, and what the lead does between the steps of
+The shape of one task round, and what the foreman does between the steps of
 `skills/herdr-teamlead/SKILL.md`. Read this when a round deviates from the happy path.
 
 ## Compose the Active Team
@@ -47,9 +47,9 @@ The developer implements against both, runs the repo's gates, pushes the
 branch, and stops without opening a PR.
 
 Work that trips a Team Composition trigger gates here: its deliverable lands
-before implementation, or the lead records the staffing decision and its
+before implementation, or the foreman records the staffing decision and its
 reason. Step 5's `detect-triggers` run decides which of the four fired, and
-reads that recorded decision; the lead's own reading of the diff does not. The cheap gate is the one worth making mandatory; a reviewer catching
+reads that recorded decision; the foreman's own reading of the diff does not. The cheap gate is the one worth making mandatory; a reviewer catching
 the same thing one finding per round is the expensive one.
 
 Untriggered work keeps the old judgement, whatever its size: skip Phase 1 when
@@ -95,7 +95,7 @@ assignment, or closes an investigation-only knowledge deliverable through Step 1
    reviewed tip for scoped re-checks; a new tip gets a new package.
 6. **Compose** — `compose-briefs.sh` renders the templates from one values
    file, refusing to write anything when a placeholder is unfilled or a
-   supplied key matches no template. The lead decides the values; the script
+   supplied key matches no template. The foreman decides the values; the script
    decides nothing.
 7. **Provision** — `provision-worktree.sh` creates every worktree the briefs
    name, from the shared checkout. A worker never runs `git` there, so its
@@ -107,7 +107,7 @@ assignment, or closes an investigation-only knowledge deliverable through Step 1
 9. **Observe** — `supervision-watch` observes every enrolled worker. Verify
    candidates with `wait-report.sh --once`, ledger outcomes, and acknowledge
    handled events under `references/supervision.md`.
-10. **Gate** — the lead reads every report in full and decides: another round,
+10. **Gate** — the foreman reads every report in full and decides: another round,
    or the release hand-off.
 
 Before relying on consultation output, save the report delivery receipt and run
@@ -116,14 +116,14 @@ in the task ledger and resolve its supervision obligations separately. Keep
 useful sessions available for likely follow-up, while preserving scoped lessons
 outside the session. No idle specialist counts as active work.
 
-The lead appends decisions throughout this flow to the persistent task ledger,
+The foreman appends decisions throughout this flow to the persistent task ledger,
 including before pauses and handoffs. `references/task-ledger.md` separates
 dispatch and report observations from assignment acceptance and task completion.
 All references to the round log here mean that ledger.
 
 ## Reading a Report
 
-A report is the worker's only channel to the lead. Read all of it, every time —
+A report is the worker's only channel to the foreman. Read all of it, every time —
 a `## BLOCKED` section can sit under a report that otherwise reads as finished.
 
 - **Blocking findings present** — take Step 12's bounded fix path under
@@ -136,7 +136,7 @@ a `## BLOCKED` section can sit under a report that otherwise reads as finished.
   dispatch. Never type the answer into the worker that is waiting.
 - **`wait-report.sh` exit 3** — the worker is at an approval or question
   dialog. Read the pane, relay the dialog text to the operator verbatim, and
-  stop the round for that worker. The lead never answers it — an approval
+  stop the round for that worker. The foreman never answers it — an approval
   dialog is input, and input to a blocked agent is exactly what Dispatch
   Safety forbids. The operator answers; the wait resumes once
   `herdr agent get <name>` reports a state other than `blocked`.
@@ -228,7 +228,7 @@ Read this task's confirmed fix history, name the next fix number,
 and return to Step 4 with self-contained briefs carrying the findings and prior
 reports. Preserve the developer for retained fixes; use a fresh context for the
 fresh-worker stage. Never reset the counter during re-planning. At a contested
-verdict or a lead override, go to Step 13 first. At an exhausted allowance,
+verdict or a foreman override, go to Step 13 first. At an exhausted allowance,
 record the checkpoint through the owner commands in
 `skills/herdr-teamlead/references/dispatch-recovery.md`, report implementation
 as `awaiting_diagnosis`, consult the investigator, and go to Step 13 with its
@@ -238,7 +238,7 @@ actual blocking review before continuing.
 
 ## Branch-Changing Ruling
 
-Acting on a ruling, the lead never edits the branch itself. At an exhausted allowance,
+Acting on a ruling, the foreman never edits the branch itself. At an exhausted allowance,
 record the checkpoint through the owner commands in
 `skills/herdr-teamlead/references/dispatch-recovery.md` and take the diagnosis;
 the boundary is a diagnostic question, not a budget prompt. The plan its remedy
@@ -271,7 +271,7 @@ The hand-off is therefore split around the bots:
 - Developer runs **Steps 5–7** — watch the reviews, act on blocking findings,
   merge and clean up.
 
-The lead releases nothing until it holds a reviewer Mode B report and a tester
+The foreman releases nothing until it holds a reviewer Mode B report and a tester
 Mode C report against the SHA the developer pushed. A newer push invalidates
 both: re-run Phase 2 against the new tip.
 
@@ -280,7 +280,7 @@ both: re-run Phase 2 against the new tip.
 The workers share one GitHub account, and GitHub refuses `APPROVE` and
 `REQUEST_CHANGES` on that account's own PR. Internal reviews are posted as
 COMMENT reviews with each finding labelled blocking or advisory per
-`rules/review-severity.md`. The COMMENT state carries no gate, so the LEAD is
+`rules/review-severity.md`. The COMMENT state carries no gate, so the FOREMAN is
 the gate: a blocking finding in an internal review sends the round back,
 whatever GitHub's merge box says.
 
@@ -296,9 +296,9 @@ It runs in two modes. Adjudication settles a dispute; diagnosis asks why a fix
 loop is not converging. Dispatch adjudication on exactly one of three triggers:
 
 - A contested reviewer or tester verdict — one worker's finding, another
-  worker's (or the lead's) disagreement, neither side able to settle it by
+  worker's (or the foreman's) disagreement, neither side able to settle it by
   re-reading the rule.
-- A lead override of a blocking finding — the lead about to waive a finding a
+- A foreman override of a blocking finding — the foreman about to waive a finding a
   worker labelled blocking gets a second, independent read first.
 - A bot finding the team disagrees with — the policy reviewer or Copilot flags
   something the developer and reviewer both think is wrong.
@@ -316,7 +316,7 @@ judge rules on them. A diagnosis without one is refused.
 The loop that exhausts its budget is rarely short of attempts: a find-rate
 that holds flat while every round closes its finding is a structural problem,
 and more rounds reproduce it. Diagnosis asks why the loop is not converging
-and what has to change. The lead ran the loop and is the wrong diagnostician
+and what has to change. The foreman ran the loop and is the wrong diagnostician
 of its own dispatch pattern, so the read is independent for the same reason a
 review is.
 
@@ -354,7 +354,7 @@ command refuses a bound above its ceiling rather than honouring it. `ASSESSMENT`
 names the investigator report the judge ruled on, and the record binds that
 path the way supervision's enrollment binds the judge's own report. A `stop`
 remedy ships what is clean and records the remainder as a tracked accepted
-defect; that authority is the judge's, stated so a lead does not re-escalate
+defect; that authority is the judge's, stated so a foreman does not re-escalate
 out of caution. Recording it also files a user-attention obligation, so the
 operator learns of the override they hold without going to look for it.
 
@@ -388,10 +388,10 @@ and never a `RULING:` or an `ACTION:`.
 
 `blocked` is the judge declining to rule on a dispute it cannot settle from
 the tree and the rule text alone. The round stops there and the named question
-goes to the operator. The lead does not dispatch a second judge and does not
+goes to the operator. The foreman does not dispatch a second judge and does not
 rule in its place.
 
-The ruling or remedy binds the round the moment the lead reads it. Only the
+The ruling or remedy binds the round the moment the foreman reads it. Only the
 operator overrides one; record the override and why in the round log. No
 diagnosis remedy waits on an operator for the task to reach a terminal state.
 A `blocked` adjudication is the one ruling that does: it stops the round and
@@ -408,9 +408,9 @@ every worker sharing that window. When that window is exhausted the round
 halts: there is no substitute judge, no fallback to another vendor's flagship,
 and no degraded ruling.
 
-## What the Lead Never Does
+## What the Foreman Never Does
 
-- Edit the shared checkout. The lead reads it and dispatches; workers write.
+- Edit the shared checkout. The foreman reads it and dispatches; workers write.
 - Answer a question by typing into a working worker. Wait for the report.
 - Answer a blocked worker's approval dialog. Relay it to the operator and stop.
 - Create a worktree for a worker after dispatch. Provision before briefing.
@@ -470,7 +470,7 @@ authorization. A blocked ruling follows the operator-question path below.
   spend the bounded rounds with the approach unchanged.
 - **`REMEDY: restructure`** — record the diagnosis, apply the named structural
   change to the shape of the work, then return to Step 12 within its bound.
-  The change is the judge's to name and the lead's to carry out.
+  The change is the judge's to name and the foreman's to carry out.
 - **`REMEDY: stop`** — record the diagnosis, release what is clean, and record
   the remainder as a tracked accepted defect. The remedy carries that
   authority; do not re-escalate it. Proceed to Step 14 for what ships. The

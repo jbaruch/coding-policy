@@ -18,7 +18,7 @@ their evidence; name available source, history and system-design tools or skills
 - What are the viable options, including the smallest change within the
   current design? Compare migration, operation and reversal where relevant.
 - Which assumption could invalidate the preferred option? Identify evidence
-  that settles it or a bounded experiment the lead can authorize.
+  that settles it or a bounded experiment the foreman can authorize.
 - Does the proposal introduce a new obligation beyond accepted behavior?
   Distinguish that proposal from a necessary correction.
 
@@ -30,5 +30,5 @@ and source evidence. Mark unsettled decisions and conditions that would change
 the recommendation. Produce a diagram only when it makes the decision clearer.
 
 An architect who originated a chosen design is a contributor to that design.
-Their implementation advice remains useful; the lead obtains an independent
+Their implementation advice remains useful; the foreman obtains an independent
 assessment of their contribution before accepting it.

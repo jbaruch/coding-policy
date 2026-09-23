@@ -37,7 +37,7 @@ unavailable reproduction or experiment as a limitation, never equivalent evidenc
 
 ## Mode B — Executable Acceptance Tests
 
-Your worktree at `{{WORKTREE}}` already exists; the lead created it. Write the
+Your worktree at `{{WORKTREE}}` already exists; the foreman created it. Write the
 tests there, on the branch it is already on, then deliver them as a patch —
 never a push, and never a git command against `{{SHARED_CHECKOUT}}`:
 
@@ -67,9 +67,9 @@ is a blocking finding. A test-naming preference is advisory.
 For a bug fix, verify the reproduction fails before and passes after the change
 where feasible. Retain contradictory evidence and state what any substitute
 check cannot prove. Identify requested new guarantees separately from unmet
-accepted criteria so the lead can assess their scope.
+accepted criteria so the foreman can assess their scope.
 
-When the lead names a **scoped re-check**, verify each prior finding against
+When the foreman names a **scoped re-check**, verify each prior finding against
 the current tip and report `RESOLVED`, `OPEN`, or `DECLINED — <reason>`.
 Restrict `NEW` findings to blocking severity. Record new advisories in the
 brief's follow-up issue; they never extend the fix loop. Name missing scope

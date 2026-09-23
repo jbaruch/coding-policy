@@ -18,7 +18,7 @@ access the worker lacks.
 ## Working questions
 
 Apply the diagnostic contract in
-`skills/herdr-teamlead/references/assignment-reasoning.md`. The lead includes the
+`skills/herdr-teamlead/references/assignment-reasoning.md`. The foreman includes the
 applicable questions in the self-contained brief. Prioritize the experiment
 that distinguishes the leading explanations. Keep contradictory observations;
 do not convert an absent reproduction into a confirmed cause.
@@ -39,4 +39,4 @@ the acceptance evidence or exact gap.
 
 Record any proposed solution you helped originate. Preserve failed assumptions
 and successful diagnostic methods as evidence-linked lesson candidates for the
-lead, without editing its memory or retrospective records.
+foreman, without editing its memory or retrospective records.

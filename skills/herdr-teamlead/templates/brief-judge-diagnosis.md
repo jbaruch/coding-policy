@@ -75,7 +75,7 @@ VERIFICATION: <what confirming this direction looks like>
 
 The allowance bounds repeated attempts at an approach already shown to fail, so
 an approved different direction starts a fresh allowance, and `BOUND` then names
-that allowance. Name the direction precisely enough that the lead applies it
+that allowance. Name the direction precisely enough that the foreman applies it
 without asking you a question, and name the verification the team owes it. A
 direction this task already tried is refused, `stop` approves none, and a new
 worker or a rewritten brief is not a different approach.
@@ -94,7 +94,7 @@ and the answer is the next rung, not a bigger number.
 
 `restructure` names a concrete change in the shape of the work — split the
 surface, change the sequence, replace the approach. Name it precisely enough
-that the lead applies it without asking you a question.
+that the foreman applies it without asking you a question.
 
 `stop` ships what is clean and tracks the remainder. Name both halves: what
 goes out, and what is recorded as an accepted defect. Your remedy carries the

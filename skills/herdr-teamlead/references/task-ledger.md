@@ -1,6 +1,6 @@
 # Task Ledger
 
-The lead records its judgments in one persistent `TASK-LEDGER.md` for the task.
+The foreman records its judgments in one persistent `TASK-LEDGER.md` for the task.
 Its location, schema, ownership, and migration contract are in
 `skills/herdr-teamlead/state-schema.md`, Task Ledger. The JSON utility ledger
 continues to record what was dispatched and which recovery decisions were
@@ -10,7 +10,7 @@ authorized. An `applied` row there says nothing about whether the work passed.
 
 At Step 3, establish the stable task identity, original base, and absolute ledger
 path. Save that path beside the task's authorization context and include it in
-every lead handoff. Create the document on a first run, or read the existing
+every foreman handoff. Create the document on a first run, or read the existing
 document in full before planning more work. Do not create a new ledger per fix.
 
 Read the referenced utility state through its owner commands. Correlate each
@@ -35,8 +35,8 @@ Use these separate vocabularies:
 | Subject | Decision | Meaning |
 | --- | --- | --- |
 | assignment | `pending` | Dispatch is planned or confirmed; no report has been assessed |
-| assignment | `reported` | Delivery was confirmed; the lead has not yet accepted the work |
-| assignment | `accepted` | The lead read the report and verified that the assignment's acceptance criteria hold |
+| assignment | `reported` | Delivery was confirmed; the foreman has not yet accepted the work |
+| assignment | `accepted` | The foreman read the report and verified that the assignment's acceptance criteria hold |
 | assignment | `needs_work` | Evidence shows unmet criteria or invalidates a prior acceptance |
 | assignment | `blocked` | A specific unresolved dependency or decision prevents the assignment from proceeding |
 | assignment | `unavailable` | A report is missing or unavailable under the wait/recovery contract |
@@ -49,7 +49,7 @@ Use these separate vocabularies:
 | task | `completed` | All task acceptance criteria and required release/cleanup obligations are verified |
 
 Record Herdr's label under `observed`, with its source. Record worker claims as
-claims there too. Neither is the lead's `decision`. `found: true` confirms report
+claims there too. Neither is the foreman's `decision`. `found: true` confirms report
 delivery only. A report containing `## BLOCKED` is not successful task completion.
 A reviewer assignment can be accepted as a completed review while its blocking
 findings keep the task `in_progress`.
@@ -93,7 +93,7 @@ dispatch_state: <absolute utility state.json path>
 - role: <role or not_applicable>
 - report: <absolute path or unknown>
 - observed: <source and its actual observation>
-- decision: <lead assessment from the table>
+- decision: <foreman assessment from the table>
 - head_revision: <full inspected SHA, unknown, or not_applicable>
 - evidence: <paths/content/digests, refs, gate URLs/results, or unknown>
 - assessment: <reason, remaining criteria, next action>
