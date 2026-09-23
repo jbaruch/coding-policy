@@ -1,16 +1,17 @@
 ---
 alwaysApply: false
-applyTo: "skills/**, scripts/**, skills/**/*.sh, skills/**/*.py, skills/**/SKILL.md — when authoring deterministic scripts that skills invoke"
-description: Deterministic operations → script, reasoning → LLM, the regex trap, script structure conventions, precheck gating
+applyTo: "skills/**, scripts/**, skills/**/*.sh, skills/**/*.py, skills/**/SKILL.md — when choosing between a script, a bounded classifier and the model, or authoring the scripts skills invoke"
+description: Deterministic operations → script, a fixed answer set read by meaning → bounded classification, everything else → LLM, the regex trap, script structure conventions, precheck gating
 ---
 
 # Script Delegation
 
 ## The Core Principle
 
-- Everything deterministic → script. Everything requiring reasoning → skill/LLM
+- Everything deterministic → script. A fixed answer set read by meaning → bounded classification. Everything else requiring reasoning → skill/LLM
 - If the logic can be expressed as a pure function with known inputs and outputs, it's a script
-- If it requires judgment, synthesis, or context-dependent decisions, it stays in the skill
+- If the answer is one of a fixed enumerated set, picking it requires reading meaning, and the question's input carries everything the answer depends on, it's a bounded classification
+- Any other question requiring judgment, synthesis, or context-dependent decisions stays in the skill
 
 ## What Belongs in a Script
 
@@ -21,14 +22,25 @@ description: Deterministic operations → script, reasoning → LLM, the regex t
 ## What Stays in the LLM
 
 - Synthesis across multiple sources, language generation
-- Branching decisions that require situational context
-- Anything where the "right answer" depends on understanding intent
+- Branching decisions that require situational context the question's input does not carry
+- Open-ended answers that depend on understanding intent
+
+## Bounded Classification
+
+- The answer is one of a fixed list, and picking the right one takes reading meaning rather than computing a value
+- The question's input carries everything the answer depends on
+- One of the allowed answers is "not enough evidence to tell"
+- When it answers that, the question goes to the reasoning round instead
+- An unavailable classifier or an answer outside the list takes the same path, never a retry into another answer
+- The label never triggers an action that cannot be undone (see `rules/ship-on-green.md`)
 
 ## The Regex Trap
 
 - Resist the over-eager urge to declare things deterministic on a regex hunch
-- If the input has too many edge cases for a reasonable regex, it's reasoning — not scripting
+- If the input has too many edge cases for a reasonable regex, it is not scripting
 - Parsing natural language dates, extracting meaning from unstructured text, classifying ambiguous input — these are **not** scripting tasks
+- Classifying into a fixed answer set is a bounded classification
+- Every other case in this section is reasoning
 - A script should only handle patterns that are fully enumerable
 
 ## Scripts Are Real Files
