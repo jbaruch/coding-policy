@@ -23,8 +23,11 @@ implementation, push, PR and release instructions do not apply to that branch.
 Gate investigation reports against the requested knowledge and evidence, including
 required independent checks. The implementation phases in Review Before PR apply
 only to authorized code changes. Preserve blocking-finding, correction-allowance,
-and judge rules for the investigation. A judge ruling returns the investigation
-to its knowledge-deliverable gate; it never supplies code-release authority.
+and judge rules for the investigation. A completed judge ruling (`uphold A`,
+`uphold B` or `amend`) returns the investigation to its knowledge-deliverable
+gate; it never supplies code-release authority. An `insufficient` ruling goes
+through the investigator and re-adjudication path in
+`skills/herdr-teamlead/references/round-flow.md` Ruling Outcomes first.
 
 ## Assess a Finding's Scope
 
