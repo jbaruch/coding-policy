@@ -147,6 +147,22 @@ class SelectionTest(unittest.TestCase):
         self.assertTrue(scarce["de_escalated"])
         self.assertEqual(scarce["pressure_headroom"], 13.0)
 
+    def test_a_round_promoted_to_a_judgment_row_never_de_escalates(self):
+        # A build that failed its gates twice, or a fourth fix, runs on the
+        # review row; scarcity must not strip that row's escalation.
+        risk = {"risk_flags": ["network", "persistence"]}
+        for tier in (select_tier(agent(), "developer", "build", {**risk, "failed_gates": 2}, headroom=1.0),
+                     select_tier(agent(), "developer", context=risk, fix_round=4, headroom=1.0)):
+            with self.subTest(tier_row=tier["tier_row"]):
+                self.assertEqual(tier["tier_row"], "review")
+                self.assertFalse(tier["de_escalated"])
+                self.assertEqual(tier["effort"], "xhigh")
+
+    def test_an_overflowing_headroom_reads_as_unmeasured(self):
+        tier = select_tier(agent(), "developer", context={"risk_flags": ["network", "persistence"]}, headroom=10 ** 1000)
+        self.assertIsNone(tier["pressure_headroom"])
+        self.assertFalse(tier["de_escalated"])
+
     def test_de_escalation_never_goes_below_the_configured_row(self):
         # The operator's table is the floor. What scarcity declines is the step
         # ABOVE it, which is the only part of the selection nobody wrote down.

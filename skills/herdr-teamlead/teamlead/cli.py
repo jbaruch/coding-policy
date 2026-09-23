@@ -42,6 +42,7 @@ from .measure import (
     measure,
 )
 from .planner import plan as build_plan
+from .planner import headroom_of
 from .tiers import MissingTierError, parse_launch_args, parse_tiers, select_tier
 from .qualification import require_qualification
 from .launch import start_worker, verify_running
@@ -541,6 +542,42 @@ def _round_inputs(args, roles):
     return rounds
 
 
+def _snapshot_headroom(snapshot):
+    """Each agent's headroom, read the way the planner ranks it, or None.
+
+    Tier resolution and worker ranking must agree on the number: a snapshot
+    holding "8" ranks a worker at 8% and must resolve its round at 8% too.
+    """
+    agents = snapshot.get("agents") if isinstance(snapshot, dict) else None
+    if not isinstance(agents, dict):
+        return {}
+    return {name: headroom_of(name, record, lambda _message: None) for name, record in agents.items()}
+
+
+def _planned_snapshot_headroom(document, state, state_path):
+    """The headroom of the snapshot a plan names, or {} when it cannot be found.
+
+    An unlocatable snapshot reads as unmeasured. A plan that de-escalated on
+    it then recomputes without the de-escalation and is refused as stale,
+    which is the outcome an unverifiable pressure claim should have.
+    """
+    ref = document.get("snapshot_ref") if isinstance(document, dict) else None
+    if not isinstance(ref, dict) or not isinstance(ref.get("source"), str):
+        return {}
+    measured_at = ref.get("measured_at")
+    if ref["source"] == str(state_path):
+        matches = [snap for snap in state.get("snapshots", [])
+                   if isinstance(snap, dict) and snap.get("measured_at") == measured_at]
+        return _snapshot_headroom(matches[-1]) if matches else {}
+    try:
+        snapshot = json.loads(Path(ref["source"]).read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return {}
+    if not isinstance(snapshot, dict) or snapshot.get("measured_at") != measured_at:
+        return {}
+    return _snapshot_headroom(snapshot)
+
+
 def _candidate_tiers(roles, agents, rounds, fix_round=None, judge=None, qualified_at=None, excludes=None, headroom=None):
     tiered = any(agent.tiers for agent in agents)
     if not tiered and not (judge and "judge" in roles):
@@ -821,10 +858,7 @@ def cmd_plan(args, client=None, warn=None, trace=None):
     # seat's round, so headroom can buy a cheaper round and not only a cheaper
     # pair. `apply` re-reads it off the plan rather than re-measuring, which is
     # what keeps its recomputed tiers equal to the planned ones (#477).
-    measured_headroom = {
-        name: record.get("headroom_pct") if isinstance(record, dict) else None
-        for name, record in (snapshot.get("agents", {}) if isinstance(snapshot.get("agents"), dict) else {}).items()
-    }
+    measured_headroom = _snapshot_headroom(snapshot)
     tier_candidates = _candidate_tiers(canonical, agents, rounds, args.fix_round, judge,
                                       None if args.preview_tiers else (args.now or now_iso()),
                                       excludes={role: names for role, names in excludes.items() if role in set(canonical)},
@@ -1135,12 +1169,10 @@ def cmd_apply(args, client=None, warn=None, trace=None):
     # `apply` measures nothing -- it re-reads the headroom the PLAN resolved its
     # tiers against, so a recomputed tier differs only when the config or the
     # fix context actually drifted, which is what the comparison below is for.
-    planned_tiers = document.get("tiers", {}) if isinstance(document.get("tiers"), dict) else {}
-    planned_headroom = {}
-    for role, name in assignments.items():
-        row = planned_tiers.get(role)
-        if isinstance(row, dict) and "pressure_headroom" in row:
-            planned_headroom[name] = row["pressure_headroom"]
+    # The headroom comes from the snapshot the plan names, never from the
+    # plan's own `pressure_headroom`: a plan edited to claim scarcity would
+    # otherwise recompute its own downgrade and pass the comparison below.
+    planned_headroom = _planned_snapshot_headroom(document, state, state_path)
     candidates = _candidate_tiers(list(assignments), agents, rounds, args.fix_round, judge,
                                   excludes=constraints["exclude"], headroom=planned_headroom)
     tiers = {}

@@ -63,6 +63,7 @@ Reading follows one rule per direction:
 """
 
 import json
+import math
 import os
 import tempfile
 import fcntl
@@ -441,7 +442,8 @@ def _validate(payload, path):
                 raise _NoUsableState("an assignment row has invalid tier evidence")
             pressure = tier.get("pressure_headroom")
             if (type(tier.get("de_escalated")) is not bool
-                    or pressure is not None and (isinstance(pressure, bool) or not isinstance(pressure, (int, float)))):
+                    or pressure is not None and (isinstance(pressure, bool) or not isinstance(pressure, (int, float))
+                                                 or not math.isfinite(pressure))):
                 raise _NoUsableState("an assignment row's tier lacks its pressure fields")
             try:
                 parse_tiers({"build": {"model": tier["model"], "effort": tier.get("effort")}}, tier["kind"])

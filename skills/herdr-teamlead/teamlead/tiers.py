@@ -427,7 +427,10 @@ def measured_pressure(headroom):
     """
     if headroom is None or isinstance(headroom, bool) or not isinstance(headroom, (int, float)):
         return None
-    value = float(headroom)
+    try:
+        value = float(headroom)
+    except OverflowError:
+        return None
     return value if math.isfinite(value) else None
 
 
@@ -491,7 +494,7 @@ def select_tier(agent, role, round_type=None, context=None, fix_round=None, head
     pressure = measured_pressure(headroom)
     de_escalated = bool(
         needs_xhigh and pressure is not None and pressure <= PRESSURE_HEADROOM_PCT
-        and round_type not in JUDGMENT_ROUNDS
+        and round_type not in JUDGMENT_ROUNDS and chosen_round not in JUDGMENT_ROUNDS
     )
     if de_escalated:
         # The configured row is the floor and it still runs. What is declined is

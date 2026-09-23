@@ -164,7 +164,7 @@ def _headroom_of(name, record, warn):
 
     try:
         number = float(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         warn(
             "headroom_pct for {!r} is {!r}, which is not a number; treating it "
             "as unknown.".format(name, value)
@@ -181,6 +181,10 @@ def _headroom_of(name, record, warn):
         return None
     return number
 
+
+#: Public name for callers outside the planner that must read headroom the
+#: same way it ranks workers.
+headroom_of = _headroom_of
 
 def _window_groups(agents):
     """`{agent: window_group}` for every agent that declares one.
