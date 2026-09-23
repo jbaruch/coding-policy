@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.261 — 2026-09-23
+
 ### Changed
 
 - **Foreman handoff gaps are structured, and each one says how to recover.**
