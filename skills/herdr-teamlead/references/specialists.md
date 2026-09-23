@@ -134,8 +134,9 @@ would otherwise be refused as classifying nothing. It says so explicitly:
 
 Every trigger is quiet on such a round by construction: each one classifies a
 repository surface, and this round touches none. The claim is checked rather
-than taken — `--roles` must name only the read-only responsibilities (`advisor`,
-`investigator`, `architect`), every other planned field must be empty, and a
+than taken — `--roles` must name only read-only responsibilities
+(`READ_ONLY_ROLES` in `skills/herdr-teamlead/teamlead/triggers.py`), every other
+planned field must be empty, and a
 tracked diff against the base refuses it, since evidence outranks intent.
 Omitting `writes_repository` reads as `true`, so a plan written before the
 field keeps its meaning.

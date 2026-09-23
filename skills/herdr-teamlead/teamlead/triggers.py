@@ -474,6 +474,9 @@ def run_command(args, runner=None):
         if not set(roles) <= READ_ONLY_ROLES:
             raise UsageError("Only {} write no repository content; this round seats {} and cannot declare writes_repository false.".format(
                 ", ".join(sorted(READ_ONLY_ROLES)), ", ".join(sorted(set(roles) - READ_ONLY_ROLES))), {})
+        # Untracked scratch in the shared checkout is not this round's surface:
+        # it passed the refusal above, and it must not fire a trigger either.
+        changes, churn, untracked = {}, {}, {}
     # An empty plan classifies exactly as much as an absent one, so the guard
     # reads the combined inputs rather than the plan's presence: a vacuous
     # success here is the silence the triggers exist to end (#415).

@@ -758,6 +758,21 @@ class DetectTriggersCommandTest(TempCase):
         self.assertEqual(code, 1)
         self.assertEqual(json.loads(out)["fired"], ["documentation"])
 
+    def test_untracked_scratch_fires_nothing_on_a_round_that_writes_nothing(self):
+        # An investigation's lead shares a checkout that may hold scratch. The
+        # scratch is no surface of the round: it must not refuse the round, and
+        # it must not fire a trigger either (#471 review).
+        (self.tmp / "docs").mkdir()
+        (self.tmp / "docs" / "notes.md").write_text("scratch the lead wrote\n")
+        planned = self.tmp.parent / (self.tmp.name + "-planned.json")
+        planned.write_text(json.dumps({"schema_version": 1, "added": [], "changed": [],
+                                       "package_lines": {}, "cli_surface": [],
+                                       "writes_repository": False}))
+        self.addCleanup(planned.unlink)
+        code, out, err = self.run_cli("--roles", "investigator", "--planned", str(planned))
+        self.assertEqual(code, 0, err)
+        self.assertEqual(json.loads(out)["fired"], [])
+
     def test_an_untracked_spec_file_fires_ux_product(self):
         (self.tmp / "src" / "cli").mkdir(parents=True)
         (self.tmp / "src" / "cli" / "ship.py").write_text('sub.add_parser("ship")\n')
