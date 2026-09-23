@@ -146,11 +146,14 @@ description: Running a multi-agent team — task-based specialist composition, c
 - In diagnosis mode it reads the round history and verifies against the tree what each round changed, and returns the six diagnosis lines with numbered reasons
 - A diagnosis repeating its predecessor's rung adds `PROGRESS:`
 - `RULING:` and `ACTION:` belong to adjudication alone; a diagnosis carries neither
-- A completed ruling (`uphold A`, `uphold B` or `amend`) binds the round; only the operator overrides it
-- `insufficient` settles nothing: it binds nothing and no checkpoint cites it
+- A completed ruling (`uphold A`, `uphold B` or `amend`) binds the round
+- Only the operator overrides a completed ruling
+- `insufficient` binds nothing
+- No checkpoint cites an `insufficient` ruling
 - `blocked` is the judge declining to rule
 - A `blocked` ruling stops the round and sends the named question to the operator
-- `blocked` is for a question only the operator can answer; a fact the tree can settle is `insufficient`
+- `blocked` is for a question only the operator can answer
+- A fact the tree can settle is `insufficient`, never `blocked`
 - The judge is declared in `config.json`, measured, and planned like every other seat
 - The judge worker and the `claude` worker authenticate as one Claude subscription and draw on one weekly window
 - `window_group` names the usage window an agent shares with other agents
