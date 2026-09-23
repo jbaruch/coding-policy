@@ -194,7 +194,7 @@ def _refuse_unowned_legacy(store, version):
         seated = [row.get("role")] if isinstance(row, dict) else []
         if isinstance(row, dict) and isinstance(row.get("result"), dict):
             seated.append(row["result"].get("role"))
-        if any(isinstance(value, str) and SEAT_SEPARATOR in value for value in seated):
+        if version < 10 and any(isinstance(value, str) and SEAT_SEPARATOR in value for value in seated):
             raise UsageError("Older recovery contains a seat-named dispatch this version never wrote; preserve it for owner recovery.", {})
         carriers = [row] if isinstance(row, dict) else []
         if isinstance(row, dict):

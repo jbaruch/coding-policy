@@ -297,6 +297,23 @@ class RecoveryCommandTests(fixture.CliCase):
         with self.assertRaisesRegex(UsageError, "judge mode this version never wrote"):
             recovery_module.migrate_store(store)
 
+    def test_a_version_eleven_store_with_seated_dispatches_still_migrates(self):
+        # Seats have been owned since store version 10. A version bump after it
+        # must upgrade a seated store, not refuse it as newer data.
+        from teamlead import recovery as recovery_module
+        for version in (10, 11):
+            with self.subTest(version=version):
+                store = recovery_module.empty_recovery()
+                store["schema_version"] = version
+                if version == 10:
+                    del store["approaches"]
+                store["dispatches"].append({"schema_version": 1, "id": "d", "role": "reviewer#api",
+                                            "agent": "claude", "task": TASK, "status": "applied",
+                                            "result": {"schema_version": 1, "role": "reviewer#api"}})
+                self.assertTrue(recovery_module.migrate_store(store))
+                self.assertEqual(store["schema_version"], recovery_module.RECOVERY_STORE_VERSION)
+                self.assertEqual(store["dispatches"][0]["role"], "reviewer#api")
+
     def test_a_live_judge_dispatch_records_its_declared_mode_on_the_assignment(self):
         # coding-policy#478: 51 recorded judge rounds, none of them saying
         # which mode they ran. The ledger is where an adjudication and a
