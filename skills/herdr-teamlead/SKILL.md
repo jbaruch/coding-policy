@@ -175,6 +175,21 @@ Proceed immediately to Step 5 once the required readings are available.
 
 ## Step 5 — Plan the Roles
 
+Read the open tasks waiting for a seat, oldest first:
+
+```bash
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
+bash "$CP/skills/herdr-teamlead/teamlead.sh" foreman-queue
+```
+
+It prints `{"schema_version": 1, "queue": [...]}`. Each entry names `task`,
+`waiting_for` (a list of `developer`, `reviewer` or `tester`),
+`dispatched_seats`, `since`, `developer` and `fix_round`. A non-zero exit names
+an unusable state file on stderr; restore it before planning. Tasks with an
+active worker are omitted. A partitioned verifier stays listed with its
+dispatched slices; check them against the validated partition. The order is a
+default; choose another when the round needs it.
+
 Choose the responsibilities needed next under `references/specialists.md`.
 Supply its requirements file for specialized work. Schedule consultation and
 verification as the task needs them. `plan` bars a developer reserved to

@@ -23,7 +23,7 @@ from types import SimpleNamespace
 from . import __version__
 from .assign import apply as apply_assignments
 from .assign import APPLY_SCHEMA_VERSION, dry_run, native_context_session, normalize_assignments, resolve_paths, validate_fix_history
-from . import attention, capabilities, composition, engagement, historical, memory, oracle, partition, recovery, report_delivery, restoration, role_clear, retrospective, retrospective_runtime, supervision, supervision_gate, supervision_runtime, triggers
+from . import attention, capabilities, composition, engagement, foreman_queue, historical, memory, oracle, partition, recovery, report_delivery, restoration, role_clear, retrospective, retrospective_runtime, supervision, supervision_gate, supervision_runtime, triggers
 from .config import default_config_path, load_config, load_judge, load_role_costs, select_agents
 from .errors import PlanError, StateError, TeamLeadError, UsageError
 from .herdr import (
@@ -381,6 +381,7 @@ def build_parser():
         record_parser.add_argument("--record", required=True, metavar="FILE", help="Structured evidence JSON; see dispatch-recovery.md.")
         record_parser.add_argument("--now", metavar="ISO8601")
     sub.add_parser("status", parents=[common], help="Show implementation budgets and paused work separately from active audit workers.")
+    sub.add_parser("foreman-queue", parents=[common], help="List open tasks waiting for their next seat, oldest first, derived from the owner records.")
 
     sub.add_parser(
         "state",
@@ -1363,6 +1364,18 @@ def cmd_status(args, client=None, warn=None, trace=None):
             "tasks": recovery.task_statuses(state["recovery"], state["assignments"])}, None
 
 
+def cmd_foreman_queue(args, client=None, warn=None, trace=None):
+    state_path = _state_path(args)
+    # Strict and read-only: an unusable ledger must fail, never read as an
+    # empty queue that hides every waiting task.
+    state, usable = load_state_checked(state_path, warn=warn, persist_migration=False)
+    if not usable:
+        raise StateError("State file {} is unusable, so the queue cannot be derived; restore it before planning.".format(state_path),
+                         {"path": str(state_path)})
+    busy = {row["assignment"]["task"] for row in supervision.load(state_path)["members"] if row["active"]}
+    return foreman_queue.waiting(state["recovery"], state["assignments"], busy), None
+
+
 def _require_independent_report(state, task, reviewer):
     """Apply the same contribution evidence to live and imported reviews."""
     if not isinstance(reviewer, str):
@@ -1701,6 +1714,7 @@ COMMANDS = {
     "apply": cmd_apply,
     "state": cmd_state,
     "status": cmd_status,
+    "foreman-queue": cmd_foreman_queue,
     **{command: cmd_recovery for command in ("task", "checkpoint", "authorize-corrections", "authorize-approach", "recover-context", "recover-role-clear", "record-report", "record-refusal", "authorize-refused-dispatch", "diagnose", "reconcile", "record-release-clear", "import-correction", "record-historical-review", "recover-report", "assess-specialist", "close-task")},
     "detect-triggers": cmd_detect_triggers,
     "validate-partition": cmd_validate_partition,
