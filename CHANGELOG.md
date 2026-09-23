@@ -19,6 +19,20 @@
   recovery, and asking the operator is the only honest one. The owner's next
   write persists the upgrade, and readers never rewrite. Lesson and source
   records stay at version 1.
+||||||| 114e2ce
+
+- **The Herdr foreman no longer writes throwaway helper scripts.** In the
+  #483 audit, the foreman wrote four scratch scripts (`pkg-setup.sh`,
+  `verify-setup.sh`, `check-member.sh`, `close-member.sh`), each chaining
+  three or four owner commands, and its handoff pointed at them after the
+  scratch directory was gone. The skill now forbids throwaway scratch
+  helpers and scratch-file references in handoffs. A sequence the foreman
+  repeats across tasks is deterministic orchestration, so under
+  `rules/script-delegation.md` it belongs in a tested script shipped with the
+  skill. The foreman records it as a follow-up instead of scripting it
+  locally. An earlier draft listed the sequences in `round-setup.md`
+  instead, and review showed the list restated the steps out of order and
+  without their required flags.
 
 ## 0.3.260 — 2026-09-23
 
