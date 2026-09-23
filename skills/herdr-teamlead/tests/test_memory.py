@@ -182,10 +182,41 @@ class MemoryTest(unittest.TestCase):
         self.assertEqual(recovered["capture"], self.capture["capture"])
         self.assertEqual([row["path"] for row in recovered["required_reads"]], [str(attention), str(self.source)])
 
-    def test_stow_with_gaps_never_claims_reset_readiness(self):
-        result = self.stow({**self.capture, "gaps": ["The current task ledger is unavailable; restore it before replacing the lead."]})
-        self.assertFalse(result["record"]["reset_ready"])
-        self.assertFalse(memory.show(self.state, LATER)["record"]["reset_ready"])
+    def gap(self, recovery):
+        return {"missing": "Why finding 4 was downgraded", "task": "nanoclaw-965", "recovery": recovery}
+
+    def test_structured_gaps_name_their_recovery_and_keep_reset_ready(self):
+        for index, recovery in enumerate(({"reread": str(self.source)}, {"ask": "Was finding 4 advisory?"},
+                                          {"accept": "The finding was re-reviewed in full at the new tip."})):
+            with self.subTest(recovery=recovery):
+                result = self.stow({**self.capture, "id": "stow-gap-{}".format(index), "gaps": [self.gap(recovery)]})
+                self.assertEqual(result["record"]["schema_version"], memory.STOW_VERSION)
+                self.assertEqual(result["record"]["gaps"], [self.gap(recovery)])
+                self.assertTrue(result["record"]["reset_ready"])
+
+    def test_a_gap_without_a_usable_recovery_is_refused(self):
+        for gap in ("The ledger is unavailable.",
+                    {"missing": "x", "task": "t"},
+                    {"missing": "x", "task": " ", "recovery": {"ask": "q"}},
+                    self.gap({}),
+                    self.gap({"ask": "q", "accept": "r"}),
+                    self.gap({"reread": "relative/path.md"}),
+                    self.gap({"guess": "maybe"}),
+                    self.gap({"accept": " "})):
+            with self.subTest(gap=gap), self.assertRaisesRegex(UsageError, "Each stow gap needs missing, task and one recovery"):
+                self.stow({**self.capture, "gaps": [gap]})
+        self.assertFalse(memory.location(self.state).exists())
+
+    def test_a_version_one_stow_keeps_its_free_text_gaps_and_blocks_reset(self):
+        self.stow()
+        document = self.raw()
+        legacy = {**document["records"][0], "id": "legacy-stow", "schema_version": 1,
+                  "gaps": ["The current task ledger is unavailable; restore it before replacing the lead."]}
+        document["records"].append(legacy)
+        memory.location(self.state).write_text(json.dumps(document), encoding="utf-8")
+        shown = memory.show(self.state, LATER, "legacy-stow")["record"]
+        self.assertEqual(shown["gaps"], legacy["gaps"])
+        self.assertFalse(shown["reset_ready"])
 
     def test_stow_source_change_or_loss_invalidates_saved_readiness(self):
         self.stow()

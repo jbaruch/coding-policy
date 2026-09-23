@@ -17,6 +17,13 @@ from .errors import StateError, UsageError
 from .state import save_state, state_lock
 
 SCHEMA_VERSION = 1
+#: Stow record version. 1 held free-text gaps. 2 makes each gap structured:
+#: what is missing, which task it affects, and exactly one recovery -- a file
+#: to re-read, a question for the operator, or an accepted loss with its
+#: reason (#483). Version-1 stows are read unchanged and never restamped.
+STOW_VERSION = 2
+STOW_VERSIONS = frozenset({SCHEMA_VERSION, STOW_VERSION})
+GAP_RECOVERIES = ("reread", "ask", "accept")
 COMMANDS = frozenset({"memory-record", "memory-list", "memory-show", "memory-stow"})
 IDENTIFIER = re.compile(r"[a-z0-9][a-z0-9_-]{0,63}\Z")
 
@@ -105,8 +112,21 @@ def _validate_source(row):
              "Memory file receipt is malformed; restore the original record.")
 
 
+def _valid_gap(gap):
+    """A version-2 gap: what is missing, the task it affects, and one recovery."""
+    if not (isinstance(gap, dict) and set(gap) == {"missing", "task", "recovery"}
+            and _text(gap["missing"]) and _text(gap["task"])
+            and isinstance(gap["recovery"], dict) and len(gap["recovery"]) == 1):
+        return False
+    (kind, value), = gap["recovery"].items()
+    if kind == "reread":
+        return isinstance(value, str) and Path(value).is_absolute()
+    return kind in GAP_RECOVERIES and _text(value)
+
+
 def _validate_record(row):
-    _require(isinstance(row, dict) and type(row.get("schema_version")) is int and row["schema_version"] == SCHEMA_VERSION,
+    versions = STOW_VERSIONS if isinstance(row, dict) and row.get("kind") == "stow" else {SCHEMA_VERSION}
+    _require(isinstance(row, dict) and type(row.get("schema_version")) is int and row["schema_version"] in versions,
              "Memory record schema is unsupported; preserve the artifact and update the owner skill.")
     common = {"schema_version", "id", "kind", "recorded_at", "input_digest"}
     _id(row.get("id"))
@@ -134,9 +154,13 @@ def _validate_record(row):
     else:
         _require(row.get("kind") == "stow" and set(row) == common | {"capture", "unresolved_work", "gaps", "required_reads"},
                  "Memory stow fields are unsupported; preserve the record and update the owner skill.")
-        _require(_text(row["capture"]) and _names(row["unresolved_work"]) and _names(row["gaps"])
-                 and isinstance(row["required_reads"], list) and bool(row["required_reads"]),
-                 "Memory stow needs a substantive capture, explicit unresolved_work and gaps lists, and at least one required read.")
+        gaps_valid = (_names(row["gaps"]) if row["schema_version"] == SCHEMA_VERSION
+                      else isinstance(row["gaps"], list) and all(_valid_gap(gap) for gap in row["gaps"]))
+        _require(_text(row["capture"]) and _names(row["unresolved_work"]) and isinstance(row["required_reads"], list)
+                 and bool(row["required_reads"]),
+                 "Memory stow needs a substantive capture, an explicit unresolved_work list, and at least one required read.")
+        _require(gaps_valid,
+                 "Each stow gap needs missing, task and one recovery: {\"reread\": \"/absolute/path\"}, {\"ask\": \"question\"} or {\"accept\": \"reason the loss is safe\"}.")
         for source in row["required_reads"]:
             _validate_source(source)
             _require(source["kind"] == "file", "Stow required reads must name durable local files; put remote references in their contents.")
@@ -192,7 +216,8 @@ def _append(path, data, kind, at):
             return _write_result(path, prior, at, replayed=True)
         _require(not document["records"] or timestamp(at, "Recording") >= timestamp(document["records"][-1]["recorded_at"], "Previous recording"),
                  "Memory recording precedes saved history; use the current UTC checkpoint without rewriting old records.")
-        row = {"schema_version": SCHEMA_VERSION, "kind": kind, "recorded_at": at, "input_digest": _digest(data), **data}
+        row = {"schema_version": SCHEMA_VERSION if kind == "lesson" else STOW_VERSION,
+               "kind": kind, "recorded_at": at, "input_digest": _digest(data), **data}
         source_key = "sources" if kind == "lesson" else "required_reads"
         _require(_names(data[source_key], nonempty=True), "Memory {} must list distinct evidence locations.".format(source_key))
         row[source_key] = [_source(value) if kind == "lesson" else _receipt(value) for value in data[source_key]]
@@ -237,7 +262,10 @@ def _view(row, at):
         result["expired"] = row["expires_at"] is not None and timestamp(at, "Checkpoint") >= timestamp(row["expires_at"], "Expiry")
         result["use_requires_live_verification"] = True
     else:
-        result["reset_ready"] = not row["gaps"] and all(source["observation"] == "same_bytes" for source in result[source_key])
+        # A structured gap names its own recovery, so it no longer blocks a
+        # reset; a version-1 free-text gap still does (#483).
+        gaps_carried = row["schema_version"] == STOW_VERSION or not row["gaps"]
+        result["reset_ready"] = gaps_carried and all(source["observation"] == "same_bytes" for source in result[source_key])
         result["readiness_scope"] = "local_capture_only"
     return result
 

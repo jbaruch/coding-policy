@@ -377,6 +377,7 @@ description: Running a multi-agent team — task-based specialist composition, c
 - Save conversation-only knowledge and open work before a planned foreman reset, compaction, or replacement
 - Give the next foreman an ordered list of durable files to read
 - Record uncaptured or unavailable context as an explicit handoff gap
+- A handoff gap names what is missing, the task it affects, and how to recover it
 - Working memory grants no authority, acceptance, or gate waiver
 - Follow `skills/herdr-teamlead/references/working-memory.md`
 
