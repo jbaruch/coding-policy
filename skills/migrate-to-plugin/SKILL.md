@@ -21,7 +21,7 @@ Convert a legacy `tile.json` plugin to the `plugin.json` form and reconcile the 
 Run the deterministic migration from the repo root:
 
 ```bash
-.tessl/plugins/jbaruch/coding-policy/skills/migrate-to-plugin/migrate.sh .
+bash .tessl/plugins/jbaruch/coding-policy/skills/migrate-to-plugin/migrate.sh .
 ```
 
 The script detects the manifest state, runs `tessl plugin migrate`, renames `.tileignore` → `.tesslignore`, removes the obsolete `tile.json`, runs `tessl plugin lint`, and emits a JSON report with a `residual_files` list. Contract — inputs, output shape, exit codes — is in the script's top-of-file docstring.

@@ -87,7 +87,11 @@ main() {
   fi
 
   local here detector
-  here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  # `pwd` through command substitution loses a trailing newline in the plugin
+  # directory's own name; the sentinel survives the strip (#466).
+  here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd && printf x)"
+  here="${here%x}"
+  here="${here%$'\n'}"
   detector="${here}/../skills/release/check-leftovers.sh"
   if [[ ! -f "$detector" || ! -r "$detector" ]]; then
     warn "detector not readable at ${detector} — reinstall the plugin so session start can report abandoned worktrees"
@@ -162,10 +166,10 @@ if not isinstance(doc["blocking"], list):
     reject("the blocking field is not a list")
 if not isinstance(doc["others"], list):
     reject("the others field is not a list")
-if doc["self"] is not None and not isinstance(doc["self"], dict):
-    reject("the self field is neither an object nor null")
+if not isinstance(doc["self"], dict):
+    reject("the self field is not an object")
 
-for entry in list(doc["others"]) + ([doc["self"]] if doc["self"] is not None else []):
+for entry in list(doc["others"]) + [doc["self"]]:
     if not isinstance(entry, dict):
         reject("a worktree entry is not an object")
     absent = [k for k in ENTRY if k not in entry]
