@@ -150,6 +150,14 @@ def build(state, reports, attention_entries, busy_tasks, decision, *, task=None,
             raise UsageError("Task {!r} has dispatches with an unknown send outcome: {}. Reconcile each with `teamlead reconcile` before this decision.".format(
                 task, ", ".join(pending)), {"task": task, "pending": pending})
     start = _round_start(assignments, task) if task is not None else None
+    if decision in ("brief", "gate", "diagnose"):
+        selected = _task_dispatches(store, assignments, task, since=None if decision == "diagnose" else start)
+        unenrolled = sorted(row["id"] for row in selected if not reports.get(row.get("id")))
+        if unenrolled:
+            # Every dispatch is enrolled before its brief is sent (Fleet
+            # Supervision); a missing enrollment is lost evidence, not "no report".
+            raise UsageError("Dispatches {} have no supervision enrollment with a report path. Restore the supervision record, or reconcile the dispatch, before this decision.".format(
+                ", ".join(unenrolled)), {"task": task, "unenrolled": unenrolled})
     if decision == "plan":
         records["queue"] = next((entry for entry in waiting(store, assignments, busy_tasks)["queue"]
                                  if entry["task"] == task), None)

@@ -28,8 +28,12 @@ Before each decision, load its records and read every listed file:
 
 ```bash
 CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
-bash "$CP/skills/herdr-teamlead/teamlead.sh" load-set --decision <decision> \
-  --task <task> | --enrollment <enrollment-id>
+bash "$CP/skills/herdr-teamlead/teamlead.sh" load-set --decision <plan|brief|gate|diagnose> --task <task>
+```
+
+```bash
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
+bash "$CP/skills/herdr-teamlead/teamlead.sh" load-set --decision wake --enrollment <enrollment-id>
 ```
 
 | Decision | Step | Target |

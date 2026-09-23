@@ -113,6 +113,14 @@ class DecisionTest(unittest.TestCase):
                 run(state, ids, decision, task="t")
         self.assertIsNotNone(run(state, ids, "plan", task="t"))
 
+    def test_a_dispatch_without_an_enrollment_refuses_round_decisions(self):
+        state, ids = two_rounds()
+        paths_by_id = reports(ids)
+        del paths_by_id[ids["rev1"]]
+        for decision in ("brief", "gate", "diagnose"):
+            with self.subTest(decision=decision), self.assertRaisesRegex(UsageError, "no supervision enrollment"):
+                build(state, paths_by_id, {}, set(), decision, task="t", exists=lambda path: True)
+
     def test_a_spent_correction_plan_is_not_offered(self):
         state, ids = two_rounds()
         plan = {"id": "p1", "task": "t", "first_fix": 1, "last_fix": 1, "supersedes": None}
@@ -150,7 +158,7 @@ class DecisionTest(unittest.TestCase):
 
     def test_a_missing_report_is_listed_not_dropped(self):
         state, ids = two_rounds()
-        result = build(state, {ids["rev1"]: "/r/missing.md"}, {}, set(), "gate", task="t",
+        result = build(state, {**reports(ids), ids["rev1"]: "/r/missing.md"}, {}, set(), "gate", task="t",
                        exists=lambda path: path != "/r/missing.md")
         self.assertIn({"path": "/r/missing.md", "why": "report for reviewer " + ids["rev1"], "present": False},
                       result["files"])

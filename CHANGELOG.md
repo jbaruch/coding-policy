@@ -18,7 +18,9 @@
   they join from `historical_attempts` with their reports and review
   receipts. `brief` offers a correction plan only while its last fix is
   unspent. `brief`, `gate` and `diagnose` refuse while the task has a
-  dispatch with an unknown send outcome, so it gets reconciled first. Open
+  dispatch with an unknown send outcome, so it gets reconciled first. They
+  also refuse a dispatch with no supervision enrollment, since its report
+  path would otherwise vanish from the set. Open
   attention items come back in full, with their
   context, consequence and resolution condition. An unknown task or
   enrollment is refused. A missing file is listed with
