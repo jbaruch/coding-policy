@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.255 — 2026-09-23
+
 ### Changed
 
 - **`seat_paths` describes what it returns.** Its docstring promised
