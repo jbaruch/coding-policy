@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.251 — 2026-09-23
+
 ### Changed
 
 - **The cheap round is licensed by a recorded oracle, not by a list of eight
