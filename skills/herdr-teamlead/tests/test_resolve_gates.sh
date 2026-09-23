@@ -40,9 +40,12 @@ run() { # <checkout>
 list() { printf '%s' "$1" | python3 -c 'import json,sys; print(",".join(json.load(sys.stdin)[sys.argv[1]]))' "$2"; }
 field() { printf '%s' "$1" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(json.dumps(eval(sys.argv[1])))' "$2"; }
 
+# An EXIT trap's final status becomes the script's, so cleanup ends on zero.
+cleanup() { if [ -n "${TMP:-}" ]; then rm -rf "$TMP"; fi; return 0; }
+
 main() {
   TMP="$(mktemp -d "${TMPDIR:-/tmp}/resolve-gates-tests.XXXXXX")" || die "mktemp"
-  trap 'rm -rf "$TMP"' EXIT
+  trap cleanup EXIT
   ERRFILE="$TMP/err"
 
   echo "▶ an undeclared repo" >&2

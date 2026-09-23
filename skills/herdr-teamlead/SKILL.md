@@ -446,8 +446,7 @@ Each label carries a verdict from the answer set in
 that decided it. Read the reports together and gate them in one turn,
 not one turn per report. A label is advisory. It never replaces the full read,
 and a report in `unannotated` is read exactly as it would have been. Look twice
-where a label disagrees with your own reading: that is where the classifier or
-the report is wrong. Which vendor and model it uses, and its measured accuracy,
+where a label disagrees with your own reading. Which vendor and model it uses, and its measured accuracy,
 are the script's contract — see `skills/herdr-teamlead/classify/classify-report.sh`.
 
 Read every report file in full, including a report whose worker exited cleanly.

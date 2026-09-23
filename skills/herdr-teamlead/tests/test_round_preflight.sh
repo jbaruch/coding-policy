@@ -41,12 +41,12 @@ stub() { # <dir> <name> <exit> <stdout>
 
 # A shadow plugin dir: the real preflight beside stubbed collaborators, so the
 # script under test is the only unstubbed thing in it.
-shadow() { # <dir> [roster-rc] [authority-rc] [prune-rc] [capability-due]
-  local dir="$1" roster="${2:-0}" authority="${3:-0}" prune="${4:-0}" due="${5:-false}"
+shadow() { # <dir> [roster-rc] [authority-rc] [prune-rc] [capability-due] [authorized]
+  local dir="$1" roster="${2:-0}" authority="${3:-0}" prune="${4:-0}" due="${5:-false}" authorized="${6:-true}"
   mkdir -p "$dir" || die "mkdir $dir"
   cp "$REAL/round-preflight.sh" "$dir/" || die "copy the script under test"
   stub "$dir" roster.sh "$roster" '{"agents":[{"name":"grok"}]}'
-  stub "$dir" verify-authority.sh "$authority" '{"authorized":true}'
+  stub "$dir" verify-authority.sh "$authority" "{\"authorized\":${authorized}}"
   stub "$dir" prune-worktrees.sh "$prune" '{"removed":[],"kept":[]}'
   stub "$dir" resolve-gates.sh 0 '{"instructions":["AGENTS.md"],"workflows":[],"runners":[]}'
   printf '#!/bin/sh\ncase "$*" in\n  *capability-check*) printf %s; exit 0 ;;\n  *measure*) printf %s; exit 0 ;;\nesac\nexit 9\n' \
@@ -65,9 +65,12 @@ run() { # <dir> [extra args...]
 # <json> <python-expression-over-d>, so a case reads one field or counts a list.
 field() { printf '%s' "$1" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(json.dumps(eval(sys.argv[1])))' "$2"; }
 
+# An EXIT trap's final status becomes the script's, so cleanup ends on zero.
+cleanup() { if [ -n "${TMP:-}" ]; then rm -rf "$TMP"; fi; return 0; }
+
 main() {
   TMP="$(mktemp -d "${TMPDIR:-/tmp}/preflight-tests.XXXXXX")" || die "mktemp"
-  trap 'rm -rf "$TMP"' EXIT
+  trap cleanup EXIT
   ERRFILE="$TMP/err"
 
   echo "▶ the aggregate verdict" >&2
@@ -96,6 +99,14 @@ main() {
   run "$TMP/badauth"
   if [[ $RC -eq 1 ]] && printf '%s' "$OUT" | grep -q 'not permission'; then
     pass; else fail "a failing authority check blocks, got RC=$RC OUT=$OUT"; fi
+
+  # A denial is a verdict the verifier emits on exit 0. It blocks as surely as
+  # a failed check: exit status alone never grants authority.
+  shadow "$TMP/denied" 0 0 0 false false
+  run "$TMP/denied"
+  if [[ $RC -eq 1 ]] && printf '%s' "$OUT" | grep -q 'does not own' \
+     && [[ "$(field "$OUT" 'd["checks"]["authority"]["status"]')" == '"denied"' ]]; then
+    pass; else fail "an authority denial on exit 0 blocks, got RC=$RC OUT=$OUT"; fi
 
   shadow "$TMP/both" 1 2
   run "$TMP/both"

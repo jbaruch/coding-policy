@@ -96,6 +96,12 @@ main() {
   printf '{}' > "$results" || die "cannot write to ${scratch}"
 
   record() { # <name> <status> <reason-or-empty> <due:0|1> <detail-file-or-empty>
+    # A check that could not be recorded would vanish from the aggregate and
+    # let `ready` pass without it, so a failed write ends the preflight.
+    record_row "$@" || die "cannot record the ${1} check in ${results}"
+  }
+
+  record_row() {
     python3 - "$results" "$1" "$2" "$3" "$4" "${5-}" <<'PY'
 import json, sys
 path, name, status, reason, due, detail = sys.argv[1:7]
@@ -144,8 +150,18 @@ PY
   bash "${HERE}/verify-authority.sh" "$repo" > "${scratch}/authority.json" 2>"${scratch}/authority.err"
   rc=$?
   cat "${scratch}/authority.err" >&2
+  local authorized=""
   if [ "$rc" -eq 0 ]; then
+    if ! authorized="$(python3 -c 'import json,sys; v=json.load(open(sys.argv[1])).get("authorized"); print("1" if v is True else "0" if v is False else sys.exit("authorized is not a boolean"))' "${scratch}/authority.json")"; then
+      authorized=""
+    fi
+  fi
+  if [ "$rc" -eq 0 ] && [ "$authorized" = "1" ]; then
     record authority ok "" 0 "${scratch}/authority.json"
+  elif [ "$rc" -eq 0 ] && [ "$authorized" = "0" ]; then
+    record authority denied "the operator does not own ${repo}; the round stays read-only unless the brief records per-action permission" 0 "${scratch}/authority.json"
+  elif [ "$rc" -eq 0 ]; then
+    record authority failed "verify-authority.sh exited 0 without a readable authorized verdict for ${repo}; an unanswerable authority check is not permission" 0 ""
   else
     record authority failed "verify-authority.sh exited ${rc} for ${repo}; an unanswerable authority check is not permission" 0 ""
   fi
