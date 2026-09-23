@@ -1,6 +1,7 @@
 """The model-capability table: its cadence, its refresh, and what it refuses."""
 
 import json
+from datetime import datetime, timedelta, timezone
 import os as _os
 import sys as _sys
 import tempfile
@@ -14,8 +15,21 @@ if _ROOT not in _sys.path:
 from teamlead import capabilities
 from teamlead.errors import UsageError
 
-AT = "2026-09-21T00:00:00+00:00"
-LATER = "2026-09-29T00:00:00+00:00"
+#: A fixed past reference; every other instant and date is derived from it
+#: (rules/testing-standards.md Determinism).
+REFERENCE = datetime(2026, 1, 5, tzinfo=timezone.utc)
+
+
+def instant(days=0, seconds=0):
+    return (REFERENCE + timedelta(days=days, seconds=seconds)).isoformat()
+
+
+def dated(days):
+    return (REFERENCE + timedelta(days=days)).date().isoformat()
+
+
+AT = instant()
+LATER = instant(days=8)
 
 
 def found(document, model, effort, capability):
@@ -28,7 +42,7 @@ def found(document, model, effort, capability):
 def entry(**overrides):
     row = {"model": "opus-5", "effort": "high", "capability": "independent-defect-detection",
            "verdict": "adequate",
-           "source": {"kind": "benchmark", "ref": "SWE-bench Verified", "dated": "2026-09-01"}}
+           "source": {"kind": "benchmark", "ref": "SWE-bench Verified", "dated": dated(-20)}}
     row.update(overrides)
     return row
 
@@ -71,9 +85,9 @@ class CapabilityTableTest(unittest.TestCase):
     def test_the_interval_is_a_week(self):
         capabilities.record(self.state, {"entries": [entry()]}, AT)
         document = capabilities.load(self.state)
-        for when, due in (("2026-09-22T00:00:00+00:00", False),
-                          ("2026-09-27T23:59:59+00:00", False),
-                          ("2026-09-28T00:00:00+00:00", True),
+        for when, due in ((instant(days=1), False),
+                          (instant(days=7, seconds=-1), False),
+                          (instant(days=7), True),
                           (LATER, True)):
             with self.subTest(when=when):
                 self.assertEqual(capabilities.cadence(document, when)["due"], due)
@@ -97,9 +111,9 @@ class CapabilityTableTest(unittest.TestCase):
         # One report about two models must not retire the rest of the table.
         capabilities.record(self.state, {"entries": [
             entry(), entry(model="haiku-4.5", effort="low", verdict="inadequate",
-                           source={"kind": "project", "ref": "coding-policy#324", "dated": "2026-07-14"})]}, AT)
+                           source={"kind": "project", "ref": "coding-policy#324", "dated": dated(-69)})]}, AT)
         capabilities.record(self.state, {"entries": [entry(
-            source={"kind": "evaluation", "ref": "third-party eval", "dated": "2026-09-20"})]}, LATER)
+            source={"kind": "evaluation", "ref": "third-party eval", "dated": dated(-1)})]}, LATER)
         document = capabilities.load(self.state)
         self.assertEqual(len(document["entries"]), 2)
         kept = found(document, "haiku-4.5", "low", "independent-defect-detection")
@@ -122,20 +136,20 @@ class CapabilityTableTest(unittest.TestCase):
         # marketing; the hierarchy exists to keep that out (#480).
         with self.assertRaisesRegex(UsageError, "routes real work on marketing"):
             capabilities.record(self.state, {"entries": [entry(
-                source={"kind": "vendor", "ref": "launch blog", "dated": "2026-09-20"})]}, AT)
+                source={"kind": "vendor", "ref": "launch blog", "dated": dated(-1)})]}, AT)
 
     def test_a_vendor_claim_still_records_what_it_can_support(self):
         for verdict in ("inadequate", "unknown"):
             with self.subTest(verdict=verdict):
                 capabilities.record(self.state, {"entries": [entry(
                     verdict=verdict,
-                    source={"kind": "vendor", "ref": "deprecation notice", "dated": "2026-09-20"})]}, AT)
+                    source={"kind": "vendor", "ref": "deprecation notice", "dated": dated(-1)})]}, AT)
 
     def test_this_projects_own_result_supports_a_verdict(self):
         # A model that failed here is evidence, cited like any other source.
         capabilities.record(self.state, {"entries": [entry(
             model="weak-1", verdict="inadequate",
-            source={"kind": "project", "ref": "coding-policy#324", "dated": "2026-07-14"})]}, AT)
+            source={"kind": "project", "ref": "coding-policy#324", "dated": dated(-69)})]}, AT)
         row = found(capabilities.load(self.state), "weak-1", "high", "independent-defect-detection")
         self.assertEqual(row["verdict"], "inadequate")
 
@@ -161,7 +175,7 @@ class CapabilityTableTest(unittest.TestCase):
     def test_a_source_names_where_it_was_read(self):
         with self.assertRaisesRegex(UsageError, "names where it was read"):
             capabilities.record(self.state, {"entries": [entry(
-                source={"kind": "benchmark", "ref": "  ", "dated": "2026-09-01"})]}, AT)
+                source={"kind": "benchmark", "ref": "  ", "dated": dated(-20)})]}, AT)
 
     def test_a_record_carries_entries_alone(self):
         with self.assertRaisesRegex(UsageError, "carries `entries` alone"):

@@ -54,7 +54,8 @@ main() {
   # A Makefile sits there and is deliberately NOT reported: nothing guesses.
   if [[ $RC -eq 0 ]] && [[ "$(field "$OUT" 'd["declared"]')" == "false" ]] \
      && [[ "$(list "$OUT" runners)" == "" ]] \
-     && [[ "$(list "$OUT" workflows)" == ".github/workflows/tests.yml" ]]; then
+     && [[ "$(list "$OUT" workflows)" == ".github/workflows/tests.yml" ]] \
+     && [[ "$(field "$OUT" 'd["brief"]')" == '"undeclared"' ]]; then
     pass; else fail "undeclared reports workflows and guesses nothing, got RC=$RC OUT=$OUT"; fi
 
   echo "▶ a declared repo" >&2
@@ -74,6 +75,12 @@ JSON
      && [[ "$(list "$OUT" runners)" == "scripts/verify.sh" ]] \
      && [[ "$(field "$OUT" 'd["notes"]')" == '"run verify before pushing"' ]]; then
     pass; else fail "a declaration is reported as written, got RC=$RC OUT=$OUT"; fi
+  # The GATES value arrives rendered: the lead copies it, never builds it.
+  # The backticks are literal Markdown the brief carries, not a command substitution.
+  # shellcheck disable=SC2016
+  expected='"- Instructions: `AGENTS.md`\n- Runners: `scripts/verify.sh`\n- Notes: run verify before pushing"'
+  if [[ "$(field "$OUT" 'd["brief"]')" == "$expected" ]]; then
+    pass; else fail "a declared repo's brief is the ready GATES list, got OUT=$OUT"; fi
 
   echo "▶ a declaration that rotted" >&2
 
@@ -82,7 +89,9 @@ JSON
 {"schema_version": 1, "instructions": ["GONE.md"], "runners": ["scripts/gone.sh"]}
 JSON
   run "$TMP/rot"
-  if [[ $RC -eq 0 ]] && [[ "$(list "$OUT" missing)" == "GONE.md,scripts/gone.sh" ]]; then
+  # A rotted path is named in `missing` and never handed to a worker.
+  if [[ $RC -eq 0 ]] && [[ "$(list "$OUT" missing)" == "GONE.md,scripts/gone.sh" ]] \
+     && [[ "$(field "$OUT" 'd["brief"]')" == '"undeclared"' ]]; then
     pass; else fail "a declared path that is gone lands in missing, got RC=$RC OUT=$OUT"; fi
 
   echo "▶ a declaration that cannot be trusted" >&2

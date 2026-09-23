@@ -102,7 +102,8 @@ main() {
   local selected="${work}/corpus.json"
   corpus "$state" "$limit" "$since" > "$selected" || die "cannot build the labelled corpus"
   local total
-  total="$(python3 -c 'import json,sys; print(len(json.load(open(sys.argv[1]))))' "$selected")"
+  total="$(python3 -c 'import json,sys; print(len(json.load(open(sys.argv[1]))))' "$selected")" \
+    || die "cannot read the corpus it just built at ${selected}"
   if [ "$total" -eq 0 ]; then
     if [ -n "$since" ]; then
       die "no labelled report was recorded on or after ${since}; run more rounds, or pass an earlier date"
@@ -111,19 +112,25 @@ main() {
   fi
 
   if [ "$corpus_only" -eq 1 ]; then
-    python3 -c 'import json,sys; rows=json.load(open(sys.argv[1])); import collections; print(json.dumps({"schema_version":1,"scored":0,"corpus":len(rows),"recorded":dict(collections.Counter(r["recorded"] for r in rows)),"reports":rows}, sort_keys=True))' "$selected"
+    python3 -c 'import json,sys; rows=json.load(open(sys.argv[1])); import collections; print(json.dumps({"schema_version":1,"scored":0,"corpus":len(rows),"recorded":dict(collections.Counter(r["recorded"] for r in rows)),"reports":rows}, sort_keys=True))' "$selected" \
+      || die "cannot summarize the corpus at ${selected}"
     return 0
   fi
 
   echo "evaluate: scoring ${total} report(s) on ${agent}; this spends one model call each" >&2
   local results="${work}/results.json" failures=0 index=0 report recorded answer
-  printf '[]' > "$results"
+  printf '[]' > "$results" || die "cannot write to ${work}"
+  local queue="${work}/queue.tsv"
+  python3 -c 'import json,sys
+for row in json.load(open(sys.argv[1])):
+    print(row["report"] + "\t" + row["recorded"])' "$selected" > "$queue" \
+    || die "cannot list the corpus at ${selected}"
   while IFS=$'\t' read -r report recorded; do
     index=$((index + 1))
     echo "  [${index}/${total}] ${report}" >&2
     answer="${work}/answer-${index}.json"
     if bash "${HERE}/classify-report.sh" "$report" --agent "$agent" ${model:+--model "$model"} --out "$answer" >/dev/null 2>"${work}/err-${index}"; then
-      python3 - "$results" "$answer" "$recorded" <<'PY'
+      if ! python3 - "$results" "$answer" "$recorded" <<'PY'
 import json, sys
 results, answer, recorded = sys.argv[1:4]
 with open(results, encoding="utf-8") as handle:
@@ -134,15 +141,14 @@ rows.append({**label, "recorded": recorded})
 with open(results, "w", encoding="utf-8") as handle:
     json.dump(rows, handle)
 PY
+      then die "cannot record the label for ${report} in ${results}"; fi
     else
       failures=$((failures + 1))
       cat "${work}/err-${index}" >&2
     fi
-  done < <(python3 -c 'import json,sys
-for row in json.load(open(sys.argv[1])):
-    print(row["report"] + "\t" + row["recorded"])' "$selected")
+  done < "$queue"
 
-  python3 - "$results" "$failures" "${model:-pinned}" "$agent" <<'PY'
+  if ! python3 - "$results" "$failures" "${model:-pinned}" "$agent" <<'PY'
 import collections, json, sys
 results, failures, model, agent = sys.argv[1], int(sys.argv[2]), sys.argv[3], sys.argv[4]
 with open(results, encoding="utf-8") as handle:
@@ -158,6 +164,7 @@ print(json.dumps({"schema_version": 1, "agent": agent, "model": rows[0]["model"]
                                     for r in rows if r["recorded"] != r["verdict"]]},
                  sort_keys=True))
 PY
+  then die "cannot assemble the accuracy report from ${results}"; fi
   [ "$failures" -eq 0 ] || return 1
   return 0
 }

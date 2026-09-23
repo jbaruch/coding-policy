@@ -173,22 +173,16 @@ Saved at `<selected-state>.capabilities.json`, schema 1, written only by
 `source.dated` records when it was read so a stale reading is visible. A result
 this project recorded is a `project` source and cites its issue.
 
-An `adequate` verdict needs a source above `vendor`: a vendor's claim about its
-own model would route real work on marketing. A `vendor` source still records
-availability, deprecation and the verdicts `inadequate` and `unknown`.
+Which source kinds exist, and which of them can support an `adequate` verdict,
+are `SOURCE_KINDS` and `SUPPORTING_SOURCES` in
+`skills/herdr-teamlead/teamlead/capabilities.py`, not restated here
+(`rules/script-as-black-box.md`).
 
 Staleness is silent — a retired entry keeps routing work with no error and no
-failing check — so the table comes due on a cadence:
-
-```bash
-CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
-bash "$CP/skills/herdr-teamlead/teamlead.sh" capability-check
-bash "$CP/skills/herdr-teamlead/teamlead.sh" capability-record --record <report.json>
-bash "$CP/skills/herdr-teamlead/teamlead.sh" capability-show
-```
-
-`capability-check` is read-only and answers whether a refresh is due; check it
-where the retrospective cadence is checked. A table never refreshed comes due as
+failing check — so the table comes due on a cadence. The round preflight
+reports it under `due`, and SKILL.md Step 2 carries the refresh commands:
+`capability-check` (read-only, whether a refresh is due), `capability-record`
+and `capability-show`. A table never refreshed comes due as
 soon as the ledger holds any work, and a fleet that dispatched nothing never
 comes due. The interval and the source hierarchy are `capabilities.py`'s
 decision contract, not restated here (`rules/script-as-black-box.md`).

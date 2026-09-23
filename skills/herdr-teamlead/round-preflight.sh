@@ -105,11 +105,14 @@ row = {"status": status, "due": due == "1"}
 if reason:
     row["reason"] = reason
 if detail:
+    # A check whose evidence cannot be read has not passed, whatever its exit
+    # code said: it blocks, and the reason names the file.
     try:
         with open(detail, encoding="utf-8") as handle:
             row["detail"] = json.load(handle)
-    except (OSError, ValueError):
-        row["detail"] = None
+    except (OSError, ValueError) as exc:
+        row.update(status="blocked", detail=None,
+                   reason="cannot read this check's output at {}: {}".format(detail, exc))
 checks[name] = row
 with open(path, "w", encoding="utf-8") as handle:
     json.dump(checks, handle)

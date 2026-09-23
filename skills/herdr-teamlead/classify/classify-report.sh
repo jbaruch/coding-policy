@@ -63,6 +63,11 @@ HERE="${HERE%$'\n'}"
 #: The default is the vendor measured adequate for this job: against 90
 #: lead-labelled reports claude-sonnet-5 caught 63 of 63 real blockers, grok-4.6
 #: caught 62, and codex was unmeasured (its subscription was exhausted).
+#: Renewal: these pins come due with the capability table, on `INTERVAL` in
+#: skills/herdr-teamlead/teamlead/capabilities.py (weekly). At each refresh,
+#: compare every pin against the table's current rows; a bump lands only after
+#: `evaluate.sh --since <last bump>` scores the new model on reports it has not
+#: seen, and the CHANGELOG records both numbers.
 DEFAULT_AGENT="claude"
 model_for() { # <kind>
   case "$1" in

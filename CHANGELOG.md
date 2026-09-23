@@ -235,7 +235,10 @@
   instruction files, runner entry points, and one line of notes. It parses no
   YAML and decides nothing about which check matters; that judgment stays with
   whoever reads the files. The preflight runs it, and the briefs carry the
-  result as the shared `GATES` value. This repo's own declaration ships here.
+  result as the shared `GATES` value, already rendered in its `brief` field, so
+  the lead copies it rather than building a Markdown list by hand. A path the
+  declaration names but the checkout lacks is reported in `missing` and never
+  reaches a worker. This repo's own declaration ships here.
 
   An earlier draft of this change matched a hardcoded list of filenames —
   `AGENTS.md`, `Makefile`, `pyproject.toml` — and defended the list as hints

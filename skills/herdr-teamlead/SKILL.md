@@ -86,6 +86,19 @@ failure — something blocks the round. Exit 2 means the preflight could not
 answer.
 
 - **Exit 0** — read `due`, satisfy any cadence it names, and proceed to Step 5.
+  When `due` names the capability table, dispatch the refresh consultation under
+  `references/model-tiers.md`, then record its report and show the result:
+
+```bash
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
+bash "$CP/skills/herdr-teamlead/teamlead.sh" capability-record --record <report.json>
+```
+
+```bash
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
+bash "$CP/skills/herdr-teamlead/teamlead.sh" capability-show
+```
+
 - **Exit 1** — report the `blocking` reasons verbatim. Each names the command
   that produced it; re-run that one, not the preflight.
 - **Exit 2** — report the diagnostic and finish here.
@@ -254,13 +267,8 @@ Proceed immediately to Step 7.
 Resolve policy paths through the Step 7 reference first. Write its outputs in
 `shared` within `{"shared": {...}, "roles": {"<role>": {...}}}` and run:
 
-`GATES` is shared and comes from Step 2's `checks.gates` payload: render its
-`instructions`, `workflows`, `runners` and `notes` as a Markdown list. Resolved
-once so five workers do not each spend turns finding the same files. On
-`declared: false`, write `undeclared` — the workers then report what they find,
-which is what the repo owner writes `.herdr/gates.json` from. On a non-empty
-`missing`, the declaration has rotted: name those paths in the round's report
-rather than passing them to a worker.
+`GATES` is shared: the `brief` field of Step 2's `checks.gates` payload,
+verbatim. On a non-empty `missing`, name those paths in the round's report.
 
 ```bash
 CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
@@ -433,8 +441,9 @@ CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
 bash "$CP/skills/herdr-teamlead/classify/classify-reports.sh" <report>...
 ```
 
-Each label is `blocking`, `approved` or `insufficient_evidence`, with the
-sentence that decided it. Read the reports together and gate them in one turn,
+Each label carries a verdict from the answer set in
+`skills/herdr-teamlead/classify/report-verdict.schema.json` and the sentence
+that decided it. Read the reports together and gate them in one turn,
 not one turn per report. A label is advisory. It never replaces the full read,
 and a report in `unannotated` is read exactly as it would have been. Look twice
 where a label disagrees with your own reading: that is where the classifier or

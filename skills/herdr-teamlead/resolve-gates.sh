@@ -39,7 +39,9 @@
 #   stdout: one JSON object --
 #     {"schema_version": 1, "declared": bool, "instructions": [...],
 #      "runners": [...], "workflows": [...], "notes": <str|null>,
-#      "missing": [...]}
+#      "missing": [...], "brief": "<the GATES value, ready to use>"}
+#   `brief` is the Markdown list a brief's GATES field carries, built from the
+#   present paths only, or the word `undeclared` when the repo declares none.
 #   `missing` lists declared paths that are not readable, so a declaration that
 #   has rotted says so rather than pointing a worker at nothing.
 #   stderr: diagnostics.
@@ -57,12 +59,18 @@ main() {
   local checkout="$1"
   [ -d "$checkout" ] || die "'${checkout}' is not a directory -- pass the repository checkout"
 
-  local workflows=() found
-  # A location the platform defines, not a filename anyone guessed.
-  while IFS= read -r found; do
-    if [ -n "$found" ]; then workflows+=("${found#"${checkout}/"}"); fi
-  done < <(find "${checkout}/.github/workflows" -maxdepth 1 -type f \
-             \( -name '*.yml' -o -name '*.yaml' \) -print 2>/dev/null | sort)
+  local workflows=() found listing
+  # A location the platform defines, not a filename anyone guessed. A repo
+  # with no workflows directory has no workflows; any other failure to list
+  # one is a tool error, never an empty list.
+  if [ -d "${checkout}/.github/workflows" ]; then
+    listing="$(find "${checkout}/.github/workflows" -maxdepth 1 -type f \
+                 \( -name '*.yml' -o -name '*.yaml' \) -print)" \
+      || die "cannot list ${checkout}/.github/workflows -- check its permissions"
+    while IFS= read -r found; do
+      if [ -n "$found" ]; then workflows+=("${found#"${checkout}/"}"); fi
+    done <<< "$(printf '%s\n' "$listing" | sort)"
+  fi
 
   python3 - "$checkout" "${#workflows[@]}" ${workflows[@]+"${workflows[@]}"} <<'PY'
 import json, os, sys
@@ -113,9 +121,23 @@ if document is not None:
         if not (os.path.isfile(candidate) and os.access(candidate, os.R_OK)):
             missing.append(entry)
 
+def brief():
+    if not declared:
+        return "undeclared"
+    lines = []
+    for label, entries in (("Instructions", instructions), ("Runners", runners), ("Workflows", workflows)):
+        present = [entry for entry in sorted(entries) if entry not in missing]
+        if present:
+            lines.append("- {}: {}".format(label, ", ".join("`{}`".format(entry) for entry in present)))
+    if notes:
+        lines.append("- Notes: {}".format(notes))
+    return "\n".join(lines) if lines else "undeclared"
+
+
 print(json.dumps({"schema_version": 1, "declared": declared,
                   "instructions": sorted(instructions), "runners": sorted(runners),
-                  "workflows": workflows, "notes": notes, "missing": sorted(missing)},
+                  "workflows": workflows, "notes": notes, "missing": sorted(missing),
+                  "brief": brief()},
                  sort_keys=True))
 PY
 }
