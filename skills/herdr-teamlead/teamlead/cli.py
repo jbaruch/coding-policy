@@ -1400,7 +1400,16 @@ def cmd_load_set(args, client=None, warn=None, trace=None):
             row.get("task") == args.task for row in state["assignments"]):
         raise UsageError("Task {!r} is neither registered nor assigned; check its identity with `teamlead state`.".format(args.task), {})
     return load_set.build(state, reports, entries, busy, args.decision, task=args.task, enrollment=args.enrollment,
-                          exists=lambda path: Path(path).is_file()), None
+                          exists=_file_present), None
+
+
+def _file_present(path):
+    """Whether a listed file is readable, or a StateError naming what blocked the probe."""
+    try:
+        return Path(path).is_file()
+    except OSError as exc:
+        raise StateError("Cannot check {} ({}); restore access to it before this decision.".format(path, exc),
+                         {"path": path}) from None
 
 
 def _require_independent_report(state, task, reviewer):

@@ -4,11 +4,12 @@ import io
 import json
 import sys
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from teamlead.errors import UsageError
+from teamlead.errors import StateError, UsageError
 from teamlead.load_set import build
 from teamlead.recovery import register_task
 from teamlead.state import add_assignment, empty_state, save_state
@@ -214,6 +215,12 @@ class LoadSetCommandTest(CliCase):
         code, _, err = self.run_cli(self.base() + ["load-set", "--decision", "plan", "--task", "t"])
         self.assertEqual(code, 0, err)
         self.assertEqual(sorted(self.tmp.rglob("*")), before)
+
+    def test_an_unreadable_listed_path_fails_with_a_diagnostic(self):
+        from teamlead import cli
+        with patch("teamlead.cli.Path.is_file", side_effect=PermissionError(13, "Permission denied")):
+            with self.assertRaisesRegex(StateError, "Cannot check /r/x.md .*restore access"):
+                cli._file_present("/r/x.md")
 
     def test_an_unusable_state_file_fails(self):
         self.state.write_text('{"schema_version": 2, broken', encoding="utf-8")
