@@ -365,6 +365,27 @@ class RecoveryCommandTests(fixture.CliCase):
         with self.assertRaisesRegex(UsageError, "judge mode this version never wrote"):
             recovery_module.migrate_store(store)
 
+    def test_an_older_store_carrying_a_task_closure_is_refused_as_newer_data(self):
+        from teamlead import recovery as recovery_module
+        store = recovery_module.empty_recovery()
+        store["schema_version"] = 12
+        store["events"].append({"schema_version": 1, "sequence": 1, "at": AT, "kind": "task_closed",
+                                "task": TASK, "details": {"outcome": "merged", "evidence": "pr"}})
+        with self.assertRaisesRegex(UsageError, "task closure this version never wrote"):
+            recovery_module.migrate_store(store)
+
+    def test_a_version_twelve_store_with_judge_modes_still_migrates(self):
+        # Judge modes are owned since store version 12; bumping past it must
+        # upgrade such a store, not refuse it as newer data.
+        from teamlead import recovery as recovery_module
+        store = recovery_module.empty_recovery()
+        store["schema_version"] = 12
+        store["dispatches"].append({"schema_version": 3, "id": "d", "role": "judge", "agent": "claude",
+                                    "task": TASK, "status": "sending", "judge_mode": "diagnosis"})
+        self.assertTrue(recovery_module.migrate_store(store))
+        self.assertEqual(store["schema_version"], recovery_module.RECOVERY_STORE_VERSION)
+        self.assertEqual(store["dispatches"][0]["judge_mode"], "diagnosis")
+
     def test_a_version_eleven_store_with_seated_dispatches_still_migrates(self):
         # Seats have been owned since store version 10. A version bump after it
         # must upgrade a seated store, not refuse it as newer data.

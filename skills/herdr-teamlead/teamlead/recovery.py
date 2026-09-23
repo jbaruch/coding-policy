@@ -39,7 +39,10 @@ RECOVERY_SCHEMA_VERSION = 1
 #: its saved result, so an interrupted judge recovers the mode it was sent for
 #: and the mode is part of the dispatch's identity (#478). An older store
 #: carrying the field anywhere is unowned newer data and is refused.
-RECOVERY_STORE_VERSION = 12
+#: Version 13 adds the `task_closed` event kind, which ends a task's developer
+#: reservation (#483). No collection is added; an older store carrying such an
+#: event is unowned newer data and is refused.
+RECOVERY_STORE_VERSION = 13
 REFUSAL_FIELDS = frozenset({"brief_identity", "refusal", "refusal_move", "provider"})
 SPECIALIST_DISPATCH_VERSION = 2
 #: Dispatch record version 3: a judge dispatch carrying the mode it was sent
@@ -210,7 +213,7 @@ def _refuse_unowned_legacy(store, version):
         carriers = [row] if isinstance(row, dict) else []
         if isinstance(row, dict):
             carriers += [part for part in (row.get("result"), row.get("context_before_send")) if isinstance(part, dict)]
-        if any("judge_mode" in part for part in carriers):
+        if version < 12 and any("judge_mode" in part for part in carriers):
             raise UsageError("Older recovery contains a judge mode this version never wrote; preserve it for owner recovery.", {})
         allowed = ALLOWED_AT_6 if version == 6 else REFUSAL_FIELDS if version >= 7 else frozenset()
         if not isinstance(row, dict) or REFUSAL_FIELDS.intersection(row) - allowed:
@@ -225,6 +228,11 @@ def _refuse_unowned_legacy(store, version):
                 or type(result.get("schema_version")) is not int
                 or result["schema_version"] != RECOVERY_SCHEMA_VERSION or DISPATCH_METADATA_FIELDS.intersection(result)):
             raise UsageError("Older recovery contains unowned newer dispatch results; preserve it for owner recovery.", {})
+    events = store.get("events")
+    if not isinstance(events, list):
+        raise UsageError("Older recovery requires an events array; restore the original owner-written store.", {})
+    if any(isinstance(row, dict) and row.get("kind") == "task_closed" for row in events):
+        raise UsageError("Older recovery contains a task closure this version never wrote; preserve it for owner recovery.", {})
     if version == 3:
         deliveries = store.get("delivery_recoveries")
         if not isinstance(deliveries, list):
@@ -474,8 +482,7 @@ def task_record(store, task):
 def close_task(store, assignments, data, at):
     """Record that a task left the team, ending its developer reservation.
 
-    A `task_closed` event: the event log is open to new kinds, so this adds
-    no store version. The closure must follow the task's latest developer
+    A `task_closed` event, owned from store version 13. The closure must follow the task's latest developer
     assignment in time; a tied or backdated one would be recorded without
     releasing anyone. A later developer assignment reopens the task (#483).
     """

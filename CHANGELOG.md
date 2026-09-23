@@ -25,8 +25,11 @@
   developer through an authorized role clear stays possible, as
   `recover-role-clear` expects.
 
-  `task_closed` is a new kind in the existing append-only event log, so the
-  recovery store version does not change. Run against the live state on
+  `task_closed` is a new event kind, so the recovery store moves to version
+  13. An older store carrying one is refused as newer data. The legacy check
+  that refused `judge_mode` at every older version is now scoped to stores
+  below 12, so it doesn't reject every v12 store as newer data after the bump.
+  The schema doc, still saying version 11, now says 13. Run against the live state on
   2026-09-23, the derivation finds seven holds: six from that day's rounds and
   one stale (`acr-p0-156`, from 2026-09-18), which the planner names until a
   `close-task` clears it.
