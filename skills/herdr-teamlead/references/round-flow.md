@@ -12,7 +12,7 @@ The shape of one task round, and what the foreman does between the steps of
 | reviewer | none | independent COMMENT review and report |
 | advisor, investigator, architect | none | bounded recommendation, diagnosis or design report |
 | release | release operations only | verified release report |
-| judge | none | binding dispute ruling |
+| judge | none | completed dispute ruling (binding), or a non-binding `insufficient` |
 
 Activate the responsibilities the next task decision needs. Add specialty
 requirements through `references/specialists.md`; a profile on the bench needs
