@@ -65,6 +65,9 @@ main() {
       :
     else
       printf '%s' "$report" > "${work}/failed-${index}"
+      # Best-effort: the batch continues, and the failure is still visible.
+      echo "classify-reports: ${report} was not annotated; read it in full. The classifier said:" >&2
+      cat "${work}/err-${index}" >&2
     fi
   done
 

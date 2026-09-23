@@ -173,8 +173,11 @@ PY
   cat "${scratch}/capability.err" >&2
   if [ "$rc" -eq 0 ]; then
     local capability_due
-    capability_due="$(python3 -c 'import json,sys; print("1" if json.load(open(sys.argv[1]))["due"] else "0")' "${scratch}/capability.json")"
-    record capability ok "" "$capability_due" "${scratch}/capability.json"
+    if capability_due="$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print("1" if d["due"] is True else "0" if d["due"] is False else sys.exit("due is not a boolean"))' "${scratch}/capability.json")"; then
+      record capability ok "" "$capability_due" "${scratch}/capability.json"
+    else
+      record capability failed "teamlead capability-check exited 0 without a readable due flag; the table's cadence is unknown" 0 ""
+    fi
   else
     record capability failed "teamlead capability-check exited ${rc}; the table's cadence is unknown" 0 ""
   fi

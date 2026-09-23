@@ -318,8 +318,9 @@
   live dispatch. Left in, it was the first thing to fail the day a tier table
   was wired in (#481).
 
-  Ledger rows written earlier may carry a `qualification` summary inside
-  `tier`; readers ignore it and no migration runs.
+  Ledger rows written earlier carried a `qualification` summary inside
+  `tier`. Ledger schema 7 → 8 removes it through the owner migration, so every
+  row reads one shape, and a current row carrying one is refused.
 
 ## 0.3.252 — 2026-09-23
 

@@ -91,11 +91,15 @@ def digest(path):
 
 def label(answer_path, report, prompt, agent, model):
     answer = read_json(answer_path)
-    if not isinstance(answer, dict) or answer.get("verdict") not in VERDICTS:
+    if not isinstance(answer, dict) or set(answer) != {"verdict", "evidence"}:
+        fail("the answer carries exactly verdict and evidence", code=2)
+    if answer["verdict"] not in VERDICTS:
         fail("the answer is outside the schema's enum", code=2)
+    if not isinstance(answer["evidence"], str):
+        fail("the answer's evidence is not a string", code=2)
     return {"schema_version": 1, "report": report, "sha256": digest(report),
             "question": digest(prompt), "agent": agent, "model": model,
-            "verdict": answer["verdict"], "evidence": answer.get("evidence", "")}
+            "verdict": answer["verdict"], "evidence": answer["evidence"]}
 
 
 def main(argv):

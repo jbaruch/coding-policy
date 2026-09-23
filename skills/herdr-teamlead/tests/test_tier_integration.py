@@ -283,6 +283,22 @@ class TierIntegrationTest(CliCase):
         self.assertEqual((tier["pressure_headroom"], tier["de_escalated"]), (None, False))
         self.assertEqual(migrated["assignments"][0]["schema_version"], STATE_SCHEMA_VERSION)
 
+    def test_a_schema_seven_row_loses_the_retired_qualification_summary(self):
+        state = empty_state()
+        argv = ["claude", "--model", "sonnet-5", "--effort", "high"]
+        add_assignment(state, AT, "developer", "claude", tier={
+            "kind": "claude", "model": "sonnet-5", "effort": "high", "launch_args": [],
+            "verified": {"source": "launch_argv", "model": "sonnet-5", "effort": "high", "pane_id": "w1:p2", "argv": argv}})
+        state["schema_version"] = 7
+        row = state["assignments"][0]
+        row["schema_version"] = 7
+        row["tier"]["qualification"] = {"role": "developer", "promotion_cases": 20}
+        self.state.write_text(json.dumps(state))
+        migrated, usable = load_state_checked(self.state)
+        self.assertTrue(usable)
+        self.assertNotIn("qualification", migrated["assignments"][0]["tier"])
+        self.assertEqual(migrated["assignments"][0]["schema_version"], STATE_SCHEMA_VERSION)
+
     def test_historical_permission_modes_stay_readable_without_becoming_live_proof(self):
         for options in ([], ["--permission-mode", "acceptEdits"]):
             with self.subTest(options=options):

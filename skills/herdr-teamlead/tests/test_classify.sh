@@ -110,6 +110,17 @@ main() {
   if [[ $RC -eq 2 && -z "$OUT" ]]; then
     pass; else fail "an answer outside the enum exits 2, got RC=$RC OUT=$OUT"; fi
 
+  # The whole schema is the contract, not the verdict alone: a label whose
+  # evidence is missing or not a string, or that carries an extra field, is
+  # no label at all.
+  for shape in '{"verdict":"approved"}' '{"verdict":"approved","evidence":7}' \
+               '{"verdict":"approved","evidence":"x","confidence":0.9}'; do
+    stub_codex "$TMP/shape" 0 "$shape"
+    classify "$TMP/shape" "$report" --agent codex
+    if [[ $RC -eq 2 && -z "$OUT" ]]; then
+      pass; else fail "answer '$shape' must be refused, got RC=$RC OUT=$OUT"; fi
+  done
+
   stub_codex "$TMP/empty" 0 ''
   classify "$TMP/empty" "$report" --agent codex
   if [[ $RC -eq 2 && -z "$OUT" ]] && printf '%s' "$ERRTEXT" | grep -q 'no schema-conforming answer'; then

@@ -115,6 +115,15 @@ if document is not None:
         sys.stderr.write("resolve-gates: {}'s notes is one non-empty line, or absent.\n".format(path))
         raise SystemExit(2)
     declared = True
+    # A declared path is a pointer a worker follows, so it must stay inside the
+    # checkout: an absolute path, a `..` or a symlink out of the tree is refused.
+    root = os.path.realpath(checkout)
+    for entry in instructions + runners:
+        resolved = os.path.realpath(os.path.join(checkout, entry))
+        if os.path.isabs(entry) or os.path.commonpath([root, resolved]) != root:
+            sys.stderr.write("resolve-gates: {} names {!r}, which resolves outside the checkout. "
+                             "Declare repo-relative paths inside it.\n".format(path, entry))
+            raise SystemExit(2)
     # A declaration that has rotted says so, rather than pointing at nothing.
     for entry in instructions + runners:
         candidate = os.path.join(checkout, entry)

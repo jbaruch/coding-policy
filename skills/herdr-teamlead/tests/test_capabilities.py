@@ -1,6 +1,8 @@
 """The model-capability table: its cadence, its refresh, and what it refuses."""
 
+import io
 import json
+from contextlib import redirect_stderr
 from datetime import datetime, timedelta, timezone
 import os as _os
 import sys as _sys
@@ -64,11 +66,38 @@ class CapabilityTableTest(unittest.TestCase):
         with self.assertRaisesRegex(UsageError, "not valid JSON"):
             capabilities.load(self.state)
 
-    def test_an_unsupported_schema_refuses_rather_than_guessing(self):
-        capabilities.storage_path(self.state).write_text(
-            json.dumps({"schema_version": 99, "refreshed_at": None, "entries": []}), encoding="utf-8")
-        with self.assertRaisesRegex(UsageError, "Unsupported capability-table schema"):
-            capabilities.load(self.state)
+    def test_a_newer_table_reads_as_no_prior_state_and_is_never_overwritten(self):
+        # rules/stateful-artifacts.md: a lagging reader treats a newer record as
+        # no usable prior state; a lagging writer must not clobber it.
+        target = capabilities.storage_path(self.state)
+        original = json.dumps({"schema_version": 99, "refreshed_at": None, "entries": [], "future": 1})
+        target.write_text(original, encoding="utf-8")
+        err = io.StringIO()
+        with redirect_stderr(err):
+            self.assertEqual(capabilities.load(self.state), capabilities.empty())
+        self.assertIn("newer than this build", err.getvalue())
+        with self.assertRaisesRegex(UsageError, "Update the coding-policy plugin before recording"):
+            capabilities.record(self.state, {"entries": [entry()]}, AT)
+        self.assertEqual(target.read_text(encoding="utf-8"), original)
+
+    def test_a_report_never_supplies_what_the_writer_stamps(self):
+        for extra in ({"recorded_at": AT}, {"schema_version": 1}):
+            with self.subTest(extra=extra), self.assertRaisesRegex(UsageError, "carries exactly"):
+                capabilities.record(self.state, {"entries": [entry(**extra)]}, AT)
+
+    def test_an_older_or_malformed_envelope_refuses_rather_than_guessing(self):
+        target = capabilities.storage_path(self.state)
+        for label, document, message in (
+            ("older version", {"schema_version": 0, "refreshed_at": None, "entries": []},
+             "Unsupported capability-table schema"),
+            ("no refreshed_at", {"schema_version": 1, "entries": []}, "carries exactly"),
+            ("stray key", {"schema_version": 1, "refreshed_at": None, "entries": [], "x": 1}, "carries exactly"),
+            ("bad refreshed_at", {"schema_version": 1, "refreshed_at": "yesterday", "entries": []}, "timestamp"),
+        ):
+            with self.subTest(label=label):
+                target.write_text(json.dumps(document), encoding="utf-8")
+                with self.assertRaisesRegex(UsageError, message):
+                    capabilities.load(self.state)
 
     # -- cadence -----------------------------------------------------------
 

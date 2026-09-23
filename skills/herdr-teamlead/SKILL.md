@@ -267,8 +267,8 @@ Proceed immediately to Step 7.
 Resolve policy paths through the Step 7 reference first. Write its outputs in
 `shared` within `{"shared": {...}, "roles": {"<role>": {...}}}` and run:
 
-`GATES` is shared: the `brief` field of Step 2's `checks.gates` payload,
-verbatim. On a non-empty `missing`, name those paths in the round's report.
+`GATES` is shared: Step 2's `checks.gates.detail.brief`, verbatim. On a
+non-empty `checks.gates.detail.missing`, name those paths in the round's report.
 
 ```bash
 CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"

@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import NoReturn
 
 from .chronology import timestamp
+from .diagnostics import stderr_warn as _warn
 from .errors import UsageError
 from .state import save_state, state_lock
 
@@ -72,8 +73,14 @@ def empty():
     return {"schema_version": SCHEMA_VERSION, "refreshed_at": None, "entries": []}
 
 
-def load(path):
-    """The saved table, or an empty one. Readers never create the file."""
+def load(path, *, for_write=False):
+    """The saved table, or an empty one. Readers never create the file.
+
+    A table stamped with a newer schema than this build owns was written by a
+    newer owner. A reader treats it as no usable prior state and says so; a
+    writer refuses, so an older build never overwrites what it cannot read
+    (rules/stateful-artifacts.md Migration Policy).
+    """
     target = storage_path(path)
     try:
         document = json.loads(target.read_text(encoding="utf-8"))
@@ -85,6 +92,16 @@ def load(path):
     except json.JSONDecodeError as exc:
         _fail("The capability table at {} is not valid JSON ({}). Restore the owner-written "
               "file rather than editing it by hand.".format(target, exc.msg))
+    version = document.get("schema_version") if isinstance(document, dict) else None
+    if isinstance(version, int) and not isinstance(version, bool) and version > SCHEMA_VERSION:
+        if for_write:
+            _fail("The capability table at {} is schema {}, newer than this build's {}. Update "
+                  "the coding-policy plugin before recording; the file is left untouched.".format(
+                      target, version, SCHEMA_VERSION))
+        _warn("capability table {} is schema {}, newer than this build's {}; reading it as no "
+              "prior state. Update the coding-policy plugin. The file is left untouched.".format(
+                  target, version, SCHEMA_VERSION))
+        return empty()
     validate(document)
     return document
 
@@ -92,7 +109,11 @@ def load(path):
 def validate(document):
     if not isinstance(document, dict) or document.get("schema_version") != SCHEMA_VERSION:
         _fail("Unsupported capability-table schema; update the owner skill before using it.")
-    if not isinstance(document.get("entries"), list):
+    if set(document) != {"schema_version", "refreshed_at", "entries"}:
+        _fail("The capability table carries exactly schema_version, refreshed_at and entries.")
+    if document["refreshed_at"] is not None:
+        _utc(document["refreshed_at"])
+    if not isinstance(document["entries"], list):
         _fail("The capability table's entries must be an array.")
     seen = set()
     for entry in document["entries"]:
@@ -172,7 +193,11 @@ def record(path, data, at):
         _fail("A capability refresh records at least one entry; an empty report refreshes nothing.")
     stamped = []
     covered = set()
+    reported = {"model", "effort", "capability", "verdict", "source"}
     for entry in data["entries"]:
+        # The writer stamps the version and the time; a report never supplies them.
+        if not isinstance(entry, dict) or set(entry) != reported:
+            _fail("A reported capability entry carries exactly {}.".format(", ".join(sorted(reported))))
         row = {**entry, "schema_version": SCHEMA_VERSION, "recorded_at": _utc(at)}
         key = validate_entry(row)
         if key in covered:
@@ -182,7 +207,7 @@ def record(path, data, at):
         stamped.append(row)
     target = storage_path(path)
     with state_lock(target):
-        document = load(path)
+        document = load(path, for_write=True)
         kept = [row for row in document["entries"]
                 if (row["model"], row["effort"], row["capability"]) not in covered]
         document["entries"] = sorted(kept + stamped,

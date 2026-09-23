@@ -100,7 +100,9 @@ JSON
   for broken in '{broken' '{"schema_version": 2}' '{"schema_version": 1, "extra": 1}' \
                 '{"schema_version": 1, "instructions": "AGENTS.md"}' \
                 '{"schema_version": 1, "runners": [""]}' \
-                '{"schema_version": 1, "notes": "  "}'; do
+                '{"schema_version": 1, "notes": "  "}' \
+                '{"schema_version": 1, "runners": ["../outside.sh"]}' \
+                '{"schema_version": 1, "instructions": ["/etc/hosts"]}'; do
     printf '%s\n' "$broken" > "$TMP/bad/.herdr/gates.json" || die "write broken declaration"
     run "$TMP/bad"
     if [[ $RC -eq 2 && -z "$OUT" ]] && printf '%s' "$ERRTEXT" | grep -q 'resolve-gates:'; then

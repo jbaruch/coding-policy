@@ -156,22 +156,50 @@ the project imports, not a measurement it takes: routing reads it to pick a
 model, and a capability nobody has evidence for is recorded `unknown` rather
 than assumed.
 
-Saved at `<selected-state>.capabilities.json`, schema 1, written only by
-`capability-record`. One entry owns one model, effort and capability:
+Saved at `<selected-state>.capabilities.json`. Owner:
+`skills/herdr-teamlead/teamlead/capabilities.py`. Writer: `capability-record`,
+alone. Readers: `capability-check`, `capability-show` and the round preflight.
 
 ```json
 {
-  "model": "opus-5", "effort": "high",
-  "capability": "independent-defect-detection",
-  "verdict": "adequate",
-  "source": {"kind": "benchmark", "ref": "SWE-bench Verified", "dated": "2026-09-01"}
+  "schema_version": 1,
+  "refreshed_at": "2026-09-01T00:00:00+00:00",
+  "entries": [
+    {
+      "schema_version": 1,
+      "model": "opus-5", "effort": "high",
+      "capability": "independent-defect-detection",
+      "verdict": "adequate",
+      "source": {"kind": "benchmark", "ref": "SWE-bench Verified", "dated": "2026-09-01"},
+      "recorded_at": "2026-09-01T00:00:00+00:00"
+    }
+  ]
 }
 ```
 
-`verdict` is `adequate`, `inadequate` or `unknown`. `source.kind` is
-`benchmark`, `evaluation`, `project` or `vendor`, strongest first, and
-`source.dated` records when it was read so a stale reading is visible. A result
-this project recorded is a `project` source and cites its issue.
+| Field | Presence | Meaning |
+| ----- | -------- | ------- |
+| `schema_version` | required | The document's version; each entry carries its own |
+| `refreshed_at` | required, UTC or `null` | The last `capability-record`; `null` until the first one |
+| `entries` | required array | One entry per model, effort and capability, sorted by those three |
+| `entries[].model`, `effort`, `capability` | required | The key; no two entries share one |
+| `entries[].verdict` | required | `adequate`, `inadequate` or `unknown` |
+| `entries[].source` | required | `kind`, `ref` (where it was read) and `dated` (`YYYY-MM-DD`, when it was read) |
+| `entries[].recorded_at` | required, UTC | Stamped by the writer, never supplied by the report |
+
+An absent file reads as an empty table: `refreshed_at: null`, no entries. A
+file stamped with a newer schema than the reader owns reads as no prior state,
+with a diagnostic to update the plugin; `capability-record` refuses to write
+over it. An older or malformed file is refused with its repair. No field has a
+default: an entry missing one is refused, never filled in.
+
+`capability-record --record <report.json>` reads the consultation's report,
+shaped `{"entries": [...]}`: each entry carries `model`, `effort`,
+`capability`, `verdict` and `source`, and nothing else. The writer stamps
+`schema_version` and `recorded_at`, replaces the entries whose key the report
+covers, keeps every other entry, and sets `refreshed_at`. A report with no
+entries refreshes nothing and is refused. A result this project recorded is a
+`project` source and cites its issue.
 
 Which source kinds exist, and which of them can support an `adequate` verdict,
 are `SOURCE_KINDS` and `SUPPORTING_SOURCES` in
