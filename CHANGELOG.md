@@ -1,66 +1,5 @@
 # Changelog
 
-## 0.3.252 — 2026-09-23
-
-### Changed
-
-- **Escalation is no longer one-way, and a tester round is no longer expensive
-  by name.** Every branch in `select_tier` moved up and nothing moved down.
-  `needs_xhigh` carried `round_type == "hostile_verify"` as an unconditional
-  clause, and `hostile_verify` is the tester's DEFAULT round, so the rule read
-  as "every tester round runs at the top model on xhigh effort" whatever the
-  surface. `headroom_pct` appeared nowhere in the module: measured pressure
-  reached `planner.plan`, which could pick a cheaper PAIR (`planner.py:604`)
-  but never a cheaper ROUND, because `select_tier` had already resolved it
-  (#477, #445 §2).
-
-  A tester round now escalates on exactly the evidence every other round
-  escalates on — two distinct risk flags, an oversized context, a recorded
-  prior miss — and its floor is the operator's configured `hostile_verify` row.
-
-  `select_tier` gains a `headroom` input. Under measured scarcity
-  (`PRESSURE_HEADROOM_PCT`, script-owned) a non-judgment round declines the
-  discretionary step above its configured row and records
-  `de_escalated: true` with the `pressure_headroom` it decided on. The
-  operator's table is the floor: de-escalation never selects below it, and a
-  judgment round is never de-escalated, which the existing "no per-round
-  override lowers it" already required. Unmeasured headroom resolves a round
-  exactly as an unmeasured fleet always did — absent, null, a string, a bool,
-  NaN and inf all read as "no measurement", never as scarcity and never as
-  capacity.
-
-  `apply` measures nothing, so it re-reads the headroom the plan resolved
-  against rather than recomputing without it; without that, a de-escalated
-  plan would refuse itself at dispatch with "Plan tiers differ from current
-  config or fix context". Plan document schema 8 → 9, ledger schema 6 → 7 with an owner migration.
-
-  All of this was latent: no worker in the audited roster carries a tier table,
-  so `select_tier` has never resolved a non-judge round. It lands before the
-  tables do.
-
-### Removed
-
-- **The tier qualification battery.** A tier row no longer needs a paired,
-  blinded screen of 5 cases, a promotion battery of 20 and a weekly canary of 5
-  per model, effort and role before live dispatch. `teamlead/qualification.py`,
-  its tests, the `qualification` tier field and `plan --preview-tiers` are gone;
-  a config still carrying `qualification` is refused with the list of allowed
-  fields (#445 §3).
-
-  **Why it could go:** it guarded against a cheap model quietly missing
-  defects, and three things already cover that. Judgment rounds are pinned to
-  the top model by `parse_tiers`, so the battery never applied where a miss
-  costs most. Every other round is independently reviewed and tested before
-  release, which catches a bad build whatever model wrote it. And which model
-  suits which job is now the capability table, sourced and dated, instead of a
-  battery nobody ran. Nobody had: 0 configured workers carry a `tiers` table
-  and 0 qualification records exist in any config, so removing it changes no
-  live dispatch. Left in, it was the first thing to fail the day a tier table
-  was wired in (#481).
-
-  Ledger rows written earlier may carry a `qualification` summary inside
-  `tier`; readers ignore it and no migration runs.
-
 ### Added
 
 - **The first bounded classification, and the labelled corpus that scores it.**
@@ -356,6 +295,31 @@
   issue, which is how #324's result enters the table rather than standing beside
   it as a separate protocol.
 
+### Removed
+
+- **The tier qualification battery.** A tier row no longer needs a paired,
+  blinded screen of 5 cases, a promotion battery of 20 and a weekly canary of 5
+  per model, effort and role before live dispatch. `teamlead/qualification.py`,
+  its tests, the `qualification` tier field and `plan --preview-tiers` are gone;
+  a config still carrying `qualification` is refused with the list of allowed
+  fields (#445 §3).
+
+  **Why it could go:** it guarded against a cheap model quietly missing
+  defects, and three things already cover that. Judgment rounds are pinned to
+  the top model by `parse_tiers`, so the battery never applied where a miss
+  costs most. Every other round is independently reviewed and tested before
+  release, which catches a bad build whatever model wrote it. And which model
+  suits which job is now the capability table, sourced and dated, instead of a
+  battery nobody ran. Nobody had: 0 configured workers carry a `tiers` table
+  and 0 qualification records exist in any config, so removing it changes no
+  live dispatch. Left in, it was the first thing to fail the day a tier table
+  was wired in (#481).
+
+  Ledger rows written earlier may carry a `qualification` summary inside
+  `tier`; readers ignore it and no migration runs.
+
+## 0.3.252 — 2026-09-23
+
 ### Changed
 
 - **Escalation is no longer one-way, and a tester round is no longer expensive
@@ -386,34 +350,11 @@
   `apply` measures nothing, so it re-reads the headroom the plan resolved
   against rather than recomputing without it; without that, a de-escalated
   plan would refuse itself at dispatch with "Plan tiers differ from current
-  config or fix context". Plan document schema 8 → 9.
+  config or fix context". Plan document schema 8 → 9, ledger schema 6 → 7 with an owner migration.
 
   All of this was latent: no worker in the audited roster carries a tier table,
   so `select_tier` has never resolved a non-judge round. It lands before the
   tables do.
-
-### Removed
-
-- **The tier qualification battery.** A tier row no longer needs a paired,
-  blinded screen of 5 cases, a promotion battery of 20 and a weekly canary of 5
-  per model, effort and role before live dispatch. `teamlead/qualification.py`,
-  its tests, the `qualification` tier field and `plan --preview-tiers` are gone;
-  a config still carrying `qualification` is refused with the list of allowed
-  fields (#445 §3).
-
-  **Why it could go:** it guarded against a cheap model quietly missing
-  defects, and three things already cover that. Judgment rounds are pinned to
-  the top model by `parse_tiers`, so the battery never applied where a miss
-  costs most. Every other round is independently reviewed and tested before
-  release, which catches a bad build whatever model wrote it. And which model
-  suits which job is now the capability table, sourced and dated, instead of a
-  battery nobody ran. Nobody had: 0 configured workers carry a `tiers` table
-  and 0 qualification records exist in any config, so removing it changes no
-  live dispatch. Left in, it was the first thing to fail the day a tier table
-  was wired in (#481).
-
-  Ledger rows written earlier may carry a `qualification` summary inside
-  `tier`; readers ignore it and no migration runs.
 
 ## 0.3.251 — 2026-09-23
 
