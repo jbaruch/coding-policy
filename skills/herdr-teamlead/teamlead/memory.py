@@ -1,7 +1,9 @@
 """Lead-owned lessons and handoff captures; never task acceptance authority.
 
 Each write atomically appends to one document under its existing OS state lock.
-Readers are offline, never lock or write, and retain old revisions for audit.
+Readers are offline and retain old revisions for audit. A read never locks or
+writes, except the read that finds a version-1 stow: it rewrites the upgraded
+document under the lock (see `load`).
 The CLI owns the clock; timestamps are explicit throughout this module.
 """
 
@@ -17,6 +19,14 @@ from .errors import StateError, UsageError
 from .state import save_state, state_lock
 
 SCHEMA_VERSION = 1
+#: Stow record version. 1 held free-text gaps. 2 makes each gap structured:
+#: what is missing, which task it affects, and exactly one recovery -- a file
+#: to re-read, a question for the operator, or an accepted loss with its
+#: reason (#483). A version-1 stow upgrades on read (see `_migrate_stow`),
+#: and the owner's first read or write persists the upgrade.
+STOW_VERSION = 2
+STOW_VERSIONS = frozenset({SCHEMA_VERSION, STOW_VERSION})
+GAP_RECOVERIES = ("reread", "ask", "accept")
 COMMANDS = frozenset({"memory-record", "memory-list", "memory-show", "memory-stow"})
 IDENTIFIER = re.compile(r"[a-z0-9][a-z0-9_-]{0,63}\Z")
 
@@ -105,8 +115,41 @@ def _validate_source(row):
              "Memory file receipt is malformed; restore the original record.")
 
 
+def _valid_gap(gap):
+    """A version-2 gap: what is missing, the task it affects, and one recovery."""
+    if not (isinstance(gap, dict) and set(gap) == {"missing", "task", "recovery"}
+            and _text(gap["missing"]) and _text(gap["task"])
+            and isinstance(gap["recovery"], dict) and len(gap["recovery"]) == 1):
+        return False
+    (kind, value), = gap["recovery"].items()
+    if kind == "reread":
+        return isinstance(value, str) and Path(value).is_absolute()
+    return kind in GAP_RECOVERIES and _text(value)
+
+
+#: The task a migrated version-1 gap names: its free text never recorded one.
+UNRECORDED_TASK = "unrecorded"
+
+
+def _migrate_stow(row):
+    """Upgrade a version-1 stow to version 2 without inventing what it never held.
+
+    A free-text gap recorded no task and no recovery, so the only honest
+    recovery is a question to the operator quoting the original text. The
+    `input_digest` keeps binding the original input, so an exact retry of it
+    still replays this record.
+    """
+    if row.get("kind") != "stow" or row.get("schema_version") != SCHEMA_VERSION:
+        return row
+    gaps = [{"missing": text, "task": UNRECORDED_TASK,
+             "recovery": {"ask": "A handoff recorded this gap without a task or recovery: {} How should it be recovered?".format(text)}}
+            for text in row["gaps"]]
+    return {**row, "schema_version": STOW_VERSION, "gaps": gaps}
+
+
 def _validate_record(row):
-    _require(isinstance(row, dict) and type(row.get("schema_version")) is int and row["schema_version"] == SCHEMA_VERSION,
+    versions = STOW_VERSIONS if isinstance(row, dict) and row.get("kind") == "stow" else {SCHEMA_VERSION}
+    _require(isinstance(row, dict) and type(row.get("schema_version")) is int and row["schema_version"] in versions,
              "Memory record schema is unsupported; preserve the artifact and update the owner skill.")
     common = {"schema_version", "id", "kind", "recorded_at", "input_digest"}
     _id(row.get("id"))
@@ -134,21 +177,48 @@ def _validate_record(row):
     else:
         _require(row.get("kind") == "stow" and set(row) == common | {"capture", "unresolved_work", "gaps", "required_reads"},
                  "Memory stow fields are unsupported; preserve the record and update the owner skill.")
-        _require(_text(row["capture"]) and _names(row["unresolved_work"]) and _names(row["gaps"])
-                 and isinstance(row["required_reads"], list) and bool(row["required_reads"]),
-                 "Memory stow needs a substantive capture, explicit unresolved_work and gaps lists, and at least one required read.")
+        gaps_valid = (_names(row["gaps"]) if row["schema_version"] == SCHEMA_VERSION
+                      else isinstance(row["gaps"], list) and all(_valid_gap(gap) for gap in row["gaps"]))
+        _require(_text(row["capture"]) and _names(row["unresolved_work"]) and isinstance(row["required_reads"], list)
+                 and bool(row["required_reads"]),
+                 "Memory stow needs a substantive capture, an explicit unresolved_work list, and at least one required read.")
+        _require(gaps_valid,
+                 "Each stow gap needs missing, task and one recovery: {\"reread\": \"/absolute/path\"}, {\"ask\": \"question\"} or {\"accept\": \"reason the loss is safe\"}.")
         for source in row["required_reads"]:
             _validate_source(source)
             _require(source["kind"] == "file", "Stow required reads must name durable local files; put remote references in their contents.")
 
 
+def _validated(row):
+    _validate_record(row)
+    return row
+
+
 def load(path):
+    """The validated memory document, with any version-1 stow upgraded on disk.
+
+    The owner rewrites an upgraded document under its lock (rules/stateful-
+    artifacts.md Migration Policy). A document with nothing to migrate is read
+    without a lock or a write.
+    """
+    document, migrated = _load(path)
+    if not migrated:
+        return document
+    with state_lock(location(path)):
+        document, migrated = _load(path)
+        if migrated:
+            save_state(location(path), document)
+    return document
+
+
+def _load(path):
+    """Return `(document, migrated)`; `migrated` tells the owner to rewrite."""
     target = location(path)
     empty = {"schema_version": SCHEMA_VERSION, "state_path": str(Path(path).expanduser().resolve()), "records": []}
     if not target.exists():
         if target.is_symlink():
             raise StateError("Memory index {} is a dangling link; preserve the link and restore its saved target before reading or recording memory.".format(target), {})
-        return empty
+        return empty, False
     document = _json(target)
     try:
         _require(isinstance(document, dict) and set(document) == set(empty)
@@ -157,8 +227,12 @@ def load(path):
                  "Memory document has an unsupported schema or state identity; preserve it and update the owner skill or restore its backup.")
         ids, lessons = set(), {}
         previous_time = None
+        # Validate each record at its saved version, then upgrade it; `load`
+        # and `_append` persist the upgrade (rules/stateful-artifacts.md).
+        saved_versions = [row.get("schema_version") if isinstance(row, dict) else None for row in document["records"]]
+        document["records"] = [_migrate_stow(_validated(row)) for row in document["records"]]
+        migrated = saved_versions != [row["schema_version"] for row in document["records"]]
         for row in document["records"]:
-            _validate_record(row)
             _require(row["id"] not in ids, "Memory record ids are duplicated; restore the original history.")
             ids.add(row["id"])
             recorded = timestamp(row["recorded_at"], "Memory recording")
@@ -168,7 +242,7 @@ def load(path):
                 _require(row["supersedes"] == lessons.get(row["lesson_id"]), "Memory lesson revision chain is broken; restore the original history.")
                 _require(row["lesson_id"] in lessons or row["status"] == "active", "Memory archive has no prior lesson; restore the original history.")
                 lessons[row["lesson_id"]] = row["id"]
-        return document
+        return document, migrated
     except UsageError as exc:
         raise StateError(str(exc), {}) from None
 
@@ -182,17 +256,25 @@ def _append(path, data, kind, at):
     _require(set(data) == common | fields, "Memory {} input needs exactly: {}.".format(kind, ", ".join(sorted(common | fields))))
     _id(data["id"])
     with state_lock(location(path)):
-        document = load(path)
+        document, migrated = _load(path)
         prior = next((row for row in document["records"] if row["id"] == data["id"]), None)
         if prior:
             _require(prior["kind"] == kind and prior["input_digest"] == _digest(data),
                      "Memory id already records different content; preserve it and use a new id.")
             _require(timestamp(at, "Retry") >= timestamp(prior["recorded_at"], "Original recording"),
                      "Memory retry precedes its original recording; supply the current UTC checkpoint.")
+            if migrated:
+                # The owner persists an upgrade on every write, a replay included.
+                save_state(location(path), document)
             return _write_result(path, prior, at, replayed=True)
         _require(not document["records"] or timestamp(at, "Recording") >= timestamp(document["records"][-1]["recorded_at"], "Previous recording"),
                  "Memory recording precedes saved history; use the current UTC checkpoint without rewriting old records.")
-        row = {"schema_version": SCHEMA_VERSION, "kind": kind, "recorded_at": at, "input_digest": _digest(data), **data}
+        row = {"schema_version": SCHEMA_VERSION if kind == "lesson" else STOW_VERSION,
+               "kind": kind, "recorded_at": at, "input_digest": _digest(data), **data}
+        if kind == "stow":
+            _require(isinstance(data["gaps"], list) and not any(
+                isinstance(gap, dict) and gap.get("task") == UNRECORDED_TASK for gap in data["gaps"]),
+                "Name the task each gap affects; `{}` is reserved for gaps migrated from version-1 stows.".format(UNRECORDED_TASK))
         source_key = "sources" if kind == "lesson" else "required_reads"
         _require(_names(data[source_key], nonempty=True), "Memory {} must list distinct evidence locations.".format(source_key))
         row[source_key] = [_source(value) if kind == "lesson" else _receipt(value) for value in data[source_key]]
@@ -237,7 +319,10 @@ def _view(row, at):
         result["expired"] = row["expires_at"] is not None and timestamp(at, "Checkpoint") >= timestamp(row["expires_at"], "Expiry")
         result["use_requires_live_verification"] = True
     else:
-        result["reset_ready"] = not row["gaps"] and all(source["observation"] == "same_bytes" for source in result[source_key])
+        # A structured gap names its own recovery and no longer blocks a reset.
+        # A migrated gap names no task, so it blocks until a new stow names one.
+        named = all(gap["task"] != UNRECORDED_TASK for gap in row["gaps"])
+        result["reset_ready"] = named and all(source["observation"] == "same_bytes" for source in result[source_key])
         result["readiness_scope"] = "local_capture_only"
     return result
 
