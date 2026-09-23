@@ -1103,8 +1103,10 @@ def cmd_apply(args, client=None, warn=None, trace=None):
                 _legacy_id, legacy = recovery.dispatch_identity(
                     args.task, role, name, args.fix_round, paths, None, options=options)
                 bound = supervision.report_bound_fingerprint(legacy, reports[role]) if role in reports else None
+                # `not_sent` reached no worker and stays retryable, as ever.
                 earlier = next((row for row in store["dispatches"]
-                                if row.get("fingerprint") in {legacy, bound} and "judge_mode" not in row), None)
+                                if row.get("fingerprint") in {legacy, bound} and "judge_mode" not in row
+                                and row.get("status") != "not_sent"), None)
                 if earlier is not None:
                     raise UsageError(
                         "Judge dispatch {} was recorded before its mode was part of its identity and "

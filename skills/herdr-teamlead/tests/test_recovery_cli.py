@@ -315,6 +315,34 @@ class RecoveryCommandTests(fixture.CliCase):
         self.assertIn("before its mode was part of its identity", err)
         self.assertEqual(self.runner.writes(), [])
 
+    def test_a_legacy_judge_dispatch_that_never_sent_stays_retryable(self):
+        # `not_sent` reached no worker; the upgrade guard must not strand it.
+        client = self.seat_judge()
+        document = json.loads(self.state.read_text())
+        from teamlead import recovery as recovery_module
+        options = {"task": TASK, "fix_round": None, "plan": None, "work": None, "rounds": {},
+                   "retain_context": False, "no_clear": True}
+        _, legacy = recovery_module.dispatch_identity(
+            TASK, "judge", "claude", None, {"common": str(self.common), "judge": str(self.briefs["judge"])},
+            options=options)
+        document["recovery"]["dispatches"].append({
+            "schema_version": 1, "at": AT, "id": "legacy-judge", "fingerprint": legacy, "task": TASK,
+            "role": "judge", "agent": "claude", "fix_round": None, "plan": None, "work": None,
+            "status": "not_sent", "result": None, "report": None})
+        self.state.write_text(json.dumps(document))
+        code, out, err = self.invoke(self.judge_args("diagnosis"), client)
+        self.assertEqual(code, 0, err)
+        self.assertEqual(json.loads(out)["applied"][0]["judge_mode"], "diagnosis")
+
+    def test_a_direct_judge_dispatch_without_a_mode_is_refused_before_input(self):
+        from teamlead.assign import apply as apply_assignments
+        client = self.seat_judge()
+        with self.assertRaisesRegex(UsageError, "declares its mode"):
+            from teamlead.config import load_config
+            agents = {agent.name: agent for agent in load_config(self.config)}
+            apply_assignments(client, {"judge": "claude"}, agents, {}, AT)
+        self.assertEqual(self.runner.writes(), [])
+
     def test_the_same_brief_under_another_mode_is_another_dispatch(self):
         # coding-policy#494 review: without the mode in the identity, a
         # diagnosis would replay a completed adjudication's receipt.

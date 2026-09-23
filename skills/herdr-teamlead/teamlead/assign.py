@@ -55,7 +55,7 @@ from .herdr import (
 from .composer import COMPOSER_READ_LINES, COMPOSER_READ_SOURCE, checkable
 from .probe import PROBE_READ_LINES, PROBE_READ_SOURCE, resolve_status, stderr_warn
 from .chronology import latest_assignment
-from .recovery import empty_recovery, fresh_transition, task_record, validate_work
+from .recovery import JUDGE_MODES, empty_recovery, fresh_transition, task_record, validate_work
 from .launch import restart_worker, verify_running, verify_running_permissions
 from .tiers import canonical_role, launch_flags, require_seatable, worker_launch_args
 from .composition import normalize_requirement, parse_requirements
@@ -595,6 +595,11 @@ def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle
     transition = validate_context_mode(assignments, no_clear, retain_context, task, fix_round,
                                        recovery=recovery, history=history, plan_id=plan_id, work=work,
                                        retain_specialist=retain_specialist, requirements=requirements)
+    # Every judge dispatch declares its mode, whichever caller reaches here; an
+    # undeclared mode is refused, never defaulted (#478).
+    if any(canonical_role(role) == "judge" for role in assignments) and judge_mode not in JUDGE_MODES:
+        raise UsageError("A judge dispatch declares its mode, one of {}; pass judge_mode.".format(
+            " | ".join(JUDGE_MODES)), {"judge_mode": judge_mode})
     validate_fix_history(assignments, history, task, fix_round)
     prior = validate_retained_history(assignments, history, task, fix_round) if retain_context else None
     tiers = dict(tiers or {})
