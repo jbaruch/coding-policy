@@ -226,6 +226,21 @@ class MemoryTest(unittest.TestCase):
         self.assertEqual([row["schema_version"] for row in self.raw()["records"] if row["kind"] == "stow"],
                          [memory.STOW_VERSION] * 3)
 
+    def test_an_exact_replay_persists_a_pending_migration(self):
+        self.stow()
+        document = self.raw()
+        document["records"][0]["schema_version"] = 1
+        self.write_raw(document)
+        replay = self.stow(at=LATER)
+        self.assertTrue(replay["replayed"])
+        self.assertEqual(self.raw()["records"][0]["schema_version"], memory.STOW_VERSION)
+
+    def test_a_replay_with_nothing_to_migrate_leaves_the_file_untouched(self):
+        self.stow()
+        before = memory.location(self.state).read_bytes()
+        self.assertTrue(self.stow(at=LATER)["replayed"])
+        self.assertEqual(memory.location(self.state).read_bytes(), before)
+
     def test_stow_source_change_or_loss_invalidates_saved_readiness(self):
         self.stow()
         self.source.write_text("New unresolved work arrived.\n", encoding="utf-8")

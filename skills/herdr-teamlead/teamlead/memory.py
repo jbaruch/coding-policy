@@ -193,12 +193,18 @@ def _validated(row):
 
 
 def load(path):
+    """The validated memory document, version-1 stows upgraded in memory."""
+    return _load(path)[0]
+
+
+def _load(path):
+    """Return `(document, migrated)`; `migrated` tells the owner to rewrite."""
     target = location(path)
     empty = {"schema_version": SCHEMA_VERSION, "state_path": str(Path(path).expanduser().resolve()), "records": []}
     if not target.exists():
         if target.is_symlink():
             raise StateError("Memory index {} is a dangling link; preserve the link and restore its saved target before reading or recording memory.".format(target), {})
-        return empty
+        return empty, False
     document = _json(target)
     try:
         _require(isinstance(document, dict) and set(document) == set(empty)
@@ -209,7 +215,9 @@ def load(path):
         previous_time = None
         # Validate each record at its saved version, then upgrade it; the next
         # owner write persists the upgrade (rules/stateful-artifacts.md).
+        saved_versions = [row.get("schema_version") if isinstance(row, dict) else None for row in document["records"]]
         document["records"] = [_migrate_stow(_validated(row)) for row in document["records"]]
+        migrated = saved_versions != [row["schema_version"] for row in document["records"]]
         for row in document["records"]:
             _require(row["id"] not in ids, "Memory record ids are duplicated; restore the original history.")
             ids.add(row["id"])
@@ -220,7 +228,7 @@ def load(path):
                 _require(row["supersedes"] == lessons.get(row["lesson_id"]), "Memory lesson revision chain is broken; restore the original history.")
                 _require(row["lesson_id"] in lessons or row["status"] == "active", "Memory archive has no prior lesson; restore the original history.")
                 lessons[row["lesson_id"]] = row["id"]
-        return document
+        return document, migrated
     except UsageError as exc:
         raise StateError(str(exc), {}) from None
 
@@ -234,13 +242,16 @@ def _append(path, data, kind, at):
     _require(set(data) == common | fields, "Memory {} input needs exactly: {}.".format(kind, ", ".join(sorted(common | fields))))
     _id(data["id"])
     with state_lock(location(path)):
-        document = load(path)
+        document, migrated = _load(path)
         prior = next((row for row in document["records"] if row["id"] == data["id"]), None)
         if prior:
             _require(prior["kind"] == kind and prior["input_digest"] == _digest(data),
                      "Memory id already records different content; preserve it and use a new id.")
             _require(timestamp(at, "Retry") >= timestamp(prior["recorded_at"], "Original recording"),
                      "Memory retry precedes its original recording; supply the current UTC checkpoint.")
+            if migrated:
+                # The owner persists an upgrade on every write, a replay included.
+                save_state(location(path), document)
             return _write_result(path, prior, at, replayed=True)
         _require(not document["records"] or timestamp(at, "Recording") >= timestamp(document["records"][-1]["recorded_at"], "Previous recording"),
                  "Memory recording precedes saved history; use the current UTC checkpoint without rewriting old records.")
