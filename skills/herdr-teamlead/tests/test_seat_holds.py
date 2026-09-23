@@ -177,12 +177,20 @@ class PlanHoldsTest(CliCase):
         self.assertEqual(code, 0, err)
         self.assertEqual(json.loads(out)["assignments"]["developer"], "grok")
 
-    def dry_apply(self, *extra):
+    def dry_apply(self, *extra, role="developer"):
         self.out, self.err = io.StringIO(), io.StringIO()
         return self.run_cli(self.base() + ["apply", "--composer-settle", "0", "--assignments",
-                                           json.dumps({"developer": "grok"}), "--common", str(self.common),
+                                           json.dumps({role: "grok"}), "--common", str(self.common),
                                            "--task", "other-task", "--dry-run", *extra]
-                            + self.brief_args("developer"), client=self._client({}))
+                            + self.brief_args(role), client=self._client({}))
+
+    def register_other_task(self):
+        record = self.tmp / "task.json"
+        record.write_text(json.dumps({"task": "other-task", "base_revision": "a" * 40, "scope": "Verify other work",
+                                      "allowed_paths": ["src/*"], "authorization": {"source": "operator", "quote": "go"}}))
+        self.out, self.err = io.StringIO(), io.StringIO()
+        code, _, err = self.run_cli(self.base() + ["task", "--record", str(record), "--now", CLOSE_AT])
+        self.assertEqual(code, 0, err)
 
     def test_apply_refuses_a_plan_whose_worker_became_reserved(self):
         self.seed()
@@ -191,11 +199,22 @@ class PlanHoldsTest(CliCase):
         self.assertIn("reserved as developer for media-77", err)
         self.assertIn("--break-reservation", err)
 
-    def test_break_reservation_is_the_explicit_override(self):
+    def test_break_reservation_reuses_the_developer_in_a_non_developer_seat(self):
         self.seed()
-        code, out, err = self.dry_apply("--break-reservation")
+        self.register_other_task()
+        code, out, err = self.dry_apply("--break-reservation", role="tester")
         self.assertEqual(code, 0, err)
         self.assertEqual(json.loads(out)["steps"][0]["agent"], "grok")
+
+    def test_break_reservation_refuses_what_a_role_clear_cannot_record(self):
+        self.seed()
+        code, _, err = self.dry_apply("--break-reservation", role="tester")
+        self.assertEqual(code, 1)
+        self.assertIn("no recorded base/scope", err)
+        self.register_other_task()
+        code, _, err = self.dry_apply("--break-reservation")
+        self.assertEqual(code, 1)
+        self.assertIn("cannot move a reserved developer into another developer seat", err)
 
     def test_plan_skips_a_busy_worker(self):
         member = {"active": True, "assignment": {"agent": "grok", "task": "fleet-deps-admin"}}

@@ -324,7 +324,7 @@ def build_parser():
     )
     apply_parser.add_argument(
         "--break-reservation", action="store_true",
-        help="Dispatch a developer reserved to another task anyway; record the role clear afterwards with recover-role-clear.",
+        help="Reuse a developer reserved to another task in a non-developer seat on a registered task; record the role clear afterwards with recover-role-clear.",
     )
     apply_parser.add_argument(
         "--fix-round", type=int, metavar="N",
@@ -473,6 +473,25 @@ def _supervision_enrollment(state_path, identifier, task, role, name, report, at
             if known["native_session"] is None:
                 supervision.refine(state_path, identifier, known["pane_id"] or pane_id, native, at)
     return expected
+
+
+def _require_role_clear_break(assignments, task, reserved, store):
+    """Admit `--break-reservation` only where `recover-role-clear` can record it.
+
+    That recovery needs a non-developer clearing role on a registered task,
+    so any other break is refused before a worker is contacted (#483).
+    """
+    broken = {role: name for role, name in assignments.items()
+              if name in reserved and reserved[name] != task}
+    if not broken:
+        return
+    developers = sorted(role for role in broken if canonical_role(role) == "developer")
+    if developers:
+        raise UsageError("--break-reservation cannot move a reserved developer into another developer seat; recover-role-clear records only a non-developer clearing role. Replan, or close the reserved task first.",
+                         {"roles": developers})
+    if not task:
+        raise UsageError("--break-reservation requires --task naming the registered task the reused worker serves.", {})
+    recovery.task_record(store, task)
 
 
 def _seat_holds(roles, task, state, state_path):
@@ -1207,7 +1226,10 @@ def cmd_apply(args, client=None, warn=None, trace=None):
         if name in constraints["exclude"].get(role, []):
             raise UsageError("Assigned worker {} is ineligible for {} under current capabilities or contribution history; replan an independent capable worker.".format(name, role), {})
     # Breaking a reservation is an explicit choice; the send re-reads it (#483).
-    reserved = {} if args.break_reservation else recovery.developer_reservations(store, state["assignments"])
+    reserved = recovery.developer_reservations(store, state["assignments"])
+    if args.break_reservation:
+        _require_role_clear_break(assignments, args.task, reserved, store)
+        reserved = {}
     # `apply` measures nothing -- it re-reads the headroom the PLAN resolved its
     # tiers against, so a recomputed tier differs only when the config or the
     # fix context actually drifted, which is what the comparison below is for.

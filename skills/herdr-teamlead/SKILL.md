@@ -181,8 +181,8 @@ verification as the task needs them. `plan` bars a developer reserved to
 another task and a worker with an active enrollment, and names each bar in its
 `rationale`; do not pass `--exclude` for either. `apply` re-reads the
 reservations before sending. Reusing a reserved developer elsewhere takes
-`apply --break-reservation` and a role clear under
-`references/dispatch-recovery.md`.
+`apply --break-reservation` into a non-developer seat on a registered task,
+then a role clear under `skills/herdr-teamlead/references/dispatch-recovery.md`.
 
 The composition triggers decide part of that roster. Classify this round
 against the repo's declaration first. For a pre-implementation round, pass
@@ -550,7 +550,7 @@ for the round's other worktrees. Proceed immediately to Step 16.
 Finalize the task ledger with the round outcome and remaining obligations.
 Mark the task completed only after its acceptance criteria and required
 release and cleanup obligations are verified. When the task merged or was
-abandoned, close it; this releases its developer's reservation. The record is
+abandoned, close it. The record is
 `{"task", "outcome": "merged" | "abandoned", "evidence"}`:
 
 ```bash

@@ -125,15 +125,17 @@ class HistoricalCommandsTest(fixture.CliCase):
         code, _, err = self.owner("task", {"task": current, "base_revision": self.base_revision,
             "scope": SCOPE, "allowed_paths": ["src/*"], "authorization": AUTH})
         self.assertEqual(code, 0, err)
+        # grok still holds recovery-fixture; the move to task A closes it first (#483).
+        closure = self.tmp / "close-recovery-fixture.json"
+        closure.write_text(json.dumps({"task": TASK, "outcome": "abandoned", "evidence": "fixture moves grok to task A"}))
+        code, _, err = self.invoke(["close-task", "--record", str(closure), "--now", CLEARED])
+        self.assertEqual(code, 0, err)
         for number in (None, 1, 2):
             self.briefs["developer"].write_text("Current task correction {}.\n".format(number or 0))
             args = self.apply_args("developer", number, "--now", "2026-02-03T09:3{}:00+00:00".format(number or 0))
             args[args.index("--task") + 1] = current
             if number is not None:
                 args.append("--retain-context")
-            else:
-                # grok still holds recovery-fixture; moving it is an explicit break (#483).
-                args.append("--break-reservation")
             client = self.fresh_client("previous-session", "current-developer") if number is None else self._client(
                 {"grok": "idle"}, sessions={"grok": "current-developer"})
             code, _, err = self.invoke(args, client)
