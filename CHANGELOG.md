@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.261 — 2026-09-23
+
 ### Changed
 
 - **The Herdr foreman no longer writes throwaway helper scripts.** In the
