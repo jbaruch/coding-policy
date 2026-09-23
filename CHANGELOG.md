@@ -16,9 +16,13 @@
   foreman then dispatches an investigator to establish exactly those facts
   with citations and re-dispatches the judge on the same dispute with that
   report. The dispute was never settled, so this is not a second ruling on a
-  settled dispute. `blocked` narrows to questions only the operator can
-  answer. `insufficient` is not a completed ruling, so a checkpoint cannot
-  cite it, the same as `blocked`.
+  settled dispute. The investigator's citations are admissible evidence on
+  that re-dispatch. `insufficient` settles nothing: it binds nothing and no
+  checkpoint cites it. `blocked` narrows to questions only the operator can
+  answer (authority, intent, or a choice no tree records). A citation names
+  a file and line, or command output, at a revision, because the judge runs
+  no git command. The no-exploring limit applies to adjudication only;
+  diagnosis still reads the round history.
 
 ## 0.3.261 — 2026-09-23
 

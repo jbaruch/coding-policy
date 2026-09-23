@@ -34,16 +34,18 @@ text it turns on is not a ruling.
 
 ## Tree to Check
 
-`{{TREE}}` holds the cited files. It is already checked out; run no git command
+`{{TREE}}` holds the cited files. Each citation names a file and line, or command output, at a revision; you run no git command to resolve one. It is already checked out; run no git command
 against it, and no git command against `{{SHARED_CHECKOUT}}`. Open only what a
 citation names. Exploring beyond the citations is outside this seat.
 
 ## Method
 
-1. Read both reports in full, not a summary of either.
+1. Read both reports in full, not a summary of either, and the investigator
+   report in full when one is named.
 2. Read the governing rule in full.
-3. Check each cited fact against the tree: the named line, output or revision
-   says what the position claims, or it does not. Take neither side's word.
+3. Check each cited fact against the tree: the named line or output says what
+   its citer claims, or it does not. The investigator's citations count as
+   evidence too. Take no one's word.
 4. Weigh the checked facts against the rule text alone, not against either
    side's framing of it.
 5. If a disputed fact rests on no citation, or the citations cannot settle it,
@@ -73,7 +75,7 @@ or a choice no tree records. Name that question inline. Follow the three lines
 with your numbered reasons — each reason ties a verified fact to the rule
 text.
 
-Your ruling binds the round. Only the operator overrides it.
+A completed ruling (`uphold A`, `uphold B`, `amend`) binds the round; only the operator overrides it. `insufficient` settles nothing: it binds nothing and no checkpoint cites it.
 
 ## Report
 

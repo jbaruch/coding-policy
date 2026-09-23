@@ -377,7 +377,8 @@ It is read-only without exception in either mode: no file edit, no mutating
 git or `gh` command, no GitHub post, no subagent dispatch.
 
 Adjudicating, it reads both positions and the governing rule, checks only the
-evidence each position cites against the tree rather than trusting either
+evidence each position cites, and after an `insufficient` ruling the
+investigator's citations too, against the tree rather than trusting either
 side's framing, and never explores beyond those citations. It returns a report
 opening with three
 lines — `RULING: uphold A | uphold B | amend — <line> | insufficient — <facts needed> | blocked — <question>`,
@@ -387,12 +388,17 @@ check — followed by its numbered reasons.
 Those three lines belong to adjudication; a diagnosis carries the five above
 and never a `RULING:` or an `ACTION:`.
 
-`blocked` is the judge declining to rule on a dispute it cannot settle from
-the tree and the rule text alone. The round stops there and the named question
-goes to the operator. The foreman does not dispatch a second judge and does not
+`insufficient` is the judge declining to rule because the cited evidence
+cannot settle a named fact. It settles nothing, binds nothing, and no
+checkpoint cites it; an investigator establishes the fact and the judge rules
+again with that report, whose citations are admissible evidence.
+
+`blocked` is the judge declining to rule on a question only the operator can
+answer: authority, intent, or a choice no tree records. The round stops there
+and the named question goes to the operator. The foreman does not dispatch a second judge and does not
 rule in its place.
 
-The ruling or remedy binds the round the moment the foreman reads it. Only the
+A completed ruling or remedy binds the round the moment the foreman reads it. Only the
 operator overrides one; record the override and why in the round log. No
 diagnosis remedy waits on an operator for the task to reach a terminal state.
 A `blocked` adjudication is the one ruling that does: it stops the round and
@@ -448,7 +454,7 @@ finish, apply the whole-fleet pause/handoff contract in `references/supervision.
 `skills/herdr-teamlead/references/judge-round.md` step 7 follows these branches. Before a finish, preserve any user question and
 apply the whole-fleet pause/handoff contract in `references/supervision.md`.
 
-The `RULING:` line binds the round. Only the operator overrides it.
+A completed `RULING:` line binds the round. Only the operator overrides it. `insufficient` binds nothing.
 
 For an investigation-only task, a non-blocked ruling returns to Step 12's
 knowledge-deliverable gate with the ruling and any required authorized research.

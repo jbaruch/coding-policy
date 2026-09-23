@@ -17,7 +17,7 @@ SKILL.md Step 14.
 For a dispute, compose from `templates/brief-judge.md` through SKILL.md Step 7: the
 dispute, both positions with report paths, the governing rule, the tree. Fill
 `POSITION_A_EVIDENCE` and `POSITION_B_EVIDENCE` with the citations each report
-makes (file and line, command output, revision), copied, never supplied by the
+makes (file and line, or command output, at a revision), copied, never supplied by the
 foreman; write "none cited" where a position cites nothing. Fill
 `INVESTIGATION_REPORT` with the investigator's report after an `insufficient`
 ruling, otherwise "none".
@@ -106,5 +106,5 @@ rulings return to SKILL.md Step 12's knowledge gate. Implementation rulings rout
 unchanged-branch rulings to verified release or renewed verification,
 branch-changing rulings to the counted correction path, an `insufficient`
 ruling to an investigator and then back to step 1, and a blocked ruling to its
-saved operator question. Only the operator overrides a ruling.
+saved operator question. Only the operator overrides a completed ruling; `insufficient` binds nothing and creates no checkpoint.
 Continue immediately to the step named by that outcome.

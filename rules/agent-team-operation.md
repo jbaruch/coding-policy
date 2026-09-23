@@ -133,16 +133,18 @@ description: Running a multi-agent team — task-based specialist composition, c
 - `stop` is terminal and never repeats; an approach takes at most five diagnoses
 - No exhausted allowance waits on an operator decision
 - The judge is read-only: it never edits a repository file, never runs a mutating git or `gh` command, never posts to GitHub, never dispatches a subagent — its only output is its report file
-- Each adjudication position cites its evidence: file and line, command output, or revision
+- Each adjudication position cites its evidence: file and line, or command output, each at a named revision
 - In adjudication mode the judge reads both positions and the governing rule, checks only the cited evidence against the tree, and returns `RULING: uphold A | uphold B | amend — <line> | insufficient — <facts needed> | blocked — <question>` with numbered reasons, an `ACTION:` naming the minimal step, and an `UNVERIFIED:` line
-- The judge never explores the tree beyond the cited evidence
+- In adjudication mode the judge never explores the tree beyond the cited evidence
 - `insufficient` names the disputed facts the cited evidence cannot settle
 - On an `insufficient` ruling the foreman dispatches an investigator to establish those facts with citations
 - The judge is re-dispatched on the same dispute with that investigator report
+- The investigator's citations are admissible evidence on that re-dispatch
 - In diagnosis mode it reads the round history and verifies against the tree what each round changed, and returns the six diagnosis lines with numbered reasons
 - A diagnosis repeating its predecessor's rung adds `PROGRESS:`
 - `RULING:` and `ACTION:` belong to adjudication alone; a diagnosis carries neither
 - The judge's ruling binds the round; only the operator overrides it
+- `insufficient` settles nothing: it binds nothing and no checkpoint cites it
 - `blocked` is the judge declining to rule
 - A `blocked` ruling stops the round and sends the named question to the operator
 - `blocked` is for a question only the operator can answer; a fact the tree can settle is `insufficient`
