@@ -515,6 +515,17 @@ def task_closure(store, assignments, task):
     return closure
 
 
+def _closed_after(store, task, instant):
+    """Whether a `task_closed` event for `task` follows `instant`.
+
+    Bound to the developer row being examined, never to the task's latest
+    developer: a second worker reopening the task must not re-hold the first.
+    """
+    return any(row["kind"] == "task_closed" and row["task"] == task
+               and timestamp(row["at"], "Close-task event {} time".format(row["sequence"])) > instant
+               for row in store["events"])
+
+
 def developer_reservations(store, assignments):
     """`{agent: task}` for each developer held through its task's early fixes.
 
@@ -535,7 +546,7 @@ def developer_reservations(store, assignments):
         row = latest[1]
         if (row.get("role") == "developer" and row.get("task")
                 and (row.get("fix_round") or 0) in RETAINED_FIX_ROUNDS
-                and task_closure(store, assignments, row["task"]) is None):
+                and not _closed_after(store, row["task"], timestamp(row.get("at"), "Assignment {} chronology".format(latest[0])))):
             held[agent] = row["task"]
     return held
 
@@ -1981,6 +1992,13 @@ def validate_store(store, assignments):
         for sequence, row in enumerate(store["events"], 1):
             if row["sequence"] != sequence or not isinstance(row["details"], dict):
                 raise UsageError("Recovery event history is malformed; preserve it for owner recovery.", {})
+            if row["kind"] == "task_closed":
+                details = row["details"]
+                if (set(details) != {"outcome", "evidence"} or details["outcome"] not in TASK_CLOSE_OUTCOMES
+                        or not isinstance(details["evidence"], str) or not details["evidence"].strip()
+                        or not isinstance(row.get("task"), str) or not row["task"].strip()):
+                    raise UsageError("Task-closed event {} is malformed; restore the owner-written closure before planning.".format(sequence), {})
+                timestamp(row.get("at"), "Close-task event {} time".format(sequence))
         # Imported records use these shared validators without a module-level cycle.
         from .historical import validate_history
         validate_history(store, assignments)

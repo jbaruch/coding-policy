@@ -1,5 +1,6 @@
 """Developer reservations and busy workers come from owner records, not memory (#483)."""
 
+import copy
 import io
 import json
 import sys
@@ -11,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from teamlead.composition import seat_holds
 from teamlead.errors import UsageError
-from teamlead.recovery import close_task, developer_reservations, task_closure
+from teamlead.recovery import close_task, developer_reservations, task_closure, validate_store
 from teamlead.state import add_assignment, empty_state, load_state, save_state
 from tests.test_cli import CliCase
 
@@ -56,6 +57,24 @@ class ReservationTest(unittest.TestCase):
         state = media_round()
         add_assignment(state, CLOSE_AT, "tester", "codex-census", task="other-task")
         self.assertEqual(developer_reservations(state["recovery"], state["assignments"]), {})
+
+    def test_another_worker_reopening_the_task_does_not_re_hold_the_first(self):
+        state = media_round()
+        close_task(state["recovery"], state["assignments"], MERGED, CLOSE_AT)
+        add_assignment(state, REOPEN_AT, "developer", "grok", task="media-77")
+        self.assertEqual(developer_reservations(state["recovery"], state["assignments"]), {"grok": "media-77"})
+
+    def test_a_malformed_closure_is_refused_rather_than_releasing_anyone(self):
+        state = media_round()
+        close_task(state["recovery"], state["assignments"], MERGED, CLOSE_AT)
+        for broken in ({"outcome": "done", "evidence": "x"}, {"outcome": "merged", "evidence": " "},
+                       {"outcome": "merged"}):
+            with self.subTest(details=broken):
+                store = copy.deepcopy(state["recovery"])
+                store["events"][-1]["details"] = broken
+                with self.assertRaisesRegex(UsageError, "Task-closed event 1 is malformed"):
+                    validate_store(store, state["assignments"])
+        validate_store(state["recovery"], state["assignments"])
 
     def test_repeating_a_closure_is_idempotent_and_a_different_one_is_refused(self):
         state = media_round()
