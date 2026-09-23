@@ -21,9 +21,11 @@
   active supervision enrollment is busy. Both are barred from other seats,
   and each bar is named in the plan's `rationale` along with the command that
   lifts it. A reserved developer can still take its own task's next fix and
-  its release. `apply` does not re-check reservations: reusing a reserved
-  developer through an authorized role clear stays possible, as
-  `recover-role-clear` expects.
+  its release. `apply` re-reads the reservations before sending, since a plan
+  can go stale. `apply --break-reservation` is the explicit override for an
+  authorized reuse, which `recover-role-clear` then records. The same closure
+  replays from anywhere in history, so re-running an old closure after the
+  task reopened doesn't release the new developer.
 
   `task_closed` is a new event kind, so the recovery store moves to version
   13. An older store carrying one is refused as newer data. The legacy check

@@ -497,6 +497,12 @@ def close_task(store, assignments, data, at):
     if not any(row.get("task") == task for row in assignments):
         raise UsageError("Task {!r} has no recorded assignment; check its identity with `teamlead state` before closing it.".format(task), {})
     details = {"outcome": data["outcome"], "evidence": data["evidence"]}
+    # The same request replays from anywhere in history, even after the task
+    # reopened: closing a reopened task takes a new decision with new evidence.
+    recorded = next((row for row in store["events"] if row["kind"] == "task_closed"
+                     and row["task"] == task and row["details"] == details), None)
+    if recorded is not None:
+        return recorded
     current = task_closure(store, assignments, task)
     if current is not None:
         if current["details"] != details:

@@ -179,8 +179,10 @@ Choose the responsibilities needed next under `references/specialists.md`.
 Supply its requirements file for specialized work. Schedule consultation and
 verification as the task needs them. `plan` bars a developer reserved to
 another task and a worker with an active enrollment, and names each bar in its
-`rationale`; do not pass `--exclude` for either. Reusing a reserved developer
-elsewhere is a role clear under `references/dispatch-recovery.md`.
+`rationale`; do not pass `--exclude` for either. `apply` re-reads the
+reservations before sending. Reusing a reserved developer elsewhere takes
+`apply --break-reservation` and a role clear under
+`references/dispatch-recovery.md`.
 
 The composition triggers decide part of that roster. Classify this round
 against the repo's declaration first. For a pre-implementation round, pass

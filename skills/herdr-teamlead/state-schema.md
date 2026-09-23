@@ -293,7 +293,7 @@ skills/herdr-teamlead/references/retrospectives.md
   ],
   "specialist_assessments": [],
   "recovery": {
-    "schema_version": 11,
+    "schema_version": 13,
     "tasks": {},
     "checkpoints": [],
     "plans": [],

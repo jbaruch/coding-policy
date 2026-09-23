@@ -323,6 +323,10 @@ def build_parser():
         help="Follow up on an assessed consultation in its verified unchanged task, engagement and session.",
     )
     apply_parser.add_argument(
+        "--break-reservation", action="store_true",
+        help="Dispatch a developer reserved to another task anyway; record the role clear afterwards with recover-role-clear.",
+    )
+    apply_parser.add_argument(
         "--fix-round", type=int, metavar="N",
         help="Fix-round number for this task; the dispatcher validates the cap.",
     )
@@ -1202,6 +1206,8 @@ def cmd_apply(args, client=None, warn=None, trace=None):
     for role, name in assignments.items():
         if name in constraints["exclude"].get(role, []):
             raise UsageError("Assigned worker {} is ineligible for {} under current capabilities or contribution history; replan an independent capable worker.".format(name, role), {})
+    # Breaking a reservation is an explicit choice; the send re-reads it (#483).
+    reserved = {} if args.break_reservation else recovery.developer_reservations(store, state["assignments"])
     # `apply` measures nothing -- it re-reads the headroom the PLAN resolved its
     # tiers against, so a recomputed tier differs only when the config or the
     # fix context actually drifted, which is what the comparison below is for.
@@ -1241,6 +1247,7 @@ def cmd_apply(args, client=None, warn=None, trace=None):
                 tiers=tiers,
                 recovery=store, history=state["assignments"], plan_id=args.correction_plan, work=work,
                 retain_specialist=args.retain_specialist, requirements=requirements,
+                reserved=reserved,
             ),
             None,
         )
@@ -1323,6 +1330,7 @@ def cmd_apply(args, client=None, warn=None, trace=None):
             start_timeout_ms=args.start_timeout,
             allow_recovery=args.allow_recovery,
             tiers=tiers,
+            reserved=reserved,
             retrospective_guard=retrospective_runtime.Guard(state_path, state, client, agents_by_name, at,
                                                           task=args.task, retain=args.retain_context or args.retain_specialist, no_clear=args.no_clear),
         )

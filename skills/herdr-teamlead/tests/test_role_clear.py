@@ -54,6 +54,8 @@ class RoleClearTests(fixture.fixture.CliCase):
         args = self.apply_args("tester")
         args[args.index(TASK)] = CLEAR_TASK
         args[args.index("--now") + 1] = CLEAR_AT
+        # Reusing the reserved developer is the authorized break this recovery records (#483).
+        args.append("--break-reservation")
         code, output, err = self.invoke(args, self._client({"grok": "idle"}, sessions={"grok": "cleared-tester"}))
         self.assertEqual(code, 0, err)
         self.evidence.write_text(output)

@@ -14,6 +14,7 @@ from teamlead.composition import seat_holds
 from teamlead.errors import UsageError
 from teamlead.recovery import close_task, developer_reservations, task_closure, validate_store
 from teamlead.state import add_assignment, empty_state, load_state, save_state
+from tests import test_cli
 from tests.test_cli import CliCase
 
 DEV_AT = "2026-09-23T09:05:56+00:00"
@@ -76,6 +77,15 @@ class ReservationTest(unittest.TestCase):
                     validate_store(store, state["assignments"])
         validate_store(state["recovery"], state["assignments"])
 
+    def test_replaying_a_closure_after_reopening_does_not_close_again(self):
+        state = media_round()
+        first = close_task(state["recovery"], state["assignments"], MERGED, CLOSE_AT)
+        add_assignment(state, REOPEN_AT, "developer", "codex-census", task="media-77", fix_round=1)
+        replay = close_task(state["recovery"], state["assignments"], MERGED, "2026-09-23T13:00:00+00:00")
+        self.assertEqual(replay, first)
+        self.assertEqual(len(state["recovery"]["events"]), 1)
+        self.assertEqual(developer_reservations(state["recovery"], state["assignments"]), {"codex-census": "media-77"})
+
     def test_repeating_a_closure_is_idempotent_and_a_different_one_is_refused(self):
         state = media_round()
         first = close_task(state["recovery"], state["assignments"], MERGED, CLOSE_AT)
@@ -135,6 +145,8 @@ class SeatHoldsTest(unittest.TestCase):
 
 
 class PlanHoldsTest(CliCase):
+    _client = test_cli.ApplyCommandTest._client
+
     def plan(self, task="other-task"):
         return self.run_cli(self.base() + ["plan", "--roles", "developer", "--snapshot", str(self.snapshot),
                                            "--task", task])
@@ -164,6 +176,26 @@ class PlanHoldsTest(CliCase):
         code, out, err = self.plan()
         self.assertEqual(code, 0, err)
         self.assertEqual(json.loads(out)["assignments"]["developer"], "grok")
+
+    def dry_apply(self, *extra):
+        self.out, self.err = io.StringIO(), io.StringIO()
+        return self.run_cli(self.base() + ["apply", "--composer-settle", "0", "--assignments",
+                                           json.dumps({"developer": "grok"}), "--common", str(self.common),
+                                           "--task", "other-task", "--dry-run", *extra]
+                            + self.brief_args("developer"), client=self._client({}))
+
+    def test_apply_refuses_a_plan_whose_worker_became_reserved(self):
+        self.seed()
+        code, _, err = self.dry_apply()
+        self.assertEqual(code, 1)
+        self.assertIn("reserved as developer for media-77", err)
+        self.assertIn("--break-reservation", err)
+
+    def test_break_reservation_is_the_explicit_override(self):
+        self.seed()
+        code, out, err = self.dry_apply("--break-reservation")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(json.loads(out)["steps"][0]["agent"], "grok")
 
     def test_plan_skips_a_busy_worker(self):
         member = {"active": True, "assignment": {"agent": "grok", "task": "fleet-deps-admin"}}

@@ -131,6 +131,9 @@ class HistoricalCommandsTest(fixture.CliCase):
             args[args.index("--task") + 1] = current
             if number is not None:
                 args.append("--retain-context")
+            else:
+                # grok still holds recovery-fixture; moving it is an explicit break (#483).
+                args.append("--break-reservation")
             client = self.fresh_client("previous-session", "current-developer") if number is None else self._client(
                 {"grok": "idle"}, sessions={"grok": "current-developer"})
             code, _, err = self.invoke(args, client)
