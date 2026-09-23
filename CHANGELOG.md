@@ -1,5 +1,42 @@
 # Changelog
 
+### Added
+
+- **The Herdr planner now reads developer reservations and busy workers from
+  the owner records.** `rules/agent-team-operation.md` already reserved a
+  developer through its task's early fixes, but only the foreman's memory
+  enforced it. The #483 audit of the 2026-09-23 foreman session that died on
+  `Prompt is too long` found 24 forced picks, every plan after 08:25, built by
+  hand with `--exclude` from what the foreman remembered about who was busy
+  and who was reserved. At 09:22 the planner picked `codex-census`, which was
+  the live developer for media #77, and only the foreman's memory stopped it.
+  #483 resets the foreman at every round boundary, and a reset foreman would
+  have let that pick through.
+
+  `plan` now derives both from durable state. A worker whose latest applied
+  assignment is a developer round 0–3 is held to that task. The hold ends at
+  a new `task_closed` event (`teamlead close-task --record FILE`, outcome
+  `merged` or `abandoned`), and any later assignment of the worker ends it
+  too, which is how an authorized role clear already reads. A worker with an
+  active supervision enrollment is busy. Both are barred from other seats,
+  and each bar is named in the plan's `rationale` along with the command that
+  lifts it. A reserved developer can still take its own task's next fix and
+  its release. `apply` re-reads the reservations before sending, since a plan
+  can go stale. There is no override. Reusing a reserved developer elsewhere
+  requires closing its task first. `recover-role-clear` still records clears
+  that happened before this change. The same closure
+  replays from anywhere in history, so re-running an old closure after the
+  task reopened doesn't release the new developer.
+
+  `task_closed` is a new event kind, so the recovery store moves to version
+  13. An older store carrying one is refused as newer data. The legacy check
+  that refused `judge_mode` at every older version is now scoped to stores
+  below 12, so it doesn't reject every v12 store as newer data after the bump.
+  The schema doc, still saying version 11, now says 13. Run against the live state on
+  2026-09-23, the derivation finds seven holds: six from that day's rounds and
+  one stale (`acr-p0-156`, from 2026-09-18), which the planner names until a
+  `close-task` clears it.
+
 ## 0.3.258 — 2026-09-23
 
 ### Changed

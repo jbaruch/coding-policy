@@ -376,7 +376,7 @@ def build_parser():
     report_parser.add_argument("--report", required=True)
     report_parser.add_argument("--lines", type=int, required=True)
 
-    for command in ("task", "checkpoint", "authorize-corrections", "authorize-approach", "recover-context", "recover-role-clear", "record-report", "record-refusal", "authorize-refused-dispatch", "diagnose", "reconcile", "record-release-clear", "import-correction", "record-historical-review", "recover-report", "assess-specialist"):
+    for command in ("task", "checkpoint", "authorize-corrections", "authorize-approach", "recover-context", "recover-role-clear", "record-report", "record-refusal", "authorize-refused-dispatch", "diagnose", "reconcile", "record-release-clear", "import-correction", "record-historical-review", "recover-report", "assess-specialist", "close-task"):
         record_parser = sub.add_parser(command, parents=[common], help="Record owner-managed {} evidence.".format(command))
         record_parser.add_argument("--record", required=True, metavar="FILE", help="Structured evidence JSON; see dispatch-recovery.md.")
         record_parser.add_argument("--now", metavar="ISO8601")
@@ -469,6 +469,13 @@ def _supervision_enrollment(state_path, identifier, task, role, name, report, at
             if known["native_session"] is None:
                 supervision.refine(state_path, identifier, known["pane_id"] or pane_id, native, at)
     return expected
+
+
+def _seat_holds(roles, task, state, state_path):
+    """Developer reservations and busy workers, read from the owner records (#483)."""
+    busy = {row["assignment"]["agent"]: row["assignment"]["task"]
+            for row in supervision.load(state_path)["members"] if row["active"]}
+    return composition.seat_holds(roles, task, recovery.developer_reservations(state["recovery"], state["assignments"]), busy)
 
 
 def _parse_excludes(pairs):
@@ -851,8 +858,11 @@ def cmd_plan(args, client=None, warn=None, trace=None):
         dispatches=state["recovery"]["dispatches"], assessments=state["specialist_assessments"],
         candidate_names=snapshot.get("agents", {}).keys() if isinstance(snapshot.get("agents"), dict) else (),
     )
-    for role, names in constraints["exclude"].items():
-        excludes[role] = sorted(set(excludes.get(role, [])) | set(names))
+    holds = _seat_holds(canonical, args.task, state, state_path)
+    for bars in (constraints, holds):
+        for role, names in bars["exclude"].items():
+            excludes[role] = sorted(set(excludes.get(role, [])) | set(names))
+    constraints = {**constraints, "rationale": constraints["rationale"] + holds["rationale"]}
     # Tier candidacy is decided per RESPONSIBILITY, so it reads the role-keyed
     # bars alone: a seat key would reach the planner's exclusion parser as an
     # unknown role (#434).
@@ -1192,6 +1202,8 @@ def cmd_apply(args, client=None, warn=None, trace=None):
     for role, name in assignments.items():
         if name in constraints["exclude"].get(role, []):
             raise UsageError("Assigned worker {} is ineligible for {} under current capabilities or contribution history; replan an independent capable worker.".format(name, role), {})
+    # A plan's holds can be stale by dispatch time; the send re-reads them (#483).
+    reserved = recovery.developer_reservations(store, state["assignments"])
     # `apply` measures nothing -- it re-reads the headroom the PLAN resolved its
     # tiers against, so a recomputed tier differs only when the config or the
     # fix context actually drifted, which is what the comparison below is for.
@@ -1231,6 +1243,7 @@ def cmd_apply(args, client=None, warn=None, trace=None):
                 tiers=tiers,
                 recovery=store, history=state["assignments"], plan_id=args.correction_plan, work=work,
                 retain_specialist=args.retain_specialist, requirements=requirements,
+                reserved=reserved,
             ),
             None,
         )
@@ -1313,6 +1326,7 @@ def cmd_apply(args, client=None, warn=None, trace=None):
             start_timeout_ms=args.start_timeout,
             allow_recovery=args.allow_recovery,
             tiers=tiers,
+            reserved=reserved,
             retrospective_guard=retrospective_runtime.Guard(state_path, state, client, agents_by_name, at,
                                                           task=args.task, retain=args.retain_context or args.retain_specialist, no_clear=args.no_clear),
         )
@@ -1399,6 +1413,8 @@ def cmd_recovery(args, client=None, warn=None, trace=None):
     data, at = _read_record(args.record), args.now or now_iso()
     if args.command == "task":
         result = recovery.register_task(store, data, at)
+    elif args.command == "close-task":
+        result = recovery.close_task(store, history, data, at)
     elif args.command == "checkpoint":
         judge = load_judge(_config_path(args))
         result = recovery.checkpoint(store, history, data, at, judge.agent if judge else None)
@@ -1685,7 +1701,7 @@ COMMANDS = {
     "apply": cmd_apply,
     "state": cmd_state,
     "status": cmd_status,
-    **{command: cmd_recovery for command in ("task", "checkpoint", "authorize-corrections", "authorize-approach", "recover-context", "recover-role-clear", "record-report", "record-refusal", "authorize-refused-dispatch", "diagnose", "reconcile", "record-release-clear", "import-correction", "record-historical-review", "recover-report", "assess-specialist")},
+    **{command: cmd_recovery for command in ("task", "checkpoint", "authorize-corrections", "authorize-approach", "recover-context", "recover-role-clear", "record-report", "record-refusal", "authorize-refused-dispatch", "diagnose", "reconcile", "record-release-clear", "import-correction", "record-historical-review", "recover-report", "assess-specialist", "close-task")},
     "detect-triggers": cmd_detect_triggers,
     "validate-partition": cmd_validate_partition,
     "verify-oracle": cmd_verify_oracle,

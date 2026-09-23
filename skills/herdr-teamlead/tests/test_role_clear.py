@@ -10,6 +10,7 @@ if ROOT not in sys.path:
 import copy
 import json
 import unittest
+from unittest.mock import patch
 
 from teamlead import recovery
 from teamlead.state import add_assignment, empty_state, save_state
@@ -54,7 +55,10 @@ class RoleClearTests(fixture.fixture.CliCase):
         args = self.apply_args("tester")
         args[args.index(TASK)] = CLEAR_TASK
         args[args.index("--now") + 1] = CLEAR_AT
-        code, output, err = self.invoke(args, self._client({"grok": "idle"}, sessions={"grok": "cleared-tester"}))
+        # This recovery records a reuse dispatched before apply enforced
+        # reservations (#483); reproduce one by lifting the hold for the seed.
+        with patch("teamlead.cli.recovery.developer_reservations", return_value={}):
+            code, output, err = self.invoke(args, self._client({"grok": "idle"}, sessions={"grok": "cleared-tester"}))
         self.assertEqual(code, 0, err)
         self.evidence.write_text(output)
         return {"id": "role-clear-next", "task": TASK, "base_revision": BASE, "assignment_index": fix,

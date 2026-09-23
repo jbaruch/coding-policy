@@ -39,7 +39,10 @@ RECOVERY_SCHEMA_VERSION = 1
 #: its saved result, so an interrupted judge recovers the mode it was sent for
 #: and the mode is part of the dispatch's identity (#478). An older store
 #: carrying the field anywhere is unowned newer data and is refused.
-RECOVERY_STORE_VERSION = 12
+#: Version 13 adds the `task_closed` event kind, which ends a task's developer
+#: reservation (#483). No collection is added; an older store carrying such an
+#: event is unowned newer data and is refused.
+RECOVERY_STORE_VERSION = 13
 REFUSAL_FIELDS = frozenset({"brief_identity", "refusal", "refusal_move", "provider"})
 SPECIALIST_DISPATCH_VERSION = 2
 #: Dispatch record version 3: a judge dispatch carrying the mode it was sent
@@ -90,6 +93,12 @@ DEFAULT_FIX_LIMIT = 5
 #: needs more than the task's own original allowance is not a bounded
 #: correction; the judge takes the next rung instead (#415).
 DIAGNOSIS_BOUND_CEILING = DEFAULT_FIX_LIMIT
+#: What ends a task's time on the team: its work landed, or it was dropped.
+TASK_CLOSE_OUTCOMES = ("merged", "abandoned")
+#: Fix rounds whose developer stays reserved to its task: the initial
+#: implementation (0) and the retained-context early fixes. Round 4 onward
+#: takes a freshly cleared worker (rules/agent-team-operation.md Fix Loops).
+RETAINED_FIX_ROUNDS = frozenset({0, 1, 2, 3})
 PENDING_STATUSES = frozenset({"reserved", "sending", "sent_but_not_started"})
 DISPATCH_STATUSES = PENDING_STATUSES | {"applied", "not_sent"}
 #: The wait-report reason a refusal receipt must carry (see wait-report.sh
@@ -204,7 +213,7 @@ def _refuse_unowned_legacy(store, version):
         carriers = [row] if isinstance(row, dict) else []
         if isinstance(row, dict):
             carriers += [part for part in (row.get("result"), row.get("context_before_send")) if isinstance(part, dict)]
-        if any("judge_mode" in part for part in carriers):
+        if version < 12 and any("judge_mode" in part for part in carriers):
             raise UsageError("Older recovery contains a judge mode this version never wrote; preserve it for owner recovery.", {})
         allowed = ALLOWED_AT_6 if version == 6 else REFUSAL_FIELDS if version >= 7 else frozenset()
         if not isinstance(row, dict) or REFUSAL_FIELDS.intersection(row) - allowed:
@@ -219,6 +228,11 @@ def _refuse_unowned_legacy(store, version):
                 or type(result.get("schema_version")) is not int
                 or result["schema_version"] != RECOVERY_SCHEMA_VERSION or DISPATCH_METADATA_FIELDS.intersection(result)):
             raise UsageError("Older recovery contains unowned newer dispatch results; preserve it for owner recovery.", {})
+    events = store.get("events")
+    if not isinstance(events, list):
+        raise UsageError("Older recovery requires an events array; restore the original owner-written store.", {})
+    if any(isinstance(row, dict) and row.get("kind") == "task_closed" for row in events):
+        raise UsageError("Older recovery contains a task closure this version never wrote; preserve it for owner recovery.", {})
     if version == 3:
         deliveries = store.get("delivery_recoveries")
         if not isinstance(deliveries, list):
@@ -463,6 +477,108 @@ def task_record(store, task):
     if record is None:
         raise UsageError("Task {!r} has no recorded base/scope. Run `teamlead task --record FILE` with its original brief and authorization; do not reset the task.".format(task), {})
     return record
+
+
+def close_task(store, assignments, data, at):
+    """Record that a task left the team, ending its developer reservation.
+
+    A `task_closed` event, owned from store version 13. The closure must follow the task's latest developer
+    assignment in time; a tied or backdated one would be recorded without
+    releasing anyone. A later developer assignment reopens the task (#483).
+    """
+    if not isinstance(data, dict) or set(data) != {"task", "outcome", "evidence"}:
+        raise UsageError("Close-task record requires exactly task, outcome and evidence.", {})
+    task = text(data["task"], "task")
+    if data["outcome"] not in TASK_CLOSE_OUTCOMES:
+        raise UsageError("Close-task outcome must be one of {}; record what actually happened to the task.".format(
+            ", ".join(TASK_CLOSE_OUTCOMES)), {})
+    text(data["evidence"], "evidence")
+    instant = timestamp(at, "Close-task time")
+    if task not in store["tasks"] and not any(row.get("task") == task for row in assignments):
+        raise UsageError("Task {!r} is neither registered nor assigned; check its identity with `teamlead state` before closing it.".format(task), {})
+    details = {"outcome": data["outcome"], "evidence": data["evidence"]}
+    # The same request replays from anywhere in history, even after the task
+    # reopened: closing a reopened task takes a new decision with new evidence.
+    recorded = next((row for row in store["events"] if row["kind"] == "task_closed"
+                     and row["task"] == task and row["details"] == details), None)
+    if recorded is not None:
+        return recorded
+    current = task_closure(store, assignments, task)
+    if current is not None:
+        if current["details"] != details:
+            raise UsageError("Task {!r} is already closed with another outcome or evidence; the first closure stands.".format(task), {})
+        return current
+    developer = _latest_developer_time(assignments, task)
+    if developer is not None and instant <= developer:
+        raise UsageError("Close-task time {} does not follow task {!r}'s latest developer assignment at {}; record the closure at the actual time it happened, after that round.".format(
+            at, task, developer.isoformat()), {})
+    _event(store, at, "task_closed", task, details)
+    return store["events"][-1]
+
+
+def _latest_developer_time(assignments, task):
+    latest = latest_assignment(assignments, task=task, role="developer", status="applied")
+    return None if latest is None else timestamp(latest[1].get("at"), "Assignment {} chronology".format(latest[0]))
+
+
+def _closure_time(row):
+    return timestamp(row["at"], "Close-task event {} time".format(row["sequence"]))
+
+
+def task_closure(store, assignments, task):
+    """The closure in force for `task`, or None while it is open.
+
+    Selected by event time, never append position. Only a closure after the
+    task's latest developer assignment counts: a later developer round
+    reopened the task. Tied closure times are uncertain and refused.
+    """
+    developer = _latest_developer_time(assignments, task)
+    closures = [row for row in store["events"] if row["kind"] == "task_closed" and row["task"] == task
+                and (developer is None or _closure_time(row) > developer)]
+    if not closures:
+        return None
+    newest = max(_closure_time(row) for row in closures)
+    tied = [row for row in closures if _closure_time(row) == newest]
+    if len(tied) != 1:
+        raise UsageError("Task {!r} closure chronology is uncertain: events {} share one time. Recover the original closure evidence; do not plan on a guess.".format(
+            task, ", ".join(str(row["sequence"]) for row in tied)), {})
+    return tied[0]
+
+
+def _closed_after(store, task, instant):
+    """Whether a `task_closed` event for `task` follows `instant`.
+
+    Bound to the developer row being examined, never to the task's latest
+    developer: a second worker reopening the task must not re-hold the first.
+    """
+    return any(row["kind"] == "task_closed" and row["task"] == task
+               and _closure_time(row) > instant
+               for row in store["events"])
+
+
+def developer_reservations(store, assignments):
+    """`{agent: task}` for each developer held through its task's early fixes.
+
+    rules/agent-team-operation.md Fix Loops reserves the developer through
+    initial and early-fix verification. The owner ledger holds everything
+    that decides it: a worker whose latest applied assignment is a developer
+    round in `RETAINED_FIX_ROUNDS` is held to that task until a
+    `task_closed` event follows. Any later assignment of the worker ends the
+    hold, which is how an authorized role clear reads. A reset foreman sees
+    the same holds the one before it kept in memory (#483).
+    """
+    held = {}
+    for agent in sorted({row["agent"] for row in assignments
+                         if row.get("role") == "developer" and row.get("status") == "applied" and row.get("agent")}):
+        latest = latest_assignment(assignments, agent=agent, status="applied")
+        if latest is None:
+            continue
+        row = latest[1]
+        if (row.get("role") == "developer" and row.get("task")
+                and (row.get("fix_round") or 0) in RETAINED_FIX_ROUNDS
+                and not _closed_after(store, row["task"], timestamp(row.get("at"), "Assignment {} chronology".format(latest[0])))):
+            held[agent] = row["task"]
+    return held
 
 
 def checkpoint(store, assignments, data, at, judge_agent):
@@ -1906,6 +2022,13 @@ def validate_store(store, assignments):
         for sequence, row in enumerate(store["events"], 1):
             if row["sequence"] != sequence or not isinstance(row["details"], dict):
                 raise UsageError("Recovery event history is malformed; preserve it for owner recovery.", {})
+            if row["kind"] == "task_closed":
+                details = row["details"]
+                if (set(details) != {"outcome", "evidence"} or details["outcome"] not in TASK_CLOSE_OUTCOMES
+                        or not isinstance(details["evidence"], str) or not details["evidence"].strip()
+                        or not isinstance(row.get("task"), str) or not row["task"].strip()):
+                    raise UsageError("Task-closed event {} is malformed; restore the owner-written closure before planning.".format(sequence), {})
+                timestamp(row.get("at"), "Close-task event {} time".format(sequence))
         # Imported records use these shared validators without a module-level cycle.
         from .historical import validate_history
         validate_history(store, assignments)

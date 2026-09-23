@@ -193,6 +193,8 @@ description: Running a multi-agent team — task-based specialist composition, c
 - An approach reset grants a bounded correction opportunity alone
 - It approves no source, waives no defect, removes no contributor exclusion, and satisfies no test, independent review or release gate
 - Reserve the developer through initial and early-fix verification before assigning it another task or role
+- The planner derives reservations and busy workers from the owner records, never from the foreman's memory
+- Close a task through the owner utility when it merges or is abandoned
 - Fix rounds 1–3 retain the same developer's context when the retention preconditions hold
 - Narrow exception for retaining context on a same-role fix round.
 - Preconditions (all required):

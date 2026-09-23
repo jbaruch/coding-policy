@@ -293,7 +293,7 @@ skills/herdr-teamlead/references/retrospectives.md
   ],
   "specialist_assessments": [],
   "recovery": {
-    "schema_version": 11,
+    "schema_version": 13,
     "tasks": {},
     "checkpoints": [],
     "plans": [],
@@ -359,7 +359,7 @@ document and arrives already stamped.
 
 ## Recovery records
 
-The recovery document uses `schema_version: 11`; individual records retain their
+The recovery document uses `schema_version: 13`; individual records retain their
 independent versions. Version 6 adds the dispatch fields `brief_identity`, `refusal` and
 `refusal_move` and the `refusal_authorizations` collection; version 7 adds the
 dispatch's send-time `provider`; version 8 adds the `diagnoses` collection;
@@ -368,7 +368,8 @@ to a seat, per Seat vs responsibility above; version 11 adds the `approaches`
 collection; version 12 adds `judge_mode` to a judge dispatch, its
 `context_before_send` and its saved result, and binds it into the dispatch
 fingerprint, so an adjudication and a diagnosis of one brief are separate
-dispatches. Only judge dispatches carry the field. The
+dispatches. Only judge dispatches carry the field. Version 13 adds the
+`task_closed` event kind. The
 owner stamps an older store on load, adds the empty collections, and refuses one
 already carrying a field — or a seat-named dispatch — its version did not own. Generic records remain version 1; stale-Grok delivery and
 composition-bearing dispatch/result records use version 2; a judge
@@ -396,7 +397,7 @@ replacement for live readiness, source review, or release gates.
 | `plans` | Unique `id`, `checkpoint`, original `base_revision`, `scope`, `allowed_paths`, `additional_fixes`, derived `first_fix`/`last_fix`, `authorization`; optional `supersedes` references a preserved prior approval. |
 | `dispatches` | Unique `id`, byte/input `fingerprint`, `role` (the SEAT, per the Writer / Reader Contract's Seat vs responsibility), `agent`, cumulative `fix_round`, `plan` or null, `work` or null, `status`, `result`, `report`, and `assignment_index` once an outcome is recorded. CLI records `brief`, `common`, `observed_before`, and `context_before_send`; reconciled retries preserve `prior_assignment_indices`. `provider` is the worker's config `kind` at send time, authoritative for the refusal's attribution. `brief_identity` digests the common and role brief bytes with the enrolled report path masked. `refusal` (`provider`, `reason`, `receipt`, `report_path`, `evidence`) appears once `record-refusal` binds an exit-5 receipt to an applied row's enrolled report; `refusal_move` (`from`, `from_provider`, `provider`) appears on the dispatch that carried the refused brief, same `brief_identity`, to another provider. |
 | `context_permissions` | Original `assignment_index`, `next_fix`, `reason`, `authorization`, `evidence`, `evidence_receipt`, later `observed_session`, and `basis: operator_authorized_fresh_handoff`. The original null session is never replaced. |
-| `events` | Append-only `sequence`, `kind`, and structured `details` preserving approvals, waiting states, reservations, send transitions, results, transport retries, superseded review receipts, and recovery decisions. |
+| `events` | Append-only `sequence`, `kind`, and structured `details` preserving approvals, waiting states, reservations, send transitions, results, transport retries, superseded review receipts, and recovery decisions. Kind `task_closed` carries `details.outcome` (`merged` or `abandoned`) and `details.evidence`; it ends the task's developer reservation until a later developer assignment reopens the task. Owned from recovery store version 13; an older store carrying one is refused as newer data. |
 | `hand_clearances` | Unique `id`, original release `assignment_index`, `previous_developer`, complete owner `input`, clear byte `receipts`, later `observed_session` or null, and `basis: verified_required_release_clear`. Both indices retain their original rows. The later observation never substitutes for historical proof; changed or missing current IDs do not invalidate archived clear evidence. |
 | `role_clearances` | Unique `id`, original `task`/`base_revision`, developer `assignment_index`, actual `clearing_assignment_index` and `clearing_dispatch`, `next_fix`, complete owner `input`, clear/authorization byte `receipts`, reused or explicit `clear_authority`, later `observed_session`, `basis: verified_authorized_role_clear`, and `grants_future_attempts: false`. The input fixes the same work and correction plan used for dispatch. Original known native proof and every earlier row remain unchanged. |
 | `historical_attempts` | Unique `id`, actual `fix_round`, `previous_developer`, appended `assignment_index`, original owner `input`, authorization/transport/report byte `receipts`, inspected `vcs` checkout/head/diff evidence, `basis: completed_authorized_manual_correction`, null `native_session_proof`, `grants_future_attempts: false`, and append-only `reviews`. |

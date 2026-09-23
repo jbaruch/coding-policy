@@ -58,7 +58,7 @@ from .chronology import latest_assignment
 from .recovery import JUDGE_MODES, empty_recovery, fresh_transition, task_record, validate_work
 from .launch import restart_worker, verify_running, verify_running_permissions
 from .tiers import canonical_role, launch_flags, require_seatable, worker_launch_args
-from .composition import normalize_requirement, parse_requirements
+from .composition import normalize_requirement, parse_requirements, seat_holds
 
 # Version 3 adds verified model-tier metadata to context and task/fix evidence.
 APPLY_SCHEMA_VERSION = 7
@@ -236,6 +236,20 @@ def validate_agents(assignments, agents_by_name):
                 ),
                 {"role": role, "agent": name},
             )
+
+
+def refuse_reserved(assignments, task, reserved):
+    """Refuse a developer reserved to another task, read at dispatch time.
+
+    `reserved` is `{agent: task}` from `recovery.developer_reservations`. A
+    plan's holds can be stale by dispatch time, so the send re-reads them
+    (#483).
+    """
+    held = seat_holds(list(assignments), task, reserved or {}, {})
+    for role, name in assignments.items():
+        if name in held["exclude"].get(role, []):
+            raise UsageError("Assigned worker {} is reserved as developer for {}. Replan, or close that task with `teamlead close-task` before reusing its developer.".format(
+                name, reserved[name]), {"agent": name, "task": reserved[name]})
 
 
 def validate_context_mode(assignments, no_clear, retain_context, task, fix_round, *, recovery=None, history=None, plan_id=None, work=None, retain_specialist=False, requirements=None):
@@ -582,7 +596,7 @@ def check_all_ready(client, assignments, agents_by_name, warn=None):
     return statuses
 
 
-def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle_timeout_ms=DEFAULT_SETTLE_TIMEOUT_MS, on_assigned=None, warn=None, sleep=time.sleep, settle_sec=COMPOSER_SETTLE_SEC, landing_attempts=LANDING_ATTEMPTS, start_timeout_ms=DEFAULT_START_TIMEOUT_MS, allow_recovery=False, task=None, retain_context=False, fix_round=None, judge_mode=None, history=None, tiers=None, recovery=None, plan_id=None, work=None, on_prepare=None, on_before_send=None, on_result=None, retrospective_guard=None, retain_specialist=False, requirements=None):
+def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle_timeout_ms=DEFAULT_SETTLE_TIMEOUT_MS, on_assigned=None, warn=None, sleep=time.sleep, settle_sec=COMPOSER_SETTLE_SEC, landing_attempts=LANDING_ATTEMPTS, start_timeout_ms=DEFAULT_START_TIMEOUT_MS, allow_recovery=False, task=None, retain_context=False, fix_round=None, judge_mode=None, history=None, tiers=None, recovery=None, plan_id=None, work=None, on_prepare=None, on_before_send=None, on_result=None, retrospective_guard=None, retain_specialist=False, requirements=None, reserved=None):
     """Hand each agent its brief using the selected context mode.
 
     `on_assigned(role, agent, at, status, context)` is called after each hand-off so the
@@ -631,6 +645,7 @@ def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle
     if specialist_prior is not None:
         name = next(iter(assignments.values()))
         verify_live_retention(specialist_prior, statuses[name]["context_session"], name)
+    refuse_reserved(assignments, task, reserved)
     steps = build_steps(
         client,
         assignments,
@@ -866,7 +881,7 @@ def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle
     }
 
 
-def dry_run(client, assignments, agents_by_name, paths, no_clear=False, settle_timeout_ms=DEFAULT_SETTLE_TIMEOUT_MS, retain_context=False, task=None, fix_round=None, tiers=None, recovery=None, history=None, plan_id=None, work=None, retain_specialist=False, requirements=None):
+def dry_run(client, assignments, agents_by_name, paths, no_clear=False, settle_timeout_ms=DEFAULT_SETTLE_TIMEOUT_MS, retain_context=False, task=None, fix_round=None, tiers=None, recovery=None, history=None, plan_id=None, work=None, retain_specialist=False, requirements=None, reserved=None):
     """Print the plan without contacting herdr at all.
 
     Deliberately makes zero herdr calls, including the status check: a dry run
@@ -878,6 +893,7 @@ def dry_run(client, assignments, agents_by_name, paths, no_clear=False, settle_t
                                        retain_specialist=retain_specialist, requirements=requirements)
     if retain_specialist:
         validate_specialist_history(assignments, history, task, requirements, tiers)
+    refuse_reserved(assignments, task, reserved)
     result = {
         "schema_version": APPLY_SCHEMA_VERSION,
         "dry_run": True,
