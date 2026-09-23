@@ -18,6 +18,11 @@
   `herdr-standup`, their references and the worker brief templates now says
   foreman.
 
+  The report classifier's prompt keeps "the lead" for now: its measured
+  accuracy is tied to that exact prompt through the question hash every label
+  carries, so its wording changes with its next revision and a re-run eval,
+  not with a rename.
+
   Unchanged on purpose: the skill name `herdr-teamlead`, the `teamlead` CLI and
   package, state and ledger field names, and code literals such as
   `<lead-label>` and the `lead` workspace label. Renaming a state field forces
