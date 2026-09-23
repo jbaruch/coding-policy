@@ -30,7 +30,7 @@
   `apply` measures nothing, so it re-reads the headroom the plan resolved
   against rather than recomputing without it; without that, a de-escalated
   plan would refuse itself at dispatch with "Plan tiers differ from current
-  config or fix context". Plan document schema 8 → 9.
+  config or fix context". Plan document schema 8 → 9, ledger schema 6 → 7 with an owner migration.
 
   All of this was latent: no worker in the audited roster carries a tier table,
   so `select_tier` has never resolved a non-judge round. It lands before the
