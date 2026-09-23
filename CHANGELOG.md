@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.252 — 2026-09-23
+
 ### Changed
 
 - **Escalation is no longer one-way, and a tester round is no longer expensive
