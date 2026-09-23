@@ -8,6 +8,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from teamlead.errors import UsageError
 from teamlead.load_set import build
 from teamlead.recovery import register_task
 from teamlead.state import add_assignment, empty_state, save_state
@@ -103,6 +104,14 @@ class DecisionTest(unittest.TestCase):
         self.assertNotIn("/r/{}.report.md".format(ids["rev1"]), paths(gate))
         self.assertIn("/r/manual-2-review.md", paths(run(state, ids, "brief", task="t")))
         self.assertIn("/r/manual-2.md", paths(run(state, ids, "diagnose", task="t")))
+
+    def test_an_unknown_send_outcome_refuses_round_decisions(self):
+        state, ids = two_rounds()
+        state["recovery"]["dispatches"][-1]["status"] = "sent_but_not_started"
+        for decision in ("brief", "gate", "diagnose"):
+            with self.subTest(decision=decision), self.assertRaisesRegex(UsageError, "unknown send outcome: " + ids["test1"]):
+                run(state, ids, decision, task="t")
+        self.assertIsNotNone(run(state, ids, "plan", task="t"))
 
     def test_a_spent_correction_plan_is_not_offered(self):
         state, ids = two_rounds()

@@ -19,6 +19,10 @@ and each open attention item in full):
   specialist assessments with their reports, checkpoints, diagnoses,
   approaches and correction plans
 
+`brief`, `gate` and `diagnose` refuse while the task has a dispatch with an
+unknown send outcome; reconcile it first. `brief` reads blocking review
+receipts, superseded ones included.
+
 Imported historical corrections have no dispatch, so `brief` and `gate` read
 the current round's imports from `historical_attempts` too. `brief` names a
 correction plan only while its last fix is unspent.
@@ -32,7 +36,8 @@ and nothing may remove an entry (#483 decision 2). Files are listed with
 
 from .chronology import latest_assignment, timestamp
 from .foreman_queue import waiting
-from .recovery import active_plans, confirmed_fix, current_approach, developer_reservations, task_statuses
+from .errors import UsageError
+from .recovery import PENDING_STATUSES, active_plans, confirmed_fix, current_approach, developer_reservations, task_statuses
 
 LOAD_SET_SCHEMA_VERSION = 1
 DECISIONS = ("plan", "brief", "gate", "diagnose", "wake")
@@ -136,6 +141,14 @@ def build(state, reports, attention_entries, busy_tasks, decision, *, task=None,
         records["dispatch"] = row
         if row is not None:
             _add_dispatch_files(files, row, reports)
+    if decision in ("brief", "gate", "diagnose"):
+        pending = sorted(row["id"] for row in store["dispatches"]
+                         if row.get("task") == task and row.get("status") in PENDING_STATUSES)
+        if pending:
+            # An unknown send outcome is reconciled before anything reads the
+            # round as complete (Dispatch Safety).
+            raise UsageError("Task {!r} has dispatches with an unknown send outcome: {}. Reconcile each with `teamlead reconcile` before this decision.".format(
+                task, ", ".join(pending)), {"task": task, "pending": pending})
     start = _round_start(assignments, task) if task is not None else None
     if decision == "plan":
         records["queue"] = next((entry for entry in waiting(store, assignments, busy_tasks)["queue"]
@@ -149,9 +162,7 @@ def build(state, reports, attention_entries, busy_tasks, decision, *, task=None,
         for row in records["historical_attempts"]:
             _add_historical_files(files, row)
         if decision == "brief":
-            receipts = [row["report"] for row in store["dispatches"]
-                        if row.get("task") == task and isinstance(row.get("report"), dict)
-                        and row["report"].get("verdict") == "blocking"]
+            receipts = [receipt for receipt in _review_receipts(store, task) if receipt.get("verdict") == "blocking"]
             for receipt in receipts:
                 files.add(receipt.get("report"), "blocking review receipt at {}".format(receipt.get("head_revision")))
             for row in _historical(store, assignments, task):

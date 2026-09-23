@@ -17,7 +17,9 @@
   with their reports. Imported historical corrections have no dispatch, so
   they join from `historical_attempts` with their reports and review
   receipts. `brief` offers a correction plan only while its last fix is
-  unspent. Open attention items come back in full, with their
+  unspent. `brief`, `gate` and `diagnose` refuse while the task has a
+  dispatch with an unknown send outcome, so it gets reconciled first. Open
+  attention items come back in full, with their
   context, consequence and resolution condition. An unknown task or
   enrollment is refused. A missing file is listed with
   `present: false` instead of being dropped. This is the must-load set from
