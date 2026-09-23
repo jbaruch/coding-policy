@@ -9,38 +9,6 @@ SHA. Fixes carry the prior attempt count and required ownership handoff.
 Verification names `full` or `scoped`, prior findings, and the follow-up for new
 advisories. Final release verification is `full`.
 
-## Per-Task Sequences
-
-The owner commands for work a round repeats per task, in order. Run them one
-by one; each is documented in the step named.
-
-**Start a task**
-
-1. `teamlead task --record <task.json>` — register the original base, scope and authorization (Step 5)
-2. `teamlead detect-triggers` — classify the planned surfaces (SKILL.md Step 5)
-3. `provision-worktree.sh` — the developer's checkout (Step 8)
-
-**Verify a pushed tip**
-
-1. `review-package.sh <base> <head> <out>` — the package both verifiers read (Step 6)
-2. `provision-worktree.sh` — the tester's checkout of the pushed branch (Step 8)
-3. `teamlead plan --roles reviewer,tester --task <task>` — one plan for both seats. Contribution exclusions, reservations and busy workers are applied automatically; pass `--exclude` only for an operator-named bar (Step 5)
-
-**Check one report**
-
-1. `teamlead supervision-status` — the enrollment's `assignment.agent` and `assignment.report`
-2. `teamlead state` — the dispatch's recorded send time
-3. `wait-report.sh --once --since <sent-at> <agent> <report>` — one delivery checkpoint (SKILL.md Step 11)
-
-**Retire an assignment after reading its report**
-
-1. `teamlead assess-specialist --record <file>` — consultations only (`references/specialists.md`)
-2. `teamlead supervision-drain` — the `through` bound
-3. `teamlead supervision-ack --record <file>` — the handled events
-4. `teamlead supervision-resolve --record <file>` — end the observation obligation
-
-The acknowledge and resolve records are in `references/supervision.md`.
-
 ## Step 2 — Verify Herdr and the Roster
 
 ```bash

@@ -24,10 +24,12 @@ Follow `rules/agent-team-operation.md` for round constraints.
 Each command resolves `CP` to the local or home plugin. Repeat its resolver in
 every call. Prose `skills/...` paths are relative to that root.
 
-Run each step's owner command as written. Never write a helper script that
-chains them, and never name a scratch file in a handoff. The recurring
-per-task sequences are in `skills/herdr-teamlead/references/round-setup.md`
-Per-Task Sequences.
+- Run each step's commands as that step documents them
+- Never write a throwaway helper script in a scratch directory
+- Never name a scratch file in a handoff
+- A command sequence you repeat across tasks belongs in a tested script
+  shipped with this skill; record it as a follow-up rather than scripting it
+  locally
 
 References:
 

@@ -2,15 +2,18 @@
 
 ### Changed
 
-- **The Herdr foreman runs owner commands directly instead of private helper
-  scripts.** In the #483 audit, the foreman wrote four scratch scripts
-  (`pkg-setup.sh`, `verify-setup.sh`, `check-member.sh`, `close-member.sh`),
-  each chaining three or four owner commands. Its handoff then pointed at
-  them after the scratch directory was gone. The skill now forbids chaining
-  helpers and scratch-file references in handoffs.
-  `references/round-setup.md` gains Per-Task Sequences, which lists the owner
-  commands each helper ran, in order. Two of the helpers also built
-  `--exclude` lists by hand, and #504 made those bars automatic.
+- **The Herdr foreman no longer writes throwaway helper scripts.** In the
+  #483 audit, the foreman wrote four scratch scripts (`pkg-setup.sh`,
+  `verify-setup.sh`, `check-member.sh`, `close-member.sh`), each chaining
+  three or four owner commands, and its handoff pointed at them after the
+  scratch directory was gone. The skill now forbids throwaway scratch
+  helpers and scratch-file references in handoffs. A sequence the foreman
+  repeats across tasks is deterministic orchestration, so under
+  `rules/script-delegation.md` it belongs in a tested script shipped with the
+  skill. The foreman records it as a follow-up instead of scripting it
+  locally. An earlier draft listed the sequences in `round-setup.md`
+  instead, and review showed the list restated the steps out of order and
+  without their required flags.
 
 ## 0.3.260 — 2026-09-23
 
