@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.260 — 2026-09-23
+
 ### Added
 
 - **`teamlead foreman-queue` lists the open tasks waiting for a seat.** The
