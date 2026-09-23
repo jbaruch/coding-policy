@@ -1,5 +1,23 @@
 # Changelog
 
+### Added
+
+- **`teamlead load-set` lists the records one foreman decision depends on.**
+  #483 resets the foreman at every round boundary and loads per decision
+  instead of carrying the session. The records a decision needs are already
+  linked in the owner store: a task's dispatches carry their brief and common
+  paths, enrollments carry report paths, and dispatches carry review receipts
+  and recovery decisions. The command joins those links for `plan`, `brief`,
+  `gate`, `diagnose` (by task) and `wake` (by enrollment). Each set includes
+  the task core: the record, budget status and open attention items.
+
+  `gate` reads the current round, from the task's latest developer
+  assignment on. `diagnose` reads every round. A missing file is listed with
+  `present: false` instead of being dropped. This is the must-load set from
+  #483 decision 2: a floor that an add-only lesson classifier may add to
+  later, and that nothing may trim. The command is read-only and refuses an
+  unusable state file.
+
 ### Changed
 
 - **The Herdr foreman no longer writes throwaway helper scripts.** In the

@@ -1,0 +1,145 @@
+"""Each foreman decision loads the owner-linked records it depends on (#483)."""
+
+import json
+import sys
+import unittest
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from teamlead.load_set import build
+from teamlead.recovery import register_task
+from teamlead.state import add_assignment, empty_state, save_state
+from tests.test_cli import CliCase
+
+DEV_0 = "2026-09-23T08:00:00+00:00"
+REVIEW_0 = "2026-09-23T08:30:00+00:00"
+DEV_1 = "2026-09-23T09:00:00+00:00"
+REVIEW_1 = "2026-09-23T09:30:00+00:00"
+TEST_1 = "2026-09-23T09:40:00+00:00"
+
+
+def dispatch(state, at, role, agent, task="t", fix_round=None, **extra):
+    add_assignment(state, at, role, agent, task=task, fix_round=fix_round)
+    identifier = "{}-{}:{}".format(task, len(state["assignments"]), role)
+    state["recovery"]["dispatches"].append({"id": identifier, "task": task, "role": role, "agent": agent,
+                                            "status": "applied", "assignment_index": len(state["assignments"]) - 1,
+                                            "brief": "/r/{}.brief.md".format(identifier), "common": "/r/COMMON.md",
+                                            "report": None, **extra})
+    return identifier
+
+
+def two_rounds():
+    state = empty_state()
+    register_task(state["recovery"], {"task": "t", "base_revision": "a" * 40, "scope": "fix it", "allowed_paths": ["src/*"],
+                                      "authorization": {"source": "operator", "quote": "go"}}, DEV_0)
+    ids = {"dev0": dispatch(state, DEV_0, "developer", "grok"),
+           "rev0": dispatch(state, REVIEW_0, "reviewer", "claude"),
+           "dev1": dispatch(state, DEV_1, "developer", "grok", fix_round=1),
+           "rev1": dispatch(state, REVIEW_1, "reviewer", "claude"),
+           "test1": dispatch(state, TEST_1, "tester", "codex")}
+    state["recovery"]["dispatches"][0]["report"] = {"verdict": "blocking", "head_revision": "b" * 40,
+                                                    "report": "/r/review-blocking.md"}
+    return state, ids
+
+
+def reports(ids):
+    return {identifier: "/r/{}.report.md".format(identifier) for identifier in ids.values()}
+
+
+def paths(result):
+    return [row["path"] for row in result["files"]]
+
+
+def run(state, ids, decision, **target):
+    return build(state, reports(ids), {}, set(), decision, exists=lambda path: path != "/r/missing.md", **target)
+
+
+class DecisionTest(unittest.TestCase):
+    def test_gate_loads_every_brief_and_report_of_the_current_round_only(self):
+        state, ids = two_rounds()
+        result = run(state, ids, "gate", task="t")
+        self.assertEqual(result["round_start"], DEV_1)
+        for key in ("dev1", "rev1", "test1"):
+            self.assertIn("/r/{}.brief.md".format(ids[key]), paths(result))
+            self.assertIn("/r/{}.report.md".format(ids[key]), paths(result))
+        self.assertNotIn("/r/{}.report.md".format(ids["rev0"]), paths(result))
+        self.assertEqual(paths(result).count("/r/COMMON.md"), 1)
+
+    def test_brief_loads_this_rounds_reports_and_every_blocking_receipt(self):
+        state, ids = two_rounds()
+        result = run(state, ids, "brief", task="t")
+        self.assertIn("/r/review-blocking.md", paths(result))
+        self.assertIn("/r/{}.report.md".format(ids["rev1"]), paths(result))
+        self.assertIn("/r/{}.brief.md".format(ids["dev1"]), paths(result))
+        self.assertNotIn("/r/{}.brief.md".format(ids["rev1"]), paths(result))
+        self.assertIn("correction_plan", result["records"])
+
+    def test_diagnose_loads_every_round(self):
+        state, ids = two_rounds()
+        result = run(state, ids, "diagnose", task="t")
+        for key in ids:
+            self.assertIn("/r/{}.report.md".format(ids[key]), paths(result))
+        self.assertEqual(set(result["records"]), {"checkpoints", "diagnoses", "approaches", "plans"})
+
+    def test_plan_names_the_queue_entry_and_the_reserved_developer(self):
+        state = empty_state()
+        dispatch(state, DEV_0, "developer", "grok")
+        result = build(state, {}, {}, set(), "plan", task="t", exists=lambda path: True)
+        self.assertEqual(result["records"]["queue"]["waiting_for"], ["reviewer", "tester"])
+        self.assertEqual(result["records"]["reserved_developer"], ["grok"])
+
+    def test_wake_is_keyed_by_enrollment(self):
+        state, ids = two_rounds()
+        result = run(state, ids, "wake", enrollment=ids["rev1"])
+        self.assertEqual(result["task"], "t")
+        self.assertEqual(paths(result), ["/r/{}.brief.md".format(ids["rev1"]), "/r/COMMON.md",
+                                         "/r/{}.report.md".format(ids["rev1"])])
+
+    def test_a_missing_report_is_listed_not_dropped(self):
+        state, ids = two_rounds()
+        result = build(state, {ids["rev1"]: "/r/missing.md"}, {}, set(), "gate", task="t",
+                       exists=lambda path: path != "/r/missing.md")
+        self.assertIn({"path": "/r/missing.md", "why": "report for reviewer " + ids["rev1"], "present": False},
+                      result["files"])
+
+    def test_core_carries_open_attention_for_the_task_only(self):
+        state, ids = two_rounds()
+        entries = {"q": {"id": "q", "kind": "question", "title": "Advisory?", "status": "open", "task": "t"},
+                   "done": {"id": "done", "kind": "question", "title": "x", "status": "resolved", "task": "t"},
+                   "other": {"id": "other", "kind": "blocker", "title": "y", "status": "open", "task": "u"}}
+        result = build(state, reports(ids), entries, set(), "gate", task="t", exists=lambda path: True)
+        self.assertEqual([row["id"] for row in result["core"]["attention"]], ["q"])
+        self.assertEqual(result["core"]["task"]["scope"], "fix it")
+
+
+class LoadSetCommandTest(CliCase):
+    def test_wake_needs_an_enrollment_and_the_rest_need_a_task(self):
+        save_state(self.state, empty_state())
+        for argv in (["--decision", "wake", "--task", "t"], ["--decision", "gate", "--enrollment", "e"]):
+            with self.subTest(argv=argv):
+                code, _, err = self.run_cli(self.base() + ["load-set", *argv])
+                self.assertEqual(code, 1)
+                self.assertIn("--enrollment for wake and --task", err)
+
+    def test_command_returns_the_load_set(self):
+        state = empty_state()
+        register_task(state["recovery"], {"task": "t", "base_revision": "a" * 40, "scope": "fix it",
+                                          "allowed_paths": ["src/*"], "authorization": {"source": "operator", "quote": "go"}}, DEV_0)
+        add_assignment(state, DEV_0, "developer", "grok", task="t")
+        save_state(self.state, state)
+        code, out, err = self.run_cli(self.base() + ["load-set", "--decision", "plan", "--task", "t"])
+        self.assertEqual(code, 0, err)
+        result = json.loads(out)
+        self.assertEqual((result["decision"], result["core"]["task"]["scope"]), ("plan", "fix it"))
+        self.assertEqual(result["records"]["reserved_developer"], ["grok"])
+
+    def test_an_unusable_state_file_fails(self):
+        self.state.write_text('{"schema_version": 2, broken', encoding="utf-8")
+        code, _, err = self.run_cli(self.base() + ["load-set", "--decision", "plan", "--task", "t"])
+        self.assertEqual(code, 1)
+        self.assertIn("unusable", err)
+
+
+if __name__ == "__main__":
+    unittest.main()

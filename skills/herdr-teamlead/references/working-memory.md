@@ -97,6 +97,26 @@ The output supplies `memory_path`, the stow record and receipts for each require
 
 `reset_ready` is false if the stow has gaps or any required file has changed or become unavailable. A true value covers only the saved local capture and its unchanged required files. It does not prove that the foreman captured every conversation fact, reconcile a fleet, satisfy the supervision gate, authorize interruption, or accept tasks. The foreman must still apply the separate handoff and supervision rules. New unresolved knowledge after the stow requires a new stow id.
 
+## Load a decision's records
+
+`teamlead load-set` lists the durable records one foreman decision depends on,
+joined from the owner records rather than recalled:
+
+```text
+teamlead load-set --decision plan|brief|gate|diagnose --task <task>
+teamlead load-set --decision wake --enrollment <enrollment-id>
+```
+
+Output: `{"schema_version": 1, "decision", "task", "enrollment", "round_start",
+"core", "records", "files"}`. `core` holds the task record, its budget status
+and its open attention items. `files` lists `{"path", "why", "present"}` in
+load order. A missing file stays listed with `present: false`. What each
+decision adds is the contract in `skills/herdr-teamlead/teamlead/load_set.py`
+(module docstring). Read every listed file before deciding. The set is a
+floor: lessons from `memory-list` come on top, and nothing on the list is
+skipped. A non-zero exit names an unusable state file, or a missing or
+mismatched `--task` / `--enrollment`, on stderr.
+
 ## Persistence contract
 
 Owner and sole writer: `herdr-teamlead`. Its memory commands work without configuration, Herdr, dispatch-state reads or worker contact. Other readers may read the documented schema but never migrate or edit it. Memory reads create no files, take no lock, and never refresh evidence or verification timestamps.
