@@ -16,7 +16,9 @@
   its own recovery. A version-1 stow upgrades on read. Each free-text gap
   becomes `{"missing": <text>, "task": "unrecorded", "recovery": {"ask":
   <a question quoting it>}}`, because the old gap recorded no task or
-  recovery, and asking the operator is the only honest one. The owner's
+  recovery, and asking the operator is the only honest one. A migrated gap
+  names no task, so it keeps `reset_ready` false until a new stow records it
+  with its actual task. The owner's
   first read or write of such a document persists the upgrade under its
   lock. A document with nothing to migrate is still read with no lock and no
   write. Lesson and source records stay at version 1.

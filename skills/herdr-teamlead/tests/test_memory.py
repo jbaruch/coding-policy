@@ -194,6 +194,11 @@ class MemoryTest(unittest.TestCase):
                 self.assertEqual(result["record"]["gaps"], [self.gap(recovery)])
                 self.assertTrue(result["record"]["reset_ready"])
 
+    def test_a_new_gap_cannot_claim_the_unrecorded_task_to_skip_naming_one(self):
+        result = self.stow({**self.capture, "gaps": [{"missing": "x", "task": memory.UNRECORDED_TASK,
+                                                      "recovery": {"ask": "q"}}]})
+        self.assertFalse(result["record"]["reset_ready"])
+
     def test_a_gap_without_a_usable_recovery_is_refused(self):
         for gap in ("The ledger is unavailable.",
                     {"missing": "x", "task": "t"},
@@ -220,6 +225,7 @@ class MemoryTest(unittest.TestCase):
         gap = shown["gaps"][0]
         self.assertEqual((gap["missing"], gap["task"]), (text, memory.UNRECORDED_TASK))
         self.assertIn(text, gap["recovery"]["ask"])
+        self.assertFalse(shown["reset_ready"])
         # The owner's read persists the upgrade.
         self.assertEqual(self.raw()["records"][1]["schema_version"], memory.STOW_VERSION)
         self.assertEqual(self.raw()["records"][1]["gaps"], shown["gaps"])

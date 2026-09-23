@@ -20,8 +20,8 @@ SCHEMA_VERSION = 1
 #: Stow record version. 1 held free-text gaps. 2 makes each gap structured:
 #: what is missing, which task it affects, and exactly one recovery -- a file
 #: to re-read, a question for the operator, or an accepted loss with its
-#: reason (#483). A version-1 stow upgrades on read (see `_migrate_stow`)
-#: and the owner rewrites it on its next write.
+#: reason (#483). A version-1 stow upgrades on read (see `_migrate_stow`),
+#: and the owner's first read or write persists the upgrade.
 STOW_VERSION = 2
 STOW_VERSIONS = frozenset({SCHEMA_VERSION, STOW_VERSION})
 GAP_RECOVERIES = ("reread", "ask", "accept")
@@ -225,8 +225,8 @@ def _load(path):
                  "Memory document has an unsupported schema or state identity; preserve it and update the owner skill or restore its backup.")
         ids, lessons = set(), {}
         previous_time = None
-        # Validate each record at its saved version, then upgrade it; the next
-        # owner write persists the upgrade (rules/stateful-artifacts.md).
+        # Validate each record at its saved version, then upgrade it; `load`
+        # and `_append` persist the upgrade (rules/stateful-artifacts.md).
         saved_versions = [row.get("schema_version") if isinstance(row, dict) else None for row in document["records"]]
         document["records"] = [_migrate_stow(_validated(row)) for row in document["records"]]
         migrated = saved_versions != [row["schema_version"] for row in document["records"]]
@@ -313,9 +313,10 @@ def _view(row, at):
         result["expired"] = row["expires_at"] is not None and timestamp(at, "Checkpoint") >= timestamp(row["expires_at"], "Expiry")
         result["use_requires_live_verification"] = True
     else:
-        # Every stow is version 2 once loaded, and a structured gap names its
-        # own recovery, so gaps no longer block a reset (#483).
-        result["reset_ready"] = all(source["observation"] == "same_bytes" for source in result[source_key])
+        # A structured gap names its own recovery and no longer blocks a reset.
+        # A migrated gap names no task, so it blocks until a new stow names one.
+        named = all(gap["task"] != UNRECORDED_TASK for gap in row["gaps"])
+        result["reset_ready"] = named and all(source["observation"] == "same_bytes" for source in result[source_key])
         result["readiness_scope"] = "local_capture_only"
     return result
 
