@@ -1,5 +1,17 @@
 # Changelog
 
+### Changed
+
+- **The Herdr foreman runs owner commands directly instead of private helper
+  scripts.** In the #483 audit, the foreman wrote four scratch scripts
+  (`pkg-setup.sh`, `verify-setup.sh`, `check-member.sh`, `close-member.sh`),
+  each chaining three or four owner commands. Its handoff then pointed at
+  them after the scratch directory was gone. The skill now forbids chaining
+  helpers and scratch-file references in handoffs.
+  `references/round-setup.md` gains Per-Task Sequences, which lists the owner
+  commands each helper ran, in order. Two of the helpers also built
+  `--exclude` lists by hand, and #504 made those bars automatic.
+
 ## 0.3.260 — 2026-09-23
 
 ### Added
