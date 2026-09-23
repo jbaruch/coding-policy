@@ -17,6 +17,9 @@
   #483 decision 2: a floor that an add-only lesson classifier may add to
   later, and that nothing may trim. The command is read-only and refuses an
   unusable state file.
+||||||| bc3cb83
+
+## 0.3.261 — 2026-09-23
 
 ### Changed
 
