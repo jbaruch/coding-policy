@@ -53,7 +53,7 @@ Prior contributions relevant to this assignment:
 Record any design, implementation or artifact content you originated or
 materially shaped, including contributions made in another role or session.
 Separate advice that shapes the solution from independent assessment. A cleared
-session, new role or different model does not erase authorship. The lead will
+session, new role or different model does not erase authorship. The foreman will
 obtain independent verification of a contributor's work through the normal
 reviewer and tester gates.
 
@@ -66,7 +66,7 @@ Write `{{REPORT}}` with:
 - Facts, recommendations, hypotheses and unresolved gaps distinguished.
 - For each finding, its severity, the accepted behavior it serves and the
   observable effect of the proposed correction. Identify added obligations for
-  the lead's scope decision; a finding cannot authorize them.
+  the foreman's scope decision; a finding cannot authorize them.
 - Material contributions to the proposed solution, decisions needing user
   attention, and evidence-linked lesson candidates with their project scope.
 

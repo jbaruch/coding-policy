@@ -1,9 +1,9 @@
-# Team-Lead State Schema
+# Foreman State Schema
 
 Schemas for the cross-invocation artifacts owned by `herdr-teamlead`, per
 `rules/stateful-artifacts.md`. The Python utility alone writes and migrates
-`state.json`. The lead maintains the separate Markdown task ledger; the utility
-does not parse or update that document. The lead drafts retrospective synthesis;
+`state.json`. The foreman maintains the separate Markdown task ledger; the utility
+does not parse or update that document. The foreman drafts retrospective synthesis;
 the utility alone records the saved notes and their separate index.
 
 ## Artifacts
@@ -12,7 +12,7 @@ the utility alone records the saved notes and their separate index.
 | ---- | ----- | ------- |
 | `$XDG_STATE_HOME/teamlead/state.json` (default `~/.local/state/teamlead/state.json`, override `--state FILE`) | `skills/herdr-teamlead/teamlead/state.py` and its `recovery.py` helper, within the same owner skill | Snapshots, append-only assignments, and audited task recovery |
 | `$XDG_CONFIG_HOME/teamlead/config.json` (default `~/.config/teamlead/config.json`, override `--config FILE`) | the operator | Per-agent usage / clear commands; teamlead reads it and never writes it |
-| `<task-reports-dir>/TASK-LEDGER.md` | `herdr-teamlead`, written by the lead | Evidence-backed assignment acceptance and task completion across rounds |
+| `<task-reports-dir>/TASK-LEDGER.md` | `herdr-teamlead`, written by the foreman | Evidence-backed assignment acceptance and task completion across rounds |
 | `<canonical-state-path>.retrospectives/` | `herdr-teamlead`, through its retrospective utility | Immutable retrospective notes, versioned index, and transition coverage |
 
 The JSON formats and utility contracts below apply to `state.json` and config.
@@ -57,7 +57,7 @@ pre-dispatch gate the seat is held to. Model and effort become explicit launch f
 values are ignored: proof comes from launch or live process argv. The planner
 never ranks the judge seat or gives its pinned worker another role.
 
-Plan schema 5 also carries `tiers` keyed by role and `rounds` with the lead's
+Plan schema 5 also carries `tiers` keyed by role and `rounds` with the foreman's
 round type and context inputs. Legacy non-tiered assignments have no tier
 metadata. The operator's tier table, supported flags, and billing evidence are documented in `references/model-tiers.md`.
 `task_context` is null for an unlabelled plan, otherwise an object containing
@@ -120,7 +120,7 @@ number is refused, naming the file and the role. `plan` is the only reader.
 
 Choose one absolute task reports directory outside the shared checkout and
 worker worktrees. Keep `TASK-LEDGER.md` there across fixes, releases, and resumes.
-Record its absolute path in the saved task authorization context and the lead's
+Record its absolute path in the saved task authorization context and the foreman's
 handoff before first dispatch. Do not move or delete it during worktree cleanup.
 It replaces the informal round log, not the utility's dispatch/recovery ledger.
 
@@ -137,21 +137,21 @@ required fields; unavailable values are the literal `unknown`, never guesses:
 | `dispatch_id`, `worker`, `role` | Actual utility dispatch identity and assigned worker/role; `not_applicable` for task events |
 | `report` | Absolute report path, or `unknown` before it is known |
 | `observed` | Source-attributed dispatch result, wait result, worker claim, or Herdr state; never an acceptance decision |
-| `decision` | Lead assessment using the status vocabulary in `references/task-ledger.md` |
+| `decision` | Foreman assessment using the status vocabulary in `references/task-ledger.md` |
 | `head_revision` | Full inspected commit SHA, `unknown` when unverified, or `not_applicable` for work without a VCS artifact |
 | `evidence` | Absolute report/artifact paths with the inspected content or digest, VCS refs, and gate/run URLs with their observed results; `unknown` when none exists |
 | `assessment` | Why this decision follows from the evidence, remaining criteria, and the next action |
 
 The task identity and base in the document apply to every event. Append a new
 decision when evidence changes; preserve earlier records. Event sections may
-contain prose under `assessment` for the lead's reasoning. This is a human-readable
+contain prose under `assessment` for the foreman's reasoning. This is a human-readable
 decision log, not a new machine status API or an input to `teamlead.sh apply`.
 
-- **Writer** — the lead running `herdr-teamlead` writes after dispatch, after
+- **Writer** — the foreman running `herdr-teamlead` writes after dispatch, after
   every wait outcome, after report assessment, and before any pause or handoff.
   It also records gate changes, judge decisions, release evidence, and cleanup.
-  One active lead writes a task ledger; transfer ownership explicitly on handoff.
-- **Readers** — a resumed lead and `herdr-standup` read schema 1 without changing
+  One active foreman writes a task ledger; transfer ownership explicitly on handoff.
+- **Readers** — a resumed foreman and `herdr-standup` read schema 1 without changing
   its meaning. Workers never write it. Standup reads it without migration and
   labels unaccepted worker claims as reported; it grants no completion status.
 - **Authority** — decisions refer to inspected evidence. Revalidate sources
@@ -182,13 +182,13 @@ Resolve the selected state path with `Path(...).expanduser().resolve()` and appe
 the literal `.retrospectives`. This directory survives task worktree and report
 staging cleanup. Its owner is `herdr-teamlead`; only
 `skills/herdr-teamlead/teamlead/retrospective.py` and the owner's dispatch helpers
-write it. The lead supplies Markdown synthesis and source metadata through
+write it. The foreman supplies Markdown synthesis and source metadata through
 `retro-record`, never edits its index or installed notes directly.
 
 | File | Contract |
 | --- | --- |
 | `index.json` | Schema 1 object with canonical `state_path`, nullable `baseline_at`, append-only `records`, and recorded `transitions` |
-| `<id>.md` | Immutable UTF-8 completed note with schema 1 metadata and the lead's substantive synthesis |
+| `<id>.md` | Immutable UTF-8 completed note with schema 1 metadata and the foreman's substantive synthesis |
 | `pending.json` | Schema 1 transaction journal with `previous_index` digest and proposed `record`; removed after the index commit |
 | `index.json.lock` | Utility lock; writers acquire it after the dispatch-state lock |
 
@@ -209,7 +209,7 @@ Each completed `records` entry carries these fields:
 
 The saved note begins with a JSON metadata object between `---` delimiters:
 `schema_version`, `id`, `completed_at`, `period_start`, `period_end`, `triggers`,
-`tasks`, `participants`, `unavailable`, `sources`, and `coverage`. The lead's
+`tasks`, `participants`, `unavailable`, `sources`, and `coverage`. The foreman's
 Markdown follows it. Recording retries retain the original completion time.
 
 Coverage binds the worker's latest original assignment identity, available
@@ -240,7 +240,7 @@ a proposed transition is independent of the daily due decision.
 
 - **Writer** — the utility validates recording metadata and required nonempty
   synthesis sections, reads source bytes, and atomically installs the completed
-  note before committing the index. The lead judges the content's substance.
+  note before committing the index. The foreman judges the content's substance.
   Writes serialize under the sidecar lock. Identical retries preserve the existing
   record and its completion time; conflicting IDs or pending transactions fail
   with a diagnostic. A journal preserves interrupted recording for reconciliation.
@@ -335,7 +335,7 @@ skills/herdr-teamlead/references/retrospectives.md
 | `assignments[].requirements` | object or null | Normalized requirement object from the assigned role in the plan; null for legacy assignments |
 | `assignments[].reviewer_scope` | string or null | Reviewer participation recorded as `verification`, `design`, or `unknown`; null for other roles. Older reviewers migrate to `unknown` |
 | `assignments[].judge_mode` | string or null | The mode the judge seat was dispatched for: `adjudication`, `diagnosis`, or `unknown`; null for other roles. Older judge rows migrate to `unknown`, and a reconciled dispatch whose receipt predates the field records `unknown`. A live judge dispatch with no declared mode is refused, never defaulted |
-| `specialist_assessments` | array | Append-only lead assessments with original dispatch and byte receipts; each record has its own schema version |
+| `specialist_assessments` | array | Append-only foreman assessments with original dispatch and byte receipts; each record has its own schema version |
 
 `verified` contains `model`, `effort`, `argv`, `source` (`launch_argv` or
 `process_argv`), and `pane_id`; process proof also contains `pid`. Loading
@@ -427,7 +427,7 @@ path; delivery is saved successful `wait-report` JSON for that worker and path,
 or the exact owner-recorded `recover-report` output for that dispatch and the
 same report bytes.
 `contribution` classifies actual work as `none`, `design`, or `implementation`.
-Outcome and summary are the lead's nonempty assessment, not task acceptance.
+Outcome and summary are the foreman's nonempty assessment, not task acceptance.
 
 The utility verifies the original confirmed dispatch, assignment and enrollment
 before appending. Exact ID/input retries preserve the original receipt, including
@@ -469,7 +469,7 @@ blocking finding, and scoped review cannot approve a release.
 `work` contains `base_revision`, `scope`, repository-relative `paths`, and
 blocking `findings`. A review receipt contains `dispatch`, `head_revision`,
 `verdict`, `review_mode`, independent `reviewer`, `report`, `changed_paths`, and
-`evidence`. The lead verifies the actual VCS diff before recording these fields;
+`evidence`. The foreman verifies the actual VCS diff before recording these fields;
 the command reads the report, checks its stated head, and records its digest.
 The next approved correction rechecks the preceding blocking report's bytes.
 An approval receipt requires full review; tester and external gates remain
@@ -561,7 +561,7 @@ The independent continuity stores do not change this dispatch-state schema.
 
 | Store | Canonical location | Contract |
 | --- | --- | --- |
-| Working lessons and lead handoffs | `<selected-state>.memory/index.json` | `skills/herdr-teamlead/references/working-memory.md`, Persistence contract |
+| Working lessons and foreman handoffs | `<selected-state>.memory/index.json` | `skills/herdr-teamlead/references/working-memory.md`, Persistence contract |
 | User attention and recorded progress | `<selected-state>.attention.json` | `skills/herdr-teamlead/references/attention.md`, Commands and files |
 | Fleet observations and supervision | `<selected-state>.supervision.json` | `skills/herdr-teamlead/references/supervision.md` |
 | Model capabilities, sourced and dated | `<selected-state>.capabilities.json` | `skills/herdr-teamlead/references/model-tiers.md`, Capability table |
@@ -569,7 +569,7 @@ The independent continuity stores do not change this dispatch-state schema.
 Resolve the selected state path before deriving these locations. Each store and
 its records have their own schema version and lock. Their offline readers never
 migrate or write dispatch state. Preserve these files during task cleanup and
-include their locations in lead handoffs. A saved observation is never task
+include their locations in foreman handoffs. A saved observation is never task
 acceptance or permission to act. The referenced contracts own full field shapes,
 retry and unsupported-schema behavior; only their owner commands mutate them.
 
@@ -585,7 +585,7 @@ replacing them. A missing never-bound store is empty; loss of a bound owner's
 store requires recovery of its history before rebinding or writing.
 
 - `binding`: `{schema_version, at, generation, identity, state_path}`.
-  `generation` is a positive, increasing integer for native lead changes.
+  `generation` is a positive, increasing integer for native foreman changes.
   `identity` contains `kind: id|path`, native `value`, canonical `cwd`,
   `herdr_env`, and `pane_id`. Path identities use an absolute native transcript
   path. The same binding is also saved at the discovery path documented in the
@@ -593,7 +593,7 @@ store requires recovery of its history before rebinding or writing.
   mutations require the binding to commit. Discovery is written before owner
   binding; an ahead
   generation blocks an incomplete handoff. An older native session stops being
-  the lead once the owner's newer generation commits.
+  the foreman once the owner's newer generation commits.
 - `members`: `{schema_version, id, at, assignment, active, observed, resolution,
   refinements}`. `assignment` contains `{id, agent, task, report, pane_id,
   native_session}`; `id` equals the stable dispatch ID, `report` is absolute,
@@ -601,7 +601,7 @@ store requires recovery of its history before rebinding or writing.
   opaque observation keys to JSON values; it grants no acceptance.
   `refinements` append `{schema_version, at, pane_id, native_session}` and fill
   missing expectations only. `resolution` is null while `active: true`;
-  otherwise it is `{schema_version, at, outcome, evidence}`. Only the lead's
+  otherwise it is `{schema_version, at, outcome, evidence}`. Only the foreman's
   explicit resolve command retires an enrollment.
 - `events`: `{schema_version, id, seq, at, member, kind, data}`. Sequences are
   contiguous positive integers and IDs are `event-<seq>`. `member` is an
@@ -631,10 +631,10 @@ store requires recovery of its history before rebinding or writing.
   lowercase 64-character SHA-256, and nonnegative byte `size`. They preserve
   observed bytes, never infer that a prose claim is true or an action authorized.
 
-The native Stop reader performs local read-only checks for the exact bound lead.
+The native Stop reader performs local read-only checks for the exact bound foreman.
 It never migrates state, acknowledges events, clears attention, or marks task
 completion. Its normal no-binding result applies only to a session never bound
-as lead; missing or unreadable bound-owner history cannot release obligations.
+as foreman; missing or unreadable bound-owner history cannot release obligations.
 
 ## Migration
 

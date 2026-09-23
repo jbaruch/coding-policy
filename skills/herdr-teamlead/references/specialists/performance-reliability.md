@@ -32,5 +32,5 @@ observed result. Distinguish results from projections; do not claim an unrun
 benchmark improved. Name limitations and a regression check that fits the task.
 
 Record any proposed design or code contribution. Offer lessons with workload
-and environment scope so the lead does not generalize a local result to every
+and environment scope so the foreman does not generalize a local result to every
 deployment.

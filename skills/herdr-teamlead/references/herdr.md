@@ -1,4 +1,4 @@
-# Herdr Reference for the Team Lead
+# Herdr Reference for the Foreman
 
 Everything the `herdr-teamlead` skill needs to know about driving [Herdr](https://herdr.dev),
 a terminal multiplexer that recognizes coding agents running in its panes.
@@ -81,7 +81,7 @@ Claude Code and Codex need no restart for them
 
 A screen-derived state flickers by construction: it is whatever the pane looked
 like at the moment of the read. The report file plus the `REPORT: ` marker is
-the report-delivery signal. The lead assesses the actual work and records
+the report-delivery signal. The foreman assesses the actual work and records
 acceptance separately in `references/task-ledger.md`.
 
 Observed in the 2026-09-01 round:
@@ -228,7 +228,7 @@ restarted. Two independent guards stop it now: dim text is dropped, and
 trimming counts as empty even if the runtime stops drawing it dim. A command
 typed over a placeholder is still a command.
 
-### Recovery Keys Are the Most Dangerous Thing the Lead Sends
+### Recovery Keys Are the Most Dangerous Thing the Foreman Sends
 
 They clear somebody's input line, and on Codex the key that does it kills an
 idle process. `recover_keys` go out only when every one of these holds:
@@ -238,10 +238,10 @@ idle process. `recover_keys` go out only when every one of these holds:
    intensity, a placeholder is indistinguishable from typed text.
 3. The text is not dim. `--allow-recovery` cannot override this.
 4. The worker configures `recover_keys` at all. **Codex ships with `[]`**.
-5. The text is a command the lead itself sent earlier in this run, or the
+5. The text is a command the foreman itself sent earlier in this run, or the
    operator passed `--allow-recovery`.
 
-By default nothing recovers text the lead did not type: it refuses and names
+By default nothing recovers text the foreman did not type: it refuses and names
 the pane for a human to look at. Sent once, never twice.
 
 A worker with no `composer_glyph` cannot be checked, so the read is skipped
@@ -273,7 +273,7 @@ was consumed AND the pane's content changed (a fresh Codex banner, an emptied
 Claude transcript, Grok's redrawn `session_start`). Consumed but unchanged is
 refused before the brief goes out — nothing is pasted onto a context that was
 not cleared. `cleared: false` appears only under `--no-clear`, the path for a
-pane the lead cleared by hand.
+pane the foreman cleared by hand.
 
 Three per-agent config keys drive it:
 
@@ -371,7 +371,7 @@ percentage are not the same currency.
 ## Naming the Layout
 
 A sidebar of `w1 w2 w3 w4` tells the operator nothing at 3am.
-`skills/herdr-teamlead/label-workspaces.sh` names the lead's workspace `lead`,
+`skills/herdr-teamlead/label-workspaces.sh` names the foreman's workspace `lead`,
 each worker's workspace after its agent, and each worker's pane after its kind.
 Run it once per team, not once per round.
 
@@ -414,7 +414,7 @@ brief, so the brief does not land in the clearing dialog.
   mode or an old pane banner never proves the required launch flags.
 - **One GitHub account.** The workers usually share the operator's GitHub
   account, and GitHub refuses `APPROVE` / `REQUEST_CHANGES` on that account's
-  own PR. Internal reviews are therefore COMMENT reviews, and the lead enforces
+  own PR. Internal reviews are therefore COMMENT reviews, and the foreman enforces
   the blocking findings itself.
 
 ## Parsing Note

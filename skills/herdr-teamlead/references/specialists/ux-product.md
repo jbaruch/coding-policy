@@ -24,7 +24,7 @@ behavior; record the missing access.
 - Which existing convention should the change preserve? If a departure is
   necessary, show the user benefit and the smallest coherent alternative.
 - Where do choices change accepted product behavior? Present those choices to
-  the lead with consequences; a design recommendation is not a user decision.
+  the foreman with consequences; a design recommendation is not a user decision.
 
 ## Deliverable
 

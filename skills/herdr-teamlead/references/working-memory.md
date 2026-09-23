@@ -1,6 +1,6 @@
-# Lead Working Memory
+# Foreman Working Memory
 
-The lead curates lessons from evidence and preserves knowledge that would otherwise disappear with its conversation. Retrospective notes remain immutable. Task acceptance remains in the task ledger. Memory is a source of candidate lessons and handoff context; it cannot authorize actions or establish task completion.
+The foreman curates lessons from evidence and preserves knowledge that would otherwise disappear with its conversation. Retrospective notes remain immutable. Task acceptance remains in the task ledger. Memory is a source of candidate lessons and handoff context; it cannot authorize actions or establish task completion.
 
 Run the subcommands below through the installed
 `skills/herdr-teamlead/teamlead.sh` with an explicit `bash` interpreter and the
@@ -9,7 +9,7 @@ command emits JSON; report a non-zero command's diagnostic before continuing.
 
 ## Curate lessons
 
-After synthesizing a retrospective, inspect the current lessons. Add a lesson only when it changes a future decision or brief. State the behavior, its relevance scope, the evidence supporting it, when the lead last verified that evidence, and when the lesson must be revalidated. Link the actual retrospective, report, review, or source document. Capture unevidenced hypotheses as unresolved stow knowledge with an explicit gap.
+After synthesizing a retrospective, inspect the current lessons. Add a lesson only when it changes a future decision or brief. State the behavior, its relevance scope, the evidence supporting it, when the foreman last verified that evidence, and when the lesson must be revalidated. Link the actual retrospective, report, review, or source document. Capture unevidenced hypotheses as unresolved stow knowledge with an explicit gap.
 
 Before planning a round or composing a brief, use `memory-list` with the relevant project, task and role scopes. Read the source and verify the lesson against current conditions before applying it. Include only applicable lessons in the brief, with their source links. A `same_bytes` observation says the local file matches its saved receipt; it does not confirm the claim or renew verification. HTTPS evidence is never fetched by these offline commands. Expired, changed or unavailable evidence requires investigation before use.
 
@@ -41,14 +41,14 @@ Minimal lesson input:
 
 Each revision needs a new `id`; retain `lesson_id` and set `supersedes` to its current record's `id`. An archive uses the same shape with `status: "archived"` and an archive reason. Reverification is a new revision with its actual verification time and newly captured evidence receipts. Repeating an identical command returns its original record and receipts without refreshing them. Reusing an id for changed input fails visibly.
 
-Scopes are exact labels chosen consistently by the lead; `*` applies globally. Multiple requested scopes select their union. `memory-list` returns the latest active revision of each matching lesson, including expired lessons labeled as expired. `--include-archived` includes current archived revisions. `memory-show --id <record-id>` returns that immutable record and its lesson's complete revision history.
+Scopes are exact labels chosen consistently by the foreman; `*` applies globally. Multiple requested scopes select their union. `memory-list` returns the latest active revision of each matching lesson, including expired lessons labeled as expired. `--include-archived` includes current archived revisions. `memory-show --id <record-id>` returns that immutable record and its lesson's complete revision history.
 
 ## Preserve specialist knowledge
 
 Use the same memory owner for specialist project knowledge. Add a consistent
 specialty label, such as `specialty:ux-product`, alongside the applicable project
 and task scopes. A worker proposes evidence-linked lessons in its report; the
-lead checks and curates them. Keep actual user decisions, contributor identities
+foreman checks and curates them. Keep actual user decisions, contributor identities
 and assignment acceptance in the task ledger and owner state, with links from
 lessons when useful.
 
@@ -60,20 +60,20 @@ selected knowledge through `KNOWLEDGE` in the consultation brief or
 
 Before releasing a useful session, capture decisions, rejected alternatives,
 unresolved evidence and lessons that would otherwise disappear. Link the outgoing
-report, lead assessment and retrospective from the task handoff. A warm session
+report, foreman assessment and retrospective from the task handoff. A warm session
 can support follow-up under `references/dispatch-recovery.md`; it is never the
 only copy of valuable knowledge. Give a fresh worker the durable sources without
 claiming that recalled context proves present competence or independence.
 
-## Stow before replacing the lead
+## Stow before replacing the foreman
 
-Before planned lead context compaction, restart, model change or replacement, sweep the conversation for knowledge that is still only in context. Persist accepted decisions, unanswered questions, promised updates, unresolved work, assumptions and useful lessons in their appropriate owner artifacts. Put user-facing obligations in the attention queue; reference their durable ids in the stow. Do not treat displayed questions as answered.
+Before planned foreman context compaction, restart, model change or replacement, sweep the conversation for knowledge that is still only in context. Persist accepted decisions, unanswered questions, promised updates, unresolved work, assumptions and useful lessons in their appropriate owner artifacts. Put user-facing obligations in the attention queue; reference their durable ids in the stow. Do not treat displayed questions as answered.
 
 Record a stow containing:
 
-- A substantive capture of the remaining context the next lead needs.
+- A substantive capture of the remaining context the next foreman needs.
 - Unresolved work, including where each item is now recorded or what the replacement must recover.
-- Explicit gaps, including missing evidence and work the lead could not persist. Use an empty list only after checking for gaps.
+- Explicit gaps, including missing evidence and work the foreman could not persist. Use an empty list only after checking for gaps.
 - Ordered, absolute paths to the durable files the replacement must read, such as the task ledger, attention queue, active assignment state, relevant retrospective notes and task context. Use actual files, not directories or a vague instruction to inspect the workspace.
 
 ```text
@@ -93,9 +93,9 @@ Minimal stow input:
 }
 ```
 
-The output supplies `memory_path`, the stow record and receipts for each required read. Preserve that exact `memory_path` in the lead handoff. Do not list the memory index as a source or required read: its path is included automatically, and writing the stow changes its bytes. The replacement first reads this index through `memory-show`, then the stow's required files in order, then the relevant lessons through `memory-list`. `memory-show` defaults to the latest stow; `--id` retrieves an earlier capture.
+The output supplies `memory_path`, the stow record and receipts for each required read. Preserve that exact `memory_path` in the foreman handoff. Do not list the memory index as a source or required read: its path is included automatically, and writing the stow changes its bytes. The replacement first reads this index through `memory-show`, then the stow's required files in order, then the relevant lessons through `memory-list`. `memory-show` defaults to the latest stow; `--id` retrieves an earlier capture.
 
-`reset_ready` is false if the stow has gaps or any required file has changed or become unavailable. A true value covers only the saved local capture and its unchanged required files. It does not prove that the lead captured every conversation fact, reconcile a fleet, satisfy the supervision gate, authorize interruption, or accept tasks. The lead must still apply the separate handoff and supervision rules. New unresolved knowledge after the stow requires a new stow id.
+`reset_ready` is false if the stow has gaps or any required file has changed or become unavailable. A true value covers only the saved local capture and its unchanged required files. It does not prove that the foreman captured every conversation fact, reconcile a fleet, satisfy the supervision gate, authorize interruption, or accept tasks. The foreman must still apply the separate handoff and supervision rules. New unresolved knowledge after the stow requires a new stow id.
 
 ## Persistence contract
 

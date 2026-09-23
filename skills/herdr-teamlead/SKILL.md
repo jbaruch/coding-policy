@@ -1,15 +1,16 @@
 ---
 name: herdr-teamlead
 description: >
-  Run Herdr rounds with on-demand specialists, model tiers, bounded briefs,
+  Run Herdr rounds as a nonworking foreman: assign, supervise, accept or
+  reject, never do the crew's work. Covers on-demand specialists, model tiers, bounded briefs,
   report verification, and release gates. Use for requests to dispatch the Herdr
   team, balance worker usage, collect reports, run or retrieve retrospectives,
   catch up on outstanding user attention, curate team lessons, or save and resume
-  lead handoffs. Live rounds require HERDR_ENV; saved memory and attention work
+  foreman handoffs. Live rounds require HERDR_ENV; saved memory and attention work
   offline. Other standalone tasks skip this skill.
 ---
 
-# Herdr Team Lead Skill
+# Herdr Foreman Skill
 
 Process steps in order. Do not skip ahead.
 
@@ -50,7 +51,7 @@ authority.
 
 - **Catch-up or saved attention** — `references/attention.md`. Read all
   attention pages before claiming completeness.
-- **Lesson curation, saved lead context, or a lead handoff** —
+- **Lesson curation, saved foreman context, or a foreman handoff** —
   `references/working-memory.md`.
 - **A saved retrospective** — `references/retrospectives.md`. Report the note's
   date, coverage, conclusions, and path.
@@ -63,9 +64,9 @@ For every other request, read `HERDR_ENV` before running scripts.
 - **Set, with a team task or new retrospective** — Proceed to Step 2.
 - **Set, with a lookup, a file inspection, research, a bounded question, a
   review of existing code, a repository edit, or any other task deliverable** —
-  a round, whatever its size. None of it is lead work. Staff it in Step 5.
+  a round, whatever its size. None of it is foreman work. Staff it in Step 5.
   Proceed to Step 2.
-- **Set, none of the above applies, and the answer is already in the lead's
+- **Set, none of the above applies, and the answer is already in the foreman's
   context** — say it. Finish here.
 
 ## Step 2 — Run the Round Preflight
@@ -545,7 +546,7 @@ Finalize the task ledger with the round outcome and remaining obligations.
 Mark the task completed only after its acceptance criteria and required
 release and cleanup obligations are verified. Preserve the ledger for resume
 and standup. Preserve retrospective notes and link them from the ledger. Save
-current progress through the attention owner and stow the lead's handoff under
+current progress through the attention owner and stow the foreman's handoff under
 the working-memory reference. Reconcile supervision before ending the turn.
 Report outstanding attention first, followed by the outcome and saved paths.
 Finish here.

@@ -37,7 +37,7 @@ lower-tier recheck examples. The separate pinned judge remains outside the
 rotating workers' tier tables and shares its configured usage window.
 
 Every team worker starts in YOLO mode, including the pinned judge and release
-worker. The lead's assignment classifier checks each brief against the task's
+worker. The foreman's assignment classifier checks each brief against the task's
 authorization and permitted actions before dispatch. Worker permission prompts
 are not a second assignment gate; the brief's role, path, and authority limits
 still apply in YOLO mode.
@@ -90,7 +90,7 @@ The declaration is checked, not taken: a digest of the wrong shape and a file
 nobody wrote both refuse the round.
 
 Which shapes qualify is the decision contract of
-`skills/herdr-teamlead/teamlead/tiers.py`, not the lead's — see
+`skills/herdr-teamlead/teamlead/tiers.py`, not the foreman's — see
 `mechanical_allowed`, not restated here (`rules/script-as-black-box.md`).
 
 The licence holds only if the comparison runs. Before a mechanical round is
@@ -216,7 +216,7 @@ comes due. The interval and the source hierarchy are `capabilities.py`'s
 decision contract, not restated here (`rules/script-as-black-box.md`).
 
 The consultation that gathers the evidence is read-only on repository content
-and returns a report at the path its brief names; the lead records it. A refresh
+and returns a report at the path its brief names; the foreman records it. A refresh
 replaces the rows it covers and leaves every other row untouched, so one report
 about two models never retires the rest of the table.
 

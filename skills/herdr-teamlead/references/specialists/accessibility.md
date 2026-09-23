@@ -22,7 +22,7 @@ accessibility skill. State which checks those tools can actually perform.
 - Does a finding reproduce in the affected environment? Distinguish a detected
   issue, a risk needing manual verification, and a check the tools cannot run.
 - Which fix restores an accepted requirement? Identify proposed additional
-  support separately for the lead's scope decision.
+  support separately for the foreman's scope decision.
 
 ## Deliverable
 
@@ -31,6 +31,6 @@ supporting evidence, and an actionable correction. Include the exact coverage
 and missing manual checks. Automated results alone do not establish that an
 entire product is accessible. Do not claim certification from a bounded review.
 
-Record any interaction decisions you helped design so the lead can preserve
+Record any interaction decisions you helped design so the foreman can preserve
 independent verification. Suggest reusable project guidance only when a source
 supports it.

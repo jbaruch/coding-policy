@@ -65,9 +65,9 @@ authorization persists; do not ask again for covered actions. Ownership alone
 does not authorize release or convert an inspection task into implementation.
 
 Apply `skills/herdr-teamlead/references/assignment-reasoning.md` to the task's
-accepted behavior. Bind the lead's live session under
+accepted behavior. Bind the foreman's live session under
 `skills/herdr-teamlead/references/supervision.md` before dispatch. On a resumed
-round, read the latest lead handoff and its required files under
+round, read the latest foreman handoff and its required files under
 `skills/herdr-teamlead/references/working-memory.md`. Reconcile the attention
 queue under `skills/herdr-teamlead/references/attention.md`; an unanswered item
 survives both a new session and a change of task.
@@ -81,7 +81,7 @@ non-owner permission is needed. Include only actions covered by the actual task.
 
 For an inspection-only task, owner or non-owner, `AUTHORIZED_ACTIONS: none`
 keeps the repository read-only. An unapproved non-owner assignment also uses
-`EXTERNAL_PERMISSION: none`; the lead selects read-only work or stops. A role
+`EXTERNAL_PERMISSION: none`; the foreman selects read-only work or stops. A role
 requiring writes must report BLOCKED under COMMON's bounds before any write.
 Proceed immediately to Step 4.
 
@@ -337,7 +337,7 @@ the path holds something else. Branch-name and path rules are the script's
 contract; see the header of
 `skills/herdr-teamlead/provision-worktree.sh`.
 
-The lead provisions every worktree a brief names, so a worker never runs git
+The foreman provisions every worktree a brief names, so a worker never runs git
 against the shared checkout (`rules/agent-team-operation.md` Writers and
 Checkouts). A consultation inspecting artifacts without git needs none. Provision
 a read-only checkout if its evidence work requires git. Remove worktrees per
@@ -354,7 +354,7 @@ bash "$CP/skills/herdr-teamlead/label-workspaces.sh" \
   <lead-label> [<agent>=<workspace-id>]...
 ```
 
-Names the lead's workspace, each worker's workspace after its agent, and each
+Names the foreman's workspace, each worker's workspace after its agent, and each
 worker's pane after its kind. With no pairs, the workspaces come from the
 roster. Emits `{"lead":{...},"agents":[...]}` with a per-target
 `renamed|unchanged|failed`. Exit 3 means at least one rename failed and the
