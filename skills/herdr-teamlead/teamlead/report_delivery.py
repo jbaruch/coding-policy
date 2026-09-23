@@ -535,6 +535,11 @@ def stale_grok_source(dispatch, assignment, observed, body, prompt, plan_body, *
         raise UsageError("grok_dispatch_unbound: restore the original specialist requirements recorded for this dispatch.", {})
     if requirements:
         options["requirements"] = requirements
+    # A judge dispatch's mode is part of its identity from recovery store 12 on;
+    # a dispatch that predates the field carries none and is rebuilt without it
+    # (#478).
+    if "judge_mode" in dispatch:
+        options["judge_mode"] = dispatch["judge_mode"]
     task_context = {key: options[key] for key in ("task", "fix_round", "plan", "work")}
     if plan.get("task_context") is not None and plan["task_context"] != task_context:
         raise UsageError("grok_dispatch_unbound: original plan names different task or correction bounds; restore its dispatch inputs.", {})

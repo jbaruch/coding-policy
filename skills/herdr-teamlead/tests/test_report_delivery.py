@@ -303,13 +303,15 @@ class NativeDeliveryTests(unittest.TestCase):
 
     def recovery_fixture(self):
         document = state.empty_state()
-        state.add_assignment(document, AT, "judge", "worker", task="task-361", context_session={"pane_id": PANE, **identity("codex")})
+        state.add_assignment(document, AT, "judge", "worker", task="task-361", judge_mode="adjudication", context_session={"pane_id": PANE, **identity("codex")})
         brief = self.tmp / "brief.md"
         brief.write_text("Judge the original dispute.\n" + self.marker + "\n")
         common = self.tmp / "common.md"
         common.write_text("Shared round requirements.\n")
+        # A version-1 dispatch result: it predates both the composition
+        # metadata and the judge mode that recovery store 12 added (#478).
         assignment = {key: value for key, value in document["assignments"][0].items()
-                      if key not in {"requirements", "reviewer_scope"}}
+                      if key not in {"requirements", "reviewer_scope", "judge_mode"}}
         dispatch = {"schema_version": 1, "id": "dispatch-361", "at": AT, "fingerprint": "fingerprint-361",
                     "task": "task-361", "role": "judge", "agent": "worker", "fix_round": None, "status": "applied",
                     "assignment_index": 0, "brief": str(brief), "common": str(common),

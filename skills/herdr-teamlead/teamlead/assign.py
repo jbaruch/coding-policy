@@ -55,9 +55,9 @@ from .herdr import (
 from .composer import COMPOSER_READ_LINES, COMPOSER_READ_SOURCE, checkable
 from .probe import PROBE_READ_LINES, PROBE_READ_SOURCE, resolve_status, stderr_warn
 from .chronology import latest_assignment
-from .recovery import empty_recovery, fresh_transition, task_record, validate_work
+from .recovery import JUDGE_MODES, empty_recovery, fresh_transition, task_record, validate_work
 from .launch import restart_worker, verify_running, verify_running_permissions
-from .tiers import launch_flags, require_seatable, worker_launch_args
+from .tiers import canonical_role, launch_flags, require_seatable, worker_launch_args
 from .composition import normalize_requirement, parse_requirements
 
 # Version 3 adds verified model-tier metadata to context and task/fix evidence.
@@ -582,7 +582,7 @@ def check_all_ready(client, assignments, agents_by_name, warn=None):
     return statuses
 
 
-def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle_timeout_ms=DEFAULT_SETTLE_TIMEOUT_MS, on_assigned=None, warn=None, sleep=time.sleep, settle_sec=COMPOSER_SETTLE_SEC, landing_attempts=LANDING_ATTEMPTS, start_timeout_ms=DEFAULT_START_TIMEOUT_MS, allow_recovery=False, task=None, retain_context=False, fix_round=None, history=None, tiers=None, recovery=None, plan_id=None, work=None, on_prepare=None, on_before_send=None, on_result=None, retrospective_guard=None, retain_specialist=False, requirements=None):
+def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle_timeout_ms=DEFAULT_SETTLE_TIMEOUT_MS, on_assigned=None, warn=None, sleep=time.sleep, settle_sec=COMPOSER_SETTLE_SEC, landing_attempts=LANDING_ATTEMPTS, start_timeout_ms=DEFAULT_START_TIMEOUT_MS, allow_recovery=False, task=None, retain_context=False, fix_round=None, judge_mode=None, history=None, tiers=None, recovery=None, plan_id=None, work=None, on_prepare=None, on_before_send=None, on_result=None, retrospective_guard=None, retain_specialist=False, requirements=None):
     """Hand each agent its brief using the selected context mode.
 
     `on_assigned(role, agent, at, status, context)` is called after each hand-off so the
@@ -595,6 +595,11 @@ def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle
     transition = validate_context_mode(assignments, no_clear, retain_context, task, fix_round,
                                        recovery=recovery, history=history, plan_id=plan_id, work=work,
                                        retain_specialist=retain_specialist, requirements=requirements)
+    # Every judge dispatch declares its mode, whichever caller reaches here; an
+    # undeclared mode is refused, never defaulted (#478).
+    if any(canonical_role(role) == "judge" for role in assignments) and judge_mode not in JUDGE_MODES:
+        raise UsageError("A judge dispatch declares its mode, one of {}; pass judge_mode.".format(
+            " | ".join(JUDGE_MODES)), {"judge_mode": judge_mode})
     validate_fix_history(assignments, history, task, fix_round)
     prior = validate_retained_history(assignments, history, task, fix_round) if retain_context else None
     tiers = dict(tiers or {})
@@ -756,9 +761,14 @@ def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle
         # send_message re-checks the composer, pastes, and confirms the
         # message actually landed as a user message rather than as a command.
         if on_before_send is not None:
-            on_before_send(step, {"cleared": cleared, "clear_reason": clear_reason,
-                                  "context_session": context_session, "tier": tier_record,
-                                  "transition": transition if step["role"] == "developer" else None})
+            before = {"cleared": cleared, "clear_reason": clear_reason,
+                      "context_session": context_session, "tier": tier_record,
+                      "transition": transition if step["role"] == "developer" else None}
+            # Only a judge dispatch carries its mode, so every other dispatch keeps
+            # the shape it had before recovery store 12 (#478).
+            if canonical_role(step["role"]) == "judge":
+                before["judge_mode"] = judge_mode
+            on_before_send(step, before)
         landing = send_message(
             client,
             agent,
@@ -810,10 +820,17 @@ def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle
         }
         if "requirements" in step:
             record["requirements"] = step["requirements"]
+        # The mode belongs to the judge seat alone, and the ledger is where an
+        # adjudication and a diagnosis stay distinguishable afterwards (#478).
+        # Only a judge result carries the key, so every other saved dispatch
+        # result keeps the shape it had before recovery store 12.
+        if canonical_role(step["role"]) == "judge":
+            record["judge_mode"] = judge_mode
         # Persist the dispatch outcome before optional UI work. A broken pipe
         # during pane relabeling must never erase a confirmed handoff.
         if on_assigned is not None:
             context = {key: record[key] for key in ("cleared", "clear_reason", "task", "fix_round", "context_session", "tier")}
+            context["judge_mode"] = record.get("judge_mode")
             on_assigned(step["role"], name, at, record["status"], context)
         if on_result is not None:
             on_result(record)

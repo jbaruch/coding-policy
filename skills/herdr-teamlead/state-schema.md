@@ -271,11 +271,11 @@ skills/herdr-teamlead/references/retrospectives.md
 
 ```json
 {
-  "schema_version": 8,
+  "schema_version": 9,
   "snapshots": ["<measure output>, oldest first, ring capped at 20"],
   "assignments": [
     {
-      "schema_version": 8,
+      "schema_version": 9,
       "at": "2026-09-01T21:00:00+00:00",
       "role": "developer",
       "agent": "grok",
@@ -287,7 +287,8 @@ skills/herdr-teamlead/references/retrospectives.md
       "context_session": {"pane_id": "w4:p1", "source": "herdr:grok", "agent": "grok", "kind": "id", "value": "native-session-id"},
       "tier": null,
       "requirements": null,
-      "reviewer_scope": null
+      "reviewer_scope": null,
+      "judge_mode": null
     }
   ],
   "specialist_assessments": [],
@@ -313,7 +314,7 @@ skills/herdr-teamlead/references/retrospectives.md
 
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
-| `schema_version` | integer | Currently `8`. Version 8 drops the retired qualification battery's summary from `tier`; migration removes it from older rows. Version 7 adds `pressure_headroom` and `de_escalated` to a row's `tier`; an older tier row migrates to null headroom and `de_escalated: false`, since nothing could de-escalate before it. Bumped on any shape change |
+| `schema_version` | integer | Currently `9`. Version 9 adds `judge_mode` to every row: the judge seat's declared mode, `unknown` for a judge row migrated from before it, null for other roles. Version 8 drops the retired qualification battery's summary from `tier`; migration removes it from older rows. Version 7 adds `pressure_headroom` and `de_escalated` to a row's `tier`; an older tier row migrates to null headroom and `de_escalated: false`, since nothing could de-escalate before it. Bumped on any shape change |
 | `snapshots` | array | Whole `measure` documents, oldest first; the ring holds the last 20 |
 | `assignments` | array | Append-only ledger of who held which role |
 | `snapshots[].schema_version` | integer | Currently `3`. Version 2 added `window_group`; version 3 adds per-round `tier_billing`. Older snapshots migrate on read, preserving headroom and shared-window membership |
@@ -333,6 +334,7 @@ skills/herdr-teamlead/references/retrospectives.md
 | `assignments[].tier` | object or null | Requested `round`, selected config `tier_row`, `kind`, `model`, `effort`, declared/effective multipliers, billing window, launch options, input `prompt_hash`, `pressure_headroom` and `de_escalated` (the measured headroom the selection used, and whether it declined a discretionary escalation), and `verified` proof. Null for old or non-tiered dispatches |
 | `assignments[].requirements` | object or null | Normalized requirement object from the assigned role in the plan; null for legacy assignments |
 | `assignments[].reviewer_scope` | string or null | Reviewer participation recorded as `verification`, `design`, or `unknown`; null for other roles. Older reviewers migrate to `unknown` |
+| `assignments[].judge_mode` | string or null | The mode the judge seat was dispatched for: `adjudication`, `diagnosis`, or `unknown`; null for other roles. Older judge rows migrate to `unknown`, and a reconciled dispatch whose receipt predates the field records `unknown`. A live judge dispatch with no declared mode is refused, never defaulted |
 | `specialist_assessments` | array | Append-only lead assessments with original dispatch and byte receipts; each record has its own schema version |
 
 `verified` contains `model`, `effort`, `argv`, `source` (`launch_argv` or
@@ -363,10 +365,16 @@ independent versions. Version 6 adds the dispatch fields `brief_identity`, `refu
 dispatch's send-time `provider`; version 8 adds the `diagnoses` collection;
 version 9 adds `legacy_ruling_recoveries`; version 10 widens `dispatches[].role`
 to a seat, per Seat vs responsibility above; version 11 adds the `approaches`
-collection. The
+collection; version 12 adds `judge_mode` to a judge dispatch, its
+`context_before_send` and its saved result, and binds it into the dispatch
+fingerprint, so an adjudication and a diagnosis of one brief are separate
+dispatches. Only judge dispatches carry the field. The
 owner stamps an older store on load, adds the empty collections, and refuses one
 already carrying a field — or a seat-named dispatch — its version did not own. Generic records remain version 1; stale-Grok delivery and
-composition-bearing dispatch/result records use version 2. Checkpoints are at
+composition-bearing dispatch/result records use version 2; a judge
+dispatch/result carrying its `judge_mode` uses version 3. Version 1 and 2 rows
+are never restamped: a judge dispatch recorded before version 3 keeps no mode,
+and its ledger row reads `unknown`. Checkpoints are at
 version 2: the owner upgrades a version-1 row on load, stamping it and
 preserving its identity, fix round, base and recorded ruling, and refuses one
 missing the ruling evidence its version required. The owner adds empty `role_clearances` and

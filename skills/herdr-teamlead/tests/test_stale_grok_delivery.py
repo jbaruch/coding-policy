@@ -74,6 +74,24 @@ class StaleGrokDeliveryTests(unittest.TestCase):
         recovery.validate_store(self.document['recovery'], self.document['assignments'])
         self.assertEqual(self.recover(), record)
 
+    def test_a_mode_bearing_judge_dispatch_recovers_under_its_own_fingerprint(self):
+        # coding-policy#494 review: the apply fingerprint carries the judge's
+        # mode from recovery store 12, so stale-Grok recovery must rebuild it
+        # with the saved mode or never match a current judge dispatch.
+        self.dispatch['judge_mode'] = 'diagnosis'
+        _, self.dispatch['fingerprint'] = recovery.dispatch_identity(
+            self.dispatch['task'], 'judge', 'worker', None,
+            {'common': self.dispatch['common'], 'judge': self.dispatch['brief']},
+            options={'task': self.dispatch['task'], 'fix_round': None, 'plan': None,
+                     'work': None, 'rounds': {}, 'retain_context': False, 'no_clear': False,
+                     'judge_mode': 'diagnosis'})
+        record = self.recover()
+        self.assertEqual(record['basis'], 'archived_grok_clear_source')
+        # A mode the dispatch was not sent for cannot reproduce its identity.
+        self.dispatch['judge_mode'] = 'adjudication'
+        with self.assertRaisesRegex(UsageError, 'grok_dispatch_unbound'):
+            self.recover()
+
     def test_public_owner_recovery_replays_without_worker_input_or_byte_rewrites(self):
         ledger_path, record_path = self.case.tmp / 'state.json', self.case.tmp / 'record.json'
         # Exercise the owner migration as well as writing a schema-2 receipt.

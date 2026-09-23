@@ -18,7 +18,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from teamlead.errors import StateError
+from teamlead.errors import StateError, UsageError
 from teamlead import recovery
 from teamlead.state import (
     MAX_SNAPSHOTS,
@@ -187,7 +187,7 @@ class MigrationTest(unittest.TestCase):
                 self.assertEqual(migrated["assignments"], [dict(
                     row, schema_version=STATE_SCHEMA_VERSION, cleared=None,
                     clear_reason="unknown", task=None, fix_round=None, context_session=None, tier=None,
-                    requirements=None, reviewer_scope=None,
+                    requirements=None, reviewer_scope=None, judge_mode=None,
                 )])
                 self.assertEqual(role_counts(migrated), {"developer": {"grok": 1}})
                 self.assertEqual(self.on_disk(), migrated)
@@ -360,8 +360,108 @@ class AssignmentRecordTest(unittest.TestCase):
                 "tier": None,
                 "requirements": None,
                 "reviewer_scope": None,
+                "judge_mode": None,
             },
         )
+
+
+class JudgeModeMigrationTest(unittest.TestCase):
+    """A version-6 row proves no declared mode, and never invents one (#478)."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.path = Path(self.tmp) / "state.json"
+        self.warnings = []
+
+    def write(self, payload):
+        self.path.write_text(json.dumps(payload), encoding="utf-8")
+
+    def load(self):
+        return load_state(self.path, warn=self.warnings.append)
+
+    def row(self, role, **extra):
+        return {"schema_version": 6, "at": "2026-01-01T00:00:00+00:00", "role": role,
+                "agent": "worker", "status": "applied", "cleared": None,
+                "clear_reason": "unknown", "task": None, "fix_round": None,
+                "context_session": None, "tier": None, "requirements": None,
+                "reviewer_scope": "unknown" if role == "reviewer" else None, **extra}
+
+    def test_an_older_judge_row_migrates_to_unknown(self):
+        self.write({"schema_version": 6, "snapshots": [], "assignments": [self.row("judge")],
+                    "specialist_assessments": []})
+        migrated = self.load()
+        self.assertEqual(migrated["assignments"][0]["judge_mode"], "unknown")
+        self.assertEqual(migrated["schema_version"], STATE_SCHEMA_VERSION)
+
+    def test_an_older_row_of_any_other_role_migrates_to_null(self):
+        for role in ("developer", "reviewer", "tester", "release"):
+            with self.subTest(role=role):
+                self.write({"schema_version": 6, "snapshots": [], "assignments": [self.row(role)],
+                            "specialist_assessments": []})
+                self.assertIsNone(self.load()["assignments"][0]["judge_mode"])
+
+    def test_an_older_row_already_carrying_a_mode_is_unowned_newer_data(self):
+        self.write({"schema_version": 6, "snapshots": [],
+                    "assignments": [self.row("judge", judge_mode="diagnosis")],
+                    "specialist_assessments": []})
+        before = self.path.read_text(encoding="utf-8")
+        self.assertEqual(self.load(), empty_state())
+        self.assertEqual(self.path.read_text(encoding="utf-8"), before)
+
+    def test_a_judge_row_with_an_invalid_mode_is_no_usable_prior_state(self):
+        for mode in (None, "arbitration", 7):
+            with self.subTest(mode=mode):
+                self.write({"schema_version": STATE_SCHEMA_VERSION, "snapshots": [],
+                            "assignments": [dict(self.row("judge"),
+                                                 schema_version=STATE_SCHEMA_VERSION, judge_mode=mode)],
+                            "specialist_assessments": []})
+                self.assertEqual(self.load(), empty_state())
+
+    def test_a_non_judge_row_carrying_a_mode_is_no_usable_prior_state(self):
+        self.write({"schema_version": STATE_SCHEMA_VERSION, "snapshots": [],
+                    "assignments": [dict(self.row("developer"),
+                                         schema_version=STATE_SCHEMA_VERSION, judge_mode="diagnosis")],
+                    "specialist_assessments": []})
+        self.assertEqual(self.load(), empty_state())
+
+
+class JudgeModeRecordTest(unittest.TestCase):
+    """The ledger is where an adjudication and a diagnosis stay apart (#478)."""
+
+    def test_a_judge_row_records_the_mode_it_was_dispatched_for(self):
+        for mode in recovery.JUDGE_MODES:
+            with self.subTest(mode=mode):
+                state = empty_state()
+                add_assignment(state, "2026-01-01T00:00:00+00:00", "judge", "judge-worker",
+                               judge_mode=mode)
+                self.assertEqual(state["assignments"][0]["judge_mode"], mode)
+
+    def test_a_judge_row_without_a_declared_mode_is_refused(self):
+        state = empty_state()
+        with self.assertRaisesRegex(UsageError, "undeclared"):
+            add_assignment(state, "2026-01-01T00:00:00+00:00", "judge", "judge-worker")
+        self.assertEqual(state["assignments"], [])
+
+    def test_a_judge_row_with_an_invented_mode_is_refused(self):
+        state = empty_state()
+        with self.assertRaisesRegex(UsageError, "undeclared"):
+            add_assignment(state, "2026-01-01T00:00:00+00:00", "judge", "judge-worker",
+                           judge_mode="arbitration")
+        self.assertEqual(state["assignments"], [])
+
+    def test_only_the_judge_seat_carries_a_mode(self):
+        state = empty_state()
+        with self.assertRaisesRegex(UsageError, "Only a judge assignment"):
+            add_assignment(state, "2026-01-01T00:00:00+00:00", "developer", "grok",
+                           judge_mode="diagnosis")
+        self.assertEqual(state["assignments"], [])
+
+    def test_a_reconciled_dispatch_predating_the_field_records_unknown(self):
+        state = empty_state()
+        add_assignment(state, "2026-01-01T00:00:00+00:00", "judge", "judge-worker",
+                       judge_mode="unknown")
+        self.assertEqual(state["assignments"][0]["judge_mode"], "unknown")
 
 
 class SnapshotRingTest(unittest.TestCase):

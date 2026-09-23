@@ -214,7 +214,8 @@ class TierIntegrationTest(CliCase):
             "agents": {"claude": {"window_group": "shared"}}}], "assignments": [row]}))
         migrated, usable = load_state_checked(self.state)
         self.assertTrue(usable)
-        self.assertEqual(migrated["assignments"][0], {**row, "schema_version": STATE_SCHEMA_VERSION, "tier": None, "requirements": None, "reviewer_scope": None})
+        self.assertEqual(migrated["assignments"][0], {**row, "schema_version": STATE_SCHEMA_VERSION,
+                         "tier": None, "requirements": None, "reviewer_scope": None, "judge_mode": None})
         self.assertEqual(migrated["snapshots"][0]["agents"]["claude"], {"window_group": "shared", "tier_billing": {}})
         self.assertEqual(role_counts(migrated), {"developer": {"claude": 1}})
 
@@ -274,6 +275,7 @@ class TierIntegrationTest(CliCase):
         state["schema_version"] = 6
         row = state["assignments"][0]
         row["schema_version"] = 6
+        del row["judge_mode"]  # a pre-9 row never carried it
         for key in ("pressure_headroom", "de_escalated"):
             del row["tier"][key]
         self.state.write_text(json.dumps(state))
@@ -292,6 +294,7 @@ class TierIntegrationTest(CliCase):
         state["schema_version"] = 7
         row = state["assignments"][0]
         row["schema_version"] = 7
+        del row["judge_mode"]  # a pre-9 row never carried it
         row["tier"]["qualification"] = {"role": "developer", "promotion_cases": 20}
         self.state.write_text(json.dumps(state))
         migrated, usable = load_state_checked(self.state)

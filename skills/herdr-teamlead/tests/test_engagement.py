@@ -243,12 +243,14 @@ class EngagementTest(unittest.TestCase):
         original["schema_version"] = 5
         original.pop("requirements")
         original.pop("reviewer_scope")
+        original.pop("judge_mode")
         self.path.write_text(json.dumps(old))
         migrated, usable = load_state_checked(self.path)
         self.assertTrue(usable)
         self.assertEqual(migrated["specialist_assessments"], [])
         self.assertEqual(migrated["assignments"][0], {**original, "schema_version": STATE_SCHEMA_VERSION,
-                                                    "requirements": None, "reviewer_scope": "unknown"})
+                                                    "requirements": None, "reviewer_scope": "unknown",
+                                                    "judge_mode": None})
         self.assertEqual(migrated["recovery"]["schema_version"], recovery.RECOVERY_STORE_VERSION)
 
     def test_older_schema_cannot_bless_future_composition_fields(self):
@@ -270,7 +272,7 @@ class EngagementTest(unittest.TestCase):
         case.setUp()
         self.addCleanup(case.doCleanups)
         state, request = case.recovery_fixture()
-        state["assignments"][0].update(role="reviewer", reviewer_scope="unknown")
+        state["assignments"][0].update(role="reviewer", reviewer_scope="unknown", judge_mode=None)
         dispatch = state["recovery"]["dispatches"][0]
         dispatch["role"] = "reviewer"
         dispatch["result"]["role"] = "reviewer"

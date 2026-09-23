@@ -85,13 +85,15 @@ class HistoricalCommandsTest(fixture.CliCase):
             row["schema_version"] = 4
             row.pop("requirements")
             row.pop("reviewer_scope")
+            row.pop("judge_mode")
         self.state.write_text(json.dumps(state))
         original = copy.deepcopy(state["assignments"])
         code, _, err = self.invoke(["state"])
         self.assertEqual(code, 0, err)
         for expected, actual in zip(original, self.saved()["assignments"]):
             expected.update(schema_version=actual["schema_version"], requirements=None,
-                            reviewer_scope="unknown" if expected["role"] == "reviewer" else None)
+                            reviewer_scope="unknown" if expected["role"] == "reviewer" else None,
+                            judge_mode="unknown" if expected["role"] == "judge" else None)
             self.assertEqual(actual, expected)
         code, _, err = self.owner("task", {"task": TASK, "base_revision": self.base_revision,
             "scope": SCOPE, "allowed_paths": ["src/*"], "authorization": AUTH})
@@ -261,7 +263,7 @@ class HistoricalCommandsTest(fixture.CliCase):
             with self.subTest(occurred_at=occurred_at):
                 self.seed(4)
                 state = self.saved()
-                add_assignment(state, COMPLETED, "judge", "claude", task=TASK)
+                add_assignment(state, COMPLETED, "judge", "claude", task=TASK, judge_mode="diagnosis")
                 save_state(self.state, state)
                 config = json.loads(self.config.read_text())
                 config["judge"] = {"agent": "claude", "model": "claude-opus-4-6", "effort": "high"}
@@ -451,7 +453,7 @@ class HistoricalCommandsTest(fixture.CliCase):
         add_assignment(state, "2026-03-01T13:00:00+00:00", "investigator", "grok", task=TASK)
         investigator_index = len(state["assignments"]) - 1
         state["assignments"][investigator_index]["status"] = "applied"
-        add_assignment(state, "2026-03-01T15:00:00+00:00", "judge", "claude", task=TASK)
+        add_assignment(state, "2026-03-01T15:00:00+00:00", "judge", "claude", task=TASK, judge_mode="diagnosis")
         save_state(self.state, state)
         config = json.loads(self.config.read_text())
         config["judge"] = {"agent": "claude", "model": "claude-opus-4-6", "effort": "high"}

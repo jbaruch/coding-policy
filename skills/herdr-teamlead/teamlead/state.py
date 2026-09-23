@@ -5,12 +5,12 @@ looked like when it was measured; it never substitutes for reading the agent's
 live status before writing to it. `plan` may run off a stale snapshot on
 purpose (planning has no side effects); `apply` always re-checks live status.
 
-Schema (schema_version 8)::
+Schema (schema_version 9)::
 
     {
-      "schema_version": 8,
+      "schema_version": 9,
       "snapshots":  [ <measure output>, ... ],   # newest last, capped at 20
-      "assignments":[ {"schema_version": 8, "at": <ISO-8601>,
+      "assignments":[ {"schema_version": 9, "at": <ISO-8601>,
                        "role": <str>, "agent": <str>,
                        "status": "applied" | "sent_but_not_started"
                                  | "unknown",
@@ -20,7 +20,8 @@ Schema (schema_version 8)::
                        "context_session": <object> | null,
                        "tier": <object> | null,
                        "requirements": <object> | null,
-                       "reviewer_scope": <str> | null}, ... ],
+                       "reviewer_scope": <str> | null,
+                       "judge_mode": <str> | null}, ... ],
       "specialist_assessments": [ <immutable lead assessment>, ... ],
       "recovery": <owner-managed task, approval, dispatch and evidence ledger>
     }
@@ -37,6 +38,8 @@ Version 7 adds `pressure_headroom` and `de_escalated` to a row's `tier`, so a
 declined escalation is countable after the fact (#477). An older tier row
 never de-escalated, since nothing could: migration stamps null headroom and
 `de_escalated: false`.
+Version 9 adds the judge seat's declared mode, so an adjudication and a
+diagnosis are distinguishable in the ledger after the fact (#478).
 Version 6 adds specialist requirements and assessed contribution receipts.
 Version 5 adds recovery history without inventing original authorization or
 session proof. Version 4 adds verified model-tier evidence.
@@ -75,13 +78,18 @@ from pathlib import Path
 from .diagnostics import stderr_warn as _warn
 from .errors import ConfigError, HerdrError, StateError, UsageError
 from .tiers import SEAT_SEPARATOR, canonical_role, parse_launch_args, parse_tiers, verify_argv
-from .recovery import empty_recovery, migrate_store, validate_store
+from .recovery import JUDGE_MODES, empty_recovery, migrate_store, validate_store
 
 #: The version this build writes for the document and assignment rows.
 #: Snapshots have their own version and migration chain below.
-STATE_SCHEMA_VERSION = 8
+STATE_SCHEMA_VERSION = 9
 
 CLEAR_REASONS = frozenset({"automatic", "hand", "retained", "unknown"})
+
+#: What a judge row may record. `unknown` is history alone: a row migrated from
+#: before the field, or a dispatch reconciled from a receipt written before it.
+#: A live dispatch declares its mode or is refused (#478).
+LEDGER_JUDGE_MODES = frozenset(JUDGE_MODES) | {"unknown"}
 
 #: An assignment row records what teamlead did, including what did not work.
 #: `applied` -- the hand-off was CONFIRMED: the brief appeared in the agent's
@@ -279,6 +287,20 @@ def _migrate_document_7_to_8(payload):
     return payload
 
 
+def _migrate_record_8_to_9(record):
+    """Old judge rows prove no declared mode; `unknown` is what history knows."""
+    if "judge_mode" in record:
+        raise _NoUsableState("older assignment contains an unowned judge mode")
+    record.update(schema_version=9,
+                  judge_mode="unknown" if record.get("role") == "judge" else None)
+    return record
+
+
+def _migrate_document_8_to_9(payload):
+    payload["schema_version"] = 9
+    return payload
+
+
 def _migrate_snapshot_2_to_3(snapshot):
     """An older snapshot has no measured per-tier billing attribution."""
     snapshot["schema_version"] = 3
@@ -332,6 +354,7 @@ MIGRATIONS = {
     5: (6, _migrate_document_5_to_6),
     6: (7, _migrate_document_6_to_7),
     7: (8, _migrate_document_7_to_8),
+    8: (9, _migrate_document_8_to_9),
 }
 
 #: The same table for one assignment record, walked the same way.
@@ -344,6 +367,7 @@ RECORD_MIGRATIONS = {
     5: (6, _migrate_record_5_to_6),
     6: (7, _migrate_record_6_to_7),
     7: (8, _migrate_record_7_to_8),
+    8: (9, _migrate_record_8_to_9),
 }
 
 
@@ -423,6 +447,13 @@ def _validate(payload, path):
                 or reviewer and (not isinstance(scope, str) or scope not in {"verification", "design", "unknown"})
                 or not reviewer and scope is not None):
             raise _NoUsableState("an assignment row has invalid reviewer responsibility provenance")
+        mode = record.get("judge_mode")
+        judge = record.get("role") == "judge"
+        if ("judge_mode" not in record
+                or mode is not None and not isinstance(mode, str)
+                or judge and mode not in LEDGER_JUDGE_MODES
+                or not judge and mode is not None):
+            raise _NoUsableState("an assignment row has invalid judge mode provenance")
         if record["requirements"] is not None:
             try:
                 if normalize_requirement(record["requirements"], record.get("role")) != record["requirements"]:
@@ -648,7 +679,7 @@ def add_snapshot(state, snapshot):
 
 
 def add_assignment(state, at, role, agent, status=STATUS_APPLIED, *,
-                   cleared=None, clear_reason="unknown", task=None, fix_round=None, context_session=None, tier=None, requirements=None, reviewer_scope=None):
+                   cleared=None, clear_reason="unknown", task=None, fix_round=None, context_session=None, tier=None, requirements=None, reviewer_scope=None, judge_mode=None):
     """Append one role-to-agent assignment to the ledger.
 
     Every hand-off is recorded, including one that never started -- the ledger
@@ -665,6 +696,17 @@ def add_assignment(state, at, role, agent, status=STATUS_APPLIED, *,
     which is what a slice's verdict is read back through (#434).
     """
     role = canonical_role(role)
+    if judge_mode is not None and not isinstance(judge_mode, str):
+        raise UsageError("A judge mode is text, one of {}.".format(" | ".join(sorted(LEDGER_JUDGE_MODES))),
+                         {"judge_mode": judge_mode})
+    if role == "judge" and judge_mode not in LEDGER_JUDGE_MODES:
+        raise UsageError(
+            "A judge assignment records the mode it was dispatched for, one of {}; an undeclared "
+            "mode is refused rather than defaulted. Recover a dispatch that predates the field with "
+            "`unknown`.".format(" | ".join(sorted(LEDGER_JUDGE_MODES))), {"judge_mode": judge_mode})
+    if role != "judge" and judge_mode is not None:
+        raise UsageError("Only a judge assignment carries a judge mode; {} does not declare one.".format(role),
+                         {"role": role, "judge_mode": judge_mode})
     if isinstance(tier, dict):
         # A tier that never met pressure (a judge start, an unmeasured round)
         # still carries both fields, so every current row reads one shape.
@@ -684,6 +726,7 @@ def add_assignment(state, at, role, agent, status=STATUS_APPLIED, *,
             "tier": tier,
             "requirements": requirements,
             "reviewer_scope": (reviewer_scope or "unknown") if role == "reviewer" else None,
+            "judge_mode": judge_mode if role == "judge" else None,
         }
     )
     return state
