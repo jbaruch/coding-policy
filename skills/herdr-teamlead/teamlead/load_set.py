@@ -15,8 +15,13 @@ and each open attention item in full):
 - `gate` -- every brief, common file and report dispatched in the current
   round, the round being the task's latest developer assignment onward
 - `diagnose` -- every report and review receipt across all rounds (superseded
-  receipts included), the task's specialist assessments with their reports,
-  checkpoints, diagnoses, approaches and correction plans
+  receipts and imported historical corrections included), the task's
+  specialist assessments with their reports, checkpoints, diagnoses,
+  approaches and correction plans
+
+Imported historical corrections have no dispatch, so `brief` and `gate` read
+the current round's imports from `historical_attempts` too. `brief` names a
+correction plan only while its last fix is unspent.
 - `wake` -- keyed by enrollment, not task: that dispatch's brief, common and
   report, plus its task core
 
@@ -27,7 +32,7 @@ and nothing may remove an entry (#483 decision 2). Files are listed with
 
 from .chronology import latest_assignment, timestamp
 from .foreman_queue import waiting
-from .recovery import active_plans, current_approach, developer_reservations, task_statuses
+from .recovery import active_plans, confirmed_fix, current_approach, developer_reservations, task_statuses
 
 LOAD_SET_SCHEMA_VERSION = 1
 DECISIONS = ("plan", "brief", "gate", "diagnose", "wake")
@@ -88,6 +93,26 @@ def _review_receipts(store, task):
     return receipts
 
 
+def _historical(store, assignments, task, since=None):
+    """Imported corrections of `task`, from `since` on: they have no dispatch."""
+    rows = []
+    for row in store["historical_attempts"]:
+        index = row.get("assignment_index")
+        if row.get("task") == task and isinstance(index, int) and 0 <= index < len(assignments) and (
+                since is None or _applied_at(assignments, index) >= since):
+            rows.append(row)
+    return rows
+
+
+def _add_historical_files(files, row, *, verdicts=None):
+    files.add(((row.get("receipts") or {}).get("report") or {}).get("path"), "report for imported correction " + row["id"])
+    for review in row.get("reviews", []):
+        body = review.get("input", {})
+        if verdicts is None or body.get("verdict") in verdicts:
+            files.add(body.get("report"), "{} review of imported correction {} at {}".format(
+                body.get("verdict"), row["id"], body.get("head_revision")))
+
+
 def _add_dispatch_files(files, row, reports, *, briefs=True):
     label = "{} {}".format(row.get("role"), row.get("id"))
     if briefs:
@@ -120,17 +145,29 @@ def build(state, reports, attention_entries, busy_tasks, decision, *, task=None,
     elif decision in ("brief", "gate"):
         for row in _task_dispatches(store, assignments, task, since=start):
             _add_dispatch_files(files, row, reports)
+        records["historical_attempts"] = _historical(store, assignments, task, since=start)
+        for row in records["historical_attempts"]:
+            _add_historical_files(files, row)
         if decision == "brief":
             receipts = [row["report"] for row in store["dispatches"]
                         if row.get("task") == task and isinstance(row.get("report"), dict)
                         and row["report"].get("verdict") == "blocking"]
             for receipt in receipts:
                 files.add(receipt.get("report"), "blocking review receipt at {}".format(receipt.get("head_revision")))
-            records["correction_plan"] = next((plan for plan in reversed(active_plans(store)) if plan["task"] == task), None)
+            for row in _historical(store, assignments, task):
+                _add_historical_files(files, row, verdicts={"blocking"})
+            # A plan whose last fix is already spent authorizes nothing more;
+            # the task re-enters diagnosis instead (Fix Loops).
+            spent = confirmed_fix(assignments, task)
+            records["correction_plan"] = next((plan for plan in reversed(active_plans(store))
+                                               if plan["task"] == task and plan["last_fix"] > spent), None)
             records["approach"] = current_approach(store, task)
     elif decision == "diagnose":
         for row in _task_dispatches(store, assignments, task):
             _add_dispatch_files(files, row, reports, briefs=False)
+        records["historical_attempts"] = _historical(store, assignments, task)
+        for row in records["historical_attempts"]:
+            _add_historical_files(files, row)
         for receipt in _review_receipts(store, task):
             files.add(receipt.get("report"), "{} review receipt at {}".format(receipt.get("verdict"), receipt.get("head_revision")))
         records["assessments"] = [row for row in state["specialist_assessments"] if row.get("task") == task]

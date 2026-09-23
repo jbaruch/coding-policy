@@ -14,7 +14,10 @@
   `gate` and `brief` read the current round, from the task's latest
   developer assignment on. `diagnose` reads every round, including every
   review receipt (superseded ones too) and the task's specialist assessments
-  with their reports. Open attention items come back in full, with their
+  with their reports. Imported historical corrections have no dispatch, so
+  they join from `historical_attempts` with their reports and review
+  receipts. `brief` offers a correction plan only while its last fix is
+  unspent. Open attention items come back in full, with their
   context, consequence and resolution condition. An unknown task or
   enrollment is refused. A missing file is listed with
   `present: false` instead of being dropped. This is the must-load set from

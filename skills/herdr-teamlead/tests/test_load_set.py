@@ -82,7 +82,35 @@ class DecisionTest(unittest.TestCase):
         for key in ids:
             self.assertIn("/r/{}.report.md".format(ids[key]), paths(result))
         self.assertIn("/r/review-blocking.md", paths(result))
-        self.assertEqual(set(result["records"]), {"assessments", "checkpoints", "diagnoses", "approaches", "plans"})
+        self.assertEqual(set(result["records"]), {"assessments", "checkpoints", "diagnoses", "approaches", "plans",
+                                                   "historical_attempts"})
+
+    def imported(self, state, at, verdict):
+        add_assignment(state, at, "developer", "grok", task="t", fix_round=2)
+        attempt = {"id": "manual-2", "task": "t", "assignment_index": len(state["assignments"]) - 1,
+                   "receipts": {"report": {"path": "/r/manual-2.md", "sha256": "0" * 64}},
+                   "reviews": [{"input": {"verdict": verdict, "head_revision": "d" * 40, "report": "/r/manual-2-review.md"}}]}
+        state["recovery"]["historical_attempts"].append(attempt)
+        return attempt
+
+    def test_an_imported_current_round_is_gated_and_diagnosed(self):
+        state, ids = two_rounds()
+        attempt = self.imported(state, "2026-09-23T10:00:00+00:00", "blocking")
+        gate = run(state, ids, "gate", task="t")
+        self.assertEqual(gate["records"]["historical_attempts"], [attempt])
+        self.assertIn("/r/manual-2.md", paths(gate))
+        self.assertIn("/r/manual-2-review.md", paths(gate))
+        self.assertNotIn("/r/{}.report.md".format(ids["rev1"]), paths(gate))
+        self.assertIn("/r/manual-2-review.md", paths(run(state, ids, "brief", task="t")))
+        self.assertIn("/r/manual-2.md", paths(run(state, ids, "diagnose", task="t")))
+
+    def test_a_spent_correction_plan_is_not_offered(self):
+        state, ids = two_rounds()
+        plan = {"id": "p1", "task": "t", "first_fix": 1, "last_fix": 1, "supersedes": None}
+        state["recovery"]["plans"].append(plan)
+        self.assertIsNone(run(state, ids, "brief", task="t")["records"]["correction_plan"])
+        plan["last_fix"] = 2
+        self.assertEqual(run(state, ids, "brief", task="t")["records"]["correction_plan"], plan)
 
     def test_diagnose_loads_superseded_receipts_and_assessment_records(self):
         state, ids = two_rounds()
