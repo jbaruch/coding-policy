@@ -475,8 +475,9 @@ def close_task(store, assignments, data, at):
     """Record that a task left the team, ending its developer reservation.
 
     A `task_closed` event: the event log is open to new kinds, so this adds
-    no store version. A later developer assignment reopens the task and its
-    reservation (#483).
+    no store version. The closure must follow the task's latest developer
+    assignment in time; a tied or backdated one would be recorded without
+    releasing anyone. A later developer assignment reopens the task (#483).
     """
     if not isinstance(data, dict) or set(data) != {"task", "outcome", "evidence"}:
         raise UsageError("Close-task record requires exactly task, outcome and evidence.", {})
@@ -485,7 +486,7 @@ def close_task(store, assignments, data, at):
         raise UsageError("Close-task outcome must be one of {}; record what actually happened to the task.".format(
             ", ".join(TASK_CLOSE_OUTCOMES)), {})
     text(data["evidence"], "evidence")
-    timestamp(at, "Close-task time")
+    instant = timestamp(at, "Close-task time")
     if not any(row.get("task") == task for row in assignments):
         raise UsageError("Task {!r} has no recorded assignment; check its identity with `teamlead state` before closing it.".format(task), {})
     details = {"outcome": data["outcome"], "evidence": data["evidence"]}
@@ -494,25 +495,41 @@ def close_task(store, assignments, data, at):
         if current["details"] != details:
             raise UsageError("Task {!r} is already closed with another outcome or evidence; the first closure stands.".format(task), {})
         return current
+    developer = _latest_developer_time(assignments, task)
+    if developer is not None and instant <= developer:
+        raise UsageError("Close-task time {} does not follow task {!r}'s latest developer assignment at {}; record the closure at the actual time it happened, after that round.".format(
+            at, task, developer.isoformat()), {})
     _event(store, at, "task_closed", task, details)
     return store["events"][-1]
+
+
+def _latest_developer_time(assignments, task):
+    latest = latest_assignment(assignments, task=task, role="developer", status="applied")
+    return None if latest is None else timestamp(latest[1].get("at"), "Assignment {} chronology".format(latest[0]))
+
+
+def _closure_time(row):
+    return timestamp(row["at"], "Close-task event {} time".format(row["sequence"]))
 
 
 def task_closure(store, assignments, task):
     """The closure in force for `task`, or None while it is open.
 
-    A closure stops counting once a developer assignment follows it: the task
-    was reopened, and its new developer holds the seat again.
+    Selected by event time, never append position. Only a closure after the
+    task's latest developer assignment counts: a later developer round
+    reopened the task. Tied closure times are uncertain and refused.
     """
-    closure = next((row for row in reversed(store["events"])
-                    if row["kind"] == "task_closed" and row["task"] == task), None)
-    if closure is None:
+    developer = _latest_developer_time(assignments, task)
+    closures = [row for row in store["events"] if row["kind"] == "task_closed" and row["task"] == task
+                and (developer is None or _closure_time(row) > developer)]
+    if not closures:
         return None
-    latest = latest_assignment(assignments, task=task, role="developer", status="applied")
-    if latest is not None and timestamp(latest[1].get("at"), "Assignment {} chronology".format(latest[0])) > timestamp(
-            closure["at"], "Close-task event {} time".format(closure["sequence"])):
-        return None
-    return closure
+    newest = max(_closure_time(row) for row in closures)
+    tied = [row for row in closures if _closure_time(row) == newest]
+    if len(tied) != 1:
+        raise UsageError("Task {!r} closure chronology is uncertain: events {} share one time. Recover the original closure evidence; do not plan on a guess.".format(
+            task, ", ".join(str(row["sequence"]) for row in tied)), {})
+    return tied[0]
 
 
 def _closed_after(store, task, instant):
@@ -522,7 +539,7 @@ def _closed_after(store, task, instant):
     developer: a second worker reopening the task must not re-hold the first.
     """
     return any(row["kind"] == "task_closed" and row["task"] == task
-               and timestamp(row["at"], "Close-task event {} time".format(row["sequence"])) > instant
+               and _closure_time(row) > instant
                for row in store["events"])
 
 

@@ -85,6 +85,29 @@ class ReservationTest(unittest.TestCase):
         with self.assertRaisesRegex(UsageError, "already closed"):
             close_task(state["recovery"], state["assignments"], {**MERGED, "outcome": "abandoned"}, REOPEN_AT)
 
+    def test_a_tied_or_backdated_closure_is_refused_and_releases_nobody(self):
+        for at in (DEV_AT, "2026-09-23T08:00:00+00:00", "2026-09-23T10:05:56+01:00"):
+            with self.subTest(at=at):
+                state = media_round()
+                with self.assertRaisesRegex(UsageError, "does not follow task 'media-77'"):
+                    close_task(state["recovery"], state["assignments"], MERGED, at)
+                self.assertEqual(state["recovery"]["events"], [])
+                self.assertEqual(developer_reservations(state["recovery"], state["assignments"]),
+                                 {"codex-census": "media-77"})
+
+    def test_closures_are_selected_by_time_and_ties_are_uncertain(self):
+        state = media_round()
+        close_task(state["recovery"], state["assignments"], MERGED, REOPEN_AT)
+        backfilled = dict(state["recovery"]["events"][0], sequence=2, at=CLOSE_AT,
+                          details={"outcome": "abandoned", "evidence": "backfill"})
+        state["recovery"]["events"].append(backfilled)
+        closure = task_closure(state["recovery"], state["assignments"], "media-77")
+        assert closure is not None
+        self.assertEqual(closure["at"], REOPEN_AT)
+        state["recovery"]["events"][1]["at"] = REOPEN_AT
+        with self.assertRaisesRegex(UsageError, "closure chronology is uncertain"):
+            task_closure(state["recovery"], state["assignments"], "media-77")
+
     def test_malformed_or_unknown_closures_are_refused(self):
         state = media_round()
         for data, message in (({**MERGED, "extra": 1}, "exactly task, outcome and evidence"),
