@@ -80,6 +80,7 @@
     "skills/herdr-teamlead/tests/test_retrospective_runtime.py",
     "skills/herdr-teamlead/tests/test_review_package.py",
     "skills/herdr-teamlead/tests/test_role_clear.py",
+    "skills/herdr-teamlead/tests/test_seat_holds.py",
     "skills/herdr-teamlead/tests/test_slice_scope_parity.py",
     "skills/herdr-teamlead/tests/test_specialist_cli.py",
     "skills/herdr-teamlead/tests/test_specialist_delivery.py",
