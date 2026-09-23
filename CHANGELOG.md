@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.259 — 2026-09-23
+
 ### Added
 
 - **The Herdr planner now reads developer reservations and busy workers from
