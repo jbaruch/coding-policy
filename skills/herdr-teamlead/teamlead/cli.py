@@ -1528,7 +1528,13 @@ def cmd_capability(args, client=None, warn=None, trace=None):
         return document, None
     at = args.now or now_iso()
     if args.command == "capability-check":
-        state, _usable = load_state_checked(path, warn=warn, persist_migration=False)
+        state, usable = load_state_checked(path, warn=warn, persist_migration=False)
+        if not usable:
+            # An unreadable ledger is not an empty one: whether work exists, and
+            # so whether a refresh is due, is unknown.
+            raise StateError("The ledger at {} exists but cannot be read, so whether the capability "
+                             "table is due is unknown. Repair or migrate it with `teamlead state`, "
+                             "then re-run capability-check.".format(path), {"path": str(path)})
         result = capabilities.cadence(document, at, existing_work=bool(state["assignments"]))
         return {"schema_version": capabilities.SCHEMA_VERSION, **result,
                 "entries": len(document["entries"])}, None

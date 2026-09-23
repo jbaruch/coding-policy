@@ -17,7 +17,7 @@ and where a model failed here that failure is itself a `project` source.
 
 import json
 import re
-from datetime import timedelta, timezone
+from datetime import date, timedelta, timezone
 from pathlib import Path
 from typing import NoReturn
 
@@ -146,6 +146,13 @@ def validate_entry(entry):
         _fail("A capability source names where it was read: a URL, a citation, or an issue reference.")
     if not isinstance(source["dated"], str) or not DATED.fullmatch(source["dated"]):
         _fail("A capability source is dated YYYY-MM-DD, so a stale reading is visible.")
+    try:
+        date.fromisoformat(source["dated"])
+        calendar = True
+    except ValueError:
+        calendar = False
+    if not calendar:
+        _fail("A capability source's date {!r} is not a calendar date.".format(source["dated"]))
     if entry["verdict"] == "adequate" and source["kind"] not in SUPPORTING_SOURCES:
         _fail("An `adequate` verdict for {} / {} / {} rests on a {} source. A vendor's claim about "
               "its own model routes real work on marketing; cite a benchmark, an independent "

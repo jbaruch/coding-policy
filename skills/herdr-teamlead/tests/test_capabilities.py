@@ -15,6 +15,7 @@ if _ROOT not in _sys.path:
     _sys.path.insert(0, _ROOT)
 
 from teamlead import capabilities
+from teamlead.cli import main
 from teamlead.errors import UsageError
 
 #: A fixed past reference; every other instant and date is derived from it
@@ -200,6 +201,22 @@ class CapabilityTableTest(unittest.TestCase):
                 with self.assertRaisesRegex(UsageError, "dated YYYY-MM-DD"):
                     capabilities.record(self.state, {"entries": [entry(
                         source={"kind": "benchmark", "ref": "x", "dated": dated})]}, AT)
+
+    def test_the_cadence_check_refuses_an_unreadable_ledger(self):
+        # An unreadable ledger is not an empty one: "no recorded work" would
+        # wrongly report the table as not due.
+        self.state.write_text("{broken", encoding="utf-8")
+        out, err = io.StringIO(), io.StringIO()
+        code = main(["capability-check", "--state", str(self.state), "--now", AT], stdout=out, stderr=err)
+        self.assertEqual((code, out.getvalue()), (1, ""))
+        self.assertIn("cannot be read", err.getvalue())
+        self.assertEqual(self.state.read_text(encoding="utf-8"), "{broken")
+
+    def test_a_source_date_is_a_real_calendar_day(self):
+        for impossible in ("2026-02-31", "2026-99-99"):
+            with self.subTest(dated=impossible), self.assertRaisesRegex(UsageError, "not a calendar date"):
+                capabilities.record(self.state, {"entries": [entry(
+                    source={"kind": "benchmark", "ref": "x", "dated": impossible})]}, AT)
 
     def test_a_source_names_where_it_was_read(self):
         with self.assertRaisesRegex(UsageError, "names where it was read"):
