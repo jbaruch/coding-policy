@@ -195,9 +195,10 @@ class MemoryTest(unittest.TestCase):
                 self.assertTrue(result["record"]["reset_ready"])
 
     def test_a_new_gap_cannot_claim_the_unrecorded_task_to_skip_naming_one(self):
-        result = self.stow({**self.capture, "gaps": [{"missing": "x", "task": memory.UNRECORDED_TASK,
-                                                      "recovery": {"ask": "q"}}]})
-        self.assertFalse(result["record"]["reset_ready"])
+        with self.assertRaisesRegex(UsageError, "reserved for gaps migrated"):
+            self.stow({**self.capture, "gaps": [{"missing": "x", "task": memory.UNRECORDED_TASK,
+                                                 "recovery": {"ask": "q"}}]})
+        self.assertFalse(memory.location(self.state).exists())
 
     def test_a_gap_without_a_usable_recovery_is_refused(self):
         for gap in ("The ledger is unavailable.",

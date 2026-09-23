@@ -269,6 +269,10 @@ def _append(path, data, kind, at):
                  "Memory recording precedes saved history; use the current UTC checkpoint without rewriting old records.")
         row = {"schema_version": SCHEMA_VERSION if kind == "lesson" else STOW_VERSION,
                "kind": kind, "recorded_at": at, "input_digest": _digest(data), **data}
+        if kind == "stow":
+            _require(isinstance(data["gaps"], list) and not any(
+                isinstance(gap, dict) and gap.get("task") == UNRECORDED_TASK for gap in data["gaps"]),
+                "Name the task each gap affects; `{}` is reserved for gaps migrated from version-1 stows.".format(UNRECORDED_TASK))
         source_key = "sources" if kind == "lesson" else "required_reads"
         _require(_names(data[source_key], nonempty=True), "Memory {} must list distinct evidence locations.".format(source_key))
         row[source_key] = [_source(value) if kind == "lesson" else _receipt(value) for value in data[source_key]]
