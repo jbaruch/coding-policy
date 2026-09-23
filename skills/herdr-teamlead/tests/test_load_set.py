@@ -1,5 +1,6 @@
 """Each foreman decision loads the owner-linked records it depends on (#483)."""
 
+import io
 import json
 import sys
 import unittest
@@ -72,7 +73,7 @@ class DecisionTest(unittest.TestCase):
         self.assertIn("/r/review-blocking.md", paths(result))
         self.assertIn("/r/{}.report.md".format(ids["rev1"]), paths(result))
         self.assertIn("/r/{}.brief.md".format(ids["dev1"]), paths(result))
-        self.assertNotIn("/r/{}.brief.md".format(ids["rev1"]), paths(result))
+        self.assertIn("/r/{}.brief.md".format(ids["rev1"]), paths(result))
         self.assertIn("correction_plan", result["records"])
 
     def test_diagnose_loads_every_round(self):
@@ -80,7 +81,21 @@ class DecisionTest(unittest.TestCase):
         result = run(state, ids, "diagnose", task="t")
         for key in ids:
             self.assertIn("/r/{}.report.md".format(ids[key]), paths(result))
-        self.assertEqual(set(result["records"]), {"checkpoints", "diagnoses", "approaches", "plans"})
+        self.assertIn("/r/review-blocking.md", paths(result))
+        self.assertEqual(set(result["records"]), {"assessments", "checkpoints", "diagnoses", "approaches", "plans"})
+
+    def test_diagnose_loads_superseded_receipts_and_assessment_records(self):
+        state, ids = two_rounds()
+        state["recovery"]["events"].append({"sequence": 1, "kind": "review_superseded", "task": "t", "at": REVIEW_1,
+                                            "details": {"previous": {"verdict": "approved", "head_revision": "c" * 40,
+                                                                     "report": "/r/superseded.md"}}})
+        assessment = {"task": "t", "role": "investigator", "report": "/r/investigation.md", "outcome": "accepted",
+                      "summary": "Loop stalls on flaky fixture."}
+        state["specialist_assessments"].append(assessment)
+        result = run(state, ids, "diagnose", task="t")
+        self.assertIn("/r/superseded.md", paths(result))
+        self.assertIn("/r/investigation.md", paths(result))
+        self.assertEqual(result["records"]["assessments"], [assessment])
 
     def test_plan_names_the_queue_entry_and_the_reserved_developer(self):
         state = empty_state()
@@ -109,7 +124,7 @@ class DecisionTest(unittest.TestCase):
                    "done": {"id": "done", "kind": "question", "title": "x", "status": "resolved", "task": "t"},
                    "other": {"id": "other", "kind": "blocker", "title": "y", "status": "open", "task": "u"}}
         result = build(state, reports(ids), entries, set(), "gate", task="t", exists=lambda path: True)
-        self.assertEqual([row["id"] for row in result["core"]["attention"]], ["q"])
+        self.assertEqual(result["core"]["attention"], [entries["q"]])
         self.assertEqual(result["core"]["task"]["scope"], "fix it")
 
 
@@ -133,6 +148,16 @@ class LoadSetCommandTest(CliCase):
         result = json.loads(out)
         self.assertEqual((result["decision"], result["core"]["task"]["scope"]), ("plan", "fix it"))
         self.assertEqual(result["records"]["reserved_developer"], ["grok"])
+
+    def test_an_unknown_task_or_enrollment_fails(self):
+        save_state(self.state, empty_state())
+        for argv, message in ((["--decision", "plan", "--task", "ghost"], "neither registered nor assigned"),
+                              (["--decision", "wake", "--enrollment", "ghost"], "no supervision enrollment")):
+            with self.subTest(argv=argv):
+                self.out, self.err = io.StringIO(), io.StringIO()
+                code, _, err = self.run_cli(self.base() + ["load-set", *argv])
+                self.assertEqual(code, 1)
+                self.assertIn(message, err)
 
     def test_an_unusable_state_file_fails(self):
         self.state.write_text('{"schema_version": 2, broken', encoding="utf-8")

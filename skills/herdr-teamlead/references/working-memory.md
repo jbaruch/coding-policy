@@ -109,13 +109,15 @@ teamlead load-set --decision wake --enrollment <enrollment-id>
 
 Output: `{"schema_version": 1, "decision", "task", "enrollment", "round_start",
 "core", "records", "files"}`. `core` holds the task record, its budget status
-and its open attention items. `files` lists `{"path", "why", "present"}` in
+and each open attention item in full. `files` lists `{"path", "why", "present"}` in
 load order. A missing file stays listed with `present: false`. What each
 decision adds is the contract in `skills/herdr-teamlead/teamlead/load_set.py`
 (module docstring). Read every listed file before deciding. The set is a
 floor: lessons from `memory-list` come on top, and nothing on the list is
 skipped. A non-zero exit names an unusable state file, or a missing or
-mismatched `--task` / `--enrollment`, on stderr.
+mismatched `--task` / `--enrollment`, on stderr. An unknown task, or an
+enrollment with no supervision record, is refused rather than answered with an
+empty set.
 
 ## Persistence contract
 

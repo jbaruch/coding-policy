@@ -7,14 +7,15 @@ receipts and recovery decisions. This joins those links per decision, so the
 foreman loads what the decision depends on and nothing else.
 
 Decisions and what each adds to the task core (task record, budget status,
-open attention items):
+and each open attention item in full):
 
 - `plan` -- the task's queue entry and any developer reservation on it
-- `brief` -- the current round's briefs and reports, blocking review
+- `brief` -- every brief and report of the current round, blocking review
   receipts, and the active correction plan and approach
 - `gate` -- every brief, common file and report dispatched in the current
   round, the round being the task's latest developer assignment onward
-- `diagnose` -- every report across all rounds, investigator assessments,
+- `diagnose` -- every report and review receipt across all rounds (superseded
+  receipts included), the task's specialist assessments with their reports,
   checkpoints, diagnoses, approaches and correction plans
 - `wake` -- keyed by enrollment, not task: that dispatch's brief, common and
   report, plus its task core
@@ -27,7 +28,6 @@ and nothing may remove an entry (#483 decision 2). Files are listed with
 from .chronology import latest_assignment, timestamp
 from .foreman_queue import waiting
 from .recovery import active_plans, current_approach, developer_reservations, task_statuses
-from .tiers import canonical_role
 
 LOAD_SET_SCHEMA_VERSION = 1
 DECISIONS = ("plan", "brief", "gate", "diagnose", "wake")
@@ -69,14 +69,23 @@ def _core(state, attention_entries, task):
     store = state["recovery"]
     return {"task": store["tasks"].get(task),
             "status": task_statuses(store, state["assignments"]).get(task),
-            "attention": [{"id": entry["id"], "kind": entry["kind"], "title": entry["title"], "status": entry["status"]}
-                          for entry in attention_entries.values()
+            "attention": [entry for entry in attention_entries.values()
                           if entry.get("task") == task and entry["status"] in OPEN_ATTENTION]}
 
 
 def _round_start(assignments, task):
     latest = latest_assignment(assignments, task=task, role="developer", status="applied")
     return None if latest is None else _applied_at(assignments, latest[0])
+
+
+def _review_receipts(store, task):
+    """Every review receipt recorded for the task, superseded ones included."""
+    receipts = [row["report"] for row in store["dispatches"]
+                if row.get("task") == task and isinstance(row.get("report"), dict)]
+    receipts += [event["details"]["previous"] for event in store["events"]
+                 if event.get("kind") == "review_superseded" and event.get("task") == task
+                 and isinstance(event.get("details", {}).get("previous"), dict)]
+    return receipts
 
 
 def _add_dispatch_files(files, row, reports, *, briefs=True):
@@ -110,7 +119,7 @@ def build(state, reports, attention_entries, busy_tasks, decision, *, task=None,
                                                if held == task)
     elif decision in ("brief", "gate"):
         for row in _task_dispatches(store, assignments, task, since=start):
-            _add_dispatch_files(files, row, reports, briefs=decision == "gate" or canonical_role(row.get("role", "")) == "developer")
+            _add_dispatch_files(files, row, reports)
         if decision == "brief":
             receipts = [row["report"] for row in store["dispatches"]
                         if row.get("task") == task and isinstance(row.get("report"), dict)
@@ -122,9 +131,11 @@ def build(state, reports, attention_entries, busy_tasks, decision, *, task=None,
     elif decision == "diagnose":
         for row in _task_dispatches(store, assignments, task):
             _add_dispatch_files(files, row, reports, briefs=False)
-        for assessment in state["specialist_assessments"]:
-            if assessment.get("task") == task:
-                files.add(assessment.get("report"), "assessed {} report".format(assessment.get("role", "specialist")))
+        for receipt in _review_receipts(store, task):
+            files.add(receipt.get("report"), "{} review receipt at {}".format(receipt.get("verdict"), receipt.get("head_revision")))
+        records["assessments"] = [row for row in state["specialist_assessments"] if row.get("task") == task]
+        for assessment in records["assessments"]:
+            files.add(assessment.get("report"), "assessed {} report".format(assessment.get("role", "specialist")))
         for name in ("checkpoints", "diagnoses", "approaches", "plans"):
             records[name] = [row for row in store[name] if row.get("task") == task]
     return {"schema_version": LOAD_SET_SCHEMA_VERSION, "decision": decision, "task": task,

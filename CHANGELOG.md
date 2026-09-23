@@ -11,8 +11,12 @@
   `gate`, `diagnose` (by task) and `wake` (by enrollment). Each set includes
   the task core: the record, budget status and open attention items.
 
-  `gate` reads the current round, from the task's latest developer
-  assignment on. `diagnose` reads every round. A missing file is listed with
+  `gate` and `brief` read the current round, from the task's latest
+  developer assignment on. `diagnose` reads every round, including every
+  review receipt (superseded ones too) and the task's specialist assessments
+  with their reports. Open attention items come back in full, with their
+  context, consequence and resolution condition. An unknown task or
+  enrollment is refused. A missing file is listed with
   `present: false` instead of being dropped. This is the must-load set from
   #483 decision 2: a floor that an add-only lesson classifier may add to
   later, and that nothing may trim. The command is read-only and refuses an

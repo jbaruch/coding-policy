@@ -1393,8 +1393,12 @@ def cmd_load_set(args, client=None, warn=None, trace=None):
     reports = {row["id"]: row["assignment"].get("report") for row in members}
     busy = {row["assignment"]["task"] for row in members if row["active"]}
     _document, entries, _progress = attention.load(state_path)
-    if args.decision == "wake" and not any(row.get("id") == args.enrollment for row in state["recovery"]["dispatches"]):
-        raise UsageError("Enrollment {} has no recorded dispatch; read supervision-status for the enrollment id.".format(args.enrollment), {})
+    if args.decision == "wake" and (args.enrollment not in reports
+                                    or not any(row.get("id") == args.enrollment for row in state["recovery"]["dispatches"])):
+        raise UsageError("Enrollment {} has no supervision enrollment with a recorded dispatch; read supervision-status for the enrollment id.".format(args.enrollment), {})
+    if args.decision != "wake" and args.task not in state["recovery"]["tasks"] and not any(
+            row.get("task") == args.task for row in state["assignments"]):
+        raise UsageError("Task {!r} is neither registered nor assigned; check its identity with `teamlead state`.".format(args.task), {})
     return load_set.build(state, reports, entries, busy, args.decision, task=args.task, enrollment=args.enrollment,
                           exists=lambda path: Path(path).is_file()), None
 
