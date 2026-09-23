@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.254 — 2026-09-23
+
 ### Fixed
 
 - **A judge round records which mode it ran in.** `rules/agent-team-operation.md`
