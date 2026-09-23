@@ -266,6 +266,7 @@ class RecoveryCommandTests(fixture.CliCase):
             self.invoke(args, client)
         dispatch = self.saved()["recovery"]["dispatches"][-1]
         self.assertEqual((dispatch["status"], dispatch["judge_mode"]), ("sending", "diagnosis"))
+        self.assertEqual(dispatch["schema_version"], 3)
         self.assertEqual(dispatch["context_before_send"]["judge_mode"], "diagnosis")
         data = {"dispatch": "interrupted-judge:judge", "outcome": "applied",
                 "reason": "Original report proves delivery and completion",
@@ -274,6 +275,8 @@ class RecoveryCommandTests(fixture.CliCase):
         self.assertEqual(code, 0, err)
         row = self.saved()["assignments"][-1]
         self.assertEqual((row["role"], row["judge_mode"]), ("judge", "diagnosis"))
+        dispatch = self.saved()["recovery"]["dispatches"][-1]
+        self.assertEqual((dispatch["result"]["schema_version"], dispatch["result"]["judge_mode"]), (3, "diagnosis"))
 
     def test_the_same_brief_under_another_mode_is_another_dispatch(self):
         # coding-policy#494 review: without the mode in the identity, a

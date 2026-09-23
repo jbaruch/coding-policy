@@ -1485,7 +1485,11 @@ def cmd_recovery(args, client=None, warn=None, trace=None):
                     requirements=recovered.get("requirements"), reviewer_scope=recovered.get("reviewer_scope"),
                     judge_mode=recovered.get("judge_mode"),
                 )
-                recovery.finish_dispatch(store, result["id"], recovered, len(history) - 1, at)
+                # A dispatch recorded before the mode existed keeps its version-1
+                # result: the ledger row says `unknown`, the dispatch says nothing.
+                saved = {key: value for key, value in recovered.items()
+                         if key != "judge_mode" or "judge_mode" in result}
+                recovery.finish_dispatch(store, result["id"], saved, len(history) - 1, at)
     recovery.validate_store(store, history)
     engagement.validate_assessments(state)
     save_state(state_path, state)

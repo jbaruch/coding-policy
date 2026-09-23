@@ -371,7 +371,10 @@ fingerprint, so an adjudication and a diagnosis of one brief are separate
 dispatches. Only judge dispatches carry the field. The
 owner stamps an older store on load, adds the empty collections, and refuses one
 already carrying a field — or a seat-named dispatch — its version did not own. Generic records remain version 1; stale-Grok delivery and
-composition-bearing dispatch/result records use version 2. Checkpoints are at
+composition-bearing dispatch/result records use version 2; a judge
+dispatch/result carrying its `judge_mode` uses version 3. Version 1 and 2 rows
+are never restamped: a judge dispatch recorded before version 3 keeps no mode,
+and its ledger row reads `unknown`. Checkpoints are at
 version 2: the owner upgrades a version-1 row on load, stamping it and
 preserving its identity, fix round, base and recorded ruling, and refuses one
 missing the ruling evidence its version required. The owner adds empty `role_clearances` and

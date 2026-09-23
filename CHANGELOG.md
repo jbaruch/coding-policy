@@ -30,7 +30,10 @@
   mid-send reconciled as `unknown`, and the dispatch fingerprint left the mode
   out, so a diagnosis of the same brief replayed a completed adjudication.
   Recovery store 11 → 12 puts `judge_mode` on the judge dispatch, its pre-send
-  context and its saved result, and binds it into the fingerprint. Only judge
+  context and its saved result, and binds it into the fingerprint. The
+  dispatch record carries its own version too: a mode-bearing judge dispatch
+  and result are record version 3, and version 1 and 2 rows are never
+  restamped. Only judge
   dispatches carry the field; an older store already carrying it is refused as
   unowned newer data. A malformed ledger `judge_mode` now reads as unusable
   state instead of raising `TypeError`.

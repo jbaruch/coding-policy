@@ -42,6 +42,11 @@ RECOVERY_SCHEMA_VERSION = 1
 RECOVERY_STORE_VERSION = 12
 REFUSAL_FIELDS = frozenset({"brief_identity", "refusal", "refusal_move", "provider"})
 SPECIALIST_DISPATCH_VERSION = 2
+#: Dispatch record version 3: a judge dispatch carrying the mode it was sent
+#: for, on the row and its saved result (#478). Version 1 and 2 rows are
+#: never restamped; a judge dispatch recorded before it keeps no mode, and
+#: its ledger row reads `unknown`.
+JUDGE_DISPATCH_VERSION = 3
 #: Checkpoint record version. 1 carries a mandatory pinned-judge ruling; 2
 #: makes it optional. Version-1 rows keep their judge evidence and are never
 #: rewritten. The checkpoint now records the exhaustion the diagnosis brief is
@@ -1120,8 +1125,15 @@ def _dispatch_version(record):
     # reach here directly, so the seat grammar is checked where the record is
     # (#434).
     require_seatable(record.get("role"))
+    # A ledger row carries `judge_mode: null` on every non-judge role, and a
+    # result built from one inherits it; null is "no mode", never a version-3
+    # field (#478).
+    judged = record.get("judge_mode") is not None
+    if judged and (canonical_role(record.get("role")) != "judge"
+                   or not isinstance(record["judge_mode"], str) or record["judge_mode"] not in JUDGE_MODES):
+        raise UsageError("A dispatch's judge_mode names adjudication or diagnosis, on a judge dispatch alone.", {})
     if not DISPATCH_METADATA_FIELDS.intersection(record):
-        return RECOVERY_SCHEMA_VERSION
+        return JUDGE_DISPATCH_VERSION if judged else RECOVERY_SCHEMA_VERSION
     if "requirements" in record:
         from .composition import normalize_requirement
         requirement = record["requirements"]
@@ -1132,7 +1144,7 @@ def _dispatch_version(record):
     if "reviewer_scope" in record and (canonical_role(record.get("role")) != "reviewer"
             or not isinstance(record["reviewer_scope"], str) or record["reviewer_scope"] not in {"verification", "design"}):
         raise UsageError("New reviewer_scope must name verification or design on a reviewer dispatch; preserve unknown scope only in legacy assignment history.", {})
-    return SPECIALIST_DISPATCH_VERSION
+    return JUDGE_DISPATCH_VERSION if judged else SPECIALIST_DISPATCH_VERSION
 
 
 def _dispatch_metadata(record):
@@ -1153,7 +1165,7 @@ def _validate_dispatch_metadata(record):
 
 def reserve(store, record, at):
     version = _dispatch_version(record)
-    if version == SPECIALIST_DISPATCH_VERSION and store.get("schema_version") != RECOVERY_STORE_VERSION:
+    if version >= SPECIALIST_DISPATCH_VERSION and store.get("schema_version") != RECOVERY_STORE_VERSION:
         raise UsageError("Composition dispatch metadata needs the owner-migrated recovery store; load the current state before reserving this assignment.", {})
     # A seat in the dispatch role is what store version 10 added. Appending one
     # to an older store leaves it carrying a row its version never wrote, which
@@ -1191,7 +1203,7 @@ def reserve(store, record, at):
     else:
         item = {"at": at, **record, "schema_version": version,
                 "status": "reserved", "result": None, "report": None}
-        if version == SPECIALIST_DISPATCH_VERSION:
+        if version >= SPECIALIST_DISPATCH_VERSION:
             item.update(_dispatch_metadata(record))
         store["dispatches"].append(item)
     _event(store, at, "dispatch_reserved", record["task"], {"dispatch": record["id"], "fix_round": record["fix_round"]})
@@ -1207,13 +1219,17 @@ def mark_sending(store, identifier, at, context):
 
 def finish_dispatch(store, identifier, result, assignment_index, at):
     record = _item(store["dispatches"], identifier, "dispatch")
+    if "judge_mode" in result and result["judge_mode"] is None:
+        result = {key: value for key, value in result.items() if key != "judge_mode"}
     version = _dispatch_version(result)
     if record["schema_version"] != version or _dispatch_metadata(record) != _dispatch_metadata(result):
         raise UsageError("Dispatch result changes its reserved composition metadata; preserve the send outcome and recover the original engagement and reviewer scope.", {})
     if "assignment_index" in record and record["assignment_index"] != assignment_index:
         record.setdefault("prior_assignment_indices", []).append(record["assignment_index"])
+    if record.get("judge_mode") != result.get("judge_mode"):
+        raise UsageError("Dispatch result changes the judge mode it was reserved for; preserve the send outcome.", {})
     saved_result = {**result, "schema_version": version}
-    if version == SPECIALIST_DISPATCH_VERSION:
+    if version >= SPECIALIST_DISPATCH_VERSION:
         saved_result.update(_dispatch_metadata(result))
     record.update(status=result["status"], result=saved_result, assignment_index=assignment_index)
     _event(store, at, "dispatch_recorded", record["task"], {"dispatch": identifier, "status": result["status"], "assignment_index": assignment_index})
@@ -1689,7 +1705,8 @@ def validate_store(store, assignments):
                 raise UsageError("Recovery {} must be an array; restore the owner-written ledger.".format(name), {})
             identifiers = []
             for row in store[name]:
-                versions = ({1, 2} if name in {"delivery_recoveries", "dispatches"}
+                versions = ({1, 2, JUDGE_DISPATCH_VERSION} if name == "dispatches"
+                            else {1, 2} if name == "delivery_recoveries"
                             else CHECKPOINT_VERSIONS if name == "checkpoints"
                             else DIAGNOSIS_VERSIONS if name == "diagnoses"
                             else {APPROACH_RECORD_VERSION} if name == "approaches"
@@ -1834,8 +1851,10 @@ def validate_store(store, assignments):
                         or any(assignment.get(key) != row[key] for key in ("task", "agent", "fix_round"))
                         or assignment.get("status") != "applied"):
                     raise UsageError("Dispatch outcome disagrees with its assignment row.", {})
-                if row["schema_version"] == SPECIALIST_DISPATCH_VERSION and any(assignment.get(key) != row.get(key) for key in DISPATCH_METADATA_FIELDS):
+                if row["schema_version"] >= SPECIALIST_DISPATCH_VERSION and any(assignment.get(key) != row.get(key) for key in DISPATCH_METADATA_FIELDS):
                     raise UsageError("Dispatch and assignment composition metadata disagree; restore their original shared engagement and reviewer scope before continuing.", {})
+                if row["schema_version"] == JUDGE_DISPATCH_VERSION and assignment.get("judge_mode") != row.get("judge_mode"):
+                    raise UsageError("Dispatch and assignment judge modes disagree; restore the mode the judge was sent for.", {})
                 if not isinstance(row["result"], dict) or any(row["result"].get(key) != row[key] for key in ("task", "role", "agent", "fix_round", "status")):
                     raise UsageError("The saved dispatch result does not match its confirmed outcome; recover it before retrying.", {})
                 if row["role"] == "developer":
