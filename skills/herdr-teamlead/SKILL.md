@@ -555,8 +555,14 @@ abandoned, close it; this releases its developer's reservation. The record is
 CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
 bash "$CP/skills/herdr-teamlead/teamlead.sh" close-task --record <close.json>
 ```
- Preserve the ledger for resume
-and standup. Preserve retrospective notes and link them from the ledger. Save
+
+- **Exit 0** — stdout is the recorded `task_closed` event JSON. Repeating the
+  same closure prints the existing event. Proceed.
+- **Non-zero** — stderr names the refused field or the conflicting earlier
+  closure. Correct the record and re-run; do not finish Step 16 with the
+  task unclosed.
+
+Preserve the ledger for resume and standup. Preserve retrospective notes and link them from the ledger. Save
 current progress through the attention owner and stow the foreman's handoff under
 the working-memory reference. Reconcile supervision before ending the turn.
 Report outstanding attention first, followed by the outcome and saved paths.
