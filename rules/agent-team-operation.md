@@ -360,6 +360,7 @@ description: Running a multi-agent team — task-based specialist composition, c
 
 - Herdr lifecycle and completion statuses are unreliable observations, never task-completion evidence
 - Maintain the foreman-owned task ledger outside Herdr throughout the task
+- Read which tasks wait for a seat from the owner's derived queue, never from memory
 - Record each dispatch outcome and each assessed worker outcome before continuing the round
 - Distinguish report delivery, accepted assignment work, and completion of the whole task
 - Bind acceptance to the actual report and the required artifact, VCS, and gate evidence

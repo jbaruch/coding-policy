@@ -1,5 +1,28 @@
 # Changelog
 
+### Added
+
+- **`teamlead foreman-queue` lists the open tasks waiting for a seat.** The
+  #483 audit found that the foreman kept the queue in its conversation. The
+  ledger recorded only "queued", and around ten times in one session the next
+  step ("admin #541 follows once `claude-check` finishes") existed nowhere
+  else. #483 resets the foreman at every round boundary, so the queue has to
+  come from durable state.
+
+  The queue is derived and never recorded, so there's no second copy to keep
+  in sync. For each open task, the latest applied developer round decides the
+  stage: `reviewer` or `tester` while that verifier has no assignment since the
+  round, `gate` once both were dispatched with no approved report recorded,
+  `release` after an approved report, and `close` after a release with no
+  `task_closed` event. Tasks with an active supervision enrollment are in
+  flight and omitted, and entries run oldest first. The command lists only
+  seat waits: `supervision-status` already covers reports waiting to be
+  gated, and `teamlead status` covers budgets.
+
+  On a copy of the 2026-09-23 live state it lists 51 tasks. 27 of them are
+  finished work that was never closed, and they leave the queue once
+  `close-task` records them.
+
 ## 0.3.259 — 2026-09-23
 
 ### Added
