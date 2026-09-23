@@ -1,5 +1,58 @@
 # Changelog
 
+### Changed
+
+- **The cheap round is licensed by a recorded oracle, not by a list of eight
+  task names.** `tiers.py` had a path for routing boring work to a cheap model.
+  In 702 recorded assignments it fired zero times, and it could not fire. To
+  qualify, a round needed its `task_kind` to be one of eight hardcoded strings
+  (`rebase`, `restack`, `apply_exact_patch`, `docs_only`, `check_rerun`,
+  `exact_thread_reply`, `homogeneous_search_replace`, `issue_filing`), plus ten
+  hand-typed booleans nothing validated, plus a two-file and 64,000-byte cap.
+  The ninth kind of boring work was permanently ineligible however completely
+  its plan was specified — the shape `rules/script-delegation.md` The Regex
+  Trap already forbids, since a script may only handle patterns that are fully
+  enumerable (#480).
+
+  The predicate is now one question answered from an artifact: is the expected
+  whole result written down where a later check compares against it byte for
+  byte? `oracle` carries `kind` `digest`, `patch` or `fixture` — an expected
+  sha256, or a file holding the exact patch or the complete expected output.
+  Where one exists a wrong result is loud, which is what licenses the round
+  below its floor.
+
+  The declaration is checked rather than taken. A digest of the wrong shape, a
+  digest that also carries a path, a file nobody wrote, and a path that is a
+  directory each refuse the round. That is the difference from the retired
+  `whole_result_oracle` boolean, which was the same idea implemented as an
+  assertion — #480's reading, that the concept was right and the implementation
+  wrong, is what this keeps and what it drops.
+
+  The size caps go with the names. File count and byte count were proxies for
+  difficulty, and #445 §2 already flags the context-size trigger as unsound: a
+  two-file change can require a decision, and a large enumerated rename requires
+  none. The nine other hand-typed proofs and escapes go too; where the whole
+  result is checkable, the oracle catches what they asserted.
+
+  A round context written for the retired predicate is refused by name, with
+  its replacement, rather than silently ignored. No saved context can be
+  affected — the lane never ran.
+
+  This half needs no classifier and no capability table. #480's remaining half,
+  matching a task against published capability knowledge, is the part a bounded
+  classification would answer, and the table itself is #481.
+
+  **The check that makes the licence honest.** Declaring an oracle licensed the
+  cheap round; nothing compared the result against it, so a digest was just a
+  64-character claim. `teamlead verify-oracle --plan --role --result` now does:
+  sha256 for `digest`, byte for byte against the named file for `patch` and
+  `fixture`. It reads the oracle from the saved plan, not from its caller, so a
+  round is judged against the oracle it was licensed on. A mismatch is a
+  blocking finding at SKILL.md Step 12. Oracle paths must be absolute, since a
+  plan replays at apply from wherever apply runs, and a non-string `kind`
+  licenses nothing instead of raising. The plan schema moves to 8.
+
+
 ## 0.3.250 — 2026-09-23
 
 ### Added

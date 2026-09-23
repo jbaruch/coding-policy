@@ -93,6 +93,8 @@
     "scripts/tests/test_source_index.py",
     "skills/herdr-teamlead/teamlead/partition.py",
     "skills/herdr-teamlead/tests/test_partition.py",
+    "skills/herdr-teamlead/teamlead/oracle.py",
+    "skills/herdr-teamlead/tests/test_oracle.py",
     "skills/herdr-teamlead/tests/test_legacy_recovery.py"
   ],
   "executionEnvironments": [

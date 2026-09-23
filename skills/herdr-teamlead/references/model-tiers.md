@@ -80,25 +80,31 @@ assigned role. A mechanical context has this shape:
 ```json
 {
   "developer": {
-    "task_kind": "apply_exact_patch",
-    "spec_complete": true,
-    "no_semantic_decisions": true,
-    "whole_result_oracle": true,
-    "exact_plan": true,
-    "risk_flags": [],
-    "files": 1,
-    "input_bytes": 1000,
-    "tool_retries": 0,
-    "repair_rounds": 0
+    "oracle": {"kind": "patch", "path": "/abs/path/to/exact.patch"}
   }
 }
 ```
 
-These fields describe evidence the lead must establish from the task and its
-oracle. They are not permission to declare judgment mechanical. The numeric
-limits and escape conditions are owned by `tiers.py`, not by the lead.
-Additional context fields cover homogeneous enumerated edits, failed gates,
-prior High misses, and the named escape conditions. Supply `--fix-round` to
+A mechanical round is licensed by one thing: a whole-result oracle, the
+expected result written down where a later check compares against it byte for
+byte. `kind` is `digest`, `patch` or `fixture` — an expected sha256 in `value`,
+or a file in `path` holding the exact patch or the complete expected output.
+The declaration is checked, not taken: a digest of the wrong shape and a file
+nobody wrote both refuse the round.
+
+Which shapes qualify is the decision contract of
+`skills/herdr-teamlead/teamlead/tiers.py`, not the lead's — see
+`mechanical_allowed`, not restated here (`rules/script-as-black-box.md`).
+
+The licence holds only if the comparison runs. Before a mechanical round is
+accepted, `verify-oracle` compares its whole result against the oracle the plan
+declared (SKILL.md Step 12). The result is the pushed diff for a `patch` oracle
+and the produced output otherwise. The comparison is the contract of
+`skills/herdr-teamlead/teamlead/oracle.py`, `verify`.
+A context written for the retired predicate — task names, `spec_complete`,
+file and byte caps, the escape booleans — is refused by name, with its
+replacement, rather than silently ignored. Other context fields cover failed
+gates, prior High misses and risk flags. Supply `--fix-round` to
 both plan and apply for a fix; a plan made for a different fix context is
 refused. A new tiered role requires an explicit cost instead of inheriting an
 unrelated fallback weight.

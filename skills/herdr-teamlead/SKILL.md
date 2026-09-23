@@ -373,6 +373,18 @@ or their unavailability and recovery are recorded.
 Read every report file in full, including a report whose worker exited cleanly.
 A `## BLOCKED` section can sit under a report that otherwise reads as finished.
 Classify each finding blocking or advisory per `rules/review-severity.md`.
+Before accepting a mechanical round, compare its whole result against the
+oracle its plan declared. `<result-file>` is the pushed diff for a `patch`
+oracle and the produced output otherwise:
+
+```bash
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
+bash "$CP/skills/herdr-teamlead/teamlead.sh" verify-oracle \
+  --plan <plan-file> --role <role> --result <result-file>
+```
+
+Exit 0 is a match. Exit 1 with `"match": false` is a blocking finding on the
+round; exit 1 with no verdict is a usage error to resolve before gating.
 Record assignment acceptance or outstanding work in the task ledger against
 the inspected report and artifact evidence. Record the task's gate decision
 separately; a worker finishing its brief never completes the whole task.

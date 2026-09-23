@@ -10,8 +10,9 @@ research column is a future adapter, not an accepted dead config row.
 """
 
 import math
+import os
 import re
-from pathlib import PurePath
+from pathlib import Path, PurePath
 
 from .billing import billing_window, effective_multiplier
 from .errors import ConfigError, HerdrError, UsageError
@@ -125,20 +126,26 @@ ROLE_ROUNDS = {
     "advisor": frozenset({"architect"}),
     "investigator": frozenset({"reconciliation"}),
 }
-MECHANICAL_TASKS = frozenset({
-    "rebase", "restack", "apply_exact_patch", "docs_only", "check_rerun",
-    "exact_thread_reply", "homogeneous_search_replace", "issue_filing",
+#: A whole-result oracle: the expected result recorded in a form a later check
+#: compares against byte for byte. Its EXISTENCE is what licenses a round below
+#: its floor, since a wrong result is then caught loudly rather than silently
+#: (#480).
+#: `digest` carries the expected sha256 of the whole result. `patch` and
+#: `fixture` name a file holding the exact patch to apply, or the complete
+#: expected output.
+ORACLE_KINDS = ("digest", "patch", "fixture")
+#: What the retired predicate accepted. Named so a saved round-context written
+#: against it is refused with its replacement rather than silently ignored.
+RETIRED_CONTEXT_FIELDS = frozenset({
+    "task_kind", "spec_complete", "no_semantic_decisions", "whole_result_oracle",
+    "exact_plan", "files", "homogeneous_enumerated", "tool_retries", "repair_rounds",
+    "unplanned_file", "semantic_question", "unresolved_conflict", "missing_oracle",
+    "gate_red_after_repair",
 })
-MECHANICAL_PROOFS = (
-    "spec_complete", "no_semantic_decisions", "whole_result_oracle", "exact_plan",
-)
-MECHANICAL_MAX_FILES = 2
-MECHANICAL_MAX_BYTES = 64000
+ORACLE_DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 XHIGH_MIN_RISKS = 2
 XHIGH_CONTEXT_BYTES = 250000
 BUILD_FAILED_GATES = 2
-MAX_MECHANICAL_RETRIES = 2
-MAX_MECHANICAL_REPAIRS = 1
 TIER_FIELDS = frozenset({"model", "effort", "multiplier", "billing_evidence", "qualification"})
 MODEL_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/-]*\Z")
 LAUNCH_SWITCHES = {
@@ -368,21 +375,39 @@ def _nonnegative_int(context, key):
 
 
 def mechanical_allowed(context):
-    """The research's whole-result predicate, including its escape conditions."""
-    return (
-        context.get("task_kind") in MECHANICAL_TASKS
-        and all(context.get(key) is True for key in MECHANICAL_PROOFS)
-        and context.get("risk_flags") == []
-        and (_nonnegative_int(context, "files") <= MECHANICAL_MAX_FILES
-             or context.get("homogeneous_enumerated") is True)
-        and "files" in context and "input_bytes" in context
-        and _nonnegative_int(context, "input_bytes") <= MECHANICAL_MAX_BYTES
-        and _nonnegative_int(context, "tool_retries") <= MAX_MECHANICAL_RETRIES
-        and _nonnegative_int(context, "repair_rounds") <= MAX_MECHANICAL_REPAIRS
-        and not any(context.get(key) for key in (
-            "unplanned_file", "semantic_question", "unresolved_conflict", "missing_oracle", "gate_red_after_repair"
-        ))
-    )
+    """Whether a whole-result oracle licenses a round below its floor.
+
+    One question, answered from the artifact rather than from an assertion: is
+    the expected whole result written down somewhere a later check can compare
+    against? Where it is, a wrong result is loud, and the round may run cheap.
+
+    The retired predicate asked instead for a task named in a closed list of
+    eight, ten hand-typed booleans nothing validated, and two size caps standing
+    in for difficulty. It fired zero times in 702 recorded assignments and could
+    not fire (#480).
+    """
+    oracle = context.get("oracle")
+    if not isinstance(oracle, dict) or set(oracle) - {"kind", "value", "path"}:
+        return False
+    kind = oracle.get("kind")
+    if not isinstance(kind, str):
+        return False
+    if kind == "digest":
+        value = oracle.get("value")
+        return isinstance(value, str) and bool(ORACLE_DIGEST.match(value)) and "path" not in oracle
+    if kind in {"patch", "fixture"}:
+        path = oracle.get("path")
+        if not isinstance(path, str) or not path.strip() or "value" in oracle:
+            return False
+        # A plan is replayed at apply, possibly from another directory. A
+        # relative path would resolve to a different file, or none.
+        if not Path(path).is_absolute():
+            return False
+        # The file, not a claim about it. A declared oracle nobody wrote is the
+        # silent failure this gate exists to refuse.
+        candidate = Path(path)
+        return candidate.is_file() and os.access(candidate, os.R_OK)
+    return False
 
 
 def select_tier(agent, role, round_type=None, context=None, fix_round=None):
@@ -394,16 +419,18 @@ def select_tier(agent, role, round_type=None, context=None, fix_round=None):
     context = {} if context is None else context
     if not isinstance(context, dict):
         raise UsageError("Round context must be a JSON object.", {})
-    allowed = set(MECHANICAL_PROOFS) | {"task_kind", "risk_flags", "files", "input_bytes", "homogeneous_enumerated",
-        "tool_retries", "repair_rounds", "unplanned_file", "semantic_question", "unresolved_conflict",
-        "missing_oracle", "gate_red_after_repair", "failed_gates", "prior_high_miss"}
+    allowed = {"oracle", "risk_flags", "input_bytes", "failed_gates", "prior_high_miss"}
+    retired = set(context) & RETIRED_CONTEXT_FIELDS
+    if retired:
+        raise UsageError(
+            "Round-context fields {} were the retired mechanical predicate: a closed list of task "
+            "names, hand-typed proofs and size caps. Declare an `oracle` instead, naming where the "
+            "expected whole result is written down.".format(", ".join(sorted(retired))), {})
     if set(context) - allowed:
         raise UsageError("Unknown round-context fields: {}; check their spelling.".format(", ".join(sorted(set(context) - allowed))), {})
-    boolean_fields = set(MECHANICAL_PROOFS) | {"homogeneous_enumerated", "unplanned_file", "semantic_question",
-        "unresolved_conflict", "missing_oracle", "gate_red_after_repair", "prior_high_miss"}
-    if any(type(context[key]) is not bool for key in boolean_fields & set(context)):
-        raise UsageError("Round-context proof and escape fields must be JSON booleans.", {})
-    for key in ("files", "input_bytes", "tool_retries", "repair_rounds", "failed_gates"):
+    if "prior_high_miss" in context and type(context["prior_high_miss"]) is not bool:
+        raise UsageError("Round-context prior_high_miss must be a JSON boolean.", {})
+    for key in ("input_bytes", "failed_gates"):
         _nonnegative_int(context, key)
     # The owner checks the task's recorded allowance before tier selection.
     # Selection preserves the true cumulative number for authorized recovery.

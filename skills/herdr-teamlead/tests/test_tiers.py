@@ -1,7 +1,7 @@
 """Policy boundaries for tier choice and launch proof."""
 
-import copy
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -30,9 +30,8 @@ def agent(kind="claude"):
 
 
 def mechanical_context():
-    return {"task_kind": "rebase", "spec_complete": True, "no_semantic_decisions": True,
-            "whole_result_oracle": True, "exact_plan": True, "risk_flags": [], "files": 2,
-            "input_bytes": 64000}
+    """A round licensed cheap by a whole-result oracle, not by assertions."""
+    return {"oracle": {"kind": "digest", "value": "a" * 64}}
 
 
 #: Synthetic session identifiers for resumed-process proof (#382); no real session.
@@ -119,17 +118,57 @@ class SelectionTest(unittest.TestCase):
         self.assertEqual(select_tier(agent("codex"), "tester")["effort"], "xhigh")
         self.assertEqual(select_tier(agent("grok"), "tester")["effort"], "high")
 
-    def test_mechanical_requires_whole_predicate(self):
+    def test_a_recorded_whole_result_oracle_licenses_the_cheap_round(self):
+        # coding-policy#480: the retired predicate wanted a task named in a
+        # closed list of eight, ten hand-typed booleans and two size caps. It
+        # fired zero times in 702 assignments and could not fire.
         context = mechanical_context()
         self.assertTrue(mechanical_allowed(context))
         self.assertEqual(select_tier(agent(), "developer", "mechanical", context)["model"], "claude-haiku-4-5")
-        for key, value in (("spec_complete", False), ("files", 3), ("input_bytes", 64001),
-                           ("risk_flags", ["network"]), ("unplanned_file", True),
-                           ("tool_retries", 3), ("gate_red_after_repair", True)):
-            changed = copy.deepcopy(context)
-            changed[key] = value
-            with self.subTest(key=key), self.assertRaises(UsageError):
-                select_tier(agent(), "developer", "mechanical", changed)
+
+    def test_a_declared_oracle_is_checked_rather_than_taken(self):
+        with tempfile.TemporaryDirectory() as root:
+            written = Path(root) / "exact.patch"
+            written.write_text("--- a\n+++ b\n", encoding="utf-8")
+            for label, oracle in (
+                ("a written patch", {"kind": "patch", "path": str(written)}),
+                ("a written fixture", {"kind": "fixture", "path": str(written)}),
+            ):
+                with self.subTest(label=label):
+                    self.assertTrue(mechanical_allowed({"oracle": oracle}))
+            for label, oracle in (
+                ("a patch nobody wrote", {"kind": "patch", "path": str(Path(root) / "absent.patch")}),
+                ("a directory", {"kind": "fixture", "path": root}),
+                # A plan replays at apply, possibly from another directory.
+                ("a relative path", {"kind": "patch", "path": "exact.patch"}),
+            ):
+                with self.subTest(label=label):
+                    self.assertFalse(mechanical_allowed({"oracle": oracle}))
+
+    def test_a_malformed_oracle_licenses_nothing(self):
+        for label, context in (
+            ("no oracle", {}),
+            ("not an object", {"oracle": True}),
+            ("unknown kind", {"oracle": {"kind": "vibes", "value": "a" * 64}}),
+            ("unhashable kind", {"oracle": {"kind": ["digest"], "value": "a" * 64}}),
+            ("short digest", {"oracle": {"kind": "digest", "value": "a" * 63}}),
+            ("uppercase digest", {"oracle": {"kind": "digest", "value": "A" * 64}}),
+            ("digest carrying a path", {"oracle": {"kind": "digest", "value": "a" * 64, "path": "/x"}}),
+            ("patch carrying a digest", {"oracle": {"kind": "patch", "path": "/x", "value": "a" * 64}}),
+            ("stray key", {"oracle": {"kind": "digest", "value": "a" * 64, "extra": 1}}),
+        ):
+            with self.subTest(label=label):
+                self.assertFalse(mechanical_allowed(context))
+                with self.assertRaises(UsageError):
+                    select_tier(agent(), "developer", "mechanical", context)
+
+    def test_a_context_written_for_the_retired_predicate_names_its_replacement(self):
+        for field, value in (("task_kind", "rebase"), ("spec_complete", True), ("files", 2),
+                             ("whole_result_oracle", True), ("tool_retries", 0),
+                             ("gate_red_after_repair", False)):
+            with self.subTest(field=field):
+                with self.assertRaisesRegex(UsageError, "Declare an `oracle` instead"):
+                    select_tier(agent(), "developer", "mechanical", {field: value})
 
     def test_reviewer_cannot_claim_mechanical_role(self):
         with self.assertRaises(UsageError):

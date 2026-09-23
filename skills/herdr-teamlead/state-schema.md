@@ -97,6 +97,14 @@ fail that per-seat check and the dispatch is refused, rather than the round
 digest standing in as evidence each seat's boundary was bound. An unpartitioned
 plan carries none of the three keys at either version and is unaffected.
 
+Plan schema 8 replaces the mechanical round context with one `oracle` object
+in `rounds.<role>.context` (#480). Writer: `plan`, from `--round-context`.
+Readers: `apply`, which recomputes each tier from that context, and
+`verify-oracle`, which reads the oracle it checks from the plan rather than
+from its caller. A version-7 plan carrying the retired context fields is
+refused by name at apply; one without them reads unchanged, and no oracle is
+ever inferred for it.
+
 The optional `role_costs` key is the second:
 `{"<role>": <number>}`, what one round in that seat is expected to
 burn out of a worker's remaining headroom percentage. It overrides the
