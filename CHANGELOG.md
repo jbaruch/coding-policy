@@ -15,6 +15,16 @@
   mechanical work is permanently ineligible however completely its plan is
   specified (#479, #480).
 
+  **Which destination wins when both fit.** Picking a label is itself a
+  judgment, so a fixed-set question matched the new destination and the old
+  "judgment stays in the skill" bullet at once. The tiebreak is the one this
+  work settled on: where the information lives. When the question's input
+  carries everything the answer depends on, it is a bounded classification;
+  when it needs situational context the input does not carry, it stays in the
+  skill. A classifier that is unavailable, or answers outside its list, takes
+  the insufficient-evidence path rather than a retry that shops for another
+  answer.
+
   Four bullets: two definitional, one safety valve, one constraint. The
   insufficient-evidence answer hands the question back to the reasoning round,
   which keeps a classifier that cannot tell from becoming a cheap default. The

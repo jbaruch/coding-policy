@@ -10,8 +10,8 @@ description: Deterministic operations → script, a fixed answer set read by mea
 
 - Everything deterministic → script. A fixed answer set read by meaning → bounded classification. Everything else requiring reasoning → skill/LLM
 - If the logic can be expressed as a pure function with known inputs and outputs, it's a script
-- If the answer is one of a fixed enumerated set and picking it requires reading meaning, it's a bounded classification
-- If it requires judgment, synthesis, or context-dependent decisions, it stays in the skill
+- If the answer is one of a fixed enumerated set, picking it requires reading meaning, and the question's input carries everything the answer depends on, it's a bounded classification
+- Any other question requiring judgment, synthesis, or context-dependent decisions stays in the skill
 
 ## What Belongs in a Script
 
@@ -22,14 +22,16 @@ description: Deterministic operations → script, a fixed answer set read by mea
 ## What Stays in the LLM
 
 - Synthesis across multiple sources, language generation
-- Branching decisions that require situational context
-- Anything where the "right answer" depends on understanding intent
+- Branching decisions that require situational context the question's input does not carry
+- Open-ended answers that depend on understanding intent
 
 ## Bounded Classification
 
 - The answer is one of a fixed list, and picking the right one takes reading meaning rather than computing a value
+- The question's input carries everything the answer depends on
 - One of the allowed answers is "not enough evidence to tell"
 - When it answers that, the question goes to the reasoning round instead
+- An unavailable classifier or an answer outside the list takes the same path, never a retry into another answer
 - The label never triggers an action that cannot be undone (see `rules/ship-on-green.md`)
 
 ## The Regex Trap
