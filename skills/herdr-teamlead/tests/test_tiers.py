@@ -110,13 +110,97 @@ class SelectionTest(unittest.TestCase):
             self.assertEqual(tier["round"], requested)
             self.assertEqual(tier["tier_row"], "review" if context or fix_round else "build")
 
-    def test_risk_and_hostile_verification_select_top_xhigh(self):
+    def test_recorded_risk_evidence_selects_top_xhigh(self):
         for context in ({"risk_flags": ["network", "persistence"]}, {"input_bytes": 250001}, {"prior_high_miss": True}):
             with self.subTest(context=context):
                 tier = select_tier(agent(), "developer", context=context)
                 self.assertEqual((tier["model"], tier["effort"]), ("opus-5", "xhigh"))
-        self.assertEqual(select_tier(agent("codex"), "tester")["effort"], "xhigh")
-        self.assertEqual(select_tier(agent("grok"), "tester")["effort"], "high")
+
+    def test_a_tester_round_escalates_on_evidence_not_on_its_name(self):
+        # coding-policy#477: `hostile_verify` is the tester's DEFAULT round, so
+        # escalating on the round name pinned every tester round in the fleet to
+        # the top model at xhigh whatever the surface. The round's name is not
+        # evidence; its floor is the operator's configured row.
+        for kind in ("claude", "codex", "grok"):
+            with self.subTest(kind=kind):
+                tier = select_tier(agent(kind), "tester")
+                self.assertEqual(tier["round"], "hostile_verify")
+                self.assertEqual(tier["effort"], "high")
+
+    def test_a_tester_round_still_escalates_when_the_evidence_says_so(self):
+        for context in ({"risk_flags": ["network", "persistence"]}, {"input_bytes": 250001},
+                        {"prior_high_miss": True}):
+            with self.subTest(context=context):
+                self.assertEqual(select_tier(agent("codex"), "tester", context=context)["effort"], "xhigh")
+
+    def test_measured_scarcity_declines_a_discretionary_escalation(self):
+        # coding-policy#477: headroom could buy a cheaper PAIR in the planner
+        # and never a cheaper ROUND, and every branch in this module moved up.
+        risk = {"risk_flags": ["network", "persistence"]}
+        abundant = select_tier(agent(), "developer", context=risk, headroom=80.0)
+        self.assertEqual((abundant["model"], abundant["effort"], abundant["tier_row"]),
+                         ("opus-5", "xhigh", "review"))
+        self.assertFalse(abundant["de_escalated"])
+        scarce = select_tier(agent(), "developer", context=risk, headroom=13.0)
+        self.assertEqual((scarce["model"], scarce["effort"], scarce["tier_row"]),
+                         ("sonnet-5", "high", "build"))
+        self.assertTrue(scarce["de_escalated"])
+        self.assertEqual(scarce["pressure_headroom"], 13.0)
+
+    def test_a_round_promoted_to_a_judgment_row_never_de_escalates(self):
+        # A build that failed its gates twice, or a fourth fix, runs on the
+        # review row; scarcity must not strip that row's escalation.
+        risk = {"risk_flags": ["network", "persistence"]}
+        for tier in (select_tier(agent(), "developer", "build", {**risk, "failed_gates": 2}, headroom=1.0),
+                     select_tier(agent(), "developer", context=risk, fix_round=4, headroom=1.0)):
+            with self.subTest(tier_row=tier["tier_row"]):
+                self.assertEqual(tier["tier_row"], "review")
+                self.assertFalse(tier["de_escalated"])
+                self.assertEqual(tier["effort"], "xhigh")
+
+    def test_an_overflowing_headroom_reads_as_unmeasured(self):
+        tier = select_tier(agent(), "developer", context={"risk_flags": ["network", "persistence"]}, headroom=10 ** 1000)
+        self.assertIsNone(tier["pressure_headroom"])
+        self.assertFalse(tier["de_escalated"])
+
+    def test_de_escalation_never_goes_below_the_configured_row(self):
+        # The operator's table is the floor. What scarcity declines is the step
+        # ABOVE it, which is the only part of the selection nobody wrote down.
+        scarce = select_tier(agent(), "developer", context={"risk_flags": ["network", "persistence"]},
+                             headroom=0.0)
+        configured = agent().tiers["build"]
+        self.assertEqual((scarce["model"], scarce["effort"]),
+                         (configured["model"], configured["effort"]))
+
+    def test_a_judgment_round_never_de_escalates(self):
+        risk = {"risk_flags": ["network", "persistence"]}
+        for role, row in (("reviewer", "review"), ("tester", "hostile_verify")):
+            with self.subTest(role=role):
+                tier = select_tier(agent(), role, context=risk, headroom=0.0)
+                self.assertEqual(tier["effort"], "xhigh")
+                self.assertFalse(tier["de_escalated"])
+                self.assertIn(tier["tier_row"], {row, "review"})
+
+    def test_unmeasured_headroom_resolves_exactly_as_an_unmeasured_fleet_did(self):
+        # Unknown pressure must not read as scarcity, and must not read as
+        # abundance either: it resolves the tier the way it always has.
+        risk = {"risk_flags": ["network", "persistence"]}
+        baseline = select_tier(agent(), "developer", context=risk)
+        for headroom in (None, "13", True, float("nan"), float("inf")):
+            with self.subTest(headroom=headroom):
+                tier = select_tier(agent(), "developer", context=risk, headroom=headroom)
+                self.assertEqual((tier["model"], tier["effort"], tier["tier_row"]),
+                                 (baseline["model"], baseline["effort"], baseline["tier_row"]))
+                self.assertFalse(tier["de_escalated"])
+                self.assertIsNone(tier["pressure_headroom"])
+
+    def test_scarcity_alone_escalates_nothing_and_lowers_nothing(self):
+        # Pressure is not itself evidence. With no risk recorded there is no
+        # discretionary step to decline, so the configured row runs unchanged.
+        quiet = select_tier(agent(), "developer", headroom=1.0)
+        self.assertEqual((quiet["model"], quiet["effort"], quiet["tier_row"]),
+                         ("sonnet-5", "high", "build"))
+        self.assertFalse(quiet["de_escalated"])
 
     def test_a_recorded_whole_result_oracle_licenses_the_cheap_round(self):
         # coding-policy#480: the retired predicate wanted a task named in a

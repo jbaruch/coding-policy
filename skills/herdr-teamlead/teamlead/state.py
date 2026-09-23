@@ -5,12 +5,12 @@ looked like when it was measured; it never substitutes for reading the agent's
 live status before writing to it. `plan` may run off a stale snapshot on
 purpose (planning has no side effects); `apply` always re-checks live status.
 
-Schema (schema_version 6)::
+Schema (schema_version 7)::
 
     {
-      "schema_version": 6,
+      "schema_version": 7,
       "snapshots":  [ <measure output>, ... ],   # newest last, capped at 20
-      "assignments":[ {"schema_version": 6, "at": <ISO-8601>,
+      "assignments":[ {"schema_version": 7, "at": <ISO-8601>,
                        "role": <str>, "agent": <str>,
                        "status": "applied" | "sent_but_not_started"
                                  | "unknown",
@@ -31,6 +31,10 @@ UNCOUNTED_STATUSES), and `unknown` marks a version-1 row migrated without the
 information. Version 1 documents and rows carry no `status`; the 1 -> 2
 migration below stamps them `unknown`.
 
+Version 7 adds `pressure_headroom` and `de_escalated` to a row's `tier`, so a
+declined escalation is countable after the fact (#477). An older tier row
+never de-escalated, since nothing could: migration stamps null headroom and
+`de_escalated: false`.
 Version 6 adds specialist requirements and assessed contribution receipts.
 Version 5 adds recovery history without inventing original authorization or
 session proof. Version 4 adds verified model-tier evidence.
@@ -59,6 +63,7 @@ Reading follows one rule per direction:
 """
 
 import json
+import math
 import os
 import tempfile
 import fcntl
@@ -72,7 +77,7 @@ from .recovery import empty_recovery, migrate_store, validate_store
 
 #: The version this build writes for the document and assignment rows.
 #: Snapshots have their own version and migration chain below.
-STATE_SCHEMA_VERSION = 6
+STATE_SCHEMA_VERSION = 7
 
 CLEAR_REASONS = frozenset({"automatic", "hand", "retained", "unknown"})
 
@@ -242,6 +247,22 @@ def _migrate_document_5_to_6(payload):
     return payload
 
 
+def _migrate_record_6_to_7(record):
+    """Old tier rows never de-escalated; nothing could before #477."""
+    tier = record.get("tier")
+    if isinstance(tier, dict):
+        if "pressure_headroom" in tier or "de_escalated" in tier:
+            raise _NoUsableState("older assignment contains unowned tier pressure fields")
+        tier.update(pressure_headroom=None, de_escalated=False)
+    record["schema_version"] = 7
+    return record
+
+
+def _migrate_document_6_to_7(payload):
+    payload["schema_version"] = 7
+    return payload
+
+
 def _migrate_snapshot_2_to_3(snapshot):
     """An older snapshot has no measured per-tier billing attribution."""
     snapshot["schema_version"] = 3
@@ -293,6 +314,7 @@ MIGRATIONS = {
     3: (4, _migrate_document_3_to_4),
     4: (5, _migrate_document_4_to_5),
     5: (6, _migrate_document_5_to_6),
+    6: (7, _migrate_document_6_to_7),
 }
 
 #: The same table for one assignment record, walked the same way.
@@ -303,6 +325,7 @@ RECORD_MIGRATIONS = {
     3: (4, _migrate_record_3_to_4),
     4: (5, _migrate_record_4_to_5),
     5: (6, _migrate_record_5_to_6),
+    6: (7, _migrate_record_6_to_7),
 }
 
 
@@ -417,6 +440,11 @@ def _validate(payload, path):
                     or proof.get("model") != tier["model"] or proof.get("effort") != tier.get("effort")
                     or not isinstance(proof.get("pane_id"), str) or not proof["pane_id"]):
                 raise _NoUsableState("an assignment row has invalid tier evidence")
+            pressure = tier.get("pressure_headroom")
+            if (type(tier.get("de_escalated")) is not bool
+                    or pressure is not None and (isinstance(pressure, bool) or not isinstance(pressure, (int, float))
+                                                 or not math.isfinite(pressure))):
+                raise _NoUsableState("an assignment row's tier lacks its pressure fields")
             try:
                 parse_tiers({"build": {"model": tier["model"], "effort": tier.get("effort")}}, tier["kind"])
                 launch_args = parse_launch_args(tier.get("launch_args", []), tier["kind"])
@@ -617,6 +645,10 @@ def add_assignment(state, at, role, agent, status=STATUS_APPLIED, *,
     which is what a slice's verdict is read back through (#434).
     """
     role = canonical_role(role)
+    if isinstance(tier, dict):
+        # A tier that never met pressure (a judge start, an unmeasured round)
+        # still carries both fields, so every current row reads one shape.
+        tier = {"pressure_headroom": None, "de_escalated": False, **tier}
     state.setdefault("assignments", []).append(
         {
             "schema_version": STATE_SCHEMA_VERSION,
