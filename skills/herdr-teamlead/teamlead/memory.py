@@ -193,8 +193,20 @@ def _validated(row):
 
 
 def load(path):
-    """The validated memory document, version-1 stows upgraded in memory."""
-    return _load(path)[0]
+    """The validated memory document, with any version-1 stow upgraded on disk.
+
+    The owner rewrites an upgraded document under its lock (rules/stateful-
+    artifacts.md Migration Policy). A document with nothing to migrate is read
+    without a lock or a write.
+    """
+    document, migrated = _load(path)
+    if not migrated:
+        return document
+    with state_lock(location(path)):
+        document, migrated = _load(path)
+        if migrated:
+            save_state(location(path), document)
+    return document
 
 
 def _load(path):

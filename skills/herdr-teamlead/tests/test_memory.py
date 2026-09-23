@@ -220,11 +220,16 @@ class MemoryTest(unittest.TestCase):
         gap = shown["gaps"][0]
         self.assertEqual((gap["missing"], gap["task"]), (text, memory.UNRECORDED_TASK))
         self.assertIn(text, gap["recovery"]["ask"])
-        # Reading never rewrites; the owner's next write persists the upgrade.
-        self.assertEqual(self.raw()["records"][1]["schema_version"], 1)
-        self.stow({**self.capture, "id": "stow-2"}, LATER)
-        self.assertEqual([row["schema_version"] for row in self.raw()["records"] if row["kind"] == "stow"],
-                         [memory.STOW_VERSION] * 3)
+        # The owner's read persists the upgrade.
+        self.assertEqual(self.raw()["records"][1]["schema_version"], memory.STOW_VERSION)
+        self.assertEqual(self.raw()["records"][1]["gaps"], shown["gaps"])
+
+    def test_a_read_with_nothing_to_migrate_takes_no_lock_and_writes_nothing(self):
+        self.stow()
+        before = memory.location(self.state).read_bytes()
+        with patch.object(memory, "state_lock", side_effect=AssertionError("reader must not lock")):
+            memory.show(self.state, LATER)
+        self.assertEqual(memory.location(self.state).read_bytes(), before)
 
     def test_an_exact_replay_persists_a_pending_migration(self):
         self.stow()
