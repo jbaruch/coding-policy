@@ -22,9 +22,9 @@
   and each bar is named in the plan's `rationale` along with the command that
   lifts it. A reserved developer can still take its own task's next fix and
   its release. `apply` re-reads the reservations before sending, since a plan
-  can go stale. `apply --break-reservation` is the explicit override, limited
-  to what `recover-role-clear` can record afterwards: a non-developer seat on
-  a task registered through `teamlead task`. The same closure
+  can go stale. There is no override. Reusing a reserved developer elsewhere
+  requires closing its task first. `recover-role-clear` still records clears
+  that happened before this change. The same closure
   replays from anywhere in history, so re-running an old closure after the
   task reopened doesn't release the new developer.
 

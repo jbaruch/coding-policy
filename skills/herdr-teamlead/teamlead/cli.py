@@ -323,10 +323,6 @@ def build_parser():
         help="Follow up on an assessed consultation in its verified unchanged task, engagement and session.",
     )
     apply_parser.add_argument(
-        "--break-reservation", action="store_true",
-        help="Reuse a developer reserved to another task in a non-developer seat on a registered task; record the role clear afterwards with recover-role-clear.",
-    )
-    apply_parser.add_argument(
         "--fix-round", type=int, metavar="N",
         help="Fix-round number for this task; the dispatcher validates the cap.",
     )
@@ -473,28 +469,6 @@ def _supervision_enrollment(state_path, identifier, task, role, name, report, at
             if known["native_session"] is None:
                 supervision.refine(state_path, identifier, known["pane_id"] or pane_id, native, at)
     return expected
-
-
-def _require_role_clear_break(assignments, task, reserved, store):
-    """Return the workers `--break-reservation` may waive, refusing the rest.
-
-    The barred set comes from the same `seat_holds` predicate `apply` enforces.
-    Each waived hold must be one `recover-role-clear` can record: a
-    non-developer seat on a registered task. Holds outside these assignments
-    stay in force (#483).
-    """
-    held = composition.seat_holds(list(assignments), task, reserved, {})
-    barred = {role: name for role, name in assignments.items() if name in held["exclude"].get(role, [])}
-    if not barred:
-        return set()
-    developers = sorted(role for role in barred if canonical_role(role) == "developer")
-    if developers:
-        raise UsageError("--break-reservation cannot move a reserved developer into another developer seat; recover-role-clear records only a non-developer clearing role. Replan, or close the reserved task first.",
-                         {"roles": developers})
-    if not task:
-        raise UsageError("--break-reservation requires --task naming the registered task the reused worker serves.", {})
-    recovery.task_record(store, task)
-    return set(barred.values())
 
 
 def _seat_holds(roles, task, state, state_path):
@@ -1228,11 +1202,8 @@ def cmd_apply(args, client=None, warn=None, trace=None):
     for role, name in assignments.items():
         if name in constraints["exclude"].get(role, []):
             raise UsageError("Assigned worker {} is ineligible for {} under current capabilities or contribution history; replan an independent capable worker.".format(name, role), {})
-    # Breaking a reservation is an explicit choice; the send re-reads it (#483).
+    # A plan's holds can be stale by dispatch time; the send re-reads them (#483).
     reserved = recovery.developer_reservations(store, state["assignments"])
-    if args.break_reservation:
-        waived = _require_role_clear_break(assignments, args.task, reserved, store)
-        reserved = {name: held for name, held in reserved.items() if name not in waived}
     # `apply` measures nothing -- it re-reads the headroom the PLAN resolved its
     # tiers against, so a recomputed tier differs only when the config or the
     # fix context actually drifted, which is what the comparison below is for.

@@ -241,14 +241,14 @@ def validate_agents(assignments, agents_by_name):
 def refuse_reserved(assignments, task, reserved):
     """Refuse a developer reserved to another task, read at dispatch time.
 
-    `reserved` is `{agent: task}` from `recovery.developer_reservations`, or
-    empty when the operator passed `--break-reservation`. A plan's holds can
-    be stale by dispatch time, so the send re-reads them (#483).
+    `reserved` is `{agent: task}` from `recovery.developer_reservations`. A
+    plan's holds can be stale by dispatch time, so the send re-reads them
+    (#483).
     """
     held = seat_holds(list(assignments), task, reserved or {}, {})
     for role, name in assignments.items():
         if name in held["exclude"].get(role, []):
-            raise UsageError("Assigned worker {} is reserved as developer for {}. Replan, close that task with `teamlead close-task`, or pass --break-reservation for an authorized reuse and record it with recover-role-clear.".format(
+            raise UsageError("Assigned worker {} is reserved as developer for {}. Replan, or close that task with `teamlead close-task` before reusing its developer.".format(
                 name, reserved[name]), {"agent": name, "task": reserved[name]})
 
 

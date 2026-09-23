@@ -180,9 +180,8 @@ Supply its requirements file for specialized work. Schedule consultation and
 verification as the task needs them. `plan` bars a developer reserved to
 another task and a worker with an active enrollment, and names each bar in its
 `rationale`; do not pass `--exclude` for either. `apply` re-reads the
-reservations before sending. Reusing a reserved developer elsewhere takes
-`apply --break-reservation` into a non-developer seat on a registered task,
-then a role clear under `skills/herdr-teamlead/references/dispatch-recovery.md`.
+reservations before sending. Reusing a reserved developer elsewhere requires
+closing its task first.
 
 The composition triggers decide part of that roster. Classify this round
 against the repo's declaration first. For a pre-implementation round, pass
