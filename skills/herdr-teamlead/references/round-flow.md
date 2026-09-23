@@ -456,14 +456,16 @@ apply the whole-fleet pause/handoff contract in `references/supervision.md`.
 
 A completed `RULING:` line binds the round. Only the operator overrides it. `insufficient` binds nothing.
 
-For an investigation-only task, a non-blocked ruling returns to Step 12's
+For an investigation-only task, a completed ruling (`uphold A`, `uphold B` or
+`amend`) returns to Step 12's
 knowledge-deliverable gate with the ruling and any required authorized research.
 Apply the existing correction allowance and judge rules to remaining findings.
 Do not enter implementation Phase 2 or Step 14 without implementation/release
 authorization. A blocked ruling follows the operator-question path below.
 
 - **`insufficient`** — the cited evidence cannot settle the named facts.
-  Dispatch an investigator under `references/specialists.md` to establish
+  Dispatch an investigator under
+  `skills/herdr-teamlead/references/specialists.md` to establish
   exactly those facts with citations. Then re-dispatch the judge on the same
   dispute, filling `INVESTIGATION_REPORT` with that report. The dispute is not
   settled, so this is not a second ruling on a settled dispute.

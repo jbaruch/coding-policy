@@ -10,7 +10,8 @@
 
   Each adjudication position now cites its evidence (file and line, command
   output, revision). The foreman copies those citations into the judge brief
-  and never supplies its own. The judge checks only what is cited and never
+  and never supplies its own. A position with no citations goes to an
+  investigator before the judge is dispatched at all. The judge checks only what is cited and never
   explores beyond it. A disputed fact with no citation, or one the citations
   cannot settle, gets the new ruling `insufficient — <facts needed>`. The
   foreman then dispatches an investigator to establish exactly those facts

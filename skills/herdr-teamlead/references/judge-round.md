@@ -18,9 +18,12 @@ For a dispute, compose from `templates/brief-judge.md` through SKILL.md Step 7: 
 dispute, both positions with report paths, the governing rule, the tree. Fill
 `POSITION_A_EVIDENCE` and `POSITION_B_EVIDENCE` with the citations each report
 makes (file and line, or command output, at a revision), copied, never supplied by the
-foreman; write "none cited" where a position cites nothing. Fill
+foreman. A position that cites nothing is not ready for the judge: dispatch an
+investigator under `skills/herdr-teamlead/references/specialists.md` to
+establish the disputed facts with citations first, and fill
+`INVESTIGATION_REPORT` with that report. Fill
 `INVESTIGATION_REPORT` with the investigator's report after an `insufficient`
-ruling, otherwise "none".
+ruling as well, otherwise "none".
 
 For an exhausted allowance, compose from `templates/brief-judge-diagnosis.md`
 through SKILL.md Step 7 under the role key `judge-diagnosis`, which writes
