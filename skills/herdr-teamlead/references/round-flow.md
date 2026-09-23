@@ -376,10 +376,11 @@ shapes are the owner's, in `references/dispatch-recovery.md`.
 It is read-only without exception in either mode: no file edit, no mutating
 git or `gh` command, no GitHub post, no subagent dispatch.
 
-Adjudicating, it reads both positions and the governing rule, verifies the
-disputed facts against the tree itself rather than trusting either side's
-framing, and returns a report opening with three
-lines — `RULING: uphold A | uphold B | amend — <line> | blocked — <question>`,
+Adjudicating, it reads both positions and the governing rule, checks only the
+evidence each position cites against the tree rather than trusting either
+side's framing, and never explores beyond those citations. It returns a report
+opening with three
+lines — `RULING: uphold A | uphold B | amend — <line> | insufficient — <facts needed> | blocked — <question>`,
 `ACTION:` naming the minimal step, `UNVERIFIED:` naming anything it could not
 check — followed by its numbered reasons.
 
@@ -455,6 +456,11 @@ Apply the existing correction allowance and judge rules to remaining findings.
 Do not enter implementation Phase 2 or Step 14 without implementation/release
 authorization. A blocked ruling follows the operator-question path below.
 
+- **`insufficient`** — the cited evidence cannot settle the named facts.
+  Dispatch an investigator under `references/specialists.md` to establish
+  exactly those facts with citations. Then re-dispatch the judge on the same
+  dispute, filling `INVESTIGATION_REPORT` with that report. The dispute is not
+  settled, so this is not a second ruling on a settled dispute.
 - **`uphold A` / `uphold B` / `amend`, `ACTION:` changing no branch content**
   — record the ruling. Proceed to Step 14 only with Step 12's broad reports
   against the current tip. Otherwise re-run Phase 2 with full briefs carrying
