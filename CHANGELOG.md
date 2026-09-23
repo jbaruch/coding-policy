@@ -24,7 +24,10 @@
   enrollment is refused. A missing file is listed with
   `present: false` instead of being dropped. This is the must-load set from
   #483 decision 2: a floor that an add-only lesson classifier may add to
-  later, and that nothing may trim. The command is read-only and refuses an
+  later, and that nothing may trim. SKILL.md now requires it before each
+  decision (Step 5 plan, Step 7 brief, Step 11 wake, Step 12 gate, Step 13
+  diagnose). `load-set` and `foreman-queue` join the read-only command set,
+  so neither takes the state lock or creates a lock file. The command is read-only and refuses an
   unusable state file.
 
 ## 0.3.261 — 2026-09-23

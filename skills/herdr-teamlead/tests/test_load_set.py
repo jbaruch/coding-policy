@@ -196,6 +196,17 @@ class LoadSetCommandTest(CliCase):
                 self.assertEqual(code, 1)
                 self.assertIn(message, err)
 
+    def test_the_command_creates_no_files(self):
+        state = empty_state()
+        register_task(state["recovery"], {"task": "t", "base_revision": "a" * 40, "scope": "fix it",
+                                          "allowed_paths": ["src/*"], "authorization": {"source": "operator", "quote": "go"}}, DEV_0)
+        add_assignment(state, DEV_0, "developer", "grok", task="t")
+        save_state(self.state, state)
+        before = sorted(self.tmp.rglob("*"))
+        code, _, err = self.run_cli(self.base() + ["load-set", "--decision", "plan", "--task", "t"])
+        self.assertEqual(code, 0, err)
+        self.assertEqual(sorted(self.tmp.rglob("*")), before)
+
     def test_an_unusable_state_file_fails(self):
         self.state.write_text('{"schema_version": 2, broken', encoding="utf-8")
         code, _, err = self.run_cli(self.base() + ["load-set", "--decision", "plan", "--task", "t"])

@@ -1775,7 +1775,7 @@ def main(argv=None, stdout=None, stderr=None, client=None):
     try:
         # Commands that may migrate or write state share its canonical lock.
         # Dry runs, probes, and retrospective reads remain read-only.
-        readonly = args.command in {"probe-report", "detect-triggers", "validate-partition", "verify-oracle", "retro-check", "retro-list", "retro-show", "capability-check", "capability-show", "supervision-gate"} or getattr(args, "dry_run", False)
+        readonly = args.command in {"probe-report", "detect-triggers", "validate-partition", "verify-oracle", "retro-check", "retro-list", "retro-show", "capability-check", "capability-show", "supervision-gate", "load-set", "foreman-queue"} or getattr(args, "dry_run", False)
         separate_owner = args.command in memory.COMMANDS | attention.COMMANDS | SUPERVISION_COMMANDS | restoration.COMMANDS
         lock = nullcontext() if readonly or separate_owner else state_lock(retrospective.canonical_state(_state_path(args)))
         with lock:
