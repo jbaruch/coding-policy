@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.258 — 2026-09-23
+
 ### Changed
 
 - **The Codex policy reviewer is pinned to GPT-5.6-Sol at high effort.** Both
