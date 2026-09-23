@@ -1097,6 +1097,20 @@ def cmd_apply(args, client=None, warn=None, trace=None):
             if args.retain_specialist:
                 options["retain_specialist"] = True
             if canonical_role(role) == "judge":
+                # A judge dispatch recorded before the mode joined its identity
+                # carries the mode-less fingerprint. Re-running it after the
+                # upgrade must not read as new work and send the round twice.
+                _legacy_id, legacy = recovery.dispatch_identity(
+                    args.task, role, name, args.fix_round, paths, None, options=options)
+                bound = supervision.report_bound_fingerprint(legacy, reports[role]) if role in reports else None
+                earlier = next((row for row in store["dispatches"]
+                                if row.get("fingerprint") in {legacy, bound} and "judge_mode" not in row), None)
+                if earlier is not None:
+                    raise UsageError(
+                        "Judge dispatch {} was recorded before its mode was part of its identity and "
+                        "has status {!r}. Inspect its recorded outcome instead of sending it again; "
+                        "a fresh judge round needs a changed brief.".format(earlier["id"], earlier["status"]),
+                        {"dispatch": earlier["id"]})
                 options["judge_mode"] = judge_mode
             identifier, fingerprint = recovery.dispatch_identity(
                 args.task, role, name, args.fix_round, paths, args.dispatch_id,

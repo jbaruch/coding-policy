@@ -1857,6 +1857,8 @@ def validate_store(store, assignments):
                     raise UsageError("Dispatch and assignment judge modes disagree; restore the mode the judge was sent for.", {})
                 if not isinstance(row["result"], dict) or any(row["result"].get(key) != row[key] for key in ("task", "role", "agent", "fix_round", "status")):
                     raise UsageError("The saved dispatch result does not match its confirmed outcome; recover it before retrying.", {})
+                if row["result"].get("judge_mode") != row.get("judge_mode"):
+                    raise UsageError("The saved dispatch result names a different judge mode than its dispatch; restore the mode the judge was sent for.", {})
                 if row["role"] == "developer":
                     slot = (row["task"], fix)
                     if slot in applied_slots:

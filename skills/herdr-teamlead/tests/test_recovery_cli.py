@@ -277,6 +277,43 @@ class RecoveryCommandTests(fixture.CliCase):
         self.assertEqual((row["role"], row["judge_mode"]), ("judge", "diagnosis"))
         dispatch = self.saved()["recovery"]["dispatches"][-1]
         self.assertEqual((dispatch["result"]["schema_version"], dispatch["result"]["judge_mode"]), (3, "diagnosis"))
+        # A saved result naming the other mode is an inconsistent record, not
+        # a second truth: the ledger refuses to read it.
+        document = self.saved()
+        document["recovery"]["dispatches"][-1]["result"]["judge_mode"] = "adjudication"
+        self.state.write_text(json.dumps(document))
+        from teamlead.state import load_state_checked
+        _state, usable = load_state_checked(self.state, warn=lambda _message: None)
+        self.assertFalse(usable)
+
+    def test_a_judge_dispatch_from_before_the_mode_is_never_sent_twice(self):
+        # coding-policy#494 review: the mode joined the fingerprint, so an
+        # older judge dispatch no longer matches by identity. Running the same
+        # brief again must stop at that record, not send the round again.
+        client = self.seat_judge()
+        code, _, err = self.invoke(self.judge_args("diagnosis"), client)
+        self.assertEqual(code, 0, err)
+        document = self.saved()
+        row = document["recovery"]["dispatches"][-1]
+        from teamlead import recovery as recovery_module
+        options = {"task": TASK, "fix_round": None, "plan": None, "work": None, "rounds": {},
+                   "retain_context": False, "no_clear": True}
+        _, legacy = recovery_module.dispatch_identity(
+            TASK, "judge", "claude", None, {"common": str(self.common), "judge": str(self.briefs["judge"])},
+            options=options)
+        # Rewrite the recorded dispatch as its pre-12 self: version 1, no mode.
+        row["fingerprint"] = legacy
+        row["schema_version"] = 1
+        del row["judge_mode"]
+        del row["result"]["judge_mode"]
+        row["result"]["schema_version"] = 1
+        row["context_before_send"].pop("judge_mode", None)
+        document["assignments"][row["assignment_index"]]["judge_mode"] = "unknown"
+        self.state.write_text(json.dumps(document))
+        code, out, err = self.invoke(self.judge_args("diagnosis"), self._client({"claude": "idle"}))
+        self.assertEqual((code, out), (1, ""))
+        self.assertIn("before its mode was part of its identity", err)
+        self.assertEqual(self.runner.writes(), [])
 
     def test_the_same_brief_under_another_mode_is_another_dispatch(self):
         # coding-policy#494 review: without the mode in the identity, a
