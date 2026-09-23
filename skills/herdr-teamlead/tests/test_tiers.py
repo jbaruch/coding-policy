@@ -139,6 +139,8 @@ class SelectionTest(unittest.TestCase):
             for label, oracle in (
                 ("a patch nobody wrote", {"kind": "patch", "path": str(Path(root) / "absent.patch")}),
                 ("a directory", {"kind": "fixture", "path": root}),
+                # A plan replays at apply, possibly from another directory.
+                ("a relative path", {"kind": "patch", "path": "exact.patch"}),
             ):
                 with self.subTest(label=label):
                     self.assertFalse(mechanical_allowed({"oracle": oracle}))
@@ -148,6 +150,7 @@ class SelectionTest(unittest.TestCase):
             ("no oracle", {}),
             ("not an object", {"oracle": True}),
             ("unknown kind", {"oracle": {"kind": "vibes", "value": "a" * 64}}),
+            ("unhashable kind", {"oracle": {"kind": ["digest"], "value": "a" * 64}}),
             ("short digest", {"oracle": {"kind": "digest", "value": "a" * 63}}),
             ("uppercase digest", {"oracle": {"kind": "digest", "value": "A" * 64}}),
             ("digest carrying a path", {"oracle": {"kind": "digest", "value": "a" * 64, "path": "/x"}}),

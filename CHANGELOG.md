@@ -42,6 +42,16 @@
   matching a task against published capability knowledge, is the part a bounded
   classification would answer, and the table itself is #481.
 
+  **The check that makes the licence honest.** Declaring an oracle licensed the
+  cheap round; nothing compared the result against it, so a digest was just a
+  64-character claim. `teamlead verify-oracle --plan --role --result` now does:
+  sha256 for `digest`, byte for byte against the named file for `patch` and
+  `fixture`. It reads the oracle from the saved plan, not from its caller, so a
+  round is judged against the oracle it was licensed on. A mismatch is a
+  blocking finding at SKILL.md Step 12. Oracle paths must be absolute, since a
+  plan replays at apply from wherever apply runs, and a non-string `kind`
+  licenses nothing instead of raising. The plan schema moves to 8.
+
 
 ## 0.3.250 — 2026-09-23
 

@@ -92,8 +92,15 @@ or a file in `path` holding the exact patch or the complete expected output.
 The declaration is checked, not taken: a digest of the wrong shape and a file
 nobody wrote both refuse the round.
 
-Which shapes qualify is `tiers.py`'s decision contract, not the lead's — see
+Which shapes qualify is the decision contract of
+`skills/herdr-teamlead/teamlead/tiers.py`, not the lead's — see
 `mechanical_allowed`, not restated here (`rules/script-as-black-box.md`).
+
+The licence holds only if the comparison runs. Before a mechanical round is
+accepted, `verify-oracle` compares its whole result against the oracle the plan
+declared (SKILL.md Step 12). The result is the pushed diff for a `patch` oracle
+and the produced output otherwise. The comparison is the contract of
+`skills/herdr-teamlead/teamlead/oracle.py`, `verify`.
 A context written for the retired predicate — task names, `spec_complete`,
 file and byte caps, the escape booleans — is refused by name, with its
 replacement, rather than silently ignored. Other context fields cover failed

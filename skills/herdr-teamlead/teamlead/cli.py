@@ -23,7 +23,7 @@ from types import SimpleNamespace
 from . import __version__
 from .assign import apply as apply_assignments
 from .assign import APPLY_SCHEMA_VERSION, dry_run, native_context_session, normalize_assignments, resolve_paths, validate_fix_history
-from . import attention, composition, engagement, historical, memory, partition, recovery, report_delivery, restoration, role_clear, retrospective, retrospective_runtime, supervision, supervision_runtime, triggers
+from . import attention, composition, engagement, historical, memory, oracle, partition, recovery, report_delivery, restoration, role_clear, retrospective, retrospective_runtime, supervision, supervision_runtime, triggers
 from .config import default_config_path, load_config, load_judge, load_role_costs, select_agents
 from .errors import PlanError, StateError, TeamLeadError, UsageError
 from .herdr import (
@@ -135,6 +135,7 @@ def build_parser():
     supervision_runtime.register_commands(sub, common)
     restoration.register_commands(sub, common)
     partition.register_commands(sub, common)
+    oracle.register_commands(sub, common)
 
     triggers.register_command(sub, common)
 
@@ -1525,6 +1526,10 @@ def cmd_validate_partition(args, client=None, warn=None, trace=None):
     return partition.run_command(args)
 
 
+def cmd_verify_oracle(args, client=None, warn=None, trace=None):
+    return oracle.run_command(args)
+
+
 def cmd_probe_report(args, client=None, warn=None, trace=None):
     if not Path(args.report).is_absolute() or any(ord(char) < 32 for char in args.report) or args.lines < 1:
         raise UsageError("Report probing needs an absolute one-row report path and positive --lines.", {})
@@ -1562,6 +1567,7 @@ COMMANDS = {
     **{command: cmd_recovery for command in ("task", "checkpoint", "authorize-corrections", "authorize-approach", "recover-context", "recover-role-clear", "record-report", "record-refusal", "authorize-refused-dispatch", "diagnose", "reconcile", "record-release-clear", "import-correction", "record-historical-review", "recover-report", "assess-specialist")},
     "detect-triggers": cmd_detect_triggers,
     "validate-partition": cmd_validate_partition,
+    "verify-oracle": cmd_verify_oracle,
     "start-judge": cmd_start_judge,
     "probe-report": cmd_probe_report,
     **{command: cmd_retrospective for command in ("retro-check", "retro-record", "retro-list", "retro-show")},
@@ -1588,7 +1594,7 @@ def main(argv=None, stdout=None, stderr=None, client=None):
     try:
         # Commands that may migrate or write state share its canonical lock.
         # Dry runs, probes, and retrospective reads remain read-only.
-        readonly = args.command in {"probe-report", "detect-triggers", "validate-partition", "retro-check", "retro-list", "retro-show"} or getattr(args, "dry_run", False)
+        readonly = args.command in {"probe-report", "detect-triggers", "validate-partition", "verify-oracle", "retro-check", "retro-list", "retro-show"} or getattr(args, "dry_run", False)
         separate_owner = args.command in memory.COMMANDS | attention.COMMANDS | SUPERVISION_COMMANDS | restoration.COMMANDS
         lock = nullcontext() if readonly or separate_owner else state_lock(retrospective.canonical_state(_state_path(args)))
         with lock:

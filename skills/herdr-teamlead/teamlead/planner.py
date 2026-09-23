@@ -75,9 +75,13 @@ from .tiers import SEAT_SEPARATOR, canonical_role
 #: apply's per-seat check and the dispatch is refused -- the reader states the
 #: boundary was never bound per seat rather than accepting the round digest as
 #: evidence it was. An unseated plan is unaffected at either version.
+#: Version 8 replaces the mechanical round context with one `oracle` object
+#: (#480). A version-7 plan carrying the retired fields is refused by name at
+#: apply, which recomputes each tier from the plan's context; one without them
+#: reads unchanged, and no oracle evidence is ever inferred for it.
 #: A plan is a round's instruction, not stored state -- it is produced and
 #: consumed inside one round and never migrated (rules/stateful-artifacts.md).
-PLAN_SCHEMA_VERSION = 7
+PLAN_SCHEMA_VERSION = 8
 
 #: What one round in each seat is expected to burn, in points of the agent's
 #: remaining headroom percentage. The ORDER is what the planner acts on:

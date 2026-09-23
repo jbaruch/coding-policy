@@ -390,12 +390,18 @@ def mechanical_allowed(context):
     if not isinstance(oracle, dict) or set(oracle) - {"kind", "value", "path"}:
         return False
     kind = oracle.get("kind")
+    if not isinstance(kind, str):
+        return False
     if kind == "digest":
         value = oracle.get("value")
         return isinstance(value, str) and bool(ORACLE_DIGEST.match(value)) and "path" not in oracle
     if kind in {"patch", "fixture"}:
         path = oracle.get("path")
         if not isinstance(path, str) or not path.strip() or "value" in oracle:
+            return False
+        # A plan is replayed at apply, possibly from another directory. A
+        # relative path would resolve to a different file, or none.
+        if not Path(path).is_absolute():
             return False
         # The file, not a claim about it. A declared oracle nobody wrote is the
         # silent failure this gate exists to refuse.
