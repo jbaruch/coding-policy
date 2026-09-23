@@ -80,12 +80,11 @@ without asking you a question, and name the verification the team owes it. A
 direction this task already tried is refused, `stop` approves none, and a new
 worker or a rewritten brief is not a different approach.
 
-The task's ORIGINAL direction is one of the directions it already tried. The
-recorded refusal cannot see it — it compares against approved transitions, and
-nothing approved the direction the task started from — so re-approving the
-original direction is refused by you reading the checkpoint, not by the
-recording command. The checkpoint's `previous_attempts` and the assessment's
-`FAILED APPROACH` both name it.
+The task's ORIGINAL direction is one of the directions it already tried, and
+the recording command does not refuse it (see `_require_new_direction` in
+`skills/herdr-teamlead/teamlead/recovery.py`). Refuse it yourself, from the
+checkpoint: its `previous_attempts` and the assessment's `FAILED APPROACH` both
+name it.
 
 `continue` is a legitimate remedy: the approach is right and it needs a stated
 number of further rounds. `BOUND` then carries that number, counted in

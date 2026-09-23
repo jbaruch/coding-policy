@@ -1804,8 +1804,10 @@ def validate_store(store, assignments):
                 if approach["task"] != row["task"]:
                     raise UsageError(
                         "Diagnosis {} cites approach {}, which belongs to task {} rather than {}; "
-                        "a diagnosis rules on its own task's approach.".format(
-                            row["id"], row[field], approach["task"], row["task"]), {})
+                        "a diagnosis rules on its own task's approach. Leave the ledger untouched, "
+                        "restore the owner-written recovery store, and re-record the diagnosis with "
+                        "`teamlead diagnose` against an approach of {}.".format(
+                            row["id"], row[field], approach["task"], row["task"], row["task"]), {})
         for row in store["plans"]:
             source = _item(store["checkpoints"], row["checkpoint"], "checkpoint")
             authorization(row["authorization"])
