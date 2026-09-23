@@ -476,22 +476,25 @@ def _supervision_enrollment(state_path, identifier, task, role, name, report, at
 
 
 def _require_role_clear_break(assignments, task, reserved, store):
-    """Admit `--break-reservation` only where `recover-role-clear` can record it.
+    """Return the workers `--break-reservation` may waive, refusing the rest.
 
-    That recovery needs a non-developer clearing role on a registered task,
-    so any other break is refused before a worker is contacted (#483).
+    The barred set comes from the same `seat_holds` predicate `apply` enforces.
+    Each waived hold must be one `recover-role-clear` can record: a
+    non-developer seat on a registered task. Holds outside these assignments
+    stay in force (#483).
     """
-    broken = {role: name for role, name in assignments.items()
-              if name in reserved and reserved[name] != task}
-    if not broken:
-        return
-    developers = sorted(role for role in broken if canonical_role(role) == "developer")
+    held = composition.seat_holds(list(assignments), task, reserved, {})
+    barred = {role: name for role, name in assignments.items() if name in held["exclude"].get(role, [])}
+    if not barred:
+        return set()
+    developers = sorted(role for role in barred if canonical_role(role) == "developer")
     if developers:
         raise UsageError("--break-reservation cannot move a reserved developer into another developer seat; recover-role-clear records only a non-developer clearing role. Replan, or close the reserved task first.",
                          {"roles": developers})
     if not task:
         raise UsageError("--break-reservation requires --task naming the registered task the reused worker serves.", {})
     recovery.task_record(store, task)
+    return set(barred.values())
 
 
 def _seat_holds(roles, task, state, state_path):
@@ -1228,8 +1231,8 @@ def cmd_apply(args, client=None, warn=None, trace=None):
     # Breaking a reservation is an explicit choice; the send re-reads it (#483).
     reserved = recovery.developer_reservations(store, state["assignments"])
     if args.break_reservation:
-        _require_role_clear_break(assignments, args.task, reserved, store)
-        reserved = {}
+        waived = _require_role_clear_break(assignments, args.task, reserved, store)
+        reserved = {name: held for name, held in reserved.items() if name not in waived}
     # `apply` measures nothing -- it re-reads the headroom the PLAN resolved its
     # tiers against, so a recomputed tier differs only when the config or the
     # fix context actually drifted, which is what the comparison below is for.

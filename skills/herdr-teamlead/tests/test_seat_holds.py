@@ -10,9 +10,10 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from teamlead import cli
 from teamlead.composition import seat_holds
 from teamlead.errors import UsageError
-from teamlead.recovery import close_task, developer_reservations, task_closure, validate_store
+from teamlead.recovery import close_task, developer_reservations, register_task, task_closure, validate_store
 from teamlead.state import add_assignment, empty_state, load_state, save_state
 from tests import test_cli
 from tests.test_cli import CliCase
@@ -205,6 +206,19 @@ class PlanHoldsTest(CliCase):
         code, out, err = self.dry_apply("--break-reservation", role="tester")
         self.assertEqual(code, 0, err)
         self.assertEqual(json.loads(out)["steps"][0]["agent"], "grok")
+
+    def test_break_reservation_waives_only_the_holds_it_validated(self):
+        state = media_round()
+        register_task(state["recovery"], {"task": "media-77", "base_revision": "a" * 40, "scope": "media",
+                                          "allowed_paths": ["src/*"], "authorization": {"source": "operator", "quote": "go"}},
+                      CLOSE_AT)
+        reserved = {"codex-census": "media-77", "grok": "third-task", "claude": "fourth-task"}
+        # Same-task non-developer seat is barred by seat_holds, so it is validated and waived;
+        # an unrelated hold outside the assignments stays in force.
+        waived = cli._require_role_clear_break(
+            {"tester": "codex-census", "reviewer": "grok"}, "media-77", reserved, state["recovery"])
+        self.assertEqual(waived, {"codex-census", "grok"})
+        self.assertNotIn("claude", waived)
 
     def test_break_reservation_refuses_what_a_role_clear_cannot_record(self):
         self.seed()
