@@ -1,7 +1,5 @@
 # Changelog
 
-## 0.3.261 — 2026-09-23
-
 ### Changed
 
 - **Foreman handoff gaps are structured, and each one says how to recover.**
@@ -21,6 +19,10 @@
   recovery, and asking the operator is the only honest one. The owner's next
   write persists the upgrade, and readers never rewrite. Lesson and source
   records stay at version 1.
+
+## 0.3.261 — 2026-09-23
+
+### Changed
 
 - **The Herdr foreman no longer writes throwaway helper scripts.** In the
   #483 audit, the foreman wrote four scratch scripts (`pkg-setup.sh`,
