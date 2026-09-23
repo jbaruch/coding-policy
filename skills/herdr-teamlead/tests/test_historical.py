@@ -144,10 +144,14 @@ class HistoricalCommandsTest(fixture.CliCase):
         self.assertEqual(json.loads(out)["assignments"], {"developer": "grok"})
         plan = self.tmp / "retained-plan.json"
         plan.write_text(out)
+        return self.retained_apply_args(task, number, str(plan))
+
+    def retained_apply_args(self, task, number=3, assignments=None):
+        """Apply arguments for a retained correction, bypassing the planner's holds."""
         self.briefs["developer"].write_text("Address independent findings in counted correction {}.\n".format(number))
         args = self.apply_args("developer", number, "--retain-context")
         args[args.index("--task") + 1] = task
-        args[args.index("--assignments") + 1] = str(plan)
+        args[args.index("--assignments") + 1] = assignments or json.dumps({"developer": "grok"})
         return args
 
     def test_older_other_task_import_preserves_live_retained_dispatch_and_replay(self):
@@ -187,14 +191,21 @@ class HistoricalCommandsTest(fixture.CliCase):
         self.assertEqual(self.state.read_bytes(), saved)
 
     def test_newer_or_tied_other_task_import_refuses_retention_without_writes(self):
-        for occurred_at, message in (("2026-02-03T09:33:00+00:00", "Cannot retain"),
-                                     ("2026-02-03T10:32:00+01:00", "chronology is uncertain")):
+        for occurred_at, message, planned in (
+                ("2026-02-03T09:33:00+00:00", "Cannot retain", "reserved as developer for recovery-fixture"),
+                ("2026-02-03T10:32:00+01:00", "chronology is uncertain", "chronology is uncertain")):
             with self.subTest(occurred_at=occurred_at):
                 current = self.current_developer()
                 code, _, err = self.owner("import-correction", {**self.attempt(), "occurred_at": occurred_at}, self._client({}))
                 self.assertEqual(code, 0, err)
                 self.assertEqual(self.runner.calls, [])
-                args = self.retained_plan(current)
+                # The planner reads the newer other-task import as grok's hold,
+                # and a tie as unknown chronology, before apply ever runs (#483).
+                code, _, err = self.invoke(["plan", "--roles", "developer", "--snapshot", str(self.snapshot),
+                    "--exclude", "developer=claude,codex", "--task", current, "--fix-round", "3", "--now", AT])
+                self.assertEqual(code, 1)
+                self.assertIn(planned, err)
+                args = self.retained_apply_args(current)
                 saved = self.state.read_bytes()
                 code, _, err = self.invoke(args, self._client({"grok": "idle"}, sessions={"grok": "current-developer"}))
                 self.assertEqual(code, 1)

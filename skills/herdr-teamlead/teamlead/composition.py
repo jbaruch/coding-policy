@@ -182,3 +182,34 @@ def selection_constraints(roles, agents, requirements, history, task, dispatches
         if independent and task:
             rationale.append("{} independence also requires the lead's exclusions for external authors and contributions missing task/proposal provenance.".format(role))
     return {"exclude": excluded, "familiarity": familiarity, "rationale": rationale}
+
+
+#: Responsibilities a reserved developer may still take on its OWN task: the
+#: next fix, and the release that ends its reservation.
+RESERVED_OWN_TASK_ROLES = frozenset({"developer", "release"})
+
+
+def seat_holds(roles, task, reservations, busy):
+    """Bar workers the owner ledger says are already spoken for, without I/O.
+
+    `reservations` is `{agent: task}` from
+    `recovery.developer_reservations`; `busy` is `{agent: task}` for each
+    active supervision enrollment. Both come from durable records, so a
+    foreman reset between rounds plans against the same holds (#483).
+    """
+    excluded = {role: [] for role in roles}
+    rationale = []
+    for role in roles:
+        base = canonical_role(role)
+        for name in sorted(set(reservations) | set(busy)):
+            reasons = []
+            if name in busy:
+                reasons.append("busy on the active enrollment for task {}; resolve it with `teamlead supervision-resolve` once its outcome is recorded".format(busy[name]))
+            held = reservations.get(name)
+            if held is not None and (held != task or base not in RESERVED_OWN_TASK_ROLES):
+                reasons.append("reserved as developer for {} through its early fixes; "
+                               "run `teamlead close-task --record FILE` once that task merges or is abandoned".format(held))
+            if reasons:
+                excluded[role].append(name)
+                rationale.append("{} excludes {}: {}.".format(role, name, "; ".join(reasons)))
+    return {"exclude": excluded, "rationale": rationale}

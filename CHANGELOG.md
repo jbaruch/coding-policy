@@ -1,5 +1,36 @@
 # Changelog
 
+### Added
+
+- **The Herdr planner now reads developer reservations and busy workers from
+  the owner records.** `rules/agent-team-operation.md` already reserved a
+  developer through its task's early fixes, but only the foreman's memory
+  enforced it. The #483 audit of the 2026-09-23 foreman session that died on
+  `Prompt is too long` found 24 forced picks, every plan after 08:25, built by
+  hand with `--exclude` from what the foreman remembered about who was busy
+  and who was reserved. At 09:22 the planner picked `codex-census`, which was
+  the live developer for media #77, and only the foreman's memory stopped it.
+  #483 resets the foreman at every round boundary, and a reset foreman would
+  have let that pick through.
+
+  `plan` now derives both from durable state. A worker whose latest applied
+  assignment is a developer round 0–3 is held to that task. The hold ends at
+  a new `task_closed` event (`teamlead close-task --record FILE`, outcome
+  `merged` or `abandoned`), and any later assignment of the worker ends it
+  too, which is how an authorized role clear already reads. A worker with an
+  active supervision enrollment is busy. Both are barred from other seats,
+  and each bar is named in the plan's `rationale` along with the command that
+  lifts it. A reserved developer can still take its own task's next fix and
+  its release. `apply` does not re-check reservations: reusing a reserved
+  developer through an authorized role clear stays possible, as
+  `recover-role-clear` expects.
+
+  `task_closed` is a new kind in the existing append-only event log, so the
+  recovery store version does not change. Run against the live state on
+  2026-09-23, the derivation finds seven holds: six from that day's rounds and
+  one stale (`acr-p0-156`, from 2026-09-18), which the planner names until a
+  `close-task` clears it.
+
 ## 0.3.258 — 2026-09-23
 
 ### Changed

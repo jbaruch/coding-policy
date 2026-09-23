@@ -90,6 +90,12 @@ DEFAULT_FIX_LIMIT = 5
 #: needs more than the task's own original allowance is not a bounded
 #: correction; the judge takes the next rung instead (#415).
 DIAGNOSIS_BOUND_CEILING = DEFAULT_FIX_LIMIT
+#: What ends a task's time on the team: its work landed, or it was dropped.
+TASK_CLOSE_OUTCOMES = ("merged", "abandoned")
+#: Fix rounds whose developer stays reserved to its task: the initial
+#: implementation (0) and the retained-context early fixes. Round 4 onward
+#: takes a freshly cleared worker (rules/agent-team-operation.md Fix Loops).
+RETAINED_FIX_ROUNDS = frozenset({0, 1, 2, 3})
 PENDING_STATUSES = frozenset({"reserved", "sending", "sent_but_not_started"})
 DISPATCH_STATUSES = PENDING_STATUSES | {"applied", "not_sent"}
 #: The wait-report reason a refusal receipt must carry (see wait-report.sh
@@ -463,6 +469,75 @@ def task_record(store, task):
     if record is None:
         raise UsageError("Task {!r} has no recorded base/scope. Run `teamlead task --record FILE` with its original brief and authorization; do not reset the task.".format(task), {})
     return record
+
+
+def close_task(store, assignments, data, at):
+    """Record that a task left the team, ending its developer reservation.
+
+    A `task_closed` event: the event log is open to new kinds, so this adds
+    no store version. A later developer assignment reopens the task and its
+    reservation (#483).
+    """
+    if not isinstance(data, dict) or set(data) != {"task", "outcome", "evidence"}:
+        raise UsageError("Close-task record requires exactly task, outcome and evidence.", {})
+    task = text(data["task"], "task")
+    if data["outcome"] not in TASK_CLOSE_OUTCOMES:
+        raise UsageError("Close-task outcome must be one of {}; record what actually happened to the task.".format(
+            ", ".join(TASK_CLOSE_OUTCOMES)), {})
+    text(data["evidence"], "evidence")
+    timestamp(at, "Close-task time")
+    if not any(row.get("task") == task for row in assignments):
+        raise UsageError("Task {!r} has no recorded assignment; check its identity with `teamlead state` before closing it.".format(task), {})
+    details = {"outcome": data["outcome"], "evidence": data["evidence"]}
+    current = task_closure(store, assignments, task)
+    if current is not None:
+        if current["details"] != details:
+            raise UsageError("Task {!r} is already closed with another outcome or evidence; the first closure stands.".format(task), {})
+        return current
+    _event(store, at, "task_closed", task, details)
+    return store["events"][-1]
+
+
+def task_closure(store, assignments, task):
+    """The closure in force for `task`, or None while it is open.
+
+    A closure stops counting once a developer assignment follows it: the task
+    was reopened, and its new developer holds the seat again.
+    """
+    closure = next((row for row in reversed(store["events"])
+                    if row["kind"] == "task_closed" and row["task"] == task), None)
+    if closure is None:
+        return None
+    latest = latest_assignment(assignments, task=task, role="developer", status="applied")
+    if latest is not None and timestamp(latest[1].get("at"), "Assignment {} chronology".format(latest[0])) > timestamp(
+            closure["at"], "Close-task event {} time".format(closure["sequence"])):
+        return None
+    return closure
+
+
+def developer_reservations(store, assignments):
+    """`{agent: task}` for each developer held through its task's early fixes.
+
+    rules/agent-team-operation.md Fix Loops reserves the developer through
+    initial and early-fix verification. The owner ledger holds everything
+    that decides it: a worker whose latest applied assignment is a developer
+    round in `RETAINED_FIX_ROUNDS` is held to that task until a
+    `task_closed` event follows. Any later assignment of the worker ends the
+    hold, which is how an authorized role clear reads. A reset foreman sees
+    the same holds the one before it kept in memory (#483).
+    """
+    held = {}
+    for agent in sorted({row["agent"] for row in assignments
+                         if row.get("role") == "developer" and row.get("status") == "applied" and row.get("agent")}):
+        latest = latest_assignment(assignments, agent=agent, status="applied")
+        if latest is None:
+            continue
+        row = latest[1]
+        if (row.get("role") == "developer" and row.get("task")
+                and (row.get("fix_round") or 0) in RETAINED_FIX_ROUNDS
+                and task_closure(store, assignments, row["task"]) is None):
+            held[agent] = row["task"]
+    return held
 
 
 def checkpoint(store, assignments, data, at, judge_agent):

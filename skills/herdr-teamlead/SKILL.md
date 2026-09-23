@@ -176,8 +176,11 @@ Proceed immediately to Step 5 once the required readings are available.
 ## Step 5 — Plan the Roles
 
 Choose the responsibilities needed next under `references/specialists.md`.
-Supply its requirements file for specialized work. Keep the developer reserved
-through early fixes; schedule consultation and verification as the task needs them.
+Supply its requirements file for specialized work. Schedule consultation and
+verification as the task needs them. `plan` bars a developer reserved to
+another task and a worker with an active enrollment, and names each bar in its
+`rationale`; do not pass `--exclude` for either. Reusing a reserved developer
+elsewhere is a role clear under `references/dispatch-recovery.md`.
 
 The composition triggers decide part of that roster. Classify this round
 against the repo's declaration first. For a pre-implementation round, pass
@@ -544,7 +547,15 @@ for the round's other worktrees. Proceed immediately to Step 16.
 
 Finalize the task ledger with the round outcome and remaining obligations.
 Mark the task completed only after its acceptance criteria and required
-release and cleanup obligations are verified. Preserve the ledger for resume
+release and cleanup obligations are verified. When the task merged or was
+abandoned, close it; this releases its developer's reservation. The record is
+`{"task", "outcome": "merged" | "abandoned", "evidence"}`:
+
+```bash
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
+bash "$CP/skills/herdr-teamlead/teamlead.sh" close-task --record <close.json>
+```
+ Preserve the ledger for resume
 and standup. Preserve retrospective notes and link them from the ledger. Save
 current progress through the attention owner and stow the foreman's handoff under
 the working-memory reference. Reconcile supervision before ending the turn.
