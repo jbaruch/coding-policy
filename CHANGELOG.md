@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.257 — 2026-09-23
+
 ### Changed
 
 - **The Herdr lead is now a nonworking foreman.** The role was called the
