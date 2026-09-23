@@ -25,6 +25,16 @@
   dispatch reconciled from a receipt written before the field — never a guessed
   value.
 
+  **The mode is part of the dispatch, not only the ledger row.** Review found
+  it recorded after the send and nowhere before it: a judge interrupted
+  mid-send reconciled as `unknown`, and the dispatch fingerprint left the mode
+  out, so a diagnosis of the same brief replayed a completed adjudication.
+  Recovery store 11 → 12 puts `judge_mode` on the judge dispatch, its pre-send
+  context and its saved result, and binds it into the fingerprint. Only judge
+  dispatches carry the field; an older store already carrying it is refused as
+  unowned newer data. A malformed ledger `judge_mode` now reads as unusable
+  state instead of raising `TypeError`.
+
   The other half of #478, refusing a developer dispatch past its approach's
   correction allowance, was already shipped by #467 (2026-09-17): `validate_work`
   checks `ceiling_at` on both the `plan` and `apply` paths, and

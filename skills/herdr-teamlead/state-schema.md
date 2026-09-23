@@ -365,7 +365,10 @@ independent versions. Version 6 adds the dispatch fields `brief_identity`, `refu
 dispatch's send-time `provider`; version 8 adds the `diagnoses` collection;
 version 9 adds `legacy_ruling_recoveries`; version 10 widens `dispatches[].role`
 to a seat, per Seat vs responsibility above; version 11 adds the `approaches`
-collection. The
+collection; version 12 adds `judge_mode` to a judge dispatch, its
+`context_before_send` and its saved result, and binds it into the dispatch
+fingerprint, so an adjudication and a diagnosis of one brief are separate
+dispatches. Only judge dispatches carry the field. The
 owner stamps an older store on load, adds the empty collections, and refuses one
 already carrying a field — or a seat-named dispatch — its version did not own. Generic records remain version 1; stale-Grok delivery and
 composition-bearing dispatch/result records use version 2. Checkpoints are at

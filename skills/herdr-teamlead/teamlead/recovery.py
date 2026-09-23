@@ -35,7 +35,11 @@ RECOVERY_SCHEMA_VERSION = 1
 #: Version 11 adds the `approaches` collection, which separates a task's
 #: cumulative attempt history from the allowance of the approach currently
 #: being tried (#462).
-RECOVERY_STORE_VERSION = 11
+#: Version 12 adds `judge_mode` to a judge dispatch, its pre-send context and
+#: its saved result, so an interrupted judge recovers the mode it was sent for
+#: and the mode is part of the dispatch's identity (#478). An older store
+#: carrying the field anywhere is unowned newer data and is refused.
+RECOVERY_STORE_VERSION = 12
 REFUSAL_FIELDS = frozenset({"brief_identity", "refusal", "refusal_move", "provider"})
 SPECIALIST_DISPATCH_VERSION = 2
 #: Checkpoint record version. 1 carries a mandatory pinned-judge ruling; 2
@@ -192,6 +196,11 @@ def _refuse_unowned_legacy(store, version):
             seated.append(row["result"].get("role"))
         if any(isinstance(value, str) and SEAT_SEPARATOR in value for value in seated):
             raise UsageError("Older recovery contains a seat-named dispatch this version never wrote; preserve it for owner recovery.", {})
+        carriers = [row] if isinstance(row, dict) else []
+        if isinstance(row, dict):
+            carriers += [part for part in (row.get("result"), row.get("context_before_send")) if isinstance(part, dict)]
+        if any("judge_mode" in part for part in carriers):
+            raise UsageError("Older recovery contains a judge mode this version never wrote; preserve it for owner recovery.", {})
         allowed = ALLOWED_AT_6 if version == 6 else REFUSAL_FIELDS if version >= 7 else frozenset()
         if not isinstance(row, dict) or REFUSAL_FIELDS.intersection(row) - allowed:
             raise UsageError("Older recovery contains unowned newer refusal records; preserve it for owner recovery.", {})

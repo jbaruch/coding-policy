@@ -13,6 +13,7 @@ import unittest
 from datetime import datetime, timedelta
 from unittest.mock import patch
 
+from teamlead.errors import UsageError
 from teamlead.state import add_assignment, empty_state, save_state, state_lock
 from tests import test_cli as fixture
 from tests.fakes import FakeRunner, ScriptedReads, agent_json
@@ -231,10 +232,8 @@ class RecoveryCommandTests(fixture.CliCase):
         code, out, err = self.invoke(args + ["--dry-run"], self._client({}))
         self.assertEqual(code, 0, err)
 
-    def test_a_live_judge_dispatch_records_its_declared_mode_on_the_assignment(self):
-        # coding-policy#478: 51 recorded judge rounds, none of them saying
-        # which mode they ran. The ledger is where an adjudication and a
-        # diagnosis stay distinguishable after the fact.
+    def seat_judge(self):
+        """An exhausted task with its investigation assessed, and a judge seat ready."""
         state = empty_state()
         for fix in (None, 1, 2, 3, 4, 5):
             add_assignment(state, "2026-02-03T09:00:0{}+00:00".format(fix or 0), "developer", "grok", task=TASK, fix_round=fix)
@@ -251,11 +250,59 @@ class RecoveryCommandTests(fixture.CliCase):
             "pane_id": "w2:p1", "foreground_processes": [{"name": "claude", "pid": 200,
             "argv": ["claude", "--dangerously-skip-permissions", "--model", "claude-opus-4-6",
                      "--effort", "high"]}]}}}))
-        code, out, err = self.invoke(
-            ["apply", "--assignments", json.dumps({"judge": "claude"}), "--common", str(self.common),
-             "--brief", "judge=" + str(self.briefs["judge"]), "--task", TASK, "--now", AT,
-             "--judge-mode", "diagnosis", "--composer-settle", "0", "--no-clear"],
-            client)
+        return client
+
+    def judge_args(self, mode, *extra):
+        return ["apply", "--assignments", json.dumps({"judge": "claude"}), "--common", str(self.common),
+                "--brief", "judge=" + str(self.briefs["judge"]), "--task", TASK, "--now", AT,
+                "--judge-mode", mode, "--composer-settle", "0", "--no-clear", *extra]
+
+    def test_an_interrupted_judge_recovers_the_mode_it_was_sent_for(self):
+        # coding-policy#494 review: the mode must survive a send that never
+        # confirmed, or reconciliation records the dispatch as `unknown`.
+        client = self.seat_judge()
+        args = self.judge_args("diagnosis", "--dispatch-id", "interrupted-judge")
+        with patch("teamlead.assign.send_message", side_effect=KeyboardInterrupt), self.assertRaises(KeyboardInterrupt):
+            self.invoke(args, client)
+        dispatch = self.saved()["recovery"]["dispatches"][-1]
+        self.assertEqual((dispatch["status"], dispatch["judge_mode"]), ("sending", "diagnosis"))
+        self.assertEqual(dispatch["context_before_send"]["judge_mode"], "diagnosis")
+        data = {"dispatch": "interrupted-judge:judge", "outcome": "applied",
+                "reason": "Original report proves delivery and completion",
+                "authorization": AUTH, "evidence": str(self.evidence)}
+        code, _, err = self.owner("reconcile", data, self._client({"claude": "idle"}, sessions={"claude": "later"}))
+        self.assertEqual(code, 0, err)
+        row = self.saved()["assignments"][-1]
+        self.assertEqual((row["role"], row["judge_mode"]), ("judge", "diagnosis"))
+
+    def test_the_same_brief_under_another_mode_is_another_dispatch(self):
+        # coding-policy#494 review: without the mode in the identity, a
+        # diagnosis would replay a completed adjudication's receipt.
+        from teamlead import recovery as recovery_module
+        brief = self.tmp / "same-brief.md"
+        brief.write_text("# judge\n")
+        paths = {"common": str(self.common), "judge": str(brief)}
+        adjudication = recovery_module.dispatch_identity(TASK, "judge", "claude", None, paths,
+                                                         options={"judge_mode": "adjudication"})
+        diagnosis = recovery_module.dispatch_identity(TASK, "judge", "claude", None, paths,
+                                                      options={"judge_mode": "diagnosis"})
+        self.assertNotEqual(adjudication[1], diagnosis[1])
+
+    def test_an_older_store_carrying_a_judge_mode_is_refused_as_newer_data(self):
+        from teamlead import recovery as recovery_module
+        store = recovery_module.empty_recovery()
+        store["schema_version"] = 11
+        store["dispatches"].append({"schema_version": 1, "id": "d", "role": "judge", "agent": "claude",
+                                    "task": TASK, "status": "sending", "judge_mode": "diagnosis"})
+        with self.assertRaisesRegex(UsageError, "judge mode this version never wrote"):
+            recovery_module.migrate_store(store)
+
+    def test_a_live_judge_dispatch_records_its_declared_mode_on_the_assignment(self):
+        # coding-policy#478: 51 recorded judge rounds, none of them saying
+        # which mode they ran. The ledger is where an adjudication and a
+        # diagnosis stay distinguishable after the fact.
+        client = self.seat_judge()
+        code, out, err = self.invoke(self.judge_args("diagnosis"), client)
         self.assertEqual(code, 0, err)
         self.assertEqual(json.loads(out)["applied"][0]["judge_mode"], "diagnosis")
         row = self.saved()["assignments"][-1]

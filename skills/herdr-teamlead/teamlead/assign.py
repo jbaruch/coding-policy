@@ -756,9 +756,14 @@ def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle
         # send_message re-checks the composer, pastes, and confirms the
         # message actually landed as a user message rather than as a command.
         if on_before_send is not None:
-            on_before_send(step, {"cleared": cleared, "clear_reason": clear_reason,
-                                  "context_session": context_session, "tier": tier_record,
-                                  "transition": transition if step["role"] == "developer" else None})
+            before = {"cleared": cleared, "clear_reason": clear_reason,
+                      "context_session": context_session, "tier": tier_record,
+                      "transition": transition if step["role"] == "developer" else None}
+            # Only a judge dispatch carries its mode, so every other dispatch keeps
+            # the shape it had before recovery store 12 (#478).
+            if canonical_role(step["role"]) == "judge":
+                before["judge_mode"] = judge_mode
+            on_before_send(step, before)
         landing = send_message(
             client,
             agent,
@@ -796,10 +801,6 @@ def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle
             "clear_reason": clear_reason,
             "task": task,
             "fix_round": fix_round,
-            # The mode belongs to the judge seat alone, and the ledger is where
-            # an adjudication and a diagnosis stay distinguishable afterwards
-            # (#478).
-            "judge_mode": judge_mode if canonical_role(step["role"]) == "judge" else None,
             "context_session": context_session,
             "tier": tier_record,
             "landed": landing["landed"],
@@ -814,10 +815,17 @@ def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle
         }
         if "requirements" in step:
             record["requirements"] = step["requirements"]
+        # The mode belongs to the judge seat alone, and the ledger is where an
+        # adjudication and a diagnosis stay distinguishable afterwards (#478).
+        # Only a judge result carries the key, so every other saved dispatch
+        # result keeps the shape it had before recovery store 12.
+        if canonical_role(step["role"]) == "judge":
+            record["judge_mode"] = judge_mode
         # Persist the dispatch outcome before optional UI work. A broken pipe
         # during pane relabeling must never erase a confirmed handoff.
         if on_assigned is not None:
-            context = {key: record[key] for key in ("cleared", "clear_reason", "task", "fix_round", "judge_mode", "context_session", "tier")}
+            context = {key: record[key] for key in ("cleared", "clear_reason", "task", "fix_round", "context_session", "tier")}
+            context["judge_mode"] = record.get("judge_mode")
             on_assigned(step["role"], name, at, record["status"], context)
         if on_result is not None:
             on_result(record)

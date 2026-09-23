@@ -1077,6 +1077,13 @@ def cmd_apply(args, client=None, warn=None, trace=None):
         raise UsageError("Bind the lead with supervision-bind before dispatching specialist requirements; every specialist needs durable observation ownership.", {})
     if supervised and (not args.task or set(reports) != set(assignments)):
         raise UsageError("Bound team rounds require --task and one --report ROLE=ABS_PATH for every assigned role before any worker input.", {})
+    # The mode is part of what a judge dispatch IS: one brief sent as an
+    # adjudication and as a diagnosis are two dispatches, so the mode is
+    # resolved before any identity is computed (#478).
+    judge_mode = None
+    if any(canonical_role(role) == "judge" for role in assignments):
+        judge_mode = recovery.require_judge_mode(
+            _judge_mode_for(args, document if isinstance(document, dict) else None))
     replayed = []
     dispatches = {}
     # Check retry identities before next-attempt validation: a completed retry
@@ -1089,6 +1096,8 @@ def cmd_apply(args, client=None, warn=None, trace=None):
                 options["requirements"] = requirements
             if args.retain_specialist:
                 options["retain_specialist"] = True
+            if canonical_role(role) == "judge":
+                options["judge_mode"] = judge_mode
             identifier, fingerprint = recovery.dispatch_identity(
                 args.task, role, name, args.fix_round, paths, args.dispatch_id,
                 options=options)
@@ -1130,6 +1139,8 @@ def cmd_apply(args, client=None, warn=None, trace=None):
                     dispatches[role]["refusal_move"] = moves[role]
                 if role in requirements:
                     dispatches[role]["requirements"] = requirements[role]
+                if canonical_role(role) == "judge":
+                    dispatches[role]["judge_mode"] = judge_mode
                 if canonical_role(role) == "reviewer":
                     dispatches[role]["reviewer_scope"] = "design" if rounds.get(role, {}).get("type") in {"architect", "reconciliation"} else "verification"
         if len(replayed) == len(assignments):
@@ -1145,10 +1156,6 @@ def cmd_apply(args, client=None, warn=None, trace=None):
     # A fresh judge seat at an exhausted allowance waits for the assessment it
     # rules on, dry runs included. A completed replay has left `assignments`
     # already, so it is not re-gated (#408).
-    judge_mode = None
-    if "judge" in assignments:
-        judge_mode = recovery.require_judge_mode(
-            _judge_mode_for(args, document if isinstance(document, dict) else None))
     if args.task and "judge" in assignments:
         # The RESOLVED mode, not the flag: a planned diagnosis dispatched
         # without one would otherwise reach the gate as None and skip the stop
@@ -1467,7 +1474,9 @@ def cmd_recovery(args, client=None, warn=None, trace=None):
                 if result.get("reviewer_scope") is not None:
                     recovered["reviewer_scope"] = result["reviewer_scope"]
                 if canonical_role(recovered["role"]) == "judge":
-                    recovered["judge_mode"] = context.get("judge_mode") or "unknown"
+                    # The mode travels in the pre-send context and on the dispatch
+                    # itself; `unknown` is only for a receipt older than both.
+                    recovered["judge_mode"] = context.get("judge_mode") or result.get("judge_mode") or "unknown"
                 add_assignment(
                     state, at, recovered["role"], name, status="applied",
                     cleared=recovered["cleared"], clear_reason=recovered["clear_reason"],

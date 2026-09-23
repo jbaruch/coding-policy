@@ -450,6 +450,7 @@ def _validate(payload, path):
         mode = record.get("judge_mode")
         judge = record.get("role") == "judge"
         if ("judge_mode" not in record
+                or mode is not None and not isinstance(mode, str)
                 or judge and mode not in LEDGER_JUDGE_MODES
                 or not judge and mode is not None):
             raise _NoUsableState("an assignment row has invalid judge mode provenance")
@@ -695,6 +696,9 @@ def add_assignment(state, at, role, agent, status=STATUS_APPLIED, *,
     which is what a slice's verdict is read back through (#434).
     """
     role = canonical_role(role)
+    if judge_mode is not None and not isinstance(judge_mode, str):
+        raise UsageError("A judge mode is text, one of {}.".format(" | ".join(sorted(LEDGER_JUDGE_MODES))),
+                         {"judge_mode": judge_mode})
     if role == "judge" and judge_mode not in LEDGER_JUDGE_MODES:
         raise UsageError(
             "A judge assignment records the mode it was dispatched for, one of {}; an undeclared "
