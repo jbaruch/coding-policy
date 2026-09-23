@@ -10,16 +10,13 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from teamlead.foreman_queue import waiting
-from teamlead.recovery import close_task
+from teamlead.recovery import close_task, register_task
 from teamlead.state import add_assignment, empty_state, save_state
 from tests.test_cli import CliCase
 
 DEV = "2026-09-23T09:00:00+00:00"
 REVIEW = "2026-09-23T09:10:00+00:00"
 TEST = "2026-09-23T09:20:00+00:00"
-REPORT = "2026-09-23T09:30:00+00:00"
-RELEASE = "2026-09-23T09:40:00+00:00"
-CLOSE = "2026-09-23T09:50:00+00:00"
 
 
 def developed(task="t", at=DEV, agent="grok", fix_round=None):
@@ -34,9 +31,9 @@ def verified(state, task="t"):
     return state
 
 
-def approve(state, task="t"):
-    state["recovery"]["dispatches"].append({"task": task, "role": "developer", "status": "applied",
-                                            "report": {"verdict": "approved", "at": REPORT}})
+def register(state, task, at=DEV):
+    register_task(state["recovery"], {"task": task, "base_revision": "a" * 40, "scope": "s", "allowed_paths": ["src/*"],
+                                      "authorization": {"source": "operator", "quote": "go"}}, at)
     return state
 
 
@@ -45,38 +42,41 @@ def stages(state, busy=()):
 
 
 class StageTest(unittest.TestCase):
-    def test_a_developed_task_waits_for_its_verifiers(self):
-        result = waiting(developed()["recovery"], developed()["assignments"], set())["queue"][0]
-        self.assertEqual((result["waiting_for"], result["also_missing"]), ("reviewer", ["tester"]))
+    def test_a_registered_task_without_a_developer_waits_for_one(self):
+        state = register(empty_state(), "new")
+        entry = waiting(state["recovery"], state["assignments"], set())["queue"][0]
+        self.assertEqual((entry["task"], entry["waiting_for"], entry["since"]), ("new", ["developer"], DEV))
+
+    def test_a_developed_task_waits_for_both_verifiers(self):
+        self.assertEqual(stages(developed()), [("t", ["reviewer", "tester"])])
 
     def test_one_verifier_dispatched_leaves_the_other(self):
         state = developed()
         add_assignment(state, REVIEW, "reviewer", "claude", task="t")
-        self.assertEqual(stages(state), [("t", "tester")])
+        self.assertEqual(stages(state), [("t", ["tester"])])
 
-    def test_both_verifiers_without_an_approved_report_wait_for_the_gate(self):
-        self.assertEqual(stages(verified(developed())), [("t", "gate")])
+    def test_both_verifiers_dispatched_leaves_no_seat_to_wait_for(self):
+        self.assertEqual(stages(verified(developed())), [])
 
-    def test_an_approved_report_waits_for_release(self):
-        self.assertEqual(stages(approve(verified(developed()))), [("t", "release")])
-
-    def test_an_approval_for_an_earlier_round_does_not_count(self):
-        state = approve(verified(developed()))
+    def test_a_new_developer_round_reopens_the_verifier_seats(self):
+        state = verified(developed())
         add_assignment(state, "2026-09-23T10:00:00+00:00", "developer", "grok", task="t", fix_round=1)
-        add_assignment(state, "2026-09-23T10:10:00+00:00", "reviewer", "claude", task="t")
-        add_assignment(state, "2026-09-23T10:20:00+00:00", "tester", "codex", task="t")
-        self.assertEqual(stages(state), [("t", "gate")])
+        self.assertEqual(stages(state), [("t", ["reviewer", "tester"])])
 
-    def test_a_release_waits_for_the_task_to_be_closed(self):
-        state = approve(verified(developed()))
-        add_assignment(state, RELEASE, "release", "grok", task="t")
-        self.assertEqual(stages(state), [("t", "close")])
+    def test_a_partitioned_verifier_stays_listed_with_its_dispatched_slices(self):
+        state = developed()
+        add_assignment(state, REVIEW, "reviewer#api", "claude", task="t")
+        state["recovery"]["dispatches"].append({"task": "t", "role": "reviewer#api", "status": "applied",
+                                                "assignment_index": 1})
+        add_assignment(state, TEST, "tester", "codex", task="t")
+        entry = waiting(state["recovery"], state["assignments"], set())["queue"][0]
+        self.assertEqual((entry["waiting_for"], entry["dispatched_seats"]),
+                         (["reviewer"], {"reviewer": ["reviewer#api"], "tester": ["tester"]}))
 
     def test_a_closed_task_leaves_the_queue(self):
-        state = approve(verified(developed()))
-        add_assignment(state, RELEASE, "release", "grok", task="t")
+        state = developed()
         close_task(state["recovery"], state["assignments"],
-                   {"task": "t", "outcome": "merged", "evidence": "pr"}, CLOSE)
+                   {"task": "t", "outcome": "abandoned", "evidence": "dropped"}, TEST)
         self.assertEqual(stages(state), [])
 
     def test_a_task_in_flight_is_not_waiting(self):
@@ -98,6 +98,12 @@ class ForemanQueueCommandTest(CliCase):
             code, out, err = self.run_cli(self.base() + ["foreman-queue"])
         self.assertEqual(code, 0, err)
         self.assertEqual([entry["task"] for entry in json.loads(out)["queue"]], ["waiting"])
+
+    def test_an_unusable_state_file_fails_instead_of_an_empty_queue(self):
+        self.state.write_text('{"schema_version": 2, broken', encoding="utf-8")
+        code, _, err = self.run_cli(self.base() + ["foreman-queue"])
+        self.assertEqual(code, 1)
+        self.assertIn("unusable", err)
 
     def test_empty_state_has_an_empty_queue(self):
         self.out, self.err = io.StringIO(), io.StringIO()

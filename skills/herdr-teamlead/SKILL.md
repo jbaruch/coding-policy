@@ -183,11 +183,12 @@ bash "$CP/skills/herdr-teamlead/teamlead.sh" foreman-queue
 ```
 
 It prints `{"schema_version": 1, "queue": [...]}`. Each entry names `task`,
-`waiting_for` (`reviewer`, `tester`, `gate`, `release` or `close`),
-`also_missing`, `since`, `developer` and `fix_round`. A non-zero exit names an
-unreadable state file on stderr; resolve it before planning. Tasks with an
-active worker are omitted. The order is a default; choose another when the
-round needs it. A `close` entry needs Step 16's `close-task`, not a seat.
+`waiting_for` (a list of `developer`, `reviewer` or `tester`),
+`dispatched_seats`, `since`, `developer` and `fix_round`. A non-zero exit names
+an unusable state file on stderr; restore it before planning. Tasks with an
+active worker are omitted. A partitioned verifier stays listed with its
+dispatched slices; check them against the validated partition. The order is a
+default; choose another when the round needs it.
 
 Choose the responsibilities needed next under `references/specialists.md`.
 Supply its requirements file for specialized work. Schedule consultation and

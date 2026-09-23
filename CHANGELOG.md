@@ -10,18 +10,19 @@
   come from durable state.
 
   The queue is derived and never recorded, so there's no second copy to keep
-  in sync. For each open task, the latest applied developer round decides the
-  stage: `reviewer` or `tester` while that verifier has no assignment since the
-  round, `gate` once both were dispatched with no approved report recorded,
-  `release` after an approved report, and `close` after a release with no
-  `task_closed` event. Tasks with an active supervision enrollment are in
-  flight and omitted, and entries run oldest first. The command lists only
-  seat waits: `supervision-status` already covers reports waiting to be
-  gated, and `teamlead status` covers budgets.
+  in sync. It lists seats only. A registered open task with no developer waits
+  for `developer`. A developed task waits for `reviewer` and/or `tester` until
+  that responsibility has an assignment after its latest developer round. A
+  partitioned verifier stays listed with the slices that went out, because
+  the records hold dispatched slices but not the partition. Gating, release
+  and closure are the foreman's own in-round decisions, so they're not
+  listed. An earlier draft derived `gate`, `release` and `close` stages, and
+  review showed the records can't prove any of them. Tasks with an active
+  supervision enrollment are omitted. The command refuses an unusable state
+  file instead of printing an empty queue.
 
-  On a copy of the 2026-09-23 live state it lists 51 tasks. 27 of them are
-  finished work that was never closed, and they leave the queue once
-  `close-task` records them.
+  On a copy of the 2026-09-23 live state it lists 24 tasks: 13 waiting for
+  both verifiers, 6 for a developer, and 5 for a tester.
 
 ## 0.3.259 — 2026-09-23
 

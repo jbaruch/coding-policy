@@ -1366,7 +1366,12 @@ def cmd_status(args, client=None, warn=None, trace=None):
 
 def cmd_foreman_queue(args, client=None, warn=None, trace=None):
     state_path = _state_path(args)
-    state = load_state(state_path, warn=warn)
+    # Strict and read-only: an unusable ledger must fail, never read as an
+    # empty queue that hides every waiting task.
+    state, usable = load_state_checked(state_path, warn=warn, persist_migration=False)
+    if not usable:
+        raise StateError("State file {} is unusable, so the queue cannot be derived; restore it before planning.".format(state_path),
+                         {"path": str(state_path)})
     busy = {row["assignment"]["task"] for row in supervision.load(state_path)["members"] if row["active"]}
     return foreman_queue.waiting(state["recovery"], state["assignments"], busy), None
 
