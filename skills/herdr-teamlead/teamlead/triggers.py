@@ -140,6 +140,13 @@ def load_decisions(path):
 
 
 PLAN_FIELDS = frozenset({"schema_version", "added", "changed", "package_lines", "cli_surface"})
+#: A round that writes no repository content says so here. Omitting the field
+#: reads as True, so every plan written before it keeps its meaning and only an
+#: explicit `false` opens the no-surface path (#471).
+PLAN_OPTIONAL_FIELDS = frozenset({"writes_repository"})
+#: The responsibilities `rules/agent-team-operation.md` declares read-only on
+#: repository content. A round claiming to write nothing seats these alone.
+READ_ONLY_ROLES = frozenset({"advisor", "investigator", "architect"})
 
 
 def load_plan(path):
@@ -162,8 +169,9 @@ def load_plan(path):
         payload = json.loads(raw)
     except json.JSONDecodeError as exc:
         raise UsageError("Planned surfaces {} are invalid JSON ({}); repair the plan.".format(path, exc.msg), {}) from None
-    if not isinstance(payload, dict) or set(payload) != PLAN_FIELDS or payload["schema_version"] != DECLARATION_SCHEMA_VERSION:
-        raise UsageError("Planned surfaces must be a schema_version {} object with added, changed, package_lines and cli_surface; state [] or {{}} for one this round has none of.".format(
+    if (not isinstance(payload, dict) or set(payload) - PLAN_OPTIONAL_FIELDS != PLAN_FIELDS
+            or payload["schema_version"] != DECLARATION_SCHEMA_VERSION):
+        raise UsageError("Planned surfaces must be a schema_version {} object with added, changed, package_lines and cli_surface, and may carry writes_repository; state [] or {{}} for one this round has none of.".format(
             DECLARATION_SCHEMA_VERSION), {})
     plan: dict[str, Any] = {"schema_version": DECLARATION_SCHEMA_VERSION}
     for field in ("added", "changed", "cli_surface"):
@@ -175,6 +183,12 @@ def load_plan(path):
         if not isinstance(name, str) or not name.strip() or type(count) is not int or count < 0:
             raise UsageError("Planned package_lines needs a package directory and a non-negative line count; state the size this round will change.", {})
     plan["package_lines"] = dict(lines)
+    writes = payload.get("writes_repository", True)
+    if type(writes) is not bool:
+        raise UsageError("Planned writes_repository is a JSON boolean; state false only for a round that writes no repository content.", {})
+    plan["writes_repository"] = writes
+    if not writes and (plan["added"] or plan["changed"] or plan["cli_surface"] or plan["package_lines"]):
+        raise UsageError("A plan declaring writes_repository false names no surface; empty added, changed, cli_surface and package_lines, or declare the surfaces the round will touch.", {})
     return plan
 
 
@@ -445,11 +459,29 @@ def run_command(args, runner=None):
             # path that is also a trust boundary fires security too; validating
             # it and classifying nothing let UX and product answer for both.
             changes.setdefault(path, "M")
+    writes = plan is None or plan["writes_repository"]
+    if not writes:
+        # An investigation touches no repository surface, so it has nothing to
+        # declare and every trigger is quiet by construction. The claim is
+        # checkable rather than asserted: the seats are the read-only ones, and
+        # a diff on the tree contradicts it (#471).
+        tracked = sorted(set(changes) - set(untracked))
+        if tracked:
+            raise UsageError("This round declares writes_repository false, but its tracked diff is not empty: {}. Evidence outranks intent -- declare the surfaces the work touches, or classify the round that produced them.".format(
+                ", ".join(tracked[:5])), {})
+        if not roles:
+            raise UsageError("A round declaring writes_repository false names the responsibilities it seats with --roles, so the read-only claim is checkable.", {})
+        if not set(roles) <= READ_ONLY_ROLES:
+            raise UsageError("Only {} write no repository content; this round seats {} and cannot declare writes_repository false.".format(
+                ", ".join(sorted(READ_ONLY_ROLES)), ", ".join(sorted(set(roles) - READ_ONLY_ROLES))), {})
+        # Untracked scratch in the shared checkout is not this round's surface:
+        # it passed the refusal above, and it must not fire a trigger either.
+        changes, churn, untracked = {}, {}, {}
     # An empty plan classifies exactly as much as an absent one, so the guard
     # reads the combined inputs rather than the plan's presence: a vacuous
     # success here is the silence the triggers exist to end (#415).
-    if not changes and not planned_lines and not (plan is not None and plan["cli_surface"]):
-        raise UsageError("This round classifies nothing: its diff is empty and no planned surface is declared. Name the paths, package sizes or CLI surfaces the work will touch in --planned before the developer is dispatched.", {})
+    elif not changes and not planned_lines and not (plan is not None and plan["cli_surface"]):
+        raise UsageError("This round classifies nothing: its diff is empty and no planned surface is declared. Name the paths, package sizes or CLI surfaces the work will touch in --planned before the developer is dispatched. A round that writes no repository content declares writes_repository false instead.", {})
     # A package declared only by its planned size has no path in `changes`, and
     # a candidate missing here reads as one the base already held -- so a
     # planned new package would fire nothing (#415).

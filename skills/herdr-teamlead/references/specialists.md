@@ -120,6 +120,27 @@ round will add a command, flag or refusal to; a path outside
 `cli_spec_paths` is refused. State `[]` or `{}` for what this round has none
 of. A later round classifies its diff, which is evidence rather than intent.
 
+A round that writes no repository content at all — an investigation, an
+architecture consultation, an advisory question — has no surface to declare and
+would otherwise be refused as classifying nothing. It says so explicitly:
+
+```json
+{
+  "schema_version": 1,
+  "added": [], "changed": [], "package_lines": {}, "cli_surface": [],
+  "writes_repository": false
+}
+```
+
+Every trigger is quiet on such a round by construction: each one classifies a
+repository surface, and this round touches none. The claim is checked rather
+than taken — `--roles` must name only read-only responsibilities
+(`READ_ONLY_ROLES` in `skills/herdr-teamlead/teamlead/triggers.py`), every other
+planned field must be empty, and a
+tracked diff against the base refuses it, since evidence outranks intent.
+Omitting `writes_repository` reads as `true`, so a plan written before the
+field keeps its meaning.
+
 Exit 0 means every fired trigger is staffed or answered. Exit 1 with an
 `unaddressed_trigger` error names the triggers that are neither; re-run it
 after each change, since the failed invocation read none of them. A trigger is

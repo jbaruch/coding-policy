@@ -43,6 +43,10 @@ description: Running a multi-agent team — task-based specialist composition, c
 - `teamlead detect-triggers` classifies the round against that declaration before the roles are planned
 - A round with work already written classifies its diff
 - A round before implementation declares the surfaces the work will touch, and classifies those
+- A round that writes no repository content declares that explicitly
+- Such a round seats read-only responsibilities alone
+- Such a round fires no trigger
+- A tracked diff refuses that declaration
 - A round that classifies neither is refused, never read as no trigger fired
 - The four non-exhaustion triggers fire from that detection, never from the lead's reading of the diff
 - An absent or incomplete declaration is refused, never read as no trigger fired
