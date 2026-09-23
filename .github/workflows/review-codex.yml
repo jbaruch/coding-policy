@@ -86,10 +86,17 @@ jobs:
         run: |
           set -euo pipefail
           git fetch --no-tags --depth=1 origin "${{ github.event.pull_request.base.ref }}"
+          # Reviewer model pin. No scanner tracks a model id, so it renews by hand:
+          # review it whenever the Codex CLI pin above bumps and at each weekly
+          # capability-table refresh (rules/dependency-management.md Freshness).
+          # Sol's own default effort is low, too shallow for a policy review.
+          # Keep in step with .github/codex-review/fleet-review-one.sh.
           codex exec \
             --json \
             --skip-git-repo-check \
             --dangerously-bypass-approvals-and-sandbox \
+            --model gpt-5.6-sol \
+            -c 'model_reasoning_effort="high"' \
             --output-schema .github/codex-review/schema.json \
             --output-last-message /tmp/codex-final.json \
             - < .github/codex-review/prompt.md

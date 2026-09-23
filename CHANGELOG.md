@@ -1,5 +1,21 @@
 # Changelog
 
+### Changed
+
+- **The Codex policy reviewer is pinned to GPT-5.6-Sol at high effort.** Both
+  review paths, this repo's own `review-codex.yml` and the fleet reviewer's
+  `fleet-review-one.sh`, used to pass no model, so the review ran on whatever
+  default the pinned Codex CLI chose for the subscription, and it could
+  change under a CLI bump without anyone deciding it. They now pass
+  `--model gpt-5.6-sol` and `model_reasoning_effort="high"`. Sol's own default
+  effort is `low`, too shallow for reading a diff against 26 rule files.
+
+  No scanner tracks a model id, so the pin renews by hand, at each Codex CLI
+  bump and each weekly capability-table refresh, as a comment beside each call
+  site says. The two literals live at both call sites, not in a shared file:
+  both run with the Codex credential on disk, and on coding-policy's own
+  path, sourcing a file would run code from the PR under review.
+
 ## 0.3.257 — 2026-09-23
 
 ### Changed
