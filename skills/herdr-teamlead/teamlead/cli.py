@@ -1007,7 +1007,9 @@ def _require_bound_slices(document, seated, briefs):
             body = Path(brief).read_text(encoding="utf-8") if brief else ""
         except (OSError, UnicodeError) as exc:
             raise UsageError(
-                "Cannot read the brief for seat {!r} at {}: {}.".format(role, brief, exc),
+                "Cannot read the brief for seat {!r} at {}: {}. Restore a readable UTF-8 brief "
+                "at that path, or regenerate the round's briefs with compose-briefs.sh, then "
+                "re-run apply.".format(role, brief, exc),
                 {"role": role}) from None
         # The whole scope block, not the facts it contains. A brief that
         # scatters the digest, the slice name and a path while directing a

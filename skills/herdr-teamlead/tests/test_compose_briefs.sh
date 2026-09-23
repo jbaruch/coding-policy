@@ -553,6 +553,10 @@ JSON
   # and both leave nothing written.
   if [[ $RC -eq 2 && ! -e "$TMP/out21e" ]] && printf '%s' "$ERRTEXT" | grep -q "SLICE_PATHS"; then
     pass; else fail "slice paths: a shared SLICE_PATHS must refuse, got RC=$RC ERR=$ERRTEXT"; fi
+  jq '.shared.SLICE_DIGEST = "0123456789ab"' "$v16" > "$TMP/v21f.json" || die "could not build the shared-digest fixture"
+  run "$TPL" "$TMP/v21f.json" "$TMP/out21f"
+  if [[ $RC -eq 2 && ! -e "$TMP/out21f" ]] && printf '%s' "$ERRTEXT" | grep -q "SLICE_DIGEST belongs to one seat"; then
+    pass; else fail "slice digest: a shared SLICE_DIGEST must refuse, got RC=$RC ERR=$ERRTEXT"; fi
 
   # 21h. A failing slice_scope aborts instead of composing an empty boundary.
   #      Nested in the outer jq's --arg, its non-zero status was discarded and

@@ -362,6 +362,10 @@ main() {
       warn "SLICE_PATHS belongs to one seat, never to .shared — every slice owns different paths"
       return 2
     fi
+    if printf '%s' "$values" | jq -e '.shared // {} | has("SLICE_DIGEST")' >/dev/null; then
+      warn "SLICE_DIGEST belongs to one seat, never to .shared — apply re-derives each seat's digest from the plan"
+      return 2
+    fi
     local slice_paths="[]"
     slice_digest=""
     if [[ "$role" == *"#"* ]]; then

@@ -21,7 +21,7 @@ from teamlead.recovery import (
     abort_pre_send, active_plans, authorize_context, authorize_plan, authorize_refused_dispatch, brief_identity, checkpoint, confirmed_fix,
     diagnose, require_investigation_before_judge, require_judge_mode,
     dispatch_identity, finish_dispatch, fresh_transition, mark_sending,
-    migrate_store, prior_dispatch, record_refusal, record_report, refusal_move, register_task, reserve,
+    _item, migrate_store, prior_dispatch, record_refusal, record_report, refusal_move, register_task, reserve,
     task_statuses, validate_store, validate_work,
 )
 from teamlead.state import add_assignment, empty_state, load_state_checked, save_state
@@ -568,6 +568,40 @@ class RecoveryTests(unittest.TestCase):
         self.assertEqual(task_statuses(self.store, self.history)[TASK]["approach_attempts"], 5)
         with self.assertRaisesRegex(UsageError, "correction allowance is exhausted"):
             validate_work(self.store, self.history, TASK, 11, None, None)
+        validate_store(self.store, self.history)
+
+    def test_a_diagnosis_cannot_cite_another_tasks_approach(self):
+        # coding-policy#468: validation confirmed the reference resolved to SOME
+        # approach, never that it belonged to the citing task. `current_diagnoses`
+        # filters the ladder by task, so a hand-edited cross-task reference
+        # dropped the row out of its own ladder and the per-approach `stop` and
+        # rung checks skipped it entirely.
+        other = "another-task"
+        register_task(self.store, {"task": other, "base_revision": BASE, "scope": WORK["scope"],
+                                   "allowed_paths": ["src/*"], "authorization": AUTH}, AT)
+        self.seed_checkpoint()
+        self.run_approach_diagnosis(self.approach_diagnosis("diag-1", 5))
+        self.spend(6, 10)
+        self.judge_after_developer(10)
+        second = self.next_checkpoint("checkpoint-6")
+        later = self.run_diagnosis(self.diagnosis("diag-2", "continue", 1, second), "judge")
+        self.assertEqual(later["approach"], "diag-1:approach")
+        validate_store(self.store, self.history)
+        # The second task's own checkpoint and approach, each internally
+        # consistent, so the only thing left to object to is which task the
+        # citing diagnosis belongs to.
+        origin_checkpoint = _item(self.store["checkpoints"], self.store["approaches"][-1]["checkpoint"], "checkpoint")
+        self.store["checkpoints"].append(dict(origin_checkpoint, id="foreign-checkpoint", task=other))
+        foreign = dict(self.store["approaches"][-1], id="foreign-approach", task=other,
+                       checkpoint="foreign-checkpoint", origin="operator", diagnosis=None,
+                       judge_evidence=None, investigator_report=None,
+                       authorization=OVERRIDE, supersedes=None)
+        self.store["approaches"].append(foreign)
+        row = next(item for item in self.store["diagnoses"] if item["id"] == "diag-2")
+        row["approach"] = "foreign-approach"
+        with self.assertRaisesRegex(UsageError, "belongs to task " + other):
+            validate_store(self.store, self.history)
+        row["approach"] = "diag-1:approach"
         validate_store(self.store, self.history)
 
     def test_a_new_approach_starts_its_ladder_rather_than_inheriting_one(self):
