@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from teamlead.herdr import HerdrClient
 from teamlead.planner import plan
-from teamlead.state import add_assignment, empty_state, load_state_checked, role_counts
+from teamlead.state import STATE_SCHEMA_VERSION, add_assignment, empty_state, load_state_checked, role_counts
 from tests.fakes import FakeRunner, ScriptedReads, agent_json, composer_reads, composer_screen, ok_json
 from tests.test_cli import CliCase, CONFIG
 from tests.test_qualification import AT, qualified_tier
@@ -199,7 +199,7 @@ class TierIntegrationTest(CliCase):
         self.assertIn(applied["tier"]["prompt_hash"], runner.pasted_prompts()[0])
         stored, usable = load_state_checked(self.state)
         self.assertTrue(usable)
-        self.assertEqual(stored["schema_version"], 6)
+        self.assertEqual(stored["schema_version"], STATE_SCHEMA_VERSION)
         self.assertEqual(stored["assignments"][0]["tier"], applied["tier"])
         self.assertEqual(role_counts(stored), {"developer": {"claude": 1}})
 
@@ -230,9 +230,29 @@ class TierIntegrationTest(CliCase):
             "agents": {"claude": {"window_group": "shared"}}}], "assignments": [row]}))
         migrated, usable = load_state_checked(self.state)
         self.assertTrue(usable)
-        self.assertEqual(migrated["assignments"][0], {**row, "schema_version": 6, "tier": None, "requirements": None, "reviewer_scope": None})
+        self.assertEqual(migrated["assignments"][0], {**row, "schema_version": STATE_SCHEMA_VERSION, "tier": None, "requirements": None, "reviewer_scope": None})
         self.assertEqual(migrated["snapshots"][0]["agents"]["claude"], {"window_group": "shared", "tier_billing": {}})
         self.assertEqual(role_counts(migrated), {"developer": {"claude": 1}})
+
+    def test_a_schema_six_tier_row_migrates_as_never_de_escalated(self):
+        # coding-policy#477: nothing could de-escalate before this version, so
+        # an older tier row says so explicitly instead of lacking the fields.
+        state = empty_state()
+        argv = ["claude", "--model", "sonnet-5", "--effort", "high"]
+        add_assignment(state, AT, "developer", "claude", tier={
+            "kind": "claude", "model": "sonnet-5", "effort": "high", "launch_args": [],
+            "verified": {"source": "launch_argv", "model": "sonnet-5", "effort": "high", "pane_id": "w1:p2", "argv": argv}})
+        state["schema_version"] = 6
+        row = state["assignments"][0]
+        row["schema_version"] = 6
+        for key in ("pressure_headroom", "de_escalated"):
+            del row["tier"][key]
+        self.state.write_text(json.dumps(state))
+        migrated, usable = load_state_checked(self.state)
+        self.assertTrue(usable)
+        tier = migrated["assignments"][0]["tier"]
+        self.assertEqual((tier["pressure_headroom"], tier["de_escalated"]), (None, False))
+        self.assertEqual(migrated["assignments"][0]["schema_version"], STATE_SCHEMA_VERSION)
 
     def test_historical_permission_modes_stay_readable_without_becoming_live_proof(self):
         for options in ([], ["--permission-mode", "acceptEdits"]):

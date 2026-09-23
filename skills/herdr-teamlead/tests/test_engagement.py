@@ -13,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from teamlead import engagement, recovery, report_delivery, supervision
 from teamlead.errors import UsageError
-from teamlead.state import add_assignment, empty_state, load_state_checked, save_state
+from teamlead.state import STATE_SCHEMA_VERSION, add_assignment, empty_state, load_state_checked, save_state
 from tests import test_report_delivery as delivery_fixture
 
 AT = "2026-02-03T10:00:00+00:00"
@@ -247,7 +247,7 @@ class EngagementTest(unittest.TestCase):
         migrated, usable = load_state_checked(self.path)
         self.assertTrue(usable)
         self.assertEqual(migrated["specialist_assessments"], [])
-        self.assertEqual(migrated["assignments"][0], {**original, "schema_version": 6,
+        self.assertEqual(migrated["assignments"][0], {**original, "schema_version": STATE_SCHEMA_VERSION,
                                                     "requirements": None, "reviewer_scope": "unknown"})
         self.assertEqual(migrated["recovery"]["schema_version"], recovery.RECOVERY_STORE_VERSION)
 
