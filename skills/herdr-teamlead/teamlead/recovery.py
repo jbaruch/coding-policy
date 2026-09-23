@@ -494,8 +494,8 @@ def close_task(store, assignments, data, at):
             ", ".join(TASK_CLOSE_OUTCOMES)), {})
     text(data["evidence"], "evidence")
     instant = timestamp(at, "Close-task time")
-    if not any(row.get("task") == task for row in assignments):
-        raise UsageError("Task {!r} has no recorded assignment; check its identity with `teamlead state` before closing it.".format(task), {})
+    if task not in store["tasks"] and not any(row.get("task") == task for row in assignments):
+        raise UsageError("Task {!r} is neither registered nor assigned; check its identity with `teamlead state` before closing it.".format(task), {})
     details = {"outcome": data["outcome"], "evidence": data["evidence"]}
     # The same request replays from anywhere in history, even after the task
     # reopened: closing a reopened task takes a new decision with new evidence.

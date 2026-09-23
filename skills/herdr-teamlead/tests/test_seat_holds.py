@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from teamlead.composition import seat_holds
 from teamlead.errors import UsageError
-from teamlead.recovery import close_task, developer_reservations, task_closure, validate_store
+from teamlead.recovery import close_task, developer_reservations, register_task, task_closure, validate_store
 from teamlead.state import add_assignment, empty_state, load_state, save_state
 from tests import test_cli
 from tests.test_cli import CliCase
@@ -118,11 +118,20 @@ class ReservationTest(unittest.TestCase):
         with self.assertRaisesRegex(UsageError, "closure chronology is uncertain"):
             task_closure(state["recovery"], state["assignments"], "media-77")
 
+    def test_a_registered_task_abandoned_before_dispatch_can_close(self):
+        state = empty_state()
+        register_task(state["recovery"], {"task": "early-drop", "base_revision": "a" * 40, "scope": "dropped",
+                                          "allowed_paths": ["src/*"], "authorization": {"source": "operator", "quote": "go"}},
+                      DEV_AT)
+        event = close_task(state["recovery"], state["assignments"],
+                           {"task": "early-drop", "outcome": "abandoned", "evidence": "operator dropped it"}, CLOSE_AT)
+        self.assertEqual((event["kind"], event["task"]), ("task_closed", "early-drop"))
+
     def test_malformed_or_unknown_closures_are_refused(self):
         state = media_round()
         for data, message in (({**MERGED, "extra": 1}, "exactly task, outcome and evidence"),
                               ({**MERGED, "outcome": "done"}, "outcome must be one of"),
-                              ({**MERGED, "task": "never-dispatched"}, "no recorded assignment")):
+                              ({**MERGED, "task": "never-dispatched"}, "neither registered nor assigned")):
             with self.subTest(message=message), self.assertRaisesRegex(UsageError, message):
                 close_task(state["recovery"], state["assignments"], data, CLOSE_AT)
         self.assertEqual(state["recovery"]["events"], [])
