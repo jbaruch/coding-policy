@@ -1,7 +1,9 @@
 """Lead-owned lessons and handoff captures; never task acceptance authority.
 
 Each write atomically appends to one document under its existing OS state lock.
-Readers are offline, never lock or write, and retain old revisions for audit.
+Readers are offline and retain old revisions for audit. A read never locks or
+writes, except the read that finds a version-1 stow: it rewrites the upgraded
+document under the lock (see `load`).
 The CLI owns the clock; timestamps are explicit throughout this module.
 """
 

@@ -378,6 +378,12 @@ description: Running a multi-agent team — task-based specialist composition, c
 - Give the next foreman an ordered list of durable files to read
 - Record uncaptured or unavailable context as an explicit handoff gap
 - A handoff gap names what is missing, the task it affects, and how to recover it
+- Narrow exception for a gap migrated from a version-1 stow.
+- Preconditions (all required):
+  1. The owner migration wrote it from a version-1 free-text gap; a new stow never names this task
+  2. Its task is `unrecorded` and its recovery asks the operator, quoting the original text
+  3. Its stow is not reset-ready until a new stow records the gap with its actual task
+- Every other handoff gap names the task it affects
 - Working memory grants no authority, acceptance, or gate waiver
 - Follow `skills/herdr-teamlead/references/working-memory.md`
 
