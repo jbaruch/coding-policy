@@ -20,7 +20,8 @@ SCHEMA_VERSION = 1
 #: Stow record version. 1 held free-text gaps. 2 makes each gap structured:
 #: what is missing, which task it affects, and exactly one recovery -- a file
 #: to re-read, a question for the operator, or an accepted loss with its
-#: reason (#483). Version-1 stows are read unchanged and never restamped.
+#: reason (#483). A version-1 stow upgrades on read (see `_migrate_stow`)
+#: and the owner rewrites it on its next write.
 STOW_VERSION = 2
 STOW_VERSIONS = frozenset({SCHEMA_VERSION, STOW_VERSION})
 GAP_RECOVERIES = ("reread", "ask", "accept")
@@ -124,6 +125,26 @@ def _valid_gap(gap):
     return kind in GAP_RECOVERIES and _text(value)
 
 
+#: The task a migrated version-1 gap names: its free text never recorded one.
+UNRECORDED_TASK = "unrecorded"
+
+
+def _migrate_stow(row):
+    """Upgrade a version-1 stow to version 2 without inventing what it never held.
+
+    A free-text gap recorded no task and no recovery, so the only honest
+    recovery is a question to the operator quoting the original text. The
+    `input_digest` keeps binding the original input, so an exact retry of it
+    still replays this record.
+    """
+    if row.get("kind") != "stow" or row.get("schema_version") != SCHEMA_VERSION:
+        return row
+    gaps = [{"missing": text, "task": UNRECORDED_TASK,
+             "recovery": {"ask": "A handoff recorded this gap without a task or recovery: {} How should it be recovered?".format(text)}}
+            for text in row["gaps"]]
+    return {**row, "schema_version": STOW_VERSION, "gaps": gaps}
+
+
 def _validate_record(row):
     versions = STOW_VERSIONS if isinstance(row, dict) and row.get("kind") == "stow" else {SCHEMA_VERSION}
     _require(isinstance(row, dict) and type(row.get("schema_version")) is int and row["schema_version"] in versions,
@@ -166,6 +187,11 @@ def _validate_record(row):
             _require(source["kind"] == "file", "Stow required reads must name durable local files; put remote references in their contents.")
 
 
+def _validated(row):
+    _validate_record(row)
+    return row
+
+
 def load(path):
     target = location(path)
     empty = {"schema_version": SCHEMA_VERSION, "state_path": str(Path(path).expanduser().resolve()), "records": []}
@@ -181,8 +207,10 @@ def load(path):
                  "Memory document has an unsupported schema or state identity; preserve it and update the owner skill or restore its backup.")
         ids, lessons = set(), {}
         previous_time = None
+        # Validate each record at its saved version, then upgrade it; the next
+        # owner write persists the upgrade (rules/stateful-artifacts.md).
+        document["records"] = [_migrate_stow(_validated(row)) for row in document["records"]]
         for row in document["records"]:
-            _validate_record(row)
             _require(row["id"] not in ids, "Memory record ids are duplicated; restore the original history.")
             ids.add(row["id"])
             recorded = timestamp(row["recorded_at"], "Memory recording")
@@ -262,10 +290,9 @@ def _view(row, at):
         result["expired"] = row["expires_at"] is not None and timestamp(at, "Checkpoint") >= timestamp(row["expires_at"], "Expiry")
         result["use_requires_live_verification"] = True
     else:
-        # A structured gap names its own recovery, so it no longer blocks a
-        # reset; a version-1 free-text gap still does (#483).
-        gaps_carried = row["schema_version"] == STOW_VERSION or not row["gaps"]
-        result["reset_ready"] = gaps_carried and all(source["observation"] == "same_bytes" for source in result[source_key])
+        # Every stow is version 2 once loaded, and a structured gap names its
+        # own recovery, so gaps no longer block a reset (#483).
+        result["reset_ready"] = all(source["observation"] == "same_bytes" for source in result[source_key])
         result["readiness_scope"] = "local_capture_only"
     return result
 

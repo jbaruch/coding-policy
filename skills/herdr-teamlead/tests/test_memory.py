@@ -207,16 +207,24 @@ class MemoryTest(unittest.TestCase):
                 self.stow({**self.capture, "gaps": [gap]})
         self.assertFalse(memory.location(self.state).exists())
 
-    def test_a_version_one_stow_keeps_its_free_text_gaps_and_blocks_reset(self):
+    def test_a_version_one_stow_migrates_its_gaps_to_operator_questions(self):
         self.stow()
         document = self.raw()
-        legacy = {**document["records"][0], "id": "legacy-stow", "schema_version": 1,
-                  "gaps": ["The current task ledger is unavailable; restore it before replacing the lead."]}
+        text = "The current task ledger is unavailable; restore it before replacing the lead."
+        legacy = {**document["records"][0], "id": "legacy-stow", "schema_version": 1, "gaps": [text]}
         document["records"].append(legacy)
-        memory.location(self.state).write_text(json.dumps(document), encoding="utf-8")
+        self.write_raw(document)
         shown = memory.show(self.state, LATER, "legacy-stow")["record"]
-        self.assertEqual(shown["gaps"], legacy["gaps"])
-        self.assertFalse(shown["reset_ready"])
+        self.assertEqual(shown["schema_version"], memory.STOW_VERSION)
+        self.assertEqual(len(shown["gaps"]), 1)
+        gap = shown["gaps"][0]
+        self.assertEqual((gap["missing"], gap["task"]), (text, memory.UNRECORDED_TASK))
+        self.assertIn(text, gap["recovery"]["ask"])
+        # Reading never rewrites; the owner's next write persists the upgrade.
+        self.assertEqual(self.raw()["records"][1]["schema_version"], 1)
+        self.stow({**self.capture, "id": "stow-2"}, LATER)
+        self.assertEqual([row["schema_version"] for row in self.raw()["records"] if row["kind"] == "stow"],
+                         [memory.STOW_VERSION] * 3)
 
     def test_stow_source_change_or_loss_invalidates_saved_readiness(self):
         self.stow()

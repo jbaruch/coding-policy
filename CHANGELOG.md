@@ -12,10 +12,13 @@
   Stow records move to version 2. Each gap is `{"missing", "task",
   "recovery"}`, and `recovery` is exactly one of `{"reread": "/absolute/path"}`,
   `{"ask": "<question>"}` or `{"accept": "<why the loss is safe>"}`. Anything
-  else is refused. Structured gaps no longer block `reset_ready`, since each
-  one carries its own recovery. Version-1 stows are read unchanged, keep
-  their free-text gaps, and still block a reset. Lesson and source records
-  stay at version 1.
+  else is refused. Gaps no longer block `reset_ready`, since each one carries
+  its own recovery. A version-1 stow upgrades on read. Each free-text gap
+  becomes `{"missing": <text>, "task": "unrecorded", "recovery": {"ask":
+  <a question quoting it>}}`, because the old gap recorded no task or
+  recovery, and asking the operator is the only honest one. The owner's next
+  write persists the upgrade, and readers never rewrite. Lesson and source
+  records stay at version 1.
 
 ## 0.3.260 — 2026-09-23
 
