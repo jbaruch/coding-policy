@@ -18,6 +18,10 @@ alwaysApply: true
 
 - Pin versions or use a lock file to ensure reproducible builds
 - Lock files are committed to the repo
+- A lock file here pins dependencies that this repo's build, test, or CI resolves
+- A tool's record of what it installed on one machine is per-machine installer state, not a lock file (e.g., `skills-lock.json` from the `skills` installer, listing skills installed into this machine's agent directories)
+- Per-machine installer state may be gitignored
+- A file some build, test, or CI step in this repo reads is a lock file, whatever it is called
 
 ## Freshness
 
