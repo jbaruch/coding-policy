@@ -23,7 +23,7 @@ from types import SimpleNamespace
 from . import __version__
 from .assign import apply as apply_assignments
 from .assign import APPLY_SCHEMA_VERSION, dry_run, native_context_session, normalize_assignments, resolve_paths, validate_fix_history
-from . import attention, capabilities, composition, engagement, foreman_queue, historical, memory, oracle, partition, recovery, report_delivery, restoration, role_clear, retrospective, retrospective_runtime, supervision, supervision_gate, supervision_runtime, triggers
+from . import attention, capabilities, composition, engagement, foreman_queue, historical, load_set, memory, oracle, partition, recovery, report_delivery, restoration, role_clear, retrospective, retrospective_runtime, supervision, supervision_gate, supervision_runtime, triggers
 from .config import default_config_path, load_config, load_judge, load_role_costs, select_agents
 from .errors import PlanError, StateError, TeamLeadError, UsageError
 from .herdr import (
@@ -382,6 +382,11 @@ def build_parser():
         record_parser.add_argument("--now", metavar="ISO8601")
     sub.add_parser("status", parents=[common], help="Show implementation budgets and paused work separately from active audit workers.")
     sub.add_parser("foreman-queue", parents=[common], help="List open tasks waiting for their next seat, oldest first, derived from the owner records.")
+    load_parser = sub.add_parser("load-set", parents=[common], help="List the durable records one foreman decision must load, derived from the owner records.")
+    load_parser.add_argument("--decision", required=True, choices=load_set.DECISIONS)
+    load_target = load_parser.add_mutually_exclusive_group(required=True)
+    load_target.add_argument("--task", help="Task identity for plan, brief, gate and diagnose.")
+    load_target.add_argument("--enrollment", help="Enrollment (dispatch) id for wake.")
 
     sub.add_parser(
         "state",
@@ -1376,6 +1381,37 @@ def cmd_foreman_queue(args, client=None, warn=None, trace=None):
     return foreman_queue.waiting(state["recovery"], state["assignments"], busy), None
 
 
+def cmd_load_set(args, client=None, warn=None, trace=None):
+    if (args.decision == "wake") != (args.enrollment is not None):
+        raise UsageError("Pass --enrollment for wake and --task for every other decision.", {"decision": args.decision})
+    state_path = _state_path(args)
+    state, usable = load_state_checked(state_path, warn=warn, persist_migration=False)
+    if not usable:
+        raise StateError("State file {} is unusable, so the load set cannot be derived; restore it before deciding.".format(state_path),
+                         {"path": str(state_path)})
+    members = supervision.load(state_path)["members"]
+    reports = {row["id"]: row["assignment"].get("report") for row in members}
+    busy = {row["assignment"]["task"] for row in members if row["active"]}
+    _document, entries, _progress = attention.load(state_path)
+    if args.decision == "wake" and (args.enrollment not in reports
+                                    or not any(row.get("id") == args.enrollment for row in state["recovery"]["dispatches"])):
+        raise UsageError("Enrollment {} has no supervision enrollment with a recorded dispatch; read supervision-status for the enrollment id.".format(args.enrollment), {})
+    if args.decision != "wake" and args.task not in state["recovery"]["tasks"] and not any(
+            row.get("task") == args.task for row in state["assignments"]):
+        raise UsageError("Task {!r} is neither registered nor assigned; check its identity with `teamlead state`.".format(args.task), {})
+    return load_set.build(state, reports, entries, busy, args.decision, task=args.task, enrollment=args.enrollment,
+                          exists=_file_present), None
+
+
+def _file_present(path):
+    """Whether a listed file is readable, or a StateError naming what blocked the probe."""
+    try:
+        return Path(path).is_file()
+    except OSError as exc:
+        raise StateError("Cannot check {} ({}); restore access to it before this decision.".format(path, exc),
+                         {"path": path}) from None
+
+
 def _require_independent_report(state, task, reviewer):
     """Apply the same contribution evidence to live and imported reviews."""
     if not isinstance(reviewer, str):
@@ -1715,6 +1751,7 @@ COMMANDS = {
     "state": cmd_state,
     "status": cmd_status,
     "foreman-queue": cmd_foreman_queue,
+    "load-set": cmd_load_set,
     **{command: cmd_recovery for command in ("task", "checkpoint", "authorize-corrections", "authorize-approach", "recover-context", "recover-role-clear", "record-report", "record-refusal", "authorize-refused-dispatch", "diagnose", "reconcile", "record-release-clear", "import-correction", "record-historical-review", "recover-report", "assess-specialist", "close-task")},
     "detect-triggers": cmd_detect_triggers,
     "validate-partition": cmd_validate_partition,
@@ -1747,7 +1784,7 @@ def main(argv=None, stdout=None, stderr=None, client=None):
     try:
         # Commands that may migrate or write state share its canonical lock.
         # Dry runs, probes, and retrospective reads remain read-only.
-        readonly = args.command in {"probe-report", "detect-triggers", "validate-partition", "verify-oracle", "retro-check", "retro-list", "retro-show", "capability-check", "capability-show", "supervision-gate"} or getattr(args, "dry_run", False)
+        readonly = args.command in {"probe-report", "detect-triggers", "validate-partition", "verify-oracle", "retro-check", "retro-list", "retro-show", "capability-check", "capability-show", "supervision-gate", "load-set", "foreman-queue"} or getattr(args, "dry_run", False)
         separate_owner = args.command in memory.COMMANDS | attention.COMMANDS | SUPERVISION_COMMANDS | restoration.COMMANDS
         lock = nullcontext() if readonly or separate_owner else state_lock(retrospective.canonical_state(_state_path(args)))
         with lock:

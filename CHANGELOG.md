@@ -25,6 +25,40 @@
   no git command. The no-exploring limit applies to adjudication only;
   diagnosis still reads the round history.
 
+## 0.3.263 — 2026-09-24
+
+### Added
+
+- **`teamlead load-set` lists the records one foreman decision depends on.**
+  #483 resets the foreman at every round boundary and loads per decision
+  instead of carrying the session. The records a decision needs are already
+  linked in the owner store: a task's dispatches carry their brief and common
+  paths, enrollments carry report paths, and dispatches carry review receipts
+  and recovery decisions. The command joins those links for `plan`, `brief`,
+  `gate`, `diagnose` (by task) and `wake` (by enrollment). Each set includes
+  the task core: the record, budget status and open attention items.
+
+  `gate` and `brief` read the current round, from the task's latest
+  developer assignment on. `diagnose` reads every round, including every
+  review receipt (superseded ones too) and the task's specialist assessments
+  with their reports. Imported historical corrections have no dispatch, so
+  they join from `historical_attempts` with their reports and review
+  receipts. `brief` offers a correction plan only while its last fix is
+  unspent. `brief`, `gate` and `diagnose` refuse while the task has a
+  dispatch with an unknown send outcome, so it gets reconciled first. They
+  also refuse a dispatch with no supervision enrollment, since its report
+  path would otherwise vanish from the set. Open
+  attention items come back in full, with their
+  context, consequence and resolution condition. An unknown task or
+  enrollment is refused. A missing file is listed with
+  `present: false` instead of being dropped. This is the must-load set from
+  #483 decision 2: a floor that an add-only lesson classifier may add to
+  later, and that nothing may trim. SKILL.md now requires it before each
+  decision (Step 5 plan, Step 7 brief, Step 11 wake, Step 12 gate, Step 13
+  diagnose). `load-set` and `foreman-queue` join the read-only command set,
+  so neither takes the state lock or creates a lock file. The command is read-only and refuses an
+  unusable state file.
+
 ## 0.3.262 — 2026-09-23
 
 ### Changed
