@@ -49,6 +49,28 @@
   first precondition is split, the investigator-supplied evidence exception
   becomes a formal carve-out, and one SKILL.md bullet is split.
 
+## 0.3.265 — 2026-09-24
+
+### Changed
+
+- **Per-machine installer state is no longer read as a project lock file.**
+  The fleet reviewer blocked jbaruch/nanoclaw#969 twice (reviews 5297463545
+  and 5297661951) for gitignoring `skills-lock.json`. It cited Pinning ("Lock
+  files are committed to the repo") and the file-hygiene exception naming
+  dependency lock files. That file is the `skills` installer's record of
+  skills installed into one machine's agent directories. No build, test, or
+  CI step reads it. A pinned judge ruled it out of scope, but a ruling in
+  one round's report doesn't reach the next review. The reviewer re-samples
+  the same rule text, and nothing in 0.3.259–0.3.264 changed that text. An
+  investigator confirmed that a close/reopen could not help.
+
+  Pinning now defines a lock file as one that pins dependencies this repo's
+  build, test, or CI resolves. A tool's per-machine install record is
+  installer state, which may be gitignored. The anti-abuse line is
+  mechanical: a file that records resolved dependencies and that a build,
+  test, or CI step reads is a lock file, whatever it is called. The file-hygiene lock-file exception points to the
+  definition.
+
 ## 0.3.264 — 2026-09-24
 
 ### Changed
