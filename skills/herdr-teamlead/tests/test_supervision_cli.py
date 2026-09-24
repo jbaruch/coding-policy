@@ -55,6 +55,8 @@ class SupervisionCliTest(fixture.CliCase):
             result += ["--task", task]
         result += self.brief_args(*assignments)
         for role, report in reports.items():
+            if role in self.briefs:
+                self.assign_report(self.briefs[role], report)
             result += ["--report", role + "=" + report]
         for option, value in options.items():
             result.append("--" + option.replace("_", "-"))
@@ -390,6 +392,8 @@ class SupervisionCliTest(fixture.CliCase):
         # Model a real old installation: this distinct state has never had a
         # supervision owner or discovery record. Never clear a live binding.
         self.state = self.tmp / "never-bound-legacy-state.json"
+        # The brief assigns its report from the start, as a composed one does.
+        self.assign_report(self.briefs["developer"], self.reports["developer"])
         arguments = self.apply_arguments(reports={})
         code, _, err = self.invoke(arguments, self._client({"grok": "idle"}))
         self.assertEqual(code, 0, err)

@@ -11,6 +11,7 @@ _ROOT = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
 if _ROOT not in _sys.path:
     _sys.path.insert(0, _ROOT)
 
+import json
 import subprocess
 import unittest
 
@@ -308,6 +309,13 @@ class ExecutionTest(unittest.TestCase):
         runner.set("pane layout --pane w11:p1", pane_layout("w11:p2", 106))
         with self.assertRaises(HerdrError):
             HerdrClient(runner=runner).pane_width("w11:p1")
+
+    def test_pane_width_skips_a_malformed_pane_entry(self):
+        runner = FakeRunner()
+        layout = json.loads(pane_layout("w11:p1", 106))
+        layout["result"]["layout"]["panes"].insert(0, "not-a-pane")
+        runner.set("pane layout --pane w11:p1", json.dumps(layout))
+        self.assertEqual(HerdrClient(runner=runner).pane_width("w11:p1"), 106)
 
     def test_pane_width_refuses_a_non_positive_width(self):
         runner = FakeRunner()

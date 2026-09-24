@@ -61,6 +61,7 @@ class SpecialistCliTest(fixture.CliCase):
         args = ["apply", "--assignments", json.dumps(document), "--task", "task-1", "--now", AT,
                 "--dispatch-id", identifier, "--common", str(self.common), "--composer-settle", "0"]
         for role in document["assignments"]:
+            self.assign_report(self.briefs[role], self.report)
             args += ["--brief", role + "=" + str(self.briefs[role]), "--report", role + "=" + str(self.report)]
         if retained:
             args.append("--retain-specialist")
@@ -111,6 +112,7 @@ class SpecialistCliTest(fixture.CliCase):
 
     def test_completed_historical_architect_retry_preserves_original_receipt(self):
         self.briefs["architect"] = self.briefs["advisor"]
+        self.assign_report(self.briefs["architect"], self.report)
         paths = {"common": str(self.common), "architect": str(self.briefs["architect"])}
         identifier, fingerprint = recovery.dispatch_identity(
             "task-1", "architect", "claude", None, paths, "legacy",

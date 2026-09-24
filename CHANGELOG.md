@@ -17,7 +17,10 @@
   live width (`herdr pane layout --pane`) and refuses the whole round, before
   any input, when a worker's display prefix, marker, path and right-edge
   reserve (`MARKER_RIGHT_RESERVE` in `teamlead/report_delivery.py`) exceed it,
-  naming the pane width and the columns needed. The compose-time cap stays as
+  naming the pane width and the columns needed. It measures the bare
+  `REPORT: ` lines the brief itself assigns, and refuses an expected
+  `--report` the brief does not assign, so a shorter argument cannot stand in
+  for the marker the worker will actually print. The compose-time cap stays as
   a coarse bound. The issue asked for recovery to accept wrapped markers; that
   would reintroduce the row join delivery refuses, so the fix prevents the
   wrap instead. Already-stuck reports still need an owner decision.

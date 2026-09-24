@@ -529,7 +529,9 @@ class HerdrClient:
         layout = result.get("layout")
         panes = layout.get("panes") if isinstance(layout, dict) else None
         for pane in panes if isinstance(panes, list) else ():
-            rect = pane.get("rect") if isinstance(pane, dict) else None
+            if not isinstance(pane, dict):
+                continue
+            rect = pane.get("rect")
             if pane.get("pane_id") == pane_id and isinstance(rect, dict):
                 width = rect.get("width")
                 if isinstance(width, int) and not isinstance(width, bool) and width > 0:

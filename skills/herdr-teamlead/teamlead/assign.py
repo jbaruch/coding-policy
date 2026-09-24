@@ -559,23 +559,48 @@ def build_steps(client, assignments, agents_by_name, paths, panes=None, no_clear
     return steps
 
 
+def brief_markers(brief_path):
+    """Every bare `REPORT: <path>` line the brief tells its worker to emit."""
+    try:
+        text = Path(brief_path).read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        raise UsageError("Cannot read brief {} to measure its REPORT marker: {}. Restore it or correct "
+                         "its --brief path before dispatch.".format(brief_path, exc), {"path": str(brief_path)}) from None
+    return [line[len("REPORT: "):] for line in text.splitlines() if line.startswith("REPORT: ")]
+
+
 def refuse_wrapping_markers(client, steps, agents_by_name, reports):
     """Refuse, before any input, a report marker the target pane would wrap.
 
     A wrapped `REPORT: <path>` row cannot be told from two authored rows, so
     delivery could never be confirmed (`report_delivery.decorated_row`). The
     live pane width decides; the brief-time length cap in compose-briefs.sh
-    cannot know which pane a worker sits in.
+    cannot know which pane a worker sits in. The brief's own marker lines are
+    what the worker emits, so those are measured, and an expected `--report`
+    the brief does not assign is refused rather than measured in their place.
     """
-    too_narrow = {}
+    if reports is None:
+        return
+    too_narrow, mismatched = {}, {}
     for step in steps:
-        report = (reports or {}).get(step["role"])
-        if report is None:
+        markers = brief_markers(step["brief"])
+        report = reports.get(step["role"])
+        if report is not None and report not in markers:
+            mismatched[step["role"]] = {"report": report, "brief": step["brief"]}
             continue
-        needed = marker_columns(agents_by_name[step["agent"]].kind, report)
+        if not markers:
+            continue
+        needed = max(marker_columns(agents_by_name[step["agent"]].kind, marker) for marker in markers)
         width = client.pane_width(step["pane_id"])
         if needed > width:
             too_narrow[step["agent"]] = {"role": step["role"], "pane_width": width, "needed": needed}
+    if mismatched:
+        raise UsageError(
+            "The --report path for {} is not the `REPORT: <path>` line its brief assigns - the worker "
+            "would emit the brief's marker, not this one. Pass the brief's exact path, or recompose "
+            "the brief, then re-run. Nothing was sent.".format(", ".join(sorted(mismatched))),
+            {"mismatched": mismatched},
+        )
     if too_narrow:
         raise UsageError(
             "The REPORT marker would wrap in {} - the worker could finish and the wait could never "
