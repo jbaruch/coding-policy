@@ -1,5 +1,37 @@
 # Changelog
 
+### Added
+
+- **The Herdr foreman resets its own context at every round boundary.** This
+  closes #483. On 2026-09-23 a foreman session ran 3.5 hours, grew from 182k
+  to 906k cached tokens per turn, and died on `Prompt is too long` with the
+  fleet still running. Every earlier #483 change made a reset safe:
+  - the planner reads reservations and busy workers from the records (0.3.259)
+  - `foreman-queue` lists tasks waiting for a seat (0.3.260)
+  - handoff gaps are structured (0.3.262)
+  - `load-set` lists each decision's records (0.3.263)
+
+  This change makes the reset happen. At Step 16 the foreman curates the
+  round's lessons, saves a reset-ready stow, holds supervision for any active
+  work, and runs `teamlead foreman-reset`. The command refuses an unready
+  stow, a call from any pane but the bound foreman's own, and any state in
+  which the foreman could not stop (an unhandled event, or active work with
+  no covering hold). Otherwise it starts a detached `foreman-reset-deliver`
+  and returns.
+
+  The deliverer waits for the foreman's pane to go idle, since a foreman
+  cannot type into its own composer mid-turn. Then it sends the runtime's
+  clear command and a resume prompt, using the same composer checks as
+  worker dispatch. The resume prompt points the fresh context at the stow,
+  the supervision resume sequence and `foreman-queue`. The foreman's clear
+  mechanics come from a configured worker of the same runtime kind. A pane
+  that never idles, a clear that changes nothing, or a prompt that doesn't
+  land is reported in the deliverer's log, and nothing further is sent.
+
+  Also folded in, from deferred advisories: the migrated-gap carve-out's
+  first precondition is split, the investigator-supplied evidence exception
+  becomes a formal carve-out, and one SKILL.md bullet is split.
+
 ## 0.3.264 — 2026-09-24
 
 ### Changed

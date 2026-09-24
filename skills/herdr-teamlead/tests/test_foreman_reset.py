@@ -1,0 +1,147 @@
+"""The foreman resets its own context only when nothing would be lost (#483)."""
+
+import io
+import json
+import sys
+import unittest
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from teamlead import foreman_reset
+from teamlead.errors import HerdrError, StateError, UsageError
+from tests.test_cli import CliCase
+
+PANE = "w9:p1"
+READY = {"id": "round-7", "reset_ready": True}
+
+
+def supervision_data(*, active=False, events=False, held=False):
+    member = {"id": "d1", "active": active}
+    data = {"binding": {"identity": {"pane_id": PANE}}, "members": [member],
+            "events": [{"id": "e1", "seq": 1}] if events else [], "acknowledgements": [], "holds": []}
+    return data, held
+
+
+def check(stow=READY, caller: "str | None" = PANE, **state):
+    data, held = supervision_data(**state)
+    with patch("teamlead.foreman_reset.supervision.held", return_value=held):
+        return foreman_reset.preflight(stow, data, caller)
+
+
+class PreflightTest(unittest.TestCase):
+    def test_a_ready_stow_from_the_foreman_pane_with_nothing_active_is_scheduled(self):
+        self.assertEqual(check(), {"pane_id": PANE, "stow": "round-7"})
+
+    def test_active_work_needs_a_covering_hold(self):
+        with self.assertRaisesRegex(UsageError, "cannot stop yet"):
+            check(active=True)
+        self.assertEqual(check(active=True, held=True)["pane_id"], PANE)
+
+    def test_unhandled_events_always_refuse(self):
+        with self.assertRaisesRegex(UsageError, "1 unhandled event"):
+            check(events=True, held=True)
+
+    def test_an_unready_stow_refuses(self):
+        with self.assertRaisesRegex(UsageError, "not reset-ready"):
+            check(stow={"id": "round-7", "reset_ready": False})
+
+    def test_only_the_bound_foreman_pane_may_reset(self):
+        with self.assertRaisesRegex(UsageError, "own pane"):
+            check(caller="w2:p1")
+        with self.assertRaisesRegex(UsageError, "outside Herdr"):
+            check(caller=None)
+
+    def test_no_binding_refuses(self):
+        with self.assertRaisesRegex(UsageError, "No foreman is bound"):
+            foreman_reset.preflight(READY, {"binding": None, "members": [], "events": [], "acknowledgements": [], "holds": []}, PANE)
+
+
+class FakeClient:
+    def __init__(self, statuses, kind="claude"):
+        self.statuses, self.kind, self.waits = list(statuses), kind, []
+
+    def agent_list(self):
+        status = self.statuses.pop(0) if len(self.statuses) > 1 else self.statuses[0]
+        return [{"name": "other", "pane_id": "w2:p1", "agent_status": "idle", "agent": "codex"},
+                {"name": "foreman", "pane_id": PANE, "agent_status": status, "agent": self.kind}]
+
+    def agent_wait(self, name, until=(), timeout_ms=None):
+        self.waits.append(name)
+
+
+def worker(name, kind):
+    return SimpleNamespace(name=name, kind=kind, clear_prompt="/clear")
+
+
+class DeliverTest(unittest.TestCase):
+    def run_deliver(self, client, *, screen_changed=True, landed=True, budget=30):
+        calls = []
+        ticks = iter(range(0, 10000, 5))
+        with patch("teamlead.foreman_reset.send_command",
+                   side_effect=lambda c, agent, pane, text, **kw: calls.append(("command", agent.name, pane, text)) or {"screen_changed": screen_changed}), \
+             patch("teamlead.foreman_reset.send_message",
+                   side_effect=lambda c, agent, text, needle, **kw: calls.append(("message", agent.name, kw["pane_id"], needle)) or {"landed": landed, "started": landed}):
+            result = foreman_reset.deliver(client, [worker("codex-a", "codex"), worker("claude-a", "claude")], PANE,
+                                           sleep=lambda seconds: None, clock=lambda: next(ticks), budget_sec=budget, poll_sec=5)
+        return result, calls
+
+    def test_waits_for_idle_then_clears_and_sends_the_resume_prompt(self):
+        client = FakeClient(["working", "working", "idle"])
+        result, calls = self.run_deliver(client)
+        self.assertEqual(calls, [("command", "foreman", PANE, "/clear"),
+                                 ("message", "foreman", PANE, foreman_reset.RESUME_OPENING)])
+        self.assertEqual(client.waits, ["foreman"])
+        self.assertTrue(result["cleared"])
+
+    def test_a_pane_that_never_idles_sends_nothing(self):
+        with self.assertRaisesRegex(HerdrError, "stayed working"):
+            self.run_deliver(FakeClient(["working"]), budget=10)
+
+    def test_a_clear_that_changed_nothing_stops_before_the_prompt(self):
+        with self.assertRaisesRegex(HerdrError, "context was not cleared"):
+            self.run_deliver(FakeClient(["idle"]), screen_changed=False)
+
+    def test_a_resume_prompt_that_did_not_land_is_reported(self):
+        with self.assertRaisesRegex(HerdrError, "did not land"):
+            self.run_deliver(FakeClient(["idle"]), landed=False)
+
+    def test_an_unconfigured_runtime_kind_is_refused(self):
+        with self.assertRaisesRegex(StateError, "kind 'grok'"):
+            self.run_deliver(FakeClient(["idle"], kind="grok"))
+
+    def test_mechanics_copy_does_not_rename_the_template(self):
+        template = worker("claude-a", "claude")
+        foreman = foreman_reset.mechanics([template], "claude", "foreman")
+        self.assertEqual((template.name, foreman.name), ("claude-a", "foreman"))
+
+
+class ResetCommandTest(CliCase):
+    def test_schedules_a_detached_deliverer_for_the_bound_pane(self):
+        spawned = []
+        with patch("teamlead.cli.memory.show", return_value={"record": READY}), \
+             patch("teamlead.cli.supervision.load", return_value=supervision_data()[0]), \
+             patch.dict("os.environ", {"HERDR_PANE_ID": PANE}), \
+             patch("teamlead.cli._spawn_detached", side_effect=lambda argv, sink: spawned.append(argv) or 4242):
+            code, out, err = self.run_cli(self.base() + ["foreman-reset"])
+        self.assertEqual(code, 0, err)
+        result = json.loads(out)
+        self.assertEqual((result["scheduled"], result["pid"], result["pane_id"]), (True, 4242, PANE))
+        self.assertIn("foreman-reset-deliver", spawned[0])
+        self.assertEqual(spawned[0][spawned[0].index("--pane") + 1], PANE)
+
+    def test_a_refused_preflight_spawns_nothing(self):
+        with patch("teamlead.cli.memory.show", return_value={"record": {"id": "s", "reset_ready": False}}), \
+             patch("teamlead.cli.supervision.load", return_value=supervision_data()[0]), \
+             patch.dict("os.environ", {"HERDR_PANE_ID": PANE}), \
+             patch("teamlead.cli._spawn_detached", side_effect=AssertionError("must not spawn")):
+            self.out, self.err = io.StringIO(), io.StringIO()
+            code, _, err = self.run_cli(self.base() + ["foreman-reset"])
+        self.assertEqual(code, 1)
+        self.assertIn("not reset-ready", err)
+
+
+if __name__ == "__main__":
+    unittest.main()

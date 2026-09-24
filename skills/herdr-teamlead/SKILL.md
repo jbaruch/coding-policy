@@ -54,8 +54,8 @@ decision's records".
 - Never write a throwaway helper script in a scratch directory
 - Never name a scratch file in a handoff
 - A command sequence you repeat across tasks belongs in a tested script
-  shipped with this skill; record it as a follow-up rather than scripting it
-  locally
+  shipped with this skill
+- Record such a sequence as a follow-up; never script it locally
 
 References:
 
@@ -612,9 +612,26 @@ bash "$CP/skills/herdr-teamlead/teamlead.sh" close-task --record <close.json>
   task unclosed.
 
 Preserve the ledger for resume and standup. Preserve retrospective notes and link them from the ledger. Save
-current progress through the attention owner and stow the foreman's handoff under
-the working-memory reference. Reconcile supervision before ending the turn.
+current progress through the attention owner and curate the round's lessons.
 Report outstanding attention first, followed by the outcome and saved paths.
+
+Then reset the foreman's context. Stow the handoff under the working-memory
+reference, with a structured gap for anything the stow could not capture.
+Handle every pending supervision event, and save `supervision-hold` kind
+`handoff` covering each active enrollment. Then schedule the reset:
+
+```bash
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
+bash "$CP/skills/herdr-teamlead/teamlead.sh" foreman-reset --stow <stow-id>
+```
+
+- **Exit 0** — stdout names the scheduled `pane_id`, `stow`, deliverer `pid`
+  and `log`. End the turn now. Once the pane is idle, the deliverer clears it
+  and sends the resume prompt. The next context starts at Step 1.
+- **Non-zero** — stderr names the refused precondition: an unready stow, the
+  wrong pane, or supervision work still unheld. Fix it and re-run. Never end
+  the turn with active work that has no hold.
+
 Finish here.
 
 For the daily standup, use

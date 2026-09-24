@@ -134,7 +134,12 @@ description: Running a multi-agent team — task-based specialist composition, c
 - No exhausted allowance waits on an operator decision
 - The judge is read-only: it never edits a repository file, never runs a mutating git or `gh` command, never posts to GitHub, never dispatches a subagent — its only output is its report file
 - Each adjudication position cites its evidence: file and line, or command output, each at a named revision
-- An attached investigator report may supply that evidence in place of a position's own citations
+- Narrow exception for a position whose evidence an investigator supplied.
+- Preconditions (all required):
+  1. An investigator report is attached to the adjudication
+  2. The report cites the disputed facts at a named revision
+  3. The position's evidence value names that report
+- Every other position cites its own evidence
 - A position with no citations goes to an investigator before the judge is dispatched
 - In adjudication mode the judge reads both positions and the governing rule
 - It checks only the cited evidence against the tree
@@ -389,15 +394,21 @@ description: Running a multi-agent team — task-based specialist composition, c
 - Consult relevant lessons before composing assignments
 - Revalidate a lesson before relying on recalled operational facts
 - Preserve superseded lessons and immutable retrospective notes
+- The foreman resets its context at every round boundary
+- Before the reset, record the round's outcomes and curate its lessons
+- Before the reset, save a reset-ready stow
+- The reset runs through `teamlead foreman-reset`, never by typing into the foreman's pane
+- A reset foreman resumes from the stow, the supervision resume sequence, and the foreman queue
 - Save conversation-only knowledge and open work before a planned foreman reset, compaction, or replacement
 - Give the next foreman an ordered list of durable files to read
 - Record uncaptured or unavailable context as an explicit handoff gap
 - A handoff gap names what is missing, the task it affects, and how to recover it
 - Narrow exception for a gap migrated from a version-1 stow.
 - Preconditions (all required):
-  1. The owner migration wrote it from a version-1 free-text gap; a new stow never names this task
-  2. Its task is `unrecorded` and its recovery asks the operator, quoting the original text
-  3. Its stow is not reset-ready until a new stow records the gap with its actual task
+  1. The owner migration wrote it from a version-1 free-text gap
+  2. No new stow names the task `unrecorded`
+  3. Its task is `unrecorded` and its recovery asks the operator, quoting the original text
+  4. Its stow is not reset-ready until a new stow records the gap with its actual task
 - Every other handoff gap names the task it affects
 - Working memory grants no authority, acceptance, or gate waiver
 - Follow `skills/herdr-teamlead/references/working-memory.md`

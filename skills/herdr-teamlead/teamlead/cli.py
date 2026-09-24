@@ -13,6 +13,8 @@ I/O contract:
 import argparse
 import hashlib
 import json
+import os
+import subprocess
 import sys
 import time
 from contextlib import nullcontext
@@ -23,7 +25,7 @@ from types import SimpleNamespace
 from . import __version__
 from .assign import apply as apply_assignments
 from .assign import APPLY_SCHEMA_VERSION, dry_run, native_context_session, normalize_assignments, resolve_paths, validate_fix_history
-from . import attention, capabilities, composition, engagement, foreman_queue, historical, load_set, memory, oracle, partition, recovery, report_delivery, restoration, role_clear, retrospective, retrospective_runtime, supervision, supervision_gate, supervision_runtime, triggers
+from . import attention, capabilities, composition, engagement, foreman_queue, foreman_reset, historical, load_set, memory, oracle, partition, recovery, report_delivery, restoration, role_clear, retrospective, retrospective_runtime, supervision, supervision_gate, supervision_runtime, triggers
 from .config import default_config_path, load_config, load_judge, load_role_costs, select_agents
 from .errors import PlanError, StateError, TeamLeadError, UsageError
 from .herdr import (
@@ -381,6 +383,11 @@ def build_parser():
         record_parser.add_argument("--record", required=True, metavar="FILE", help="Structured evidence JSON; see dispatch-recovery.md.")
         record_parser.add_argument("--now", metavar="ISO8601")
     sub.add_parser("status", parents=[common], help="Show implementation budgets and paused work separately from active audit workers.")
+    reset_parser = sub.add_parser("foreman-reset", parents=[common], help="Schedule the foreman's round-boundary context reset from a reset-ready stow.")
+    reset_parser.add_argument("--stow", default="latest", help="Stow id the reset resumes from (default: the latest).")
+    reset_parser.add_argument("--now", metavar="ISO8601")
+    deliver_parser = sub.add_parser("foreman-reset-deliver", parents=[common], help="Internal: wait for the foreman pane to idle, then clear it and send the resume prompt.")
+    deliver_parser.add_argument("--pane", required=True)
     sub.add_parser("foreman-queue", parents=[common], help="List open tasks waiting for their next seat, oldest first, derived from the owner records.")
     load_parser = sub.add_parser("load-set", parents=[common], help="List the durable records one foreman decision must load, derived from the owner records.")
     load_parser.add_argument("--decision", required=True, choices=load_set.DECISIONS)
@@ -1369,6 +1376,38 @@ def cmd_status(args, client=None, warn=None, trace=None):
             "tasks": recovery.task_statuses(state["recovery"], state["assignments"])}, None
 
 
+def cmd_foreman_reset(args, client=None, warn=None, trace=None, spawn=None):
+    state_path = _state_path(args)
+    stow = memory.show(state_path, args.now or now_iso(), args.stow)["record"]
+    plan = foreman_reset.preflight(stow, supervision.load(state_path), os.environ.get("HERDR_PANE_ID"))
+    log = Path(str(Path(state_path).expanduser().resolve()) + ".foreman-reset.log")
+    argv = [sys.executable, "-m", "teamlead", "foreman-reset-deliver", "--pane", plan["pane_id"],
+            "--state", str(state_path), "--config", str(_config_path(args))]
+    if getattr(args, "herdr_bin", None):
+        argv += ["--herdr-bin", args.herdr_bin]
+    try:
+        with open(log, "ab") as sink:
+            pid = (spawn or _spawn_detached)(argv, sink)
+    except OSError as exc:
+        raise StateError("Could not start the reset deliverer ({}); nothing was sent. Clear the foreman by hand.".format(exc),
+                         {"log": str(log)}) from None
+    return {"schema_version": foreman_reset.RESET_SCHEMA_VERSION, "scheduled": True, **plan, "pid": pid,
+            "log": str(log), "next": "End this turn now; the deliverer clears the pane once it is idle."}, None
+
+
+def _spawn_detached(argv, sink):
+    """Start `argv` in its own session so it outlives the foreman's turn."""
+    process = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=sink, stderr=sink,
+                               start_new_session=True, cwd=str(Path(__file__).resolve().parents[1]))
+    return process.pid
+
+
+def cmd_foreman_reset_deliver(args, client=None, warn=None, trace=None):
+    client = client if client is not None else _client(args, trace=trace)
+    agents = load_config(_config_path(args))
+    return foreman_reset.deliver(client, agents, args.pane, warn=warn), None
+
+
 def cmd_foreman_queue(args, client=None, warn=None, trace=None):
     state_path = _state_path(args)
     # Strict and read-only: an unusable ledger must fail, never read as an
@@ -1751,6 +1790,8 @@ COMMANDS = {
     "state": cmd_state,
     "status": cmd_status,
     "foreman-queue": cmd_foreman_queue,
+    "foreman-reset": cmd_foreman_reset,
+    "foreman-reset-deliver": cmd_foreman_reset_deliver,
     "load-set": cmd_load_set,
     **{command: cmd_recovery for command in ("task", "checkpoint", "authorize-corrections", "authorize-approach", "recover-context", "recover-role-clear", "record-report", "record-refusal", "authorize-refused-dispatch", "diagnose", "reconcile", "record-release-clear", "import-correction", "record-historical-review", "recover-report", "assess-specialist", "close-task")},
     "detect-triggers": cmd_detect_triggers,
