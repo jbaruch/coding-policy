@@ -142,7 +142,7 @@ description: Running a multi-agent team — task-based specialist composition, c
 - `insufficient` names the disputed facts the cited evidence cannot settle
 - On an `insufficient` ruling the foreman dispatches an investigator to establish those facts with citations
 - The judge is re-dispatched on the same dispute with that investigator report
-- The investigator's citations are admissible evidence on that re-dispatch
+- An investigator report attached to an adjudication is admissible evidence, whether it preceded the first dispatch or followed an `insufficient` ruling
 - In diagnosis mode it reads the round history and verifies against the tree what each round changed, and returns the six diagnosis lines with numbered reasons
 - A diagnosis repeating its predecessor's rung adds `PROGRESS:`
 - `RULING:` and `ACTION:` belong to adjudication alone; a diagnosis carries neither
