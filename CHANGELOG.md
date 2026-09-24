@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.264 — 2026-09-24
+
 ### Changed
 
 - **The judge checks cited evidence instead of investigating the tree.** An
