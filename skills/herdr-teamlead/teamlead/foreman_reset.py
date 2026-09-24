@@ -38,7 +38,7 @@ from pathlib import Path
 
 from .assign import SETTLE_STATES
 from .composer import COMPOSER_SETTLE_SEC, send_command, send_message
-from .errors import HerdrError, StateError, UsageError
+from .errors import HerdrError, StateError, TeamLeadError, UsageError
 from .herdr import DEFAULT_SETTLE_TIMEOUT_MS
 from . import supervision
 from .state import save_state, state_lock
@@ -51,22 +51,25 @@ IDLE_POLL_SEC = 5
 RESUME_OPENING = "Foreman resume after a planned round-boundary reset."
 RESUME_TEMPLATE = (
     RESUME_OPENING + " Your earlier conversation is gone by design. Run the "
-    "herdr-teamlead skill. Before anything else: run `teamlead memory-show --id {stow}` "
-    "and read its required files in order; run `teamlead supervision-bind`, "
-    "`supervision-resume`, `supervision-status` and `supervision-drain`; then "
-    "`teamlead foreman-queue`. Load each decision's records with `teamlead "
-    "load-set` before making it."
+    "herdr-teamlead skill with `--state {state}` on every teamlead command. Before "
+    "anything else: run `teamlead memory-show --state {state} --id {stow}` and read its "
+    "required files in order; run `teamlead supervision-bind`, `supervision-resume`, "
+    "`supervision-status` and `supervision-drain`, each with `--state {state}`; then "
+    "`teamlead foreman-queue --state {state}`. Load each decision's records with "
+    "`teamlead load-set --state {state}` before making it."
 )
 
-def resume_prompt(stow):
-    return RESUME_TEMPLATE.format(stow=stow)
+def resume_prompt(stow, state):
+    return RESUME_TEMPLATE.format(stow=stow, state=state)
 
 
 def record_path(state_path):
     return Path(str(Path(state_path).expanduser().resolve()) + ".foreman-reset.json")
 
 
-STATUSES = frozenset({"scheduled", "delivering", "delivered", "failed"})
+#: `interrupted` is a delivery that failed after its first keystroke: the
+#: pane may be cleared or half-prompted, so it is never retried automatically.
+STATUSES = frozenset({"scheduled", "delivering", "delivered", "failed", "interrupted"})
 ROW_FIELDS = frozenset({"schema_version", "pane_id", "stow", "status", "scheduled_at", "pid", "result"})
 
 
@@ -115,10 +118,10 @@ def replay(state_path, plan, *, alive=_alive):
     prior = _row(_records(record_path(state_path)), plan)
     if prior is None or prior["status"] == "failed":
         return None
-    if prior["status"] == "delivered" or alive(prior["pid"]):
+    if prior["status"] == "delivered" or (prior["status"] != "interrupted" and alive(prior["pid"])):
         return {**prior, "replayed": True}
-    if prior["status"] == "delivering":
-        raise UsageError("The reset from stow {} lost its deliverer mid-delivery, so the pane may already be cleared. Check the foreman pane: if it resumed, nothing is owed; otherwise clear it by hand and paste the resume prompt. Reset again only from a new stow.".format(
+    if prior["status"] in ("delivering", "interrupted"):
+        raise UsageError("The reset from stow {} stopped mid-delivery, so the pane may already be cleared. Check the foreman pane: if it resumed, nothing is owed; otherwise clear it by hand and paste the resume prompt. Reset again only from a new stow.".format(
             plan["stow"]), {"record": str(record_path(state_path))})
     return None
 
@@ -209,7 +212,11 @@ def mechanics(agents, kind, name):
     return foreman
 
 
-def deliver(client, agents, pane_id, stow, *, still_ready=lambda: True, sleep=time.sleep, clock=time.monotonic, warn=None,
+class DeliveryInterrupted(HerdrError):
+    """A delivery that failed after typing into the pane; never retried automatically."""
+
+
+def deliver(client, agents, pane_id, stow, state, *, still_ready=lambda: True, sleep=time.sleep, clock=time.monotonic, warn=None,
             budget_sec=IDLE_BUDGET_SEC, poll_sec=IDLE_POLL_SEC, settle_sec=COMPOSER_SETTLE_SEC):
     """Wait for the foreman's pane to go idle, then clear it and send the resume prompt.
 
@@ -229,6 +236,8 @@ def deliver(client, agents, pane_id, stow, *, still_ready=lambda: True, sleep=ti
     if not still_ready():
         raise UsageError("Stow {} is no longer reset-ready; nothing was sent. Record a new stow and reset again.".format(stow), {"stow": stow})
 
+    typed = []
+
     def guard():
         # Dispatch Safety: never type into a pane that started another turn.
         live = _foreman_record(client, pane_id)
@@ -236,18 +245,25 @@ def deliver(client, agents, pane_id, stow, *, still_ready=lambda: True, sleep=ti
                 or live.get("agent_status") not in SETTLE_STATES):
             raise HerdrError("The foreman's pane {} changed ({} {}, {}) before typing, so the reset stopped. Let that turn finish, confirm the stow is still reset-ready with memory-show, and run foreman-reset again.".format(
                 pane_id, live.get("agent"), live.get("name"), live.get("agent_status")), {"pane_id": pane_id})
+        typed.append(True)
 
-    outcome = send_command(client, agent, pane_id, agent.clear_prompt, sleep=sleep, warn=warn, settle_sec=settle_sec,
-                           before_input=guard)
-    if not outcome["screen_changed"]:
-        raise HerdrError("The foreman consumed {} but its screen did not change, so its context was not cleared and nothing further was sent. Check the clear command configured for kind {}, or clear pane {} by hand and paste:\n{}".format(
-            agent.clear_prompt, agent.kind, pane_id, resume_prompt(stow)), {"pane_id": pane_id})
-    client.agent_wait(agent.name, until=SETTLE_STATES, timeout_ms=DEFAULT_SETTLE_TIMEOUT_MS)
-    sleep(settle_sec)
-    landing = send_message(client, agent, resume_prompt(stow), RESUME_OPENING, pane_id=pane_id, sleep=sleep, warn=warn,
-                           settle_sec=settle_sec, before_input=guard)
-    if not landing["landed"]:
-        raise HerdrError("The foreman was cleared but the resume prompt did not land in pane {}. Paste it by hand:\n{}".format(
-            pane_id, resume_prompt(stow)), {"pane_id": pane_id})
+    try:
+        outcome = send_command(client, agent, pane_id, agent.clear_prompt, sleep=sleep, warn=warn, settle_sec=settle_sec,
+                               before_input=guard)
+        if not outcome["screen_changed"]:
+            raise HerdrError("The foreman consumed {} but its screen did not change, so its context was not cleared and nothing further was sent. Check the clear command configured for kind {}, or clear pane {} by hand and paste:\n{}".format(
+                agent.clear_prompt, agent.kind, pane_id, resume_prompt(stow, state)), {"pane_id": pane_id})
+        client.agent_wait(agent.name, until=SETTLE_STATES, timeout_ms=DEFAULT_SETTLE_TIMEOUT_MS)
+        sleep(settle_sec)
+        landing = send_message(client, agent, resume_prompt(stow, state), RESUME_OPENING, pane_id=pane_id, sleep=sleep, warn=warn,
+                               settle_sec=settle_sec, before_input=guard)
+        if not landing["landed"]:
+            raise HerdrError("The foreman was cleared but the resume prompt did not land in pane {}. Paste it by hand:\n{}".format(
+                pane_id, resume_prompt(stow, state)), {"pane_id": pane_id})
+    except TeamLeadError as exc:
+        if typed and not isinstance(exc, DeliveryInterrupted):
+            raise DeliveryInterrupted("{} The pane was already typed into, so this reset is not retried; check pane {} and resume it by hand.".format(
+                exc.message, pane_id), exc.details) from None
+        raise
     return {"schema_version": RESET_SCHEMA_VERSION, "pane_id": pane_id, "stow": stow, "agent": agent.name,
             "cleared": True, "resume": landing}

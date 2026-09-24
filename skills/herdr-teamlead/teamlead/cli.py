@@ -1422,17 +1422,18 @@ def _spawn_detached(argv, sink):
 
 
 def cmd_foreman_reset_deliver(args, client=None, warn=None, trace=None):
-    state_path = _state_path(args)
+    state_path = Path(_state_path(args)).expanduser().resolve()
     plan = {"pane_id": args.pane, "stow": args.stow}
     if not foreman_reset.claim(state_path, plan, os.getpid()):
         return {"schema_version": foreman_reset.RESET_SCHEMA_VERSION, **plan, "skipped": "not the scheduled owner of this reset"}, None
     client = client if client is not None else _client(args, trace=trace)
     try:
         result = foreman_reset.deliver(
-            client, load_config(_config_path(args)), args.pane, args.stow, warn=warn,
+            client, load_config(_config_path(args)), args.pane, args.stow, str(state_path), warn=warn,
             still_ready=lambda: memory.show(state_path, now_iso(), args.stow)["record"]["reset_ready"])
     except TeamLeadError as exc:
-        foreman_reset.finish(state_path, plan, "failed", exc.to_dict())
+        status = "interrupted" if isinstance(exc, foreman_reset.DeliveryInterrupted) else "failed"
+        foreman_reset.finish(state_path, plan, status, exc.to_dict())
         raise
     foreman_reset.finish(state_path, plan, "delivered", result)
     return result, None

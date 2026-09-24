@@ -36,7 +36,11 @@
   again. One that died mid-delivery is refused, since the pane may already
   be cleared. The deliverer serializes on the reset record's lock, never the
   state lock the parent `foreman-reset` still holds while it starts it. A
-  first draft missed that, and the reset would never have been delivered. The
+  first draft missed that, and the reset would never have been delivered. A
+  failure after the first keystroke is recorded `interrupted` and never
+  retried, since the pane may be half-reset. The resume prompt carries the
+  state path onto every command, so a foreman on a non-default `--state`
+  resumes against its own records. The
   reset is its own Step 17, and every return from Step 12 to Step 4 passes
   through Steps 16 and 17, so fix rounds reset too, not only finished
   tasks.

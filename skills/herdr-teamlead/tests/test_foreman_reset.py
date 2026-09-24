@@ -11,7 +11,8 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from teamlead import foreman_reset
+from teamlead import foreman_reset, retrospective
+from teamlead.state import state_lock
 from teamlead.errors import HerdrError, StateError, UsageError
 from tests.test_cli import CliCase
 
@@ -95,6 +96,7 @@ class DeliverTest(unittest.TestCase):
         with patch("teamlead.foreman_reset.send_command", side_effect=command), \
              patch("teamlead.foreman_reset.send_message", side_effect=message):
             result = foreman_reset.deliver(client, [worker("codex-a", "codex"), worker("claude-a", "claude")], PANE, "round-7",
+                                           "/state/s.json",
                                            still_ready=still_ready, sleep=lambda seconds: None, clock=lambda: next(ticks),
                                            budget_sec=budget, poll_sec=5)
         return result, calls
@@ -103,8 +105,9 @@ class DeliverTest(unittest.TestCase):
         client = FakeClient(["working", "working", "idle"])
         result, calls = self.run_deliver(client)
         self.assertEqual(calls, [("command", "foreman", PANE, "/clear"),
-                                 ("message", "foreman", PANE, foreman_reset.resume_prompt("round-7"))])
-        self.assertIn("memory-show --id round-7", calls[1][3])
+                                 ("message", "foreman", PANE, foreman_reset.resume_prompt("round-7", "/state/s.json"))])
+        self.assertIn("memory-show --state /state/s.json --id round-7", calls[1][3])
+        self.assertIn("foreman-queue --state /state/s.json", calls[1][3])
         self.assertEqual(client.waits, ["foreman"])
         self.assertTrue(result["cleared"])
 
@@ -112,13 +115,18 @@ class DeliverTest(unittest.TestCase):
         with self.assertRaisesRegex(HerdrError, "stayed working"):
             self.run_deliver(FakeClient(["working"]), budget=10)
 
-    def test_a_clear_that_changed_nothing_stops_before_the_prompt(self):
-        with self.assertRaisesRegex(HerdrError, "context was not cleared"):
+    def test_a_clear_that_changed_nothing_is_an_interrupted_delivery(self):
+        with self.assertRaisesRegex(foreman_reset.DeliveryInterrupted, "(?s)context was not cleared.*not retried"):
             self.run_deliver(FakeClient(["idle"]), screen_changed=False)
 
-    def test_a_resume_prompt_that_did_not_land_is_reported(self):
-        with self.assertRaisesRegex(HerdrError, "did not land"):
+    def test_a_resume_prompt_that_did_not_land_is_an_interrupted_delivery(self):
+        with self.assertRaisesRegex(foreman_reset.DeliveryInterrupted, "did not land"):
             self.run_deliver(FakeClient(["idle"]), landed=False)
+
+    def test_a_refusal_before_any_keystroke_is_an_ordinary_failure(self):
+        with self.assertRaises(HerdrError) as caught:
+            self.run_deliver(FakeClient(["idle", "working"]))
+        self.assertNotIsInstance(caught.exception, foreman_reset.DeliveryInterrupted)
 
     def test_an_unconfigured_runtime_kind_is_refused(self):
         with self.assertRaisesRegex(StateError, "kind 'grok'"):
@@ -187,10 +195,17 @@ class RecordTest(unittest.TestCase):
         rows = json.loads(foreman_reset.record_path(self.state).read_text())["resets"]
         self.assertEqual([row["status"] for row in rows], ["failed", "scheduled"])
 
+    def test_an_interrupted_reset_is_never_retried_automatically(self):
+        foreman_reset.schedule(self.state, self.plan, "t1", self.start, alive=lambda pid: True)
+        foreman_reset.finish(self.state, self.plan, "interrupted", {"error": "herdr_error"})
+        with self.assertRaisesRegex(UsageError, "stopped mid-delivery"):
+            foreman_reset.schedule(self.state, self.plan, "t2", self.start, alive=lambda pid: True)
+        self.assertEqual(self.starts, 1)
+
     def test_a_reset_that_died_mid_delivery_is_never_retried_automatically(self):
         foreman_reset.schedule(self.state, self.plan, "t1", self.start, alive=lambda pid: True)
         self.assertTrue(foreman_reset.claim(self.state, self.plan, 1001))
-        with self.assertRaisesRegex(UsageError, "lost its deliverer mid-delivery"):
+        with self.assertRaisesRegex(UsageError, "stopped mid-delivery"):
             foreman_reset.schedule(self.state, self.plan, "t2", self.start, alive=lambda pid: False)
         self.assertEqual(self.starts, 1)
 
@@ -235,11 +250,15 @@ class ResetCommandTest(CliCase):
         self.assertEqual(code, 0, err)
         self.assertTrue(json.loads(out)["replayed"])
 
-    def test_the_deliverer_never_takes_the_state_lock_its_parent_holds(self):
-        with patch("teamlead.cli.state_lock", side_effect=AssertionError("deliverer must not take the state lock")):
+    def test_the_deliverer_claims_its_reset_while_the_parent_holds_the_state_lock(self):
+        foreman_reset.schedule(self.state, {"pane_id": PANE, "stow": "round-7"}, "t1", os.getpid)
+        with state_lock(retrospective.canonical_state(self.state)), \
+             patch("teamlead.foreman_reset.deliver", return_value={"cleared": True}):
             code, out, err = self.run_cli(self.base() + ["foreman-reset-deliver", "--pane", PANE, "--stow", "round-7"],
                                           client=object())
         self.assertEqual(code, 0, err)
+        rows = json.loads(foreman_reset.record_path(self.state).read_text())["resets"]
+        self.assertEqual(rows[-1]["status"], "delivered")
 
     def test_a_deliverer_that_does_not_own_the_reset_sends_nothing(self):
         code, out, err = self.run_cli(self.base() + ["foreman-reset-deliver", "--pane", PANE, "--stow", "round-7"],

@@ -528,8 +528,8 @@ Persist user-facing obligations under `references/attention.md` before presentin
 them; record an actual answer or resolution separately from showing the item.
 
 Every return to Step 4 is a round boundary: run Step 16 to log the round and
-Step 17 to reset first. The reset foreman re-enters at Step 1 and reaches Step
-4 through `foreman-queue`.
+Step 17 to reset first. The reset foreman re-enters at Step 1; Step 2's
+preflight continues it to Step 5, where `foreman-queue` names the next seat.
 
 After accepting a consultation, return to Step 4 for the next needed
 responsibility. For an investigation-only task, use the knowledge gate below.
