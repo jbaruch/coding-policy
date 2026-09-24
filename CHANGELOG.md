@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.266 — 2026-09-24
+
 ### Fixed
 
 - **`teamlead apply` refuses a report marker the target pane would wrap
