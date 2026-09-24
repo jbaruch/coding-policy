@@ -129,7 +129,7 @@ class DeliverTest(unittest.TestCase):
         self.assertTrue(result["cleared"])
 
     def test_a_pane_that_never_idles_sends_nothing(self):
-        with self.assertRaisesRegex(HerdrError, "stayed working"):
+        with self.assertRaisesRegex(HerdrError, "(?s)stayed working.*Do not run foreman-reset again"):
             self.run_deliver(FakeClient(["working"]), budget=10)
 
     def test_a_clear_that_changed_nothing_is_an_interrupted_delivery(self):
@@ -166,7 +166,7 @@ class DeliverTest(unittest.TestCase):
 
     def test_a_pane_that_starts_working_again_gets_no_keystroke(self):
         client = FakeClient(["idle", "working"])
-        with self.assertRaisesRegex(HerdrError, "changed .* before typing"):
+        with self.assertRaisesRegex(HerdrError, "(?s)changed .* before typing.*Do not run foreman-reset again"):
             self.run_deliver(client)
 
     def test_a_pane_whose_runtime_changed_gets_no_keystroke(self):
@@ -186,7 +186,7 @@ class DeliverTest(unittest.TestCase):
             self.run_deliver(client)
 
     def test_a_stow_that_changed_while_waiting_stops_the_reset(self):
-        with self.assertRaisesRegex(UsageError, "no longer reset-ready"):
+        with self.assertRaisesRegex(UsageError, "(?s)no longer reset-ready.*Do not run foreman-reset again"):
             self.run_deliver(FakeClient(["idle"]), still_ready=lambda: False)
 
     def test_the_resume_prompt_quotes_a_state_path_with_spaces(self):
@@ -245,9 +245,10 @@ class RecordTest(unittest.TestCase):
                     foreman_reset.claim(self.state, self.plan, self.me())
                 elif status != "scheduled":
                     foreman_reset.finish(self.state, self.plan, status, self.FAILURE)
-                with self.assertRaises(UsageError) as caught:
+                with self.assertRaises(foreman_reset.ResetEnded) as caught:
                     self.schedule("2026-09-24T10:05:00+00:00", False)
-                self.assertIn("is not retried", caught.exception.message)
+                self.assertEqual(caught.exception.code, "reset_ended")
+                self.assertIn("Do not run foreman-reset again", caught.exception.message)
                 expected = "resume" if status in ("failed", "interrupted") else "memory-show --state"
                 self.assertIn(expected, caught.exception.details["resume_prompt"])
                 row = json.loads(foreman_reset.record_path(self.state).read_text())["resets"][-1]
@@ -263,14 +264,15 @@ class RecordTest(unittest.TestCase):
     def test_a_launch_failure_leaves_a_failed_row_with_the_resume_prompt(self):
         def broken():
             raise StateError("spawn failed", {})
-        with self.assertRaisesRegex(StateError, "spawn failed"):
+        with self.assertRaisesRegex(foreman_reset.ResetEnded, "(?s)spawn failed.*Do not run foreman-reset again") as caught:
             foreman_reset.schedule(self.state, self.plan, "2026-09-24T10:00:00+00:00", broken)
         row = json.loads(foreman_reset.record_path(self.state).read_text())["resets"][-1]
         self.assertEqual((row["status"], row["process"]), ("failed", None))
         self.assertIn("memory-show", row["result"]["resume_prompt"])
+        self.assertEqual(caught.exception.details["resume_prompt"], row["result"]["resume_prompt"])
 
     def test_a_deliverer_gone_before_identification_fails_the_row(self):
-        with self.assertRaisesRegex(StateError, "exited before it could be identified"):
+        with self.assertRaisesRegex(foreman_reset.ResetEnded, "exited before it could be identified"):
             foreman_reset.schedule(self.state, self.plan, "2026-09-24T10:00:00+00:00", self.start, probe=lambda pid: None)
         row = json.loads(foreman_reset.record_path(self.state).read_text())["resets"][-1]
         self.assertEqual((row["status"], row["process"]), ("failed", None))
@@ -287,6 +289,29 @@ class RecordTest(unittest.TestCase):
         foreman_reset.finish(self.state, self.plan, "delivered", {"cleared": True})
         with self.assertRaisesRegex(StateError, "malformed"):
             foreman_reset.replay(self.state, self.plan)
+
+    def test_a_newer_record_reads_as_no_prior_reset_and_refuses_writes_untouched(self):
+        path = foreman_reset.record_path(self.state)
+        newer = json.dumps({"schema_version": 2, "resets": [{"shape": "from the future"}]})
+        path.write_text(newer)
+        self.assertIsNone(foreman_reset.replay(self.state, self.plan))
+        with self.assertRaises(foreman_reset.ResetRecordNewer) as caught:
+            self.schedule("2026-09-24T10:00:00+00:00", True)
+        self.assertEqual(caught.exception.code, "reset_record_newer")
+        self.assertIn("update the coding-policy plugin", caught.exception.message)
+        with self.assertRaises(foreman_reset.ResetRecordNewer):
+            foreman_reset.claim(self.state, self.plan, self.me())
+        self.assertEqual((path.read_text(), self.starts), (newer, 0))
+
+    def test_a_corrupt_record_is_distinct_from_a_newer_one(self):
+        path = foreman_reset.record_path(self.state)
+        for document in ([], {"schema_version": 0, "resets": []}, {"schema_version": "2", "resets": []}):
+            with self.subTest(document=document):
+                path.write_text(json.dumps(document))
+                with self.assertRaises(foreman_reset.ResetRecordUnusable) as caught:
+                    foreman_reset.replay(self.state, self.plan)
+                self.assertEqual(caught.exception.code, "reset_record_unusable")
+                self.assertEqual(path.read_text(), json.dumps(document))
 
     def test_a_malformed_record_row_is_refused(self):
         foreman_reset.record_path(self.state).write_text(json.dumps(

@@ -736,11 +736,13 @@ checks every field, and the `result` shape each `status` requires.
 `foreman-reset-deliver` claims that row and finishes it.
 
 Envelope: `{"schema_version": 1, "resets": [<row>, ...]}`, rows in append
-order. A missing file means no prior reset. A file whose envelope or any row
-fails validation, including another `schema_version`, is refused and left
-untouched. There is no older version, so no migration exists. A future shape
-change bumps `schema_version` and migrates in the owner
-(`rules/stateful-artifacts.md`).
+order. A missing file means no prior reset. A file whose envelope carries an
+integer `schema_version` above 1 was written by a newer build: a read takes it
+as no prior reset, and a write refuses with `reset_record_newer`, leaving the
+file untouched (`rules/stateful-artifacts.md` Migration Policy). Any other
+envelope or row that fails validation is refused with `reset_record_unusable`
+and left untouched. There is no older version, so no migration exists. A
+future shape change bumps `schema_version` and migrates in the owner.
 
 | Field | Type | Meaning |
 | --- | --- | --- |

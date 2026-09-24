@@ -646,11 +646,21 @@ bash "$CP/skills/herdr-teamlead/teamlead.sh" foreman-reset --stow <stow-id>
   nothing new started. End the turn now. Once the pane is idle, the deliverer
   clears it and sends a resume prompt naming that stow. The next context
   starts at Step 1.
-- **Non-zero** — stderr names the refused precondition: an unready stow, the
-  wrong pane, or supervision work still unheld. Fix it and re-run. Never end
-  the turn with active work that has no hold. A stow whose earlier reset
-  failed or was interrupted is never retried: its record holds the resume
-  prompt for the operator, and the next round resets from a new stow.
+- **Exit 1** — stderr is one JSON object; route on its `error` field:
+  - `reset_ended` — this stow's one reset attempt failed or was interrupted,
+    including a deliverer that could not start. Never re-run it. Record a
+    user-attention blocker quoting `details.resume_prompt` and
+    `details.record`, then end the turn. The operator recovers under the
+    Working Memory carve-out; the next round resets from a new stow
+  - `reset_record_newer` — a newer build wrote the reset record. Record a
+    user-attention blocker to update the plugin; the file stays untouched
+  - `reset_record_unusable` — the reset record is unreadable or malformed.
+    Record a user-attention blocker naming `details.record`; the operator
+    restores it. Never edit or delete it
+  - any other `error` — a refused precondition: an unready stow, the wrong
+    pane, supervision work still unheld, or an unreadable stow or state.
+    Fix the cause stderr names and re-run
+- Never end the turn with active work that has no hold
 
 Finish here.
 

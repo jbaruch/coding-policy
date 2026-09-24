@@ -71,8 +71,27 @@ def resume_prompt(stow, state):
     return RESUME_TEMPLATE.format(stow=shlex.quote(stow), state=shlex.quote(state))
 
 
-OPERATOR_RECOVERY = ("The operator recovers the foreman under rules/agent-team-operation.md Working Memory, "
-                     "pasting the resume prompt saved in this reset's record.")
+OPERATOR_RECOVERY = ("Do not run foreman-reset again for this stow. The operator recovers the foreman under "
+                     "rules/agent-team-operation.md Working Memory: clear the foreman's pane, then paste the "
+                     "resume prompt saved in this reset's record. The next round resets from a new stow.")
+
+
+class ResetEnded(UsageError):
+    """This stow's one reset attempt failed or was interrupted; only the operator recovers it."""
+
+    code = "reset_ended"
+
+
+class ResetRecordNewer(StateError):
+    """The reset record was written by a newer build; read as no prior reset, never written."""
+
+    code = "reset_record_newer"
+
+
+class ResetRecordUnusable(StateError):
+    """The reset record is unreadable or fails validation; preserved untouched."""
+
+    code = "reset_record_unusable"
 
 
 def record_path(state_path):
@@ -86,16 +105,36 @@ ROW_FIELDS = frozenset({"schema_version", "pane_id", "stow", "status", "schedule
 
 
 def _records(path):
+    """The reset record to write through; a newer one refuses, untouched.
+
+    A newer `schema_version` is data this build lags, not corruption
+    (rules/stateful-artifacts.md Migration Policy). A write refuses it here;
+    `_readable` takes it as no usable prior reset.
+    """
     if not path.exists():
         return {"schema_version": RESET_SCHEMA_VERSION, "resets": []}
     document = supervision.read_json(path)
     if not isinstance(document, dict):
-        raise StateError("Reset record {} is unreadable; preserve it and restore a valid file before resetting.".format(path), {})
+        raise ResetRecordUnusable("Reset record {} is unreadable. It is left untouched; the operator restores a valid file "
+                                  "from its own backup before any reset.".format(path), {"record": str(path)})
+    version = document.get("schema_version")
+    if type(version) is int and version > RESET_SCHEMA_VERSION:
+        raise ResetRecordNewer("Reset record {} is schema {}, newer than this build's {}. It is left untouched; update the "
+                               "coding-policy plugin, then run foreman-reset.".format(path, version, RESET_SCHEMA_VERSION),
+                               {"record": str(path), "schema_version": version})
     rows = document.get("resets")
-    if (document.get("schema_version") != RESET_SCHEMA_VERSION or not isinstance(rows, list)
-            or not all(_valid_row(row) for row in rows)):
-        raise StateError("Reset record {} is malformed or newer; preserve it and restore a valid file before resetting.".format(path), {})
+    if version != RESET_SCHEMA_VERSION or not isinstance(rows, list) or not all(_valid_row(row) for row in rows):
+        raise ResetRecordUnusable("Reset record {} is malformed. It is left untouched; the operator restores a valid file "
+                                  "from its own backup before any reset.".format(path), {"record": str(path)})
     return document
+
+
+def _readable(path):
+    """The reset record for a read, or None when a newer build wrote it."""
+    try:
+        return _records(path)
+    except ResetRecordNewer:
+        return None
 
 
 def _valid_row(row):
@@ -153,10 +192,10 @@ def _settle(document, row, state_path, alive):
     return None, changed
 
 
-def _refuse(row, state_path):
-    raise UsageError("The reset from stow {} ended {} and is not retried; the pane may already be cleared. {}".format(
-        row["stow"], row["status"], OPERATOR_RECOVERY), {"record": str(record_path(state_path)),
-                                                          "resume_prompt": row["result"]["resume_prompt"]})
+def _refuse(row, state_path, cause=None):
+    raise ResetEnded("The reset from stow {} ended {}{}; the pane may already be cleared. {}".format(
+        row["stow"], row["status"], " ({})".format(cause) if cause else "", OPERATOR_RECOVERY),
+        {"record": str(record_path(state_path)), "resume_prompt": row["result"]["resume_prompt"]})
 
 
 def replay(state_path, plan, *, alive=_alive):
@@ -168,7 +207,9 @@ def replay(state_path, plan, *, alive=_alive):
     """
     path = record_path(state_path)
     with state_lock(path):
-        document = _records(path)
+        document = _readable(path)
+        if document is None:
+            return None
         row = _row(document, plan)
         if row is None:
             return None
@@ -214,7 +255,7 @@ def schedule(state_path, plan, at, start, *, alive=_alive, probe=None):
         except TeamLeadError as exc:
             row.update(status="failed", result=failure(exc, plan["stow"], str(Path(state_path).expanduser().resolve())))
             save_state(path, document)
-            raise
+            _refuse(row, state_path, exc.message)
         save_state(path, document)
         return {**row, "replayed": False}
 
@@ -282,7 +323,8 @@ def preflight(stow, supervision_data, caller_pane):
 def _foreman_record(client, pane_id):
     record = next((row for row in client.agent_list() if row.get("pane_id") == pane_id), None)
     if record is None:
-        raise HerdrError("No Herdr agent runs in the foreman's pane {}, so nothing was sent. The operator restarts the foreman in that pane; it resumes from the same stow with foreman-reset.".format(pane_id), {"pane_id": pane_id})
+        raise HerdrError("No Herdr agent runs in the foreman's pane {}, so nothing further was sent. {}".format(
+            pane_id, OPERATOR_RECOVERY), {"pane_id": pane_id})
     return record
 
 
@@ -313,12 +355,12 @@ def deliver(client, agents, pane_id, stow, state, *, still_ready=lambda: True, s
         if record.get("agent_status") in SETTLE_STATES:
             break
         if clock() >= deadline:
-            raise HerdrError("The foreman's pane {} stayed {} for {}s; nothing was sent. Let the turn end, then run foreman-reset again.".format(
-                pane_id, record.get("agent_status"), budget_sec), {"pane_id": pane_id})
+            raise HerdrError("The foreman's pane {} stayed {} for {}s; nothing was sent. {}".format(
+                pane_id, record.get("agent_status"), budget_sec, OPERATOR_RECOVERY), {"pane_id": pane_id})
         sleep(poll_sec)
     agent = mechanics(agents, record.get("agent"), record["name"])
     if not still_ready():
-        raise UsageError("Stow {} is no longer reset-ready; nothing was sent. Record a new stow and reset again.".format(stow), {"stow": stow})
+        raise UsageError("Stow {} is no longer reset-ready; nothing was sent. {}".format(stow, OPERATOR_RECOVERY), {"stow": stow})
 
     typed = []
 
@@ -330,8 +372,8 @@ def deliver(client, agents, pane_id, stow, state, *, still_ready=lambda: True, s
         live = _foreman_record(client, pane_id)
         if (live.get("name") != agent.name or live.get("agent") != agent.kind
                 or live.get("agent_status") not in SETTLE_STATES):
-            raise HerdrError("The foreman's pane {} changed ({} {}, {}) before typing, so the reset stopped. Let that turn finish, confirm the stow is still reset-ready with memory-show, and run foreman-reset again.".format(
-                pane_id, live.get("agent"), live.get("name"), live.get("agent_status")), {"pane_id": pane_id})
+            raise HerdrError("The foreman's pane {} changed ({} {}, {}) before typing, so the reset stopped. {}".format(
+                pane_id, live.get("agent"), live.get("name"), live.get("agent_status"), OPERATOR_RECOVERY), {"pane_id": pane_id})
         typed.append(True)
 
     try:

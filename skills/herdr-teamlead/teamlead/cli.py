@@ -1406,7 +1406,7 @@ def cmd_foreman_reset(args, client=None, warn=None, trace=None, spawn=None):
             with open(log, "ab") as sink:
                 return (spawn or _spawn_detached)(argv, sink)
         except OSError as exc:
-            raise StateError("Could not start the reset deliverer ({}); nothing was sent. Fix the cause named here, then run foreman-reset again.".format(exc),
+            raise StateError("Could not start the reset deliverer ({}); nothing was sent.".format(exc),
                              {"log": str(log)}) from None
 
     row = foreman_reset.schedule(state_path, plan, at, start)

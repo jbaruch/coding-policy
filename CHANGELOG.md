@@ -60,6 +60,15 @@
   Also folded in, from deferred advisories: the migrated-gap carve-out's
   first precondition is split, the investigator-supplied evidence exception
   becomes a formal carve-out, and one SKILL.md bullet is split.
+  A failed reset is recovered one way only. Every deliverer diagnostic
+  and a launch failure used to tell the foreman to run `foreman-reset`
+  again, yet the record refuses a second attempt for the same stow, so the
+  advice looped. Each now names the operator recovery (clear the pane,
+  paste the logged resume prompt), and `foreman-reset` exits with a
+  distinct `error` per class: `reset_ended`, `reset_record_newer`,
+  `reset_record_unusable`, or an ordinary refused precondition. A reset
+  record written by a newer build reads as no prior reset and refuses
+  writes, instead of being reported as corrupt.
 
 ## 0.3.266 — 2026-09-24
 
