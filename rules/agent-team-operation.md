@@ -399,6 +399,12 @@ description: Running a multi-agent team — task-based specialist composition, c
 - Before the reset, curate the round's lessons
 - Before the reset, save a reset-ready stow
 - The reset runs through `teamlead foreman-reset`, never by typing into the foreman's pane
+- Narrow exception for recovering a reset that failed or was interrupted.
+- Preconditions (all required):
+  1. The reset record shows the reset `failed` or `interrupted`
+  2. The operator, never the foreman, clears the foreman's pane
+  3. The operator pastes the resume prompt the deliverer logged for that reset
+- Every other reset runs through `teamlead foreman-reset`
 - A reset foreman resumes from the stow, the supervision resume sequence, and the foreman queue
 - Save conversation-only knowledge and open work before a planned foreman reset, compaction, or replacement
 - Give the next foreman an ordered list of durable files to read

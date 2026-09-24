@@ -40,7 +40,14 @@
   failure after the first keystroke is recorded `interrupted` and never
   retried, since the pane may be half-reset. The resume prompt carries the
   state path onto every command, so a foreman on a non-default `--state`
-  resumes against its own records. The
+  resumes against its own records.
+  A deliverer counts as live only while its recorded process identity (start
+  time and command line) still matches, so a reused pid can't hold a reset.
+  Only a `handoff` hold lets the foreman reset over active work; a pause
+  waiting on the user never auto-resumes. A failed or interrupted reset is
+  recovered by the operator, never the foreman. That is a narrow carve-out
+  in Working Memory: the operator clears the pane and pastes the logged
+  resume prompt. The state path in that prompt is shell-quoted. The
   reset is its own Step 17, and every return from Step 12 to Step 4 passes
   through Steps 16 and 17, so fix rounds reset too, not only finished
   tasks.

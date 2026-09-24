@@ -1384,6 +1384,10 @@ def cmd_foreman_reset(args, client=None, warn=None, trace=None, spawn=None):
     data = supervision.load(state_path)
     bound_pane = (data.get("binding") or {}).get("identity", {}).get("pane_id")
     # A retry replays before any new-reset precondition (see foreman_reset.replay).
+    caller = os.environ.get("HERDR_PANE_ID")
+    if bound_pane and caller != bound_pane:
+        raise UsageError("foreman-reset runs from the bound foreman's own pane ({}); this call came from {}.".format(
+            bound_pane, caller or "outside Herdr"), {"pane_id": bound_pane})
     existing = foreman_reset.replay(state_path, {"pane_id": bound_pane, "stow": stow["id"]}) if bound_pane else None
     if existing is not None:
         return {"schema_version": foreman_reset.RESET_SCHEMA_VERSION, "scheduled": True, **existing,
@@ -1401,7 +1405,7 @@ def cmd_foreman_reset(args, client=None, warn=None, trace=None, spawn=None):
             with open(log, "ab") as sink:
                 return (spawn or _spawn_detached)(argv, sink)
         except OSError as exc:
-            raise StateError("Could not start the reset deliverer ({}); nothing was sent. Clear the foreman by hand.".format(exc),
+            raise StateError("Could not start the reset deliverer ({}); nothing was sent. Fix the cause named here, then run foreman-reset again.".format(exc),
                              {"log": str(log)}) from None
 
     row = foreman_reset.schedule(state_path, plan, at, start)
@@ -1424,13 +1428,14 @@ def _spawn_detached(argv, sink):
 def cmd_foreman_reset_deliver(args, client=None, warn=None, trace=None):
     state_path = Path(_state_path(args)).expanduser().resolve()
     plan = {"pane_id": args.pane, "stow": args.stow}
-    if not foreman_reset.claim(state_path, plan, os.getpid()):
+    if not foreman_reset.claim(state_path, plan, supervision_runtime.process_identity(os.getpid())):
         return {"schema_version": foreman_reset.RESET_SCHEMA_VERSION, **plan, "skipped": "not the scheduled owner of this reset"}, None
-    client = client if client is not None else _client(args, trace=trace)
     try:
+        # Setup runs after the claim, so its failure must finish the row too.
+        client = client if client is not None else _client(args, trace=trace)
         result = foreman_reset.deliver(
             client, load_config(_config_path(args)), args.pane, args.stow, str(state_path), warn=warn,
-            still_ready=lambda: memory.show(state_path, now_iso(), args.stow)["record"]["reset_ready"])
+            still_ready=lambda: memory.show(state_path, now_iso(), args.stow)["record"].get("reset_ready") is True)
     except TeamLeadError as exc:
         status = "interrupted" if isinstance(exc, foreman_reset.DeliveryInterrupted) else "failed"
         foreman_reset.finish(state_path, plan, status, exc.to_dict())
