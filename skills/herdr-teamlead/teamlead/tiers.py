@@ -30,15 +30,23 @@ EFFORTS = {
 }
 NO_EFFORT_MODELS = frozenset({"claude-haiku-4-5", "haiku-4.5"})
 JUDGMENT_ROUNDS = frozenset({
-    "architect", "reconciliation", "test_plan", "critic", "review",
+    "architect", "reconciliation", "critic", "review",
     "hostile_verify", "recheck", "release_adjudication", "lead",
 })
-ROUNDS = JUDGMENT_ROUNDS | {"build", "fix", "mechanical", "release_mechanics"}
+#: `consultation` is evidence gathering that decides nothing, and `test_plan`
+#: is pre-development preparation that passes nothing: neither is a gate, so
+#: neither carries the judgment floor (#518). A consultation that must settle
+#: something is planned on `reconciliation` or `architect` explicitly.
+ROUNDS = JUDGMENT_ROUNDS | {"build", "fix", "mechanical", "release_mechanics", "consultation", "test_plan"}
+#: Each seat's default is the cheapest round its contract allows. A release
+#: worker edits no source and its skill's own gates fail the round loudly, so
+#: it defaults to mechanics; `release_adjudication` is requested explicitly
+#: when the worker must interpret a dispute (#521).
 DEFAULT_ROUNDS = {
     "developer": "build", "tester": "hostile_verify", "reviewer": "review",
-    "release": "release_adjudication", "architect": "architect",
+    "release": "release_mechanics", "architect": "architect",
     "critic": "critic", "lead": "lead",
-    "advisor": "architect", "investigator": "reconciliation",
+    "advisor": "consultation", "investigator": "consultation",
 }
 #: Separates a seat from the slice it owns in a role name (`reviewer#api`). A
 #: role name never contains it, so the seat reads back unambiguously (#409).
@@ -123,8 +131,8 @@ ROLE_ROUNDS = {
     "release": frozenset({"release_adjudication", "release_mechanics"}),
     "architect": frozenset({"architect", "reconciliation"}),
     "critic": frozenset({"critic"}), "lead": frozenset({"lead"}),
-    "advisor": frozenset({"architect"}),
-    "investigator": frozenset({"reconciliation"}),
+    "advisor": frozenset({"consultation", "architect"}),
+    "investigator": frozenset({"consultation", "reconciliation"}),
 }
 #: A whole-result oracle: the expected result recorded in a form a later check
 #: compares against byte for byte. Its EXISTENCE is what licenses a round below
@@ -476,7 +484,10 @@ def select_tier(agent, role, round_type=None, context=None, fix_round=None, head
     if chosen_round not in agent.tiers:
         raise MissingTierError("Agent {} has no {!r} tier; add the required row before planning.".format(agent.name, chosen_round), {})
     tier = dict(agent.tiers[chosen_round])
-    if round_type in {"mechanical", "release_mechanics"} and not mechanical_allowed(context):
+    # Only a developer's mechanical round needs an oracle. A release round's
+    # loud failure is the release skill's own gates, and it has no pre-written
+    # whole result to compare against (#521).
+    if round_type == "mechanical" and not mechanical_allowed(context):
         raise UsageError("Mechanical eligibility is unproven or an escape condition fired; use a judgment round with a fresh brief.", {})
     risks = context.get("risk_flags", [])
     if not isinstance(risks, list) or any(not isinstance(flag, str) or not flag for flag in risks):

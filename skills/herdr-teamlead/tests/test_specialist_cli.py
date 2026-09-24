@@ -217,7 +217,7 @@ class SpecialistCliTest(fixture.CliCase):
         self.bind()
         tier = {**tier_row(), "model": "opus-5"}
         self.settings["agents"] = self.settings["agents"][:1]
-        self.settings["agents"][0]["tiers"] = {"architect": tier}
+        self.settings["agents"][0]["tiers"] = {"architect": tier, "consultation": tier}
         self.config.write_text(json.dumps(self.settings))
         agent = load_config(self.config)[0]
         wanted = select_tier(agent, "advisor")
