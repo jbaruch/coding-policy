@@ -24,6 +24,32 @@ Follow `rules/agent-team-operation.md` for round constraints.
 Each command resolves `CP` to the local or home plugin. Repeat its resolver in
 every call. Prose `skills/...` paths are relative to that root.
 
+Before each decision, load its records and read every listed file:
+
+```bash
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
+bash "$CP/skills/herdr-teamlead/teamlead.sh" load-set --decision <plan|brief|gate|diagnose> --task <task>
+```
+
+```bash
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
+bash "$CP/skills/herdr-teamlead/teamlead.sh" load-set --decision wake --enrollment <enrollment-id>
+```
+
+| Decision | Step | Target |
+| --- | --- | --- |
+| `plan` | Step 5 | `--task` |
+| `brief` | Step 7 | `--task` |
+| `wake` | Step 11, per `wake` event | `--enrollment` |
+| `gate` | Step 12 | `--task` |
+| `diagnose` | Step 13, diagnosis mode | `--task` |
+
+It prints JSON whose `files` list is the floor for that decision; a file with
+`present: false` is a gap to resolve, not one to skip. A non-zero exit names a
+refused task, enrollment or unreconciled dispatch on stderr; resolve it first.
+The contract is `skills/herdr-teamlead/references/working-memory.md` "Load a
+decision's records".
+
 - Run each step's commands as that step documents them
 - Never write a throwaway helper script in a scratch directory
 - Never name a scratch file in a handoff
