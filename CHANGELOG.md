@@ -16,8 +16,8 @@
   Pinning now defines a lock file as one that pins dependencies this repo's
   build, test, or CI resolves. A tool's per-machine install record is
   installer state, which may be gitignored. The anti-abuse line is
-  mechanical: any file a build, test, or CI step reads is a lock file,
-  whatever it is called. The file-hygiene lock-file exception points to the
+  mechanical: a file that records resolved dependencies and that a build,
+  test, or CI step reads is a lock file, whatever it is called. The file-hygiene lock-file exception points to the
   definition.
 
 ## 0.3.264 — 2026-09-24
