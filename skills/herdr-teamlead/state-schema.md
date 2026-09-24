@@ -14,6 +14,7 @@ the utility alone records the saved notes and their separate index.
 | `$XDG_CONFIG_HOME/teamlead/config.json` (default `~/.config/teamlead/config.json`, override `--config FILE`) | the operator | Per-agent usage / clear commands; teamlead reads it and never writes it |
 | `<task-reports-dir>/TASK-LEDGER.md` | `herdr-teamlead`, written by the foreman | Evidence-backed assignment acceptance and task completion across rounds |
 | `<canonical-state-path>.retrospectives/` | `herdr-teamlead`, through its retrospective utility | Immutable retrospective notes, versioned index, and transition coverage |
+| `<canonical-state-path>.foreman-reset.json` | `skills/herdr-teamlead/teamlead/foreman_reset.py` | One record per foreman round-boundary reset; see Foreman Reset Record below |
 
 The JSON formats and utility contracts below apply to `state.json` and config.
 The Markdown ledger has its own contract in Task Ledger below; adding it changes
@@ -724,3 +725,26 @@ assignment, attempt count, plan, evidence or authorization is removed or
 invented. Receipts grant no corrections, review approvals or new dispatch
 authority. There is no owner command that appends, deletes or downgrades these
 records.
+
+## Foreman Reset Record
+
+`<canonical-state-path>.foreman-reset.json` holds `{"schema_version": 1,
+"resets": [...]}`. Its owner and only writer is
+`skills/herdr-teamlead/teamlead/foreman_reset.py`, under the file's state lock.
+`foreman-reset` appends a row; `foreman-reset-deliver` claims and finishes it.
+No other skill reads it.
+
+| Field | Meaning |
+| --- | --- |
+| `schema_version` | `1` on every row |
+| `pane_id`, `stow` | The reset's identity: the foreman pane and the stow it resumes from |
+| `status` | `scheduled` → `delivering` → `delivered` or `failed` |
+| `scheduled_at` | The `foreman-reset` time |
+| `pid` | The detached deliverer's process id |
+| `result` | The deliverer's outcome, or the error that failed it; null until finished |
+
+A `delivered` row replays forever. A `scheduled` or `delivering` row replays
+while its process is alive, and is marked `failed` when its process is gone.
+A `failed` row allows a new row for the same pane and stow. A missing file is
+no prior reset. An unreadable file, or one with another `schema_version`, is
+refused and left untouched.

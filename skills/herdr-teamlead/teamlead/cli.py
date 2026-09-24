@@ -388,6 +388,7 @@ def build_parser():
     reset_parser.add_argument("--now", metavar="ISO8601")
     deliver_parser = sub.add_parser("foreman-reset-deliver", parents=[common], help="Internal: wait for the foreman pane to idle, then clear it and send the resume prompt.")
     deliver_parser.add_argument("--pane", required=True)
+    deliver_parser.add_argument("--stow", required=True)
     sub.add_parser("foreman-queue", parents=[common], help="List open tasks waiting for their next seat, oldest first, derived from the owner records.")
     load_parser = sub.add_parser("load-set", parents=[common], help="List the durable records one foreman decision must load, derived from the owner records.")
     load_parser.add_argument("--decision", required=True, choices=load_set.DECISIONS)
@@ -1377,22 +1378,33 @@ def cmd_status(args, client=None, warn=None, trace=None):
 
 
 def cmd_foreman_reset(args, client=None, warn=None, trace=None, spawn=None):
-    state_path = _state_path(args)
-    stow = memory.show(state_path, args.now or now_iso(), args.stow)["record"]
+    state_path = Path(_state_path(args)).expanduser().resolve()
+    at = args.now or now_iso()
+    stow = memory.show(state_path, at, args.stow)["record"]
     plan = foreman_reset.preflight(stow, supervision.load(state_path), os.environ.get("HERDR_PANE_ID"))
-    log = Path(str(Path(state_path).expanduser().resolve()) + ".foreman-reset.log")
-    argv = [sys.executable, "-m", "teamlead", "foreman-reset-deliver", "--pane", plan["pane_id"],
-            "--state", str(state_path), "--config", str(_config_path(args))]
+    log = Path(str(state_path) + ".foreman-reset.log")
+    # The deliverer runs from the package directory, so every path it gets is absolute.
+    argv = [sys.executable, "-m", "teamlead", "foreman-reset-deliver", "--pane", plan["pane_id"], "--stow", plan["stow"],
+            "--state", str(state_path), "--config", str(Path(_config_path(args)).expanduser().resolve())]
     if getattr(args, "herdr_bin", None):
-        argv += ["--herdr-bin", args.herdr_bin]
-    try:
-        with open(log, "ab") as sink:
-            pid = (spawn or _spawn_detached)(argv, sink)
-    except OSError as exc:
-        raise StateError("Could not start the reset deliverer ({}); nothing was sent. Clear the foreman by hand.".format(exc),
-                         {"log": str(log)}) from None
-    return {"schema_version": foreman_reset.RESET_SCHEMA_VERSION, "scheduled": True, **plan, "pid": pid,
-            "log": str(log), "next": "End this turn now; the deliverer clears the pane once it is idle."}, None
+        argv += ["--herdr-bin", _absolute_executable(args.herdr_bin)]
+
+    def start():
+        try:
+            with open(log, "ab") as sink:
+                return (spawn or _spawn_detached)(argv, sink)
+        except OSError as exc:
+            raise StateError("Could not start the reset deliverer ({}); nothing was sent. Clear the foreman by hand.".format(exc),
+                             {"log": str(log)}) from None
+
+    row = foreman_reset.schedule(state_path, plan, at, start)
+    return {"schema_version": foreman_reset.RESET_SCHEMA_VERSION, "scheduled": True, **row, "log": str(log),
+            "next": "End this turn now; the deliverer clears the pane once it is idle."}, None
+
+
+def _absolute_executable(value):
+    """A relative executable path resolved now, before the deliverer changes directory."""
+    return str(Path(value).expanduser().resolve()) if os.sep in value else value
 
 
 def _spawn_detached(argv, sink):
@@ -1403,9 +1415,20 @@ def _spawn_detached(argv, sink):
 
 
 def cmd_foreman_reset_deliver(args, client=None, warn=None, trace=None):
+    state_path = _state_path(args)
+    plan = {"pane_id": args.pane, "stow": args.stow}
+    if not foreman_reset.claim(state_path, plan):
+        return {"schema_version": foreman_reset.RESET_SCHEMA_VERSION, **plan, "skipped": "not the scheduled owner of this reset"}, None
     client = client if client is not None else _client(args, trace=trace)
-    agents = load_config(_config_path(args))
-    return foreman_reset.deliver(client, agents, args.pane, warn=warn), None
+    try:
+        result = foreman_reset.deliver(
+            client, load_config(_config_path(args)), args.pane, args.stow, warn=warn,
+            still_ready=lambda: memory.show(state_path, now_iso(), args.stow)["record"]["reset_ready"])
+    except TeamLeadError as exc:
+        foreman_reset.finish(state_path, plan, "failed", exc.to_dict())
+        raise
+    foreman_reset.finish(state_path, plan, "delivered", result)
+    return result, None
 
 
 def cmd_foreman_queue(args, client=None, warn=None, trace=None):

@@ -77,22 +77,33 @@ def worker(name, kind):
 
 
 class DeliverTest(unittest.TestCase):
-    def run_deliver(self, client, *, screen_changed=True, landed=True, budget=30):
+    def run_deliver(self, client, *, screen_changed=True, landed=True, budget=30, still_ready=lambda: True):
         calls = []
         ticks = iter(range(0, 10000, 5))
-        with patch("teamlead.foreman_reset.send_command",
-                   side_effect=lambda c, agent, pane, text, **kw: calls.append(("command", agent.name, pane, text)) or {"screen_changed": screen_changed}), \
-             patch("teamlead.foreman_reset.send_message",
-                   side_effect=lambda c, agent, text, needle, **kw: calls.append(("message", agent.name, kw["pane_id"], needle)) or {"landed": landed, "started": landed}):
-            result = foreman_reset.deliver(client, [worker("codex-a", "codex"), worker("claude-a", "claude")], PANE,
-                                           sleep=lambda seconds: None, clock=lambda: next(ticks), budget_sec=budget, poll_sec=5)
+
+        def command(c, agent, pane, text, **kw):
+            kw["before_input"]()
+            calls.append(("command", agent.name, pane, text))
+            return {"screen_changed": screen_changed}
+
+        def message(c, agent, text, needle, **kw):
+            kw["before_input"]()
+            calls.append(("message", agent.name, kw["pane_id"], text))
+            return {"landed": landed, "started": landed}
+
+        with patch("teamlead.foreman_reset.send_command", side_effect=command), \
+             patch("teamlead.foreman_reset.send_message", side_effect=message):
+            result = foreman_reset.deliver(client, [worker("codex-a", "codex"), worker("claude-a", "claude")], PANE, "round-7",
+                                           still_ready=still_ready, sleep=lambda seconds: None, clock=lambda: next(ticks),
+                                           budget_sec=budget, poll_sec=5)
         return result, calls
 
     def test_waits_for_idle_then_clears_and_sends_the_resume_prompt(self):
         client = FakeClient(["working", "working", "idle"])
         result, calls = self.run_deliver(client)
         self.assertEqual(calls, [("command", "foreman", PANE, "/clear"),
-                                 ("message", "foreman", PANE, foreman_reset.RESUME_OPENING)])
+                                 ("message", "foreman", PANE, foreman_reset.resume_prompt("round-7"))])
+        self.assertIn("memory-show --id round-7", calls[1][3])
         self.assertEqual(client.waits, ["foreman"])
         self.assertTrue(result["cleared"])
 
@@ -112,10 +123,58 @@ class DeliverTest(unittest.TestCase):
         with self.assertRaisesRegex(StateError, "kind 'grok'"):
             self.run_deliver(FakeClient(["idle"], kind="grok"))
 
+    def test_a_pane_that_starts_working_again_gets_no_keystroke(self):
+        client = FakeClient(["idle", "working"])
+        with self.assertRaisesRegex(HerdrError, "is working again"):
+            self.run_deliver(client)
+
+    def test_a_stow_that_changed_while_waiting_stops_the_reset(self):
+        with self.assertRaisesRegex(UsageError, "no longer reset-ready"):
+            self.run_deliver(FakeClient(["idle"]), still_ready=lambda: False)
+
     def test_mechanics_copy_does_not_rename_the_template(self):
         template = worker("claude-a", "claude")
         foreman = foreman_reset.mechanics([template], "claude", "foreman")
         self.assertEqual((template.name, foreman.name), ("claude-a", "foreman"))
+
+
+class RecordTest(unittest.TestCase):
+    def setUp(self):
+        import tempfile
+        self.dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.dir.cleanup)
+        self.state = Path(self.dir.name) / "state.json"
+        self.plan = {"pane_id": PANE, "stow": "round-7"}
+        self.starts = 0
+
+    def start(self):
+        self.starts += 1
+        return 1000 + self.starts
+
+    def test_a_retry_of_a_live_reset_replays_without_spawning(self):
+        first = foreman_reset.schedule(self.state, self.plan, "t1", self.start, alive=lambda pid: True)
+        again = foreman_reset.schedule(self.state, self.plan, "t2", self.start, alive=lambda pid: True)
+        self.assertEqual((first["replayed"], again["replayed"], again["pid"], self.starts), (False, True, 1001, 1))
+
+    def test_a_delivered_reset_replays_even_after_its_process_exits(self):
+        foreman_reset.schedule(self.state, self.plan, "t1", self.start, alive=lambda pid: True)
+        foreman_reset.finish(self.state, self.plan, "delivered", {"cleared": True})
+        again = foreman_reset.schedule(self.state, self.plan, "t2", self.start, alive=lambda pid: False)
+        self.assertTrue(again["replayed"])
+        self.assertEqual(self.starts, 1)
+
+    def test_a_reset_whose_deliverer_died_is_failed_and_rescheduled(self):
+        foreman_reset.schedule(self.state, self.plan, "t1", self.start, alive=lambda pid: True)
+        again = foreman_reset.schedule(self.state, self.plan, "t2", self.start, alive=lambda pid: False)
+        self.assertEqual((again["replayed"], again["pid"]), (False, 1002))
+        rows = json.loads(foreman_reset.record_path(self.state).read_text())["resets"]
+        self.assertEqual([row["status"] for row in rows], ["failed", "scheduled"])
+
+    def test_only_one_deliverer_claims_a_reset(self):
+        foreman_reset.schedule(self.state, self.plan, "t1", self.start, alive=lambda pid: True)
+        self.assertTrue(foreman_reset.claim(self.state, self.plan))
+        self.assertFalse(foreman_reset.claim(self.state, self.plan))
+        self.assertFalse(foreman_reset.claim(self.state, {"pane_id": PANE, "stow": "other"}))
 
 
 class ResetCommandTest(CliCase):
@@ -131,6 +190,15 @@ class ResetCommandTest(CliCase):
         self.assertEqual((result["scheduled"], result["pid"], result["pane_id"]), (True, 4242, PANE))
         self.assertIn("foreman-reset-deliver", spawned[0])
         self.assertEqual(spawned[0][spawned[0].index("--pane") + 1], PANE)
+        self.assertEqual(spawned[0][spawned[0].index("--stow") + 1], "round-7")
+        self.assertTrue(Path(spawned[0][spawned[0].index("--config") + 1]).is_absolute())
+        self.assertTrue(Path(spawned[0][spawned[0].index("--state") + 1]).is_absolute())
+
+    def test_a_deliverer_that_does_not_own_the_reset_sends_nothing(self):
+        code, out, err = self.run_cli(self.base() + ["foreman-reset-deliver", "--pane", PANE, "--stow", "round-7"],
+                                      client=object())
+        self.assertEqual(code, 0, err)
+        self.assertIn("not the scheduled owner", json.loads(out)["skipped"])
 
     def test_a_refused_preflight_spawns_nothing(self):
         with patch("teamlead.cli.memory.show", return_value={"record": {"id": "s", "reset_ready": False}}), \

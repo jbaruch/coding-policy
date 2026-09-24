@@ -527,6 +527,10 @@ Assess correction scope and bug evidence under `references/assignment-reasoning.
 Persist user-facing obligations under `references/attention.md` before presenting
 them; record an actual answer or resolution separately from showing the item.
 
+Every return to Step 4 is a round boundary: run Step 16 to log the round and
+Step 17 to reset first. The reset foreman re-enters at Step 1 and reaches Step
+4 through `foreman-queue`.
+
 After accepting a consultation, return to Step 4 for the next needed
 responsibility. For an investigation-only task, use the knowledge gate below.
 
@@ -614,11 +618,14 @@ bash "$CP/skills/herdr-teamlead/teamlead.sh" close-task --record <close.json>
 Preserve the ledger for resume and standup. Preserve retrospective notes and link them from the ledger. Save
 current progress through the attention owner and curate the round's lessons.
 Report outstanding attention first, followed by the outcome and saved paths.
+Proceed immediately to Step 17.
 
-Then reset the foreman's context. Stow the handoff under the working-memory
-reference, with a structured gap for anything the stow could not capture.
-Handle every pending supervision event, and save `supervision-hold` kind
-`handoff` covering each active enrollment. Then schedule the reset:
+## Step 17 — Reset the Foreman Context
+
+Stow the handoff under the working-memory reference, with a structured gap
+for anything the stow could not capture. Handle every pending supervision
+event, and save `supervision-hold` kind `handoff` covering each active
+enrollment. Then schedule the reset:
 
 ```bash
 CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
@@ -626,8 +633,10 @@ bash "$CP/skills/herdr-teamlead/teamlead.sh" foreman-reset --stow <stow-id>
 ```
 
 - **Exit 0** — stdout names the scheduled `pane_id`, `stow`, deliverer `pid`
-  and `log`. End the turn now. Once the pane is idle, the deliverer clears it
-  and sends the resume prompt. The next context starts at Step 1.
+  and `log`; `replayed: true` means this exact reset was already scheduled, and
+  nothing new started. End the turn now. Once the pane is idle, the deliverer
+  clears it and sends a resume prompt naming that stow. The next context
+  starts at Step 1.
 - **Non-zero** — stderr names the refused precondition: an unready stow, the
   wrong pane, or supervision work still unheld. Fix it and re-run. Never end
   the turn with active work that has no hold.

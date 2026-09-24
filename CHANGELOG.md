@@ -27,6 +27,15 @@
   mechanics come from a configured worker of the same runtime kind. A pane
   that never idles, a clear that changes nothing, or a prompt that doesn't
   land is reported in the deliverer's log, and nothing further is sent.
+  The deliverer re-reads the pane before every keystroke and stops if the
+  foreman started another turn. It also re-checks the stow just before
+  clearing. The resume prompt names that exact stow. One reset record per
+  pane and stow (`<state>.foreman-reset.json`) makes a retried
+  `foreman-reset` replay instead of spawning a second deliverer. A record
+  whose deliverer died is marked failed and can be scheduled again. The
+  reset is its own Step 17, and every return from Step 12 to Step 4 passes
+  through Steps 16 and 17, so fix rounds reset too, not only finished
+  tasks.
 
   Also folded in, from deferred advisories: the migrated-gap carve-out's
   first precondition is split, the investigator-supplied evidence exception

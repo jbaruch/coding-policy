@@ -67,7 +67,7 @@ claiming that recalled context proves present competence or independence.
 
 ## Stow before replacing the foreman
 
-The foreman resets its context at every round boundary (SKILL.md Step 16), so
+The foreman resets its context at every round boundary (SKILL.md Step 17), so
 this stow runs every round. `teamlead foreman-reset` refuses unless the stow is
 `reset_ready`; the reset command's contract is in
 `skills/herdr-teamlead/teamlead/foreman_reset.py` (module docstring).
