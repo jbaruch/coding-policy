@@ -248,7 +248,10 @@ class RecordTest(unittest.TestCase):
                 with self.assertRaises(UsageError) as caught:
                     self.schedule("2026-09-24T10:05:00+00:00", False)
                 self.assertIn("is not retried", caught.exception.message)
-                self.assertIn("memory-show --state", caught.exception.details["resume_prompt"])
+                expected = "resume" if status in ("failed", "interrupted") else "memory-show --state"
+                self.assertIn(expected, caught.exception.details["resume_prompt"])
+                row = json.loads(foreman_reset.record_path(self.state).read_text())["resets"][-1]
+                self.assertEqual(row["status"], {"scheduled": "failed", "delivering": "interrupted"}.get(status, status))
                 self.assertEqual(self.starts, 1)
 
     def test_a_reused_pid_is_not_the_recorded_deliverer(self):
@@ -265,6 +268,12 @@ class RecordTest(unittest.TestCase):
         row = json.loads(foreman_reset.record_path(self.state).read_text())["resets"][-1]
         self.assertEqual((row["status"], row["process"]), ("failed", None))
         self.assertIn("memory-show", row["result"]["resume_prompt"])
+
+    def test_a_deliverer_gone_before_identification_fails_the_row(self):
+        with self.assertRaisesRegex(StateError, "exited before it could be identified"):
+            foreman_reset.schedule(self.state, self.plan, "2026-09-24T10:00:00+00:00", self.start, probe=lambda pid: None)
+        row = json.loads(foreman_reset.record_path(self.state).read_text())["resets"][-1]
+        self.assertEqual((row["status"], row["process"]), ("failed", None))
 
     def test_only_the_started_deliverer_claims_its_reset_once(self):
         self.schedule("2026-09-24T10:00:00+00:00", True)
@@ -292,7 +301,8 @@ class ResetCommandTest(CliCase):
         with patch("teamlead.cli.memory.show", return_value={"record": READY}), \
              patch("teamlead.cli.supervision.load", return_value=supervision_data()[0]), \
              patch.dict("os.environ", {"HERDR_PANE_ID": PANE}), \
-             patch("teamlead.cli._spawn_detached", side_effect=lambda argv, sink: spawned.append(argv) or 4242):
+             patch("teamlead.cli._spawn_detached", side_effect=lambda argv, sink: spawned.append(argv) or 4242), \
+             patch("teamlead.foreman_reset.process_identity", side_effect=lambda pid: {"pid": pid, "identity": "child"}):
             code, out, err = self.run_cli(self.base() + ["foreman-reset"])
         self.assertEqual(code, 0, err)
         result = json.loads(out)

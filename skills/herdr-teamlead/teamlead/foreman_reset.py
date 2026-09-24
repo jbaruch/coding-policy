@@ -23,12 +23,15 @@ The foreman's runtime mechanics (clear command, slash delivery, composer
 glyphs) come from a configured worker of the same kind; Herdr names the kind
 and the foreman's agent name from its own pane.
 
-One reset per pane and stow: `<state>.foreman-reset.json` records each
-scheduled reset (`schedule`), and the deliverer claims it before sending
-anything (`claim`). A retry of a scheduled or delivered reset replays the
-record and spawns nothing; only a failed one may be scheduled again. Before
-every keystroke the deliverer re-reads the pane and refuses unless the same
-agent is still idle.
+One delivery attempt per pane and stow, never retried automatically.
+`<state>.foreman-reset.json` records each scheduled reset (`schedule`), and
+the deliverer claims it before sending anything (`claim`). A retry of a live
+or delivered reset replays the record and spawns nothing. Any other reset is
+finalized `failed` (nothing typed) or `interrupted` (typing began) with the
+resume prompt the operator pastes, under the Working Memory recovery
+carve-out; the next round resets from a new stow. Before every keystroke the
+deliverer re-reads the stow and the pane, and refuses unless the stow is
+still reset-ready and the same agent is still idle.
 """
 
 import copy
@@ -59,8 +62,9 @@ RESUME_TEMPLATE = (
     "required files in order; run `teamlead supervision-bind --state {state}`, "
     "`teamlead supervision-resume --state {state}`, `teamlead supervision-status --state {state}` "
     "and `teamlead supervision-drain --state {state}`; then "
-    "`teamlead foreman-queue --state {state}`. Load each decision's records with "
-    "`teamlead load-set --state {state}` before making it."
+    "`teamlead foreman-queue --state {state}`. Load each decision's records before making it, with "
+    "`teamlead load-set --state {state} --decision <plan|brief|gate|diagnose> --task <task>` or "
+    "`teamlead load-set --state {state} --decision wake --enrollment <enrollment-id>`."
 )
 
 def resume_prompt(stow, state):
@@ -125,46 +129,77 @@ def _row(document, plan):
                  if row["pane_id"] == plan["pane_id"] and row["stow"] == plan["stow"]), None)
 
 
-def _alive(process, probe=process_identity):
+def _alive(process, probe=None):
     """Whether the recorded deliverer is still that exact process, not a reused pid."""
-    return process is not None and probe(process["pid"]) == process
+    return process is not None and (probe or process_identity)(process["pid"]) == process
+
+
+def _settle(document, row, state_path, alive):
+    """Replay a live or delivered reset; finalize any other, then refuse it for the operator.
+
+    A dead `scheduled` row typed nothing and becomes `failed`; a dead
+    `delivering` row may have typed and becomes `interrupted`. Either way the
+    row carries the resume prompt before the operator is sent to recover.
+    Returns (replay-or-None, changed).
+    """
+    if row["status"] == "delivered" or (row["status"] in ("scheduled", "delivering") and alive(row["process"])):
+        return {**row, "replayed": True}, False
+    state = str(Path(state_path).expanduser().resolve())
+    changed = row["status"] in ("scheduled", "delivering")
+    if changed:
+        lost = StateError("The reset deliverer for stow {} exited without finishing.".format(row["stow"]), {"process": row["process"]})
+        row.update(status="failed" if row["status"] == "scheduled" else "interrupted",
+                   result=failure(lost, row["stow"], state))
+    return None, changed
+
+
+def _refuse(row, state_path):
+    raise UsageError("The reset from stow {} ended {} and is not retried; the pane may already be cleared. {}".format(
+        row["stow"], row["status"], OPERATOR_RECOVERY), {"record": str(record_path(state_path)),
+                                                          "resume_prompt": row["result"]["resume_prompt"]})
 
 
 def replay(state_path, plan, *, alive=_alive):
     """The existing reset for (pane, stow), or None when this stow never reset.
 
-    One delivery attempt per stow, never retried automatically. Read before
-    any new-reset precondition: once a reset ran, its stow's reads and the
-    supervision state legitimately change, and a retry still replays. A live
-    or delivered reset replays; any other existing reset goes to the operator
-    under the Working Memory recovery carve-out, and the next round resets
-    from a new stow.
+    Read before any new-reset precondition: once a reset ran, its stow's reads
+    and the supervision state legitimately change, and a retry still replays.
+    A reset that is neither live nor delivered is finalized and refused.
     """
-    prior = _row(_records(record_path(state_path)), plan)
-    if prior is None:
-        return None
-    if prior["status"] == "delivered" or (prior["status"] in ("scheduled", "delivering") and alive(prior["process"])):
-        return {**prior, "replayed": True}
-    raise UsageError("The reset from stow {} ended {} and is not retried; the pane may already be cleared. {}".format(
-        plan["stow"], prior["status"] if prior["status"] in ("failed", "interrupted") else "without its deliverer",
-        OPERATOR_RECOVERY), {"record": str(record_path(state_path)),
-                             "resume_prompt": resume_prompt(plan["stow"], str(Path(state_path).expanduser().resolve()))})
+    path = record_path(state_path)
+    with state_lock(path):
+        document = _records(path)
+        row = _row(document, plan)
+        if row is None:
+            return None
+        live, changed = _settle(document, row, state_path, alive)
+        if changed:
+            save_state(path, document)
+    if live is None:
+        _refuse(row, state_path)
+    return live
 
 
-def schedule(state_path, plan, at, start, *, alive=_alive, probe=process_identity):
+def schedule(state_path, plan, at, start, *, alive=_alive, probe=None):
     """Record one reset for (pane, stow) and start its deliverer exactly once.
 
     `start()` launches the deliverer and returns its pid. The record lock is
     held until the deliverer's process identity is saved, and a deliverer
-    claims only the row carrying its own identity. A launch or probe failure
-    finishes the row `failed` with the resume prompt before re-raising.
+    claims only the row carrying its own identity. A launch failure, or a
+    deliverer that is already gone when probed, finishes the row `failed`
+    with the resume prompt before re-raising.
     """
     path = record_path(state_path)
     with state_lock(path):
-        existing = replay(state_path, plan, alive=alive)
-        if existing is not None:
-            return existing
         document = _records(path)
+        prior = _row(document, plan)
+        if prior is not None:
+            live, changed = _settle(document, prior, state_path, alive)
+            if changed:
+                save_state(path, document)
+            if live is not None:
+                return live
+            _refuse(prior, state_path)
         row = {"schema_version": RESET_SCHEMA_VERSION, **plan, "status": "scheduled", "scheduled_at": at,
                "process": None, "result": None}
         document["resets"].append(row)
@@ -172,7 +207,10 @@ def schedule(state_path, plan, at, start, *, alive=_alive, probe=process_identit
         try:
             pid = start()
             # The deliverer waits on this lock to claim, so it is alive to be identified.
-            row["process"] = probe(pid) or {"pid": pid, "identity": "unverified"}
+            identity = (probe or process_identity)(pid)
+            if identity is None:
+                raise StateError("The reset deliverer (pid {}) exited before it could be identified; nothing was sent.".format(pid), {"pid": pid})
+            row["process"] = identity
         except TeamLeadError as exc:
             row.update(status="failed", result=failure(exc, plan["stow"], str(Path(state_path).expanduser().resolve())))
             save_state(path, document)

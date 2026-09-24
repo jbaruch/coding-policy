@@ -578,6 +578,11 @@ The judge is read-only, so Step 8 is skipped for it. Never substitute a judge,
 lower its tier, or hand-write an assignment to bypass a refusal. Its last step
 names where to continue.
 
+A judge round is a round: once its ruling is recorded, run Step 16 and Step
+17 before continuing, whatever the ruling (`insufficient` and `blocked`
+included). Record the step the ruling named in the stow. The reset foreman
+resumes at Step 1 and continues there.
+
 ## Step 14 — Release the Pull Request
 
 The release is one more assignment, never a prompt into the developer's

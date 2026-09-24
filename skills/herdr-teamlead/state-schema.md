@@ -755,8 +755,12 @@ change bumps `schema_version` and migrates in the owner
 One delivery attempt per pane and stow, never retried automatically. A
 retry replays before any new-reset precondition is checked. A `delivered`
 row, or a `scheduled` or `delivering` row whose exact process identity is
-still alive, replays. Every other existing row is refused with its resume
-prompt, for operator recovery under the Working Memory carve-out. The next
+still alive, replays. A dead `scheduled` row is finalized `failed` (nothing
+was typed), and a dead `delivering` row `interrupted` (typing may have
+begun), each with the failure object. Every row that is neither live nor
+delivered is then refused with its resume prompt, for operator recovery under
+the Working Memory carve-out. The next
 round resets from a new stow. A deliverer claims only the row carrying its
-own process identity. A launch or probe failure finishes the row `failed`,
-so no durable row is left with a null `process`.
+own process identity. A launch failure, or a deliverer already gone when
+probed, finishes the row `failed`. So no durable row is left `scheduled` with
+a null `process`.

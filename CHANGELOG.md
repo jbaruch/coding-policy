@@ -31,10 +31,9 @@
   foreman started another turn. It also re-checks the stow just before
   clearing. The resume prompt names that exact stow. One reset record per
   pane and stow (`<state>.foreman-reset.json`) makes a retried
-  `foreman-reset` replay instead of spawning a second deliverer. A record
-  whose deliverer died before claiming it is marked failed and scheduled
-  again. One that died mid-delivery is refused, since the pane may already
-  be cleared. The deliverer serializes on the reset record's lock, never the
+  `foreman-reset` replay instead of spawning a second deliverer. A reset
+  whose deliverer died is finalized, `failed` before typing and
+  `interrupted` after, and goes to the operator. The deliverer serializes on the reset record's lock, never the
   state lock the parent `foreman-reset` still holds while it starts it. A
   first draft missed that, and the reset would never have been delivered. A
   failure after the first keystroke is recorded `interrupted` and never
@@ -52,7 +51,8 @@
   resume prompt the operator pastes, and the next round resets from a new
   stow. A resume prompt that lands but starts no turn counts as
   interrupted. Step 16 closes only a merged or abandoned task, so fix rounds
-  reach Step 17 open. The
+  reach Step 17 open. A judge round also ends in Steps 16 and 17, whatever
+  its ruling. The
   reset is its own Step 17, and every return from Step 12 to Step 4 passes
   through Steps 16 and 17, so fix rounds reset too, not only finished
   tasks.
