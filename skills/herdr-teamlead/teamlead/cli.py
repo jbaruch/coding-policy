@@ -1381,7 +1381,14 @@ def cmd_foreman_reset(args, client=None, warn=None, trace=None, spawn=None):
     state_path = Path(_state_path(args)).expanduser().resolve()
     at = args.now or now_iso()
     stow = memory.show(state_path, at, args.stow)["record"]
-    plan = foreman_reset.preflight(stow, supervision.load(state_path), os.environ.get("HERDR_PANE_ID"))
+    data = supervision.load(state_path)
+    bound_pane = (data.get("binding") or {}).get("identity", {}).get("pane_id")
+    # A retry replays before any new-reset precondition (see foreman_reset.replay).
+    existing = foreman_reset.replay(state_path, {"pane_id": bound_pane, "stow": stow["id"]}) if bound_pane else None
+    if existing is not None:
+        return {"schema_version": foreman_reset.RESET_SCHEMA_VERSION, "scheduled": True, **existing,
+                "log": str(Path(str(state_path) + ".foreman-reset.log"))}, None
+    plan = foreman_reset.preflight(stow, data, os.environ.get("HERDR_PANE_ID"))
     log = Path(str(state_path) + ".foreman-reset.log")
     # The deliverer runs from the package directory, so every path it gets is absolute.
     argv = [sys.executable, "-m", "teamlead", "foreman-reset-deliver", "--pane", plan["pane_id"], "--stow", plan["stow"],
@@ -1417,7 +1424,7 @@ def _spawn_detached(argv, sink):
 def cmd_foreman_reset_deliver(args, client=None, warn=None, trace=None):
     state_path = _state_path(args)
     plan = {"pane_id": args.pane, "stow": args.stow}
-    if not foreman_reset.claim(state_path, plan):
+    if not foreman_reset.claim(state_path, plan, os.getpid()):
         return {"schema_version": foreman_reset.RESET_SCHEMA_VERSION, **plan, "skipped": "not the scheduled owner of this reset"}, None
     client = client if client is not None else _client(args, trace=trace)
     try:
@@ -1849,7 +1856,9 @@ def main(argv=None, stdout=None, stderr=None, client=None):
         # Commands that may migrate or write state share its canonical lock.
         # Dry runs, probes, and retrospective reads remain read-only.
         readonly = args.command in {"probe-report", "detect-triggers", "validate-partition", "verify-oracle", "retro-check", "retro-list", "retro-show", "capability-check", "capability-show", "supervision-gate", "load-set", "foreman-queue"} or getattr(args, "dry_run", False)
-        separate_owner = args.command in memory.COMMANDS | attention.COMMANDS | SUPERVISION_COMMANDS | restoration.COMMANDS
+        # The deliverer starts while `foreman-reset` still holds the state lock;
+        # it serializes on the reset record's own lock instead.
+        separate_owner = args.command in memory.COMMANDS | attention.COMMANDS | SUPERVISION_COMMANDS | restoration.COMMANDS | {"foreman-reset-deliver"}
         lock = nullcontext() if readonly or separate_owner else state_lock(retrospective.canonical_state(_state_path(args)))
         with lock:
             retro_lock = retrospective.lock(_state_path(args)) if not readonly and args.command in {"apply", "start-judge", "retro-record"} else nullcontext()

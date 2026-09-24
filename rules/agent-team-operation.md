@@ -395,7 +395,8 @@ description: Running a multi-agent team — task-based specialist composition, c
 - Revalidate a lesson before relying on recalled operational facts
 - Preserve superseded lessons and immutable retrospective notes
 - The foreman resets its context at every round boundary
-- Before the reset, record the round's outcomes and curate its lessons
+- Before the reset, record the round's outcomes
+- Before the reset, curate the round's lessons
 - Before the reset, save a reset-ready stow
 - The reset runs through `teamlead foreman-reset`, never by typing into the foreman's pane
 - A reset foreman resumes from the stow, the supervision resume sequence, and the foreman queue

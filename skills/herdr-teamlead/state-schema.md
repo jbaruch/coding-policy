@@ -743,8 +743,12 @@ No other skill reads it.
 | `pid` | The detached deliverer's process id |
 | `result` | The deliverer's outcome, or the error that failed it; null until finished |
 
-A `delivered` row replays forever. A `scheduled` or `delivering` row replays
-while its process is alive, and is marked `failed` when its process is gone.
-A `failed` row allows a new row for the same pane and stow. A missing file is
+A `delivered` row replays forever, and a retry replays before any new-reset
+precondition is checked. A `scheduled` or `delivering` row replays while its
+process is alive. A `scheduled` row whose process is gone is marked `failed`
+and scheduled again, since nothing was typed. A `delivering` row whose process
+is gone is refused, because the pane may already be cleared. A new stow starts
+a new reset. A deliverer claims only the row carrying its own `pid`. A
+`failed` row allows a new row for the same pane and stow. A missing file is
 no prior reset. An unreadable file, or one with another `schema_version`, is
 refused and left untouched.

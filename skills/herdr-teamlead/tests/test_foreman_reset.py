@@ -1,6 +1,7 @@
 """The foreman resets its own context only when nothing would be lost (#483)."""
 
 import io
+import os
 import json
 import sys
 import unittest
@@ -125,7 +126,23 @@ class DeliverTest(unittest.TestCase):
 
     def test_a_pane_that_starts_working_again_gets_no_keystroke(self):
         client = FakeClient(["idle", "working"])
-        with self.assertRaisesRegex(HerdrError, "is working again"):
+        with self.assertRaisesRegex(HerdrError, "changed .* before typing"):
+            self.run_deliver(client)
+
+    def test_a_pane_whose_runtime_changed_gets_no_keystroke(self):
+        client = FakeClient(["idle"])
+        original = client.agent_list
+        calls = {"n": 0}
+
+        def swapped():
+            calls["n"] += 1
+            rows = original()
+            if calls["n"] > 1:
+                rows[1]["agent"] = "codex"
+            return rows
+
+        client.agent_list = swapped
+        with self.assertRaisesRegex(HerdrError, "changed \\(codex foreman"):
             self.run_deliver(client)
 
     def test_a_stow_that_changed_while_waiting_stops_the_reset(self):
@@ -163,18 +180,32 @@ class RecordTest(unittest.TestCase):
         self.assertTrue(again["replayed"])
         self.assertEqual(self.starts, 1)
 
-    def test_a_reset_whose_deliverer_died_is_failed_and_rescheduled(self):
+    def test_a_reset_whose_deliverer_died_before_claiming_is_rescheduled(self):
         foreman_reset.schedule(self.state, self.plan, "t1", self.start, alive=lambda pid: True)
         again = foreman_reset.schedule(self.state, self.plan, "t2", self.start, alive=lambda pid: False)
         self.assertEqual((again["replayed"], again["pid"]), (False, 1002))
         rows = json.loads(foreman_reset.record_path(self.state).read_text())["resets"]
         self.assertEqual([row["status"] for row in rows], ["failed", "scheduled"])
 
-    def test_only_one_deliverer_claims_a_reset(self):
+    def test_a_reset_that_died_mid_delivery_is_never_retried_automatically(self):
         foreman_reset.schedule(self.state, self.plan, "t1", self.start, alive=lambda pid: True)
-        self.assertTrue(foreman_reset.claim(self.state, self.plan))
-        self.assertFalse(foreman_reset.claim(self.state, self.plan))
-        self.assertFalse(foreman_reset.claim(self.state, {"pane_id": PANE, "stow": "other"}))
+        self.assertTrue(foreman_reset.claim(self.state, self.plan, 1001))
+        with self.assertRaisesRegex(UsageError, "lost its deliverer mid-delivery"):
+            foreman_reset.schedule(self.state, self.plan, "t2", self.start, alive=lambda pid: False)
+        self.assertEqual(self.starts, 1)
+
+    def test_only_the_started_deliverer_claims_its_reset_once(self):
+        foreman_reset.schedule(self.state, self.plan, "t1", self.start, alive=lambda pid: True)
+        self.assertFalse(foreman_reset.claim(self.state, self.plan, 9999))
+        self.assertTrue(foreman_reset.claim(self.state, self.plan, 1001))
+        self.assertFalse(foreman_reset.claim(self.state, self.plan, 1001))
+        self.assertFalse(foreman_reset.claim(self.state, {"pane_id": PANE, "stow": "other"}, 1001))
+
+    def test_a_malformed_record_row_is_refused(self):
+        foreman_reset.record_path(self.state).write_text(json.dumps(
+            {"schema_version": 1, "resets": [{"schema_version": 1, "pane_id": PANE}]}))
+        with self.assertRaisesRegex(StateError, "malformed"):
+            foreman_reset.replay(self.state, self.plan)
 
 
 class ResetCommandTest(CliCase):
@@ -193,6 +224,22 @@ class ResetCommandTest(CliCase):
         self.assertEqual(spawned[0][spawned[0].index("--stow") + 1], "round-7")
         self.assertTrue(Path(spawned[0][spawned[0].index("--config") + 1]).is_absolute())
         self.assertTrue(Path(spawned[0][spawned[0].index("--state") + 1]).is_absolute())
+
+    def test_a_retry_replays_before_preconditions_that_the_reset_itself_changed(self):
+        # A live pid: this test process stands in for the running deliverer.
+        foreman_reset.schedule(self.state, {"pane_id": PANE, "stow": "round-7"}, "t1", os.getpid)
+        with patch("teamlead.cli.memory.show", return_value={"record": {"id": "round-7", "reset_ready": False}}), \
+             patch("teamlead.cli.supervision.load", return_value=supervision_data(active=True)[0]), \
+             patch("teamlead.cli._spawn_detached", side_effect=AssertionError("must not spawn")):
+            code, out, err = self.run_cli(self.base() + ["foreman-reset"])
+        self.assertEqual(code, 0, err)
+        self.assertTrue(json.loads(out)["replayed"])
+
+    def test_the_deliverer_never_takes_the_state_lock_its_parent_holds(self):
+        with patch("teamlead.cli.state_lock", side_effect=AssertionError("deliverer must not take the state lock")):
+            code, out, err = self.run_cli(self.base() + ["foreman-reset-deliver", "--pane", PANE, "--stow", "round-7"],
+                                          client=object())
+        self.assertEqual(code, 0, err)
 
     def test_a_deliverer_that_does_not_own_the_reset_sends_nothing(self):
         code, out, err = self.run_cli(self.base() + ["foreman-reset-deliver", "--pane", PANE, "--stow", "round-7"],
