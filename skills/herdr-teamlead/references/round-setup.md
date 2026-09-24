@@ -271,8 +271,10 @@ failed and nothing was written — an absent or unreadable policy artifact or re
 an unfilled placeholder, a supplied key no template uses, a value that is not
 text, a relative, multiline, existing or duplicated `REPORT` destination,
 a report overlapping a generated brief, or a `REPORT` longer than the
-script's limit (the worker's `REPORT: <path>` line must fit one pane row for
-Step 11 to confirm it; use a short reports directory). Exit 3 means the placeholder scan
+script's limit (use a short reports directory). The limit is a coarse
+composition-time cap; `teamlead apply` then measures each target pane and
+refuses, before any input, a `REPORT: <path>` row that pane would wrap — widen
+the pane or recompose with a shorter path. Exit 3 means the placeholder scan
 itself failed, so whether the briefs are clean is unknown: re-run, never
 dispatch on it. The placeholder set and both validation directions are the
 script's contract; see the header of

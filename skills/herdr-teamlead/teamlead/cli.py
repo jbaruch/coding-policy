@@ -1333,6 +1333,7 @@ def cmd_apply(args, client=None, warn=None, trace=None):
             allow_recovery=args.allow_recovery,
             tiers=tiers,
             reserved=reserved,
+            reports=reports,
             retrospective_guard=retrospective_runtime.Guard(state_path, state, client, agents_by_name, at,
                                                           task=args.task, retain=args.retain_context or args.retain_specialist, no_clear=args.no_clear),
         )

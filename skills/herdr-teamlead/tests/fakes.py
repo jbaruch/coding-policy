@@ -9,6 +9,13 @@ import shlex
 import json
 
 
+def pane_layout(pane_id, width):
+    """A `herdr pane layout --pane` response with one pane of `width` columns."""
+    return json.dumps({"result": {"layout": {"area": {"height": 48, "width": width, "x": 0, "y": 0},
+        "panes": [{"focused": True, "pane_id": pane_id, "rect": {"height": 48, "width": width, "x": 0, "y": 0}}],
+        "splits": [], "zoomed": False}, "type": "pane_layout"}})
+
+
 class FakeCompleted:
     """The subset of subprocess.CompletedProcess the transport reads."""
 
@@ -72,6 +79,10 @@ class FakeRunner:
                 if kind in flags:
                     return FakeCompleted(stdout=json.dumps({"result": {"process_info": {"pane_id": argv[4],
                         "foreground_processes": [{"name": kind, "pid": 200, "argv": [kind, flags[kind]]}]}}}))
+            # Dispatch fixtures predate the marker-width gate; give them a pane
+            # wide enough for any fixture path unless a test scripts the layout.
+            if argv[1:4] == ["pane", "layout", "--pane"]:
+                return FakeCompleted(stdout=pane_layout(argv[4], 300))
             raise AssertionError(
                 "FakeRunner has no scripted response for: {}\nscripted: {}".format(
                     joined, sorted(self.responses)

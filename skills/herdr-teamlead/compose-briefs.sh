@@ -42,10 +42,11 @@ set -euo pipefail
 PLACEHOLDER_RE='\{\{[A-Z0-9_]+\}\}'
 # Longest REPORT value a brief may carry. The worker's final message ends with
 # `REPORT: <path>`, and the wait confirms the complete literal on one visible
-# row. A TUI wraps that line at its own content width and
-# a wrap cannot be told from a newline, so the only sound fix
-# is a path that fits one row on every pane this fleet runs: the widest marker
-# line is the prefix plus indentation plus this many characters.
+# row. A TUI wraps that line at its own content width and a wrap cannot be told
+# from a newline, so the path must fit one row of the pane it is sent to. This
+# cap is a coarse composition-time bound only: no brief knows its pane, so
+# `teamlead apply` measures the live pane width and refuses a marker that pane
+# would wrap (`marker_columns` in teamlead/report_delivery.py).
 TEAMLEAD_REPORT_PATH_MAX_COLS="${TEAMLEAD_REPORT_PATH_MAX_COLS:-100}"
 
 warn() { printf 'compose-briefs: %s\n' "$1" >&2; }
