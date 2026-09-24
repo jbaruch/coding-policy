@@ -520,6 +520,26 @@ class HerdrClient:
             raise HerdrError("herdr pane get returned no pane record; restore the pane connection.", {"pane": pane_id})
         return pane
 
+    def argv_pane_layout(self, pane_id):
+        return [self.binary, "pane", "layout", "--pane", pane_id]
+
+    def pane_width(self, pane_id):
+        """Return the pane's live column count from its tab layout."""
+        result = self._run_json_object(self.argv_pane_layout(pane_id))
+        layout = result.get("layout")
+        panes = layout.get("panes") if isinstance(layout, dict) else None
+        for pane in panes if isinstance(panes, list) else ():
+            rect = pane.get("rect") if isinstance(pane, dict) else None
+            if pane.get("pane_id") == pane_id and isinstance(rect, dict):
+                width = rect.get("width")
+                if isinstance(width, int) and not isinstance(width, bool) and width > 0:
+                    return width
+        raise HerdrError(
+            "herdr pane layout returned no width for {}; inspect `herdr pane layout --pane {}` "
+            "and restore the pane before dispatch.".format(pane_id, pane_id),
+            {"pane": pane_id},
+        )
+
     def pane_read(self, pane_id, lines):
         """Read visible rows even while the agent status changes."""
         return self._run([self.binary, "pane", "read", pane_id, "--source", "visible", "--lines", str(lines)])

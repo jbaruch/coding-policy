@@ -18,6 +18,7 @@ import hashlib
 import json
 import os
 import re
+import unicodedata
 from fnmatch import fnmatchcase
 from pathlib import Path
 
@@ -29,6 +30,11 @@ from .errors import UsageError
 
 
 DISPLAY_PREFIXES = {"codex": ("• ",), "grok": ("     ",), "claude": ("\u23fa ",)}
+# Columns each TUI keeps right of its transcript text. Grok holds a scrollbar
+# margin plus room for its right-aligned `12:00 PM` clock on the same row;
+# measured on Grok 1.0.13 (Grok 4.6/4.7), Claude Code 2.1.263 and Codex
+# 0.153.2 under Herdr 0.8.2. An unknown kind takes the widest prefix and reserve.
+MARKER_RIGHT_RESERVE = {"codex": 2, "grok": 15, "claude": 2}
 SESSION_ID = re.compile(r"[A-Za-z0-9_-]+\Z")
 FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
 CONTAINER = re.compile(r"^ {0,3}(?:>|[-+*•][ \t]|[0-9]{1,9}[.)][ \t])")
@@ -63,6 +69,15 @@ def bare_final(text, report):
     # Unmarked rows can be lazy paragraph continuations inside a list/quote.
     # A blank row ends that ambiguity for an unindented final marker.
     return not fence and not container
+
+
+def marker_columns(kind, report):
+    """Columns the worker's `REPORT: <path>` row needs to stay on one row."""
+    prefixes = DISPLAY_PREFIXES.get(kind) or tuple(p for group in DISPLAY_PREFIXES.values() for p in group)
+    reserve = MARKER_RIGHT_RESERVE.get(kind, max(MARKER_RIGHT_RESERVE.values()))
+    text = "REPORT: " + report
+    wide = sum(1 for char in text if unicodedata.east_asian_width(char) in ("W", "F"))
+    return max(len(prefix) for prefix in prefixes) + len(text) + wide + reserve
 
 
 def decorated_row(visible, kind, report):

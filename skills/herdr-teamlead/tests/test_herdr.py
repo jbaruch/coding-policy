@@ -26,7 +26,7 @@ from teamlead.herdr import (
     trace_enabled_in_env,
 )
 
-from tests.fakes import FakeRunner, agent_json, ok_json
+from tests.fakes import FakeRunner, agent_json, ok_json, pane_layout
 
 
 class ArgvBuilderTest(unittest.TestCase):
@@ -297,6 +297,23 @@ class ExecutionTest(unittest.TestCase):
         client = HerdrClient(runner=runner)
         self.assertEqual(client.agent_prompt("grok", "/usage")["type"], "agent_prompt")
         self.assertEqual(client.agent_send_keys("claude", ["esc"])["type"], "agent_send_keys")
+
+    def test_pane_width_reads_the_named_pane_rect(self):
+        runner = FakeRunner()
+        runner.set("pane layout --pane w11:p1", pane_layout("w11:p1", 106))
+        self.assertEqual(HerdrClient(runner=runner).pane_width("w11:p1"), 106)
+
+    def test_pane_width_refuses_a_layout_without_that_pane(self):
+        runner = FakeRunner()
+        runner.set("pane layout --pane w11:p1", pane_layout("w11:p2", 106))
+        with self.assertRaises(HerdrError):
+            HerdrClient(runner=runner).pane_width("w11:p1")
+
+    def test_pane_width_refuses_a_non_positive_width(self):
+        runner = FakeRunner()
+        runner.set("pane layout --pane w11:p1", pane_layout("w11:p1", 0))
+        with self.assertRaises(HerdrError):
+            HerdrClient(runner=runner).pane_width("w11:p1")
 
     def test_pane_wait_output_executes_the_built_argv(self):
         runner = FakeRunner()

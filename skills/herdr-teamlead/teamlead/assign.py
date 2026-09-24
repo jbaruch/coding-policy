@@ -58,6 +58,7 @@ from .chronology import latest_assignment
 from .recovery import JUDGE_MODES, empty_recovery, fresh_transition, task_record, validate_work
 from .launch import restart_worker, verify_running, verify_running_permissions
 from .tiers import canonical_role, launch_flags, require_seatable, worker_launch_args
+from .report_delivery import marker_columns
 from .composition import normalize_requirement, parse_requirements, seat_holds
 
 # Version 3 adds verified model-tier metadata to context and task/fix evidence.
@@ -558,6 +559,34 @@ def build_steps(client, assignments, agents_by_name, paths, panes=None, no_clear
     return steps
 
 
+def refuse_wrapping_markers(client, steps, agents_by_name, reports):
+    """Refuse, before any input, a report marker the target pane would wrap.
+
+    A wrapped `REPORT: <path>` row cannot be told from two authored rows, so
+    delivery could never be confirmed (`report_delivery.decorated_row`). The
+    live pane width decides; the brief-time length cap in compose-briefs.sh
+    cannot know which pane a worker sits in.
+    """
+    too_narrow = {}
+    for step in steps:
+        report = (reports or {}).get(step["role"])
+        if report is None:
+            continue
+        needed = marker_columns(agents_by_name[step["agent"]].kind, report)
+        width = client.pane_width(step["pane_id"])
+        if needed > width:
+            too_narrow[step["agent"]] = {"role": step["role"], "pane_width": width, "needed": needed}
+    if too_narrow:
+        raise UsageError(
+            "The REPORT marker would wrap in {} - the worker could finish and the wait could never "
+            "confirm delivery. Widen the pane to the needed columns, or recompose the brief with a "
+            "shorter reports directory, then re-run. Nothing was sent.".format(
+                ", ".join("{} ({} columns, needs {})".format(name, row["pane_width"], row["needed"])
+                          for name, row in sorted(too_narrow.items()))),
+            {"too_narrow": too_narrow},
+        )
+
+
 def check_all_ready(client, assignments, agents_by_name, warn=None):
     """Read every target's live status before anything is sent.
 
@@ -596,7 +625,7 @@ def check_all_ready(client, assignments, agents_by_name, warn=None):
     return statuses
 
 
-def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle_timeout_ms=DEFAULT_SETTLE_TIMEOUT_MS, on_assigned=None, warn=None, sleep=time.sleep, settle_sec=COMPOSER_SETTLE_SEC, landing_attempts=LANDING_ATTEMPTS, start_timeout_ms=DEFAULT_START_TIMEOUT_MS, allow_recovery=False, task=None, retain_context=False, fix_round=None, judge_mode=None, history=None, tiers=None, recovery=None, plan_id=None, work=None, on_prepare=None, on_before_send=None, on_result=None, retrospective_guard=None, retain_specialist=False, requirements=None, reserved=None):
+def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle_timeout_ms=DEFAULT_SETTLE_TIMEOUT_MS, on_assigned=None, warn=None, sleep=time.sleep, settle_sec=COMPOSER_SETTLE_SEC, landing_attempts=LANDING_ATTEMPTS, start_timeout_ms=DEFAULT_START_TIMEOUT_MS, allow_recovery=False, task=None, retain_context=False, fix_round=None, judge_mode=None, history=None, tiers=None, recovery=None, plan_id=None, work=None, on_prepare=None, on_before_send=None, on_result=None, retrospective_guard=None, retain_specialist=False, requirements=None, reserved=None, reports=None):
     """Hand each agent its brief using the selected context mode.
 
     `on_assigned(role, agent, at, status, context)` is called after each hand-off so the
@@ -669,6 +698,7 @@ def apply(client, assignments, agents_by_name, paths, at, no_clear=False, settle
             raise UsageError("Herdr reported no pane for {!r}; inspect `herdr agent list` before dispatch so live YOLO arguments can be verified.".format(step["agent"]), {})
         if not step["tier"]:
             verify_running_permissions(client, agents_by_name[step["agent"]], step["pane_id"])
+    refuse_wrapping_markers(client, steps, agents_by_name, reports)
 
     if retrospective_guard is not None:
         retrospective_guard.preflight(steps, statuses)

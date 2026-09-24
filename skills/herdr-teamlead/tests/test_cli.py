@@ -28,6 +28,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from teamlead import attention, cli
+from teamlead.report_delivery import marker_columns
 from teamlead.cli import build_parser, main
 from teamlead.errors import UsageError
 from teamlead.herdr import HerdrClient
@@ -40,6 +41,7 @@ from tests.fakes import (
     agent_json,
     composer_reads,
     ok_json,
+    pane_layout,
 )
 
 AT = "2026-02-03T10:00:00+00:00"
@@ -1211,6 +1213,34 @@ class ApplyCommandTest(CliCase):
         dispatch = saved["recovery"]["dispatches"][0]
         self.assertEqual(dispatch["role"], "reviewer#api")
         self.assertEqual(dispatch["reviewer_scope"], "verification")
+
+    def _seat_dispatch_into(self, width_delta):
+        # The report path's length depends on the temp dir, so the pane is
+        # sized from the marker itself: exactly fitting, or one column short.
+        report = str(self.tmp / "wrap-report.md")
+        client = self._client({"grok": "idle"})
+        self.runner.set("pane layout --pane w4:p1", pane_layout("w4:p1", marker_columns("grok", report) + width_delta))
+        save_state(self.state, empty_state())
+        return self.run_cli(
+            self.base()
+            + ["apply", "--composer-settle", "0",
+               "--assignments", json.dumps(self.seat_plan),
+               "--task", "t-wrap", "--common", str(self.common), "--now", AT]
+            + ["--brief", "reviewer#api=" + str(self.seat_brief),
+               "--report", "reviewer#api=" + report],
+            client=client,
+        )
+
+    def test_a_report_marker_the_pane_would_wrap_is_refused_before_input(self):
+        code, _, err = self._seat_dispatch_into(-1)
+        self.assertNotEqual(code, 0)
+        self.assertIn("REPORT marker would wrap", err)
+        self.assertEqual(self.runner.writes(), [])
+
+    def test_a_report_marker_that_exactly_fits_the_pane_dispatches(self):
+        code, _, err = self._seat_dispatch_into(0)
+        self.assertEqual(code, 0, err)
+        self.assertIn("pane layout --pane w4:p1", self.runner.commands())
 
     def test_a_saved_seat_dispatch_reloads_with_its_history(self):
         # The ledger row carries the responsibility and the dispatch carries

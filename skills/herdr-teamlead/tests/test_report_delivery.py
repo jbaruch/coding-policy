@@ -58,6 +58,24 @@ def encode(rows):
     return "\n".join(json.dumps(row) for row in rows) + "\n"
 
 
+class MarkerColumnsTests(unittest.TestCase):
+    REPORT = "/Users/me/.local/state/fleet/r/architect.md"
+
+    def test_each_kind_adds_its_prefix_and_right_reserve(self):
+        text = len("REPORT: " + self.REPORT)
+        self.assertEqual(delivery.marker_columns("grok", self.REPORT), 5 + text + 15)
+        self.assertEqual(delivery.marker_columns("codex", self.REPORT), 2 + text + 2)
+        self.assertEqual(delivery.marker_columns("claude", self.REPORT), 2 + text + 2)
+
+    def test_unknown_kind_takes_the_widest_prefix_and_reserve(self):
+        self.assertEqual(delivery.marker_columns("gemini", self.REPORT),
+                         delivery.marker_columns("grok", self.REPORT))
+
+    def test_wide_characters_count_two_columns(self):
+        self.assertEqual(delivery.marker_columns("codex", "/r/\u5831\u544a.md"),
+                         delivery.marker_columns("codex", "/r/abcd.md"))
+
+
 class NativeDeliveryTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()

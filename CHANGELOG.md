@@ -1,5 +1,29 @@
 # Changelog
 
+### Fixed
+
+- **`teamlead apply` refuses a report marker the target pane would wrap
+  (#513).** A Grok architect finished a NanoClaw Telegram round, wrote its
+  report and ended with the correct `REPORT: <path>` line, but the 106-column
+  pane wrapped the path onto a second row. Both waits returned exit 4 and
+  `recover-report` rightly refused the split marker: a wrap cannot be told
+  from two authored rows, which is why delivery confirmation never joins rows.
+  The defence was `compose-briefs.sh`'s 100-character `REPORT` cap, whose
+  comment promised a path that "fits one row on every pane this fleet runs".
+  It did not: Grok indents five columns and keeps about four at the right
+  edge, so on that pane any path over ~93 characters wraps, and a row that
+  also carries Grok's clock wraps sooner. No brief knows its pane, so no
+  compose-time constant can keep that promise. `apply` now reads each target's
+  live width (`herdr pane layout --pane`) and refuses the whole round, before
+  any input, when a worker's display prefix, marker, path and right-edge
+  reserve (`MARKER_RIGHT_RESERVE` in `teamlead/report_delivery.py`) exceed it,
+  naming the pane width and the columns needed. The compose-time cap stays as
+  a coarse bound. The issue asked for recovery to accept wrapped markers; that
+  would reintroduce the row join delivery refuses, so the fix prevents the
+  wrap instead. Already-stuck reports still need an owner decision.
+  `standup-ask.sh` makes the same one-row promise on its own send path and is
+  tracked in #515.
+
 ## 0.3.265 — 2026-09-24
 
 ### Changed
