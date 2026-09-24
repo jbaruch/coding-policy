@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.263 — 2026-09-24
+
 ### Added
 
 - **`teamlead load-set` lists the records one foreman decision depends on.**
