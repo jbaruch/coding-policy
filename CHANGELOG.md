@@ -1,5 +1,30 @@
 # Changelog
 
+### Changed
+
+- **The judge checks cited evidence instead of investigating the tree.** An
+  operator caught the pinned judge doing open-ended archaeology on
+  top-tier tokens during a bot-versus-reviewers adjudication. The rule told it
+  to: adjudication "verifies the disputed facts against the tree," while
+  diagnosis had already moved that digging to the cheaper investigator seat.
+
+  Each adjudication position now cites its evidence (file and line, command
+  output, revision). The foreman copies those citations into the judge brief
+  and never supplies its own. A position with no citations goes to an
+  investigator before the judge is dispatched at all. The judge checks only what is cited and never
+  explores beyond it. A disputed fact with no citation, or one the citations
+  cannot settle, gets the new ruling `insufficient — <facts needed>`. The
+  foreman then dispatches an investigator to establish exactly those facts
+  with citations and re-dispatches the judge on the same dispute with that
+  report. The dispute was never settled, so this is not a second ruling on a
+  settled dispute. The investigator's citations are admissible evidence on
+  that re-dispatch. `insufficient` settles nothing: it binds nothing and no
+  checkpoint cites it. `blocked` narrows to questions only the operator can
+  answer (authority, intent, or a choice no tree records). A citation names
+  a file and line, or command output, at a revision, because the judge runs
+  no git command. The no-exploring limit applies to adjudication only;
+  diagnosis still reads the round history.
+
 ## 0.3.263 — 2026-09-24
 
 ### Added

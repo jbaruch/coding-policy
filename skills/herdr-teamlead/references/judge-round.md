@@ -15,7 +15,16 @@ disagreement inside SKILL.md Step 14 returns here first). No trigger — proceed
 SKILL.md Step 14.
 
 For a dispute, compose from `templates/brief-judge.md` through SKILL.md Step 7: the
-dispute, both positions with report paths, the governing rule, the tree.
+dispute, both positions with report paths, the governing rule, the tree. Fill
+`POSITION_A_EVIDENCE` and `POSITION_B_EVIDENCE` with the citations each report
+makes (file and line, or command output, at a revision), copied, never supplied by the
+foreman. A position that cites nothing is not ready for the judge: dispatch an
+investigator under `skills/herdr-teamlead/references/specialists.md` to
+establish the disputed facts with citations first, fill that position's
+evidence value with `supplied by the investigator report`, and fill
+`INVESTIGATION_REPORT` with that report. Fill
+`INVESTIGATION_REPORT` with the investigator's report after an `insufficient`
+ruling as well, otherwise "none".
 
 For an exhausted allowance, compose from `templates/brief-judge-diagnosis.md`
 through SKILL.md Step 7 under the role key `judge-diagnosis`, which writes
@@ -99,6 +108,7 @@ under observation.
 Apply the Ruling Outcomes contract in `skills/herdr-teamlead/references/round-flow.md`. Investigation
 rulings return to SKILL.md Step 12's knowledge gate. Implementation rulings route
 unchanged-branch rulings to verified release or renewed verification,
-branch-changing rulings to the counted correction path, and a blocked ruling
-to its saved operator question. Only the operator overrides a ruling.
+branch-changing rulings to the counted correction path, an `insufficient`
+ruling to an investigator and then back to step 1, and a blocked ruling to its
+saved operator question. Only the operator overrides a completed ruling; `insufficient` binds nothing and creates no checkpoint.
 Continue immediately to the step named by that outcome.

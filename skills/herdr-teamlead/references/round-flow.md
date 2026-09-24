@@ -12,7 +12,7 @@ The shape of one task round, and what the foreman does between the steps of
 | reviewer | none | independent COMMENT review and report |
 | advisor, investigator, architect | none | bounded recommendation, diagnosis or design report |
 | release | release operations only | verified release report |
-| judge | none | binding dispute ruling |
+| judge | none | completed dispute ruling (binding), or a non-binding `insufficient` |
 
 Activate the responsibilities the next task decision needs. Add specialty
 requirements through `references/specialists.md`; a profile on the bench needs
@@ -376,22 +376,30 @@ shapes are the owner's, in `references/dispatch-recovery.md`.
 It is read-only without exception in either mode: no file edit, no mutating
 git or `gh` command, no GitHub post, no subagent dispatch.
 
-Adjudicating, it reads both positions and the governing rule, verifies the
-disputed facts against the tree itself rather than trusting either side's
-framing, and returns a report opening with three
-lines — `RULING: uphold A | uphold B | amend — <line> | blocked — <question>`,
+Adjudicating, it reads both positions and the governing rule, checks only the
+evidence each position cites, and the citations of any attached investigator
+report, against the tree rather than trusting either
+side's framing, and never explores beyond those citations. It returns a report
+opening with three
+lines — `RULING: uphold A | uphold B | amend — <line> | insufficient — <facts needed> | blocked — <question>`,
 `ACTION:` naming the minimal step, `UNVERIFIED:` naming anything it could not
 check — followed by its numbered reasons.
 
 Those three lines belong to adjudication; a diagnosis carries the five above
 and never a `RULING:` or an `ACTION:`.
 
-`blocked` is the judge declining to rule on a dispute it cannot settle from
-the tree and the rule text alone. The round stops there and the named question
-goes to the operator. The foreman does not dispatch a second judge and does not
+`insufficient` is the judge declining to rule because the cited evidence
+cannot settle a named fact. It settles nothing, binds nothing, and no
+checkpoint cites it; an investigator establishes the fact and the judge rules
+again with that report. An attached investigator report's citations are
+admissible evidence, on the first dispatch or after `insufficient`.
+
+`blocked` is the judge declining to rule on a question only the operator can
+answer: authority, intent, or a choice no tree records. The round stops there
+and the named question goes to the operator. The foreman does not dispatch a second judge and does not
 rule in its place.
 
-The ruling or remedy binds the round the moment the foreman reads it. Only the
+A completed ruling or remedy binds the round the moment the foreman reads it. Only the
 operator overrides one; record the override and why in the round log. No
 diagnosis remedy waits on an operator for the task to reach a terminal state.
 A `blocked` adjudication is the one ruling that does: it stops the round and
@@ -447,14 +455,21 @@ finish, apply the whole-fleet pause/handoff contract in `references/supervision.
 `skills/herdr-teamlead/references/judge-round.md` step 7 follows these branches. Before a finish, preserve any user question and
 apply the whole-fleet pause/handoff contract in `references/supervision.md`.
 
-The `RULING:` line binds the round. Only the operator overrides it.
+A completed `RULING:` line binds the round. Only the operator overrides it. `insufficient` binds nothing.
 
-For an investigation-only task, a non-blocked ruling returns to Step 12's
+For an investigation-only task, a completed ruling (`uphold A`, `uphold B` or
+`amend`) returns to Step 12's
 knowledge-deliverable gate with the ruling and any required authorized research.
 Apply the existing correction allowance and judge rules to remaining findings.
 Do not enter implementation Phase 2 or Step 14 without implementation/release
 authorization. A blocked ruling follows the operator-question path below.
 
+- **`insufficient`** — the cited evidence cannot settle the named facts.
+  Dispatch an investigator under
+  `skills/herdr-teamlead/references/specialists.md` to establish
+  exactly those facts with citations. Then re-dispatch the judge on the same
+  dispute, filling `INVESTIGATION_REPORT` with that report. The dispute is not
+  settled, so this is not a second ruling on a settled dispute.
 - **`uphold A` / `uphold B` / `amend`, `ACTION:` changing no branch content**
   — record the ruling. Proceed to Step 14 only with Step 12's broad reports
   against the current tip. Otherwise re-run Phase 2 with full briefs carrying
