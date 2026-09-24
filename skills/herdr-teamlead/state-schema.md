@@ -759,7 +759,9 @@ future shape change bumps `schema_version` and migrates in the owner.
 | `result` | null, the delivery object, or the failure object | `scheduled` and `delivering` hold null. `delivered` holds exactly `{"schema_version", "pane_id", "stow", "agent", "cleared": true, "resume": {"landed": true, "started": true}}`, whose `schema_version`, `pane_id` and `stow` equal the row's. `failed` and `interrupted` hold exactly `{"error": string, "message": string, "details": object, "resume_prompt": string}`; `resume_prompt` is what the operator pastes |
 
 One delivery attempt per pane and stow, never retried automatically. A
-retry replays before any new-reset precondition is checked. A `delivered`
+retry replays before every precondition the reset itself changes (stow
+readiness, supervision work); reading the stow and supervision, and checking
+the caller's pane, still come first. A `delivered`
 row, or a `scheduled` or `delivering` row whose exact process identity is
 still alive, replays. A dead `scheduled` row is finalized `failed` (nothing
 was typed), and a dead `delivering` row `interrupted` (typing may have
@@ -768,5 +770,8 @@ delivered is then refused with its resume prompt, for operator recovery under
 the Working Memory carve-out. The next
 round resets from a new stow. A deliverer claims only the row carrying its
 own process identity. A launch failure, or a deliverer already gone when
-probed, finishes the row `failed`. So no durable row is left `scheduled` with
-a null `process`.
+probed, finishes the row `failed`. A `foreman-reset` that dies between the
+row's first save and the identity save leaves it `scheduled` with a null
+`process`; the next read finds no live deliverer and finalizes it `failed`.
+A deliverer that fails after scheduling exits with a `reset_ended` error whose
+details carry the record path and the resume prompt.

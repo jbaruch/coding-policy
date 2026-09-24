@@ -1384,12 +1384,15 @@ def cmd_foreman_reset(args, client=None, warn=None, trace=None, spawn=None):
     stow = memory.show(state_path, at, args.stow)["record"]
     data = supervision.load(state_path)
     bound_pane = (data.get("binding") or {}).get("identity", {}).get("pane_id")
-    # A retry replays before any new-reset precondition (see foreman_reset.replay).
+    # A retry replays before every precondition the reset itself can change
+    # (stow readiness, supervision work); reading the stow and supervision and
+    # checking the caller's pane still come first (see foreman_reset.replay).
     caller = os.environ.get("HERDR_PANE_ID")
     if bound_pane and caller != bound_pane:
         raise UsageError("foreman-reset runs from the bound foreman's own pane ({}); this call came from {}.".format(
             bound_pane, caller or "outside Herdr"), {"pane_id": bound_pane})
-    existing = foreman_reset.replay(state_path, {"pane_id": bound_pane, "stow": stow["id"]}) if bound_pane else None
+    options = _resume_options(args)
+    existing = foreman_reset.replay(state_path, {"pane_id": bound_pane, "stow": stow["id"]}, options=options) if bound_pane else None
     if existing is not None:
         return {"schema_version": foreman_reset.RESET_SCHEMA_VERSION, "scheduled": True, **existing,
                 "log": str(Path(str(state_path) + ".foreman-reset.log"))}, None
@@ -1409,7 +1412,7 @@ def cmd_foreman_reset(args, client=None, warn=None, trace=None, spawn=None):
             raise StateError("Could not start the reset deliverer ({}); nothing was sent.".format(exc),
                              {"log": str(log)}) from None
 
-    row = foreman_reset.schedule(state_path, plan, at, start)
+    row = foreman_reset.schedule(state_path, plan, at, start, options=options)
     return {"schema_version": foreman_reset.RESET_SCHEMA_VERSION, "scheduled": True, **row, "log": str(log),
             "next": "End this turn now; the deliverer clears the pane once it is idle."}, None
 
@@ -1426,21 +1429,37 @@ def _spawn_detached(argv, sink):
     return process.pid
 
 
+def _resume_options(args):
+    """The non-default owner settings a resumed foreman must keep passing."""
+    options = {"config": str(Path(_config_path(args)).expanduser().resolve())}
+    if getattr(args, "herdr_bin", None):
+        options["herdr_bin"] = _absolute_executable(args.herdr_bin)
+    return options
+
+
 def cmd_foreman_reset_deliver(args, client=None, warn=None, trace=None):
     state_path = Path(_state_path(args)).expanduser().resolve()
     plan = {"pane_id": args.pane, "stow": args.stow}
-    if not foreman_reset.claim(state_path, plan, supervision_runtime.process_identity(os.getpid())):
+    options = _resume_options(args)
+    try:
+        claimed = foreman_reset.claim(state_path, plan, supervision_runtime.process_identity(os.getpid()))
+    except TeamLeadError as exc:
+        # Unclaimed, the row stays `scheduled` under a now-dead deliverer; the
+        # next foreman-reset read finalizes it `failed`.
+        raise foreman_reset.delivery_failed(state_path, args.stow, foreman_reset.failure(exc, args.stow, str(state_path), **options)) from None
+    if not claimed:
         return {"schema_version": foreman_reset.RESET_SCHEMA_VERSION, **plan, "skipped": "not the scheduled owner of this reset"}, None
     try:
         # Setup runs after the claim, so its failure must finish the row too.
         client = client if client is not None else _client(args, trace=trace)
         result = foreman_reset.deliver(
-            client, load_config(_config_path(args)), args.pane, args.stow, str(state_path), warn=warn,
+            client, load_config(_config_path(args)), args.pane, args.stow, str(state_path), warn=warn, options=options,
             still_ready=lambda: memory.show(state_path, now_iso(), args.stow)["record"].get("reset_ready") is True)
     except TeamLeadError as exc:
         status = "interrupted" if isinstance(exc, foreman_reset.DeliveryInterrupted) else "failed"
-        foreman_reset.finish(state_path, plan, status, foreman_reset.failure(exc, args.stow, str(state_path)))
-        raise
+        outcome = foreman_reset.failure(exc, args.stow, str(state_path), **options)
+        foreman_reset.finish(state_path, plan, status, outcome)
+        raise foreman_reset.delivery_failed(state_path, args.stow, outcome) from None
     foreman_reset.finish(state_path, plan, "delivered", result)
     return result, None
 

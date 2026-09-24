@@ -64,18 +64,25 @@ CLAIM_LOCK_POLL_SEC = 0.2
 RESUME_OPENING = "Foreman resume after a planned round-boundary reset."
 RESUME_TEMPLATE = (
     RESUME_OPENING + " Your earlier conversation is gone by design. Run the "
-    "herdr-teamlead skill with `--state {state}` on every teamlead command. Before "
-    "anything else: run `teamlead memory-show --state {state} --id {stow}` and read its "
-    "required files in order; run `teamlead supervision-bind --state {state}`, "
-    "`teamlead supervision-resume --state {state}`, `teamlead supervision-status --state {state}` "
-    "and `teamlead supervision-drain --state {state}`; then "
-    "`teamlead foreman-queue --state {state}`. Load each decision's records before making it, with "
-    "`teamlead load-set --state {state} --decision <plan|brief|gate|diagnose> --task <task>` or "
-    "`teamlead load-set --state {state} --decision wake --enrollment <enrollment-id>`."
+    "herdr-teamlead skill with `{flags}` on every teamlead command. Before "
+    "anything else: run `teamlead memory-show {flags} --id {stow}` and read its "
+    "required files in order; run `teamlead supervision-bind {flags}`, "
+    "`teamlead supervision-resume {flags}`, `teamlead supervision-status {flags}` "
+    "and `teamlead supervision-drain {flags}`; then "
+    "`teamlead foreman-queue {flags}`. Load each decision's records before making it, with "
+    "`teamlead load-set {flags} --decision <plan|brief|gate|diagnose> --task <task>` or "
+    "`teamlead load-set {flags} --decision wake --enrollment <enrollment-id>`."
 )
 
-def resume_prompt(stow, state):
-    return RESUME_TEMPLATE.format(stow=shlex.quote(stow), state=shlex.quote(state))
+
+def resume_prompt(stow, state, *, config=None, herdr_bin=None):
+    """The prompt a fresh context resumes from, carrying every non-default owner setting."""
+    flags = "--state " + shlex.quote(state)
+    if config:
+        flags += " --config " + shlex.quote(config)
+    if herdr_bin:
+        flags += " --herdr-bin " + shlex.quote(herdr_bin)
+    return RESUME_TEMPLATE.format(stow=shlex.quote(stow), flags=flags)
 
 
 OPERATOR_RECOVERY = ("Do not run foreman-reset again for this stow. The operator recovers the foreman under "
@@ -195,7 +202,7 @@ def _alive(process, probe=None):
     return process is not None and (probe or process_identity)(process["pid"]) == process
 
 
-def _settle(document, row, state_path, alive):
+def _settle(document, row, state_path, alive, options):
     """Replay a live or delivered reset; finalize any other, then refuse it for the operator.
 
     A dead `scheduled` row typed nothing and becomes `failed`; a dead
@@ -210,7 +217,7 @@ def _settle(document, row, state_path, alive):
     if changed:
         lost = StateError("The reset deliverer for stow {} exited without finishing.".format(row["stow"]), {"process": row["process"]})
         row.update(status="failed" if row["status"] == "scheduled" else "interrupted",
-                   result=failure(lost, row["stow"], state))
+                   result=failure(lost, row["stow"], state, **options))
     return None, changed
 
 
@@ -220,11 +227,13 @@ def _refuse(row, state_path, cause=None):
         {"record": str(record_path(state_path)), "resume_prompt": row["result"]["resume_prompt"]})
 
 
-def replay(state_path, plan, *, alive=_alive):
+def replay(state_path, plan, *, alive=_alive, options=None):
     """The existing reset for (pane, stow), or None when this stow never reset.
 
-    Read before any new-reset precondition: once a reset ran, its stow's reads
-    and the supervision state legitimately change, and a retry still replays.
+    Read before every precondition the reset itself changes: once a reset
+    ran, its stow's reads and the supervision state legitimately change, and a
+    retry still replays. Reading the stow and supervision, and checking the
+    caller's pane, still come first (`cli.cmd_foreman_reset`).
     A reset that is neither live nor delivered is finalized and refused.
     """
     path = record_path(state_path)
@@ -235,7 +244,7 @@ def replay(state_path, plan, *, alive=_alive):
         row = _row(document, plan)
         if row is None:
             return None
-        live, changed = _settle(document, row, state_path, alive)
+        live, changed = _settle(document, row, state_path, alive, options or {})
         if changed:
             save_state(path, document)
     if live is None:
@@ -243,7 +252,7 @@ def replay(state_path, plan, *, alive=_alive):
     return live
 
 
-def schedule(state_path, plan, at, start, *, alive=_alive, probe=None):
+def schedule(state_path, plan, at, start, *, alive=_alive, probe=None, options=None):
     """Record one reset for (pane, stow) and start its deliverer exactly once.
 
     `start()` launches the deliverer and returns its pid. The record lock is
@@ -257,7 +266,7 @@ def schedule(state_path, plan, at, start, *, alive=_alive, probe=None):
         document = _records(path)
         prior = _row(document, plan)
         if prior is not None:
-            live, changed = _settle(document, prior, state_path, alive)
+            live, changed = _settle(document, prior, state_path, alive, options or {})
             if changed:
                 save_state(path, document)
             if live is not None:
@@ -275,16 +284,24 @@ def schedule(state_path, plan, at, start, *, alive=_alive, probe=None):
                 raise StateError("The reset deliverer (pid {}) exited before it could be identified; nothing was sent.".format(pid), {"pid": pid})
             row["process"] = identity
         except TeamLeadError as exc:
-            row.update(status="failed", result=failure(exc, plan["stow"], str(Path(state_path).expanduser().resolve())))
+            row.update(status="failed", result=failure(exc, plan["stow"], str(Path(state_path).expanduser().resolve()), **(options or {})))
             save_state(path, document)
             _refuse(row, state_path, exc.message)
         save_state(path, document)
         return {**row, "replayed": False}
 
 
-def failure(exc, stow, state):
+def failure(exc, stow, state, **options):
     """The durable result of a failed or interrupted reset: the error and the prompt the operator pastes."""
-    return {"error": exc.code, "message": exc.message, "details": exc.details, "resume_prompt": resume_prompt(stow, state)}
+    return {"error": exc.code, "message": exc.message, "details": exc.details, "resume_prompt": resume_prompt(stow, state, **options)}
+
+
+def delivery_failed(state_path, stow, result):
+    """The error a deliverer exits with once its failure is recorded: where the record and the prompt are."""
+    record = record_path(state_path)
+    return ResetEnded("The reset from stow {} did not complete ({}); {} holds the cause and the resume prompt. {}".format(
+        stow, result["error"], record, OPERATOR_RECOVERY),
+        {"record": str(record), "resume_prompt": result["resume_prompt"], "cause": {"error": result["error"], "message": result["message"]}})
 
 
 @contextmanager
@@ -400,7 +417,7 @@ class DeliveryInterrupted(HerdrError):
 
 
 def deliver(client, agents, pane_id, stow, state, *, still_ready=lambda: True, sleep=time.sleep, clock=time.monotonic, warn=None,
-            budget_sec=IDLE_BUDGET_SEC, poll_sec=IDLE_POLL_SEC, settle_sec=COMPOSER_SETTLE_SEC):
+            budget_sec=IDLE_BUDGET_SEC, poll_sec=IDLE_POLL_SEC, settle_sec=COMPOSER_SETTLE_SEC, options=None):
     """Wait for the foreman's pane to go idle, then clear it and send the resume prompt.
 
     `still_ready()` re-checks the stow right before the clear; a stow that
@@ -415,6 +432,9 @@ def deliver(client, agents, pane_id, stow, state, *, still_ready=lambda: True, s
             raise HerdrError("The foreman's pane {} stayed {} for {}s; nothing was sent. {}".format(
                 pane_id, record.get("agent_status"), budget_sec, OPERATOR_RECOVERY), {"pane_id": pane_id})
         sleep(poll_sec)
+    if not isinstance(record.get("name"), str) or not record["name"]:
+        raise HerdrError("Herdr lists the foreman's pane {} with no agent name, so its runtime cannot be matched; nothing was "
+                         "sent. {}".format(pane_id, OPERATOR_RECOVERY), {"pane_id": pane_id})
     agent = mechanics(agents, record.get("agent"), record["name"])
     if not still_ready():
         raise UsageError("Stow {} is no longer reset-ready; nothing was sent. {}".format(stow, OPERATOR_RECOVERY), {"stow": stow})
@@ -441,7 +461,7 @@ def deliver(client, agents, pane_id, stow, state, *, still_ready=lambda: True, s
                 agent.clear_prompt, agent.kind, pane_id, OPERATOR_RECOVERY), {"pane_id": pane_id})
         client.agent_wait(agent.name, until=SETTLE_STATES, timeout_ms=DEFAULT_SETTLE_TIMEOUT_MS)
         sleep(settle_sec)
-        landing = send_message(client, agent, resume_prompt(stow, state), RESUME_OPENING, pane_id=pane_id, sleep=sleep, warn=warn,
+        landing = send_message(client, agent, resume_prompt(stow, state, **(options or {})), RESUME_OPENING, pane_id=pane_id, sleep=sleep, warn=warn,
                                settle_sec=settle_sec, before_input=guard)
         if not (landing["landed"] and landing["started"]):
             raise HerdrError("The foreman was cleared but the resume prompt did not {} in pane {}. {}".format(

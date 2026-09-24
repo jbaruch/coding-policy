@@ -638,28 +638,42 @@ enrollment. Then schedule the reset:
 
 ```bash
 CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
-bash "$CP/skills/herdr-teamlead/teamlead.sh" foreman-reset --stow <stow-id>
+bash "$CP/skills/herdr-teamlead/teamlead.sh" foreman-reset --stow <stow-id> \
+  [--state <state-file>] [--config <config-file>] [--herdr-bin <path>]
 ```
 
+Pass the same `--state`, `--config` and `--herdr-bin` the stow was recorded
+under; the resume prompt carries them to the next context.
+
 - **Exit 0** — stdout names the scheduled `pane_id`, `stow`, deliverer `pid`
-  and `log`; `replayed: true` means this exact reset was already scheduled, and
-  nothing new started. End the turn now. Once the pane is idle, the deliverer
-  clears it and sends a resume prompt naming that stow. The next context
-  starts at Step 1.
+  and `log`
+  - `replayed: true` means this exact reset was already scheduled, and
+    nothing new started
+  - End the turn now
+  - Once the pane is idle, the deliverer clears it and sends the resume
+    prompt naming that stow; the next context starts at Step 1
 - **Exit 1** — stderr is one JSON object; route on its `error` field:
-  - `reset_ended` — this stow's one reset attempt failed or was interrupted,
-    including a deliverer that could not start. Never re-run it. Record a
-    user-attention blocker quoting `details.resume_prompt` and
-    `details.record`, then end the turn. The operator recovers under the
-    Working Memory carve-out; the next round resets from a new stow
-  - `reset_record_newer` — a newer build wrote the reset record. Record a
-    user-attention blocker to update the plugin; the file stays untouched
-  - `reset_record_unusable` — the reset record is unreadable or malformed.
-    Record a user-attention blocker naming `details.record`; the operator
-    restores it. Never edit or delete it
+  - `reset_ended` — this stow's one reset attempt failed or was
+    interrupted, including a deliverer that could not start
+    - Never re-run `foreman-reset` for this stow
+    - Record a user-attention blocker quoting `details.resume_prompt` and
+      `details.record`
+    - End the turn
+    - The operator recovers under the Working Memory carve-out
+    - The next round resets from a new stow
+  - `reset_record_newer` — a newer build wrote the reset record
+    - Record a user-attention blocker to update the plugin
+    - Leave the file untouched
+  - `reset_record_unusable` — the reset record is a link, unreadable or
+    malformed
+    - Record a user-attention blocker naming `details.record`
+    - Never edit or delete the file; the operator restores it
   - any other `error` — a refused precondition: an unready stow, the wrong
-    pane, supervision work still unheld, or an unreadable stow or state.
-    Fix the cause stderr names and re-run
+    pane, supervision work still unheld, or an unreadable stow or state
+    - Fix the cause stderr names
+    - Re-run `foreman-reset`
+- A deliverer that fails after scheduling writes the same `reset_ended`
+  JSON to the `log` named at exit 0
 - Never end the turn with active work that has no hold
 
 Finish here.

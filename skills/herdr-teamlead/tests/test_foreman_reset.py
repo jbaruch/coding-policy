@@ -194,6 +194,21 @@ class DeliverTest(unittest.TestCase):
         prompt = foreman_reset.resume_prompt("round-7", "/tmp/owner state.json")
         self.assertIn("--state '/tmp/owner state.json'", prompt)
 
+    def test_the_resume_prompt_carries_config_and_herdr_on_every_command(self):
+        prompt = foreman_reset.resume_prompt("round-7", "/s.json", config="/c/my config.json", herdr_bin="/opt/herdr")
+        flags = "--state /s.json --config '/c/my config.json' --herdr-bin /opt/herdr"
+        for command in ("memory-show", "supervision-bind", "supervision-resume", "supervision-status",
+                        "supervision-drain", "foreman-queue", "load-set"):
+            with self.subTest(command=command):
+                self.assertIn("teamlead {} {}".format(command, flags), prompt)
+
+    def test_an_unnamed_foreman_pane_sends_nothing(self):
+        class Unnamed(FakeClient):
+            def agent_list(self):
+                return [{"pane_id": PANE, "agent_status": "idle", "agent": "claude"}]
+        with self.assertRaisesRegex(HerdrError, "(?s)no agent name.*Do not run foreman-reset again"):
+            self.run_deliver(Unnamed(["idle"]))
+
     def test_mechanics_copy_does_not_rename_the_template(self):
         template = worker("claude-a", "claude")
         foreman = foreman_reset.mechanics([template], "claude", "foreman")
@@ -458,6 +473,22 @@ class ResetCommandTest(CliCase):
         self.assertEqual(code, 1)
         rows = json.loads(foreman_reset.record_path(self.state).read_text())["resets"]
         self.assertEqual(rows[-1]["status"], "failed")
+        emitted = json.loads(err)
+        self.assertEqual(emitted["error"], "reset_ended")
+        self.assertEqual(emitted["details"]["record"], str(foreman_reset.record_path(self.state)))
+        self.assertEqual(emitted["details"]["resume_prompt"], rows[-1]["result"]["resume_prompt"])
+        self.assertIn("--config", emitted["details"]["resume_prompt"])
+        self.assertEqual(emitted["details"]["cause"]["message"], "config unreadable")
+
+    def test_a_deliverer_that_cannot_identify_itself_exits_with_the_recovery(self):
+        foreman_reset.schedule(self.state, {"pane_id": PANE, "stow": "round-7"}, "2026-09-24T10:00:00+00:00", os.getpid)
+        with patch("teamlead.cli.supervision_runtime.process_identity", side_effect=StateError("ps timed out", {})):
+            code, _, err = self.run_cli(self.base() + ["foreman-reset-deliver", "--pane", PANE, "--stow", "round-7"],
+                                        client=object())
+        self.assertEqual(code, 1)
+        emitted = json.loads(err)
+        self.assertEqual(emitted["error"], "reset_ended")
+        self.assertIn("memory-show", emitted["details"]["resume_prompt"])
 
     def test_a_deliverer_that_does_not_own_the_reset_sends_nothing(self):
         code, out, err = self.run_cli(self.base() + ["foreman-reset-deliver", "--pane", PANE, "--stow", "round-7"],
