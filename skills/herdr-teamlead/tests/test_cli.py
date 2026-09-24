@@ -28,6 +28,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from teamlead import attention, cli
+from teamlead.report_delivery import marker_columns
 from teamlead.cli import build_parser, main
 from teamlead.errors import UsageError
 from teamlead.herdr import HerdrClient
@@ -40,6 +41,7 @@ from tests.fakes import (
     agent_json,
     composer_reads,
     ok_json,
+    pane_layout,
 )
 
 AT = "2026-02-03T10:00:00+00:00"
@@ -159,6 +161,20 @@ class CliCase(unittest.TestCase):
 
     def base(self):
         return ["--config", str(self.config), "--state", str(self.state)]
+
+    @staticmethod
+    def assign_report(brief, report):
+        """Give a fixture brief the `REPORT:` line a composed brief carries."""
+        text = Path(brief).read_text(encoding="utf-8")
+        if "REPORT: " + str(report) not in text.splitlines():
+            separator = "" if not text or text.endswith("\n") else "\n"
+            Path(brief).write_text(text + separator + "REPORT: " + str(report) + "\n", encoding="utf-8")
+
+    def seat_report(self, name):
+        """A seat report path its brief assigns, as a composed brief would."""
+        report = str(self.tmp / name)
+        self.assign_report(self.seat_brief, report)
+        return report
 
     def brief_args(self, *roles):
         args = []
@@ -888,7 +904,7 @@ class ApplyCommandTest(CliCase):
                "--assignments", json.dumps(self.seat_plan),
                "--task", "t-ledger-seat", "--common", str(self.common), "--now", AT]
             + ["--brief", "reviewer#api=" + str(self.seat_brief),
-               "--report", "reviewer#api=" + str(self.tmp / "ledger-seat.md")],
+               "--report", "reviewer#api=" + self.seat_report("ledger-seat.md")],
             client=client,
         )
         self.assertEqual(code, 0, err)
@@ -1202,7 +1218,7 @@ class ApplyCommandTest(CliCase):
                "--assignments", json.dumps(self.seat_plan),
                "--task", "t-live-seat", "--common", str(self.common), "--now", AT]
             + ["--brief", "reviewer#api=" + str(self.seat_brief),
-               "--report", "reviewer#api=" + str(self.tmp / "seat-report.md")],
+               "--report", "reviewer#api=" + self.seat_report("seat-report.md")],
             client=self._client({"grok": "idle"}),
         )
         self.assertEqual(code, 0, err)
@@ -1211,6 +1227,52 @@ class ApplyCommandTest(CliCase):
         dispatch = saved["recovery"]["dispatches"][0]
         self.assertEqual(dispatch["role"], "reviewer#api")
         self.assertEqual(dispatch["reviewer_scope"], "verification")
+
+    def _seat_dispatch_into(self, width_delta):
+        # The report path's length depends on the temp dir, so the pane is
+        # sized from the marker itself: exactly fitting, or one column short.
+        report = self.seat_report("wrap-report.md")
+        client = self._client({"grok": "idle"})
+        self.runner.set("pane layout --pane w4:p1", pane_layout("w4:p1", marker_columns("grok", report) + width_delta))
+        save_state(self.state, empty_state())
+        return self.run_cli(
+            self.base()
+            + ["apply", "--composer-settle", "0",
+               "--assignments", json.dumps(self.seat_plan),
+               "--task", "t-wrap", "--common", str(self.common), "--now", AT]
+            + ["--brief", "reviewer#api=" + str(self.seat_brief),
+               "--report", "reviewer#api=" + report],
+            client=client,
+        )
+
+    def test_a_report_marker_the_pane_would_wrap_is_refused_before_input(self):
+        code, _, err = self._seat_dispatch_into(-1)
+        self.assertNotEqual(code, 0)
+        self.assertIn("REPORT marker would wrap", err)
+        self.assertEqual(self.runner.writes(), [])
+
+    def test_a_report_the_brief_does_not_assign_is_refused_before_input(self):
+        # A short --report must not stand in for the brief's own longer marker.
+        self.seat_report("long-" + "x" * 200 + ".md")
+        client = self._client({"grok": "idle"})
+        save_state(self.state, empty_state())
+        code, _, err = self.run_cli(
+            self.base()
+            + ["apply", "--composer-settle", "0",
+               "--assignments", json.dumps(self.seat_plan),
+               "--task", "t-mismatch", "--common", str(self.common), "--now", AT]
+            + ["--brief", "reviewer#api=" + str(self.seat_brief),
+               "--report", "reviewer#api=" + str(self.tmp / "r.md")],
+            client=client,
+        )
+        self.assertNotEqual(code, 0)
+        self.assertIn("is not the `REPORT: <path>` line its brief assigns", err)
+        self.assertEqual(self.runner.writes(), [])
+
+    def test_a_report_marker_that_exactly_fits_the_pane_dispatches(self):
+        code, _, err = self._seat_dispatch_into(0)
+        self.assertEqual(code, 0, err)
+        self.assertIn("pane layout --pane w4:p1", self.runner.commands())
 
     def test_a_saved_seat_dispatch_reloads_with_its_history(self):
         # The ledger row carries the responsibility and the dispatch carries
@@ -1224,7 +1286,7 @@ class ApplyCommandTest(CliCase):
                "--assignments", json.dumps(self.seat_plan),
                "--task", "t-reload-seat", "--common", str(self.common), "--now", AT]
             + ["--brief", "reviewer#api=" + str(self.seat_brief),
-               "--report", "reviewer#api=" + str(self.tmp / "reload-report.md")],
+               "--report", "reviewer#api=" + self.seat_report("reload-report.md")],
             client=self._client({"grok": "idle"}),
         )
         self.assertEqual(code, 0, err)
