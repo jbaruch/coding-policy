@@ -50,6 +50,8 @@ import time
 DEFAULT_INTERVAL_SEC = 5.0
 DEFAULT_BUDGET_SEC = 60.0
 GH_TIMEOUT_SEC = 30.0
+PR_STATES = frozenset({"OPEN", "MERGED", "CLOSED"})
+ISSUE_STATES = frozenset({"OPEN", "CLOSED"})
 
 # The two non-closing issue lines the Step 2 template allows, each a whole
 # line, so "No issue found" or "Part of #483 remains open" does not count.
@@ -89,11 +91,14 @@ def gh_json(args, timeout):
         raise GhError("gh {} did not answer within {:g}s; check `gh auth status` and network access, then re-run".format(
             " ".join(args), timeout)) from None
     if done.returncode != 0:
-        raise GhError("gh {} failed: {}".format(" ".join(args), done.stderr.strip()))
+        raise GhError("gh {} failed ({}). Check `gh auth status`, and that the owner, repo and number name an "
+                      "existing PR or issue you can read, then re-run".format(
+                          " ".join(args), done.stderr.strip() or "exit {}, no message".format(done.returncode)))
     try:
         return json.loads(done.stdout)
     except json.JSONDecodeError as exc:
-        raise GhError("gh {} returned invalid JSON: {}".format(" ".join(args), exc)) from None
+        raise GhError("gh {} returned invalid JSON ({}). Run the same command by hand to see its output, update the "
+                      "GitHub CLI if it is not JSON, then re-run".format(" ".join(args), exc)) from None
 
 
 def _shape(ok, what):
@@ -109,7 +114,7 @@ def _absent_as(value, default):
 def read_pr(owner, repo, pr, gh):
     data = gh(["pr", "view", str(pr), "-R", "{}/{}".format(owner, repo),
                "--json", "state,body,closingIssuesReferences"], GH_TIMEOUT_SEC)
-    _shape(isinstance(data, dict) and isinstance(data.get("state"), str), "the PR")
+    _shape(isinstance(data, dict) and data.get("state") in PR_STATES, "the PR")
     refs = _absent_as(data.get("closingIssuesReferences"), [])
     body = _absent_as(data.get("body"), "")
     _shape(isinstance(refs, list) and isinstance(body, str), "the PR")
@@ -134,7 +139,7 @@ def read_pr(owner, repo, pr, gh):
 
 def issue_state(repo, number, gh, timeout):
     data = gh(["issue", "view", str(number), "-R", repo, "--json", "state"], timeout)
-    _shape(isinstance(data, dict) and isinstance(data.get("state"), str), "issue {}#{}".format(repo, number))
+    _shape(isinstance(data, dict) and data.get("state") in ISSUE_STATES, "issue {}#{}".format(repo, number))
     return data["state"]
 
 

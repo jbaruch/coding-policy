@@ -168,7 +168,7 @@ class Errors(unittest.TestCase):
                     self.assertIn(name, err)
 
     def test_unexpected_response_shapes_are_exit_2_not_a_traceback(self):
-        shapes = [[], {"state": 3}, {"state": "OPEN", "closingIssuesReferences": {}},
+        shapes = [[], {"state": 3}, {"state": "DRAFT"}, {"state": "OPEN", "closingIssuesReferences": {}},
                   {"state": "OPEN", "closingIssuesReferences": [{"number": "1"}]},
                   {"state": "OPEN", "closingIssuesReferences": [{"number": 1, "repository": []}]}]
         for shape in shapes:
@@ -177,12 +177,25 @@ class Errors(unittest.TestCase):
                 self.assertEqual((code, report), (2, None))
                 self.assertIn("unexpected shape", err)
 
-    def test_an_issue_state_of_the_wrong_shape_is_exit_2(self):
+    def test_an_issue_state_outside_the_enum_is_exit_2(self):
+        state = None
+
         def gh(args, timeout):
-            return merged_pr([ref(1)]) if args[:2] == ["pr", "view"] else {"state": None}
-        code, report, err = run(gh, "12", "--merged")
-        self.assertEqual((code, report), (2, None))
-        self.assertIn("issue jbaruch/coding-policy#1", err)
+            return merged_pr([ref(1)]) if args[:2] == ["pr", "view"] else {"state": state}
+        for state in (None, "MERGED", "LOCKED"):
+            with self.subTest(state=state):
+                code, report, err = run(gh, "12", "--merged")
+                self.assertEqual((code, report), (2, None))
+                self.assertIn("issue jbaruch/coding-policy#1", err)
+
+    def test_gh_diagnostics_name_the_repair(self):
+        failed = mock.Mock(returncode=1, stderr="", stdout="")
+        garbled = mock.Mock(returncode=0, stderr="", stdout="not json")
+        for done, repair in ((failed, "gh auth status"), (garbled, "update the GitHub CLI")):
+            with self.subTest(repair=repair), mock.patch.object(check.subprocess, "run", return_value=done):
+                with self.assertRaises(check.GhError) as caught:
+                    check.gh_json(["pr", "view", "12"], 5)
+                self.assertIn(repair, str(caught.exception))
 
 
 if __name__ == "__main__":
