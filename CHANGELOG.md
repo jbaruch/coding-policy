@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.265 — 2026-09-24
+
 ### Changed
 
 - **Per-machine installer state is no longer read as a project lock file.**
