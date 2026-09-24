@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.267 — 2026-09-24
+
 ### Fixed
 
 - **The release skill's PR body names the issues it closes, and checks they
