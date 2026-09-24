@@ -70,6 +70,25 @@
   record written by a newer build reads as no prior reset and refuses
   writes, instead of being reported as corrupt.
 
+## 0.3.267 — 2026-09-24
+
+### Fixed
+
+- **The release skill's PR body names the issues it closes, and checks they
+  closed (#517).** A 2026-09-24 triage found 16 open issues that merged PRs
+  had already fixed. Every one of those PRs wrote `Refs #N`, a bullet
+  mentioning `(#N)`, or nothing, and GitHub treats all three as mentions
+  rather than closing keywords. The cause was the Step 2 body template: it had
+  a Summary and a Test plan and no issue line, so each agent improvised one,
+  and the herdr release brief told its worker not to improvise around a
+  template that left the link out. Step 2's template now ends in a `Closes
+  #<n>` line, with `Part of #<n>` for a partial resolution and `No issue` for
+  untracked work. The new `check-closing-issues.py` reads GitHub's resolved
+  `closingIssuesReferences` before merge and refuses a body that links
+  nothing and declares no alternative. After merge, `--merged` polls each
+  closing issue until it closes, since GitHub closes them asynchronously, and
+  names any still open at the budget.
+
 ## 0.3.266 — 2026-09-24
 
 ### Fixed
