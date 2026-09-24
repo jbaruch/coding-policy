@@ -750,13 +750,13 @@ change bumps `schema_version` and migrates in the owner
 | `status` | one of `scheduled`, `delivering`, `delivered`, `failed`, `interrupted` | `scheduled` → `delivering` → `delivered`; `failed` before any keystroke; `interrupted` after one |
 | `scheduled_at` | ISO-8601 string with timezone | The `foreman-reset` time |
 | `process` | `{"pid": integer, "identity": string}`, or null | The deliverer's process: its pid and a digest of its start time and command line (`supervision_runtime.process_identity`). Null only between the row's first save and the deliverer's start, both under the record lock. A reused pid carries another identity |
-| `result` | null, the delivery object, or an error object | Null until finished. `delivered` holds `{"schema_version", "pane_id", "stow", "agent", "cleared", "resume": {"landed", "started"}}`. `failed` and `interrupted` hold the error's `{"error", "message", "details"}`, or `{"error": "deliverer_lost", "process"}` when a scheduled deliverer vanished. `scheduled` and `delivering` rows hold null |
+| `result` | null, the delivery object, or the failure object | `scheduled` and `delivering` hold null. `delivered` holds exactly `{"schema_version", "pane_id", "stow", "agent", "cleared": true, "resume": {"landed": true, "started": true}}`. `failed` and `interrupted` hold exactly `{"error": string, "message": string, "details": object, "resume_prompt": string}`; `resume_prompt` is what the operator pastes |
 
-A `delivered` row replays forever, and a retry replays before any new-reset
-precondition is checked. A `scheduled` or `delivering` row replays while its
-process is alive. A `scheduled` row whose process is gone is marked `failed`
-and scheduled again, since nothing was typed. A `delivering` row whose process
-is gone, and any `interrupted` row, is refused, because the pane may already
-be cleared. A new stow starts a new reset. A deliverer claims only the row
-carrying its own process identity, and "alive" means that exact identity. A `failed` row allows a new row for the same pane and
-stow.
+One delivery attempt per pane and stow, never retried automatically. A
+retry replays before any new-reset precondition is checked. A `delivered`
+row, or a `scheduled` or `delivering` row whose exact process identity is
+still alive, replays. Every other existing row is refused with its resume
+prompt, for operator recovery under the Working Memory carve-out. The next
+round resets from a new stow. A deliverer claims only the row carrying its
+own process identity. A launch or probe failure finishes the row `failed`,
+so no durable row is left with a null `process`.

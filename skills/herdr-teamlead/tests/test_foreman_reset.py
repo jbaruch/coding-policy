@@ -96,7 +96,7 @@ class HandoffHoldTest(unittest.TestCase):
 
 
 class DeliverTest(unittest.TestCase):
-    def run_deliver(self, client, *, screen_changed=True, landed=True, budget=30, still_ready=lambda: True):
+    def run_deliver(self, client, *, screen_changed=True, landed=True, started=None, budget=30, still_ready=lambda: True):
         calls = []
         ticks = iter(range(0, 10000, 5))
 
@@ -108,7 +108,7 @@ class DeliverTest(unittest.TestCase):
         def message(c, agent, text, needle, **kw):
             kw["before_input"]()
             calls.append(("message", agent.name, kw["pane_id"], text))
-            return {"landed": landed, "started": landed}
+            return {"landed": landed, "started": landed if started is None else started}
 
         with patch("teamlead.foreman_reset.send_command", side_effect=command), \
              patch("teamlead.foreman_reset.send_message", side_effect=message):
@@ -139,6 +139,21 @@ class DeliverTest(unittest.TestCase):
     def test_a_resume_prompt_that_did_not_land_is_an_interrupted_delivery(self):
         with self.assertRaisesRegex(foreman_reset.DeliveryInterrupted, "did not land"):
             self.run_deliver(FakeClient(["idle"]), landed=False)
+
+    def test_a_prompt_that_landed_but_started_no_turn_is_interrupted(self):
+        with self.assertRaisesRegex(foreman_reset.DeliveryInterrupted, "start a turn"):
+            self.run_deliver(FakeClient(["idle"]), started=False)
+
+    def test_a_stow_that_changes_between_keystrokes_stops_the_prompt(self):
+        answers = iter([True, True, False])
+        with self.assertRaisesRegex(foreman_reset.DeliveryInterrupted, "stopped being reset-ready"):
+            self.run_deliver(FakeClient(["idle"]), still_ready=lambda: next(answers))
+
+    def test_every_resume_command_is_a_runnable_teamlead_call(self):
+        prompt = foreman_reset.resume_prompt("round-7", "/s.json")
+        for command in ("memory-show", "supervision-bind", "supervision-resume", "supervision-status",
+                        "supervision-drain", "foreman-queue", "load-set"):
+            self.assertIn("`teamlead {} --state /s.json".format(command), prompt)
 
     def test_a_refusal_before_any_keystroke_is_an_ordinary_failure(self):
         with self.assertRaises(HerdrError) as caught:
@@ -204,6 +219,10 @@ class RecordTest(unittest.TestCase):
     def me(self, pid=1001):
         return {"pid": pid, "identity": "proc-%d" % pid}
 
+    DELIVERED = {"schema_version": 1, "pane_id": PANE, "stow": "round-7", "agent": "foreman", "cleared": True,
+                 "resume": {"landed": True, "started": True}}
+    FAILURE = {"error": "herdr_error", "message": "boom", "details": {}, "resume_prompt": "resume"}
+
     def test_a_retry_of_a_live_reset_replays_without_spawning(self):
         first = self.schedule("2026-09-24T10:00:00+00:00", True)
         again = self.schedule("2026-09-24T10:05:00+00:00", True)
@@ -211,31 +230,41 @@ class RecordTest(unittest.TestCase):
 
     def test_a_delivered_reset_replays_even_after_its_process_exits(self):
         self.schedule("2026-09-24T10:00:00+00:00", True)
-        foreman_reset.finish(self.state, self.plan, "delivered", {"cleared": True})
+        foreman_reset.finish(self.state, self.plan, "delivered", self.DELIVERED)
         again = self.schedule("2026-09-24T10:05:00+00:00", False)
         self.assertTrue(again["replayed"])
         self.assertEqual(self.starts, 1)
 
-    def test_a_reset_whose_deliverer_died_before_claiming_is_rescheduled(self):
-        self.schedule("2026-09-24T10:00:00+00:00", True)
-        again = self.schedule("2026-09-24T10:05:00+00:00", False)
-        self.assertEqual((again["replayed"], again["process"]), (False, self.me(1002)))
-        rows = json.loads(foreman_reset.record_path(self.state).read_text())["resets"]
-        self.assertEqual([row["status"] for row in rows], ["failed", "scheduled"])
+    def test_no_ended_reset_is_retried_and_each_refusal_carries_the_resume_prompt(self):
+        for status in ("failed", "interrupted", "scheduled", "delivering"):
+            with self.subTest(status=status):
+                foreman_reset.record_path(self.state).unlink(missing_ok=True)
+                self.starts = 0
+                self.schedule("2026-09-24T10:00:00+00:00", True)
+                if status == "delivering":
+                    foreman_reset.claim(self.state, self.plan, self.me())
+                elif status != "scheduled":
+                    foreman_reset.finish(self.state, self.plan, status, self.FAILURE)
+                with self.assertRaises(UsageError) as caught:
+                    self.schedule("2026-09-24T10:05:00+00:00", False)
+                self.assertIn("is not retried", caught.exception.message)
+                self.assertIn("memory-show --state", caught.exception.details["resume_prompt"])
+                self.assertEqual(self.starts, 1)
 
-    def test_an_interrupted_reset_is_never_retried_automatically(self):
-        self.schedule("2026-09-24T10:00:00+00:00", True)
-        foreman_reset.finish(self.state, self.plan, "interrupted", {"error": "herdr_error"})
-        with self.assertRaisesRegex(UsageError, "stopped mid-delivery"):
-            self.schedule("2026-09-24T10:05:00+00:00", True)
-        self.assertEqual(self.starts, 1)
+    def test_a_reused_pid_is_not_the_recorded_deliverer(self):
+        self.assertFalse(foreman_reset._alive({"pid": 1001, "identity": "original"},
+                                              probe=lambda pid: {"pid": pid, "identity": "someone-else"}))
+        self.assertTrue(foreman_reset._alive({"pid": 1001, "identity": "original"},
+                                             probe=lambda pid: {"pid": pid, "identity": "original"}))
 
-    def test_a_reset_that_died_mid_delivery_is_never_retried_automatically(self):
-        self.schedule("2026-09-24T10:00:00+00:00", True)
-        self.assertTrue(foreman_reset.claim(self.state, self.plan, self.me()))
-        with self.assertRaisesRegex(UsageError, "stopped mid-delivery"):
-            self.schedule("2026-09-24T10:05:00+00:00", False)
-        self.assertEqual(self.starts, 1)
+    def test_a_launch_failure_leaves_a_failed_row_with_the_resume_prompt(self):
+        def broken():
+            raise StateError("spawn failed", {})
+        with self.assertRaisesRegex(StateError, "spawn failed"):
+            foreman_reset.schedule(self.state, self.plan, "2026-09-24T10:00:00+00:00", broken)
+        row = json.loads(foreman_reset.record_path(self.state).read_text())["resets"][-1]
+        self.assertEqual((row["status"], row["process"]), ("failed", None))
+        self.assertIn("memory-show", row["result"]["resume_prompt"])
 
     def test_only_the_started_deliverer_claims_its_reset_once(self):
         self.schedule("2026-09-24T10:00:00+00:00", True)
@@ -244,14 +273,11 @@ class RecordTest(unittest.TestCase):
         self.assertFalse(foreman_reset.claim(self.state, self.plan, self.me()))
         self.assertFalse(foreman_reset.claim(self.state, {"pane_id": PANE, "stow": "other"}, self.me()))
 
-    def test_a_reused_pid_is_not_the_recorded_deliverer(self):
-        foreman_reset.schedule(self.state, self.plan, "2026-09-24T10:00:00+00:00", self.start,
-                               probe=lambda pid: {"pid": pid, "identity": "original"})
-        self.assertFalse(foreman_reset._alive({"pid": 1001, "identity": "original"},
-                                              probe=lambda pid: {"pid": pid, "identity": "someone-else"}))
-        again = foreman_reset.schedule(self.state, self.plan, "2026-09-24T10:05:00+00:00", self.start,
-                                       probe=lambda pid: {"pid": pid, "identity": "someone-else"})
-        self.assertFalse(again["replayed"])
+    def test_a_truncated_delivered_result_is_refused(self):
+        self.schedule("2026-09-24T10:00:00+00:00", True)
+        foreman_reset.finish(self.state, self.plan, "delivered", {"cleared": True})
+        with self.assertRaisesRegex(StateError, "malformed"):
+            foreman_reset.replay(self.state, self.plan)
 
     def test_a_malformed_record_row_is_refused(self):
         foreman_reset.record_path(self.state).write_text(json.dumps(

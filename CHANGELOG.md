@@ -47,7 +47,12 @@
   waiting on the user never auto-resumes. A failed or interrupted reset is
   recovered by the operator, never the foreman. That is a narrow carve-out
   in Working Memory: the operator clears the pane and pastes the logged
-  resume prompt. The state path in that prompt is shell-quoted. The
+  resume prompt. The state path in that prompt is shell-quoted. Each stow gets
+  one delivery attempt and is never retried. A failure records the exact
+  resume prompt the operator pastes, and the next round resets from a new
+  stow. A resume prompt that lands but starts no turn counts as
+  interrupted. Step 16 closes only a merged or abandoned task, so fix rounds
+  reach Step 17 open. The
   reset is its own Step 17, and every return from Step 12 to Step 4 passes
   through Steps 16 and 17, so fix rounds reset too, not only finished
   tasks.

@@ -56,8 +56,9 @@ RESUME_TEMPLATE = (
     RESUME_OPENING + " Your earlier conversation is gone by design. Run the "
     "herdr-teamlead skill with `--state {state}` on every teamlead command. Before "
     "anything else: run `teamlead memory-show --state {state} --id {stow}` and read its "
-    "required files in order; run `teamlead supervision-bind`, `supervision-resume`, "
-    "`supervision-status` and `supervision-drain`, each with `--state {state}`; then "
+    "required files in order; run `teamlead supervision-bind --state {state}`, "
+    "`teamlead supervision-resume --state {state}`, `teamlead supervision-status --state {state}` "
+    "and `teamlead supervision-drain --state {state}`; then "
     "`teamlead foreman-queue --state {state}`. Load each decision's records with "
     "`teamlead load-set --state {state}` before making it."
 )
@@ -67,7 +68,7 @@ def resume_prompt(stow, state):
 
 
 OPERATOR_RECOVERY = ("The operator recovers the foreman under rules/agent-team-operation.md Working Memory, "
-                     "using the resume prompt in this log.")
+                     "pasting the resume prompt saved in this reset's record.")
 
 
 def record_path(state_path):
@@ -110,8 +111,13 @@ def _valid_row(row):
     if status in ("scheduled", "delivering"):
         return result is None
     if status == "delivered":
-        return isinstance(result, dict) and result.get("cleared") is True
-    return isinstance(result, dict) and isinstance(result.get("error"), str)
+        return (isinstance(result, dict) and set(result) == {"schema_version", "pane_id", "stow", "agent", "cleared", "resume"}
+                and result["cleared"] is True and isinstance(result["agent"], str)
+                and isinstance(result["resume"], dict) and set(result["resume"]) == {"landed", "started"}
+                and result["resume"]["landed"] is True and result["resume"]["started"] is True)
+    return (isinstance(result, dict) and set(result) == {"error", "message", "details", "resume_prompt"}
+            and all(isinstance(result[key], str) for key in ("error", "message", "resume_prompt"))
+            and isinstance(result["details"], dict))
 
 
 def _row(document, plan):
@@ -125,30 +131,33 @@ def _alive(process, probe=process_identity):
 
 
 def replay(state_path, plan, *, alive=_alive):
-    """The existing reset for (pane, stow) a retry must return, or None to schedule anew.
+    """The existing reset for (pane, stow), or None when this stow never reset.
 
-    Read before any new-reset precondition: once a reset ran, its stow's reads
-    and the supervision state legitimately change, and a retry still replays.
-    A `delivering` row whose process is gone may have cleared the pane already,
-    so it is never retried automatically.
+    One delivery attempt per stow, never retried automatically. Read before
+    any new-reset precondition: once a reset ran, its stow's reads and the
+    supervision state legitimately change, and a retry still replays. A live
+    or delivered reset replays; any other existing reset goes to the operator
+    under the Working Memory recovery carve-out, and the next round resets
+    from a new stow.
     """
     prior = _row(_records(record_path(state_path)), plan)
-    if prior is None or prior["status"] == "failed":
+    if prior is None:
         return None
-    if prior["status"] == "delivered" or (prior["status"] != "interrupted" and alive(prior["process"])):
+    if prior["status"] == "delivered" or (prior["status"] in ("scheduled", "delivering") and alive(prior["process"])):
         return {**prior, "replayed": True}
-    if prior["status"] in ("delivering", "interrupted"):
-        raise UsageError("The reset from stow {} stopped mid-delivery, so the pane may already be cleared; it is not retried. {} A new round resets from a new stow.".format(
-            plan["stow"], OPERATOR_RECOVERY), {"record": str(record_path(state_path))})
-    return None
+    raise UsageError("The reset from stow {} ended {} and is not retried; the pane may already be cleared. {}".format(
+        plan["stow"], prior["status"] if prior["status"] in ("failed", "interrupted") else "without its deliverer",
+        OPERATOR_RECOVERY), {"record": str(record_path(state_path)),
+                             "resume_prompt": resume_prompt(plan["stow"], str(Path(state_path).expanduser().resolve()))})
 
 
 def schedule(state_path, plan, at, start, *, alive=_alive, probe=process_identity):
     """Record one reset for (pane, stow) and start its deliverer exactly once.
 
     `start()` launches the deliverer and returns its pid. The record lock is
-    held until that pid is saved, and a deliverer claims only a row carrying
-    its own pid, so no deliverer can act on a row it was not started for.
+    held until the deliverer's process identity is saved, and a deliverer
+    claims only the row carrying its own identity. A launch or probe failure
+    finishes the row `failed` with the resume prompt before re-raising.
     """
     path = record_path(state_path)
     with state_lock(path):
@@ -156,19 +165,25 @@ def schedule(state_path, plan, at, start, *, alive=_alive, probe=process_identit
         if existing is not None:
             return existing
         document = _records(path)
-        prior = _row(document, plan)
-        if prior is not None and prior["status"] == "scheduled":
-            # Its deliverer never claimed the row and is gone; nothing was typed.
-            prior.update(status="failed", result={"error": "deliverer_lost", "process": prior["process"]})
         row = {"schema_version": RESET_SCHEMA_VERSION, **plan, "status": "scheduled", "scheduled_at": at,
                "process": None, "result": None}
         document["resets"].append(row)
         save_state(path, document)
-        pid = start()
-        # The deliverer waits on this lock to claim, so it is alive to be identified.
-        row["process"] = probe(pid) or {"pid": pid, "identity": "unverified"}
+        try:
+            pid = start()
+            # The deliverer waits on this lock to claim, so it is alive to be identified.
+            row["process"] = probe(pid) or {"pid": pid, "identity": "unverified"}
+        except TeamLeadError as exc:
+            row.update(status="failed", result=failure(exc, plan["stow"], str(Path(state_path).expanduser().resolve())))
+            save_state(path, document)
+            raise
         save_state(path, document)
         return {**row, "replayed": False}
+
+
+def failure(exc, stow, state):
+    """The durable result of a failed or interrupted reset: the error and the prompt the operator pastes."""
+    return {"error": exc.code, "message": exc.message, "details": exc.details, "resume_prompt": resume_prompt(stow, state)}
 
 
 def claim(state_path, plan, process):
@@ -270,6 +285,9 @@ def deliver(client, agents, pane_id, stow, state, *, still_ready=lambda: True, s
     typed = []
 
     def guard():
+        # The stow and the pane are both re-read right before every keystroke.
+        if not still_ready():
+            raise UsageError("Stow {} stopped being reset-ready before typing; nothing more was sent. {}".format(stow, OPERATOR_RECOVERY), {"stow": stow})
         # Dispatch Safety: never type into a pane that started another turn.
         live = _foreman_record(client, pane_id)
         if (live.get("name") != agent.name or live.get("agent") != agent.kind
@@ -282,15 +300,15 @@ def deliver(client, agents, pane_id, stow, state, *, still_ready=lambda: True, s
         outcome = send_command(client, agent, pane_id, agent.clear_prompt, sleep=sleep, warn=warn, settle_sec=settle_sec,
                                before_input=guard)
         if not outcome["screen_changed"]:
-            raise HerdrError("The foreman consumed {} but its screen did not change, so its context was not cleared and nothing further was sent. Check the clear command configured for kind {} in pane {}. {}\n{}".format(
-                agent.clear_prompt, agent.kind, pane_id, OPERATOR_RECOVERY, resume_prompt(stow, state)), {"pane_id": pane_id})
+            raise HerdrError("The foreman consumed {} but its screen did not change, so its context was not cleared and nothing further was sent. Check the clear command configured for kind {} in pane {}. {}".format(
+                agent.clear_prompt, agent.kind, pane_id, OPERATOR_RECOVERY), {"pane_id": pane_id})
         client.agent_wait(agent.name, until=SETTLE_STATES, timeout_ms=DEFAULT_SETTLE_TIMEOUT_MS)
         sleep(settle_sec)
         landing = send_message(client, agent, resume_prompt(stow, state), RESUME_OPENING, pane_id=pane_id, sleep=sleep, warn=warn,
                                settle_sec=settle_sec, before_input=guard)
-        if not landing["landed"]:
-            raise HerdrError("The foreman was cleared but the resume prompt did not land in pane {}. {}\n{}".format(
-                pane_id, OPERATOR_RECOVERY, resume_prompt(stow, state)), {"pane_id": pane_id})
+        if not (landing["landed"] and landing["started"]):
+            raise HerdrError("The foreman was cleared but the resume prompt did not {} in pane {}. {}".format(
+                "land" if not landing["landed"] else "start a turn", pane_id, OPERATOR_RECOVERY), {"pane_id": pane_id})
     except TeamLeadError as exc:
         if typed and not isinstance(exc, DeliveryInterrupted):
             raise DeliveryInterrupted("{} The pane was already typed into, so this reset is not retried. {}".format(

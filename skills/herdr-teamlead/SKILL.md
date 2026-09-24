@@ -55,7 +55,8 @@ decision's records".
 - Never name a scratch file in a handoff
 - A command sequence you repeat across tasks belongs in a tested script
   shipped with this skill
-- Record such a sequence as a follow-up; never script it locally
+- Record such a sequence as a follow-up
+- Never script such a sequence locally
 
 References:
 
@@ -612,8 +613,11 @@ bash "$CP/skills/herdr-teamlead/teamlead.sh" close-task --record <close.json>
 - **Exit 0** — stdout is the recorded `task_closed` event JSON. Repeating the
   same closure prints the existing event. Proceed.
 - **Non-zero** — stderr names the refused field or the conflicting earlier
-  closure. Correct the record and re-run; do not finish Step 16 with the
-  task unclosed.
+  closure. Correct the record and re-run; do not finish Step 16 with a merged
+  or abandoned task unclosed.
+
+A task still in progress (a consultation or a fix round) is not closed; it
+continues to Step 17 open.
 
 Preserve the ledger for resume and standup. Preserve retrospective notes and link them from the ledger. Save
 current progress through the attention owner and curate the round's lessons.
@@ -639,7 +643,9 @@ bash "$CP/skills/herdr-teamlead/teamlead.sh" foreman-reset --stow <stow-id>
   starts at Step 1.
 - **Non-zero** — stderr names the refused precondition: an unready stow, the
   wrong pane, or supervision work still unheld. Fix it and re-run. Never end
-  the turn with active work that has no hold.
+  the turn with active work that has no hold. A stow whose earlier reset
+  failed or was interrupted is never retried: its record holds the resume
+  prompt for the operator, and the next round resets from a new stow.
 
 Finish here.
 

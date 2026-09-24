@@ -1438,7 +1438,7 @@ def cmd_foreman_reset_deliver(args, client=None, warn=None, trace=None):
             still_ready=lambda: memory.show(state_path, now_iso(), args.stow)["record"].get("reset_ready") is True)
     except TeamLeadError as exc:
         status = "interrupted" if isinstance(exc, foreman_reset.DeliveryInterrupted) else "failed"
-        foreman_reset.finish(state_path, plan, status, exc.to_dict())
+        foreman_reset.finish(state_path, plan, status, foreman_reset.failure(exc, args.stow, str(state_path)))
         raise
     foreman_reset.finish(state_path, plan, "delivered", result)
     return result, None
