@@ -739,9 +739,13 @@ Envelope: `{"schema_version": 1, "resets": [<row>, ...]}`, rows in append
 order. A missing file means no prior reset. A file whose envelope carries an
 integer `schema_version` above 1 was written by a newer build: a read takes it
 as no prior reset, and a write refuses with `reset_record_newer`, leaving the
-file untouched (`rules/stateful-artifacts.md` Migration Policy). Any other
-envelope or row that fails validation is refused with `reset_record_unusable`
-and left untouched. There is no older version, so no migration exists. A
+file untouched (`rules/stateful-artifacts.md` Migration Policy). A record that
+is a link, cannot be read or parsed, fails any row's validation, or holds two
+rows for one pane and stow is refused with `reset_record_unusable` and left
+untouched. Only the deliverer that claimed a `delivering` row finishes it, and
+an outcome that would not validate is refused before it is written. The
+deliverer waits up to `CLAIM_LOCK_BUDGET_SEC` for the record lock, which
+`foreman-reset` holds until it has saved the deliverer's identity. There is no older version, so no migration exists. A
 future shape change bumps `schema_version` and migrates in the owner.
 
 | Field | Type | Meaning |
@@ -751,8 +755,8 @@ future shape change bumps `schema_version` and migrates in the owner.
 | `stow` | string | The stow id the resume prompt names |
 | `status` | one of `scheduled`, `delivering`, `delivered`, `failed`, `interrupted` | `scheduled` → `delivering` → `delivered`; `failed` before any keystroke; `interrupted` after one |
 | `scheduled_at` | ISO-8601 string with timezone | The `foreman-reset` time |
-| `process` | `{"pid": integer, "identity": string}`, or null | The deliverer's process: its pid and a digest of its start time and command line (`supervision_runtime.process_identity`). Null only between the row's first save and the deliverer's start, both under the record lock. A reused pid carries another identity |
-| `result` | null, the delivery object, or the failure object | `scheduled` and `delivering` hold null. `delivered` holds exactly `{"schema_version", "pane_id", "stow", "agent", "cleared": true, "resume": {"landed": true, "started": true}}`. `failed` and `interrupted` hold exactly `{"error": string, "message": string, "details": object, "resume_prompt": string}`; `resume_prompt` is what the operator pastes |
+| `process` | `{"pid": integer, "identity": string}`, or null | The deliverer's process: its pid and a digest of its start time and command line (`supervision_runtime.process_identity`). A reused pid carries another identity. Null only on a `scheduled` row before its deliverer is identified, or on a `failed` row whose deliverer never started or was gone before identification. Every `delivering`, `delivered` and `interrupted` row carries one |
+| `result` | null, the delivery object, or the failure object | `scheduled` and `delivering` hold null. `delivered` holds exactly `{"schema_version", "pane_id", "stow", "agent", "cleared": true, "resume": {"landed": true, "started": true}}`, whose `schema_version`, `pane_id` and `stow` equal the row's. `failed` and `interrupted` hold exactly `{"error": string, "message": string, "details": object, "resume_prompt": string}`; `resume_prompt` is what the operator pastes |
 
 One delivery attempt per pane and stow, never retried automatically. A
 retry replays before any new-reset precondition is checked. A `delivered`

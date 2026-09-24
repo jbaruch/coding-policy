@@ -35,9 +35,11 @@ still reset-ready and the same agent is still idle.
 """
 
 import copy
+import fcntl
 import os
 import shlex
 import time
+from contextlib import contextmanager
 from pathlib import Path
 
 from .assign import SETTLE_STATES
@@ -54,6 +56,11 @@ RESET_SCHEMA_VERSION = 1
 #: it looks. Script-owned constants (rules/ci-safety.md Always Watch CI).
 IDLE_BUDGET_SEC = 1800
 IDLE_POLL_SEC = 5
+#: How long a new deliverer waits to claim its row. `schedule` holds the
+#: record lock from the row's first save until the deliverer's identity is
+#: saved, and the deliverer starts inside that window.
+CLAIM_LOCK_BUDGET_SEC = 60
+CLAIM_LOCK_POLL_SEC = 0.2
 RESUME_OPENING = "Foreman resume after a planned round-boundary reset."
 RESUME_TEMPLATE = (
     RESUME_OPENING + " Your earlier conversation is gone by design. Run the "
@@ -111,9 +118,16 @@ def _records(path):
     (rules/stateful-artifacts.md Migration Policy). A write refuses it here;
     `_readable` takes it as no usable prior reset.
     """
+    unusable = ("Reset record {} is {}. It is left untouched; the operator restores a valid file from its own backup "
+                "before any reset.")
+    if path.is_symlink():
+        raise ResetRecordUnusable(unusable.format(path, "a link, not the owner's file"), {"record": str(path)})
     if not path.exists():
         return {"schema_version": RESET_SCHEMA_VERSION, "resets": []}
-    document = supervision.read_json(path)
+    try:
+        document = supervision.read_json(path)
+    except StateError as exc:
+        raise ResetRecordUnusable(unusable.format(path, "unreadable ({})".format(exc.message)), {"record": str(path)}) from None
     if not isinstance(document, dict):
         raise ResetRecordUnusable("Reset record {} is unreadable. It is left untouched; the operator restores a valid file "
                                   "from its own backup before any reset.".format(path), {"record": str(path)})
@@ -123,7 +137,8 @@ def _records(path):
                                "coding-policy plugin, then run foreman-reset.".format(path, version, RESET_SCHEMA_VERSION),
                                {"record": str(path), "schema_version": version})
     rows = document.get("resets")
-    if version != RESET_SCHEMA_VERSION or not isinstance(rows, list) or not all(_valid_row(row) for row in rows):
+    if (version != RESET_SCHEMA_VERSION or not isinstance(rows, list) or not all(_valid_row(row) for row in rows)
+            or len({(row["pane_id"], row["stow"]) for row in rows}) != len(rows)):
         raise ResetRecordUnusable("Reset record {} is malformed. It is left untouched; the operator restores a valid file "
                                   "from its own backup before any reset.".format(path), {"record": str(path)})
     return document
@@ -148,13 +163,20 @@ def _valid_row(row):
         timestamp(row["scheduled_at"], "Reset scheduled_at")
     except UsageError:
         return False
-    if process is not None and not (isinstance(process, dict) and set(process) == {"pid", "identity"}
-                                    and type(process["pid"]) is int and isinstance(process["identity"], str)):
+    if process is None:
+        # Null only before the deliverer is identified: a row still scheduled,
+        # or one whose deliverer never started or was gone before identification.
+        if status not in ("scheduled", "failed"):
+            return False
+    elif not (isinstance(process, dict) and set(process) == {"pid", "identity"}
+              and type(process["pid"]) is int and isinstance(process["identity"], str)):
         return False
     if status in ("scheduled", "delivering"):
         return result is None
     if status == "delivered":
         return (isinstance(result, dict) and set(result) == {"schema_version", "pane_id", "stow", "agent", "cleared", "resume"}
+                and result["schema_version"] == RESET_SCHEMA_VERSION
+                and result["pane_id"] == row["pane_id"] and result["stow"] == row["stow"]
                 and result["cleared"] is True and isinstance(result["agent"], str)
                 and isinstance(result["resume"], dict) and set(result["resume"]) == {"landed", "started"}
                 and result["resume"]["landed"] is True and result["resume"]["started"] is True)
@@ -265,13 +287,41 @@ def failure(exc, stow, state):
     return {"error": exc.code, "message": exc.message, "details": exc.details, "resume_prompt": resume_prompt(stow, state)}
 
 
-def claim(state_path, plan, process):
+@contextmanager
+def _waiting_lock(path, *, budget_sec=CLAIM_LOCK_BUDGET_SEC, poll_sec=CLAIM_LOCK_POLL_SEC, sleep=time.sleep, clock=time.monotonic):
+    """The record's owner lock (the file `state_lock` uses), waited for up to a budget."""
+    lock_path = Path(str(path) + ".lock")
+    try:
+        handle = lock_path.open("a", encoding="utf-8")
+    except OSError as exc:
+        raise StateError("Cannot open reset lock {}: {}. Restore directory access; the reset was not claimed.".format(lock_path, exc), {}) from None
+    with handle:
+        deadline = clock() + budget_sec
+        while True:
+            try:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                remaining = deadline - clock()
+                if remaining <= 0:
+                    raise StateError("Reset lock {} was still held after {}s; this deliverer did not claim and sent nothing.".format(
+                        lock_path, budget_sec), {"lock": str(lock_path)}) from None
+                sleep(min(poll_sec, remaining))
+            except OSError as exc:
+                raise StateError("Cannot lock {}: {}. Use a filesystem supporting process locks; the reset was not claimed.".format(
+                    lock_path, exc), {}) from None
+        yield
+
+
+def claim(state_path, plan, process, *, sleep=time.sleep, clock=time.monotonic):
     """Move this deliverer's scheduled reset to `delivering`; False when it is not the owner.
 
     `process` is the caller's own identity; a reused pid carries another one.
+    The deliverer starts while `schedule` still holds the record lock, so it
+    waits for that lock rather than failing on it.
     """
     path = record_path(state_path)
-    with state_lock(path):
+    with _waiting_lock(path, sleep=sleep, clock=clock):
         document = _records(path)
         row = _row(document, plan)
         if row is None or row["status"] != "scheduled" or row["process"] != process:
@@ -282,12 +332,19 @@ def claim(state_path, plan, process):
 
 
 def finish(state_path, plan, status, result):
+    """Record the claimed delivery's outcome; only a `delivering` row finishes."""
     path = record_path(state_path)
     with state_lock(path):
         document = _records(path)
-        row = next(item for item in reversed(document["resets"])
-                   if item["pane_id"] == plan["pane_id"] and item["stow"] == plan["stow"])
+        row = _row(document, plan)
+        if row is None or row["status"] != "delivering":
+            raise ResetRecordUnusable("Reset record {} holds no delivering reset for stow {} in pane {}; this outcome ({}) was "
+                                      "not recorded. The operator reconciles the record before any reset.".format(
+                                          path, plan["stow"], plan["pane_id"], status), {"record": str(path)})
         row.update(status=status, result=result)
+        if not _valid_row(row):
+            raise ResetRecordUnusable("The {} outcome for stow {} does not match the reset record's shape; it was not recorded.".format(
+                status, plan["stow"]), {"record": str(path)})
         save_state(path, document)
 
 

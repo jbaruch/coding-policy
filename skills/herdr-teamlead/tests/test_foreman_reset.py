@@ -2,6 +2,7 @@
 
 import io
 import os
+import fcntl
 import json
 import sys
 import unittest
@@ -230,6 +231,7 @@ class RecordTest(unittest.TestCase):
 
     def test_a_delivered_reset_replays_even_after_its_process_exits(self):
         self.schedule("2026-09-24T10:00:00+00:00", True)
+        foreman_reset.claim(self.state, self.plan, self.me())
         foreman_reset.finish(self.state, self.plan, "delivered", self.DELIVERED)
         again = self.schedule("2026-09-24T10:05:00+00:00", False)
         self.assertTrue(again["replayed"])
@@ -241,9 +243,9 @@ class RecordTest(unittest.TestCase):
                 foreman_reset.record_path(self.state).unlink(missing_ok=True)
                 self.starts = 0
                 self.schedule("2026-09-24T10:00:00+00:00", True)
-                if status == "delivering":
+                if status != "scheduled":
                     foreman_reset.claim(self.state, self.plan, self.me())
-                elif status != "scheduled":
+                if status not in ("scheduled", "delivering"):
                     foreman_reset.finish(self.state, self.plan, status, self.FAILURE)
                 with self.assertRaises(foreman_reset.ResetEnded) as caught:
                     self.schedule("2026-09-24T10:05:00+00:00", False)
@@ -284,11 +286,88 @@ class RecordTest(unittest.TestCase):
         self.assertFalse(foreman_reset.claim(self.state, self.plan, self.me()))
         self.assertFalse(foreman_reset.claim(self.state, {"pane_id": PANE, "stow": "other"}, self.me()))
 
-    def test_a_truncated_delivered_result_is_refused(self):
+    def test_a_truncated_delivered_result_is_refused_and_not_recorded(self):
         self.schedule("2026-09-24T10:00:00+00:00", True)
-        foreman_reset.finish(self.state, self.plan, "delivered", {"cleared": True})
-        with self.assertRaisesRegex(StateError, "malformed"):
+        foreman_reset.claim(self.state, self.plan, self.me())
+        before = foreman_reset.record_path(self.state).read_text()
+        with self.assertRaises(foreman_reset.ResetRecordUnusable):
+            foreman_reset.finish(self.state, self.plan, "delivered", {"cleared": True})
+        self.assertEqual(foreman_reset.record_path(self.state).read_text(), before)
+
+    def test_a_delivered_result_for_another_reset_is_malformed(self):
+        for field, value in (("stow", "round-8"), ("pane_id", "w9:p9"), ("schema_version", 2)):
+            with self.subTest(field=field):
+                row = {"schema_version": 1, "pane_id": PANE, "stow": "round-7", "status": "delivered",
+                       "scheduled_at": "2026-09-24T10:00:00+00:00", "process": self.me(),
+                       "result": {**self.DELIVERED, field: value}}
+                foreman_reset.record_path(self.state).write_text(json.dumps({"schema_version": 1, "resets": [row]}))
+                with self.assertRaises(foreman_reset.ResetRecordUnusable):
+                    foreman_reset.replay(self.state, self.plan)
+
+    def test_only_a_delivering_row_finishes(self):
+        self.schedule("2026-09-24T10:00:00+00:00", True)
+        with self.assertRaisesRegex(foreman_reset.ResetRecordUnusable, "no delivering reset"):
+            foreman_reset.finish(self.state, self.plan, "delivered", self.DELIVERED)
+        with self.assertRaisesRegex(foreman_reset.ResetRecordUnusable, "no delivering reset"):
+            foreman_reset.finish(self.state, {"pane_id": PANE, "stow": "never"}, "failed", self.FAILURE)
+
+    def test_a_null_process_is_valid_only_before_identification(self):
+        for status, result, valid in (("scheduled", None, True), ("failed", self.FAILURE, True),
+                                      ("delivering", None, False), ("interrupted", self.FAILURE, False),
+                                      ("delivered", self.DELIVERED, False)):
+            with self.subTest(status=status):
+                row = {"schema_version": 1, "pane_id": PANE, "stow": "round-7", "status": status,
+                       "scheduled_at": "2026-09-24T10:00:00+00:00", "process": None, "result": result}
+                self.assertEqual(foreman_reset._valid_row(row), valid)
+
+    def test_duplicate_rows_for_one_reset_are_malformed(self):
+        row = {"schema_version": 1, "pane_id": PANE, "stow": "round-7", "status": "failed",
+               "scheduled_at": "2026-09-24T10:00:00+00:00", "process": None, "result": self.FAILURE}
+        foreman_reset.record_path(self.state).write_text(json.dumps({"schema_version": 1, "resets": [row, row]}))
+        with self.assertRaises(foreman_reset.ResetRecordUnusable):
             foreman_reset.replay(self.state, self.plan)
+
+    def test_unreadable_and_linked_records_are_unusable_and_untouched(self):
+        path = foreman_reset.record_path(self.state)
+        path.write_bytes(b"{not json")
+        with self.assertRaises(foreman_reset.ResetRecordUnusable):
+            foreman_reset.replay(self.state, self.plan)
+        self.assertEqual(path.read_bytes(), b"{not json")
+        path.unlink()
+        path.symlink_to(Path(self.dir.name) / "elsewhere.json")
+        with self.assertRaises(foreman_reset.ResetRecordUnusable):
+            self.schedule("2026-09-24T10:00:00+00:00", True)
+        self.assertTrue(path.is_symlink())
+        self.assertFalse((Path(self.dir.name) / "elsewhere.json").exists())
+
+    def test_claim_waits_for_the_lock_the_scheduling_parent_holds(self):
+        self.schedule("2026-09-24T10:00:00+00:00", True)
+        lock = Path(str(foreman_reset.record_path(self.state)) + ".lock").open("a")
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        waits = []
+
+        def parent_finishes(seconds):
+            waits.append(seconds)
+            lock.close()
+
+        self.assertTrue(foreman_reset.claim(self.state, self.plan, self.me(), sleep=parent_finishes, clock=lambda: 0.0))
+        self.assertEqual(waits, [foreman_reset.CLAIM_LOCK_POLL_SEC])
+
+    def test_claim_gives_up_at_its_budget_without_claiming(self):
+        self.schedule("2026-09-24T10:00:00+00:00", True)
+        lock = Path(str(foreman_reset.record_path(self.state)) + ".lock").open("a")
+        self.addCleanup(lock.close)
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        now = [0.0]
+
+        def tick(seconds):
+            now[0] += seconds
+
+        with self.assertRaisesRegex(StateError, "still held"):
+            foreman_reset.claim(self.state, self.plan, self.me(), sleep=tick, clock=lambda: now[0])
+        lock.close()
+        row = json.loads(foreman_reset.record_path(self.state).read_text())["resets"][-1]
+        self.assertEqual(row["status"], "scheduled")
 
     def test_a_newer_record_reads_as_no_prior_reset_and_refuses_writes_untouched(self):
         path = foreman_reset.record_path(self.state)
@@ -362,7 +441,9 @@ class ResetCommandTest(CliCase):
     def test_the_deliverer_claims_its_reset_while_the_parent_holds_the_state_lock(self):
         foreman_reset.schedule(self.state, {"pane_id": PANE, "stow": "round-7"}, "2026-09-24T10:00:00+00:00", os.getpid)
         with state_lock(retrospective.canonical_state(self.state)), \
-             patch("teamlead.foreman_reset.deliver", return_value={"cleared": True}):
+             patch("teamlead.foreman_reset.deliver", return_value={
+                 "schema_version": 1, "pane_id": PANE, "stow": "round-7", "agent": "foreman", "cleared": True,
+                 "resume": {"landed": True, "started": True}}):
             code, out, err = self.run_cli(self.base() + ["foreman-reset-deliver", "--pane", PANE, "--stow", "round-7"],
                                           client=object())
         self.assertEqual(code, 0, err)
