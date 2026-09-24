@@ -55,9 +55,9 @@ Exit 0 clears the release. Exit 1 blocks it, with `blocking` naming each leftove
 
     Closes #<n>
     ```
-  - **Issue line**, one or more of:
+  - **Issue lines**, one or more of, each on a line of its own:
     - `Closes #<n>`, one line per issue the PR fully resolves
-    - `Part of #<n>` for an issue it only partly resolves; comment on that issue after merge with what shipped and what remains
+    - `Part of #<n>` for an issue it only partly resolves
     - `No issue` for work with no tracking issue
   - `Refs #<n>`, `Related #<n>` and a bare `#<n>` close nothing
 - Check the link GitHub resolved from the body:
@@ -66,7 +66,10 @@ Exit 0 clears the release. Exit 1 blocks it, with `blocking` naming each leftove
   python3 skills/release/check-closing-issues.py <owner> <repo> <pr-number>
   ```
 
-  Exit 0 passes. Exit 1 (`unlinked`) means the body names no issue GitHub will close and declares no alternative; edit the body and re-run. Exit 2 is a usage or `gh` error. Output fields and verdicts are the script's contract — see `skills/release/check-closing-issues.py` docstring
+- Exit 0 passes
+- Exit 1 (`unlinked`): the body names no issue GitHub will close and declares no alternative. Edit the body and re-run
+- Exit 2 is a usage, environment or `gh` error
+- Output fields and verdicts are the script's contract — see `skills/release/check-closing-issues.py` docstring
 
 When this step is wrapped in a reusable script (e.g., `release.sh` that other devs run unattended), see the script-wrapping gates at:
 
@@ -207,7 +210,12 @@ Order in (B) is mandatory: `git branch -d` refuses to delete a branch that is ch
 After merge — per `rules/ci-safety.md`'s Always Watch CI duty extended through release, run each gate its channels owe, in order:
 
 - Verify the merge landed on main (`git pull --ff-only` succeeds; `git log -1 --oneline` shows the merge commit)
-- Confirm every closing issue closed: `python3 skills/release/check-closing-issues.py <owner> <repo> <pr-number> --merged`. Exit 1 (`still_open`) names each issue still open; close it with a comment naming the PR. Poll budget is the script's constant
+- Confirm every closing issue closed: `python3 skills/release/check-closing-issues.py <owner> <repo> <pr-number> --merged`
+- Exit 1 (`still_open`) names each closing issue still open at the script's poll budget
+- Every issue comment below is an action on that issue's repository, governed by `rules/external-repo-contributions.md`:
+  - In a repository the operator owns, close each still-open issue with a comment naming the PR
+  - In a repository the operator owns, comment on each `Part of #<n>` issue with what shipped and what remains
+  - Anywhere else, report the still-open or partly resolved issue to the operator instead of commenting
 - **GitHub tag/asset publication:** push the release tag from the fast-forwarded `main` before resolving anything. Its publish workflow fires on the tag, never on the merge. The version follows Step 3
 - **Every publication, whatever channel carries it:** resolve that publication's own run with `resolve-publish-run.sh`
 - Bind that resolution to the workflow, the exact commit, the `push` event and the ref that fired it, never to "latest on main"

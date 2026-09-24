@@ -6,22 +6,25 @@ keyword (`Closes #N`, `Fixes #N`, `Resolves #N`). `Refs #N`, `Related #N` and a
 bare `#N` are mentions: the issue stays open after the merge, and the next
 triage has to rediscover that the work already shipped (#517).
 
-The PR body template in `skills/release/SKILL.md` Step 2 carries one of three
-issue lines. This script reads what GitHub resolved from them.
+The PR body template in `skills/release/SKILL.md` Step 2 carries issue lines.
+This script reads what GitHub resolved from them.
 
 Modes:
   default (before merge)
     Reads `closingIssuesReferences`. Passes when it names at least one issue,
-    or when the body carries a `Part of #N` line (a partial resolution) or a
-    `No issue` line (work with no tracking issue). Refuses otherwise: the body
-    names no issue GitHub will close and declares no alternative.
+    or when the body carries a whole `Part of #N` line (a partial resolution)
+    or a whole `No issue` line (work with no tracking issue). Refuses
+    otherwise: the body names no issue GitHub will close and declares no
+    alternative.
   --merged (after merge)
     Requires the PR to be MERGED, then reads each closing issue's state until
     every one is CLOSED or the budget runs out. GitHub closes linked issues
     asynchronously, so a first read right after the merge can still see OPEN.
+    No read starts after the budget, and no `gh` call outlives it.
 
 Poll interval and budget are script-owned constants, overridable by the
-environment for tests: CLOSE_INTERVAL_SEC, CLOSE_BUDGET_SEC.
+environment: CLOSE_INTERVAL_SEC and CLOSE_BUDGET_SEC, each a finite number of
+seconds above 0. GH_TIMEOUT_SEC bounds any single `gh` call.
 
 Usage: check-closing-issues.py <owner> <repo> <pr-number> [--merged]
 
@@ -32,35 +35,59 @@ Output contract (rules/script-delegation.md -- structured stdout):
      "no_issue": bool, "verdict": "ok|unlinked|still_open|not_merged"}
   stderr: an actionable diagnostic for every non-ok verdict.
 
-Exit: 0 on verdict ok; 1 on a refusing verdict; 2 on a usage or `gh` error.
+Exit: 0 on verdict ok; 1 on a refusing verdict; 2 on a usage, environment or
+`gh` error, with nothing on stdout.
 """
 
 import json
+import math
 import os
 import re
 import subprocess
 import sys
 import time
 
-CLOSE_INTERVAL_SEC = float(os.environ.get("CLOSE_INTERVAL_SEC", "5"))
-CLOSE_BUDGET_SEC = float(os.environ.get("CLOSE_BUDGET_SEC", "60"))
+DEFAULT_INTERVAL_SEC = 5.0
+DEFAULT_BUDGET_SEC = 60.0
+GH_TIMEOUT_SEC = 30.0
 
-# The two non-closing issue lines the Step 2 template allows. Anchored to a
-# whole line so prose that happens to contain the words does not count.
-PART_OF = re.compile(r"^\s*Part of\s+#(\d+)\b", re.MULTILINE)
-NO_ISSUE = re.compile(r"^\s*No issue\b", re.MULTILINE)
+# The two non-closing issue lines the Step 2 template allows, each a whole
+# line, so "No issue found" or "Part of #483 remains open" does not count.
+PART_OF = re.compile(r"^[ \t]*Part of #(\d+)[ \t]*$", re.MULTILINE)
+NO_ISSUE = re.compile(r"^[ \t]*No issue[ \t]*$", re.MULTILINE)
 
 
 class GhError(Exception):
-    """`gh` failed or returned something that is not the expected JSON."""
+    """`gh` failed, timed out, or returned a shape this script cannot read."""
 
 
-def gh_json(args):
+class EnvError(Exception):
+    """A poll override is not a usable number."""
+
+
+def env_seconds(name, default):
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        value = math.nan
+    if not math.isfinite(value) or value <= 0:
+        raise EnvError("{}={!r} is not usable; set a finite number of seconds above 0, or unset it for the default {:g}.".format(
+            name, raw, default))
+    return value
+
+
+def gh_json(args, timeout):
     """Run `gh` and parse its JSON stdout. Replaced by tests."""
     try:
-        done = subprocess.run(["gh"] + args, capture_output=True, text=True, check=False)
+        done = subprocess.run(["gh"] + args, capture_output=True, text=True, check=False, timeout=timeout)
     except FileNotFoundError:
         raise GhError("gh is not installed; install the GitHub CLI and run `gh auth login`") from None
+    except subprocess.TimeoutExpired:
+        raise GhError("gh {} did not answer within {:g}s; check `gh auth status` and network access, then re-run".format(
+            " ".join(args), timeout)) from None
     if done.returncode != 0:
         raise GhError("gh {} failed: {}".format(" ".join(args), done.stderr.strip()))
     try:
@@ -69,16 +96,33 @@ def gh_json(args):
         raise GhError("gh {} returned invalid JSON: {}".format(" ".join(args), exc)) from None
 
 
-def read_pr(owner, repo, pr):
-    data = gh_json(["pr", "view", str(pr), "-R", "{}/{}".format(owner, repo),
-                    "--json", "state,body,closingIssuesReferences"])
+def _shape(ok, what):
+    if not ok:
+        raise GhError("gh returned {} in an unexpected shape; update the GitHub CLI (`gh --version`) and re-run".format(what))
+
+
+def _absent_as(value, default):
+    """`default` for a missing or null field; any other value, empty or not, as is."""
+    return default if value is None else value
+
+
+def read_pr(owner, repo, pr, gh):
+    data = gh(["pr", "view", str(pr), "-R", "{}/{}".format(owner, repo),
+               "--json", "state,body,closingIssuesReferences"], GH_TIMEOUT_SEC)
+    _shape(isinstance(data, dict) and isinstance(data.get("state"), str), "the PR")
+    refs = _absent_as(data.get("closingIssuesReferences"), [])
+    body = _absent_as(data.get("body"), "")
+    _shape(isinstance(refs, list) and isinstance(body, str), "the PR")
     closing = []
-    for ref in data.get("closingIssuesReferences") or []:
-        where = ref.get("repository") or {}
-        owner_login = (where.get("owner") or {}).get("login", owner)
-        closing.append({"repo": "{}/{}".format(owner_login, where.get("name", repo)),
+    for ref in refs:
+        _shape(isinstance(ref, dict) and type(ref.get("number")) is int, "a closing issue reference")
+        where = _absent_as(ref.get("repository"), {})
+        _shape(isinstance(where, dict), "a closing issue's repository")
+        who = _absent_as(where.get("owner"), {})
+        _shape(isinstance(who, dict), "a closing issue's repository owner")
+        owner_login = who.get("login") or owner
+        closing.append({"repo": "{}/{}".format(owner_login, where.get("name") or repo),
                         "number": ref["number"], "state": None})
-    body = data.get("body") or ""
     return {
         "pr": int(pr),
         "state": data["state"],
@@ -88,8 +132,10 @@ def read_pr(owner, repo, pr):
     }
 
 
-def issue_state(repo, number):
-    return gh_json(["issue", "view", str(number), "-R", repo, "--json", "state"])["state"]
+def issue_state(repo, number, gh, timeout):
+    data = gh(["issue", "view", str(number), "-R", repo, "--json", "state"], timeout)
+    _shape(isinstance(data, dict) and isinstance(data.get("state"), str), "issue {}#{}".format(repo, number))
+    return data["state"]
 
 
 def check_linked(report):
@@ -98,32 +144,39 @@ def check_linked(report):
     return "unlinked"
 
 
-def check_closed(report, sleep=time.sleep, clock=time.monotonic):
+def check_closed(report, gh, interval, budget, *, sleep=time.sleep, clock=time.monotonic):
+    """Poll until every closing issue is CLOSED; no read starts after the budget."""
     if report["state"] != "MERGED":
         return "not_merged"
-    deadline = clock() + CLOSE_BUDGET_SEC
+    deadline = clock() + budget
     while True:
         for issue in report["closing"]:
             if issue["state"] != "CLOSED":
-                issue["state"] = issue_state(issue["repo"], issue["number"])
+                remaining = deadline - clock()
+                if remaining <= 0:
+                    return "still_open"
+                issue["state"] = issue_state(issue["repo"], issue["number"], gh, min(GH_TIMEOUT_SEC, remaining))
         if all(issue["state"] == "CLOSED" for issue in report["closing"]):
             return "ok"
-        if clock() >= deadline:
+        remaining = deadline - clock()
+        if remaining <= 0:
             return "still_open"
-        sleep(CLOSE_INTERVAL_SEC)
+        sleep(min(interval, remaining))
 
 
 DIAGNOSTICS = {
     "unlinked": ("PR #{pr} names no issue GitHub will close. Add `Closes #<n>` for each issue it "
-                 "resolves, `Part of #<n>` for one it only partly resolves, or a `No issue` line; "
-                 "`Refs`, `Related` and a bare `#<n>` do not close anything."),
+                 "resolves, a whole `Part of #<n>` line for one it only partly resolves, or a whole "
+                 "`No issue` line; `Refs`, `Related` and a bare `#<n>` do not close anything."),
     "not_merged": "PR #{pr} is {state}, not MERGED. Run --merged only after the merge lands.",
     "still_open": ("PR #{pr} merged but these closing issues are still open after {budget:g}s: {open}. "
-                   "Check the issue timeline for a reopen, then close each with a comment naming the PR."),
+                   "Check each issue's timeline for a reopen. Closing one with a comment is an action on "
+                   "that repository: take it only where rules/external-repo-contributions.md permits it, "
+                   "and otherwise report the open issue to the operator."),
 }
 
 
-def main(argv):
+def main(argv, gh=gh_json, sleep=time.sleep, clock=time.monotonic):
     args = [a for a in argv if a != "--merged"]
     merged = len(args) != len(argv)
     if len(args) != 3 or not args[2].isdigit():
@@ -131,9 +184,11 @@ def main(argv):
         return 2
     owner, repo, pr = args
     try:
-        report = read_pr(owner, repo, pr)
-        verdict = check_closed(report) if merged else check_linked(report)
-    except GhError as exc:
+        interval = env_seconds("CLOSE_INTERVAL_SEC", DEFAULT_INTERVAL_SEC)
+        budget = env_seconds("CLOSE_BUDGET_SEC", DEFAULT_BUDGET_SEC)
+        report = read_pr(owner, repo, pr, gh)
+        verdict = check_closed(report, gh, interval, budget, sleep=sleep, clock=clock) if merged else check_linked(report)
+    except (EnvError, GhError) as exc:
         print("error: {}".format(exc), file=sys.stderr)
         return 2
     report["verdict"] = verdict
@@ -142,7 +197,7 @@ def main(argv):
         still = ", ".join("{}#{}".format(i["repo"], i["number"])
                           for i in report["closing"] if i["state"] != "CLOSED")
         print(DIAGNOSTICS[verdict].format(pr=report["pr"], state=report["state"],
-                                          budget=CLOSE_BUDGET_SEC, open=still), file=sys.stderr)
+                                          budget=budget, open=still), file=sys.stderr)
         return 1
     return 0
 
