@@ -134,6 +134,7 @@ description: Running a multi-agent team — task-based specialist composition, c
 - No exhausted allowance waits on an operator decision
 - The judge is read-only: it never edits a repository file, never runs a mutating git or `gh` command, never posts to GitHub, never dispatches a subagent — its only output is its report file
 - Each adjudication position cites its evidence: file and line, or command output, each at a named revision
+- An attached investigator report may supply that evidence in place of a position's own citations
 - A position with no citations goes to an investigator before the judge is dispatched
 - In adjudication mode the judge reads both positions and the governing rule
 - It checks only the cited evidence against the tree

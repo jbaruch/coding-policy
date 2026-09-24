@@ -20,7 +20,8 @@ dispute, both positions with report paths, the governing rule, the tree. Fill
 makes (file and line, or command output, at a revision), copied, never supplied by the
 foreman. A position that cites nothing is not ready for the judge: dispatch an
 investigator under `skills/herdr-teamlead/references/specialists.md` to
-establish the disputed facts with citations first, and fill
+establish the disputed facts with citations first, fill that position's
+evidence value with `supplied by the investigator report`, and fill
 `INVESTIGATION_REPORT` with that report. Fill
 `INVESTIGATION_REPORT` with the investigator's report after an `insufficient`
 ruling as well, otherwise "none".
