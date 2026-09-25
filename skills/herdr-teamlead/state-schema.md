@@ -109,6 +109,15 @@ from its caller. A version-7 plan carrying the retired context fields is
 refused by name at apply; one without them reads unchanged, and no oracle is
 ever inferred for it.
 
+Plan schema 10 adds `capability` and `cheaper_adequate` to each entry in
+`tiers` (#520). Writer: `plan`, from the capability table beside the state.
+`capability` is `adequate` when every capability the round needs is recorded
+adequate on a supporting source, and `unknown` otherwise; an `inadequate`
+entry refuses the candidate instead, so it is never stored. `cheaper_adequate`
+names a cheaper configured row recorded adequate for the same needs, or null;
+it is recorded, never selected. Reader: `apply`, which recomputes both. An
+older plan carries neither and is refused as stale.
+
 Plan schema 9 adds `pressure_headroom` and `de_escalated` to each entry in
 `tiers` (#477). Writer: `plan`, from the measured snapshot. Reader: `apply`,
 which recomputes each tier against the headroom the plan resolved with rather

@@ -83,9 +83,12 @@ from .tiers import SEAT_SEPARATOR, canonical_role
 #: `tiers` (#477), so `apply` recomputes against the headroom the plan
 #: resolved with. Additive: an older plan carries neither, reads as unmeasured
 #: pressure, and resolves the tier exactly as it did before.
+#: Version 10 adds `capability` (`adequate` or `unknown`) and `cheaper_adequate`
+#: to each entry in `tiers` (#520). An older plan carries neither, so `apply`'s
+#: recompute differs and refuses it as stale; replan.
 #: A plan is a round's instruction, not stored state -- it is produced and
 #: consumed inside one round and never migrated (rules/stateful-artifacts.md).
-PLAN_SCHEMA_VERSION = 9
+PLAN_SCHEMA_VERSION = 10
 
 #: What one round in each seat is expected to burn, in points of the agent's
 #: remaining headroom percentage. The ORDER is what the planner acts on:

@@ -43,7 +43,8 @@ from .measure import (
 )
 from .planner import plan as build_plan
 from .planner import headroom_of
-from .tiers import MissingTierError, parse_launch_args, parse_tiers, select_tier
+from .tiers import JUDGMENT_ROUNDS, MissingTierError, parse_launch_args, parse_tiers, select_tier
+from .billing import effective_multiplier
 from .launch import start_worker, verify_running
 from .state import (
     add_assignment,
@@ -600,7 +601,39 @@ def _planned_snapshot_headroom(document, state, state_path):
     return _snapshot_headroom(snapshot)
 
 
-def _candidate_tiers(roles, agents, rounds, fix_round=None, judge=None, excludes=None, headroom=None):
+def _build_plan_with_refusals(build, refusals, *args, **kwargs):
+    """Plan, naming every capability refusal when no candidate is left to plan."""
+    try:
+        return build(*args, **kwargs)
+    except PlanError as exc:
+        if not refusals:
+            raise
+        raise PlanError("{} Capability refusals: {}".format(exc.message, " ".join(
+            "{} for {}: {}".format(row["agent"], row["role"], row["message"]) for row in refusals)),
+            {**exc.details, "capability_refusals": refusals}) from None
+
+
+def _cheaper_adequate(agent, tier, needs, table):
+    """A configured row cheaper than `tier` that the table records adequate for the same needs, or None.
+
+    Recorded, never selected: the operator owns the table and the config, and
+    this only explains why a cheaper candidate was not used (#520).
+    """
+    cost = tier["effective_multiplier"]
+    for name, row in sorted(agent.tiers.items()):
+        if (row["model"], row.get("effort")) == (tier["model"], tier.get("effort")) or effective_multiplier(row) >= cost:
+            continue
+        try:
+            if capabilities.assess(table, row["model"], row.get("effort"), needs) == "adequate":
+                return {"model": row["model"], "effort": row.get("effort"), "tier_row": name}
+        except capabilities.InadequateCapability:
+            continue
+    return None
+
+
+def _candidate_tiers(roles, agents, rounds, fix_round=None, judge=None, excludes=None, headroom=None, table=None, refusals=None):
+    """Each role's candidate tiers; `refusals` collects a capability refusal per skipped candidate."""
+    table = table if table is not None else capabilities.empty()
     tiered = any(agent.tiers for agent in agents)
     if not tiered and not (judge and "judge" in roles):
         if rounds:
@@ -614,9 +647,13 @@ def _candidate_tiers(roles, agents, rounds, fix_round=None, judge=None, excludes
                 continue
             if judge and agent.name == judge.agent:
                 if role == "judge":
+                    # The pinned judge has no substitute, so an inadequate pin refuses the plan.
+                    verdict = capabilities.assess(table, judge.model, judge.effort or None,
+                                                  capabilities.required("judge", "judge", JUDGMENT_ROUNDS))
                     candidates[role][agent.name] = {"round": "judge", "tier_row": "judge", "kind": agent.kind,
                         "model": judge.model, "effort": judge.effort or None,
-                        "billing_window": "unknown", "multiplier": 1.0, "effective_multiplier": 1.0}
+                        "billing_window": "unknown", "multiplier": 1.0, "effective_multiplier": 1.0,
+                        "capability": verdict, "cheaper_adequate": None}
                 continue
             if role == "judge":
                 continue
@@ -632,10 +669,20 @@ def _candidate_tiers(roles, agents, rounds, fix_round=None, judge=None, excludes
                 continue
             if tier is None:
                 continue
+            needs = capabilities.required(canonical_role(role), tier["round"], JUDGMENT_ROUNDS)
+            try:
+                verdict = capabilities.assess(table, tier["model"], tier["effort"], needs)
+            except capabilities.InadequateCapability as exc:
+                if refusals is not None:
+                    refusals.append({"role": role, "agent": agent.name, "message": exc.message, **exc.details})
+                continue
             candidates[role][agent.name] = {key: tier[key] for key in (
                 "round", "tier_row", "kind", "model", "effort", "multiplier", "billing_window",
                 "effective_multiplier", "pressure_headroom", "de_escalated",
             )}
+            candidates[role][agent.name].update(
+                capability=verdict,
+                cheaper_adequate=_cheaper_adequate(agent, tier, needs, table) if verdict == "adequate" else None)
     return candidates
 
 
@@ -877,9 +924,13 @@ def cmd_plan(args, client=None, warn=None, trace=None):
     # pair. `apply` re-reads it off the plan rather than re-measuring, which is
     # what keeps its recomputed tiers equal to the planned ones (#477).
     measured_headroom = _snapshot_headroom(snapshot)
+    capability_refusals = []
     tier_candidates = _candidate_tiers(canonical, agents, rounds, args.fix_round, judge,
                                       excludes={role: names for role, names in excludes.items() if role in set(canonical)},
-                                      headroom=measured_headroom)
+                                      headroom=measured_headroom, table=capabilities.load(_state_path(args)),
+                                      refusals=capability_refusals)
+    constraints = {**constraints, "rationale": constraints["rationale"] + [
+        "{} was not considered for {}: {}".format(row["agent"], row["role"], row["message"]) for row in capability_refusals]}
     # Each seat inherits its role's bars, tiers, round type and requirements.
     # `role_costs` is not fanned out: the planner resolves a seat's default
     # weight and rotation history through its role (#434).
@@ -893,7 +944,7 @@ def cmd_plan(args, client=None, warn=None, trace=None):
     constraints = {**constraints,
                    "familiarity": _fan_out_seats(constraints["familiarity"], seats)}
 
-    result = build_plan(
+    result = _build_plan_with_refusals(build_plan, capability_refusals,
             roles,
             snapshot,
             role_counts(state),
@@ -1217,11 +1268,16 @@ def cmd_apply(args, client=None, warn=None, trace=None):
     # plan's own `pressure_headroom`: a plan edited to claim scarcity would
     # otherwise recompute its own downgrade and pass the comparison below.
     planned_headroom = _planned_snapshot_headroom(document, state, state_path)
+    capability_refusals = []
     candidates = _candidate_tiers(list(assignments), agents, rounds, args.fix_round, judge,
-                                  excludes=constraints["exclude"], headroom=planned_headroom)
+                                  excludes=constraints["exclude"], headroom=planned_headroom,
+                                  table=capabilities.load(state_path), refusals=capability_refusals)
     tiers = {}
     if candidates is not None:
         for role, name in assignments.items():
+            refused = next((row for row in capability_refusals if (row["role"], row["agent"]) == (role, name)), None)
+            if refused is not None:
+                raise capabilities.InadequateCapability(refused["message"], {key: refused[key] for key in refused if key != "message"})
             if name not in candidates.get(role, {}):
                 raise UsageError("Assigned agent {} has no eligible tier for {}; replan from current config.".format(name, role), {})
             if candidates[role][name] is not None:
