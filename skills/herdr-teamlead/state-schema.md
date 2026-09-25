@@ -14,6 +14,7 @@ the utility alone records the saved notes and their separate index.
 | `$XDG_CONFIG_HOME/teamlead/config.json` (default `~/.config/teamlead/config.json`, override `--config FILE`) | the operator | Per-agent usage / clear commands; teamlead reads it and never writes it |
 | `<task-reports-dir>/TASK-LEDGER.md` | `herdr-teamlead`, written by the foreman | Evidence-backed assignment acceptance and task completion across rounds |
 | `<canonical-state-path>.retrospectives/` | `herdr-teamlead`, through its retrospective utility | Immutable retrospective notes, versioned index, and transition coverage |
+| `<canonical-state-path>.foreman-reset.json` | `skills/herdr-teamlead/teamlead/foreman_reset.py` | One record per foreman round-boundary reset; see Foreman Reset Record below |
 
 The JSON formats and utility contracts below apply to `state.json` and config.
 The Markdown ledger has its own contract in Task Ledger below; adding it changes
@@ -755,3 +756,72 @@ assignment, attempt count, plan, evidence or authorization is removed or
 invented. Receipts grant no corrections, review approvals or new dispatch
 authority. There is no owner command that appends, deletes or downgrades these
 records.
+
+## Foreman Reset Record
+
+`<canonical-state-path>.foreman-reset.json` is owned by
+`skills/herdr-teamlead/teamlead/foreman_reset.py`, which is its only writer and
+reader. It writes under the file's own state lock, never the main state lock.
+`foreman-reset` appends a row and starts the deliverer. The reader
+checks every field, and the `result` shape each `status` requires.
+`foreman-reset-deliver` claims that row and finishes it.
+
+Envelope: `{"schema_version": 1, "resets": [<row>, ...]}`, rows in append
+order. A missing file means no prior reset. A file whose envelope carries an
+integer `schema_version` above 1 was written by a newer build: a read takes it
+as no prior reset, and a write refuses with `reset_record_newer`, leaving the
+file untouched (`rules/stateful-artifacts.md` Migration Policy). A record that
+is a link, cannot be read or parsed, fails any row's validation, or holds two
+rows for one pane and stow is refused with `reset_record_unusable` and left
+untouched. Only the deliverer that claimed a `delivering` row finishes it, and
+an outcome that would not validate is refused before it is written. The
+deliverer waits up to `CLAIM_LOCK_BUDGET_SEC` for the record lock, which
+`foreman-reset` holds until it has saved the deliverer's identity. There is no older version, so no migration exists. A
+future shape change bumps `schema_version` and migrates in the owner.
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `schema_version` | integer, always `1` | Row version |
+| `pane_id` | string | The foreman's Herdr pane; with `stow`, the reset's identity |
+| `stow` | string | The stow id the resume prompt names |
+| `status` | one of `scheduled`, `delivering`, `delivered`, `failed`, `interrupted`, `reconciled` | `scheduled` → `delivering` → `delivered`; `failed` before any keystroke; `interrupted` after one; `reconciled` when the operator confirmed through `foreman-reset-reconcile` that the foreman resumed |
+| `scheduled_at` | ISO-8601 string with timezone | The `foreman-reset` time |
+| `options` | object with optional non-empty string `config` and `herdr_bin` | The non-default settings `foreman-reset` ran with; every resume prompt for this row carries them, including one finalized later by another process |
+| `process` | `{"pid": integer, "identity": string}`, or null | The deliverer's process: its pid and a digest of its start time and command line (`supervision_runtime.process_identity`). A reused pid carries another identity. Null only on a `scheduled` row before its deliverer is identified, or on a `failed` row whose deliverer never started or was gone before identification. Every `delivering`, `delivered` and `interrupted` row carries one |
+| `result` | null, the delivery object, or the failure object | `scheduled` and `delivering` hold null. `delivered` holds exactly `{"schema_version", "pane_id", "stow", "agent", "cleared": true, "resume": {"landed": true, "started": true}}`, whose `schema_version`, `pane_id` and `stow` equal the row's. `failed` and `interrupted` hold exactly `{"error": string, "message": string, "details": object, "resume_prompt": string}`; `resume_prompt` is what the operator pastes. `reconciled` holds exactly `{"outcome": "delivered", "reconciled_at": ISO-8601 string}` |
+
+One delivery attempt per pane and stow, never retried automatically. A
+retry replays before every precondition the reset itself changes (stow
+readiness, supervision work); reading the stow and supervision, and checking
+the caller's pane, still come first. A `delivered` or `reconciled` row,
+or a `scheduled` or `delivering` row whose exact process identity is still
+alive, replays: each returns the recorded row with `replayed: true` and
+starts nothing. A dead `scheduled` row is finalized `failed` (nothing
+was typed), and a dead `delivering` row `interrupted` (typing may have
+begun), each with the failure object. Every other row, `failed` or
+`interrupted` whether recorded earlier or just finalized, is then refused
+with `reset_ended` and its resume prompt, for operator recovery under
+the Working Memory carve-out. The next
+round resets from a new stow. A deliverer claims only the row carrying its
+own process identity. A launch failure, or a deliverer already gone when
+probed, finishes the row `failed`. A `foreman-reset` that dies between the
+row's first save and the identity save leaves it `scheduled` with a null
+`process`; the next read finds no live deliverer and finalizes it `failed`.
+A deliverer that fails before its claim records its still-`scheduled` row
+`failed` itself. A deliverer exits `reset_ended`, with the record path and
+resume prompt, only when the row shows `failed` or `interrupted`; when the
+record could not be updated it exits with that error instead.
+
+The record is the durable blocker for a failed reset: `catch-up` reads it
+through `foreman_reset.outstanding` and lists, ahead of the attention queue,
+each pane whose latest reset ended `failed` or `interrupted`, or never reached
+an outcome with its deliverer gone, and an unreadable record. A later
+`delivered` or `reconciled` reset for the pane supersedes an older failure.
+
+`foreman-reset-reconcile --pane <pane> --stow <stow> --outcome delivered|failed`
+is the owner's repair for a row whose deliverer is gone: a `scheduled` row
+(`failed` only, since nothing was typed), a `delivering` row (either outcome),
+and an `interrupted` row the operator saw resume (`delivered` only): `failed` records the failure with the resume prompt built from the row's
+own `options`, `delivered` records `reconciled`. An identical retry returns
+the recorded row with `replayed: true`; a row that already ended any other
+way, or whose deliverer is still running, is refused.

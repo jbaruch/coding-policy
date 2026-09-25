@@ -54,8 +54,9 @@ decision's records".
 - Never write a throwaway helper script in a scratch directory
 - Never name a scratch file in a handoff
 - A command sequence you repeat across tasks belongs in a tested script
-  shipped with this skill; record it as a follow-up rather than scripting it
-  locally
+  shipped with this skill
+- Record such a sequence as a follow-up
+- Never script such a sequence locally
 
 References:
 
@@ -120,6 +121,8 @@ failure — something blocks the round. Exit 2 means the preflight could not
 answer.
 
 - **Exit 0** — read `due`, satisfy any cadence it names, and proceed to Step 5.
+  A resumed foreman proceeds to the stow's continuation step instead (Step 17
+  Resume Route).
   When `due` names the capability table, dispatch the refresh consultation under
   `references/model-tiers.md`, then record its report and show the result:
 
@@ -167,7 +170,7 @@ Run `references/retrospectives.md` on resume, before planning, or for an
 explicit retrospective request. For an explicit request, complete a new
 retrospective and finish here.
 
-Proceed immediately to Step 5.
+Proceed immediately to Step 5, or on a resume to the stow's continuation step.
 
 ## Step 3 — Verify Authority for the Repo
 
@@ -470,9 +473,10 @@ checkpoint's `exit` and delivery JSON as `wait`:
 - The command itself exits non-zero when the dispatch has no recorded send
   time, or when the wait ran without a verdict (`wait_failed`, carrying the
   wait's own exit, 2 included); resolve the diagnostic stderr names, then run
-  it again Read delivered reports in full. Pass the worker's checkout
-as `--worktree` when it has one. An exit 1
-then carries either `reason: checkpoint_pending` or a `stall` object; act on a
+  it again
+
+Read delivered reports in full. Pass the worker's checkout as `--worktree`
+when it has one. An exit 1 then carries either `reason: checkpoint_pending` or a `stall` object; act on a
 stall under `rules/agent-team-operation.md` Stalled Workers and record the
 obligation through `references/attention.md`. Preserve the blocked/refusal and native-recovery paths in the
 following references; never re-dispatch over uncertainty or resend a refused
@@ -545,6 +549,10 @@ Assess correction scope and bug evidence under `references/assignment-reasoning.
 Persist user-facing obligations under `references/attention.md` before presenting
 them; record an actual answer or resolution separately from showing the item.
 
+Every return to Step 4 is a round boundary: run Step 16 to log the round and
+Step 17 to reset first. Record the step this gate decision named as the stow's
+continuation step. The reset foreman takes Step 17's Resume Route.
+
 After accepting a consultation, return to Step 4 for the next needed
 responsibility. For an investigation-only task, use the knowledge gate below.
 
@@ -592,6 +600,11 @@ The judge is read-only, so Step 8 is skipped for it. Never substitute a judge,
 lower its tier, or hand-write an assignment to bypass a refusal. Its last step
 names where to continue.
 
+A judge round is a round: once its ruling is recorded, run Step 16 and Step
+17 before continuing, whatever the ruling (`insufficient` and `blocked`
+included). Record the step the ruling named as the stow's continuation step.
+The reset foreman takes Step 17's Resume Route.
+
 ## Step 14 — Release the Pull Request
 
 The release is one more assignment, never a prompt into the developer's
@@ -627,13 +640,90 @@ bash "$CP/skills/herdr-teamlead/teamlead.sh" close-task --record <close.json>
 - **Exit 0** — stdout is the recorded `task_closed` event JSON. Repeating the
   same closure prints the existing event. Proceed.
 - **Non-zero** — stderr names the refused field or the conflicting earlier
-  closure. Correct the record and re-run; do not finish Step 16 with the
-  task unclosed.
+  closure. Correct the record and re-run; do not finish Step 16 with a merged
+  or abandoned task unclosed.
+
+A task still in progress (a consultation or a fix round) is not closed; it
+continues to Step 17 open.
 
 Preserve the ledger for resume and standup. Preserve retrospective notes and link them from the ledger. Save
-current progress through the attention owner and stow the foreman's handoff under
-the working-memory reference. Reconcile supervision before ending the turn.
+current progress through the attention owner and curate the round's lessons.
 Report outstanding attention first, followed by the outcome and saved paths.
+Proceed immediately to Step 17.
+
+## Step 17 — Reset the Foreman Context
+
+Stow the handoff under the working-memory reference, with a structured gap
+for anything the stow could not capture. The stow's `unresolved_work` names
+the continuation step, the step the round's outcome routes to:
+
+- A gate decision, judge ruling or remedy — the step it named
+- A release-ready pull request — Step 14
+- A merged or abandoned task awaiting closure — Step 16
+- Only `foreman-queue` seats remaining — Step 5
+
+Handle every pending supervision event, and save `supervision-hold` kind
+`handoff` covering each active enrollment. Then schedule the reset:
+
+```bash
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
+bash "$CP/skills/herdr-teamlead/teamlead.sh" foreman-reset --stow <stow-id> \
+  [--state <state-file>] [--config <config-file>] [--herdr-bin <path>]
+```
+
+Pass the same `--state`, `--config` and `--herdr-bin` the stow was recorded
+under.
+
+- **Exit 0** — stdout names the scheduled `pane_id`, `stow`, deliverer `pid`
+  and `log`
+  - `replayed: true` means this exact reset was already scheduled, and
+    nothing new started
+  - End the turn now
+  - Once the pane is idle, the deliverer clears it and sends the resume
+    prompt naming that stow; the next context takes the Resume Route below
+- **Exit 1** — stderr is one JSON object; route on its `error` field:
+  - `reset_ended` — this stow's one reset attempt failed or was
+    interrupted, including a deliverer that could not start
+    - Never re-run `foreman-reset` for this stow
+    - Record a user-attention blocker quoting `details.resume_prompt` and
+      `details.record`
+    - End the turn
+    - The operator recovers under the Working Memory carve-out, first
+      confirming the pane is not already running a resumed foreman
+    - The next round resets from a new stow
+  - `reset_record_newer` — a newer build wrote the reset record
+    - Record a user-attention blocker to update the plugin
+    - Leave the file untouched
+  - `reset_record_unusable` — the reset record is a link, unreadable or
+    malformed
+    - Record a user-attention blocker naming `details.record`
+    - Never edit or delete the file
+    - The operator restores it
+  - any other `error` — a refused precondition: an unready stow, the wrong
+    pane, supervision work still unheld, or an unreadable stow or state
+    - Fix the cause stderr names
+    - Re-run `foreman-reset`
+- A deliverer that fails after scheduling leaves its outcome on the reset
+  record
+- `catch-up` surfaces that outcome ahead of the attention queue
+  (`foreman_resets`)
+- The deliverer writes its error JSON to the `log` named at exit 0
+  - `reset_ended` there means the row shows `failed` or `interrupted`
+  - Any other error means the record could not be updated; the operator
+    closes the reset with the complete `foreman-reset-reconcile` command
+    catch-up prints for that row, before any recovery
+- Never end the turn with active work that has no hold
+
+**Resume Route** — the next context follows one route:
+
+1. The resume prompt's reads: the stow and its required files, supervision,
+   `foreman-queue`
+2. Step 1, then Step 2
+3. The stow's continuation step, in place of Step 5
+
+`foreman-queue` lists seats only. Gating, release and closure return through
+the continuation step, never through the queue.
+
 Finish here.
 
 For the daily standup, use
