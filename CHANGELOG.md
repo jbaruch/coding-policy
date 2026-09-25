@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.272 — 2026-09-25
+
 ### Added
 
 - **The Herdr foreman resets its own context at every round boundary.** This
