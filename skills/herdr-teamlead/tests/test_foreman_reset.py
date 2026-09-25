@@ -41,6 +41,13 @@ def check(stow=READY, caller: "str | None" = PANE, **state):
 
 
 class PreflightTest(unittest.TestCase):
+    def test_an_open_user_pause_refuses_even_under_a_handoff_hold(self):
+        data, _ = supervision_data(active=True, held=True, hold_kind="handoff")
+        data["holds"].append({"id": "ask-user", "kind": "waiting_for_user", "resumed_at": None,
+                              "through": 0, "members": "x"})
+        with self.assertRaisesRegex(UsageError, "user pause is still open"):
+            foreman_reset.preflight(READY, data, PANE)
+
     def test_a_ready_stow_from_the_foreman_pane_with_nothing_active_is_scheduled(self):
         self.assertEqual(check(), {"pane_id": PANE, "stow": "round-7"})
 
@@ -92,7 +99,7 @@ def worker(name, kind):
 class HandoffHoldTest(unittest.TestCase):
     def test_only_a_handoff_hold_lets_the_foreman_reset(self):
         self.assertEqual(check(active=True, held=True, hold_kind="handoff")["pane_id"], PANE)
-        with self.assertRaisesRegex(UsageError, "cannot stop yet"):
+        with self.assertRaisesRegex(UsageError, "user pause is still open"):
             check(active=True, held=True, hold_kind="waiting_for_user")
 
 
@@ -639,12 +646,27 @@ class ResetCommandTest(CliCase):
         self.assertEqual(code, 1)
         self.assertIn("outside Herdr", err)
 
+    def test_a_herdr_marker_other_than_1_is_outside_herdr(self):
+        for marker in ("0", "fixture", ""):
+            with self.subTest(marker=marker), \
+                 patch("teamlead.cli.memory.show", return_value={"record": READY}), \
+                 patch("teamlead.cli.supervision.load", return_value=supervision_data()[0]), \
+                 patch.dict("os.environ", {"HERDR_PANE_ID": PANE, "HERDR_ENV": marker}), \
+                 patch("teamlead.cli._spawn_detached", side_effect=AssertionError("must not spawn")):
+                code, _, err = self.run_cli(self.base() + ["foreman-reset", "--now", RESET_AT])
+                self.assertEqual(code, 1)
+                self.assertIn("outside Herdr", err)
+
     def test_a_failure_record_keeps_identifiers_only(self):
         from teamlead.errors import HerdrError as Raw
         leaked = Raw("composer read failed", {"pane_id": PANE, "stderr": "token=secret", "screen": ["$ export KEY=x"],
                                               "pid": 7})
         record = foreman_reset.failure(leaked, "round-7", "/s.json")
         self.assertEqual(record["details"], {"pane_id": PANE, "pid": 7})
+        noisy = Raw("herdr agent prompt failed: token=secret\n$ export KEY=x", {})
+        self.assertNotIn("secret", foreman_reset.failure(noisy, "round-7", "/s.json")["message"])
+        own = UsageError("Stow round-7 is no longer reset-ready.", {})
+        self.assertEqual(foreman_reset.failure(own, "round-7", "/s.json")["message"], own.message)
 
     def test_an_unusable_record_is_itself_outstanding(self):
         foreman_reset.record_path(self.state).write_text("{not json")

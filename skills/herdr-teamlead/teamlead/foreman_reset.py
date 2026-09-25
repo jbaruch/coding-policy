@@ -328,15 +328,24 @@ def schedule(state_path, plan, at, start, *, alive=_alive, probe=None, options=N
         return {**row, "replayed": False}
 
 
+#: Error codes whose messages this owner writes itself. Any other error, a
+#: Herdr or composer failure above all, can carry raw subprocess output or pane
+#: text in its message; the record keeps a generic line and the log keeps it.
+OWN_MESSAGE_CODES = frozenset({"usage_error", "state_error", "reset_ended", "reset_record_newer", "reset_record_unusable"})
+
+
 def failure(exc, stow, state, **options):
     """The durable result of a failed or interrupted reset: the error and the prompt the operator pastes.
 
-    Details are filtered to identifier keys with scalar values; anything else
-    an error carried stays out of the durable record.
+    Details are filtered to identifier keys with scalar values, and a message
+    this owner did not write is replaced by a generic one; the full error
+    stays in the deliverer's log.
     """
     details = {key: value for key, value in exc.details.items()
                if key in FAILURE_DETAIL_KEYS and (value is None or isinstance(value, (str, int, float, bool)))}
-    return {"error": exc.code, "message": exc.message, "details": details, "resume_prompt": resume_prompt(stow, state, **options)}
+    message = exc.message if exc.code in OWN_MESSAGE_CODES else (
+        "A Herdr call failed ({}); the reset's log holds its output.".format(exc.code))
+    return {"error": exc.code, "message": message, "details": details, "resume_prompt": resume_prompt(stow, state, **options)}
 
 
 def launcher():
@@ -579,6 +588,12 @@ def preflight(stow, supervision_data, caller_pane):
             pane, caller_pane or "outside Herdr"), {"pane_id": pane})
     events = supervision.pending(supervision_data)
     active = [row["id"] for row in supervision_data["members"] if row["active"]]
+    # The resume sequence resumes every open hold, so a user pause must not ride along.
+    waiting = [row.get("id") for row in supervision_data["holds"] if row["resumed_at"] is None and row["kind"] != "handoff"]
+    if waiting:
+        raise UsageError("A user pause is still open ({}); the reset's resume sequence would resume it without the user. "
+                         "Record the user's answer and resume that hold before resetting.".format(", ".join(map(str, waiting))),
+                         {"holds": waiting})
     if events or (active and not _handoff_held(supervision_data)):
         raise UsageError("The foreman cannot stop yet: {} unhandled event(s), {} active assignment(s) without a covering hold. Handle the events and save supervision-hold kind handoff (a user pause does not qualify) before resetting.".format(
             len(events), len(active)), {"events": len(events), "active": active})

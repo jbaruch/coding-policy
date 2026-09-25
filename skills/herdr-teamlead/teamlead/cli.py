@@ -1462,7 +1462,7 @@ def cmd_foreman_reset(args, client=None, warn=None, trace=None, spawn=None):
     # (stow readiness, supervision work); reading the stow and supervision and
     # checking the caller's pane still come first (see foreman_reset.replay).
     # A pane id alone can be set by any process; a Herdr pane also carries HERDR_ENV.
-    caller = os.environ.get("HERDR_PANE_ID") if os.environ.get("HERDR_ENV") else None
+    caller = os.environ.get("HERDR_PANE_ID") if os.environ.get("HERDR_ENV") == "1" else None
     if bound_pane and caller != bound_pane:
         raise UsageError("foreman-reset runs from the bound foreman's own pane ({}); this call came from {}.".format(
             bound_pane, caller or "outside Herdr"), {"pane_id": bound_pane})
