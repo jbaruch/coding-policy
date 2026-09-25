@@ -185,6 +185,8 @@ class TierIntegrationTest(CliCase):
         self.assertTrue(usable)
         self.assertEqual(stored["schema_version"], STATE_SCHEMA_VERSION)
         self.assertEqual(stored["assignments"][0]["tier"], applied["tier"])
+        # The capability verdict explains a plan; the recorded tier keeps its schema (#520).
+        self.assertFalse({"capability", "cheaper_adequate"} & set(stored["assignments"][0]["tier"]))
         self.assertEqual(role_counts(stored), {"developer": {"claude": 1}})
 
     def test_tiered_worker_changed_during_composer_read_receives_no_prompt(self):

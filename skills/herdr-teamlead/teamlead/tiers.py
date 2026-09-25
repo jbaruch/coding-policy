@@ -18,6 +18,10 @@ from .billing import billing_window, effective_multiplier
 from .errors import ConfigError, HerdrError, UsageError
 
 
+#: The pinned top model per adapter. Review these ids whenever
+#: `capability-check` reports the capability table due (`capabilities.INTERVAL`),
+#: and bump one only with a CHANGELOG note citing the table entry that moved it;
+#: never rewrite this set from a model's own report (#520).
 TOP_MODELS = {
     "claude": frozenset({"opus-5", "claude-opus-5"}),
     "codex": frozenset({"gpt-5.6-sol"}),

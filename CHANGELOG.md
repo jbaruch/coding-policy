@@ -1,5 +1,26 @@
 # Changelog
 
+### Changed
+
+- **Tier selection reads the capability table (#520).** The table shipped in
+  0.3.252, replaced the qualification battery, and its docstring said routing
+  read it; nothing did. `capabilities.lookup` was called from its own tests
+  alone. Planning and dispatch now assess every candidate against it. An
+  `inadequate` entry for the selected model and effort refuses that
+  candidate, naming the source; a plan left with no candidate says which
+  entries refused which workers. `unknown`, a missing entry or a missing
+  table leaves the configured row in place, so no floor moves on missing
+  evidence. Only a `benchmark`, `evaluation` or `project` source counts as
+  `adequate`, even in a hand-edited file. A cheaper configured row recorded
+  adequate for the same work is written to the plan as `cheaper_adequate`
+  and never selected; the operator owns the config. The issue proposed four
+  new capability names, which matched none of the ten already recorded, so
+  every lookup but one would have read `unknown` and the table would have
+  stayed as inert as before. Routing instead reads the recorded vocabulary,
+  owned as `ROUND_CAPABILITIES` and `VOCABULARY`, and `capability-record`
+  refuses any other name. Plan schema 10 carries `capability` and
+  `cheaper_adequate` on each tier; `TOP_MODELS` gains its renewal note.
+
 ## 0.3.268 — 2026-09-25
 
 ### Changed

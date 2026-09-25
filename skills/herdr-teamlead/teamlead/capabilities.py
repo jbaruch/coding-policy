@@ -1,8 +1,9 @@
 """The model-capability table: what each model can do, sourced and dated.
 
 A dependency the project imports, not a measurement it takes (#480). Entries
-carry published knowledge that routing reads, each with the source supporting it
-and the date that source was read.
+carry published knowledge that tier selection reads (`assess`, called from
+`select_tier`'s callers), each with the source supporting it and the date that
+source was read.
 
 Staleness here is silent. Models ship monthly, a retired entry keeps routing
 work to a model that stopped being the right choice, and nothing errors and no
@@ -42,6 +43,38 @@ SOURCE_KINDS = ("benchmark", "evaluation", "project", "vendor")
 SUPPORTING_SOURCES = frozenset({"benchmark", "evaluation", "project"})
 
 VERDICTS = ("adequate", "inadequate", "unknown")
+
+#: The table's vocabulary, owned here so what a consultation records is what
+#: routing reads (#520). `ROUND_CAPABILITIES` names what each round needs a
+#: model to do; a judgment round on a rotating worker also needs
+#: `JUDGMENT_TIER`, and a consultation needs what its role does.
+#: `RECORDED_ONLY` names are facts the table keeps without routing on them.
+#: `record` refuses any other name.
+JUDGMENT_TIER = "rotating-worker-judgment-tier"
+JUDGE_CAPABILITY = "pinned-judge-launch"
+ROUND_CAPABILITIES = {
+    "review": ("independent-defect-detection",),
+    "hostile_verify": ("independent-defect-detection",),
+    "recheck": ("independent-defect-detection",),
+    "critic": ("independent-defect-detection",),
+    "test_plan": ("independent-defect-detection",),
+    "architect": ("advisory-synthesis",),
+    "reconciliation": ("causal-investigation",),
+    "release_adjudication": ("release-adjudication",),
+    "lead": (),
+    "build": ("implementation",),
+    "fix": ("implementation",),
+    "mechanical": ("mechanical-execution",),
+    "release_mechanics": ("mechanical-execution",),
+    "consultation": (),
+}
+CONSULTATION_CAPABILITIES = {"investigator": "causal-investigation", "advisor": "advisory-synthesis"}
+RECORDED_ONLY = frozenset({"context-window-1m", "report-verdict-classification"})
+VOCABULARY = frozenset(
+    {JUDGMENT_TIER, JUDGE_CAPABILITY} | set(CONSULTATION_CAPABILITIES.values()) | RECORDED_ONLY
+    | {name for names in ROUND_CAPABILITIES.values() for name in names})
+#: The effort a table row names for a model that takes no effort flag.
+DEFAULT_EFFORT = "default"
 
 NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,127}\Z")
 DATED = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}\Z")
@@ -186,6 +219,62 @@ def lookup(document, model, effort, capability):
     return None
 
 
+def required(role, round_type, judgment_rounds):
+    """The capabilities a round asks of the model that runs it, in vocabulary order."""
+    if round_type == "judge":
+        return (JUDGE_CAPABILITY,)
+    names = list(ROUND_CAPABILITIES[round_type])
+    if round_type == "consultation":
+        names.append(CONSULTATION_CAPABILITIES[role])
+    if round_type in judgment_rounds:
+        names.insert(0, JUDGMENT_TIER)
+    return tuple(names)
+
+
+def evidence(document, model, effort, capabilities):
+    """The sources of the entries recorded for one model and effort, one per capability found."""
+    effort = effort or DEFAULT_EFFORT
+    found = []
+    for name in capabilities:
+        entry = lookup(document, model, effort, name)
+        if entry is not None:
+            found.append({"capability": name, **entry["source"]})
+    return found
+
+
+class InadequateCapability(UsageError):
+    """The table records the selected model and effort as inadequate for this round."""
+
+    code = "capability_inadequate"
+
+
+def assess(document, model, effort, capabilities):
+    """`adequate` or `unknown` for one model and effort; an `inadequate` entry refuses.
+
+    Unknown never selects a different model and never lowers a floor: a
+    missing table, a missing entry and an `unknown` verdict all leave the
+    configured row in place and say so. Only an entry resting on a supporting
+    source counts as `adequate`, whatever the file claims.
+    """
+    effort = effort or DEFAULT_EFFORT
+    verdicts = []
+    for name in capabilities:
+        entry = lookup(document, model, effort, name)
+        if entry is None:
+            verdicts.append("unknown")
+            continue
+        if entry["verdict"] == "inadequate":
+            source = entry["source"]
+            raise InadequateCapability(
+                "The capability table records {} at {} effort as inadequate for {} ({} source {}, read {}). Configure "
+                "another model for this round, or record newer evidence through capability-record.".format(
+                    model, effort, name, source["kind"], source["ref"], source["dated"]),
+                {"model": model, "effort": effort, "capability": name, "source": source})
+        supported = entry["verdict"] == "adequate" and entry["source"]["kind"] in SUPPORTING_SOURCES
+        verdicts.append("adequate" if supported else "unknown")
+    return "adequate" if verdicts and all(v == "adequate" for v in verdicts) else "unknown"
+
+
 def record(path, data, at):
     """Write a consultation's report into the table, replacing what it covers.
 
@@ -207,6 +296,10 @@ def record(path, data, at):
             _fail("A reported capability entry carries exactly {}.".format(", ".join(sorted(reported))))
         row = {**entry, "schema_version": SCHEMA_VERSION, "recorded_at": _utc(at)}
         key = validate_entry(row)
+        # After validation, so the name is known to be a string.
+        if key[2] not in VOCABULARY:
+            _fail("Capability {!r} is not one routing reads or the table keeps; use one of {}.".format(
+                key[2], ", ".join(sorted(VOCABULARY))))
         if key in covered:
             _fail("This refresh records {} twice; one entry owns one model, effort and "
                   "capability.".format(" / ".join(key)))
