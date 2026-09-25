@@ -559,9 +559,12 @@ bash "$CP/skills/herdr-teamlead/teamlead.sh" verify-partition \
   paths the slices leave unowned, no longer cover, or own twice
 - Exit 1 also names a seat whose latest dispatch is not this plan's applied
   send to its assigned worker, or a plan made without `--task`
-- On exit 1, re-validate the partition at the tip
-- Then replan from that result
-- Then review the slices again
+- Exit 1 is a blocking finding on the round, gated below like any other
+- Run Step 16, then Step 17, with Step 4 as the stow's continuation step
+- The reset foreman resumes at Step 4 and re-validates the partition at the
+  tip in Step 5, replanning from that result
+- The new plan then takes Step 7 composition, Step 10 dispatch, Step 11
+  observation, and this step's gate
 
 Record assignment acceptance or outstanding work in the task ledger against
 the inspected report and artifact evidence. Record the task's gate decision

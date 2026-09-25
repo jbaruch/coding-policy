@@ -75,6 +75,23 @@ class FreezeLinkTest(FreezeTest):
         with self.assertRaisesRegex(UsageError, "is a link"):
             freeze_paths(self.paths)
 
+    def test_a_symlinked_frozen_directory_is_refused(self):
+        elsewhere = self.root / "elsewhere"
+        elsewhere.mkdir()
+        (self.root / FROZEN_DIR).symlink_to(elsewhere)
+        with self.assertRaisesRegex(UsageError, "is a link or not a directory"):
+            freeze_paths(self.paths)
+        self.assertEqual(list(elsewhere.iterdir()), [])
+
+    def test_a_copy_read_back_through_a_symlinked_directory_is_refused(self):
+        from teamlead.assign import read_frozen
+        frozen = Path(freeze_paths(self.paths)["reviewer"])
+        moved = self.root / "moved"
+        frozen.parent.rename(moved)
+        frozen.parent.symlink_to(moved)
+        with self.assertRaisesRegex(UsageError, "is a link or not a directory"):
+            read_frozen(frozen)
+
     def test_a_fifo_or_directory_at_the_frozen_path_is_refused(self):
         for plant in (os.mkfifo, os.mkdir):
             with self.subTest(plant=plant.__name__):

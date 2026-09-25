@@ -41,7 +41,9 @@
   state lock and checks the exact bytes it verified. An existing frozen copy is inspected through one no-follow,
   non-blocking descriptor outside the `FileExistsError` handler, so a copy
   that vanishes or turns unreadable mid-inspection is an actionable refusal
-  rather than a traceback, and a FIFO or directory there is refused. An
+  rather than a traceback, and a FIFO or directory there is refused. A
+  `.dispatched/` directory that is itself a symlink is refused on freeze and
+  on the gate's read, so no frozen copy lands outside the source directory. An
   unknown revision passed to `validate-partition` or `verify-partition` now
   reaches its "pass a revision it holds" message instead of git's bare
   "Needed a single revision". Revisions and proofs accept SHA-256 commit ids

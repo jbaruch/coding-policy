@@ -226,6 +226,11 @@ def freeze_paths(paths):
         target = Path(source).parent / FROZEN_DIR / "{}.{}{}".format(Path(source).stem, digest[:16], Path(source).suffix)
         try:
             target.parent.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            raise UsageError("Cannot create {} beside brief {}: {}. Make its directory writable and re-run.".format(
+                target.parent, source, exc.strerror or str(exc)), {"path": str(target.parent)}) from None
+        _require_frozen_dir(target.parent)
+        try:
             with open(target, "xb") as handle:
                 handle.write(data)
             exists = False
@@ -241,6 +246,23 @@ def freeze_paths(paths):
             _require_frozen_copy(target, digest)
         frozen[key] = str(target)
     return frozen
+
+
+def _require_frozen_dir(directory):
+    """Refuse a `FROZEN_DIR` that is a link or not a directory.
+
+    A symlinked directory would place frozen copies, and the gate's later
+    read of them, somewhere outside the source's own directory that nothing
+    keeps immutable (#460).
+    """
+    try:
+        status = os.lstat(directory)
+    except OSError as exc:
+        raise UsageError("Cannot inspect frozen-brief directory {}: {}. Restore it or move it aside and re-run."
+                         .format(directory, exc.strerror or str(exc)), {"path": str(directory)}) from None
+    if not stat.S_ISDIR(status.st_mode):
+        raise UsageError("Frozen-brief directory {} is a link or not a directory; move it aside and re-run so the "
+                         "freeze writes real copies beside the source.".format(directory), {"path": str(directory)})
 
 
 def _read_unlinked_regular(target):
@@ -295,6 +317,8 @@ def read_frozen(path):
     content its name's digest names, so the bytes read are the bytes sent.
     """
     target = Path(path)
+    if target.parent.name == FROZEN_DIR:
+        _require_frozen_dir(target.parent)
     data = _read_unlinked_regular(target) if target.parent.name == FROZEN_DIR else None
     if data is None or hashlib.sha256(data).hexdigest()[:16] not in target.name.split("."):
         raise UsageError("Dispatched brief {} is not an intact frozen copy, so what the worker read cannot be "
