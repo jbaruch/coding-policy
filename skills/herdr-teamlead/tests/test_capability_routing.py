@@ -6,6 +6,7 @@ import sys
 import unittest
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -142,6 +143,35 @@ class RoutingTest(CliCase):
         self.assertEqual(rc, 0, error)
         tier = document["tiers"]["developer"]
         self.assertEqual((tier["capability"], tier["cheaper_adequate"]["model"]), ("unknown", "sonnet-5"))
+
+    def test_a_cheaper_row_the_role_cannot_run_is_never_named(self):
+        # `release_mechanics` is cheaper and adequately evidenced, but a developer can never run it.
+        self.settings["agents"][0]["tiers"]["release_mechanics"] = {"model": "sonnet-5", "effort": "medium", "multiplier": 0.5}
+        self.settings["agents"][0]["tiers"]["fix"] = {"model": "opus-5", "effort": "high", "multiplier": 3.0}
+        self.config.write_text(json.dumps(self.settings), encoding="utf-8")
+        self.record(entry("opus-5", "high", "implementation", "adequate"),
+                    entry("sonnet-5", "medium", "implementation", "adequate"))
+        rc, document, error = self.plan()
+        self.assertEqual(rc, 0, error)
+        self.assertIsNone(document["tiers"]["developer"]["cheaper_adequate"])
+
+    def test_the_dispatched_assignment_records_no_plan_only_fields(self):
+        rc, document, error = self.plan()
+        self.assertEqual(rc, 0, error)
+        seen = {}
+
+        def capture(*args, **kwargs):
+            seen.update(kwargs.get("tiers") or {})
+            return {"schema_version": 1, "steps": []}
+
+        with patch("teamlead.cli.dry_run", side_effect=capture):
+            rc, _output, error = self.run_cli(
+                ["apply", *self.base(), "--assignments", json.dumps(document), "--common", str(self.common),
+                 *self.brief_args("developer"), "--now", AT, "--composer-settle", "0", "--dry-run"],
+                client=HerdrClient("herdr", FakeRunner()))
+        self.assertEqual(rc, 0, error)
+        self.assertEqual(seen["developer"]["model"], "opus-5")
+        self.assertFalse(set(seen["developer"]) & {"capability", "cheaper_adequate"})
 
     def test_an_inadequate_candidate_is_not_planned_and_the_plan_says_why(self):
         self.record(entry("opus-5", "high", "implementation", "inadequate"))

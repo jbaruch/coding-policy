@@ -43,7 +43,7 @@ from .measure import (
 )
 from .planner import plan as build_plan
 from .planner import headroom_of
-from .tiers import JUDGMENT_ROUNDS, MissingTierError, parse_launch_args, parse_tiers, select_tier
+from .tiers import JUDGMENT_ROUNDS, ROLE_ROUNDS, MissingTierError, parse_launch_args, parse_tiers, select_tier
 from .billing import effective_multiplier
 from .launch import start_worker, verify_running
 from .state import (
@@ -613,14 +613,22 @@ def _build_plan_with_refusals(build, refusals, *args, **kwargs):
             {**exc.details, "capability_refusals": refusals}) from None
 
 
-def _cheaper_adequate(agent, tier, needs, table):
+#: Tier fields a plan carries to explain itself and a dispatch never records.
+PLAN_ONLY_TIER_FIELDS = frozenset({"capability", "cheaper_adequate"})
+
+
+def _cheaper_adequate(agent, role, tier, needs, table):
     """A configured row cheaper than `tier` that the table records adequate for the same needs, or None.
 
     Recorded, never selected: the operator owns the table and the config, and
     this only explains why a cheaper candidate was not used (#520).
     """
     cost = tier["effective_multiplier"]
+    allowed = ROLE_ROUNDS.get(canonical_role(role), frozenset())
     for name, row in sorted(agent.tiers.items()):
+        if name not in allowed:
+            # A row this role can never run explains nothing about its choice.
+            continue
         if (row["model"], row.get("effort")) == (tier["model"], tier.get("effort")) or effective_multiplier(row) >= cost:
             continue
         try:
@@ -683,7 +691,7 @@ def _candidate_tiers(roles, agents, rounds, fix_round=None, judge=None, excludes
             )}
             candidates[role][agent.name].update(
                 capability=verdict,
-                cheaper_adequate=_cheaper_adequate(agent, tier, needs, table))
+                cheaper_adequate=_cheaper_adequate(agent, role, tier, needs, table))
     return candidates
 
 
@@ -1286,6 +1294,10 @@ def cmd_apply(args, client=None, warn=None, trace=None):
         saved_tiers = {role: tier for role, tier in document.get("tiers", {}).items() if tier is not None and role in assignments} if isinstance(document.get("tiers", {}), dict) else None
         if "tiers" in document and saved_tiers != tiers:
             raise UsageError("Plan tiers differ from current config or fix context; re-run plan before dispatch.", {})
+        # The capability verdict explains the plan; it is not part of the tier a
+        # dispatch records, so the assignment row keeps its schema (#520).
+        tiers = {role: {key: value for key, value in tier.items() if key not in PLAN_ONLY_TIER_FIELDS}
+                 for role, tier in tiers.items()}
     client = client if client is not None else _client(args, trace=trace)
 
     if args.retain_specialist:

@@ -116,7 +116,9 @@ adequate on a supporting source, and `unknown` otherwise; an `inadequate`
 entry refuses the candidate instead, so it is never stored. `cheaper_adequate`
 names a cheaper configured row recorded adequate for the same needs, with the
 `sources` of the entries that say so, or null, whatever the selected row's own
-verdict; it is recorded, never selected. Reader: `apply`, which recomputes both. An
+verdict; it is recorded, never selected, and only a row the role can run
+qualifies. Reader: `apply`, which recomputes both and drops them from the tier
+it dispatches, so assignment rows keep their schema. An
 older plan carries neither and is refused as stale.
 
 Plan schema 9 adds `pressure_headroom` and `de_escalated` to each entry in
