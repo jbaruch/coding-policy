@@ -209,7 +209,7 @@ def load_validated(path):
     # uncovered file pass a shape check, and the round seats against them.
     # Re-deriving costs nothing and re-proves the property rather than taking
     # the artifact's word for it (#453).
-    inner = {key: value for key, value in document.items() if key != "changed"}
+    inner = {key: value for key, value in document.items() if key not in ("changed", "proof")}
     accepted = validate_document(inner, str(path))
     validate_resolved(set(changed), accepted, str(path))
     return accepted
@@ -354,13 +354,86 @@ def register_commands(sub, common):
     parser.add_argument("--base", required=True, metavar="REV", help="The revision the round started from.")
     parser.add_argument("--head", metavar="REV", help="The pushed head; omit to read the working tree.")
     parser.add_argument("--partition", required=True, metavar="FILE", help="The round's partition document.")
+    check = sub.add_parser(
+        "verify-partition", parents=[common],
+        help="At the review gate, confirm a partitioned plan still covers exactly the diff at the tip under review.",
+    )
+    check.add_argument("--plan", required=True, metavar="FILE", help="The plan `plan --partition` wrote.")
+    check.add_argument("--repo", required=True, metavar="PATH", help="The repository the partition covers.")
+    check.add_argument("--head", required=True, metavar="REV", help="The tip whose review is being accepted.")
+
+
+def _revision(run, rev):
+    """The full commit a revision names in the repository, or a refusal naming it."""
+    resolved = run(["rev-parse", "--verify", rev + "^{commit}"]).strip()
+    if not re.fullmatch(r"[0-9a-f]{40}", resolved):
+        raise UsageError("{!r} does not name a commit in the repository; pass a revision it holds.".format(rev), {"rev": rev})
+    return resolved
 
 
 def run_command(args, runner=None):
-    """Validate this round's partition against the paths its diff changed."""
+    """Validate this round's partition against the paths its diff changed, and stamp what it was proven against."""
+    if getattr(args, "command", None) == "verify-partition":
+        return verify(args, runner), None
     partition = load_partition(args.partition)
     run = runner if runner is not None else git_runner(args.repo)
     head = getattr(args, "head", None)
     span = [args.base + "..." + head] if head else [args.base]
     changes = parse_name_status(run(["diff", "--no-renames", *span, "--name-status", "-z"]))
-    return validate(set(changes), partition), None
+    result = validate(set(changes), partition)
+    # The proof names what the partition was checked against, so the review
+    # gate can confirm the plan still covers the diff at the tip it accepts (#460).
+    result["proof"] = {"repo": str(Path(args.repo).expanduser().resolve()), "base": _revision(run, args.base),
+                       "head": _revision(run, head) if head else None}
+    return result, None
+
+
+def load_proof(path):
+    """The proof a `validate-partition` result carries, or a refusal to re-validate."""
+    document = json.loads(Path(path).read_text(encoding="utf-8"))
+    proof = document.get("proof") if isinstance(document, dict) else None
+    if (not isinstance(proof, dict) or set(proof) != {"repo", "base", "head"}
+            or not all(isinstance(proof[key], str) and proof[key] for key in ("repo", "base"))
+            or not (proof["head"] is None or isinstance(proof["head"], str))):
+        raise UsageError("The validated partition at {} carries no proof of what it was checked against; re-run "
+                         "`validate-partition` with this build and plan from its output.".format(path), {"path": str(path)})
+    return proof
+
+
+def verify(args, runner=None):
+    """Refuse a plan's partition unless it covers exactly the diff at the tip under review."""
+    try:
+        plan = json.loads(Path(args.plan).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise UsageError("Cannot read the plan at {}: {}. Pass the JSON `plan --partition` wrote.".format(args.plan, exc),
+                         {"path": str(args.plan)}) from None
+    proof = plan.get("partition_proof") if isinstance(plan, dict) else None
+    slice_paths = plan.get("slice_paths") if isinstance(plan, dict) else None
+    if not isinstance(proof, dict) or not isinstance(slice_paths, dict) or not slice_paths:
+        raise UsageError("The plan at {} seats no validated partition (no partition_proof or slice_paths); plan the "
+                         "round with `plan --partition <validate-partition output>`.".format(args.plan), {"path": str(args.plan)})
+    if proof.get("head") is None:
+        raise UsageError("The partition was validated against the working tree, not a pushed head, so no tip can be "
+                         "checked against it. Re-run validate-partition with --head at the pushed tip, replan, and "
+                         "re-dispatch the slices.", {"path": str(args.plan)})
+    run = runner if runner is not None else git_runner(args.repo)
+    tip = _revision(run, args.head)
+    if tip != proof["head"]:
+        raise UsageError("The partition was proven at {}, but the tip under review is {}. A new push can change the diff "
+                         "the slices cover: re-run validate-partition at the tip, replan, and review the slices again."
+                         .format(proof["head"], tip), {"proven": proof["head"], "tip": tip})
+    changed = set(parse_name_status(run(["diff", "--no-renames", proof["base"] + "..." + tip, "--name-status", "-z"])))
+    owners_of = {}
+    for seat, paths in slice_paths.items():
+        for path in paths:
+            owners_of.setdefault(path, []).append(seat)
+    unowned = sorted(changed - set(owners_of))
+    stale = sorted(set(owners_of) - changed)
+    shared = sorted(path for path, seats in owners_of.items() if len(seats) > 1)
+    if unowned or stale or shared:
+        raise UsageError("The plan's slices do not cover exactly the diff {}...{}: {} unowned, {} no longer changed, {} "
+                         "owned twice. Re-run validate-partition at the tip and replan.".format(
+                             proof["base"][:12], tip[:12], len(unowned), len(stale), len(shared)),
+                         {"unowned": unowned, "stale": stale, "shared": shared})
+    return {"schema_version": PARTITION_SCHEMA_VERSION, "verified": True, "base": proof["base"], "head": tip,
+            "seats": sorted(slice_paths), "changed": len(changed)}

@@ -1,5 +1,27 @@
 # Changelog
 
+### Fixed
+
+- **A dispatched brief is frozen, and a partitioned review is checked at its
+  tip (#460).** Two holes left open on #456. First, preflight read each
+  brief, but the worker reads it again minutes after the send, so a brief
+  rewritten in between (the realistic case is the foreman re-running
+  `compose-briefs.sh` mid-round) reached the worker unchecked. The issue
+  proposed passing checked content into `apply`; `apply` never sends a brief,
+  only its path, so that would have narrowed nothing. `apply` now copies each
+  brief to a content-addressed file under `.dispatched/` before any check
+  reads it, and a new dispatch uses that copy everywhere: the checks, its
+  identity, the prompt and the recovery that later rebuilds it. A dispatch
+  already recorded with its source paths keeps them, so an upgrade does not
+  turn its replay into new work. Second, `plan` re-proved a partition over
+  whatever `changed` list the file carried, and nothing checked it against
+  the real diff later. The issue proposed signing the result; the only party
+  able to narrow the list would also hold the key. Instead
+  `validate-partition` stamps the repo, base and head it was proven against,
+  `plan` carries that proof, and the new `verify-partition` refuses a review
+  at any other tip, or slices that do not cover exactly
+  `git diff base...head`.
+
 ## 0.3.269 — 2026-09-25
 
 ### Changed

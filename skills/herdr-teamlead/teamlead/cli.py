@@ -22,7 +22,7 @@ from types import SimpleNamespace
 
 from . import __version__
 from .assign import apply as apply_assignments
-from .assign import APPLY_SCHEMA_VERSION, dry_run, native_context_session, normalize_assignments, resolve_paths, validate_fix_history
+from .assign import APPLY_SCHEMA_VERSION, dry_run, freeze_paths, native_context_session, normalize_assignments, resolve_paths, validate_fix_history
 from . import attention, capabilities, composition, engagement, foreman_queue, historical, load_set, memory, oracle, partition, recovery, report_delivery, restoration, role_clear, retrospective, retrospective_runtime, supervision, supervision_gate, supervision_runtime, triggers
 from .config import default_config_path, load_config, load_judge, load_role_costs, select_agents
 from .errors import PlanError, StateError, TeamLeadError, UsageError
@@ -993,6 +993,8 @@ def cmd_plan(args, client=None, warn=None, trace=None):
         # only asks whether a digest is present.
         result["seat_digests"] = {seat: partition.seat_digest(seat, paths)
                                   for seat, paths in accepted.items()}
+        # What the partition was proven against, for `verify-partition` at the gate (#460).
+        result["partition_proof"] = partition.load_proof(args.partition)
     return result, None
 
 
@@ -1103,6 +1105,13 @@ def _require_bound_slices(document, seated, briefs):
                 {"role": role, "expected_scope": expected_scope})
 
 
+def _recorded_with_sources(store, task, assignments, paths):
+    """Whether this task already recorded a dispatch of these roles under the unfrozen source paths."""
+    return bool(task) and any(
+        row.get("task") == task and row.get("role") in assignments and row.get("brief") == paths.get(row.get("role"))
+        for row in store["dispatches"])
+
+
 def cmd_apply(args, client=None, warn=None, trace=None):
     agents = load_config(_config_path(args))
     agents_by_name = {agent.name: agent for agent in agents}
@@ -1143,6 +1152,12 @@ def cmd_apply(args, client=None, warn=None, trace=None):
     if document.get("task_context") is not None and document["task_context"] != task_context:
         raise UsageError("Saved plan and apply name different task, count or correction bounds; replan from the current ledger.", {})
     paths = resolve_paths(assignments, _parse_briefs(args.briefs), args.common)
+    # A new dispatch reads frozen copies everywhere: every check below, its
+    # identity, the prompt it sends (#460). A dispatch recorded before the
+    # freeze keeps the source paths its record names, so its replay still
+    # matches. A dry run writes nothing and reads the sources.
+    if not args.dry_run and not _recorded_with_sources(state["recovery"], args.task, assignments, paths):
+        paths = freeze_paths(paths)
     if seated or any(key in document for key in ("slice_paths", "slice_digest", "seat_digests")):
         # Keyed on the metadata, not only on the seats: a saved plan stripped
         # of every seat would otherwise skip the check entirely and dispatch a
@@ -1829,6 +1844,7 @@ COMMANDS = {
     **{command: cmd_recovery for command in ("task", "checkpoint", "authorize-corrections", "authorize-approach", "recover-context", "recover-role-clear", "record-report", "record-refusal", "authorize-refused-dispatch", "diagnose", "reconcile", "record-release-clear", "import-correction", "record-historical-review", "recover-report", "assess-specialist", "close-task")},
     "detect-triggers": cmd_detect_triggers,
     "validate-partition": cmd_validate_partition,
+    "verify-partition": cmd_validate_partition,
     "verify-oracle": cmd_verify_oracle,
     "start-judge": cmd_start_judge,
     "probe-report": cmd_probe_report,
@@ -1858,7 +1874,7 @@ def main(argv=None, stdout=None, stderr=None, client=None):
     try:
         # Commands that may migrate or write state share its canonical lock.
         # Dry runs, probes, and retrospective reads remain read-only.
-        readonly = args.command in {"probe-report", "detect-triggers", "validate-partition", "verify-oracle", "retro-check", "retro-list", "retro-show", "capability-check", "capability-show", "supervision-gate", "load-set", "foreman-queue"} or getattr(args, "dry_run", False)
+        readonly = args.command in {"probe-report", "detect-triggers", "validate-partition", "verify-partition", "verify-oracle", "retro-check", "retro-list", "retro-show", "capability-check", "capability-show", "supervision-gate", "load-set", "foreman-queue"} or getattr(args, "dry_run", False)
         separate_owner = args.command in memory.COMMANDS | attention.COMMANDS | SUPERVISION_COMMANDS | restoration.COMMANDS
         lock = nullcontext() if readonly or separate_owner else state_lock(retrospective.canonical_state(_state_path(args)))
         with lock:

@@ -689,7 +689,9 @@ def validated_partition(slices=None, changed=None):
     slices = slices or [{"name": "api", "paths": ["src/api/routes.py"]},
                         {"name": "core", "paths": ["src/core/db.py"]}]
     return {"schema_version": 1, "role": "reviewer", "slices": slices,
-            "changed": changed or ["src/api/routes.py", "src/core/db.py"]}
+            "changed": changed or ["src/api/routes.py", "src/core/db.py"],
+            # What `validate-partition` stamps: the diff the slices were proven over (#460).
+            "proof": {"repo": "/repo", "base": "b" * 40, "head": "c" * 40}}
 
 
 class ApplyCommandTest(CliCase):

@@ -156,8 +156,13 @@ class RunCommand(unittest.TestCase):
         self.path = self.tmp / "partition.json"
         self.path.write_text(json.dumps(document()))
 
+    #: Fixed commits the fake repository resolves revisions to.
+    COMMITS = {"BASE": "b" * 40, "HEAD": "c" * 40, "NEWER": "d" * 40}
+
     def runner(self, changed):
         def run(args):
+            if args[0] == "rev-parse":
+                return self.COMMITS.get(args[2].split("^")[0], "") + "\n"
             self.assertIn("--name-status", args)
             return "".join("M\0{}\0".format(path) for path in changed)
         return run
@@ -167,6 +172,47 @@ class RunCommand(unittest.TestCase):
         result, failure = partition.run_command(args, runner=self.runner(["src/api/routes.py", "src/core/db.py"]))
         self.assertIsNone(failure)
         self.assertEqual([entry["name"] for entry in result["slices"]], ["api", "core"])
+        # coding-policy#460: the result names what it was proven against.
+        self.assertEqual(result["proof"], {"repo": str(self.tmp.resolve()), "base": "b" * 40, "head": "c" * 40})
+
+    def plan_for(self, changed, head: "str | None" = "HEAD"):
+        args = SimpleNamespace(repo=str(self.tmp), base="BASE", head=head, partition=str(self.path))
+        result, _ = partition.run_command(args, runner=self.runner(changed))
+        seats = partition.seat_paths(result, "reviewer")
+        plan = self.tmp / "plan.json"
+        plan.write_text(json.dumps({"slice_paths": seats, "partition_proof": result["proof"]}))
+        return plan
+
+    def verify(self, plan, changed, head="HEAD"):
+        args = SimpleNamespace(command="verify-partition", plan=str(plan), repo=str(self.tmp), head=head)
+        return partition.run_command(args, runner=self.runner(changed))[0]
+
+    def test_the_gate_accepts_a_plan_covering_the_diff_at_its_proven_tip(self):
+        changed = ["src/api/routes.py", "src/core/db.py"]
+        result = self.verify(self.plan_for(changed), changed)
+        self.assertEqual((result["verified"], result["head"]), (True, "c" * 40))
+
+    def test_the_gate_refuses_a_newer_tip(self):
+        changed = ["src/api/routes.py", "src/core/db.py"]
+        with self.assertRaisesRegex(UsageError, "proven at"):
+            self.verify(self.plan_for(changed), changed, head="NEWER")
+
+    def test_the_gate_refuses_slices_that_no_longer_match_the_diff(self):
+        plan = self.plan_for(["src/api/routes.py", "src/core/db.py"])
+        with self.assertRaises(UsageError) as raised:
+            self.verify(plan, ["src/api/routes.py", "src/api/new.py"])
+        self.assertEqual((raised.exception.details["unowned"], raised.exception.details["stale"]),
+                         (["src/api/new.py"], ["src/core/db.py"]))
+
+    def test_the_gate_refuses_a_working_tree_proof(self):
+        plan = self.plan_for(["src/api/routes.py", "src/core/db.py"], head=None)
+        with self.assertRaisesRegex(UsageError, "working tree"):
+            self.verify(plan, ["src/api/routes.py", "src/core/db.py"])
+
+    def test_an_unknown_revision_is_refused(self):
+        args = SimpleNamespace(repo=str(self.tmp), base="MISSING", head="HEAD", partition=str(self.path))
+        with self.assertRaisesRegex(UsageError, "does not name a commit"):
+            partition.run_command(args, runner=self.runner(["src/api/routes.py", "src/core/db.py"]))
 
     def test_an_unowned_changed_path_refuses_the_round(self):
         args = SimpleNamespace(repo=str(self.tmp), base="BASE", head=None, partition=str(self.path))

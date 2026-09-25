@@ -267,7 +267,21 @@ bash "$CP/skills/herdr-teamlead/teamlead.sh" validate-partition \
 Exit 1 names every unowned path, every overlap and every slice owning nothing,
 in one run. Fix the partition and re-run; plan only once it exits 0. Save its
 stdout — `plan --partition` takes that result, never the document
-`validate-partition` read. Format, ownership
+`validate-partition` read. Validate at the pushed head: the result's `proof`
+records the repo, base and head it was proven against, and a working-tree
+proof cannot be checked at the review gate. Before accepting a partitioned
+responsibility's pass at Step 12, confirm its plan still covers exactly the
+diff at the tip under review:
+
+```bash
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
+bash "$CP/skills/herdr-teamlead/teamlead.sh" verify-partition \
+  --plan <plan.json> --repo <repo-path> --head <tip-under-review>
+```
+
+Exit 0 confirms it. Exit 1 names the stale head, or the paths the slices
+leave unowned, no longer cover, or own twice; re-validate at the tip, replan,
+and review the slices again. Format, ownership
 payload and the seating it produces:
 
 ```text

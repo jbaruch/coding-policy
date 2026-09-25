@@ -175,6 +175,45 @@ def reject_duplicate_agents(assignments):
     )
 
 
+#: Where a dispatched brief's checked bytes are frozen, beside the source.
+FROZEN_DIR = ".dispatched"
+
+
+def freeze_paths(paths):
+    """Copy each brief, and the common brief, to a content-addressed file nothing rewrites.
+
+    Preflight checks read a brief, and the worker reads it again minutes after
+    send. A source edited in between would reach the worker unchecked (#460).
+    A new dispatch uses the frozen copies as its paths throughout: its checks,
+    its identity, the prompt it sends and the recovery that later rebuilds
+    that prompt all read the same bytes. The name carries the content's
+    sha256, so the same brief freezes to the same file and a retry is unchanged.
+    """
+    frozen = {}
+    for key, source in paths.items():
+        try:
+            data = Path(source).read_bytes()
+        except OSError as exc:
+            raise UsageError("Cannot read briefing file {} to freeze it for dispatch: {}. Restore readability or "
+                             "correct its --common/--brief path before dispatch.".format(source, exc.strerror or str(exc)),
+                             {"path": source}) from None
+        digest = hashlib.sha256(data).hexdigest()
+        target = Path(source).parent / FROZEN_DIR / "{}.{}{}".format(Path(source).stem, digest[:16], Path(source).suffix)
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with open(target, "xb") as handle:
+                handle.write(data)
+        except FileExistsError:
+            if hashlib.sha256(target.read_bytes()).hexdigest() != digest:
+                raise UsageError("Frozen brief {} exists with other content; it is never rewritten. Move it aside "
+                                 "and re-run.".format(target), {"path": str(target)}) from None
+        except OSError as exc:
+            raise UsageError("Cannot freeze brief {} at {}: {}. Make its directory writable and re-run.".format(
+                source, target, exc), {"path": str(target)}) from None
+        frozen[key] = str(target)
+    return frozen
+
+
 def resolve_paths(assignments, briefs, common):
     """Turn the brief/common inputs into absolute paths, or explain what is missing."""
     missing_briefs = [role for role in assignments if role not in briefs]

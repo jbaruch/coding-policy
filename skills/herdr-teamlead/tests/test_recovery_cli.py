@@ -9,6 +9,7 @@ if ROOT not in sys.path:
 
 import io
 import json
+from pathlib import Path
 import unittest
 from datetime import datetime, timedelta
 from unittest.mock import patch
@@ -286,6 +287,21 @@ class RecoveryCommandTests(fixture.CliCase):
         _state, usable = load_state_checked(self.state, warn=lambda _message: None)
         self.assertFalse(usable)
 
+    def test_a_dispatch_records_and_sends_a_frozen_copy_of_its_brief(self):
+        # coding-policy#460: the worker reads the bytes preflight checked, even
+        # if the source brief is rewritten after the send.
+        client = self.seat_judge()
+        checked = self.briefs["judge"].read_bytes()
+        code, _, err = self.invoke(self.judge_args("diagnosis"), client)
+        self.assertEqual(code, 0, err)
+        row = self.saved()["recovery"]["dispatches"][-1]
+        frozen = Path(row["brief"])
+        self.assertEqual(frozen.parent.name, ".dispatched")
+        self.assertEqual(frozen.read_bytes(), checked)
+        self.assertIn(str(frozen), "".join(self.runner.pasted_prompts()))
+        self.briefs["judge"].write_text("rewritten after the send\n")
+        self.assertEqual(frozen.read_bytes(), checked)
+
     def test_a_judge_dispatch_from_before_the_mode_is_never_sent_twice(self):
         # coding-policy#494 review: the mode joined the fingerprint, so an
         # older judge dispatch no longer matches by identity. Running the same
@@ -301,8 +317,10 @@ class RecoveryCommandTests(fixture.CliCase):
         _, legacy = recovery_module.dispatch_identity(
             TASK, "judge", "claude", None, {"common": str(self.common), "judge": str(self.briefs["judge"])},
             options=options)
-        # Rewrite the recorded dispatch as its pre-12 self: version 1, no mode.
+        # Rewrite the recorded dispatch as its pre-12 self: version 1, no mode,
+        # and the source brief paths every dispatch recorded before #460's freeze.
         row["fingerprint"] = legacy
+        row["brief"], row["common"] = str(self.briefs["judge"]), str(self.common)
         row["schema_version"] = 1
         del row["judge_mode"]
         del row["result"]["judge_mode"]
