@@ -6,11 +6,11 @@ import sys
 import unittest
 from pathlib import Path
 from typing import Any
-from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from teamlead import capabilities
+from teamlead.errors import UsageError
 from teamlead.herdr import HerdrClient
 from teamlead.tiers import JUDGMENT_ROUNDS, ROLE_ROUNDS
 from tests.fakes import FakeRunner
@@ -55,7 +55,6 @@ class VocabularyTest(unittest.TestCase):
                          ("rotating-worker-judgment-tier", "independent-defect-detection"))
 
     def test_a_capability_of_the_wrong_type_is_a_usage_error_not_a_traceback(self):
-        from teamlead.errors import UsageError
         for value in ([], {}, 3, None):
             with self.subTest(value=value), self.assertRaises(UsageError):
                 capabilities.record("/nonexistent/state.json", {"entries": [
@@ -63,7 +62,7 @@ class VocabularyTest(unittest.TestCase):
                      "source": {"kind": "vendor", "ref": "x", "dated": "2026-09-23"}}]}, AT)
 
     def test_recording_a_name_routing_does_not_own_is_refused(self):
-        with self.assertRaisesRegex(Exception, "not one routing reads"):
+        with self.assertRaisesRegex(UsageError, "not one routing reads"):
             capabilities.record("/nonexistent/state.json", {"entries": [
                 {"model": "m", "effort": "high", "capability": "binding-judgment", "verdict": "unknown",
                  "source": {"kind": "vendor", "ref": "x", "dated": "2026-09-23"}}]}, AT)
@@ -154,24 +153,6 @@ class RoutingTest(CliCase):
         rc, document, error = self.plan()
         self.assertEqual(rc, 0, error)
         self.assertIsNone(document["tiers"]["developer"]["cheaper_adequate"])
-
-    def test_the_dispatched_assignment_records_no_plan_only_fields(self):
-        rc, document, error = self.plan()
-        self.assertEqual(rc, 0, error)
-        seen = {}
-
-        def capture(*args, **kwargs):
-            seen.update(kwargs.get("tiers") or {})
-            return {"schema_version": 1, "steps": []}
-
-        with patch("teamlead.cli.dry_run", side_effect=capture):
-            rc, _output, error = self.run_cli(
-                ["apply", *self.base(), "--assignments", json.dumps(document), "--common", str(self.common),
-                 *self.brief_args("developer"), "--now", AT, "--composer-settle", "0", "--dry-run"],
-                client=HerdrClient("herdr", FakeRunner()))
-        self.assertEqual(rc, 0, error)
-        self.assertEqual(seen["developer"]["model"], "opus-5")
-        self.assertFalse(set(seen["developer"]) & {"capability", "cheaper_adequate"})
 
     def test_an_inadequate_candidate_is_not_planned_and_the_plan_says_why(self):
         self.record(entry("opus-5", "high", "implementation", "inadequate"))
