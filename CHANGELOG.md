@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.269 — 2026-09-25
+
 ### Changed
 
 - **Every Herdr worker carries a tier table from config schema 5, and the
