@@ -77,6 +77,12 @@ skills/herdr-foreman/state-schema.md
 
 ## Step 1 — Determine the Mode
 
+A command that refuses because the default home is still at the legacy
+`teamlead` path is a one-time operator step, not a mode: record it as a
+user-attention blocker naming `foreman migrate-home` (`state-schema.md` Home
+Migration), and run nothing else until the operator has stopped every foreman
+and run it.
+
 Three request kinds are answered offline, need no live Herdr, and finish here
 after the requested operation. Each reference carries its own owner commands and
 their contracts. Use the recorded state override or default, report any non-zero

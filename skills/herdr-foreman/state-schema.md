@@ -16,6 +16,25 @@ the utility alone records the saved notes and their separate index.
 | `<canonical-state-path>.retrospectives/` | `herdr-foreman`, through its retrospective utility | Immutable retrospective notes, versioned index, and transition coverage |
 | `<canonical-state-path>.foreman-reset.json` | `skills/herdr-foreman/foreman/foreman_reset.py` | One record per foreman round-boundary reset; see Foreman Reset Record below |
 
+## Home Migration
+
+Both homes were named `teamlead` before the rename to foreman (#501). Every
+command whose state or config comes from the default path refuses while that
+default home is still at the legacy `teamlead` path, naming `migrate-home`,
+and creates nothing at the new path; a command given explicit `--state` and
+`--config` is unaffected. `foreman migrate-home` is the owner's one-time move
+(`skills/herdr-foreman/foreman/home.py`, module docstring):
+
+- It refuses while any owner lock in the legacy state home is held
+- It moves each home to the `foreman` path and leaves the legacy path as a
+  link to it, so absolute paths quoted in history still resolve
+- It rewrites each store's `state_path` identity field that names the legacy
+  canonical state path, and nothing else; record shapes and versions are
+  unchanged
+- It refuses a home that exists at both paths, never merging them
+- A second run changes nothing; a run that finds the move done but the link
+  or identity fields missing finishes them
+
 The JSON formats and utility contracts below apply to `state.json` and config.
 The Markdown ledger has its own contract in Task Ledger below; adding it changes
 none of the existing JSON record shapes or versions.
@@ -27,18 +46,18 @@ unchanged. Its canonical state path is the expanded, resolved path selected by
 adds per-agent `capabilities`; schemas 1 and 2 remain readable without rewriting
 the operator-owned file. Missing capabilities mean an empty list, never inferred
 expertise. Capability entries are unique lowercase identifiers validated by
-`foreman/config.py` (`parse_capabilities`). Declare them from available skills,
+`skills/herdr-foreman/foreman/config.py` (`parse_capabilities`). Declare them from available skills,
 tools and inspected evidence. The example leaves every capability list empty.
 
 Config schema 4 requires every tier table to carry a `consultation` row, the
-round investigator and advisor default to (`foreman/config.py`). A tier table
+round investigator and advisor default to (`skills/herdr-foreman/foreman/config.py`). A tier table
 under schema 2 or 3 has no such row and keeps the defaults it was written
 against: investigator on `reconciliation`, advisor on `architect`. Moving to
 schema 4 is the operator adding the example's `consultation` row and bumping
 `schema_version`; nothing rewrites the file.
 
 Config schema 5 requires a tier table on every worker except the pinned judge
-named in the `judge` block (`foreman/config.py`). A worker without one gets
+named in the `judge` block (`skills/herdr-foreman/foreman/config.py`). A worker without one gets
 no tier from selection, so every round it takes records `tier: null` and runs
 at whatever model is already live, unproven (#476). Under schema 4 and below
 an untiered worker still loads, with that behaviour.
@@ -628,7 +647,7 @@ retry and unsupported-schema behavior; only their owner commands mutate them.
 
 ### Supervision schema 1
 
-`foreman/supervision.py` owns `<canonical selected state>.supervision.json`.
+`skills/herdr-foreman/foreman/supervision.py` owns `<canonical selected state>.supervision.json`.
 The document has `schema_version: 1`, canonical `state_path`, nullable `binding`,
 and arrays `members`, `events`, `acknowledgements`, `holds`, and `watchers`.
 Each array entry, binding, refinement, resolution, disposition, and evidence
