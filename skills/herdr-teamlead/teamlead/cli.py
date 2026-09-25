@@ -1670,6 +1670,10 @@ def cmd_start_judge(args, client=None, warn=None, trace=None):
         raise UsageError("Judge --task differs from its plan; use the original task identity.", {})
     at = args.now or now_iso()
     attention.require_dispatch_clear(state_path, args.task or planned_task, at)
+    # The pinned judge has no substitute: a table recording its model
+    # inadequate refuses the start, before anything launches (#476).
+    capabilities.assess(capabilities.load(state_path), parsed["model"], parsed["effort"],
+                        capabilities.required("judge", "judge", JUDGMENT_ROUNDS))
     # The judge rules on the investigator's assessment, so the seat is never
     # started at an exhausted allowance before that assessment exists (#408).
     full = _load_state_for_write(state_path, warn, persist_migration=False)

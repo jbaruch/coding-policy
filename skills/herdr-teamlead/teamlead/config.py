@@ -15,8 +15,8 @@ from .errors import ConfigError, TeamLeadError
 from .herdr import SLASH_DELIVERIES, SLASH_DELIVERY_PASTE
 from .tiers import parse_launch_args, parse_tiers
 
-CONFIG_SCHEMA_VERSION = 4
-READABLE_CONFIG_VERSIONS = frozenset({1, 2, 3, 4})
+CONFIG_SCHEMA_VERSION = 5
+READABLE_CONFIG_VERSIONS = frozenset({1, 2, 3, 4, 5})
 CAPABILITY_ID = re.compile(r"[a-z][a-z0-9_-]*\Z")
 
 REQUIRED_AGENT_FIELDS = ("name", "kind", "usage_prompt", "usage_marker", "usage_read_source", "clear_prompt")
@@ -222,6 +222,14 @@ def parse_config(payload, source="<memory>"):
         name = entry["name"]
         if "tiers" in entry and version < 2:
             raise ConfigError("Tier tables need config schema_version 2; upgrade the operator-owned config.", {"source": source})
+        pinned_judge = payload.get("judge", {}).get("agent") if isinstance(payload.get("judge"), dict) else None
+        if version >= 5 and not entry.get("tiers") and entry.get("name") != pinned_judge:
+            # Without a table, tier selection returns nothing for this worker and
+            # every round it takes records `tier: null`, unproven (#476).
+            raise ConfigError(
+                "Config at {}: agents[{}] ({}) has no tier table, which config schema_version 5 requires of every "
+                "worker but the pinned judge. Copy the rows for its kind from config.example.json.".format(source, index, entry.get("name")),
+                {"source": source, "index": index})
         if version >= 4 and entry.get("tiers") and "consultation" not in entry["tiers"]:
             raise ConfigError(
                 "Config at {}: agents[{}] has a tier table without a `consultation` row, which config schema_version 4 "

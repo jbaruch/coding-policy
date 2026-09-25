@@ -179,10 +179,22 @@ class ParseConfigTest(unittest.TestCase):
         self.assertEqual(by_name["grok"].dialog_next_tab_keys, ("tab",))
 
     def test_wrong_schema_version_is_rejected(self):
-        payload = dict(VALID, schema_version=5)
+        payload = dict(VALID, schema_version=6)
         with self.assertRaises(ConfigError) as caught:
             parse_config(payload)
         self.assertIn("schema_version", str(caught.exception))
+
+    def test_schema_5_requires_a_tier_table_on_every_worker_but_the_judge(self):
+        # coding-policy#476: an untiered worker records `tier: null` for every
+        # round it takes, so schema 5 refuses it by name.
+        untiered = dict(VALID["agents"][0])
+        untiered.pop("tiers", None)
+        with self.assertRaisesRegex(ConfigError, "no tier table"):
+            parse_config(dict(VALID, schema_version=5, agents=[untiered]))
+        self.assertEqual(len(parse_config(dict(VALID, schema_version=4, agents=[untiered]))), 1)
+        judged = dict(VALID, schema_version=5, agents=[untiered],
+                      judge={"agent": untiered["name"], "model": "gpt-5.6-sol", "effort": "high"})
+        self.assertEqual(len(parse_config(judged)), 1)
 
     def test_schema_4_tier_tables_carry_a_consultation_row(self):
         # coding-policy#518/#524: investigator and advisor default to
