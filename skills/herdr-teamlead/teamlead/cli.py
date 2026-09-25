@@ -1462,7 +1462,8 @@ def cmd_foreman_reset(args, client=None, warn=None, trace=None, spawn=None):
     # (stow readiness, supervision work); reading the stow and supervision and
     # checking the caller's pane still come first (see foreman_reset.replay).
     # A pane id alone can be set by any process; a Herdr pane also carries HERDR_ENV.
-    caller = os.environ.get("HERDR_PANE_ID") if os.environ.get("HERDR_ENV") == "1" else None
+    # rules/agent-team-operation.md Two Modes: a team round is HERDR_ENV set, any value.
+    caller = os.environ.get("HERDR_PANE_ID") if os.environ.get("HERDR_ENV") else None
     if bound_pane and caller != bound_pane:
         raise UsageError("foreman-reset runs from the bound foreman's own pane ({}); this call came from {}.".format(
             bound_pane, caller or "outside Herdr"), {"pane_id": bound_pane})
@@ -1528,6 +1529,19 @@ def _raise_reset_failure(state_path, stow, outcome, record) -> NoReturn:
     raise foreman_reset.delivery_failed(state_path, stow, outcome)
 
 
+def _log_safe(warn):
+    """A warning sink for the detached deliverer, whose stderr is a persistent log.
+
+    Composer warnings can quote raw pane or subprocess text, so the log gets a
+    fixed line per warning instead: the warning stays visible, and its body
+    never reaches the file (rules/no-secrets.md Logging).
+    """
+    def sink(_message):
+        if warn is not None:
+            warn("composer warning during reset delivery; its text is withheld from this log")
+    return sink
+
+
 def cmd_foreman_reset_deliver(args, client=None, warn=None, trace=None):
     state_path = Path(_state_path(args)).expanduser().resolve()
     plan = {"pane_id": args.pane, "stow": args.stow}
@@ -1546,7 +1560,7 @@ def cmd_foreman_reset_deliver(args, client=None, warn=None, trace=None):
         # Setup runs after the claim, so its failure must finish the row too.
         client = client if client is not None else _client(args, trace=trace)
         result = foreman_reset.deliver(
-            client, load_config(_config_path(args)), args.pane, args.stow, str(state_path), warn=warn, options=options,
+            client, load_config(_config_path(args)), args.pane, args.stow, str(state_path), warn=_log_safe(warn), options=options,
             still_ready=lambda: memory.show(state_path, now_iso(), args.stow)["record"].get("reset_ready") is True)
     except TeamLeadError as exc:
         status = "interrupted" if isinstance(exc, foreman_reset.DeliveryInterrupted) else "failed"

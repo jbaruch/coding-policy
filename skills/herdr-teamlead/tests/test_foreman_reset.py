@@ -646,8 +646,15 @@ class ResetCommandTest(CliCase):
         self.assertEqual(code, 1)
         self.assertIn("outside Herdr", err)
 
-    def test_a_herdr_marker_other_than_1_is_outside_herdr(self):
-        for marker in ("0", "fixture", ""):
+    def test_the_log_safe_warning_sink_withholds_the_message(self):
+        from teamlead.cli import _log_safe
+        seen = []
+        _log_safe(seen.append)("composer read: token=secret $ export KEY=x")
+        self.assertEqual(len(seen), 1)
+        self.assertNotIn("secret", seen[0])
+
+    def test_an_empty_herdr_marker_is_outside_herdr(self):
+        for marker in ("",):
             with self.subTest(marker=marker), \
                  patch("teamlead.cli.memory.show", return_value={"record": READY}), \
                  patch("teamlead.cli.supervision.load", return_value=supervision_data()[0]), \
