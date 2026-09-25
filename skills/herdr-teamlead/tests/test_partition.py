@@ -179,9 +179,10 @@ class RunCommand(unittest.TestCase):
         args = SimpleNamespace(repo=str(self.tmp), base="BASE", head=head, partition=str(self.path))
         result, _ = partition.run_command(args, runner=self.runner(changed))
         seats = partition.seat_paths(result, "reviewer")
-        return {"slice_paths": seats, "slice_digest": partition.slice_digest(seats),
-                "seat_digests": {seat: partition.seat_digest(seat, paths) for seat, paths in seats.items()},
-                "partition_proof": result["proof"]}
+        proof = result["proof"]
+        return {"slice_paths": seats, "slice_digest": partition.slice_digest(seats, proof),
+                "seat_digests": {seat: partition.seat_digest(seat, paths, proof) for seat, paths in seats.items()},
+                "partition_proof": proof}
 
     def verify(self, plan, changed, head="HEAD", base=None, repo=None):
         return partition.verify(plan, repo or str(self.tmp), head, base or self.COMMITS["BASE"],
@@ -194,6 +195,15 @@ class RunCommand(unittest.TestCase):
             self.verify(plan, changed, repo=str(self.tmp / "elsewhere"))
         with self.assertRaisesRegex(UsageError, "task's recorded base"):
             self.verify(plan, changed, base="e" * 40)
+
+    def test_a_proof_swapped_after_planning_fails_the_digests(self):
+        # coding-policy#460: the proof is inside the digests the briefs carry, so
+        # a plan re-pointed at a newer head no longer matches what was dispatched.
+        changed = ["src/api/routes.py", "src/core/db.py"]
+        plan = self.plan_for(changed)
+        plan["partition_proof"] = {**plan["partition_proof"], "head": "d" * 40}
+        with self.assertRaisesRegex(UsageError, "edited after planning"):
+            self.verify(plan, changed, head="NEWER")
 
     def test_the_gate_refuses_an_edited_boundary_or_proof(self):
         changed = ["src/api/routes.py", "src/core/db.py"]

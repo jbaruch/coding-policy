@@ -128,7 +128,7 @@ def seats_for(partition, role):
     return {seat_name(role, entry["name"]): role for entry in partition["slices"]}
 
 
-def seat_digest(seat, paths):
+def seat_digest(seat, paths, proof=None):
     """A short digest over ONE seat and the paths it owns.
 
     Per seat, not per round: a round-level digest is identical in every seat's
@@ -136,7 +136,10 @@ def seat_digest(seat, paths):
     the digest appears. Binding the seat's own name and globs makes each brief
     answerable for its own boundary (#453).
     """
-    canonical = json.dumps([seat, list(paths)], sort_keys=True, separators=(",", ":"))
+    # With a proof, the digest also binds the diff the boundary was proven over,
+    # so a brief dispatched for one tip cannot pass a gate at another (#460).
+    bound = [seat, list(paths)] if proof is None else [seat, list(paths), proof]
+    canonical = json.dumps(bound, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:12]
 
 
@@ -162,7 +165,7 @@ def slice_scope(seat, paths, digest):
             seat.split(SEAT_SEPARATOR, 1)[1], listed, digest))
 
 
-def slice_digest(seat_paths):
+def slice_digest(seat_paths, proof=None):
     """A short digest over the accepted `{seat: [glob, ...]}` map.
 
     Carried from the plan into each seat's brief and checked at dispatch, so a
@@ -170,7 +173,8 @@ def slice_digest(seat_paths):
     than dispatched (#453). Twelve hex characters: enough to catch an edit,
     short enough to sit in a brief a worker reads.
     """
-    canonical = json.dumps({seat: list(paths) for seat, paths in sorted(seat_paths.items())},
+    boundary = {seat: list(paths) for seat, paths in sorted(seat_paths.items())}
+    canonical = json.dumps(boundary if proof is None else {"slices": boundary, "proof": proof},
                            sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:12]
 
@@ -183,6 +187,9 @@ def load_validated(path):
     is seated from a partition proven disjoint and exhaustive over this round's
     change. `load_partition` alone reads shape and cannot check ownership —
     `plan` has no repo, base or head to check against (#453).
+
+    Returns `(partition, proof)` from one read, so the slices and the proof a
+    plan binds cannot come from two versions of the file (#460).
     """
     if not path:
         raise UsageError(
@@ -219,12 +226,12 @@ def load_validated(path):
             "The validated partition at {} is result schema {}; this build plans from schema {}, which records "
             "the proof. Re-run `validate-partition` and plan from its output.".format(
                 path, document.get("schema_version"), RESULT_SCHEMA_VERSION), {"path": str(path)})
-    check_proof(document.get("proof"), "The validated partition at {}".format(path))
+    proof = check_proof(document.get("proof"), "The validated partition at {}".format(path))
     inner = {key: value for key, value in document.items() if key not in ("changed", "proof")}
     inner["schema_version"] = PARTITION_SCHEMA_VERSION
     accepted = validate_document(inner, str(path))
     validate_resolved(set(changed), accepted, str(path))
-    return accepted
+    return accepted, proof
 
 
 def validate_resolved(changed, partition, source):
@@ -414,12 +421,6 @@ def check_proof(proof, where):
     return proof
 
 
-def load_proof(path):
-    """The proof a `validate-partition` result carries, or a refusal to re-validate."""
-    document = json.loads(Path(path).read_text(encoding="utf-8"))
-    return check_proof(document.get("proof") if isinstance(document, dict) else None,
-                       "The validated partition at {}".format(path))
-
 
 def check_slice_paths(slice_paths, where):
     """`{seat: [path, ...]}` with string seats and non-empty lists of non-empty strings."""
@@ -442,11 +443,11 @@ def verify(plan, repo, head, task_base, runner=None):
     """
     where = "The plan"
     slice_paths = check_slice_paths(plan.get("slice_paths") if isinstance(plan, dict) else None, where)
-    if plan.get("slice_digest") != slice_digest(slice_paths) or plan.get("seat_digests") != {
-            seat: seat_digest(seat, paths) for seat, paths in slice_paths.items()}:
-        raise UsageError("The plan's slice_paths no longer match its slice_digest and seat_digests, so its boundary "
-                         "was edited after planning. Replan from the validate-partition result.", {})
     proof = check_proof(plan.get("partition_proof"), where)
+    if plan.get("slice_digest") != slice_digest(slice_paths, proof) or plan.get("seat_digests") != {
+            seat: seat_digest(seat, paths, proof) for seat, paths in slice_paths.items()}:
+        raise UsageError("The plan's slice_paths or partition_proof no longer match its slice_digest and seat_digests, "
+                         "so its boundary was edited after planning. Replan from the validate-partition result.", {})
     if proof["head"] is None:
         raise UsageError("The partition was validated against the working tree, not a pushed head, so no tip can be "
                          "checked against it. Re-run validate-partition with --head at the pushed tip, replan, and "

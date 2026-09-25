@@ -162,6 +162,30 @@ class RecoveryCommandTests(fixture.CliCase):
             "supersedes": "diag-cap:plan"})
         self.assertEqual(code, 0, err)
 
+    def test_a_later_correction_over_a_legacy_dispatchs_source_paths_is_frozen(self):
+        # coding-policy#460 review: only the recorded dispatch's complete
+        # identity keeps its source paths. A correction reusing the same brief
+        # files, even byte-identical, is new work and reads a frozen copy.
+        self.register()
+        with patch("teamlead.cli.freeze_paths", side_effect=lambda paths: paths):
+            code, _, err = self.invoke(self.apply_args(), self.fresh_client("previous-task", "developer-0"))
+        self.assertEqual(code, 0, err)
+        legacy = self.saved()["recovery"]["dispatches"][-1]
+        self.assertEqual(legacy["brief"], str(self.briefs["developer"]))
+        # Replaying that exact dispatch keeps its recorded paths and its receipt.
+        code, out, err = self.invoke(self.apply_args(), self._client({"grok": "idle"}))
+        self.assertEqual(code, 0, err)
+        self.assertTrue(json.loads(out)["applied"][0]["replayed"])
+        self.assertEqual(len(self.saved()["recovery"]["dispatches"]), 1)
+        code, _, err = self.invoke(self.apply_args("release"), self._client({"grok": "idle"}))
+        self.assertEqual(code, 0, err)
+        code, _, err = self.invoke(self.apply_args("developer", 1), self.fresh_client("release-session", "developer-1"))
+        self.assertEqual(code, 0, err)
+        correction = self.saved()["recovery"]["dispatches"][-1]
+        self.assertEqual(correction["fix_round"], 1)
+        self.assertEqual(Path(correction["brief"]).parent.name, ".dispatched")
+        self.assertEqual(Path(correction["brief"]).read_bytes(), self.briefs["developer"].read_bytes())
+
     def test_two_release_fresh_fix_cycles_preserve_task_base_history_and_next_number(self):
         self.register()
         code, _, err = self.invoke(self.apply_args(), self.fresh_client("previous-task", "developer-0"))

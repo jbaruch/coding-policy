@@ -796,12 +796,14 @@ def _judge_mode_for(args, document):
 def _expand_partition_seats(roles, partition_path):
     """Replace the partitioned role with one seat per slice.
 
-    Returns `(roles, {seat: role}, {seat: [glob, ...]})`. Without a partition
-    the round is untouched, which is every single-seat round (#409).
+    Returns `(roles, {seat: role}, {seat: [glob, ...]}, proof)`. Without a
+    partition the round is untouched, which is every single-seat round (#409).
+    The proof comes from the same read as the slices, so the two cannot come
+    from different versions of the file (#460).
     """
     if not partition_path:
-        return roles, {}, {}
-    document = partition.load_validated(partition_path)
+        return roles, {}, {}, None
+    document, proof = partition.load_validated(partition_path)
     role = partition.partition_role(document)
     if role not in roles:
         raise PlanError(
@@ -812,7 +814,7 @@ def _expand_partition_seats(roles, partition_path):
     expanded = []
     for item in roles:
         expanded.extend(seats) if item == role else expanded.append(item)
-    return expanded, seats, partition.seat_paths(document, role)
+    return expanded, seats, partition.seat_paths(document, role), proof
 
 
 def _fan_out_seats(mapping, seats):
@@ -868,7 +870,7 @@ def cmd_plan(args, client=None, warn=None, trace=None):
             "disjoint and exhaustive over the round's change.".format(
                 ", ".join(seated), ", ".join(sorted({canonical_role(role) for role in seated}))),
             {"roles": seated})
-    roles, seats, seat_paths = _expand_partition_seats(canonical, getattr(args, "partition", None))
+    roles, seats, seat_paths, proof = _expand_partition_seats(canonical, getattr(args, "partition", None))
     if "judge" in canonical:
         recovery.require_judge_mode(getattr(args, "judge_mode", None))
     excludes = _parse_excludes(args.excludes)
@@ -994,14 +996,14 @@ def cmd_plan(args, client=None, warn=None, trace=None):
         result["slice_paths"] = accepted
         # The digest travels with the map, into each brief and back at dispatch,
         # so an edit between the validated partition and the send is refused.
-        result["slice_digest"] = partition.slice_digest(accepted)
+        result["slice_digest"] = partition.slice_digest(accepted, proof)
         # Per seat as well: one digest for the whole round is identical in
         # every brief, so swapping two seats' briefs would pass a check that
         # only asks whether a digest is present.
-        result["seat_digests"] = {seat: partition.seat_digest(seat, paths)
+        result["seat_digests"] = {seat: partition.seat_digest(seat, paths, proof)
                                   for seat, paths in accepted.items()}
         # What the partition was proven against, for `verify-partition` at the gate (#460).
-        result["partition_proof"] = partition.load_proof(args.partition)
+        result["partition_proof"] = proof
     return result, None
 
 
@@ -1074,7 +1076,8 @@ def _require_bound_slices(document, seated, briefs):
                 ", ".join(repr(seat) for seat in sorted(map(str, slice_paths))) or "nothing",
                 ", ".join(repr(role) for role in sorted(seated)) or "nothing"),
             {"slice_paths": sorted(map(str, slice_paths)), "seated": sorted(seated)})
-    expected = partition.slice_digest(slice_paths)
+    proof = document.get("partition_proof")
+    expected = partition.slice_digest(slice_paths, proof)
     if expected != recorded:
         raise UsageError(
             "The plan's slice_paths no longer match its slice_digest ({} vs {}); the "
@@ -1101,7 +1104,7 @@ def _require_bound_slices(document, seated, briefs):
         # whole-repository pass satisfies three substring checks and still
         # dispatches a full-surface verdict as a slice one; the block carries
         # its own restrictions, so requiring it requires those too.
-        expected_seat = partition.seat_digest(role, slice_paths[role])
+        expected_seat = partition.seat_digest(role, slice_paths[role], proof)
         expected_scope = partition.slice_scope(role, slice_paths[role], expected_seat)
         if expected_scope not in body:
             raise UsageError(
@@ -1152,18 +1155,6 @@ def cmd_apply(args, client=None, warn=None, trace=None):
     if document.get("task_context") is not None and document["task_context"] != task_context:
         raise UsageError("Saved plan and apply name different task, count or correction bounds; replan from the current ledger.", {})
     paths = resolve_paths(assignments, _parse_briefs(args.briefs), args.common)
-    # A new dispatch reads frozen copies everywhere: every check below, its
-    # identity, the prompt it sends (#460). A dispatch recorded before the
-    # freeze keeps the source paths its record names, so its replay still
-    # matches. A dry run writes nothing and reads the sources.
-    if not args.dry_run and freeze_decision(state["recovery"]["dispatches"], args.task, assignments, paths) == "frozen":
-        paths = freeze_paths(paths)
-    if seated or any(key in document for key in ("slice_paths", "slice_digest", "seat_digests")):
-        # Keyed on the metadata, not only on the seats: a saved plan stripped
-        # of every seat would otherwise skip the check entirely and dispatch a
-        # full-surface role while still carrying the boundary it was planned
-        # against. After the briefs resolve, since the check reads each brief.
-        _require_bound_slices(document, seated, paths)
     reports = _parse_reports(args.reports, assignments)
     supervised = supervision.dispatch_binding(state_path) is not None
     if requirements and not args.dry_run and not supervised:
@@ -1177,6 +1168,58 @@ def cmd_apply(args, client=None, warn=None, trace=None):
     if any(canonical_role(role) == "judge" for role in assignments):
         judge_mode = recovery.require_judge_mode(
             _judge_mode_for(args, document if isinstance(document, dict) else None))
+
+    def options_for(role):
+        options = {**task_context, "rounds": rounds, "retain_context": args.retain_context, "no_clear": args.no_clear}
+        if requirements:
+            options["requirements"] = requirements
+        if args.retain_specialist:
+            options["retain_specialist"] = True
+        return options
+
+    def identity(role, name, paths_now):
+        """The dispatch identity these inputs resolve to: its id and fingerprint."""
+        options = options_for(role)
+        if canonical_role(role) == "judge":
+            options["judge_mode"] = judge_mode
+        identifier, fingerprint = recovery.dispatch_identity(
+            args.task, role, name, args.fix_round, paths_now, args.dispatch_id, options=options)
+        if supervised:
+            # Keep legacy retry IDs, while new bound dispatch fingerprints
+            # also bind the explicit report path. Existing legacy receipts
+            # cannot retroactively prove a report input they never stored.
+            old = next((row for row in store["dispatches"] if row["id"] == identifier), None)
+            if old is None or old["fingerprint"] != fingerprint:
+                fingerprint = supervision.report_bound_fingerprint(fingerprint, reports[role])
+        return identifier, fingerprint
+
+    def legacy_judge_fingerprints(role, name, paths_now):
+        """A judge dispatch recorded before the mode joined its identity carries the mode-less fingerprint.
+
+        Re-running it after the upgrade must not read as new work and send the
+        round twice (#478).
+        """
+        if canonical_role(role) != "judge":
+            return set()
+        _legacy_id, legacy = recovery.dispatch_identity(
+            args.task, role, name, args.fix_round, paths_now, None, options=options_for(role))
+        return {legacy, supervision.report_bound_fingerprint(legacy, reports[role])} if role in reports else {legacy}
+
+    # A new dispatch reads frozen copies everywhere: every check below, its
+    # identity, the prompt it sends (#460). A dispatch recorded before the
+    # freeze keeps the source paths its record names, so its replay still
+    # matches -- only when the complete identity those paths resolve to is
+    # the recorded one. A dry run writes nothing and reads the sources.
+    if not args.dry_run and freeze_decision(
+            store["dispatches"] if args.task else [], assignments,
+            lambda role, name: {identity(role, name, paths)[1]} | legacy_judge_fingerprints(role, name, paths)) == "frozen":
+        paths = freeze_paths(paths)
+    if seated or any(key in document for key in ("slice_paths", "slice_digest", "seat_digests")):
+        # Keyed on the metadata, not only on the seats: a saved plan stripped
+        # of every seat would otherwise skip the check entirely and dispatch a
+        # full-surface role while still carrying the boundary it was planned
+        # against. After the briefs resolve, since the check reads each brief.
+        _require_bound_slices(document, seated, paths)
     replayed = []
     dispatches = {}
     # Check retry identities before next-attempt validation: a completed retry
@@ -1184,21 +1227,11 @@ def cmd_apply(args, client=None, warn=None, trace=None):
     if args.task and not args.dry_run:
         resolved = []
         for role, name in assignments.items():
-            options = {**task_context, "rounds": rounds, "retain_context": args.retain_context, "no_clear": args.no_clear}
-            if requirements:
-                options["requirements"] = requirements
-            if args.retain_specialist:
-                options["retain_specialist"] = True
             if canonical_role(role) == "judge":
-                # A judge dispatch recorded before the mode joined its identity
-                # carries the mode-less fingerprint. Re-running it after the
-                # upgrade must not read as new work and send the round twice.
-                _legacy_id, legacy = recovery.dispatch_identity(
-                    args.task, role, name, args.fix_round, paths, None, options=options)
-                bound = supervision.report_bound_fingerprint(legacy, reports[role]) if role in reports else None
+                legacy = legacy_judge_fingerprints(role, name, paths)
                 # `not_sent` reached no worker and stays retryable, as ever.
                 earlier = next((row for row in store["dispatches"]
-                                if row.get("fingerprint") in {legacy, bound} and "judge_mode" not in row
+                                if row.get("fingerprint") in legacy and "judge_mode" not in row
                                 and row.get("status") != "not_sent"), None)
                 if earlier is not None:
                     raise UsageError(
@@ -1206,17 +1239,7 @@ def cmd_apply(args, client=None, warn=None, trace=None):
                         "has status {!r}. Inspect its recorded outcome instead of sending it again; "
                         "a fresh judge round needs a changed brief.".format(earlier["id"], earlier["status"]),
                         {"dispatch": earlier["id"]})
-                options["judge_mode"] = judge_mode
-            identifier, fingerprint = recovery.dispatch_identity(
-                args.task, role, name, args.fix_round, paths, args.dispatch_id,
-                options=options)
-            if supervised:
-                # Keep legacy retry IDs, while new bound dispatch fingerprints
-                # also bind the explicit report path. Existing legacy receipts
-                # cannot retroactively prove a report input they never stored.
-                old = next((row for row in store["dispatches"] if row["id"] == identifier), None)
-                if old is None or old["fingerprint"] != fingerprint:
-                    fingerprint = supervision.report_bound_fingerprint(fingerprint, reports[role])
+            identifier, fingerprint = identity(role, name, paths)
             prior = recovery.prior_dispatch(store, identifier, fingerprint)
             resolved.append((role, name, identifier, fingerprint, prior))
         fresh = [role for role, _name, _identifier, _fingerprint, prior in resolved if not (prior and prior["status"] == "applied")]

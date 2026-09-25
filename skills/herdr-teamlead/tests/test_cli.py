@@ -797,7 +797,7 @@ class ApplyCommandTest(CliCase):
 
         # The plan stamps the digest that binds this boundary to the briefs
         # and the dispatch (#453).
-        self.assertEqual(plan["slice_digest"], slice_digest(plan["slice_paths"]))
+        self.assertEqual(plan["slice_digest"], slice_digest(plan["slice_paths"], plan["partition_proof"]))
 
         # Each seat takes its role's brief template, carrying the digest, and
         # dispatches.
@@ -835,6 +835,42 @@ class ApplyCommandTest(CliCase):
                                    "--head", "HEAD", "--task", "never-registered"], stdout=io.StringIO(), stderr=err)
         self.assertEqual(code, 1)
         self.assertIn("no registered base", err.getvalue())
+
+    def plan_at(self, name, head):
+        document = validated_partition()
+        document["proof"]["head"] = head
+        partition = self.tmp / (name + ".json")
+        partition.write_text(json.dumps(document))
+        out = io.StringIO()
+        code = main(self.base() + ["plan", "--roles", "reviewer", "--partition", str(partition),
+                                   "--now", AT, "--snapshot", str(self.snapshot)], stdout=out)
+        self.assertEqual(code, 0, out.getvalue())
+        return json.loads(out.getvalue())
+
+    def test_briefs_dispatched_at_an_older_head_fail_a_replan_over_the_same_paths(self):
+        # coding-policy#460: a push can change a file's content without changing
+        # which paths changed. The seat digests bind the proof, so briefs sent for
+        # the old tip do not satisfy a plan proven at the new one.
+        old, new = self.plan_at("old", "c" * 40), self.plan_at("new", "d" * 40)
+        self.assertEqual(old["slice_paths"], new["slice_paths"])
+        briefs = {}
+        for seat in old["slice_paths"]:
+            brief = self.tmp / ("old-" + seat.replace("#", "-") + ".md")
+            brief.write_text(seat_brief_text(seat, old), encoding="utf-8")
+            briefs[seat] = str(brief)
+        cli._require_bound_slices(old, sorted(old["slice_paths"]), briefs)
+        with self.assertRaises(UsageError):
+            cli._require_bound_slices(new, sorted(new["slice_paths"]), briefs)
+
+    def test_a_validated_result_without_a_proof_is_refused_at_planning(self):
+        document = validated_partition()
+        del document["proof"]
+        partition = self.tmp / "unproven.json"
+        partition.write_text(json.dumps(document))
+        code, _, err = self.run_cli(self.base() + ["plan", "--roles", "reviewer", "--partition", str(partition),
+                                                   "--now", AT, "--snapshot", str(self.snapshot)])
+        self.assertEqual(code, 1)
+        self.assertIn("carries no usable proof", err)
 
     def test_a_seat_inherits_its_role_bars_alongside_its_own(self):
         # An exclusion is a bar, not a setting a seat overrides. Naming one

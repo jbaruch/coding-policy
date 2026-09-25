@@ -553,7 +553,9 @@ bash "$CP/skills/herdr-teamlead/teamlead.sh" verify-partition \
 - Exit 1 names what failed: another repo or base, a stale head, an edited
   boundary, a seat never dispatched or dispatched with another boundary, or
   paths the slices leave unowned, no longer cover, or own twice
-- On exit 1, re-validate at the tip, replan, and review the slices again
+- On exit 1, re-validate the partition at the tip
+- Then replan from that result
+- Then review the slices again
 
 Record assignment acceptance or outstanding work in the task ledger against
 the inspected report and artifact evidence. Record the task's gate decision
