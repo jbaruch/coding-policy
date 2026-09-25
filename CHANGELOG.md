@@ -70,6 +70,26 @@
   record written by a newer build reads as no prior reset and refuses
   writes, instead of being reported as corrupt.
 
+## 0.3.269 — 2026-09-25
+
+### Changed
+
+- **Every Herdr worker carries a tier table from config schema 5, and the
+  judge's pin is checked before it launches (#476).** A ledger audit found
+  651 of 702 assignments recorded `tier: null`. The issue read that as tier
+  selection never running outside the judge seat; the code does run it for
+  every role, and the cause was configuration: all 19 configured workers had
+  no `tiers` table, so selection returned nothing and each round inherited
+  whatever model was already live, unproven. Launch proof and `tier_billing`
+  were already recorded for any tiered assignment; they recorded nothing
+  because nothing was tiered. Config schema 5 now refuses a worker without a
+  table, except the pinned judge, so a newly added untiered worker cannot
+  quietly bring `tier: null` back; schema 4 and below keep loading as before.
+  `start-judge` also reads the capability table and refuses a pin recorded
+  inadequate before launching it, instead of the refusal arriving first at
+  `apply`, after the launch (deferred from #525). The live operator tables
+  are written from the example once this version is installed.
+
 ## 0.3.268 — 2026-09-25
 
 ### Changed

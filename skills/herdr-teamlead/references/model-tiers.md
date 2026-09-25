@@ -176,7 +176,8 @@ than assumed.
 Saved at `<selected-state>.capabilities.json`. Owner:
 `skills/herdr-teamlead/teamlead/capabilities.py`. Writer: `capability-record`,
 alone. Readers: `capability-check`, `capability-show`, the round preflight,
-and `plan` and `apply`. `plan` and `apply` read it read-only through
+`plan`, `apply` and `start-judge`, which refuses a pinned judge the table
+records inadequate before anything launches. `plan` and `apply` read it read-only through
 `capabilities.load`: a missing file is an empty table, a table written by a
 newer build is read as empty with a warning and left untouched, and an
 unreadable or malformed one refuses the command naming the file.
