@@ -40,6 +40,8 @@
   reaches its "pass a revision it holds" message instead of git's bare
   "Needed a single revision".
 
+## 0.3.272 — 2026-09-25
+
 ### Added
 
 - **The Herdr foreman resets its own context at every round boundary.** This
