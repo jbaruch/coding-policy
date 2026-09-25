@@ -451,20 +451,22 @@ why, is the script's decision contract — see
 `skills/herdr-teamlead/teamlead/supervision_gate.py`, not restated here
 (`rules/script-as-black-box.md`).
 
-For each `wake` event, verify report delivery:
+For each `wake` event, verify report delivery for its enrollment:
 
 ```bash
 CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
-bash "$CP/skills/herdr-teamlead/wait-report.sh" --once \
-  [--worktree <worker-checkout>] [--base <dispatch-base>] \
-  [--since <dispatch-sent-at>] <agent-name> <report-path>
+bash "$CP/skills/herdr-teamlead/teamlead.sh" check-member --enrollment <enrollment-id> \
+  [--worktree <worker-checkout>]
 ```
 
-The checkpoint emits delivery JSON; exit 2 emits only stderr. Exit 0 confirms
-delivery, 1 remains pending, 3 confirms blocked, 4 lacks confirmed delivery, and
-5 proves terminal refusal; record it with `record-refusal`. Read delivered
-reports in full. Pass this dispatch's recorded send time as `--since`, its
-recorded base as `--base`, and the worker's checkout as `--worktree`. An exit 1
+It reads the agent, report, recorded base and send time from the owner
+records and runs `wait-report.sh --once` with them (`teamlead/members.py`).
+Its JSON carries the checkpoint's `exit` and delivery JSON as `wait`; the
+command itself exits non-zero only when those records cannot be read. For
+`exit`: 0 confirms delivery, 1 remains pending, 3 confirms blocked, 4 lacks
+confirmed delivery, and 5 proves terminal refusal; record it with
+`record-refusal`. Read delivered reports in full. Pass the worker's checkout
+as `--worktree` when it has one. An exit 1
 then carries either `reason: checkpoint_pending` or a `stall` object; act on a
 stall under `rules/agent-team-operation.md` Stalled Workers and record the
 obligation through `references/attention.md`. Preserve the blocked/refusal and native-recovery paths in the
@@ -481,8 +483,19 @@ under `references/specialists.md` before retiring its enrollment.
 
 Record each outcome in the task ledger and user-facing obligations in the
 attention queue. Acknowledge only handled event IDs through the saved snapshot;
-schedule pending rechecks. Resolve enrollment only after recording its assessed
-outcome, separately from assignment acceptance and task completion. Complete due
+schedule pending rechecks. Once the ledger records an assignment's assessed
+outcome, close its enrollment in one call:
+
+```bash
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
+bash "$CP/skills/herdr-teamlead/teamlead.sh" close-member --enrollment <enrollment-id> \
+  --ledger <absolute-TASK-LEDGER.md>
+```
+
+It refuses until the ledger's latest event for that worker and report carries
+an assessed decision, then acknowledges the enrollment's pending events and
+resolves it, citing that ledger event; a repeat replays. Resolution stays
+separate from assignment acceptance and task completion. Complete due
 retrospectives between checkpoints without interrupting workers. Resume the fleet
 watch while any observation obligation remains; one blocked worker never hides
 another worker's report. Proceed to Step 12 when the required reports are delivered
