@@ -282,6 +282,11 @@ def schedule(state_path, plan, at, start, *, alive=_alive, probe=None, options=N
     deliverer that is already gone when probed, finishes the row `failed`
     with the resume prompt before re-raising.
     """
+    try:
+        timestamp(at, "Reset scheduled_at")
+    except UsageError:
+        raise UsageError("The reset time {!r} is not an ISO-8601 timestamp with a timezone; nothing was scheduled.".format(at),
+                         {"at": at}) from None
     path = record_path(state_path)
     with state_lock(path):
         document = _records(path)
@@ -295,6 +300,9 @@ def schedule(state_path, plan, at, start, *, alive=_alive, probe=None, options=N
             _refuse(prior, state_path)
         row = {"schema_version": RESET_SCHEMA_VERSION, **plan, "status": "scheduled", "scheduled_at": at,
                "options": dict(options or {}), "process": None, "result": None}
+        if not _valid_row(row):
+            raise UsageError("The reset for stow {} would not validate as a reset row; nothing was scheduled.".format(
+                plan.get("stow")), {"row": row})
         document["resets"].append(row)
         save_state(path, document)
         try:

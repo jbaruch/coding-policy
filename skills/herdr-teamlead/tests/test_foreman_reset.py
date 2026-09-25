@@ -414,7 +414,20 @@ class RecordTest(unittest.TestCase):
             foreman_reset.replay(self.state, self.plan)
 
 
+#: A fixed reset time, so no test records a run-dependent timestamp.
+RESET_AT = "2026-09-24T10:00:00+00:00"
+
+
 class ResetCommandTest(CliCase):
+    def test_a_reset_with_an_invalid_time_writes_nothing(self):
+        with patch("teamlead.cli.memory.show", return_value={"record": READY}), \
+             patch("teamlead.cli.supervision.load", return_value=supervision_data()[0]), \
+             patch.dict("os.environ", {"HERDR_PANE_ID": PANE}), \
+             patch("teamlead.cli._spawn_detached", side_effect=AssertionError("must not spawn")):
+            code, _, err = self.run_cli(self.base() + ["foreman-reset", "--now", "not-a-time"])
+        self.assertEqual(code, 1)
+        self.assertFalse(foreman_reset.record_path(self.state).exists())
+
     def test_schedules_a_detached_deliverer_for_the_bound_pane(self):
         spawned = []
         with patch("teamlead.cli.memory.show", return_value={"record": READY}), \
@@ -422,7 +435,7 @@ class ResetCommandTest(CliCase):
              patch.dict("os.environ", {"HERDR_PANE_ID": PANE}), \
              patch("teamlead.cli._spawn_detached", side_effect=lambda argv, sink: spawned.append(argv) or 4242), \
              patch("teamlead.foreman_reset.process_identity", side_effect=lambda pid: {"pid": pid, "identity": "child"}):
-            code, out, err = self.run_cli(self.base() + ["foreman-reset"])
+            code, out, err = self.run_cli(self.base() + ["foreman-reset", "--now", RESET_AT])
         self.assertEqual(code, 0, err)
         result = json.loads(out)
         self.assertEqual((result["scheduled"], result["process"]["pid"], result["pane_id"]), (True, 4242, PANE))
@@ -430,6 +443,7 @@ class ResetCommandTest(CliCase):
         self.assertEqual(spawned[0][spawned[0].index("--pane") + 1], PANE)
         self.assertEqual(spawned[0][spawned[0].index("--stow") + 1], "round-7")
         self.assertTrue(Path(spawned[0][spawned[0].index("--config") + 1]).is_absolute())
+        self.assertEqual(json.loads(foreman_reset.record_path(self.state).read_text())["resets"][-1]["scheduled_at"], RESET_AT)
         self.assertTrue(Path(spawned[0][spawned[0].index("--state") + 1]).is_absolute())
 
     def test_a_retry_replays_before_preconditions_that_the_reset_itself_changed(self):
@@ -439,7 +453,7 @@ class ResetCommandTest(CliCase):
              patch("teamlead.cli.supervision.load", return_value=supervision_data(active=True)[0]), \
              patch.dict("os.environ", {"HERDR_PANE_ID": PANE}), \
              patch("teamlead.cli._spawn_detached", side_effect=AssertionError("must not spawn")):
-            code, out, err = self.run_cli(self.base() + ["foreman-reset"])
+            code, out, err = self.run_cli(self.base() + ["foreman-reset", "--now", RESET_AT])
         self.assertEqual(code, 0, err)
         self.assertTrue(json.loads(out)["replayed"])
 
@@ -449,7 +463,7 @@ class ResetCommandTest(CliCase):
              patch("teamlead.cli.supervision.load", return_value=supervision_data()[0]), \
              patch.dict("os.environ", {"HERDR_PANE_ID": "w2:p1"}):
             self.out, self.err = io.StringIO(), io.StringIO()
-            code, _, err = self.run_cli(self.base() + ["foreman-reset"])
+            code, _, err = self.run_cli(self.base() + ["foreman-reset", "--now", RESET_AT])
         self.assertEqual(code, 1)
         self.assertIn("own pane", err)
 
@@ -625,7 +639,7 @@ class ResetCommandTest(CliCase):
              patch.dict("os.environ", {"HERDR_PANE_ID": PANE}), \
              patch("teamlead.cli._spawn_detached", side_effect=AssertionError("must not spawn")):
             self.out, self.err = io.StringIO(), io.StringIO()
-            code, _, err = self.run_cli(self.base() + ["foreman-reset"])
+            code, _, err = self.run_cli(self.base() + ["foreman-reset", "--now", RESET_AT])
         self.assertEqual(code, 1)
         self.assertIn("not reset-ready", err)
 
