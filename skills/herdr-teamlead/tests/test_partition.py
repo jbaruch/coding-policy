@@ -269,7 +269,8 @@ class RunCommand(unittest.TestCase):
         for rev in ("no-such-branch", "0" * 40, "-x"):
             with self.subTest(rev=rev), self.assertRaisesRegex(UsageError, "pass a revision it holds"):
                 partition._revision(partition.git_runner(repo), rev)
-        self.assertRegex(partition._revision(partition.git_runner(repo), "HEAD"), "^[0-9a-f]{40}$")
+        # Either object format git may default to (GIT_DEFAULT_HASH, init.defaultObjectFormat).
+        self.assertTrue(partition.FULL_SHA.fullmatch(partition._revision(partition.git_runner(repo), "HEAD")))
 
     def test_a_sha256_repository_validates_and_passes_the_gate(self):
         # A task records a 64-character base in a SHA-256 repository; its

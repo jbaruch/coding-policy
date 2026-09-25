@@ -243,16 +243,15 @@ def freeze_paths(paths):
     return frozen
 
 
-def _require_frozen_copy(target, digest):
-    """Accept an existing frozen brief only when it is an unlinked regular file holding `digest`.
+def _read_unlinked_regular(target):
+    """The bytes of `target`, refused unless it is an unlinked regular file.
 
-    A symlink could point back at the mutable source, and a hard link shares
-    its inode, so rewriting the source rewrites either. The checks and the
-    read go through one descriptor opened without following a link, so the
-    file inspected is the file hashed.
+    A symlink could point back at a mutable file and a hard link shares its
+    inode, so rewriting that file rewrites either. The checks and the read go
+    through one descriptor opened without following a link, and non-blocking
+    so a FIFO planted there is refused rather than hung on.
     """
     try:
-        # Non-blocking, so a FIFO planted there is refused rather than hung on.
         fd = os.open(target, os.O_RDONLY | os.O_NONBLOCK | getattr(os, "O_NOFOLLOW", 0))
     except OSError as exc:
         if exc.errno == errno.ELOOP:
@@ -271,7 +270,6 @@ def _require_frozen_copy(target, digest):
             if not chunk:
                 break
             chunks.append(chunk)
-        existing = b"".join(chunks)
     except OSError as exc:
         raise UsageError("Cannot read frozen brief {}: {}. Restore its readability or move it aside and re-run."
                          .format(target, exc.strerror or str(exc)), {"path": str(target)}) from None
@@ -280,9 +278,28 @@ def _require_frozen_copy(target, digest):
     if not regular:
         raise UsageError("Frozen brief {} is a link or not a regular file; move it aside and re-run so the "
                          "freeze writes a real copy.".format(target), {"path": str(target)})
-    if hashlib.sha256(existing).hexdigest() != digest:
+    return b"".join(chunks)
+
+
+def _require_frozen_copy(target, digest):
+    """Accept an existing frozen brief only when it is an unlinked regular file holding `digest`."""
+    if hashlib.sha256(_read_unlinked_regular(target)).hexdigest() != digest:
         raise UsageError("Frozen brief {} exists with other content; it is never rewritten. Move it aside "
                          "and re-run.".format(target), {"path": str(target)})
+
+
+def read_frozen(path):
+    """The bytes a dispatch recorded at `path`, refused unless they are an intact frozen copy.
+
+    Intact: under `FROZEN_DIR`, an unlinked regular file, and holding the
+    content its name's digest names, so the bytes read are the bytes sent.
+    """
+    target = Path(path)
+    data = _read_unlinked_regular(target) if target.parent.name == FROZEN_DIR else None
+    if data is None or hashlib.sha256(data).hexdigest()[:16] not in target.name.split("."):
+        raise UsageError("Dispatched brief {} is not an intact frozen copy, so what the worker read cannot be "
+                         "shown. Dispatch again with this build.".format(target), {"path": str(target)})
+    return data
 
 
 def resolve_paths(assignments, briefs, common):

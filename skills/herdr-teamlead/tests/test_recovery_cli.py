@@ -841,11 +841,45 @@ class RecoveryCommandTests(fixture.CliCase):
         document = self.saved()
         row = next(item for item in document["recovery"]["dispatches"] if item["role"] == seat)
         document["recovery"]["dispatches"].append({**row, "id": "resent-" + seat, "fingerprint": "0" * 64,
+                                                   "at": "2026-02-03T11:00:00+00:00",
                                                    "status": "not_sent", "result": None, "report": None})
         self.state.write_text(json.dumps(document))
         code, _, err = self.gate()
         self.assertEqual(code, 1)
         self.assertIn("latest dispatch is 'not_sent', not applied", err)
+
+    def test_the_latest_dispatch_is_chosen_by_event_time_not_append_order(self):
+        # Imported evidence can be appended after newer rows. An older unsent
+        # row appended last must not hide the plan's applied send.
+        plan = self.dispatch_partitioned_plan()
+        seat = sorted(plan["assignments"])[0]
+        document = self.saved()
+        row = next(item for item in document["recovery"]["dispatches"] if item["role"] == seat)
+        document["recovery"]["dispatches"].append({**row, "id": "imported-" + seat, "fingerprint": "0" * 64,
+                                                   "at": "2020-01-01T00:00:00+00:00",
+                                                   "status": "not_sent", "result": None, "report": None})
+        self.state.write_text(json.dumps(document))
+        code, _, err = self.gate()
+        self.assertEqual(code, 1)
+        self.assertIn("was proven in /repo", err)
+
+    def test_a_rewritten_common_brief_is_refused(self):
+        # The worker reads the common brief too, so it must still be what was sent.
+        self.dispatch_partitioned_plan()
+        row = next(item for item in self.saved()["recovery"]["dispatches"] if "#" in item["role"])
+        Path(row["common"]).write_text("rewritten after the send\n")
+        code, _, err = self.gate()
+        self.assertEqual(code, 1)
+        self.assertIn("not an intact frozen copy", err)
+
+    def test_a_fifo_at_the_recorded_brief_is_refused_without_hanging(self):
+        self.dispatch_partitioned_plan()
+        row = next(item for item in self.saved()["recovery"]["dispatches"] if "#" in item["role"])
+        Path(row["brief"]).unlink()
+        os.mkfifo(row["brief"])
+        code, _, err = self.gate()
+        self.assertEqual(code, 1)
+        self.assertIn("not a regular file", err)
 
     def test_a_plan_made_without_the_task_is_refused(self):
         self.dispatch_partitioned_plan(task=None)

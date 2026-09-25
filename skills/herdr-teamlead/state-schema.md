@@ -101,8 +101,9 @@ repo path and the full base and head commits (SHA-1 or SHA-256) the slices were 
 (`head` null for a working-tree proof). Writer: `plan --partition`. Reader:
 `verify-partition --task`, which checks every field's shape, the
 `slice_digest` and `seat_digests` against `slice_paths`, each seat's latest
-dispatch for the task (applied, to the plan's assigned agent, under the plan's
-`task_context`, from an intact frozen brief) against its seat digest, the repo, the task's recorded base,
+dispatch for the task by event time (applied, to the plan's assigned agent,
+under the plan's `task_context`, from an intact frozen brief and common brief)
+against its seat digest, under the state lock, the repo, the task's recorded base,
 the tip against `head`, and that the slices cover exactly
 `git diff base...head` (#460). A plan without the proof is refused there.
 From schema 11, `slice_digest` and every `seat_digests` entry also cover

@@ -34,9 +34,11 @@
   slices in one read rather than re-reading a file that may have changed.
   The gate binds each seat to this plan's own send: the seat's latest dispatch
   for the task must be applied, to the worker the plan assigns, under the
-  plan's task context, from a frozen brief whose bytes still match its name.
-  An older dispatch to another worker, or a newer one that never applied, no
-  longer passes. An existing frozen copy is inspected through one no-follow,
+  plan's task context, from a frozen brief and common brief whose bytes still
+  match their names. An older dispatch to another worker, or a newer one that
+  never applied, no longer passes. "Latest" is by event time through
+  `chronology`, never append order, and the gate reads the ledger under the
+  state lock and checks the exact bytes it verified. An existing frozen copy is inspected through one no-follow,
   non-blocking descriptor outside the `FileExistsError` handler, so a copy
   that vanishes or turns unreadable mid-inspection is an actionable refusal
   rather than a traceback, and a FIFO or directory there is refused. An
