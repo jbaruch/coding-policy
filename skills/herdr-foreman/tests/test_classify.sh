@@ -280,6 +280,24 @@ PY
   if [[ $RC -eq 2 && -z "$OUT" ]] && printf '%s' "$ERRTEXT" | grep -q 'on or after 2026-09-04'; then
     pass; else fail "--since past every report names the date, got RC=$RC ERR=$ERRTEXT"; fi
 
+  # The default corpus refuses a state home still at the legacy teamlead path
+  # rather than reading the new path as empty; a migrated home (legacy path
+  # linked to the new one) reads normally.
+  local xdg="$TMP/xdg"
+  mkdir -p "$xdg/teamlead"
+  cp "$state" "$xdg/teamlead/state.json"
+  OUT="$(XDG_STATE_HOME="$xdg" bash "$DIR/evaluate.sh" --corpus-only 2>"$ERRFILE")"
+  RC=$?
+  ERRTEXT="$(cat "$ERRFILE")"
+  if [[ $RC -eq 2 && -z "$OUT" ]] && printf '%s' "$ERRTEXT" | grep -q 'migrate-home'; then
+    pass; else fail "a legacy default home names migrate-home, got RC=$RC ERR=$ERRTEXT"; fi
+  mv "$xdg/teamlead" "$xdg/foreman"
+  ln -s "$xdg/foreman" "$xdg/teamlead"
+  OUT="$(XDG_STATE_HOME="$xdg" bash "$DIR/evaluate.sh" --corpus-only 2>"$ERRFILE")"
+  RC=$?
+  if [[ $RC -eq 0 ]] && [[ "$(field "$OUT" corpus)" == "1" ]]; then
+    pass; else fail "a migrated default home reads its corpus, got RC=$RC OUT=$OUT"; fi
+
   echo "▶ scoring" >&2
 
   stub_codex "$TMP/score" 0 '{"verdict":"blocking","evidence":"B1"}'

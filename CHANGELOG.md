@@ -19,8 +19,15 @@
   is still at `~/.local/state/teamlead` or `~/.config/teamlead`, names
   `foreman migrate-home`, and creates nothing at the new path. A command
   given explicit `--state` and `--config` is unaffected. `migrate-home`
-  (`skills/herdr-foreman/foreman/home.py`) refuses while any owner lock in
-  the legacy home is held, renames each home, leaves the old path as a
+  (`skills/herdr-foreman/foreman/home.py`) takes the home guard
+  `$XDG_STATE_HOME/.foreman-home.lock` exclusively before reading either
+  home, and every other command holds that guard shared for its whole run,
+  so a migration never starts under a running command and a command started
+  mid-migration is refused. The guard sits beside both homes, so it does
+  not move with them; a scan of the owner locks inside the legacy home
+  alone left a window between the scan and the move. It also refuses while
+  any owner lock in the legacy home is held (a foreman older than the
+  guard), refuses `--state` and `--config`, renames each home, leaves the old path as a
   symlink to the new one, and rewrites only the stores' `state_path`
   identity fields, which the stores compare against the canonical state path
   on load. Every other absolute path a record quotes (stow required reads,
@@ -35,9 +42,11 @@
   disagreements, so no verdict changed with the wording.
 - **Test runs no longer see the operator's own homes.** `scripts/run-tests.sh`
   gives every run an empty per-run `XDG_STATE_HOME` and `XDG_CONFIG_HOME`
-  and removes them on exit (`scripts/tests/test_run_tests.sh` checks both),
-  and `classify/evaluate.sh` honours `XDG_STATE_HOME` for its default
-  corpus. Before, a suite that did not pass a path read, and could refuse
+  and removes them on exit (`scripts/tests/test_run_tests.sh` checks both);
+  a failed `mktemp` or `mkdir` during setup reports the runner's structured
+  JSON error instead of a bare exit. `classify/evaluate.sh` honours
+  `XDG_STATE_HOME` for its default corpus and refuses a home still at the
+  legacy path, naming `migrate-home`, instead of reading an empty corpus. Before, a suite that did not pass a path read, and could refuse
   on, the machine's real foreman state, which the home migration would
   have made an ordinary occurrence.
 - The foreman definition bullet in `rules/agent-team-operation.md` is split

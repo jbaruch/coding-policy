@@ -25,7 +25,12 @@ and creates nothing at the new path; a command given explicit `--state` and
 `--config` is unaffected. `foreman migrate-home` is the owner's one-time move
 (`skills/herdr-foreman/foreman/home.py`, module docstring):
 
-- It refuses while any owner lock in the legacy state home is held
+- Every other command holds the home guard `$XDG_STATE_HOME/.foreman-home.lock`
+  shared for its whole run; `migrate-home` takes it exclusively before reading
+  either home and holds it through both moves, so it refuses while any command
+  runs and a command started mid-migration is refused
+- It also refuses while any owner lock in the legacy state home is held
+- It moves the default homes only and refuses `--state` or `--config`
 - It moves each home to the `foreman` path and leaves the legacy path as a
   link to it, so absolute paths quoted in history still resolve
 - It rewrites each store's `state_path` identity field that names the legacy

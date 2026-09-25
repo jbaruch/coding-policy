@@ -273,6 +273,31 @@ else
 fi
 rm -rf "$base" "$seen"
 
+# --- a setup step that fails reports the structured error, never a bare exit ---
+# Each shim fails one setup call and passes every other call through, so the
+# failure lands on exactly the step under test.
+shim_fail() { # <dir> <tool> <condition on "$@" that selects the call to fail>
+  local dir="$1" tool="$2" when="$3" real
+  real="$(command -v "$tool")"
+  mkdir -p "$dir"
+  printf '#!/usr/bin/env bash\nif %s; then exit 1; fi\nexec %q "$@"\n' "$when" "$real" > "$dir/$tool"
+  chmod +x "$dir/$tool"
+}
+for case_ in "mktemp:[[ \$# -eq 0 ]]:mktemp failed" "mktemp:[[ \${1-} == -d ]]:mktemp -d failed" "mkdir:[[ \${1-} == -p ]]:mkdir of the per-run XDG home failed"; do
+  tool="${case_%%:*}"; rest="${case_#*:}"; when="${rest%%:*}"; want="${rest#*:}"
+  base="$(make_base)"; add_suite "$base" alpha 0
+  shims="$(mktemp -d)"; shim_fail "$shims" "$tool" "$when"
+  errf="$(mktemp)"
+  OUT="$(PATH="$shims:$PATH" "$RUNNER" "$base" 2>"$errf")"; CODE=$?
+  ERR="$(cat "$errf")"; rm -f "$errf"
+  if [[ "$CODE" == 2 ]] && jq -e --arg want "$want" '.error == $want and .suites == 0' <<<"$OUT" >/dev/null; then
+    pass "${want} -> exit 2, JSON error"
+  else
+    fail "${want}: expected exit 2 with that JSON error, got code=$CODE out=$OUT err=$ERR"
+  fi
+  rm -rf "$base" "$shims"
+done
+
 echo ""
 echo "run-tests.sh: ${PASS_COUNT} passed, ${FAIL_COUNT} failed"
 [[ $FAIL_COUNT -eq 0 ]] || exit 1

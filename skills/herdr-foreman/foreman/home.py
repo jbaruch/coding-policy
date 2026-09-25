@@ -33,15 +33,19 @@ Any other command whose default home is `legacy` refuses and names
 `migrate-home` (`require_current`); it never starts an empty store at the new
 path. A command given explicit `--state`/`--config` paths is unaffected.
 
-`migrate` refuses while any owner lock in the old state home is held, so a
-running foreman is never moved underneath. It holds those locks through the
-move.
+Every other command holds the home guard, `$XDG_STATE_HOME/.foreman-home.lock`,
+shared for its whole run (`guard`). The guard lives beside both homes, never
+inside one, so it stays put while they move. `migrate` takes it exclusively
+before it looks at either home and holds it through both moves: it refuses
+while any command holds the guard, and a command that starts mid-migration is
+refused instead of reading a half-moved home. It also refuses while any owner
+lock in the old state home is held, for a running foreman older than the guard.
 """
 
 import fcntl
 import json
 import os
-from contextlib import ExitStack
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
 
 from .errors import StateError, UsageError
@@ -50,6 +54,7 @@ from .state import save_state
 LEGACY = "teamlead"
 CURRENT = "foreman"
 STATE_FILE = "state.json"
+GUARD = ".foreman-home.lock"
 
 
 def roots(environ=None):
@@ -78,6 +83,38 @@ def status(root):
     if old.is_dir():
         return "split" if new.exists() else "legacy"
     return "current" if new.is_dir() else "absent"
+
+
+@contextmanager
+def guard(exclusive, environ=None):
+    """Hold the home guard: exclusive for `migrate`, shared for every other command."""
+    root = roots(environ)["state"]
+    path = root / GUARD
+    if not root.is_dir():
+        # No state root means no home to move, and a migration has nothing to
+        # take: creating the root here would be a write a read-only command
+        # never makes.
+        yield
+        return
+    try:
+        handle = path.open("a", encoding="utf-8")
+    except OSError as exc:
+        raise StateError("Cannot open the home guard {}: {}. Restore access to {}, then run the command again; "
+                         "nothing was read or written.".format(path, exc, root), {"guard": str(path)}) from None
+    with handle:
+        try:
+            fcntl.flock(handle.fileno(), (fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH) | fcntl.LOCK_NB)
+        except BlockingIOError:
+            if exclusive:
+                raise UsageError("A foreman command is running (it holds {}). Stop every foreman and let running "
+                                 "commands finish, then run migrate-home again; nothing was moved.".format(path),
+                                 {"guard": str(path)}) from None
+            raise UsageError("migrate-home is moving the foreman homes (it holds {}). Wait for it to finish, then run "
+                             "this command again; nothing was read or written.".format(path), {"guard": str(path)}) from None
+        except OSError as exc:
+            raise StateError("Cannot lock the home guard {}: {}. Use a filesystem supporting process locks; nothing "
+                             "was read or written.".format(path, exc), {"guard": str(path)}) from None
+        yield
 
 
 def require_current(kinds, environ=None):
@@ -185,8 +222,9 @@ def _move(kind, root, rewrite):
 def migrate(environ=None):
     """Move both homes; idempotent, and a crash midway is finished by a re-run."""
     homes = roots(environ)
-    for kind, root in homes.items():
-        state = status(root)
-        if state in ("split", "blocked"):
-            raise UsageError(_refusal(kind, root, state), {"legacy": str(pair(root)[0]), "current": str(pair(root)[1])})
-    return {"schema_version": 1, "homes": [_move("state", homes["state"], True), _move("config", homes["config"], False)]}
+    with guard(True, environ):
+        for kind, root in homes.items():
+            state = status(root)
+            if state in ("split", "blocked"):
+                raise UsageError(_refusal(kind, root, state), {"legacy": str(pair(root)[0]), "current": str(pair(root)[1])})
+        return {"schema_version": 1, "homes": [_move("state", homes["state"], True), _move("config", homes["config"], False)]}

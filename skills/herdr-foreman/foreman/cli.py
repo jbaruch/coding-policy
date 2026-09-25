@@ -2163,27 +2163,34 @@ def main(argv=None, stdout=None, stderr=None, client=None):
 
     try:
         # A default home still at the legacy path is refused before anything is
-        # read or created at the new one; `migrate-home` moves it, and holds the
-        # owner locks inside the home itself instead of the state lock below.
+        # read or created at the new one. `migrate-home` moves the default homes
+        # alone, under the home guard held exclusively; every other command holds
+        # that guard shared for its whole run, so neither starts under the other.
         if args.command == "migrate-home":
+            given = [flag for flag, attr in (("--state", "state"), ("--config", "config")) if getattr(args, attr, None)]
+            if given:
+                raise UsageError("migrate-home moves the default homes under $XDG_STATE_HOME and $XDG_CONFIG_HOME and takes "
+                                 "no {}. Run it without {}; an explicit state or config file is never moved.".format(
+                                     " or ".join(given), " or ".join(given)), {"given": given})
             payload, failure = COMMANDS[args.command](args, client=client, warn=warn, trace=trace)
             json.dump(payload, stdout, indent=2)
             stdout.write("\n")
             return 0
-        home.require_current({kind for kind, given in (("state", getattr(args, "state", None)),
-                                                       ("config", getattr(args, "config", None))) if not given})
-        # Commands that may migrate or write state share its canonical lock.
-        # Dry runs, probes, and retrospective reads remain read-only.
-        readonly = args.command in {"probe-report", "detect-triggers", "validate-partition", "verify-oracle", "retro-check", "retro-list", "retro-show", "capability-check", "capability-show", "supervision-gate", "load-set", "foreman-queue", "check-member"} or getattr(args, "dry_run", False)
-        # The deliverer starts while `foreman-reset` still holds the state lock;
-        # it serializes on the reset record's own lock instead. close-member
-        # writes only through the supervision owner's own lock.
-        separate_owner = args.command in memory.COMMANDS | attention.COMMANDS | SUPERVISION_COMMANDS | restoration.COMMANDS | {"foreman-reset-deliver", "foreman-reset-reconcile", "close-member"}
-        lock = nullcontext() if readonly or separate_owner else state_lock(retrospective.canonical_state(_state_path(args)))
-        with lock:
-            retro_lock = retrospective.lock(_state_path(args)) if not readonly and args.command in {"apply", "start-judge", "retro-record"} else nullcontext()
-            with retro_lock:
-                payload, failure = COMMANDS[args.command](args, client=client, warn=warn, trace=trace)
+        with home.guard(False):
+            home.require_current({kind for kind, given in (("state", getattr(args, "state", None)),
+                                                           ("config", getattr(args, "config", None))) if not given})
+            # Commands that may migrate or write state share its canonical lock.
+            # Dry runs, probes, and retrospective reads remain read-only.
+            readonly = args.command in {"probe-report", "detect-triggers", "validate-partition", "verify-oracle", "retro-check", "retro-list", "retro-show", "capability-check", "capability-show", "supervision-gate", "load-set", "foreman-queue", "check-member"} or getattr(args, "dry_run", False)
+            # The deliverer starts while `foreman-reset` still holds the state lock;
+            # it serializes on the reset record's own lock instead. close-member
+            # writes only through the supervision owner's own lock.
+            separate_owner = args.command in memory.COMMANDS | attention.COMMANDS | SUPERVISION_COMMANDS | restoration.COMMANDS | {"foreman-reset-deliver", "foreman-reset-reconcile", "close-member"}
+            lock = nullcontext() if readonly or separate_owner else state_lock(retrospective.canonical_state(_state_path(args)))
+            with lock:
+                retro_lock = retrospective.lock(_state_path(args)) if not readonly and args.command in {"apply", "start-judge", "retro-record"} else nullcontext()
+                with retro_lock:
+                    payload, failure = COMMANDS[args.command](args, client=client, warn=warn, trace=trace)
     except ForemanError as exc:
         json.dump(exc.to_dict(), stderr, indent=2)
         stderr.write("\n")

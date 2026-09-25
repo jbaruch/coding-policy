@@ -95,6 +95,35 @@ class MigrateTest(HomeCase):
         self.assertTrue((self.state_root / "teamlead").is_dir())
         self.assertFalse((self.state_root / "foreman").exists())
 
+    def test_a_running_command_holding_the_guard_refuses_and_moves_nothing(self):
+        self.legacy_home()
+        with home.guard(False, self.env):
+            with self.assertRaisesRegex(UsageError, "Stop every foreman"):
+                home.migrate(self.env)
+        self.assertTrue((self.state_root / "teamlead").is_dir())
+        self.assertFalse((self.state_root / "foreman").exists())
+
+    def test_a_command_starting_mid_migration_is_refused(self):
+        self.legacy_home()
+        seen = []
+        real_rename = home.os.rename
+
+        def rename_then_start_a_command(src, dst):
+            # A foreman command starts after the homes were scanned, before the
+            # move lands: the guard, not the lock scan, must turn it away.
+            out, err = io.StringIO(), io.StringIO()
+            with mock.patch.dict("os.environ", self.env):
+                seen.append((main(["foreman-queue"], stdout=out, stderr=err), err.getvalue()))
+            real_rename(src, dst)
+
+        with mock.patch.object(home.os, "rename", side_effect=rename_then_start_a_command):
+            result = home.migrate(self.env)
+        self.assertEqual([row["moved"] for row in result["homes"]], [True, True])
+        self.assertEqual(len(seen), 2)
+        for code, err in seen:
+            self.assertEqual(code, 1)
+            self.assertIn("migrate-home is moving", err)
+
     def test_a_split_home_is_refused_and_never_merged(self):
         self.legacy_home()
         (self.state_root / "foreman").mkdir()
@@ -129,6 +158,16 @@ class RequireCurrentTest(HomeCase):
             self.assertEqual(main(["migrate-home"], stdout=out, stderr=err), 0, err.getvalue())
         self.assertEqual(json.loads(out.getvalue())["homes"][0]["status"], "current")
 
+
+    def test_migrate_home_refuses_explicit_paths(self):
+        self.legacy_home()
+        for flags in (["--state", str(self.state_root / "x.json")], ["--config", str(self.config_root / "c.json")]):
+            out, err = io.StringIO(), io.StringIO()
+            with mock.patch.dict("os.environ", self.env):
+                self.assertEqual(main(["migrate-home", *flags], stdout=out, stderr=err), 1)
+            self.assertIn("takes no " + flags[0], err.getvalue())
+        self.assertTrue((self.state_root / "teamlead").is_dir())
+        self.assertFalse((self.state_root / "foreman").exists())
 
 if __name__ == "__main__":
     unittest.main()

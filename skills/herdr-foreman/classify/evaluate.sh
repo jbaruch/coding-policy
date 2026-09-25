@@ -80,7 +80,8 @@ PY
 }
 
 main() {
-  local limit=0 since="" model="" agent="claude" state="${XDG_STATE_HOME:-${HOME}/.local/state}/foreman/state.json" corpus_only=0
+  local state_root="${XDG_STATE_HOME:-${HOME}/.local/state}"
+  local limit=0 since="" model="" agent="claude" state="" corpus_only=0
   while [ $# -gt 0 ]; do
     case "$1" in
       --limit) limit="${2-}"; shift 2 || die "--limit needs a count" ;;
@@ -94,6 +95,15 @@ main() {
     esac
   done
   case "$limit" in ''|*[!0-9]*) die "--limit takes a non-negative integer" ;; esac
+  if [ -z "$state" ]; then
+    # The default corpus follows the foreman's own home rule
+    # (foreman/home.py): a legacy home that is still a real directory has not
+    # been migrated, and the new path would read as an empty corpus.
+    if [ -d "${state_root}/teamlead" ] && [ ! -L "${state_root}/teamlead" ]; then
+      die "the state home is still at ${state_root}/teamlead; stop every foreman and run \`foreman migrate-home\`, or pass --state"
+    fi
+    state="${state_root}/foreman/state.json"
+  fi
 
   local work
   work="$(mktemp -d "${TMPDIR:-/tmp}/classify-eval.XXXXXX")" || die "cannot create a temporary directory"

@@ -136,7 +136,12 @@ main() {
   # `set -o pipefail` propagates a `find` failure through `| sort -z` to
   # the redirection, and the `if !` catches it — a command substitution
   # can't be used because bash strips NUL bytes from its output.
-  local tmplist; tmplist="$(mktemp)"
+  local tmplist
+  if ! tmplist="$(mktemp)"; then
+    echo "run-tests: could not create the suite list (mktemp failed); check TMPDIR" >&2
+    printf '{"suites":0,"passed":0,"failed":0,"failures":[],"error":%s}\n' "$(json_str "mktemp failed")"
+    return 2
+  fi
   # `-path '*/tests/test_*.sh'` narrows to a tests/ dir, but `find`'s `*`
   # matches `/` too, so it still matches a NESTED file like
   # `tests/test_fixtures/helper.sh`. The direct-child requirement can't be
@@ -178,7 +183,11 @@ main() {
     return 2
   fi
   trap remove_xdg_run_home EXIT
-  mkdir -p "$XDG_RUN_HOME/state" "$XDG_RUN_HOME/config"
+  if ! mkdir -p "$XDG_RUN_HOME/state" "$XDG_RUN_HOME/config"; then
+    echo "run-tests: could not create state/ and config/ under the per-run XDG home ${XDG_RUN_HOME}; check TMPDIR" >&2
+    printf '{"suites":0,"passed":0,"failed":0,"failures":[],"error":%s}\n' "$(json_str "mkdir of the per-run XDG home failed")"
+    return 2
+  fi
   export XDG_STATE_HOME="$XDG_RUN_HOME/state" XDG_CONFIG_HOME="$XDG_RUN_HOME/config"
 
   echo "Running ${#suites[@]} test suite(s):" >&2

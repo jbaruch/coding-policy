@@ -584,7 +584,7 @@ class SeatableRoleTest(unittest.TestCase):
                 self.assertEqual(require_seatable(name), name)
 
     def test_a_seat_of_a_per_task_counter_role_is_refused(self):
-        for name in ("developer#api", "release#core", "judge#api", "foreman#x"):
+        for name in ("developer#api", "release#core", "judge#api", "lead#x"):
             with self.subTest(name=name):
                 with self.assertRaisesRegex(UsageError, "names a seat of"):
                     require_seatable(name)
