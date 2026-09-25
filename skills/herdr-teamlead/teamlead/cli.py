@@ -13,7 +13,10 @@ I/O contract:
 import argparse
 import hashlib
 import json
+import os
+import subprocess
 import sys
+from typing import NoReturn
 import time
 from contextlib import nullcontext
 from datetime import datetime, timezone
@@ -23,7 +26,7 @@ from types import SimpleNamespace
 from . import __version__
 from .assign import apply as apply_assignments
 from .assign import APPLY_SCHEMA_VERSION, FROZEN_DIR, dry_run, freeze_decision, freeze_paths, native_context_session, normalize_assignments, resolve_paths, validate_fix_history
-from . import attention, capabilities, composition, engagement, foreman_queue, historical, load_set, members, memory, oracle, partition, recovery, report_delivery, restoration, role_clear, retrospective, retrospective_runtime, supervision, supervision_gate, supervision_runtime, triggers
+from . import attention, capabilities, composition, engagement, foreman_queue, foreman_reset, historical, load_set, members, memory, oracle, partition, recovery, report_delivery, restoration, role_clear, retrospective, retrospective_runtime, supervision, supervision_gate, supervision_runtime, triggers
 from .config import default_config_path, load_config, load_judge, load_role_costs, select_agents
 from .errors import PlanError, StateError, TeamLeadError, UsageError
 from .herdr import (
@@ -382,6 +385,16 @@ def build_parser():
         record_parser.add_argument("--record", required=True, metavar="FILE", help="Structured evidence JSON; see dispatch-recovery.md.")
         record_parser.add_argument("--now", metavar="ISO8601")
     sub.add_parser("status", parents=[common], help="Show implementation budgets and paused work separately from active audit workers.")
+    reset_parser = sub.add_parser("foreman-reset", parents=[common], help="Schedule the foreman's round-boundary context reset from a reset-ready stow.")
+    reset_parser.add_argument("--stow", default="latest", help="Stow id the reset resumes from (default: the latest).")
+    reset_parser.add_argument("--now", metavar="ISO8601")
+    deliver_parser = sub.add_parser("foreman-reset-deliver", parents=[common], help="Internal: wait for the foreman pane to idle, then clear it and send the resume prompt.")
+    deliver_parser.add_argument("--pane", required=True)
+    deliver_parser.add_argument("--stow", required=True)
+    reconcile_parser = sub.add_parser("foreman-reset-reconcile", parents=[common], help="Close a reset whose deliverer stopped without an outcome, as delivered or failed.")
+    reconcile_parser.add_argument("--pane", required=True)
+    reconcile_parser.add_argument("--stow", required=True)
+    reconcile_parser.add_argument("--outcome", required=True, choices=["delivered", "failed"])
     close_member = sub.add_parser("close-member", parents=[common], help="Acknowledge an enrollment's pending events and resolve it, once the task ledger records its assessed outcome.")
     close_member.add_argument("--enrollment", required=True)
     close_member.add_argument("--ledger", required=True, help="Absolute path of the task's TASK-LEDGER.md.")
@@ -1477,6 +1490,146 @@ def cmd_status(args, client=None, warn=None, trace=None):
             "tasks": recovery.task_statuses(state["recovery"], state["assignments"])}, None
 
 
+def cmd_foreman_reset(args, client=None, warn=None, trace=None, spawn=None):
+    state_path = Path(_state_path(args)).expanduser().resolve()
+    at = args.now or now_iso()
+    stow = memory.show(state_path, at, args.stow)["record"]
+    data = supervision.load(state_path)
+    bound_pane = (data.get("binding") or {}).get("identity", {}).get("pane_id")
+    # A retry replays before every precondition the reset itself can change
+    # (stow readiness, supervision work); reading the stow and supervision and
+    # checking the caller's pane still come first (see foreman_reset.replay).
+    # A pane id alone can be set by any process; a Herdr pane also carries HERDR_ENV.
+    # rules/agent-team-operation.md Two Modes: a team round is HERDR_ENV set, any value.
+    caller = os.environ.get("HERDR_PANE_ID") if "HERDR_ENV" in os.environ else None
+    if bound_pane and caller != bound_pane:
+        raise UsageError("foreman-reset runs from the bound foreman's own pane ({}); this call came from {}.".format(
+            bound_pane, caller or "outside Herdr"), {"pane_id": bound_pane})
+    options = _resume_options(args)
+    existing = foreman_reset.replay(state_path, {"pane_id": bound_pane, "stow": stow["id"]}) if bound_pane else None
+    if existing is not None:
+        return {"schema_version": foreman_reset.RESET_SCHEMA_VERSION, "scheduled": True, **existing,
+                "log": str(Path(str(state_path) + ".foreman-reset.log"))}, None
+    plan = foreman_reset.preflight(stow, data, caller)
+    log = Path(str(state_path) + ".foreman-reset.log")
+    # The deliverer runs from the package directory, so every path it gets is absolute.
+    argv = [sys.executable, "-m", "teamlead", "foreman-reset-deliver", "--pane", plan["pane_id"], "--stow", plan["stow"],
+            "--state", str(state_path), "--config", str(Path(_config_path(args)).expanduser().resolve())]
+    if getattr(args, "herdr_bin", None):
+        argv += ["--herdr-bin", _absolute_executable(args.herdr_bin)]
+
+    def start():
+        try:
+            # No-follow, like the reset record: a planted link would send Herdr
+            # diagnostics into another file.
+            descriptor = os.open(log, os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+            with os.fdopen(descriptor, "ab") as sink:
+                return (spawn or _spawn_detached)(argv, sink)
+        except OSError as exc:
+            raise StateError("Could not start the reset deliverer ({}); nothing was sent.".format(exc),
+                             {"log": str(log)}) from None
+
+    row = foreman_reset.schedule(state_path, plan, at, start, options=options)
+    return {"schema_version": foreman_reset.RESET_SCHEMA_VERSION, "scheduled": True, **row, "log": str(log),
+            "next": "End this turn now; the deliverer clears the pane once it is idle."}, None
+
+
+def _absolute_executable(value):
+    """A relative executable path resolved now, before the deliverer changes directory."""
+    return str(Path(value).expanduser().resolve()) if os.sep in value else value
+
+
+def _spawn_detached(argv, sink):
+    """Start `argv` in its own session so it outlives the foreman's turn."""
+    process = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=sink, stderr=sink,
+                               start_new_session=True, cwd=str(Path(__file__).resolve().parents[1]))
+    return process.pid
+
+
+def _resume_options(args):
+    """The non-default owner settings a resumed foreman must keep passing."""
+    options = {"config": str(Path(_config_path(args)).expanduser().resolve())}
+    if getattr(args, "herdr_bin", None):
+        options["herdr_bin"] = _absolute_executable(args.herdr_bin)
+    return options
+
+
+def _raise_reset_failure(state_path, stow, outcome, record) -> NoReturn:
+    """Record a deliverer failure, then exit with the error it earned.
+
+    `reset_ended` authorizes the operator's recovery, so it is raised only once
+    the row shows `failed` or `interrupted`. The record is also the durable
+    blocker: `catch-up` reads it (`foreman_reset.outstanding`), so a failure
+    that could not be recorded still surfaces there as a reset with no outcome.
+    """
+    status = record()
+    if status not in foreman_reset.TERMINAL_FAILURES:
+        raise StateError("The reset for stow {} failed here, but its record shows {!r}, which another process set; this "
+                         "deliverer authorizes no recovery. Inspect {}.".format(stow, status, foreman_reset.record_path(state_path)),
+                         {"record": str(foreman_reset.record_path(state_path)), "status": status})
+    raise foreman_reset.delivery_failed(state_path, stow, outcome)
+
+
+def _log_safe(warn):
+    """A warning sink for the detached deliverer, whose stderr is a persistent log.
+
+    Composer warnings can quote raw pane or subprocess text, so the log gets a
+    fixed line per warning instead: the warning stays visible, and its body
+    never reaches the file (rules/no-secrets.md Logging).
+    """
+    def sink(_message):
+        if warn is not None:
+            warn("composer warning during reset delivery; its text is withheld from this log")
+    return sink
+
+
+def cmd_foreman_reset_deliver(args, client=None, warn=None, trace=None):
+    state_path = Path(_state_path(args)).expanduser().resolve()
+    plan = {"pane_id": args.pane, "stow": args.stow}
+    options = _resume_options(args)
+    try:
+        claimed = foreman_reset.claim(state_path, plan, supervision_runtime.process_identity(os.getpid()))
+    except TeamLeadError as exc:
+        # Nothing was typed. The row must show a terminal failure before the
+        # operator's recovery is authorized.
+        outcome = foreman_reset.failure(exc, args.stow, str(state_path), **options)
+        _raise_reset_failure(state_path, args.stow, outcome,
+                             lambda: foreman_reset.fail_unclaimed(state_path, plan, outcome))
+    if not claimed:
+        return {"schema_version": foreman_reset.RESET_SCHEMA_VERSION, **plan, "skipped": "not the scheduled owner of this reset"}, None
+    try:
+        # Setup runs after the claim, so its failure must finish the row too.
+        client = client if client is not None else _client(args, trace=trace)
+        result = foreman_reset.deliver(
+            client, load_config(_config_path(args)), args.pane, args.stow, str(state_path), warn=_log_safe(warn), options=options,
+            still_ready=lambda: memory.show(state_path, now_iso(), args.stow)["record"].get("reset_ready") is True)
+    except TeamLeadError as exc:
+        status = "interrupted" if isinstance(exc, foreman_reset.DeliveryInterrupted) else "failed"
+        outcome = foreman_reset.failure(exc, args.stow, str(state_path), **options)
+
+        def record():
+            foreman_reset.finish(state_path, plan, status, outcome)
+            return status
+        _raise_reset_failure(state_path, args.stow, outcome, record)
+    try:
+        foreman_reset.finish(state_path, plan, "delivered", result)
+    except TeamLeadError as exc:
+        # The pane is resumed; only the record lags. Catch-up shows the row as a
+        # delivery with no outcome, and this says which way it actually went.
+        raise StateError("The reset from stow {} was delivered and the foreman resumed, but the record could not say so: "
+                         "{} Once the record is readable, run `{}`; do not recover the pane.".format(
+                             args.stow, exc.message,
+                             foreman_reset.reconcile_command(state_path, args.pane, args.stow, "delivered")),
+                         {"record": str(foreman_reset.record_path(state_path)), "delivered": result}) from None
+    return result, None
+
+
+def cmd_foreman_reset_reconcile(args, client=None, warn=None, trace=None):
+    state_path = Path(_state_path(args)).expanduser().resolve()
+    return foreman_reset.reconcile(state_path, {"pane_id": args.pane, "stow": args.stow}, args.outcome,
+                                   getattr(args, "now", None) or now_iso()), None
+
+
 def cmd_close_member(args, client=None, warn=None, trace=None):
     return members.close(_state_path(args), args.enrollment, args.ledger, args.now or now_iso()), None
 
@@ -1949,6 +2102,9 @@ COMMANDS = {
     "state": cmd_state,
     "status": cmd_status,
     "foreman-queue": cmd_foreman_queue,
+    "foreman-reset": cmd_foreman_reset,
+    "foreman-reset-deliver": cmd_foreman_reset_deliver,
+    "foreman-reset-reconcile": cmd_foreman_reset_reconcile,
     "close-member": cmd_close_member,
     "check-member": cmd_check_member,
     "load-set": cmd_load_set,
@@ -1986,8 +2142,10 @@ def main(argv=None, stdout=None, stderr=None, client=None):
         # Commands that may migrate or write state share its canonical lock.
         # Dry runs, probes, and retrospective reads remain read-only.
         readonly = args.command in {"probe-report", "detect-triggers", "validate-partition", "verify-partition", "verify-oracle", "retro-check", "retro-list", "retro-show", "capability-check", "capability-show", "supervision-gate", "load-set", "foreman-queue", "check-member"} or getattr(args, "dry_run", False)
-        # close-member writes only through the supervision owner's own lock.
-        separate_owner = args.command in memory.COMMANDS | attention.COMMANDS | SUPERVISION_COMMANDS | restoration.COMMANDS | {"close-member"}
+        # The deliverer starts while `foreman-reset` still holds the state lock;
+        # it serializes on the reset record's own lock instead. close-member
+        # writes only through the supervision owner's own lock.
+        separate_owner = args.command in memory.COMMANDS | attention.COMMANDS | SUPERVISION_COMMANDS | restoration.COMMANDS | {"foreman-reset-deliver", "foreman-reset-reconcile", "close-member"}
         lock = nullcontext() if readonly or separate_owner else state_lock(retrospective.canonical_state(_state_path(args)))
         with lock:
             retro_lock = retrospective.lock(_state_path(args)) if not readonly and args.command in {"apply", "start-judge", "retro-record"} else nullcontext()

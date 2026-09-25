@@ -2,7 +2,7 @@
 
 import copy
 
-from . import attention
+from . import attention, foreman_reset
 from .chronology import timestamp
 from .errors import UsageError
 
@@ -49,8 +49,12 @@ def _pagination(page, label):
 
 def _render(result):
     lines = ["# Needs your attention", ""]
+    for reset in result["foreman_resets"]:
+        lines.extend(["## Foreman reset {} needs you".format(reset["status"]), "",
+                      _short(reset["needed"]), "", "Record: {}".format(reset["record"]), ""])
     queue = result["attention"]
-    if not queue["total"]:
+    needs_you = bool(queue["total"] or result["foreman_resets"])
+    if not needs_you:
         lines.append("Nothing currently needs your attention in the saved queue.")
     for row in queue["items"]:
         lines.extend(["## {}".format(_short(row["title"], 300)), "",
@@ -70,7 +74,7 @@ def _render(result):
                    "review": "Still awaiting your review."}.get(row["kind"], "Still open from the earlier update.")
             lines.extend(["_{}_".format(cue), ""])
     lines.extend(_pagination(queue, "actionable obligations"))
-    result["attention_markdown"] = "\n".join(lines).rstrip() + "\n" if queue["total"] else ""
+    result["attention_markdown"] = "\n".join(lines).rstrip() + "\n" if needs_you else ""
     deferred = result["deferred"]
     if deferred["total"]:
         lines.extend(["", "## Coming back later", ""])
@@ -129,7 +133,9 @@ def catch_up(path, at, *, task=None, limit=10, offset=0, since=None, include_clo
               "task": task, "since": since, "attention": _page(actionable, offset, limit),
               "deferred": _page(deferred, offset, limit), "progress": _page(progress, offset, limit),
               "closed": _page(closed, offset, limit) if include_closed else None,
-              "retrospective_index": str(attention.canonical_state(path)) + ".retrospectives/index.json", "sources": []}
+              "retrospective_index": str(attention.canonical_state(path)) + ".retrospectives/index.json", "sources": [],
+              # The reset record is the durable blocker for a failed foreman reset.
+              "foreman_resets": foreman_reset.outstanding(path)}
     sources = []
     for section in ("attention", "deferred", "progress", "closed"):
         page = result[section]

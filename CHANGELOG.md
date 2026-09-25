@@ -40,6 +40,88 @@
   reaches its "pass a revision it holds" message instead of git's bare
   "Needed a single revision".
 
+### Added
+
+- **The Herdr foreman resets its own context at every round boundary.** This
+  closes #483. On 2026-09-23 a foreman session ran 3.5 hours, grew from 182k
+  to 906k cached tokens per turn, and died on `Prompt is too long` with the
+  fleet still running. Every earlier #483 change made a reset safe:
+  - the planner reads reservations and busy workers from the records (0.3.259)
+  - `foreman-queue` lists tasks waiting for a seat (0.3.260)
+  - handoff gaps are structured (0.3.262)
+  - `load-set` lists each decision's records (0.3.263)
+
+  This change makes the reset happen. At Step 16 the foreman curates the
+  round's lessons, saves a reset-ready stow, holds supervision for any active
+  work, and runs `teamlead foreman-reset`. The command refuses an unready
+  stow, a call from any pane but the bound foreman's own, and any state in
+  which the foreman could not stop (an unhandled event, or active work with
+  no covering hold). Otherwise it starts a detached `foreman-reset-deliver`
+  and returns.
+
+  The deliverer waits for the foreman's pane to go idle, since a foreman
+  cannot type into its own composer mid-turn. Then it sends the runtime's
+  clear command and a resume prompt, using the same composer checks as
+  worker dispatch. The resume prompt points the fresh context at the stow,
+  the supervision resume sequence and `foreman-queue`, then one Resume Route:
+  Steps 1 and 2, then the continuation step the stow names. A review caught
+  two routes in an earlier draft (the judge reference said "the step the
+  outcome names", Step 13 said "Step 1 and continue"), and `foreman-queue`
+  lists seats only, so a release-ready or closure-pending task would have
+  been replanned or lost. The stow now names that step, and Step 2 goes
+  there instead of Step 5. The prompt's commands run as written: each is
+  `bash <installed>/skills/herdr-teamlead/teamlead.sh <command> ...`, and a
+  test executes them against a fixture stow. An earlier draft said bare
+  `teamlead`, which no installed plugin puts on `PATH`, so the fresh context
+  would have stalled before reading its stow. A stow id of `latest` is
+  refused, since `memory-show --id latest` picks the newest stow rather than
+  that one. The foreman's clear
+  mechanics come from a configured worker of the same runtime kind. A pane
+  that never idles, a clear that changes nothing, or a prompt that doesn't
+  land is reported in the deliverer's log, and nothing further is sent.
+  The deliverer re-reads the pane before every keystroke and stops if the
+  foreman started another turn. It also re-checks the stow just before
+  clearing. The resume prompt names that exact stow. One reset record per
+  pane and stow (`<state>.foreman-reset.json`) makes a retried
+  `foreman-reset` replay instead of spawning a second deliverer. A reset
+  whose deliverer died is finalized, `failed` before typing and
+  `interrupted` after, and goes to the operator. The deliverer serializes on the reset record's lock, never the
+  state lock the parent `foreman-reset` still holds while it starts it. A
+  first draft missed that, and the reset would never have been delivered. A
+  failure after the first keystroke is recorded `interrupted` and never
+  retried, since the pane may be half-reset. The resume prompt carries the
+  state path onto every command, so a foreman on a non-default `--state`
+  resumes against its own records.
+  A deliverer counts as live only while its recorded process identity (start
+  time and command line) still matches, so a reused pid can't hold a reset.
+  Only a `handoff` hold lets the foreman reset over active work; a pause
+  waiting on the user never auto-resumes. A failed or interrupted reset is
+  recovered by the operator, never the foreman. That is a narrow carve-out
+  in Working Memory: the operator clears the pane and pastes the logged
+  resume prompt. The state path in that prompt is shell-quoted. Each stow gets
+  one delivery attempt and is never retried. A failure records the exact
+  resume prompt the operator pastes, and the next round resets from a new
+  stow. A resume prompt that lands but starts no turn counts as
+  interrupted. Step 16 closes only a merged or abandoned task, so fix rounds
+  reach Step 17 open. A judge round also ends in Steps 16 and 17, whatever
+  its ruling. The
+  reset is its own Step 17, and every return from Step 12 to Step 4 passes
+  through Steps 16 and 17, so fix rounds reset too, not only finished
+  tasks.
+
+  Also folded in, from deferred advisories: the migrated-gap carve-out's
+  first precondition is split, the investigator-supplied evidence exception
+  becomes a formal carve-out, and one SKILL.md bullet is split.
+  A failed reset is recovered one way only. Every deliverer diagnostic
+  and a launch failure used to tell the foreman to run `foreman-reset`
+  again, yet the record refuses a second attempt for the same stow, so the
+  advice looped. Each now names the operator recovery (clear the pane,
+  paste the logged resume prompt), and `foreman-reset` exits with a
+  distinct `error` per class: `reset_ended`, `reset_record_newer`,
+  `reset_record_unusable`, or an ordinary refused precondition. A reset
+  record written by a newer build reads as no prior reset and refuses
+  writes, instead of being reported as corrupt.
+
 ## 0.3.270 — 2026-09-25
 
 ### Added
