@@ -156,8 +156,13 @@ class RunCommand(unittest.TestCase):
         self.path = self.tmp / "partition.json"
         self.path.write_text(json.dumps(document()))
 
+    #: Fixed commits the fake repository resolves revisions to.
+    COMMITS = {"BASE": "b" * 40, "HEAD": "c" * 40, "NEWER": "d" * 40}
+
     def runner(self, changed):
         def run(args):
+            if args[0] == "rev-parse":
+                return self.COMMITS.get(args[-1].split("^")[0], "") + "\n"
             self.assertIn("--name-status", args)
             return "".join("M\0{}\0".format(path) for path in changed)
         return run
@@ -167,6 +172,121 @@ class RunCommand(unittest.TestCase):
         result, failure = partition.run_command(args, runner=self.runner(["src/api/routes.py", "src/core/db.py"]))
         self.assertIsNone(failure)
         self.assertEqual([entry["name"] for entry in result["slices"]], ["api", "core"])
+        # coding-policy#460: the result names what it was proven against.
+        self.assertEqual(result["proof"], {"repo": str(self.tmp.resolve()), "base": "b" * 40, "head": "c" * 40})
+
+    def plan_for(self, changed, head: "str | None" = "HEAD"):
+        args = SimpleNamespace(repo=str(self.tmp), base="BASE", head=head, partition=str(self.path))
+        result, _ = partition.run_command(args, runner=self.runner(changed))
+        seats = partition.seat_paths(result, "reviewer")
+        proof = result["proof"]
+        return {"slice_paths": seats, "slice_digest": partition.slice_digest(seats, proof),
+                "seat_digests": {seat: partition.seat_digest(seat, paths, proof) for seat, paths in seats.items()},
+                "partition_proof": proof}
+
+    def verify(self, plan, changed, head="HEAD", base=None, repo=None):
+        return partition.verify(plan, repo or str(self.tmp), head, base or self.COMMITS["BASE"],
+                                runner=self.runner(changed))
+
+    def test_the_gate_refuses_another_repo_or_base(self):
+        changed = ["src/api/routes.py", "src/core/db.py"]
+        plan = self.plan_for(changed)
+        with self.assertRaisesRegex(UsageError, "proven in"):
+            self.verify(plan, changed, repo=str(self.tmp / "elsewhere"))
+        with self.assertRaisesRegex(UsageError, "task's recorded base"):
+            self.verify(plan, changed, base="e" * 40)
+
+    def test_a_proof_swapped_after_planning_fails_the_digests(self):
+        # coding-policy#460: the proof is inside the digests the briefs carry, so
+        # a plan re-pointed at a newer head no longer matches what was dispatched.
+        changed = ["src/api/routes.py", "src/core/db.py"]
+        plan = self.plan_for(changed)
+        plan["partition_proof"] = {**plan["partition_proof"], "head": "d" * 40}
+        with self.assertRaisesRegex(UsageError, "edited after planning"):
+            self.verify(plan, changed, head="NEWER")
+
+    def test_the_gate_refuses_an_edited_boundary_or_proof(self):
+        changed = ["src/api/routes.py", "src/core/db.py"]
+        moved = self.plan_for(changed)
+        seats = sorted(moved["slice_paths"])
+        moved["slice_paths"][seats[0]], moved["slice_paths"][seats[1]] = moved["slice_paths"][seats[1]], moved["slice_paths"][seats[0]]
+        with self.assertRaisesRegex(UsageError, "edited after planning"):
+            self.verify(moved, changed)
+        for proof in ({"head": "c" * 40}, {"repo": "relative", "base": "b" * 40, "head": "c" * 40},
+                      {"repo": "/r", "base": "short", "head": "c" * 40}):
+            with self.subTest(proof=proof):
+                broken = {**self.plan_for(changed), "partition_proof": proof}
+                with self.assertRaisesRegex(UsageError, "no usable proof"):
+                    self.verify(broken, changed)
+        with self.assertRaisesRegex(UsageError, "no usable slice_paths"):
+            self.verify({**self.plan_for(changed), "slice_paths": {"reviewer#api": "not-a-list"}}, changed)
+
+    def test_a_result_before_schema_2_is_refused_at_plan(self):
+        args = SimpleNamespace(repo=str(self.tmp), base="BASE", head="HEAD", partition=str(self.path))
+        result, _ = partition.run_command(args, runner=self.runner(["src/api/routes.py", "src/core/db.py"]))
+        self.assertEqual(result["schema_version"], partition.RESULT_SCHEMA_VERSION)
+        old = self.tmp / "old-result.json"
+        old.write_text(json.dumps({**{k: v for k, v in result.items() if k != "proof"}, "schema_version": 1}))
+        with self.assertRaisesRegex(UsageError, "result schema 1"):
+            partition.load_validated(str(old))
+
+    def test_the_gate_accepts_a_plan_covering_the_diff_at_its_proven_tip(self):
+        changed = ["src/api/routes.py", "src/core/db.py"]
+        result = self.verify(self.plan_for(changed), changed)
+        self.assertEqual((result["verified"], result["head"]), (True, "c" * 40))
+
+    def test_the_gate_refuses_a_newer_tip(self):
+        changed = ["src/api/routes.py", "src/core/db.py"]
+        with self.assertRaisesRegex(UsageError, "proven at"):
+            self.verify(self.plan_for(changed), changed, head="NEWER")
+
+    def test_the_gate_refuses_slices_that_no_longer_match_the_diff(self):
+        plan = self.plan_for(["src/api/routes.py", "src/core/db.py"])
+        with self.assertRaises(UsageError) as raised:
+            self.verify(plan, ["src/api/routes.py", "src/api/new.py"])
+        self.assertEqual((raised.exception.details["unowned"], raised.exception.details["stale"]),
+                         (["src/api/new.py"], ["src/core/db.py"]))
+
+    def test_the_gate_refuses_a_working_tree_proof(self):
+        plan = self.plan_for(["src/api/routes.py", "src/core/db.py"], head=None)
+        with self.assertRaisesRegex(UsageError, "working tree"):
+            self.verify(plan, ["src/api/routes.py", "src/core/db.py"])
+
+    def test_an_unknown_revision_is_refused(self):
+        args = SimpleNamespace(repo=str(self.tmp), base="MISSING", head="HEAD", partition=str(self.path))
+        with self.assertRaisesRegex(UsageError, "does not name a commit"):
+            partition.run_command(args, runner=self.runner(["src/api/routes.py", "src/core/db.py"]))
+
+    def test_an_unknown_revision_in_a_real_repository_names_the_repair(self):
+        # Through git itself, not the fake runner: `rev-parse --verify` exits
+        # 128 and the runner raised git's bare diagnostic before this message.
+        import subprocess
+        repo = self.tmp / "repo"
+        repo.mkdir()
+        for command in (["init", "-q"], ["-c", "user.name=t", "-c", "user.email=t@example.com",
+                                         "commit", "-q", "--allow-empty", "-m", "base"]):
+            subprocess.run(["git", "-C", str(repo), *command], check=True, capture_output=True)
+        for rev in ("no-such-branch", "0" * 40, "-x"):
+            with self.subTest(rev=rev), self.assertRaisesRegex(UsageError, "pass a revision it holds"):
+                partition._revision(partition.git_runner(repo), rev)
+        # Either object format git may default to (GIT_DEFAULT_HASH, init.defaultObjectFormat).
+        self.assertTrue(partition.FULL_SHA.fullmatch(partition._revision(partition.git_runner(repo), "HEAD")))
+
+    def test_a_sha256_repository_validates_and_passes_the_gate(self):
+        # A task records a 64-character base in a SHA-256 repository; its
+        # partition must prove and verify with the same shape.
+        changed = ["src/api/routes.py", "src/core/db.py"]
+        self.COMMITS = {"BASE": "b" * 64, "HEAD": "c" * 64}
+        plan = self.plan_for(changed)
+        self.assertEqual((plan["partition_proof"]["base"], plan["partition_proof"]["head"]), ("b" * 64, "c" * 64))
+        self.assertTrue(self.verify(plan, changed, base="b" * 64)["verified"])
+        for malformed in ("b" * 41, "b" * 63, "b" * 65):
+            with self.subTest(malformed=malformed), self.assertRaisesRegex(UsageError, "no usable proof"):
+                partition.check_proof({**plan["partition_proof"], "base": malformed}, "The plan")
+
+    def test_a_missing_repository_keeps_gits_diagnostic(self):
+        with self.assertRaisesRegex(UsageError, "git rev-parse"):
+            partition._revision(partition.git_runner(self.tmp / "absent"), "HEAD")
 
     def test_an_unowned_changed_path_refuses_the_round(self):
         args = SimpleNamespace(repo=str(self.tmp), base="BASE", head=None, partition=str(self.path))

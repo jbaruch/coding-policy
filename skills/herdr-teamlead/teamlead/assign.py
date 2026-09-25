@@ -31,7 +31,9 @@ reported as `sent_but_not_started` rather than as success.
 builders live on the transport) and prints them without running anything.
 """
 
+import errno
 import os
+import stat
 import time
 import hashlib
 from pathlib import Path
@@ -173,6 +175,155 @@ def reject_duplicate_agents(assignments):
         ),
         {"doubled": {agent: sorted(roles) for agent, roles in doubled.items()}},
     )
+
+
+#: Where a dispatched brief's checked bytes are frozen, beside the source.
+FROZEN_DIR = ".dispatched"
+
+
+def freeze_decision(assignments, is_replay):
+    """`source` when every assigned role replays a dispatch recorded under these source paths, else `frozen`.
+
+    `is_replay(role, agent)` answers whether the source paths resolve to an
+    APPLIED recorded dispatch: the same id and fingerprint (task, role, agent,
+    fix round, correction plan, work, round options and brief bytes), or an
+    older form of it the ledger still carries. Such a replay returns its saved
+    receipt and sends nothing, so the source paths never reach a worker.
+    Anything that would send -- a new dispatch, or a retry of a row never
+    sent -- freezes, and so does anything short of the complete identity. A
+    batch mixing replays with new roles is refused, so no new dispatch escapes
+    the freeze (#460).
+    """
+    replays = {role for role, name in assignments.items() if is_replay(role, name)}
+    if not replays:
+        return "frozen"
+    if replays != set(assignments):
+        raise UsageError("Roles {} replay dispatches recorded under their source briefs, and {} are new. Apply them in "
+                         "separate calls: a replay keeps its recorded paths, and a new dispatch reads frozen copies."
+                         .format(", ".join(sorted(replays)), ", ".join(sorted(set(assignments) - replays))), {})
+    return "source"
+
+
+def freeze_paths(paths):
+    """Copy each brief, and the common brief, to a content-addressed file nothing rewrites.
+
+    Preflight checks read a brief, and the worker reads it again minutes after
+    send. A source edited in between would reach the worker unchecked (#460).
+    A new dispatch uses the frozen copies as its paths throughout: its checks,
+    its identity, the prompt it sends and the recovery that later rebuilds
+    that prompt all read the same bytes. The name carries the content's
+    sha256, so the same brief freezes to the same file and a retry is unchanged.
+    """
+    frozen = {}
+    for key, source in paths.items():
+        try:
+            data = Path(source).read_bytes()
+        except OSError as exc:
+            raise UsageError("Cannot read briefing file {} to freeze it for dispatch: {}. Restore readability or "
+                             "correct its --common/--brief path before dispatch.".format(source, exc.strerror or str(exc)),
+                             {"path": source}) from None
+        digest = hashlib.sha256(data).hexdigest()
+        target = Path(source).parent / FROZEN_DIR / "{}.{}{}".format(Path(source).stem, digest[:16], Path(source).suffix)
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            raise UsageError("Cannot create {} beside brief {}: {}. Make its directory writable and re-run.".format(
+                target.parent, source, exc.strerror or str(exc)), {"path": str(target.parent)}) from None
+        _require_frozen_dir(target.parent)
+        try:
+            with open(target, "xb") as handle:
+                handle.write(data)
+            exists = False
+        except FileExistsError:
+            exists = True
+        except OSError as exc:
+            raise UsageError("Cannot freeze brief {} at {}: {}. Make its directory writable and re-run.".format(
+                source, target, exc), {"path": str(target)}) from None
+        if exists:
+            # Inspected outside the `except` above: an error raised inside a
+            # handler never reaches a sibling handler, so it would escape as a
+            # traceback (#460).
+            _require_frozen_copy(target, digest)
+        frozen[key] = str(target)
+    return frozen
+
+
+def _require_frozen_dir(directory):
+    """Refuse a `FROZEN_DIR` that is a link or not a directory.
+
+    A symlinked directory would place frozen copies, and the gate's later
+    read of them, somewhere outside the source's own directory that nothing
+    keeps immutable (#460).
+    """
+    try:
+        status = os.lstat(directory)
+    except OSError as exc:
+        raise UsageError("Cannot inspect frozen-brief directory {}: {}. Restore it or move it aside and re-run."
+                         .format(directory, exc.strerror or str(exc)), {"path": str(directory)}) from None
+    if not stat.S_ISDIR(status.st_mode):
+        raise UsageError("Frozen-brief directory {} is a link or not a directory; move it aside and re-run so the "
+                         "freeze writes real copies beside the source.".format(directory), {"path": str(directory)})
+
+
+def _read_unlinked_regular(target):
+    """The bytes of `target`, refused unless it is an unlinked regular file.
+
+    A symlink could point back at a mutable file and a hard link shares its
+    inode, so rewriting that file rewrites either. The checks and the read go
+    through one descriptor opened without following a link, and non-blocking
+    so a FIFO planted there is refused rather than hung on.
+    """
+    try:
+        fd = os.open(target, os.O_RDONLY | os.O_NONBLOCK | getattr(os, "O_NOFOLLOW", 0))
+    except OSError as exc:
+        if exc.errno == errno.ELOOP:
+            raise UsageError("Frozen brief {} is a link or not a regular file; move it aside and re-run so the "
+                             "freeze writes a real copy.".format(target), {"path": str(target)}) from None
+        raise UsageError("Cannot open frozen brief {}: {}. Restore its readability or move it aside and re-run."
+                         .format(target, exc.strerror or str(exc)), {"path": str(target)}) from None
+    try:
+        # On the raw descriptor, before any file object: wrapping a directory
+        # fails first and would hide that it is not a regular file.
+        status = os.fstat(fd)
+        regular = stat.S_ISREG(status.st_mode) and status.st_nlink == 1
+        chunks = []
+        while regular:
+            chunk = os.read(fd, 1 << 16)
+            if not chunk:
+                break
+            chunks.append(chunk)
+    except OSError as exc:
+        raise UsageError("Cannot read frozen brief {}: {}. Restore its readability or move it aside and re-run."
+                         .format(target, exc.strerror or str(exc)), {"path": str(target)}) from None
+    finally:
+        os.close(fd)
+    if not regular:
+        raise UsageError("Frozen brief {} is a link or not a regular file; move it aside and re-run so the "
+                         "freeze writes a real copy.".format(target), {"path": str(target)})
+    return b"".join(chunks)
+
+
+def _require_frozen_copy(target, digest):
+    """Accept an existing frozen brief only when it is an unlinked regular file holding `digest`."""
+    if hashlib.sha256(_read_unlinked_regular(target)).hexdigest() != digest:
+        raise UsageError("Frozen brief {} exists with other content; it is never rewritten. Move it aside "
+                         "and re-run.".format(target), {"path": str(target)})
+
+
+def read_frozen(path):
+    """The bytes a dispatch recorded at `path`, refused unless they are an intact frozen copy.
+
+    Intact: under `FROZEN_DIR`, an unlinked regular file, and holding the
+    content its name's digest names, so the bytes read are the bytes sent.
+    """
+    target = Path(path)
+    if target.parent.name == FROZEN_DIR:
+        _require_frozen_dir(target.parent)
+    data = _read_unlinked_regular(target) if target.parent.name == FROZEN_DIR else None
+    if data is None or hashlib.sha256(data).hexdigest()[:16] not in target.name.split("."):
+        raise UsageError("Dispatched brief {} is not an intact frozen copy, so what the worker read cannot be "
+                         "shown. Dispatch again with this build.".format(target), {"path": str(target)})
+    return data
 
 
 def resolve_paths(assignments, briefs, common):

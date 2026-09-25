@@ -9,6 +9,7 @@ if ROOT not in sys.path:
 
 import io
 import json
+from pathlib import Path
 import unittest
 from datetime import datetime, timedelta
 from unittest.mock import patch
@@ -161,6 +162,57 @@ class RecoveryCommandTests(fixture.CliCase):
             "supersedes": "diag-cap:plan"})
         self.assertEqual(code, 0, err)
 
+    def test_a_later_correction_over_a_legacy_dispatchs_source_paths_is_frozen(self):
+        # coding-policy#460 review: only the recorded dispatch's complete
+        # identity keeps its source paths. A correction reusing the same brief
+        # files, even byte-identical, is new work and reads a frozen copy.
+        self.register()
+        with patch("teamlead.cli.freeze_paths", side_effect=lambda paths: paths):
+            code, _, err = self.invoke(self.apply_args(), self.fresh_client("previous-task", "developer-0"))
+        self.assertEqual(code, 0, err)
+        legacy = self.saved()["recovery"]["dispatches"][-1]
+        self.assertEqual(legacy["brief"], str(self.briefs["developer"]))
+        # Replaying that exact dispatch keeps its recorded paths and its receipt.
+        code, out, err = self.invoke(self.apply_args(), self._client({"grok": "idle"}))
+        self.assertEqual(code, 0, err)
+        self.assertTrue(json.loads(out)["applied"][0]["replayed"])
+        self.assertEqual(len(self.saved()["recovery"]["dispatches"]), 1)
+        code, _, err = self.invoke(self.apply_args("release"), self._client({"grok": "idle"}))
+        self.assertEqual(code, 0, err)
+        code, _, err = self.invoke(self.apply_args("developer", 1), self.fresh_client("release-session", "developer-1"))
+        self.assertEqual(code, 0, err)
+        correction = self.saved()["recovery"]["dispatches"][-1]
+        self.assertEqual(correction["fix_round"], 1)
+        self.assertEqual(Path(correction["brief"]).parent.name, ".dispatched")
+        self.assertEqual(Path(correction["brief"]).read_bytes(), self.briefs["developer"].read_bytes())
+
+    def legacy_developer_dispatch(self):
+        """A developer dispatch recorded under its source paths, as before #460's freeze."""
+        self.register()
+        with patch("teamlead.cli.freeze_paths", side_effect=lambda paths: paths):
+            code, _, err = self.invoke(self.apply_args(), self.fresh_client("previous-task", "developer-0"))
+        self.assertEqual(code, 0, err)
+
+    def test_a_source_brief_rewritten_after_the_replay_decision_is_refused(self):
+        # coding-policy#460 review: the decision reads the source once; if it
+        # changes before the identity is resolved, the batch is new work and
+        # must not be sent from the mutable file.
+        self.legacy_developer_dispatch()
+        from teamlead import cli as cli_module
+        decide = cli_module.freeze_decision
+
+        def then_rewrite(*arguments):
+            outcome = decide(*arguments)
+            self.briefs["developer"].write_text("rewritten between the decision and the send\n")
+            return outcome
+
+        client = self._client({"grok": "idle"})
+        with patch("teamlead.cli.freeze_decision", side_effect=then_rewrite):
+            code, _, err = self.invoke(self.apply_args(), client)
+        self.assertEqual(code, 1)
+        self.assertIn("changed after it matched its recorded dispatch", err)
+        self.assertEqual(self.runner.writes(), [])
+
     def test_two_release_fresh_fix_cycles_preserve_task_base_history_and_next_number(self):
         self.register()
         code, _, err = self.invoke(self.apply_args(), self.fresh_client("previous-task", "developer-0"))
@@ -286,6 +338,21 @@ class RecoveryCommandTests(fixture.CliCase):
         _state, usable = load_state_checked(self.state, warn=lambda _message: None)
         self.assertFalse(usable)
 
+    def test_a_dispatch_records_and_sends_a_frozen_copy_of_its_brief(self):
+        # coding-policy#460: the worker reads the bytes preflight checked, even
+        # if the source brief is rewritten after the send.
+        client = self.seat_judge()
+        checked = self.briefs["judge"].read_bytes()
+        code, _, err = self.invoke(self.judge_args("diagnosis"), client)
+        self.assertEqual(code, 0, err)
+        row = self.saved()["recovery"]["dispatches"][-1]
+        frozen = Path(row["brief"])
+        self.assertEqual(frozen.parent.name, ".dispatched")
+        self.assertEqual(frozen.read_bytes(), checked)
+        self.assertIn(str(frozen), "".join(self.runner.pasted_prompts()))
+        self.briefs["judge"].write_text("rewritten after the send\n")
+        self.assertEqual(frozen.read_bytes(), checked)
+
     def test_a_judge_dispatch_from_before_the_mode_is_never_sent_twice(self):
         # coding-policy#494 review: the mode joined the fingerprint, so an
         # older judge dispatch no longer matches by identity. Running the same
@@ -301,8 +368,10 @@ class RecoveryCommandTests(fixture.CliCase):
         _, legacy = recovery_module.dispatch_identity(
             TASK, "judge", "claude", None, {"common": str(self.common), "judge": str(self.briefs["judge"])},
             options=options)
-        # Rewrite the recorded dispatch as its pre-12 self: version 1, no mode.
+        # Rewrite the recorded dispatch as its pre-12 self: version 1, no mode,
+        # and the source brief paths every dispatch recorded before #460's freeze.
         row["fingerprint"] = legacy
+        row["brief"], row["common"] = str(self.briefs["judge"]), str(self.common)
         row["schema_version"] = 1
         del row["judge_mode"]
         del row["result"]["judge_mode"]
@@ -333,6 +402,9 @@ class RecoveryCommandTests(fixture.CliCase):
         code, out, err = self.invoke(self.judge_args("diagnosis"), client)
         self.assertEqual(code, 0, err)
         self.assertEqual(json.loads(out)["applied"][0]["judge_mode"], "diagnosis")
+        # A retry of an unsent row sends, so it reads a frozen copy like new
+        # work, never the mutable source the legacy row names (#460).
+        self.assertEqual(Path(self.saved()["recovery"]["dispatches"][-1]["brief"]).parent.name, ".dispatched")
 
     def test_a_direct_judge_dispatch_without_a_mode_is_refused_before_input(self):
         from teamlead.assign import apply as apply_assignments
@@ -718,6 +790,110 @@ class RecoveryCommandTests(fixture.CliCase):
         self.assertEqual(self.state.read_bytes(), before)
         self.assertFalse(self.state.with_suffix(".json.lock").exists())
 
+
+    # coding-policy#460 review: the partition gate accepts only the dispatches
+    # THIS plan sent.
+    def dispatch_partitioned_plan(self, task: "str | None" = TASK):
+        self.register()
+        partition = self.tmp / "validated.json"
+        partition.write_text(json.dumps(fixture.validated_partition()))
+        code, out, err = self.invoke(["plan", "--roles", "reviewer", "--partition", str(partition), "--now", AT,
+                                      "--snapshot", str(self.snapshot)] + (["--task", task] if task else []))
+        self.assertEqual(code, 0, err)
+        plan = json.loads(out)
+        self.plan_file = self.tmp / "partitioned-plan.json"
+        self.plan_file.write_text(json.dumps(plan))
+        briefs = []
+        for seat in plan["assignments"]:
+            brief = self.tmp / (seat.replace("#", "-") + ".md")
+            brief.write_text(fixture.seat_brief_text(seat, plan), encoding="utf-8")
+            briefs += ["--brief", seat + "=" + str(brief)]
+        code, _, err = self.invoke(["apply", "--assignments", str(self.plan_file), "--common", str(self.common),
+                                    "--task", TASK, "--now", AT, "--composer-settle", "0", *briefs],
+                                   self._client({name: "idle" for name in plan["assignments"].values()}))
+        self.assertEqual(code, 0, err)
+        return plan
+
+    def gate(self):
+        return self.invoke(["verify-partition", "--plan", str(self.plan_file), "--repo", str(self.tmp),
+                            "--head", "HEAD", "--task", TASK])
+
+    def test_the_plans_own_dispatches_reach_the_proof_checks(self):
+        self.dispatch_partitioned_plan()
+        code, _, err = self.gate()
+        # Past the binding: the fixture's proof names another repository.
+        self.assertEqual(code, 1)
+        self.assertIn("was proven in /repo", err)
+
+    def test_an_older_dispatch_to_another_worker_does_not_pass_a_new_plan(self):
+        plan = self.dispatch_partitioned_plan()
+        seat = sorted(plan["assignments"])[0]
+        others = sorted({"claude", "codex", "grok"} - set(plan["assignments"].values()))
+        plan["assignments"][seat] = others[0]
+        self.plan_file.write_text(json.dumps(plan))
+        code, _, err = self.gate()
+        self.assertEqual(code, 1)
+        self.assertIn("differs from this plan in agent", err)
+
+    def test_a_newer_dispatch_that_never_applied_is_not_the_review(self):
+        plan = self.dispatch_partitioned_plan()
+        seat = sorted(plan["assignments"])[0]
+        document = self.saved()
+        row = next(item for item in document["recovery"]["dispatches"] if item["role"] == seat)
+        document["recovery"]["dispatches"].append({**row, "id": "resent-" + seat, "fingerprint": "0" * 64,
+                                                   "at": "2026-02-03T11:00:00+00:00",
+                                                   "status": "not_sent", "result": None, "report": None})
+        self.state.write_text(json.dumps(document))
+        code, _, err = self.gate()
+        self.assertEqual(code, 1)
+        self.assertIn("latest dispatch is 'not_sent', not applied", err)
+
+    def test_the_latest_dispatch_is_chosen_by_event_time_not_append_order(self):
+        # Imported evidence can be appended after newer rows. An older unsent
+        # row appended last must not hide the plan's applied send.
+        plan = self.dispatch_partitioned_plan()
+        seat = sorted(plan["assignments"])[0]
+        document = self.saved()
+        row = next(item for item in document["recovery"]["dispatches"] if item["role"] == seat)
+        document["recovery"]["dispatches"].append({**row, "id": "imported-" + seat, "fingerprint": "0" * 64,
+                                                   "at": "2020-01-01T00:00:00+00:00",
+                                                   "status": "not_sent", "result": None, "report": None})
+        self.state.write_text(json.dumps(document))
+        code, _, err = self.gate()
+        self.assertEqual(code, 1)
+        self.assertIn("was proven in /repo", err)
+
+    def test_a_rewritten_common_brief_is_refused(self):
+        # The worker reads the common brief too, so it must still be what was sent.
+        self.dispatch_partitioned_plan()
+        row = next(item for item in self.saved()["recovery"]["dispatches"] if "#" in item["role"])
+        Path(row["common"]).write_text("rewritten after the send\n")
+        code, _, err = self.gate()
+        self.assertEqual(code, 1)
+        self.assertIn("not an intact frozen copy", err)
+
+    def test_a_fifo_at_the_recorded_brief_is_refused_without_hanging(self):
+        self.dispatch_partitioned_plan()
+        row = next(item for item in self.saved()["recovery"]["dispatches"] if "#" in item["role"])
+        Path(row["brief"]).unlink()
+        os.mkfifo(row["brief"])
+        code, _, err = self.gate()
+        self.assertEqual(code, 1)
+        self.assertIn("not a regular file", err)
+
+    def test_a_plan_made_without_the_task_is_refused(self):
+        self.dispatch_partitioned_plan(task=None)
+        code, _, err = self.gate()
+        self.assertEqual(code, 1)
+        self.assertIn("was not made for task", err)
+
+    def test_a_dispatched_brief_rewritten_in_place_is_refused(self):
+        self.dispatch_partitioned_plan()
+        row = next(item for item in self.saved()["recovery"]["dispatches"] if "#" in item["role"])
+        Path(row["brief"]).write_text("rewritten after the send\n")
+        code, _, err = self.gate()
+        self.assertEqual(code, 1)
+        self.assertIn("not an intact frozen copy", err)
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,5 +1,54 @@
 # Changelog
 
+### Fixed
+
+- **A dispatched brief is frozen, and a partitioned review is checked at its
+  tip (#460).** Two holes left open on #456. First, preflight read each
+  brief, but the worker reads it again minutes after the send, so a brief
+  rewritten in between (the realistic case is the foreman re-running
+  `compose-briefs.sh` mid-round) reached the worker unchecked. The issue
+  proposed passing checked content into `apply`; `apply` never sends a brief,
+  only its path, so that would have narrowed nothing. `apply` now copies each
+  brief to a content-addressed file under `.dispatched/` before any check
+  reads it, and a new dispatch uses that copy everywhere: the checks, its
+  identity, the prompt and the recovery that later rebuilds it. A dispatch
+  whose complete recorded identity (its fingerprint over task, fix round,
+  correction plan, work, options and brief bytes) resolves under its source
+  paths keeps them, so an upgrade does not turn its replay into new work; a
+  first cut matched on task, role, agent and paths alone, which let a later
+  correction over the same files skip the freeze. Only an applied row
+  replays that way, returning its saved receipt without sending: a retry of
+  a row never sent is frozen like new work, and a source brief rewritten
+  between the replay decision and the send is refused, so a worker never
+  reads a mutable source. A frozen copy that is a hard
+  link to its source is refused like a symlink. Second, `plan` re-proved a partition over
+  whatever `changed` list the file carried, and nothing checked it against
+  the real diff later. The issue proposed signing the result; the only party
+  able to narrow the list would also hold the key. Instead
+  `validate-partition` stamps the repo, base and head it was proven against,
+  `plan` carries that proof, and the new `verify-partition` refuses a review
+  at any other tip, or slices that do not cover exactly
+  `git diff base...head`. The slice and seat digests cover the proof, so seat
+  briefs dispatched for an older head cannot pass a plan re-pointed at a newer
+  one whose diff touches the same paths, and `plan` reads the proof and the
+  slices in one read rather than re-reading a file that may have changed.
+  The gate binds each seat to this plan's own send: the seat's latest dispatch
+  for the task must be applied, to the worker the plan assigns, under the
+  plan's task context, from a frozen brief and common brief whose bytes still
+  match their names. An older dispatch to another worker, or a newer one that
+  never applied, no longer passes. "Latest" is by event time through
+  `chronology`, never append order, and the gate reads the ledger under the
+  state lock and checks the exact bytes it verified. An existing frozen copy is inspected through one no-follow,
+  non-blocking descriptor outside the `FileExistsError` handler, so a copy
+  that vanishes or turns unreadable mid-inspection is an actionable refusal
+  rather than a traceback, and a FIFO or directory there is refused. A
+  `.dispatched/` directory that is itself a symlink is refused on freeze and
+  on the gate's read, so no frozen copy lands outside the source directory. An
+  unknown revision passed to `validate-partition` or `verify-partition` now
+  reaches its "pass a revision it holds" message instead of git's bare
+  "Needed a single revision". Revisions and proofs accept SHA-256 commit ids
+  as well as SHA-1, the shape the task ledger already records.
+
 ## 0.3.272 — 2026-09-25
 
 ### Added

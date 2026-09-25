@@ -270,7 +270,9 @@ bash "$CP/skills/herdr-teamlead/teamlead.sh" validate-partition \
 Exit 1 names every unowned path, every overlap and every slice owning nothing,
 in one run. Fix the partition and re-run; plan only once it exits 0. Save its
 stdout — `plan --partition` takes that result, never the document
-`validate-partition` read. Format, ownership
+`validate-partition` read. Validate at the pushed head: the result's `proof`
+records the repo, base and head it was proven against, and Step 12's gate
+cannot check a working-tree proof. Format, ownership
 payload and the seating it produces:
 
 ```text
@@ -542,6 +544,28 @@ bash "$CP/skills/herdr-teamlead/teamlead.sh" verify-oracle \
 
 Exit 0 is a match. Exit 1 with `"match": false` is a blocking finding on the
 round; exit 1 with no verdict is a usage error to resolve before gating.
+Before accepting a partitioned responsibility's pass, confirm its plan, as
+dispatched, still covers exactly the task's diff at the tip under review:
+
+```bash
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
+bash "$CP/skills/herdr-teamlead/teamlead.sh" verify-partition \
+  --plan <plan.json> --repo <repo-path> --head <tip-under-review> --task <task>
+```
+
+- Exit 0 confirms it
+- Exit 1 names what failed: another repo or base, a stale head, an edited
+  boundary, a seat never dispatched or dispatched with another boundary, or
+  paths the slices leave unowned, no longer cover, or own twice
+- Exit 1 also names a seat whose latest dispatch is not this plan's applied
+  send to its assigned worker, or a plan made without `--task`
+- Exit 1 is a blocking finding on the round, gated below like any other
+- Run Step 16, then Step 17, with Step 4 as the stow's continuation step
+- The reset foreman resumes at Step 4 and re-validates the partition at the
+  tip in Step 5, replanning from that result
+- The new plan then takes Step 7 composition, Step 10 dispatch, Step 11
+  observation, and this step's gate
+
 Record assignment acceptance or outstanding work in the task ledger against
 the inspected report and artifact evidence. Record the task's gate decision
 separately; a worker finishing its brief never completes the whole task.

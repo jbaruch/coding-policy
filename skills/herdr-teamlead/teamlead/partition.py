@@ -44,6 +44,13 @@ from .triggers import git_runner, parse_name_status
 #: The partition document's own version, so a later shape change is auditable
 #: (`rules/stateful-artifacts.md` Migration Policy).
 PARTITION_SCHEMA_VERSION = 1
+#: A `validate-partition` RESULT's own version. Version 2 adds `proof`, the
+#: repo, base and head the slices were proven over (#460). A version-1 result
+#: carries no proof and is refused at `plan`: re-validate.
+RESULT_SCHEMA_VERSION = 2
+#: A full commit id: SHA-1, or SHA-256 in a repository using that object
+#: format, the shape the task ledger accepts (`recovery.SHA_RE`).
+FULL_SHA = re.compile(r"[0-9a-f]{40}(?:[0-9a-f]{24})?")
 
 COMMANDS = frozenset({"validate-partition"})
 
@@ -123,7 +130,7 @@ def seats_for(partition, role):
     return {seat_name(role, entry["name"]): role for entry in partition["slices"]}
 
 
-def seat_digest(seat, paths):
+def seat_digest(seat, paths, proof=None):
     """A short digest over ONE seat and the paths it owns.
 
     Per seat, not per round: a round-level digest is identical in every seat's
@@ -131,7 +138,10 @@ def seat_digest(seat, paths):
     the digest appears. Binding the seat's own name and globs makes each brief
     answerable for its own boundary (#453).
     """
-    canonical = json.dumps([seat, list(paths)], sort_keys=True, separators=(",", ":"))
+    # With a proof, the digest also binds the diff the boundary was proven over,
+    # so a brief dispatched for one tip cannot pass a gate at another (#460).
+    bound = [seat, list(paths)] if proof is None else [seat, list(paths), proof]
+    canonical = json.dumps(bound, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:12]
 
 
@@ -157,7 +167,7 @@ def slice_scope(seat, paths, digest):
             seat.split(SEAT_SEPARATOR, 1)[1], listed, digest))
 
 
-def slice_digest(seat_paths):
+def slice_digest(seat_paths, proof=None):
     """A short digest over the accepted `{seat: [glob, ...]}` map.
 
     Carried from the plan into each seat's brief and checked at dispatch, so a
@@ -165,7 +175,8 @@ def slice_digest(seat_paths):
     than dispatched (#453). Twelve hex characters: enough to catch an edit,
     short enough to sit in a brief a worker reads.
     """
-    canonical = json.dumps({seat: list(paths) for seat, paths in sorted(seat_paths.items())},
+    boundary = {seat: list(paths) for seat, paths in sorted(seat_paths.items())}
+    canonical = json.dumps(boundary if proof is None else {"slices": boundary, "proof": proof},
                            sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:12]
 
@@ -178,6 +189,9 @@ def load_validated(path):
     is seated from a partition proven disjoint and exhaustive over this round's
     change. `load_partition` alone reads shape and cannot check ownership —
     `plan` has no repo, base or head to check against (#453).
+
+    Returns `(partition, proof)` from one read, so the slices and the proof a
+    plan binds cannot come from two versions of the file (#460).
     """
     if not path:
         raise UsageError(
@@ -209,10 +223,17 @@ def load_validated(path):
     # uncovered file pass a shape check, and the round seats against them.
     # Re-deriving costs nothing and re-proves the property rather than taking
     # the artifact's word for it (#453).
-    inner = {key: value for key, value in document.items() if key != "changed"}
+    if document.get("schema_version") != RESULT_SCHEMA_VERSION:
+        raise UsageError(
+            "The validated partition at {} is result schema {}; this build plans from schema {}, which records "
+            "the proof. Re-run `validate-partition` and plan from its output.".format(
+                path, document.get("schema_version"), RESULT_SCHEMA_VERSION), {"path": str(path)})
+    proof = check_proof(document.get("proof"), "The validated partition at {}".format(path))
+    inner = {key: value for key, value in document.items() if key not in ("changed", "proof")}
+    inner["schema_version"] = PARTITION_SCHEMA_VERSION
     accepted = validate_document(inner, str(path))
     validate_resolved(set(changed), accepted, str(path))
-    return accepted
+    return accepted, proof
 
 
 def validate_resolved(changed, partition, source):
@@ -354,13 +375,115 @@ def register_commands(sub, common):
     parser.add_argument("--base", required=True, metavar="REV", help="The revision the round started from.")
     parser.add_argument("--head", metavar="REV", help="The pushed head; omit to read the working tree.")
     parser.add_argument("--partition", required=True, metavar="FILE", help="The round's partition document.")
+    check = sub.add_parser(
+        "verify-partition", parents=[common],
+        help="At the review gate, confirm a partitioned plan still covers exactly the diff at the tip under review.",
+    )
+    check.add_argument("--plan", required=True, metavar="FILE", help="The plan `plan --partition` wrote.")
+    check.add_argument("--repo", required=True, metavar="PATH", help="The repository the partition covers.")
+    check.add_argument("--head", required=True, metavar="REV", help="The tip whose review is being accepted.")
+    check.add_argument("--task", required=True, help="The task whose recorded base and dispatched seats the plan covers.")
+
+
+def _revision(run, rev):
+    """The full commit a revision names in the repository, or a refusal naming it."""
+    # `--revs-only` prints nothing for a name the repository does not hold and
+    # exits 0, so the refusal below is reached; `--verify` exits 128 and the
+    # runner would raise git's bare "Needed a single revision" first. A broken
+    # repository still fails in the runner with git's own diagnostic.
+    resolved = run(["rev-parse", "--revs-only", "--end-of-options", rev + "^{commit}"]).strip()
+    if not FULL_SHA.fullmatch(resolved):
+        raise UsageError("{!r} does not name a commit in the repository; pass a revision it holds.".format(rev), {"rev": rev})
+    return resolved
 
 
 def run_command(args, runner=None):
-    """Validate this round's partition against the paths its diff changed."""
+    """Validate this round's partition against the paths its diff changed, and stamp what it was proven against."""
     partition = load_partition(args.partition)
     run = runner if runner is not None else git_runner(args.repo)
     head = getattr(args, "head", None)
-    span = [args.base + "..." + head] if head else [args.base]
+    # Resolved first, so an unknown revision is named rather than failing the diff.
+    base_sha = _revision(run, args.base)
+    head_sha = _revision(run, head) if head else None
+    span = [base_sha + "..." + head_sha] if head_sha else [base_sha]
     changes = parse_name_status(run(["diff", "--no-renames", *span, "--name-status", "-z"]))
-    return validate(set(changes), partition), None
+    result = validate(set(changes), partition)
+    result["schema_version"] = RESULT_SCHEMA_VERSION
+    # The proof names what the partition was checked against, so the review
+    # gate can confirm the plan still covers the diff at the tip it accepts (#460).
+    result["proof"] = {"repo": str(Path(args.repo).expanduser().resolve()), "base": base_sha, "head": head_sha}
+    return result, None
+
+
+def check_proof(proof, where):
+    """A proof's exact shape: an absolute repo, a full base commit, and a full head commit or null."""
+    valid = (isinstance(proof, dict) and set(proof) == {"repo", "base", "head"}
+             and isinstance(proof["repo"], str) and Path(proof["repo"]).is_absolute()
+             and isinstance(proof["base"], str) and bool(FULL_SHA.fullmatch(proof["base"]))
+             and (proof["head"] is None or isinstance(proof["head"], str) and bool(FULL_SHA.fullmatch(proof["head"]))))
+    if not valid:
+        raise UsageError("{} carries no usable proof of what the partition was checked against; re-run "
+                         "`validate-partition` with this build and plan from its output.".format(where), {"where": where})
+    return proof
+
+
+
+def check_slice_paths(slice_paths, where):
+    """`{seat: [path, ...]}` with string seats and non-empty lists of non-empty strings."""
+    if (not isinstance(slice_paths, dict) or not slice_paths
+            or any(not isinstance(seat, str) or not isinstance(paths, list) or not paths
+                   or any(not isinstance(path, str) or not path.strip() for path in paths)
+                   for seat, paths in slice_paths.items())):
+        raise UsageError("{} has no usable slice_paths; plan the round with `plan --partition <validate-partition "
+                         "output>` rather than editing the plan.".format(where), {"where": where})
+    return slice_paths
+
+
+def verify(plan, repo, head, task_base, runner=None):
+    """Refuse a plan's partition unless it covers exactly the task's diff at the tip under review.
+
+    `plan` is the loaded plan document; the caller has already checked each
+    seat's dispatched brief against its seat digest. Every field is checked
+    before use, and the proof is bound to this repo and the task's recorded
+    base, so an edited plan is refused rather than verified.
+    """
+    where = "The plan"
+    slice_paths = check_slice_paths(plan.get("slice_paths") if isinstance(plan, dict) else None, where)
+    proof = check_proof(plan.get("partition_proof"), where)
+    if plan.get("slice_digest") != slice_digest(slice_paths, proof) or plan.get("seat_digests") != {
+            seat: seat_digest(seat, paths, proof) for seat, paths in slice_paths.items()}:
+        raise UsageError("The plan's slice_paths or partition_proof no longer match its slice_digest and seat_digests, "
+                         "so its boundary was edited after planning. Replan from the validate-partition result.", {})
+    if proof["head"] is None:
+        raise UsageError("The partition was validated against the working tree, not a pushed head, so no tip can be "
+                         "checked against it. Re-run validate-partition with --head at the pushed tip, replan, and "
+                         "re-dispatch the slices.", {})
+    here = str(Path(repo).expanduser().resolve())
+    if proof["repo"] != here:
+        raise UsageError("The partition was proven in {}, not {}; verify it against the repository it covers.".format(
+            proof["repo"], here), {"proven": proof["repo"], "repo": here})
+    if proof["base"] != task_base:
+        raise UsageError("The partition was proven from base {}, but the task's recorded base is {}; a later base "
+                         "hides part of the task's change. Re-validate from the recorded base and replan.".format(
+                             proof["base"], task_base), {"proven": proof["base"], "task_base": task_base})
+    run = runner if runner is not None else git_runner(repo)
+    tip = _revision(run, head)
+    if tip != proof["head"]:
+        raise UsageError("The partition was proven at {}, but the tip under review is {}. A new push can change the diff "
+                         "the slices cover: re-run validate-partition at the tip, replan, and review the slices again."
+                         .format(proof["head"], tip), {"proven": proof["head"], "tip": tip})
+    changed = set(parse_name_status(run(["diff", "--no-renames", proof["base"] + "..." + tip, "--name-status", "-z"])))
+    owners_of = {}
+    for seat, paths in slice_paths.items():
+        for path in paths:
+            owners_of.setdefault(path, []).append(seat)
+    unowned = sorted(changed - set(owners_of))
+    stale = sorted(set(owners_of) - changed)
+    shared = sorted(path for path, seats in owners_of.items() if len(seats) > 1)
+    if unowned or stale or shared:
+        raise UsageError("The plan's slices do not cover exactly the diff {}...{}: {} unowned, {} no longer changed, {} "
+                         "owned twice. Re-run validate-partition at the tip and replan.".format(
+                             proof["base"][:12], tip[:12], len(unowned), len(stale), len(shared)),
+                         {"unowned": unowned, "stale": stale, "shared": shared})
+    return {"schema_version": RESULT_SCHEMA_VERSION, "verified": True, "base": proof["base"], "head": tip,
+            "seats": sorted(slice_paths), "changed": len(changed)}

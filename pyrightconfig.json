@@ -66,6 +66,7 @@
     "skills/herdr-teamlead/tests/test_entrypoints.py",
     "skills/herdr-teamlead/tests/test_foreman_queue.py",
     "skills/herdr-teamlead/tests/test_foreman_reset.py",
+    "skills/herdr-teamlead/tests/test_freeze.py",
     "skills/herdr-teamlead/tests/test_herdr.py",
     "skills/herdr-teamlead/tests/test_historical.py",
     "skills/herdr-teamlead/tests/test_launch.py",
