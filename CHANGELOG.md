@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.268 — 2026-09-25
+
 ### Changed
 
 - **Each Herdr seat defaults to the cheapest round its contract allows
