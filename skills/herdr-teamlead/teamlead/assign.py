@@ -31,7 +31,9 @@ reported as `sent_but_not_started` rather than as success.
 builders live on the transport) and prints them without running anything.
 """
 
+import errno
 import os
+import stat
 import time
 import hashlib
 from pathlib import Path
@@ -229,25 +231,61 @@ def freeze_paths(paths):
             target.parent.mkdir(parents=True, exist_ok=True)
             with open(target, "xb") as handle:
                 handle.write(data)
+            exists = False
         except FileExistsError:
-            # A link could point back at the mutable source; only a regular file is a frozen copy.
-            # A hard link shares the source's inode, so rewriting the source rewrites it too.
-            if target.is_symlink() or not target.is_file() or target.stat().st_nlink > 1:
-                raise UsageError("Frozen brief {} is a link or not a regular file; move it aside and re-run so the "
-                                 "freeze writes a real copy.".format(target), {"path": str(target)}) from None
-            try:
-                existing = target.read_bytes()
-            except OSError as exc:
-                raise UsageError("Cannot read frozen brief {}: {}. Restore its readability or move it aside and "
-                                 "re-run.".format(target, exc.strerror or str(exc)), {"path": str(target)}) from None
-            if hashlib.sha256(existing).hexdigest() != digest:
-                raise UsageError("Frozen brief {} exists with other content; it is never rewritten. Move it aside "
-                                 "and re-run.".format(target), {"path": str(target)}) from None
+            exists = True
         except OSError as exc:
             raise UsageError("Cannot freeze brief {} at {}: {}. Make its directory writable and re-run.".format(
                 source, target, exc), {"path": str(target)}) from None
+        if exists:
+            # Inspected outside the `except` above: an error raised inside a
+            # handler never reaches a sibling handler, so it would escape as a
+            # traceback (#460).
+            _require_frozen_copy(target, digest)
         frozen[key] = str(target)
     return frozen
+
+
+def _require_frozen_copy(target, digest):
+    """Accept an existing frozen brief only when it is an unlinked regular file holding `digest`.
+
+    A symlink could point back at the mutable source, and a hard link shares
+    its inode, so rewriting the source rewrites either. The checks and the
+    read go through one descriptor opened without following a link, so the
+    file inspected is the file hashed.
+    """
+    try:
+        # Non-blocking, so a FIFO planted there is refused rather than hung on.
+        fd = os.open(target, os.O_RDONLY | os.O_NONBLOCK | getattr(os, "O_NOFOLLOW", 0))
+    except OSError as exc:
+        if exc.errno == errno.ELOOP:
+            raise UsageError("Frozen brief {} is a link or not a regular file; move it aside and re-run so the "
+                             "freeze writes a real copy.".format(target), {"path": str(target)}) from None
+        raise UsageError("Cannot open frozen brief {}: {}. Restore its readability or move it aside and re-run."
+                         .format(target, exc.strerror or str(exc)), {"path": str(target)}) from None
+    try:
+        # On the raw descriptor, before any file object: wrapping a directory
+        # fails first and would hide that it is not a regular file.
+        status = os.fstat(fd)
+        regular = stat.S_ISREG(status.st_mode) and status.st_nlink == 1
+        chunks = []
+        while regular:
+            chunk = os.read(fd, 1 << 16)
+            if not chunk:
+                break
+            chunks.append(chunk)
+        existing = b"".join(chunks)
+    except OSError as exc:
+        raise UsageError("Cannot read frozen brief {}: {}. Restore its readability or move it aside and re-run."
+                         .format(target, exc.strerror or str(exc)), {"path": str(target)}) from None
+    finally:
+        os.close(fd)
+    if not regular:
+        raise UsageError("Frozen brief {} is a link or not a regular file; move it aside and re-run so the "
+                         "freeze writes a real copy.".format(target), {"path": str(target)})
+    if hashlib.sha256(existing).hexdigest() != digest:
+        raise UsageError("Frozen brief {} exists with other content; it is never rewritten. Move it aside "
+                         "and re-run.".format(target), {"path": str(target)})
 
 
 def resolve_paths(assignments, briefs, common):

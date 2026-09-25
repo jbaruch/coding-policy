@@ -162,7 +162,7 @@ class RunCommand(unittest.TestCase):
     def runner(self, changed):
         def run(args):
             if args[0] == "rev-parse":
-                return self.COMMITS.get(args[2].split("^")[0], "") + "\n"
+                return self.COMMITS.get(args[-1].split("^")[0], "") + "\n"
             self.assertIn("--name-status", args)
             return "".join("M\0{}\0".format(path) for path in changed)
         return run
@@ -256,6 +256,24 @@ class RunCommand(unittest.TestCase):
         args = SimpleNamespace(repo=str(self.tmp), base="MISSING", head="HEAD", partition=str(self.path))
         with self.assertRaisesRegex(UsageError, "does not name a commit"):
             partition.run_command(args, runner=self.runner(["src/api/routes.py", "src/core/db.py"]))
+
+    def test_an_unknown_revision_in_a_real_repository_names_the_repair(self):
+        # Through git itself, not the fake runner: `rev-parse --verify` exits
+        # 128 and the runner raised git's bare diagnostic before this message.
+        import subprocess
+        repo = self.tmp / "repo"
+        repo.mkdir()
+        for command in (["init", "-q"], ["-c", "user.name=t", "-c", "user.email=t@example.com",
+                                         "commit", "-q", "--allow-empty", "-m", "base"]):
+            subprocess.run(["git", "-C", str(repo), *command], check=True, capture_output=True)
+        for rev in ("no-such-branch", "0" * 40, "-x"):
+            with self.subTest(rev=rev), self.assertRaisesRegex(UsageError, "pass a revision it holds"):
+                partition._revision(partition.git_runner(repo), rev)
+        self.assertRegex(partition._revision(partition.git_runner(repo), "HEAD"), "^[0-9a-f]{40}$")
+
+    def test_a_missing_repository_keeps_gits_diagnostic(self):
+        with self.assertRaisesRegex(UsageError, "git rev-parse"):
+            partition._revision(partition.git_runner(self.tmp / "absent"), "HEAD")
 
     def test_an_unowned_changed_path_refuses_the_round(self):
         args = SimpleNamespace(repo=str(self.tmp), base="BASE", head=None, partition=str(self.path))

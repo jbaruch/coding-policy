@@ -385,7 +385,11 @@ def register_commands(sub, common):
 
 def _revision(run, rev):
     """The full commit a revision names in the repository, or a refusal naming it."""
-    resolved = run(["rev-parse", "--verify", rev + "^{commit}"]).strip()
+    # `--revs-only` prints nothing for a name the repository does not hold and
+    # exits 0, so the refusal below is reached; `--verify` exits 128 and the
+    # runner would raise git's bare "Needed a single revision" first. A broken
+    # repository still fails in the runner with git's own diagnostic.
+    resolved = run(["rev-parse", "--revs-only", "--end-of-options", rev + "^{commit}"]).strip()
     if not re.fullmatch(r"[0-9a-f]{40}", resolved):
         raise UsageError("{!r} does not name a commit in the repository; pass a revision it holds.".format(rev), {"rev": rev})
     return resolved

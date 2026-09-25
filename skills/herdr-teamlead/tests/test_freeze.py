@@ -11,6 +11,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from teamlead.assign import FROZEN_DIR, freeze_decision, freeze_paths
 from teamlead.errors import UsageError
@@ -73,6 +74,29 @@ class FreezeLinkTest(FreezeTest):
         os.link(self.brief, target)
         with self.assertRaisesRegex(UsageError, "is a link"):
             freeze_paths(self.paths)
+
+    def test_a_fifo_or_directory_at_the_frozen_path_is_refused(self):
+        for plant in (os.mkfifo, os.mkdir):
+            with self.subTest(plant=plant.__name__):
+                target = Path(freeze_paths(self.paths)["reviewer"])
+                target.unlink()
+                plant(target)
+                with self.assertRaisesRegex(UsageError, "not a regular file"):
+                    freeze_paths(self.paths)
+                target.unlink() if plant is os.mkfifo else target.rmdir()
+
+    def test_a_frozen_path_that_fails_inspection_is_an_actionable_refusal(self):
+        # coding-policy#460 review: the inspection used to run inside the
+        # `except FileExistsError` block, where the sibling `except OSError`
+        # never catches it, so a vanished or unreadable copy leaked a traceback.
+        freeze_paths(self.paths)
+        for error in (FileNotFoundError(2, "No such file or directory"), PermissionError(13, "Permission denied")):
+            with self.subTest(error=type(error).__name__), patch("teamlead.assign.os.open", side_effect=error):
+                with self.assertRaisesRegex(UsageError, "Cannot open frozen brief .*: {}. Restore".format(error.strerror)):
+                    freeze_paths(self.paths)
+        with patch("teamlead.assign.os.fstat", side_effect=OSError(5, "Input/output error")):
+            with self.assertRaisesRegex(UsageError, "Cannot read frozen brief .*Input/output error"):
+                freeze_paths(self.paths)
 
 
 class FreezeDecisionTest(unittest.TestCase):

@@ -761,5 +761,75 @@ class RecoveryCommandTests(fixture.CliCase):
         self.assertFalse(self.state.with_suffix(".json.lock").exists())
 
 
+    # coding-policy#460 review: the partition gate accepts only the dispatches
+    # THIS plan sent.
+    def dispatch_partitioned_plan(self, task: "str | None" = TASK):
+        self.register()
+        partition = self.tmp / "validated.json"
+        partition.write_text(json.dumps(fixture.validated_partition()))
+        code, out, err = self.invoke(["plan", "--roles", "reviewer", "--partition", str(partition), "--now", AT,
+                                      "--snapshot", str(self.snapshot)] + (["--task", task] if task else []))
+        self.assertEqual(code, 0, err)
+        plan = json.loads(out)
+        self.plan_file = self.tmp / "partitioned-plan.json"
+        self.plan_file.write_text(json.dumps(plan))
+        briefs = []
+        for seat in plan["assignments"]:
+            brief = self.tmp / (seat.replace("#", "-") + ".md")
+            brief.write_text(fixture.seat_brief_text(seat, plan), encoding="utf-8")
+            briefs += ["--brief", seat + "=" + str(brief)]
+        code, _, err = self.invoke(["apply", "--assignments", str(self.plan_file), "--common", str(self.common),
+                                    "--task", TASK, "--now", AT, "--composer-settle", "0", *briefs],
+                                   self._client({name: "idle" for name in plan["assignments"].values()}))
+        self.assertEqual(code, 0, err)
+        return plan
+
+    def gate(self):
+        return self.invoke(["verify-partition", "--plan", str(self.plan_file), "--repo", str(self.tmp),
+                            "--head", "HEAD", "--task", TASK])
+
+    def test_the_plans_own_dispatches_reach_the_proof_checks(self):
+        self.dispatch_partitioned_plan()
+        code, _, err = self.gate()
+        # Past the binding: the fixture's proof names another repository.
+        self.assertEqual(code, 1)
+        self.assertIn("was proven in /repo", err)
+
+    def test_an_older_dispatch_to_another_worker_does_not_pass_a_new_plan(self):
+        plan = self.dispatch_partitioned_plan()
+        seat = sorted(plan["assignments"])[0]
+        others = sorted({"claude", "codex", "grok"} - set(plan["assignments"].values()))
+        plan["assignments"][seat] = others[0]
+        self.plan_file.write_text(json.dumps(plan))
+        code, _, err = self.gate()
+        self.assertEqual(code, 1)
+        self.assertIn("differs from this plan in agent", err)
+
+    def test_a_newer_dispatch_that_never_applied_is_not_the_review(self):
+        plan = self.dispatch_partitioned_plan()
+        seat = sorted(plan["assignments"])[0]
+        document = self.saved()
+        row = next(item for item in document["recovery"]["dispatches"] if item["role"] == seat)
+        document["recovery"]["dispatches"].append({**row, "id": "resent-" + seat, "fingerprint": "0" * 64,
+                                                   "status": "not_sent", "result": None, "report": None})
+        self.state.write_text(json.dumps(document))
+        code, _, err = self.gate()
+        self.assertEqual(code, 1)
+        self.assertIn("latest dispatch is 'not_sent', not applied", err)
+
+    def test_a_plan_made_without_the_task_is_refused(self):
+        self.dispatch_partitioned_plan(task=None)
+        code, _, err = self.gate()
+        self.assertEqual(code, 1)
+        self.assertIn("was not made for task", err)
+
+    def test_a_dispatched_brief_rewritten_in_place_is_refused(self):
+        self.dispatch_partitioned_plan()
+        row = next(item for item in self.saved()["recovery"]["dispatches"] if "#" in item["role"])
+        Path(row["brief"]).write_text("rewritten after the send\n")
+        code, _, err = self.gate()
+        self.assertEqual(code, 1)
+        self.assertIn("not an intact frozen copy", err)
+
 if __name__ == "__main__":
     unittest.main()

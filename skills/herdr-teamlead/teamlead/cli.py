@@ -22,7 +22,7 @@ from types import SimpleNamespace
 
 from . import __version__
 from .assign import apply as apply_assignments
-from .assign import APPLY_SCHEMA_VERSION, dry_run, freeze_decision, freeze_paths, native_context_session, normalize_assignments, resolve_paths, validate_fix_history
+from .assign import APPLY_SCHEMA_VERSION, FROZEN_DIR, dry_run, freeze_decision, freeze_paths, native_context_session, normalize_assignments, resolve_paths, validate_fix_history
 from . import attention, capabilities, composition, engagement, foreman_queue, historical, load_set, members, memory, oracle, partition, recovery, report_delivery, restoration, role_clear, retrospective, retrospective_runtime, supervision, supervision_gate, supervision_runtime, triggers
 from .config import default_config_path, load_config, load_judge, load_role_costs, select_agents
 from .errors import PlanError, StateError, TeamLeadError, UsageError
@@ -1830,6 +1830,53 @@ def cmd_detect_triggers(args, client=None, warn=None, trace=None):
     return triggers.run_command(args)
 
 
+def _dispatched_seat_briefs(plan, slice_paths, dispatches, task):
+    """Each seat's brief as THIS plan dispatched it, or a refusal naming the seat.
+
+    The seat's latest dispatch for the task must be applied, to the worker the
+    plan assigns, under the plan's task context, from an intact frozen brief.
+    An older dispatch of the seat to another worker, or a newer one that never
+    applied, is not this plan's review (#460).
+    """
+    context = plan.get("task_context")
+    if not isinstance(context, dict) or context.get("task") != task:
+        raise UsageError("The plan was not made for task {!r}, so no seat dispatch can be bound to it. Replan with "
+                         "`plan --partition ... --task {}` and dispatch from that plan.".format(task, task), {"task": task})
+    assignments = plan.get("assignments")
+    if not isinstance(assignments, dict):
+        raise UsageError("The plan carries no assignments; pass the JSON `plan --partition` wrote.", {})
+    briefs = {}
+    for seat in slice_paths:
+        agent = assignments.get(seat)
+        row = next((item for item in reversed(dispatches) if item.get("task") == task and item.get("role") == seat), None)
+        if not isinstance(agent, str) or row is None:
+            raise UsageError("Seat {} has no dispatch for task {}; a slice nobody was sent cannot pass.".format(
+                seat, task), {"seat": seat})
+        mismatched = [key for key, expected in (("agent", agent), ("fix_round", context.get("fix_round")),
+                                                ("plan", context.get("plan")), ("work", context.get("work")))
+                      if row.get(key) != expected]
+        if mismatched:
+            raise UsageError("Seat {}'s latest dispatch differs from this plan in {}; it is another plan's review. "
+                             "Verify the plan that dispatch was sent from, or dispatch this one.".format(
+                                 seat, ", ".join(mismatched)), {"seat": seat, "fields": mismatched})
+        if row.get("status") != "applied":
+            raise UsageError("Seat {}'s latest dispatch is {!r}, not applied, so its worker never took this plan's "
+                             "brief. Reconcile it, or dispatch the seat again.".format(seat, row.get("status")),
+                             {"seat": seat, "status": row.get("status")})
+        brief = Path(row.get("brief") or "")
+        try:
+            content = brief.read_bytes()
+        except OSError as exc:
+            raise UsageError("Cannot read seat {}'s dispatched brief {}: {}. Restore it from the dispatch record or "
+                             "dispatch the seat again.".format(seat, brief, exc.strerror or str(exc)), {"seat": seat}) from None
+        if brief.parent.name != FROZEN_DIR or hashlib.sha256(content).hexdigest()[:16] not in brief.name.split("."):
+            raise UsageError("Seat {}'s dispatched brief {} is not an intact frozen copy, so what the worker read "
+                             "cannot be shown. Dispatch the seat again with this build.".format(seat, brief),
+                             {"seat": seat})
+        briefs[seat] = str(brief)
+    return briefs
+
+
 def cmd_verify_partition(args, client=None, warn=None, trace=None):
     """The review gate for a partitioned round: the plan's boundary, as dispatched, covers the task's diff at the tip."""
     try:
@@ -1848,14 +1895,7 @@ def cmd_verify_partition(args, client=None, warn=None, trace=None):
     if task is None:
         raise UsageError("Task {!r} has no registered base; pass the task the plan was dispatched under.".format(args.task), {})
     slice_paths = partition.check_slice_paths(plan.get("slice_paths"), "The plan")
-    briefs = {}
-    for seat in slice_paths:
-        row = next((item for item in reversed(store["dispatches"]) if item.get("task") == args.task
-                    and item.get("role") == seat and item.get("status") == "applied"), None)
-        if row is None or not row.get("brief"):
-            raise UsageError("Seat {} has no applied dispatch for task {}; a slice nobody was sent cannot pass.".format(
-                seat, args.task), {"seat": seat})
-        briefs[seat] = row["brief"]
+    briefs = _dispatched_seat_briefs(plan, slice_paths, store["dispatches"], args.task)
     # Each seat reviewed what its dispatched (frozen) brief bound it to.
     _require_bound_slices(plan, sorted(slice_paths), briefs)
     return partition.verify(plan, args.repo, args.head, task["base_revision"]), None
