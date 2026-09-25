@@ -23,7 +23,13 @@
   cannot type into its own composer mid-turn. Then it sends the runtime's
   clear command and a resume prompt, using the same composer checks as
   worker dispatch. The resume prompt points the fresh context at the stow,
-  the supervision resume sequence and `foreman-queue`. The foreman's clear
+  the supervision resume sequence and `foreman-queue`, then one Resume Route:
+  Steps 1 and 2, then the continuation step the stow names. A review caught
+  two routes in an earlier draft (the judge reference said "the step the
+  outcome names", Step 13 said "Step 1 and continue"), and `foreman-queue`
+  lists seats only, so a release-ready or closure-pending task would have
+  been replanned or lost. The stow now names that step, and Step 2 goes
+  there instead of Step 5. The foreman's clear
   mechanics come from a configured worker of the same runtime kind. A pane
   that never idles, a clear that changes nothing, or a prompt that doesn't
   land is reported in the deliverer's log, and nothing further is sent.

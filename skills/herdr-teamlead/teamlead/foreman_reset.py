@@ -77,7 +77,9 @@ RESUME_TEMPLATE = (
     "required files in order; run `teamlead supervision-bind {flags}`, "
     "`teamlead supervision-resume {flags}`, `teamlead supervision-status {flags}` "
     "and `teamlead supervision-drain {flags}`; then "
-    "`teamlead foreman-queue {flags}`. Load each decision's records before making it, with "
+    "`teamlead foreman-queue {flags}`. Then take SKILL.md Step 17's Resume Route: Step 1, Step 2, "
+    "then the continuation step the stow's unresolved work names, in place of Step 5. "
+    "Load each decision's records before making it, with "
     "`teamlead load-set {flags} --decision <plan|brief|gate|diagnose> --task <task>` or "
     "`teamlead load-set {flags} --decision wake --enrollment <enrollment-id>`."
 )

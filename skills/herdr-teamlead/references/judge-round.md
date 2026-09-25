@@ -112,5 +112,5 @@ branch-changing rulings to the counted correction path, an `insufficient`
 ruling to an investigator and then back to step 1, and a blocked ruling to its
 saved operator question. Only the operator overrides a completed ruling; `insufficient` binds nothing and creates no checkpoint.
 A judge round is a round: log it in SKILL.md Step 16 and reset in Step 17,
-recording the step that outcome names in the stow. The next context resumes
-there.
+recording the step that outcome names as the stow's continuation step. The
+next context takes SKILL.md Step 17's Resume Route.

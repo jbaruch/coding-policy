@@ -121,6 +121,8 @@ failure — something blocks the round. Exit 2 means the preflight could not
 answer.
 
 - **Exit 0** — read `due`, satisfy any cadence it names, and proceed to Step 5.
+  A resumed foreman proceeds to the stow's continuation step instead (Step 17
+  Resume Route).
   When `due` names the capability table, dispatch the refresh consultation under
   `references/model-tiers.md`, then record its report and show the result:
 
@@ -168,7 +170,7 @@ Run `references/retrospectives.md` on resume, before planning, or for an
 explicit retrospective request. For an explicit request, complete a new
 retrospective and finish here.
 
-Proceed immediately to Step 5.
+Proceed immediately to Step 5, or on a resume to the stow's continuation step.
 
 ## Step 3 — Verify Authority for the Repo
 
@@ -599,8 +601,8 @@ names where to continue.
 
 A judge round is a round: once its ruling is recorded, run Step 16 and Step
 17 before continuing, whatever the ruling (`insufficient` and `blocked`
-included). Record the step the ruling named in the stow. The reset foreman
-resumes at Step 1 and continues there.
+included). Record the step the ruling named as the stow's continuation step.
+The reset foreman takes Step 17's Resume Route.
 
 ## Step 14 — Release the Pull Request
 
@@ -651,7 +653,14 @@ Proceed immediately to Step 17.
 ## Step 17 — Reset the Foreman Context
 
 Stow the handoff under the working-memory reference, with a structured gap
-for anything the stow could not capture. Handle every pending supervision
+for anything the stow could not capture. The stow's `unresolved_work` names
+the continuation step, the step the round's outcome routes to:
+
+- A judge ruling or remedy — the step it named
+- A release-ready pull request — Step 14
+- A merged or abandoned task awaiting closure — Step 16
+- Only `foreman-queue` seats remaining — Step 5
+ Handle every pending supervision
 event, and save `supervision-hold` kind `handoff` covering each active
 enrollment. Then schedule the reset:
 
@@ -662,7 +671,7 @@ bash "$CP/skills/herdr-teamlead/teamlead.sh" foreman-reset --stow <stow-id> \
 ```
 
 Pass the same `--state`, `--config` and `--herdr-bin` the stow was recorded
-under; the resume prompt carries them to the next context.
+under.
 
 - **Exit 0** — stdout names the scheduled `pane_id`, `stow`, deliverer `pid`
   and `log`
@@ -670,7 +679,7 @@ under; the resume prompt carries them to the next context.
     nothing new started
   - End the turn now
   - Once the pane is idle, the deliverer clears it and sends the resume
-    prompt naming that stow; the next context starts at Step 1
+    prompt naming that stow; the next context takes the Resume Route below
 - **Exit 1** — stderr is one JSON object; route on its `error` field:
   - `reset_ended` — this stow's one reset attempt failed or was
     interrupted, including a deliverer that could not start
@@ -703,6 +712,16 @@ under; the resume prompt carries them to the next context.
     closes the reset with the complete `foreman-reset-reconcile` command
     catch-up prints for that row, before any recovery
 - Never end the turn with active work that has no hold
+
+**Resume Route** — the next context follows one route:
+
+1. The resume prompt's reads: the stow and its required files, supervision,
+   `foreman-queue`
+2. Step 1, then Step 2
+3. The stow's continuation step, in place of Step 5
+
+`foreman-queue` lists seats only. Gating, release and closure return through
+the continuation step, never through the queue.
 
 Finish here.
 

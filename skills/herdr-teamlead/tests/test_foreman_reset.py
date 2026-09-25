@@ -163,6 +163,12 @@ class DeliverTest(unittest.TestCase):
                         "supervision-drain", "foreman-queue", "load-set"):
             self.assertIn("`teamlead {} --state /s.json".format(command), prompt)
 
+    def test_the_resume_prompt_routes_to_the_stow_continuation_step(self):
+        prompt = foreman_reset.resume_prompt("round-7", "/s.json")
+        self.assertIn("Step 17's Resume Route", prompt)
+        self.assertIn("continuation step the stow's unresolved work names", prompt)
+        self.assertLess(prompt.index("foreman-queue"), prompt.index("Resume Route"))
+
     def test_a_refusal_before_any_keystroke_is_an_ordinary_failure(self):
         with self.assertRaises(HerdrError) as caught:
             self.run_deliver(FakeClient(["idle", "working"]))
