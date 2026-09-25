@@ -28,6 +28,13 @@ the operator-owned file. Missing capabilities mean an empty list, never inferred
 expertise. Capability entries are unique lowercase identifiers validated by
 `teamlead/config.py` (`parse_capabilities`). Declare them from available skills,
 tools and inspected evidence. The example leaves every capability list empty.
+
+Config schema 4 requires every tier table to carry a `consultation` row, the
+round investigator and advisor default to (`teamlead/config.py`). A tier table
+under schema 2 or 3 has no such row and keeps the defaults it was written
+against: investigator on `reconciliation`, advisor on `architect`. Moving to
+schema 4 is the operator adding the example's `consultation` row and bumping
+`schema_version`; nothing rewrites the file.
 Config schema 2 added per-agent `tiers` and `launch_args`.
 See `skills/herdr-teamlead/references/model-tiers.md` for billing evidence. A missing config is refused with the exact `cp` command to run. The
 optional `idle_markers` / `working_markers` per-agent keys carry the footer

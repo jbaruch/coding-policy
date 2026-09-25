@@ -30,15 +30,33 @@ EFFORTS = {
 }
 NO_EFFORT_MODELS = frozenset({"claude-haiku-4-5", "haiku-4.5"})
 JUDGMENT_ROUNDS = frozenset({
-    "architect", "reconciliation", "test_plan", "critic", "review",
+    "architect", "reconciliation", "critic", "review",
     "hostile_verify", "recheck", "release_adjudication", "lead",
 })
-ROUNDS = JUDGMENT_ROUNDS | {"build", "fix", "mechanical", "release_mechanics"}
+#: `consultation` is evidence gathering that decides nothing, and `test_plan`
+#: is pre-development preparation that passes nothing: neither is a gate, so
+#: neither carries the judgment floor (#518). A consultation that must settle
+#: something is planned on `reconciliation` or `architect` explicitly.
+ROUNDS = JUDGMENT_ROUNDS | {"build", "fix", "mechanical", "release_mechanics", "consultation", "test_plan"}
+#: Each seat's default is the cheapest round its contract allows. A release
+#: worker edits no source and its skill's own gates fail the round loudly, so
+#: it defaults to mechanics; `release_adjudication` is requested explicitly
+#: when the worker must interpret a dispute (#521).
 DEFAULT_ROUNDS = {
     "developer": "build", "tester": "hostile_verify", "reviewer": "review",
-    "release": "release_adjudication", "architect": "architect",
+    "release": "release_mechanics", "architect": "architect",
     "critic": "critic", "lead": "lead",
-    "advisor": "architect", "investigator": "reconciliation",
+    "advisor": "consultation", "investigator": "consultation",
+}
+#: The judgment round a consultation takes when its recorded evidence says it
+#: must settle something, and the default it took before `consultation`
+#: existed. Selection reads the evidence from the round context rather than
+#: relying on a remembered `--round` override (#518).
+CONSULTATION_ESCALATION = {"investigator": "reconciliation", "advisor": "architect"}
+#: Round-context evidence that moves each consultation to its judgment round.
+ESCALATION_EVIDENCE = {
+    "investigator": ("diagnosis_input", "prior_high_miss"),
+    "advisor": ("security_trigger",),
 }
 #: Separates a seat from the slice it owns in a role name (`reviewer#api`). A
 #: role name never contains it, so the seat reads back unambiguously (#409).
@@ -123,8 +141,8 @@ ROLE_ROUNDS = {
     "release": frozenset({"release_adjudication", "release_mechanics"}),
     "architect": frozenset({"architect", "reconciliation"}),
     "critic": frozenset({"critic"}), "lead": frozenset({"lead"}),
-    "advisor": frozenset({"architect"}),
-    "investigator": frozenset({"reconciliation"}),
+    "advisor": frozenset({"consultation", "architect"}),
+    "investigator": frozenset({"consultation", "reconciliation"}),
 }
 #: A whole-result oracle: the expected result recorded in a form a later check
 #: compares against byte for byte. Its EXISTENCE is what licenses a round below
@@ -447,7 +465,8 @@ def select_tier(agent, role, round_type=None, context=None, fix_round=None, head
     context = {} if context is None else context
     if not isinstance(context, dict):
         raise UsageError("Round context must be a JSON object.", {})
-    allowed = {"oracle", "risk_flags", "input_bytes", "failed_gates", "prior_high_miss"}
+    allowed = {"oracle", "risk_flags", "input_bytes", "failed_gates", "prior_high_miss",
+               "diagnosis_input", "security_trigger"}
     retired = set(context) & RETIRED_CONTEXT_FIELDS
     if retired:
         raise UsageError(
@@ -456,8 +475,9 @@ def select_tier(agent, role, round_type=None, context=None, fix_round=None, head
             "expected whole result is written down.".format(", ".join(sorted(retired))), {})
     if set(context) - allowed:
         raise UsageError("Unknown round-context fields: {}; check their spelling.".format(", ".join(sorted(set(context) - allowed))), {})
-    if "prior_high_miss" in context and type(context["prior_high_miss"]) is not bool:
-        raise UsageError("Round-context prior_high_miss must be a JSON boolean.", {})
+    for flag in ("prior_high_miss", "diagnosis_input", "security_trigger"):
+        if flag in context and type(context[flag]) is not bool:
+            raise UsageError("Round-context {} must be a JSON boolean.".format(flag), {})
     for key in ("input_bytes", "failed_gates"):
         _nonnegative_int(context, key)
     # The owner checks the task's recorded allowance before tier selection.
@@ -465,6 +485,15 @@ def select_tier(agent, role, round_type=None, context=None, fix_round=None, head
     if fix_round is not None and (type(fix_round) is not int or fix_round < 1):
         raise UsageError("Fix round must be a positive integer; preserve the task counter.", {})
     base = canonical_role(role)
+    evidence = [flag for flag in ESCALATION_EVIDENCE.get(base, ()) if context.get(flag) is True]
+    if evidence and round_type == "consultation":
+        raise UsageError("Round-context {} requires {} to settle this, on {!r}; drop the `consultation` round request.".format(
+            ", ".join(evidence), base, CONSULTATION_ESCALATION[base]), {})
+    if round_type is None and base in CONSULTATION_ESCALATION and (evidence or "consultation" not in agent.tiers):
+        # Evidence escalates deterministically. A tier table written before
+        # config schema 4 has no `consultation` row and keeps the judgment
+        # round it always defaulted to (config.py enforces the row from 4).
+        round_type = CONSULTATION_ESCALATION[base]
     round_type = round_type or ("fix" if base == "developer" and fix_round else DEFAULT_ROUNDS.get(base))
     if not isinstance(round_type, str) or round_type not in ROLE_ROUNDS.get(base, frozenset()):
         raise UsageError("Round {!r} cannot perform role {!r}; choose its documented round type.".format(round_type, role), {})
@@ -476,7 +505,10 @@ def select_tier(agent, role, round_type=None, context=None, fix_round=None, head
     if chosen_round not in agent.tiers:
         raise MissingTierError("Agent {} has no {!r} tier; add the required row before planning.".format(agent.name, chosen_round), {})
     tier = dict(agent.tiers[chosen_round])
-    if round_type in {"mechanical", "release_mechanics"} and not mechanical_allowed(context):
+    # Only a developer's mechanical round needs an oracle. A release round's
+    # loud failure is the release skill's own gates, and it has no pre-written
+    # whole result to compare against (#521).
+    if round_type == "mechanical" and not mechanical_allowed(context):
         raise UsageError("Mechanical eligibility is unproven or an escape condition fired; use a judgment round with a fresh brief.", {})
     risks = context.get("risk_flags", [])
     if not isinstance(risks, list) or any(not isinstance(flag, str) or not flag for flag in risks):

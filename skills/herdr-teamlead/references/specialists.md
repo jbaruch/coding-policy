@@ -148,7 +148,9 @@ answered by planning its role or by a requirements assignment carrying its
 specialty; which role and which specialty answer each trigger are the
 `TRIGGER_ROLES` and `TRIGGER_SPECIALTIES` constants in
 `skills/herdr-teamlead/teamlead/triggers.py`, and the detection payload names
-the one it accepted.
+the one it accepted. An advisor staffed for a fired `security` trigger is
+planned with round context `{"advisor": {"security_trigger": true}}`, which
+selects its judgment round (`references/model-tiers.md`).
 
 A staffing decision answers a fired trigger instead, and the detector reads it:
 

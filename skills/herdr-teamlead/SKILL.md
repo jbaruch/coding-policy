@@ -541,7 +541,8 @@ Step 16. No implementation or release is inferred from the diagnostic result.
   an authorized correction or Step 13 for a required judge ruling. At an
   exhausted approach allowance, record the checkpoint through
   `references/dispatch-recovery.md`, consult the investigator under
-  `references/specialists.md`, and take its assessed report to Step 13 for the
+  `references/specialists.md` with round context `{"investigator":
+  {"diagnosis_input": true}}`, and take its assessed report to Step 13 for the
   diagnosis; no operator decision is awaited.
 - **Advisory findings only** — record them in the round log and fold them into
   the next round that is already happening. Never spend a round on a lone
