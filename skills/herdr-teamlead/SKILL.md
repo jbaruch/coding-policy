@@ -673,9 +673,9 @@ under; the resume prompt carries them to the next context.
     pane, supervision work still unheld, or an unreadable stow or state
     - Fix the cause stderr names
     - Re-run `foreman-reset`
-- A deliverer that fails after scheduling records its own user-attention
-  blocker, which the next catch-up surfaces, and writes its error JSON to the
-  `log` named at exit 0
+- A deliverer that fails after scheduling leaves its outcome on the reset
+  record, which `catch-up` surfaces ahead of the attention queue
+  (`foreman_resets`), and writes its error JSON to the `log` named at exit 0
   - `reset_ended` there means the row shows `failed` or `interrupted`
   - Any other error means the record could not be updated; the operator
     reconciles it before any recovery

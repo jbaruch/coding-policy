@@ -1393,7 +1393,7 @@ def cmd_foreman_reset(args, client=None, warn=None, trace=None, spawn=None):
         raise UsageError("foreman-reset runs from the bound foreman's own pane ({}); this call came from {}.".format(
             bound_pane, caller or "outside Herdr"), {"pane_id": bound_pane})
     options = _resume_options(args)
-    existing = foreman_reset.replay(state_path, {"pane_id": bound_pane, "stow": stow["id"]}, options=options) if bound_pane else None
+    existing = foreman_reset.replay(state_path, {"pane_id": bound_pane, "stow": stow["id"]}) if bound_pane else None
     if existing is not None:
         return {"schema_version": foreman_reset.RESET_SCHEMA_VERSION, "scheduled": True, **existing,
                 "log": str(Path(str(state_path) + ".foreman-reset.log"))}, None
@@ -1438,29 +1438,19 @@ def _resume_options(args):
     return options
 
 
-def _raise_reset_failure(state_path, stow, outcome, record, *, now) -> NoReturn:
-    """Record a deliverer failure, leave a durable blocker, then exit with the error it earned.
+def _raise_reset_failure(state_path, stow, outcome, record) -> NoReturn:
+    """Record a deliverer failure, then exit with the error it earned.
 
     `reset_ended` authorizes the operator's recovery, so it is raised only once
-    the row shows `failed` or `interrupted`. The deliverer runs detached after
-    the foreman's turn ended, so no foreman reads its log: it records the
-    user-attention blocker itself, whichever way recording went.
+    the row shows `failed` or `interrupted`. The record is also the durable
+    blocker: `catch-up` reads it (`foreman_reset.outstanding`), so a failure
+    that could not be recorded still surfaces there as a reset with no outcome.
     """
-    try:
-        status = record()
-    except TeamLeadError as unrecorded:
-        blocker = foreman_reset.attention_blocker(state_path, stow, {
-            "error": unrecorded.code, "message": "{} The reset record could not be updated: {}".format(
-                outcome["message"], unrecorded.message)})
-        blocker["resolution_condition"] = ("The operator restores or reconciles {} so it shows the reset's outcome, "
-                                           "before any recovery of the foreman's pane.".format(foreman_reset.record_path(state_path)))
-        attention.write(state_path, "record", blocker, now)
-        raise unrecorded from None
+    status = record()
     if status not in foreman_reset.TERMINAL_FAILURES:
         raise StateError("The reset for stow {} failed here, but its record shows {!r}, which another process set; this "
                          "deliverer authorizes no recovery. Inspect {}.".format(stow, status, foreman_reset.record_path(state_path)),
                          {"record": str(foreman_reset.record_path(state_path)), "status": status})
-    attention.write(state_path, "record", foreman_reset.attention_blocker(state_path, stow, outcome), now)
     raise foreman_reset.delivery_failed(state_path, stow, outcome)
 
 
@@ -1475,7 +1465,7 @@ def cmd_foreman_reset_deliver(args, client=None, warn=None, trace=None):
         # operator's recovery is authorized.
         outcome = foreman_reset.failure(exc, args.stow, str(state_path), **options)
         _raise_reset_failure(state_path, args.stow, outcome,
-                             lambda: foreman_reset.fail_unclaimed(state_path, plan, outcome), now=now_iso())
+                             lambda: foreman_reset.fail_unclaimed(state_path, plan, outcome))
     if not claimed:
         return {"schema_version": foreman_reset.RESET_SCHEMA_VERSION, **plan, "skipped": "not the scheduled owner of this reset"}, None
     try:
@@ -1491,8 +1481,16 @@ def cmd_foreman_reset_deliver(args, client=None, warn=None, trace=None):
         def record():
             foreman_reset.finish(state_path, plan, status, outcome)
             return status
-        _raise_reset_failure(state_path, args.stow, outcome, record, now=now_iso())
-    foreman_reset.finish(state_path, plan, "delivered", result)
+        _raise_reset_failure(state_path, args.stow, outcome, record)
+    try:
+        foreman_reset.finish(state_path, plan, "delivered", result)
+    except TeamLeadError as exc:
+        # The pane is resumed; only the record lags. Catch-up shows the row as a
+        # delivery with no outcome, and this says which way it actually went.
+        raise StateError("The reset from stow {} was delivered and the foreman resumed, but the record could not say so: "
+                         "{} Reconcile {} to `delivered`; do not recover the pane.".format(
+                             args.stow, exc.message, foreman_reset.record_path(state_path)),
+                         {"record": str(foreman_reset.record_path(state_path)), "delivered": result}) from None
     return result, None
 
 

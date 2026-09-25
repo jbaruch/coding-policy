@@ -313,7 +313,7 @@ class RecordTest(unittest.TestCase):
         for field, value in (("stow", "round-8"), ("pane_id", "w9:p9"), ("schema_version", 2)):
             with self.subTest(field=field):
                 row = {"schema_version": 1, "pane_id": PANE, "stow": "round-7", "status": "delivered",
-                       "scheduled_at": "2026-09-24T10:00:00+00:00", "process": self.me(),
+                       "scheduled_at": "2026-09-24T10:00:00+00:00", "options": {}, "process": self.me(),
                        "result": {**self.DELIVERED, field: value}}
                 foreman_reset.record_path(self.state).write_text(json.dumps({"schema_version": 1, "resets": [row]}))
                 with self.assertRaises(foreman_reset.ResetRecordUnusable):
@@ -332,12 +332,12 @@ class RecordTest(unittest.TestCase):
                                       ("delivered", self.DELIVERED, False)):
             with self.subTest(status=status):
                 row = {"schema_version": 1, "pane_id": PANE, "stow": "round-7", "status": status,
-                       "scheduled_at": "2026-09-24T10:00:00+00:00", "process": None, "result": result}
+                       "scheduled_at": "2026-09-24T10:00:00+00:00", "options": {}, "process": None, "result": result}
                 self.assertEqual(foreman_reset._valid_row(row), valid)
 
     def test_duplicate_rows_for_one_reset_are_malformed(self):
         row = {"schema_version": 1, "pane_id": PANE, "stow": "round-7", "status": "failed",
-               "scheduled_at": "2026-09-24T10:00:00+00:00", "process": None, "result": self.FAILURE}
+               "scheduled_at": "2026-09-24T10:00:00+00:00", "options": {}, "process": None, "result": self.FAILURE}
         foreman_reset.record_path(self.state).write_text(json.dumps({"schema_version": 1, "resets": [row, row]}))
         with self.assertRaises(foreman_reset.ResetRecordUnusable):
             foreman_reset.replay(self.state, self.plan)
@@ -479,16 +479,11 @@ class ResetCommandTest(CliCase):
         self.assertEqual(emitted["details"]["resume_prompt"], rows[-1]["result"]["resume_prompt"])
         self.assertIn("--config", emitted["details"]["resume_prompt"])
         self.assertEqual(emitted["details"]["cause"]["message"], "config unreadable")
-        blocker = self.attention_entry("foreman-reset:round-7")
-        self.assertEqual(blocker["kind"], "blocker")
-        self.assertIn(str(foreman_reset.record_path(self.state)), blocker["resolution_condition"])
+        outstanding = foreman_reset.outstanding(self.state)
+        self.assertEqual([(item["stow"], item["status"]) for item in outstanding], [("round-7", "failed")])
+        self.assertEqual(outstanding[0]["resume_prompt"], rows[-1]["result"]["resume_prompt"])
 
-    def attention_entry(self, name):
-        from teamlead import attention
-        _document, entries, _progress = attention.load(self.state)
-        return entries[name]
-
-    def test_an_unrecordable_failure_is_not_reset_ended_and_still_leaves_a_blocker(self):
+    def test_an_unrecordable_failure_is_not_reset_ended_and_still_surfaces(self):
         foreman_reset.schedule(self.state, {"pane_id": PANE, "stow": "round-7"}, "2026-09-24T10:00:00+00:00", os.getpid)
         with patch("teamlead.cli.load_config", side_effect=StateError("config unreadable", {})), \
              patch("teamlead.foreman_reset.finish", side_effect=foreman_reset.ResetRecordUnusable("record gone", {})):
@@ -496,15 +491,71 @@ class ResetCommandTest(CliCase):
                                         client=object())
         self.assertEqual(code, 1)
         self.assertEqual(json.loads(err)["error"], "reset_record_unusable")
-        blocker = self.attention_entry("foreman-reset:round-7")
-        self.assertIn("could not be updated", blocker["context"])
-        self.assertIn("before any recovery", blocker["resolution_condition"])
+        # The row never reached an outcome; once its deliverer is gone, catch-up shows it.
+        outstanding = foreman_reset.outstanding(self.state, alive=lambda process: False)
+        self.assertEqual([(item["status"], item["resume_prompt"]) for item in outstanding], [("delivering", None)])
+        self.assertIn("outcome is unknown", outstanding[0]["needed"])
 
-    def test_attention_ids_stay_within_the_id_grammar(self):
-        self.assertEqual(foreman_reset._attention_id("round-7"), "foreman-reset:round-7")
-        odd = foreman_reset._attention_id("stow with spaces/and slashes")
-        self.assertRegex(odd, r"^foreman-reset:[0-9a-f]{32}$")
-        self.assertNotEqual(odd, foreman_reset._attention_id("another odd stow"))
+    def test_a_delivery_the_record_cannot_confirm_says_the_foreman_resumed(self):
+        foreman_reset.schedule(self.state, {"pane_id": PANE, "stow": "round-7"}, "2026-09-24T10:00:00+00:00", os.getpid)
+        delivered = {"schema_version": 1, "pane_id": PANE, "stow": "round-7", "agent": "foreman", "cleared": True,
+                     "resume": {"landed": True, "started": True}}
+        with patch("teamlead.foreman_reset.deliver", return_value=delivered), \
+             patch("teamlead.foreman_reset.finish", side_effect=foreman_reset.ResetRecordUnusable("record gone", {})):
+            code, _, err = self.run_cli(self.base() + ["foreman-reset-deliver", "--pane", PANE, "--stow", "round-7"],
+                                        client=object())
+        self.assertEqual(code, 1)
+        emitted = json.loads(err)
+        self.assertIn("do not recover the pane", emitted["message"])
+        self.assertEqual(emitted["details"]["delivered"], delivered)
+
+    def test_catch_up_surfaces_an_outstanding_reset_ahead_of_the_queue(self):
+        from teamlead import attention_view
+        plan = {"pane_id": PANE, "stow": "round-7"}
+        foreman_reset.schedule(self.state, plan, "2026-09-24T10:00:00+00:00", os.getpid)
+        foreman_reset.claim(self.state, plan, supervision_runtime.process_identity(os.getpid()))
+        foreman_reset.finish(self.state, plan, "failed",
+                             {"error": "herdr_error", "message": "boom", "details": {}, "resume_prompt": "paste me"})
+        result = attention_view.catch_up(self.state, "2026-09-24T11:00:00+00:00")
+        self.assertEqual([(item["stow"], item["resume_prompt"]) for item in result["foreman_resets"]], [("round-7", "paste me")])
+        self.assertTrue(result["markdown"].index("Foreman reset failed") < len(result["markdown"]))
+
+    def test_a_later_delivered_reset_supersedes_an_older_failure(self):
+        first, second = {"pane_id": PANE, "stow": "round-7"}, {"pane_id": PANE, "stow": "round-8"}
+        me = supervision_runtime.process_identity(os.getpid())
+        foreman_reset.schedule(self.state, first, "2026-09-24T10:00:00+00:00", os.getpid)
+        foreman_reset.claim(self.state, first, me)
+        foreman_reset.finish(self.state, first, "failed",
+                             {"error": "herdr_error", "message": "boom", "details": {}, "resume_prompt": "p"})
+        foreman_reset.schedule(self.state, second, "2026-09-24T11:00:00+00:00", os.getpid)
+        foreman_reset.claim(self.state, second, me)
+        foreman_reset.finish(self.state, second, "delivered", {
+            "schema_version": 1, "pane_id": PANE, "stow": "round-8", "agent": "foreman", "cleared": True,
+            "resume": {"landed": True, "started": True}})
+        self.assertEqual(foreman_reset.outstanding(self.state), [])
+
+    def test_an_unusable_record_is_itself_outstanding(self):
+        foreman_reset.record_path(self.state).write_text("{not json")
+        self.assertEqual([item["status"] for item in foreman_reset.outstanding(self.state)], ["record_unusable"])
+
+    def test_the_resume_prompt_on_recovery_keeps_the_settings_the_reset_was_scheduled_with(self):
+        plan = {"pane_id": PANE, "stow": "round-7"}
+        foreman_reset.schedule(self.state, plan, "2026-09-24T10:00:00+00:00", os.getpid,
+                               options={"config": "/c/cfg.json", "herdr_bin": "/opt/herdr"})
+        with self.assertRaises(foreman_reset.ResetEnded) as caught:
+            foreman_reset.replay(self.state, plan, alive=lambda process: False)
+        self.assertIn("--config /c/cfg.json --herdr-bin /opt/herdr", caught.exception.details["resume_prompt"])
+
+    def test_versions_and_pids_are_checked_by_type_and_range(self):
+        row = {"schema_version": 1, "pane_id": PANE, "stow": "round-7", "status": "delivering",
+               "scheduled_at": "2026-09-24T10:00:00+00:00", "options": {}, "process": {"pid": 5, "identity": "x"},
+               "result": None}
+        self.assertTrue(foreman_reset._valid_row(row))
+        for field, value in (("schema_version", True), ("schema_version", 1.0), ("process", {"pid": 0, "identity": "x"}),
+                             ("process", {"pid": -1, "identity": "x"}), ("options", {"config": ""}),
+                             ("options", {"other": "x"})):
+            with self.subTest(field=field, value=value):
+                self.assertFalse(foreman_reset._valid_row({**row, field: value}))
 
     def test_a_deliverer_that_cannot_identify_itself_exits_with_the_recovery(self):
         foreman_reset.schedule(self.state, {"pane_id": PANE, "stow": "round-7"}, "2026-09-24T10:00:00+00:00", os.getpid)

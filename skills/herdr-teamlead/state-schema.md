@@ -762,6 +762,7 @@ future shape change bumps `schema_version` and migrates in the owner.
 | `stow` | string | The stow id the resume prompt names |
 | `status` | one of `scheduled`, `delivering`, `delivered`, `failed`, `interrupted` | `scheduled` → `delivering` → `delivered`; `failed` before any keystroke; `interrupted` after one |
 | `scheduled_at` | ISO-8601 string with timezone | The `foreman-reset` time |
+| `options` | object with optional non-empty string `config` and `herdr_bin` | The non-default settings `foreman-reset` ran with; every resume prompt for this row carries them, including one finalized later by another process |
 | `process` | `{"pid": integer, "identity": string}`, or null | The deliverer's process: its pid and a digest of its start time and command line (`supervision_runtime.process_identity`). A reused pid carries another identity. Null only on a `scheduled` row before its deliverer is identified, or on a `failed` row whose deliverer never started or was gone before identification. Every `delivering`, `delivered` and `interrupted` row carries one |
 | `result` | null, the delivery object, or the failure object | `scheduled` and `delivering` hold null. `delivered` holds exactly `{"schema_version", "pane_id", "stow", "agent", "cleared": true, "resume": {"landed": true, "started": true}}`, whose `schema_version`, `pane_id` and `stow` equal the row's. `failed` and `interrupted` hold exactly `{"error": string, "message": string, "details": object, "resume_prompt": string}`; `resume_prompt` is what the operator pastes |
 
@@ -781,9 +782,12 @@ probed, finishes the row `failed`. A `foreman-reset` that dies between the
 row's first save and the identity save leaves it `scheduled` with a null
 `process`; the next read finds no live deliverer and finalizes it `failed`.
 A deliverer that fails before its claim records its still-`scheduled` row
-`failed` itself. Any deliverer that fails after scheduling records a
-user-attention `blocker` (id `foreman-reset:<stow>`, or a digest of the stow)
-through the attention owner, then exits. It exits `reset_ended`, with the
-record path and resume prompt, only when the row shows `failed` or
-`interrupted`; when the record could not be updated it exits with that
-error, and the blocker asks the operator to reconcile the record first.
+`failed` itself. A deliverer exits `reset_ended`, with the record path and
+resume prompt, only when the row shows `failed` or `interrupted`; when the
+record could not be updated it exits with that error instead.
+
+The record is the durable blocker for a failed reset: `catch-up` reads it
+through `foreman_reset.outstanding` and lists, ahead of the attention queue,
+each pane whose latest reset ended `failed` or `interrupted`, or never reached
+an outcome with its deliverer gone, and an unreadable record. A later
+`delivered` reset for the pane supersedes an older failure.

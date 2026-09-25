@@ -36,7 +36,6 @@ still reset-ready and the same agent is still idle.
 
 import copy
 import fcntl
-import hashlib
 import os
 import shlex
 import time
@@ -116,7 +115,13 @@ def record_path(state_path):
 #: `interrupted` is a delivery that failed after its first keystroke: the
 #: pane may be cleared or half-prompted, so it is never retried automatically.
 STATUSES = frozenset({"scheduled", "delivering", "delivered", "failed", "interrupted"})
-ROW_FIELDS = frozenset({"schema_version", "pane_id", "stow", "status", "scheduled_at", "process", "result"})
+ROW_FIELDS = frozenset({"schema_version", "pane_id", "stow", "status", "scheduled_at", "options", "process", "result"})
+OPTION_FIELDS = frozenset({"config", "herdr_bin"})
+
+
+def _version(value):
+    """A stored schema version is this exact integer; JSON `true` and `1.0` are not."""
+    return type(value) is int and value == RESET_SCHEMA_VERSION
 
 
 def _records(path):
@@ -145,7 +150,7 @@ def _records(path):
                                "coding-policy plugin, then run foreman-reset.".format(path, version, RESET_SCHEMA_VERSION),
                                {"record": str(path), "schema_version": version})
     rows = document.get("resets")
-    if (version != RESET_SCHEMA_VERSION or not isinstance(rows, list) or not all(_valid_row(row) for row in rows)
+    if (not _version(version) or not isinstance(rows, list) or not all(_valid_row(row) for row in rows)
             or len({(row["pane_id"], row["stow"]) for row in rows}) != len(rows)):
         raise ResetRecordUnusable("Reset record {} is malformed. It is left untouched; the operator restores a valid file "
                                   "from its own backup before any reset.".format(path), {"record": str(path)})
@@ -162,7 +167,11 @@ def _readable(path):
 
 def _valid_row(row):
     """Every documented field, typed, with the result shape its status requires."""
-    if not isinstance(row, dict) or set(row) != ROW_FIELDS or row["schema_version"] != RESET_SCHEMA_VERSION:
+    if not isinstance(row, dict) or set(row) != ROW_FIELDS or not _version(row["schema_version"]):
+        return False
+    options = row["options"]
+    if not (isinstance(options, dict) and set(options) <= OPTION_FIELDS
+            and all(isinstance(value, str) and value for value in options.values())):
         return False
     status, process, result = row["status"], row["process"], row["result"]
     if not (isinstance(row["pane_id"], str) and isinstance(row["stow"], str) and isinstance(status, str) and status in STATUSES):
@@ -177,13 +186,13 @@ def _valid_row(row):
         if status not in ("scheduled", "failed"):
             return False
     elif not (isinstance(process, dict) and set(process) == {"pid", "identity"}
-              and type(process["pid"]) is int and isinstance(process["identity"], str)):
+              and type(process["pid"]) is int and process["pid"] > 0 and isinstance(process["identity"], str)):
         return False
     if status in ("scheduled", "delivering"):
         return result is None
     if status == "delivered":
         return (isinstance(result, dict) and set(result) == {"schema_version", "pane_id", "stow", "agent", "cleared", "resume"}
-                and result["schema_version"] == RESET_SCHEMA_VERSION
+                and _version(result["schema_version"])
                 and result["pane_id"] == row["pane_id"] and result["stow"] == row["stow"]
                 and result["cleared"] is True and isinstance(result["agent"], str)
                 and isinstance(result["resume"], dict) and set(result["resume"]) == {"landed", "started"}
@@ -203,7 +212,7 @@ def _alive(process, probe=None):
     return process is not None and (probe or process_identity)(process["pid"]) == process
 
 
-def _settle(document, row, state_path, alive, options):
+def _settle(document, row, state_path, alive):
     """Replay a live or delivered reset; finalize any other, then refuse it for the operator.
 
     A dead `scheduled` row typed nothing and becomes `failed`; a dead
@@ -218,7 +227,7 @@ def _settle(document, row, state_path, alive, options):
     if changed:
         lost = StateError("The reset deliverer for stow {} exited without finishing.".format(row["stow"]), {"process": row["process"]})
         row.update(status="failed" if row["status"] == "scheduled" else "interrupted",
-                   result=failure(lost, row["stow"], state, **options))
+                   result=failure(lost, row["stow"], state, **row["options"]))
     return None, changed
 
 
@@ -228,7 +237,7 @@ def _refuse(row, state_path, cause=None):
         {"record": str(record_path(state_path)), "resume_prompt": row["result"]["resume_prompt"]})
 
 
-def replay(state_path, plan, *, alive=_alive, options=None):
+def replay(state_path, plan, *, alive=_alive):
     """The existing reset for (pane, stow), or None when this stow never reset.
 
     Read before every precondition the reset itself changes: once a reset
@@ -245,7 +254,7 @@ def replay(state_path, plan, *, alive=_alive, options=None):
         row = _row(document, plan)
         if row is None:
             return None
-        live, changed = _settle(document, row, state_path, alive, options or {})
+        live, changed = _settle(document, row, state_path, alive)
         if changed:
             save_state(path, document)
     if live is None:
@@ -267,14 +276,14 @@ def schedule(state_path, plan, at, start, *, alive=_alive, probe=None, options=N
         document = _records(path)
         prior = _row(document, plan)
         if prior is not None:
-            live, changed = _settle(document, prior, state_path, alive, options or {})
+            live, changed = _settle(document, prior, state_path, alive)
             if changed:
                 save_state(path, document)
             if live is not None:
                 return live
             _refuse(prior, state_path)
         row = {"schema_version": RESET_SCHEMA_VERSION, **plan, "status": "scheduled", "scheduled_at": at,
-               "process": None, "result": None}
+               "options": dict(options or {}), "process": None, "result": None}
         document["resets"].append(row)
         save_state(path, document)
         try:
@@ -300,27 +309,46 @@ def failure(exc, stow, state, **options):
 TERMINAL_FAILURES = frozenset({"failed", "interrupted"})
 
 
-def attention_blocker(state_path, stow, result):
-    """The user-attention entry a failed deliverer leaves, since no foreman is running to leave it."""
-    record = str(record_path(state_path))
-    return {
-        "id": _attention_id(stow),
-        "kind": "blocker",
-        "title": "Foreman reset from stow {} failed; the foreman pane needs operator recovery".format(stow),
-        "context": "The round-boundary reset did not complete ({}): {}".format(result["error"], result["message"]),
-        "consequence": "The foreman is not running a fresh context. Active work waits under its handoff hold until the "
-                       "operator recovers it.",
-        "resolution_condition": "The operator clears the foreman's pane and pastes the resume prompt saved in {}, "
-                                "under rules/agent-team-operation.md Working Memory.".format(record),
-        "sources": [{"schema_version": 1, "kind": "artifact", "ref": record}],
-    }
+def outstanding(state_path, *, alive=_alive):
+    """The foreman resets that still need the operator, read from the record alone.
 
-
-def _attention_id(stow):
-    """One stable attention id per stow: its name when the id grammar allows, else its digest."""
-    if 0 < len(stow) <= 100 and all(char.isascii() and (char.isalnum() or char in "._:-") for char in stow):
-        return "foreman-reset:" + stow
-    return "foreman-reset:" + hashlib.sha256(stow.encode("utf-8")).hexdigest()[:32]
+    The record is the durable blocker: `foreman-reset` writes the row before
+    anything else can fail, and every later failure lands on it. For each pane,
+    the latest reset needs the operator when it ended `failed` or
+    `interrupted`, or when it never reached an outcome and its deliverer is
+    gone. A later `delivered` reset for the pane supersedes an older failure.
+    An unreadable record is itself outstanding. Read-only: nothing is written.
+    """
+    path = record_path(state_path)
+    try:
+        document = _readable(path)
+    except ResetRecordUnusable as exc:
+        return [{"pane_id": None, "stow": None, "status": "record_unusable", "record": str(path),
+                 "needed": exc.message, "resume_prompt": None}]
+    if document is None:
+        return []
+    latest = {}
+    for row in document["resets"]:
+        latest[row["pane_id"]] = row
+    items = []
+    for row in latest.values():
+        if row["status"] in TERMINAL_FAILURES:
+            needed = OPERATOR_RECOVERY
+            prompt = row["result"]["resume_prompt"]
+        elif row["status"] in ("scheduled", "delivering") and not alive(row["process"]):
+            prompt = None
+            if row["status"] == "scheduled":
+                needed = ("The deliverer stopped before claiming the reset, so nothing was typed. Reconcile the record "
+                          "before any recovery: the foreman in pane {} still holds its old context.".format(row["pane_id"]))
+            else:
+                needed = ("The deliverer stopped mid-delivery and its outcome is unknown. Look at pane {} before acting: "
+                          "a resumed foreman needs nothing; a cleared or half-typed pane needs the operator to reconcile "
+                          "the record first.".format(row["pane_id"]))
+        else:
+            continue
+        items.append({"pane_id": row["pane_id"], "stow": row["stow"], "status": row["status"], "record": str(path),
+                      "needed": needed, "resume_prompt": prompt})
+    return items
 
 
 def delivery_failed(state_path, stow, result):
