@@ -253,6 +253,26 @@ else
 fi
 rm -rf "$base"
 
+# --- suites see an empty per-run XDG home, never the caller's, and it is removed ---
+base="$(make_base)"; dir="$base/skills/probe/tests"; mkdir -p "$dir"
+seen="$(mktemp)"
+cat > "$dir/test_probe.sh" <<PROBE
+#!/usr/bin/env bash
+printf '%s\n%s\n' "\$XDG_STATE_HOME" "\$XDG_CONFIG_HOME" > "$seen"
+[[ -d "\$XDG_STATE_HOME" && -d "\$XDG_CONFIG_HOME" ]] || exit 1
+[[ -z "\$(ls -A "\$XDG_STATE_HOME")" && -z "\$(ls -A "\$XDG_CONFIG_HOME")" ]] || exit 1
+PROBE
+XDG_STATE_HOME="$base/caller-state" XDG_CONFIG_HOME="$base/caller-config" invoke "$base"
+state_seen="$(sed -n 1p "$seen")"; config_seen="$(sed -n 2p "$seen")"
+if [[ "$CODE" == 0 ]] && [[ -n "$state_seen" ]] \
+  && [[ "$state_seen" != "$base/caller-state" ]] && [[ "$config_seen" != "$base/caller-config" ]] \
+  && [[ ! -e "$state_seen" ]]; then
+  pass "suites run against an empty per-run XDG home, removed after the run"
+else
+  fail "hermetic XDG home: code=$CODE state=$state_seen config=$config_seen err=$ERR"
+fi
+rm -rf "$base" "$seen"
+
 echo ""
 echo "run-tests.sh: ${PASS_COUNT} passed, ${FAIL_COUNT} failed"
 [[ $FAIL_COUNT -eq 0 ]] || exit 1

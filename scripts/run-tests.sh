@@ -108,6 +108,15 @@ json_str() {
   printf '"%s"' "$out"
 }
 
+XDG_RUN_HOME=""
+
+remove_xdg_run_home() {
+  if [[ -n "$XDG_RUN_HOME" ]]; then
+    rm -rf "$XDG_RUN_HOME"
+  fi
+  return 0
+}
+
 main() {
   local base="${1:-}"
   if [[ -z "$base" ]]; then
@@ -159,6 +168,18 @@ main() {
       "$(json_str "no test suites found under ${base}/**/tests/test_*.{sh,py}")"
     return 2
   fi
+
+  # Suites run against an empty per-run home, never the operator's own:
+  # anything a test does not pass explicitly would otherwise read, and
+  # possibly refuse on, the machine's real XDG state and config.
+  if ! XDG_RUN_HOME="$(mktemp -d)"; then
+    echo "run-tests: could not create the per-run XDG home (mktemp -d failed); check TMPDIR" >&2
+    printf '{"suites":0,"passed":0,"failed":0,"failures":[],"error":%s}\n' "$(json_str "mktemp -d failed")"
+    return 2
+  fi
+  trap remove_xdg_run_home EXIT
+  mkdir -p "$XDG_RUN_HOME/state" "$XDG_RUN_HOME/config"
+  export XDG_STATE_HOME="$XDG_RUN_HOME/state" XDG_CONFIG_HOME="$XDG_RUN_HOME/config"
 
   echo "Running ${#suites[@]} test suite(s):" >&2
   echo "" >&2

@@ -80,7 +80,7 @@ PY
 }
 
 main() {
-  local limit=0 since="" model="" agent="claude" state="${HOME}/.local/state/foreman/state.json" corpus_only=0
+  local limit=0 since="" model="" agent="claude" state="${XDG_STATE_HOME:-${HOME}/.local/state}/foreman/state.json" corpus_only=0
   while [ $# -gt 0 ]; do
     case "$1" in
       --limit) limit="${2-}"; shift 2 || die "--limit needs a count" ;;
