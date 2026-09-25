@@ -348,6 +348,25 @@ def claim(state_path, plan, process, *, sleep=time.sleep, clock=time.monotonic):
         return True
 
 
+def fail_unclaimed(state_path, plan, result, *, sleep=time.sleep, clock=time.monotonic):
+    """Finalize a still-`scheduled` row `failed` for a deliverer that could not claim it.
+
+    The operator's recovery requires the record to show `failed` or
+    `interrupted`, so the deliverer records its own pre-claim failure before
+    exiting. Nothing was typed. A row that is no longer `scheduled` belongs to
+    whatever moved it, and is left alone.
+    """
+    path = record_path(state_path)
+    with _waiting_lock(path, sleep=sleep, clock=clock):
+        document = _records(path)
+        row = _row(document, plan)
+        if row is None or row["status"] != "scheduled":
+            return False
+        row.update(status="failed", result=result)
+        save_state(path, document)
+        return True
+
+
 def finish(state_path, plan, status, result):
     """Record the claimed delivery's outcome; only a `delivering` row finishes."""
     path = record_path(state_path)

@@ -1444,9 +1444,15 @@ def cmd_foreman_reset_deliver(args, client=None, warn=None, trace=None):
     try:
         claimed = foreman_reset.claim(state_path, plan, supervision_runtime.process_identity(os.getpid()))
     except TeamLeadError as exc:
-        # Unclaimed, the row stays `scheduled` under a now-dead deliverer; the
-        # next foreman-reset read finalizes it `failed`.
-        raise foreman_reset.delivery_failed(state_path, args.stow, foreman_reset.failure(exc, args.stow, str(state_path), **options)) from None
+        # Nothing was typed. Record the row `failed` so the operator's recovery
+        # finds it; if even that write fails, the error says so.
+        outcome = foreman_reset.failure(exc, args.stow, str(state_path), **options)
+        try:
+            foreman_reset.fail_unclaimed(state_path, plan, outcome)
+        except TeamLeadError as unrecorded:
+            outcome = {**outcome, "message": "{} The reset record could not be updated either: {}".format(
+                outcome["message"], unrecorded.message)}
+        raise foreman_reset.delivery_failed(state_path, args.stow, outcome) from None
     if not claimed:
         return {"schema_version": foreman_reset.RESET_SCHEMA_VERSION, **plan, "skipped": "not the scheduled owner of this reset"}, None
     try:

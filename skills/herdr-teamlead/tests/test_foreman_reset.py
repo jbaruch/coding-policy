@@ -12,7 +12,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from teamlead import foreman_reset, retrospective
+from teamlead import foreman_reset, retrospective, supervision_runtime
 from teamlead.state import state_lock
 from teamlead.errors import HerdrError, StateError, UsageError
 from tests.test_cli import CliCase
@@ -489,6 +489,19 @@ class ResetCommandTest(CliCase):
         emitted = json.loads(err)
         self.assertEqual(emitted["error"], "reset_ended")
         self.assertIn("memory-show", emitted["details"]["resume_prompt"])
+        # The operator's recovery needs the record to show the failure.
+        row = json.loads(foreman_reset.record_path(self.state).read_text())["resets"][-1]
+        self.assertEqual(row["status"], "failed")
+        self.assertEqual(row["result"]["resume_prompt"], emitted["details"]["resume_prompt"])
+
+    def test_fail_unclaimed_leaves_a_row_another_process_moved(self):
+        plan = {"pane_id": PANE, "stow": "round-7"}
+        foreman_reset.schedule(self.state, plan, "2026-09-24T10:00:00+00:00", os.getpid)
+        foreman_reset.claim(self.state, plan, supervision_runtime.process_identity(os.getpid()))
+        outcome = {"error": "state_error", "message": "x", "details": {}, "resume_prompt": "p"}
+        self.assertFalse(foreman_reset.fail_unclaimed(self.state, plan, outcome))
+        row = json.loads(foreman_reset.record_path(self.state).read_text())["resets"][-1]
+        self.assertEqual(row["status"], "delivering")
 
     def test_a_deliverer_that_does_not_own_the_reset_sends_nothing(self):
         code, out, err = self.run_cli(self.base() + ["foreman-reset-deliver", "--pane", PANE, "--stow", "round-7"],

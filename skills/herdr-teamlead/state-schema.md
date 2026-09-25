@@ -773,5 +773,6 @@ own process identity. A launch failure, or a deliverer already gone when
 probed, finishes the row `failed`. A `foreman-reset` that dies between the
 row's first save and the identity save leaves it `scheduled` with a null
 `process`; the next read finds no live deliverer and finalizes it `failed`.
-A deliverer that fails after scheduling exits with a `reset_ended` error whose
-details carry the record path and the resume prompt.
+A deliverer that fails before its claim records its still-`scheduled` row
+`failed` itself. Any deliverer that fails after scheduling exits with a
+`reset_ended` error whose details carry the record path and the resume prompt.
