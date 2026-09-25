@@ -16,6 +16,7 @@ import json
 import os
 import subprocess
 import sys
+from typing import NoReturn
 import time
 from contextlib import nullcontext
 from datetime import datetime, timezone
@@ -1437,6 +1438,32 @@ def _resume_options(args):
     return options
 
 
+def _raise_reset_failure(state_path, stow, outcome, record, *, now) -> NoReturn:
+    """Record a deliverer failure, leave a durable blocker, then exit with the error it earned.
+
+    `reset_ended` authorizes the operator's recovery, so it is raised only once
+    the row shows `failed` or `interrupted`. The deliverer runs detached after
+    the foreman's turn ended, so no foreman reads its log: it records the
+    user-attention blocker itself, whichever way recording went.
+    """
+    try:
+        status = record()
+    except TeamLeadError as unrecorded:
+        blocker = foreman_reset.attention_blocker(state_path, stow, {
+            "error": unrecorded.code, "message": "{} The reset record could not be updated: {}".format(
+                outcome["message"], unrecorded.message)})
+        blocker["resolution_condition"] = ("The operator restores or reconciles {} so it shows the reset's outcome, "
+                                           "before any recovery of the foreman's pane.".format(foreman_reset.record_path(state_path)))
+        attention.write(state_path, "record", blocker, now)
+        raise unrecorded from None
+    if status not in foreman_reset.TERMINAL_FAILURES:
+        raise StateError("The reset for stow {} failed here, but its record shows {!r}, which another process set; this "
+                         "deliverer authorizes no recovery. Inspect {}.".format(stow, status, foreman_reset.record_path(state_path)),
+                         {"record": str(foreman_reset.record_path(state_path)), "status": status})
+    attention.write(state_path, "record", foreman_reset.attention_blocker(state_path, stow, outcome), now)
+    raise foreman_reset.delivery_failed(state_path, stow, outcome)
+
+
 def cmd_foreman_reset_deliver(args, client=None, warn=None, trace=None):
     state_path = Path(_state_path(args)).expanduser().resolve()
     plan = {"pane_id": args.pane, "stow": args.stow}
@@ -1444,15 +1471,11 @@ def cmd_foreman_reset_deliver(args, client=None, warn=None, trace=None):
     try:
         claimed = foreman_reset.claim(state_path, plan, supervision_runtime.process_identity(os.getpid()))
     except TeamLeadError as exc:
-        # Nothing was typed. Record the row `failed` so the operator's recovery
-        # finds it; if even that write fails, the error says so.
+        # Nothing was typed. The row must show a terminal failure before the
+        # operator's recovery is authorized.
         outcome = foreman_reset.failure(exc, args.stow, str(state_path), **options)
-        try:
-            foreman_reset.fail_unclaimed(state_path, plan, outcome)
-        except TeamLeadError as unrecorded:
-            outcome = {**outcome, "message": "{} The reset record could not be updated either: {}".format(
-                outcome["message"], unrecorded.message)}
-        raise foreman_reset.delivery_failed(state_path, args.stow, outcome) from None
+        _raise_reset_failure(state_path, args.stow, outcome,
+                             lambda: foreman_reset.fail_unclaimed(state_path, plan, outcome), now=now_iso())
     if not claimed:
         return {"schema_version": foreman_reset.RESET_SCHEMA_VERSION, **plan, "skipped": "not the scheduled owner of this reset"}, None
     try:
@@ -1464,8 +1487,11 @@ def cmd_foreman_reset_deliver(args, client=None, warn=None, trace=None):
     except TeamLeadError as exc:
         status = "interrupted" if isinstance(exc, foreman_reset.DeliveryInterrupted) else "failed"
         outcome = foreman_reset.failure(exc, args.stow, str(state_path), **options)
-        foreman_reset.finish(state_path, plan, status, outcome)
-        raise foreman_reset.delivery_failed(state_path, args.stow, outcome) from None
+
+        def record():
+            foreman_reset.finish(state_path, plan, status, outcome)
+            return status
+        _raise_reset_failure(state_path, args.stow, outcome, record, now=now_iso())
     foreman_reset.finish(state_path, plan, "delivered", result)
     return result, None
 

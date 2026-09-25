@@ -36,6 +36,7 @@ still reset-ready and the same agent is still idle.
 
 import copy
 import fcntl
+import hashlib
 import os
 import shlex
 import time
@@ -296,6 +297,32 @@ def failure(exc, stow, state, **options):
     return {"error": exc.code, "message": exc.message, "details": exc.details, "resume_prompt": resume_prompt(stow, state, **options)}
 
 
+TERMINAL_FAILURES = frozenset({"failed", "interrupted"})
+
+
+def attention_blocker(state_path, stow, result):
+    """The user-attention entry a failed deliverer leaves, since no foreman is running to leave it."""
+    record = str(record_path(state_path))
+    return {
+        "id": _attention_id(stow),
+        "kind": "blocker",
+        "title": "Foreman reset from stow {} failed; the foreman pane needs operator recovery".format(stow),
+        "context": "The round-boundary reset did not complete ({}): {}".format(result["error"], result["message"]),
+        "consequence": "The foreman is not running a fresh context. Active work waits under its handoff hold until the "
+                       "operator recovers it.",
+        "resolution_condition": "The operator clears the foreman's pane and pastes the resume prompt saved in {}, "
+                                "under rules/agent-team-operation.md Working Memory.".format(record),
+        "sources": [{"schema_version": 1, "kind": "artifact", "ref": record}],
+    }
+
+
+def _attention_id(stow):
+    """One stable attention id per stow: its name when the id grammar allows, else its digest."""
+    if 0 < len(stow) <= 100 and all(char.isascii() and (char.isalnum() or char in "._:-") for char in stow):
+        return "foreman-reset:" + stow
+    return "foreman-reset:" + hashlib.sha256(stow.encode("utf-8")).hexdigest()[:32]
+
+
 def delivery_failed(state_path, stow, result):
     """The error a deliverer exits with once its failure is recorded: where the record and the prompt are."""
     record = record_path(state_path)
@@ -349,22 +376,26 @@ def claim(state_path, plan, process, *, sleep=time.sleep, clock=time.monotonic):
 
 
 def fail_unclaimed(state_path, plan, result, *, sleep=time.sleep, clock=time.monotonic):
-    """Finalize a still-`scheduled` row `failed` for a deliverer that could not claim it.
+    """Finalize a still-`scheduled` row `failed`; return the row's status afterwards.
 
     The operator's recovery requires the record to show `failed` or
     `interrupted`, so the deliverer records its own pre-claim failure before
     exiting. Nothing was typed. A row that is no longer `scheduled` belongs to
-    whatever moved it, and is left alone.
+    whatever moved it, and is left alone; its status says whether recovery is
+    authorized.
     """
     path = record_path(state_path)
     with _waiting_lock(path, sleep=sleep, clock=clock):
         document = _records(path)
         row = _row(document, plan)
-        if row is None or row["status"] != "scheduled":
-            return False
-        row.update(status="failed", result=result)
-        save_state(path, document)
-        return True
+        if row is None:
+            raise ResetRecordUnusable("Reset record {} holds no reset for stow {} in pane {}; the failure was not recorded. "
+                                      "The operator reconciles the record before any recovery.".format(path, plan["stow"], plan["pane_id"]),
+                                      {"record": str(path)})
+        if row["status"] == "scheduled":
+            row.update(status="failed", result=result)
+            save_state(path, document)
+        return row["status"]
 
 
 def finish(state_path, plan, status, result):

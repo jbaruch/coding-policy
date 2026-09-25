@@ -774,5 +774,9 @@ probed, finishes the row `failed`. A `foreman-reset` that dies between the
 row's first save and the identity save leaves it `scheduled` with a null
 `process`; the next read finds no live deliverer and finalizes it `failed`.
 A deliverer that fails before its claim records its still-`scheduled` row
-`failed` itself. Any deliverer that fails after scheduling exits with a
-`reset_ended` error whose details carry the record path and the resume prompt.
+`failed` itself. Any deliverer that fails after scheduling records a
+user-attention `blocker` (id `foreman-reset:<stow>`, or a digest of the stow)
+through the attention owner, then exits. It exits `reset_ended`, with the
+record path and resume prompt, only when the row shows `failed` or
+`interrupted`; when the record could not be updated it exits with that
+error, and the blocker asks the operator to reconcile the record first.

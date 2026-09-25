@@ -479,6 +479,32 @@ class ResetCommandTest(CliCase):
         self.assertEqual(emitted["details"]["resume_prompt"], rows[-1]["result"]["resume_prompt"])
         self.assertIn("--config", emitted["details"]["resume_prompt"])
         self.assertEqual(emitted["details"]["cause"]["message"], "config unreadable")
+        blocker = self.attention_entry("foreman-reset:round-7")
+        self.assertEqual(blocker["kind"], "blocker")
+        self.assertIn(str(foreman_reset.record_path(self.state)), blocker["resolution_condition"])
+
+    def attention_entry(self, name):
+        from teamlead import attention
+        _document, entries, _progress = attention.load(self.state)
+        return entries[name]
+
+    def test_an_unrecordable_failure_is_not_reset_ended_and_still_leaves_a_blocker(self):
+        foreman_reset.schedule(self.state, {"pane_id": PANE, "stow": "round-7"}, "2026-09-24T10:00:00+00:00", os.getpid)
+        with patch("teamlead.cli.load_config", side_effect=StateError("config unreadable", {})), \
+             patch("teamlead.foreman_reset.finish", side_effect=foreman_reset.ResetRecordUnusable("record gone", {})):
+            code, _, err = self.run_cli(self.base() + ["foreman-reset-deliver", "--pane", PANE, "--stow", "round-7"],
+                                        client=object())
+        self.assertEqual(code, 1)
+        self.assertEqual(json.loads(err)["error"], "reset_record_unusable")
+        blocker = self.attention_entry("foreman-reset:round-7")
+        self.assertIn("could not be updated", blocker["context"])
+        self.assertIn("before any recovery", blocker["resolution_condition"])
+
+    def test_attention_ids_stay_within_the_id_grammar(self):
+        self.assertEqual(foreman_reset._attention_id("round-7"), "foreman-reset:round-7")
+        odd = foreman_reset._attention_id("stow with spaces/and slashes")
+        self.assertRegex(odd, r"^foreman-reset:[0-9a-f]{32}$")
+        self.assertNotEqual(odd, foreman_reset._attention_id("another odd stow"))
 
     def test_a_deliverer_that_cannot_identify_itself_exits_with_the_recovery(self):
         foreman_reset.schedule(self.state, {"pane_id": PANE, "stow": "round-7"}, "2026-09-24T10:00:00+00:00", os.getpid)
@@ -499,7 +525,7 @@ class ResetCommandTest(CliCase):
         foreman_reset.schedule(self.state, plan, "2026-09-24T10:00:00+00:00", os.getpid)
         foreman_reset.claim(self.state, plan, supervision_runtime.process_identity(os.getpid()))
         outcome = {"error": "state_error", "message": "x", "details": {}, "resume_prompt": "p"}
-        self.assertFalse(foreman_reset.fail_unclaimed(self.state, plan, outcome))
+        self.assertEqual(foreman_reset.fail_unclaimed(self.state, plan, outcome), "delivering")
         row = json.loads(foreman_reset.record_path(self.state).read_text())["resets"][-1]
         self.assertEqual(row["status"], "delivering")
 
