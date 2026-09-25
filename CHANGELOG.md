@@ -70,6 +70,37 @@
   record written by a newer build reads as no prior reset and refuses
   writes, instead of being reported as corrupt.
 
+## 0.3.268 — 2026-09-25
+
+### Changed
+
+- **Each Herdr seat defaults to the cheapest round its contract allows
+  (#518, #519, #521).** A 2026-09-24 role/model audit found three defaults
+  that priced work above what its contract needs, each blocking the tier
+  tables #476 will write. Investigator and advisor consultations launched on
+  `reconciliation` and `architect`, both judgment rounds pinned to the top
+  model, though an investigator gathers evidence and decides nothing. They
+  now default to a new non-judgment `consultation` round, and `test_plan`
+  leaves the judgment set, since pre-development preparation passes nothing.
+  The judgment rounds stay available by explicit `--round` for a
+  consultation that must settle something: the exhausted-allowance
+  diagnosis input, a recorded prior High miss, a fired `security` trigger.
+  The release worker, which edits no source, defaulted to
+  `release_adjudication`; it now defaults to `release_mechanics`, which no
+  longer demands a whole-result oracle a release cannot write in advance
+  (developer `mechanical` still does). The example config's tester
+  `hostile_verify` row drops from `xhigh` to `high` on Claude and Codex:
+  #477 made recorded risk the only path to `xhigh`, and an operator copying
+  the old example pinned every tester round there anyway. `review`,
+  `hostile_verify`, `recheck` and the judge keep their top-model floors. The
+  example's Codex `consultation` row at `medium` is unmeasured and says so.
+  Escalation is read from evidence, not remembered: round-context
+  `diagnosis_input`, `security_trigger` or a recorded `prior_high_miss` moves
+  the consultation to its judgment round, and a `consultation` request
+  against that evidence is refused. Config schema 4 requires the
+  `consultation` row in every tier table; a schema-3 table keeps the
+  judgment defaults it was written against.
+
 ## 0.3.267 — 2026-09-24
 
 ### Fixed

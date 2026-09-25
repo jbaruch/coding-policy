@@ -71,8 +71,31 @@ CLI or changing a model pin.
 ## Planning and dispatch
 
 `plan --round ROLE=ROUND` selects a configured round type. Without it, the
-role's default applies. `--round-context FILE` reads a JSON object keyed by
-assigned role. A mechanical context has this shape:
+role's default applies: each role's default is the cheapest round its contract
+allows (`DEFAULT_ROUNDS` in `skills/herdr-teamlead/teamlead/tiers.py`). A
+consultation that must settle something moves to its judgment round on the
+evidence in its round context, never on a remembered override. Which evidence
+moves which role is `ESCALATION_EVIDENCE` in the same file:
+
+- `diagnosis_input: true` on an investigator that is the exhausted-allowance
+  diagnosis input
+- `security_trigger: true` on an advisor when `detect-triggers` fired
+  `security`
+- a recorded `prior_high_miss` on an investigator
+
+With that evidence, a `consultation` round request is refused. Pass
+`--round release=release_adjudication` when the release worker must interpret
+a dispute; an ordinary dispute still goes to the judge.
+
+A `consultation` or `test_plan` row may name a non-top model. The example's
+Codex `consultation` and `test_plan` rows at `medium` are a starting point, not
+a measured result; record a measurement in the capability table before
+relying on it. Config schema 4 refuses a tier table without a `consultation`
+row; copy the example's row, never synthesize one from `build`. A schema-3
+table keeps the judgment defaults it was written against (`state-schema.md`).
+
+`--round-context FILE` reads a JSON object keyed by assigned role. A
+mechanical context has this shape:
 
 ```json
 {
@@ -82,7 +105,7 @@ assigned role. A mechanical context has this shape:
 }
 ```
 
-A mechanical round is licensed by one thing: a whole-result oracle, the
+A developer's `mechanical` round is licensed by one thing: a whole-result oracle, the
 expected result written down where a later check compares against it byte for
 byte. `kind` is `digest`, `patch` or `fixture` — an expected sha256 in `value`,
 or a file in `path` holding the exact patch or the complete expected output.

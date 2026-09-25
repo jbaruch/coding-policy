@@ -179,10 +179,25 @@ class ParseConfigTest(unittest.TestCase):
         self.assertEqual(by_name["grok"].dialog_next_tab_keys, ("tab",))
 
     def test_wrong_schema_version_is_rejected(self):
-        payload = dict(VALID, schema_version=4)
+        payload = dict(VALID, schema_version=5)
         with self.assertRaises(ConfigError) as caught:
             parse_config(payload)
         self.assertIn("schema_version", str(caught.exception))
+
+    def test_schema_4_tier_tables_carry_a_consultation_row(self):
+        # coding-policy#518/#524: investigator and advisor default to
+        # `consultation` from schema 4; an older table keeps its old default.
+        tiered = dict(VALID["agents"][0], tiers={"review": {"model": "opus-5", "effort": "high"}})
+        for version, refused in ((3, False), (4, True)):
+            with self.subTest(version=version):
+                payload = dict(VALID, schema_version=version, agents=[tiered])
+                if refused:
+                    with self.assertRaisesRegex(ConfigError, "consultation"):
+                        parse_config(payload)
+                else:
+                    self.assertEqual(len(parse_config(payload)), 1)
+        with_row = dict(tiered, tiers={**tiered["tiers"], "consultation": {"model": "sonnet-5", "effort": "high"}})
+        self.assertEqual(len(parse_config(dict(VALID, schema_version=4, agents=[with_row]))), 1)
 
     def test_missing_agents_array_is_rejected(self):
         with self.assertRaises(ConfigError):

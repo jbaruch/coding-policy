@@ -231,7 +231,8 @@ fresh-worker stage. Never reset the counter during re-planning. At a contested
 verdict or a foreman override, go to Step 13 first. At an exhausted allowance,
 record the checkpoint through the owner commands in
 `skills/herdr-teamlead/references/dispatch-recovery.md`, report implementation
-as `awaiting_diagnosis`, consult the investigator, and go to Step 13 with its
+as `awaiting_diagnosis`, consult the investigator with round context
+`{"investigator": {"diagnosis_input": true}}`, and go to Step 13 with its
 assessed report. Use the plan its
 remedy records for the bounded extra attempts; collect each preceding attempt's
 actual blocking review before continuing.

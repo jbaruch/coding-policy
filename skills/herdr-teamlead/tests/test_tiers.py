@@ -1,5 +1,6 @@
 """Policy boundaries for tier choice and launch proof."""
 
+import json
 import sys
 import tempfile
 import unittest
@@ -9,7 +10,7 @@ from types import SimpleNamespace
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from teamlead.errors import ConfigError, HerdrError, UsageError
-from teamlead.tiers import MissingTierError, SEATABLE_ROLES, launch_flags, mechanical_allowed, parse_tiers, require_seatable, select_tier as _select_tier, verify_argv, verify_worker_permissions, worker_launch_args
+from teamlead.tiers import TOP_MODELS, MissingTierError, SEATABLE_ROLES, launch_flags, mechanical_allowed, parse_tiers, require_seatable, select_tier as _select_tier, verify_argv, verify_worker_permissions, worker_launch_args
 
 
 def select_tier(*args, **kwargs):
@@ -55,7 +56,7 @@ class TierConfigTest(unittest.TestCase):
                 parse_tiers({"build": entry}, "claude")
 
     def test_judgment_cannot_be_lowered_by_config(self):
-        for round_type in ("review", "critic", "recheck", "test_plan", "release_adjudication"):
+        for round_type in ("review", "critic", "recheck", "hostile_verify", "architect", "reconciliation", "release_adjudication"):
             for entry in ({"model": "sonnet-5", "effort": "high"}, {"model": "opus-5", "effort": "medium"}):
                 with self.subTest(round_type=round_type, entry=entry), self.assertRaises(ConfigError):
                     parse_tiers({round_type: entry}, "claude")
@@ -73,7 +74,9 @@ class TierConfigTest(unittest.TestCase):
 class SelectionTest(unittest.TestCase):
     def test_only_missing_candidate_tiers_have_a_skippable_error(self):
         worker = agent()
-        with self.assertRaisesRegex(MissingTierError, "architect"):
+        # A table without a `consultation` row (config schema 3) keeps the
+        # advisor's old judgment default.
+        with self.assertRaisesRegex(MissingTierError, "'architect'"):
             select_tier(worker, "advisor")
         worker.tiers.pop("review")
         with self.assertRaisesRegex(MissingTierError, "review tier"):
@@ -83,19 +86,123 @@ class SelectionTest(unittest.TestCase):
                 select_tier(worker, role, requested, context)
             self.assertNotIsInstance(caught.exception, MissingTierError)
 
-    def test_consultations_use_fixed_judgment_rounds(self):
+    def test_consultations_default_below_the_judgment_floor(self):
+        # coding-policy#518: an investigator gathers evidence and decides
+        # nothing, and an advisor answers a bounded question; neither is a gate.
+        worker = agent()
+        worker.tiers.update(parse_tiers({
+            "consultation": {"model": "sonnet-5", "effort": "high"},
+            "architect": {"model": "opus-5", "effort": "high"},
+            "reconciliation": {"model": "opus-5", "effort": "high"},
+        }, worker.kind))
+        for role, escalated in (("advisor", "architect"), ("investigator", "reconciliation")):
+            with self.subTest(role=role):
+                tier = select_tier(worker, role)
+                self.assertEqual((tier["round"], tier["model"], tier["effort"]), ("consultation", "sonnet-5", "high"))
+                explicit = select_tier(worker, role, escalated)
+                self.assertEqual((explicit["round"], explicit["model"]), (escalated, "opus-5"))
+                for forbidden in ("build", "fix", "mechanical", "release_mechanics", "review", "hostile_verify", "recheck"):
+                    with self.assertRaisesRegex(UsageError, "cannot perform role"):
+                        select_tier(worker, role, forbidden, mechanical_context())
+
+    def test_consultation_and_test_plan_accept_a_non_top_row_and_gates_do_not(self):
+        for round_type in ("consultation", "test_plan"):
+            with self.subTest(round_type=round_type):
+                self.assertEqual(parse_tiers({round_type: {"model": "sonnet-5", "effort": "high"}}, "claude")[round_type]["model"],
+                                 "sonnet-5")
+        for round_type in ("reconciliation", "architect", "hostile_verify", "recheck"):
+            with self.subTest(round_type=round_type), self.assertRaises(ConfigError):
+                parse_tiers({round_type: {"model": "sonnet-5", "effort": "high"}}, "claude")
+
+    def test_scarcity_declines_a_consultation_bump_but_never_an_escalated_round(self):
+        worker = agent("codex")
+        worker.tiers.update(parse_tiers({
+            "consultation": {"model": "gpt-5.6-sol", "effort": "medium"},
+            "reconciliation": {"model": "gpt-5.6-sol", "effort": "high"},
+        }, worker.kind))
+        risk = {"risk_flags": ["network", "persistence"]}
+        scarce = select_tier(worker, "investigator", context=risk, headroom=1.0)
+        self.assertEqual((scarce["effort"], scarce["de_escalated"]), ("medium", True))
+        self.assertEqual(select_tier(worker, "investigator", context=risk, headroom=80.0)["effort"], "xhigh")
+        escalated = select_tier(worker, "investigator", "reconciliation", context=risk, headroom=1.0)
+        self.assertEqual((escalated["effort"], escalated["de_escalated"]), ("xhigh", False))
+
+    def test_recorded_evidence_selects_the_judgment_round_without_an_override(self):
+        worker = agent()
+        worker.tiers.update(parse_tiers({
+            "consultation": {"model": "sonnet-5", "effort": "high"},
+            "architect": {"model": "opus-5", "effort": "high"},
+            "reconciliation": {"model": "opus-5", "effort": "high"},
+        }, worker.kind))
+        for role, context, expected in (("investigator", {"diagnosis_input": True}, "reconciliation"),
+                                        ("investigator", {"prior_high_miss": True}, "reconciliation"),
+                                        ("advisor", {"security_trigger": True}, "architect"),
+                                        ("advisor", {"diagnosis_input": True}, "consultation"),
+                                        ("investigator", {"security_trigger": True}, "consultation")):
+            with self.subTest(role=role, context=context):
+                tier = select_tier(worker, role, context=context, headroom=1.0)
+                self.assertEqual((tier["round"], tier["de_escalated"]), (expected, False))
+
+    def test_an_explicit_consultation_cannot_override_escalation_evidence(self):
+        worker = agent()
+        worker.tiers.update(parse_tiers({"consultation": {"model": "sonnet-5", "effort": "high"}}, worker.kind))
+        with self.assertRaisesRegex(UsageError, "diagnosis_input requires investigator to settle this"):
+            select_tier(worker, "investigator", "consultation", {"diagnosis_input": True})
+        for flag in ("diagnosis_input", "security_trigger"):
+            with self.subTest(flag=flag), self.assertRaisesRegex(UsageError, "JSON boolean"):
+                select_tier(worker, "advisor", context={flag: "yes"})
+
+    def test_a_table_written_before_schema_4_keeps_the_judgment_default(self):
         worker = agent()
         worker.tiers.update(parse_tiers({
             "architect": {"model": "opus-5", "effort": "high"},
             "reconciliation": {"model": "opus-5", "effort": "high"},
         }, worker.kind))
-        for role, expected in (("advisor", "architect"), ("investigator", "reconciliation")):
-            with self.subTest(role=role):
-                self.assertEqual(select_tier(worker, role)["round"], expected)
-                self.assertEqual(select_tier(worker, role)["model"], "opus-5")
-                for forbidden in ("build", "fix", "mechanical", "release_mechanics", "review"):
-                    with self.assertRaisesRegex(UsageError, "cannot perform role"):
-                        select_tier(worker, role, forbidden, mechanical_context())
+        self.assertEqual(select_tier(worker, "advisor")["round"], "architect")
+        self.assertEqual(select_tier(worker, "investigator")["round"], "reconciliation")
+
+    def test_architect_role_default_is_unchanged(self):
+        worker = agent()
+        worker.tiers.update(parse_tiers({"architect": {"model": "opus-5", "effort": "high"}}, worker.kind))
+        self.assertEqual(select_tier(worker, "architect")["round"], "architect")
+
+    def test_release_defaults_to_mechanics_without_an_oracle(self):
+        # coding-policy#521: a release worker edits no source; its skill's own
+        # gates are the loud failure, and it has no pre-written whole result.
+        worker = agent()
+        worker.tiers.update(parse_tiers({
+            "release_mechanics": {"model": "sonnet-5", "effort": "medium"},
+            "release_adjudication": {"model": "opus-5", "effort": "high"},
+        }, worker.kind))
+        tier = select_tier(worker, "release")
+        self.assertEqual((tier["round"], tier["model"]), ("release_mechanics", "sonnet-5"))
+        adjudication = select_tier(worker, "release", "release_adjudication")
+        self.assertEqual((adjudication["model"], adjudication["effort"]), ("opus-5", "high"))
+
+    def test_a_developer_mechanical_round_still_needs_an_oracle(self):
+        with self.assertRaisesRegex(UsageError, "Mechanical eligibility"):
+            select_tier(agent(), "developer", "mechanical", {})
+        self.assertEqual(select_tier(agent(), "developer", "mechanical", mechanical_context())["round"], "mechanical")
+
+    def test_the_shipped_example_is_the_documented_template(self):
+        # coding-policy#518/#519: the example is what operators copy.
+        example = json.loads((Path(__file__).resolve().parents[1] / "config.example.json").read_text())
+        agents = example["agents"] if isinstance(example["agents"], list) else list(example["agents"].values())
+        tiered = [worker for worker in agents if worker.get("tiers")]
+        self.assertEqual(sorted(worker["kind"] for worker in tiered), ["claude", "codex", "grok"])
+        for worker in tiered:
+            tiers = parse_tiers(worker["tiers"], worker["kind"])
+            with self.subTest(kind=worker["kind"]):
+                self.assertEqual(tiers["hostile_verify"]["effort"], "high")
+                self.assertIn(tiers["hostile_verify"]["model"], TOP_MODELS[worker["kind"]])
+                if worker["kind"] == "claude":
+                    self.assertNotIn(tiers["consultation"]["model"], TOP_MODELS["claude"])
+                self.assertEqual(tiers["consultation"], {**tiers["test_plan"]})
+                probe = SimpleNamespace(name=worker["kind"], kind=worker["kind"], tiers=tiers)
+                empty = select_tier(probe, "tester")
+                self.assertEqual(empty["effort"], "high")
+                risky = select_tier(probe, "tester", context={"risk_flags": ["network", "persistence"]})
+                self.assertEqual(risky["effort"], "high" if worker["kind"] == "grok" else "xhigh")
 
     def test_initial_build_and_late_fix_have_different_models(self):
         worker = agent()
