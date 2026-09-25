@@ -179,13 +179,46 @@ class RunCommand(unittest.TestCase):
         args = SimpleNamespace(repo=str(self.tmp), base="BASE", head=head, partition=str(self.path))
         result, _ = partition.run_command(args, runner=self.runner(changed))
         seats = partition.seat_paths(result, "reviewer")
-        plan = self.tmp / "plan.json"
-        plan.write_text(json.dumps({"slice_paths": seats, "partition_proof": result["proof"]}))
-        return plan
+        return {"slice_paths": seats, "slice_digest": partition.slice_digest(seats),
+                "seat_digests": {seat: partition.seat_digest(seat, paths) for seat, paths in seats.items()},
+                "partition_proof": result["proof"]}
 
-    def verify(self, plan, changed, head="HEAD"):
-        args = SimpleNamespace(command="verify-partition", plan=str(plan), repo=str(self.tmp), head=head)
-        return partition.run_command(args, runner=self.runner(changed))[0]
+    def verify(self, plan, changed, head="HEAD", base=None, repo=None):
+        return partition.verify(plan, repo or str(self.tmp), head, base or self.COMMITS["BASE"],
+                                runner=self.runner(changed))
+
+    def test_the_gate_refuses_another_repo_or_base(self):
+        changed = ["src/api/routes.py", "src/core/db.py"]
+        plan = self.plan_for(changed)
+        with self.assertRaisesRegex(UsageError, "proven in"):
+            self.verify(plan, changed, repo=str(self.tmp / "elsewhere"))
+        with self.assertRaisesRegex(UsageError, "task's recorded base"):
+            self.verify(plan, changed, base="e" * 40)
+
+    def test_the_gate_refuses_an_edited_boundary_or_proof(self):
+        changed = ["src/api/routes.py", "src/core/db.py"]
+        moved = self.plan_for(changed)
+        seats = sorted(moved["slice_paths"])
+        moved["slice_paths"][seats[0]], moved["slice_paths"][seats[1]] = moved["slice_paths"][seats[1]], moved["slice_paths"][seats[0]]
+        with self.assertRaisesRegex(UsageError, "edited after planning"):
+            self.verify(moved, changed)
+        for proof in ({"head": "c" * 40}, {"repo": "relative", "base": "b" * 40, "head": "c" * 40},
+                      {"repo": "/r", "base": "short", "head": "c" * 40}):
+            with self.subTest(proof=proof):
+                broken = {**self.plan_for(changed), "partition_proof": proof}
+                with self.assertRaisesRegex(UsageError, "no usable proof"):
+                    self.verify(broken, changed)
+        with self.assertRaisesRegex(UsageError, "no usable slice_paths"):
+            self.verify({**self.plan_for(changed), "slice_paths": {"reviewer#api": "not-a-list"}}, changed)
+
+    def test_a_result_before_schema_2_is_refused_at_plan(self):
+        args = SimpleNamespace(repo=str(self.tmp), base="BASE", head="HEAD", partition=str(self.path))
+        result, _ = partition.run_command(args, runner=self.runner(["src/api/routes.py", "src/core/db.py"]))
+        self.assertEqual(result["schema_version"], partition.RESULT_SCHEMA_VERSION)
+        old = self.tmp / "old-result.json"
+        old.write_text(json.dumps({**{k: v for k, v in result.items() if k != "proof"}, "schema_version": 1}))
+        with self.assertRaisesRegex(UsageError, "result schema 1"):
+            partition.load_validated(str(old))
 
     def test_the_gate_accepts_a_plan_covering_the_diff_at_its_proven_tip(self):
         changed = ["src/api/routes.py", "src/core/db.py"]

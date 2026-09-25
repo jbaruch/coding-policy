@@ -688,7 +688,7 @@ def validated_partition(slices=None, changed=None):
     """
     slices = slices or [{"name": "api", "paths": ["src/api/routes.py"]},
                         {"name": "core", "paths": ["src/core/db.py"]}]
-    return {"schema_version": 1, "role": "reviewer", "slices": slices,
+    return {"schema_version": 2, "role": "reviewer", "slices": slices,
             "changed": changed or ["src/api/routes.py", "src/core/db.py"],
             # What `validate-partition` stamps: the diff the slices were proven over (#460).
             "proof": {"repo": "/repo", "base": "b" * 40, "head": "c" * 40}}
@@ -818,6 +818,23 @@ class ApplyCommandTest(CliCase):
         steps = {step["role"]: step["agent"] for step in json.loads(applied)["steps"]}
         self.assertEqual(sorted(steps), ["reviewer#api", "reviewer#core"])
         self.assertEqual(len(set(steps.values())), 2)
+
+    def test_the_review_gate_refuses_a_task_with_no_recorded_base(self):
+        # coding-policy#460: the gate binds the proof to the task's recorded base.
+        partition = self.tmp / "gate.json"
+        partition.write_text(json.dumps(validated_partition()))
+        out = io.StringIO()
+        code = main(self.base() + ["plan", "--roles", "reviewer", "--partition", str(partition),
+                                   "--now", AT, "--snapshot", str(self.snapshot)], stdout=out)
+        self.assertEqual(code, 0, out.getvalue())
+        plan_file = self.tmp / "gate-plan.json"
+        plan_file.write_text(out.getvalue(), encoding="utf-8")
+        self.assertEqual(json.loads(out.getvalue())["partition_proof"]["head"], "c" * 40)
+        err = io.StringIO()
+        code = main(self.base() + ["verify-partition", "--plan", str(plan_file), "--repo", str(self.tmp),
+                                   "--head", "HEAD", "--task", "never-registered"], stdout=io.StringIO(), stderr=err)
+        self.assertEqual(code, 1)
+        self.assertIn("no registered base", err.getvalue())
 
     def test_a_seat_inherits_its_role_bars_alongside_its_own(self):
         # An exclusion is a bar, not a setting a seat overrides. Naming one

@@ -44,6 +44,11 @@ from .triggers import git_runner, parse_name_status
 #: The partition document's own version, so a later shape change is auditable
 #: (`rules/stateful-artifacts.md` Migration Policy).
 PARTITION_SCHEMA_VERSION = 1
+#: A `validate-partition` RESULT's own version. Version 2 adds `proof`, the
+#: repo, base and head the slices were proven over (#460). A version-1 result
+#: carries no proof and is refused at `plan`: re-validate.
+RESULT_SCHEMA_VERSION = 2
+FULL_SHA = re.compile(r"[0-9a-f]{40}")
 
 COMMANDS = frozenset({"validate-partition"})
 
@@ -209,7 +214,14 @@ def load_validated(path):
     # uncovered file pass a shape check, and the round seats against them.
     # Re-deriving costs nothing and re-proves the property rather than taking
     # the artifact's word for it (#453).
+    if document.get("schema_version") != RESULT_SCHEMA_VERSION:
+        raise UsageError(
+            "The validated partition at {} is result schema {}; this build plans from schema {}, which records "
+            "the proof. Re-run `validate-partition` and plan from its output.".format(
+                path, document.get("schema_version"), RESULT_SCHEMA_VERSION), {"path": str(path)})
+    check_proof(document.get("proof"), "The validated partition at {}".format(path))
     inner = {key: value for key, value in document.items() if key not in ("changed", "proof")}
+    inner["schema_version"] = PARTITION_SCHEMA_VERSION
     accepted = validate_document(inner, str(path))
     validate_resolved(set(changed), accepted, str(path))
     return accepted
@@ -361,6 +373,7 @@ def register_commands(sub, common):
     check.add_argument("--plan", required=True, metavar="FILE", help="The plan `plan --partition` wrote.")
     check.add_argument("--repo", required=True, metavar="PATH", help="The repository the partition covers.")
     check.add_argument("--head", required=True, metavar="REV", help="The tip whose review is being accepted.")
+    check.add_argument("--task", required=True, help="The task whose recorded base and dispatched seats the plan covers.")
 
 
 def _revision(run, rev):
@@ -373,51 +386,81 @@ def _revision(run, rev):
 
 def run_command(args, runner=None):
     """Validate this round's partition against the paths its diff changed, and stamp what it was proven against."""
-    if getattr(args, "command", None) == "verify-partition":
-        return verify(args, runner), None
     partition = load_partition(args.partition)
     run = runner if runner is not None else git_runner(args.repo)
     head = getattr(args, "head", None)
-    span = [args.base + "..." + head] if head else [args.base]
+    # Resolved first, so an unknown revision is named rather than failing the diff.
+    base_sha = _revision(run, args.base)
+    head_sha = _revision(run, head) if head else None
+    span = [base_sha + "..." + head_sha] if head_sha else [base_sha]
     changes = parse_name_status(run(["diff", "--no-renames", *span, "--name-status", "-z"]))
     result = validate(set(changes), partition)
+    result["schema_version"] = RESULT_SCHEMA_VERSION
     # The proof names what the partition was checked against, so the review
     # gate can confirm the plan still covers the diff at the tip it accepts (#460).
-    result["proof"] = {"repo": str(Path(args.repo).expanduser().resolve()), "base": _revision(run, args.base),
-                       "head": _revision(run, head) if head else None}
+    result["proof"] = {"repo": str(Path(args.repo).expanduser().resolve()), "base": base_sha, "head": head_sha}
     return result, None
+
+
+def check_proof(proof, where):
+    """A proof's exact shape: an absolute repo, a full base commit, and a full head commit or null."""
+    valid = (isinstance(proof, dict) and set(proof) == {"repo", "base", "head"}
+             and isinstance(proof["repo"], str) and Path(proof["repo"]).is_absolute()
+             and isinstance(proof["base"], str) and bool(FULL_SHA.fullmatch(proof["base"]))
+             and (proof["head"] is None or isinstance(proof["head"], str) and bool(FULL_SHA.fullmatch(proof["head"]))))
+    if not valid:
+        raise UsageError("{} carries no usable proof of what the partition was checked against; re-run "
+                         "`validate-partition` with this build and plan from its output.".format(where), {"where": where})
+    return proof
 
 
 def load_proof(path):
     """The proof a `validate-partition` result carries, or a refusal to re-validate."""
     document = json.loads(Path(path).read_text(encoding="utf-8"))
-    proof = document.get("proof") if isinstance(document, dict) else None
-    if (not isinstance(proof, dict) or set(proof) != {"repo", "base", "head"}
-            or not all(isinstance(proof[key], str) and proof[key] for key in ("repo", "base"))
-            or not (proof["head"] is None or isinstance(proof["head"], str))):
-        raise UsageError("The validated partition at {} carries no proof of what it was checked against; re-run "
-                         "`validate-partition` with this build and plan from its output.".format(path), {"path": str(path)})
-    return proof
+    return check_proof(document.get("proof") if isinstance(document, dict) else None,
+                       "The validated partition at {}".format(path))
 
 
-def verify(args, runner=None):
-    """Refuse a plan's partition unless it covers exactly the diff at the tip under review."""
-    try:
-        plan = json.loads(Path(args.plan).read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
-        raise UsageError("Cannot read the plan at {}: {}. Pass the JSON `plan --partition` wrote.".format(args.plan, exc),
-                         {"path": str(args.plan)}) from None
-    proof = plan.get("partition_proof") if isinstance(plan, dict) else None
-    slice_paths = plan.get("slice_paths") if isinstance(plan, dict) else None
-    if not isinstance(proof, dict) or not isinstance(slice_paths, dict) or not slice_paths:
-        raise UsageError("The plan at {} seats no validated partition (no partition_proof or slice_paths); plan the "
-                         "round with `plan --partition <validate-partition output>`.".format(args.plan), {"path": str(args.plan)})
-    if proof.get("head") is None:
+def check_slice_paths(slice_paths, where):
+    """`{seat: [path, ...]}` with string seats and non-empty lists of non-empty strings."""
+    if (not isinstance(slice_paths, dict) or not slice_paths
+            or any(not isinstance(seat, str) or not isinstance(paths, list) or not paths
+                   or any(not isinstance(path, str) or not path.strip() for path in paths)
+                   for seat, paths in slice_paths.items())):
+        raise UsageError("{} has no usable slice_paths; plan the round with `plan --partition <validate-partition "
+                         "output>` rather than editing the plan.".format(where), {"where": where})
+    return slice_paths
+
+
+def verify(plan, repo, head, task_base, runner=None):
+    """Refuse a plan's partition unless it covers exactly the task's diff at the tip under review.
+
+    `plan` is the loaded plan document; the caller has already checked each
+    seat's dispatched brief against its seat digest. Every field is checked
+    before use, and the proof is bound to this repo and the task's recorded
+    base, so an edited plan is refused rather than verified.
+    """
+    where = "The plan"
+    slice_paths = check_slice_paths(plan.get("slice_paths") if isinstance(plan, dict) else None, where)
+    if plan.get("slice_digest") != slice_digest(slice_paths) or plan.get("seat_digests") != {
+            seat: seat_digest(seat, paths) for seat, paths in slice_paths.items()}:
+        raise UsageError("The plan's slice_paths no longer match its slice_digest and seat_digests, so its boundary "
+                         "was edited after planning. Replan from the validate-partition result.", {})
+    proof = check_proof(plan.get("partition_proof"), where)
+    if proof["head"] is None:
         raise UsageError("The partition was validated against the working tree, not a pushed head, so no tip can be "
                          "checked against it. Re-run validate-partition with --head at the pushed tip, replan, and "
-                         "re-dispatch the slices.", {"path": str(args.plan)})
-    run = runner if runner is not None else git_runner(args.repo)
-    tip = _revision(run, args.head)
+                         "re-dispatch the slices.", {})
+    here = str(Path(repo).expanduser().resolve())
+    if proof["repo"] != here:
+        raise UsageError("The partition was proven in {}, not {}; verify it against the repository it covers.".format(
+            proof["repo"], here), {"proven": proof["repo"], "repo": here})
+    if proof["base"] != task_base:
+        raise UsageError("The partition was proven from base {}, but the task's recorded base is {}; a later base "
+                         "hides part of the task's change. Re-validate from the recorded base and replan.".format(
+                             proof["base"], task_base), {"proven": proof["base"], "task_base": task_base})
+    run = runner if runner is not None else git_runner(repo)
+    tip = _revision(run, head)
     if tip != proof["head"]:
         raise UsageError("The partition was proven at {}, but the tip under review is {}. A new push can change the diff "
                          "the slices cover: re-run validate-partition at the tip, replan, and review the slices again."
@@ -435,5 +478,5 @@ def verify(args, runner=None):
                          "owned twice. Re-run validate-partition at the tip and replan.".format(
                              proof["base"][:12], tip[:12], len(unowned), len(stale), len(shared)),
                          {"unowned": unowned, "stale": stale, "shared": shared})
-    return {"schema_version": PARTITION_SCHEMA_VERSION, "verified": True, "base": proof["base"], "head": tip,
+    return {"schema_version": RESULT_SCHEMA_VERSION, "verified": True, "base": proof["base"], "head": tip,
             "seats": sorted(slice_paths), "changed": len(changed)}

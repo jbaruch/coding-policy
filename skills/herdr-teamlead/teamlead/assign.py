@@ -179,6 +179,30 @@ def reject_duplicate_agents(assignments):
 FROZEN_DIR = ".dispatched"
 
 
+def freeze_decision(dispatches, task, assignments, paths):
+    """`source` when every assigned role replays a dispatch recorded under these source paths, else `frozen`.
+
+    A replay must keep the paths its record names, or its identity changes
+    and it reads as new work. A dispatch recorded before the freeze names its
+    source brief and common brief; an exact match on task, role, agent and
+    both paths is a replay. A batch mixing replays with new roles is refused,
+    so no new dispatch escapes the freeze (#460).
+    """
+    if not task:
+        return "frozen"
+    replays = {role for role, name in assignments.items() if any(
+        row.get("task") == task and row.get("role") == role and row.get("agent") == name
+        and row.get("brief") == paths[role] and row.get("common") == paths["common"]
+        for row in dispatches)}
+    if not replays:
+        return "frozen"
+    if replays != set(assignments):
+        raise UsageError("Roles {} replay dispatches recorded under their source briefs, and {} are new. Apply them in "
+                         "separate calls: a replay keeps its recorded paths, and a new dispatch reads frozen copies."
+                         .format(", ".join(sorted(replays)), ", ".join(sorted(set(assignments) - replays))), {})
+    return "source"
+
+
 def freeze_paths(paths):
     """Copy each brief, and the common brief, to a content-addressed file nothing rewrites.
 
@@ -204,7 +228,16 @@ def freeze_paths(paths):
             with open(target, "xb") as handle:
                 handle.write(data)
         except FileExistsError:
-            if hashlib.sha256(target.read_bytes()).hexdigest() != digest:
+            # A link could point back at the mutable source; only a regular file is a frozen copy.
+            if target.is_symlink() or not target.is_file():
+                raise UsageError("Frozen brief {} is a link or not a regular file; move it aside and re-run so the "
+                                 "freeze writes a real copy.".format(target), {"path": str(target)}) from None
+            try:
+                existing = target.read_bytes()
+            except OSError as exc:
+                raise UsageError("Cannot read frozen brief {}: {}. Restore its readability or move it aside and "
+                                 "re-run.".format(target, exc.strerror or str(exc)), {"path": str(target)}) from None
+            if hashlib.sha256(existing).hexdigest() != digest:
                 raise UsageError("Frozen brief {} exists with other content; it is never rewritten. Move it aside "
                                  "and re-run.".format(target), {"path": str(target)}) from None
         except OSError as exc:

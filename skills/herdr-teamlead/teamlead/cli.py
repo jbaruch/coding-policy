@@ -22,7 +22,7 @@ from types import SimpleNamespace
 
 from . import __version__
 from .assign import apply as apply_assignments
-from .assign import APPLY_SCHEMA_VERSION, dry_run, freeze_paths, native_context_session, normalize_assignments, resolve_paths, validate_fix_history
+from .assign import APPLY_SCHEMA_VERSION, dry_run, freeze_decision, freeze_paths, native_context_session, normalize_assignments, resolve_paths, validate_fix_history
 from . import attention, capabilities, composition, engagement, foreman_queue, historical, load_set, members, memory, oracle, partition, recovery, report_delivery, restoration, role_clear, retrospective, retrospective_runtime, supervision, supervision_gate, supervision_runtime, triggers
 from .config import default_config_path, load_config, load_judge, load_role_costs, select_agents
 from .errors import PlanError, StateError, TeamLeadError, UsageError
@@ -1112,13 +1112,6 @@ def _require_bound_slices(document, seated, briefs):
                 {"role": role, "expected_scope": expected_scope})
 
 
-def _recorded_with_sources(store, task, assignments, paths):
-    """Whether this task already recorded a dispatch of these roles under the unfrozen source paths."""
-    return bool(task) and any(
-        row.get("task") == task and row.get("role") in assignments and row.get("brief") == paths.get(row.get("role"))
-        for row in store["dispatches"])
-
-
 def cmd_apply(args, client=None, warn=None, trace=None):
     agents = load_config(_config_path(args))
     agents_by_name = {agent.name: agent for agent in agents}
@@ -1163,7 +1156,7 @@ def cmd_apply(args, client=None, warn=None, trace=None):
     # identity, the prompt it sends (#460). A dispatch recorded before the
     # freeze keeps the source paths its record names, so its replay still
     # matches. A dry run writes nothing and reads the sources.
-    if not args.dry_run and not _recorded_with_sources(state["recovery"], args.task, assignments, paths):
+    if not args.dry_run and freeze_decision(state["recovery"]["dispatches"], args.task, assignments, paths) == "frozen":
         paths = freeze_paths(paths)
     if seated or any(key in document for key in ("slice_paths", "slice_digest", "seat_digests")):
         # Keyed on the metadata, not only on the seats: a saved plan stripped
@@ -1814,6 +1807,37 @@ def cmd_detect_triggers(args, client=None, warn=None, trace=None):
     return triggers.run_command(args)
 
 
+def cmd_verify_partition(args, client=None, warn=None, trace=None):
+    """The review gate for a partitioned round: the plan's boundary, as dispatched, covers the task's diff at the tip."""
+    try:
+        plan = json.loads(Path(args.plan).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise UsageError("Cannot read the plan at {}: {}. Pass the JSON `plan --partition` wrote.".format(args.plan, exc),
+                         {"path": str(args.plan)}) from None
+    if not isinstance(plan, dict):
+        raise UsageError("The plan at {} is not a JSON object; pass the JSON `plan --partition` wrote.".format(args.plan), {})
+    state, usable = load_state_checked(_state_path(args), warn, persist_migration=False)
+    if not usable:
+        raise StateError("The dispatch state is unusable, so the task's base and dispatched briefs cannot be read; "
+                         "restore it before verifying.", {})
+    store = state["recovery"]
+    task = store["tasks"].get(args.task)
+    if task is None:
+        raise UsageError("Task {!r} has no registered base; pass the task the plan was dispatched under.".format(args.task), {})
+    slice_paths = partition.check_slice_paths(plan.get("slice_paths"), "The plan")
+    briefs = {}
+    for seat in slice_paths:
+        row = next((item for item in reversed(store["dispatches"]) if item.get("task") == args.task
+                    and item.get("role") == seat and item.get("status") == "applied"), None)
+        if row is None or not row.get("brief"):
+            raise UsageError("Seat {} has no applied dispatch for task {}; a slice nobody was sent cannot pass.".format(
+                seat, args.task), {"seat": seat})
+        briefs[seat] = row["brief"]
+    # Each seat reviewed what its dispatched (frozen) brief bound it to.
+    _require_bound_slices(plan, sorted(slice_paths), briefs)
+    return partition.verify(plan, args.repo, args.head, task["base_revision"]), None
+
+
 def cmd_validate_partition(args, client=None, warn=None, trace=None):
     return partition.run_command(args)
 
@@ -1868,7 +1892,7 @@ COMMANDS = {
     **{command: cmd_recovery for command in ("task", "checkpoint", "authorize-corrections", "authorize-approach", "recover-context", "recover-role-clear", "record-report", "record-refusal", "authorize-refused-dispatch", "diagnose", "reconcile", "record-release-clear", "import-correction", "record-historical-review", "recover-report", "assess-specialist", "close-task")},
     "detect-triggers": cmd_detect_triggers,
     "validate-partition": cmd_validate_partition,
-    "verify-partition": cmd_validate_partition,
+    "verify-partition": cmd_verify_partition,
     "verify-oracle": cmd_verify_oracle,
     "start-judge": cmd_start_judge,
     "probe-report": cmd_probe_report,

@@ -11,7 +11,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from teamlead.assign import FROZEN_DIR, freeze_paths
+from teamlead.assign import FROZEN_DIR, freeze_decision, freeze_paths
 from teamlead.errors import UsageError
 
 
@@ -54,6 +54,40 @@ class FreezeTest(unittest.TestCase):
     def test_an_unreadable_source_names_the_repair(self):
         with self.assertRaisesRegex(UsageError, "Restore readability"):
             freeze_paths({"common": str(self.root / "missing.md")})
+
+
+class FreezeLinkTest(FreezeTest):
+    def test_a_frozen_path_that_is_a_link_is_refused(self):
+        target = Path(freeze_paths(self.paths)["reviewer"])
+        target.unlink()
+        target.symlink_to(self.brief)
+        with self.assertRaisesRegex(UsageError, "is a link"):
+            freeze_paths(self.paths)
+
+
+class FreezeDecisionTest(unittest.TestCase):
+    PATHS = {"common": "/b/COMMON.md", "reviewer": "/b/reviewer.md", "tester": "/b/tester.md"}
+
+    def row(self, role, agent, brief=None, common="/b/COMMON.md", task="t"):
+        return {"task": task, "role": role, "agent": agent, "brief": brief or self.PATHS[role], "common": common}
+
+    def test_new_work_is_frozen(self):
+        self.assertEqual(freeze_decision([], "t", {"reviewer": "codex"}, self.PATHS), "frozen")
+        self.assertEqual(freeze_decision([self.row("reviewer", "codex")], None, {"reviewer": "codex"}, self.PATHS), "frozen")
+
+    def test_an_exact_source_path_replay_keeps_its_sources(self):
+        rows = [self.row("reviewer", "codex"), self.row("tester", "grok")]
+        self.assertEqual(freeze_decision(rows, "t", {"reviewer": "codex", "tester": "grok"}, self.PATHS), "source")
+
+    def test_a_near_match_is_new_work(self):
+        for row in (self.row("reviewer", "claude"), self.row("reviewer", "codex", common="/b/OTHER.md"),
+                    self.row("reviewer", "codex", task="other")):
+            with self.subTest(row=row):
+                self.assertEqual(freeze_decision([row], "t", {"reviewer": "codex"}, self.PATHS), "frozen")
+
+    def test_a_batch_mixing_replays_and_new_roles_is_refused(self):
+        with self.assertRaisesRegex(UsageError, "separate calls"):
+            freeze_decision([self.row("reviewer", "codex")], "t", {"reviewer": "codex", "tester": "grok"}, self.PATHS)
 
 
 if __name__ == "__main__":

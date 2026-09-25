@@ -268,20 +268,8 @@ Exit 1 names every unowned path, every overlap and every slice owning nothing,
 in one run. Fix the partition and re-run; plan only once it exits 0. Save its
 stdout — `plan --partition` takes that result, never the document
 `validate-partition` read. Validate at the pushed head: the result's `proof`
-records the repo, base and head it was proven against, and a working-tree
-proof cannot be checked at the review gate. Before accepting a partitioned
-responsibility's pass at Step 12, confirm its plan still covers exactly the
-diff at the tip under review:
-
-```bash
-CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
-bash "$CP/skills/herdr-teamlead/teamlead.sh" verify-partition \
-  --plan <plan.json> --repo <repo-path> --head <tip-under-review>
-```
-
-Exit 0 confirms it. Exit 1 names the stale head, or the paths the slices
-leave unowned, no longer cover, or own twice; re-validate at the tip, replan,
-and review the slices again. Format, ownership
+records the repo, base and head it was proven against, and Step 12's gate
+cannot check a working-tree proof. Format, ownership
 payload and the seating it produces:
 
 ```text
@@ -552,6 +540,21 @@ bash "$CP/skills/herdr-teamlead/teamlead.sh" verify-oracle \
 
 Exit 0 is a match. Exit 1 with `"match": false` is a blocking finding on the
 round; exit 1 with no verdict is a usage error to resolve before gating.
+Before accepting a partitioned responsibility's pass, confirm its plan, as
+dispatched, still covers exactly the task's diff at the tip under review:
+
+```bash
+CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
+bash "$CP/skills/herdr-teamlead/teamlead.sh" verify-partition \
+  --plan <plan.json> --repo <repo-path> --head <tip-under-review> --task <task>
+```
+
+- Exit 0 confirms it
+- Exit 1 names what failed: another repo or base, a stale head, an edited
+  boundary, a seat never dispatched or dispatched with another boundary, or
+  paths the slices leave unowned, no longer cover, or own twice
+- On exit 1, re-validate at the tip, replan, and review the slices again
+
 Record assignment acceptance or outstanding work in the task ledger against
 the inspected report and artifact evidence. Record the task's gate decision
 separately; a worker finishing its brief never completes the whole task.
