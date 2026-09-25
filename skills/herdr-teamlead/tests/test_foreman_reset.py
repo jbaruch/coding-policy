@@ -518,7 +518,8 @@ class ResetCommandTest(CliCase):
                              {"error": "herdr_error", "message": "boom", "details": {}, "resume_prompt": "paste me"})
         result = attention_view.catch_up(self.state, "2026-09-24T11:00:00+00:00")
         self.assertEqual([(item["stow"], item["resume_prompt"]) for item in result["foreman_resets"]], [("round-7", "paste me")])
-        self.assertTrue(result["markdown"].index("Foreman reset failed") < len(result["markdown"]))
+        self.assertIn("Foreman reset failed", result["attention_markdown"])
+        self.assertNotIn("Nothing currently needs your attention", result["attention_markdown"])
 
     def test_a_later_delivered_reset_supersedes_an_older_failure(self):
         first, second = {"pane_id": PANE, "stow": "round-7"}, {"pane_id": PANE, "stow": "round-8"}
