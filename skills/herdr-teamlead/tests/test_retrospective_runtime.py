@@ -308,6 +308,27 @@ class RetrospectiveRuntimeTest(unittest.TestCase):
         self.assertEqual(start.call_count, 0)
         self.assertFalse(self.path.exists())
 
+    def test_judge_start_refuses_a_pin_the_capability_table_records_inadequate(self):
+        # coding-policy#476: the pinned judge has no substitute, so the table is
+        # read before anything launches, not first at apply.
+        from teamlead import capabilities
+        self.path = self.root / "capability-team.json"
+        plan = self.root / "capability-judge-plan.json"
+        plan.write_text(json.dumps({"assignments": {"judge": "codex"},
+                                   "task_context": {"task": "judge-task"},
+                                   "judge": {"agent": "codex", "model": "gpt-5.6-sol", "effort": "high",
+                                             "mode": "adjudication"}}))
+        capabilities.storage_path(self.path).write_text(json.dumps({
+            "schema_version": 1, "refreshed_at": AT, "entries": [{
+                "schema_version": 1, "model": "gpt-5.6-sol", "effort": "high", "capability": "pinned-judge-launch",
+                "verdict": "inadequate", "source": {"kind": "project", "ref": "fixture", "dated": "2026-09-23"},
+                "recorded_at": AT}]}))
+        with patch.object(self.client, "agent_start") as start:
+            rc, out, err = self.invoke("start-judge", "--assignments", str(plan), "--pane", "w3:p1", "--kind", "codex", "--now", AT)
+        self.assertEqual(rc, 1)
+        self.assertEqual(json.loads(err)["error"], "capability_inadequate")
+        self.assertEqual(start.call_count, 0)
+
     def test_canonical_state_symlink_survives_owner_write(self):
         alias = self.root / "alias.json"
         alias.symlink_to(self.path)

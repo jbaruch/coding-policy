@@ -35,6 +35,12 @@ under schema 2 or 3 has no such row and keeps the defaults it was written
 against: investigator on `reconciliation`, advisor on `architect`. Moving to
 schema 4 is the operator adding the example's `consultation` row and bumping
 `schema_version`; nothing rewrites the file.
+
+Config schema 5 requires a tier table on every worker except the pinned judge
+named in the `judge` block (`teamlead/config.py`). A worker without one gets
+no tier from selection, so every round it takes records `tier: null` and runs
+at whatever model is already live, unproven (#476). Under schema 4 and below
+an untiered worker still loads, with that behaviour.
 Config schema 2 added per-agent `tiers` and `launch_args`.
 See `skills/herdr-teamlead/references/model-tiers.md` for billing evidence. A missing config is refused with the exact `cp` command to run. The
 optional `idle_markers` / `working_markers` per-agent keys carry the footer
