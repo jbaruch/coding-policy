@@ -22,6 +22,24 @@
   at any other tip, or slices that do not cover exactly
   `git diff base...head`.
 
+## 0.3.270 — 2026-09-25
+
+### Added
+
+- **`teamlead close-member` and `check-member` replace the foreman's two most
+  repeated command chains (#508).** The foreman session audited in #483 wrote
+  four scratch scripts; #491's round preflight and #504/#505's derived bars
+  and queue absorbed two of them. The two left run once per report.
+  `close-member` refuses until the task ledger's latest event for the
+  enrollment's worker and report carries an assessed decision, then
+  acknowledges that enrollment's pending events and resolves it, citing the
+  ledger event. The order is the point: acknowledging an observation must
+  never stand in for accepting the assignment, and prose asked the foreman
+  to remember that. `check-member` reads the agent, report, the task's
+  registered base and the dispatch's send time from the owner records and
+  runs `wait-report.sh --once` with them, so none of those is looked up by
+  hand. Both compose the existing owner functions and replay safely.
+
 ## 0.3.269 — 2026-09-25
 
 ### Changed
