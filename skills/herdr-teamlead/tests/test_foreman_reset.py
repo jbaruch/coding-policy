@@ -165,8 +165,14 @@ class DeliverTest(unittest.TestCase):
         with self.assertRaisesRegex(StateError, "kind 'grok'"):
             self.run_deliver(FakeClient(["idle"], kind="grok"))
 
+    def test_a_single_done_flicker_is_not_an_ended_turn(self):
+        # references/herdr.md: `done` can read for one poll mid-turn.
+        client = FakeClient(["done", "working"])
+        with self.assertRaisesRegex(HerdrError, "stayed working"):
+            self.run_deliver(client, budget=30)
+
     def test_a_pane_that_starts_working_again_gets_no_keystroke(self):
-        client = FakeClient(["idle", "working"])
+        client = FakeClient(["idle"] * foreman_reset.RESET_STABLE_READS + ["working"])
         with self.assertRaisesRegex(HerdrError, "(?s)changed .* before typing.*Do not run foreman-reset again"):
             self.run_deliver(client)
 
@@ -178,7 +184,7 @@ class DeliverTest(unittest.TestCase):
         def swapped():
             calls["n"] += 1
             rows = original()
-            if calls["n"] > 1:
+            if calls["n"] > foreman_reset.RESET_STABLE_READS:
                 rows[1]["agent"] = "codex"
             return rows
 
@@ -422,7 +428,7 @@ class ResetCommandTest(CliCase):
     def test_a_reset_with_an_invalid_time_writes_nothing(self):
         with patch("teamlead.cli.memory.show", return_value={"record": READY}), \
              patch("teamlead.cli.supervision.load", return_value=supervision_data()[0]), \
-             patch.dict("os.environ", {"HERDR_PANE_ID": PANE}), \
+             patch.dict("os.environ", {"HERDR_PANE_ID": PANE, "HERDR_ENV": "1"}), \
              patch("teamlead.cli._spawn_detached", side_effect=AssertionError("must not spawn")):
             code, _, err = self.run_cli(self.base() + ["foreman-reset", "--now", "not-a-time"])
         self.assertEqual(code, 1)
@@ -432,7 +438,7 @@ class ResetCommandTest(CliCase):
         spawned = []
         with patch("teamlead.cli.memory.show", return_value={"record": READY}), \
              patch("teamlead.cli.supervision.load", return_value=supervision_data()[0]), \
-             patch.dict("os.environ", {"HERDR_PANE_ID": PANE}), \
+             patch.dict("os.environ", {"HERDR_PANE_ID": PANE, "HERDR_ENV": "1"}), \
              patch("teamlead.cli._spawn_detached", side_effect=lambda argv, sink: spawned.append(argv) or 4242), \
              patch("teamlead.foreman_reset.process_identity", side_effect=lambda pid: {"pid": pid, "identity": "child"}):
             code, out, err = self.run_cli(self.base() + ["foreman-reset", "--now", RESET_AT])
@@ -451,7 +457,7 @@ class ResetCommandTest(CliCase):
         foreman_reset.schedule(self.state, {"pane_id": PANE, "stow": "round-7"}, "2026-09-24T10:00:00+00:00", os.getpid)
         with patch("teamlead.cli.memory.show", return_value={"record": {"id": "round-7", "kind": "stow", "reset_ready": False}}), \
              patch("teamlead.cli.supervision.load", return_value=supervision_data(active=True)[0]), \
-             patch.dict("os.environ", {"HERDR_PANE_ID": PANE}), \
+             patch.dict("os.environ", {"HERDR_PANE_ID": PANE, "HERDR_ENV": "1"}), \
              patch("teamlead.cli._spawn_detached", side_effect=AssertionError("must not spawn")):
             code, out, err = self.run_cli(self.base() + ["foreman-reset", "--now", RESET_AT])
         self.assertEqual(code, 0, err)
@@ -461,7 +467,7 @@ class ResetCommandTest(CliCase):
         foreman_reset.schedule(self.state, {"pane_id": PANE, "stow": "round-7"}, "2026-09-24T10:00:00+00:00", os.getpid)
         with patch("teamlead.cli.memory.show", return_value={"record": READY}), \
              patch("teamlead.cli.supervision.load", return_value=supervision_data()[0]), \
-             patch.dict("os.environ", {"HERDR_PANE_ID": "w2:p1"}):
+             patch.dict("os.environ", {"HERDR_PANE_ID": "w2:p1", "HERDR_ENV": "1"}):
             self.out, self.err = io.StringIO(), io.StringIO()
             code, _, err = self.run_cli(self.base() + ["foreman-reset", "--now", RESET_AT])
         self.assertEqual(code, 1)
@@ -592,7 +598,28 @@ class ResetCommandTest(CliCase):
         plan = {"pane_id": PANE, "stow": "round-7"}
         foreman_reset.schedule(self.state, plan, "2026-09-24T10:00:00+00:00", os.getpid)
         needed = foreman_reset.outstanding(self.state, alive=lambda process: False)[0]["needed"]
-        self.assertIn("foreman-reset-reconcile --pane {} --stow round-7 --outcome failed".format(PANE), needed)
+        self.assertIn("foreman-reset-reconcile --state {} --pane {} --stow round-7 --outcome failed".format(
+            self.state.resolve(), PANE), needed)
+        self.assertIn("bash {}".format(foreman_reset.launcher()), needed)
+        self.assertTrue(Path(foreman_reset.launcher()).is_file())
+
+    def test_a_caller_outside_herdr_is_not_the_foreman_pane(self):
+        with patch("teamlead.cli.memory.show", return_value={"record": READY}), \
+             patch("teamlead.cli.supervision.load", return_value=supervision_data()[0]), \
+             patch.dict("os.environ", {"HERDR_PANE_ID": PANE}, clear=False), \
+             patch("teamlead.cli._spawn_detached", side_effect=AssertionError("must not spawn")):
+            import os as _os
+            _os.environ.pop("HERDR_ENV", None)
+            code, _, err = self.run_cli(self.base() + ["foreman-reset", "--now", RESET_AT])
+        self.assertEqual(code, 1)
+        self.assertIn("outside Herdr", err)
+
+    def test_a_failure_record_keeps_identifiers_only(self):
+        from teamlead.errors import HerdrError as Raw
+        leaked = Raw("composer read failed", {"pane_id": PANE, "stderr": "token=secret", "screen": ["$ export KEY=x"],
+                                              "pid": 7})
+        record = foreman_reset.failure(leaked, "round-7", "/s.json")
+        self.assertEqual(record["details"], {"pane_id": PANE, "pid": 7})
 
     def test_an_unusable_record_is_itself_outstanding(self):
         foreman_reset.record_path(self.state).write_text("{not json")
@@ -649,7 +676,7 @@ class ResetCommandTest(CliCase):
     def test_a_refused_preflight_spawns_nothing(self):
         with patch("teamlead.cli.memory.show", return_value={"record": {"id": "s", "kind": "stow", "reset_ready": False}}), \
              patch("teamlead.cli.supervision.load", return_value=supervision_data()[0]), \
-             patch.dict("os.environ", {"HERDR_PANE_ID": PANE}), \
+             patch.dict("os.environ", {"HERDR_PANE_ID": PANE, "HERDR_ENV": "1"}), \
              patch("teamlead.cli._spawn_detached", side_effect=AssertionError("must not spawn")):
             self.out, self.err = io.StringIO(), io.StringIO()
             code, _, err = self.run_cli(self.base() + ["foreman-reset", "--now", RESET_AT])

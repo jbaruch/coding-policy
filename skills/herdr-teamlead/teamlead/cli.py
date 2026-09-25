@@ -15,7 +15,6 @@ import hashlib
 import json
 import os
 import subprocess
-import shlex
 import sys
 from typing import NoReturn
 import time
@@ -1462,7 +1461,8 @@ def cmd_foreman_reset(args, client=None, warn=None, trace=None, spawn=None):
     # A retry replays before every precondition the reset itself can change
     # (stow readiness, supervision work); reading the stow and supervision and
     # checking the caller's pane still come first (see foreman_reset.replay).
-    caller = os.environ.get("HERDR_PANE_ID")
+    # A pane id alone can be set by any process; a Herdr pane also carries HERDR_ENV.
+    caller = os.environ.get("HERDR_PANE_ID") if os.environ.get("HERDR_ENV") else None
     if bound_pane and caller != bound_pane:
         raise UsageError("foreman-reset runs from the bound foreman's own pane ({}); this call came from {}.".format(
             bound_pane, caller or "outside Herdr"), {"pane_id": bound_pane})
@@ -1471,7 +1471,7 @@ def cmd_foreman_reset(args, client=None, warn=None, trace=None, spawn=None):
     if existing is not None:
         return {"schema_version": foreman_reset.RESET_SCHEMA_VERSION, "scheduled": True, **existing,
                 "log": str(Path(str(state_path) + ".foreman-reset.log"))}, None
-    plan = foreman_reset.preflight(stow, data, os.environ.get("HERDR_PANE_ID"))
+    plan = foreman_reset.preflight(stow, data, caller)
     log = Path(str(state_path) + ".foreman-reset.log")
     # The deliverer runs from the package directory, so every path it gets is absolute.
     argv = [sys.executable, "-m", "teamlead", "foreman-reset-deliver", "--pane", plan["pane_id"], "--stow", plan["stow"],
@@ -1562,9 +1562,9 @@ def cmd_foreman_reset_deliver(args, client=None, warn=None, trace=None):
         # The pane is resumed; only the record lags. Catch-up shows the row as a
         # delivery with no outcome, and this says which way it actually went.
         raise StateError("The reset from stow {} was delivered and the foreman resumed, but the record could not say so: "
-                         "{} Once the record is readable, run `foreman-reset-reconcile --pane {} --stow {} --outcome "
-                         "delivered`; do not recover the pane.".format(
-                             args.stow, exc.message, shlex.quote(args.pane), shlex.quote(args.stow)),
+                         "{} Once the record is readable, run `{}`; do not recover the pane.".format(
+                             args.stow, exc.message,
+                             foreman_reset.reconcile_command(state_path, args.pane, args.stow, "delivered")),
                          {"record": str(foreman_reset.record_path(state_path)), "delivered": result}) from None
     return result, None
 

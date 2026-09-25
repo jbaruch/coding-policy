@@ -61,6 +61,14 @@ IDLE_POLL_SEC = 5
 #: saved, and the deliverer starts inside that window.
 CLAIM_LOCK_BUDGET_SEC = 60
 CLAIM_LOCK_POLL_SEC = 0.2
+#: Consecutive settled reads, `IDLE_POLL_SEC` apart, before the first keystroke.
+#: Herdr can report `done` for a single read while a turn is still running
+#: (references/herdr.md), so one settled read is not an ended turn.
+RESET_STABLE_READS = 3
+#: The detail keys a failure record keeps. Herdr and composer errors can carry
+#: raw subprocess output or pane text; the record keeps identifiers only.
+FAILURE_DETAIL_KEYS = frozenset({"pane_id", "stow", "record", "status", "pid", "lock", "kind", "reconciled",
+                                 "reconciled_at", "schema_version"})
 RESUME_OPENING = "Foreman resume after a planned round-boundary reset."
 RESUME_TEMPLATE = (
     RESUME_OPENING + " Your earlier conversation is gone by design. Run the "
@@ -321,8 +329,26 @@ def schedule(state_path, plan, at, start, *, alive=_alive, probe=None, options=N
 
 
 def failure(exc, stow, state, **options):
-    """The durable result of a failed or interrupted reset: the error and the prompt the operator pastes."""
-    return {"error": exc.code, "message": exc.message, "details": exc.details, "resume_prompt": resume_prompt(stow, state, **options)}
+    """The durable result of a failed or interrupted reset: the error and the prompt the operator pastes.
+
+    Details are filtered to identifier keys with scalar values; anything else
+    an error carried stays out of the durable record.
+    """
+    details = {key: value for key, value in exc.details.items()
+               if key in FAILURE_DETAIL_KEYS and (value is None or isinstance(value, (str, int, float, bool)))}
+    return {"error": exc.code, "message": exc.message, "details": details, "resume_prompt": resume_prompt(stow, state, **options)}
+
+
+def launcher():
+    """The installed launcher that runs this package's commands."""
+    return str(Path(__file__).resolve().parents[1] / "teamlead.sh")
+
+
+def reconcile_command(state_path, pane_id, stow, outcome):
+    """The complete, runnable repair command for one reset."""
+    return "bash {} foreman-reset-reconcile --state {} --pane {} --stow {} --outcome {}".format(
+        shlex.quote(launcher()), shlex.quote(str(Path(state_path).expanduser().resolve())),
+        shlex.quote(pane_id), shlex.quote(stow), outcome)
 
 
 TERMINAL_FAILURES = frozenset({"failed", "interrupted"})
@@ -356,15 +382,16 @@ def outstanding(state_path, *, alive=_alive):
             prompt = row["result"]["resume_prompt"]
         elif row["status"] in ("scheduled", "delivering") and not alive(row["process"]):
             prompt = None
-            command = "foreman-reset-reconcile --pane {} --stow {}".format(shlex.quote(row["pane_id"]), shlex.quote(row["stow"]))
+            failed = reconcile_command(state_path, row["pane_id"], row["stow"], "failed")
+            delivered = reconcile_command(state_path, row["pane_id"], row["stow"], "delivered")
             if row["status"] == "scheduled":
                 needed = ("The deliverer stopped before claiming the reset, so nothing was typed and the foreman in pane {} "
-                          "still holds its old context. Run `{} --outcome failed`; catch-up then shows the saved resume "
-                          "prompt for recovery.".format(row["pane_id"], command))
+                          "still holds its old context. Run `{}`; catch-up then shows the saved resume "
+                          "prompt for recovery.".format(row["pane_id"], failed))
             else:
                 needed = ("The deliverer stopped mid-delivery and its outcome is unknown. Look at pane {}: if a resumed "
-                          "foreman is running there, run `{} --outcome delivered`; otherwise run `{} --outcome failed` "
-                          "and recover from the saved resume prompt.".format(row["pane_id"], command, command))
+                          "foreman is running there, run `{}`; otherwise run `{}` "
+                          "and recover from the saved resume prompt.".format(row["pane_id"], delivered, failed))
         else:
             continue
         items.append({"pane_id": row["pane_id"], "stow": row["stow"], "status": row["status"], "record": str(path),
@@ -578,9 +605,11 @@ def deliver(client, agents, pane_id, stow, state, *, still_ready=lambda: True, s
     changed while the deliverer waited stops the reset with nothing sent.
     """
     deadline = clock() + budget_sec
+    settled = 0
     while True:
         record = _foreman_record(client, pane_id)
-        if record.get("agent_status") in SETTLE_STATES:
+        settled = settled + 1 if record.get("agent_status") in SETTLE_STATES else 0
+        if settled >= RESET_STABLE_READS:
             break
         if clock() >= deadline:
             raise HerdrError("The foreman's pane {} stayed {} for {}s; nothing was sent. {}".format(
