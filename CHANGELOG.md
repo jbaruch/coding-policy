@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.270 — 2026-09-25
+
 ### Added
 
 - **`teamlead close-member` and `check-member` replace the foreman's two most
