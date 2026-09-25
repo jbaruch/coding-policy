@@ -795,5 +795,6 @@ an outcome with its deliverer gone, and an unreadable record. A later
 `foreman-reset-reconcile --pane <pane> --stow <stow> --outcome delivered|failed`
 is the owner's repair for a `scheduled` or `delivering` row whose deliverer is
 gone: `failed` records the failure with the resume prompt built from the row's
-own `options`, `delivered` records `reconciled`. A row that already ended, or
-whose deliverer is still running, is refused.
+own `options`, `delivered` records `reconciled`. An identical retry returns
+the recorded row with `replayed: true`; a row that already ended any other
+way, or whose deliverer is still running, is refused.

@@ -571,9 +571,22 @@ class ResetCommandTest(CliCase):
         foreman_reset.schedule(self.state, plan, "2026-09-24T10:00:00+00:00", os.getpid)
         with self.assertRaisesRegex(UsageError, "still has its deliverer running"):
             foreman_reset.reconcile(self.state, plan, "failed", "2026-09-24T11:00:00+00:00", alive=lambda process: True)
-        foreman_reset.reconcile(self.state, plan, "failed", "2026-09-24T11:00:00+00:00", alive=lambda process: False)
-        with self.assertRaisesRegex(UsageError, "already ended failed"):
+        first = foreman_reset.reconcile(self.state, plan, "failed", "2026-09-24T11:00:00+00:00", alive=lambda process: False)
+        self.assertFalse(first["replayed"])
+        # An identical retry replays; a conflicting one is refused.
+        again = foreman_reset.reconcile(self.state, plan, "failed", "2026-09-24T11:05:00+00:00", alive=lambda process: False)
+        self.assertEqual((again["replayed"], again["result"]), (True, first["result"]))
+        with self.assertRaisesRegex(UsageError, r"already ended failed \(reconciled as failed\)"):
             foreman_reset.reconcile(self.state, plan, "delivered", "2026-09-24T12:00:00+00:00", alive=lambda process: False)
+
+    def test_reconcile_as_delivered_replays_and_refuses_a_later_failure(self):
+        plan = {"pane_id": PANE, "stow": "round-7"}
+        foreman_reset.schedule(self.state, plan, "2026-09-24T10:00:00+00:00", os.getpid)
+        foreman_reset.reconcile(self.state, plan, "delivered", "2026-09-24T11:00:00+00:00", alive=lambda process: False)
+        self.assertTrue(foreman_reset.reconcile(self.state, plan, "delivered", "2026-09-24T11:05:00+00:00",
+                                                alive=lambda process: False)["replayed"])
+        with self.assertRaisesRegex(UsageError, "already ended reconciled"):
+            foreman_reset.reconcile(self.state, plan, "failed", "2026-09-24T12:00:00+00:00", alive=lambda process: False)
 
     def test_outstanding_names_the_reconcile_command(self):
         plan = {"pane_id": PANE, "stow": "round-7"}

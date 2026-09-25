@@ -394,22 +394,37 @@ def reconcile(state_path, plan, outcome, at, *, alive=_alive):
         if row is None:
             raise UsageError("Reset record {} holds no reset for stow {} in pane {}; nothing to reconcile.".format(
                 path, plan["stow"], plan["pane_id"]), {"record": str(path)})
+        previous = _reconciled_outcome(row)
+        if previous == outcome:
+            # An identical retry, e.g. after the first response was lost.
+            return {**row, "replayed": True}
         if row["status"] not in ("scheduled", "delivering"):
-            raise UsageError("The reset from stow {} already ended {}; there is nothing to reconcile.".format(
-                row["stow"], row["status"]), {"record": str(path), "status": row["status"]})
+            raise UsageError("The reset from stow {} already ended {}{}; there is nothing to reconcile.".format(
+                row["stow"], row["status"], " (reconciled as {})".format(previous) if previous else ""),
+                {"record": str(path), "status": row["status"]})
         if alive(row["process"]):
             raise UsageError("The reset from stow {} still has its deliverer running; let it finish instead of "
                              "reconciling.".format(row["stow"]), {"record": str(path), "process": row["process"]})
         if outcome == "delivered":
             row.update(status="reconciled", result={"outcome": "delivered", "reconciled_at": at})
         else:
-            lost = StateError("The operator reconciled this reset as failed: its deliverer stopped without an outcome.", {})
+            lost = StateError("The operator reconciled this reset as failed: its deliverer stopped without an outcome.",
+                              {"reconciled": "failed", "reconciled_at": at})
             row.update(status="failed", result=failure(lost, row["stow"], str(Path(state_path).expanduser().resolve()),
                                                        **row["options"]))
         if not _valid_row(row):
             raise UsageError("The reconciled row does not validate; nothing was written.", {"record": str(path)})
         save_state(path, document)
-        return {**row}
+        return {**row, "replayed": False}
+
+
+def _reconciled_outcome(row):
+    """The outcome `reconcile` recorded on this row, or None when it never ran."""
+    if row["status"] == "reconciled":
+        return "delivered"
+    if row["status"] == "failed" and row["result"]["details"].get("reconciled") == "failed":
+        return "failed"
+    return None
 
 
 def delivery_failed(state_path, stow, result):
