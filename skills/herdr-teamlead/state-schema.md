@@ -114,8 +114,9 @@ Plan schema 10 adds `capability` and `cheaper_adequate` to each entry in
 `capability` is `adequate` when every capability the round needs is recorded
 adequate on a supporting source, and `unknown` otherwise; an `inadequate`
 entry refuses the candidate instead, so it is never stored. `cheaper_adequate`
-names a cheaper configured row recorded adequate for the same needs, or null;
-it is recorded, never selected. Reader: `apply`, which recomputes both. An
+names a cheaper configured row recorded adequate for the same needs, with the
+`sources` of the entries that say so, or null, whatever the selected row's own
+verdict; it is recorded, never selected. Reader: `apply`, which recomputes both. An
 older plan carries neither and is refused as stale.
 
 Plan schema 9 adds `pressure_headroom` and `de_escalated` to each entry in

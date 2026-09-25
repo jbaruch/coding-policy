@@ -231,6 +231,17 @@ def required(role, round_type, judgment_rounds):
     return tuple(names)
 
 
+def evidence(document, model, effort, capabilities):
+    """The sources of the entries recorded for one model and effort, one per capability found."""
+    effort = effort or DEFAULT_EFFORT
+    found = []
+    for name in capabilities:
+        entry = lookup(document, model, effort, name)
+        if entry is not None:
+            found.append({"capability": name, **entry["source"]})
+    return found
+
+
 class InadequateCapability(UsageError):
     """The table records the selected model and effort as inadequate for this round."""
 
@@ -283,11 +294,12 @@ def record(path, data, at):
         # The writer stamps the version and the time; a report never supplies them.
         if not isinstance(entry, dict) or set(entry) != reported:
             _fail("A reported capability entry carries exactly {}.".format(", ".join(sorted(reported))))
-        if entry["capability"] not in VOCABULARY:
-            _fail("Capability {!r} is not one routing reads or the table keeps; use one of {}.".format(
-                entry["capability"], ", ".join(sorted(VOCABULARY))))
         row = {**entry, "schema_version": SCHEMA_VERSION, "recorded_at": _utc(at)}
         key = validate_entry(row)
+        # After validation, so the name is known to be a string.
+        if key[2] not in VOCABULARY:
+            _fail("Capability {!r} is not one routing reads or the table keeps; use one of {}.".format(
+                key[2], ", ".join(sorted(VOCABULARY))))
         if key in covered:
             _fail("This refresh records {} twice; one entry owns one model, effort and "
                   "capability.".format(" / ".join(key)))

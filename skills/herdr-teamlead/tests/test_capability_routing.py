@@ -53,6 +53,14 @@ class VocabularyTest(unittest.TestCase):
         self.assertEqual(capabilities.required("reviewer", "review", JUDGMENT_ROUNDS),
                          ("rotating-worker-judgment-tier", "independent-defect-detection"))
 
+    def test_a_capability_of_the_wrong_type_is_a_usage_error_not_a_traceback(self):
+        from teamlead.errors import UsageError
+        for value in ([], {}, 3, None):
+            with self.subTest(value=value), self.assertRaises(UsageError):
+                capabilities.record("/nonexistent/state.json", {"entries": [
+                    {"model": "m", "effort": "high", "capability": value, "verdict": "unknown",
+                     "source": {"kind": "vendor", "ref": "x", "dated": "2026-09-23"}}]}, AT)
+
     def test_recording_a_name_routing_does_not_own_is_refused(self):
         with self.assertRaisesRegex(Exception, "not one routing reads"):
             capabilities.record("/nonexistent/state.json", {"entries": [
@@ -124,7 +132,16 @@ class RoutingTest(CliCase):
         self.assertEqual(rc, 0, error)
         tier = document["tiers"]["developer"]
         self.assertEqual((tier["model"], tier["capability"]), ("opus-5", "adequate"))
-        self.assertEqual(tier["cheaper_adequate"], {"model": "sonnet-5", "effort": "high", "tier_row": "fix"})
+        self.assertEqual(tier["cheaper_adequate"], {
+            "model": "sonnet-5", "effort": "high", "tier_row": "fix",
+            "sources": [{"capability": "implementation", "kind": "project", "ref": "fixture", "dated": "2026-09-23"}]})
+
+    def test_a_cheaper_adequate_row_is_recorded_even_when_the_selected_row_is_unknown(self):
+        self.record(entry("sonnet-5", "high", "implementation", "adequate"))
+        rc, document, error = self.plan()
+        self.assertEqual(rc, 0, error)
+        tier = document["tiers"]["developer"]
+        self.assertEqual((tier["capability"], tier["cheaper_adequate"]["model"]), ("unknown", "sonnet-5"))
 
     def test_an_inadequate_candidate_is_not_planned_and_the_plan_says_why(self):
         self.record(entry("opus-5", "high", "implementation", "inadequate"))

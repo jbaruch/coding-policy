@@ -625,7 +625,8 @@ def _cheaper_adequate(agent, tier, needs, table):
             continue
         try:
             if capabilities.assess(table, row["model"], row.get("effort"), needs) == "adequate":
-                return {"model": row["model"], "effort": row.get("effort"), "tier_row": name}
+                return {"model": row["model"], "effort": row.get("effort"), "tier_row": name,
+                        "sources": capabilities.evidence(table, row["model"], row.get("effort"), needs)}
         except capabilities.InadequateCapability:
             continue
     return None
@@ -682,7 +683,7 @@ def _candidate_tiers(roles, agents, rounds, fix_round=None, judge=None, excludes
             )}
             candidates[role][agent.name].update(
                 capability=verdict,
-                cheaper_adequate=_cheaper_adequate(agent, tier, needs, table) if verdict == "adequate" else None)
+                cheaper_adequate=_cheaper_adequate(agent, tier, needs, table))
     return candidates
 
 
