@@ -403,7 +403,7 @@ description: Running a multi-agent team — task-based specialist composition, c
 - Preconditions (all required):
   1. The reset record shows the reset `failed` or `interrupted`
   2. The operator, never the foreman, clears the foreman's pane
-  3. The operator pastes the resume prompt the deliverer logged for that reset
+  3. The operator pastes the resume prompt the reset record saved for that reset
 - Every other reset runs through `teamlead foreman-reset`
 - A reset foreman resumes from the stow, the supervision resume sequence, and the foreman queue
 - Save conversation-only knowledge and open work before a planned foreman reset, compaction, or replacement

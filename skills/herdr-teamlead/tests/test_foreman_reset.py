@@ -534,6 +534,38 @@ class ResetCommandTest(CliCase):
             "resume": {"landed": True, "started": True}})
         self.assertEqual(foreman_reset.outstanding(self.state), [])
 
+    def test_reconcile_closes_a_dead_delivery_either_way(self):
+        plan = {"pane_id": PANE, "stow": "round-7"}
+        for outcome, status in (("delivered", "reconciled"), ("failed", "failed")):
+            with self.subTest(outcome=outcome):
+                foreman_reset.record_path(self.state).unlink(missing_ok=True)
+                foreman_reset.schedule(self.state, plan, "2026-09-24T10:00:00+00:00", os.getpid,
+                                       options={"config": "/c/cfg.json"})
+                foreman_reset.claim(self.state, plan, supervision_runtime.process_identity(os.getpid()))
+                row = foreman_reset.reconcile(self.state, plan, outcome, "2026-09-24T11:00:00+00:00",
+                                              alive=lambda process: False)
+                self.assertEqual(row["status"], status)
+                items = foreman_reset.outstanding(self.state, alive=lambda process: False)
+                if outcome == "delivered":
+                    self.assertEqual(items, [])
+                else:
+                    self.assertIn("--config /c/cfg.json", items[0]["resume_prompt"])
+
+    def test_reconcile_refuses_a_live_or_finished_reset(self):
+        plan = {"pane_id": PANE, "stow": "round-7"}
+        foreman_reset.schedule(self.state, plan, "2026-09-24T10:00:00+00:00", os.getpid)
+        with self.assertRaisesRegex(UsageError, "still has its deliverer running"):
+            foreman_reset.reconcile(self.state, plan, "failed", "2026-09-24T11:00:00+00:00", alive=lambda process: True)
+        foreman_reset.reconcile(self.state, plan, "failed", "2026-09-24T11:00:00+00:00", alive=lambda process: False)
+        with self.assertRaisesRegex(UsageError, "already ended failed"):
+            foreman_reset.reconcile(self.state, plan, "delivered", "2026-09-24T12:00:00+00:00", alive=lambda process: False)
+
+    def test_outstanding_names_the_reconcile_command(self):
+        plan = {"pane_id": PANE, "stow": "round-7"}
+        foreman_reset.schedule(self.state, plan, "2026-09-24T10:00:00+00:00", os.getpid)
+        needed = foreman_reset.outstanding(self.state, alive=lambda process: False)[0]["needed"]
+        self.assertIn("foreman-reset-reconcile --pane {} --stow round-7 --outcome failed".format(PANE), needed)
+
     def test_an_unusable_record_is_itself_outstanding(self):
         foreman_reset.record_path(self.state).write_text("{not json")
         self.assertEqual([item["status"] for item in foreman_reset.outstanding(self.state)], ["record_unusable"])

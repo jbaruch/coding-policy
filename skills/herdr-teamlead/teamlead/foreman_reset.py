@@ -114,7 +114,10 @@ def record_path(state_path):
 
 #: `interrupted` is a delivery that failed after its first keystroke: the
 #: pane may be cleared or half-prompted, so it is never retried automatically.
-STATUSES = frozenset({"scheduled", "delivering", "delivered", "failed", "interrupted"})
+#: `reconciled` is a reset the operator closed through `reconcile` after its
+#: deliverer was gone without recording an outcome, confirming the foreman
+#: resumed.
+STATUSES = frozenset({"scheduled", "delivering", "delivered", "failed", "interrupted", "reconciled"})
 ROW_FIELDS = frozenset({"schema_version", "pane_id", "stow", "status", "scheduled_at", "options", "process", "result"})
 OPTION_FIELDS = frozenset({"config", "herdr_bin"})
 
@@ -190,6 +193,14 @@ def _valid_row(row):
         return False
     if status in ("scheduled", "delivering"):
         return result is None
+    if status == "reconciled":
+        if not (isinstance(result, dict) and set(result) == {"outcome", "reconciled_at"} and result["outcome"] == "delivered"):
+            return False
+        try:
+            timestamp(result["reconciled_at"], "Reset reconciled_at")
+        except UsageError:
+            return False
+        return True
     if status == "delivered":
         return (isinstance(result, dict) and set(result) == {"schema_version", "pane_id", "stow", "agent", "cleared", "resume"}
                 and _version(result["schema_version"])
@@ -220,7 +231,7 @@ def _settle(document, row, state_path, alive):
     row carries the resume prompt before the operator is sent to recover.
     Returns (replay-or-None, changed).
     """
-    if row["status"] == "delivered" or (row["status"] in ("scheduled", "delivering") and alive(row["process"])):
+    if row["status"] in ("delivered", "reconciled") or (row["status"] in ("scheduled", "delivering") and alive(row["process"])):
         return {**row, "replayed": True}, False
     state = str(Path(state_path).expanduser().resolve())
     changed = row["status"] in ("scheduled", "delivering")
@@ -337,18 +348,60 @@ def outstanding(state_path, *, alive=_alive):
             prompt = row["result"]["resume_prompt"]
         elif row["status"] in ("scheduled", "delivering") and not alive(row["process"]):
             prompt = None
+            command = "foreman-reset-reconcile --pane {} --stow {}".format(shlex.quote(row["pane_id"]), shlex.quote(row["stow"]))
             if row["status"] == "scheduled":
-                needed = ("The deliverer stopped before claiming the reset, so nothing was typed. Reconcile the record "
-                          "before any recovery: the foreman in pane {} still holds its old context.".format(row["pane_id"]))
+                needed = ("The deliverer stopped before claiming the reset, so nothing was typed and the foreman in pane {} "
+                          "still holds its old context. Run `{} --outcome failed`; catch-up then shows the saved resume "
+                          "prompt for recovery.".format(row["pane_id"], command))
             else:
-                needed = ("The deliverer stopped mid-delivery and its outcome is unknown. Look at pane {} before acting: "
-                          "a resumed foreman needs nothing; a cleared or half-typed pane needs the operator to reconcile "
-                          "the record first.".format(row["pane_id"]))
+                needed = ("The deliverer stopped mid-delivery and its outcome is unknown. Look at pane {}: if a resumed "
+                          "foreman is running there, run `{} --outcome delivered`; otherwise run `{} --outcome failed` "
+                          "and recover from the saved resume prompt.".format(row["pane_id"], command, command))
         else:
             continue
         items.append({"pane_id": row["pane_id"], "stow": row["stow"], "status": row["status"], "record": str(path),
                       "needed": needed, "resume_prompt": prompt})
     return items
+
+
+RECONCILE_OUTCOMES = ("delivered", "failed")
+
+
+def reconcile(state_path, plan, outcome, at, *, alive=_alive):
+    """Close a reset whose deliverer is gone without an outcome; the operator says which one happened.
+
+    The owner's repair for a record that could not say how a delivery ended.
+    Only a `scheduled` or `delivering` row whose deliverer is no longer that
+    process qualifies: a live one is still working, and a finished one already
+    has its outcome. `failed` records the failure with the resume prompt built
+    from the row's own settings; `delivered` records that the operator saw the
+    foreman resume.
+    """
+    if outcome not in RECONCILE_OUTCOMES:
+        raise UsageError("Reconcile outcome is delivered or failed.", {"outcome": outcome})
+    path = record_path(state_path)
+    with state_lock(path):
+        document = _records(path)
+        row = _row(document, plan)
+        if row is None:
+            raise UsageError("Reset record {} holds no reset for stow {} in pane {}; nothing to reconcile.".format(
+                path, plan["stow"], plan["pane_id"]), {"record": str(path)})
+        if row["status"] not in ("scheduled", "delivering"):
+            raise UsageError("The reset from stow {} already ended {}; there is nothing to reconcile.".format(
+                row["stow"], row["status"]), {"record": str(path), "status": row["status"]})
+        if alive(row["process"]):
+            raise UsageError("The reset from stow {} still has its deliverer running; let it finish instead of "
+                             "reconciling.".format(row["stow"]), {"record": str(path), "process": row["process"]})
+        if outcome == "delivered":
+            row.update(status="reconciled", result={"outcome": "delivered", "reconciled_at": at})
+        else:
+            lost = StateError("The operator reconciled this reset as failed: its deliverer stopped without an outcome.", {})
+            row.update(status="failed", result=failure(lost, row["stow"], str(Path(state_path).expanduser().resolve()),
+                                                       **row["options"]))
+        if not _valid_row(row):
+            raise UsageError("The reconciled row does not validate; nothing was written.", {"record": str(path)})
+        save_state(path, document)
+        return {**row}
 
 
 def delivery_failed(state_path, stow, result):

@@ -760,11 +760,11 @@ future shape change bumps `schema_version` and migrates in the owner.
 | `schema_version` | integer, always `1` | Row version |
 | `pane_id` | string | The foreman's Herdr pane; with `stow`, the reset's identity |
 | `stow` | string | The stow id the resume prompt names |
-| `status` | one of `scheduled`, `delivering`, `delivered`, `failed`, `interrupted` | `scheduled` → `delivering` → `delivered`; `failed` before any keystroke; `interrupted` after one |
+| `status` | one of `scheduled`, `delivering`, `delivered`, `failed`, `interrupted`, `reconciled` | `scheduled` → `delivering` → `delivered`; `failed` before any keystroke; `interrupted` after one; `reconciled` when the operator confirmed through `foreman-reset-reconcile` that the foreman resumed |
 | `scheduled_at` | ISO-8601 string with timezone | The `foreman-reset` time |
 | `options` | object with optional non-empty string `config` and `herdr_bin` | The non-default settings `foreman-reset` ran with; every resume prompt for this row carries them, including one finalized later by another process |
 | `process` | `{"pid": integer, "identity": string}`, or null | The deliverer's process: its pid and a digest of its start time and command line (`supervision_runtime.process_identity`). A reused pid carries another identity. Null only on a `scheduled` row before its deliverer is identified, or on a `failed` row whose deliverer never started or was gone before identification. Every `delivering`, `delivered` and `interrupted` row carries one |
-| `result` | null, the delivery object, or the failure object | `scheduled` and `delivering` hold null. `delivered` holds exactly `{"schema_version", "pane_id", "stow", "agent", "cleared": true, "resume": {"landed": true, "started": true}}`, whose `schema_version`, `pane_id` and `stow` equal the row's. `failed` and `interrupted` hold exactly `{"error": string, "message": string, "details": object, "resume_prompt": string}`; `resume_prompt` is what the operator pastes |
+| `result` | null, the delivery object, or the failure object | `scheduled` and `delivering` hold null. `delivered` holds exactly `{"schema_version", "pane_id", "stow", "agent", "cleared": true, "resume": {"landed": true, "started": true}}`, whose `schema_version`, `pane_id` and `stow` equal the row's. `failed` and `interrupted` hold exactly `{"error": string, "message": string, "details": object, "resume_prompt": string}`; `resume_prompt` is what the operator pastes. `reconciled` holds exactly `{"outcome": "delivered", "reconciled_at": ISO-8601 string}` |
 
 One delivery attempt per pane and stow, never retried automatically. A
 retry replays before every precondition the reset itself changes (stow
@@ -791,3 +791,9 @@ through `foreman_reset.outstanding` and lists, ahead of the attention queue,
 each pane whose latest reset ended `failed` or `interrupted`, or never reached
 an outcome with its deliverer gone, and an unreadable record. A later
 `delivered` reset for the pane supersedes an older failure.
+
+`foreman-reset-reconcile --pane <pane> --stow <stow> --outcome delivered|failed`
+is the owner's repair for a `scheduled` or `delivering` row whose deliverer is
+gone: `failed` records the failure with the resume prompt built from the row's
+own `options`, `delivered` records `reconciled`. A row that already ended, or
+whose deliverer is still running, is refused.

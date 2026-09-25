@@ -15,6 +15,7 @@ import hashlib
 import json
 import os
 import subprocess
+import shlex
 import sys
 from typing import NoReturn
 import time
@@ -390,6 +391,10 @@ def build_parser():
     deliver_parser = sub.add_parser("foreman-reset-deliver", parents=[common], help="Internal: wait for the foreman pane to idle, then clear it and send the resume prompt.")
     deliver_parser.add_argument("--pane", required=True)
     deliver_parser.add_argument("--stow", required=True)
+    reconcile_parser = sub.add_parser("foreman-reset-reconcile", parents=[common], help="Close a reset whose deliverer stopped without an outcome, as delivered or failed.")
+    reconcile_parser.add_argument("--pane", required=True)
+    reconcile_parser.add_argument("--stow", required=True)
+    reconcile_parser.add_argument("--outcome", required=True, choices=["delivered", "failed"])
     sub.add_parser("foreman-queue", parents=[common], help="List open tasks waiting for their next seat, oldest first, derived from the owner records.")
     load_parser = sub.add_parser("load-set", parents=[common], help="List the durable records one foreman decision must load, derived from the owner records.")
     load_parser.add_argument("--decision", required=True, choices=load_set.DECISIONS)
@@ -1488,10 +1493,17 @@ def cmd_foreman_reset_deliver(args, client=None, warn=None, trace=None):
         # The pane is resumed; only the record lags. Catch-up shows the row as a
         # delivery with no outcome, and this says which way it actually went.
         raise StateError("The reset from stow {} was delivered and the foreman resumed, but the record could not say so: "
-                         "{} Reconcile {} to `delivered`; do not recover the pane.".format(
-                             args.stow, exc.message, foreman_reset.record_path(state_path)),
+                         "{} Once the record is readable, run `foreman-reset-reconcile --pane {} --stow {} --outcome "
+                         "delivered`; do not recover the pane.".format(
+                             args.stow, exc.message, shlex.quote(args.pane), shlex.quote(args.stow)),
                          {"record": str(foreman_reset.record_path(state_path)), "delivered": result}) from None
     return result, None
+
+
+def cmd_foreman_reset_reconcile(args, client=None, warn=None, trace=None):
+    state_path = Path(_state_path(args)).expanduser().resolve()
+    return foreman_reset.reconcile(state_path, {"pane_id": args.pane, "stow": args.stow}, args.outcome,
+                                   getattr(args, "now", None) or now_iso()), None
 
 
 def cmd_foreman_queue(args, client=None, warn=None, trace=None):
@@ -1878,6 +1890,7 @@ COMMANDS = {
     "foreman-queue": cmd_foreman_queue,
     "foreman-reset": cmd_foreman_reset,
     "foreman-reset-deliver": cmd_foreman_reset_deliver,
+    "foreman-reset-reconcile": cmd_foreman_reset_reconcile,
     "load-set": cmd_load_set,
     **{command: cmd_recovery for command in ("task", "checkpoint", "authorize-corrections", "authorize-approach", "recover-context", "recover-role-clear", "record-report", "record-refusal", "authorize-refused-dispatch", "diagnose", "reconcile", "record-release-clear", "import-correction", "record-historical-review", "recover-report", "assess-specialist", "close-task")},
     "detect-triggers": cmd_detect_triggers,
@@ -1914,7 +1927,7 @@ def main(argv=None, stdout=None, stderr=None, client=None):
         readonly = args.command in {"probe-report", "detect-triggers", "validate-partition", "verify-oracle", "retro-check", "retro-list", "retro-show", "capability-check", "capability-show", "supervision-gate", "load-set", "foreman-queue"} or getattr(args, "dry_run", False)
         # The deliverer starts while `foreman-reset` still holds the state lock;
         # it serializes on the reset record's own lock instead.
-        separate_owner = args.command in memory.COMMANDS | attention.COMMANDS | SUPERVISION_COMMANDS | restoration.COMMANDS | {"foreman-reset-deliver"}
+        separate_owner = args.command in memory.COMMANDS | attention.COMMANDS | SUPERVISION_COMMANDS | restoration.COMMANDS | {"foreman-reset-deliver", "foreman-reset-reconcile"}
         lock = nullcontext() if readonly or separate_owner else state_lock(retrospective.canonical_state(_state_path(args)))
         with lock:
             retro_lock = retrospective.lock(_state_path(args)) if not readonly and args.command in {"apply", "start-judge", "retro-record"} else nullcontext()

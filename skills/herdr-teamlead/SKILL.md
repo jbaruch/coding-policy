@@ -678,7 +678,9 @@ under; the resume prompt carries them to the next context.
   (`foreman_resets`), and writes its error JSON to the `log` named at exit 0
   - `reset_ended` there means the row shows `failed` or `interrupted`
   - Any other error means the record could not be updated; the operator
-    reconciles it before any recovery
+    closes the reset with `foreman-reset-reconcile --pane <pane> --stow
+    <stow> --outcome delivered|failed` before any recovery, as catch-up
+    names
 - Never end the turn with active work that has no hold
 
 Finish here.
