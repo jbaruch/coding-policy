@@ -460,12 +460,17 @@ bash "$CP/skills/herdr-teamlead/teamlead.sh" check-member --enrollment <enrollme
 ```
 
 It reads the agent, report, recorded base and send time from the owner
-records and runs `wait-report.sh --once` with them (`teamlead/members.py`).
-Its JSON carries the checkpoint's `exit` and delivery JSON as `wait`; the
-command itself exits non-zero only when those records cannot be read. For
-`exit`: 0 confirms delivery, 1 remains pending, 3 confirms blocked, 4 lacks
-confirmed delivery, and 5 proves terminal refusal; record it with
-`record-refusal`. Read delivered reports in full. Pass the worker's checkout
+records and runs `wait-report.sh --once` with them
+(`skills/herdr-teamlead/teamlead/members.py`). Its JSON carries the
+checkpoint's `exit` and delivery JSON as `wait`:
+
+- `exit` 0 confirms delivery, 1 remains pending, 3 confirms blocked, 4 lacks
+  confirmed delivery, and 5 proves terminal refusal; record it with
+  `record-refusal`
+- The command itself exits non-zero when the dispatch has no recorded send
+  time, or when the wait ran without a verdict (`wait_failed`, carrying the
+  wait's own exit, 2 included); resolve the diagnostic stderr names, then run
+  it again Read delivered reports in full. Pass the worker's checkout
 as `--worktree` when it has one. An exit 1
 then carries either `reason: checkpoint_pending` or a `stall` object; act on a
 stall under `rules/agent-team-operation.md` Stalled Workers and record the

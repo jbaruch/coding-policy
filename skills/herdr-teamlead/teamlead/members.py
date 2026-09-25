@@ -29,46 +29,76 @@ from .state import load_state_checked
 #: Ledger decisions that record an assessment (references/task-ledger.md);
 #: `pending`, `reported` and `unknown` do not.
 ASSESSED = frozenset({"accepted", "needs_work", "blocked", "unavailable"})
+#: The task-ledger schema this reader accepts (state-schema.md, Task Ledger).
+LEDGER_SCHEMA_VERSION = "1"
+FRONT_FIELDS = ("schema_version", "task", "base_revision", "dispatch_state")
+EVENT_FIELDS = ("schema_version", "id", "at", "subject", "dispatch_id", "worker", "role", "report", "observed",
+                "decision", "head_revision", "evidence", "assessment")
 FIELD = re.compile(r"^- ([a-z_]+): (.*)$")
+FRONT_FIELD = re.compile(r"^([a-z_]+): (.*)$")
+
+
+def _unusable(path, why):
+    return UsageError("Task ledger {} is not usable here: {}. Fix the ledger by appending a correct event, or pass "
+                      "the ledger this task's authorization records; nothing was closed.".format(path, why),
+                      {"ledger": str(path)})
 
 
 def ledger_events(path):
-    """The task ledger's frontmatter task and its event sections, in order."""
+    """The ledger's frontmatter and events, each carrying every schema-1 field, or a refusal."""
     try:
         text = Path(path).read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as exc:
         raise UsageError("Cannot read the task ledger {}: {}. Pass the absolute TASK-LEDGER.md path the task "
                          "authorization records.".format(path, exc), {"ledger": str(path)}) from None
     front = re.match(r"\A---\n(.*?)\n---\n", text, re.S)
-    task = None
-    if front:
-        match = re.search(r"^task: (.+)$", front.group(1), re.M)
-        task = match.group(1).strip() if match else None
+    if not front:
+        raise _unusable(path, "it has no frontmatter")
+    header = {}
+    for line in front.group(1).splitlines():
+        match = FRONT_FIELD.match(line)
+        if match:
+            header[match.group(1)] = match.group(2).strip()
+    missing = [key for key in FRONT_FIELDS if not header.get(key)]
+    if missing:
+        raise _unusable(path, "its frontmatter lacks " + ", ".join(missing))
+    if header["schema_version"] != LEDGER_SCHEMA_VERSION:
+        raise _unusable(path, "it is schema {}, and this build reads schema {}".format(
+            header["schema_version"], LEDGER_SCHEMA_VERSION))
     events, current = [], None
-    for line in text.splitlines():
+    for line in text[front.end():].splitlines():
         if line.startswith("## "):
-            current = {}
+            current = {"_section": line[3:].strip()}
             events.append(current)
             continue
         match = FIELD.match(line)
         if current is not None and match:
             current[match.group(1)] = match.group(2).strip()
-    return task, events
+    for event in events:
+        absent = [key for key in EVENT_FIELDS if not event.get(key)]
+        if absent:
+            raise _unusable(path, "event {} lacks {}".format(event["_section"], ", ".join(absent)))
+        if event["schema_version"] != LEDGER_SCHEMA_VERSION:
+            raise _unusable(path, "event {} is schema {}".format(event["_section"], event["schema_version"]))
+    return header, events
 
 
-def assessed_event(path, member):
-    """The latest assessed assignment event for this enrollment's worker and report."""
-    task, events = ledger_events(path)
-    if task != member["task"]:
+def assessed_event(path, member, state_path):
+    """The latest assessed event for this enrollment's dispatch, from a ledger bound to this state."""
+    header, events = ledger_events(path)
+    if header["task"] != member["task"]:
         raise UsageError("Task ledger {} records task {!r}, not this enrollment's {!r}; pass the ledger for {}.".format(
-            path, task, member["task"], member["task"]), {"ledger": str(path)})
-    matching = [row for row in events if row.get("subject") == "assignment" and row.get("worker") == member["agent"]
-                and row.get("report") == member["report"]]
-    if not matching or matching[-1].get("decision") not in ASSESSED:
-        latest = matching[-1].get("decision") if matching else None
-        raise UsageError("The task ledger has no assessed outcome for {} ({}): its latest event for that report is {}. "
+            path, header["task"], member["task"], member["task"]), {"ledger": str(path)})
+    bound = str(Path(header["dispatch_state"]).expanduser().resolve())
+    if bound != str(Path(state_path).expanduser().resolve()):
+        raise _unusable(path, "it is bound to dispatch state {}, not {}".format(header["dispatch_state"], state_path))
+    matching = [row for row in events if row["subject"] == "assignment" and row["dispatch_id"] == member["id"]
+                and row["worker"] == member["agent"] and row["report"] == member["report"]]
+    if not matching or matching[-1]["decision"] not in ASSESSED:
+        latest = matching[-1]["decision"] if matching else None
+        raise UsageError("The task ledger has no assessed outcome for dispatch {} ({}, {}): its latest event for it is {}. "
                          "Append the assessed decision ({}) to {} before closing the assignment.".format(
-                             member["agent"], member["report"], repr(latest) if latest else "missing",
+                             member["id"], member["agent"], member["report"], repr(latest) if latest else "missing",
                              ", ".join(sorted(ASSESSED)), path),
                          {"ledger": str(path), "latest_decision": latest})
     return matching[-1]
@@ -87,7 +117,7 @@ def close(state_path, enrollment, ledger, at):
     ledger = str(Path(ledger).expanduser().resolve())
     member = _member(supervision.load(state_path), enrollment)
     assignment = supervision.expected_assignment(member)
-    event = assessed_event(ledger, assignment)
+    event = assessed_event(ledger, assignment, state_path)
     outcome = "Task ledger event {}: {}".format(event.get("id", "unknown"), event["decision"])
     drained = supervision.drain(state_path)
     mine = [row for row in drained["events"] if row["member"] == enrollment]
@@ -110,12 +140,21 @@ def wait_inputs(state_path, enrollment, warn=None):
                          "restore it before checking the report.".format(state_path), {"state": str(state_path)})
     store = state["recovery"]
     task = store["tasks"].get(assignment["task"])
-    dispatch = next((row for row in reversed(store["dispatches"])
-                     if row.get("agent") == assignment["agent"] and row.get("task") == assignment["task"]
-                     and row.get("report") == assignment["report"] and row.get("status") == "applied"), None)
+    # The enrollment id is its dispatch id; the dispatch's send time is what lets
+    # repeated checkpoints reach the stall outcome (wait-report.sh --since).
+    dispatch = next((row for row in store["dispatches"] if row.get("id") == enrollment), None)
+    since = (dispatch.get("result") or {}).get("at") if dispatch and dispatch.get("status") == "applied" else None
+    if since is None:
+        raise UsageError("Dispatch {} has no applied send time in {}, so a checkpoint could never reach its stall "
+                         "outcome. Reconcile the dispatch through references/dispatch-recovery.md before checking "
+                         "its report.".format(enrollment, state_path), {"enrollment": enrollment})
     return {"agent": assignment["agent"], "report": assignment["report"],
-            "base": task["base_revision"] if task else None,
-            "since": (dispatch.get("result") or {}).get("at") if dispatch else None}
+            "base": task["base_revision"] if task else None, "since": since}
+
+
+#: wait-report.sh's checkpoint verdicts. Any other exit, 2 above all, is a
+#: usage, precondition or tool failure of the wait itself.
+VERDICT_EXITS = frozenset({0, 1, 3, 4, 5})
 
 
 def check(state_path, enrollment, worktree=None, *, run=subprocess.run, warn=None):

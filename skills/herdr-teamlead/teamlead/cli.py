@@ -1451,9 +1451,13 @@ def cmd_close_member(args, client=None, warn=None, trace=None):
 
 
 def cmd_check_member(args, client=None, warn=None, trace=None):
-    # The wait's own outcome travels in `exit` and `wait`; this command fails
-    # only when its inputs cannot be read.
-    payload, _code = members.check(_state_path(args), args.enrollment, args.worktree, warn=warn)
+    # A checkpoint verdict travels in `exit` and `wait`; a wait that could not
+    # run (exit 2, or any code outside the verdicts) fails this command.
+    payload, code = members.check(_state_path(args), args.enrollment, args.worktree, warn=warn)
+    if code not in members.VERDICT_EXITS:
+        return payload, {"error": "wait_failed", "message": "wait-report.sh exited {} without a verdict: {} Resolve "
+                         "that diagnostic, then run check-member again.".format(code, payload["diagnostics"] or "(no diagnostic)"),
+                         "details": {"exit": code}}
     return payload, None
 
 
