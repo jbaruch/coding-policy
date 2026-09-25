@@ -68,22 +68,22 @@ in_list() { # <needle> <haystack...>
   return 1
 }
 
-# Is this session a Herdr WORKER rather than the lead?
+# Is this session a Herdr WORKER rather than the foreman?
 #
 # The team rules reserve the shared checkout and every worktree operation for
-# the lead: a worker "runs no git command against the shared checkout,
+# the foreman: a worker "runs no git command against the shared checkout,
 # mutating or otherwise" and "never creates, moves, or removes a worktree"
 # (rules/agent-team-operation.md Writers and Checkouts). A hook that tells a
 # worker to fast-forward `main` or remove a worktree is instructing it to
 # break that rule -- which is exactly what happened in a live round, where the
 # worker reported the contradiction and then obeyed the hook.
 #
-# Herdr exports no lead/worker flag, so the role is derived from where the
-# session sits: the lead works in the shared checkout, every worker works in a
+# Herdr exports no foreman/worker flag, so the role is derived from where the
+# session sits: the foreman works in the shared checkout, every worker works in a
 # linked worktree. In a linked worktree `--git-dir` and `--git-common-dir`
 # resolve differently; in the main checkout they are the same.
 #
-# 0 = a Herdr worker (suppress lead-only advice), 1 = the lead, a standalone
+# 0 = a Herdr worker (suppress foreman-only advice), 1 = the foreman, a standalone
 # agent, or anything this cannot determine. Fail open: a hook that goes silent
 # because a git command failed would be worse than one that speaks up.
 is_herdr_worker() {
@@ -92,13 +92,13 @@ is_herdr_worker() {
   local git_dir common_dir rc=0
   git_dir="$(git rev-parse --absolute-git-dir 2>/dev/null)" || rc=$?
   if (( rc != 0 )); then
-    warn "git rev-parse --absolute-git-dir failed (exit ${rc}) — cannot tell a Herdr worker from the lead; treating this as the lead"
+    warn "git rev-parse --absolute-git-dir failed (exit ${rc}) — cannot tell a Herdr worker from the foreman; treating this as the foreman"
     return 1
   fi
   rc=0
   common_dir="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || rc=$?
   if (( rc != 0 )); then
-    warn "git rev-parse --git-common-dir failed (exit ${rc}) — cannot tell a Herdr worker from the lead; treating this as the lead"
+    warn "git rev-parse --git-common-dir failed (exit ${rc}) — cannot tell a Herdr worker from the foreman; treating this as the foreman"
     return 1
   fi
 
@@ -139,10 +139,10 @@ main() {
   fi
   [[ "$inside" == "true" ]] || return 0
 
-  # Branch and worktree cleanup is the lead's, never a worker's
+  # Branch and worktree cleanup is the foreman's, never a worker's
   # (rules/agent-team-operation.md Writers and Checkouts). Blocking a worker's
   # stop over leftovers it is forbidden to remove would force it to either
-  # disobey the rule or fail to hand off. The lead's own teardown runs at the
+  # disobey the rule or fail to hand off. The foreman's own teardown runs at the
   # end of its round.
   #
   # ONLY that cleanup is suppressed. The diagnostics gate and the dirty-tree
@@ -165,7 +165,7 @@ main() {
     if [[ -z "$base" ]]; then
       warn "could not resolve origin's default branch — reporting only worktrees whose upstream is gone"
     fi
-    # `rules/agent-team-operation.md` Writers and Checkouts: the lead removes
+    # `rules/agent-team-operation.md` Writers and Checkouts: the foreman removes
     # only a merged, clean worktree, and reports a dirty, unmerged, locked or
     # detached one to the operator. So removal ALWAYS requires clean and
     # contained -- a gone upstream is a reason to look, never a licence, since
@@ -386,10 +386,10 @@ build_branch_findings() {
   # Report-only, never an instruction to remove: a detached, locked, dirty or
   # unmerged worktree is the operator's call under Writers and Checkouts.
   for p in ${spent_detached[@]+"${spent_detached[@]}"}; do
-    reports+=("Detached worktree holding nothing new: ${p} — report it to the operator; the lead never removes a detached worktree.")
+    reports+=("Detached worktree holding nothing new: ${p} — report it to the operator; the foreman never removes a detached worktree.")
   done
   for p in ${held[@]+"${held[@]}"}; do
-    reports+=("Worktree left for the operator: ${p} — the lead never removes a dirty, unmerged, locked or detached worktree.")
+    reports+=("Worktree left for the operator: ${p} — the foreman never removes a dirty, unmerged, locked or detached worktree.")
   done
   return 0
 }

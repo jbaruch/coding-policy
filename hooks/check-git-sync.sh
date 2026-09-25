@@ -64,22 +64,22 @@ emit_notice() { # <notice-text>
   return 0
 }
 
-# Is this session a Herdr WORKER rather than the lead?
+# Is this session a Herdr WORKER rather than the foreman?
 #
 # The team rules reserve the shared checkout and every worktree operation for
-# the lead: a worker "runs no git command against the shared checkout,
+# the foreman: a worker "runs no git command against the shared checkout,
 # mutating or otherwise" and "never creates, moves, or removes a worktree"
 # (rules/agent-team-operation.md Writers and Checkouts). A hook that tells a
 # worker to fast-forward `main` or remove a worktree is instructing it to
 # break that rule -- which is exactly what happened in a live round, where the
 # worker reported the contradiction and then obeyed the hook.
 #
-# Herdr exports no lead/worker flag, so the role is derived from where the
-# session sits: the lead works in the shared checkout, every worker works in a
+# Herdr exports no foreman/worker flag, so the role is derived from where the
+# session sits: the foreman works in the shared checkout, every worker works in a
 # linked worktree. In a linked worktree `--git-dir` and `--git-common-dir`
 # resolve differently; in the main checkout they are the same.
 #
-# 0 = a Herdr worker (suppress lead-only advice), 1 = the lead, a standalone
+# 0 = a Herdr worker (suppress foreman-only advice), 1 = the foreman, a standalone
 # agent, or anything this cannot determine. Fail open: a hook that goes silent
 # because a git command failed would be worse than one that speaks up.
 is_herdr_worker() {
@@ -88,13 +88,13 @@ is_herdr_worker() {
   local git_dir common_dir rc=0
   git_dir="$(git rev-parse --absolute-git-dir 2>/dev/null)" || rc=$?
   if (( rc != 0 )); then
-    warn "git rev-parse --absolute-git-dir failed (exit ${rc}) — cannot tell a Herdr worker from the lead; treating this as the lead"
+    warn "git rev-parse --absolute-git-dir failed (exit ${rc}) — cannot tell a Herdr worker from the foreman; treating this as the foreman"
     return 1
   fi
   rc=0
   common_dir="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || rc=$?
   if (( rc != 0 )); then
-    warn "git rev-parse --git-common-dir failed (exit ${rc}) — cannot tell a Herdr worker from the lead; treating this as the lead"
+    warn "git rev-parse --git-common-dir failed (exit ${rc}) — cannot tell a Herdr worker from the foreman; treating this as the foreman"
     return 1
   fi
 
@@ -294,7 +294,7 @@ main() {
   # A worker never touches the shared checkout, so telling it to sync one is
   # telling it to break the rule. Report the drift, name whose job it is.
   if is_herdr_worker; then
-    emit_notice "Session-start status — git: local \`${db}\` is ${behind} behind / ${ahead} ahead of \`origin/${db}\`. This is a Herdr worker session: the shared checkout is the lead's (rules/agent-team-operation.md Writers and Checkouts). Do not sync it — work in this worktree and report the drift."
+    emit_notice "Session-start status — git: local \`${db}\` is ${behind} behind / ${ahead} ahead of \`origin/${db}\`. This is a Herdr worker session: the shared checkout is the foreman's (rules/agent-team-operation.md Writers and Checkouts). Do not sync it — work in this worktree and report the drift."
     return 0
   fi
 

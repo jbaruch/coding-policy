@@ -166,7 +166,7 @@ main() {
     pass; else fail "never-pushed worktree: expected an orphaned report, got RC=$RC OUT=$OUT"; fi
 
   # 4a-ii. A DETACHED worktree at a commit main already has. No branch name
-  # could ever have matched it — and the lead never removes one
+  # could ever have matched it — and the foreman never removes one
   # (rules/agent-team-operation.md Writers and Checkouts), so it is surfaced on
   # stderr and never listed under "remove them".
   mk_origin o4b; clone_from "$BARE" "$TMP/r4b"
@@ -259,7 +259,7 @@ main() {
 
   # 4b. The same orphaned worktree, seen from INSIDE a linked worktree with
   # HERDR_ENV set: that is a worker session, and removing a worktree is the
-  # lead's job (rules/agent-team-operation.md). Blocking here would force the
+  # foreman's job (rules/agent-team-operation.md). Blocking here would force the
   # worker to either disobey the rule or fail to hand off.
   OUT="$(cd "$TMP/r4-wt" && printf '%s' '{"stop_hook_active":false}' \
     | HERDR_ENV=1 bash "$HOOK" 2>/dev/null)"; RC=$?
@@ -277,12 +277,12 @@ main() {
     pass; else fail "worker diagnostics: expected a diagnostics block without the worktree finding, got RC=$RC OUT=$OUT"; fi
   rm -f "$TMP/r4-wt/bad.sh" || die "r4-wt cleanup failed"
 
-  # 4c. The lead's own session (main checkout) still blocks with HERDR_ENV set:
+  # 4c. The foreman's own session (main checkout) still blocks with HERDR_ENV set:
   # the suppression keys on being in a linked worktree, not on Herdr alone.
   OUT="$(cd "$TMP/r4" && printf '%s' '{"stop_hook_active":false}' \
     | HERDR_ENV=1 bash "$HOOK" 2>/dev/null)"; RC=$?
   if [[ $RC -eq 0 ]] && reason_has "Orphaned worktrees"; then
-    pass; else fail "lead session: expected the worktree block, got RC=$RC OUT=$OUT"; fi
+    pass; else fail "foreman session: expected the worktree block, got RC=$RC OUT=$OUT"; fi
 
   # 5. dirty tree only -> allow (report-only).
   mk_origin o5; clone_from "$BARE" "$TMP/r5"

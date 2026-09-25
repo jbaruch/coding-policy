@@ -1,0 +1,16 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "verdict": {
+      "type": "string",
+      "enum": ["blocking", "approved", "insufficient_evidence"],
+      "description": "blocking if the report states any finding the foreman must resolve before the work proceeds, whether or not it carries a BLOCKED section; approved if the report's own conclusion is that nothing blocks; insufficient_evidence if the report does not say either way."
+    },
+    "evidence": {
+      "type": "string",
+      "description": "The sentence from the report that decides the verdict, quoted verbatim. Empty only for insufficient_evidence."
+    }
+  },
+  "required": ["verdict", "evidence"]
+}

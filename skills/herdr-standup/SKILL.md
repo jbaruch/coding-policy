@@ -27,7 +27,7 @@ Prose `skills/...` paths are relative to that plugin root.
 
 ```bash
 CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
-bash "$CP/skills/herdr-teamlead/roster.sh"
+bash "$CP/skills/herdr-foreman/roster.sh"
 ```
 
 Emits `{"caller":{...},"agents":[{"name","kind","pane_id","state"}]}` for every
@@ -119,7 +119,7 @@ file for the renderer:
 round log or the assignment ledger — never from a pane read, and never from a
 guess about what a worker is probably doing.
 Use the foreman's schema-1 task ledger under
-`skills/herdr-teamlead/state-schema.md` for accepted completion. Read it without
+`skills/herdr-foreman/state-schema.md` for accepted completion. Read it without
 writing or migrating it. Missing or unsupported records mean unknown completion;
 dispatch status alone establishes none. Worker `DONE` answers remain self-reports.
 
@@ -157,7 +157,7 @@ Read saved attention using the team's recorded state override or default:
 
 ```bash
 CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
-bash "$CP/skills/herdr-teamlead/teamlead.sh" catch-up [--state <state-file>]
+bash "$CP/skills/herdr-foreman/foreman.sh" catch-up [--state <state-file>]
 ```
 
 Present nonempty `attention_markdown` before the table. Follow `attention` page
@@ -168,7 +168,7 @@ continue with the independently gathered standup. If there are no pending items,
 proceed silently. Its lifecycle contract is:
 
 ```text
-skills/herdr-teamlead/references/attention.md
+skills/herdr-foreman/references/attention.md
 ```
 
 Print `block` from the saved output verbatim (`jq -r .block <file>`), exactly
