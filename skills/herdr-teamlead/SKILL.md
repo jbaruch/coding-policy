@@ -473,9 +473,10 @@ checkpoint's `exit` and delivery JSON as `wait`:
 - The command itself exits non-zero when the dispatch has no recorded send
   time, or when the wait ran without a verdict (`wait_failed`, carrying the
   wait's own exit, 2 included); resolve the diagnostic stderr names, then run
-  it again Read delivered reports in full. Pass the worker's checkout
-as `--worktree` when it has one. An exit 1
-then carries either `reason: checkpoint_pending` or a `stall` object; act on a
+  it again
+
+Read delivered reports in full. Pass the worker's checkout as `--worktree`
+when it has one. An exit 1 then carries either `reason: checkpoint_pending` or a `stall` object; act on a
 stall under `rules/agent-team-operation.md` Stalled Workers and record the
 obligation through `references/attention.md`. Preserve the blocked/refusal and native-recovery paths in the
 following references; never re-dispatch over uncertainty or resend a refused
@@ -549,8 +550,8 @@ Persist user-facing obligations under `references/attention.md` before presentin
 them; record an actual answer or resolution separately from showing the item.
 
 Every return to Step 4 is a round boundary: run Step 16 to log the round and
-Step 17 to reset first. The reset foreman re-enters at Step 1; Step 2's
-preflight continues it to Step 5, where `foreman-queue` names the next seat.
+Step 17 to reset first. Record the step this gate decision named as the stow's
+continuation step. The reset foreman takes Step 17's Resume Route.
 
 After accepting a consultation, return to Step 4 for the next needed
 responsibility. For an investigation-only task, use the knowledge gate below.
@@ -656,13 +657,13 @@ Stow the handoff under the working-memory reference, with a structured gap
 for anything the stow could not capture. The stow's `unresolved_work` names
 the continuation step, the step the round's outcome routes to:
 
-- A judge ruling or remedy — the step it named
+- A gate decision, judge ruling or remedy — the step it named
 - A release-ready pull request — Step 14
 - A merged or abandoned task awaiting closure — Step 16
 - Only `foreman-queue` seats remaining — Step 5
- Handle every pending supervision
-event, and save `supervision-hold` kind `handoff` covering each active
-enrollment. Then schedule the reset:
+
+Handle every pending supervision event, and save `supervision-hold` kind
+`handoff` covering each active enrollment. Then schedule the reset:
 
 ```bash
 CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"

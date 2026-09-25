@@ -29,7 +29,13 @@
   outcome names", Step 13 said "Step 1 and continue"), and `foreman-queue`
   lists seats only, so a release-ready or closure-pending task would have
   been replanned or lost. The stow now names that step, and Step 2 goes
-  there instead of Step 5. The foreman's clear
+  there instead of Step 5. The prompt's commands run as written: each is
+  `bash <installed>/skills/herdr-teamlead/teamlead.sh <command> ...`, and a
+  test executes them against a fixture stow. An earlier draft said bare
+  `teamlead`, which no installed plugin puts on `PATH`, so the fresh context
+  would have stalled before reading its stow. A stow id of `latest` is
+  refused, since `memory-show --id latest` picks the newest stow rather than
+  that one. The foreman's clear
   mechanics come from a configured worker of the same runtime kind. A pane
   that never idles, a clear that changes nothing, or a prompt that doesn't
   land is reported in the deliverer's log, and nothing further is sent.

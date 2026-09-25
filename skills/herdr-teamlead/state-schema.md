@@ -793,12 +793,14 @@ future shape change bumps `schema_version` and migrates in the owner.
 One delivery attempt per pane and stow, never retried automatically. A
 retry replays before every precondition the reset itself changes (stow
 readiness, supervision work); reading the stow and supervision, and checking
-the caller's pane, still come first. A `delivered`
-row, or a `scheduled` or `delivering` row whose exact process identity is
-still alive, replays. A dead `scheduled` row is finalized `failed` (nothing
+the caller's pane, still come first. A `delivered` or `reconciled` row,
+or a `scheduled` or `delivering` row whose exact process identity is still
+alive, replays: each returns the recorded row with `replayed: true` and
+starts nothing. A dead `scheduled` row is finalized `failed` (nothing
 was typed), and a dead `delivering` row `interrupted` (typing may have
-begun), each with the failure object. Every row that is neither live nor
-delivered is then refused with its resume prompt, for operator recovery under
+begun), each with the failure object. Every other row, `failed` or
+`interrupted` whether recorded earlier or just finalized, is then refused
+with `reset_ended` and its resume prompt, for operator recovery under
 the Working Memory carve-out. The next
 round resets from a new stow. A deliverer claims only the row carrying its
 own process identity. A launch failure, or a deliverer already gone when
@@ -814,7 +816,7 @@ The record is the durable blocker for a failed reset: `catch-up` reads it
 through `foreman_reset.outstanding` and lists, ahead of the attention queue,
 each pane whose latest reset ended `failed` or `interrupted`, or never reached
 an outcome with its deliverer gone, and an unreadable record. A later
-`delivered` reset for the pane supersedes an older failure.
+`delivered` or `reconciled` reset for the pane supersedes an older failure.
 
 `foreman-reset-reconcile --pane <pane> --stow <stow> --outcome delivered|failed`
 is the owner's repair for a row whose deliverer is gone: a `scheduled` row

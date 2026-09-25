@@ -15,6 +15,7 @@ workers (teamlead/composer.py). It never types into a working or blocked pane.
 Preconditions, all checked before anything is scheduled:
 
 - the named stow is `reset_ready` (memory.py)
+- its id is not `latest`, the memory-show selector the resume prompt cannot name exactly
 - the caller runs in the bound foreman's own Herdr pane
 - the foreman could stop now: no unhandled supervision event, and either no
   active enrollment or a hold covering the current ones (the Stop hook's rule)
@@ -25,9 +26,9 @@ and the foreman's agent name from its own pane.
 
 One delivery attempt per pane and stow, never retried automatically.
 `<state>.foreman-reset.json` records each scheduled reset (`schedule`), and
-the deliverer claims it before sending anything (`claim`). A retry of a live
-or delivered reset replays the record and spawns nothing. Any other reset is
-finalized `failed` (nothing typed) or `interrupted` (typing began) with the
+the deliverer claims it before sending anything (`claim`). A retry of a live,
+delivered or reconciled reset replays the record and spawns nothing. Any
+other reset is finalized `failed` (nothing typed) or `interrupted` (typing began) with the
 resume prompt the operator pastes, under the Working Memory recovery
 carve-out; the next round resets from a new stow. Before every keystroke the
 deliverer re-reads the stow and the pane, and refuses unless the stow is
@@ -72,16 +73,17 @@ FAILURE_DETAIL_KEYS = frozenset({"pane_id", "stow", "record", "status", "pid", "
 RESUME_OPENING = "Foreman resume after a planned round-boundary reset."
 RESUME_TEMPLATE = (
     RESUME_OPENING + " Your earlier conversation is gone by design. Run the "
-    "herdr-teamlead skill with `{flags}` on every teamlead command. Before "
-    "anything else: run `teamlead memory-show {flags} --id {stow}` and read its "
-    "required files in order; run `teamlead supervision-bind {flags}`, "
-    "`teamlead supervision-resume {flags}`, `teamlead supervision-status {flags}` "
-    "and `teamlead supervision-drain {flags}`; then "
-    "`teamlead foreman-queue {flags}`. Then take SKILL.md Step 17's Resume Route: Step 1, Step 2, "
+    "herdr-teamlead skill; every command below is complete and runnable as written, "
+    "and every other launcher command takes the same `{flags}`. Before "
+    "anything else: run `{tl} memory-show {flags} --id {stow}` and read its "
+    "required files in order; run `{tl} supervision-bind {flags}`, "
+    "`{tl} supervision-resume {flags}`, `{tl} supervision-status {flags}` "
+    "and `{tl} supervision-drain {flags}`; then "
+    "`{tl} foreman-queue {flags}`. Then take SKILL.md Step 17's Resume Route: Step 1, Step 2, "
     "then the continuation step the stow's unresolved work names, in place of Step 5. "
     "Load each decision's records before making it, with "
-    "`teamlead load-set {flags} --decision <plan|brief|gate|diagnose> --task <task>` or "
-    "`teamlead load-set {flags} --decision wake --enrollment <enrollment-id>`."
+    "`{tl} load-set {flags} --decision <plan|brief|gate|diagnose> --task <task>` or "
+    "`{tl} load-set {flags} --decision wake --enrollment <enrollment-id>`."
 )
 
 
@@ -92,7 +94,7 @@ def resume_prompt(stow, state, *, config=None, herdr_bin=None):
         flags += " --config " + shlex.quote(config)
     if herdr_bin:
         flags += " --herdr-bin " + shlex.quote(herdr_bin)
-    return RESUME_TEMPLATE.format(stow=shlex.quote(stow), flags=flags)
+    return RESUME_TEMPLATE.format(tl="bash " + shlex.quote(launcher()), stow=shlex.quote(stow), flags=flags)
 
 
 OPERATOR_RECOVERY = ("Do not run foreman-reset again for this stow. The operator recovers the foreman under "
@@ -234,7 +236,7 @@ def _alive(process, probe=None):
 
 
 def _settle(document, row, state_path, alive):
-    """Replay a live or delivered reset; finalize any other, then refuse it for the operator.
+    """Replay a live, delivered or reconciled reset; finalize any other, then refuse it for the operator.
 
     A dead `scheduled` row typed nothing and becomes `failed`; a dead
     `delivering` row may have typed and becomes `interrupted`. Either way the
@@ -265,7 +267,7 @@ def replay(state_path, plan, *, alive=_alive):
     ran, its stow's reads and the supervision state legitimately change, and a
     retry still replays. Reading the stow and supervision, and checking the
     caller's pane, still come first (`cli.cmd_foreman_reset`).
-    A reset that is neither live nor delivered is finalized and refused.
+    A reset that is neither live, delivered nor reconciled is finalized and refused.
     """
     path = record_path(state_path)
     with state_lock(path):
@@ -372,7 +374,7 @@ def outstanding(state_path, *, alive=_alive):
     anything else can fail, and every later failure lands on it. For each pane,
     the latest reset needs the operator when it ended `failed` or
     `interrupted`, or when it never reached an outcome and its deliverer is
-    gone. A later `delivered` reset for the pane supersedes an older failure.
+    gone. A later `delivered` or `reconciled` reset for the pane supersedes an older failure.
     An unreadable record is itself outstanding. Read-only: nothing is written.
     """
     path = record_path(state_path)
@@ -424,9 +426,10 @@ def reconcile(state_path, plan, outcome, at, *, alive=_alive):
     """Close a reset whose deliverer is gone without an outcome; the operator says which one happened.
 
     The owner's repair for a record that could not say how a delivery ended.
-    Only a `scheduled` or `delivering` row whose deliverer is no longer that
-    process qualifies: a live one is still working, and a finished one already
-    has its outcome. `failed` records the failure with the resume prompt built
+    A `scheduled` row (`failed` only) or a `delivering` row whose deliverer is
+    no longer that process qualifies, and so does an `interrupted` row the
+    operator saw resume (`delivered` only). A live deliverer is still working,
+    and any other finished row already has its outcome. `failed` records the failure with the resume prompt built
     from the row's own settings; `delivered` records that the operator saw the
     foreman resume.
     """
@@ -582,6 +585,10 @@ def preflight(stow, supervision_data, caller_pane):
     """Refuse a reset that would lose work; return what the deliverer needs."""
     if stow.get("kind") != "stow":
         raise UsageError("Memory record {} is not a stow; name the stow to resume from.".format(stow.get("id")), {"record": stow.get("id")})
+    if stow["id"] == "latest":
+        # `memory-show --id latest` selects the newest stow, so the resume prompt could not name this one.
+        raise UsageError("Stow id 'latest' is the memory-show selector, so the resume prompt cannot name it exactly. "
+                         "Record the handoff under another stow id before resetting.", {"stow": "latest"})
     if not stow["reset_ready"]:
         raise UsageError("Stow {} is not reset-ready: a required read changed or a gap names no task. Record a new stow before resetting.".format(
             stow["id"]), {"stow": stow["id"]})

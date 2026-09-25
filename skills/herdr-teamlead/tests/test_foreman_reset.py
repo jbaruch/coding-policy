@@ -2,6 +2,11 @@
 
 import io
 import os
+import re
+import shlex
+import shutil
+import subprocess
+import tempfile
 import fcntl
 import json
 import sys
@@ -68,6 +73,10 @@ class PreflightTest(unittest.TestCase):
         with self.assertRaisesRegex(UsageError, "not a stow"):
             check(stow={"id": "lesson-1", "kind": "lesson"})
 
+    def test_a_stow_named_like_the_latest_selector_refuses(self):
+        with self.assertRaisesRegex(UsageError, "cannot name it exactly"):
+            check(stow={"id": "latest", "kind": "stow", "reset_ready": True})
+
     def test_only_the_bound_foreman_pane_may_reset(self):
         with self.assertRaisesRegex(UsageError, "own pane"):
             check(caller="w2:p1")
@@ -77,6 +86,57 @@ class PreflightTest(unittest.TestCase):
     def test_no_binding_refuses(self):
         with self.assertRaisesRegex(UsageError, "No foreman is bound"):
             foreman_reset.preflight(READY, {"binding": None, "members": [], "events": [], "acknowledgements": [], "holds": []}, PANE)
+
+
+class ResumePromptRunsTest(unittest.TestCase):
+    """The fresh context has only the prompt, so every command in it must run as written."""
+
+    def setUp(self):
+        self.root = Path(tempfile.mkdtemp(prefix="foreman-resume-"))
+        self.addCleanup(shutil.rmtree, self.root)
+        self.state = self.root / "owner state.json"
+        self.herdr = self.root / "herdr-stub"
+        self.herdr.write_text('#!/bin/sh\necho \'{"error":{"code":"agent_not_found","message":"no"}}\' >&2\nexit 1\n',
+                              encoding="utf-8")
+        self.herdr.chmod(0o755)
+        ledger = self.root / "TASK-LEDGER.md"
+        ledger.write_text("# ledger\n", encoding="utf-8")
+        record = self.root / "stow.json"
+        record.write_text(json.dumps({"id": "round-7", "capture": "Release is next for task t.",
+                                      "unresolved_work": ["Continue at Step 14 for task t."], "gaps": [],
+                                      "required_reads": [str(ledger)]}), encoding="utf-8")
+        stowed = self.run_command("bash {} memory-stow --state {} --record {}".format(
+            shlex.quote(foreman_reset.launcher()), shlex.quote(str(self.state)), shlex.quote(str(record))))
+        self.assertEqual(stowed.returncode, 0, stowed.stderr)
+
+    def run_command(self, command):
+        env = {key: value for key, value in os.environ.items() if not key.startswith("HERDR")}
+        return subprocess.run(shlex.split(command), capture_output=True, text=True, env=env, cwd=str(self.root),
+                              check=False)
+
+    def commands(self):
+        prompt = foreman_reset.resume_prompt("round-7", str(self.state), herdr_bin=str(self.herdr))
+        return re.findall(r"`(bash [^`]+)`", prompt)
+
+    def test_the_offline_commands_run_and_answer_from_the_saved_records(self):
+        by_name = {shlex.split(command)[2]: command for command in self.commands()}
+        shown = self.run_command(by_name["memory-show"])
+        self.assertEqual(shown.returncode, 0, shown.stderr)
+        self.assertEqual(json.loads(shown.stdout)["record"]["id"], "round-7")
+        queued = self.run_command(by_name["foreman-queue"])
+        self.assertEqual(queued.returncode, 0, queued.stderr)
+        self.assertEqual(json.loads(queued.stdout)["queue"], [])
+
+    def test_every_command_is_accepted_by_the_launcher(self):
+        commands = self.commands()
+        self.assertEqual(len(commands), 8)
+        for command in commands:
+            filled = (command.replace("<plan|brief|gate|diagnose>", "plan").replace("<task>", "t")
+                      .replace("<enrollment-id>", "e1"))
+            with self.subTest(command=filled):
+                result = self.run_command(filled)
+                self.assertNotIn("usage:", result.stderr)
+                self.assertNotIn("Traceback", result.stderr)
 
 
 class FakeClient:
@@ -161,7 +221,7 @@ class DeliverTest(unittest.TestCase):
         prompt = foreman_reset.resume_prompt("round-7", "/s.json")
         for command in ("memory-show", "supervision-bind", "supervision-resume", "supervision-status",
                         "supervision-drain", "foreman-queue", "load-set"):
-            self.assertIn("`teamlead {} --state /s.json".format(command), prompt)
+            self.assertIn("`bash {} {} --state /s.json".format(foreman_reset.launcher(), command), prompt)
 
     def test_the_resume_prompt_routes_to_the_stow_continuation_step(self):
         prompt = foreman_reset.resume_prompt("round-7", "/s.json")
@@ -219,7 +279,7 @@ class DeliverTest(unittest.TestCase):
         for command in ("memory-show", "supervision-bind", "supervision-resume", "supervision-status",
                         "supervision-drain", "foreman-queue", "load-set"):
             with self.subTest(command=command):
-                self.assertIn("teamlead {} {}".format(command, flags), prompt)
+                self.assertIn("teamlead.sh {} {}".format(command, flags), prompt)
 
     def test_an_unnamed_foreman_pane_sends_nothing(self):
         class Unnamed(FakeClient):
@@ -635,6 +695,19 @@ class ResetCommandTest(CliCase):
                                                 alive=lambda process: False)["replayed"])
         with self.assertRaisesRegex(UsageError, "already ended reconciled"):
             foreman_reset.reconcile(self.state, plan, "failed", "2026-09-24T12:00:00+00:00", alive=lambda process: False)
+
+    def test_a_reconciled_reset_replays_on_retry_and_starts_nothing(self):
+        plan = {"pane_id": PANE, "stow": "round-7"}
+        foreman_reset.schedule(self.state, plan, "2026-09-24T10:00:00+00:00", os.getpid)
+        foreman_reset.claim(self.state, plan, supervision_runtime.process_identity(os.getpid()))
+        foreman_reset.reconcile(self.state, plan, "delivered", "2026-09-24T11:00:00+00:00", alive=lambda process: False)
+        started = []
+        again = foreman_reset.schedule(self.state, plan, "2026-09-24T12:00:00+00:00", lambda: started.append(1),
+                                       alive=lambda process: False)
+        self.assertEqual((again["status"], again["replayed"], started), ("reconciled", True, []))
+        replayed = foreman_reset.replay(self.state, plan, alive=lambda process: False)
+        assert replayed is not None, "a reconciled reset replays"
+        self.assertEqual(replayed["status"], "reconciled")
 
     def test_outstanding_names_the_reconcile_command(self):
         plan = {"pane_id": PANE, "stow": "round-7"}
