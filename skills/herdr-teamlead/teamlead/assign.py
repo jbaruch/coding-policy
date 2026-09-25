@@ -181,23 +181,20 @@ def reject_duplicate_agents(assignments):
 FROZEN_DIR = ".dispatched"
 
 
-def freeze_decision(dispatches, assignments, identity):
+def freeze_decision(assignments, is_replay):
     """`source` when every assigned role replays a dispatch recorded under these source paths, else `frozen`.
 
-    `identity(role, agent)` returns the fingerprints the source paths resolve
-    to: task, role, agent, fix round, correction plan, work, round options,
-    both paths and the brief bytes, plus any older form of the same dispatch
-    the ledger still carries. A replay is a recorded row with one of those
-    fingerprints, whatever its status; the status decides what
-    the replay does (a saved receipt, a transport retry, a pending refusal), not
-    whether it is one. Anything short of the complete identity is new work and
-    freezes. A batch mixing replays with new roles is refused, so no new
-    dispatch escapes the freeze (#460).
+    `is_replay(role, agent)` answers whether the source paths resolve to an
+    APPLIED recorded dispatch: the same id and fingerprint (task, role, agent,
+    fix round, correction plan, work, round options and brief bytes), or an
+    older form of it the ledger still carries. Such a replay returns its saved
+    receipt and sends nothing, so the source paths never reach a worker.
+    Anything that would send -- a new dispatch, or a retry of a row never
+    sent -- freezes, and so does anything short of the complete identity. A
+    batch mixing replays with new roles is refused, so no new dispatch escapes
+    the freeze (#460).
     """
-    if not dispatches:
-        return "frozen"
-    recorded = {row.get("fingerprint") for row in dispatches}
-    replays = {role for role, name in assignments.items() if identity(role, name) & recorded}
+    replays = {role for role, name in assignments.items() if is_replay(role, name)}
     if not replays:
         return "frozen"
     if replays != set(assignments):

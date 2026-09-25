@@ -1223,9 +1223,16 @@ def cmd_apply(args, client=None, warn=None, trace=None):
     # freeze keeps the source paths its record names, so its replay still
     # matches -- only when the complete identity those paths resolve to is
     # the recorded one. A dry run writes nothing and reads the sources.
-    if not args.dry_run and freeze_decision(
-            store["dispatches"] if args.task else [], assignments,
-            lambda role, name: {identity(role, name, paths)[1]} | legacy_judge_fingerprints(role, name, paths)) == "frozen":
+    def is_replay(role, name):
+        """An applied row these source paths resolve to, by the identity the send loop resolves."""
+        identifier, fingerprint = identity(role, name, paths)
+        legacy = legacy_judge_fingerprints(role, name, paths)
+        return any(row.get("status") == "applied" and (
+            (row.get("id"), row.get("fingerprint")) == (identifier, fingerprint) or row.get("fingerprint") in legacy)
+            for row in store["dispatches"])
+
+    decision = "frozen" if args.dry_run or not args.task else freeze_decision(assignments, is_replay)
+    if decision == "frozen" and not args.dry_run:
         paths = freeze_paths(paths)
     if seated or any(key in document for key in ("slice_paths", "slice_digest", "seat_digests")):
         # Keyed on the metadata, not only on the seats: a saved plan stripped
@@ -1254,6 +1261,13 @@ def cmd_apply(args, client=None, warn=None, trace=None):
                         {"dispatch": earlier["id"]})
             identifier, fingerprint = identity(role, name, paths)
             prior = recovery.prior_dispatch(store, identifier, fingerprint)
+            if decision == "source" and not (prior and prior["status"] == "applied"):
+                # The source brief changed after the replay decision read it,
+                # so this is no longer the recorded dispatch and would send a
+                # mutable file (#460).
+                raise UsageError("The source brief for {} changed after it matched its recorded dispatch, so it is "
+                                 "new work. Re-run apply; a new dispatch is sent from a frozen copy.".format(role),
+                                 {"role": role})
             resolved.append((role, name, identifier, fingerprint, prior))
         fresh = [role for role, _name, _identifier, _fingerprint, prior in resolved if not (prior and prior["status"] == "applied")]
         moves = {}

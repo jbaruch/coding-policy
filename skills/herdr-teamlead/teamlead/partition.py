@@ -48,7 +48,9 @@ PARTITION_SCHEMA_VERSION = 1
 #: repo, base and head the slices were proven over (#460). A version-1 result
 #: carries no proof and is refused at `plan`: re-validate.
 RESULT_SCHEMA_VERSION = 2
-FULL_SHA = re.compile(r"[0-9a-f]{40}")
+#: A full commit id: SHA-1, or SHA-256 in a repository using that object
+#: format, the shape the task ledger accepts (`recovery.SHA_RE`).
+FULL_SHA = re.compile(r"[0-9a-f]{40}(?:[0-9a-f]{24})?")
 
 COMMANDS = frozenset({"validate-partition"})
 
@@ -390,7 +392,7 @@ def _revision(run, rev):
     # runner would raise git's bare "Needed a single revision" first. A broken
     # repository still fails in the runner with git's own diagnostic.
     resolved = run(["rev-parse", "--revs-only", "--end-of-options", rev + "^{commit}"]).strip()
-    if not re.fullmatch(r"[0-9a-f]{40}", resolved):
+    if not FULL_SHA.fullmatch(resolved):
         raise UsageError("{!r} does not name a commit in the repository; pass a revision it holds.".format(rev), {"rev": rev})
     return resolved
 

@@ -271,6 +271,18 @@ class RunCommand(unittest.TestCase):
                 partition._revision(partition.git_runner(repo), rev)
         self.assertRegex(partition._revision(partition.git_runner(repo), "HEAD"), "^[0-9a-f]{40}$")
 
+    def test_a_sha256_repository_validates_and_passes_the_gate(self):
+        # A task records a 64-character base in a SHA-256 repository; its
+        # partition must prove and verify with the same shape.
+        changed = ["src/api/routes.py", "src/core/db.py"]
+        self.COMMITS = {"BASE": "b" * 64, "HEAD": "c" * 64}
+        plan = self.plan_for(changed)
+        self.assertEqual((plan["partition_proof"]["base"], plan["partition_proof"]["head"]), ("b" * 64, "c" * 64))
+        self.assertTrue(self.verify(plan, changed, base="b" * 64)["verified"])
+        for malformed in ("b" * 41, "b" * 63, "b" * 65):
+            with self.subTest(malformed=malformed), self.assertRaisesRegex(UsageError, "no usable proof"):
+                partition.check_proof({**plan["partition_proof"], "base": malformed}, "The plan")
+
     def test_a_missing_repository_keeps_gits_diagnostic(self):
         with self.assertRaisesRegex(UsageError, "git rev-parse"):
             partition._revision(partition.git_runner(self.tmp / "absent"), "HEAD")

@@ -16,7 +16,11 @@
   correction plan, work, options and brief bytes) resolves under its source
   paths keeps them, so an upgrade does not turn its replay into new work; a
   first cut matched on task, role, agent and paths alone, which let a later
-  correction over the same files skip the freeze. A frozen copy that is a hard
+  correction over the same files skip the freeze. Only an applied row
+  replays that way, returning its saved receipt without sending: a retry of
+  a row never sent is frozen like new work, and a source brief rewritten
+  between the replay decision and the send is refused, so a worker never
+  reads a mutable source. A frozen copy that is a hard
   link to its source is refused like a symlink. Second, `plan` re-proved a partition over
   whatever `changed` list the file carried, and nothing checked it against
   the real diff later. The issue proposed signing the result; the only party
@@ -38,7 +42,8 @@
   rather than a traceback, and a FIFO or directory there is refused. An
   unknown revision passed to `validate-partition` or `verify-partition` now
   reaches its "pass a revision it holds" message instead of git's bare
-  "Needed a single revision".
+  "Needed a single revision". Revisions and proofs accept SHA-256 commit ids
+  as well as SHA-1, the shape the task ledger already records.
 
 ## 0.3.272 — 2026-09-25
 

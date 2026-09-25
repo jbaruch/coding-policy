@@ -186,6 +186,33 @@ class RecoveryCommandTests(fixture.CliCase):
         self.assertEqual(Path(correction["brief"]).parent.name, ".dispatched")
         self.assertEqual(Path(correction["brief"]).read_bytes(), self.briefs["developer"].read_bytes())
 
+    def legacy_developer_dispatch(self):
+        """A developer dispatch recorded under its source paths, as before #460's freeze."""
+        self.register()
+        with patch("teamlead.cli.freeze_paths", side_effect=lambda paths: paths):
+            code, _, err = self.invoke(self.apply_args(), self.fresh_client("previous-task", "developer-0"))
+        self.assertEqual(code, 0, err)
+
+    def test_a_source_brief_rewritten_after_the_replay_decision_is_refused(self):
+        # coding-policy#460 review: the decision reads the source once; if it
+        # changes before the identity is resolved, the batch is new work and
+        # must not be sent from the mutable file.
+        self.legacy_developer_dispatch()
+        from teamlead import cli as cli_module
+        decide = cli_module.freeze_decision
+
+        def then_rewrite(*arguments):
+            outcome = decide(*arguments)
+            self.briefs["developer"].write_text("rewritten between the decision and the send\n")
+            return outcome
+
+        client = self._client({"grok": "idle"})
+        with patch("teamlead.cli.freeze_decision", side_effect=then_rewrite):
+            code, _, err = self.invoke(self.apply_args(), client)
+        self.assertEqual(code, 1)
+        self.assertIn("changed after it matched its recorded dispatch", err)
+        self.assertEqual(self.runner.writes(), [])
+
     def test_two_release_fresh_fix_cycles_preserve_task_base_history_and_next_number(self):
         self.register()
         code, _, err = self.invoke(self.apply_args(), self.fresh_client("previous-task", "developer-0"))
@@ -375,6 +402,9 @@ class RecoveryCommandTests(fixture.CliCase):
         code, out, err = self.invoke(self.judge_args("diagnosis"), client)
         self.assertEqual(code, 0, err)
         self.assertEqual(json.loads(out)["applied"][0]["judge_mode"], "diagnosis")
+        # A retry of an unsent row sends, so it reads a frozen copy like new
+        # work, never the mutable source the legacy row names (#460).
+        self.assertEqual(Path(self.saved()["recovery"]["dispatches"][-1]["brief"]).parent.name, ".dispatched")
 
     def test_a_direct_judge_dispatch_without_a_mode_is_refused_before_input(self):
         from teamlead.assign import apply as apply_assignments
