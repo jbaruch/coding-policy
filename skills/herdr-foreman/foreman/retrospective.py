@@ -1,4 +1,4 @@
-"""Durable, lead-authored retrospective notes, separate from dispatch state.
+"""Durable, foreman-authored retrospective notes, separate from dispatch state.
 
 The index is the commit point: immutable note bytes are installed before its
 atomic replacement. A pending transaction allows an identical interrupted

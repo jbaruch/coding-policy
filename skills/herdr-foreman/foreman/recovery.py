@@ -700,7 +700,7 @@ def require_investigation_before_judge(store, assignments, task, investigations,
     ends implementation and the ladder, and the one operator-requested ruling a
     checkpoint may cite is bounded per task, so there is nothing such a round
     could record. An adjudication is untouched on the same task -- the judge
-    still owes a contested reviewer or tester verdict, a lead override, or a
+    still owes a contested reviewer or tester verdict, a foreman override, or a
     disputed bot finding during the release of the clean scope. An operator
     plan authorized over the `stop` lifts the refusal, since the correction it
     authorizes is ordinary work.
@@ -835,7 +835,7 @@ def diagnose(store, assignments, data, at, judge_agent, enrolled_report, supervi
     A dispatch marked `applied` proves the send, never the delivery. Every
     team round is supervised (`rules/agent-team-operation.md` Fleet
     Supervision), so when the foreman is bound the cited report must be the one
-    supervision enrolled for the pinned judge, and a bound lead with no such
+    supervision enrolled for the pinned judge, and a bound foreman with no such
     enrollment has no diagnosis to record. `supervised` and `enrolled_report`
     are the caller's reading of that binding.
 
@@ -932,7 +932,7 @@ def diagnose(store, assignments, data, at, judge_agent, enrolled_report, supervi
         raise UsageError("A diagnosis rules on a prepared causal assessment: record an assessed investigator consultation for task {} after its latest developer attempt, assessed before the judge dispatch you cite.".format(data["task"]), {})
     if supervised:
         if not isinstance(enrolled_report, str) or not enrolled_report.strip():
-            raise UsageError("This lead is bound, and no supervision enrollment binds a report to the pinned judge on task {}; dispatch the diagnosis through the bound round before recording it.".format(data["task"]), {})
+            raise UsageError("This foreman is bound, and no supervision enrollment binds a report to the pinned judge on task {}; dispatch the diagnosis through the bound round before recording it.".format(data["task"]), {})
         if str(Path(data["judge_report"]).resolve()) != str(Path(enrolled_report).resolve()):
             raise UsageError("The cited report is not the one supervision enrolled for this judge dispatch ({}); cite the delivered report.".format(enrolled_report), {})
     evidence, body = receipt(data["judge_report"])

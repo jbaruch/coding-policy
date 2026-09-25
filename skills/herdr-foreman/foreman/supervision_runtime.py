@@ -260,7 +260,7 @@ def bind_current(state_path, client, at, *, environ=None, cwd=None, root=None):
     if (pane.get("pane_id") != pane_id or not isinstance(native, dict)
             or native.get("kind") not in ("id", "path") or native.get("agent") not in ("claude", "codex")
             or native.get("source") != "herdr:" + native["agent"]):
-        raise UsageError("This lead pane lacks supported Claude/Codex native session proof. Restore Herdr's session identity before binding the native Stop backstop.", {})
+        raise UsageError("This foreman pane lacks supported Claude/Codex native session proof. Restore Herdr's session identity before binding the native Stop backstop.", {})
     who = store.identity(native["value"], cwd or str(Path.cwd()), environ.get("HERDR_ENV"),
                          kind=native["kind"], pane_id=pane_id)
     return store.bind(state_path, who, at, root=root)
@@ -268,12 +268,12 @@ def bind_current(state_path, client, at, *, environ=None, cwd=None, root=None):
 
 def register_commands(sub, common):
     for name in ("bind", "enroll", "ack", "resolve", "hold", "resume", "drain", "status", "watch"):
-        parser = sub.add_parser("supervision-" + name, parents=[common], help="Persist or inspect lead fleet supervision: " + name)
+        parser = sub.add_parser("supervision-" + name, parents=[common], help="Persist or inspect foreman fleet supervision: " + name)
         parser.add_argument("--now", metavar="ISO")
         if name in ("enroll", "ack", "resolve", "hold"):
             parser.add_argument("--record", required=True, metavar="FILE")
         if name == "bind":
-            parser.add_argument("--record", metavar="FILE", help="Explicit verified native binding; otherwise discover the current lead pane.")
+            parser.add_argument("--record", metavar="FILE", help="Explicit verified native binding; otherwise discover the current foreman pane.")
         if name == "drain":
             parser.add_argument("--through", type=int)
         if name == "watch":

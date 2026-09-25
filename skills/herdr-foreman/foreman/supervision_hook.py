@@ -1,7 +1,7 @@
-"""Native Claude/Codex Stop contract for an explicitly bound Herdr lead only.
+"""Native Claude/Codex Stop contract for an explicitly bound Herdr foreman only.
 
 stdin: native Stop JSON containing cwd and session_id and/or transcript_path.
-stdout: {decision:block,reason:...} only for the matching bound lead with
+stdout: {decision:block,reason:...} only for the matching bound foreman with
 unhandled events, active observation obligations, or unreadable owner state.
 Workers, other native sessions, and never-bound sessions produce no output.
 No writes, worker contact, process termination, or acknowledgement occurs.
@@ -41,13 +41,13 @@ def check(payload, environ, at, *, root=None, probe=runtime.process_identity):
             if (not isinstance(binding, dict) or binding.get("schema_version") != 1
                     or binding.get("identity") != who or not isinstance(binding.get("state_path"), str)
                     or type(binding.get("generation")) is not int or binding["generation"] < 1):
-                return block("The exact lead binding is unreadable. Restore {} and reconcile its saved state before stopping.".format(path))
+                return block("The exact foreman binding is unreadable. Restore {} and reconcile its saved state before stopping.".format(path))
             data = store.load(binding["state_path"])
             if data["binding"] is None:
-                return block("This bound lead's supervision state is missing. Restore {} before stopping; missing state cannot prove its work was resolved.".format(store.store_path(binding["state_path"])))
+                return block("This bound foreman's supervision state is missing. Restore {} before stopping; missing state cannot prove its work was resolved.".format(store.store_path(binding["state_path"])))
             if data["binding"]["identity"] != who:
                 if binding["generation"] >= data["binding"]["generation"]:
-                    return block("This lead's native binding handoff is incomplete. Retry supervision-bind for the same owner state before stopping.")
+                    return block("This foreman's native binding handoff is incomplete. Retry supervision-bind for the same owner state before stopping.")
                 continue
             events = store.pending(data)
             active = [row["id"] for row in data["members"] if row["active"]]
@@ -58,7 +58,7 @@ def check(payload, environ, at, *, root=None, probe=runtime.process_identity):
             health = runtime.health(data, at, probe)
             return block("{} active assignment(s), {} unhandled event(s); watcher is {}. Run supervision-drain, reconcile report/ledger evidence, acknowledge handled outcomes, and keep awaiting the foreground supervision-watch handle. To pause for the user or hand off, save supervision-hold with a disposition and evidence for every active assignment. State: {}".format(len(active), len(events), health["state"], binding["state_path"]))
         except ForemanError as exc:
-            return block("Cannot verify this bound lead's supervision: {} Resume from its saved state before stopping.".format(exc))
+            return block("Cannot verify this bound foreman's supervision: {} Resume from its saved state before stopping.".format(exc))
     return None
 
 
@@ -80,11 +80,11 @@ def main():
         result = check(payload, os.environ, now_iso())
     # outer-boundary-process-contract: native Stop treats nonzero/invalid stdout
     # as no block; emit a structured block for unexpected evaluation errors so
-    # a bound lead's supervision does not silently disappear on a traceback.
+    # a bound foreman's supervision does not silently disappear on a traceback.
     except Exception as exc:
         print("herdr-supervision-stop: evaluation failed ({}); inspect the hook installation.".format(type(exc).__name__), file=sys.stderr)
         if bound:
-            print(json.dumps(block("The bound lead's supervision could not be evaluated. Restore the hook/state installation and reconcile active work before stopping.")))
+            print(json.dumps(block("The bound foreman's supervision could not be evaluated. Restore the hook/state installation and reconcile active work before stopping.")))
         return 0
     if result is not None:
         print(json.dumps(result))

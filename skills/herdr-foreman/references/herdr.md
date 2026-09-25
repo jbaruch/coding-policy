@@ -371,7 +371,7 @@ percentage are not the same currency.
 ## Naming the Layout
 
 A sidebar of `w1 w2 w3 w4` tells the operator nothing at 3am.
-`skills/herdr-foreman/label-workspaces.sh` names the foreman's workspace `lead`,
+`skills/herdr-foreman/label-workspaces.sh` names the foreman's workspace `foreman`,
 each worker's workspace after its agent, and each worker's pane after its kind.
 Run it once per team, not once per round.
 

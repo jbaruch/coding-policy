@@ -1,4 +1,4 @@
-"""Lead-owned obligations: explicit lifecycle events, independent of Herdr status."""
+"""Foreman-owned obligations: explicit lifecycle events, independent of Herdr status."""
 
 import copy
 import json
@@ -76,7 +76,7 @@ def _details(data):
     for key in ("title", "context", "consequence", "resolution_condition"):
         _text(data[key], key, limit=300 if key == "title" else 8000)
     if type(data["priority"]) is not int or not 0 <= data["priority"] <= 100:
-        _fail("Attention priority must be a lead-assigned integer from 0 to 100, with 100 most consequential.")
+        _fail("Attention priority must be a foreman-assigned integer from 0 to 100, with 100 most consequential.")
     if not isinstance(data["options"], list) or len(data["options"]) > 10:
         _fail("Attention options must list at most 10 choices; use [] when choices do not apply.")
     for option in data["options"]:
@@ -330,7 +330,7 @@ def show(path, name):
 
 def register_commands(sub, common):
     for command in ("attention-record", "attention-update", "attention-progress"):
-        parser = sub.add_parser(command, parents=[common], help="Persist a lead-owned attention or progress event.")
+        parser = sub.add_parser(command, parents=[common], help="Persist a foreman-owned attention or progress event.")
         parser.add_argument("--record", required=True, help="JSON input file; see references/attention.md.")
         parser.add_argument("--now", help="ISO-8601 checkpoint with timezone.")
     for command in ("attention-list", "catch-up"):

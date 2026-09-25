@@ -1,13 +1,13 @@
-"""Durable lead-owned fleet observations, acknowledgements, and stop bindings.
+"""Durable foreman-owned fleet observations, acknowledgements, and stop bindings.
 
 Every document/row is schema 1. The canonical selected state owns an adjacent
-`.supervision.json`; exact native lead identities discover it through one
+`.supervision.json`; exact native foreman identities discover it through one
 hashed binding under the default state directory. Reads never migrate or write.
 Unknown/corrupt files are preserved and mutations refuse them. Transactions use
 state_lock/save_state; observations and acknowledgements commit together.
 
 Events describe observations, never task acceptance. Acknowledgement requires
-an explicit lead outcome and evidence receipt; reading/draining cannot ack.
+an explicit foreman outcome and evidence receipt; reading/draining cannot ack.
 Resolving enrollment ends observation only and grants no task completion.
 """
 
@@ -78,7 +78,7 @@ def read_json(path):
 def receipt(path):
     source = canonical(text(path, "evidence path"))
     if not Path(path).expanduser().is_absolute():
-        raise UsageError("Evidence paths must be absolute; supply the saved lead outcome or task-ledger path.", {})
+        raise UsageError("Evidence paths must be absolute; supply the saved foreman outcome or task-ledger path.", {})
     try:
         body = source.read_bytes()
     except OSError as exc:
@@ -88,7 +88,7 @@ def receipt(path):
 
 def evidence(paths):
     if not isinstance(paths, list) or not paths:
-        raise UsageError("Provide at least one absolute saved evidence path for this lead outcome.", {})
+        raise UsageError("Provide at least one absolute saved evidence path for this foreman outcome.", {})
     return [receipt(path) for path in paths]
 
 
@@ -120,7 +120,7 @@ def load(state_path):
                     or identity(who["value"], who["cwd"], who["herdr_env"], kind=who["kind"], pane_id=who["pane_id"]) != who
                     or saved_binding["state_path"] != str(canonical(state_path))
                     or type(saved_binding["generation"]) is not int or saved_binding["generation"] < 1):
-                raise ValueError("invalid bound lead identity")
+                raise ValueError("invalid bound foreman identity")
             timestamp(saved_binding["at"])
         ids = set()
         for row in data["members"]:
@@ -239,7 +239,7 @@ def enroll(state_path, record, at):
     timestamp(at)
     def mutate(data):
         if data["binding"] is None:
-            raise UsageError("Bind this lead's native session with supervision-bind before enrolling worker assignments.", {})
+            raise UsageError("Bind this foreman's native session with supervision-bind before enrolling worker assignments.", {})
         previous = next((row for row in data["members"] if row["id"] == record["id"]), None)
         if previous:
             if previous["assignment"] != record:
@@ -316,7 +316,7 @@ def acknowledge(state_path, record, at):
 
 def resolve(state_path, record, at):
     if not isinstance(record, dict) or set(record) != {"id", "outcome", "evidence"}:
-        raise UsageError("Resolution requires enrollment id, lead outcome, and saved evidence paths.", {})
+        raise UsageError("Resolution requires enrollment id, foreman outcome, and saved evidence paths.", {})
     result = {"schema_version": 1, "at": at, "outcome": text(record["outcome"], "outcome"), "evidence": evidence(record["evidence"])}
     timestamp(at)
     def mutate(data):
@@ -416,7 +416,7 @@ def held(data):
 def identity(value, cwd, environment, *, kind="id", pane_id):
     if kind not in ("id", "path"):
         raise UsageError("Native binding kind must be id or path.", {})
-    value = text(value, "native lead identity")
+    value = text(value, "native foreman identity")
     if kind == "path":
         if not Path(value).is_absolute():
             raise UsageError("Native transcript binding must use an absolute path.", {})
@@ -433,7 +433,7 @@ def binding_path(who, root=None):
 def dispatch_binding(state_path, *, root=None):
     """Read-only dispatch guard: missing historical owner is never legacy mode.
 
-    Scan all saved lead identities, not only the caller's current identity: a
+    Scan all saved foreman identities, not only the caller's current identity: a
     context/model change cannot make its earlier obligations disappear. An
     existing empty owner marks an interrupted first bind and is not dispatchable.
     Only a missing owner with no prior discovery may use legacy compatibility.
@@ -449,7 +449,7 @@ def dispatch_binding(state_path, *, root=None):
 
 
 def _refuse_lost_owner(state_path, directory):
-    """Discovery proves prior ownership even after a lead identity changes."""
+    """Discovery proves prior ownership even after a foreman identity changes."""
     try:
         paths = [path for path in directory.iterdir() if path.suffix == ".json"]
     except FileNotFoundError:
@@ -459,7 +459,7 @@ def _refuse_lost_owner(state_path, directory):
     for path in paths:
         prior = read_json(path)
         if isinstance(prior, dict) and prior.get("state_path") == str(canonical(state_path)):
-            raise StateError("A saved lead discovery record already names the missing supervision owner {}. Restore its owner document before rebinding; do not discard unresolved assignments.".format(store_path(state_path)), {})
+            raise StateError("A saved foreman discovery record already names the missing supervision owner {}. Restore its owner document before rebinding; do not discard unresolved assignments.".format(store_path(state_path)), {})
 
 
 def bind(state_path, who, at, *, root=None):
@@ -471,7 +471,7 @@ def bind(state_path, who, at, *, root=None):
     # An empty unbound first-use owner exists before discovery. No transaction
     # can enroll work until binding commits, so this state is safe to retry.
     # Discovery precedes bound owner. A higher-generation discovery
-    # record makes an interrupted handoff block the new lead, while older
+    # record makes an interrupted handoff block the new foreman, while older
     # sessions can stop once the owner has committed a newer binding.
     with state_lock(store_path(state_path)):
         data = load(state_path)
@@ -486,7 +486,7 @@ def bind(state_path, who, at, *, root=None):
             previous = read_json(path)
             if previous is not None and (not isinstance(previous, dict) or previous.get("schema_version") != 1
                     or previous.get("identity") != who or previous.get("state_path") != row["state_path"]):
-                raise StateError("Lead identity already has a conflicting or unreadable state binding. Preserve it and explicitly reconcile the original state path.", {})
+                raise StateError("Foreman identity already has a conflicting or unreadable state binding. Preserve it and explicitly reconcile the original state path.", {})
             if first_use:
                 save_state(store_path(state_path), data)
             save_state(path, row)

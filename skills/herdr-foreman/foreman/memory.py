@@ -1,4 +1,4 @@
-"""Lead-owned lessons and handoff captures; never task acceptance authority.
+"""Foreman-owned lessons and handoff captures; never task acceptance authority.
 
 Each write atomically appends to one document under its existing OS state lock.
 Readers are offline and retain old revisions for audit. A read never locks or
@@ -279,7 +279,7 @@ def _append(path, data, kind, at):
         _require(_names(data[source_key], nonempty=True), "Memory {} must list distinct evidence locations.".format(source_key))
         row[source_key] = [_source(value) if kind == "lesson" else _receipt(value) for value in data[source_key]]
         _require(all(source.get("path") != str(location(path)) for source in row[source_key]),
-                 "Do not receipt memory's own changing index; replacement leads read memory_path automatically, then required_reads.")
+                 "Do not receipt memory's own changing index; replacement foremen read memory_path automatically, then required_reads.")
         _validate_record(row)
         if kind == "lesson":
             prior_lesson = next((old for old in reversed(document["records"]) if old["kind"] == "lesson" and old["lesson_id"] == row["lesson_id"]), None)
@@ -363,15 +363,15 @@ def show(path, at, name="latest"):
 
 def register_commands(sub, common):
     for command in sorted(COMMANDS):
-        parser = sub.add_parser(command, parents=[common], help="Read or curate persistent lead working memory offline.")
+        parser = sub.add_parser(command, parents=[common], help="Read or curate persistent foreman working memory offline.")
         parser.add_argument("--now", metavar="ISO", help="Injected observation or recording time (default: current UTC).")
         if command in {"memory-record", "memory-stow"}:
-            parser.add_argument("--record", required=True, metavar="FILE", help="Lead-authored JSON record; see references/working-memory.md.")
+            parser.add_argument("--record", required=True, metavar="FILE", help="Foreman-authored JSON record; see references/working-memory.md.")
         elif command == "memory-list":
             parser.add_argument("--scope", action="append", dest="scopes")
             parser.add_argument("--include-archived", action="store_true")
         else:
-            parser.add_argument("--id", default="latest", help="Immutable record id, or latest for the latest lead stow.")
+            parser.add_argument("--id", default="latest", help="Immutable record id, or latest for the latest foreman stow.")
 
 
 def run_command(args, state_path, now):

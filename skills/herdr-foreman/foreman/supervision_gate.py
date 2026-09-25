@@ -2,9 +2,9 @@
 
 Herdr records every change it observes in a worker, and the foreman acknowledges
 all of them. Over 1790 recorded events it acknowledged 1790: every one cost a
-full lead turn, and a lead turn ships the foreman's whole conversation.
+full foreman turn, and a foreman turn ships the foreman's whole conversation.
 
-Much of it carries nothing a lead can act on. `visible_observed` is a sha256 of
+Much of it carries nothing a foreman can act on. `visible_observed` is a sha256 of
 the worker's screen, and before any report file exists it says only that a
 worker is working; `recheck_due` is the foreman's own deferral coming back.
 
@@ -21,7 +21,7 @@ That matters: `<key>_observed` kinds are generated from whatever an observation
 samples, and the recorded history contains none of the failure kinds --
 `watcher_lost`, `observation_error_observed`, `report_error_observed`,
 `unavailable_observed`. A gate enumerating what to WAKE on would be silent for
-exactly those. Enumerating what to SUPPRESS means an unknown kind costs one lead
+exactly those. Enumerating what to SUPPRESS means an unknown kind costs one foreman
 turn instead of a missed failure.
 
 Read-only. It decides nothing and writes nothing; the caller acts on the verdict.

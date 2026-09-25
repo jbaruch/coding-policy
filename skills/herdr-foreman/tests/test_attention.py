@@ -55,7 +55,7 @@ class AttentionTest(unittest.TestCase):
 
     def update(self, action, *, at=LATER, name="q1", revision=1, event_id="event-1", **extra):
         data = {"event_id": event_id, "id": name, "expected_revision": revision, "action": action,
-                "reason": "Lead verified the linked event against this obligation.", **extra}
+                "reason": "Foreman verified the linked event against this obligation.", **extra}
         return attention.write(self.path, "update", data, at)
 
     def saved(self):
@@ -149,7 +149,7 @@ class AttentionTest(unittest.TestCase):
 
     def test_deferral_resurfaces_at_due_time_without_writing(self):
         self.record()
-        self.update("defer", until=DUE, evidence=evidence("source", "Lead will revisit at the recorded checkpoint."))
+        self.update("defer", until=DUE, evidence=evidence("source", "Foreman will revisit at the recorded checkpoint."))
         before = self.saved()
         early = catch_up(self.path, LATER)
         self.assertEqual(early["attention"]["total"], 0)
@@ -381,7 +381,7 @@ class AttentionTest(unittest.TestCase):
                     evidence=evidence("delivery", "Presented in the catch-up message."))
         self.assertEqual(self.gate(), ["d1"])
         self.update("defer", event_id="defer-1", name="d1", revision=2, until=DUE,
-                    evidence=evidence("source", "Lead recorded the deferral rationale."))
+                    evidence=evidence("source", "Foreman recorded the deferral rationale."))
         self.assertEqual(self.gate(at=LATER), [])
         self.assertEqual(self.gate(at=AFTER), ["d1"])
         self.assertTrue(attention.dispatch_gate(self.path, "owner/repo#5", AFTER)[0]["resurfaced"])
@@ -413,7 +413,7 @@ class AttentionTest(unittest.TestCase):
         # A deferral due at DUE must not read as pending under an earlier --now.
         self.record(obligation("d1", "decision"))
         self.update("defer", event_id="defer-1", name="d1", until=DUE, at=LATER,
-                    evidence=evidence("source", "Lead recorded the deferral rationale."))
+                    evidence=evidence("source", "Foreman recorded the deferral rationale."))
         with self.assertRaisesRegex(UsageError, "precedes saved attention events"):
             attention.dispatch_gate(self.path, "owner/repo#5", AT)
         with self.assertRaisesRegex(UsageError, "precedes saved attention events"):

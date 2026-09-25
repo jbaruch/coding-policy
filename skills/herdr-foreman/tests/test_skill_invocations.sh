@@ -20,7 +20,7 @@
 # 5. Inside a Herdr round, round work reaches Step 2 and the foreman's own
 #    finish-here branch stays residual. Checks 4a/4b pass with the old
 #    direct-execution hatch restored, so they do not cover the routing the
-#    lead actually acts on: a lead that answers a bounded question or writes a
+#    foreman actually acts on: a foreman that answers a bounded question or writes a
 #    deliverable itself never dispatches the round (#470).
 #
 # `set -e` is dropped so every check runs and the suite reports an aggregate;

@@ -1665,7 +1665,7 @@ class ApplyCommandTest(CliCase):
     def test_apply_refuses_while_a_decision_on_the_task_is_unanswered(self):
         # coding-policy#399: the foreman withheld a tester on an unanswered
         # priority-99 decision and kept dispatching fix rounds on the same
-        # task. A lead that can keep dispatching has not been blocked.
+        # task. A foreman that can keep dispatching has not been blocked.
         self._seed_context()
         attention.write(self.state, "record", self._obligation("acr14-tester"), AT)
         for extra in ((), ("--dry-run",)):

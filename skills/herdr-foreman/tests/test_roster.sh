@@ -116,11 +116,11 @@ main() {
       and (.agents[2] == {name:"grok", kind:"grok", pane_id:"w4:p1", state:"done"})' >/dev/null 2>&1; then
     pass; else fail "named workers: expected 3 entries with full fields, got RC=$RC OUT=$OUT"; fi
 
-  # 2. A NAMED agent on the caller's own pane is excluded — a lead never
+  # 2. A NAMED agent on the caller's own pane is excluded — a foreman never
   #    dispatches a brief to itself.
   local l2="$TMP/list2.json"
   write_list "$l2" \
-    "$(agent_json "w1:p1" claude idle lead)" \
+    "$(agent_json "w1:p1" claude idle foreman)" \
     "$(agent_json "w2:p1" codex idle codex)"
   run "$l2"
   if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | jq -e '
@@ -139,7 +139,7 @@ main() {
 
   # 4. Nobody but the caller -> an empty array is a valid roster, exit 0.
   local l4="$TMP/list4.json"
-  write_list "$l4" "$(agent_json "w1:p1" claude idle lead)"
+  write_list "$l4" "$(agent_json "w1:p1" claude idle foreman)"
   run "$l4"
   if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | jq -e '.agents == []' >/dev/null 2>&1; then
     pass; else fail "empty roster: expected agents == [] and exit 0, got RC=$RC OUT=$OUT"; fi

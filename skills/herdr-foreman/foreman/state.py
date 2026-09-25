@@ -22,7 +22,7 @@ Schema (schema_version 9)::
                        "requirements": <object> | null,
                        "reviewer_scope": <str> | null,
                        "judge_mode": <str> | null}, ... ],
-      "specialist_assessments": [ <immutable lead assessment>, ... ],
+      "specialist_assessments": [ <immutable foreman assessment>, ... ],
       "recovery": <owner-managed task, approval, dispatch and evidence ledger>
     }
 

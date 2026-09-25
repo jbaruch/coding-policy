@@ -75,7 +75,7 @@ class SupervisionTest(unittest.TestCase):
         self.path = self.root / "owner.json"
         self.bindings = self.root / "bindings"
         self.evidence = self.root / "TASK-LEDGER.md"
-        self.evidence.write_text("Lead verified this bounded outcome; task release still pending.\n")
+        self.evidence.write_text("Foreman verified this bounded outcome; task release still pending.\n")
         self.who = store.identity("lead-session", str(self.root), "fixture", pane_id="lead-pane")
         store.bind(self.path, self.who, AT, root=self.bindings)
         self.client = Client()
@@ -300,7 +300,7 @@ class SupervisionTest(unittest.TestCase):
     def test_only_explicit_resolution_ends_observation(self):
         self.member()
         self.emit()
-        request = {"id": "dispatch-a", "outcome": "Lead reconciled assignment; release tracked separately", "evidence": [str(self.evidence)]}
+        request = {"id": "dispatch-a", "outcome": "Foreman reconciled assignment; release tracked separately", "evidence": [str(self.evidence)]}
         with self.assertRaises(UsageError):
             store.resolve(self.path, request, AT)
         self.ack()
@@ -383,7 +383,7 @@ class SupervisionTest(unittest.TestCase):
                 store.bind(self.path, new_who, AT, root=self.bindings)
         self.assertEqual(self.stop({**self.payload, "session_id": "new-lead"})["decision"], "block")
         store.bind(self.path, new_who, AT, root=self.bindings)
-        self.assertIsNone(self.stop(), "Old native lead no longer owns the committed binding")
+        self.assertIsNone(self.stop(), "Old native foreman no longer owns the committed binding")
         self.assertEqual(self.stop({**self.payload, "session_id": "new-lead"})["decision"], "block")
 
     def test_bind_current_uses_read_only_native_pane_evidence(self):

@@ -759,7 +759,7 @@ class DetectTriggersCommandTest(TempCase):
         self.assertEqual(json.loads(out)["fired"], ["documentation"])
 
     def test_untracked_scratch_fires_nothing_on_a_round_that_writes_nothing(self):
-        # An investigation's lead shares a checkout that may hold scratch. The
+        # An investigation's foreman shares a checkout that may hold scratch. The
         # scratch is no surface of the round: it must not refuse the round, and
         # it must not fire a trigger either (#471 review).
         (self.tmp / "docs").mkdir()

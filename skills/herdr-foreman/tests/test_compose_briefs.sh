@@ -206,7 +206,7 @@ JSON
       pass; else fail "read-only $ownership must deny writes even in an accidentally selected release role: RC=$RC ERR=$ERRTEXT"; fi
   done
 
-  # A lead using the old values cannot silently omit task authorization.
+  # A foreman using the old values cannot silently omit task authorization.
   local missing_authority
   for missing_authority in TASK_AUTHORIZATION AUTHORIZED_ACTIONS; do
     jq --arg key "$missing_authority" 'del(.shared[$key])' "$v6b" > "$TMP/authority-missing.json" \

@@ -1,4 +1,4 @@
-"""Lead assessments of delivered specialist work, owned by foreman state.
+"""Foreman assessments of delivered specialist work, owned by foreman state.
 
 Report delivery proves an artifact arrived. The foreman supplies its assessment
 and contribution classification; these receipts never accept the whole task.
@@ -74,7 +74,7 @@ def validate_assessments(state):
 
 
 def record_assessment(state, state_path, data, at):
-    """Append a lead assessment bound to a delivered enrollment's report bytes."""
+    """Append a foreman assessment bound to a delivered enrollment's report bytes."""
     _input(data)
     supervision.timestamp(at)
     prior = next((row for row in state["specialist_assessments"] if row["id"] == data["id"]), None)
@@ -124,7 +124,7 @@ def require_followup(state, state_path, assignments):
         index, row = prior
         assessment = next((item for item in reversed(state["specialist_assessments"]) if item["assignment_index"] == index), None)
         if assessment is None or row["role"] != canonical_role(role):
-            raise UsageError("Retained specialist needs the preceding assignment's saved lead assessment; run assess-specialist before following up.", {})
+            raise UsageError("Retained specialist needs the preceding assignment's saved foreman assessment; run assess-specialist before following up.", {})
         for key in ("report_evidence", "delivery_evidence"):
             current, _body = receipt(assessment[key]["path"])
             if current != assessment[key]:
