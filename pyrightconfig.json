@@ -52,6 +52,7 @@
     "skills/herdr-teamlead/tests/test_attention.py",
     "skills/herdr-teamlead/tests/test_billing.py",
     "skills/herdr-teamlead/tests/test_capabilities.py",
+    "skills/herdr-teamlead/tests/test_capability_routing.py",
     "skills/herdr-teamlead/tests/test_chronology.py",
     "skills/herdr-teamlead/tests/test_claude_native.py",
     "skills/herdr-teamlead/tests/test_cli.py",

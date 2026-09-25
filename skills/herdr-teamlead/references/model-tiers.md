@@ -75,15 +75,9 @@ role's default applies: each role's default is the cheapest round its contract
 allows (`DEFAULT_ROUNDS` in `skills/herdr-teamlead/teamlead/tiers.py`). A
 consultation that must settle something moves to its judgment round on the
 evidence in its round context, never on a remembered override. Which evidence
-moves which role is `ESCALATION_EVIDENCE` in the same file:
-
-- `diagnosis_input: true` on an investigator that is the exhausted-allowance
-  diagnosis input
-- `security_trigger: true` on an advisor when `detect-triggers` fired
-  `security`
-- a recorded `prior_high_miss` on an investigator
-
-With that evidence, a `consultation` round request is refused. Pass
+moves which role is `ESCALATION_EVIDENCE` in the same file; the steps that
+consult an investigator or staff a fired trigger name the field to pass. With
+that evidence, a `consultation` round request is refused. Pass
 `--round release=release_adjudication` when the release worker must interpret
 a dispute; an ordinary dispute still goes to the judge.
 
@@ -181,7 +175,11 @@ than assumed.
 
 Saved at `<selected-state>.capabilities.json`. Owner:
 `skills/herdr-teamlead/teamlead/capabilities.py`. Writer: `capability-record`,
-alone. Readers: `capability-check`, `capability-show` and the round preflight.
+alone. Readers: `capability-check`, `capability-show`, the round preflight,
+and `plan` and `apply`. `plan` and `apply` read it read-only through
+`capabilities.load`: a missing file is an empty table, a table written by a
+newer build is read as empty with a warning and left untouched, and an
+unreadable or malformed one refuses the command naming the file.
 
 ```json
 {
@@ -291,7 +289,12 @@ cover what one would catch:
 2. Every other round's output passes independent review and testing before
    release.
 3. Which model suits which job is the capability table above: sourced, dated
-   rows, refreshed on a cadence.
+   rows, refreshed on a cadence. Tier selection reads it for every candidate:
+   an `inadequate` entry for the selected model and effort refuses that
+   candidate, naming its source, and `unknown` leaves the configured row in
+   place. Which capabilities each round needs, and the only names
+   `capability-record` accepts, are `ROUND_CAPABILITIES` and `VOCABULARY` in
+   `skills/herdr-teamlead/teamlead/capabilities.py`
 
 The pinned judge start path keeps its own launch proof. The operator owns
 billing inputs inside config.json; these readers never write or migrate that
