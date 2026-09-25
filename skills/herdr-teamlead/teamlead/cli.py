@@ -1470,7 +1470,7 @@ def cmd_foreman_reset(args, client=None, warn=None, trace=None, spawn=None):
     # checking the caller's pane still come first (see foreman_reset.replay).
     # A pane id alone can be set by any process; a Herdr pane also carries HERDR_ENV.
     # rules/agent-team-operation.md Two Modes: a team round is HERDR_ENV set, any value.
-    caller = os.environ.get("HERDR_PANE_ID") if os.environ.get("HERDR_ENV") else None
+    caller = os.environ.get("HERDR_PANE_ID") if "HERDR_ENV" in os.environ else None
     if bound_pane and caller != bound_pane:
         raise UsageError("foreman-reset runs from the bound foreman's own pane ({}); this call came from {}.".format(
             bound_pane, caller or "outside Herdr"), {"pane_id": bound_pane})
@@ -1489,7 +1489,10 @@ def cmd_foreman_reset(args, client=None, warn=None, trace=None, spawn=None):
 
     def start():
         try:
-            with open(log, "ab") as sink:
+            # No-follow, like the reset record: a planted link would send Herdr
+            # diagnostics into another file.
+            descriptor = os.open(log, os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+            with os.fdopen(descriptor, "ab") as sink:
                 return (spawn or _spawn_detached)(argv, sink)
         except OSError as exc:
             raise StateError("Could not start the reset deliverer ({}); nothing was sent.".format(exc),

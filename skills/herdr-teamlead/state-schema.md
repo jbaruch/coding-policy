@@ -817,8 +817,9 @@ an outcome with its deliverer gone, and an unreadable record. A later
 `delivered` reset for the pane supersedes an older failure.
 
 `foreman-reset-reconcile --pane <pane> --stow <stow> --outcome delivered|failed`
-is the owner's repair for a `scheduled` or `delivering` row whose deliverer is
-gone, and for an `interrupted` row the operator saw resume (`delivered` only): `failed` records the failure with the resume prompt built from the row's
+is the owner's repair for a row whose deliverer is gone: a `scheduled` row
+(`failed` only, since nothing was typed), a `delivering` row (either outcome),
+and an `interrupted` row the operator saw resume (`delivered` only): `failed` records the failure with the resume prompt built from the row's
 own `options`, `delivered` records `reconciled`. An identical retry returns
 the recorded row with `replayed: true`; a row that already ended any other
 way, or whose deliverer is still running, is refused.

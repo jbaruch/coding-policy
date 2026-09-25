@@ -443,7 +443,11 @@ def reconcile(state_path, plan, outcome, at, *, alive=_alive):
             return {**row, "replayed": True}
         # An interrupted delivery may have resumed the foreman after all; the
         # operator who sees it running reconciles it as delivered.
-        reopenable = row["status"] in ("scheduled", "delivering") or (row["status"] == "interrupted" and outcome == "delivered")
+        # A `scheduled` row was never claimed, so nothing was typed and it can
+        # only have failed; a delivery that began may have resumed the foreman.
+        reopenable = ((row["status"] == "scheduled" and outcome == "failed")
+                      or row["status"] == "delivering"
+                      or (row["status"] == "interrupted" and outcome == "delivered"))
         if not reopenable:
             raise UsageError("The reset from stow {} already ended {}{}; there is nothing to reconcile.".format(
                 row["stow"], row["status"], " (reconciled as {})".format(previous) if previous else ""),

@@ -620,6 +620,10 @@ class ResetCommandTest(CliCase):
     def test_reconcile_as_delivered_replays_and_refuses_a_later_failure(self):
         plan = {"pane_id": PANE, "stow": "round-7"}
         foreman_reset.schedule(self.state, plan, "2026-09-24T10:00:00+00:00", os.getpid)
+        # Never claimed, so nothing was typed: a scheduled row cannot be delivered.
+        with self.assertRaisesRegex(UsageError, "nothing to reconcile"):
+            foreman_reset.reconcile(self.state, plan, "delivered", "2026-09-24T10:30:00+00:00", alive=lambda process: False)
+        foreman_reset.claim(self.state, plan, supervision_runtime.process_identity(os.getpid()))
         foreman_reset.reconcile(self.state, plan, "delivered", "2026-09-24T11:00:00+00:00", alive=lambda process: False)
         self.assertTrue(foreman_reset.reconcile(self.state, plan, "delivered", "2026-09-24T11:05:00+00:00",
                                                 alive=lambda process: False)["replayed"])
@@ -653,13 +657,39 @@ class ResetCommandTest(CliCase):
         self.assertEqual(len(seen), 1)
         self.assertNotIn("secret", seen[0])
 
-    def test_an_empty_herdr_marker_is_outside_herdr(self):
-        for marker in ("",):
+    def test_any_herdr_marker_value_counts_as_inside_herdr(self):
+        # rules/agent-team-operation.md Two Modes: HERDR_ENV set, any value, is a team round.
+        for marker in ("", "0", "fixture"):
             with self.subTest(marker=marker), \
                  patch("teamlead.cli.memory.show", return_value={"record": READY}), \
                  patch("teamlead.cli.supervision.load", return_value=supervision_data()[0]), \
                  patch.dict("os.environ", {"HERDR_PANE_ID": PANE, "HERDR_ENV": marker}), \
+                 patch("teamlead.cli._spawn_detached", side_effect=lambda argv, sink: 4242), \
+                 patch("teamlead.foreman_reset.process_identity", side_effect=lambda pid: {"pid": pid, "identity": "c"}):
+                foreman_reset.record_path(self.state).unlink(missing_ok=True)
+                code, _, err = self.run_cli(self.base() + ["foreman-reset", "--now", RESET_AT])
+                self.assertEqual(code, 0, err)
+
+    def test_a_planted_log_link_is_refused_and_nothing_follows_it(self):
+        target = self.tmp / "elsewhere.txt"
+        log = Path(str(self.state.resolve()) + ".foreman-reset.log")
+        log.symlink_to(target)
+        with patch("teamlead.cli.memory.show", return_value={"record": READY}), \
+             patch("teamlead.cli.supervision.load", return_value=supervision_data()[0]), \
+             patch.dict("os.environ", {"HERDR_PANE_ID": PANE, "HERDR_ENV": "1"}), \
+             patch("teamlead.cli._spawn_detached", side_effect=AssertionError("must not spawn")):
+            code, _, _err = self.run_cli(self.base() + ["foreman-reset", "--now", RESET_AT])
+        self.assertEqual(code, 1)
+        self.assertFalse(target.exists())
+
+    def test_an_absent_herdr_marker_is_outside_herdr(self):
+        for marker in (None,):
+            with self.subTest(marker=marker), \
+                 patch("teamlead.cli.memory.show", return_value={"record": READY}), \
+                 patch("teamlead.cli.supervision.load", return_value=supervision_data()[0]), \
+                 patch.dict("os.environ", {"HERDR_PANE_ID": PANE}), \
                  patch("teamlead.cli._spawn_detached", side_effect=AssertionError("must not spawn")):
+                os.environ.pop("HERDR_ENV", None)
                 code, _, err = self.run_cli(self.base() + ["foreman-reset", "--now", RESET_AT])
                 self.assertEqual(code, 1)
                 self.assertIn("outside Herdr", err)

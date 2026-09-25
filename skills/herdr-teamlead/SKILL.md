@@ -687,14 +687,17 @@ under; the resume prompt carries them to the next context.
   - `reset_record_unusable` — the reset record is a link, unreadable or
     malformed
     - Record a user-attention blocker naming `details.record`
-    - Never edit or delete the file; the operator restores it
+    - Never edit or delete the file
+    - The operator restores it
   - any other `error` — a refused precondition: an unready stow, the wrong
     pane, supervision work still unheld, or an unreadable stow or state
     - Fix the cause stderr names
     - Re-run `foreman-reset`
 - A deliverer that fails after scheduling leaves its outcome on the reset
-  record, which `catch-up` surfaces ahead of the attention queue
-  (`foreman_resets`), and writes its error JSON to the `log` named at exit 0
+  record
+- `catch-up` surfaces that outcome ahead of the attention queue
+  (`foreman_resets`)
+- The deliverer writes its error JSON to the `log` named at exit 0
   - `reset_ended` there means the row shows `failed` or `interrupted`
   - Any other error means the record could not be updated; the operator
     closes the reset with the complete `foreman-reset-reconcile` command
