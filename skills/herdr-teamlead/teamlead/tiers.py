@@ -48,6 +48,16 @@ DEFAULT_ROUNDS = {
     "critic": "critic", "lead": "lead",
     "advisor": "consultation", "investigator": "consultation",
 }
+#: The judgment round a consultation takes when its recorded evidence says it
+#: must settle something, and the default it took before `consultation`
+#: existed. Selection reads the evidence from the round context rather than
+#: relying on a remembered `--round` override (#518).
+CONSULTATION_ESCALATION = {"investigator": "reconciliation", "advisor": "architect"}
+#: Round-context evidence that moves each consultation to its judgment round.
+ESCALATION_EVIDENCE = {
+    "investigator": ("diagnosis_input", "prior_high_miss"),
+    "advisor": ("security_trigger",),
+}
 #: Separates a seat from the slice it owns in a role name (`reviewer#api`). A
 #: role name never contains it, so the seat reads back unambiguously (#409).
 SEAT_SEPARATOR = "#"
@@ -455,7 +465,8 @@ def select_tier(agent, role, round_type=None, context=None, fix_round=None, head
     context = {} if context is None else context
     if not isinstance(context, dict):
         raise UsageError("Round context must be a JSON object.", {})
-    allowed = {"oracle", "risk_flags", "input_bytes", "failed_gates", "prior_high_miss"}
+    allowed = {"oracle", "risk_flags", "input_bytes", "failed_gates", "prior_high_miss",
+               "diagnosis_input", "security_trigger"}
     retired = set(context) & RETIRED_CONTEXT_FIELDS
     if retired:
         raise UsageError(
@@ -464,8 +475,9 @@ def select_tier(agent, role, round_type=None, context=None, fix_round=None, head
             "expected whole result is written down.".format(", ".join(sorted(retired))), {})
     if set(context) - allowed:
         raise UsageError("Unknown round-context fields: {}; check their spelling.".format(", ".join(sorted(set(context) - allowed))), {})
-    if "prior_high_miss" in context and type(context["prior_high_miss"]) is not bool:
-        raise UsageError("Round-context prior_high_miss must be a JSON boolean.", {})
+    for flag in ("prior_high_miss", "diagnosis_input", "security_trigger"):
+        if flag in context and type(context[flag]) is not bool:
+            raise UsageError("Round-context {} must be a JSON boolean.".format(flag), {})
     for key in ("input_bytes", "failed_gates"):
         _nonnegative_int(context, key)
     # The owner checks the task's recorded allowance before tier selection.
@@ -473,6 +485,15 @@ def select_tier(agent, role, round_type=None, context=None, fix_round=None, head
     if fix_round is not None and (type(fix_round) is not int or fix_round < 1):
         raise UsageError("Fix round must be a positive integer; preserve the task counter.", {})
     base = canonical_role(role)
+    evidence = [flag for flag in ESCALATION_EVIDENCE.get(base, ()) if context.get(flag) is True]
+    if evidence and round_type == "consultation":
+        raise UsageError("Round-context {} requires {} to settle this, on {!r}; drop the `consultation` round request.".format(
+            ", ".join(evidence), base, CONSULTATION_ESCALATION[base]), {})
+    if round_type is None and base in CONSULTATION_ESCALATION and (evidence or "consultation" not in agent.tiers):
+        # Evidence escalates deterministically. A tier table written before
+        # config schema 4 has no `consultation` row and keeps the judgment
+        # round it always defaulted to (config.py enforces the row from 4).
+        round_type = CONSULTATION_ESCALATION[base]
     round_type = round_type or ("fix" if base == "developer" and fix_round else DEFAULT_ROUNDS.get(base))
     if not isinstance(round_type, str) or round_type not in ROLE_ROUNDS.get(base, frozenset()):
         raise UsageError("Round {!r} cannot perform role {!r}; choose its documented round type.".format(round_type, role), {})

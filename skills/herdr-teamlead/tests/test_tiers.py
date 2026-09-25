@@ -74,7 +74,9 @@ class TierConfigTest(unittest.TestCase):
 class SelectionTest(unittest.TestCase):
     def test_only_missing_candidate_tiers_have_a_skippable_error(self):
         worker = agent()
-        with self.assertRaisesRegex(MissingTierError, "'consultation'"):
+        # A table without a `consultation` row (config schema 3) keeps the
+        # advisor's old judgment default.
+        with self.assertRaisesRegex(MissingTierError, "'architect'"):
             select_tier(worker, "advisor")
         worker.tiers.pop("review")
         with self.assertRaisesRegex(MissingTierError, "review tier"):
@@ -124,6 +126,40 @@ class SelectionTest(unittest.TestCase):
         self.assertEqual(select_tier(worker, "investigator", context=risk, headroom=80.0)["effort"], "xhigh")
         escalated = select_tier(worker, "investigator", "reconciliation", context=risk, headroom=1.0)
         self.assertEqual((escalated["effort"], escalated["de_escalated"]), ("xhigh", False))
+
+    def test_recorded_evidence_selects_the_judgment_round_without_an_override(self):
+        worker = agent()
+        worker.tiers.update(parse_tiers({
+            "consultation": {"model": "sonnet-5", "effort": "high"},
+            "architect": {"model": "opus-5", "effort": "high"},
+            "reconciliation": {"model": "opus-5", "effort": "high"},
+        }, worker.kind))
+        for role, context, expected in (("investigator", {"diagnosis_input": True}, "reconciliation"),
+                                        ("investigator", {"prior_high_miss": True}, "reconciliation"),
+                                        ("advisor", {"security_trigger": True}, "architect"),
+                                        ("advisor", {"diagnosis_input": True}, "consultation"),
+                                        ("investigator", {"security_trigger": True}, "consultation")):
+            with self.subTest(role=role, context=context):
+                tier = select_tier(worker, role, context=context, headroom=1.0)
+                self.assertEqual((tier["round"], tier["de_escalated"]), (expected, False))
+
+    def test_an_explicit_consultation_cannot_override_escalation_evidence(self):
+        worker = agent()
+        worker.tiers.update(parse_tiers({"consultation": {"model": "sonnet-5", "effort": "high"}}, worker.kind))
+        with self.assertRaisesRegex(UsageError, "diagnosis_input requires investigator to settle this"):
+            select_tier(worker, "investigator", "consultation", {"diagnosis_input": True})
+        for flag in ("diagnosis_input", "security_trigger"):
+            with self.subTest(flag=flag), self.assertRaisesRegex(UsageError, "JSON boolean"):
+                select_tier(worker, "advisor", context={flag: "yes"})
+
+    def test_a_table_written_before_schema_4_keeps_the_judgment_default(self):
+        worker = agent()
+        worker.tiers.update(parse_tiers({
+            "architect": {"model": "opus-5", "effort": "high"},
+            "reconciliation": {"model": "opus-5", "effort": "high"},
+        }, worker.kind))
+        self.assertEqual(select_tier(worker, "advisor")["round"], "architect")
+        self.assertEqual(select_tier(worker, "investigator")["round"], "reconciliation")
 
     def test_architect_role_default_is_unchanged(self):
         worker = agent()

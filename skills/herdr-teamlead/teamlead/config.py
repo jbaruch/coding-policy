@@ -15,8 +15,8 @@ from .errors import ConfigError, TeamLeadError
 from .herdr import SLASH_DELIVERIES, SLASH_DELIVERY_PASTE
 from .tiers import parse_launch_args, parse_tiers
 
-CONFIG_SCHEMA_VERSION = 3
-READABLE_CONFIG_VERSIONS = frozenset({1, 2, 3})
+CONFIG_SCHEMA_VERSION = 4
+READABLE_CONFIG_VERSIONS = frozenset({1, 2, 3, 4})
 CAPABILITY_ID = re.compile(r"[a-z][a-z0-9_-]*\Z")
 
 REQUIRED_AGENT_FIELDS = ("name", "kind", "usage_prompt", "usage_marker", "usage_read_source", "clear_prompt")
@@ -222,6 +222,11 @@ def parse_config(payload, source="<memory>"):
         name = entry["name"]
         if "tiers" in entry and version < 2:
             raise ConfigError("Tier tables need config schema_version 2; upgrade the operator-owned config.", {"source": source})
+        if version >= 4 and entry.get("tiers") and "consultation" not in entry["tiers"]:
+            raise ConfigError(
+                "Config at {}: agents[{}] has a tier table without a `consultation` row, which config schema_version 4 "
+                "requires: investigator and advisor default to it. Copy the row from config.example.json; never "
+                "synthesize it from `build`.".format(source, index), {"source": source, "index": index})
         if "capabilities" in entry and version < 3:
             raise ConfigError("Capability declarations need config schema_version 3; upgrade the operator-owned config without changing its existing launch or tier settings.", {"source": source})
         capabilities = parse_capabilities(entry.get("capabilities", []), "{}: agents[{}].capabilities".format(source, index))

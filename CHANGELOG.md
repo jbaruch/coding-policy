@@ -22,6 +22,12 @@
   the old example pinned every tester round there anyway. `review`,
   `hostile_verify`, `recheck` and the judge keep their top-model floors. The
   example's Codex `consultation` row at `medium` is unmeasured and says so.
+  Escalation is read from evidence, not remembered: round-context
+  `diagnosis_input`, `security_trigger` or a recorded `prior_high_miss` moves
+  the consultation to its judgment round, and a `consultation` request
+  against that evidence is refused. Config schema 4 requires the
+  `consultation` row in every tier table; a schema-3 table keeps the
+  judgment defaults it was written against.
 
 ## 0.3.267 — 2026-09-24
 
