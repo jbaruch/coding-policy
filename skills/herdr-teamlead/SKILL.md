@@ -660,7 +660,8 @@ under; the resume prompt carries them to the next context.
     - Record a user-attention blocker quoting `details.resume_prompt` and
       `details.record`
     - End the turn
-    - The operator recovers under the Working Memory carve-out
+    - The operator recovers under the Working Memory carve-out, first
+      confirming the pane is not already running a resumed foreman
     - The next round resets from a new stow
   - `reset_record_newer` — a newer build wrote the reset record
     - Record a user-attention blocker to update the plugin

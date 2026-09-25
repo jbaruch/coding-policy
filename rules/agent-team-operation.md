@@ -404,6 +404,8 @@ description: Running a multi-agent team — task-based specialist composition, c
   1. The reset record shows the reset `failed` or `interrupted`
   2. The operator, never the foreman, clears the foreman's pane
   3. The operator pastes the resume prompt the reset record saved for that reset
+  4. Before clearing, the operator confirms the pane is not already running a foreman resumed from that reset
+  5. A pane already running that resumed foreman is reconciled as delivered, never cleared
 - Every other reset runs through `teamlead foreman-reset`
 - A reset foreman resumes from the stow, the supervision resume sequence, and the foreman queue
 - Save conversation-only knowledge and open work before a planned foreman reset, compaction, or replacement

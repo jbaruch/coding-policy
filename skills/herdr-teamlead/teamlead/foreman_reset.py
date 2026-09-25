@@ -378,8 +378,15 @@ def outstanding(state_path, *, alive=_alive):
     items = []
     for row in latest.values():
         if row["status"] in TERMINAL_FAILURES:
-            needed = OPERATOR_RECOVERY
             prompt = row["result"]["resume_prompt"]
+            needed = OPERATOR_RECOVERY
+            if row["status"] == "interrupted":
+                # Typing began, so the pane may already hold a resumed foreman:
+                # the record alone cannot say, and clearing it would erase that context.
+                needed = ("Look at pane {} first: if a foreman resumed from this reset is running there, run `{}` "
+                          "and clear nothing. Otherwise: {}".format(
+                              row["pane_id"], reconcile_command(state_path, row["pane_id"], row["stow"], "delivered"),
+                              OPERATOR_RECOVERY))
         elif row["status"] in ("scheduled", "delivering") and not alive(row["process"]):
             prompt = None
             failed = reconcile_command(state_path, row["pane_id"], row["stow"], "failed")
@@ -425,11 +432,14 @@ def reconcile(state_path, plan, outcome, at, *, alive=_alive):
         if previous == outcome:
             # An identical retry, e.g. after the first response was lost.
             return {**row, "replayed": True}
-        if row["status"] not in ("scheduled", "delivering"):
+        # An interrupted delivery may have resumed the foreman after all; the
+        # operator who sees it running reconciles it as delivered.
+        reopenable = row["status"] in ("scheduled", "delivering") or (row["status"] == "interrupted" and outcome == "delivered")
+        if not reopenable:
             raise UsageError("The reset from stow {} already ended {}{}; there is nothing to reconcile.".format(
                 row["stow"], row["status"], " (reconciled as {})".format(previous) if previous else ""),
                 {"record": str(path), "status": row["status"]})
-        if alive(row["process"]):
+        if row["status"] != "interrupted" and alive(row["process"]):
             raise UsageError("The reset from stow {} still has its deliverer running; let it finish instead of "
                              "reconciling.".format(row["stow"]), {"record": str(path), "process": row["process"]})
         if outcome == "delivered":

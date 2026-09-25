@@ -21,17 +21,23 @@ PANE = "w9:p1"
 READY = {"id": "round-7", "kind": "stow", "reset_ready": True}
 
 
-def supervision_data(*, active=False, events=False, held=False):
-    member = {"id": "d1", "active": active}
+def supervision_data(*, active=False, events=False, held=False, hold_kind="handoff"):
+    """Real supervision shapes: an enrolled member and, when held, a hold covering it."""
+    from teamlead import supervision
+    member = {"id": "d1", "active": active, "refinements": [],
+              "assignment": {"id": "d1", "agent": "worker", "task": "t", "report": "/r.md", "pane_id": "w2:p1",
+                             "native_session": None}}
     data = {"binding": {"identity": {"pane_id": PANE}}, "members": [member],
-            "events": [{"id": "e1", "seq": 1}] if events else [], "acknowledgements": [], "holds": []}
+            "events": [{"id": "e1", "seq": 1, "member": "d1"}] if events else [], "acknowledgements": [], "holds": []}
+    if held:
+        data["holds"].append({"kind": hold_kind, "resumed_at": None, "through": len(data["events"]),
+                              "members": supervision.active_digest(data)})
     return data, held
 
 
 def check(stow=READY, caller: "str | None" = PANE, **state):
-    data, held = supervision_data(**state)
-    with patch("teamlead.foreman_reset._handoff_held", return_value=held):
-        return foreman_reset.preflight(stow, data, caller)
+    data, _held = supervision_data(**state)
+    return foreman_reset.preflight(stow, data, caller)
 
 
 class PreflightTest(unittest.TestCase):
@@ -84,16 +90,10 @@ def worker(name, kind):
 
 
 class HandoffHoldTest(unittest.TestCase):
-    def hold(self, kind):
-        data = {"members": [{"id": "d1", "active": True}], "events": [], "acknowledgements": [],
-                "holds": [{"kind": kind, "resumed_at": None, "through": 0, "members": "digest"}]}
-        with patch("teamlead.foreman_reset.supervision.held", return_value=True), \
-             patch("teamlead.foreman_reset.supervision.active_digest", return_value="digest"):
-            return foreman_reset._handoff_held(data)
-
     def test_only_a_handoff_hold_lets_the_foreman_reset(self):
-        self.assertTrue(self.hold("handoff"))
-        self.assertFalse(self.hold("waiting_for_user"))
+        self.assertEqual(check(active=True, held=True, hold_kind="handoff")["pane_id"], PANE)
+        with self.assertRaisesRegex(UsageError, "cannot stop yet"):
+            check(active=True, held=True, hold_kind="waiting_for_user")
 
 
 class DeliverTest(unittest.TestCase):
@@ -279,10 +279,18 @@ class RecordTest(unittest.TestCase):
                 self.assertEqual(self.starts, 1)
 
     def test_a_reused_pid_is_not_the_recorded_deliverer(self):
-        self.assertFalse(foreman_reset._alive({"pid": 1001, "identity": "original"},
-                                              probe=lambda pid: {"pid": pid, "identity": "someone-else"}))
-        self.assertTrue(foreman_reset._alive({"pid": 1001, "identity": "original"},
-                                             probe=lambda pid: {"pid": pid, "identity": "original"}))
+        original = {"pid": 1001, "identity": "original"}
+        foreman_reset.schedule(self.state, self.plan, "2026-09-24T10:00:00+00:00", lambda: 1001,
+                               probe=lambda pid: original)
+        with patch("teamlead.foreman_reset.process_identity", return_value=original):
+            live = foreman_reset.replay(self.state, self.plan)
+        self.assertIsNotNone(live)
+        assert live is not None  # narrowed for the type checker; the assertion above is the check
+        self.assertTrue(live["replayed"])
+        # The same pid now belongs to another process: the reset is not live.
+        with patch("teamlead.foreman_reset.process_identity", return_value={"pid": 1001, "identity": "someone-else"}), \
+             self.assertRaises(foreman_reset.ResetEnded):
+            foreman_reset.replay(self.state, self.plan)
 
     def test_a_launch_failure_leaves_a_failed_row_with_the_resume_prompt(self):
         def broken():
@@ -339,7 +347,9 @@ class RecordTest(unittest.TestCase):
             with self.subTest(status=status):
                 row = {"schema_version": 1, "pane_id": PANE, "stow": "round-7", "status": status,
                        "scheduled_at": "2026-09-24T10:00:00+00:00", "options": {}, "process": None, "result": result}
-                self.assertEqual(foreman_reset._valid_row(row), valid)
+                foreman_reset.record_path(self.state).write_text(json.dumps({"schema_version": 1, "resets": [row]}))
+                status = foreman_reset.outstanding(self.state, alive=lambda process: True)
+                self.assertEqual(any(item["status"] == "record_unusable" for item in status), not valid)
 
     def test_duplicate_rows_for_one_reset_are_malformed(self):
         row = {"schema_version": 1, "pane_id": PANE, "stow": "round-7", "status": "failed",
@@ -585,6 +595,21 @@ class ResetCommandTest(CliCase):
         with self.assertRaisesRegex(UsageError, r"already ended failed \(reconciled as failed\)"):
             foreman_reset.reconcile(self.state, plan, "delivered", "2026-09-24T12:00:00+00:00", alive=lambda process: False)
 
+    def test_an_interrupted_reset_the_operator_saw_resume_reconciles_as_delivered(self):
+        plan = {"pane_id": PANE, "stow": "round-7"}
+        foreman_reset.schedule(self.state, plan, "2026-09-24T10:00:00+00:00", os.getpid)
+        foreman_reset.claim(self.state, plan, supervision_runtime.process_identity(os.getpid()))
+        foreman_reset.finish(self.state, plan, "interrupted",
+                             {"error": "herdr_error", "message": "x", "details": {}, "resume_prompt": "p"})
+        needed = foreman_reset.outstanding(self.state)[0]["needed"]
+        self.assertIn("Look at pane {} first".format(PANE), needed)
+        self.assertIn("--outcome delivered", needed)
+        with self.assertRaisesRegex(UsageError, "already ended interrupted"):
+            foreman_reset.reconcile(self.state, plan, "failed", "2026-09-24T11:00:00+00:00")
+        row = foreman_reset.reconcile(self.state, plan, "delivered", "2026-09-24T11:00:00+00:00")
+        self.assertEqual(row["status"], "reconciled")
+        self.assertEqual(foreman_reset.outstanding(self.state), [])
+
     def test_reconcile_as_delivered_replays_and_refuses_a_later_failure(self):
         plan = {"pane_id": PANE, "stow": "round-7"}
         foreman_reset.schedule(self.state, plan, "2026-09-24T10:00:00+00:00", os.getpid)
@@ -637,12 +662,17 @@ class ResetCommandTest(CliCase):
         row = {"schema_version": 1, "pane_id": PANE, "stow": "round-7", "status": "delivering",
                "scheduled_at": "2026-09-24T10:00:00+00:00", "options": {}, "process": {"pid": 5, "identity": "x"},
                "result": None}
-        self.assertTrue(foreman_reset._valid_row(row))
+        def unusable(candidate):
+            foreman_reset.record_path(self.state).write_text(json.dumps({"schema_version": 1, "resets": [candidate]}))
+            return any(item["status"] == "record_unusable"
+                       for item in foreman_reset.outstanding(self.state, alive=lambda process: True))
+
+        self.assertFalse(unusable(row))
         for field, value in (("schema_version", True), ("schema_version", 1.0), ("process", {"pid": 0, "identity": "x"}),
                              ("process", {"pid": -1, "identity": "x"}), ("options", {"config": ""}),
                              ("options", {"other": "x"})):
             with self.subTest(field=field, value=value):
-                self.assertFalse(foreman_reset._valid_row({**row, field: value}))
+                self.assertTrue(unusable({**row, field: value}))
 
     def test_a_deliverer_that_cannot_identify_itself_exits_with_the_recovery(self):
         foreman_reset.schedule(self.state, {"pane_id": PANE, "stow": "round-7"}, "2026-09-24T10:00:00+00:00", os.getpid)
