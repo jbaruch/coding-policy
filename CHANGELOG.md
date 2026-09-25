@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.273 — 2026-09-25
+
 ### Fixed
 
 - **A dispatched brief is frozen, and a partitioned review is checked at its
