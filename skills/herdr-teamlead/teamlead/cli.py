@@ -26,7 +26,7 @@ from types import SimpleNamespace
 from . import __version__
 from .assign import apply as apply_assignments
 from .assign import APPLY_SCHEMA_VERSION, dry_run, native_context_session, normalize_assignments, resolve_paths, validate_fix_history
-from . import attention, capabilities, composition, engagement, foreman_queue, foreman_reset, historical, load_set, memory, oracle, partition, recovery, report_delivery, restoration, role_clear, retrospective, retrospective_runtime, supervision, supervision_gate, supervision_runtime, triggers
+from . import attention, capabilities, composition, engagement, foreman_queue, foreman_reset, historical, load_set, members, memory, oracle, partition, recovery, report_delivery, restoration, role_clear, retrospective, retrospective_runtime, supervision, supervision_gate, supervision_runtime, triggers
 from .config import default_config_path, load_config, load_judge, load_role_costs, select_agents
 from .errors import PlanError, StateError, TeamLeadError, UsageError
 from .herdr import (
@@ -395,6 +395,13 @@ def build_parser():
     reconcile_parser.add_argument("--pane", required=True)
     reconcile_parser.add_argument("--stow", required=True)
     reconcile_parser.add_argument("--outcome", required=True, choices=["delivered", "failed"])
+    close_member = sub.add_parser("close-member", parents=[common], help="Acknowledge an enrollment's pending events and resolve it, once the task ledger records its assessed outcome.")
+    close_member.add_argument("--enrollment", required=True)
+    close_member.add_argument("--ledger", required=True, help="Absolute path of the task's TASK-LEDGER.md.")
+    close_member.add_argument("--now", metavar="ISO8601")
+    check_member = sub.add_parser("check-member", parents=[common], help="Run wait-report.sh --once for an enrollment, with its base and send time read from the owner records.")
+    check_member.add_argument("--enrollment", required=True)
+    check_member.add_argument("--worktree", help="The worker's own checkout, when it has one.")
     sub.add_parser("foreman-queue", parents=[common], help="List open tasks waiting for their next seat, oldest first, derived from the owner records.")
     load_parser = sub.add_parser("load-set", parents=[common], help="List the durable records one foreman decision must load, derived from the owner records.")
     load_parser.add_argument("--decision", required=True, choices=load_set.DECISIONS)
@@ -1589,6 +1596,21 @@ def cmd_foreman_reset_reconcile(args, client=None, warn=None, trace=None):
                                    getattr(args, "now", None) or now_iso()), None
 
 
+def cmd_close_member(args, client=None, warn=None, trace=None):
+    return members.close(_state_path(args), args.enrollment, args.ledger, args.now or now_iso()), None
+
+
+def cmd_check_member(args, client=None, warn=None, trace=None):
+    # A checkpoint verdict travels in `exit` and `wait`; a wait that could not
+    # run (exit 2, or any code outside the verdicts) fails this command.
+    payload, code = members.check(_state_path(args), args.enrollment, args.worktree, warn=warn)
+    if code not in members.VERDICT_EXITS:
+        return payload, {"error": "wait_failed", "message": "wait-report.sh exited {} without a verdict: {} Resolve "
+                         "that diagnostic, then run check-member again.".format(code, payload["diagnostics"] or "(no diagnostic)"),
+                         "details": {"exit": code}}
+    return payload, None
+
+
 def cmd_foreman_queue(args, client=None, warn=None, trace=None):
     state_path = _state_path(args)
     # Strict and read-only: an unusable ledger must fail, never read as an
@@ -1978,6 +2000,8 @@ COMMANDS = {
     "foreman-reset": cmd_foreman_reset,
     "foreman-reset-deliver": cmd_foreman_reset_deliver,
     "foreman-reset-reconcile": cmd_foreman_reset_reconcile,
+    "close-member": cmd_close_member,
+    "check-member": cmd_check_member,
     "load-set": cmd_load_set,
     **{command: cmd_recovery for command in ("task", "checkpoint", "authorize-corrections", "authorize-approach", "recover-context", "recover-role-clear", "record-report", "record-refusal", "authorize-refused-dispatch", "diagnose", "reconcile", "record-release-clear", "import-correction", "record-historical-review", "recover-report", "assess-specialist", "close-task")},
     "detect-triggers": cmd_detect_triggers,
@@ -2011,10 +2035,11 @@ def main(argv=None, stdout=None, stderr=None, client=None):
     try:
         # Commands that may migrate or write state share its canonical lock.
         # Dry runs, probes, and retrospective reads remain read-only.
-        readonly = args.command in {"probe-report", "detect-triggers", "validate-partition", "verify-oracle", "retro-check", "retro-list", "retro-show", "capability-check", "capability-show", "supervision-gate", "load-set", "foreman-queue"} or getattr(args, "dry_run", False)
+        readonly = args.command in {"probe-report", "detect-triggers", "validate-partition", "verify-oracle", "retro-check", "retro-list", "retro-show", "capability-check", "capability-show", "supervision-gate", "load-set", "foreman-queue", "check-member"} or getattr(args, "dry_run", False)
         # The deliverer starts while `foreman-reset` still holds the state lock;
-        # it serializes on the reset record's own lock instead.
-        separate_owner = args.command in memory.COMMANDS | attention.COMMANDS | SUPERVISION_COMMANDS | restoration.COMMANDS | {"foreman-reset-deliver", "foreman-reset-reconcile"}
+        # it serializes on the reset record's own lock instead. close-member
+        # writes only through the supervision owner's own lock.
+        separate_owner = args.command in memory.COMMANDS | attention.COMMANDS | SUPERVISION_COMMANDS | restoration.COMMANDS | {"foreman-reset-deliver", "foreman-reset-reconcile", "close-member"}
         lock = nullcontext() if readonly or separate_owner else state_lock(retrospective.canonical_state(_state_path(args)))
         with lock:
             retro_lock = retrospective.lock(_state_path(args)) if not readonly and args.command in {"apply", "start-judge", "retro-record"} else nullcontext()

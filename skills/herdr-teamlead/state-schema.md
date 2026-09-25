@@ -178,7 +178,13 @@ decision log, not a new machine status API or an input to `teamlead.sh apply`.
   It also records gate changes, judge decisions, release evidence, and cleanup.
   One active foreman writes a task ledger; transfer ownership explicitly on handoff.
 - **Readers** — a resumed foreman and `herdr-standup` read schema 1 without changing
-  its meaning. Workers never write it. Standup reads it without migration and
+  its meaning. `close-member` (`skills/herdr-teamlead/teamlead/members.py`)
+  reads it too, and only through a validated schema-1 document: frontmatter
+  carrying every field above, `dispatch_state` resolving to the state the
+  command runs against, and every event carrying every field. Any other
+  version, a missing field or another state's ledger is refused and closes
+  nothing. It matches an event by `dispatch_id`, `worker` and `report`, and
+  never writes the ledger. Workers never write it. Standup reads it without migration and
   labels unaccepted worker claims as reported; it grants no completion status.
 - **Authority** — decisions refer to inspected evidence. Revalidate sources
   before acting on a recalled entry. The document grants no authorization,
