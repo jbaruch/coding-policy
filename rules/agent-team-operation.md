@@ -17,7 +17,9 @@ description: Running a multi-agent team — task-based specialist composition, c
 - A standalone agent never simulates the roles, the briefs, or the reports
 - Standalone work is still governed by every other rule in this plugin
 - The foreman is a nonworking foreman
-- It assigns the work, supervises the crew, and accepts or rejects what the crew delivers
+- It assigns the work
+- It supervises the crew
+- It accepts or rejects what the crew delivers
 - In a team round the foreman dispatches the task work and never executes it itself
 - The foreman's own execution covers reading the shared checkout, this plugin's owner scripts, and the foreman-owned records those scripts write
 - Foreman-owned records are the task ledger, retrospective notes, attention items, and working memory

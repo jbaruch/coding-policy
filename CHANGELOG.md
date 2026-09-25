@@ -1,5 +1,49 @@
 # Changelog
 
+### Changed
+
+- **`herdr-teamlead` is now `herdr-foreman` (#501).** The rules already
+  called the role the foreman; the skill, the Python package, the launcher
+  and the environment prefix still said teamlead, so a reader moved between
+  two names for one thing. Renamed with no alias (operator decision):
+  `skills/herdr-teamlead/` is `skills/herdr-foreman/`, the `teamlead/`
+  package is `foreman/`, `teamlead.sh` is `foreman.sh`, and every
+  `TEAMLEAD_*` variable is `FOREMAN_*` (`FOREMAN_HERDR_BIN` and the rest).
+  "The lead" became "the foreman" in prose, messages and help text.
+  Deliberately unchanged: the `lead` round type in config tier tables
+  (renaming it is a config schema change), the `New assignment from the
+  team lead.` opening the composer matches in live panes and recorded
+  dispatches, fixture labels, and this CHANGELOG's history.
+- **The state and config homes move with the name.** Every command whose
+  state or config comes from the default path now refuses while that home
+  is still at `~/.local/state/teamlead` or `~/.config/teamlead`, names
+  `foreman migrate-home`, and creates nothing at the new path. A command
+  given explicit `--state` and `--config` is unaffected. `migrate-home`
+  (`skills/herdr-foreman/foreman/home.py`) refuses while any owner lock in
+  the legacy home is held, renames each home, leaves the old path as a
+  symlink to the new one, and rewrites only the stores' `state_path`
+  identity fields, which the stores compare against the canonical state path
+  on load. Every other absolute path a record quotes (stow required reads,
+  retrospective notes, attention evidence, reset resume prompts) is history
+  and is left alone; the symlink keeps it resolving. It never merges a home
+  that exists at both paths, and a second run changes nothing. Upgrade
+  order: stop every foreman, update the installs, run `foreman migrate-home`
+  once per machine.
+- **The report classifier was re-scored under the new name.** The renamed
+  prompt and the original prompt were both run on the same 96 labelled
+  reports with `claude-sonnet-5`: both scored 0.9792 with the same two
+  disagreements, so no verdict changed with the wording.
+- **Test runs no longer see the operator's own homes.** `scripts/run-tests.sh`
+  gives every run an empty per-run `XDG_STATE_HOME` and `XDG_CONFIG_HOME`
+  and removes them on exit (`scripts/tests/test_run_tests.sh` checks both),
+  and `classify/evaluate.sh` honours `XDG_STATE_HOME` for its default
+  corpus. Before, a suite that did not pass a path read, and could refuse
+  on, the machine's real foreman state, which the home migration would
+  have made an ordinary occurrence.
+- The foreman definition bullet in `rules/agent-team-operation.md` is split
+  into one directive per bullet, and `state-schema.md` names `config.py`
+  and `supervision.py` by repo-relative path (advisory carried from #526).
+
 ## 0.3.273 — 2026-09-25
 
 ### Fixed
