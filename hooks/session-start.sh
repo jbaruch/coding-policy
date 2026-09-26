@@ -1,14 +1,17 @@
 #!/usr/bin/env bash
 # Run every SessionStart hook and deliver all of their statuses at once.
 #
-# The plugin declares this script as its only SessionStart hook. `tessl hook run`
-# keeps only the LAST hook's output in a group, so with several hooks each one
-# overwrote the one before it, and a silent last hook (the usual case) erased
-# every status. One entry point that merges the statuses itself delivers them all.
+# The plugin declares this script as its only SessionStart hook, as a native
+# hook for Claude Code and Codex. Two `tessl hook run` behaviours rule out the
+# portable form: it keeps only the LAST hook's output in a group, and it hands a
+# hook only HOME, PATH, TMPDIR and TESSL_* from the environment, so HERDR_ENV
+# never reached the hooks that decide on it. One native entry that merges the
+# statuses itself delivers them all, with the session's environment intact.
 #
 # Contract:
 #   stdin : consensus SessionStart JSON — not read; each hook gets /dev/null.
-#   stdout: one JSON object {"additionalContext": "<statuses>"} joining every
+#   stdout: one native payload {"hookSpecificOutput": {"hookEventName":
+#           "SessionStart", "additionalContext": "<statuses>"}} joining every
 #           hook's additionalContext with a blank line, in HOOKS order. Nothing
 #           when no hook reported. A hook that exits non-zero or prints
 #           something other than one additionalContext object is reported as
@@ -53,12 +56,12 @@ sys.stdout.write(ctx)
   fi
 }
 
-# Print {"additionalContext": <text>} as JSON.
+# Print the native SessionStart payload Claude Code and Codex both read.
 encode() { # <text>
   if [[ "$JSON_TOOL" == python3 ]]; then
-    python3 -c 'import json, sys; print(json.dumps({"additionalContext": sys.argv[1]}))' "$1"
+    python3 -c 'import json, sys; print(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": sys.argv[1]}}))' "$1"
   else
-    jq -n --arg c "$1" '{additionalContext: $c}'
+    jq -n --arg c "$1" '{hookSpecificOutput: {hookEventName: "SessionStart", additionalContext: $c}}'
   fi
 }
 
