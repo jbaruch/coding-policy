@@ -22,7 +22,9 @@
 #     untracked non-ignored file become one commit at
 #     refs/archive/worktrees/<name>-<pathhash>-<UTC stamp>, whose JSON note
 #     under ARCHIVE_NOTES is the archive record (state-schema.md Worktree
-#     Archives); the note is written before the ref; then `git worktree move`
+#     Archives); the commit message names the ref and source, so each archive
+#     is its own commit; the note is written before the ref and never over an
+#     existing note; then `git worktree move`
 #     renames it to <root>/.trash/<same name>. Nothing on this path deletes:
 #     a writer that got in after the last check lands in the moved copy.
 # Before either removal or archive, a worktree holding another repository's
@@ -62,11 +64,13 @@
 #     registered here, be unlocked, be on the recorded HEAD and branch, be
 #     IDLE for ARCHIVE_IDLE_HOURS with no process inside, and snapshot to
 #     exactly the recorded tree; anything else KEEPS the archive;
-#   * then, in order: the process probe is re-read; the trash worktree is
-#     force-removed (safe: its content is the archive); the branch is deleted
+#   * then, in order: the process probe is re-read fresh and the fingerprint
+#     recomputed (any change keeps it); the trash worktree is force-removed
+#     (safe: its content is the archive); the branch is deleted
 #     only when its tip equals the recorded head; the ref is compare-and-
 #     deleted; the note is removed. A failure at any step keeps the ref.
-# A ref not named <name>-<10 hex>-<UTC stamp> is never touched.
+# A ref not named <name>-<10 hex>-<UTC stamp>, with <name> drawn only from
+# the A-Za-z0-9._- charset archive_names generates, is never touched.
 # Every judgment reads origin's refs fetched by THIS run and origin's default branch as
 # re-queried by THIS run — a fetch or default-branch lookup that fails is a
 # precondition failure, never a judgment from stale refs. Every removal is
@@ -130,8 +134,8 @@
 #           1 precondition unmet (usage, git or python3 absent, not a repo,
 #             no origin, fetch failed, default branch unresolvable, worktree
 #             or branch inventory unreadable) — no JSON, nothing decided,
-#           2 at least one check, removal or deletion failed; the rest still
-#             ran and `failed` names each one.
+#           2 at least one check, removal, archive, move, expiry step or
+#             deletion failed; the rest still ran and `failed` names each one.
 #   env   : WORKTREE_ROOT overrides the worktree root (default
 #           $HOME/.worktrees); the tests point it at a temp dir.
 #           PRUNE_IDLE_HOURS / PRUNE_ARCHIVE_IDLE_HOURS /
@@ -583,7 +587,9 @@ snapshot_tree() { # <real> <head>
 
 # Snapshot the worktree at <real> into a new commit at <ref> whose JSON note
 # under ARCHIVE_NOTES is the archive record. The note is written before the
-# ref, so no archive ref exists without its record. Returns 1 on any failure,
+# ref, so no archive ref exists without its record, and never with -f: a note
+# already on that commit refuses the archive rather than overwrite another
+# archive's record. Returns 1 on any failure,
 # leaving ERRFILE with the reason and the worktree untouched.
 archive_worktree() { # <shared> <real> <head> <branch|""> <ref> <trash-path> <dry 0|1>
   local shared="$1" real="$2" head="$3" branch="$4" ref="$5" trash="$6" dry="$7" tree commit resolved note
@@ -591,11 +597,15 @@ archive_worktree() { # <shared> <real> <head> <branch|""> <ref> <trash-path> <dr
   tree="$(snapshot_tree "$real" "$head")" || return 1
   local -a ident=(GIT_AUTHOR_NAME=prune-worktrees GIT_AUTHOR_EMAIL=prune-worktrees@localhost
                   GIT_COMMITTER_NAME=prune-worktrees GIT_COMMITTER_EMAIL=prune-worktrees@localhost)
-  commit="$(env "${ident[@]}" git -C "$real" commit-tree "$tree" -p "$head" -m "Archive of a worktree before removal" 2>"$ERRFILE")" || return 1
+  # The message names the ref and the source path, so two archives of one
+  # parent and tree in one second are still two commits, each with its own
+  # note.
+  commit="$(env "${ident[@]}" git -C "$real" commit-tree "$tree" -p "$head" \
+    -m "Archive ${ref}" -m "Source: ${real}" 2>"$ERRFILE")" || return 1
   if ! note="$(mktemp 2>"$ERRFILE")"; then return 1; fi
   local ok=0
   if python3 - "$note" "$ARCHIVE_SCHEMA" "$ref" "$real" "$trash" "$head" "$branch" "$tree" 2>"$ERRFILE" <<'PY' \
-    && env "${ident[@]}" git -C "$shared" notes --ref="$ARCHIVE_NOTES" add -f -F "$note" "$commit" 2>"$ERRFILE" \
+    && env "${ident[@]}" git -C "$shared" notes --ref="$ARCHIVE_NOTES" add -F "$note" "$commit" 2>"$ERRFILE" \
     && git -C "$shared" update-ref "$ref" "$commit" "" 2>"$ERRFILE" \
     && resolved="$(git -C "$shared" rev-parse --verify --quiet "${ref}^{commit}" 2>"$ERRFILE")" \
     && [[ "$resolved" == "$commit" ]]; then
@@ -844,7 +854,9 @@ IDENT = dict(os.environ, GIT_AUTHOR_NAME="prune-worktrees", GIT_AUTHOR_EMAIL="pr
 # ARCHIVE_SCHEMA in prune-worktrees.sh.
 MIGRATIONS = {}
 
-NAME = re.compile(r"^refs/archive/worktrees/(?P<base>(?P<name>.+)-(?P<hash>[0-9a-f]{10})-(?P<stamp>\d{8}T\d{6}Z))$")
+# Only the shape `archive_names` generates: the name part is its sanitized
+# charset, so a ref with a slash in its basename is never this script's.
+NAME = re.compile(r"^refs/archive/worktrees/(?P<base>(?P<name>[A-Za-z0-9._-]+)-(?P<hash>[0-9a-f]{10})-(?P<stamp>\d{8}T\d{6}Z))$")
 
 
 def git(*args, env=None, stdin=None):
@@ -1033,8 +1045,15 @@ sys.stdout.write("\x1f".join([r["trash"], r["head"], r.get("branch") or "", r["t
     if (( $3 )); then row expired "$ref" "$branch" "" "$sha" "$trash"; continue; fi
     # Destructive steps, in order; any failure keeps the archive ref.
     if [[ -e "$trash" ]]; then
-      rc=0; in_use "$trash" || rc=$?
+      # Immediately before the forced removal: a fresh probe, never the
+      # snapshot trash_gates took, and a fresh fingerprint.
+      local last_tree
+      reprobe; rc=0; in_use "$trash" || rc=$?
       if (( rc != 1 )); then row archive-kept "$ref" "" "a process entered its trash worktree" "$sha" "$trash"; continue; fi
+      if ! last_tree="$(snapshot_tree "$trash" "$head")"; then
+        row failed "$ref" "" "cannot snapshot the trash worktree ${trash} before removal, so ${ref} was kept: $(tr '\n' ' ' < "$ERRFILE")"; continue
+      fi
+      if [[ "$last_tree" != "$tree" ]]; then row archive-kept "$ref" "" "its trash worktree changed after the gates" "$sha" "$trash"; continue; fi
       if ! git -C "$1" worktree remove --force "$trash" 2>"$ERRFILE"; then
         row failed "$ref" "" "removing the trash worktree ${trash} failed, so ${ref} was kept: $(tr '\n' ' ' < "$ERRFILE")"; continue
       fi

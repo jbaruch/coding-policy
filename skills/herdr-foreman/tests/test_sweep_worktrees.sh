@@ -23,6 +23,10 @@
 #                           directory and the root's .trash are not descended.
 #  10. Attributed error  -> an error names its repository when the gitdir's
 #                           files resolve it.
+#  11. Trash only        -> a repository whose only worktree is archived in
+#                           .trash still gets its prune, so its archive expires.
+#  12. Unreadable result -> a prune exiting 0 without readable JSON fails the
+#                           sweep (exit 2, stderr diagnostic).
 #
 # Run: bash skills/herdr-foreman/tests/test_sweep_worktrees.sh
 set -uo pipefail
@@ -154,6 +158,45 @@ main() {
   echo "10. an unreadable worktree names its repository when its gitdir resolves it"
   if (( RC == 2 )) && [[ "$(q 'next((e["repo"] for e in d["errors"] if e["path"].endswith("/badhead")), "")')" == "$alpha" ]]; then
     pass; else fail "attributed error: rc=$RC out=$OUT"; fi
+
+  # --- 11. a repository whose only worktree sits in .trash still expires.
+  local root4="$TMP/worktrees4" tw="$TMP/worktrees4/delta-wt"
+  mkdir -p "$root4" || die "mkdir root4 failed"
+  mk_repo delta; local delta="$SHARED"
+  "${G[@]}" -C "$delta" worktree add -q -b feat/delta "$tw" origin/main 2>/dev/null || die "delta worktree failed"
+  printf 'd\n' > "$tw/d.txt" || die "delta write failed"
+  "${G[@]}" -C "$tw" add d.txt || die "delta add failed"
+  "${G[@]}" -C "$tw" commit -q -m d || die "delta commit failed"
+  local gd; gd="$(git -C "$tw" rev-parse --absolute-git-dir)" || die "delta gitdir failed"
+  local f; for f in "$gd/HEAD" "$gd/index" "$gd/logs/HEAD"; do touch -t 202001010000 "$f" || die "touch $f failed"; done
+  find "$tw" -path "$tw/.git" -prune -o -exec touch -h -t 202001010000 {} + || die "age delta failed"
+  OUT="$(PRUNE_NOW=1578614400 bash "$SCRIPT" "$root4" 2>"$TMP/err.trash1")"; RC=$?
+  local trash_path; trash_path="$(q 'd["repos"][0]["result"]["worktrees_archived"][0]["trash_path"]')"
+  [[ -d "$trash_path" ]] || die "trash-only setup: no trash worktree, out=$OUT err=$(cat "$TMP/err.trash1")"
+  gd="$(git -C "$trash_path" rev-parse --absolute-git-dir)" || die "trash gitdir failed"
+  for f in "$gd/HEAD" "$gd/index" "$gd/logs/HEAD"; do touch -t 202001100000 "$f" || die "touch $f failed"; done
+  find "$trash_path" -path "$trash_path/.git" -prune -o -exec touch -h -t 202001100000 {} + || die "age trash failed"
+  RUN_SEQ=$((RUN_SEQ+1))
+  OUT="$(PRUNE_NOW=$((1578614400 + 31 * 86400)) bash "$SCRIPT" "$root4" 2>"$TMP/err.$RUN_SEQ")"; RC=$?
+  ERRTEXT="$(cat "$TMP/err.$RUN_SEQ")"
+  echo "11. a repository whose only worktree is in .trash still gets its expiry pass"
+  if (( RC == 0 )) && [[ "$(q 'len(d["repos"][0]["result"]["archives_expired"])')" == 1 ]] && [[ ! -e "$trash_path" ]] \
+    && [[ "$(q '[s for s in d["skipped"] if ".trash" in s["path"]]')" == "[]" ]]; then
+    pass; else fail "trash only: rc=$RC out=$OUT err=$ERRTEXT"; fi
+
+  # --- 12. a prune exiting 0 with unreadable JSON fails the sweep.
+  local shadow="$TMP/shadow12"
+  mkdir -p "$shadow" || die "mkdir shadow failed"
+  cp "$SCRIPT" "$shadow/" || die "copy sweep failed"
+  printf '#!/usr/bin/env bash\nset -euo pipefail\nprintf "not json\\n"\n' > "$shadow/prune-worktrees.sh" || die "stub prune failed"
+  "${G[@]}" -C "$alpha" worktree add -q -b review/twelve "$root4/alpha-twelve" origin/main 2>/dev/null || die "alpha twelve failed"
+  RUN_SEQ=$((RUN_SEQ+1))
+  OUT="$(bash "$shadow/sweep-worktrees.sh" "$root4" 2>"$TMP/err.$RUN_SEQ")"; RC=$?
+  ERRTEXT="$(cat "$TMP/err.$RUN_SEQ")"
+  echo "12. a prune exiting 0 without readable JSON fails the sweep"
+  if (( RC == 2 )) && [[ "$(q '"error" in d["repos"][0] and "result" not in d["repos"][0]')" == True ]] \
+    && [[ "$ERRTEXT" == *"without a readable JSON result"* ]]; then
+    pass; else fail "unreadable result: rc=$RC out=$OUT err=$ERRTEXT"; fi
 
   run
   echo "5a. no root is exit 1 with no JSON"

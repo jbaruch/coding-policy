@@ -16,8 +16,10 @@
     at `refs/archive/worktrees/<name>-<pathhash>-<stamp>`, and a JSON record
     with `schema_version` 1 (ref, source, trash, head, branch, stamp, tree
     fingerprint) is written first as a git note under
-    `refs/notes/worktree-archive`. JSON keeps paths holding a newline whole,
-    which commit trailers did not. Then `git worktree move` renames it into
+    `refs/notes/worktree-archive`, never over an existing note. The commit
+    message names the ref and source, so two archives of one parent and tree
+    in one second are two commits with two records. JSON keeps a path holding
+    a newline whole. Then `git worktree move` renames it into
     the root's `.trash/`, so a writer that got in after the last check lands
     in the moved copy. The path hash keeps two worktrees with one basename
     apart.
@@ -54,7 +56,9 @@
       inside, and snapshot to exactly the recorded tree.
     - Only then does it remove, in order: the trash worktree, the branch
       (only when its tip equals the recorded head), the ref, and the note.
-      A failure at any step keeps the ref.
+      Immediately before the forced removal the process probe is re-read
+      fresh and the fingerprint recomputed. A failure at any step keeps the
+      ref.
   - The owner migrates an older record through `MIGRATIONS` (empty: v1 is
     the first schema) and rewrites its note. A newer, missing, unparseable
     or unmigratable record is kept and reported under `archives_kept`,
@@ -63,8 +67,11 @@
     carry `archive_ref` and `trash_path`, and locked rows carry
     `lock_reason`.
   - New `skills/herdr-foreman/sweep-worktrees.sh` finds worktrees anywhere
-    under the root, never descending into a found checkout, `.git`, the
-    root's `.trash` or a symlinked directory. It groups them by repository
+    under the root, never descending into a found checkout, `.git` or a
+    symlinked directory. A worktree in the root's `.trash` names its
+    repository but is never a candidate, so a repository whose only
+    worktrees are archived still gets its expiry pass. A prune that exits
+    without readable JSON fails the sweep. It groups them by repository
     and runs the prune once each. A plain directory, a clone or a repository
     without origin is reported, never fatal. A worktree git cannot read is
     an `errors` entry naming its repository when the gitdir's files resolve

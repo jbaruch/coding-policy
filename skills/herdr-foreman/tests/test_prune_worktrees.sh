@@ -92,6 +92,10 @@
 #  62. Gitlink, embedded    -> a dirty gitlink without .gitmodules, and an
 #                             untracked embedded repository, keep the worktree.
 #  63. Unusable records     -> too old to migrate, or unparseable: kept.
+#  64. Twin archives        -> one parent and tree in one second: two commits,
+#                             two records.
+#  65. Foreign ref name     -> a slash in the name part: never planned.
+#  66. Late process         -> a fresh probe before the forced trash removal.
 #
 # Run: bash skills/herdr-foreman/tests/test_prune_worktrees.sh
 set -uo pipefail
@@ -229,6 +233,18 @@ age_trash() { # <trash>
   find "$1" -path "$1/.git" -prune -o -exec touch -h -t 202001100000 {} + || die "touch trash files failed"
 }
 
+
+# Stop the background sleeper: SIGTERM, then its exit status must be 143
+# (128 + SIGTERM); anything else means the fixture did not behave as assumed.
+stop_sleeper() {
+  local st=0
+  kill "$SLEEPER" || die "could not stop the sleeper $SLEEPER"
+  wait "$SLEEPER" || st=$?
+  case "$st" in
+    143) SLEEPER="" ;;
+    *) die "the sleeper $SLEEPER ended with status $st, not 143 (SIGTERM)" ;;
+  esac
+}
 main() {
   PASS=0; FAIL=0; RUN_SEQ=0
   SCRIPT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/prune-worktrees.sh"
@@ -665,8 +681,7 @@ SHIM
   SLEEPER=$!
   local wt; for wt in "$det" "$pushed" "$busy" "$stale" "$held"; do age_wt "$wt"; done
   idle_run
-  kill "$SLEEPER" || die "could not stop the sleeper"
-  wait "$SLEEPER"
+  stop_sleeper
   echo "35. an idle clean worktree on a pushed commit is removed, detached or on a pushed branch"
   if (( RC == 0 )) && ! listed "$SHARED" "$det" && ! listed "$SHARED" "$pushed" \
     && [[ -n "$(removed_head "$det")" ]] && ! has_branch "$SHARED" review/pushed; then
@@ -758,8 +773,7 @@ SHIM
   (cd "$mbusy" && exec sleep 300) &
   SLEEPER=$!
   idle_run
-  kill "$SLEEPER" || die "could not stop the sleeper"
-  wait "$SLEEPER"
+  stop_sleeper
   echo "44. a clean merged worktree with fresh activity is kept"
   if [[ "$(kept_reason "$mfresh")" == merged-not-idle ]] && listed "$SHARED" "$mfresh" && has_branch "$SHARED" review/mfresh; then
     pass; else fail "merged not idle: out=$OUT"; fi
@@ -864,7 +878,7 @@ SHIM
   (cd "${g_busy#* }" && exec sleep 300) &
   SLEEPER=$!
   later_run
-  kill "$SLEEPER" || die "could not stop the sleeper"; wait "$SLEEPER"
+  stop_sleeper
   echo "53. a newer-schema record is kept and reported"
   if [[ "$(archives_kept_reason "${g_new%% *}")" == schema-newer ]] && listed "$SHARED" "${g_new#* }"; then pass; else fail "newer: out=$OUT"; fi
   echo "54. a record naming another worktree as its trash is kept, and that worktree untouched"
@@ -997,6 +1011,48 @@ SHIM
   if [[ "$(archives_kept_reason "${o1%% *}")" == schema-unmigratable && "$(archives_kept_reason "${o2%% *}")" == record-unparseable ]] \
     && listed "$SHARED" "${o1#* }" && listed "$SHARED" "${o2#* }"; then
     pass; else fail "old records: out=$OUT"; fi
+
+  # --- 64. two archives of one parent and tree in one second stay two records.
+  mk_repo twins
+  local twin_c tw1="$ROOT/twin-a/wt" tw2="$ROOT/twin-b/wt"
+  twin_c="$(git -C "$SHARED" -c user.name=t -c user.email=t@t commit-tree "origin/main^{tree}" -p origin/main -m local)" || die "commit-tree failed"
+  mkdir -p "$ROOT/twin-a" "$ROOT/twin-b" || die "mkdir twins failed"
+  git -C "$SHARED" worktree add -q --detach "$tw1" "$twin_c" 2>/dev/null || die "twin a add failed"
+  git -C "$SHARED" worktree add -q --detach "$tw2" "$twin_c" 2>/dev/null || die "twin b add failed"
+  age_wt "$tw1"; age_wt "$tw2"
+  idle_run
+  echo "64. two same-parent, same-tree archives in one second get two commits and two records"
+  local tr1 tr2 tc1 tc2
+  tr1="$(archived_ref "$tw1")"; tr2="$(archived_ref "$tw2")"
+  if (( RC == 0 )) && [[ -n "$tr1" && -n "$tr2" ]] \
+    && tc1="$(git -C "$SHARED" rev-parse "$tr1")" && tc2="$(git -C "$SHARED" rev-parse "$tr2")" && [[ "$tc1" != "$tc2" ]] \
+    && [[ "$(record_of "$SHARED" "$tr1" | python3 -c 'import json,sys; print(json.load(sys.stdin)["ref"])')" == "$tr1" ]] \
+    && [[ "$(record_of "$SHARED" "$tr2" | python3 -c 'import json,sys; print(json.load(sys.stdin)["ref"])')" == "$tr2" ]]; then
+    pass; else fail "twins: rc=$RC out=$OUT err=$ERRTEXT"; fi
+
+  # --- 65. a ref with a slash in its name part is never this script's.
+  mk_repo slashref
+  local sl sl_c
+  sl="$(archive_one slash1 feat/slash1)"
+  sl_c="$(git -C "$SHARED" rev-parse "${sl%% *}")" || die "rev-parse slash archive failed"
+  git -C "$SHARED" update-ref "refs/archive/worktrees/x/y-0123456789-20191201T000000Z" "$sl_c" || die "update-ref slash failed"
+  later_run
+  echo "65. a ref outside the generated name charset is not planned or reported"
+  if (( RC == 0 )) && [[ "$OUT" != *"x/y-0123456789"* ]] && git -C "$SHARED" rev-parse --verify --quiet "refs/archive/worktrees/x/y-0123456789-20191201T000000Z" >/dev/null; then
+    pass; else fail "slash ref: rc=$RC out=$OUT err=$ERRTEXT"; fi
+
+  # --- 66. a process arriving after the expiry gates keeps the trash.
+  mk_repo latebusy
+  local lb; lb="$(archive_one late1 feat/late1)"
+  age_trash "${lb#* }"
+  lsof_turns_busy "$TMP/lsof66" 2 "${lb#* }"
+  RUN_SEQ=$((RUN_SEQ+1))
+  OUT="$(env WORKTREE_ROOT="$ROOT" PRUNE_NOW="$LATER_NOW" PRUNE_LSOF="$TMP/lsof66/lsof" bash "$SCRIPT" "$SHARED" 2>"$TMP/err.$RUN_SEQ")"; RC=$?
+  ERRTEXT="$(cat "$TMP/err.$RUN_SEQ")"
+  echo "66. a process that enters the trash after its gates, before the forced removal, keeps it"
+  if (( RC == 0 )) && [[ "$(archives_kept_reason "${lb%% *}")" == *"process entered"* ]] && listed "$SHARED" "${lb#* }" \
+    && git -C "$SHARED" rev-parse --verify --quiet "${lb%% *}" >/dev/null; then
+    pass; else fail "late busy: rc=$RC out=$OUT err=$ERRTEXT"; fi
 
   # --- 14. usage / not a repo.
   run

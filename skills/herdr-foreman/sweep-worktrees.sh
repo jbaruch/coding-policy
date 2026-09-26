@@ -21,8 +21,11 @@
 #           `result` is that repository's prune-worktrees.sh JSON. `error`
 #           replaces it when the prune decided nothing (exit 1: no origin, a
 #           failed fetch, ...). Worktrees are found anywhere below the root; a
-#           found checkout, a .git directory, the root's .trash (the prune's
-#           archived worktrees) and a symlinked directory are not descended.
+#           found checkout, a .git directory and a symlinked directory are
+#           not descended. The root's .trash holds the prune's archived
+#           worktrees: each names its repository, so a repository whose only
+#           worktrees are archived still gets its prune (and expiry) run,
+#           but a trash worktree is never a candidate.
 #           A skipped entry is not-a-worktree (a direct child of
 #           the root holding no checkout), clone (a repository's own main
 #           checkout), or broken-worktree (its .git file names a gitdir that
@@ -32,8 +35,9 @@
 #   stderr: diagnostics, and each prune's stderr prefixed with its repository.
 #   exit  : 0 every repository decided cleanly,
 #           1 usage, python3 absent, or the root unreadable — no JSON,
-#           2 at least one repository failed or reported a failure, or
-#             `errors` is non-empty; every other repository still ran.
+#           2 at least one repository's prune exited non-zero or returned
+#             no readable JSON (its entry carries `error`), or `errors` is
+#             non-empty; every other repository still ran.
 #   env   : PRUNE_* variables pass through to prune-worktrees.sh.
 set -euo pipefail
 
@@ -104,6 +108,15 @@ def discover(root):
     for top in sorted(os.listdir(root)):
         top_path = os.path.join(root, top)
         if top == ".trash":
+            # The prune's archived worktrees: never pruned as candidates, but
+            # each still names a repository whose expiry pass must run.
+            try:
+                trashed = sorted(os.listdir(top_path))
+            except OSError as exc:
+                errors.append({"path": top_path, "repo": None, "exit": None, "error": "cannot list: {}".format(exc)})
+                continue
+            found.extend(("trash", os.path.join(top_path, name)) for name in trashed
+                         if os.path.isfile(os.path.join(top_path, name, ".git")))
             continue
         before = len(found)
         stack = [top_path]
@@ -158,7 +171,9 @@ for kind, path in found:
     if not shared or not os.path.isdir(shared):
         errors.append({"path": path, "repo": owner, "exit": 0, "error": "its repository lists no main checkout on disk"})
         continue
-    repos.setdefault(os.path.realpath(shared), []).append(path)
+    candidates = repos.setdefault(os.path.realpath(shared), [])
+    if kind == "worktree":
+        candidates.append(path)
 
 for entry in errors:
     if entry["repo"]:
@@ -177,10 +192,16 @@ for shared in sorted(repos):
         entry["result"] = json.loads(run.stdout) if run.returncode in (0, 2) else None
     except ValueError:
         entry["result"] = None
-    if entry["result"] is None:
+    if not isinstance(entry["result"], dict):
         del entry["result"]
         entry["error"] = run.stderr.strip() or "prune-worktrees.sh exited {} with no JSON".format(run.returncode)
-    if run.returncode != 0:
+        # A prune whose result cannot be read decided nothing we can report,
+        # whatever its exit code said.
+        if run.returncode in (0, 2):
+            sys.stderr.write("sweep-worktrees: {}: prune-worktrees.sh exited {} without a readable JSON result "
+                             "— run it directly to see why\n".format(shared, run.returncode))
+        failed = True
+    elif run.returncode != 0:
         failed = True
     results.append(entry)
 

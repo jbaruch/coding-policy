@@ -15,7 +15,8 @@ the utility alone records the saved notes and their separate index.
 | `<task-reports-dir>/TASK-LEDGER.md` | `herdr-foreman`, written by the foreman | Evidence-backed assignment acceptance and task completion across rounds |
 | `<canonical-state-path>.retrospectives/` | `herdr-foreman`, through its retrospective utility | Immutable retrospective notes, versioned index, and transition coverage |
 | `<canonical-state-path>.foreman-reset.json` | `skills/herdr-foreman/foreman/foreman_reset.py` | One record per foreman round-boundary reset; see Foreman Reset Record below |
-| `refs/archive/worktrees/<name>-<UTC stamp>` in each repository | `skills/herdr-foreman/prune-worktrees.sh` | Archive record of an idle dirty or unpushed worktree moved to the root's `.trash/`; see Worktree Archives below |
+| `refs/archive/worktrees/<name>-<pathhash>-<YYYYMMDDTHHMMSSZ>` in each repository | `skills/herdr-foreman/prune-worktrees.sh` | Archive ref: the snapshot commit of an idle dirty or unpushed worktree moved to the root's `.trash/`; see Worktree Archives below |
+| JSON note on each archive commit under `refs/notes/worktree-archive` | `skills/herdr-foreman/prune-worktrees.sh` | Archive record (`schema_version`, ref, source, trash, head, branch, stamp, tree); see Worktree Archives below |
 
 ## Home Migration
 
@@ -887,7 +888,8 @@ Archive commit and ref:
   `<name>` is the worktree directory's basename with every character outside
   `A-Za-z0-9._-` replaced by `-`, and `<pathhash>` is the first 10 hex digits
   of the SHA-1 of the worktree's absolute path
-- Commit: parent is the worktree's HEAD; tree is every tracked and untracked
+- Commit: parent is the worktree's HEAD; message names the ref and the source
+  path, so every archive is its own commit; tree is every tracked and untracked
   non-ignored file as it stood. Ignored files are not kept. A worktree holding
   a submodule or an embedded repository is never archived
 - The trash worktree is the original, moved by `git worktree move` to
@@ -904,14 +906,16 @@ Archive record — one JSON object, the note on the archive commit under
 | `trash` | the trash worktree's absolute path |
 | `head` | the worktree's HEAD when archived (the commit's parent) |
 | `branch` | its branch, or `null` when detached |
-| `stamp` | the ref's UTC stamp |
+| `stamp` | the ref's `YYYYMMDDTHHMMSSZ` UTC stamp |
 | `tree` | the fingerprint: the archive commit's tree id |
 
 Writer / reader contract:
 
 - Owner and only writer: `skills/herdr-foreman/prune-worktrees.sh`. The note is
-  written before the ref, create-only (`update-ref <ref> <commit> ""`), so an
-  archive ref never exists without its record
+  written before the ref and never over an existing note (a note already on
+  the commit refuses the archive); the ref is create-only
+  (`update-ref <ref> <commit> ""`), so an archive ref never exists without its
+  own record
 - The prune's JSON names each written archive under `worktrees_archived`
   (`archive_ref`, `trash_path`)
 - The same script is the only reader. Every live run reads every record and
@@ -941,5 +945,6 @@ Migration:
 - A record whose version is newer than `ARCHIVE_SCHEMA` is no usable state,
   and so is one that is missing, unparseable, or older than any migration
   reaches: it is reported under `archives_kept` and never expired
-- A ref under `refs/archive/worktrees/` not named `<name>-<10 hex>-<stamp>` is
-  never touched
+- A ref under `refs/archive/worktrees/` not named
+  `<name>-<pathhash>-<YYYYMMDDTHHMMSSZ>`, with `<name>` drawn only from
+  `A-Za-z0-9._-` and `<pathhash>` 10 hex digits, is never touched
