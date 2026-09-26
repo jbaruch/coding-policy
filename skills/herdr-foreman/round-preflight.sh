@@ -4,7 +4,7 @@
 # SKILL.md Steps 1-9 precede the first dispatch, and each one was a separate
 # foreman turn that shipped the foreman's whole accumulated context to run a script
 # and read its exit code. The checks are deterministic -- Herdr reachable, the
-# roster measured, authority verified, a cadence due, worktrees pruned -- so
+# roster measured, authority verified, a cadence due, worktrees swept -- so
 # rules/script-delegation.md puts them here, and its Precheck Gating shape says
 # what to emit: one payload saying whether the agent is needed and what it
 # needs (#445 §1).
@@ -209,15 +209,40 @@ PY
     record gates failed "resolve-gates.sh exited ${rc}; the briefs carry no gate pointers and every worker searches" 0 ""
   fi
 
-  # 7. Worktree hygiene. Pruned every round, before provisioning.
-  bash "${HERE}/prune-worktrees.sh" "$checkout" > "${scratch}/prune.json" 2>"${scratch}/prune.err"
-  rc=$?
-  cat "${scratch}/prune.err" >&2
-  case "$rc" in
-    0) record worktrees ok "" 0 "${scratch}/prune.json" ;;
-    1) record worktrees undecided "prune-worktrees.sh decided nothing; fix its diagnostic and re-run before provisioning" 0 "" ;;
-    *) record worktrees failed "prune-worktrees.sh exited ${rc}; git refused a check or a removal" 0 "" ;;
-  esac
+  # 7. Worktree hygiene. Every repository owning a worktree under the root is
+  #    swept every round, before provisioning. Only this checkout's own prune
+  #    blocks the round; another repository's failure is reported as degraded.
+  local wroot="${WORKTREE_ROOT:-${HOME}/.worktrees}" own
+  if [ ! -d "$wroot" ]; then
+    record worktrees ok "" 0 ""
+  else
+    bash "${HERE}/sweep-worktrees.sh" "$wroot" > "${scratch}/sweep.json" 2>"${scratch}/sweep.err"
+    rc=$?
+    cat "${scratch}/sweep.err" >&2
+    case "$rc" in
+      0) record worktrees ok "" 0 "${scratch}/sweep.json" ;;
+      1) record worktrees undecided "sweep-worktrees.sh decided nothing; fix its diagnostic and re-run before provisioning" 0 "" ;;
+      2)
+        # This checkout's own prune exit, or "none" when it owns no worktree there.
+        if ! own="$(python3 - "${scratch}/sweep.json" "$checkout" <<'PY'
+import json, os, sys
+with open(sys.argv[1], encoding="utf-8") as handle:
+    sweep = json.load(handle)
+mine = os.path.realpath(sys.argv[2])
+print(next((str(r["exit"]) for r in sweep["repos"] if os.path.realpath(r["shared"]) == mine), "none"))
+PY
+)"; then
+          record worktrees failed "sweep-worktrees.sh exited 2 and its JSON could not be read" 0 ""
+        else
+          case "$own" in
+            1) record worktrees undecided "prune-worktrees.sh decided nothing for ${checkout}; fix its diagnostic and re-run before provisioning" 0 "" ;;
+            2) record worktrees failed "prune-worktrees.sh reported a failure for ${checkout}; git refused a check or a removal" 0 "" ;;
+            *) record worktrees degraded "" 0 "${scratch}/sweep.json" ;;
+          esac
+        fi ;;
+      *) record worktrees failed "sweep-worktrees.sh exited ${rc}" 0 "" ;;
+    esac
+  fi
 
   local payload
   payload="$(emit "$results")" || die "cannot assemble the preflight payload"

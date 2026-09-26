@@ -354,19 +354,23 @@ Proceed immediately to Step 8.
 
 ## Step 8 — Provision the Worktrees
 
-Step 2's preflight pruned, every round, and reported the result under
-`checks.worktrees`. Report every kept `dirty`, `unmerged`, `locked` and
-`detached` entry to the operator; never remove them by hand. Run it alone only
-to re-prune:
+Step 2's preflight swept every repository owning a worktree under the root,
+every round, and reported the result under `checks.worktrees`. `degraded`
+means another repository's prune failed; it does not block this round. Report
+every kept `locked`, `in-use` and `idle-unknown` entry, and every archived one
+with its `archive_ref`, to the operator; never remove a worktree by hand. Run
+the sweep alone only to re-sweep:
 
 ```bash
 CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
-bash "$CP/skills/herdr-foreman/prune-worktrees.sh" <shared-checkout>
+bash "$CP/skills/herdr-foreman/sweep-worktrees.sh" "$HOME/.worktrees"
 ```
 
-Emits the worktrees and branches removed, each kept one with its reason, and
-`failed`; exit 2 lists every check or removal git refused. Exit 1 decided
-nothing: fix its diagnostic and re-run before provisioning.
+Emits one entry per repository with that repository's prune result (worktrees
+removed, archived and kept with their reasons, branches deleted, `failed`) or
+its `error`, plus the root's `skipped` entries. Exit 2 names a repository that
+failed; exit 1 decided nothing. The removal and archive predicates live in
+`skills/herdr-foreman/prune-worktrees.sh` (top-of-file docstring).
 
 Then run once per writing worker and every worktree named in a brief:
 
@@ -651,7 +655,7 @@ Record that evidence in the task ledger.
 ## Step 15 — Clean Up the Worktree
 
 Fast-forward the shared checkout, remove the worktree, and delete the branch
-per `rules/agent-worktree-isolation.md`, then run Step 8's prune script again
+per `rules/agent-worktree-isolation.md`, then run Step 8's sweep again
 for the round's other worktrees. Proceed immediately to Step 16.
 
 ## Step 16 — Log the Round

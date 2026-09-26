@@ -47,7 +47,12 @@ shadow() { # <dir> [roster-rc] [authority-rc] [prune-rc] [capability-due] [autho
   cp "$REAL/round-preflight.sh" "$dir/" || die "copy the script under test"
   stub "$dir" roster.sh "$roster" '{"agents":[{"name":"grok"}]}'
   stub "$dir" verify-authority.sh "$authority" "{\"authorized\":${authorized}}"
-  stub "$dir" prune-worktrees.sh "$prune" '{"removed":[],"kept":[]}'
+  local sweep_out='{"repos":[],"skipped":[]}'
+  case "$prune" in
+    2) sweep_out='{"repos":[{"shared":"/tmp","exit":2}],"skipped":[]}' ;;
+    other) prune=2; sweep_out='{"repos":[{"shared":"/elsewhere","exit":1}],"skipped":[]}' ;;
+  esac
+  stub "$dir" sweep-worktrees.sh "$prune" "$sweep_out"
   stub "$dir" resolve-gates.sh 0 '{"instructions":["AGENTS.md"],"workflows":[],"runners":[]}'
   printf '#!/bin/sh\ncase "$*" in\n  *capability-check*) printf %s; exit 0 ;;\n  *measure*) printf %s; exit 0 ;;\nesac\nexit 9\n' \
     "'{\"due\":$due,\"entries\":0}'" "'{\"agents\":{}}'" > "$dir/foreman.sh" || die "write foreman stub"
@@ -56,7 +61,7 @@ shadow() { # <dir> [roster-rc] [authority-rc] [prune-rc] [capability-due] [autho
 
 run() { # <dir> [extra args...]
   local dir="$1"; shift
-  OUT="$(HERDR_ENV=fixture bash "$dir/round-preflight.sh" \
+  OUT="$(HERDR_ENV=fixture WORKTREE_ROOT="$TMP" bash "$dir/round-preflight.sh" \
     --repo owner/repo --checkout /tmp "$@" 2>"$ERRFILE")"
   RC=$?
   ERRTEXT="$(cat "$ERRFILE")"
@@ -124,6 +129,12 @@ main() {
   run "$TMP/prune2"
   if [[ $RC -eq 1 ]] && [[ "$(field "$OUT" 'd["checks"]["worktrees"]["status"]')" == '"failed"' ]]; then
     pass; else fail "prune exit 2 is failed, got RC=$RC OUT=$OUT"; fi
+
+  shadow "$TMP/prune-other" 0 0 other
+  run "$TMP/prune-other"
+  if [[ $RC -eq 0 ]] && [[ "$(field "$OUT" 'd["checks"]["worktrees"]["status"]')" == '"degraded"' ]] \
+     && [[ "$(field "$OUT" 'd["ready"]')" == "true" ]]; then
+    pass; else fail "another repository's failed prune must not block this round, got RC=$RC OUT=$OUT"; fi
 
   echo "▶ what is due without blocking" >&2
 
