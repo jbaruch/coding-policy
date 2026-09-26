@@ -134,6 +134,7 @@ PY
   local shims="$TMP/broken-parsers" realpy
   realpy="$(command -v python3)" || die "python3 required"
   mkdir -p "$shims" || die "cannot create $shims"
+  # shellcheck disable=SC2016  # The format string is the shim's source: its ${2:-} and "$@" expand in the shim.
   printf '#!/usr/bin/env bash\ncase "${2:-}" in *json.loads*) exit 2 ;; esac\nexec %q "$@"\n' "$realpy" > "$shims/python3" \
     || die "cannot write the python3 shim"
   printf '#!/usr/bin/env bash\nexit 2\n' > "$shims/jq" || die "cannot write the jq shim"
