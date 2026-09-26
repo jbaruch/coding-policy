@@ -1,5 +1,34 @@
 # Changelog
 
+### Fixed
+
+- **SessionStart statuses reach the session again.** `tessl hook run` keeps
+  only the LAST hook's output in a group: each hook overwrote the one before,
+  and the usual silent last hook (`check-leftover-worktrees`) erased them all,
+  so no consumer session ever saw a sync, version or Herdr-team status. Probed
+  on tessl 0.111.0 with a scratch plugin: `[a, d]` delivered only `d`,
+  `[a, e]` (e silent) delivered `{}`. The plugin now declares one SessionStart
+  hook, `hooks/session-start.sh`, which runs `check-git-sync`,
+  `check-tessl-latest`, `herdr-team-status` and `check-leftover-worktrees` in
+  order and merges their statuses; a hook that fails or prints non-JSON is
+  reported as its own status line instead of vanishing
+  (`hooks/tests/test_session_start.sh`).
+- **Hooks do the mechanical fix instead of asking for it.** `check-git-sync`
+  now fast-forwards a local default branch strictly behind origin after a
+  fresh fetch: `merge --ff-only` on the checked-out branch, `fetch .
+  origin/<db>:<db>` otherwise, so git refuses a non-fast-forward, an overwrite
+  of local changes, and a branch checked out in another worktree; a refusal
+  is reported. Diverged branches and Herdr-worker sessions stay report-only.
+  It also fetches every session by default (`SYNC_THROTTLE_HOURS` default 0):
+  a throttled run only told the agent to run the fetch itself.
+- **`check-policy-freshness` removed.** It only warned (`run tessl update`),
+  kept one throttle stamp for the whole machine, so the first session anywhere
+  silenced every other repo for 24h, and duplicated `check-tessl-latest`,
+  which already runs `tessl update --yes` every session. On 2026-09-26 20 of
+  23 consumers tracking `latest` were stale (0.3.147–0.3.271) and were updated
+  by hand. The README now says `check-tessl-latest` updates rather than warns.
+  Filed as #539.
+
 ## 0.3.274 — 2026-09-26
 
 ### Changed
