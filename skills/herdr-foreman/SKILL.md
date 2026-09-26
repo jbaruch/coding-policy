@@ -79,7 +79,7 @@ skills/herdr-foreman/state-schema.md
 
 A command that refuses because the default home is still at the legacy
 `teamlead` path is a one-time operator step, not a mode: record it as a
-user-attention blocker naming `foreman migrate-home` (`state-schema.md` Home
+user-attention blocker naming `foreman migrate-home` (`skills/herdr-foreman/state-schema.md` Home
 Migration), and run nothing else until the operator has stopped every foreman
 and run it.
 

@@ -36,10 +36,13 @@ path. A command given explicit `--state`/`--config` paths is unaffected.
 Every other command holds the home guard, `$XDG_STATE_HOME/.foreman-home.lock`,
 shared for its whole run (`guard`). The guard lives beside both homes, never
 inside one, so it stays put while they move. `migrate` takes it exclusively
-before it looks at either home and holds it through both moves: it refuses
+before it looks at either home and holds it through both moves, creating
+the state root first when only a legacy config home exists: it refuses
 while any command holds the guard, and a command that starts mid-migration is
 refused instead of reading a half-moved home. It also refuses while any owner
 lock in the old state home is held, for a running foreman older than the guard.
+A failed rename or link raises `StateError` naming what moved; a re-run
+finishes it.
 """
 
 import fcntl
@@ -91,11 +94,20 @@ def guard(exclusive, environ=None):
     root = roots(environ)["state"]
     path = root / GUARD
     if not root.is_dir():
-        # No state root means no home to move, and a migration has nothing to
-        # take: creating the root here would be a write a read-only command
-        # never makes.
-        yield
-        return
+        if not exclusive:
+            # A command never creates the root. Without it there is no state home
+            # to move, and a legacy config home refuses the command before it
+            # reads anything (`require_current`), so it has nothing to protect.
+            yield
+            return
+        # `migrate` writes anyway, and a legacy config home can exist without a
+        # state root: create the root so a command starting mid-migration meets
+        # the guard.
+        try:
+            root.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            raise StateError("Cannot create the state root {}: {}. Restore access to it, then run migrate-home "
+                             "again; nothing was moved.".format(root, exc), {"root": str(root)}) from None
     try:
         handle = path.open("a", encoding="utf-8")
     except OSError as exc:
@@ -207,10 +219,21 @@ def _move(kind, root, rewrite):
         # Lock fds follow the directory through the rename.
         stack.enter_context(_held_locks(old if state == "legacy" else new))
         if state == "legacy":
-            os.rename(old, new)
+            try:
+                os.rename(old, new)
+            except OSError as exc:
+                raise StateError("Cannot move the {} home {} to {}: {}. Nothing was moved; restore access to {}, then "
+                                 "run migrate-home again.".format(kind, old, new, exc, root),
+                                 {"legacy": str(old), "current": str(new)}) from None
             moved = True
         if not old.is_symlink():
-            os.symlink(new, old, target_is_directory=True)
+            try:
+                os.symlink(new, old, target_is_directory=True)
+            except OSError as exc:
+                raise StateError("The {} home moved to {}, but linking {} to it failed: {}. Quoted history under the "
+                                 "old path does not resolve until the link exists; restore access to {}, then run "
+                                 "migrate-home again to finish.".format(kind, new, old, exc, root),
+                                 {"legacy": str(old), "current": str(new), "moved": moved}) from None
         rewritten = []
         if rewrite:
             # Stores recorded the canonical path, so compare against the resolved root.

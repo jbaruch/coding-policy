@@ -220,7 +220,7 @@ independence. `engagement` identifies the bounded consultation across its
 follow-ups, not a new task or correction budget. Give each distinct engagement
 its own identity and preserve the parent task identity.
 
-The input parser in `foreman/composition.py` owns the accepted keys and names.
+The input parser in `skills/herdr-foreman/foreman/composition.py` owns the accepted keys and names.
 Reviewer and tester requirements use `independent: true`. New advisor and
 investigator assignments require a requirements file; supply it for every new
 architect consultation too. Legacy architect records remain readable but establish

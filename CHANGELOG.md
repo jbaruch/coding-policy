@@ -25,7 +25,10 @@
   so a migration never starts under a running command and a command started
   mid-migration is refused. The guard sits beside both homes, so it does
   not move with them; a scan of the owner locks inside the legacy home
-  alone left a window between the scan and the move. It also refuses while
+  alone left a window between the scan and the move. With no state root and only a legacy config home, `migrate-home` creates
+  the root so the guard still exists; a command never creates it. A failed
+  rename or link raises a state error naming the partial move instead of a
+  traceback, and a re-run finishes it. It also refuses while
   any owner lock in the legacy home is held (a foreman older than the
   guard), refuses `--state` and `--config`, renames each home, leaves the old path as a
   symlink to the new one, and rewrites only the stores' `state_path`

@@ -124,6 +124,53 @@ class MigrateTest(HomeCase):
             self.assertEqual(code, 1)
             self.assertIn("migrate-home is moving", err)
 
+    def test_a_failed_move_is_an_actionable_error_and_moves_nothing(self):
+        self.legacy_home()
+        with mock.patch.object(home.os, "rename", side_effect=PermissionError(13, "denied")):
+            with self.assertRaisesRegex(StateError, "Nothing was moved"):
+                home.migrate(self.env)
+        self.assertTrue((self.state_root / "teamlead").is_dir())
+        self.assertFalse((self.state_root / "foreman").exists())
+
+    def test_a_failed_link_names_the_partial_move_and_a_rerun_finishes_it(self):
+        self.legacy_home()
+        with mock.patch.object(home.os, "symlink", side_effect=OSError(30, "read-only")):
+            with self.assertRaisesRegex(StateError, "run migrate-home again to finish"):
+                home.migrate(self.env)
+        self.assertTrue((self.state_root / "foreman").is_dir())
+        self.assertFalse((self.state_root / "teamlead").exists())
+        home.migrate(self.env)
+        self.assertTrue((self.state_root / "teamlead").is_symlink())
+        self.assertEqual(self.read("state.json.attention.json")["state_path"], str(self.state_root / "foreman" / "state.json"))
+
+    def test_a_config_only_migration_creates_the_state_root_and_holds_the_guard(self):
+        self.state_root.rmdir()
+        (self.config_root / "teamlead").mkdir()
+        (self.config_root / "teamlead" / "config.json").write_text('{"schema_version": 4}')
+        seen = []
+        real_rename = home.os.rename
+
+        def rename_then_try_the_guard(src, dst):
+            try:
+                with home.guard(False, self.env):
+                    seen.append("entered")
+            except UsageError as exc:
+                seen.append(str(exc))
+            real_rename(src, dst)
+
+        with mock.patch.object(home.os, "rename", side_effect=rename_then_try_the_guard):
+            result = home.migrate(self.env)
+        self.assertEqual([row["status"] for row in result["homes"]], ["absent", "current"])
+        self.assertEqual(len(seen), 1)
+        self.assertIn("migrate-home is moving", seen[0])
+        self.assertTrue((self.config_root / "teamlead").is_symlink())
+
+    def test_a_command_without_a_state_root_creates_nothing(self):
+        self.state_root.rmdir()
+        with home.guard(False, self.env):
+            pass
+        self.assertFalse(self.state_root.exists())
+
     def test_a_split_home_is_refused_and_never_merged(self):
         self.legacy_home()
         (self.state_root / "foreman").mkdir()

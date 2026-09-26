@@ -178,8 +178,8 @@ worker; a changed candidate requires a fresh handoff. Follow the owner checks in
 `references/dispatch-recovery.md` instead of treating a warm pane as dispatch proof.
 
 `--roles` keys the output document. Configured `role_costs` calibrate its costs.
-`foreman/composition.py` owns capability, contribution and familiarity evidence;
-`foreman/planner.py` owns affordability, fill order and headroom optimization.
+`skills/herdr-foreman/foreman/composition.py` owns capability, contribution and familiarity evidence;
+`skills/herdr-foreman/foreman/planner.py` owns affordability, fill order and headroom optimization.
 The same eligibility checks run before unsent apply. Familiarity reflects a
 matching dispatch, never expertise or completed work. Requirements do not change
 the reserved judge or the developer correction contract.

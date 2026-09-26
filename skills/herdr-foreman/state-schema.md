@@ -10,7 +10,7 @@ the utility alone records the saved notes and their separate index.
 
 | Path | Owner | Purpose |
 | ---- | ----- | ------- |
-| `$XDG_STATE_HOME/foreman/state.json` (default `~/.local/state/foreman/state.json`, override `--state FILE`) | `skills/herdr-foreman/foreman/state.py` and its `recovery.py` helper, within the same owner skill | Snapshots, append-only assignments, and audited task recovery |
+| `$XDG_STATE_HOME/foreman/state.json` (default `~/.local/state/foreman/state.json`, override `--state FILE`) | `skills/herdr-foreman/foreman/state.py` and its `skills/herdr-foreman/foreman/recovery.py` helper, within the same owner skill | Snapshots, append-only assignments, and audited task recovery |
 | `$XDG_CONFIG_HOME/foreman/config.json` (default `~/.config/foreman/config.json`, override `--config FILE`) | the operator | Per-agent usage / clear commands; foreman reads it and never writes it |
 | `<task-reports-dir>/TASK-LEDGER.md` | `herdr-foreman`, written by the foreman | Evidence-backed assignment acceptance and task completion across rounds |
 | `<canonical-state-path>.retrospectives/` | `herdr-foreman`, through its retrospective utility | Immutable retrospective notes, versioned index, and transition coverage |
@@ -29,7 +29,9 @@ and creates nothing at the new path; a command given explicit `--state` and
   shared for its whole run; `migrate-home` takes it exclusively before reading
   either home and holds it through both moves, so it refuses while any command
   runs and a command started mid-migration is refused
+- It creates the state root first when only a legacy config home exists, so the guard exists to hold
 - It also refuses while any owner lock in the legacy state home is held
+- A failed rename or link exits with a state error naming what moved; running `migrate-home` again finishes it
 - It moves the default homes only and refuses `--state` or `--config`
 - It moves each home to the `foreman` path and leaves the legacy path as a
   link to it, so absolute paths quoted in history still resolve

@@ -234,7 +234,7 @@ reports it under `due`, and SKILL.md Step 2 carries the refresh commands:
 `capability-check` (read-only, whether a refresh is due), `capability-record`
 and `capability-show`. A table never refreshed comes due as
 soon as the ledger holds any work, and a fleet that dispatched nothing never
-comes due. The interval and the source hierarchy are `capabilities.py`'s
+comes due. The interval and the source hierarchy are `skills/herdr-foreman/foreman/capabilities.py`'s
 decision contract, not restated here (`rules/script-as-black-box.md`).
 
 The consultation that gathers the evidence is read-only on repository content

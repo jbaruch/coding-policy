@@ -43,8 +43,8 @@ apply \
   --common <common-path> --retain-specialist [--dispatch-id <stable-id>]
 ```
 
-`foreman/engagement.py` owns assessment-source and retired-enrollment validation;
-`foreman/assign.py` owns retained responsibility, engagement, session and exact
+`skills/herdr-foreman/foreman/engagement.py` owns assessment-source and retired-enrollment validation;
+`skills/herdr-foreman/foreman/assign.py` owns retained responsibility, engagement, session and exact
 tier proof. Staffing follows `references/round-setup.md` Step 5.
 Follow the owner diagnostics before retrying.
 This mode carries no developer correction parameters and cannot replace the

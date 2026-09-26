@@ -177,11 +177,11 @@ preserve it and restore the owner-written record.
 
 ## Persistence and command contract
 
-The owner skill is `herdr-foreman`. `supervision.py` alone writes the document
+The owner skill is `herdr-foreman`. `skills/herdr-foreman/foreman/supervision.py` alone writes the document
 at `<canonical selected state>.supervision.json` through the existing locked,
 atomic state helpers. Discovery records live under
 `<default state directory>/supervision-bindings/<identity digest>.json`.
-`supervision_hook.py` and display readers are read-only, perform no migrations,
+`skills/herdr-foreman/foreman/supervision_hook.py` and display readers are read-only, perform no migrations,
 and acknowledge nothing. Dispatch state and the Markdown task ledger retain
 their own authority. The full shape is documented in
 `skills/herdr-foreman/state-schema.md`.
