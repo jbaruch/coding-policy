@@ -39,21 +39,6 @@
     "rules/hook-action-reporting.md",
     "rules/agent-team-operation.md"
   ],
-  "hooks": {
-    "SessionStart": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash",
-            "args": [
-              "${TESSL_PLUGIN_DIR}/hooks/session-start.sh"
-            ]
-          }
-        ]
-      }
-    ]
-  },
   "nativeHooks": {
     "claude-code": {
       "Stop": [
@@ -75,6 +60,19 @@
             }
           ]
         }
+      ],
+      "SessionStart": [
+        {
+          "hooks": [
+            {
+              "type": "command",
+              "command": "bash",
+              "args": [
+                "${TESSL_PLUGIN_DIR}/hooks/session-start.sh"
+              ]
+            }
+          ]
+        }
       ]
     },
     "codex": {
@@ -88,6 +86,16 @@
             {
               "type": "command",
               "command": "bash \"${TESSL_PLUGIN_DIR}/hooks/herdr-supervision-stop.sh\""
+            }
+          ]
+        }
+      ],
+      "SessionStart": [
+        {
+          "hooks": [
+            {
+              "type": "command",
+              "command": "bash \"${TESSL_PLUGIN_DIR}/hooks/session-start.sh\""
             }
           ]
         }

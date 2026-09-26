@@ -14,7 +14,8 @@
 #   2. No hook reports       -> no output, exit 0.
 #   3. A hook exits non-zero -> its own status line; the others still arrive.
 #   4. A hook prints non-JSON -> its own status line; the others still arrive.
-#   5. The plugin manifest declares session-start.sh as the only SessionStart hook.
+#   5. The manifest declares session-start.sh as the only SessionStart hook, native
+#      for claude-code and codex, with no portable (tessl-wrapped) SessionStart.
 #   6. jq only, no python3  -> the same merged payload.
 #   7. Neither python3 nor jq -> the hooks still run; a warning, no payload.
 #
@@ -48,7 +49,7 @@ only_tools() { # <dir> <tool...>
   done
 }
 
-context() { python3 -c 'import json,sys; print(json.loads(sys.stdin.read())["additionalContext"])' <<<"$OUT"; }
+context() { python3 -c 'import json,sys; d=json.loads(sys.stdin.read())["hookSpecificOutput"]; assert d["hookEventName"] == "SessionStart"; print(d["additionalContext"])' <<<"$OUT"; }
 
 main() {
   local here
@@ -89,11 +90,16 @@ main() {
   # 5. the manifest routes SessionStart through this script alone.
   if python3 - "$here/../.tessl-plugin/plugin.json" <<'PY'
 import json, sys
-groups = json.load(open(sys.argv[1]))["hooks"]["SessionStart"]
-hooks = [h for g in groups for h in g["hooks"]]
-sys.exit(0 if len(hooks) == 1 and hooks[0]["args"] == ["${TESSL_PLUGIN_DIR}/hooks/session-start.sh"] else 1)
+d = json.load(open(sys.argv[1]))
+portable = d.get("hooks", {}).get("SessionStart")
+claude = [h for g in d["nativeHooks"]["claude-code"]["SessionStart"] for h in g["hooks"]]
+codex = [h for g in d["nativeHooks"]["codex"]["SessionStart"] for h in g["hooks"]]
+ok = (not portable
+      and len(claude) == 1 and claude[0]["args"] == ["${TESSL_PLUGIN_DIR}/hooks/session-start.sh"]
+      and len(codex) == 1 and codex[0]["command"] == 'bash "${TESSL_PLUGIN_DIR}/hooks/session-start.sh"')
+sys.exit(0 if ok else 1)
 PY
-  then pass; else fail "manifest: SessionStart must declare session-start.sh alone"; fi
+  then pass; else fail "manifest: SessionStart must be native-only, session-start.sh alone, for claude-code and codex"; fi
 
   # 6. jq alone merges the same way.
   command -v jq >/dev/null || die "jq required for these tests"
