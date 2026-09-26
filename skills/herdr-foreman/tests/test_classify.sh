@@ -291,6 +291,20 @@ PY
   ERRTEXT="$(cat "$ERRFILE")"
   if [[ $RC -eq 2 && -z "$OUT" ]] && printf '%s' "$ERRTEXT" | grep -q 'migrate-home'; then
     pass; else fail "a legacy default home names migrate-home, got RC=$RC ERR=$ERRTEXT"; fi
+  # A legacy path that is not a directory, or a link elsewhere, is refused
+  # the same way the owner refuses it, never read past as an empty store.
+  local other="$TMP/xdg-other" blocked="$TMP/xdg-blocked"
+  mkdir -p "$other/elsewhere" "$other/foreman" "$blocked"
+  ln -s "$other/elsewhere" "$other/teamlead"
+  printf 'x' > "$blocked/teamlead"
+  local root
+  for root in "$other" "$blocked"; do
+    OUT="$(XDG_STATE_HOME="$root" bash "$DIR/evaluate.sh" --corpus-only 2>"$ERRFILE")"
+    RC=$?
+    ERRTEXT="$(cat "$ERRFILE")"
+    if [[ $RC -eq 2 && -z "$OUT" ]] && printf '%s' "$ERRTEXT" | grep -q 'migrate-home'; then
+      pass; else fail "a split or blocked legacy home under $root is refused, got RC=$RC ERR=$ERRTEXT"; fi
+  done
   mv "$xdg/teamlead" "$xdg/foreman"
   ln -s "$xdg/foreman" "$xdg/teamlead"
   OUT="$(XDG_STATE_HOME="$xdg" bash "$DIR/evaluate.sh" --corpus-only 2>"$ERRFILE")"

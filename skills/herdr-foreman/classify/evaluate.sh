@@ -81,6 +81,8 @@ PY
 
 main() {
   local state_root="${XDG_STATE_HOME:-${HOME}/.local/state}"
+  local skill_dir
+  skill_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)" || die "cannot resolve the skill directory"
   local limit=0 since="" model="" agent="claude" state="" corpus_only=0
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -96,11 +98,24 @@ main() {
   done
   case "$limit" in ''|*[!0-9]*) die "--limit takes a non-negative integer" ;; esac
   if [ -z "$state" ]; then
-    # The default corpus follows the foreman's own home rule
-    # (foreman/home.py): a legacy home that is still a real directory has not
-    # been migrated, and the new path would read as an empty corpus.
-    if [ -d "${state_root}/teamlead" ] && [ ! -L "${state_root}/teamlead" ]; then
-      die "the state home is still at ${state_root}/teamlead; stop every foreman and run \`foreman migrate-home\`, or pass --state"
+    # The default corpus asks the owner's own home check
+    # (skills/herdr-foreman/foreman/home.py `require_current`), so a legacy,
+    # split or blocked home refuses here exactly as it refuses the foreman,
+    # never reading the new path as an empty corpus.
+    local refusal
+    if ! refusal="$(XDG_STATE_HOME="$state_root" PYTHONPATH="${skill_dir}" python3 -c '
+import sys
+from foreman import home
+from foreman.errors import StateError
+try:
+    home.require_current({"state"})
+except StateError as exc:
+    print(exc)
+')"; then
+      die "cannot check the state home under ${state_root} (skills/herdr-foreman/foreman/home.py failed to run); pass --state"
+    fi
+    if [ -n "$refusal" ]; then
+      die "${refusal} Or pass --state."
     fi
     state="${state_root}/foreman/state.json"
   fi

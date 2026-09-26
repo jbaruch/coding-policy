@@ -44,12 +44,15 @@
   reports with `claude-sonnet-5`: both scored 0.9792 with the same two
   disagreements, so no verdict changed with the wording.
 - **Test runs no longer see the operator's own homes.** `scripts/run-tests.sh`
-  gives every run an empty per-run `XDG_STATE_HOME` and `XDG_CONFIG_HOME`
-  and removes them on exit (`scripts/tests/test_run_tests.sh` checks both);
-  a failed `mktemp` or `mkdir` during setup reports the runner's structured
-  JSON error instead of a bare exit. `classify/evaluate.sh` honours
-  `XDG_STATE_HOME` for its default corpus and refuses a home still at the
-  legacy path, naming `migrate-home`, instead of reading an empty corpus. Before, a suite that did not pass a path read, and could refuse
+  gives every suite its own empty `XDG_STATE_HOME` and `XDG_CONFIG_HOME`,
+  so no suite reads another's leftovers, and removes them on exit
+  (`scripts/tests/test_run_tests.sh` checks both); a failed `mktemp` or
+  `mkdir` during setup reports the runner's structured JSON error instead of
+  a bare exit, and a failed cleanup warns without changing the run's exit
+  status. `classify/evaluate.sh` honours `XDG_STATE_HOME` for its default
+  corpus and asks the owner's `home.require_current`, so a legacy, split or
+  blocked home refuses, naming `migrate-home`, instead of reading an empty
+  corpus. Before, a suite that did not pass a path read, and could refuse
   on, the machine's real foreman state, which the home migration would
   have made an ordinary occurrence.
 - The foreman definition bullet in `rules/agent-team-operation.md` is split
