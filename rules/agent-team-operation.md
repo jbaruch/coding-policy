@@ -288,7 +288,7 @@ description: Running a multi-agent team — task-based specialist composition, c
 - A worker's repository writes happen only in the worktree its brief names, under `~/.worktrees/`
 - The foreman sweeps every repository owning a worktree under `~/.worktrees/` every round, before provisioning and after the merge
 - The sweep runs through `skills/herdr-foreman/sweep-worktrees.sh`
-- The sweep removes a clean worktree on a merged branch
+- The sweep removes an idle clean worktree on a merged branch
 - The sweep deletes merged local branches
 - The sweep removes an idle clean worktree whose HEAD a remote ref holds
 - The sweep archives an idle dirty or unpushed worktree under `refs/archive/worktrees/`
@@ -296,6 +296,8 @@ description: Running a multi-agent team — task-based specialist composition, c
 - A failed archive keeps the worktree
 - Idle windows and the in-use test live in `skills/herdr-foreman/prune-worktrees.sh` (top-of-file docstring)
 - A locked, in-use or not-yet-idle worktree is kept
+- A worktree that changes between judgment and removal is kept
+- The sweep deletes archive refs past the expiry window in `skills/herdr-foreman/prune-worktrees.sh`
 - Every kept locked or in-use worktree and every archive is reported to the operator
 - The foreman never removes a worktree by hand
 - A worker's report, plan, and patch artifacts go only under the reports directory its brief names

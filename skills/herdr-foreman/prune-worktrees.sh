@@ -11,8 +11,8 @@
 #
 # Decision predicate — a worktree under the worktree root, other than the
 # shared checkout, not locked and not on origin's default branch, is:
-#   * REMOVED (its branch deleted) when clean and its branch is an ancestor of
-#     origin's default branch (fully merged), whatever its age;
+#   * REMOVED (its branch deleted) when clean, IDLE for IDLE_HOURS, and its
+#     branch is an ancestor of origin's default branch (fully merged);
 #   * REMOVED when clean, IDLE for IDLE_HOURS, and its HEAD is contained in
 #     some remote-tracking ref (detached included); its branch, if any, is
 #     deleted at the tip a remote ref holds;
@@ -27,11 +27,19 @@
 # do not, they are reproducible by the ignore's own claim.
 # "IDLE for N hours" is both: no process of this user has its cwd inside the
 # worktree (`lsof`; a missing or failing probe keeps every worktree, reason
-# idle-unknown), and the newest mtime among the worktree directory and its own
-# gitdir's HEAD, index and logs/HEAD is at least N hours old. Age is read
-# before the run's own `git status`, which runs with --no-optional-locks so
-# it never rewrites the index. IDLE_HOURS and ARCHIVE_IDLE_HOURS are the
-# constants beside `decide_worktree`.
+# idle-unknown), and the newest mtime among the worktree directory, its own
+# gitdir's HEAD, index and logs/HEAD, and every modified tracked or untracked
+# non-ignored file is at least N hours old (a worktree holding more such files
+# than ACTIVITY_FILE_LIMIT is never idle). Every read runs with
+# --no-optional-locks, so judging never rewrites the index. Immediately
+# before each removal, and again after an archive is written, HEAD, the branch
+# tip, the status, the age and the process probe are all read again; any
+# change keeps the worktree (reason changed). IDLE_HOURS, ARCHIVE_IDLE_HOURS,
+# ACTIVITY_FILE_LIMIT and ARCHIVE_EXPIRE_DAYS are constants beside the
+# functions that use them.
+# Archive refs whose embedded stamp is older than ARCHIVE_EXPIRE_DAYS are
+# deleted each live run (compare-and-delete); a ref without such a stamp is
+# never touched.
 # Every judgment reads refs fetched by THIS run and origin's default branch as
 # re-queried by THIS run — a fetch or default-branch lookup that fails is a
 # precondition failure, never a judgment from stale refs. Every removal is
@@ -70,19 +78,24 @@
 #   stdout: one JSON object —
 #           {"shared":"<abs>","default_branch":"<name>","dry_run":bool,
 #            "worktrees_removed":[{"path","branch","head"}],
-#            "worktrees_archived":[{"path","branch","head","archive_ref"}],
+#            "worktrees_archived":[{"path","branch","head","archive_ref","removed"}],
+#            "archives_expired":[{"ref","head"}],
 #            "worktrees_kept":[{"path","branch","reason"[,"lock_reason"]}],
 #            "branches_deleted":["<name>"],
 #            "branches_kept":[{"branch","reason"}],
 #            "failed":[{"target","error"}]}
 #           reason is one of: checked-out (a worktree claimed the branch after
 #           the inventory was taken), default-branch, detached, dirty,
-#           idle-unknown (the process probe could not run), in-use (a process
-#           works inside it), locked (with its lock_reason), outside-root,
+#           changed (it changed between judgment and removal), idle-unknown
+#           (the process probe could not run), in-use (a process works
+#           inside it), locked (with its lock_reason), merged-not-idle,
+#           outside-root,
 #           prunable (its directory is gone; a live run's metadata prune
 #           removes it), unmerged. detached, dirty and unmerged mean not idle
-#           long enough for the matching removal. A dry run reports the
-#           archive_ref it would write.
+#           long enough for the matching removal. An archived entry with
+#           "removed": false kept its worktree (a change after the snapshot,
+#           or a failed removal, also reported). A dry run reports the
+#           archive_ref it would write and the archives it would expire.
 #   stderr: diagnostics only.
 #   exit  : 0 every decision applied (or previewed),
 #           1 precondition unmet (usage, git or python3 absent, not a repo,
@@ -92,8 +105,9 @@
 #             ran and `failed` names each one.
 #   env   : WORKTREE_ROOT overrides the worktree root (default
 #           $HOME/.worktrees); the tests point it at a temp dir.
-#           PRUNE_IDLE_HOURS / PRUNE_ARCHIVE_IDLE_HOURS override the idle
-#           windows, PRUNE_NOW (epoch seconds) the clock, PRUNE_LSOF the probe.
+#           PRUNE_IDLE_HOURS / PRUNE_ARCHIVE_IDLE_HOURS /
+#           PRUNE_ARCHIVE_EXPIRE_DAYS / PRUNE_ACTIVITY_FILE_LIMIT override the
+#           constants, PRUNE_NOW (epoch seconds) the clock, PRUNE_LSOF the probe.
 set -euo pipefail
 
 ERRFILE=""
@@ -361,9 +375,12 @@ report_branch_delete() { # <branch> <tip> <delete_branch rc>
 }
 
 #: `ok` once CWD_FILE holds every cwd of this user's processes, `failed` when
-#: the probe could not run, empty before the first probe.
+#: the probe could not run, empty before a probe. `reprobe` clears it so a
+#: pre-removal recheck reads the processes as they are now.
 CWD_STATE=""
 CWD_FILE=""
+
+reprobe() { CWD_STATE=""; }
 
 # 0 = some live process of this user has its cwd inside <real>, 1 = none does,
 # 2 = unknown (probe missing or failed). Unknown is never read as idle.
@@ -375,7 +392,8 @@ in_use() { # <real-path>
       warn "${lsof_bin} not found on PATH — cannot tell whether a worktree is in use, so none is judged idle; install lsof"
     elif ! uid="$(id -u)"; then
       warn "id -u failed — cannot scope the process probe, so no worktree is judged idle"
-    elif ! CWD_FILE="$(mktemp)"; then
+    elif [[ -z "$CWD_FILE" ]] && ! CWD_FILE="$(mktemp)"; then
+      CWD_FILE=""
       warn "mktemp failed — cannot hold the process probe, so no worktree is judged idle"
     elif ! "$lsof_bin" -a -u "$uid" -d cwd -Fn >"$CWD_FILE" 2>"$ERRFILE"; then
       warn "\`${lsof_bin} -a -u ${uid} -d cwd -Fn\` failed: $(tr '\n' ' ' < "$ERRFILE") — no worktree is judged idle"
@@ -393,32 +411,81 @@ in_use() { # <real-path>
   return 1
 }
 
-# Echo whole hours since the newest git activity in the worktree at <real>:
-# the worktree directory itself and its own gitdir's HEAD, index and logs/HEAD.
-# Returns 1 when that cannot be read. PRUNE_NOW (epoch seconds) replaces the
-# clock for tests.
+#: The idle clock stats at most this many modified or untracked files; a
+#: worktree holding more is never judged idle.
+ACTIVITY_FILE_LIMIT="${PRUNE_ACTIVITY_FILE_LIMIT:-20000}"
+
+# Echo whole hours since the newest activity in the worktree at <real>: the
+# worktree directory, its own gitdir's HEAD, index and logs/HEAD, and every
+# modified tracked or untracked non-ignored file. Returns 1 when that cannot
+# be read. PRUNE_NOW (epoch seconds) replaces the clock for tests.
 idle_hours() { # <real-path>
   local gitdir
   if ! gitdir="$(git -C "$1" rev-parse --absolute-git-dir 2>"$ERRFILE")"; then
     return 1
   fi
-  python3 - "$1" "$gitdir" "${PRUNE_NOW:-}" <<'PY'
+  python3 - "$1" "$gitdir" "${PRUNE_NOW:-}" "$ACTIVITY_FILE_LIMIT" 2>"$ERRFILE" <<'PY'
 import os
+import subprocess
 import sys
 import time
 
-path, gitdir, now = sys.argv[1], sys.argv[2], sys.argv[3]
+path, gitdir, now, limit = sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4])
 now = float(now) if now else time.time()
+candidates = [path, os.path.join(gitdir, "HEAD"), os.path.join(gitdir, "index"), os.path.join(gitdir, "logs", "HEAD")]
+listed = subprocess.run(["git", "--no-optional-locks", "-C", path, "ls-files", "-z", "-m", "-o", "--exclude-standard"],
+                        capture_output=True)
+if listed.returncode != 0:
+    sys.stderr.write("git ls-files failed: {}".format(listed.stderr.decode("utf-8", "replace")))
+    sys.exit(1)
+files = [name for name in listed.stdout.decode("utf-8", "surrogateescape").split("\0") if name]
+if len(files) > limit:
+    sys.stderr.write("{} modified or untracked files exceed the idle-clock limit of {}".format(len(files), limit))
+    sys.exit(1)
+candidates += [os.path.join(path, name) for name in files]
 stamps = []
-for candidate in (path, os.path.join(gitdir, "HEAD"), os.path.join(gitdir, "index"), os.path.join(gitdir, "logs", "HEAD")):
+for candidate in candidates:
     try:
-        stamps.append(os.stat(candidate).st_mtime)
+        stamps.append(os.lstat(candidate).st_mtime)
     except FileNotFoundError:
         continue
 if not stamps:
     sys.exit(1)
 print(int(max(0.0, now - max(stamps)) // 3600))
 PY
+}
+
+# Snapshot what the removal decision rests on, as one line: HEAD, the branch
+# tip, and the porcelain status. Returns 1 when any read fails.
+worktree_state() { # <shared> <real> <branch|"">
+  local head tip="" status
+  head="$(git -C "$2" rev-parse --verify --quiet 'HEAD^{commit}' 2>"$ERRFILE")" || return 1
+  if [[ -n "$3" ]]; then tip="$(branch_tip "$1" "$3")" || return 1; fi
+  status="$(git --no-optional-locks -C "$2" status --porcelain --untracked-files=all 2>"$ERRFILE")" || return 1
+  printf '%s %s %s' "$head" "$tip" "$status"
+}
+
+# Immediately before a removal: 0 when the worktree is unchanged since it was
+# judged and still idle for <window> hours with no process inside; otherwise
+# 1 with RECHECK_WHY set.
+RECHECK_WHY=""
+recheck() { # <shared> <real> <branch|""> <state-when-judged> <window-hours>
+  local now_state age rc=0
+  RECHECK_WHY=""
+  if ! now_state="$(worktree_state "$1" "$2" "$3")"; then
+    RECHECK_WHY="its state could not be re-read: $(tr '\n' ' ' < "$ERRFILE")"; return 1
+  fi
+  if [[ "$now_state" != "$4" ]]; then RECHECK_WHY="its HEAD, branch tip or status changed"; return 1; fi
+  if ! age="$(idle_hours "$2")"; then RECHECK_WHY="its activity age could not be re-read"; return 1; fi
+  if (( age < $5 )); then RECHECK_WHY="it was written to ${age}h ago"; return 1; fi
+  reprobe
+  in_use "$2" || rc=$?
+  case "$rc" in
+    1) return 0 ;;
+    0) RECHECK_WHY="a process is now working inside it" ;;
+    *) RECHECK_WHY="the process probe could not run" ;;
+  esac
+  return 1
 }
 
 # 0 when <commit> is contained in some remote-tracking ref, 1 when none holds
@@ -507,58 +574,51 @@ decide_worktree() { # <shared> <abs_root> <default> <dry-run 0|1> <path> <branch
     DECIDED_PRUNABLE=1
     row kept "$path" "$branch" prunable; return 0
   fi
-  # Age first: the status below must not refresh the index and reset it.
+  # Age first, and every read below without optional locks: judging a
+  # worktree must never refresh its index and reset its clock.
   local age="" age_ok=1
   if ! age="$(idle_hours "$path")"; then
     age_ok=0
-    warn "cannot read the git activity age of ${path}: $(tr '\n' ' ' < "$ERRFILE") — not judging it idle"
+    warn "cannot read the activity age of ${path}: $(tr '\n' ' ' < "$ERRFILE") — not judging it idle"
   fi
-  local status rc=0
-  # Explicit untracked mode: status.showUntrackedFiles=no would hide the
-  # very files the dirty check exists to protect.
-  status="$(git --no-optional-locks -C "$path" status --porcelain --untracked-files=all 2>"$ERRFILE")" || rc=$?
-  if (( rc != 0 )); then
-    row failed "$path" "$branch" "git status failed: $(tr '\n' ' ' < "$ERRFILE")"; return 0
+  local state
+  if ! state="$(worktree_state "$shared" "$path" "$branch")"; then
+    row failed "$path" "$branch" "cannot read HEAD, branch tip or status: $(tr '\n' ' ' < "$ERRFILE")"; return 0
   fi
-  local head
-  if ! head="$(git -C "$path" rev-parse --verify --quiet 'HEAD^{commit}' 2>"$ERRFILE")"; then
-    row failed "$path" "$branch" "cannot read HEAD: $(tr '\n' ' ' < "$ERRFILE")"; return 0
-  fi
-  # A branch worktree judges its branch tip, captured once: the deletion below
-  # is conditional on that same commit, so one commit answers both (#405).
-  local tip="$head" merged=""
-  if [[ -n "$branch" ]]; then
-    if ! tip="$(branch_tip "$shared" "$branch")"; then
-      row failed "$path" "$branch" "cannot read the tip of ${branch}: $(tr '\n' ' ' < "$ERRFILE")"; return 0
-    fi
-    if ! merged="$(ancestry "$shared" "$tip" "$db")"; then
-      row failed "$path" "$branch" "git merge-base failed for ${branch}: $(tr '\n' ' ' < "$ERRFILE")"; return 0
-    fi
+  local head="${state%% *}" rest="${state#* }" tip status
+  tip="${rest%% *}"; status="${rest#* }"
+  [[ -n "$tip" ]] || tip="$head"
+  local merged=""
+  if [[ -n "$branch" ]] && ! merged="$(ancestry "$shared" "$tip" "$db")"; then
+    row failed "$path" "$branch" "git merge-base failed for ${branch}: $(tr '\n' ' ' < "$ERRFILE")"; return 0
   fi
   local legacy=unmerged
   [[ -n "$status" ]] && legacy=dirty
   [[ -z "$status" && -z "$branch" ]] && legacy=detached
-  # Clean and merged: removed as before, whatever its age.
-  if [[ -z "$status" && "$merged" == merged ]]; then
-    remove_worktree "$shared" "$dry" "$path" "$branch" "$tip" removed ""; return 0
-  fi
+  [[ -z "$status" && "$merged" == merged ]] && legacy="merged-not-idle"
   if (( ! age_ok )) || (( age < IDLE_HOURS )); then
     row kept "$path" "$branch" "$legacy"; return 0
   fi
-  rc=0; in_use "$path" || rc=$?
+  local rc=0
+  in_use "$path" || rc=$?
   case "$rc" in
     0) row kept "$path" "$branch" in-use; return 0 ;;
     1) ;;
     *) row kept "$path" "$branch" idle-unknown; return 0 ;;
   esac
   local reach=0
-  rc=0; reachable_remotely "$shared" "$head" || rc=$?
-  case "$rc" in
-    0) reach=1 ;;
-    1) ;;
-    *) row failed "$path" "$branch" "cannot read which remote refs hold ${head}: $(tr '\n' ' ' < "$ERRFILE")"; return 0 ;;
-  esac
-  if [[ -z "$status" ]] && (( reach )); then
+  if [[ "$merged" != merged ]]; then
+    rc=0; reachable_remotely "$shared" "$head" || rc=$?
+    case "$rc" in
+      0) reach=1 ;;
+      1) ;;
+      *) row failed "$path" "$branch" "cannot read which remote refs hold ${head}: $(tr '\n' ' ' < "$ERRFILE")"; return 0 ;;
+    esac
+  fi
+  if [[ -z "$status" ]] && [[ "$merged" == merged ]] || { [[ -z "$status" ]] && (( reach )); }; then
+    if (( ! dry )) && ! recheck "$shared" "$path" "$branch" "$state" "$IDLE_HOURS"; then
+      row kept "$path" "$branch" changed; warn "kept ${path}: ${RECHECK_WHY}"; return 0
+    fi
     remove_worktree "$shared" "$dry" "$path" "$branch" "$tip" removed ""; return 0
   fi
   if (( age < ARCHIVE_IDLE_HOURS )); then
@@ -567,6 +627,11 @@ decide_worktree() { # <shared> <abs_root> <default> <dry-run 0|1> <path> <branch
   local ref
   if ! ref="$(archive_worktree "$shared" "$path" "$head" "$dry")"; then
     row failed "$path" "$branch" "archiving before removal failed, so the worktree was kept: $(tr '\n' ' ' < "$ERRFILE")"; return 0
+  fi
+  # The snapshot took time: anything written since is not in it.
+  if (( ! dry )) && ! recheck "$shared" "$path" "$branch" "$state" "$ARCHIVE_IDLE_HOURS"; then
+    row archived "$path" "$branch" kept "$head" "$ref"
+    row kept "$path" "$branch" changed; warn "kept ${path} after archiving it to ${ref}: ${RECHECK_WHY}"; return 0
   fi
   remove_worktree "$shared" "$dry" "$path" "$branch" "$tip" archived "$ref" --force
   return 0
@@ -583,6 +648,8 @@ remove_worktree() { # <shared> <dry> <path> <branch> <tip> <kind> <archive-ref> 
     row "$kind" "$path" "$branch" "" "$tip" "$ref"; return 0
   fi
   if ! git -C "$shared" "${remove[@]}" "$path" 2>"$ERRFILE"; then
+    # A written archive is reported whatever the removal did.
+    [[ "$kind" == archived ]] && row archived "$path" "$branch" kept "$tip" "$ref"
     row failed "$path" "$branch" "git worktree remove failed: $(tr '\n' ' ' < "$ERRFILE")${ref:+ — its archive ${ref} was kept}"; return 0
   fi
   # The removal happened: report it whatever the deletion does, so the JSON
@@ -592,6 +659,49 @@ remove_worktree() { # <shared> <dry> <path> <branch> <tip> <kind> <archive-ref> 
   local rc=0
   delete_branch "$shared" "$branch" "$tip" || rc=$?
   report_branch_delete "$branch" "$tip" "$rc"
+  return 0
+}
+
+#: Archive refs older than this many days are deleted by every live run.
+ARCHIVE_EXPIRE_DAYS="${PRUNE_ARCHIVE_EXPIRE_DAYS:-30}"
+
+# Delete refs/archive/worktrees/* whose embedded UTC stamp is older than
+# ARCHIVE_EXPIRE_DAYS; a dry run only reports them. A ref whose name carries
+# no stamp this script writes is left alone.
+expire_archives() { # <shared> <dry 0|1>
+  local listing expired line ref sha
+  if ! listing="$(git -C "$1" for-each-ref --format='%(refname) %(objectname)' refs/archive/worktrees/ 2>"$ERRFILE")"; then
+    row failed "refs/archive/worktrees/" "" "cannot list archive refs: $(tr '\n' ' ' < "$ERRFILE")"; return 0
+  fi
+  [[ -n "$listing" ]] || return 0
+  if ! expired="$(python3 - "${PRUNE_NOW:-}" "$ARCHIVE_EXPIRE_DAYS" "$listing" 2>"$ERRFILE" <<'PY'
+import datetime
+import re
+import sys
+import time
+
+now = float(sys.argv[1]) if sys.argv[1] else time.time()
+cutoff = now - int(sys.argv[2]) * 86400
+for line in sys.argv[3].splitlines():
+    ref, _, sha = line.strip().partition(" ")
+    match = re.search(r"-(\d{8}T\d{6}Z)$", ref)
+    if not match:
+        continue
+    stamp = datetime.datetime.strptime(match.group(1), "%Y%m%dT%H%M%SZ").replace(tzinfo=datetime.timezone.utc)
+    if stamp.timestamp() < cutoff:
+        print(ref, sha)
+PY
+)"; then
+    row failed "refs/archive/worktrees/" "" "cannot judge archive ages: $(tr '\n' ' ' < "$ERRFILE")"; return 0
+  fi
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    ref="${line%% *}"; sha="${line#* }"
+    if (( ! $2 )) && ! git -C "$1" update-ref -d "$ref" "$sha" 2>"$ERRFILE"; then
+      row failed "$ref" "" "deleting expired archive ${ref} failed: $(tr '\n' ' ' < "$ERRFILE")"; continue
+    fi
+    row expired "$ref" "" "" "$sha" ""
+  done <<<"$expired"
   return 0
 }
 
@@ -837,11 +947,14 @@ main() {
     warn "could not remove temp inventories ${inventory} ${branches} — remove them by hand"
   fi
 
+  expire_archives "$shared" "$dry"
+
   local rc=0
   python3 - "$abs_shared" "$db" "$dry" "$ROWS" <<'PY' || rc=$?
 import json, sys
 shared, db, dry, rows_path = sys.argv[1], sys.argv[2], sys.argv[3] == "1", sys.argv[4]
 result = {"shared": shared, "default_branch": db, "dry_run": dry, "worktrees_removed": [], "worktrees_archived": [],
+          "archives_expired": [],
           "worktrees_kept": [], "branches_deleted": [], "branches_kept": [], "failed": []}
 with open(rows_path, "rb") as handle:
     fields = handle.read().decode("utf-8", "surrogateescape").split("\0")
@@ -856,7 +969,10 @@ for index in range(0, len(fields), 6):
         if kind == "removed":
             result["worktrees_removed"].append({"path": target, "branch": branch or None, "head": head})
         elif kind == "archived":
-            result["worktrees_archived"].append({"path": target, "branch": branch or None, "head": head, "archive_ref": extra})
+            result["worktrees_archived"].append({"path": target, "branch": branch or None, "head": head,
+                                                 "archive_ref": extra, "removed": reason != "kept"})
+        elif kind == "expired":
+            result["archives_expired"].append({"ref": target, "head": head})
         elif kind == "kept":
             kept = {"path": target, "branch": branch or None, "reason": reason}
             if reason == "locked":

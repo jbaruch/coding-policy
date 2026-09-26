@@ -21,11 +21,24 @@
     everything (`idle-unknown`). The run's own `git status` uses
     `--no-optional-locks`, so judging a worktree never refreshes its index
     and resets the clock. Windows are top-of-file constants.
+  - Every removal waits for idleness, the merged fast path included. The
+    idle clock covers working-tree activity too: every modified tracked or
+    untracked non-ignored file (bounded by `ACTIVITY_FILE_LIMIT`).
+  - Immediately before a removal, and again after an archive is written,
+    HEAD, the branch tip, status, age and the process probe are re-read; any
+    change keeps the worktree (`changed`). A written archive is always
+    listed, with `removed: false` when its worktree stayed.
+  - Archive refs expire: each live run deletes `refs/archive/worktrees/*`
+    whose embedded stamp is older than `ARCHIVE_EXPIRE_DAYS` (default 30)
+    and lists them under `archives_expired`; a dry run only lists them.
   - Every removal is restorable: removed rows carry `head`, archived rows
     carry `archive_ref`, and locked rows carry `lock_reason`.
-  - New `skills/herdr-foreman/sweep-worktrees.sh` groups the root's entries
-    by repository and runs the prune once each. A plain directory, a clone or
-    a repository without origin is reported, never fatal.
+  - New `skills/herdr-foreman/sweep-worktrees.sh` finds worktrees
+    recursively under the root (bounded by `MAX_DEPTH`), groups them by
+    repository and runs the prune once each. A plain directory, a clone or a
+    repository without origin is reported, never fatal. A worktree git
+    cannot read is an `errors` entry (exit 2); `broken-worktree` is only a
+    `.git` file naming a vanished gitdir.
   - `round-preflight.sh` runs the sweep in place of the single-repository
     prune. Only this checkout's own prune failure blocks the round; another
     repository's failure is `degraded`.
@@ -35,6 +48,9 @@
     Checkouts and the `stop-handoff-hygiene` report text now describe the
     sweep instead of "never removes a dirty, unmerged, locked or detached
     worktree".
+  - `rules/agent-worktree-isolation.md` Cleanup defines abandoned: idle past
+    the prune script's windows, with its work held by a remote ref or an
+    archive ref (operator decision).
 
 ## 0.3.275 — 2026-09-26
 

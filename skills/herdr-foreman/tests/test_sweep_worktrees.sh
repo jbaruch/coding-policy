@@ -16,6 +16,9 @@
 #                           others still ran.
 #   4. Dry run           -> the same decisions, nothing removed.
 #   5. Usage             -> no root or a missing root is exit 1, no JSON.
+#   6. Nested            -> a worktree below an intermediate directory is found.
+#   7. Stale metadata    -> a .git file naming a vanished gitdir is broken-worktree.
+#   8. Unreadable        -> a worktree git cannot read is an error entry, exit 2.
 #
 # Run: bash skills/herdr-foreman/tests/test_sweep_worktrees.sh
 set -uo pipefail
@@ -49,7 +52,7 @@ mk_repo() { # <prefix> [no-origin] -> sets SHARED
 
 run() { # <args...>
   RUN_SEQ=$((RUN_SEQ+1))
-  OUT="$(bash "$SCRIPT" "$@" 2>"$TMP/err.$RUN_SEQ")"
+  OUT="$(PRUNE_IDLE_HOURS=0 bash "$SCRIPT" "$@" 2>"$TMP/err.$RUN_SEQ")"
   RC=$?
   ERRTEXT="$(cat "$TMP/err.$RUN_SEQ")"
 }
@@ -104,6 +107,27 @@ main() {
   if (( RC == 2 )) && [[ "$(q 'next(r.get("error","") for r in d["repos"] if r["shared"].endswith("gamma-shared"))')" == *"no origin"* ]] \
     && ! listed "$alpha" "$root/alpha-again" && listed "$gamma" "$root/gamma-wt"; then
     pass; else fail "no origin: rc=$RC out=$OUT err=$ERRTEXT"; fi
+
+  # --- 6-8 on a fresh root.
+  local root2="$TMP/worktrees2"
+  mkdir -p "$root2/group/sub" || die "mkdir nested failed"
+  "${G[@]}" -C "$beta" worktree add -q -b review/nested "$root2/group/sub/beta-nested" origin/main 2>/dev/null || die "nested worktree failed"
+  mkdir -p "$root2/stale" || die "mkdir stale failed"
+  printf 'gitdir: %s\n' "$TMP/vanished/gitdir" > "$root2/stale/.git" || die "write stale .git failed"
+  "${G[@]}" -C "$alpha" worktree add -q -b review/unreadable "$root2/unreadable" origin/main 2>/dev/null || die "unreadable worktree failed"
+  local ugitdir
+  ugitdir="$(git -C "$root2/unreadable" rev-parse --absolute-git-dir)" || die "rev-parse unreadable gitdir failed"
+  printf '%s\n' "$TMP/no-such-common" > "$ugitdir/commondir" || die "corrupt commondir failed"
+  run "$root2"
+  echo "6. a worktree below an intermediate directory is found and pruned"
+  if ! listed "$beta" "$root2/group/sub/beta-nested" && [[ "$(q '[s["path"] for s in d["skipped"] if s["path"].endswith("/group")]')" == "[]" ]]; then
+    pass; else fail "nested: rc=$RC out=$OUT err=$ERRTEXT"; fi
+  echo "7. a .git file naming a vanished gitdir is broken-worktree"
+  if [[ "$(q 'next((s["reason"] for s in d["skipped"] if s["path"].endswith("/stale")), "")')" == broken-worktree ]]; then
+    pass; else fail "stale: out=$OUT"; fi
+  echo "8. a worktree git cannot read is an error entry, exit 2"
+  if (( RC == 2 )) && [[ "$(q 'next((e["path"] for e in d["errors"]), "")')" == "$root2/unreadable" ]] && [[ "$ERRTEXT" == *"cannot read the worktree"* ]]; then
+    pass; else fail "unreadable: rc=$RC out=$OUT err=$ERRTEXT"; fi
 
   run
   echo "5a. no root is exit 1 with no JSON"

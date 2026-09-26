@@ -890,6 +890,7 @@ writes one git ref in that repository:
   `git worktree add <path> <archive_ref>`, or read one file with
   `git show <archive_ref>:<file>`
 - The prune's JSON names each written ref under `worktrees_archived`
-- Nothing expires an archive ref; deleting one is the operator's decision
-- The idle windows and the in-use test are that script's top-of-file
-  docstring and constants, not restated here
+- Every live prune deletes an archive ref whose stamp is older than the expiry window (compare-and-delete) and lists it under `archives_expired`; a dry run only lists it
+- A ref under `refs/archive/worktrees/` without such a stamp is never deleted by the prune
+- The idle windows, the in-use test and the expiry window are that script's
+  top-of-file docstring and constants, not restated here

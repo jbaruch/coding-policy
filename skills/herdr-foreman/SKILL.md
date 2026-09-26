@@ -357,8 +357,8 @@ Proceed immediately to Step 8.
 Step 2's preflight swept every repository owning a worktree under the root,
 every round, and reported the result under `checks.worktrees`. `degraded`
 means another repository's prune failed; it does not block this round. Report
-every kept `locked`, `in-use` and `idle-unknown` entry, and every archived one
-with its `archive_ref`, to the operator; never remove a worktree by hand. Run
+every kept `locked`, `in-use`, `changed` and `idle-unknown` entry, every archived
+one with its `archive_ref`, and every expired archive, to the operator; never remove a worktree by hand. Run
 the sweep alone only to re-sweep:
 
 ```bash
@@ -367,8 +367,9 @@ bash "$CP/skills/herdr-foreman/sweep-worktrees.sh" "$HOME/.worktrees"
 ```
 
 Emits one entry per repository with that repository's prune result (worktrees
-removed, archived and kept with their reasons, branches deleted, `failed`) or
-its `error`, plus the root's `skipped` entries. Exit 2 names a repository that
+removed, archived and kept with their reasons, archives expired, branches
+deleted, `failed`) or its `error`, plus the root's `skipped` and `errors`
+entries. Exit 2 names a repository that
 failed; exit 1 decided nothing. The removal and archive predicates live in
 `skills/herdr-foreman/prune-worktrees.sh` (top-of-file docstring).
 

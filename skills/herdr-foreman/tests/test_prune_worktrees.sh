@@ -17,7 +17,7 @@
 #   3. Unmerged            -> kept, reason unmerged; branch survives.
 #   4. Dirty (untracked)   -> kept, reason dirty.
 #   5. Dirty (modified)    -> kept, reason dirty.
-#   6. Detached            -> kept, reason detached.
+#   6. Detached, unpushed  -> kept, reason detached.
 #   7. Locked              -> kept, reason locked.
 #   8. Outside the root    -> kept, reason outside-root, never removed.
 #   9. Shared checkout     -> never listed, never removed; default branch kept.
@@ -69,6 +69,14 @@
 #  42. Archive fails        -> the worktree is kept and the failure reported.
 #  43. Dry run              -> reachable and archive candidates are previewed,
 #                             nothing is removed and no archive ref is written.
+#  44. Merged, not idle     -> a clean merged worktree with fresh activity is kept.
+#  45. Merged, in use       -> a process inside keeps a clean merged worktree.
+#  46. Fresh edit           -> a tracked file edited now keeps an old worktree.
+#  47. Changed at removal   -> a process arriving before the removal keeps it.
+#  48. Changed after archive-> the archive is reported, the worktree kept.
+#  49. Removal fails        -> a written archive is still reported.
+#  50. Archive expiry       -> refs past the expiry window are deleted; a dry
+#                             run previews; a recent or unstamped ref stays.
 #
 # Run: bash skills/herdr-foreman/tests/test_prune_worktrees.sh
 set -uo pipefail
@@ -110,7 +118,7 @@ commit_in() { # <worktree> <file>
 
 run() { # <args...>
   RUN_SEQ=$((RUN_SEQ+1))
-  OUT="$(env WORKTREE_ROOT="$ROOT" bash "$SCRIPT" "$@" 2>"$TMP/err.$RUN_SEQ")"
+  OUT="$(env WORKTREE_ROOT="$ROOT" PRUNE_IDLE_HOURS=0 PRUNE_ARCHIVE_IDLE_HOURS=100000 bash "$SCRIPT" "$@" 2>"$TMP/err.$RUN_SEQ")"
   RC=$?
   ERRTEXT="$(cat "$TMP/err.$RUN_SEQ")"
 }
@@ -141,9 +149,10 @@ IDLE_NOW=1578614400
 age_wt() { # <worktree>
   local gitdir f
   gitdir="$(git -C "$1" rev-parse --absolute-git-dir)" || die "rev-parse --absolute-git-dir failed in $1"
-  for f in "$1" "$gitdir/HEAD" "$gitdir/index" "$gitdir/logs/HEAD"; do
+  for f in "$gitdir/HEAD" "$gitdir/index" "$gitdir/logs/HEAD"; do
     if [[ -e "$f" ]]; then touch -t 202001010000 "$f" || die "touch $f failed"; fi
   done
+  find "$1" -path "$1/.git" -prune -o -exec touch -h -t 202001010000 {} + || die "touch the files of $1 failed"
 }
 idle_run() { # <extra env...> -- runs the script on $SHARED with the fixed clock
   RUN_SEQ=$((RUN_SEQ+1))
@@ -154,6 +163,17 @@ idle_run() { # <extra env...> -- runs the script on $SHARED with the fixed clock
 archived_ref() { python3 -c 'import json,sys; d=json.load(sys.stdin); print(next((r["archive_ref"] for r in d["worktrees_archived"] if r["path"]==sys.argv[1]), ""))' "$1" <<<"$OUT"; }
 lock_reason_of() { python3 -c 'import json,sys; d=json.load(sys.stdin); print(next((r.get("lock_reason") or "" for r in d["worktrees_kept"] if r["path"]==sys.argv[1]), ""))' "$1" <<<"$OUT"; }
 removed_head() { python3 -c 'import json,sys; d=json.load(sys.stdin); print(next((r["head"] for r in d["worktrees_removed"] if r["path"]==sys.argv[1]), ""))' "$1" <<<"$OUT"; }
+
+# An lsof stand-in: silent until its <n>th call, then reporting a process
+# working inside <path>.
+lsof_turns_busy() { # <dir> <n> <path>
+  mkdir -p "$1" || die "mkdir $1 failed"
+  # shellcheck disable=SC2016  # The stand-in's $(...) must run in the stand-in, not here.
+  printf '#!/usr/bin/env bash\nset -euo pipefail\nprintf x >> %q\nif (( $(wc -c < %q) >= %s )); then printf "p1\\nfcwd\\nn%%s\\n" %q; fi\n' \
+    "$1/calls" "$1/calls" "$2" "$3" > "$1/lsof" || die "write lsof stand-in failed"
+  chmod +x "$1/lsof" || die "chmod lsof stand-in failed"
+}
+archived_removed() { python3 -c 'import json,sys; d=json.load(sys.stdin); print(next((str(r["removed"]).lower() for r in d["worktrees_archived"] if r["path"]==sys.argv[1]), ""))' "$1" <<<"$OUT"; }
 main() {
   PASS=0; FAIL=0; RUN_SEQ=0
   SCRIPT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/prune-worktrees.sh"
@@ -173,6 +193,7 @@ main() {
   git -C "$SHARED" config status.showUntrackedFiles no || die "config failed"
   add_wt "$SHARED" test/modified "$ROOT/one-modified"; printf 'changed\n' > "$ROOT/one-modified/f" || die "write failed"
   git -C "$SHARED" worktree add -q --detach "$ROOT/one-detached" origin/main 2>/dev/null || die "detached add failed"
+  commit_in "$ROOT/one-detached" d
   add_wt "$SHARED" test/locked "$ROOT/one-locked"; git -C "$SHARED" worktree lock "$ROOT/one-locked" || die "lock failed"
   git -C "$SHARED" branch --no-track merged-no-wt origin/main || die "branch failed"
   git -C "$SHARED" branch --no-track unmerged-no-wt origin/main || die "branch failed"
@@ -189,7 +210,7 @@ main() {
   if [[ "$(kept_reason "$ROOT/one-untracked")" == dirty ]] && [[ -f "$ROOT/one-untracked/scratch" ]]; then pass; else fail "out=$OUT"; fi
   echo "5. modified file keeps the worktree as dirty"
   if [[ "$(kept_reason "$ROOT/one-modified")" == dirty ]] && [[ -d "$ROOT/one-modified" ]]; then pass; else fail "out=$OUT"; fi
-  echo "6. detached worktree is kept"
+  echo "6. a detached worktree holding an unpushed commit is kept"
   if [[ "$(kept_reason "$ROOT/one-detached")" == detached ]] && [[ -d "$ROOT/one-detached" ]]; then pass; else fail "out=$OUT"; fi
   echo "7. locked worktree is kept"
   if [[ "$(kept_reason "$ROOT/one-locked")" == locked ]] && [[ -d "$ROOT/one-locked" ]]; then pass; else fail "out=$OUT"; fi
@@ -267,7 +288,7 @@ case "\$*" in *merge-base*) printf 'not-a-sha\n' > "$SHARED/.git/refs/remotes/or
 exec "$(command -v git)" "\$@"
 SHIM
   chmod +x "$TMP/shim/git" || die "chmod shim failed"
-  run_with_shim() { RUN_SEQ=$((RUN_SEQ+1)); OUT="$(env WORKTREE_ROOT="$ROOT" PATH="$TMP/shim:$PATH" bash "$SCRIPT" "$SHARED" 2>"$TMP/err.$RUN_SEQ")"; RC=$?; ERRTEXT="$(cat "$TMP/err.$RUN_SEQ")"; }
+  run_with_shim() { RUN_SEQ=$((RUN_SEQ+1)); OUT="$(env WORKTREE_ROOT="$ROOT" PRUNE_IDLE_HOURS=0 PRUNE_ARCHIVE_IDLE_HOURS=100000 PATH="$TMP/shim:$PATH" bash "$SCRIPT" "$SHARED" 2>"$TMP/err.$RUN_SEQ")"; RC=$?; ERRTEXT="$(cat "$TMP/err.$RUN_SEQ")"; }
   run_with_shim
   echo "16. a merge-base tool failure lands in failed, on stderr, exit 2, worktree untouched"
   if (( RC == 2 )) && [[ "$OUT" == *'"failed": [{'*merge-base* ]] && [[ "$ERRTEXT" == *"merge-base failed"* ]] && [[ "$(kept_reason "$ROOT/sixteen-broken")" == "" ]] && [[ -d "$ROOT/sixteen-broken" ]]; then pass; else fail "rc=$RC out=$OUT err=$ERRTEXT"; fi
@@ -325,27 +346,27 @@ SHIM
   cat > "$TMP/shim21/git" <<SHIM || die "shim write failed"
 #!/usr/bin/env bash
 set -euo pipefail
-# Move the branch on the SECOND read of its tip — after the worktree is gone,
-# so the move is allowed, and before the compare-and-delete reads it. The new
-# tip is merged too, so only the guard can keep the branch. A move that fails
-# breaks the fixture's premise: say so and stop rather than let the run pass.
+# Move the branch on the THIRD read of its tip — the first judges it, the
+# second is the pre-removal recheck, the third comes after the worktree is gone
+# (so the move is allowed) and before the compare-and-delete. The new tip is
+# merged too, so only the guard can keep the branch. A move that fails breaks
+# the fixture's premise: say so and stop rather than let the run pass.
 case "\$*" in *"refs/heads/review/racing"*)
-  if [[ -e "$TMP/shim21/seen" ]]; then
+  printf 'x' >> "$TMP/shim21/reads"
+  if [[ "\$(cat "$TMP/shim21/reads")" == xxx ]]; then
     # The move's own chatter must not reach stdout: the caller is capturing it
     # as the branch tip.
     if ! "$(command -v git)" -C "$SHARED" branch -f review/racing refs/remotes/origin/main >&2; then
       echo "shim21: fixture could not move review/racing" >&2
       exit 1
     fi
-  else
-    : > "$TMP/shim21/seen"
   fi ;;
 esac
 exec "$(command -v git)" "\$@"
 SHIM
   chmod +x "$TMP/shim21/git" || die "chmod shim failed"
   RUN_SEQ=$((RUN_SEQ+1))
-  OUT="$(env WORKTREE_ROOT="$ROOT" PATH="$TMP/shim21:$PATH" bash "$SCRIPT" "$SHARED" 2>"$TMP/err.$RUN_SEQ")"; RC=$?; ERRTEXT="$(cat "$TMP/err.$RUN_SEQ")"
+  OUT="$(env WORKTREE_ROOT="$ROOT" PRUNE_IDLE_HOURS=0 PRUNE_ARCHIVE_IDLE_HOURS=100000 PATH="$TMP/shim21:$PATH" bash "$SCRIPT" "$SHARED" 2>"$TMP/err.$RUN_SEQ")"; RC=$?; ERRTEXT="$(cat "$TMP/err.$RUN_SEQ")"
   echo "21. a branch that moved after its ancestry check is kept, its removal still reported, exit 2"
   if (( RC == 2 )) && [[ "$(removed_paths)" == *"$ROOT/twentyone-racing"* ]] && [[ "$OUT" == *"moved after its ancestry check"* ]] && has_branch "$SHARED" review/racing; then pass; else fail "rc=$RC out=$OUT err=$ERRTEXT"; fi
 
@@ -361,7 +382,7 @@ exec "$(command -v git)" "\$@"
 SHIM
   chmod +x "$TMP/shim22/git" || die "chmod shim failed"
   RUN_SEQ=$((RUN_SEQ+1))
-  OUT="$(env WORKTREE_ROOT="$ROOT" PATH="$TMP/shim22:$PATH" bash "$SCRIPT" "$SHARED" 2>"$TMP/err.$RUN_SEQ")"; RC=$?; ERRTEXT="$(cat "$TMP/err.$RUN_SEQ")"
+  OUT="$(env WORKTREE_ROOT="$ROOT" PRUNE_IDLE_HOURS=0 PRUNE_ARCHIVE_IDLE_HOURS=100000 PATH="$TMP/shim22:$PATH" bash "$SCRIPT" "$SHARED" 2>"$TMP/err.$RUN_SEQ")"; RC=$?; ERRTEXT="$(cat "$TMP/err.$RUN_SEQ")"
   echo "22. the JSON reports the removal that happened even when the branch deletion fails"
   if (( RC == 2 )) && [[ "$(removed_paths)" == *"$ROOT/twentytwo-halfway"* ]] && [[ ! -e "$ROOT/twentytwo-halfway" ]] && [[ "$OUT" == *'"failed": [{'*"deleting"* ]] && [[ "$OUT" == *"fixture refuses the deletion"* ]]; then pass; else fail "rc=$RC out=$OUT err=$ERRTEXT"; fi
 
@@ -423,7 +444,7 @@ exec "$(command -v git)" "\$@"
 SHIM
   chmod +x "$TMP/shim27/git" || die "chmod shim failed"
   RUN_SEQ=$((RUN_SEQ+1))
-  OUT="$(env WORKTREE_ROOT="$ROOT" PATH="$TMP/shim27:$PATH" bash "$SCRIPT" "$SHARED" 2>"$TMP/err.$RUN_SEQ")"; RC=$?; ERRTEXT="$(cat "$TMP/err.$RUN_SEQ")"
+  OUT="$(env WORKTREE_ROOT="$ROOT" PRUNE_IDLE_HOURS=0 PRUNE_ARCHIVE_IDLE_HOURS=100000 PATH="$TMP/shim27:$PATH" bash "$SCRIPT" "$SHARED" 2>"$TMP/err.$RUN_SEQ")"; RC=$?; ERRTEXT="$(cat "$TMP/err.$RUN_SEQ")"
   echo "27. a git without -z refuses the inventory, deciding nothing"
   plain_dir=0; [[ -d "$ROOT/twentyseven-plain" ]] && plain_dir=1
   plain_branch=0; has_branch "$SHARED" review/plain && plain_branch=1
@@ -475,7 +496,7 @@ exec "$(command -v git)" "\$@"
 SHIM
   chmod +x "$TMP/shim30/git" || die "chmod shim failed"
   RUN_SEQ=$((RUN_SEQ+1))
-  OUT="$(env WORKTREE_ROOT="$ROOT" PATH="$TMP/shim30:$PATH" bash "$SCRIPT" "$SHARED" 2>"$TMP/err.$RUN_SEQ")"; RC=$?; ERRTEXT="$(cat "$TMP/err.$RUN_SEQ")"
+  OUT="$(env WORKTREE_ROOT="$ROOT" PRUNE_IDLE_HOURS=0 PRUNE_ARCHIVE_IDLE_HOURS=100000 PATH="$TMP/shim30:$PATH" bash "$SCRIPT" "$SHARED" 2>"$TMP/err.$RUN_SEQ")"; RC=$?; ERRTEXT="$(cat "$TMP/err.$RUN_SEQ")"
   echo "30. a branch checked out in a worktree the inventory missed is kept"
   if (( RC == 0 )) && [[ "$(branch_kept_reason review/claimed)" == checked-out ]] && has_branch "$SHARED" review/claimed && [[ -d "$ROOT/thirty-claimed" ]]; then pass; else fail "rc=$RC out=$OUT err=$ERRTEXT"; fi
 
@@ -501,7 +522,7 @@ exec "$(command -v git)" "\$@"
 SHIM
   chmod +x "$TMP/shim31/git" || die "chmod shim failed"
   RUN_SEQ=$((RUN_SEQ+1))
-  OUT="$(env WORKTREE_ROOT="$ROOT" PATH="$TMP/shim31:$PATH" bash "$SCRIPT" "$SHARED" 2>"$TMP/err.$RUN_SEQ")"; RC=$?; ERRTEXT="$(cat "$TMP/err.$RUN_SEQ")"
+  OUT="$(env WORKTREE_ROOT="$ROOT" PRUNE_IDLE_HOURS=0 PRUNE_ARCHIVE_IDLE_HOURS=100000 PATH="$TMP/shim31:$PATH" bash "$SCRIPT" "$SHARED" 2>"$TMP/err.$RUN_SEQ")"; RC=$?; ERRTEXT="$(cat "$TMP/err.$RUN_SEQ")"
   echo "31. a branch claimed while it was being deleted is put back"
   if (( RC == 2 )) && has_branch "$SHARED" review/raced && [[ "$OUT" == *"was restored at"* ]]; then pass; else fail "rc=$RC out=$OUT err=$ERRTEXT"; fi
 
@@ -523,7 +544,7 @@ exec "$(command -v git)" "\$@"
 SHIM
   chmod +x "$TMP/shim33/git" || die "chmod shim failed"
   RUN_SEQ=$((RUN_SEQ+1))
-  OUT="$(env WORKTREE_ROOT="$ROOT" PATH="$TMP/shim33:$PATH" bash "$SCRIPT" "$SHARED" 2>"$TMP/err.$RUN_SEQ")"; RC=$?; ERRTEXT="$(cat "$TMP/err.$RUN_SEQ")"
+  OUT="$(env WORKTREE_ROOT="$ROOT" PRUNE_IDLE_HOURS=0 PRUNE_ARCHIVE_IDLE_HOURS=100000 PATH="$TMP/shim33:$PATH" bash "$SCRIPT" "$SHARED" 2>"$TMP/err.$RUN_SEQ")"; RC=$?; ERRTEXT="$(cat "$TMP/err.$RUN_SEQ")"
   echo "33. a failed post-deletion occupancy read is reported, not read as unoccupied"
   if (( RC == 2 )) && [[ "$OUT" == *"could not be read"* ]] && [[ "$OUT" == *"fixture inventory failure"* ]] && [[ "$(branches_deleted)" != *review/unreadable* ]]; then pass; else fail "rc=$RC out=$OUT err=$ERRTEXT"; fi
 
@@ -562,7 +583,7 @@ exec "$(command -v git)" "\$@"
 SHIM
   chmod +x "$TMP/shim34/git" || die "chmod shim failed"
   RUN_SEQ=$((RUN_SEQ+1))
-  OUT="$(env WORKTREE_ROOT="$ROOT" PATH="$TMP/shim34:$PATH" bash "$SCRIPT" "$SHARED" 2>"$TMP/err.$RUN_SEQ")"; RC=$?; ERRTEXT="$(cat "$TMP/err.$RUN_SEQ")"
+  OUT="$(env WORKTREE_ROOT="$ROOT" PRUNE_IDLE_HOURS=0 PRUNE_ARCHIVE_IDLE_HOURS=100000 PATH="$TMP/shim34:$PATH" bash "$SCRIPT" "$SHARED" 2>"$TMP/err.$RUN_SEQ")"; RC=$?; ERRTEXT="$(cat "$TMP/err.$RUN_SEQ")"
   echo "34. a branch.<name> section recreated after the deletion is left untouched"
   kept_config=0
   config_rc=0
@@ -666,6 +687,94 @@ SHIM
     && listed "$SHARED" "$dd" && listed "$SHARED" "$ds" \
     && [[ -z "$(git -C "$SHARED" for-each-ref refs/archive/)" ]] && has_branch "$SHARED" feat/drystale; then
     pass; else fail "dry run: rc=$RC out=$OUT err=$ERRTEXT"; fi
+
+  # --- 44-45: the merged path waits for idleness and an empty worktree too.
+  mk_repo mergedidle
+  local mfresh="$ROOT/mergedidle-fresh" mbusy="$ROOT/mergedidle-busy"
+  add_wt "$SHARED" review/mfresh "$mfresh"
+  add_wt "$SHARED" review/mbusy "$mbusy"
+  age_wt "$mbusy"
+  (cd "$mbusy" && exec sleep 300) &
+  SLEEPER=$!
+  idle_run
+  kill "$SLEEPER" || die "could not stop the sleeper"
+  wait "$SLEEPER"
+  echo "44. a clean merged worktree with fresh activity is kept"
+  if [[ "$(kept_reason "$mfresh")" == merged-not-idle ]] && listed "$SHARED" "$mfresh" && has_branch "$SHARED" review/mfresh; then
+    pass; else fail "merged not idle: out=$OUT"; fi
+  echo "45. a process inside keeps a clean merged worktree"
+  if [[ "$(kept_reason "$mbusy")" == in-use ]] && listed "$SHARED" "$mbusy"; then
+    pass; else fail "merged in use: out=$OUT"; fi
+
+  # --- 46. a tracked file edited now keeps an otherwise old worktree.
+  mk_repo freshedit
+  local fe="$ROOT/freshedit-wt"
+  add_wt "$SHARED" feat/freshedit "$fe"; commit_in "$fe" e.txt
+  age_wt "$fe"
+  printf 'edited now\n' >> "$fe/e.txt" || die "edit failed"
+  touch -t 202001091200 "$fe/e.txt" || die "touch edit failed"
+  idle_run
+  echo "46. a fresh edit to a tracked file keeps an old worktree from being archived"
+  if [[ "$(kept_reason "$fe")" == dirty ]] && listed "$SHARED" "$fe" && [[ -z "$(git -C "$SHARED" for-each-ref refs/archive/)" ]]; then
+    pass; else fail "fresh edit: out=$OUT err=$ERRTEXT"; fi
+
+  # --- 47. a process arriving between the judgment and the removal keeps it.
+  mk_repo race
+  local rw="$ROOT/race-detached"
+  git -C "$SHARED" worktree add -q --detach "$rw" origin/main 2>/dev/null || die "race worktree add failed"
+  age_wt "$rw"
+  lsof_turns_busy "$TMP/lsof47" 2 "$rw"
+  idle_run PRUNE_LSOF="$TMP/lsof47/lsof"
+  echo "47. a worktree that turns busy before its removal is kept"
+  if (( RC == 0 )) && [[ "$(kept_reason "$rw")" == changed ]] && listed "$SHARED" "$rw" && [[ "$ERRTEXT" == *"process is now working inside"* ]]; then
+    pass; else fail "changed at removal: rc=$RC out=$OUT err=$ERRTEXT"; fi
+
+  # --- 48. a worktree that turns busy while it is archived keeps its archive and itself.
+  mk_repo racearch
+  local ra="$ROOT/racearch-wt"
+  add_wt "$SHARED" feat/racearch "$ra"; commit_in "$ra" r.txt
+  age_wt "$ra"
+  lsof_turns_busy "$TMP/lsof48" 2 "$ra"
+  idle_run PRUNE_LSOF="$TMP/lsof48/lsof"
+  echo "48. a worktree that turns busy after its archive keeps the archive reported and the worktree"
+  local ra_ref; ra_ref="$(archived_ref "$ra")"
+  if [[ -n "$ra_ref" && "$(archived_removed "$ra")" == false && "$(kept_reason "$ra")" == changed ]] && listed "$SHARED" "$ra" \
+    && git -C "$SHARED" rev-parse --verify --quiet "$ra_ref" >/dev/null; then
+    pass; else fail "changed after archive: out=$OUT err=$ERRTEXT"; fi
+
+  # --- 49. a forced removal that fails after the archive still reports the archive.
+  mk_repo rmfail
+  local rf="$ROOT/rmfail-wt"
+  add_wt "$SHARED" feat/rmfail "$rf"; commit_in "$rf" f.txt
+  age_wt "$rf"
+  mkdir -p "$TMP/shim49" || die "mkdir shim49 failed"
+  # shellcheck disable=SC2016  # The shim's "$@" and $a must expand in the shim, not here.
+  printf '#!/usr/bin/env bash\nset -euo pipefail\nfor a in "$@"; do if [[ "$a" == --force ]]; then echo "remove refused" >&2; exit 1; fi; done\nexec %q "$@"\n' "$real_git" > "$TMP/shim49/git" \
+    || die "shim49 write failed"
+  chmod +x "$TMP/shim49/git" || die "chmod shim49 failed"
+  idle_run PATH="$TMP/shim49:$PATH"
+  echo "49. a failed removal after the archive still names the archive ref"
+  if (( RC == 2 )) && [[ -n "$(archived_ref "$rf")" && "$(archived_removed "$rf")" == false ]] && [[ "$OUT" == *"remove refused"* ]] && listed "$SHARED" "$rf"; then
+    pass; else fail "removal failure: rc=$RC out=$OUT err=$ERRTEXT"; fi
+
+  # --- 50. archive refs past the expiry window are deleted.
+  mk_repo expiry
+  local c1; c1="$(git -C "$SHARED" rev-parse HEAD)" || die "rev-parse failed"
+  local r
+  for r in old-20191201T000000Z recent-20200105T000000Z nostamp; do
+    git -C "$SHARED" update-ref "refs/archive/worktrees/$r" "$c1" || die "update-ref $r failed"
+  done
+  IDLE_ARGS=(--dry-run)
+  idle_run
+  IDLE_ARGS=()
+  echo "50a. a dry run previews the expired archive and deletes nothing"
+  if (( RC == 0 )) && [[ "$(python3 -c 'import json,sys; print(",".join(r["ref"] for r in json.load(sys.stdin)["archives_expired"]))' <<<"$OUT")" == refs/archive/worktrees/old-20191201T000000Z ]] \
+    && [[ "$(git -C "$SHARED" for-each-ref refs/archive/ | wc -l | tr -d ' ')" == 3 ]]; then
+    pass; else fail "expiry dry run: rc=$RC out=$OUT"; fi
+  idle_run
+  echo "50b. a live run deletes only the archive past the window"
+  if (( RC == 0 )) && [[ "$(git -C "$SHARED" for-each-ref --format='%(refname)' refs/archive/ | sort | tr '\n' ' ')" == "refs/archive/worktrees/nostamp refs/archive/worktrees/recent-20200105T000000Z " ]]; then
+    pass; else fail "expiry: rc=$RC out=$OUT"; fi
 
   # --- 14. usage / not a repo.
   run
