@@ -24,6 +24,8 @@
 #           skipped and nothing changes.
 #   stderr: diagnostics only.
 #   exit  : always 0.
+#   needs : acr >= ACR_MIN_VERSION (top of file); an older or unreadable
+#           version gets a status and no run.
 #   env   : ACR_BIN names the acr executable (default `acr`), as ACR's own hook does.
 #           ACR_LATEST_FETCH_TIMEOUT bounds the sync-proof fetch (seconds).
 set -euo pipefail
@@ -32,30 +34,63 @@ warn() { printf 'check-acr-latest: %s\n' "$1" >&2; }
 
 emit() { # <status text>
   if command -v python3 >/dev/null; then
-    python3 -c 'import json, sys; print(json.dumps({"additionalContext": sys.argv[1]}))' "$1"
+    if ! python3 -c 'import json, sys; print(json.dumps({"additionalContext": sys.argv[1]}))' "$1"; then
+      warn "python3 failed to encode the ACR status — it was: ${1}"
+    fi
   elif command -v jq >/dev/null; then
-    jq -n --arg c "$1" '{additionalContext: $c}'
+    if ! jq -n --arg c "$1" '{additionalContext: $c}'; then
+      warn "jq failed to encode the ACR status — it was: ${1}"
+    fi
   else
-    warn "neither python3 nor jq is on PATH — cannot report the ACR status"
+    warn "neither python3 nor jq is on PATH — cannot report the ACR status: ${1}"
   fi
+  return 0
 }
 
 #: Seconds allowed for the sync-proof fetch before the update is skipped.
 FETCH_TIMEOUT_SEC="${ACR_LATEST_FETCH_TIMEOUT:-10}"
 
-# Echo origin's default branch for the repo in the working directory, or
-# return 1 when neither origin/HEAD nor origin/main nor origin/master resolves.
+#: Oldest acr whose `freshness run --project --policy install` contract this
+#: hook relies on. Renewal: re-check at every acr minor release, and raise it
+#: whenever the freshness flags, exit codes or output this hook reads change;
+#: an older acr is reported and never run.
+ACR_MIN_VERSION="0.2.0"
+
+# 0 when <have> is at least <want> (dotted numeric), 1 when older, 2 when
+# <have> is not a dotted version.
+version_at_least() { # <have> <want>
+  local have="$1" want="$2" i h w
+  [[ "$have" =~ ^[0-9]+(\.[0-9]+)*$ ]] || return 2
+  local -a H W
+  IFS=. read -r -a H <<<"$have"
+  IFS=. read -r -a W <<<"$want"
+  for i in 0 1 2; do
+    h="${H[$i]:-0}"; w="${W[$i]:-0}"
+    (( 10#$h > 10#$w )) && return 0
+    (( 10#$h < 10#$w )) && return 1
+  done
+  return 0
+}
+
+# Echo origin's default branch for the repo in the working directory. Return 1
+# when none of origin/HEAD, origin/main, origin/master resolves, and 2 on a git
+# failure: only git's own "absent" exit (1) moves on to the next candidate.
 default_branch() {
-  local ref cand
-  if ref="$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD)"; then
-    printf '%s' "${ref#origin/}"
-    return 0
-  fi
+  local ref cand rc=0
+  ref="$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD)" || rc=$?
+  case "$rc" in
+    0) printf '%s' "${ref#origin/}"; return 0 ;;
+    1) ;;
+    *) return 2 ;;
+  esac
   for cand in main master; do
-    if git show-ref --verify --quiet "refs/remotes/origin/${cand}"; then
-      printf '%s' "$cand"
-      return 0
-    fi
+    rc=0
+    git show-ref --verify --quiet "refs/remotes/origin/${cand}" || rc=$?
+    case "$rc" in
+      0) printf '%s' "$cand"; return 0 ;;
+      1) ;;
+      *) return 2 ;;
+    esac
   done
   return 1
 }
@@ -75,14 +110,20 @@ unsafe_reason() {
     printf 'fetching origin failed (%s)' "${out//$'\n'/ }"
     return 0
   fi
-  if ! db="$(default_branch)"; then
-    printf "origin's default branch could not be resolved"
-    return 0
-  fi
-  if ! git merge-base --is-ancestor "refs/remotes/origin/${db}" HEAD; then
-    printf 'this checkout does not contain %sorigin/%s%s (behind or diverged); sync it first' '`' "$db" '`'
-    return 0
-  fi
+  local rc=0
+  db="$(default_branch)" || rc=$?
+  case "$rc" in
+    0) ;;
+    1) printf "origin's default branch could not be resolved"; return 0 ;;
+    *) printf "git failed resolving origin's default branch"; return 0 ;;
+  esac
+  rc=0
+  git merge-base --is-ancestor "refs/remotes/origin/${db}" HEAD || rc=$?
+  case "$rc" in
+    0) ;;
+    1) printf 'this checkout does not contain %sorigin/%s%s (behind or diverged); sync it first' '`' "$db" '`'; return 0 ;;
+    *) printf 'git merge-base failed (exit %s) comparing HEAD with origin/%s' "$rc" "$db"; return 0 ;;
+  esac
   if ! status="$(git status --porcelain --untracked-files=all)"; then
     printf 'git status failed'
     return 0
@@ -129,6 +170,19 @@ main() {
   acr="${ACR_BIN:-acr}"
   if ! command -v "$acr" >/dev/null; then
     emit "Session-start status — acr: this project declares ACR dependencies (agents.yaml) but \`${acr}\` is not on PATH, so they were not updated; install it with \`brew install jbaruch/agentic-context-registry/acr\` or set ACR_BIN."
+    return 0
+  fi
+
+  local version
+  if ! version="$("$acr" --version 2>&1)"; then
+    emit "Session-start status — acr: \`${acr} --version\` failed (${version//$'\n'/ }), so ACR dependencies were not updated; reinstall acr."
+    return 0
+  fi
+  version="${version%% *}"
+  rc=0
+  version_at_least "$version" "$ACR_MIN_VERSION" || rc=$?
+  if (( rc != 0 )); then
+    emit "Session-start status — acr: acr ${version} is older than ${ACR_MIN_VERSION}, the oldest this hook runs, so ACR dependencies were not updated; upgrade with \`brew upgrade jbaruch/agentic-context-registry/acr\`."
     return 0
   fi
 

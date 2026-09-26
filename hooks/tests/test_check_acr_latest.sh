@@ -22,6 +22,7 @@
 #   8. Uncommitted changes            -> a "not updated" status, acr never called.
 #   9. Fetch fails (origin gone)      -> a "not updated" status, acr never called.
 #  10. Outside git, agents.yaml       -> installs (no checkout to sync).
+#  11. acr older than ACR_MIN_VERSION -> an upgrade status, acr never run.
 #
 # Run: bash hooks/tests/test_check_acr_latest.sh
 set -uo pipefail
@@ -38,6 +39,7 @@ mk_fake_acr() {
   cat > "$TMP/acr" <<'FAKE' || die "cannot write the fake acr"
 #!/usr/bin/env bash
 set -euo pipefail
+if [[ "${1:-}" == --version ]]; then printf '%s (abc123)\n' "${FAKE_VERSION:-0.2.0}"; exit 0; fi
 printf '%s\n' "$*" >> "$FAKE_CALLS"
 if [[ -n "${FAKE_OUT:-}" ]]; then printf '%s\n' "$FAKE_OUT"; fi
 exit "${FAKE_RC:-0}"
@@ -103,6 +105,7 @@ main() {
     pass; else fail "synced: expected an install run and its status, got OUT=$OUT calls=$(calls) err=$(cat "$TMP/err")"; fi
 
   # 3. throttled or nothing to do -> nothing.
+  mk_project p3
   run "$PROJECT"
   if [[ $RC -eq 0 && -z "$OUT" ]]; then pass; else fail "no change: expected silence, got OUT=$OUT"; fi
 
@@ -116,6 +119,7 @@ main() {
     pass; else fail "acr failure: expected a quoted diagnose command, got OUT=$OUT"; fi
 
   # 5. acr missing -> the install command.
+  mk_project p5
   OUT="$(cd "$PROJECT" && env -u HERDR_ENV ACR_BIN="$TMP/no-such-acr" bash "$SCRIPT" </dev/null 2>"$TMP/err")"; RC=$?
   if [[ $RC -eq 0 ]] && context | grep -q "brew install jbaruch/agentic-context-registry/acr"; then
     pass; else fail "acr missing: expected the install command, got OUT=$OUT"; fi
@@ -156,6 +160,12 @@ main() {
   run "$nogit" GIT_CEILING_DIRECTORIES="$TMP" FAKE_OUT="Updated x"
   if [[ $RC -eq 0 ]] && [[ "$(calls)" == "freshness run --project ${nogit} --policy install" ]]; then
     pass; else fail "outside git: expected an install run, got OUT=$OUT calls=$(calls) err=$(cat "$TMP/err")"; fi
+
+  # 11. acr older than the hook's floor -> an upgrade status, never run.
+  mk_project p11
+  run "$PROJECT" FAKE_VERSION=0.1.9 FAKE_OUT="Updated something"
+  if [[ $RC -eq 0 && -z "$(calls)" ]] && context | grep -q "acr 0.1.9 is older than" && context | grep -q "brew upgrade"; then
+    pass; else fail "old acr: expected an upgrade status and no run, got OUT=$OUT calls=$(calls)"; fi
 
   echo "─────────────────────────────────────────────"
   if (( FAIL > 0 )); then echo "FAILED: ${FAIL} failed, ${PASS} passed"; exit 1; fi

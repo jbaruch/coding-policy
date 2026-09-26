@@ -39,7 +39,12 @@
   changes (`rules/sync-before-work.md`). Outside git there is no checkout to
   sync and it installs. `hooks/session-start.sh` runs it after
   `check-tessl-latest`; it is silent without `agents.yaml` and in every
-  Herdr session, whose checkouts belong to the foreman or a writer brief. Verified against acr 0.2.0
+  Herdr session, whose checkouts belong to the foreman or a writer brief.
+  The hook runs only an `acr` at or above `ACR_MIN_VERSION` (0.2.0, the
+  first with `freshness run --project --policy install`); the constant's
+  renewal cadence sits beside it. Only git's own "absent" and "not an
+  ancestor" exits count as answers; any other git failure marks the checkout
+  unsafe. Verified against acr 0.2.0
   on a scratch project installing `github:jbaruch/ffa-acr-dogfood`: the first
   run installed and reported `restart_required`, the second was throttled and
   silent (`hooks/tests/test_check_acr_latest.sh` covers the contract with a
