@@ -56,12 +56,29 @@
 #                             name ends in a newline.
 #  33. Unreadable recheck   -> a failed post-deletion occupancy read is a
 #                             failure, never an unoccupied answer.
+#  35. Reachable, idle      -> a clean detached worktree on a pushed commit is
+#                             removed; a pushed unmerged branch goes with it.
+#  36. In use               -> a process with its cwd inside keeps it.
+#  37. Unpushed, idle       -> archived under refs/archive/worktrees/ with its
+#                             commits and an untracked file, then removed.
+#  38. Locked, idle         -> kept, reported with its lock reason.
+#  39. Not idle             -> fresh activity keeps a reachable worktree.
+#  40. Idle, below archive  -> an unpushed one idle past the removal window but
+#                             not the archive window is kept.
+#  41. No process probe     -> lsof missing keeps it as idle-unknown.
+#  42. Archive fails        -> the worktree is kept and the failure reported.
+#  43. Dry run              -> reachable and archive candidates are previewed,
+#                             nothing is removed and no archive ref is written.
 #
 # Run: bash skills/herdr-foreman/tests/test_prune_worktrees.sh
 set -uo pipefail
 
 die() { echo "fatal: $*" >&2; exit 2; }
-cleanup() { [[ -n "${TMP:-}" ]] && ! rm -rf "$TMP" && echo "warn: could not remove $TMP" >&2; return 0; }
+cleanup() {
+  if [[ -n "${SLEEPER:-}" ]] && kill -0 "$SLEEPER" 2>/dev/null; then kill "$SLEEPER" || echo "warn: could not stop sleeper $SLEEPER" >&2; fi
+  [[ -n "${TMP:-}" ]] && ! rm -rf "$TMP" && echo "warn: could not remove $TMP" >&2
+  return 0
+}
 pass() { PASS=$((PASS+1)); }
 fail() { FAIL=$((FAIL+1)); echo "  ✗ FAIL: $1" >&2; }
 
@@ -117,6 +134,26 @@ listed() { # <shared> <path>  -> 0 listed, 1 not listed; a tool failure aborts t
   case "$rc" in 0) return 0 ;; 1) return 1 ;; *) die "grep failed (exit $rc) reading the worktree inventory" ;; esac
 }
 
+
+# Age a worktree: its directory and its gitdir's HEAD, index and logs/HEAD all
+# last written on 2020-01-01. IDLE_NOW is nine days later, fixed.
+IDLE_NOW=1578614400
+age_wt() { # <worktree>
+  local gitdir f
+  gitdir="$(git -C "$1" rev-parse --absolute-git-dir)" || die "rev-parse --absolute-git-dir failed in $1"
+  for f in "$1" "$gitdir/HEAD" "$gitdir/index" "$gitdir/logs/HEAD"; do
+    if [[ -e "$f" ]]; then touch -t 202001010000 "$f" || die "touch $f failed"; fi
+  done
+}
+idle_run() { # <extra env...> -- runs the script on $SHARED with the fixed clock
+  RUN_SEQ=$((RUN_SEQ+1))
+  OUT="$(env WORKTREE_ROOT="$ROOT" PRUNE_NOW="$IDLE_NOW" "$@" bash "$SCRIPT" "$SHARED" "${IDLE_ARGS[@]+"${IDLE_ARGS[@]}"}" 2>"$TMP/err.$RUN_SEQ")"
+  RC=$?
+  ERRTEXT="$(cat "$TMP/err.$RUN_SEQ")"
+}
+archived_ref() { python3 -c 'import json,sys; d=json.load(sys.stdin); print(next((r["archive_ref"] for r in d["worktrees_archived"] if r["path"]==sys.argv[1]), ""))' "$1" <<<"$OUT"; }
+lock_reason_of() { python3 -c 'import json,sys; d=json.load(sys.stdin); print(next((r.get("lock_reason") or "" for r in d["worktrees_kept"] if r["path"]==sys.argv[1]), ""))' "$1" <<<"$OUT"; }
+removed_head() { python3 -c 'import json,sys; d=json.load(sys.stdin); print(next((r["head"] for r in d["worktrees_removed"] if r["path"]==sys.argv[1]), ""))' "$1" <<<"$OUT"; }
 main() {
   PASS=0; FAIL=0; RUN_SEQ=0
   SCRIPT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/prune-worktrees.sh"
@@ -533,6 +570,101 @@ SHIM
   case "$config_rc" in 0) kept_config=1 ;; 1) ;; *) die "git config --get failed (exit $config_rc)" ;; esac
   if (( kept_config )) && [[ "$OUT" == *"remove nothing by hand"* ]] && [[ "$OUT" == *'"branches_deleted": ['*'review/recreated'* ]]; then
     pass; else fail "the recreated branch's config must survive and be reported: rc=$RC out=$OUT err=$ERRTEXT"; fi
+
+  # --- 35-38: one live run over idle worktrees of every kind.
+  mk_repo idle
+  local det="$ROOT/idle-detached" pushed="$ROOT/idle-pushed" busy="$ROOT/idle-busy" stale="$ROOT/idle-stale" held="$ROOT/idle-held"
+  git -C "$SHARED" worktree add -q --detach "$det" origin/main 2>/dev/null || die "detached worktree add failed"
+  add_wt "$SHARED" review/pushed "$pushed"; commit_in "$pushed" p.txt
+  git -C "$pushed" push -q origin review/pushed 2>/dev/null || die "push review/pushed failed"
+  git -C "$SHARED" fetch -q origin || die "fetch after push failed"
+  git -C "$SHARED" worktree add -q --detach "$busy" origin/main 2>/dev/null || die "busy worktree add failed"
+  add_wt "$SHARED" feat/stale "$stale"; commit_in "$stale" s.txt
+  printf 'untracked work\n' > "$stale/notes.txt" || die "untracked write failed"
+  git -C "$SHARED" worktree add -q --detach "$held" origin/main 2>/dev/null || die "held worktree add failed"
+  git -C "$SHARED" worktree lock --reason "Active Herdr reviewer" "$held" || die "worktree lock failed"
+  local stale_tip
+  stale_tip="$(git -C "$stale" rev-parse HEAD)" || die "rev-parse stale HEAD failed"
+  (cd "$busy" && exec sleep 300) &
+  SLEEPER=$!
+  local wt; for wt in "$det" "$pushed" "$busy" "$stale" "$held"; do age_wt "$wt"; done
+  idle_run
+  kill "$SLEEPER" || die "could not stop the sleeper"
+  wait "$SLEEPER"
+  echo "35. an idle clean worktree on a pushed commit is removed, detached or on a pushed branch"
+  if (( RC == 0 )) && ! listed "$SHARED" "$det" && ! listed "$SHARED" "$pushed" \
+    && [[ -n "$(removed_head "$det")" ]] && ! has_branch "$SHARED" review/pushed; then
+    pass; else fail "reachable removal: rc=$RC out=$OUT err=$ERRTEXT"; fi
+  echo "36. a process with its cwd inside keeps an idle worktree"
+  if [[ "$(kept_reason "$busy")" == in-use ]] && listed "$SHARED" "$busy"; then
+    pass; else fail "in-use: out=$OUT"; fi
+  echo "37. an idle unpushed worktree is archived with its commits and untracked files, then removed"
+  local ref; ref="$(archived_ref "$stale")"
+  if [[ "$ref" == refs/archive/worktrees/idle-stale-20200110T000000Z ]] && ! listed "$SHARED" "$stale" \
+    && git -C "$SHARED" merge-base --is-ancestor "$stale_tip" "$ref" \
+    && [[ "$(git -C "$SHARED" show "$ref:notes.txt")" == "untracked work" ]] \
+    && ! has_branch "$SHARED" feat/stale; then
+    pass; else fail "archive: ref=$ref out=$OUT err=$ERRTEXT"; fi
+  echo "38. a locked idle worktree is kept with its lock reason"
+  if [[ "$(kept_reason "$held")" == locked && "$(lock_reason_of "$held")" == "Active Herdr reviewer" ]] && listed "$SHARED" "$held"; then
+    pass; else fail "locked: out=$OUT"; fi
+  git -C "$SHARED" worktree unlock "$held" || die "worktree unlock failed"
+
+  # --- 39-40: fresh activity, and idle past removal but short of archiving.
+  mk_repo fresh
+  local fresh_det="$ROOT/fresh-detached" mid="$ROOT/fresh-mid"
+  git -C "$SHARED" worktree add -q --detach "$fresh_det" origin/main 2>/dev/null || die "fresh worktree add failed"
+  add_wt "$SHARED" feat/mid "$mid"; commit_in "$mid" m.txt
+  age_wt "$mid"
+  idle_run PRUNE_ARCHIVE_IDLE_HOURS=100000
+  echo "39. a reachable worktree with fresh activity is kept"
+  if [[ "$(kept_reason "$fresh_det")" == detached ]] && listed "$SHARED" "$fresh_det"; then
+    pass; else fail "not idle: out=$OUT"; fi
+  echo "40. an unpushed worktree idle short of the archive window is kept"
+  if [[ "$(kept_reason "$mid")" == unmerged ]] && listed "$SHARED" "$mid" \
+    && [[ -z "$(git -C "$SHARED" for-each-ref refs/archive/)" ]]; then
+    pass; else fail "below archive window: out=$OUT"; fi
+
+  # --- 41. no process probe: nothing is judged idle.
+  mk_repo noprobe
+  local np="$ROOT/noprobe-detached"
+  git -C "$SHARED" worktree add -q --detach "$np" origin/main 2>/dev/null || die "noprobe worktree add failed"
+  age_wt "$np"
+  idle_run PRUNE_LSOF="$TMP/no-such-lsof"
+  echo "41. a missing process probe keeps an idle worktree as idle-unknown"
+  if (( RC == 0 )) && [[ "$(kept_reason "$np")" == idle-unknown ]] && listed "$SHARED" "$np" && [[ "$ERRTEXT" == *"install lsof"* ]]; then
+    pass; else fail "no probe: rc=$RC out=$OUT err=$ERRTEXT"; fi
+
+  # --- 42. a failed snapshot keeps the worktree.
+  mk_repo archfail
+  local af="$ROOT/archfail-wt"
+  add_wt "$SHARED" feat/archfail "$af"; commit_in "$af" a.txt
+  age_wt "$af"
+  mkdir -p "$TMP/shim42" || die "mkdir shim42 failed"
+  local real_git; real_git="$(command -v git)" || die "git not found"
+  printf '#!/usr/bin/env bash\nset -euo pipefail\nfor a in "$@"; do if [[ "$a" == commit-tree ]]; then echo "commit-tree refused" >&2; exit 1; fi; done\nexec %q "$@"\n' "$real_git" > "$TMP/shim42/git" \
+    || die "shim42 write failed"
+  chmod +x "$TMP/shim42/git" || die "chmod shim42 failed"
+  idle_run PATH="$TMP/shim42:$PATH"
+  echo "42. a failed archive keeps the worktree and reports the failure"
+  if (( RC == 2 )) && listed "$SHARED" "$af" && [[ "$OUT" == *"archiving before removal failed"* ]] \
+    && [[ -z "$(git -C "$SHARED" for-each-ref refs/archive/)" ]] && has_branch "$SHARED" feat/archfail; then
+    pass; else fail "archive failure: rc=$RC out=$OUT err=$ERRTEXT"; fi
+
+  # --- 43. dry run previews both new removals and changes nothing.
+  mk_repo dryidle
+  local dd="$ROOT/dryidle-detached" ds="$ROOT/dryidle-stale"
+  git -C "$SHARED" worktree add -q --detach "$dd" origin/main 2>/dev/null || die "dryidle worktree add failed"
+  add_wt "$SHARED" feat/drystale "$ds"; commit_in "$ds" d.txt
+  age_wt "$dd"; age_wt "$ds"
+  IDLE_ARGS=(--dry-run)
+  idle_run
+  IDLE_ARGS=()
+  echo "43. a dry run previews the removal and the archive and changes nothing"
+  if (( RC == 0 )) && [[ -n "$(removed_head "$dd")" && -n "$(archived_ref "$ds")" ]] \
+    && listed "$SHARED" "$dd" && listed "$SHARED" "$ds" \
+    && [[ -z "$(git -C "$SHARED" for-each-ref refs/archive/)" ]] && has_branch "$SHARED" feat/drystale; then
+    pass; else fail "dry run: rc=$RC out=$OUT err=$ERRTEXT"; fi
 
   # --- 14. usage / not a repo.
   run

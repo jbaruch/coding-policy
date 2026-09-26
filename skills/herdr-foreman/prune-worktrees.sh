@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Remove the worker worktrees and local branches a round left behind.
+# Remove or archive the worker worktrees and local branches a round left behind.
 #
 # Every Herdr round provisions worktrees under the worktree root
 # (`provision-worktree.sh`) and the foreman removes the task's own worktree after
@@ -9,19 +9,33 @@
 # scrolling. Which of them are safe to remove is one right answer per input,
 # so the decision lives here (`rules/script-delegation.md`).
 #
-# Decision predicate — a worktree is REMOVED (and its branch deleted) iff:
-#   * it is not the shared checkout itself,
-#   * it lies under the worktree root,
-#   * it is on a branch (not detached) other than origin's default branch,
-#   * it is not locked,
-#   * `git status --porcelain --untracked-files=all` is empty — untracked
-#     files count as dirty whatever `status.showUntrackedFiles` says;
-#     ignored files do not, they are reproducible by the ignore's own claim
-#     and `git worktree remove` treats them the same way,
-#   * its branch is an ancestor of origin's default branch (fully merged),
-#     judged against refs fetched by THIS run and origin's default branch as
-#     re-queried by THIS run — a fetch or default-branch lookup that fails is
-#     a precondition failure, never a judgment from stale refs.
+# Decision predicate — a worktree under the worktree root, other than the
+# shared checkout, not locked and not on origin's default branch, is:
+#   * REMOVED (its branch deleted) when clean and its branch is an ancestor of
+#     origin's default branch (fully merged), whatever its age;
+#   * REMOVED when clean, IDLE for IDLE_HOURS, and its HEAD is contained in
+#     some remote-tracking ref (detached included); its branch, if any, is
+#     deleted at the tip a remote ref holds;
+#   * ARCHIVED then REMOVED when dirty or holding commits no remote ref holds,
+#     and IDLE for ARCHIVE_IDLE_HOURS: its HEAD plus every tracked and
+#     untracked non-ignored file become one commit under
+#     refs/archive/worktrees/<name>-<UTC stamp>, the ref is verified, then
+#     `git worktree remove --force` runs and its branch is deleted at the tip
+#     the archive holds. A failed snapshot keeps the worktree.
+# "Clean" is `git status --porcelain --untracked-files=all` empty — untracked
+# files count as dirty whatever `status.showUntrackedFiles` says; ignored files
+# do not, they are reproducible by the ignore's own claim.
+# "IDLE for N hours" is both: no process of this user has its cwd inside the
+# worktree (`lsof`; a missing or failing probe keeps every worktree, reason
+# idle-unknown), and the newest mtime among the worktree directory and its own
+# gitdir's HEAD, index and logs/HEAD is at least N hours old. Age is read
+# before the run's own `git status`, which runs with --no-optional-locks so
+# it never rewrites the index. IDLE_HOURS and ARCHIVE_IDLE_HOURS are the
+# constants beside `decide_worktree`.
+# Every judgment reads refs fetched by THIS run and origin's default branch as
+# re-queried by THIS run — a fetch or default-branch lookup that fails is a
+# precondition failure, never a judgment from stale refs. Every removal is
+# restorable: `git worktree add <path> <head>` or `<archive_ref>`.
 # A local branch with no worktree is DELETED iff it is not the default branch
 # and is an ancestor of origin's default branch. That ancestry check is the
 # safety, and it judges a captured commit rather than a name that can move.
@@ -55,15 +69,20 @@
 #           branch, config or metadata entry changes.
 #   stdout: one JSON object —
 #           {"shared":"<abs>","default_branch":"<name>","dry_run":bool,
-#            "worktrees_removed":[{"path","branch"}],
-#            "worktrees_kept":[{"path","branch","reason"}],
+#            "worktrees_removed":[{"path","branch","head"}],
+#            "worktrees_archived":[{"path","branch","head","archive_ref"}],
+#            "worktrees_kept":[{"path","branch","reason"[,"lock_reason"]}],
 #            "branches_deleted":["<name>"],
 #            "branches_kept":[{"branch","reason"}],
 #            "failed":[{"target","error"}]}
 #           reason is one of: checked-out (a worktree claimed the branch after
-#           the inventory was taken), default-branch, detached, dirty, locked,
-#           outside-root, prunable (its directory is gone; a live run's
-#           metadata prune removes it), unmerged.
+#           the inventory was taken), default-branch, detached, dirty,
+#           idle-unknown (the process probe could not run), in-use (a process
+#           works inside it), locked (with its lock_reason), outside-root,
+#           prunable (its directory is gone; a live run's metadata prune
+#           removes it), unmerged. detached, dirty and unmerged mean not idle
+#           long enough for the matching removal. A dry run reports the
+#           archive_ref it would write.
 #   stderr: diagnostics only.
 #   exit  : 0 every decision applied (or previewed),
 #           1 precondition unmet (usage, git or python3 absent, not a repo,
@@ -73,6 +92,8 @@
 #             ran and `failed` names each one.
 #   env   : WORKTREE_ROOT overrides the worktree root (default
 #           $HOME/.worktrees); the tests point it at a temp dir.
+#           PRUNE_IDLE_HOURS / PRUNE_ARCHIVE_IDLE_HOURS override the idle
+#           windows, PRUNE_NOW (epoch seconds) the clock, PRUNE_LSOF the probe.
 set -euo pipefail
 
 ERRFILE=""
@@ -82,7 +103,7 @@ warn() { printf 'prune-worktrees: %s\n' "$1" >&2; }
 
 cleanup() {
   local f
-  for f in "$ERRFILE" "$ROWS"; do
+  for f in "$ERRFILE" "$ROWS" "$CWD_FILE"; do
     if [[ -n "$f" ]] && ! rm -f "$f"; then
       warn "could not remove temp file ${f} — remove it by hand"
     fi
@@ -92,8 +113,8 @@ cleanup() {
 
 # Append one decision row: <kind> <target> <branch> <reason>, NUL-delimited
 # so a path or diagnostic holding a tab or newline cannot shift the fields.
-row() {
-  printf '%s\0%s\0%s\0%s\0' "$1" "$2" "$3" "$4" >> "$ROWS"
+row() { # <kind> <target> <branch> <reason> [head] [extra]
+  printf '%s\0%s\0%s\0%s\0%s\0%s\0' "$1" "$2" "$3" "$4" "${5:-}" "${6:-}" >> "$ROWS"
   # A failure is a diagnostic on stderr as well as a JSON row
   # (rules/script-delegation.md Script Requirements).
   if [[ "$1" == failed ]]; then
@@ -322,61 +343,10 @@ delete_branch() { # <shared> <branch> <tip>  -> 0 deleted, 1 moved, 2 git refuse
 #: released.
 DECIDED_PRUNABLE=0
 
-decide_worktree() { # <shared> <abs_root> <default> <dry-run 0|1> <path> <branch|""> <detached 0|1> <locked 0|1>
-  DECIDED_PRUNABLE=0
-  local shared="$1" abs_root="$2" db="$3" dry="$4" path="$5" branch="$6" detached="$7" locked="$8"
-  if [[ "$path" != "$abs_root"/* ]]; then
-    row kept "$path" "$branch" outside-root; return 0
-  fi
-  if (( detached )); then
-    row kept "$path" "" detached; return 0
-  fi
-  if [[ "$branch" == "$db" ]]; then
-    row kept "$path" "$branch" default-branch; return 0
-  fi
-  if (( locked )); then
-    row kept "$path" "$branch" locked; return 0
-  fi
-  if [[ ! -d "$path" ]]; then
-    # The caller releases this branch to the branch pass once the metadata
-    # prune runs; an entry kept for any earlier reason never reaches here.
-    DECIDED_PRUNABLE=1
-    row kept "$path" "$branch" prunable; return 0
-  fi
-  local status rc=0
-  # Explicit untracked mode: status.showUntrackedFiles=no would hide the
-  # very files the dirty check exists to protect.
-  status="$(git -C "$path" status --porcelain --untracked-files=all 2>"$ERRFILE")" || rc=$?
-  if (( rc != 0 )); then
-    row failed "$path" "$branch" "git status failed: $(tr '\n' ' ' < "$ERRFILE")"; return 0
-  fi
-  if [[ -n "$status" ]]; then
-    row kept "$path" "$branch" dirty; return 0
-  fi
-  # The tip is captured before it is judged, and the deletion below is
-  # conditional on that same commit, so one commit answers both (#405).
-  local tip merged
-  if ! tip="$(branch_tip "$shared" "$branch")"; then
-    row failed "$path" "$branch" "cannot read the tip of ${branch}: $(tr '\n' ' ' < "$ERRFILE")"; return 0
-  fi
-  if ! merged="$(ancestry "$shared" "$tip" "$db")"; then
-    row failed "$path" "$branch" "git merge-base failed for ${branch}: $(tr '\n' ' ' < "$ERRFILE")"; return 0
-  fi
-  if [[ "$merged" == unmerged ]]; then
-    row kept "$path" "$branch" unmerged; return 0
-  fi
-  if (( dry )); then
-    row removed "$path" "$branch" ""; return 0
-  fi
-  if ! git -C "$shared" worktree remove "$path" 2>"$ERRFILE"; then
-    row failed "$path" "$branch" "git worktree remove failed: $(tr '\n' ' ' < "$ERRFILE")"; return 0
-  fi
-  # The removal happened: report it whatever the deletion does, so the JSON
-  # matches the disk a retry would find (#405).
-  row removed "$path" "$branch" ""
-  local rc=0
-  delete_branch "$shared" "$branch" "$tip" || rc=$?
-  case "$rc" in
+# Report a branch deletion that followed a worktree removal or archive.
+report_branch_delete() { # <branch> <tip> <delete_branch rc>
+  local branch="$1" tip="$2"
+  case "$3" in
     0) ;;
     1) row failed "$branch" "$branch" "branch ${branch} moved after its ancestry check and was left alone; its worktree is already removed, so re-run to judge the new tip" ;;
     3) row failed "$branch" "$branch" "${branch} is deleted but its branch.${branch} config could not be cleaned up: $(tr '\n' ' ' < "$ERRFILE") — check and remove it by hand" ;;
@@ -388,6 +358,240 @@ decide_worktree() { # <shared> <abs_root> <default> <dry-run 0|1> <path> <branch
     9) row failed "$branch" "$branch" "${branch} is deleted, and a worktree recreated a branch of that name before its config could be cleaned up — branch.${branch} belongs to that live branch and was left untouched; remove nothing by hand" ;;
     *) row failed "$branch" "$branch" "deleting ${branch} failed after the worktree was removed: $(tr '\n' ' ' < "$ERRFILE")" ;;
   esac
+}
+
+#: `ok` once CWD_FILE holds every cwd of this user's processes, `failed` when
+#: the probe could not run, empty before the first probe.
+CWD_STATE=""
+CWD_FILE=""
+
+# 0 = some live process of this user has its cwd inside <real>, 1 = none does,
+# 2 = unknown (probe missing or failed). Unknown is never read as idle.
+in_use() { # <real-path>
+  if [[ -z "$CWD_STATE" ]]; then
+    CWD_STATE=failed
+    local lsof_bin="${PRUNE_LSOF:-lsof}" uid
+    if ! command -v "$lsof_bin" >/dev/null 2>&1; then
+      warn "${lsof_bin} not found on PATH — cannot tell whether a worktree is in use, so none is judged idle; install lsof"
+    elif ! uid="$(id -u)"; then
+      warn "id -u failed — cannot scope the process probe, so no worktree is judged idle"
+    elif ! CWD_FILE="$(mktemp)"; then
+      warn "mktemp failed — cannot hold the process probe, so no worktree is judged idle"
+    elif ! "$lsof_bin" -a -u "$uid" -d cwd -Fn >"$CWD_FILE" 2>"$ERRFILE"; then
+      warn "\`${lsof_bin} -a -u ${uid} -d cwd -Fn\` failed: $(tr '\n' ' ' < "$ERRFILE") — no worktree is judged idle"
+    else
+      CWD_STATE=ok
+    fi
+  fi
+  [[ "$CWD_STATE" == ok ]] || return 2
+  local line cwd
+  while IFS= read -r line; do
+    [[ "$line" == n* ]] || continue
+    cwd="${line#n}"
+    if [[ "$cwd" == "$1" || "$cwd" == "$1"/* ]]; then return 0; fi
+  done < "$CWD_FILE"
+  return 1
+}
+
+# Echo whole hours since the newest git activity in the worktree at <real>:
+# the worktree directory itself and its own gitdir's HEAD, index and logs/HEAD.
+# Returns 1 when that cannot be read. PRUNE_NOW (epoch seconds) replaces the
+# clock for tests.
+idle_hours() { # <real-path>
+  local gitdir
+  if ! gitdir="$(git -C "$1" rev-parse --absolute-git-dir 2>"$ERRFILE")"; then
+    return 1
+  fi
+  python3 - "$1" "$gitdir" "${PRUNE_NOW:-}" <<'PY'
+import os
+import sys
+import time
+
+path, gitdir, now = sys.argv[1], sys.argv[2], sys.argv[3]
+now = float(now) if now else time.time()
+stamps = []
+for candidate in (path, os.path.join(gitdir, "HEAD"), os.path.join(gitdir, "index"), os.path.join(gitdir, "logs", "HEAD")):
+    try:
+        stamps.append(os.stat(candidate).st_mtime)
+    except FileNotFoundError:
+        continue
+if not stamps:
+    sys.exit(1)
+print(int(max(0.0, now - max(stamps)) // 3600))
+PY
+}
+
+# 0 when <commit> is contained in some remote-tracking ref, 1 when none holds
+# it, 2 on a tool failure.
+reachable_remotely() { # <shared> <commit>
+  local out
+  if ! out="$(git -C "$1" for-each-ref --contains "$2" --format='%(refname)' refs/remotes/ 2>"$ERRFILE")"; then
+    return 2
+  fi
+  [[ -n "$out" ]]
+}
+
+# Snapshot the worktree at <real> — its HEAD plus every tracked and untracked
+# non-ignored file — into a new commit under refs/archive/worktrees/, and echo
+# that ref. Returns 1 on any failure, leaving ERRFILE with the reason and the
+# worktree untouched.
+archive_worktree() { # <shared> <real> <head> <dry 0|1>
+  local shared="$1" real="$2" head="$3" dry="$4" stamp name ref scratch tree commit resolved
+  if ! stamp="$(python3 -c '
+import datetime, sys, time
+now = float(sys.argv[1]) if sys.argv[1] else time.time()
+print(datetime.datetime.fromtimestamp(now, datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ"))' "${PRUNE_NOW:-}" 2>"$ERRFILE")"; then
+    return 1
+  fi
+  name="${real%/}"; name="${name##*/}"
+  name="$(printf '%s' "$name" | LC_ALL=C tr -c 'A-Za-z0-9._-' '-')"
+  name="${name#.}"
+  ref="refs/archive/worktrees/${name:-worktree}-${stamp}"
+  if ! git check-ref-format "$ref" 2>"$ERRFILE"; then
+    printf 'archive ref %s is not a valid ref name\n' "$ref" > "$ERRFILE"
+    return 1
+  fi
+  if (( dry )); then printf '%s' "$ref"; return 0; fi
+  if ! scratch="$(mktemp -d 2>"$ERRFILE")"; then return 1; fi
+  local ok=0
+  # A temporary index seeded from HEAD, so `add -A` captures the working tree
+  # without touching the worktree's own index.
+  if GIT_INDEX_FILE="${scratch}/index" git -C "$real" read-tree "$head" 2>"$ERRFILE" \
+    && GIT_INDEX_FILE="${scratch}/index" git -C "$real" add -A 2>"$ERRFILE" \
+    && tree="$(GIT_INDEX_FILE="${scratch}/index" git -C "$real" write-tree 2>"$ERRFILE")" \
+    && commit="$(GIT_AUTHOR_NAME=prune-worktrees GIT_AUTHOR_EMAIL=prune-worktrees@localhost \
+         GIT_COMMITTER_NAME=prune-worktrees GIT_COMMITTER_EMAIL=prune-worktrees@localhost \
+         git -C "$real" commit-tree "$tree" -p "$head" -m "Archive of worktree ${real} before removal" 2>"$ERRFILE")" \
+    && git -C "$shared" update-ref "$ref" "$commit" "" 2>"$ERRFILE" \
+    && resolved="$(git -C "$shared" rev-parse --verify --quiet "${ref}^{commit}" 2>"$ERRFILE")" \
+    && [[ "$resolved" == "$commit" ]]; then
+    ok=1
+  fi
+  if ! rm -rf "$scratch"; then warn "could not remove temp dir ${scratch} — remove it by hand"; fi
+  if (( ! ok )); then
+    [[ -s "$ERRFILE" ]] || printf 'archive ref %s did not resolve to the snapshot commit\n' "$ref" > "$ERRFILE"
+    return 1
+  fi
+  printf '%s' "$ref"
+}
+
+# Decide one worktree; emits a row and performs the removal unless dry-run.
+#: Set by `decide_worktree` when, and only when, it decided `prunable`. Git
+#: keeps a locked entry's metadata through `worktree prune`, so a locked entry
+#: whose directory is gone stays checked out and its branch must not be
+#: released.
+DECIDED_PRUNABLE=0
+
+#: Idle windows (hours since the newest git activity), overridable for tests:
+#: a clean worktree whose HEAD a remote ref holds is removed after IDLE_HOURS;
+#: a dirty or unpushed one is archived under refs/archive/worktrees/ and
+#: removed after ARCHIVE_IDLE_HOURS.
+IDLE_HOURS="${PRUNE_IDLE_HOURS:-24}"
+ARCHIVE_IDLE_HOURS="${PRUNE_ARCHIVE_IDLE_HOURS:-72}"
+
+decide_worktree() { # <shared> <abs_root> <default> <dry-run 0|1> <path> <branch|""> <detached 0|1> <locked 0|1> [lock-reason]
+  DECIDED_PRUNABLE=0
+  local shared="$1" abs_root="$2" db="$3" dry="$4" path="$5" branch="$6" detached="$7" locked="$8" lock_reason="${9:-}"
+  if [[ "$path" != "$abs_root"/* ]]; then
+    row kept "$path" "$branch" outside-root; return 0
+  fi
+  if [[ -n "$branch" && "$branch" == "$db" ]]; then
+    row kept "$path" "$branch" default-branch; return 0
+  fi
+  if (( locked )); then
+    row kept "$path" "$branch" locked "" "$lock_reason"; return 0
+  fi
+  if [[ ! -d "$path" ]]; then
+    # The caller releases this branch to the branch pass once the metadata
+    # prune runs; an entry kept for any earlier reason never reaches here.
+    DECIDED_PRUNABLE=1
+    row kept "$path" "$branch" prunable; return 0
+  fi
+  # Age first: the status below must not refresh the index and reset it.
+  local age="" age_ok=1
+  if ! age="$(idle_hours "$path")"; then
+    age_ok=0
+    warn "cannot read the git activity age of ${path}: $(tr '\n' ' ' < "$ERRFILE") — not judging it idle"
+  fi
+  local status rc=0
+  # Explicit untracked mode: status.showUntrackedFiles=no would hide the
+  # very files the dirty check exists to protect.
+  status="$(git --no-optional-locks -C "$path" status --porcelain --untracked-files=all 2>"$ERRFILE")" || rc=$?
+  if (( rc != 0 )); then
+    row failed "$path" "$branch" "git status failed: $(tr '\n' ' ' < "$ERRFILE")"; return 0
+  fi
+  local head
+  if ! head="$(git -C "$path" rev-parse --verify --quiet 'HEAD^{commit}' 2>"$ERRFILE")"; then
+    row failed "$path" "$branch" "cannot read HEAD: $(tr '\n' ' ' < "$ERRFILE")"; return 0
+  fi
+  # A branch worktree judges its branch tip, captured once: the deletion below
+  # is conditional on that same commit, so one commit answers both (#405).
+  local tip="$head" merged=""
+  if [[ -n "$branch" ]]; then
+    if ! tip="$(branch_tip "$shared" "$branch")"; then
+      row failed "$path" "$branch" "cannot read the tip of ${branch}: $(tr '\n' ' ' < "$ERRFILE")"; return 0
+    fi
+    if ! merged="$(ancestry "$shared" "$tip" "$db")"; then
+      row failed "$path" "$branch" "git merge-base failed for ${branch}: $(tr '\n' ' ' < "$ERRFILE")"; return 0
+    fi
+  fi
+  local legacy=unmerged
+  [[ -n "$status" ]] && legacy=dirty
+  [[ -z "$status" && -z "$branch" ]] && legacy=detached
+  # Clean and merged: removed as before, whatever its age.
+  if [[ -z "$status" && "$merged" == merged ]]; then
+    remove_worktree "$shared" "$dry" "$path" "$branch" "$tip" removed ""; return 0
+  fi
+  if (( ! age_ok )) || (( age < IDLE_HOURS )); then
+    row kept "$path" "$branch" "$legacy"; return 0
+  fi
+  rc=0; in_use "$path" || rc=$?
+  case "$rc" in
+    0) row kept "$path" "$branch" in-use; return 0 ;;
+    1) ;;
+    *) row kept "$path" "$branch" idle-unknown; return 0 ;;
+  esac
+  local reach=0
+  rc=0; reachable_remotely "$shared" "$head" || rc=$?
+  case "$rc" in
+    0) reach=1 ;;
+    1) ;;
+    *) row failed "$path" "$branch" "cannot read which remote refs hold ${head}: $(tr '\n' ' ' < "$ERRFILE")"; return 0 ;;
+  esac
+  if [[ -z "$status" ]] && (( reach )); then
+    remove_worktree "$shared" "$dry" "$path" "$branch" "$tip" removed ""; return 0
+  fi
+  if (( age < ARCHIVE_IDLE_HOURS )); then
+    row kept "$path" "$branch" "$legacy"; return 0
+  fi
+  local ref
+  if ! ref="$(archive_worktree "$shared" "$path" "$head" "$dry")"; then
+    row failed "$path" "$branch" "archiving before removal failed, so the worktree was kept: $(tr '\n' ' ' < "$ERRFILE")"; return 0
+  fi
+  remove_worktree "$shared" "$dry" "$path" "$branch" "$tip" archived "$ref" --force
+  return 0
+}
+
+# Remove the worktree at <path>, report it as <kind> (removed|archived), then
+# delete its branch at <tip>. A removed branch tip is held by origin's default
+# or another remote ref; an archived one by its archive ref.
+remove_worktree() { # <shared> <dry> <path> <branch> <tip> <kind> <archive-ref> [--force]
+  local shared="$1" dry="$2" path="$3" branch="$4" tip="$5" kind="$6" ref="$7" force="${8:-}"
+  local -a remove=(worktree remove)
+  [[ -n "$force" ]] && remove+=(--force)
+  if (( dry )); then
+    row "$kind" "$path" "$branch" "" "$tip" "$ref"; return 0
+  fi
+  if ! git -C "$shared" "${remove[@]}" "$path" 2>"$ERRFILE"; then
+    row failed "$path" "$branch" "git worktree remove failed: $(tr '\n' ' ' < "$ERRFILE")${ref:+ — its archive ${ref} was kept}"; return 0
+  fi
+  # The removal happened: report it whatever the deletion does, so the JSON
+  # matches the disk a retry would find (#405).
+  row "$kind" "$path" "$branch" "" "$tip" "$ref"
+  [[ -n "$branch" ]] || return 0
+  local rc=0
+  delete_branch "$shared" "$branch" "$tip" || rc=$?
+  report_branch_delete "$branch" "$tip" "$rc"
   return 0
 }
 
@@ -517,7 +721,7 @@ main() {
   fi
 
   # Walk `worktree list --porcelain`: blank-line-separated blocks.
-  local path="" branch="" detached=0 locked=0 line unenterable=0
+  local path="" branch="" detached=0 locked=0 lock_reason="" line unenterable=0
   local -a seen_branches=() prunable_branches=()
   flush() {
     if [[ -n "$path" ]]; then
@@ -536,7 +740,7 @@ main() {
           # Confirmed gone: reported prunable. Its branch goes to the
           # no-worktree pass only once the metadata prune actually releases
           # it, so it is recorded here and released below.
-          decide_worktree "$shared" "$abs_root" "$db" "$dry" "$path" "$branch" "$detached" "$locked"
+          decide_worktree "$shared" "$abs_root" "$db" "$dry" "$path" "$branch" "$detached" "$locked" "$lock_reason"
           if [[ -n "$branch" ]]; then
             if (( DECIDED_PRUNABLE )); then
               prunable_branches+=("$branch")
@@ -546,7 +750,7 @@ main() {
               seen_branches+=("$branch")
             fi
           fi
-          path=""; branch=""; detached=0; locked=0
+          path=""; branch=""; detached=0; locked=0; lock_reason=""
           return 0
         else
           row failed "$path" "$branch" "cannot confirm the worktree is gone: its parent ${parent} is missing or not traversable"
@@ -554,7 +758,7 @@ main() {
           # try `branch -D` on it (#405).
           if [[ -n "$branch" ]]; then seen_branches+=("$branch"); fi
           unenterable=1
-          path=""; branch=""; detached=0; locked=0
+          path=""; branch=""; detached=0; locked=0; lock_reason=""
           return 0
         fi
       else
@@ -569,23 +773,24 @@ main() {
           row failed "$path" "$branch" "cannot enter the worktree: $(tr '\n' ' ' < "$ERRFILE")"
           if [[ -n "$branch" ]]; then seen_branches+=("$branch"); fi
           unenterable=1
-          path=""; branch=""; detached=0; locked=0
+          path=""; branch=""; detached=0; locked=0; lock_reason=""
           return 0
         fi
       fi
       if [[ -n "$branch" ]]; then seen_branches+=("$branch"); fi
       if [[ "$real" != "$abs_shared" ]]; then
-        decide_worktree "$shared" "$abs_root" "$db" "$dry" "$real" "$branch" "$detached" "$locked"
+        decide_worktree "$shared" "$abs_root" "$db" "$dry" "$real" "$branch" "$detached" "$locked" "$lock_reason"
       fi
     fi
-    path=""; branch=""; detached=0; locked=0
+    path=""; branch=""; detached=0; locked=0; lock_reason=""
   }
   while IFS= read -r -d '' line || [[ -n "$line" ]]; do
     case "$line" in
       "worktree "*) flush; path="${line#worktree }" ;;
       "branch refs/heads/"*) branch="${line#branch refs/heads/}" ;;
       detached) detached=1 ;;
-      "locked"*) locked=1 ;;
+      locked) locked=1 ;;
+      "locked "*) locked=1; lock_reason="${line#locked }" ;;
       "") flush ;;
     esac
   done < "$inventory"
@@ -636,22 +841,27 @@ main() {
   python3 - "$abs_shared" "$db" "$dry" "$ROWS" <<'PY' || rc=$?
 import json, sys
 shared, db, dry, rows_path = sys.argv[1], sys.argv[2], sys.argv[3] == "1", sys.argv[4]
-result = {"shared": shared, "default_branch": db, "dry_run": dry, "worktrees_removed": [], "worktrees_kept": [],
-          "branches_deleted": [], "branches_kept": [], "failed": []}
+result = {"shared": shared, "default_branch": db, "dry_run": dry, "worktrees_removed": [], "worktrees_archived": [],
+          "worktrees_kept": [], "branches_deleted": [], "branches_kept": [], "failed": []}
 with open(rows_path, "rb") as handle:
     fields = handle.read().decode("utf-8", "surrogateescape").split("\0")
 if fields and fields[-1] == "":
     fields.pop()
-if len(fields) % 4:
+if len(fields) % 6:
     sys.stderr.write("prune-worktrees: decision rows are malformed; report this as a bug\n")
     sys.exit(2)
-for index in range(0, len(fields), 4):
-    kind, target, branch, reason = fields[index:index + 4]
+for index in range(0, len(fields), 6):
+    kind, target, branch, reason, head, extra = fields[index:index + 6]
     if True:
         if kind == "removed":
-            result["worktrees_removed"].append({"path": target, "branch": branch})
+            result["worktrees_removed"].append({"path": target, "branch": branch or None, "head": head})
+        elif kind == "archived":
+            result["worktrees_archived"].append({"path": target, "branch": branch or None, "head": head, "archive_ref": extra})
         elif kind == "kept":
-            result["worktrees_kept"].append({"path": target, "branch": branch or None, "reason": reason})
+            kept = {"path": target, "branch": branch or None, "reason": reason}
+            if reason == "locked":
+                kept["lock_reason"] = extra or None
+            result["worktrees_kept"].append(kept)
         elif kind == "branch-deleted":
             result["branches_deleted"].append(branch)
         elif kind == "branch-kept":
