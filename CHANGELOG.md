@@ -12,12 +12,13 @@
   `hooks/session-start.sh` is now declared under `nativeHooks` for
   `claude-code` and `codex`, the form the Stop hooks already use, and emits
   their native `hookSpecificOutput.additionalContext` payload. The portable
-  SessionStart declaration is gone, which also drops the last-output-wins
-  wrapper #540 worked around. Agents without a native entry get no
-  SessionStart hook. Verified by installing the branch into a scratch
-  consumer: `.claude/settings.json` and `.codex/config.toml` each carry one
-  direct `session-start.sh` entry, and running it delivered the merged
-  statuses with `ACR_BIN` intact.
+  SessionStart declaration stays for every other agent: under `tessl hook
+  run` the script sees `TESSL_AGENT`, exits at once for `claude-code` and
+  `codex` (their native entry already ran), and otherwise emits the
+  consensus `{"additionalContext"}` tessl translates. Verified by installing the branch into a scratch
+  consumer: `.claude/settings.json` carries the native and the portable
+  entry; the portable one returned `{}` and the native one delivered the
+  merged statuses with `ACR_BIN` intact.
 
 ### Added
 
@@ -31,9 +32,14 @@
   shape #540 removed from this plugin. The override applies to that run only;
   `agents.yaml` is not rewritten. ACR throttles remote checks per project and
   policy to one per 24 hours, so a project already at `freshness: install`
-  shares one check with ACR's own hook. `hooks/session-start.sh` runs it after
-  `check-tessl-latest`; it is silent without `agents.yaml` and in Herdr worker
-  sessions, whose checkouts it must not write into. Verified against acr 0.2.0
+  shares one check with ACR's own hook. The install rewrites the committed
+  `.agents/registry.lock`, so it runs only on a safe checkout (operator
+  decision): a fresh fetch succeeded, `HEAD` contains `origin/<default>`, and
+  the tree is clean; otherwise the status names the reason and nothing
+  changes (`rules/sync-before-work.md`). Outside git there is no checkout to
+  sync and it installs. `hooks/session-start.sh` runs it after
+  `check-tessl-latest`; it is silent without `agents.yaml` and in every
+  Herdr session, whose checkouts belong to the foreman or a writer brief. Verified against acr 0.2.0
   on a scratch project installing `github:jbaruch/ffa-acr-dogfood`: the first
   run installed and reported `restart_required`, the second was throttled and
   silent (`hooks/tests/test_check_acr_latest.sh` covers the contract with a
