@@ -100,14 +100,18 @@ default_branch() {
 # (rules/sync-before-work.md). A git failure is a reason, never a pass.
 unsafe_reason() {
   local -a fetch=(git fetch --quiet origin)
-  local out db status
+  local db status
   if command -v timeout >/dev/null; then
     fetch=(timeout "$FETCH_TIMEOUT_SEC" "${fetch[@]}")
   elif command -v gtimeout >/dev/null; then
     fetch=(gtimeout "$FETCH_TIMEOUT_SEC" "${fetch[@]}")
   fi
-  if ! out="$("${fetch[@]}" 2>&1)"; then
-    printf 'fetching origin failed (%s)' "${out//$'\n'/ }"
+  local frc=0
+  "${fetch[@]}" >/dev/null 2>&1 || frc=$?
+  if (( frc != 0 )); then
+    # git's message can carry a credential-bearing remote URL, so it stays out
+    # of the status (rules/no-secrets.md Logging).
+    printf 'fetching origin failed (exit %s); run %sgit fetch origin%s to see why' "$frc" '`' '`'
     return 0
   fi
   local rc=0
@@ -181,15 +185,63 @@ main() {
   version="${version%% *}"
   rc=0
   version_at_least "$version" "$ACR_MIN_VERSION" || rc=$?
-  if (( rc != 0 )); then
-    emit "Session-start status — acr: acr ${version} is older than ${ACR_MIN_VERSION}, the oldest this hook runs, so ACR dependencies were not updated; upgrade with \`brew upgrade jbaruch/agentic-context-registry/acr\`."
+  case "$rc" in
+    0) ;;
+    1)
+      emit "Session-start status — acr: acr ${version} is older than ${ACR_MIN_VERSION}, the oldest this hook runs, so ACR dependencies were not updated; upgrade with \`brew upgrade jbaruch/agentic-context-registry/acr\`."
+      return 0 ;;
+    *)
+      emit "Session-start status — acr: \`${acr} --version\` printed \`${version}\`, which is not a release version, so ACR dependencies were not updated; check which acr is on PATH and reinstall a release."
+      return 0 ;;
+  esac
+
+  # The Runtime-Managed Manifest Carve-Out check (rules/dependency-management.md,
+  # consumer `agents.yaml`): name every github:jbaruch/* dependency not at latest.
+  local listing notes=""
+  if listing="$("$acr" list --json --project "$root" 2>&1)"; then
+    # shellcheck disable=SC2016  # Backticks are Markdown in the Python source, not shell expansions.
+    notes="$(python3 -c '
+import json, sys
+try:
+    deps = json.loads(sys.argv[1])["result"]["dependencies"]
+except (ValueError, KeyError, TypeError):
+    print("NOTE: `acr list --json` returned something unreadable; the latest-specifier check did not run.")
+    sys.exit(0)
+pinned = [d["declaration"]["source"] + "@" + str(d["declaration"].get("requested"))
+          for d in deps
+          if d.get("declaration", {}).get("source", "").startswith("github:jbaruch/")
+          and d["declaration"].get("requested") != "latest"]
+if pinned:
+    print("NOTE: agents.yaml pins jbaruch dependencies that must float at `latest` (Runtime-Managed Manifest Carve-Out, rules/dependency-management.md): "
+          + ", ".join(pinned) + ". Set them to `requested: latest`.")
+' "$listing")" || notes="NOTE: the latest-specifier check failed to run (python3)."
+  else
+    notes="NOTE: \`acr list --json\` failed, so the latest-specifier check did not run."
+  fi
+
+  # Under `tessl hook run` the environment is stripped, so a Herdr session
+  # cannot be ruled out: report, never write.
+  if [[ "${SESSION_START_MODE:-}" == portable ]]; then
+    emit "Session-start status — acr: this agent runs SessionStart through tessl, which hides the session's environment, so ACR dependencies were not updated here; run \`$(printf '%q' "$acr") freshness run --project $(printf '%q' "$root") --policy install\` when it is safe.${notes:+$'\n'}${notes}"
     return 0
   fi
 
   if (( in_git )); then
+    local trc=0
+    # --error-unmatch exits 1 for an untracked path (its expected message is
+    # silenced); anything else is a git failure, reported and never updated.
+    git -C "$root" ls-files --error-unmatch .agents/registry.lock >/dev/null 2>&1 || trc=$?
+    if (( trc > 1 )); then
+      emit "Session-start status — acr: \`git ls-files\` failed (exit ${trc}) checking whether \`.agents/registry.lock\` is tracked, so ACR dependencies were not updated; run \`git -C $(printf '%q' "$root") status\` to see why."
+      return 0
+    fi
+    if (( trc == 0 )); then
+      emit "Session-start status — acr: \`.agents/registry.lock\` is committed here, so updating it would be an unfocused dependency change; ACR dependencies were not updated. Untrack it (\`git rm --cached .agents/registry.lock\`, gitignore \`.agents/\`) per the Runtime-Managed Manifest Carve-Out (rules/dependency-management.md).${notes:+$'\n'}${notes}"
+      return 0
+    fi
     reason="$(cd "$root" && unsafe_reason)"
     if [[ -n "$reason" ]]; then
-      emit "Session-start status — acr: ACR dependencies were not updated: ${reason}. Run \`$(printf '%q' "$acr") freshness run --project $(printf '%q' "$root") --policy install\` once it is."
+      emit "Session-start status — acr: ACR dependencies were not updated: ${reason}. Run \`$(printf '%q' "$acr") freshness run --project $(printf '%q' "$root") --policy install\` once it is.${notes:+$'\n'}${notes}"
       return 0
     fi
   fi
@@ -200,8 +252,11 @@ main() {
     emit "Session-start status — acr: updating ACR dependencies failed (exit ${rc}):"$'\n'"${out}"$'\n'"Run \`${diag}\` to diagnose it."
     return 0
   fi
-  [[ -n "${out//[[:space:]]/}" ]] || return 0
-  emit "Session-start status — acr:"$'\n'"${out}"
+  if [[ -z "${out//[[:space:]]/}" ]]; then
+    [[ -z "$notes" ]] || emit "Session-start status — acr: ${notes}"
+    return 0
+  fi
+  emit "Session-start status — acr:"$'\n'"${out}${notes:+$'\n'}${notes}"
   return 0
 }
 

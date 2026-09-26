@@ -310,6 +310,13 @@ main() {
     return 0
   fi
 
+  # Under tessl (hooks/session-start.sh portable mode) the environment is
+  # stripped and a Herdr worker cannot be ruled out: report, never write.
+  if [[ "${SESSION_START_MODE:-}" == portable ]]; then
+    emit_notice "Session-start status — Local \`${db}\` is ${behind} commit(s) behind \`origin/${db}\`; not fast-forwarded here (this agent runs SessionStart through tessl, which hides the session's environment) — fast-forward \`${db}\` if this is not a Herdr worker session (rules/sync-before-work.md)."
+    return 0
+  fi
+
   # Strictly behind after a fresh fetch: sync it rather than asking someone to.
   if fast_forward "$db"; then
     emit_notice "Session-start status — git: fast-forwarded local \`${db}\` by ${behind} commit(s) to \`origin/${db}\`"

@@ -23,6 +23,11 @@
 #   9. Fetch fails (origin gone)      -> a "not updated" status, acr never called.
 #  10. Outside git, agents.yaml       -> installs (no checkout to sync).
 #  11. acr older than ACR_MIN_VERSION -> an upgrade status, acr never run.
+#  12. Committed registry lock        -> refused, untrack guidance.
+#  13. Pinned jbaruch dependency      -> carve-out NOTE, update still runs.
+#  14. Portable mode (under tessl)    -> report, never run.
+#  15. Fetch fails with a secret URL  -> exit code only, no URL in the status.
+#  16. Unreadable acr version         -> reinstall guidance.
 #
 # Run: bash hooks/tests/test_check_acr_latest.sh
 set -uo pipefail
@@ -40,6 +45,11 @@ mk_fake_acr() {
 #!/usr/bin/env bash
 set -euo pipefail
 if [[ "${1:-}" == --version ]]; then printf '%s (abc123)\n' "${FAKE_VERSION:-0.2.0}"; exit 0; fi
+if [[ "${1:-}" == list ]]; then
+  default='{"ok":true,"result":{"dependencies":[{"declaration":{"source":"github:jbaruch/coding-policy","requested":"latest"}}]}}'
+  printf '%s\n' "${FAKE_LIST:-$default}"
+  exit 0
+fi
 printf '%s\n' "$*" >> "$FAKE_CALLS"
 if [[ -n "${FAKE_OUT:-}" ]]; then printf '%s\n' "$FAKE_OUT"; fi
 exit "${FAKE_RC:-0}"
@@ -166,6 +176,43 @@ main() {
   run "$PROJECT" FAKE_VERSION=0.1.9 FAKE_OUT="Updated something"
   if [[ $RC -eq 0 && -z "$(calls)" ]] && context | grep -q "acr 0.1.9 is older than" && context | grep -q "brew upgrade"; then
     pass; else fail "old acr: expected an upgrade status and no run, got OUT=$OUT calls=$(calls)"; fi
+
+  # 12. a committed registry lock -> not updated, untrack guidance.
+  mk_project p12
+  mkdir -p "$PROJECT/.agents" || die "cannot create .agents"
+  printf 'lock\n' > "$PROJECT/.agents/registry.lock" || die "cannot write lock"
+  git -C "$PROJECT" add .agents/registry.lock || die "git add lock failed"
+  git -C "$PROJECT" commit -q -m lock || die "commit lock failed"
+  git -C "$PROJECT" push -q origin main || die "push lock failed"
+  run "$PROJECT" FAKE_OUT="Updated something"
+  if [[ $RC -eq 0 && -z "$(calls)" ]] && context | grep -q "registry.lock\` is committed" && context | grep -q "git rm --cached"; then
+    pass; else fail "tracked lock: expected a refusal with untrack guidance, got OUT=$OUT calls=$(calls)"; fi
+
+  # 13. a pinned jbaruch dependency -> the carve-out NOTE, and the update still runs.
+  mk_project p13
+  run "$PROJECT" FAKE_OUT="Updated x" FAKE_LIST='{"ok":true,"result":{"dependencies":[{"declaration":{"source":"github:jbaruch/coding-policy","requested":"v0.3.1"}},{"declaration":{"source":"github:other/pkg","requested":"v1"}}]}}'
+  if [[ $RC -eq 0 ]] && [[ "$(calls)" == "freshness run --project ${PROJECT} --policy install" ]] \
+    && context | grep -q "github:jbaruch/coding-policy@v0.3.1" && ! context | grep -q "other/pkg"; then
+    pass; else fail "pinned dep: expected a NOTE naming only the jbaruch pin, got OUT=$OUT calls=$(calls)"; fi
+
+  # 14. portable mode (under tessl) -> report, never run.
+  mk_project p14
+  run "$PROJECT" SESSION_START_MODE=portable FAKE_OUT="Updated x"
+  if [[ $RC -eq 0 && -z "$(calls)" ]] && context | grep -q "through tessl"; then
+    pass; else fail "portable: expected a report and no run, got OUT=$OUT calls=$(calls)"; fi
+
+  # 15. a failed fetch reports its exit code, never git's message (it can carry a URL).
+  mk_project p15
+  git -C "$PROJECT" remote set-url origin "https://user:s3cr3t-token@example.invalid/repo.git" || die "set-url failed"
+  run "$PROJECT" GIT_TERMINAL_PROMPT=0 FAKE_OUT="Updated x"
+  if [[ $RC -eq 0 && -z "$(calls)" ]] && context | grep -q "fetching origin failed (exit" && ! context | grep -q "s3cr3t"; then
+    pass; else fail "fetch redaction: expected a URL-free failure, got OUT=$OUT"; fi
+
+  # 16. an unreadable version -> reinstall guidance, not "upgrade".
+  mk_project p16
+  run "$PROJECT" FAKE_VERSION=dev FAKE_OUT="Updated x"
+  if [[ $RC -eq 0 && -z "$(calls)" ]] && context | grep -q "not a release version" && ! context | grep -q "brew upgrade"; then
+    pass; else fail "bad version: expected reinstall guidance, got OUT=$OUT"; fi
 
   echo "─────────────────────────────────────────────"
   if (( FAIL > 0 )); then echo "FAILED: ${FAIL} failed, ${PASS} passed"; exit 1; fi

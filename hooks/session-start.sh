@@ -93,6 +93,9 @@ main() {
     done
     MODE=portable
   fi
+  # Child hooks that would write read this: under tessl the session's
+  # environment is gone, so they report instead of acting.
+  export SESSION_START_MODE="$MODE"
   local -a hooks statuses=() names=() codes=() outputs=()
   here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || { warn "cannot resolve the hooks directory"; return 0; }
   read -r -a hooks <<<"${SESSION_START_HOOKS:-${HOOKS[*]}}"

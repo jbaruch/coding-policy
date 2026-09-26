@@ -113,6 +113,15 @@ main() {
     && [[ ! -e "$TMP/post-merge-ran" ]]; then
     pass; else fail "behind on main: expected a fast-forward with no repo hook run, got RC=$RC OUT=$OUT"; fi
 
+  # 1e. Behind under tessl (session-start portable mode): report, never move.
+  mk_origin o1e
+  clone_from "$BARE" "$TMP/r1e"
+  commit_push "$SEED" "c2"
+  run "$TMP/r1e" "$TMP/s1f" SESSION_START_MODE=portable
+  if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | jq -e '.additionalContext | test("not fast-forwarded here")' >/dev/null 2>&1 \
+    && [[ "$(git -C "$TMP/r1e" rev-parse main)" != "$(git -C "$TMP/r1e" rev-parse origin/main)" ]]; then
+    pass; else fail "portable: expected a report and main unmoved, got RC=$RC OUT=$OUT"; fi
+
   # 1c. Behind while a feature branch is checked out: main moves without a
   # checkout, and the feature branch is untouched.
   mk_origin o1c
