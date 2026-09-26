@@ -44,7 +44,27 @@
   first with `freshness run --project --policy install`); the constant's
   renewal cadence sits beside it. Only git's own "absent" and "not an
   ancestor" exits count as answers; any other git failure marks the checkout
-  unsafe. Verified against acr 0.2.0
+  unsafe.
+- **ACR joins the Runtime-Managed Manifest Carve-Out (operator decision).**
+  An install rewrites `.agents/registry.lock`; committed, that is an
+  unfocused dependency bump on whatever branch a session opens
+  (`rules/dependency-management.md` Freshness), in a checkout another agent
+  may share (`rules/agent-worktree-isolation.md`). The fleet treats ACR like
+  tessl instead: `.agents/` is gitignored (onboarding already does this, since
+  tessl uses the same directory), `github:jbaruch/*` dependencies float at
+  `requested: latest`, and a new Authority of Record names consumer
+  `agents.yaml`. `check-acr-latest` is its deterministic check: it names any
+  `github:jbaruch/*` dependency not at `latest` (from `acr list --json`) and
+  refuses to update while the lock is committed. Verified against acr 0.2.0
+  that an untracked lock works: install, realize and `acr check` pass, and a
+  fresh clone without the lock resolves and realizes cleanly.
+- **Under tessl, hooks that write only report.** `hooks/session-start.sh`
+  exports `SESSION_START_MODE`; in portable mode (an agent without a native
+  entry, where tessl strips `HERDR_ENV`) `check-acr-latest` and
+  `check-git-sync`'s fast-forward report instead of acting, since a Herdr
+  worker cannot be ruled out. A failed fetch reports its exit code only (git's
+  message can carry a credential-bearing URL), and an unreadable `acr
+  --version` gets reinstall guidance instead of "upgrade". Verified against acr 0.2.0
   on a scratch project installing `github:jbaruch/ffa-acr-dogfood`: the first
   run installed and reported `restart_required`, the second was throttled and
   silent (`hooks/tests/test_check_acr_latest.sh` covers the contract with a
