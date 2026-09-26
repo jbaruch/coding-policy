@@ -74,29 +74,6 @@ version_at_least() { # <have> <want>
   return 0
 }
 
-# Echo origin's default branch for the repo in the working directory. Return 1
-# when none of origin/HEAD, origin/main, origin/master resolves, and 2 on a git
-# failure: only git's own "absent" exit (1) moves on to the next candidate.
-default_branch() {
-  local ref cand rc=0
-  ref="$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD)" || rc=$?
-  case "$rc" in
-    0) printf '%s' "${ref#origin/}"; return 0 ;;
-    1) ;;
-    *) return 2 ;;
-  esac
-  for cand in main master; do
-    rc=0
-    git show-ref --verify --quiet "refs/remotes/origin/${cand}" || rc=$?
-    case "$rc" in
-      0) printf '%s' "$cand"; return 0 ;;
-      1) ;;
-      *) return 2 ;;
-    esac
-  done
-  return 1
-}
-
 # Echo "source@requested" for each github:jbaruch/* dependency not at latest,
 # comma-separated, from `acr list --json` output. Exit 0 checked (empty output =
 # none pinned), 1 unreadable JSON, 2 no JSON tool.
@@ -123,17 +100,18 @@ sys.stdout.write(", ".join(pinned))
   fi
 }
 
-# Build the bounded `git fetch origin` command in FETCH_CMD. timeout/gtimeout
-# when present; otherwise git's own bounds: an HTTP low-speed limit and ssh
-# connect/keepalive timeouts, so a stalled remote cannot hang session start.
-bounded_fetch() { # <seconds>
+# Build a bounded git network command in NET_CMD: timeout/gtimeout when
+# present, otherwise git's own bounds (an HTTP low-speed limit and ssh
+# connect/keepalive timeouts), so a stalled remote cannot hang session start.
+bounded_git() { # <seconds> <git args...>
+  local secs="$1"; shift
   if command -v timeout >/dev/null; then
-    FETCH_CMD=(timeout "$1" git fetch --quiet origin)
+    NET_CMD=(timeout "$secs" git "$@")
   elif command -v gtimeout >/dev/null; then
-    FETCH_CMD=(gtimeout "$1" git fetch --quiet origin)
+    NET_CMD=(gtimeout "$secs" git "$@")
   else
-    FETCH_CMD=(env "GIT_SSH_COMMAND=${GIT_SSH_COMMAND:-ssh} -o ConnectTimeout=$1 -o ServerAliveInterval=5 -o ServerAliveCountMax=2"
-      git -c http.lowSpeedLimit=1000 -c "http.lowSpeedTime=$1" fetch --quiet origin)
+    NET_CMD=(env "GIT_SSH_COMMAND=${GIT_SSH_COMMAND:-ssh} -o ConnectTimeout=${secs} -o ServerAliveInterval=5 -o ServerAliveCountMax=2"
+      git -c http.lowSpeedLimit=1000 -c "http.lowSpeedTime=${secs}" "$@")
   fi
 }
 
@@ -141,21 +119,38 @@ bounded_fetch() { # <seconds>
 # fetched from origin, HEAD containing origin's default branch, and a clean tree
 # (rules/sync-before-work.md). A git failure is a reason, never a pass.
 unsafe_reason() {
-  local db status frc=0
-  bounded_fetch "$FETCH_TIMEOUT_SEC"
-  "${FETCH_CMD[@]}" >/dev/null 2>&1 || frc=$?
+  local db status frc=0 head_line
+  bounded_git "$FETCH_TIMEOUT_SEC" fetch --quiet origin
+  "${NET_CMD[@]}" >/dev/null 2>&1 || frc=$?
   if (( frc != 0 )); then
     # git's message can carry a credential-bearing remote URL, so it stays out
     # of the status (rules/no-secrets.md Logging).
     printf 'fetching origin failed (exit %s); run %sgit fetch origin%s to see why' "$frc" '`' '`'
     return 0
   fi
+  # Ask origin for its current default branch: a local origin/HEAD can be
+  # stale after a remote rename, and a stale answer would vouch for nothing.
   local rc=0
-  db="$(default_branch)" || rc=$?
+  bounded_git "$FETCH_TIMEOUT_SEC" ls-remote --symref origin HEAD
+  # git's stderr can carry a credential-bearing remote URL, so it is dropped
+  # here and the failure below names the command to rerun (rules/no-secrets.md).
+  head_line="$("${NET_CMD[@]}" 2>/dev/null)" || rc=$?
+  if (( rc != 0 )); then
+    printf "asking origin for its default branch failed (exit %s); run %sgit ls-remote --symref origin HEAD%s to see why" "$rc" '`' '`'
+    return 0
+  fi
+  local re='ref: refs/heads/([^[:space:]]+)[[:space:]]+HEAD'
+  if [[ ! "$head_line" =~ $re ]]; then
+    printf "origin did not name its default branch"
+    return 0
+  fi
+  db="${BASH_REMATCH[1]}"
+  rc=0
+  git show-ref --verify --quiet "refs/remotes/origin/${db}" || rc=$?
   case "$rc" in
     0) ;;
-    1) printf "origin's default branch could not be resolved"; return 0 ;;
-    *) printf "git failed resolving origin's default branch"; return 0 ;;
+    1) printf 'origin/%s is missing after the fetch' "$db"; return 0 ;;
+    *) printf 'git failed reading origin/%s' "$db"; return 0 ;;
   esac
   rc=0
   git merge-base --is-ancestor "refs/remotes/origin/${db}" HEAD || rc=$?
@@ -276,7 +271,10 @@ main() {
       emit "Session-start status — acr: \`.agents/registry.lock\` is committed here, so updating it would be an unfocused dependency change; ACR dependencies were not updated. Untrack it (\`git rm --cached .agents/registry.lock\`, gitignore \`.agents/\`) per the Runtime-Managed Manifest Carve-Out (rules/dependency-management.md).${notes:+$'\n'}${notes}"
       return 0
     fi
-    reason="$(cd "$root" && unsafe_reason)"
+    if ! reason="$(cd "$root" && unsafe_reason)"; then
+      emit "Session-start status — acr: could not enter $(printf '%q' "$root") to check it, so ACR dependencies were not updated."
+      return 0
+    fi
     if [[ -n "$reason" ]]; then
       emit "Session-start status — acr: ACR dependencies were not updated: ${reason}. Run \`$(printf '%q' "$acr") freshness run --project $(printf '%q' "$root") --policy install\` once it is.${notes:+$'\n'}${notes}"
       return 0

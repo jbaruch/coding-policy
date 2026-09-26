@@ -31,6 +31,7 @@
 #  6b. Herdr session, pinned dep      -> the carve-out NOTE, no update.
 #  17. jq only, no timeout utility    -> check and update run (bounded-fetch fallback).
 #  18. Neither python3 nor jq         -> no update, warning on stderr.
+#  19. origin's default renamed       -> checked against origin's live HEAD.
 #
 # Run: bash hooks/tests/test_check_acr_latest.sh
 set -uo pipefail
@@ -83,11 +84,19 @@ run() {
   rm -f "$TMP/calls" || die "cannot reset calls"
   OUT="$(cd "$dir" && env -u HERDR_ENV ACR_BIN="$TMP/acr" FAKE_CALLS="$TMP/calls" "$@" bash "$SCRIPT" </dev/null 2>"$TMP/err")"
   RC=$?
+  read_calls
 }
 
 context() { python3 -c 'import json,sys; print(json.loads(sys.stdin.read())["additionalContext"])' <<<"$OUT"; }
 
-calls() { if [[ -f "$TMP/calls" ]]; then cat "$TMP/calls"; fi; }
+# Read the fake acr's call log into CALLS; an unreadable log stops the harness
+# rather than reading as "no calls".
+read_calls() {
+  CALLS=""
+  if [[ -e "$TMP/calls" ]]; then
+    CALLS="$(cat "$TMP/calls")" || die "cannot read $TMP/calls"
+  fi
+}
 
 main() {
   SCRIPT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/check-acr-latest.sh"
@@ -108,14 +117,14 @@ main() {
 
   # 1. no agents.yaml -> silent, no acr call.
   run "$plain"
-  if [[ $RC -eq 0 && -z "$OUT" && -z "$(calls)" ]]; then pass; else fail "no agents.yaml: expected silence, got OUT=$OUT calls=$(calls)"; fi
+  if [[ $RC -eq 0 && -z "$OUT" && -z "$CALLS" ]]; then pass; else fail "no agents.yaml: expected silence, got OUT=$OUT calls=$CALLS"; fi
 
   # 2. synced and clean -> install policy on the project root, output as the status.
   mk_project p2
   run "$PROJECT" FAKE_OUT="Updated github:jbaruch/coding-policy v0.3.274 -> v0.3.275"
-  if [[ $RC -eq 0 ]] && [[ "$(calls)" == "freshness run --project ${PROJECT} --policy install" ]] \
+  if [[ $RC -eq 0 ]] && [[ "$CALLS" == "freshness run --project ${PROJECT} --policy install" ]] \
     && [[ "$(context)" == $'Session-start status — acr:\nUpdated github:jbaruch/coding-policy v0.3.274 -> v0.3.275' ]]; then
-    pass; else fail "synced: expected an install run and its status, got OUT=$OUT calls=$(calls) err=$(cat "$TMP/err")"; fi
+    pass; else fail "synced: expected an install run and its status, got OUT=$OUT calls=$CALLS err=$(cat "$TMP/err")"; fi
 
   # 3. throttled or nothing to do -> nothing.
   mk_project p3
@@ -133,7 +142,7 @@ main() {
 
   # 5. acr missing -> the install command.
   mk_project p5
-  OUT="$(cd "$PROJECT" && env -u HERDR_ENV ACR_BIN="$TMP/no-such-acr" bash "$SCRIPT" </dev/null 2>"$TMP/err")"; RC=$?
+  OUT="$(cd "$PROJECT" && env -u HERDR_ENV ACR_BIN="$TMP/no-such-acr" bash "$SCRIPT" </dev/null 2>"$TMP/err")"; RC=$?; read_calls
   if [[ $RC -eq 0 ]] && context | grep -q "brew install jbaruch/agentic-context-registry/acr"; then
     pass; else fail "acr missing: expected the install command, got OUT=$OUT"; fi
 
@@ -141,12 +150,12 @@ main() {
   #    silent when nothing is pinned.
   mk_project p6
   run "$PROJECT" HERDR_ENV=1 FAKE_OUT="Updated something"
-  if [[ $RC -eq 0 && -z "$OUT" && -z "$(calls)" ]]; then pass; else fail "herdr: expected silence and no acr call, got OUT=$OUT calls=$(calls)"; fi
+  if [[ $RC -eq 0 && -z "$OUT" && -z "$CALLS" ]]; then pass; else fail "herdr: expected silence and no acr call, got OUT=$OUT calls=$CALLS"; fi
 
   # 6b. a Herdr session still runs the read-only carve-out check.
   run "$PROJECT" HERDR_ENV=1 FAKE_OUT="Updated something" FAKE_LIST='{"ok":true,"result":{"dependencies":[{"declaration":{"source":"github:jbaruch/x","requested":"v1"}}]}}'
-  if [[ $RC -eq 0 && -z "$(calls)" ]] && context | grep -q "github:jbaruch/x@v1"; then
-    pass; else fail "herdr pin check: expected the NOTE and no update, got OUT=$OUT calls=$(calls)"; fi
+  if [[ $RC -eq 0 && -z "$CALLS" ]] && context | grep -q "github:jbaruch/x@v1"; then
+    pass; else fail "herdr pin check: expected the NOTE and no update, got OUT=$OUT calls=$CALLS"; fi
 
   # 7. behind origin -> not updated, acr never called.
   mk_project p7
@@ -154,22 +163,22 @@ main() {
   git -C "$SEED" commit -q -am next || die "seed commit failed"
   git -C "$SEED" push -q origin main || die "seed push failed"
   run "$PROJECT" FAKE_OUT="Updated something"
-  if [[ $RC -eq 0 && -z "$(calls)" ]] && context | grep -q "not updated" && context | grep -q "does not contain \`origin/main\`"; then
-    pass; else fail "behind: expected a skip naming origin/main, got OUT=$OUT calls=$(calls)"; fi
+  if [[ $RC -eq 0 && -z "$CALLS" ]] && context | grep -q "not updated" && context | grep -q "does not contain \`origin/main\`"; then
+    pass; else fail "behind: expected a skip naming origin/main, got OUT=$OUT calls=$CALLS"; fi
 
   # 8. uncommitted changes -> not updated, acr never called.
   mk_project p8
   printf 'scratch\n' > "$PROJECT/notes.txt" || die "cannot write notes.txt"
   run "$PROJECT" FAKE_OUT="Updated something"
-  if [[ $RC -eq 0 && -z "$(calls)" ]] && context | grep -q "uncommitted changes"; then
-    pass; else fail "dirty: expected a skip naming uncommitted changes, got OUT=$OUT calls=$(calls)"; fi
+  if [[ $RC -eq 0 && -z "$CALLS" ]] && context | grep -q "uncommitted changes"; then
+    pass; else fail "dirty: expected a skip naming uncommitted changes, got OUT=$OUT calls=$CALLS"; fi
 
   # 9. fetch fails -> not updated, acr never called.
   mk_project p9
   rm -rf "$ORIGIN" || die "cannot remove $ORIGIN"
   run "$PROJECT" FAKE_OUT="Updated something"
-  if [[ $RC -eq 0 && -z "$(calls)" ]] && context | grep -q "fetching origin failed"; then
-    pass; else fail "fetch failure: expected a skip, got OUT=$OUT calls=$(calls)"; fi
+  if [[ $RC -eq 0 && -z "$CALLS" ]] && context | grep -q "fetching origin failed"; then
+    pass; else fail "fetch failure: expected a skip, got OUT=$OUT calls=$CALLS"; fi
 
   # 10. outside git with agents.yaml -> installs; there is no checkout to sync.
   local nogit="$TMP/nogit"
@@ -177,14 +186,14 @@ main() {
   printf 'agents: [claude-code]\n' > "$nogit/agents.yaml" || die "cannot write agents.yaml"
   nogit="$(cd "$nogit" && pwd -P)" || die "cannot resolve $nogit"
   run "$nogit" GIT_CEILING_DIRECTORIES="$TMP" FAKE_OUT="Updated x"
-  if [[ $RC -eq 0 ]] && [[ "$(calls)" == "freshness run --project ${nogit} --policy install" ]]; then
-    pass; else fail "outside git: expected an install run, got OUT=$OUT calls=$(calls) err=$(cat "$TMP/err")"; fi
+  if [[ $RC -eq 0 ]] && [[ "$CALLS" == "freshness run --project ${nogit} --policy install" ]]; then
+    pass; else fail "outside git: expected an install run, got OUT=$OUT calls=$CALLS err=$(cat "$TMP/err")"; fi
 
   # 11. acr older than the hook's floor -> an upgrade status, never run.
   mk_project p11
   run "$PROJECT" FAKE_VERSION=0.1.9 FAKE_OUT="Updated something"
-  if [[ $RC -eq 0 && -z "$(calls)" ]] && context | grep -q "acr 0.1.9 is older than" && context | grep -q "brew upgrade"; then
-    pass; else fail "old acr: expected an upgrade status and no run, got OUT=$OUT calls=$(calls)"; fi
+  if [[ $RC -eq 0 && -z "$CALLS" ]] && context | grep -q "acr 0.1.9 is older than" && context | grep -q "brew upgrade"; then
+    pass; else fail "old acr: expected an upgrade status and no run, got OUT=$OUT calls=$CALLS"; fi
 
   # 12. a committed registry lock -> not updated, untrack guidance.
   mk_project p12
@@ -194,33 +203,33 @@ main() {
   git -C "$PROJECT" commit -q -m lock || die "commit lock failed"
   git -C "$PROJECT" push -q origin main || die "push lock failed"
   run "$PROJECT" FAKE_OUT="Updated something"
-  if [[ $RC -eq 0 && -z "$(calls)" ]] && context | grep -q "registry.lock\` is committed" && context | grep -q "git rm --cached"; then
-    pass; else fail "tracked lock: expected a refusal with untrack guidance, got OUT=$OUT calls=$(calls)"; fi
+  if [[ $RC -eq 0 && -z "$CALLS" ]] && context | grep -q "registry.lock\` is committed" && context | grep -q "git rm --cached"; then
+    pass; else fail "tracked lock: expected a refusal with untrack guidance, got OUT=$OUT calls=$CALLS"; fi
 
   # 13. a pinned jbaruch dependency -> the carve-out NOTE, and the update still runs.
   mk_project p13
   run "$PROJECT" FAKE_OUT="Updated x" FAKE_LIST='{"ok":true,"result":{"dependencies":[{"declaration":{"source":"github:jbaruch/coding-policy","requested":"v0.3.1"}},{"declaration":{"source":"github:other/pkg","requested":"v1"}}]}}'
-  if [[ $RC -eq 0 ]] && [[ "$(calls)" == "freshness run --project ${PROJECT} --policy install" ]] \
+  if [[ $RC -eq 0 ]] && [[ "$CALLS" == "freshness run --project ${PROJECT} --policy install" ]] \
     && context | grep -q "github:jbaruch/coding-policy@v0.3.1" && ! context | grep -q "other/pkg"; then
-    pass; else fail "pinned dep: expected a NOTE naming only the jbaruch pin, got OUT=$OUT calls=$(calls)"; fi
+    pass; else fail "pinned dep: expected a NOTE naming only the jbaruch pin, got OUT=$OUT calls=$CALLS"; fi
 
   # 14. portable mode (under tessl) -> report, never run.
   mk_project p14
   run "$PROJECT" SESSION_START_MODE=portable FAKE_OUT="Updated x"
-  if [[ $RC -eq 0 && -z "$(calls)" ]] && context | grep -q "through tessl"; then
-    pass; else fail "portable: expected a report and no run, got OUT=$OUT calls=$(calls)"; fi
+  if [[ $RC -eq 0 && -z "$CALLS" ]] && context | grep -q "through tessl"; then
+    pass; else fail "portable: expected a report and no run, got OUT=$OUT calls=$CALLS"; fi
 
   # 15. a failed fetch reports its exit code, never git's message (it can carry a URL).
   mk_project p15
   git -C "$PROJECT" remote set-url origin "https://user:s3cr3t-token@example.invalid/repo.git" || die "set-url failed"
   run "$PROJECT" GIT_TERMINAL_PROMPT=0 FAKE_OUT="Updated x"
-  if [[ $RC -eq 0 && -z "$(calls)" ]] && context | grep -q "fetching origin failed (exit" && ! context | grep -q "s3cr3t"; then
+  if [[ $RC -eq 0 && -z "$CALLS" ]] && context | grep -q "fetching origin failed (exit" && ! context | grep -q "s3cr3t"; then
     pass; else fail "fetch redaction: expected a URL-free failure, got OUT=$OUT"; fi
 
   # 16. an unreadable version -> reinstall guidance, not "upgrade".
   mk_project p16
   run "$PROJECT" FAKE_VERSION=dev FAKE_OUT="Updated x"
-  if [[ $RC -eq 0 && -z "$(calls)" ]] && context | grep -q "not a release version" && ! context | grep -q "brew upgrade"; then
+  if [[ $RC -eq 0 && -z "$CALLS" ]] && context | grep -q "not a release version" && ! context | grep -q "brew upgrade"; then
     pass; else fail "bad version: expected reinstall guidance, got OUT=$OUT"; fi
 
   # 17. jq only (no python3): the carve-out check still runs, and the update.
@@ -233,10 +242,10 @@ main() {
   done
   OUT="$(cd "$PROJECT" && env -u HERDR_ENV PATH="$tools" ACR_BIN="$TMP/acr" FAKE_CALLS="$TMP/calls" FAKE_OUT="Updated x" \
     FAKE_LIST='{"ok":true,"result":{"dependencies":[{"declaration":{"source":"github:jbaruch/y","requested":"v2"}}]}}' \
-    "$tools/bash" "$SCRIPT" </dev/null 2>"$TMP/err")"; RC=$?
-  if [[ $RC -eq 0 ]] && [[ "$(calls)" == "freshness run --project ${PROJECT} --policy install" ]] \
+    "$tools/bash" "$SCRIPT" </dev/null 2>"$TMP/err")"; RC=$?; read_calls
+  if [[ $RC -eq 0 ]] && [[ "$CALLS" == "freshness run --project ${PROJECT} --policy install" ]] \
     && jq -r .additionalContext <<<"$OUT" | grep -q "github:jbaruch/y@v2"; then
-    pass; else fail "jq only: expected the check and the update (and the no-timeout fetch fallback), got OUT=$OUT calls=$(calls) err=$(cat "$TMP/err")"; fi
+    pass; else fail "jq only: expected the check and the update (and the no-timeout fetch fallback), got OUT=$OUT calls=$CALLS err=$(cat "$TMP/err")"; fi
   rm -f "$TMP/calls" || die "cannot reset calls"
 
   # 18. neither python3 nor jq: the check cannot run, so no update.
@@ -248,9 +257,21 @@ main() {
     ln -sf "$real" "$bare/$t" || die "cannot link $t"
   done
   OUT="$(cd "$PROJECT" && env -u HERDR_ENV PATH="$bare" ACR_BIN="$TMP/acr" FAKE_CALLS="$TMP/calls" FAKE_OUT="Updated x" \
-    "$bare/bash" "$SCRIPT" </dev/null 2>"$TMP/err")"; RC=$?
-  if [[ $RC -eq 0 && -z "$(calls)" ]] && grep -q "neither python3 nor jq" "$TMP/err"; then
-    pass; else fail "no JSON tool: expected no update and a warning, got OUT=$OUT calls=$(calls) err=$(cat "$TMP/err")"; fi
+    "$bare/bash" "$SCRIPT" </dev/null 2>"$TMP/err")"; RC=$?; read_calls
+  if [[ $RC -eq 0 && -z "$CALLS" ]] && grep -q "neither python3 nor jq" "$TMP/err"; then
+    pass; else fail "no JSON tool: expected no update and a warning, got OUT=$OUT calls=$CALLS err=$(cat "$TMP/err")"; fi
+
+  # 19. origin renamed its default branch after the clone: the check follows
+  #     origin's live HEAD, not the stale local origin/HEAD.
+  mk_project p19
+  git -C "$SEED" checkout -q -b develop || die "seed branch failed"
+  printf 'develop\n' >> "$SEED/agents.yaml" || die "seed edit failed"
+  git -C "$SEED" commit -q -am develop || die "seed commit failed"
+  git -C "$SEED" push -q origin develop || die "seed push failed"
+  git -C "$ORIGIN" symbolic-ref HEAD refs/heads/develop || die "origin HEAD switch failed"
+  run "$PROJECT" FAKE_OUT="Updated x"
+  if [[ $RC -eq 0 && -z "$CALLS" ]] && context | grep -q "does not contain \`origin/develop\`"; then
+    pass; else fail "renamed default: expected a skip naming origin/develop, got OUT=$OUT calls=$CALLS"; fi
 
   echo "─────────────────────────────────────────────"
   if (( FAIL > 0 )); then echo "FAILED: ${FAIL} failed, ${PASS} passed"; exit 1; fi

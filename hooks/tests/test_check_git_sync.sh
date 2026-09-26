@@ -34,6 +34,16 @@ set -uo pipefail
 
 die() { echo "fatal: $*" >&2; exit 2; }
 
+# 0 when <a> and <b> name the same commit in <repo>, 1 when they differ. Called
+# in the harness's own shell, never in $(...): a ref that does not resolve stops
+# the harness, so an unresolved ref can never read as "different".
+same_commit() { # <repo> <a> <b>
+  local x y
+  x="$(git -C "$1" rev-parse --verify --quiet "$2^{commit}")" || die "cannot resolve $2 in $1"
+  y="$(git -C "$1" rev-parse --verify --quiet "$3^{commit}")" || die "cannot resolve $3 in $1"
+  [[ "$x" == "$y" ]]
+}
+
 cleanup() { [[ -n "${TMP:-}" ]] && ! rm -rf "$TMP" && echo "warn: could not remove $TMP" >&2; return 0; }
 
 g() { git "$@"; }
@@ -98,7 +108,7 @@ main() {
     || die "r1 worktree add failed"
   run "$TMP/r1-wt" "$TMP/s1b" HERDR_ENV=1
   if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | jq -e '.additionalContext | test("Herdr worker session") and test("Do not sync") and (test("fast-forward") | not)' >/dev/null 2>&1 \
-    && [[ "$(git -C "$TMP/r1" rev-parse main)" != "$(git -C "$TMP/r1" rev-parse origin/main)" ]]; then
+    && ! same_commit "$TMP/r1" main origin/main; then
     pass; else fail "worker session: expected a no-sync notice and main unmoved, got RC=$RC OUT=$OUT"; fi
 
   # 1b. The same drift from the MAIN checkout (on main) is the foreman or a
@@ -109,7 +119,7 @@ main() {
   chmod +x "$TMP/r1/.git/hooks/post-merge" || die "could not make the post-merge hook executable"
   run "$TMP/r1" "$TMP/s1c" HERDR_ENV=1
   if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | jq -e '.additionalContext | test("Session-start status") and test("fast-forwarded local `main` by 1")' >/dev/null 2>&1 \
-    && [[ "$(git -C "$TMP/r1" rev-parse main)" == "$(git -C "$TMP/r1" rev-parse origin/main)" ]] \
+    && same_commit "$TMP/r1" main origin/main \
     && [[ ! -e "$TMP/post-merge-ran" ]]; then
     pass; else fail "behind on main: expected a fast-forward with no repo hook run, got RC=$RC OUT=$OUT"; fi
 
@@ -119,7 +129,7 @@ main() {
   commit_push "$SEED" "c2"
   run "$TMP/r1e" "$TMP/s1f" SESSION_START_MODE=portable
   if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | jq -e '.additionalContext | test("not fast-forwarded here")' >/dev/null 2>&1 \
-    && [[ "$(git -C "$TMP/r1e" rev-parse main)" != "$(git -C "$TMP/r1e" rev-parse origin/main)" ]]; then
+    && ! same_commit "$TMP/r1e" main origin/main; then
     pass; else fail "portable: expected a report and main unmoved, got RC=$RC OUT=$OUT"; fi
 
   # 1c. Behind while a feature branch is checked out: main moves without a
@@ -130,7 +140,7 @@ main() {
   commit_push "$SEED" "c2"
   run "$TMP/r1c" "$TMP/s1d"
   if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | jq -e '.additionalContext | test("fast-forwarded")' >/dev/null 2>&1 \
-    && [[ "$(git -C "$TMP/r1c" rev-parse main)" == "$(git -C "$TMP/r1c" rev-parse origin/main)" ]] \
+    && same_commit "$TMP/r1c" main origin/main \
     && [[ "$(git -C "$TMP/r1c" symbolic-ref --short HEAD)" == "feat/x" ]]; then
     pass; else fail "behind off main: expected main fast-forwarded in place, got RC=$RC OUT=$OUT"; fi
 
@@ -143,7 +153,7 @@ main() {
   run "$TMP/r1d" "$TMP/s1e"
   if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | jq -e '.additionalContext | test("fast-forward was refused")' >/dev/null 2>&1 \
     && grep -q "local edit" "$TMP/r1d/f" \
-    && [[ "$(git -C "$TMP/r1d" rev-parse main)" != "$(git -C "$TMP/r1d" rev-parse origin/main)" ]]; then
+    && ! same_commit "$TMP/r1d" main origin/main; then
     pass; else fail "refused fast-forward: expected a report and the edit kept, got RC=$RC OUT=$OUT"; fi
 
   # 2. up to date -> marker "in sync" status.
