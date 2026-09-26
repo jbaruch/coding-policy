@@ -6,6 +6,7 @@ Coding policy plugin for Baruch's AI agents. Language-agnostic code quality rule
 
 ## What's New
 
+- `sweep-worktrees.sh` — the foreman's round sweep over every repository owning a worktree under `~/.worktrees`: idle clean worktrees a remote ref holds are removed, idle dirty or unpushed ones are archived under `refs/archive/worktrees/` and then removed; locked and in-use ones are kept
 - `herdr-foreman` and `herdr-standup` skills + `agent-team-operation` rule + `herdr-team-status` hook — run a three-agent team round inside [Herdr](https://herdr.dev): measure each worker's subscription headroom, assign developer / tester / reviewer by measured headroom, clear each worker's context and send a fresh role brief, wait on the report file plus its `REPORT: ` marker, and hand the merge to `release`; a non-rotating **judge** seat on the most capable model, dispatched from its own balancer config, rules on disputed verdicts, foreman overrides of blocking findings, fifth-round fix loops, and bot disagreements
 - `stop-handoff-hygiene` hook — a `Stop` hook (Claude Code + Codex) that blocks the handoff once (loop-safe via `stop_hook_active`) when it finds leftover local branches (merged, upstream deleted), orphaned worktrees, or diagnostics findings in the changed set; a dirty working tree is reported, not blocked
 - `check-tessl-latest` hook — runs `tessl update` every session and reports each `jbaruch/*` dependency's version, flagging one pinned instead of `latest` (`rules/dependency-management.md`). Never blocks

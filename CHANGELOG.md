@@ -1,5 +1,41 @@
 # Changelog
 
+### Changed
+
+- **The foreman's worktree cleanup reaches every repository and removes what
+  is spent (#535).** `~/.worktrees` held 94 entries across 14 repositories.
+  Run against the real root on 2026-09-25, `prune-worktrees.sh` would have
+  removed 2. Only branches merged into origin's default were removable, so
+  review, test and detached checkouts stayed forever, and a round pruned only
+  the repository in front of it.
+  - `skills/herdr-foreman/prune-worktrees.sh` now also removes an idle clean
+    worktree whose HEAD any remote-tracking ref holds, detached included. It
+    archives an idle dirty or unpushed one first: its HEAD plus every tracked
+    and untracked non-ignored file become one commit under
+    `refs/archive/worktrees/<name>-<stamp>`, verified before
+    `worktree remove --force`. A failed snapshot keeps the worktree.
+  - "Idle" is two facts: no process of this user has its cwd inside
+    (`lsof`), and no git activity (the worktree dir, its gitdir's HEAD, index
+    and logs/HEAD) for the window. Workers run `cd <worktree> && ...`, so a
+    cwd alone never proves idleness. A missing or failing probe keeps
+    everything (`idle-unknown`). The run's own `git status` uses
+    `--no-optional-locks`, so judging a worktree never refreshes its index
+    and resets the clock. Windows are top-of-file constants.
+  - Every removal is restorable: removed rows carry `head`, archived rows
+    carry `archive_ref`, and locked rows carry `lock_reason`.
+  - New `skills/herdr-foreman/sweep-worktrees.sh` groups the root's entries
+    by repository and runs the prune once each. A plain directory, a clone or
+    a repository without origin is reported, never fatal.
+  - `round-preflight.sh` runs the sweep in place of the single-repository
+    prune. Only this checkout's own prune failure blocks the round; another
+    repository's failure is `degraded`.
+  - The ledger records no worktree path per assignment, so the issue's
+    "ledger join" was dropped: locked worktrees stay kept and are reported
+    with their lock reason. `rules/agent-team-operation.md` Writers and
+    Checkouts and the `stop-handoff-hygiene` report text now describe the
+    sweep instead of "never removes a dirty, unmerged, locked or detached
+    worktree".
+
 ## 0.3.275 — 2026-09-26
 
 ### Fixed

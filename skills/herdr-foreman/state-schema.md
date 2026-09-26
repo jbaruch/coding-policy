@@ -15,6 +15,7 @@ the utility alone records the saved notes and their separate index.
 | `<task-reports-dir>/TASK-LEDGER.md` | `herdr-foreman`, written by the foreman | Evidence-backed assignment acceptance and task completion across rounds |
 | `<canonical-state-path>.retrospectives/` | `herdr-foreman`, through its retrospective utility | Immutable retrospective notes, versioned index, and transition coverage |
 | `<canonical-state-path>.foreman-reset.json` | `skills/herdr-foreman/foreman/foreman_reset.py` | One record per foreman round-boundary reset; see Foreman Reset Record below |
+| `refs/archive/worktrees/<name>-<UTC stamp>` in each repository | `skills/herdr-foreman/prune-worktrees.sh` | Snapshot of an idle dirty or unpushed worktree taken before its removal; see Worktree Archives below |
 
 ## Home Migration
 
@@ -871,3 +872,24 @@ and an `interrupted` row the operator saw resume (`delivered` only): `failed` re
 own `options`, `delivered` records `reconciled`. An identical retry returns
 the recorded row with `replayed: true`; a row that already ended any other
 way, or whose deliverer is still running, is refused.
+
+## Worktree Archives
+
+The round's sweep (`skills/herdr-foreman/sweep-worktrees.sh`) runs
+`skills/herdr-foreman/prune-worktrees.sh` per repository. Before removing an
+idle worktree that is dirty or holds commits no remote ref holds, the prune
+writes one git ref in that repository:
+
+- Name: `refs/archive/worktrees/<name>-<YYYYMMDDTHHMMSSZ>`, where `<name>` is
+  the worktree directory's basename with every character outside
+  `A-Za-z0-9._-` replaced by `-`
+- Target: a commit whose parent is the worktree's HEAD and whose tree is every
+  tracked and untracked non-ignored file as it stood; ignored files are not kept
+- Writer: the prune alone, create-only (`update-ref <ref> <commit> ""`)
+- Readers: the operator. Restore with
+  `git worktree add <path> <archive_ref>`, or read one file with
+  `git show <archive_ref>:<file>`
+- The prune's JSON names each written ref under `worktrees_archived`
+- Nothing expires an archive ref; deleting one is the operator's decision
+- The idle windows and the in-use test are that script's top-of-file
+  docstring and constants, not restated here
