@@ -205,6 +205,17 @@ class RequireCurrentTest(HomeCase):
             self.assertEqual(main(["migrate-home"], stdout=out, stderr=err), 0, err.getvalue())
         self.assertEqual(json.loads(out.getvalue())["homes"][0]["status"], "current")
 
+    def test_a_command_with_explicit_paths_runs_during_a_migration(self):
+        self.legacy_home()
+        state, config = self.state_root / "own" / "state.json", self.config_root / "own.json"
+        with home.guard(True, self.env):
+            for argv, refused in ((["foreman-queue", "--state", str(state), "--config", str(config)], False),
+                                  (["foreman-queue", "--state", str(state)], True)):
+                out, err = io.StringIO(), io.StringIO()
+                with mock.patch.dict("os.environ", self.env):
+                    main(argv, stdout=out, stderr=err)
+                with self.subTest(argv=argv):
+                    self.assertEqual("migrate-home is moving" in err.getvalue(), refused, err.getvalue())
 
     def test_migrate_home_refuses_explicit_paths(self):
         self.legacy_home()

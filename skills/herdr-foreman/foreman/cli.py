@@ -2176,9 +2176,13 @@ def main(argv=None, stdout=None, stderr=None, client=None):
             json.dump(payload, stdout, indent=2)
             stdout.write("\n")
             return 0
-        with home.guard(False):
-            home.require_current({kind for kind, given in (("state", getattr(args, "state", None)),
-                                                           ("config", getattr(args, "config", None))) if not given})
+        # Only a command reading a default home takes the guard: explicit
+        # --state and --config paths are never moved, so a migration never
+        # blocks them.
+        defaults = {kind for kind, given in (("state", getattr(args, "state", None)),
+                                             ("config", getattr(args, "config", None))) if not given}
+        with home.guard(False) if defaults else nullcontext():
+            home.require_current(defaults)
             # Commands that may migrate or write state share its canonical lock.
             # Dry runs, probes, and retrospective reads remain read-only.
             readonly = args.command in {"probe-report", "detect-triggers", "validate-partition", "verify-oracle", "retro-check", "retro-list", "retro-show", "capability-check", "capability-show", "supervision-gate", "load-set", "foreman-queue", "check-member"} or getattr(args, "dry_run", False)

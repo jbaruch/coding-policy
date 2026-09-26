@@ -21,7 +21,7 @@
   given explicit `--state` and `--config` is unaffected. `migrate-home`
   (`skills/herdr-foreman/foreman/home.py`) takes the home guard
   `$XDG_STATE_HOME/.foreman-home.lock` exclusively before reading either
-  home, and every other command holds that guard shared for its whole run,
+  home, and every other command reading a default home holds that guard shared for its whole run (explicit `--state` and `--config` paths skip it),
   so a migration never starts under a running command and a command started
   mid-migration is refused. The guard sits beside both homes, so it does
   not move with them; a scan of the owner locks inside the legacy home

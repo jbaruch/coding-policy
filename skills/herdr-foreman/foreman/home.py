@@ -33,7 +33,7 @@ Any other command whose default home is `legacy` refuses and names
 `migrate-home` (`require_current`); it never starts an empty store at the new
 path. A command given explicit `--state`/`--config` paths is unaffected.
 
-Every other command holds the home guard, `$XDG_STATE_HOME/.foreman-home.lock`,
+Every other command reading a default home holds the home guard, `$XDG_STATE_HOME/.foreman-home.lock`,
 shared for its whole run (`guard`). The guard lives beside both homes, never
 inside one, so it stays put while they move. `migrate` takes it exclusively
 before it looks at either home and holds it through both moves, creating

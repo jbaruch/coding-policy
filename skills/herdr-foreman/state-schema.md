@@ -25,7 +25,7 @@ and creates nothing at the new path; a command given explicit `--state` and
 `--config` is unaffected. `foreman migrate-home` is the owner's one-time move
 (`skills/herdr-foreman/foreman/home.py`, module docstring):
 
-- Every other command holds the home guard `$XDG_STATE_HOME/.foreman-home.lock`
+- Every other command reading a default home holds the home guard `$XDG_STATE_HOME/.foreman-home.lock`
   shared for its whole run; `migrate-home` takes it exclusively before reading
   either home and holds it through both moves, so it refuses while any command
   runs and a command started mid-migration is refused
