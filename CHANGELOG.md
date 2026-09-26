@@ -1,5 +1,56 @@
 # Changelog
 
+### Added
+
+- Add a separate central subscription acceptance workflow for ACR #156. Require
+  fresh exact-candidate credential-boundary proof before authentication, retain
+  validated producer Git bundles, scan seed/suite credential values, and bind
+  secret-free consumption to the exact successful producer run and artifact.
+  ACR integration and real conversion/publication/consumer acceptance remain
+  pending; the lane refuses candidates missing that interface.
+- Authenticate supplied local producer files against the immutable remote
+  artifact before verification or consumption.
+- Give the acceptance lane its own Codex credential,
+  `ACR_ACCEPT_CODEX_AUTH_JSON` (an `auth.json` holding a separate ChatGPT
+  account session or an `OPENAI_API_KEY`). It had seeded from the fleet
+  reviewer's `CODEX_AUTH_JSON`, so a token refresh inside ACR's isolated homes
+  could rotate the reviewer's session and fail every policy review. The
+  workflow never reads `CODEX_AUTH_JSON`; an absent secret refuses `seed` with
+  the secrets-settings URL, and the scanner treats an API key as a credential.
+- Make every acceptance command safe to repeat. `write_new` treats an existing
+  file with identical bytes as success; `prepare` and `consume` resume a run
+  root carrying the helper's ownership marker and redo partial clones and event
+  streams; `proof-run` keeps a valid proof for the same candidate; `seal` and
+  `download` return an existing export or extraction that matches exactly.
+  Mismatches still refuse.
+- Pin `setup-python` to 3.12.14, with its monthly renewal named in the step.
+- Preserve FFA's original Pyright configuration as an unchanged gate input.
+- Retain explicitly classified successful semantic repairs with complete
+  credential-boundary evidence.
+
+### Fixed
+
+- Require helper-created acceptance roots and safe directory identity before
+  cleanup, retaining partial-setup and consumer cleanup. Keep initial subscription
+  values in a private oracle and refuse central seed mutation or loss before
+  export; isolated-copy refresh remains valid. Document the existing installer
+  step handoff and cover its digest, ELF, version and fresh-attestation behavior
+  without native downloads. Add local Actions-read GH_TOKEN setup and fixed ZIP
+  fixture timestamps. Real ACR/Linux integration remains pending; reviewed
+  candidate trust and post-capture output limits are unchanged.
+
+- Roll back safely identifiable run-root initialization residue when ownership
+  record creation fails in prepare or consume, allowing same-path retry while
+  still failing setup. Preserve uncertain or replaced state and foreign contents;
+  standalone cleanup continues refusing unmarked roots.
+
+- Pin the acceptance runner's bubblewrap package to the reviewed Noble amd64
+  version, verify its installed Debian version, architecture and status before
+  native proof or subscription seeding, and document monthly/security-update
+  renewal beside the pin. Deterministic command fixtures cover exact selection
+  and failure propagation; actual hosted installation and native proof remain
+  required for Linux acceptance.
+
 ## 0.3.275 — 2026-09-26
 
 ### Fixed
