@@ -124,6 +124,23 @@
     task's own worktree at SKILL.md Step 15, with `git worktree remove` in the
     post-merge order. Every other worktree leaves only through the sweep.
 
+## 0.3.279 — 2026-09-26
+
+### Fixed
+
+- **Session-start git calls never run repo code, and ACR output is masked
+  (#547).** A `git fetch` that updates refs runs the repository's
+  `reference-transaction` hook, so every session start could execute
+  project-local code before any safety check, in `check-git-sync` (shipped in
+  #540) and in `check-acr-latest`'s sync proof. Every git network call in
+  both hooks now runs with `core.hooksPath=/dev/null`, as the fast-forward
+  already did; a regression in each suite installs a
+  `reference-transaction` hook that must never run, and fails with the fix
+  removed. `check-acr-latest` also masks URL userinfo, GitHub tokens,
+  OpenAI-style keys and bearer tokens in `acr freshness run` output before it
+  reaches the session (`rules/no-secrets.md` Logging), in pure bash so no
+  missing tool can skip it.
+
 ## 0.3.278 — 2026-09-26
 
 ### Fixed
