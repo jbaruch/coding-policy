@@ -37,15 +37,17 @@ warn() { printf 'check-acr-latest: %s\n' "$1" >&2; }
 # Echo <text> with credentials masked: URL userinfo, GitHub tokens, OpenAI-style
 # keys, and Bearer/Basic authorization values in any casing (rules/no-secrets.md Logging). Pure bash, so it needs
 # no tool that could be missing.
+# No length floor on any pattern: a short credential is still a credential, and
+# masking an ordinary word that happens to follow "Basic" is the safe failure.
 redact() { # <text>
   local text="$1" re
   local -a patterns=(
     '(://)[^/@[:space:]]+@'
     '(gh[pousr]_)[A-Za-z0-9_]+'
     '(github_pat_)[A-Za-z0-9_]+'
-    '(sk-)[A-Za-z0-9_-]{16,}'
+    '(sk-)[A-Za-z0-9_-]+'
     '([Bb][Ee][Aa][Rr][Ee][Rr][[:space:]]+)[A-Za-z0-9._~+/=-]+'
-    '([Bb][Aa][Ss][Ii][Cc][[:space:]]+)[A-Za-z0-9+/=]{8,}'
+    '([Bb][Aa][Ss][Ii][Cc][[:space:]]+)[A-Za-z0-9+/=]+'
   )
   for re in "${patterns[@]}"; do
     while [[ "$text" =~ $re ]]; do
