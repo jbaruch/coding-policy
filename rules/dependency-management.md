@@ -57,6 +57,17 @@ alwaysApply: true
 - `skills/onboard-repo` sets `latest` and gitignores `.tessl/` at onboarding
 - Third-party dependencies (`tessl-labs/*`, `tessl/npm-*`) pin normally and stay out of scope
 
+### Authority of Record — consumer `agents.yaml`
+
+- Covered manifest: the fleet's consumer ACR `agents.yaml`
+- ACR writes its resolved state into `.agents/registry.lock`, gitignored with the rest of `.agents/`
+- `github:jbaruch/*` dependencies use `requested: latest`
+- Deterministic check: the plugin-shipped `hooks/check-acr-latest.sh` `SessionStart` hook
+- The hook flags any `github:jbaruch/*` dependency not at `latest`
+- The hook refuses to update while `.agents/registry.lock` is tracked
+- `skills/onboard-repo` gitignores `.agents/` at onboarding
+- Dependencies from other owners pin normally and stay out of scope
+
 ## Adversarial-Freshness Dependency Carve-Out
 
 - Narrow exception for a dependency whose value is tracking an adversary, not a version
