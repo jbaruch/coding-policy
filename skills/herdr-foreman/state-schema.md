@@ -15,7 +15,7 @@ the utility alone records the saved notes and their separate index.
 | `<task-reports-dir>/TASK-LEDGER.md` | `herdr-foreman`, written by the foreman | Evidence-backed assignment acceptance and task completion across rounds |
 | `<canonical-state-path>.retrospectives/` | `herdr-foreman`, through its retrospective utility | Immutable retrospective notes, versioned index, and transition coverage |
 | `<canonical-state-path>.foreman-reset.json` | `skills/herdr-foreman/foreman/foreman_reset.py` | One record per foreman round-boundary reset; see Foreman Reset Record below |
-| `refs/archive/worktrees/<name>-<UTC stamp>` in each repository | `skills/herdr-foreman/prune-worktrees.sh` | Snapshot of an idle dirty or unpushed worktree taken before its removal; see Worktree Archives below |
+| `refs/archive/worktrees/<name>-<UTC stamp>` in each repository | `skills/herdr-foreman/prune-worktrees.sh` | Archive record of an idle dirty or unpushed worktree moved to the root's `.trash/`; see Worktree Archives below |
 
 ## Home Migration
 
@@ -876,21 +876,46 @@ way, or whose deliverer is still running, is refused.
 ## Worktree Archives
 
 The round's sweep (`skills/herdr-foreman/sweep-worktrees.sh`) runs
-`skills/herdr-foreman/prune-worktrees.sh` per repository. Before removing an
-idle worktree that is dirty or holds commits no remote ref holds, the prune
-writes one git ref in that repository:
+`skills/herdr-foreman/prune-worktrees.sh` per repository. Before moving an
+idle worktree that is dirty or holds commits no remote ref holds into the
+root's `.trash/`, the prune writes one archive record in that repository.
 
-- Name: `refs/archive/worktrees/<name>-<YYYYMMDDTHHMMSSZ>`, where `<name>` is
-  the worktree directory's basename with every character outside
-  `A-Za-z0-9._-` replaced by `-`
+Record:
+
+- Ref: `refs/archive/worktrees/<name>-<pathhash>-<YYYYMMDDTHHMMSSZ>`, where
+  `<name>` is the worktree directory's basename with every character outside
+  `A-Za-z0-9._-` replaced by `-`, and `<pathhash>` is the first 10 hex digits
+  of the SHA-1 of the worktree's absolute path
 - Target: a commit whose parent is the worktree's HEAD and whose tree is every
-  tracked and untracked non-ignored file as it stood; ignored files are not kept
-- Writer: the prune alone, create-only (`update-ref <ref> <commit> ""`)
-- Readers: the operator. Restore with
-  `git worktree add <path> <archive_ref>`, or read one file with
-  `git show <archive_ref>:<file>`
-- The prune's JSON names each written ref under `worktrees_archived`
-- Every live prune deletes an archive ref whose stamp is older than the expiry window (compare-and-delete) and lists it under `archives_expired`; a dry run only lists it
-- A ref under `refs/archive/worktrees/` without such a stamp is never deleted by the prune
+  tracked and untracked non-ignored file as it stood; ignored files and
+  submodule contents are not kept (a worktree with a dirty submodule is never
+  archived)
+- Commit-message trailers, the record's fields:
+  - `Archive-Schema: 1` — the schema version
+  - `Archive-Source:` — the worktree's absolute path
+  - `Archive-Head:` — its HEAD when archived
+  - `Archive-Branch:` — its branch, empty when detached
+  - `Archive-Trash:` — the trash worktree path, `<root>/.trash/<ref basename>`
+- The trash worktree is the original, moved there by `git worktree move`; it
+  stays registered with git until expiry
+
+Writer / reader contract:
+
+- Owner and only writer: `skills/herdr-foreman/prune-worktrees.sh`,
+  create-only (`update-ref <ref> <commit> ""`); only the owner migrates a
+  record, and a shape change bumps `Archive-Schema`
+- The prune's JSON names each written record under `worktrees_archived`
+  (`archive_ref`, `trash_path`)
+- Expiry reader: the same script. A record whose stamp is older than the
+  expiry window has its trash worktree removed, its branch deleted when the
+  archive holds the branch tip, and its ref compare-and-deleted; each is
+  listed under `archives_expired`, and a dry run only lists it
+- A record with no `Archive-Schema` trailer, or one the reader does not know
+  (older or newer), is left alone and never expired
+- A ref under `refs/archive/worktrees/` without the stamp suffix is never
+  touched
+- Operator reader: restore with `git worktree add <path> <archive_ref>`, read
+  one file with `git show <archive_ref>:<file>`, or use the trash worktree
+  directly before it expires
 - The idle windows, the in-use test and the expiry window are that script's
   top-of-file docstring and constants, not restated here

@@ -9,39 +9,49 @@
   review, test and detached checkouts stayed forever, and a round pruned only
   the repository in front of it.
   - `skills/herdr-foreman/prune-worktrees.sh` now also removes an idle clean
-    worktree whose HEAD any remote-tracking ref holds, detached included. It
-    archives an idle dirty or unpushed one first: its HEAD plus every tracked
-    and untracked non-ignored file become one commit under
-    `refs/archive/worktrees/<name>-<stamp>`, verified before
-    `worktree remove --force`. A failed snapshot keeps the worktree.
+    worktree whose HEAD any remote-tracking ref holds, detached included,
+    with plain `git worktree remove`: git refuses a tree that turned dirty.
+  - An idle dirty or unpushed worktree is never deleted. It is archived:
+    its HEAD plus every tracked and untracked non-ignored file become one
+    commit at `refs/archive/worktrees/<name>-<pathhash>-<stamp>` with
+    `Archive-Schema: 1` trailers. Then `git worktree move` renames it into
+    the root's `.trash/`, so a writer that got in after the last check lands
+    in the moved copy. A worktree with a dirty submodule is kept, since the
+    snapshot covers the superproject only. The path hash keeps two worktrees
+    with one basename apart.
   - "Idle" is two facts: no process of this user has its cwd inside
-    (`lsof`), and no git activity (the worktree dir, its gitdir's HEAD, index
-    and logs/HEAD) for the window. Workers run `cd <worktree> && ...`, so a
-    cwd alone never proves idleness. A missing or failing probe keeps
-    everything (`idle-unknown`). The run's own `git status` uses
-    `--no-optional-locks`, so judging a worktree never refreshes its index
-    and resets the clock. Windows are top-of-file constants.
-  - Every removal waits for idleness, the merged fast path included. The
-    idle clock covers working-tree activity too: every modified tracked or
-    untracked non-ignored file (bounded by `ACTIVITY_FILE_LIMIT`).
+    (`lsof`), and no activity for the window. The clock covers the worktree
+    dir, its gitdir's HEAD, index and logs/HEAD, and every modified tracked
+    or untracked non-ignored file, bounded by `ACTIVITY_FILE_LIMIT`. Workers
+    run `cd <worktree> && ...`, so a cwd alone never proves idleness. A
+    missing or failing probe keeps everything (`idle-unknown`). Every read
+    uses `--no-optional-locks`, so judging never resets the clock. Every
+    removal waits for idleness, the merged path included.
   - Immediately before a removal, and again after an archive is written,
     HEAD, the branch tip, status, age and the process probe are re-read; any
     change keeps the worktree (`changed`). A written archive is always
-    listed, with `removed: false` when its worktree stayed.
-  - Archive refs expire: each live run deletes `refs/archive/worktrees/*`
-    whose embedded stamp is older than `ARCHIVE_EXPIRE_DAYS` (default 30)
-    and lists them under `archives_expired`; a dry run only lists them.
+    listed, with `trash_path: null` when its worktree stayed in place.
+  - Archives expire: each live run takes a record older than
+    `ARCHIVE_EXPIRE_DAYS` (default 30), removes its trash worktree, deletes
+    its branch when the archive holds the tip, and deletes the ref. A record
+    with an unknown `Archive-Schema` is never expired. A dry run only lists
+    them under `archives_expired`.
   - Every removal is restorable: removed rows carry `head`, archived rows
-    carry `archive_ref`, and locked rows carry `lock_reason`.
-  - New `skills/herdr-foreman/sweep-worktrees.sh` finds worktrees
-    recursively under the root (bounded by `MAX_DEPTH`), groups them by
-    repository and runs the prune once each. A plain directory, a clone or a
-    repository without origin is reported, never fatal. A worktree git
-    cannot read is an `errors` entry (exit 2); `broken-worktree` is only a
-    `.git` file naming a vanished gitdir.
+    carry `archive_ref` and `trash_path`, and locked rows carry
+    `lock_reason`.
+  - New `skills/herdr-foreman/sweep-worktrees.sh` finds worktrees anywhere
+    under the root, never descending into a found checkout, `.git`, the
+    root's `.trash` or a symlinked directory. It groups them by repository
+    and runs the prune once each. A plain directory, a clone or a repository
+    without origin is reported, never fatal. A worktree git cannot read is
+    an `errors` entry naming its repository when the gitdir's files resolve
+    it (exit 2); `broken-worktree` is only a `.git` file naming a vanished
+    gitdir.
   - `round-preflight.sh` runs the sweep in place of the single-repository
-    prune. Only this checkout's own prune failure blocks the round; another
-    repository's failure is `degraded`.
+    prune and keeps the sweep JSON even on a failed check. This checkout's
+    own failure, or an error naming no repository, blocks the round; another
+    repository's failure is `degraded`. SKILL.md Step 2 reports the sweep's
+    outcomes on every route.
   - The ledger records no worktree path per assignment, so the issue's
     "ledger join" was dropped: locked worktrees stay kept and are reported
     with their lock reason. `rules/agent-team-operation.md` Writers and
@@ -49,8 +59,9 @@
     sweep instead of "never removes a dirty, unmerged, locked or detached
     worktree".
   - `rules/agent-worktree-isolation.md` Cleanup defines abandoned: idle past
-    the prune script's windows, with its work held by a remote ref or an
-    archive ref (operator decision).
+    the prune script's windows. An abandoned worktree is removed once a
+    remote ref holds its work, or archived and moved to `.trash/` (operator
+    decision).
 
 ## 0.3.275 — 2026-09-26
 

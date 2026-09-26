@@ -223,20 +223,32 @@ PY
       0) record worktrees ok "" 0 "${scratch}/sweep.json" ;;
       1) record worktrees undecided "sweep-worktrees.sh decided nothing; fix its diagnostic and re-run before provisioning" 0 "" ;;
       2)
-        # This checkout's own prune exit, or "none" when it owns no worktree there.
+        # Whose failure it is: this checkout's prune (undecided / failed), an
+        # error no repository could be named for (unassociated), or another
+        # repository's alone (degraded). Only the last lets the round proceed.
         if ! own="$(python3 - "${scratch}/sweep.json" "$checkout" <<'PY'
 import json, os, sys
 with open(sys.argv[1], encoding="utf-8") as handle:
     sweep = json.load(handle)
 mine = os.path.realpath(sys.argv[2])
-print(next((str(r["exit"]) for r in sweep["repos"] if os.path.realpath(r["shared"]) == mine), "none"))
+own = next((r["exit"] for r in sweep["repos"] if os.path.realpath(r["shared"]) == mine), 0)
+errors = sweep.get("errors", [])
+if own == 1:
+    print("undecided")
+elif own != 0 or any(e.get("repo") and os.path.realpath(e["repo"]) == mine for e in errors):
+    print("failed")
+elif any(not e.get("repo") for e in errors):
+    print("unassociated")
+else:
+    print("degraded")
 PY
 )"; then
           record worktrees failed "sweep-worktrees.sh exited 2 and its JSON could not be read" 0 ""
         else
           case "$own" in
-            1) record worktrees undecided "prune-worktrees.sh decided nothing for ${checkout}; fix its diagnostic and re-run before provisioning" 0 "" ;;
-            2) record worktrees failed "prune-worktrees.sh reported a failure for ${checkout}; git refused a check or a removal" 0 "" ;;
+            undecided) record worktrees undecided "prune-worktrees.sh decided nothing for ${checkout}; fix its diagnostic and re-run before provisioning" 0 "${scratch}/sweep.json" ;;
+            failed) record worktrees failed "the sweep reported a failure for ${checkout}; git refused a check or a removal" 0 "${scratch}/sweep.json" ;;
+            unassociated) record worktrees failed "the sweep could not read a worktree under ${wroot} and could not name its repository; inspect the errors entry before provisioning" 0 "${scratch}/sweep.json" ;;
             *) record worktrees degraded "" 0 "${scratch}/sweep.json" ;;
           esac
         fi ;;

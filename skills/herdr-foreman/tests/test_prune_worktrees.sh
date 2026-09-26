@@ -60,7 +60,8 @@
 #                             removed; a pushed unmerged branch goes with it.
 #  36. In use               -> a process with its cwd inside keeps it.
 #  37. Unpushed, idle       -> archived under refs/archive/worktrees/ with its
-#                             commits and an untracked file, then removed.
+#                             commits and an untracked file, then moved to
+#                             the root's .trash/.
 #  38. Locked, idle         -> kept, reported with its lock reason.
 #  39. Not idle             -> fresh activity keeps a reachable worktree.
 #  40. Idle, below archive  -> an unpushed one idle past the removal window but
@@ -74,9 +75,13 @@
 #  46. Fresh edit           -> a tracked file edited now keeps an old worktree.
 #  47. Changed at removal   -> a process arriving before the removal keeps it.
 #  48. Changed after archive-> the archive is reported, the worktree kept.
-#  49. Removal fails        -> a written archive is still reported.
-#  50. Archive expiry       -> refs past the expiry window are deleted; a dry
-#                             run previews; a recent or unstamped ref stays.
+#  49. Move fails           -> a written archive is still reported.
+#  37b. Trash              -> a moved worktree is not judged by the next run.
+#  50. Archive expiry       -> refs past the expiry window go with their trash
+#                             worktree and branch; a dry run previews; a
+#                             recent, unstamped or unknown-schema ref stays.
+#  51. Dirty submodule      -> kept, never archived.
+#  52. Same basename        -> two worktrees archive to two refs.
 #
 # Run: bash skills/herdr-foreman/tests/test_prune_worktrees.sh
 set -uo pipefail
@@ -138,7 +143,7 @@ has_branch() { # <shared> <branch> -> 0 present, 1 absent; a git error aborts th
 listed() { # <shared> <path>  -> 0 listed, 1 not listed; a tool failure aborts the harness
   local inventory rc=0
   inventory="$(git -C "$1" worktree list --porcelain)" || die "git worktree list failed in $1"
-  grep -qx "worktree $2" <<<"$inventory" || rc=$?
+  grep -qxF "worktree $2" <<<"$inventory" || rc=$?
   case "$rc" in 0) return 0 ;; 1) return 1 ;; *) die "grep failed (exit $rc) reading the worktree inventory" ;; esac
 }
 
@@ -173,7 +178,16 @@ lsof_turns_busy() { # <dir> <n> <path>
     "$1/calls" "$1/calls" "$2" "$3" > "$1/lsof" || die "write lsof stand-in failed"
   chmod +x "$1/lsof" || die "chmod lsof stand-in failed"
 }
-archived_removed() { python3 -c 'import json,sys; d=json.load(sys.stdin); print(next((str(r["removed"]).lower() for r in d["worktrees_archived"] if r["path"]==sys.argv[1]), ""))' "$1" <<<"$OUT"; }
+trash_of() { python3 -c 'import json,sys; d=json.load(sys.stdin); print(next((r["trash_path"] or "" for r in d["worktrees_archived"] if r["path"]==sys.argv[1]), ""))' "$1" <<<"$OUT"; }
+# An archive commit of <commit> with schema <n> trailers naming <trash> and <branch>, at <ref>.
+mk_archive() { # <shared> <ref> <commit> <schema> <trash> <branch>
+  local tree c
+  tree="$(git -C "$1" rev-parse "$3^{tree}")" || die "rev-parse tree failed"
+  c="$(git -C "$1" -c user.name=t -c user.email=t@t commit-tree "$tree" -p "$3" \
+    -m "$(printf 'Archive\n\nArchive-Schema: %s\nArchive-Source: x\nArchive-Head: %s\nArchive-Branch: %s\nArchive-Trash: %s\n' "$4" "$3" "$6" "$5")")" \
+    || die "commit-tree failed"
+  git -C "$1" update-ref "$2" "$c" || die "update-ref $2 failed"
+}
 main() {
   PASS=0; FAIL=0; RUN_SEQ=0
   SCRIPT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/prune-worktrees.sh"
@@ -619,13 +633,19 @@ SHIM
   echo "36. a process with its cwd inside keeps an idle worktree"
   if [[ "$(kept_reason "$busy")" == in-use ]] && listed "$SHARED" "$busy"; then
     pass; else fail "in-use: out=$OUT"; fi
-  echo "37. an idle unpushed worktree is archived with its commits and untracked files, then removed"
-  local ref; ref="$(archived_ref "$stale")"
-  if [[ "$ref" == refs/archive/worktrees/idle-stale-20200110T000000Z ]] && ! listed "$SHARED" "$stale" \
+  echo "37. an idle unpushed worktree is archived with its commits and untracked files, then moved to the trash"
+  local ref trash; ref="$(archived_ref "$stale")"; trash="$(trash_of "$stale")"
+  if [[ "$ref" =~ ^refs/archive/worktrees/idle-stale-[0-9a-f]{10}-20200110T000000Z$ ]] && ! listed "$SHARED" "$stale" \
+    && [[ "$trash" == "$ROOT/.trash/${ref#refs/archive/worktrees/}" ]] && listed "$SHARED" "$trash" \
     && git -C "$SHARED" merge-base --is-ancestor "$stale_tip" "$ref" \
     && [[ "$(git -C "$SHARED" show "$ref:notes.txt")" == "untracked work" ]] \
-    && ! has_branch "$SHARED" feat/stale; then
-    pass; else fail "archive: ref=$ref out=$OUT err=$ERRTEXT"; fi
+    && [[ "$(git -C "$SHARED" log -1 --format=%B "$ref")" == *"Archive-Schema: 1"* ]] \
+    && has_branch "$SHARED" feat/stale; then
+    pass; else fail "archive: ref=$ref trash=$trash out=$OUT err=$ERRTEXT"; fi
+  idle_run
+  echo "37b. a trash worktree is not judged again by the next run"
+  if (( RC == 0 )) && ! mentions_path "$trash"; then
+    pass; else fail "trash re-judged: out=$OUT"; fi
   echo "38. a locked idle worktree is kept with its lock reason"
   if [[ "$(kept_reason "$held")" == locked && "$(lock_reason_of "$held")" == "Active Herdr reviewer" ]] && listed "$SHARED" "$held"; then
     pass; else fail "locked: out=$OUT"; fi
@@ -738,7 +758,7 @@ SHIM
   idle_run PRUNE_LSOF="$TMP/lsof48/lsof"
   echo "48. a worktree that turns busy after its archive keeps the archive reported and the worktree"
   local ra_ref; ra_ref="$(archived_ref "$ra")"
-  if [[ -n "$ra_ref" && "$(archived_removed "$ra")" == false && "$(kept_reason "$ra")" == changed ]] && listed "$SHARED" "$ra" \
+  if [[ -n "$ra_ref" && -z "$(trash_of "$ra")" && "$(kept_reason "$ra")" == changed ]] && listed "$SHARED" "$ra" \
     && git -C "$SHARED" rev-parse --verify --quiet "$ra_ref" >/dev/null; then
     pass; else fail "changed after archive: out=$OUT err=$ERRTEXT"; fi
 
@@ -749,32 +769,69 @@ SHIM
   age_wt "$rf"
   mkdir -p "$TMP/shim49" || die "mkdir shim49 failed"
   # shellcheck disable=SC2016  # The shim's "$@" and $a must expand in the shim, not here.
-  printf '#!/usr/bin/env bash\nset -euo pipefail\nfor a in "$@"; do if [[ "$a" == --force ]]; then echo "remove refused" >&2; exit 1; fi; done\nexec %q "$@"\n' "$real_git" > "$TMP/shim49/git" \
+  printf '#!/usr/bin/env bash\nset -euo pipefail\nfor a in "$@"; do if [[ "$a" == move ]]; then echo "move refused" >&2; exit 1; fi; done\nexec %q "$@"\n' "$real_git" > "$TMP/shim49/git" \
     || die "shim49 write failed"
   chmod +x "$TMP/shim49/git" || die "chmod shim49 failed"
   idle_run PATH="$TMP/shim49:$PATH"
-  echo "49. a failed removal after the archive still names the archive ref"
-  if (( RC == 2 )) && [[ -n "$(archived_ref "$rf")" && "$(archived_removed "$rf")" == false ]] && [[ "$OUT" == *"remove refused"* ]] && listed "$SHARED" "$rf"; then
+  echo "49. a failed move after the archive still names the archive ref"
+  if (( RC == 2 )) && [[ -n "$(archived_ref "$rf")" && -z "$(trash_of "$rf")" ]] && [[ "$OUT" == *"move refused"* ]] && listed "$SHARED" "$rf"; then
     pass; else fail "removal failure: rc=$RC out=$OUT err=$ERRTEXT"; fi
 
-  # --- 50. archive refs past the expiry window are deleted.
+  # --- 50. archive refs past the expiry window go, with their trash worktree.
   mk_repo expiry
-  local c1; c1="$(git -C "$SHARED" rev-parse HEAD)" || die "rev-parse failed"
-  local r
-  for r in old-20191201T000000Z recent-20200105T000000Z nostamp; do
-    git -C "$SHARED" update-ref "refs/archive/worktrees/$r" "$c1" || die "update-ref $r failed"
-  done
+  local c1 etrash="$ROOT/.trash/old-0000000000-20191201T000000Z"
+  c1="$(git -C "$SHARED" rev-parse HEAD)" || die "rev-parse failed"
+  mkdir -p "$ROOT/.trash" || die "mkdir trash failed"
+  git -C "$SHARED" worktree add -q -b feat/expired "$etrash" "$c1" 2>/dev/null || die "trash worktree add failed"
+  printf 'left in trash\n' > "$etrash/late.txt" || die "trash write failed"
+  mk_archive "$SHARED" refs/archive/worktrees/old-0000000000-20191201T000000Z "$c1" 1 "$etrash" feat/expired
+  mk_archive "$SHARED" refs/archive/worktrees/recent-0000000000-20200105T000000Z "$c1" 1 "" ""
+  mk_archive "$SHARED" refs/archive/worktrees/future-0000000000-20191201T000000Z "$c1" 2 "" ""
+  git -C "$SHARED" update-ref refs/archive/worktrees/nostamp "$c1" || die "update-ref nostamp failed"
   IDLE_ARGS=(--dry-run)
   idle_run
   IDLE_ARGS=()
-  echo "50a. a dry run previews the expired archive and deletes nothing"
-  if (( RC == 0 )) && [[ "$(python3 -c 'import json,sys; print(",".join(r["ref"] for r in json.load(sys.stdin)["archives_expired"]))' <<<"$OUT")" == refs/archive/worktrees/old-20191201T000000Z ]] \
-    && [[ "$(git -C "$SHARED" for-each-ref refs/archive/ | wc -l | tr -d ' ')" == 3 ]]; then
+  echo "50a. a dry run previews the expired archive and changes nothing"
+  if (( RC == 0 )) && [[ "$(python3 -c 'import json,sys; print(",".join(r["ref"] for r in json.load(sys.stdin)["archives_expired"]))' <<<"$OUT")" == refs/archive/worktrees/old-0000000000-20191201T000000Z ]] \
+    && [[ "$(git -C "$SHARED" for-each-ref refs/archive/ | wc -l | tr -d ' ')" == 4 ]] && listed "$SHARED" "$etrash"; then
     pass; else fail "expiry dry run: rc=$RC out=$OUT"; fi
   idle_run
-  echo "50b. a live run deletes only the archive past the window"
-  if (( RC == 0 )) && [[ "$(git -C "$SHARED" for-each-ref --format='%(refname)' refs/archive/ | sort | tr '\n' ' ')" == "refs/archive/worktrees/nostamp refs/archive/worktrees/recent-20200105T000000Z " ]]; then
-    pass; else fail "expiry: rc=$RC out=$OUT"; fi
+  echo "50b. a live run removes the expired archive, its trash worktree and its branch; an unknown schema stays"
+  if (( RC == 0 )) && [[ "$(git -C "$SHARED" for-each-ref --format='%(refname)' refs/archive/ | sort | tr '\n' ' ')" == "refs/archive/worktrees/future-0000000000-20191201T000000Z refs/archive/worktrees/nostamp refs/archive/worktrees/recent-0000000000-20200105T000000Z " ]] \
+    && ! listed "$SHARED" "$etrash" && [[ ! -e "$etrash" ]] && ! has_branch "$SHARED" feat/expired; then
+    pass; else fail "expiry: rc=$RC out=$OUT err=$ERRTEXT"; fi
+
+  # --- 51. a dirty submodule keeps an idle worktree; it is never archived.
+  mk_repo submod
+  local sub_origin="$TMP/sublib.git" sw="$ROOT/submod-wt"
+  git init -q --bare -b main "$sub_origin" || die "sub origin init failed"
+  git clone -q "$sub_origin" "$TMP/sublib-seed" 2>/dev/null || die "sub seed clone failed"
+  printf 's\n' > "$TMP/sublib-seed/s" || die "sub seed write failed"
+  git -C "$TMP/sublib-seed" -c user.name=t -c user.email=t@t add s || die "sub add failed"
+  git -C "$TMP/sublib-seed" -c user.name=t -c user.email=t@t commit -q -m s1 || die "sub commit failed"
+  git -C "$TMP/sublib-seed" push -q origin main 2>/dev/null || die "sub push failed"
+  add_wt "$SHARED" feat/submod "$sw"
+  git -C "$sw" -c protocol.file.allow=always submodule --quiet add "$sub_origin" lib 2>/dev/null || die "submodule add failed"
+  git -C "$sw" -c user.name=t -c user.email=t@t commit -q -m "add lib" || die "submodule commit failed"
+  printf 'nested edit\n' >> "$sw/lib/s" || die "nested edit failed"
+  age_wt "$sw"
+  idle_run
+  echo "51. a worktree whose submodule holds changes is kept, never archived"
+  if [[ "$(kept_reason "$sw")" == submodule-dirty ]] && listed "$SHARED" "$sw" && [[ -z "$(git -C "$SHARED" for-each-ref refs/archive/)" ]]; then
+    pass; else fail "submodule: out=$OUT err=$ERRTEXT"; fi
+
+  # --- 52. two worktrees sharing a basename get two archives.
+  mk_repo samename
+  local s1="$ROOT/a/wt" s2="$ROOT/b/wt"
+  mkdir -p "$ROOT/a" "$ROOT/b" || die "mkdir samename failed"
+  add_wt "$SHARED" feat/same1 "$s1"; commit_in "$s1" one.txt
+  add_wt "$SHARED" feat/same2 "$s2"; commit_in "$s2" two.txt
+  age_wt "$s1"; age_wt "$s2"
+  idle_run
+  echo "52. two worktrees with one basename are archived to distinct refs"
+  local ref1 ref2; ref1="$(archived_ref "$s1")"; ref2="$(archived_ref "$s2")"
+  if (( RC == 0 )) && [[ -n "$ref1" && -n "$ref2" && "$ref1" != "$ref2" ]] && ! listed "$SHARED" "$s1" && ! listed "$SHARED" "$s2"; then
+    pass; else fail "same basename: rc=$RC out=$OUT err=$ERRTEXT"; fi
 
   # --- 14. usage / not a repo.
   run

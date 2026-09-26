@@ -16,16 +16,19 @@
 #            "repos":[{"shared":"<abs>","exit":N,"result":{...}}
 #                     | {"shared":"<abs>","exit":N,"error":"<stderr>"}],
 #            "skipped":[{"path":"<abs>","reason":"<why>"}],
-#            "errors":[{"path":"<abs>","exit":N|null,"error":"<stderr>"}]}
+#            "errors":[{"path":"<abs>","repo":"<abs>"|null,"exit":N|null,
+#                       "error":"<stderr>"}]}
 #           `result` is that repository's prune-worktrees.sh JSON. `error`
 #           replaces it when the prune decided nothing (exit 1: no origin, a
-#           failed fetch, ...). Worktrees are found recursively, up to
-#           MAX_DEPTH directories below the root; a found checkout is not
-#           descended. A skipped entry is not-a-worktree (a direct child of
+#           failed fetch, ...). Worktrees are found anywhere below the root; a
+#           found checkout, a .git directory, the root's .trash (the prune's
+#           archived worktrees) and a symlinked directory are not descended.
+#           A skipped entry is not-a-worktree (a direct child of
 #           the root holding no checkout), clone (a repository's own main
 #           checkout), or broken-worktree (its .git file names a gitdir that
 #           no longer exists). An `errors` entry is a worktree git could not
-#           read (rev-parse or worktree list failed), with its exit code.
+#           read (rev-parse or worktree list failed), with its exit code and
+#           the repository owning it when its gitdir's files name one.
 #   stderr: diagnostics, and each prune's stderr prefixed with its repository.
 #   exit  : 0 every repository decided cleanly,
 #           1 usage, python3 absent, or the root unreadable — no JSON,
@@ -68,11 +71,6 @@ import sys
 root, dry, prune = os.path.realpath(sys.argv[1]), sys.argv[2] == "1", sys.argv[3]
 
 
-#: Directories below the root searched for worktrees; a worktree nested
-#: deeper than this is not found.
-MAX_DEPTH = 4
-
-
 def git(*args):
     return subprocess.run(["git", *args], capture_output=True, text=True)
 
@@ -89,30 +87,41 @@ def gitdir_of(path):
     return os.path.normpath(os.path.join(path, first[len("gitdir: "):]))
 
 
+def repo_of(gitdir):
+    """The main checkout owning a linked worktree's gitdir, read from its files, or None."""
+    try:
+        with open(os.path.join(gitdir, "commondir"), encoding="utf-8") as handle:
+            common = os.path.normpath(os.path.join(gitdir, handle.read().strip()))
+    except OSError:
+        return None
+    return os.path.dirname(common) if os.path.basename(common) == ".git" else None
+
+
 def discover(root):
-    """Walk the root: yield ("worktree"|"clone", path); a found checkout is not descended."""
+    """Walk the whole root: a checkout found is not descended, nor is .git,
+    the prune's .trash, or a symlinked directory."""
     found, empty_tops = [], []
     for top in sorted(os.listdir(root)):
         top_path = os.path.join(root, top)
+        if top == ".trash":
+            continue
         before = len(found)
-        stack = [(top_path, 0)]
+        stack = [top_path]
         while stack:
-            current, depth = stack.pop()
-            if not os.path.isdir(current) or os.path.islink(current):
+            current = stack.pop()
+            if os.path.islink(current) or not os.path.isdir(current):
                 continue
             dotgit = os.path.join(current, ".git")
             if os.path.isdir(dotgit):
                 found.append(("clone", current)); continue
             if os.path.isfile(dotgit):
                 found.append(("worktree", current)); continue
-            if depth >= MAX_DEPTH:
-                continue
             try:
                 children = sorted(os.listdir(current), reverse=True)
             except OSError as exc:
-                errors.append({"path": current, "exit": None, "error": "cannot list: {}".format(exc)})
+                errors.append({"path": current, "repo": None, "exit": None, "error": "cannot list: {}".format(exc)})
                 continue
-            stack.extend((os.path.join(current, child), depth + 1) for child in children if child != ".git")
+            stack.extend(os.path.join(current, child) for child in children if child != ".git")
         if len(found) == before:
             empty_tops.append(top_path)
     return found, empty_tops
@@ -127,27 +136,33 @@ for kind, path in found:
         continue
     gitdir = gitdir_of(path)
     if gitdir is None:
-        errors.append({"path": path, "exit": None, "error": "its .git file names no gitdir"})
+        errors.append({"path": path, "repo": None, "exit": None, "error": "its .git file names no gitdir"})
         continue
     if not os.path.exists(gitdir):
         # Proven stale: the metadata the .git file points at is gone.
         skipped.append({"path": path, "reason": "broken-worktree"})
         continue
+    owner = repo_of(gitdir)
     common = git("-C", path, "rev-parse", "--path-format=absolute", "--git-common-dir")
     if common.returncode != 0:
-        errors.append({"path": path, "exit": common.returncode, "error": common.stderr.strip()})
+        errors.append({"path": path, "repo": owner, "exit": common.returncode, "error": common.stderr.strip()})
         continue
-    listed = git("--git-dir", common.stdout.strip(), "worktree", "list", "--porcelain", "-z")
+    common_dir = common.stdout.strip()
+    if owner is None and os.path.basename(common_dir) == ".git":
+        owner = os.path.dirname(common_dir)
+    listed = git("--git-dir", common_dir, "worktree", "list", "--porcelain", "-z")
     if listed.returncode != 0:
-        errors.append({"path": path, "exit": listed.returncode, "error": listed.stderr.strip()})
+        errors.append({"path": path, "repo": owner, "exit": listed.returncode, "error": listed.stderr.strip()})
         continue
     shared = next((f[len("worktree "):] for f in listed.stdout.split("\0") if f.startswith("worktree ")), None)
     if not shared or not os.path.isdir(shared):
-        errors.append({"path": path, "exit": 0, "error": "its repository lists no main checkout on disk"})
+        errors.append({"path": path, "repo": owner, "exit": 0, "error": "its repository lists no main checkout on disk"})
         continue
     repos.setdefault(os.path.realpath(shared), []).append(path)
 
 for entry in errors:
+    if entry["repo"]:
+        entry["repo"] = os.path.realpath(entry["repo"])
     sys.stderr.write("sweep-worktrees: cannot read the worktree {} (exit {}): {} — inspect it by hand\n".format(
         entry["path"], entry["exit"], entry["error"]))
 results, failed = [], bool(errors)

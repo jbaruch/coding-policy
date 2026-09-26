@@ -19,6 +19,10 @@
 #   6. Nested            -> a worktree below an intermediate directory is found.
 #   7. Stale metadata    -> a .git file naming a vanished gitdir is broken-worktree.
 #   8. Unreadable        -> a worktree git cannot read is an error entry, exit 2.
+#   9. Deep, linked, trash-> a worktree six levels down is found; a symlinked
+#                           directory and the root's .trash are not descended.
+#  10. Attributed error  -> an error names its repository when the gitdir's
+#                           files resolve it.
 #
 # Run: bash skills/herdr-foreman/tests/test_sweep_worktrees.sh
 set -uo pipefail
@@ -59,10 +63,11 @@ run() { # <args...>
 
 q() { python3 -c "import json,sys; d=json.load(sys.stdin); print($1)" <<<"$OUT"; }
 
-listed() { # <shared> <path>
-  local inventory
+listed() { # <shared> <path>  -> 0 listed, 1 not listed; any other failure aborts the harness
+  local inventory rc=0
   inventory="$(git -C "$1" worktree list --porcelain)" || die "git worktree list failed in $1"
-  grep -qx "worktree $2" <<<"$inventory"
+  grep -qxF "worktree $2" <<<"$inventory" || rc=$?
+  case "$rc" in 0) return 0 ;; 1) return 1 ;; *) die "grep failed (exit $rc) reading the worktree inventory" ;; esac
 }
 
 main() {
@@ -126,8 +131,29 @@ main() {
   if [[ "$(q 'next((s["reason"] for s in d["skipped"] if s["path"].endswith("/stale")), "")')" == broken-worktree ]]; then
     pass; else fail "stale: out=$OUT"; fi
   echo "8. a worktree git cannot read is an error entry, exit 2"
-  if (( RC == 2 )) && [[ "$(q 'next((e["path"] for e in d["errors"]), "")')" == "$root2/unreadable" ]] && [[ "$ERRTEXT" == *"cannot read the worktree"* ]]; then
+  if (( RC == 2 )) && [[ "$(q 'next((e["path"] for e in d["errors"]), "")')" == "$root2/unreadable" ]] \
+    && [[ "$(q 'next((str(e["repo"]) for e in d["errors"]), "")')" == None ]] && [[ "$ERRTEXT" == *"cannot read the worktree"* ]]; then
     pass; else fail "unreadable: rc=$RC out=$OUT err=$ERRTEXT"; fi
+
+  # --- 9-10 on a third root.
+  local root3="$TMP/worktrees3" deep="$TMP/worktrees3/a/b/c/d/e/f/beta-deep"
+  mkdir -p "$(dirname "$deep")" "$root3/.trash" "$TMP/elsewhere" || die "mkdir root3 failed"
+  "${G[@]}" -C "$beta" worktree add -q -b review/deep "$deep" origin/main 2>/dev/null || die "deep worktree failed"
+  "${G[@]}" -C "$beta" worktree add -q -b review/trashed "$root3/.trash/beta-trashed" origin/main 2>/dev/null || die "trash worktree failed"
+  "${G[@]}" -C "$alpha" worktree add -q -b review/linked "$TMP/elsewhere/alpha-linked" origin/main 2>/dev/null || die "linked worktree failed"
+  ln -s "$TMP/elsewhere" "$root3/link" || die "symlink failed"
+  "${G[@]}" -C "$alpha" worktree add -q -b review/badhead "$root3/badhead" origin/main 2>/dev/null || die "badhead worktree failed"
+  local bgitdir
+  bgitdir="$(git -C "$root3/badhead" rev-parse --absolute-git-dir)" || die "rev-parse badhead gitdir failed"
+  printf 'garbage\n' > "$bgitdir/HEAD" || die "corrupt HEAD failed"
+  run "$root3"
+  echo "9. a deep worktree is found; a symlinked directory and .trash are not descended"
+  if ! listed "$beta" "$deep" && listed "$beta" "$root3/.trash/beta-trashed" && listed "$alpha" "$TMP/elsewhere/alpha-linked" \
+    && [[ "$(q '[s["reason"] for s in d["skipped"] if s["path"].endswith("/link")]')" == "['not-a-worktree']" ]]; then
+    pass; else fail "deep/linked/trash: rc=$RC out=$OUT err=$ERRTEXT"; fi
+  echo "10. an unreadable worktree names its repository when its gitdir resolves it"
+  if (( RC == 2 )) && [[ "$(q 'next((e["repo"] for e in d["errors"] if e["path"].endswith("/badhead")), "")')" == "$alpha" ]]; then
+    pass; else fail "attributed error: rc=$RC out=$OUT"; fi
 
   run
   echo "5a. no root is exit 1 with no JSON"

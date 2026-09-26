@@ -126,6 +126,12 @@ Emits one JSON object: `ready`, the `blocking` reasons, the cadences that are
 failure — something blocks the round. Exit 2 means the preflight could not
 answer.
 
+Whatever the exit, and before following any route below, report the worktree
+sweep from `checks.worktrees.detail` to the operator: every archive with its
+`archive_ref` and `trash_path`, every expired archive, every kept `locked`,
+`in-use`, `changed`, `idle-unknown` and `submodule-dirty` entry, and every
+`errors` entry. A sweep that failed still leaves its partial JSON there.
+
 - **Exit 0** — read `due`, satisfy any cadence it names, and proceed to Step 5.
   A resumed foreman proceeds to the stow's continuation step instead (Step 17
   Resume Route).
@@ -355,11 +361,10 @@ Proceed immediately to Step 8.
 ## Step 8 — Provision the Worktrees
 
 Step 2's preflight swept every repository owning a worktree under the root,
-every round, and reported the result under `checks.worktrees`. `degraded`
-means another repository's prune failed; it does not block this round. Report
-every kept `locked`, `in-use`, `changed` and `idle-unknown` entry, every archived
-one with its `archive_ref`, and every expired archive, to the operator; never remove a worktree by hand. Run
-the sweep alone only to re-sweep:
+every round, and Step 2 reported its outcomes. `degraded` means another
+repository's prune failed; it does not block this round. Never remove a
+worktree by hand. Run the sweep alone only to re-sweep, and report its
+outcomes the same way:
 
 ```bash
 CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"

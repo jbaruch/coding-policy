@@ -50,7 +50,9 @@ shadow() { # <dir> [roster-rc] [authority-rc] [prune-rc] [capability-due] [autho
   local sweep_out='{"repos":[],"skipped":[]}'
   case "$prune" in
     2) sweep_out='{"repos":[{"shared":"/tmp","exit":2}],"skipped":[]}' ;;
-    other) prune=2; sweep_out='{"repos":[{"shared":"/elsewhere","exit":1}],"skipped":[]}' ;;
+    other) prune=2; sweep_out='{"repos":[{"shared":"/elsewhere","exit":1}],"skipped":[],"errors":[{"path":"/w/x","repo":"/elsewhere","exit":128,"error":"e"}]}' ;;
+    orphan) prune=2; sweep_out='{"repos":[],"skipped":[],"errors":[{"path":"/w/x","repo":null,"exit":128,"error":"e"}]}' ;;
+    mine) prune=2; sweep_out='{"repos":[],"skipped":[],"errors":[{"path":"/w/x","repo":"/tmp","exit":128,"error":"e"}]}' ;;
   esac
   stub "$dir" sweep-worktrees.sh "$prune" "$sweep_out"
   stub "$dir" resolve-gates.sh 0 '{"instructions":["AGENTS.md"],"workflows":[],"runners":[]}'
@@ -135,6 +137,17 @@ main() {
   if [[ $RC -eq 0 ]] && [[ "$(field "$OUT" 'd["checks"]["worktrees"]["status"]')" == '"degraded"' ]] \
      && [[ "$(field "$OUT" 'd["ready"]')" == "true" ]]; then
     pass; else fail "another repository's failed prune must not block this round, got RC=$RC OUT=$OUT"; fi
+
+  shadow "$TMP/prune-orphan" 0 0 orphan
+  run "$TMP/prune-orphan"
+  if [[ $RC -eq 1 ]] && [[ "$(field "$OUT" 'd["checks"]["worktrees"]["status"]')" == '"failed"' ]] \
+     && [[ "$(field "$OUT" 'd["checks"]["worktrees"]["detail"]["errors"][0]["path"]')" == '"/w/x"' ]]; then
+    pass; else fail "an error naming no repository must block and keep the sweep detail, got RC=$RC OUT=$OUT"; fi
+
+  shadow "$TMP/prune-mine" 0 0 mine
+  run "$TMP/prune-mine"
+  if [[ $RC -eq 1 ]] && [[ "$(field "$OUT" 'd["checks"]["worktrees"]["status"]')" == '"failed"' ]]; then
+    pass; else fail "an error naming this checkout must block, got RC=$RC OUT=$OUT"; fi
 
   echo "▶ what is due without blocking" >&2
 
