@@ -126,11 +126,15 @@ Emits one JSON object: `ready`, the `blocking` reasons, the cadences that are
 failure — something blocks the round. Exit 2 means the preflight could not
 answer.
 
-Whatever the exit, and before following any route below, report the worktree
-sweep from `checks.worktrees.detail` to the operator: every archive with its
-`archive_ref` and `trash_path`, every expired archive, every kept `locked`,
-`in-use`, `changed`, `idle-unknown` and `submodule-dirty` entry, and every
-`errors` entry. A sweep that failed still leaves its partial JSON there.
+Before following any route below, report the worktree sweep to the operator:
+
+- When `checks.worktrees.detail` is present, report from it every archive with
+  its `archive_ref` and `trash_path`, every expired, kept or migrated archive,
+  every kept worktree other than an ordinary not-yet-idle one, and every
+  `errors` entry
+- When `checks.worktrees` has no `detail`, report its `reason` verbatim; a
+  status `ok` with no `detail` means the worktree root does not exist
+- On exit 2 there is no JSON; report the stderr diagnostic instead
 
 - **Exit 0** — read `due`, satisfy any cadence it names, and proceed to Step 5.
   A resumed foreman proceeds to the stow's continuation step instead (Step 17

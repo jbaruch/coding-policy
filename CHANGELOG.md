@@ -11,14 +11,26 @@
   - `skills/herdr-foreman/prune-worktrees.sh` now also removes an idle clean
     worktree whose HEAD any remote-tracking ref holds, detached included,
     with plain `git worktree remove`: git refuses a tree that turned dirty.
-  - An idle dirty or unpushed worktree is never deleted. It is archived:
-    its HEAD plus every tracked and untracked non-ignored file become one
-    commit at `refs/archive/worktrees/<name>-<pathhash>-<stamp>` with
-    `Archive-Schema: 1` trailers. Then `git worktree move` renames it into
+  - An idle dirty or unpushed worktree is never deleted. It is archived: its
+    HEAD plus every tracked and untracked non-ignored file become one commit
+    at `refs/archive/worktrees/<name>-<pathhash>-<stamp>`, and a JSON record
+    with `schema_version` 1 (ref, source, trash, head, branch, stamp, tree
+    fingerprint) is written first as a git note under
+    `refs/notes/worktree-archive`. JSON keeps paths holding a newline whole,
+    which commit trailers did not. Then `git worktree move` renames it into
     the root's `.trash/`, so a writer that got in after the last check lands
-    in the moved copy. A worktree with a dirty submodule is kept, since the
-    snapshot covers the superproject only. The path hash keeps two worktrees
-    with one basename apart.
+    in the moved copy. The path hash keeps two worktrees with one basename
+    apart.
+  - A worktree holding another repository's checkout is kept before any
+    removal or archive: a gitlink found from the index, not `.gitmodules`,
+    whose checkout changed (`submodule-dirty`) or is populated
+    (`submodule`), or an untracked directory with its own `.git`
+    (`nested-repo`), which `add -A` would reduce to a bare gitlink.
+  - Reachability counts only `refs/remotes/origin/*`, the refs this run
+    fetched; a stale ref of another remote proved nothing. The removal
+    proof (merged, or origin holds HEAD) is re-derived immediately before
+    the removal, after every other recheck, so a concurrent fetch or
+    force-push that drops it keeps the worktree.
   - "Idle" is two facts: no process of this user has its cwd inside
     (`lsof`), and no activity for the window. The clock covers the worktree
     dir, its gitdir's HEAD, index and logs/HEAD, and every modified tracked
@@ -31,11 +43,22 @@
     HEAD, the branch tip, status, age and the process probe are re-read; any
     change keeps the worktree (`changed`). A written archive is always
     listed, with `trash_path: null` when its worktree stayed in place.
-  - Archives expire: each live run takes a record older than
-    `ARCHIVE_EXPIRE_DAYS` (default 30), removes its trash worktree, deletes
-    its branch when the archive holds the tip, and deletes the ref. A record
-    with an unknown `Archive-Schema` is never expired. A dry run only lists
-    them under `archives_expired`.
+  - Expiry, for a record older than `ARCHIVE_EXPIRE_DAYS` (default 30),
+    checks everything before it destroys anything:
+    - The record must name this ref and stamp, hash its source to the ref's
+      path hash, and name the commit's parent and tree and exactly
+      `<root>/.trash/<ref basename>`. A recorded path is never trusted on
+      its own.
+    - The trash worktree must be registered here at that exact path,
+      unlocked, on the recorded HEAD and branch, idle, with no process
+      inside, and snapshot to exactly the recorded tree.
+    - Only then does it remove, in order: the trash worktree, the branch
+      (only when its tip equals the recorded head), the ref, and the note.
+      A failure at any step keeps the ref.
+  - The owner migrates an older record through `MIGRATIONS` (empty: v1 is
+    the first schema) and rewrites its note. A newer, missing, unparseable
+    or unmigratable record is kept and reported under `archives_kept`,
+    never expired.
   - Every removal is restorable: removed rows carry `head`, archived rows
     carry `archive_ref` and `trash_path`, and locked rows carry
     `lock_reason`.
@@ -48,7 +71,8 @@
     it (exit 2); `broken-worktree` is only a `.git` file naming a vanished
     gitdir.
   - `round-preflight.sh` runs the sweep in place of the single-repository
-    prune and keeps the sweep JSON even on a failed check. This checkout's
+    prune and keeps the sweep JSON on every failed check that produced one;
+    its header documents each worktrees status and when `detail` is present. This checkout's
     own failure, or an error naming no repository, blocks the round; another
     repository's failure is `degraded`. SKILL.md Step 2 reports the sweep's
     outcomes on every route.
@@ -59,8 +83,8 @@
     sweep instead of "never removes a dirty, unmerged, locked or detached
     worktree".
   - `rules/agent-worktree-isolation.md` Cleanup defines abandoned: idle past
-    the prune script's windows. An abandoned worktree is removed once a
-    remote ref holds its work, or archived and moved to `.trash/` (operator
+    the prune script's windows. An abandoned worktree is removed once an
+    origin ref holds its work, or archived and moved to `.trash/` (operator
     decision).
 
 ## 0.3.277 — 2026-09-26

@@ -31,7 +31,20 @@
 # preflight could not answer.
 #
 # `--no-measure` skips the headroom snapshot, which is the one check that
-# writes. Everything else here is read-only.
+# writes. Every other check is read-only except the worktree sweep, which
+# removes and archives worktrees under its own contract.
+#
+# `checks.worktrees` (the sweep, sweep-worktrees.sh):
+#   ok         no detail when the worktree root does not exist; otherwise the
+#              sweep JSON as detail
+#   undecided  the sweep decided nothing (exit 1): reason, no detail; or this
+#              checkout's own prune decided nothing: reason, sweep JSON detail
+#   failed     this checkout's prune failed, or an error names this checkout
+#              or no repository: reason, sweep JSON detail; the sweep's JSON
+#              was unreadable or it exited other than 0/1/2: reason, no detail
+#   degraded   only another repository failed: sweep JSON detail; not blocking
+# A detail file that cannot be read turns any status into blocked (reason
+# names the file).
 
 # `-e` is dropped under rules/error-handling.md's aggregate-reporting carve-out:
 # each check below is independent, every exit code is captured explicitly, and

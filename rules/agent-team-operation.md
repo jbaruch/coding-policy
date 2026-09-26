@@ -290,18 +290,20 @@ description: Running a multi-agent team — task-based specialist composition, c
 - The sweep runs through `skills/herdr-foreman/sweep-worktrees.sh`
 - The sweep removes an idle clean worktree on a merged branch
 - The sweep deletes merged local branches
-- The sweep removes an idle clean worktree whose HEAD a remote ref holds
+- The sweep removes an idle clean worktree whose HEAD an origin ref holds
 - The sweep archives an idle dirty or unpushed worktree under `refs/archive/worktrees/`
 - The sweep moves an archived worktree into the root's `.trash/` once its archive ref resolves
 - The sweep never deletes an archived worktree before its archive expires
 - A failed archive keeps the worktree
-- A worktree whose submodule holds changes is kept, never archived
+- A worktree holding a submodule or an embedded repository is kept, never archived
 - Idle windows and the in-use test live in `skills/herdr-foreman/prune-worktrees.sh` (top-of-file docstring)
 - A locked, in-use or not-yet-idle worktree is kept
 - A worktree that changes between judgment and removal is kept
-- The sweep deletes an archive ref past the expiry window in `skills/herdr-foreman/prune-worktrees.sh`
-- The sweep removes that archive's trash worktree with the ref
-- The foreman reports the sweep's archives, trash moves, expiries, kept worktrees and errors to the operator at Step 2, on every route
+- The sweep expires an archive past the expiry window in `skills/herdr-foreman/prune-worktrees.sh`
+- Expiry removes the archive's trash worktree only once it is idle, unlocked, unused and unchanged since the archive
+- Expiry deletes the archive ref last, after the trash worktree and the branch
+- An archive record the sweep cannot read or validate is kept and reported
+- The foreman reports the sweep's archives, trash moves, expiries, kept archives, kept worktrees and errors to the operator at Step 2, on every route
 - The foreman never removes a worktree by hand
 - A worker's report, plan, and patch artifacts go only under the reports directory its brief names
 - A worker writes nowhere else

@@ -82,6 +82,16 @@
 #                             recent, unstamped or unknown-schema ref stays.
 #  51. Dirty submodule      -> kept, never archived.
 #  52. Same basename        -> two worktrees archive to two refs.
+#  53-57. Expiry gates      -> a newer schema, a record naming another
+#                             worktree, content the archive lacks, a lock,
+#                             or a process inside keeps the archive and trash.
+#  58. Moved branch         -> kept at expiry; the archive still expires.
+#  59. Newline path         -> recorded whole in JSON; expires with its trash.
+#  60. Other remote         -> a ref of a remote other than origin proves nothing.
+#  61. Proof gone           -> reachability re-derived just before removal.
+#  62. Gitlink, embedded    -> a dirty gitlink without .gitmodules, and an
+#                             untracked embedded repository, keep the worktree.
+#  63. Unusable records     -> too old to migrate, or unparseable: kept.
 #
 # Run: bash skills/herdr-foreman/tests/test_prune_worktrees.sh
 set -uo pipefail
@@ -179,15 +189,46 @@ lsof_turns_busy() { # <dir> <n> <path>
   chmod +x "$1/lsof" || die "chmod lsof stand-in failed"
 }
 trash_of() { python3 -c 'import json,sys; d=json.load(sys.stdin); print(next((r["trash_path"] or "" for r in d["worktrees_archived"] if r["path"]==sys.argv[1]), ""))' "$1" <<<"$OUT"; }
-# An archive commit of <commit> with schema <n> trailers naming <trash> and <branch>, at <ref>.
-mk_archive() { # <shared> <ref> <commit> <schema> <trash> <branch>
-  local tree c
-  tree="$(git -C "$1" rev-parse "$3^{tree}")" || die "rev-parse tree failed"
-  c="$(git -C "$1" -c user.name=t -c user.email=t@t commit-tree "$tree" -p "$3" \
-    -m "$(printf 'Archive\n\nArchive-Schema: %s\nArchive-Source: x\nArchive-Head: %s\nArchive-Branch: %s\nArchive-Trash: %s\n' "$4" "$3" "$6" "$5")")" \
-    || die "commit-tree failed"
-  git -C "$1" update-ref "$2" "$c" || die "update-ref $2 failed"
+# Write a note <json> on the commit <ref> points at (a hand-made record).
+set_record() { # <shared> <ref> <json>
+  git -C "$1" -c user.name=t -c user.email=t@t notes --ref=refs/notes/worktree-archive add -f -m "$3" "$2" \
+    || die "notes add failed for $2"
 }
+record_of() { # <shared> <ref>
+  git -C "$1" notes --ref=refs/notes/worktree-archive show "$2" || die "notes show failed for $2"
+}
+archives_kept_reason() { python3 -c 'import json,sys; d=json.load(sys.stdin); print(next((r["reason"] for r in d["archives_kept"] if r["ref"]==sys.argv[1]), ""))' "$1" <<<"$OUT"; }
+expired_refs() { python3 -c 'import json,sys; print(",".join(sorted(r["ref"] for r in json.load(sys.stdin)["archives_expired"])))' <<<"$OUT"; }
+# Archive one idle unpushed worktree named <name> in $SHARED and echo "<ref> <trash>".
+archive_one() { # <name> <branch>
+  local wt="$ROOT/$1"
+  add_wt "$SHARED" "$2" "$wt"; commit_in "$wt" "$1.txt"
+  printf 'kept work\n' > "$wt/untracked-$1" || die "untracked write failed"
+  age_wt "$wt"
+  idle_run
+  local ref trash
+  ref="$(archived_ref "$wt")"; trash="$(trash_of "$wt")"
+  [[ -n "$ref" && -n "$trash" ]] || die "archive_one $1: no archive, out=$OUT err=$ERRTEXT"
+  printf '%s %s' "$ref" "$trash"
+}
+# 31 days after IDLE_NOW: every archive written at IDLE_NOW is past expiry.
+LATER_NOW=$((1578614400 + 31 * 86400))
+later_run() {
+  RUN_SEQ=$((RUN_SEQ+1))
+  OUT="$(env WORKTREE_ROOT="$ROOT" PRUNE_NOW="$LATER_NOW" bash "$SCRIPT" "$SHARED" "${IDLE_ARGS[@]+"${IDLE_ARGS[@]}"}" 2>"$TMP/err.$RUN_SEQ")"
+  RC=$?
+  ERRTEXT="$(cat "$TMP/err.$RUN_SEQ")"
+}
+# Age a trash worktree to before LATER_NOW's archive window.
+age_trash() { # <trash>
+  local gitdir
+  gitdir="$(git -C "$1" rev-parse --absolute-git-dir)" || die "rev-parse trash gitdir failed"
+  local f; for f in "$gitdir/HEAD" "$gitdir/index" "$gitdir/logs/HEAD"; do
+    if [[ -e "$f" ]]; then touch -t 202001100000 "$f" || die "touch $f failed"; fi
+  done
+  find "$1" -path "$1/.git" -prune -o -exec touch -h -t 202001100000 {} + || die "touch trash files failed"
+}
+
 main() {
   PASS=0; FAIL=0; RUN_SEQ=0
   SCRIPT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/prune-worktrees.sh"
@@ -639,7 +680,7 @@ SHIM
     && [[ "$trash" == "$ROOT/.trash/${ref#refs/archive/worktrees/}" ]] && listed "$SHARED" "$trash" \
     && git -C "$SHARED" merge-base --is-ancestor "$stale_tip" "$ref" \
     && [[ "$(git -C "$SHARED" show "$ref:notes.txt")" == "untracked work" ]] \
-    && [[ "$(git -C "$SHARED" log -1 --format=%B "$ref")" == *"Archive-Schema: 1"* ]] \
+    && [[ "$(git -C "$SHARED" notes --ref=refs/notes/worktree-archive show "$ref" | python3 -c 'import json,sys; print(json.load(sys.stdin)["schema_version"])')" == 1 ]] \
     && has_branch "$SHARED" feat/stale; then
     pass; else fail "archive: ref=$ref trash=$trash out=$OUT err=$ERRTEXT"; fi
   idle_run
@@ -777,29 +818,90 @@ SHIM
   if (( RC == 2 )) && [[ -n "$(archived_ref "$rf")" && -z "$(trash_of "$rf")" ]] && [[ "$OUT" == *"move refused"* ]] && listed "$SHARED" "$rf"; then
     pass; else fail "removal failure: rc=$RC out=$OUT err=$ERRTEXT"; fi
 
-  # --- 50. archive refs past the expiry window go, with their trash worktree.
+  # --- 50. expiry: every gate passes, then trash, branch, ref and note go.
   mk_repo expiry
-  local c1 etrash="$ROOT/.trash/old-0000000000-20191201T000000Z"
-  c1="$(git -C "$SHARED" rev-parse HEAD)" || die "rev-parse failed"
-  mkdir -p "$ROOT/.trash" || die "mkdir trash failed"
-  git -C "$SHARED" worktree add -q -b feat/expired "$etrash" "$c1" 2>/dev/null || die "trash worktree add failed"
-  printf 'left in trash\n' > "$etrash/late.txt" || die "trash write failed"
-  mk_archive "$SHARED" refs/archive/worktrees/old-0000000000-20191201T000000Z "$c1" 1 "$etrash" feat/expired
-  mk_archive "$SHARED" refs/archive/worktrees/recent-0000000000-20200105T000000Z "$c1" 1 "" ""
-  mk_archive "$SHARED" refs/archive/worktrees/future-0000000000-20191201T000000Z "$c1" 2 "" ""
-  git -C "$SHARED" update-ref refs/archive/worktrees/nostamp "$c1" || die "update-ref nostamp failed"
+  local e1 e1ref e1trash
+  e1="$(archive_one exp1 feat/exp1)"; e1ref="${e1%% *}"; e1trash="${e1#* }"
+  age_trash "$e1trash"
+  local bare_c; bare_c="$(git -C "$SHARED" rev-parse origin/main)" || die "rev-parse origin/main failed"
+  git -C "$SHARED" update-ref refs/archive/worktrees/nonote-0000000000-20191201T000000Z "$bare_c" || die "update-ref nonote failed"
+  git -C "$SHARED" update-ref refs/archive/worktrees/nostamp "$bare_c" || die "update-ref nostamp failed"
   IDLE_ARGS=(--dry-run)
-  idle_run
+  later_run
   IDLE_ARGS=()
-  echo "50a. a dry run previews the expired archive and changes nothing"
-  if (( RC == 0 )) && [[ "$(python3 -c 'import json,sys; print(",".join(r["ref"] for r in json.load(sys.stdin)["archives_expired"]))' <<<"$OUT")" == refs/archive/worktrees/old-0000000000-20191201T000000Z ]] \
-    && [[ "$(git -C "$SHARED" for-each-ref refs/archive/ | wc -l | tr -d ' ')" == 4 ]] && listed "$SHARED" "$etrash"; then
-    pass; else fail "expiry dry run: rc=$RC out=$OUT"; fi
-  idle_run
-  echo "50b. a live run removes the expired archive, its trash worktree and its branch; an unknown schema stays"
-  if (( RC == 0 )) && [[ "$(git -C "$SHARED" for-each-ref --format='%(refname)' refs/archive/ | sort | tr '\n' ' ')" == "refs/archive/worktrees/future-0000000000-20191201T000000Z refs/archive/worktrees/nostamp refs/archive/worktrees/recent-0000000000-20200105T000000Z " ]] \
-    && ! listed "$SHARED" "$etrash" && [[ ! -e "$etrash" ]] && ! has_branch "$SHARED" feat/expired; then
+  echo "50a. a dry run previews the expiry and changes nothing"
+  if (( RC == 0 )) && [[ "$(expired_refs)" == "$e1ref" ]] && listed "$SHARED" "$e1trash" \
+    && git -C "$SHARED" rev-parse --verify --quiet "$e1ref" >/dev/null && has_branch "$SHARED" feat/exp1; then
+    pass; else fail "expiry dry run: rc=$RC out=$OUT err=$ERRTEXT"; fi
+  later_run
+  echo "50b. a live run removes the trash worktree, its branch, the ref and the note"
+  if (( RC == 0 )) && [[ "$(expired_refs)" == "$e1ref" ]] && ! listed "$SHARED" "$e1trash" && [[ ! -e "$e1trash" ]] \
+    && ! has_branch "$SHARED" feat/exp1 && ! git -C "$SHARED" rev-parse --verify --quiet "$e1ref" >/dev/null; then
     pass; else fail "expiry: rc=$RC out=$OUT err=$ERRTEXT"; fi
+  echo "50c. a ref without a record is kept and reported, never expired; an unstamped ref is untouched"
+  if [[ "$(archives_kept_reason refs/archive/worktrees/nonote-0000000000-20191201T000000Z)" == record-missing ]] \
+    && git -C "$SHARED" rev-parse --verify --quiet refs/archive/worktrees/nonote-0000000000-20191201T000000Z >/dev/null \
+    && git -C "$SHARED" rev-parse --verify --quiet refs/archive/worktrees/nostamp >/dev/null; then
+    pass; else fail "no record: out=$OUT"; fi
+
+  # --- 53-58: every gate that keeps an expiring archive.
+  mk_repo gates
+  local g_new g_bad g_chg g_lck g_busy other
+  g_new="$(archive_one gnew feat/gnew)"; g_bad="$(archive_one gbad feat/gbad)"; g_chg="$(archive_one gchg feat/gchg)"
+  g_lck="$(archive_one glck feat/glck)"; g_busy="$(archive_one gbusy feat/gbusy)"
+  other="$ROOT/gates-other"
+  git -C "$SHARED" worktree add -q --detach "$other" origin/main 2>/dev/null || die "other worktree add failed"
+  local t; for t in "${g_new#* }" "${g_bad#* }" "${g_chg#* }" "${g_lck#* }" "${g_busy#* }"; do age_trash "$t"; done
+  # 53: a newer schema.
+  set_record "$SHARED" "${g_new%% *}" "$(record_of "$SHARED" "${g_new%% *}" | python3 -c 'import json,sys; r=json.load(sys.stdin); r["schema_version"]=2; print(json.dumps(r))')"
+  # 54: a record pointing its trash at another registered worktree.
+  set_record "$SHARED" "${g_bad%% *}" "$(record_of "$SHARED" "${g_bad%% *}" | python3 -c 'import json,sys; r=json.load(sys.stdin); r["trash"]=sys.argv[1]; print(json.dumps(r))' "$other")"
+  # 55: content written into the trash after the archive.
+  printf 'late\n' > "${g_chg#* }/late.txt" || die "late write failed"; age_trash "${g_chg#* }"
+  # 56: locked.
+  git -C "$SHARED" worktree lock "${g_lck#* }" || die "lock trash failed"
+  # 57: a process inside.
+  (cd "${g_busy#* }" && exec sleep 300) &
+  SLEEPER=$!
+  later_run
+  kill "$SLEEPER" || die "could not stop the sleeper"; wait "$SLEEPER"
+  echo "53. a newer-schema record is kept and reported"
+  if [[ "$(archives_kept_reason "${g_new%% *}")" == schema-newer ]] && listed "$SHARED" "${g_new#* }"; then pass; else fail "newer: out=$OUT"; fi
+  echo "54. a record naming another worktree as its trash is kept, and that worktree untouched"
+  if [[ "$(archives_kept_reason "${g_bad%% *}")" == record-invalid:* ]] && listed "$SHARED" "$other" && listed "$SHARED" "${g_bad#* }"; then pass; else fail "invalid: out=$OUT"; fi
+  echo "55. a trash worktree holding content the archive lacks is kept"
+  if [[ "$(archives_kept_reason "${g_chg%% *}")" == *"content the archive lacks"* ]] && [[ -e "${g_chg#* }/late.txt" ]]; then pass; else fail "changed trash: out=$OUT"; fi
+  echo "56. a locked trash worktree is kept"
+  if [[ "$(archives_kept_reason "${g_lck%% *}")" == *locked* ]] && listed "$SHARED" "${g_lck#* }"; then pass; else fail "locked trash: out=$OUT"; fi
+  echo "57. a trash worktree with a process inside is kept"
+  if [[ "$(archives_kept_reason "${g_busy%% *}")" == *"process is working inside"* ]] && listed "$SHARED" "${g_busy#* }"; then pass; else fail "busy trash: out=$OUT"; fi
+  git -C "$SHARED" worktree unlock "${g_lck#* }" || die "unlock trash failed"
+
+  # --- 58. a branch moved since the archive is kept; the archive still expires.
+  mk_repo moved
+  local mv1; mv1="$(archive_one mv1 feat/mv1)"
+  git -C "$SHARED" worktree remove --force "${mv1#* }" || die "remove trash by hand failed"
+  local unmerged_c
+  unmerged_c="$(git -C "$SHARED" -c user.name=t -c user.email=t@t commit-tree "origin/main^{tree}" -p origin/main -m elsewhere)" || die "commit-tree failed"
+  git -C "$SHARED" branch -f feat/mv1 "$unmerged_c" || die "branch -f failed"
+  later_run
+  echo "58. a branch moved since the archive is kept; the archive expires"
+  if (( RC == 0 )) && [[ "$(expired_refs)" == "${mv1%% *}" ]] && has_branch "$SHARED" feat/mv1 \
+    && python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if {"branch":"feat/mv1","reason":"moved-since-archive"} in d["branches_kept"] else 1)' <<<"$OUT"; then
+    pass; else fail "moved branch: rc=$RC out=$OUT err=$ERRTEXT"; fi
+
+  # --- 59. a path holding a newline archives and expires whole.
+  mk_repo newline
+  local nlwt="$ROOT/nl"$'\n'"wt"
+  add_wt "$SHARED" feat/nl "$nlwt"; commit_in "$nlwt" n.txt
+  age_wt "$nlwt"
+  idle_run
+  local nlref nltrash; nlref="$(archived_ref "$nlwt")"; nltrash="$(trash_of "$nlwt")"
+  age_trash "$nltrash"
+  later_run
+  echo "59. a worktree path with a newline is recorded whole and expires with its trash"
+  if [[ -n "$nlref" ]] && [[ "$(expired_refs)" == "$nlref" ]] && [[ ! -e "$nltrash" ]] && ! has_branch "$SHARED" feat/nl; then
+    pass; else fail "newline: ref=$nlref out=$OUT err=$ERRTEXT"; fi
 
   # --- 51. a dirty submodule keeps an idle worktree; it is never archived.
   mk_repo submod
@@ -832,6 +934,69 @@ SHIM
   local ref1 ref2; ref1="$(archived_ref "$s1")"; ref2="$(archived_ref "$s2")"
   if (( RC == 0 )) && [[ -n "$ref1" && -n "$ref2" && "$ref1" != "$ref2" ]] && ! listed "$SHARED" "$s1" && ! listed "$SHARED" "$s2"; then
     pass; else fail "same basename: rc=$RC out=$OUT err=$ERRTEXT"; fi
+
+  # --- 60. only origin's refs prove reachability.
+  mk_repo otherremote
+  local orw="$ROOT/otherremote-wt"
+  git init -q --bare -b main "$TMP/upstream.git" || die "upstream init failed"
+  git -C "$SHARED" remote add upstream "$TMP/upstream.git" || die "remote add failed"
+  git -C "$SHARED" worktree add -q --detach "$orw" origin/main 2>/dev/null || die "otherremote worktree add failed"
+  commit_in "$orw" u.txt
+  git -C "$orw" push -q upstream HEAD:refs/heads/side 2>/dev/null || die "push upstream failed"
+  git -C "$SHARED" fetch -q upstream || die "fetch upstream failed"
+  age_wt "$orw"
+  idle_run PRUNE_ARCHIVE_IDLE_HOURS=100000
+  echo "60. a HEAD held only by another remote's ref is not reachable"
+  if [[ "$(kept_reason "$orw")" == detached ]] && listed "$SHARED" "$orw"; then
+    pass; else fail "other remote: out=$OUT err=$ERRTEXT"; fi
+
+  # --- 61. the reachability proof is re-derived just before the removal.
+  mk_repo proofgone
+  local pg="$ROOT/proofgone-wt"
+  git -C "$SHARED" worktree add -q --detach "$pg" origin/main 2>/dev/null || die "proofgone worktree add failed"
+  age_wt "$pg"
+  mkdir -p "$TMP/shim61" || die "mkdir shim61 failed"
+  # The second origin containment query answers "no ref holds it".
+  # shellcheck disable=SC2016  # The shim's "$@" and $a must expand in the shim, not here.
+  printf '#!/usr/bin/env bash\nset -euo pipefail\nfor a in "$@"; do if [[ "$a" == --contains ]]; then printf x >> %q; if [[ "$(cat %q)" == xx ]]; then exit 0; fi; fi; done\nexec %q "$@"\n' \
+    "$TMP/shim61/n" "$TMP/shim61/n" "$real_git" > "$TMP/shim61/git" || die "shim61 write failed"
+  chmod +x "$TMP/shim61/git" || die "chmod shim61 failed"
+  idle_run PATH="$TMP/shim61:$PATH"
+  echo "61. a worktree whose origin ref vanished before its removal is kept"
+  if [[ "$(kept_reason "$pg")" == changed ]] && listed "$SHARED" "$pg" && [[ "$ERRTEXT" == *"origin no longer holds"* ]]; then
+    pass; else fail "proof gone: out=$OUT err=$ERRTEXT"; fi
+
+  # --- 62. a dirty gitlink is found without .gitmodules; an embedded repository keeps a worktree.
+  mk_repo gitlink
+  local gl="$ROOT/gitlink-wt" nr="$ROOT/gitlink-nested"
+  add_wt "$SHARED" feat/gitlink "$gl"
+  git -C "$gl" -c protocol.file.allow=always submodule --quiet add "$sub_origin" lib 2>/dev/null || die "submodule add failed"
+  git -C "$gl" -c user.name=t -c user.email=t@t commit -q -m "add lib" || die "submodule commit failed"
+  rm "$gl/.gitmodules" || die "rm .gitmodules failed"
+  printf 'nested edit\n' >> "$gl/lib/s" || die "nested edit failed"
+  add_wt "$SHARED" feat/nested "$nr"; commit_in "$nr" base.txt
+  git init -q "$nr/embedded" || die "embedded init failed"
+  printf 'inner\n' > "$nr/embedded/inner.txt" || die "inner write failed"
+  age_wt "$gl"; age_wt "$nr"
+  idle_run
+  echo "62a. a dirty submodule is kept even with .gitmodules gone"
+  if [[ "$(kept_reason "$gl")" == submodule-dirty ]] && listed "$SHARED" "$gl"; then pass; else fail "gitlink: out=$OUT err=$ERRTEXT"; fi
+  echo "62b. an untracked embedded repository keeps its worktree"
+  if [[ "$(kept_reason "$nr")" == nested-repo ]] && listed "$SHARED" "$nr" && [[ -z "$(git -C "$SHARED" for-each-ref refs/archive/)" ]]; then
+    pass; else fail "nested repo: out=$OUT err=$ERRTEXT"; fi
+
+  # --- 63. an older record with no migration, and an unparseable one, are kept.
+  mk_repo oldrec
+  local o1 o2
+  o1="$(archive_one oldv0 feat/oldv0)"; o2="$(archive_one garbled feat/garbled)"
+  age_trash "${o1#* }"; age_trash "${o2#* }"
+  set_record "$SHARED" "${o1%% *}" "$(record_of "$SHARED" "${o1%% *}" | python3 -c 'import json,sys; r=json.load(sys.stdin); r["schema_version"]=0; print(json.dumps(r))')"
+  set_record "$SHARED" "${o2%% *}" "not json"
+  later_run
+  echo "63. a record older than any migration, or unparseable, is kept and never expired"
+  if [[ "$(archives_kept_reason "${o1%% *}")" == schema-unmigratable && "$(archives_kept_reason "${o2%% *}")" == record-unparseable ]] \
+    && listed "$SHARED" "${o1#* }" && listed "$SHARED" "${o2#* }"; then
+    pass; else fail "old records: out=$OUT"; fi
 
   # --- 14. usage / not a repo.
   run

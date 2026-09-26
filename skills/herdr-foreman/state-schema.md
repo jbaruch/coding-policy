@@ -877,45 +877,69 @@ way, or whose deliverer is still running, is refused.
 
 The round's sweep (`skills/herdr-foreman/sweep-worktrees.sh`) runs
 `skills/herdr-foreman/prune-worktrees.sh` per repository. Before moving an
-idle worktree that is dirty or holds commits no remote ref holds into the
-root's `.trash/`, the prune writes one archive record in that repository.
+idle worktree that is dirty or holds commits origin lacks into the root's
+`.trash/`, the prune writes one archive in that repository: a commit, its ref,
+and a JSON record in a git note on that commit.
 
-Record:
+Archive commit and ref:
 
 - Ref: `refs/archive/worktrees/<name>-<pathhash>-<YYYYMMDDTHHMMSSZ>`, where
   `<name>` is the worktree directory's basename with every character outside
   `A-Za-z0-9._-` replaced by `-`, and `<pathhash>` is the first 10 hex digits
   of the SHA-1 of the worktree's absolute path
-- Target: a commit whose parent is the worktree's HEAD and whose tree is every
-  tracked and untracked non-ignored file as it stood; ignored files and
-  submodule contents are not kept (a worktree with a dirty submodule is never
-  archived)
-- Commit-message trailers, the record's fields:
-  - `Archive-Schema: 1` — the schema version
-  - `Archive-Source:` — the worktree's absolute path
-  - `Archive-Head:` — its HEAD when archived
-  - `Archive-Branch:` — its branch, empty when detached
-  - `Archive-Trash:` — the trash worktree path, `<root>/.trash/<ref basename>`
-- The trash worktree is the original, moved there by `git worktree move`; it
-  stays registered with git until expiry
+- Commit: parent is the worktree's HEAD; tree is every tracked and untracked
+  non-ignored file as it stood. Ignored files are not kept. A worktree holding
+  a submodule or an embedded repository is never archived
+- The trash worktree is the original, moved by `git worktree move` to
+  `<root>/.trash/<ref basename>`; it stays registered with git until expiry
+
+Archive record — one JSON object, the note on the archive commit under
+`refs/notes/worktree-archive`:
+
+| Field | Meaning |
+| ----- | ------- |
+| `schema_version` | integer; `1` is the first schema |
+| `ref` | the archive ref |
+| `source` | the worktree's absolute path when archived |
+| `trash` | the trash worktree's absolute path |
+| `head` | the worktree's HEAD when archived (the commit's parent) |
+| `branch` | its branch, or `null` when detached |
+| `stamp` | the ref's UTC stamp |
+| `tree` | the fingerprint: the archive commit's tree id |
 
 Writer / reader contract:
 
-- Owner and only writer: `skills/herdr-foreman/prune-worktrees.sh`,
-  create-only (`update-ref <ref> <commit> ""`); only the owner migrates a
-  record, and a shape change bumps `Archive-Schema`
-- The prune's JSON names each written record under `worktrees_archived`
+- Owner and only writer: `skills/herdr-foreman/prune-worktrees.sh`. The note is
+  written before the ref, create-only (`update-ref <ref> <commit> ""`), so an
+  archive ref never exists without its record
+- The prune's JSON names each written archive under `worktrees_archived`
   (`archive_ref`, `trash_path`)
-- Expiry reader: the same script. A record whose stamp is older than the
-  expiry window has its trash worktree removed, its branch deleted when the
-  archive holds the branch tip, and its ref compare-and-deleted; each is
-  listed under `archives_expired`, and a dry run only lists it
-- A record with no `Archive-Schema` trailer, or one the reader does not know
-  (older or newer), is left alone and never expired
-- A ref under `refs/archive/worktrees/` without the stamp suffix is never
-  touched
+- The same script is the only reader. Every live run reads every record and
+  expires one older than the expiry window. It first checks the record
+  against the ref, the commit and the expected trash path, then checks the
+  trash worktree's registration, lock, HEAD, branch, idleness, processes
+  and content fingerprint. Only then does it remove the trash worktree,
+  the branch (only when its tip equals `head`), the ref and the note.
+  Any failed check or step keeps the ref
+- Results: `archives_expired`, `archives_kept` (with the reason),
+  `archives_migrated`; a dry run only reports
 - Operator reader: restore with `git worktree add <path> <archive_ref>`, read
   one file with `git show <archive_ref>:<file>`, or use the trash worktree
   directly before it expires
 - The idle windows, the in-use test and the expiry window are that script's
   top-of-file docstring and constants, not restated here
+
+Migration:
+
+- `ARCHIVE_SCHEMA` in the script is the current `schema_version`
+- An older record is upgraded by the owner through the `MIGRATIONS` table in
+  `plan_archives` and its note rewritten (live runs only); reported under
+  `archives_migrated`
+- Version 1 is the first schema, so the table is empty
+- A version 2 adds `MIGRATIONS[1]`, a function taking a version-1 record and
+  returning the version-2 record, and raises `ARCHIVE_SCHEMA` to 2
+- A record whose version is newer than `ARCHIVE_SCHEMA` is no usable state,
+  and so is one that is missing, unparseable, or older than any migration
+  reaches: it is reported under `archives_kept` and never expired
+- A ref under `refs/archive/worktrees/` not named `<name>-<10 hex>-<stamp>` is
+  never touched
