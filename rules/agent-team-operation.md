@@ -290,7 +290,7 @@ description: Running a multi-agent team — task-based specialist composition, c
 - The sweep runs through `skills/herdr-foreman/sweep-worktrees.sh`
 - The sweep removes an idle clean worktree on a merged branch
 - The sweep deletes merged local branches
-- The sweep removes an idle clean worktree whose HEAD an origin remote-tracking ref holds
+- The sweep removes an idle clean worktree whose HEAD a branch on origin holds, as origin reports it at the sweep
 - The sweep archives an idle dirty or unpushed worktree under `refs/archive/worktrees/`
 - The sweep moves an archived worktree into the root's `.trash/` once its archive ref resolves
 - The sweep locks each trash worktree with its own lock reason

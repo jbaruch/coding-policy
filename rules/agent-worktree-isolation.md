@@ -22,8 +22,8 @@ alwaysApply: true
 - A worktree's lifecycle ends when its branch merges or the worktree is abandoned
 - A merged worktree is removed at that point, by the post-merge order below
 - Abandoned means idle past the windows in `skills/herdr-foreman/prune-worktrees.sh` (top-of-file docstring)
-- An abandoned worktree whose work an origin ref holds is removed at that point
-- An abandoned worktree whose work no origin ref holds is archived under `refs/archive/worktrees/`
+- An abandoned worktree whose work a branch on origin holds is removed at that point
+- An abandoned worktree whose work no branch on origin holds is archived under `refs/archive/worktrees/`
 - An archived worktree is moved into the worktree root's `.trash/`
 - An archived worktree whose move fails stays in place, reported with its archive ref
 - A trash worktree is removed with its archive ref at archive expiry, only once every expiry check in that script passes
