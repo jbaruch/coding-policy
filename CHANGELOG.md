@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.274 — 2026-09-26
+
 ### Changed
 
 - **`herdr-teamlead` is now `herdr-foreman` (#501).** The rules already
