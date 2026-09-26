@@ -893,14 +893,18 @@ Archive commit and ref:
   non-ignored file as it stood. Ignored files are not kept. A worktree holding
   a submodule or an embedded repository is never archived
 - The trash worktree is the original, moved by `git worktree move` to
-  `<root>/.trash/<ref basename>`; it stays registered with git until expiry
+  `<root>/.trash/<ref basename>` and locked with the reason
+  `prune-worktrees archive <ref>`; it stays registered with git, lock and all,
+  until expiry. A failed move leaves the original in place with its archive
+  resolved, and no second archive of that path is written while the first
+  waits for its trash
 
 Archive record — one JSON object, the note on the archive commit under
 `refs/notes/worktree-archive`:
 
 | Field | Meaning |
 | ----- | ------- |
-| `schema_version` | integer; `1` is the first schema |
+| `schema_version` | integer, at least 1 (a boolean is not an integer); `1` is the first schema |
 | `ref` | the archive ref |
 | `source` | the worktree's absolute path when archived |
 | `trash` | the trash worktree's absolute path |
@@ -920,11 +924,14 @@ Writer / reader contract:
   (`archive_ref`, `trash_path`)
 - The same script is the only reader. Every live run reads every record and
   expires one older than the expiry window. It first checks the record
-  against the ref, the commit and the expected trash path, then checks the
-  trash worktree's registration, lock, HEAD, branch, idleness, processes
-  and content fingerprint. Only then does it remove the trash worktree,
-  the branch (only when its tip equals `head`), the ref and the note.
-  Any failed check or step keeps the ref
+  against the ref, the commit and the expected trash path. It then checks
+  that the trash worktree is present and registered, carries the sweep's
+  lock and no other, sits on the recorded HEAD and branch, is idle with no
+  process inside, and matches the content fingerprint; a missing trash
+  worktree keeps the archive. It reads the branch, telling absence from a git
+  error. Only then does it remove the trash worktree, the branch (only when
+  its tip equals `head`), the note and the ref, in that order. Any failed
+  check or step keeps the ref; a ref deletion that fails puts the note back
 - Results: `archives_expired`, `archives_kept` (with the reason),
   `archives_migrated`; a dry run only reports
 - Operator reader: restore with `git worktree add <path> <archive_ref>`, read

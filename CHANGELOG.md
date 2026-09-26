@@ -9,7 +9,7 @@
   review, test and detached checkouts stayed forever, and a round pruned only
   the repository in front of it.
   - `skills/herdr-foreman/prune-worktrees.sh` now also removes an idle clean
-    worktree whose HEAD any remote-tracking ref holds, detached included,
+    worktree whose HEAD an origin remote-tracking ref holds, detached included,
     with plain `git worktree remove`: git refuses a tree that turned dirty.
   - An idle dirty or unpushed worktree is never deleted. It is archived: its
     HEAD plus every tracked and untracked non-ignored file become one commit
@@ -19,10 +19,13 @@
     `refs/notes/worktree-archive`, never over an existing note. The commit
     message names the ref and source, so two archives of one parent and tree
     in one second are two commits with two records. JSON keeps a path holding
-    a newline whole. Then `git worktree move` renames it into
-    the root's `.trash/`, so a writer that got in after the last check lands
-    in the moved copy. The path hash keeps two worktrees with one basename
-    apart.
+    a newline whole. Then `git worktree move` renames it into the root's
+    `.trash/`, so a writer that got in after the last check lands in the
+    moved copy, and the sweep locks it with its own reason, so `git worktree
+    prune` never drops its registration. A failed move leaves it in place
+    with the archive resolved and reported, and no second archive of that
+    path is written while the first waits (`archive-pending`). The path hash
+    keeps two worktrees with one basename apart.
   - A worktree holding another repository's checkout is kept before any
     removal or archive: a gitlink found from the index, not `.gitmodules`,
     whose checkout changed (`submodule-dirty`) or is populated
@@ -51,18 +54,23 @@
       path hash, and name the commit's parent and tree and exactly
       `<root>/.trash/<ref basename>`. A recorded path is never trusted on
       its own.
-    - The trash worktree must be registered here at that exact path,
-      unlocked, on the recorded HEAD and branch, idle, with no process
-      inside, and snapshot to exactly the recorded tree.
+    - The trash worktree must exist and be registered here at that exact
+      path, carry the sweep's lock and no other, sit on the recorded HEAD and
+      branch, be idle with no process inside, and snapshot to exactly the
+      recorded tree. A missing trash worktree keeps the archive, and a trash
+      path whose directory vanished is never pruned as an ordinary worktree.
+    - The branch is read with absence told apart from a git error; an error
+      keeps the archive.
     - Only then does it remove, in order: the trash worktree, the branch
-      (only when its tip equals the recorded head), the ref, and the note.
+      (only when its tip equals the recorded head), the note, and the ref.
       Immediately before the forced removal the process probe is re-read
       fresh and the fingerprint recomputed. A failure at any step keeps the
-      ref.
+      ref; a failed ref deletion puts the note back.
   - The owner migrates an older record through `MIGRATIONS` (empty: v1 is
     the first schema) and rewrites its note. A newer, missing, unparseable
-    or unmigratable record is kept and reported under `archives_kept`,
-    never expired.
+    or unmigratable record, or a `schema_version` that is not an integer of
+    at least 1 (a JSON `true` included), is kept and reported under
+    `archives_kept`, never expired.
   - Every removal is restorable: removed rows carry `head`, archived rows
     carry `archive_ref` and `trash_path`, and locked rows carry
     `lock_reason`.
@@ -71,7 +79,9 @@
     symlinked directory. A worktree in the root's `.trash` names its
     repository but is never a candidate, so a repository whose only
     worktrees are archived still gets its expiry pass. A prune that exits
-    without readable JSON fails the sweep. It groups them by repository
+    without readable JSON fails the sweep. A symlinked `.trash`, or a
+    symlinked entry in it, is never followed. Missing `python3`, `git` or
+    `bash` is exit 1 with an install message. It groups them by repository
     and runs the prune once each. A plain directory, a clone or a repository
     without origin is reported, never fatal. A worktree git cannot read is
     an `errors` entry naming its repository when the gitdir's files resolve
@@ -79,10 +89,12 @@
     gitdir.
   - `round-preflight.sh` runs the sweep in place of the single-repository
     prune and keeps the sweep JSON on every failed check that produced one;
-    its header documents each worktrees status and when `detail` is present. This checkout's
-    own failure, or an error naming no repository, blocks the round; another
-    repository's failure is `degraded`. SKILL.md Step 2 reports the sweep's
-    outcomes on every route.
+    its header documents each worktrees status and when `detail` is present.
+    This checkout's own failure (a non-zero prune exit, or a prune result
+    that could not be read), or an error naming no repository, blocks the
+    round; another repository's failure is `degraded`. SKILL.md Step 2
+    reports the sweep's outcomes on every route, every kept worktree
+    included (the ordinary ones as counts by reason).
   - The ledger records no worktree path per assignment, so the issue's
     "ledger join" was dropped: locked worktrees stay kept and are reported
     with their lock reason. `rules/agent-team-operation.md` Writers and
@@ -92,7 +104,11 @@
   - `rules/agent-worktree-isolation.md` Cleanup defines abandoned: idle past
     the prune script's windows. An abandoned worktree is removed once an
     origin ref holds its work, or archived and moved to `.trash/` (operator
-    decision).
+    decision); a merged worktree is removed by the post-merge order.
+  - `rules/agent-team-operation.md` Writers and Checkouts adds a narrow
+    exception naming the one removal the foreman makes itself: the merged
+    task's own worktree at SKILL.md Step 15, with `git worktree remove` in the
+    post-merge order. Every other worktree leaves only through the sweep.
 
 ## 0.3.277 — 2026-09-26
 

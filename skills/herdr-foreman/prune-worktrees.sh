@@ -25,8 +25,12 @@
 #     Archives); the commit message names the ref and source, so each archive
 #     is its own commit; the note is written before the ref and never over an
 #     existing note; then `git worktree move`
-#     renames it to <root>/.trash/<same name>. Nothing on this path deletes:
-#     a writer that got in after the last check lands in the moved copy.
+#     renames it to <root>/.trash/<same name> and locks it with the reason
+#     `prune-worktrees archive <ref>`. Nothing on this path deletes: a writer
+#     that got in after the last check lands in the moved copy. A failed move
+#     leaves it in place with the archive resolved (reported), and while an
+#     archive of this path waits for its trash, no other is written
+#     (archive-pending).
 # Before either removal or archive, a worktree holding another repository's
 # checkout is KEPT: a gitlink found from the index (never .gitmodules) whose
 # checkout changed (submodule-dirty) or is populated (submodule), or an
@@ -60,15 +64,20 @@
 #     ref's path hash, name the archive commit's parent as head and its tree
 #     as tree, and name exactly <root>/.trash/<ref basename> as trash — a
 #     record that fails any of these is KEPT (record-invalid);
-#   * the trash worktree, when present, must resolve to that exact path, be
-#     registered here, be unlocked, be on the recorded HEAD and branch, be
-#     IDLE for ARCHIVE_IDLE_HOURS with no process inside, and snapshot to
-#     exactly the recorded tree; anything else KEEPS the archive;
+#   * the trash worktree must exist (a missing one KEEPS the archive), resolve
+#     to that exact path, be registered here, carry the sweep's own lock and
+#     no other, be on the recorded HEAD and branch, be IDLE for
+#     ARCHIVE_IDLE_HOURS with no process inside, and snapshot to exactly the
+#     recorded tree; anything else KEEPS the archive;
+#   * the branch is read with absence told apart from a git error (an error
+#     KEEPS the archive); only a tip equal to the recorded head is deleted;
 #   * then, in order: the process probe is re-read fresh and the fingerprint
 #     recomputed (any change keeps it); the trash worktree is force-removed
-#     (safe: its content is the archive); the branch is deleted
-#     only when its tip equals the recorded head; the ref is compare-and-
-#     deleted; the note is removed. A failure at any step keeps the ref.
+#     past its lock (safe: its content is the archive); the branch is
+#     deleted; the note is removed; the ref is compare-and-deleted, and a
+#     failed deletion puts the note back. A failure at any step keeps the ref.
+# A trash worktree is never pruned or released as an ordinary worktree, even
+# when its directory is missing: expiry reports it and its branch stays held.
 # A ref not named <name>-<10 hex>-<UTC stamp>, with <name> drawn only from
 # the A-Za-z0-9._- charset archive_names generates, is never touched.
 # Every judgment reads origin's refs fetched by THIS run and origin's default branch as
@@ -122,7 +131,9 @@
 #           changed (it changed between judgment and removal), idle-unknown
 #           (the process probe could not run), in-use (a process works
 #           inside it), locked (with its lock_reason), merged-not-idle,
-#           nested-repo, outside-root, submodule, submodule-dirty,
+#           archive-pending (an earlier archive of this path waits for its
+#           trash; carries archive_ref), nested-repo, outside-root, submodule,
+#           submodule-dirty,
 #           prunable (its directory is gone; a live run's metadata prune
 #           removes it), unmerged. detached, dirty and unmerged mean not idle
 #           long enough for the matching removal. An archived entry whose
@@ -775,6 +786,19 @@ decide_worktree() { # <shared> <abs_root> <default> <dry-run 0|1> <path> <branch
     row failed "$path" "$branch" "cannot name the archive, so the worktree was kept: $(tr '\n' ' ' < "$ERRFILE")"; return 0
   fi
   ref="${names%% *}"; trash="${names#* }"
+  # An earlier archive of this same path whose trash never came to exist (a
+  # failed move) is still waiting on the operator: never stack another.
+  local pending
+  if ! pending="$(git -C "$shared" for-each-ref --format='%(refname)' "${ref%-*}-*" 2>"$ERRFILE")"; then
+    row failed "$path" "$branch" "cannot list earlier archives of this path, so it was kept: $(tr '\n' ' ' < "$ERRFILE")"; return 0
+  fi
+  local earlier
+  while IFS= read -r earlier; do
+    [[ -n "$earlier" ]] || continue
+    if [[ ! -e "$abs_root/.trash/${earlier#refs/archive/worktrees/}" ]]; then
+      row kept "$path" "$branch" archive-pending "" "$earlier"; return 0
+    fi
+  done <<<"$pending"
   if ! archive_worktree "$shared" "$path" "$head" "$branch" "$ref" "$trash" "$dry"; then
     row failed "$path" "$branch" "archiving before removal failed, so the worktree was kept: $(tr '\n' ' ' < "$ERRFILE")"; return 0
   fi
@@ -795,6 +819,11 @@ decide_worktree() { # <shared> <abs_root> <default> <dry-run 0|1> <path> <branch
     row failed "$path" "$branch" "moving it to ${trash} failed, so it stayed in place: $(tr '\n' ' ' < "$ERRFILE") — its archive ${ref} was kept"; return 0
   fi
   row archived "$path" "$branch" "" "$head" "${ref}"$'\t'"${trash}"
+  # The sweep's own lock: `git worktree prune` keeps a locked entry, so a trash
+  # worktree whose directory vanishes stays registered for expiry to report.
+  if ! git -C "$shared" worktree lock --reason "$(trash_lock_reason "$ref")" "$trash" 2>"$ERRFILE"; then
+    row failed "$trash" "$branch" "locking the trash worktree failed: $(tr '\n' ' ' < "$ERRFILE") — expiry keeps ${ref} until it carries the sweep's lock"
+  fi
   return 0
 }
 
@@ -885,7 +914,9 @@ for line in listed.stdout.decode("utf-8", "surrogateescape").splitlines():
     except ValueError:
         emit("unusable", "record-unparseable"); continue
     version = record.get("schema_version") if isinstance(record, dict) else None
-    if not isinstance(version, int):
+    # type() rather than isinstance(): a JSON true is a bool, which Python
+    # would otherwise accept as the integer 1.
+    if type(version) is not int or version < 1:
         emit("unusable", "record-unparseable"); continue
     if version > current:
         emit("unusable", "schema-newer"); continue
@@ -936,10 +967,11 @@ with open(out, "w", encoding="utf-8", errors="surrogateescape") as handle:
 PY
 }
 
-# Echo "<head> <branch|-> <locked 0|1>" for the worktree registered at <path>,
-# or return 1 when none is.
+# Echo "<head>\x1f<branch>\x1f<locked 0|1>\x1f<lock reason>" for the worktree
+# registered at <path>; return 1 when none is, 2 when the inventory is
+# unreadable.
 registered_worktree() { # <shared> <path>
-  local listing field cur="" head="" branch="-" locked=0 hit=1
+  local listing field cur="" head="" branch="" locked=0 reason="" hit=1
   if ! listing="$(mktemp 2>"$ERRFILE")"; then return 2; fi
   if ! git -C "$1" worktree list --porcelain -z >"$listing" 2>"$ERRFILE"; then
     if ! rm -f "$listing"; then warn "could not remove temp file ${listing} — remove it by hand"; fi
@@ -949,25 +981,31 @@ registered_worktree() { # <shared> <path>
     case "$field" in
       "worktree "*)
         if [[ "$cur" == "$2" ]]; then hit=0; break; fi
-        cur="${field#worktree }"; head=""; branch="-"; locked=0 ;;
+        cur="${field#worktree }"; head=""; branch=""; locked=0; reason="" ;;
       "HEAD "*) head="${field#HEAD }" ;;
       "branch refs/heads/"*) branch="${field#branch refs/heads/}" ;;
-      locked*) locked=1 ;;
+      locked) locked=1 ;;
+      "locked "*) locked=1; reason="${field#locked }" ;;
     esac
   done < "$listing"
   [[ "$cur" == "$2" ]] && hit=0
   if ! rm -f "$listing"; then warn "could not remove temp file ${listing} — remove it by hand"; fi
   (( hit == 0 )) || return 1
-  printf '%s %s %s' "$head" "$branch" "$locked"
+  printf '%s\x1f%s\x1f%s\x1f%s' "$head" "$branch" "$locked" "$reason"
 }
 
+#: The lock reason the archive path puts on every trash worktree: git keeps a
+#: locked entry through `worktree prune`, and expiry accepts only this lock.
+trash_lock_reason() { printf 'prune-worktrees archive %s' "$1"; }
+
 # Every gate an expiring trash worktree must pass before it is destroyed:
-# registered here at exactly its recorded path, not a symlink, not locked, on
+# registered here at exactly its recorded path, not a symlink, locked with the
+# sweep's own reason and no other, on
 # its recorded HEAD and branch, idle for ARCHIVE_IDLE_HOURS, no process inside,
 # and holding exactly the archived content. 0 = pass, 1 = keep (EXPIRE_WHY set),
 # 2 = a read failed (EXPIRE_WHY set).
 EXPIRE_WHY=""
-trash_gates() { # <shared> <trash> <head> <branch|""> <tree>
+trash_gates() { # <shared> <trash> <head> <branch|""> <tree> <ref>
   local entry rc=0 age real now_tree
   EXPIRE_WHY=""
   if ! real="$(cd "$2" 2>"$ERRFILE" && pwd -P)"; then EXPIRE_WHY="its trash worktree cannot be entered"; return 2; fi
@@ -978,10 +1016,11 @@ trash_gates() { # <shared> <trash> <head> <branch|""> <tree>
     1) EXPIRE_WHY="its trash path is not a worktree of this repository"; return 1 ;;
     *) EXPIRE_WHY="the worktree inventory cannot be read: $(tr '\n' ' ' < "$ERRFILE")"; return 2 ;;
   esac
-  local e_head="${entry%% *}" rest="${entry#* }"
-  local e_branch="${rest%% *}" e_locked="${rest##* }"
-  [[ "$e_branch" == "-" ]] && e_branch=""
-  if [[ "$e_locked" == 1 ]]; then EXPIRE_WHY="its trash worktree is locked"; return 1; fi
+  local e_head e_branch e_locked e_reason
+  IFS=$'\x1f' read -r e_head e_branch e_locked e_reason <<<"$entry"
+  if [[ "$e_locked" != 1 || "$e_reason" != "$(trash_lock_reason "$6")" ]]; then
+    EXPIRE_WHY="its trash worktree is not locked by this sweep alone (someone unlocked or re-locked it)"; return 1
+  fi
   if [[ "$e_head" != "$3" ]]; then EXPIRE_WHY="its trash worktree moved off the archived HEAD"; return 1; fi
   if [[ "$e_branch" != "$4" ]]; then EXPIRE_WHY="its trash worktree is on another branch"; return 1; fi
   if ! age="$(idle_hours "$2")"; then EXPIRE_WHY="its trash worktree's activity age cannot be read"; return 2; fi
@@ -1027,36 +1066,50 @@ r = json.loads(sys.argv[1])
 sys.stdout.write("\x1f".join([r["trash"], r["head"], r.get("branch") or "", r["tree"]]) + "\0")' "$record" 2>"$ERRFILE"); }; then
       row failed "$ref" "" "cannot read its record: $(tr '\n' ' ' < "$ERRFILE")"; continue
     fi
-    # Gates first, nothing destroyed yet.
-    if [[ -e "$trash" || -L "$trash" ]]; then
-      rc=0; trash_gates "$1" "$trash" "$head" "$branch" "$tree" || rc=$?
-      case "$rc" in
-        0) ;;
-        1) row archive-kept "$ref" "" "$EXPIRE_WHY" "$sha" "$trash"; continue ;;
-        *) row failed "$ref" "" "expiry kept ${ref}: ${EXPIRE_WHY}"; continue ;;
-      esac
+    # Gates first, nothing destroyed yet. The trash worktree must exist and
+    # pass every gate: a missing one keeps the archive, never expires it.
+    if [[ ! -e "$trash" && ! -L "$trash" ]]; then
+      row archive-kept "$ref" "" "its trash worktree ${trash} is missing" "$sha" "$trash"; continue
     fi
+    rc=0; trash_gates "$1" "$trash" "$head" "$branch" "$tree" "$ref" || rc=$?
+    case "$rc" in
+      0) ;;
+      1) row archive-kept "$ref" "" "$EXPIRE_WHY" "$sha" "$trash"; continue ;;
+      *) row failed "$ref" "" "expiry kept ${ref}: ${EXPIRE_WHY}"; continue ;;
+    esac
+    # The branch: absent is fine; a tip other than the recorded head is kept;
+    # any git error keeps the whole archive.
     del_branch=""
     if [[ -n "$branch" ]]; then
-      if tip="$(branch_tip "$1" "$branch")"; then
-        if [[ "$tip" == "$head" ]]; then del_branch="$branch"; else row branch-kept "$branch" "$branch" moved-since-archive; fi
-      fi
+      rc=0; git -C "$1" show-ref --verify --quiet "refs/heads/${branch}" 2>"$ERRFILE" || rc=$?
+      case "$rc" in
+        0) if ! tip="$(branch_tip "$1" "$branch")"; then
+             row failed "$ref" "" "cannot read the tip of ${branch}, so ${ref} was kept: $(tr '\n' ' ' < "$ERRFILE")"; continue
+           fi
+           if [[ "$tip" == "$head" ]]; then del_branch="$branch"; else row branch-kept "$branch" "$branch" moved-since-archive; fi ;;
+        1) ;;
+        *) row failed "$ref" "" "cannot tell whether ${branch} exists, so ${ref} was kept: $(tr '\n' ' ' < "$ERRFILE")"; continue ;;
+      esac
+    fi
+    local note_text
+    if ! note_text="$(git -C "$1" notes --ref="$ARCHIVE_NOTES" show "$sha" 2>"$ERRFILE")"; then
+      row failed "$ref" "" "cannot re-read its record, so ${ref} was kept: $(tr '\n' ' ' < "$ERRFILE")"; continue
     fi
     if (( $3 )); then row expired "$ref" "$branch" "" "$sha" "$trash"; continue; fi
-    # Destructive steps, in order; any failure keeps the archive ref.
-    if [[ -e "$trash" ]]; then
-      # Immediately before the forced removal: a fresh probe, never the
-      # snapshot trash_gates took, and a fresh fingerprint.
-      local last_tree
-      reprobe; rc=0; in_use "$trash" || rc=$?
-      if (( rc != 1 )); then row archive-kept "$ref" "" "a process entered its trash worktree" "$sha" "$trash"; continue; fi
-      if ! last_tree="$(snapshot_tree "$trash" "$head")"; then
-        row failed "$ref" "" "cannot snapshot the trash worktree ${trash} before removal, so ${ref} was kept: $(tr '\n' ' ' < "$ERRFILE")"; continue
-      fi
-      if [[ "$last_tree" != "$tree" ]]; then row archive-kept "$ref" "" "its trash worktree changed after the gates" "$sha" "$trash"; continue; fi
-      if ! git -C "$1" worktree remove --force "$trash" 2>"$ERRFILE"; then
-        row failed "$ref" "" "removing the trash worktree ${trash} failed, so ${ref} was kept: $(tr '\n' ' ' < "$ERRFILE")"; continue
-      fi
+    # Destructive steps, in order: trash worktree, branch, note, ref. A failure
+    # at any step keeps the ref; a ref deletion that fails puts the note back.
+    # Immediately before the forced removal: a fresh probe, never the
+    # snapshot trash_gates took, and a fresh fingerprint.
+    local last_tree
+    reprobe; rc=0; in_use "$trash" || rc=$?
+    if (( rc != 1 )); then row archive-kept "$ref" "" "a process entered its trash worktree" "$sha" "$trash"; continue; fi
+    if ! last_tree="$(snapshot_tree "$trash" "$head")"; then
+      row failed "$ref" "" "cannot snapshot the trash worktree ${trash} before removal, so ${ref} was kept: $(tr '\n' ' ' < "$ERRFILE")"; continue
+    fi
+    if [[ "$last_tree" != "$tree" ]]; then row archive-kept "$ref" "" "its trash worktree changed after the gates" "$sha" "$trash"; continue; fi
+    # Twice forced: the trash worktree carries the sweep's own lock.
+    if ! git -C "$1" worktree remove --force --force "$trash" 2>"$ERRFILE"; then
+      row failed "$ref" "" "removing the trash worktree ${trash} failed, so ${ref} was kept: $(tr '\n' ' ' < "$ERRFILE")"; continue
     fi
     if [[ -n "$del_branch" ]]; then
       rc=0; delete_branch "$1" "$del_branch" "$head" || rc=$?
@@ -1066,13 +1119,21 @@ sys.stdout.write("\x1f".join([r["trash"], r["head"], r.get("branch") or "", r["t
       fi
       row branch-deleted "$del_branch" "$del_branch" ""
     fi
+    if ! git -C "$1" notes --ref="$ARCHIVE_NOTES" remove "$sha" 2>"$ERRFILE"; then
+      row failed "$ref" "" "removing its record note failed, so ${ref} was kept: $(tr '\n' ' ' < "$ERRFILE")"; continue
+    fi
     if ! git -C "$1" update-ref -d "$ref" "$sha" 2>"$ERRFILE"; then
-      row failed "$ref" "" "deleting expired archive ${ref} failed: $(tr '\n' ' ' < "$ERRFILE")"; continue
+      local why; why="$(tr '\n' ' ' < "$ERRFILE")"
+      if printf '%s\n' "$note_text" | env GIT_AUTHOR_NAME=prune-worktrees GIT_AUTHOR_EMAIL=prune-worktrees@localhost \
+           GIT_COMMITTER_NAME=prune-worktrees GIT_COMMITTER_EMAIL=prune-worktrees@localhost \
+           git -C "$1" notes --ref="$ARCHIVE_NOTES" add -F - "$sha" 2>"$ERRFILE"; then
+        row failed "$ref" "" "deleting ${ref} failed (${why}); its record note was restored and the archive kept"
+      else
+        row failed "$ref" "" "deleting ${ref} failed (${why}) and its record note could not be restored: $(tr '\n' ' ' < "$ERRFILE") — the ref is kept without a record; restore the note by hand"
+      fi
+      continue
     fi
     row expired "$ref" "$branch" "" "$sha" "$trash"
-    if ! git -C "$1" notes --ref="$ARCHIVE_NOTES" remove --ignore-missing "$sha" 2>"$ERRFILE"; then
-      warn "expired ${ref} but could not remove its record note: $(tr '\n' ' ' < "$ERRFILE") — run \`git notes --ref=${ARCHIVE_NOTES} prune\`"
-    fi
   done
   return 0
 }
@@ -1219,6 +1280,13 @@ main() {
         # traversal. Absence is confirmed only through a traversable parent;
         # anything else is a failure that also inhibits the metadata prune.
         if [[ -d "$parent" && -x "$parent" ]]; then
+          # A trash worktree belongs to its archive, missing or not: expiry
+          # reports it and its branch stays held.
+          if [[ "$path" == "$abs_root/.trash/"* ]]; then
+            if [[ -n "$branch" ]]; then seen_branches+=("$branch"); fi
+            path=""; branch=""; detached=0; locked=0; lock_reason=""
+            return 0
+          fi
           # Confirmed gone: reported prunable. Its branch goes to the
           # no-worktree pass only once the metadata prune actually releases
           # it, so it is recorded here and released below.
@@ -1357,6 +1425,8 @@ for index in range(0, len(fields), 6):
             kept = {"path": target, "branch": branch or None, "reason": reason}
             if reason == "locked":
                 kept["lock_reason"] = extra or None
+            if reason == "archive-pending":
+                kept["archive_ref"] = extra or None
             result["worktrees_kept"].append(kept)
         elif kind == "branch-deleted":
             result["branches_deleted"].append(branch)

@@ -130,8 +130,10 @@ Before following any route below, report the worktree sweep to the operator:
 
 - When `checks.worktrees.detail` is present, report from it every archive with
   its `archive_ref` and `trash_path`, every expired, kept or migrated archive,
-  every kept worktree other than an ordinary not-yet-idle one, and every
-  `errors` entry
+  every `errors` entry, and every kept worktree: list the ones kept for
+  `locked`, `in-use`, `changed`, `idle-unknown`, `archive-pending`,
+  `submodule`, `submodule-dirty` or `nested-repo` by path, and give the rest
+  as counts by reason
 - When `checks.worktrees` has no `detail`, report its `reason` verbatim; a
   status `ok` with no `detail` means the worktree root does not exist
 - On exit 2 there is no JSON; report the stderr diagnostic instead
@@ -367,8 +369,9 @@ Proceed immediately to Step 8.
 Step 2's preflight swept every repository owning a worktree under the root,
 every round, and Step 2 reported its outcomes. `degraded` means another
 repository's prune failed; it does not block this round. Never remove a
-worktree by hand. Run the sweep alone only to re-sweep, and report its
-outcomes the same way:
+worktree by hand; Step 15's removal of the merged task's own worktree is the
+one exception. Run the sweep alone only to re-sweep, and report its outcomes
+the same way:
 
 ```bash
 CP=.tessl/plugins/jbaruch/coding-policy; [ -d "$CP" ] || CP="$HOME/$CP"
@@ -666,9 +669,12 @@ Record that evidence in the task ledger.
 
 ## Step 15 — Clean Up the Worktree
 
-Fast-forward the shared checkout, remove the worktree, and delete the branch
-per `rules/agent-worktree-isolation.md`, then run Step 8's sweep again
-for the round's other worktrees. Proceed immediately to Step 16.
+Fast-forward the shared checkout, remove the merged task's own worktree with
+`git worktree remove`, and delete the branch, in the post-merge order of
+`rules/agent-worktree-isolation.md` Cleanup. This is the one removal the
+foreman makes itself (`rules/agent-team-operation.md` Writers and Checkouts,
+the merged-task exception). Then run Step 8's sweep again for the round's other
+worktrees. Proceed immediately to Step 16.
 
 ## Step 16 — Log the Round
 

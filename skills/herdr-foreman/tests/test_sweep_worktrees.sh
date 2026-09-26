@@ -27,6 +27,9 @@
 #                           .trash still gets its prune, so its archive expires.
 #  12. Unreadable result -> a prune exiting 0 without readable JSON fails the
 #                           sweep (exit 2, stderr diagnostic).
+#  13. No git            -> exit 1 with an actionable message, no traceback.
+#  14. Symlinked trash   -> a symlinked .trash, or a symlinked entry in .trash,
+#                           never names a repository.
 #
 # Run: bash skills/herdr-foreman/tests/test_sweep_worktrees.sh
 set -uo pipefail
@@ -197,6 +200,32 @@ main() {
   if (( RC == 2 )) && [[ "$(q '"error" in d["repos"][0] and "result" not in d["repos"][0]')" == True ]] \
     && [[ "$ERRTEXT" == *"without a readable JSON result"* ]]; then
     pass; else fail "unreadable result: rc=$RC out=$OUT err=$ERRTEXT"; fi
+
+  # --- 13. git missing from PATH.
+  local nogit="$TMP/nogit" tool
+  mkdir -p "$nogit" || die "mkdir nogit failed"
+  for tool in bash python3 dirname; do
+    ln -s "$(command -v "$tool")" "$nogit/$tool" || die "link $tool failed"
+  done
+  RUN_SEQ=$((RUN_SEQ+1))
+  OUT="$(PATH="$nogit" "$BASH" "$SCRIPT" "$root" 2>"$TMP/err.$RUN_SEQ")"; RC=$?
+  ERRTEXT="$(cat "$TMP/err.$RUN_SEQ")"
+  echo "13. no git on PATH is exit 1 with an actionable message"
+  if (( RC == 1 )) && [[ -z "$OUT" ]] && [[ "$ERRTEXT" == *"git not found on PATH"* ]] && [[ "$ERRTEXT" != *Traceback* ]]; then
+    pass; else fail "no git: rc=$RC out=$OUT err=$ERRTEXT"; fi
+
+  # --- 14. symlinked .trash, and a symlinked entry inside a real .trash.
+  local root5="$TMP/worktrees5" root6="$TMP/worktrees6" outside="$TMP/outside-trash"
+  mkdir -p "$root5" "$root6/.trash" "$outside" || die "mkdir root5/6 failed"
+  "${G[@]}" -C "$alpha" worktree add -q -b review/outside "$outside/alpha-out" origin/main 2>/dev/null || die "outside worktree failed"
+  ln -s "$outside" "$root5/.trash" || die "symlink .trash failed"
+  ln -s "$outside/alpha-out" "$root6/.trash/alpha-out" || die "symlink trash entry failed"
+  local repos5 repos6
+  run "$root5"; repos5="$(q 'len(d["repos"])')"
+  run "$root6"; repos6="$(q 'len(d["repos"])')"
+  echo "14. a symlinked .trash or trash entry names no repository"
+  if [[ "$repos5" == 0 && "$repos6" == 0 ]] && listed "$alpha" "$outside/alpha-out"; then
+    pass; else fail "symlinked trash: repos5=$repos5 repos6=$repos6 out=$OUT"; fi
 
   run
   echo "5a. no root is exit 1 with no JSON"

@@ -22,7 +22,8 @@
 #           replaces it when the prune decided nothing (exit 1: no origin, a
 #           failed fetch, ...). Worktrees are found anywhere below the root; a
 #           found checkout, a .git directory and a symlinked directory are
-#           not descended. The root's .trash holds the prune's archived
+#           not descended; a symlinked .trash, and a symlinked entry inside
+#           .trash, are never followed. The root's .trash holds the prune's archived
 #           worktrees: each names its repository, so a repository whose only
 #           worktrees are archived still gets its prune (and expiry) run,
 #           but a trash worktree is never a candidate.
@@ -34,7 +35,8 @@
 #           the repository owning it when its gitdir's files name one.
 #   stderr: diagnostics, and each prune's stderr prefixed with its repository.
 #   exit  : 0 every repository decided cleanly,
-#           1 usage, python3 absent, or the root unreadable — no JSON,
+#           1 usage, python3, git or bash absent, or the root unreadable — no
+#             JSON,
 #           2 at least one repository's prune exited non-zero or returned
 #             no readable JSON (its entry carries `error`), or `errors` is
 #             non-empty; every other repository still ran.
@@ -56,10 +58,15 @@ main() {
     warn "usage: sweep-worktrees.sh <worktree-root> [--dry-run]"
     return 1
   fi
-  if ! command -v python3 >/dev/null; then
-    warn "python3 not found on PATH — install it to sweep worktrees"
-    return 1
-  fi
+  # Every tool the embedded program and the per-repository prune run: checked
+  # here, so a missing one is an actionable message, never a traceback.
+  local tool
+  for tool in python3 git bash; do
+    if ! command -v "$tool" >/dev/null; then
+      warn "${tool} not found on PATH — install ${tool} (or restore it to PATH) to sweep worktrees"
+      return 1
+    fi
+  done
   if [[ ! -d "$root" || ! -r "$root" || ! -x "$root" ]]; then
     warn "worktree root ${root} is missing or unreadable — pass the directory holding the worktrees"
     return 1
@@ -107,7 +114,7 @@ def discover(root):
     found, empty_tops = [], []
     for top in sorted(os.listdir(root)):
         top_path = os.path.join(root, top)
-        if top == ".trash":
+        if top == ".trash" and not os.path.islink(top_path):
             # The prune's archived worktrees: never pruned as candidates, but
             # each still names a repository whose expiry pass must run.
             try:
@@ -115,8 +122,11 @@ def discover(root):
             except OSError as exc:
                 errors.append({"path": top_path, "repo": None, "exit": None, "error": "cannot list: {}".format(exc)})
                 continue
+            # A symlinked entry is never followed: it could name a checkout
+            # outside the root.
             found.extend(("trash", os.path.join(top_path, name)) for name in trashed
-                         if os.path.isfile(os.path.join(top_path, name, ".git")))
+                         if not os.path.islink(os.path.join(top_path, name))
+                         and os.path.isfile(os.path.join(top_path, name, ".git")))
             continue
         before = len(found)
         stack = [top_path]

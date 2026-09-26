@@ -75,7 +75,8 @@
 #  46. Fresh edit           -> a tracked file edited now keeps an old worktree.
 #  47. Changed at removal   -> a process arriving before the removal keeps it.
 #  48. Changed after archive-> the archive is reported, the worktree kept.
-#  49. Move fails           -> a written archive is still reported.
+#  49. Move fails           -> a written archive is still reported; the next
+#                             run never stacks another (archive-pending).
 #  37b. Trash              -> a moved worktree is not judged by the next run.
 #  50. Archive expiry       -> refs past the expiry window go with their trash
 #                             worktree and branch; a dry run previews; a
@@ -85,17 +86,19 @@
 #  53-57. Expiry gates      -> a newer schema, a record naming another
 #                             worktree, content the archive lacks, a lock,
 #                             or a process inside keeps the archive and trash.
-#  58. Moved branch         -> kept at expiry; the archive still expires.
+#  58. Missing trash        -> its archive, registration and branch are kept.
 #  59. Newline path         -> recorded whole in JSON; expires with its trash.
 #  60. Other remote         -> a ref of a remote other than origin proves nothing.
 #  61. Proof gone           -> reachability re-derived just before removal.
 #  62. Gitlink, embedded    -> a dirty gitlink without .gitmodules, and an
 #                             untracked embedded repository, keep the worktree.
-#  63. Unusable records     -> too old to migrate, or unparseable: kept.
+#  63. Unusable records     -> schema_version 0, or unparseable: kept.
 #  64. Twin archives        -> one parent and tree in one second: two commits,
 #                             two records.
 #  65. Foreign ref name     -> a slash in the name part: never planned.
 #  66. Late process         -> a fresh probe before the forced trash removal.
+#  67. Bool schema          -> schema_version true is unparseable.
+#  68. Note removal fails   -> the ref and its record are kept.
 #
 # Run: bash skills/herdr-foreman/tests/test_prune_worktrees.sh
 set -uo pipefail
@@ -696,7 +699,8 @@ SHIM
     && git -C "$SHARED" merge-base --is-ancestor "$stale_tip" "$ref" \
     && [[ "$(git -C "$SHARED" show "$ref:notes.txt")" == "untracked work" ]] \
     && [[ "$(git -C "$SHARED" notes --ref=refs/notes/worktree-archive show "$ref" | python3 -c 'import json,sys; print(json.load(sys.stdin)["schema_version"])')" == 1 ]] \
-    && has_branch "$SHARED" feat/stale; then
+    && has_branch "$SHARED" feat/stale \
+    && git -C "$SHARED" worktree list --porcelain | grep -qxF "locked prune-worktrees archive $ref"; then
     pass; else fail "archive: ref=$ref trash=$trash out=$OUT err=$ERRTEXT"; fi
   idle_run
   echo "37b. a trash worktree is not judged again by the next run"
@@ -817,7 +821,7 @@ SHIM
     && git -C "$SHARED" rev-parse --verify --quiet "$ra_ref" >/dev/null; then
     pass; else fail "changed after archive: out=$OUT err=$ERRTEXT"; fi
 
-  # --- 49. a forced removal that fails after the archive still reports the archive.
+  # --- 49. a move that fails after the archive still reports the archive.
   mk_repo rmfail
   local rf="$ROOT/rmfail-wt"
   add_wt "$SHARED" feat/rmfail "$rf"; commit_in "$rf" f.txt
@@ -830,7 +834,11 @@ SHIM
   idle_run PATH="$TMP/shim49:$PATH"
   echo "49. a failed move after the archive still names the archive ref"
   if (( RC == 2 )) && [[ -n "$(archived_ref "$rf")" && -z "$(trash_of "$rf")" ]] && [[ "$OUT" == *"move refused"* ]] && listed "$SHARED" "$rf"; then
-    pass; else fail "removal failure: rc=$RC out=$OUT err=$ERRTEXT"; fi
+    pass; else fail "move failure: rc=$RC out=$OUT err=$ERRTEXT"; fi
+  idle_run PATH="$TMP/shim49:$PATH"
+  echo "49b. an archive still waiting on its trash is never stacked with another"
+  if [[ "$(kept_reason "$rf")" == archive-pending ]] && [[ "$(git -C "$SHARED" for-each-ref refs/archive/ | wc -l | tr -d ' ')" == 1 ]]; then
+    pass; else fail "pending archive: out=$OUT err=$ERRTEXT"; fi
 
   # --- 50. expiry: every gate passes, then trash, branch, ref and note go.
   mk_repo expiry
@@ -873,7 +881,8 @@ SHIM
   # 55: content written into the trash after the archive.
   printf 'late\n' > "${g_chg#* }/late.txt" || die "late write failed"; age_trash "${g_chg#* }"
   # 56: locked.
-  git -C "$SHARED" worktree lock "${g_lck#* }" || die "lock trash failed"
+  git -C "$SHARED" worktree unlock "${g_lck#* }" || die "unlock sweep's trash lock failed"
+  git -C "$SHARED" worktree lock --reason "operator hold" "${g_lck#* }" || die "lock trash failed"
   # 57: a process inside.
   (cd "${g_busy#* }" && exec sleep 300) &
   SLEEPER=$!
@@ -885,24 +894,22 @@ SHIM
   if [[ "$(archives_kept_reason "${g_bad%% *}")" == record-invalid:* ]] && listed "$SHARED" "$other" && listed "$SHARED" "${g_bad#* }"; then pass; else fail "invalid: out=$OUT"; fi
   echo "55. a trash worktree holding content the archive lacks is kept"
   if [[ "$(archives_kept_reason "${g_chg%% *}")" == *"content the archive lacks"* ]] && [[ -e "${g_chg#* }/late.txt" ]]; then pass; else fail "changed trash: out=$OUT"; fi
-  echo "56. a locked trash worktree is kept"
-  if [[ "$(archives_kept_reason "${g_lck%% *}")" == *locked* ]] && listed "$SHARED" "${g_lck#* }"; then pass; else fail "locked trash: out=$OUT"; fi
+  echo "56. a trash worktree locked by anyone but the sweep is kept"
+  if [[ "$(archives_kept_reason "${g_lck%% *}")" == *"not locked by this sweep alone"* ]] && listed "$SHARED" "${g_lck#* }"; then pass; else fail "locked trash: out=$OUT"; fi
   echo "57. a trash worktree with a process inside is kept"
   if [[ "$(archives_kept_reason "${g_busy%% *}")" == *"process is working inside"* ]] && listed "$SHARED" "${g_busy#* }"; then pass; else fail "busy trash: out=$OUT"; fi
   git -C "$SHARED" worktree unlock "${g_lck#* }" || die "unlock trash failed"
 
-  # --- 58. a branch moved since the archive is kept; the archive still expires.
+  # --- 58. a missing trash worktree keeps its archive; the branch stays held.
   mk_repo moved
   local mv1; mv1="$(archive_one mv1 feat/mv1)"
-  git -C "$SHARED" worktree remove --force "${mv1#* }" || die "remove trash by hand failed"
-  local unmerged_c
-  unmerged_c="$(git -C "$SHARED" -c user.name=t -c user.email=t@t commit-tree "origin/main^{tree}" -p origin/main -m elsewhere)" || die "commit-tree failed"
-  git -C "$SHARED" branch -f feat/mv1 "$unmerged_c" || die "branch -f failed"
+  rm -rf "${mv1#* }" || die "rm trash dir failed"
   later_run
-  echo "58. a branch moved since the archive is kept; the archive expires"
-  if (( RC == 0 )) && [[ "$(expired_refs)" == "${mv1%% *}" ]] && has_branch "$SHARED" feat/mv1 \
-    && python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if {"branch":"feat/mv1","reason":"moved-since-archive"} in d["branches_kept"] else 1)' <<<"$OUT"; then
-    pass; else fail "moved branch: rc=$RC out=$OUT err=$ERRTEXT"; fi
+  echo "58. a trash worktree whose directory vanished keeps its archive, registration and branch"
+  if (( RC == 0 )) && [[ "$(archives_kept_reason "${mv1%% *}")" == *"is missing"* ]] \
+    && git -C "$SHARED" rev-parse --verify --quiet "${mv1%% *}" >/dev/null \
+    && listed "$SHARED" "${mv1#* }" && has_branch "$SHARED" feat/mv1 && ! mentions_path "${mv1#* }"; then
+    pass; else fail "missing trash: rc=$RC out=$OUT err=$ERRTEXT"; fi
 
   # --- 59. a path holding a newline archives and expires whole.
   mk_repo newline
@@ -1007,8 +1014,10 @@ SHIM
   set_record "$SHARED" "${o1%% *}" "$(record_of "$SHARED" "${o1%% *}" | python3 -c 'import json,sys; r=json.load(sys.stdin); r["schema_version"]=0; print(json.dumps(r))')"
   set_record "$SHARED" "${o2%% *}" "not json"
   later_run
-  echo "63. a record older than any migration, or unparseable, is kept and never expired"
-  if [[ "$(archives_kept_reason "${o1%% *}")" == schema-unmigratable && "$(archives_kept_reason "${o2%% *}")" == record-unparseable ]] \
+  # Versions start at 1: a 0 is malformed, not old. The unmigratable path
+  # needs a version between 1 and ARCHIVE_SCHEMA, which v1 does not have yet.
+  echo "63. a record with schema_version 0, or unparseable, is kept and never expired"
+  if [[ "$(archives_kept_reason "${o1%% *}")" == record-unparseable && "$(archives_kept_reason "${o2%% *}")" == record-unparseable ]] \
     && listed "$SHARED" "${o1#* }" && listed "$SHARED" "${o2#* }"; then
     pass; else fail "old records: out=$OUT"; fi
 
@@ -1053,6 +1062,32 @@ SHIM
   if (( RC == 0 )) && [[ "$(archives_kept_reason "${lb%% *}")" == *"process entered"* ]] && listed "$SHARED" "${lb#* }" \
     && git -C "$SHARED" rev-parse --verify --quiet "${lb%% *}" >/dev/null; then
     pass; else fail "late busy: rc=$RC out=$OUT err=$ERRTEXT"; fi
+
+  # --- 67. a boolean schema_version is unusable, never version 1.
+  mk_repo boolschema
+  local bs; bs="$(archive_one bool1 feat/bool1)"
+  age_trash "${bs#* }"
+  set_record "$SHARED" "${bs%% *}" "$(record_of "$SHARED" "${bs%% *}" | python3 -c 'import json,sys; r=json.load(sys.stdin); r["schema_version"]=True; print(json.dumps(r))')"
+  later_run
+  echo "67. a record whose schema_version is true is unparseable and kept"
+  if [[ "$(archives_kept_reason "${bs%% *}")" == record-unparseable ]] && listed "$SHARED" "${bs#* }"; then pass; else fail "bool schema: out=$OUT"; fi
+
+  # --- 68. a failed note removal keeps the ref and its record.
+  mk_repo notefail
+  local nf; nf="$(archive_one note1 feat/note1)"
+  age_trash "${nf#* }"
+  mkdir -p "$TMP/shim68" || die "mkdir shim68 failed"
+  # shellcheck disable=SC2016  # The shim's "$@" and $a must expand in the shim, not here.
+  printf '#!/usr/bin/env bash\nset -euo pipefail\nfor a in "$@"; do if [[ "$a" == remove ]]; then for b in "$@"; do if [[ "$b" == notes ]]; then echo "notes remove refused" >&2; exit 1; fi; done; fi; done\nexec %q "$@"\n' "$real_git" > "$TMP/shim68/git" \
+    || die "shim68 write failed"
+  chmod +x "$TMP/shim68/git" || die "chmod shim68 failed"
+  RUN_SEQ=$((RUN_SEQ+1))
+  OUT="$(env WORKTREE_ROOT="$ROOT" PRUNE_NOW="$LATER_NOW" PATH="$TMP/shim68:$PATH" bash "$SCRIPT" "$SHARED" 2>"$TMP/err.$RUN_SEQ")"; RC=$?
+  ERRTEXT="$(cat "$TMP/err.$RUN_SEQ")"
+  echo "68. a note removal that fails keeps the archive ref and its record, never reported expired"
+  if (( RC == 2 )) && [[ "$(expired_refs)" == "" ]] && [[ "$OUT" == *"notes remove refused"* ]] \
+    && git -C "$SHARED" rev-parse --verify --quiet "${nf%% *}" >/dev/null && record_of "$SHARED" "${nf%% *}" >/dev/null; then
+    pass; else fail "note removal failure: rc=$RC out=$OUT err=$ERRTEXT"; fi
 
   # --- 14. usage / not a repo.
   run

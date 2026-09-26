@@ -39,7 +39,8 @@
 #              sweep JSON as detail
 #   undecided  the sweep decided nothing (exit 1): reason, no detail; or this
 #              checkout's own prune decided nothing: reason, sweep JSON detail
-#   failed     this checkout's prune failed, or an error names this checkout
+#   failed     this checkout's prune failed or returned no readable result,
+#              or an error names this checkout
 #              or no repository: reason, sweep JSON detail; the sweep's JSON
 #              was unreadable or it exited other than 0/1/2: reason, no detail
 #   degraded   only another repository failed: sweep JSON detail; not blocking
@@ -244,11 +245,13 @@ import json, os, sys
 with open(sys.argv[1], encoding="utf-8") as handle:
     sweep = json.load(handle)
 mine = os.path.realpath(sys.argv[2])
-own = next((r["exit"] for r in sweep["repos"] if os.path.realpath(r["shared"]) == mine), 0)
+entry = next((r for r in sweep["repos"] if os.path.realpath(r["shared"]) == mine), None)
 errors = sweep.get("errors", [])
-if own == 1:
+if entry is not None and entry["exit"] == 1:
     print("undecided")
-elif own != 0 or any(e.get("repo") and os.path.realpath(e["repo"]) == mine for e in errors):
+elif (entry is not None and (entry["exit"] != 0 or "result" not in entry)) \
+        or any(e.get("repo") and os.path.realpath(e["repo"]) == mine for e in errors):
+    # A result that could not be read is a failure, whatever the exit said.
     print("failed")
 elif any(not e.get("repo") for e in errors):
     print("unassociated")
