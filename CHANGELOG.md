@@ -110,6 +110,86 @@
     task's own worktree at SKILL.md Step 15, with `git worktree remove` in the
     post-merge order. Every other worktree leaves only through the sweep.
 
+## 0.3.278 — 2026-09-26
+
+### Fixed
+
+- **SessionStart is a native hook, so it sees the session's environment.**
+  `tessl hook run` hands a hook only `HOME`, `PATH`, `TMPDIR` and `TESSL_*`
+  (probed on tessl 0.111.0: `HERDR_ENV`, `XDG_STATE_HOME`, `ACR_BIN` and
+  `CLAUDE_PROJECT_DIR` all arrive unset). Under the portable declaration
+  `herdr-team-status` could never see `HERDR_ENV=1` and never reported, and
+  `check-git-sync`'s worker guard never fired, so a worker got the
+  foreman's "sync `main`" advice (git's own refusal kept `main` from moving).
+  `hooks/session-start.sh` is now declared under `nativeHooks` for
+  `claude-code` and `codex`, the form the Stop hooks already use, and emits
+  their native `hookSpecificOutput.additionalContext` payload. The portable
+  SessionStart declaration stays for every other agent: under `tessl hook
+  run` the script sees `TESSL_AGENT`, exits at once for `claude-code` and
+  `codex` (their native entry already ran), and otherwise emits the
+  consensus `{"additionalContext"}` tessl translates. Verified by installing the branch into a scratch
+  consumer: `.claude/settings.json` carries the native and the portable
+  entry; the portable one returned `{}` and the native one delivered the
+  merged statuses with `ACR_BIN` intact.
+
+### Added
+
+- **`check-acr-latest` hook: ACR dependencies update at session start.** As
+  the fleet moves from Tessl to ACR, `check-tessl-latest` stops covering what
+  a project installs. ACR's own session-start hook defaults to `outdated`
+  (ACR #16), which only reports, the warn-only shape #540 removed here. In a
+  project with `agents.yaml` the new hook runs `acr freshness run --project
+  <root> --policy install`: it reconciles dependencies declared `latest`,
+  realizes changed files, never moves pinned tags or commits, and never
+  rewrites `agents.yaml`. ACR throttles remote checks to one per project and
+  policy per 24 hours, so a project already at `freshness: install` shares
+  one check with ACR's own hook. The shipped behaviour:
+  - Every session, Herdr included, runs the read-only carve-out check below
+    and reports any finding.
+  - The update runs only on a safe checkout (operator decision): a bounded
+    fresh fetch succeeded, `HEAD` contains `origin/<default>`, the tree is
+    clean, and `.agents/registry.lock` is gitignored and not committed; the
+    default branch is origin's live HEAD, asked for within the same bound, and
+    the fetched ref must equal the tip origin advertises at that moment.
+    Otherwise the status
+    names the reason and nothing changes. Outside git there is no checkout to
+    sync, and it updates.
+  - No update in a Herdr session (the checkout belongs to the foreman or a
+    writer brief), or under tessl for agents without a native entry, where
+    the stripped environment cannot rule a Herdr session out.
+  - It runs only `acr` >= `ACR_MIN_VERSION` (0.2.0), whose renewal cadence
+    sits beside the constant; an older or unreadable version is reported.
+  - Only git's own "absent" and "not an ancestor" exits count as answers; any
+    other git failure is unsafe. A failed fetch reports its exit code, never
+    git's message, which can carry a credential-bearing URL.
+  Verified against acr 0.2.0 on a scratch project installing
+  `github:jbaruch/ffa-acr-dogfood` (first run installed and reported
+  `restart_required`, the second was throttled); `hooks/tests/
+  test_check_acr_latest.sh` covers the contract with a fake acr.
+- **ACR joins the Runtime-Managed Manifest Carve-Out (operator decision).**
+  Committed, `.agents/registry.lock` would make every update an unfocused
+  dependency bump on whatever branch a session opens
+  (`rules/dependency-management.md` Freshness), in a checkout another agent
+  may share (`rules/agent-worktree-isolation.md`). The fleet treats ACR like
+  tessl: `.agents/` is gitignored (onboarding already does this, since tessl
+  uses the same directory), `github:jbaruch/*` dependencies float at
+  `requested: latest`, and a new Authority of Record names consumer
+  `agents.yaml`. `check-acr-latest` is its deterministic check: it names any
+  `github:jbaruch/*` dependency not at `latest` (from `acr list --json`,
+  parsed with python3 or jq), refuses to update while the lock is committed
+  or not gitignored, and refuses to update when the check cannot run. Verified against acr 0.2.0
+  that an untracked lock works: install, realize and `acr check` pass, and a
+  fresh clone without the lock resolves and realizes cleanly.
+- **Every session-start fetch is bounded.** `check-acr-latest` and
+  `check-git-sync` bound `git fetch` with `timeout`/`gtimeout` when present,
+  and otherwise with git's own HTTP low-speed limit and ssh connect/keepalive
+  timeouts; stock macOS has neither utility, so the fetch was unbounded there.
+  Under tessl (`hooks/session-start.sh` exports `SESSION_START_MODE`),
+  `check-git-sync` reports a behind branch instead of fast-forwarding it. A zero
+  or non-numeric timeout falls back to the default rather than switching the
+  bound off. Every JSON encode and parse in these hooks tries python3 and jq
+  in turn before giving up with a warning.
+
 ## 0.3.277 — 2026-09-26
 
 ### Added

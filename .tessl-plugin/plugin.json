@@ -1,6 +1,6 @@
 {
   "name": "jbaruch/coding-policy",
-  "version": "0.3.277",
+  "version": "0.3.278",
   "description": "General-purpose coding policy for Baruch's AI agents",
   "private": false,
   "skills": [
@@ -75,6 +75,19 @@
             }
           ]
         }
+      ],
+      "SessionStart": [
+        {
+          "hooks": [
+            {
+              "type": "command",
+              "command": "bash",
+              "args": [
+                "${TESSL_PLUGIN_DIR}/hooks/session-start.sh"
+              ]
+            }
+          ]
+        }
       ]
     },
     "codex": {
@@ -88,6 +101,16 @@
             {
               "type": "command",
               "command": "bash \"${TESSL_PLUGIN_DIR}/hooks/herdr-supervision-stop.sh\""
+            }
+          ]
+        }
+      ],
+      "SessionStart": [
+        {
+          "hooks": [
+            {
+              "type": "command",
+              "command": "bash \"${TESSL_PLUGIN_DIR}/hooks/session-start.sh\""
             }
           ]
         }

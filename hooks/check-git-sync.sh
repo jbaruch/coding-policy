@@ -18,7 +18,8 @@
 #     fresh fetch this session the remote-tracking ref may be stale, so a
 #     throttled (or failed) fetch reports "sync not verified" rather than a
 #     definitive conclusion (rules/sync-before-work.md).
-#   - The fetch is time-bounded (timeout, if available) so a hung network can't
+#   - The fetch is time-bounded (timeout/gtimeout, else git's HTTP low-speed and ssh
+#     connect/keepalive limits) so a hung network can't
 #     stall session start.
 #   - Acts when the answer is mechanical: a default branch strictly behind
 #     origin after a fresh fetch is fast-forwarded (git refuses every unsafe
@@ -64,9 +65,17 @@ ref_exists() { # <fully-qualified-ref>
 # Emit the sync notice as additionalContext JSON. jq is required only here; its
 # absence is an expected environment condition, not a failure.
 emit_notice() { # <notice-text>
-  command -v jq >/dev/null 2>&1 || { warn "jq not found — install jq to emit the sync notice"; return 0; }
-  jq -n --arg c "$1" '{additionalContext: $c}' ||
-    warn "could not emit the sync notice as JSON — skipping sync check"
+  # jq first, then python3; printed only once a tool produced it.
+  local out
+  if command -v jq >/dev/null 2>&1 && out="$(jq -n --arg c "$1" '{additionalContext: $c}')"; then
+    printf '%s\n' "$out"
+    return 0
+  fi
+  if command -v python3 >/dev/null 2>&1 && out="$(python3 -c 'import json, sys; print(json.dumps({"additionalContext": sys.argv[1]}))' "$1")"; then
+    printf '%s\n' "$out"
+    return 0
+  fi
+  warn "neither jq nor python3 could encode the sync notice — install one of them; it was: ${1}"
   return 0
 }
 
@@ -241,15 +250,18 @@ main() {
       fi
     fi
 
-    # Time-bound the fetch so a hung network can't stall session start. timeout is
-    # optional (gtimeout on macOS via coreutils); fall back to a plain fetch.
-    fetch=(git fetch --quiet origin)
-    if [[ "$FETCH_TIMEOUT" =~ ^[0-9]+$ ]]; then
-      if command -v timeout >/dev/null 2>&1; then
-        fetch=(timeout "$FETCH_TIMEOUT" "${fetch[@]}")
-      elif command -v gtimeout >/dev/null 2>&1; then
-        fetch=(gtimeout "$FETCH_TIMEOUT" "${fetch[@]}")
-      fi
+    # Time-bound the fetch so a hung network can't stall session start:
+    # timeout/gtimeout when present, else git's own HTTP low-speed limit and ssh
+    # connect/keepalive timeouts.
+    # Zero or a non-number would switch the bound off; fall back to the default.
+    [[ "$FETCH_TIMEOUT" =~ ^[1-9][0-9]*$ ]] || FETCH_TIMEOUT=10
+    if command -v timeout >/dev/null 2>&1; then
+      fetch=(timeout "$FETCH_TIMEOUT" git fetch --quiet origin)
+    elif command -v gtimeout >/dev/null 2>&1; then
+      fetch=(gtimeout "$FETCH_TIMEOUT" git fetch --quiet origin)
+    else
+      fetch=(env "GIT_SSH_COMMAND=${GIT_SSH_COMMAND:-ssh} -o ConnectTimeout=${FETCH_TIMEOUT} -o ServerAliveInterval=5 -o ServerAliveCountMax=2"
+        git -c http.lowSpeedLimit=1000 -c "http.lowSpeedTime=${FETCH_TIMEOUT}" fetch --quiet origin)
     fi
     # A fetch failure (offline, auth, timeout) is a no-op, not a broken session —
     # warn and let the unverified-sync branch below report it. Comparing against
@@ -307,6 +319,13 @@ main() {
   # Diverged needs judgment (which side wins), so it stays a report.
   if (( ahead > 0 )); then
     emit_notice "Session-start status — Local \`${db}\` has diverged from \`origin/${db}\` (${behind} behind, ${ahead} ahead) — reconcile before working (rules/sync-before-work.md): \`git fetch origin\`, then rebase \`${db}\` onto \`origin/${db}\` (a fast-forward won't apply)."
+    return 0
+  fi
+
+  # Under tessl (hooks/session-start.sh portable mode) the environment is
+  # stripped and a Herdr worker cannot be ruled out: report, never write.
+  if [[ "${SESSION_START_MODE:-}" == portable ]]; then
+    emit_notice "Session-start status — Local \`${db}\` is ${behind} commit(s) behind \`origin/${db}\`; not fast-forwarded here (this agent runs SessionStart through tessl, which hides the session's environment) — fast-forward \`${db}\` if this is not a Herdr worker session (rules/sync-before-work.md)."
     return 0
   fi
 
