@@ -17,7 +17,9 @@ description: Running a multi-agent team — task-based specialist composition, c
 - A standalone agent never simulates the roles, the briefs, or the reports
 - Standalone work is still governed by every other rule in this plugin
 - The foreman is a nonworking foreman
-- It assigns the work, supervises the crew, and accepts or rejects what the crew delivers
+- It assigns the work
+- It supervises the crew
+- It accepts or rejects what the crew delivers
 - In a team round the foreman dispatches the task work and never executes it itself
 - The foreman's own execution covers reading the shared checkout, this plugin's owner scripts, and the foreman-owned records those scripts write
 - Foreman-owned records are the task ledger, retrospective notes, attention items, and working memory
@@ -40,9 +42,9 @@ description: Running a multi-agent team — task-based specialist composition, c
 - A new user-facing command, flag or refusal path triggers UX and product
 - A new user-facing document triggers documentation
 - Fix rounds reaching the task's allowance without converging trigger the investigator
-- Each trigger names its deliverable in `skills/herdr-teamlead/references/specialists.md`
+- Each trigger names its deliverable in `skills/herdr-foreman/references/specialists.md`
 - The repo states each trigger surface and its package size in its own trigger declaration
-- `teamlead detect-triggers` classifies the round against that declaration before the roles are planned
+- `foreman detect-triggers` classifies the round against that declaration before the roles are planned
 - A round with work already written classifies its diff
 - A round before implementation declares the surfaces the work will touch, and classifies those
 - A round that writes no repository content declares that explicitly
@@ -87,7 +89,7 @@ description: Running a multi-agent team — task-based specialist composition, c
   5. The prior supervision enrollment is resolved with no pending observations
   6. No correction count, correction plan or implementation work is carried through this mode
 - Every other consultation clears context under the normal retrospective and dispatch gates
-- Follow `skills/herdr-teamlead/references/specialists.md` for profiles and assessment workflow
+- Follow `skills/herdr-foreman/references/specialists.md` for profiles and assessment workflow
 
 ## Judge Seat
 
@@ -107,7 +109,7 @@ description: Running a multi-agent team — task-based specialist composition, c
 - A `stop` remedy approves no direction
 - A `continue` or `restructure` remedy's `BOUND` supplies the attempt budget the operator formerly supplied
 - `BOUND` counts developer attempts and justifies the number against the evidence the diagnosis cites
-- A `BOUND` above the ceiling `teamlead diagnose` enforces is refused, never silently honoured
+- A `BOUND` above the ceiling `foreman diagnose` enforces is refused, never silently honoured
 - A `stop` remedy ships what is clean and records the remainder as a tracked accepted defect
 - The operator overrides it with a plan over the remedy, or with a different approach
 - Either override is recordable, plannable and dispatchable without a further diagnosis
@@ -115,7 +117,7 @@ description: Running a multi-agent team — task-based specialist composition, c
 - That obligation gates no dispatch and waits on no answer
 - The judge's authority in diagnosis mode covers accepting a tracked defect into a release under a `stop` remedy
 - That acceptance follows `rules/review-severity.md` Judge-Accepted Defect Carve-Out; every other release gate holds
-- Record the diagnosis through `teamlead diagnose` under the original task and base before acting on its remedy
+- Record the diagnosis through `foreman diagnose` under the original task and base before acting on its remedy
 - A bound foreman cites the report supervision enrolled for the pinned judge, never another file
 - The operator overrides this exhaustion's recorded remedy
 - An approved budget never stands in for a diagnosis
@@ -180,7 +182,7 @@ description: Running a multi-agent team — task-based specialist composition, c
 
 - A worker's `tiers` table maps round types to model, effort, and cost data
 - Judgment rounds use the pinned top model; no per-round override lowers it
-- Apply mechanical eligibility and risk escalation through `skills/herdr-teamlead/teamlead/tiers.py`
+- Apply mechanical eligibility and risk escalation through `skills/herdr-foreman/foreman/tiers.py`
 - A round escalates on recorded evidence, never on its own round type or role name
 - Measured headroom resolves a seat's round, not only which worker fills it
 - Under measured scarcity a non-judgment round declines a discretionary escalation and records the round de-escalated
@@ -192,7 +194,7 @@ description: Running a multi-agent team — task-based specialist composition, c
 - Before relaunch, verify the idle worker, empty composer, pane occupant, and foreground PID
 - Record model, effort, launch argv, verified pair, and evidence source in the assignment ledger
 - Unmeasured tier billing windows remain `unknown`; no model name establishes free capacity
-- Metering contracts are in `skills/herdr-teamlead/references/model-tiers.md`
+- Metering contracts are in `skills/herdr-foreman/references/model-tiers.md`
 
 ## Fix Loops
 
@@ -326,7 +328,7 @@ description: Running a multi-agent team — task-based specialist composition, c
 - Never send input to a `working` or `blocked` agent
 - Never clear a working agent's context
 - Wait on the report marker plus the report file, never on a single idle or done observation
-- Every report wait runs through `skills/herdr-teamlead/wait-report.sh`, never a hand-rolled loop
+- Every report wait runs through `skills/herdr-foreman/wait-report.sh`, never a hand-rolled loop
 - Each interval a wait reads the report file, the worker's status and the remaining budget, and ends on whichever settles first
 - The poll interval and the give-up budget are script-owned constants, never numbers the foreman picks per round
 - Confirm a `blocked` verdict across two reads and the pane before acting on it
@@ -349,13 +351,13 @@ description: Running a multi-agent team — task-based specialist composition, c
 - A worktree mid-operation, staged, modified or holding untracked files is recoverable partial work, preserved as evidence
 - A clean worktree with no commits against the dispatch's recorded base produced nothing; the dispatch is a `not_sent`-equivalent and may be retried
 - An absent base establishes no such thing, and the classification says so rather than reading a clean tree as retryable
-- Commits present and unpushed are completed work with a failed transport, recovered through `skills/herdr-teamlead/references/dispatch-recovery.md`
+- Commits present and unpushed are completed work with a failed transport, recovered through `skills/herdr-foreman/references/dispatch-recovery.md`
 - Commits present and already pushed are completed work whose report did not arrive; they are recovery evidence, never a retryable dispatch
 - A stalled worker's output is unreviewed
 - Re-dispatch that work with the observed state described, or discard it
 - Never commit a stalled worker's partial work on the strength of the tree building or the conflict count reaching zero
-- A stall records a user-attention obligation through `skills/herdr-teamlead/references/attention.md`
-- The classification and its evidence shape are `skills/herdr-teamlead/wait-report.sh`'s `--worktree` contract
+- A stall records a user-attention obligation through `skills/herdr-foreman/references/attention.md`
+- The classification and its evidence shape are `skills/herdr-foreman/wait-report.sh`'s `--worktree` contract
 
 ## Assignment Reasoning
 
@@ -365,7 +367,7 @@ description: Running a multi-agent team — task-based specialist composition, c
 - Record a new contract obligation or unsettled operator choice before requesting its decision
 - Route contested findings through the existing judge triggers
 - Reassess a repeated causal theme against observed progress before proposing another fix
-- Require bug briefs and diagnostic assessments to follow `skills/herdr-teamlead/references/assignment-reasoning.md`
+- Require bug briefs and diagnostic assessments to follow `skills/herdr-foreman/references/assignment-reasoning.md`
 
 ## Worker Launch Mode
 
@@ -374,7 +376,7 @@ description: Running a multi-agent team — task-based specialist composition, c
 - Verify the worker's permission flags from launch or live foreground-process argv before dispatch
 - Preserve the assignment classifier and the brief's authority, role, and path limits
 - YOLO mode grants no additional task authority
-- Permission flags and their validation live in `skills/herdr-teamlead/teamlead/tiers.py`
+- Permission flags and their validation live in `skills/herdr-foreman/foreman/tiers.py`
 
 ## Task Ledger
 
@@ -386,7 +388,7 @@ description: Running a multi-agent team — task-based specialist composition, c
 - Bind acceptance to the actual report and the required artifact, VCS, and gate evidence
 - Reconcile recalled ledger entries against their sources on resume
 - Never restart accepted work solely on a stale Herdr status
-- The ledger's path, schema, ownership, and recovery contract are in `skills/herdr-teamlead/state-schema.md`
+- The ledger's path, schema, ownership, and recovery contract are in `skills/herdr-foreman/state-schema.md`
 
 ## Working Memory
 
@@ -398,7 +400,7 @@ description: Running a multi-agent team — task-based specialist composition, c
 - Before the reset, record the round's outcomes
 - Before the reset, curate the round's lessons
 - Before the reset, save a reset-ready stow
-- The reset runs through `teamlead foreman-reset`, never by typing into the foreman's pane
+- The reset runs through `foreman foreman-reset`, never by typing into the foreman's pane
 - Narrow exception for recovering a reset that failed or was interrupted.
 - Preconditions (all required):
   1. The reset record shows the reset `failed` or `interrupted`
@@ -406,7 +408,7 @@ description: Running a multi-agent team — task-based specialist composition, c
   3. The operator pastes the resume prompt the reset record saved for that reset
   4. Before clearing, the operator confirms the pane is not already running a foreman resumed from that reset
   5. A pane already running that resumed foreman is reconciled as delivered, never cleared
-- Every other reset runs through `teamlead foreman-reset`
+- Every other reset runs through `foreman foreman-reset`
 - A reset foreman resumes from the stow, the supervision resume sequence, and the foreman queue
 - Save conversation-only knowledge and open work before a planned foreman reset, compaction, or replacement
 - Give the next foreman an ordered list of durable files to read
@@ -420,7 +422,7 @@ description: Running a multi-agent team — task-based specialist composition, c
   4. Its stow is not reset-ready until a new stow records the gap with its actual task
 - Every other handoff gap names the task it affects
 - Working memory grants no authority, acceptance, or gate waiver
-- Follow `skills/herdr-teamlead/references/working-memory.md`
+- Follow `skills/herdr-foreman/references/working-memory.md`
 
 ## User Attention
 
@@ -434,7 +436,7 @@ description: Running a multi-agent team — task-based specialist composition, c
 - An open decision or blocker on a task refuses further dispatch on that task until it is resolved or explicitly deferred with recorded rationale
 - Record an answer required before further dispatch as a decision or blocker, never as a question
 - Keep attention records separate from task acceptance and worker lifecycle observations
-- Follow `skills/herdr-teamlead/references/attention.md`
+- Follow `skills/herdr-foreman/references/attention.md`
 
 ## Fleet Supervision
 
@@ -445,7 +447,7 @@ description: Running a multi-agent team — task-based specialist composition, c
 - Acknowledging an observation never accepts the assignment or completes the task
 - Reconcile interrupted supervision against its saved events and live process evidence
 - Never finish a foreman turn with active work lacking continued supervision or an explicit recorded pause or handoff
-- Follow `skills/herdr-teamlead/references/supervision.md`
+- Follow `skills/herdr-foreman/references/supervision.md`
 
 ## Retrospectives
 
@@ -472,14 +474,14 @@ description: Running a multi-agent team — task-based specialist composition, c
 - Preserve completed notes during cleanup
 - Retrieve saved notes on request with their date, coverage, and path
 - Retrospectives grant no task authority, correction allowance, acceptance, or gate waiver
-- Execution, persistence, and retrieval contracts are in `skills/herdr-teamlead/references/retrospectives.md`
+- Execution, persistence, and retrieval contracts are in `skills/herdr-foreman/references/retrospectives.md`
 
 ## Review Before PR
 
 - An implementation round runs two phases: pre-development planning, then mandatory post-push verification
 - Pre-development planning is optional for work that trips no Team Composition trigger
 - Work that trips one gates on its deliverable before implementation, or on the recorded staffing decision the four non-exhaustion triggers allow
-- An investigation-only round gates its knowledge deliverable under `skills/herdr-teamlead/references/assignment-reasoning.md`
+- An investigation-only round gates its knowledge deliverable under `skills/herdr-foreman/references/assignment-reasoning.md`
 - Pre-development output is a design note or a test plan, never a pass
 - The tester and the reviewer pass on the pushed branch before the PR opens
 - A round may split a reviewer's or a tester's surface across several seats against a declared partition
@@ -487,11 +489,11 @@ description: Running a multi-agent team — task-based specialist composition, c
 - Every changed file belongs to exactly one slice
 - A partition leaving a changed file unowned is refused
 - A partition whose slices overlap is refused
-- `skills/herdr-teamlead/teamlead/partition.py` decides both refusals, through `teamlead validate-partition`
+- `skills/herdr-foreman/foreman/partition.py` decides both refusals, through `foreman validate-partition`
 - A partition seats the reviewer or the tester responsibility alone
 - A responsibility holding a per-task counter is never sliced
 - A seat's role decides its bars, tiers, requirements, weight and history
-- `teamlead plan --partition` seats one worker per slice under the existing capability, contribution-exclusion and headroom ordering
+- `foreman plan --partition` seats one worker per slice under the existing capability, contribution-exclusion and headroom ordering
 - A seat carries its slice's identity
 - The responsibility a seat fills is its role
 - The ledger records that role, never the seat

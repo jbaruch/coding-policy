@@ -17,13 +17,13 @@
     "hooks/*",
     "rules/*",
     "skills/adopt-fork-pr/*",
-    "skills/herdr-teamlead/*.sh",
-    "skills/herdr-teamlead/teamlead/*.py",
-    "skills/herdr-teamlead/verify-authority.sh",
+    "skills/herdr-foreman/*.sh",
+    "skills/herdr-foreman/foreman/*.py",
+    "skills/herdr-foreman/verify-authority.sh",
     "skills/release/*"
   ],
   "cli_spec_paths": [
-    "skills/herdr-teamlead/teamlead/*.py",
+    "skills/herdr-foreman/foreman/*.py",
     "skills/*/*.sh",
     "skills/*/*.py",
     "scripts/*.sh",

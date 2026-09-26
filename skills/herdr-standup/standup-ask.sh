@@ -3,7 +3,7 @@
 #
 # The prompt is fixed text, the reply shape is fixed, and the report path is
 # the worker's only channel back — so the whole thing is one deterministic
-# send (`rules/script-delegation.md`). What the lead does with the answers is
+# send (`rules/script-delegation.md`). What the foreman does with the answers is
 # the reasoning part, and that stays in the skill.
 #
 # The prompt goes out as a MESSAGE, never a slash command: a standup question
@@ -130,7 +130,7 @@ main() {
   fi
 
   # A standup is worth less than somebody's turn. A worker that is not ready
-  # keeps working, and the lead fills its row from the round log instead.
+  # keeps working, and the foreman fills its row from the round log instead.
   if [[ " $READY_STATES " != *" $state "* ]]; then
     warn "${AGENT} is '${state}' — not asking. Fill its row from the round log."
     jq -n --arg a "$AGENT" --arg p "$REPORT_PATH" --arg s "$state" \

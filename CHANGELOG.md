@@ -1,5 +1,64 @@
 # Changelog
 
+### Changed
+
+- **`herdr-teamlead` is now `herdr-foreman` (#501).** The rules already
+  called the role the foreman; the skill, the Python package, the launcher
+  and the environment prefix still said teamlead, so a reader moved between
+  two names for one thing. Renamed with no alias (operator decision):
+  `skills/herdr-teamlead/` is `skills/herdr-foreman/`, the `teamlead/`
+  package is `foreman/`, `teamlead.sh` is `foreman.sh`, and every
+  `TEAMLEAD_*` variable is `FOREMAN_*` (`FOREMAN_HERDR_BIN` and the rest).
+  "The lead" became "the foreman" in prose, messages and help text.
+  Deliberately unchanged: the `lead` round type in config tier tables
+  (renaming it is a config schema change), the `New assignment from the
+  team lead.` opening the composer matches in live panes and recorded
+  dispatches, fixture labels, and this CHANGELOG's history.
+- **The state and config homes move with the name.** Every command whose
+  state or config comes from the default path now refuses while that home
+  is still at `~/.local/state/teamlead` or `~/.config/teamlead`, names
+  `foreman migrate-home`, and creates nothing at the new path. A command
+  given explicit `--state` and `--config` is unaffected. `migrate-home`
+  (`skills/herdr-foreman/foreman/home.py`) takes the home guard
+  `$XDG_STATE_HOME/.foreman-home.lock` exclusively before reading either
+  home, and every other command reading a default home holds that guard shared for its whole run (explicit `--state` and `--config` paths skip it),
+  so a migration never starts under a running command and a command started
+  mid-migration is refused. The guard sits beside both homes, so it does
+  not move with them; a scan of the owner locks inside the legacy home
+  alone left a window between the scan and the move. With no state root and only a legacy config home, `migrate-home` creates
+  the root so the guard still exists; a command never creates it. A failed
+  rename or link raises a state error naming the partial move instead of a
+  traceback, and a re-run finishes it. It also refuses while
+  any owner lock in the legacy home is held (a foreman older than the
+  guard), refuses `--state` and `--config`, renames each home, leaves the old path as a
+  symlink to the new one, and rewrites only the stores' `state_path`
+  identity fields, which the stores compare against the canonical state path
+  on load. Every other absolute path a record quotes (stow required reads,
+  retrospective notes, attention evidence, reset resume prompts) is history
+  and is left alone; the symlink keeps it resolving. It never merges a home
+  that exists at both paths, and a second run changes nothing. Upgrade
+  order: stop every foreman, update the installs, run `foreman migrate-home`
+  once per machine.
+- **The report classifier was re-scored under the new name.** The renamed
+  prompt and the original prompt were both run on the same 96 labelled
+  reports with `claude-sonnet-5`: both scored 0.9792 with the same two
+  disagreements, so no verdict changed with the wording.
+- **Test runs no longer see the operator's own homes.** `scripts/run-tests.sh`
+  gives every suite its own empty `XDG_STATE_HOME` and `XDG_CONFIG_HOME`,
+  so no suite reads another's leftovers, and removes them on exit
+  (`scripts/tests/test_run_tests.sh` checks both); a failed `mktemp` or
+  `mkdir` during setup reports the runner's structured JSON error instead of
+  a bare exit, and a failed cleanup warns without changing the run's exit
+  status. `classify/evaluate.sh` honours `XDG_STATE_HOME` for its default
+  corpus and asks the owner's `home.require_current`, so a legacy, split or
+  blocked home refuses, naming `migrate-home`, instead of reading an empty
+  corpus. Before, a suite that did not pass a path read, and could refuse
+  on, the machine's real foreman state, which the home migration would
+  have made an ordinary occurrence.
+- The foreman definition bullet in `rules/agent-team-operation.md` is split
+  into one directive per bullet, and `state-schema.md` names `config.py`
+  and `supervision.py` by repo-relative path (advisory carried from #526).
+
 ## 0.3.273 — 2026-09-25
 
 ### Fixed
