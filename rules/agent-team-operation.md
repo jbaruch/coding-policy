@@ -286,9 +286,18 @@ description: Running a multi-agent team — task-based specialist composition, c
 - The worker names that drift in its report
 - The worker acts on none of it
 - A worker's repository writes happen only in the worktree its brief names, under `~/.worktrees/`
-- The foreman prunes merged, clean worktrees and merged local branches every round, before provisioning and after the merge
-- A dirty, unmerged, locked or detached worktree is reported to the operator
-- The foreman never removes a dirty, unmerged, locked or detached worktree
+- The foreman sweeps every repository owning a worktree under `~/.worktrees/` every round, before provisioning and after the merge
+- The sweep runs through `skills/herdr-foreman/sweep-worktrees.sh`
+- The sweep removes a clean worktree on a merged branch
+- The sweep deletes merged local branches
+- The sweep removes an idle clean worktree whose HEAD a remote ref holds
+- The sweep archives an idle dirty or unpushed worktree under `refs/archive/worktrees/`
+- The sweep removes an archived worktree once its archive ref resolves
+- A failed archive keeps the worktree
+- Idle windows and the in-use test live in `skills/herdr-foreman/prune-worktrees.sh` (top-of-file docstring)
+- A locked, in-use or not-yet-idle worktree is kept
+- Every kept locked or in-use worktree and every archive is reported to the operator
+- The foreman never removes a worktree by hand
 - A worker's report, plan, and patch artifacts go only under the reports directory its brief names
 - A worker writes nowhere else
 - Narrow exception for a task-owned fixture root outside the reports directory

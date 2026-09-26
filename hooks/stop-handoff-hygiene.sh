@@ -165,11 +165,11 @@ main() {
     if [[ -z "$base" ]]; then
       warn "could not resolve origin's default branch — reporting only worktrees whose upstream is gone"
     fi
-    # `rules/agent-team-operation.md` Writers and Checkouts: the foreman removes
-    # only a merged, clean worktree, and reports a dirty, unmerged, locked or
-    # detached one to the operator. So removal ALWAYS requires clean and
-    # contained -- a gone upstream is a reason to look, never a licence, since
-    # an upstream can vanish while its tree is dirty or ahead.
+    # `rules/agent-team-operation.md` Writers and Checkouts: removal beyond a
+    # merged, clean worktree is the round's sweep (idle windows, archive), never
+    # this hook. So a removal named here ALWAYS requires clean and contained --
+    # a gone upstream is a reason to look, never a licence, since an upstream
+    # can vanish while its tree is dirty or ahead.
     local spent
     for (( i = 0; i < ${#wt_paths[@]}; i++ )); do
       b="${wt_branches[$i]}"; p="${wt_paths[$i]}"
@@ -383,13 +383,13 @@ build_branch_findings() {
     done
     blocking+=("$section")
   fi
-  # Report-only, never an instruction to remove: a detached, locked, dirty or
-  # unmerged worktree is the operator's call under Writers and Checkouts.
+  # Report-only, never an instruction to remove: a detached, dirty or unmerged
+  # worktree is the sweep's once idle, and a locked one is the operator's.
   for p in ${spent_detached[@]+"${spent_detached[@]}"}; do
-    reports+=("Detached worktree holding nothing new: ${p} — report it to the operator; the foreman never removes a detached worktree.")
+    reports+=("Detached worktree holding nothing new: ${p} — never remove it by hand; the foreman's sweep (skills/herdr-foreman/sweep-worktrees.sh) removes it once idle.")
   done
   for p in ${held[@]+"${held[@]}"}; do
-    reports+=("Worktree left for the operator: ${p} — the foreman never removes a dirty, unmerged, locked or detached worktree.")
+    reports+=("Worktree left for the operator: ${p} — never remove it by hand; the foreman's sweep removes or archives it once idle, and a locked one stays until its lock is released.")
   done
   return 0
 }

@@ -175,7 +175,7 @@ main() {
   OUT="$(cd "$TMP/r4b" && printf '%s' '{"stop_hook_active":false}' | bash "$HOOK" 2>"$ERRFILE")"; RC=$?
   ERRTEXT="$(cat "$ERRFILE")"
   if [[ $RC -eq 0 ]] && [[ "$ERRTEXT" == *"r4b-detached"* ]] \
-     && [[ "$ERRTEXT" == *"never removes a detached worktree"* ]] \
+     && [[ "$ERRTEXT" == *"removes it once idle"* ]] \
      && ! reason_has "r4b-detached"; then
     pass; else fail "detached worktree: expected a report, not a removal instruction, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
 
