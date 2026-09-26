@@ -132,6 +132,18 @@ main() {
     && ! same_commit "$TMP/r1e" main origin/main; then
     pass; else fail "portable: expected a report and main unmoved, got RC=$RC OUT=$OUT"; fi
 
+  # 1f. The fetch never runs repo code: a reference-transaction hook, which a
+  #     ref-updating fetch triggers, leaves no marker.
+  mk_origin o1f
+  clone_from "$BARE" "$TMP/r1f"
+  commit_push "$SEED" "c2"
+  printf '#!/bin/sh\ntouch "%s"\n' "$TMP/sync-ref-hook-ran" > "$TMP/r1f/.git/hooks/reference-transaction" \
+    || die "could not write the reference-transaction hook"
+  chmod +x "$TMP/r1f/.git/hooks/reference-transaction" || die "could not make the hook executable"
+  run "$TMP/r1f" "$TMP/s1g"
+  if [[ $RC -eq 0 && ! -e "$TMP/sync-ref-hook-ran" ]]; then
+    pass; else fail "repo hooks: the reference-transaction hook ran during the sync fetch or fast-forward (OUT=$OUT)"; fi
+
   # 1c. Behind while a feature branch is checked out: main moves without a
   # checkout, and the feature branch is untouched.
   mk_origin o1c

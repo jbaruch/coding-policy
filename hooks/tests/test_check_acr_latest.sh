@@ -36,6 +36,8 @@
 #  21. Zero fetch timeout             -> default bound, update runs.
 #  22. python3 present but failing    -> jq runs the pin check.
 #  23. Fetched ref behind origin's tip -> not updated.
+#  24. reference-transaction hook     -> never runs during the safety fetch.
+#  25. Secret in ACR's output         -> masked in the status.
 #
 # Run: bash hooks/tests/test_check_acr_latest.sh
 set -uo pipefail
@@ -318,6 +320,24 @@ main() {
   run "$PROJECT" FAKE_OUT="Updated x"
   if [[ $RC -eq 0 && -z "$CALLS" ]] && context | grep -q "moved during the check"; then
     pass; else fail "stale fetched ref: expected a skip, got OUT=$OUT calls=$CALLS"; fi
+
+  # 24. the safety fetch never runs repo code: a reference-transaction hook
+  #     (which a ref-updating fetch triggers) leaves no marker.
+  mk_project p24
+  printf 'moved\n' >> "$SEED/agents.yaml" || die "seed edit failed"
+  git -C "$SEED" commit -q -am moved || die "seed commit failed"
+  git -C "$SEED" push -q origin main || die "seed push failed"
+  printf '#!/bin/sh\ntouch "%s"\n' "$TMP/ref-hook-ran" > "$PROJECT/.git/hooks/reference-transaction" || die "cannot write the hook"
+  chmod +x "$PROJECT/.git/hooks/reference-transaction" || die "cannot make the hook executable"
+  run "$PROJECT" FAKE_OUT="Updated x"
+  if [[ $RC -eq 0 && ! -e "$TMP/ref-hook-ran" ]]; then
+    pass; else fail "repo hooks: the reference-transaction hook ran during the safety fetch (OUT=$OUT)"; fi
+
+  # 25. ACR's output is masked before it reaches the session.
+  mk_project p25
+  run "$PROJECT" FAKE_RC=1 FAKE_OUT="fatal: https://jb:s3cret@github.com/x.git token ghp_abcDEF123"
+  if [[ $RC -eq 0 ]] && context | grep -q "github.com/x.git" && ! context | grep -q "s3cret" && ! context | grep -q "abcDEF123"; then
+    pass; else fail "redaction: expected masked credentials, got OUT=$OUT"; fi
 
   echo "─────────────────────────────────────────────"
   if (( FAIL > 0 )); then echo "FAILED: ${FAIL} failed, ${PASS} passed"; exit 1; fi
