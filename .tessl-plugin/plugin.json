@@ -39,6 +39,21 @@
     "rules/hook-action-reporting.md",
     "rules/agent-team-operation.md"
   ],
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash",
+            "args": [
+              "${TESSL_PLUGIN_DIR}/hooks/session-start.sh"
+            ]
+          }
+        ]
+      }
+    ]
+  },
   "nativeHooks": {
     "claude-code": {
       "Stop": [

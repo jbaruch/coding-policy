@@ -14,8 +14,10 @@
 #   2. No hook reports       -> no output, exit 0.
 #   3. A hook exits non-zero -> its own status line; the others still arrive.
 #   4. A hook prints non-JSON -> its own status line; the others still arrive.
-#   5. The manifest declares session-start.sh as the only SessionStart hook, native
-#      for claude-code and codex, with no portable (tessl-wrapped) SessionStart.
+#   5. The manifest declares session-start.sh as the only SessionStart hook:
+#      portable, plus native for claude-code and codex.
+#   8. Portable run under a native agent (TESSL_AGENT=claude-code/codex) -> silent.
+#   9. Portable run under another agent -> the consensus {"additionalContext"} form.
 #   6. jq only, no python3  -> the same merged payload.
 #   7. Neither python3 nor jq -> the hooks still run; a warning, no payload.
 #
@@ -91,15 +93,15 @@ main() {
   if python3 - "$here/../.tessl-plugin/plugin.json" <<'PY'
 import json, sys
 d = json.load(open(sys.argv[1]))
-portable = d.get("hooks", {}).get("SessionStart")
+portable = [h for g in d["hooks"]["SessionStart"] for h in g["hooks"]]
 claude = [h for g in d["nativeHooks"]["claude-code"]["SessionStart"] for h in g["hooks"]]
 codex = [h for g in d["nativeHooks"]["codex"]["SessionStart"] for h in g["hooks"]]
-ok = (not portable
+ok = (len(portable) == 1 and portable[0]["args"] == ["${TESSL_PLUGIN_DIR}/hooks/session-start.sh"]
       and len(claude) == 1 and claude[0]["args"] == ["${TESSL_PLUGIN_DIR}/hooks/session-start.sh"]
       and len(codex) == 1 and codex[0]["command"] == 'bash "${TESSL_PLUGIN_DIR}/hooks/session-start.sh"')
 sys.exit(0 if ok else 1)
 PY
-  then pass; else fail "manifest: SessionStart must be native-only, session-start.sh alone, for claude-code and codex"; fi
+  then pass; else fail "manifest: SessionStart must be session-start.sh alone: portable, plus native for claude-code and codex"; fi
 
   # 6. jq alone merges the same way.
   command -v jq >/dev/null || die "jq required for these tests"
@@ -114,6 +116,18 @@ PY
   RUN_PATH="$TMP/bare" run marker one
   if [[ $RC -eq 0 && -z "$OUT" && -f "$TMP/marker" ]] && grep -q "neither python3 nor jq" "$TMP/err"; then
     pass; else fail "no JSON tool: expected hooks run, a warning and no payload, got RC=$RC OUT=$OUT err=$(cat "$TMP/err")"; fi
+
+  # 8. the portable run defers to the native entry for claude-code and codex.
+  local agent
+  for agent in claude-code codex; do
+    OUT="$(TESSL_AGENT="$agent" SESSION_START_HOOKS="one" bash "$DIR/session-start.sh" </dev/null 2>"$TMP/err")"; RC=$?
+    if [[ $RC -eq 0 && -z "$OUT" ]]; then pass; else fail "portable under $agent: expected silence, got RC=$RC OUT=$OUT"; fi
+  done
+
+  # 9. another agent gets the consensus form tessl translates.
+  OUT="$(TESSL_AGENT=cursor SESSION_START_HOOKS="one two" bash "$DIR/session-start.sh" </dev/null 2>"$TMP/err")"; RC=$?
+  if [[ $RC -eq 0 ]] && python3 -c 'import json,sys; d=json.loads(sys.argv[1]); assert "hookSpecificOutput" not in d; assert d["additionalContext"] == "Session-start status — one\n\nSession-start status — two"' "$OUT"; then
+    pass; else fail "portable under cursor: expected the consensus payload, got RC=$RC OUT=$OUT"; fi
 
   echo "─────────────────────────────────────────────"
   if (( FAIL > 0 )); then echo "FAILED: ${FAIL} failed, ${PASS} passed"; exit 1; fi

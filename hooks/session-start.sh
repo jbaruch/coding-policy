@@ -1,17 +1,20 @@
 #!/usr/bin/env bash
 # Run every SessionStart hook and deliver all of their statuses at once.
 #
-# The plugin declares this script as its only SessionStart hook, as a native
-# hook for Claude Code and Codex. Two `tessl hook run` behaviours rule out the
-# portable form: it keeps only the LAST hook's output in a group, and it hands a
-# hook only HOME, PATH, TMPDIR and TESSL_* from the environment, so HERDR_ENV
-# never reached the hooks that decide on it. One native entry that merges the
-# statuses itself delivers them all, with the session's environment intact.
+# The plugin declares this script as its only SessionStart hook: native for
+# Claude Code and Codex, and portable (through `tessl hook run`) for every other
+# agent. `tessl hook run` keeps only the LAST hook's output in a group, and hands
+# a hook only HOME, PATH, TMPDIR and TESSL_*, so HERDR_ENV never reaches it. The
+# native entry keeps the session's environment; the portable run exits at once
+# for an agent in NATIVE_AGENTS, so each session runs this once. One entry that
+# merges the statuses itself delivers them all.
 #
 # Contract:
 #   stdin : consensus SessionStart JSON — not read; each hook gets /dev/null.
-#   stdout: one native payload {"hookSpecificOutput": {"hookEventName":
-#           "SessionStart", "additionalContext": "<statuses>"}} joining every
+#   stdout: natively, {"hookSpecificOutput": {"hookEventName": "SessionStart",
+#           "additionalContext": "<statuses>"}}; under tessl (TESSL_AGENT set,
+#           not a native agent), {"additionalContext": "<statuses>"}. Either
+#           joins every
 #           hook's additionalContext with a blank line, in HOOKS order. Nothing
 #           when no hook reported. A hook that exits non-zero or prints
 #           something other than one additionalContext object is reported as
@@ -32,6 +35,14 @@ warn() { printf 'session-start: %s\n' "$1" >&2; }
 
 #: The JSON tool in use: python3, jq, or empty when neither is on PATH.
 JSON_TOOL=""
+
+#: Agents whose native SessionStart entry runs this script with the session's
+#: environment; the portable (tessl-wrapped) run defers to it for them.
+NATIVE_AGENTS=(claude-code codex)
+
+#: native (the agent runs this directly) or portable (under `tessl hook run`,
+#: which sets TESSL_AGENT and strips the rest of the environment).
+MODE=native
 
 # Print the additionalContext string of one hook output; exit 1 when the output
 # is not one object carrying a string additionalContext.
@@ -56,8 +67,17 @@ sys.stdout.write(ctx)
   fi
 }
 
-# Print the native SessionStart payload Claude Code and Codex both read.
+# Print the payload for this mode: the native SessionStart payload Claude Code
+# and Codex read, or the consensus {"additionalContext"} tessl translates.
 encode() { # <text>
+  if [[ "$MODE" == portable ]]; then
+    if [[ "$JSON_TOOL" == python3 ]]; then
+      python3 -c 'import json, sys; print(json.dumps({"additionalContext": sys.argv[1]}))' "$1"
+    else
+      jq -n --arg c "$1" '{additionalContext: $c}'
+    fi
+    return
+  fi
   if [[ "$JSON_TOOL" == python3 ]]; then
     python3 -c 'import json, sys; print(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": sys.argv[1]}}))' "$1"
   else
@@ -66,7 +86,13 @@ encode() { # <text>
 }
 
 main() {
-  local here name out rc ctx joined=""
+  local here name out rc ctx joined="" agent
+  if [[ -n "${TESSL_AGENT:-}" ]]; then
+    for agent in "${NATIVE_AGENTS[@]}"; do
+      [[ "$TESSL_AGENT" != "$agent" ]] || return 0
+    done
+    MODE=portable
+  fi
   local -a hooks statuses=() names=() codes=() outputs=()
   here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || { warn "cannot resolve the hooks directory"; return 0; }
   read -r -a hooks <<<"${SESSION_START_HOOKS:-${HOOKS[*]}}"
