@@ -134,13 +134,19 @@ class ProofTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertNotIn(b"arbitrary private diagnostics", output.read_bytes())
             self.assertEqual(json.loads(output.read_bytes())["events_sha256"], c.sha(transcript.read_bytes()))
+            # An identical re-run succeeds and leaves the proof unchanged; a different existing proof refuses.
+            first = output.read_bytes()
+            self.assertEqual(subprocess.run(argv, env=env, capture_output=True).returncode, 0)
+            self.assertEqual(output.read_bytes(), first)
+            output.write_bytes(b"{}")
             self.assertNotEqual(subprocess.run(argv, env=env, capture_output=True).returncode, 0)
+            self.assertEqual(output.read_bytes(), b"{}")
             output.unlink(); (repo / "source").write_text("dirty\n")
             self.assertNotEqual(subprocess.run(argv, env=env, capture_output=True).returncode, 0)
             self.assertFalse(output.exists())
 
     def test_failed_proof_prevents_seed_even_with_present_secret(self):
-        with tempfile.TemporaryDirectory() as name, mock.patch.dict(os.environ, {**ENV, "CODEX_AUTH_JSON": json.dumps({"tokens": {"access_token": SEED}})}):
+        with tempfile.TemporaryDirectory() as name, mock.patch.dict(os.environ, {**ENV, "ACR_ACCEPT_CODEX_AUTH_JSON": json.dumps({"tokens": {"access_token": SEED}})}):
             root = Path(name).resolve()
             c.write_new(root / "evidence/credential-boundary.json", c.encoded({**proof(), "run_attempt": "1"}))
             with self.assertRaises(c.Refusal):
@@ -232,9 +238,11 @@ class InstalledTests(unittest.TestCase):
                     "binary_sha256": c.sha(self.binary.read_bytes())}
         self.assertEqual(json.loads(record.read_bytes()), expected)
         self.assertEqual(record.stat().st_mode & 0o777, 0o600)
-        with self.assertRaises(FileExistsError):
-            c.installed(self.repo, self.root)
+        c.installed(self.repo, self.root)  # An identical re-run is success.
         self.assertEqual(json.loads(record.read_bytes()), expected)
+        record.write_bytes(c.encoded({**expected, "binary_sha256": "0" * 64}))
+        with self.assertRaisesRegex(c.Refusal, "different content"):
+            c.installed(self.repo, self.root)
 
     def test_missing_step_environment_or_archive_refuses(self):
         for key in ("ACR_CODEX_RELEASE_BIN", "RUNNER_TEMP"):
@@ -547,6 +555,32 @@ class CleanupTests(unittest.TestCase):
                 self.assertFalse(root.exists())
                 c.clean(root)  # Also covers absent-path idempotence after deletion.
 
+    def test_prepare_rerun_resumes_owned_root_and_refuses_foreign(self):
+        root = self.base / "acr-accept"
+        clones = []
+        def clone(argv, **kwargs):
+            clones.append(argv[-1]); Path(argv[-1]).mkdir(); return b""
+        with mock.patch.object(c, "run", side_effect=clone), mock.patch.object(c, "git"), mock.patch.object(c, "checkout"):
+            c.prepare(root)
+            marker = (root / ".acr-owned.json").read_bytes()
+            # Identical re-run over finished clones: nothing is recloned.
+            with mock.patch.object(c, "fixture_clone_matches", return_value=True):
+                c.prepare(root)
+            self.assertEqual(len(clones), len(c.FIXTURES))
+            # Partial clones from an interrupted run are redone inside the owned root.
+            (root / "fixtures/ffa/partial").write_text("interrupted")
+            c.prepare(root)
+            self.assertEqual(len(clones), 2 * len(c.FIXTURES))
+            self.assertFalse((root / "fixtures/ffa/partial").exists())
+            self.assertEqual((root / ".acr-owned.json").read_bytes(), marker)
+        c.clean(root)
+        # A directory this helper did not create is never adopted.
+        root.mkdir(); keep = root / "keep"; keep.write_text("unowned data")
+        with mock.patch.object(c, "run", side_effect=clone), mock.patch.object(c, "git"), mock.patch.object(c, "checkout"):
+            with self.assertRaises((c.Refusal, OSError)):
+                c.prepare(root)
+        self.assertEqual(keep.read_text(), "unowned data")
+
     def test_absent_and_unowned_roots(self):
         root = self.base / "acr-accept"
         c.clean(root)
@@ -642,7 +676,7 @@ class ExportTests(unittest.TestCase):
         self.patch.start(); self.addCleanup(self.patch.stop)
         c.write_new(self.evidence / "credential-boundary.json", c.encoded(proof()))
         original_run = c.subprocess.run
-        with mock.patch.dict(os.environ, {"CODEX_AUTH_JSON": json.dumps({"tokens": {"access_token": SEED}})}), \
+        with mock.patch.dict(os.environ, {"ACR_ACCEPT_CODEX_AUTH_JSON": json.dumps({"tokens": {"access_token": SEED}})}), \
                 mock.patch.object(c.subprocess, "run", side_effect=lambda *a, **kw: original_run(*a, **kw, capture_output=True)):
             c.seed(self.root)
         c.write_new(self.root / "codex.json", c.encoded({"version": "0.154.0", "archive_sha256": "d" * 64, "binary_sha256": "e" * 64}))
@@ -912,7 +946,7 @@ class ExportTests(unittest.TestCase):
                 return original_run(argv, **kwargs)
             called.append(argv)
             env = kwargs["env"]
-            for name in ("GH_TOKEN", "GITHUB_TOKEN", "CODEX_AUTH_JSON", "OPENAI_API_KEY"):
+            for name in ("GH_TOKEN", "GITHUB_TOKEN", "CODEX_AUTH_JSON", "ACR_ACCEPT_CODEX_AUTH_JSON", "OPENAI_API_KEY"):
                 self.assertNotIn(name, env)
             caller_manifest = artifact / "manifest.json"
             original = caller_manifest.read_bytes()
@@ -1023,10 +1057,10 @@ class ExportTests(unittest.TestCase):
             kwargs["stdout"].write(event_bytes(rows))
             return subprocess.CompletedProcess(argv, 0)
         with mock.patch.object(c, "checkout"), mock.patch.object(c.subprocess, "run", side_effect=child), mock.patch.dict(os.environ, {
-                "CODEX_AUTH_JSON": "synthetic-unused", "GITHUB_TOKEN": "synthetic-unused", "CODEX_API_KEY": "synthetic-unused", "OPENAI_API_KEY": "synthetic-unused"}):
+                "CODEX_AUTH_JSON": "synthetic-unused", "ACR_ACCEPT_CODEX_AUTH_JSON": "synthetic-unused", "GITHUB_TOKEN": "synthetic-unused", "CODEX_API_KEY": "synthetic-unused", "OPENAI_API_KEY": "synthetic-unused"}):
             c.convert(self.base, self.root)
         self.assertEqual(seen["GH_TOKEN"], SUITE)
-        for name in ("CODEX_AUTH_JSON", "GITHUB_TOKEN", "CODEX_API_KEY", "OPENAI_API_KEY"):
+        for name in ("CODEX_AUTH_JSON", "ACR_ACCEPT_CODEX_AUTH_JSON", "GITHUB_TOKEN", "CODEX_API_KEY", "OPENAI_API_KEY"):
             self.assertNotIn(name, seen)
         self.assertEqual(seen["ACR_CODEX_LIVE_REQUIRED"], "1")
         self.assertEqual(seen["CODEX_HOME"], str(self.root / "seed"))
@@ -1239,6 +1273,66 @@ class ExportTests(unittest.TestCase):
                         c.extract_archive(buffer.getvalue(), self.base / "download")
                 self.assertFalse((self.base / "download").exists())
 
+    def test_seed_rerun_identical_succeeds_and_changed_secret_refuses(self):
+        auth = (self.root / "seed/auth.json").read_bytes()
+        original_run = c.subprocess.run
+        quiet = mock.patch.object(c.subprocess, "run", side_effect=lambda *a, **kw: original_run(*a, **kw, capture_output=True))
+        with quiet, mock.patch.dict(os.environ, {"ACR_ACCEPT_CODEX_AUTH_JSON": json.dumps({"tokens": {"access_token": SEED}})}):
+            c.seed(self.root)
+        self.assertEqual((self.root / "seed/auth.json").read_bytes(), auth)
+        with quiet, mock.patch.dict(os.environ, {"ACR_ACCEPT_CODEX_AUTH_JSON": json.dumps({"tokens": {"access_token": SEED + "-rotated"}})}):
+            with self.assertRaisesRegex(c.Refusal, "different content"):
+                c.seed(self.root)
+        self.assertEqual((self.root / "seed/auth.json").read_bytes(), auth)
+
+    def test_missing_seed_secret_names_it_and_never_falls_back(self):
+        env = {k: v for k, v in os.environ.items() if k != "ACR_ACCEPT_CODEX_AUTH_JSON"}
+        env["CODEX_AUTH_JSON"] = json.dumps({"tokens": {"access_token": SEED}})
+        with tempfile.TemporaryDirectory() as name, mock.patch.dict(os.environ, env, clear=True):
+            root = Path(name).resolve()
+            c.write_new(root / "evidence/credential-boundary.json", c.encoded(proof()))
+            with self.assertRaisesRegex(c.Refusal, r"ACR_ACCEPT_CODEX_AUTH_JSON is empty.*settings/secrets/actions"):
+                c.seed(root)
+            self.assertFalse((root / "seed/auth.json").exists())
+
+    def test_api_key_auth_is_accepted_and_scanned(self):
+        key = "sk-synthetic-" + "not-a-key" * 3
+        auth = self.base / "api-auth.json"; auth.write_bytes(c.encoded({"OPENAI_API_KEY": key}))
+        known = c.credentials(auth, SUITE)
+        self.assertIn(key.encode(), known)
+        with self.assertRaisesRegex(c.Refusal, "Credential material"):
+            c.scan(b"leaked " + key.encode(), known)
+        empty = self.base / "empty-auth.json"; empty.write_bytes(c.encoded({"tokens": {}}))
+        with self.assertRaisesRegex(c.Refusal, "session tokens or an OPENAI_API_KEY"):
+            c.credentials(empty, SUITE)
+
+    def test_seal_rerun_identical_succeeds_and_altered_export_refuses(self):
+        first = self.seal()
+        self.assertEqual(self.seal(), first)
+        manifest = self.output / "manifest.json"
+        original = manifest.read_bytes()
+        manifest.write_bytes(original + b" ")
+        with self.assertRaisesRegex(c.Refusal, "sealed encoding"):
+            self.seal()
+        manifest.write_bytes(original)
+        member = self.output / "evidence/credential-boundary.json"
+        member.write_bytes(member.read_bytes() + b" ")
+        with self.assertRaises(c.Refusal):
+            self.seal()
+
+    def test_extract_rerun_identical_succeeds_and_differing_destination_refuses(self):
+        self.seal(); buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w") as archive:
+            for name, data in c.members(self.output).items():
+                archive.writestr(zipfile.ZipInfo(name, date_time=(2001, 1, 1, 0, 0, 0)), data)
+        destination = self.base / "download"
+        c.extract_archive(buffer.getvalue(), destination)
+        c.extract_archive(buffer.getvalue(), destination)
+        (destination / "manifest.json").write_bytes(b"{}")
+        with self.assertRaisesRegex(c.Refusal, "different content"):
+            c.extract_archive(buffer.getvalue(), destination)
+        self.assertEqual((destination / "manifest.json").read_bytes(), b"{}")
+
     def test_clean_archive_roundtrip(self):
         self.seal(); buffer = io.BytesIO()
         with zipfile.ZipFile(buffer, "w") as archive:
@@ -1395,8 +1489,11 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(convert["permissions"], {"contents": "read", "issues": "read", "pull-requests": "read"})
         self.assertEqual(consumer_job["permissions"], {"contents": "read", "actions": "read"})
         secrets = [(s.get("id"), k) for s in convert["steps"] for k, v in s.get("env", {}).items() if "secrets." in v]
-        self.assertEqual(secrets, [("seed", "CODEX_AUTH_JSON")])
-        self.assertNotIn("CODEX_AUTH_JSON", json.dumps(consumer_job))
+        self.assertEqual(secrets, [("seed", "ACR_ACCEPT_CODEX_AUTH_JSON")])
+        # The lane never reads the fleet reviewer's credential, in any job.
+        self.assertNotIn('"CODEX_AUTH_JSON"', json.dumps(self.workflow))
+        self.assertNotIn("secrets.CODEX_AUTH_JSON", json.dumps(self.workflow))
+        self.assertNotIn("ACR_ACCEPT_CODEX_AUTH_JSON", json.dumps(consumer_job))
         self.assertEqual([s["id"] for s in convert["steps"] if "GH_TOKEN" in s.get("env", {})], ["conversion", "seal"])
         for name in ("convert", "consume"):
             self.assertEqual(self.workflow["jobs"][name]["needs"], ["preflight"])

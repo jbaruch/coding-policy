@@ -1,8 +1,10 @@
 # Central ACR Codex acceptance
 
 `.github/workflows/acr-codex-accept.yml` is a manual, separate acceptance lane
-in `jbaruch/coding-policy`. It uses that repository's existing
-`CODEX_AUTH_JSON` subscription credential. It does not change fleet review.
+in `jbaruch/coding-policy`. It authenticates with its own secret,
+`ACR_ACCEPT_CODEX_AUTH_JSON`, and never reads the fleet reviewer's
+`CODEX_AUTH_JSON`: a token refresh during acceptance must not rotate the
+reviewer's session. It does not change fleet review.
 The Python standard-library helper is `.github/codex-accept/contract.py`;
 the workflow uses JSON syntax, a YAML subset, so its complete job/step structure
 can be tested without adding a YAML dependency. Existing Renovate GitHub
@@ -133,7 +135,15 @@ Seal binds to this convert run. Verify binds to the authenticated **producer**
 run, never to a later consume run. The private-event digest is an identifier,
 not an independent attestation of an arbitrary executable.
 
-Only after proof passes does `seed` write valid subscription JSON under the
+`ACR_ACCEPT_CODEX_AUTH_JSON` holds a complete Codex `auth.json`: either a
+ChatGPT account session (`tokens`) for an account used by nothing else, or an
+`OPENAI_API_KEY`. Codex reads both. Configure it at
+https://github.com/jbaruch/coding-policy/settings/secrets/actions. An absent or
+empty secret refuses `seed` with that URL; there is no fallback to
+`CODEX_AUTH_JSON`. The central scanner treats every token and the API key as
+credentials.
+
+Only after proof passes does `seed` write that JSON under the
 private run root, with directory/file modes 0700/0600, and invoke the existing
 central masking helper. It retains identical initial bytes privately at
 `central/seed-oracle.json`, outside the seed `CODEX_HOME` and under the same
@@ -143,8 +153,7 @@ regular, valid and byte-identical to the retained oracle. Missing, malformed or
 unreadable oracle also refuses export. This detects accidental seed mutation;
 it does not authenticate files against a hostile process running as the same
 user. The snapshot is never exported and cleanup removes it on every path.
-There is no API-key fallback. `CODEX_AUTH_JSON` is scoped
-to that single step. The suite token is scoped to conversion and sealing.
+`ACR_ACCEPT_CODEX_AUTH_JSON` is scoped to that single step. The suite token is scoped to conversion and sealing.
 The future ACR harness must capture it before journey setup, pass it solely to
 original-test children, clear `GITHUB_TOKEN` there, and exclude both tokens from
 Codex children. Missing or `journey-fixture-token` values refuse centrally.
@@ -295,7 +304,7 @@ also required, with file-presence checks. Scanner failure produces no export.
 
 An always-run cleanup removes seed, oracle, private proof/live output and runtime
 state. `prepare` and `consume` record helper ownership immediately after creating
-the fresh run root, before child setup. If record initialization fails, the
+the run root, before child setup. If record initialization fails, the
 creator revalidates its retained directory and marker identities, removes only
 its known initialization residue and empty root when safe, then propagates the
 setup failure. Uncertain identity, replacements, unsafe links, unrelated entries
@@ -335,7 +344,8 @@ python3 .github/codex-accept/contract.py download --acr-sha "$ACR_SHA" --run-id 
 python3 .github/codex-accept/contract.py verify --acr-sha "$ACR_SHA" --run-id "$PRODUCER_RUN" --run-attempt "$PRODUCER_ATTEMPT" --artifact "$DOWNLOAD"
 ```
 
-`$DOWNLOAD` must be fresh for download. Verification requires network access and
+A repeated download into `$DOWNLOAD` succeeds only when its members are
+byte-identical to the archive; any other existing content refuses. Verification requires network access and
 an unexpired remote artifact; there is no offline local-directory certification.
 It leaves the directory unchanged and returns success only for byte-identical
 content. Import/publish from that verified directory without modifying it. A
@@ -354,7 +364,7 @@ producer commit and version tag; dry-run publish precedes the one real publish.
 Record independently retrieved release metadata/archive/checksums. Repository
 creation/settings/push/release are not actions this workflow performs.
 
-The consume job installs no Codex and has no subscription credential. It verifies
+The consume job installs no Codex and has no Codex credential. It verifies
 the producer before invoking `TestCodexLivePublishedConsumption` with
 `ACR_CODEX_CONSUME_REQUIRED=1`, `_MANIFEST`, `_EVIDENCE`, `_GOC_SOURCE`,
 `_FFA_SOURCE`. The test must execute `GOC` and `FFA` subtests without skips,
@@ -384,6 +394,21 @@ archive/declaration assertions; it cannot certify a malicious trusted candidate.
 Central rejects mismatched commit/kind/release/content/inventory even if a check
 status is true. The same real lane must later run locally and hosted. Synthetic
 central parser tests do not establish that real consumers passed.
+
+## Re-running a step
+
+Every command is safe to repeat with the same inputs:
+
+- A file it writes (seed, oracle, `codex.json`, proof) that already holds exactly
+  the bytes it would write is success; different bytes refuse.
+- `prepare` and `consume` resume a run root carrying this helper's ownership
+  marker (path, device, inode). A partial fixture clone or event stream from an
+  interrupted run inside that root is removed and redone. A root without the
+  marker is never adopted.
+- `proof-run` returns success when the root already holds a valid proof for the
+  same candidate; a stale or partial proof is replaced.
+- `seal` returns the existing export when it verifies for this exact run and its
+  manifest is the sealed encoding; anything else refuses.
 
 ## Local development and rollout
 

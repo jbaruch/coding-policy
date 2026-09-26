@@ -10,6 +10,20 @@
   pending; the lane refuses candidates missing that interface.
 - Authenticate supplied local producer files against the immutable remote
   artifact before verification or consumption.
+- Give the acceptance lane its own Codex credential,
+  `ACR_ACCEPT_CODEX_AUTH_JSON` (an `auth.json` holding a separate ChatGPT
+  account session or an `OPENAI_API_KEY`). It had seeded from the fleet
+  reviewer's `CODEX_AUTH_JSON`, so a token refresh inside ACR's isolated homes
+  could rotate the reviewer's session and fail every policy review. The
+  workflow never reads `CODEX_AUTH_JSON`; an absent secret refuses `seed` with
+  the secrets-settings URL, and the scanner treats an API key as a credential.
+- Make every acceptance command safe to repeat. `write_new` treats an existing
+  file with identical bytes as success; `prepare` and `consume` resume a run
+  root carrying the helper's ownership marker and redo partial clones and event
+  streams; `proof-run` keeps a valid proof for the same candidate; `seal` and
+  `download` return an existing export or extraction that matches exactly.
+  Mismatches still refuse.
+- Pin `setup-python` to 3.12.14, with its monthly renewal named in the step.
 - Preserve FFA's original Pyright configuration as an unchanged gate input.
 - Retain explicitly classified successful semantic repairs with complete
   credential-boundary evidence.

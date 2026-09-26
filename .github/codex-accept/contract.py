@@ -29,6 +29,8 @@ CONTRACT = "acr-credential-boundary/v1"
 CENTRAL = "jbaruch/coding-policy"
 ACR = "jbaruch/agentic-context-registry"
 WORKFLOW = ".github/workflows/acr-codex-accept.yml"
+#: This lane's own Codex credential; the fleet reviewer's CODEX_AUTH_JSON is never read here.
+SEED_SECRET = "ACR_ACCEPT_CODEX_AUTH_JSON"
 MAX_FILES = 1000
 MAX_TEXT = 8 * 1024 * 1024
 MAX_TEXT_TOTAL = 64 * 1024 * 1024
@@ -147,10 +149,22 @@ def regular(path: Path, limit: int = MAX_TEXT) -> bytes:
 
 
 def write_new(path: Path, value: bytes) -> None:
+    """Create <path> holding <value>; an existing file with exactly <value> is success (idempotent re-run)."""
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if path.exists() or path.is_symlink():
+        require(not path.is_symlink() and path.is_file() and path.read_bytes() == value,
+                "Output already exists with different content; refuse to overwrite it")
+        return
     with path.open("xb") as handle:
         handle.write(value)
     path.chmod(0o600)
+
+
+def fresh_private(path: Path) -> None:
+    """Remove a partial scratch file left by an interrupted run inside an owned run root."""
+    if path.is_symlink() or path.exists():
+        require(not path.is_symlink() and path.is_file(), "Partial scratch output is not a regular file; inspect it")
+        path.unlink()
 
 
 def run(argv: list[str], cwd: Path | None = None, env: dict[str, str] | None = None) -> bytes:
@@ -301,13 +315,23 @@ def validate_proof(proof: Any, context: dict[str, str]) -> None:
 
 def run_proof(acr_root: Path, root: Path) -> None:
     context = binding()
+    proof = root / "evidence/credential-boundary.json"
+    if proof.exists() or proof.is_symlink():
+        try:
+            validate_proof(parse(regular(proof)), context)
+            return  # This exact candidate already proved the boundary in this run root.
+        except Refusal:
+            fresh_private(proof)  # Stale or partial proof from an interrupted run; prove again.
     checkout(acr_root, context["acr_sha"])
     private = root / "proof-private"
+    if private.exists() or private.is_symlink():
+        require(not private.is_symlink() and private.is_dir(), "Proof scratch is not a directory; inspect the run root")
+        shutil.rmtree(private)
     private.mkdir(mode=0o700)
     for name in ("home", "codex", "state", "tmp"):
         (private / name).mkdir(mode=0o700)
     env = {k: v for k, v in os.environ.items() if not k.startswith(("ACR_CODEX_", "CODEX_", "OPENAI_"))
-           and k not in ("GH_TOKEN", "GITHUB_TOKEN", "CODEX_AUTH_JSON")}
+           and k not in ("GH_TOKEN", "GITHUB_TOKEN", "CODEX_AUTH_JSON", SEED_SECRET)}
     env.update(HOME=str(private / "home"), CODEX_HOME=str(private / "codex"),
                ACR_STATE_HOME=str(private / "state"), TMPDIR=str(private / "tmp"),
                PYTHONDONTWRITEBYTECODE="1")
@@ -320,12 +344,23 @@ def run_proof(acr_root: Path, root: Path) -> None:
     prove_runtime(acr_root, events, result.returncode, root / "evidence/credential-boundary.json")
 
 
+def secret_values(document: Any) -> list[str]:
+    """The credential strings an auth.json carries: account-session tokens, an API key, or both."""
+    values = []
+    if type(document) is dict:
+        tokens = document.get("tokens")
+        if type(tokens) is dict:
+            values += [v for v in tokens.values() if type(v) is str and len(v) >= 16]
+        key = document.get("OPENAI_API_KEY")
+        if type(key) is str and len(key) >= 16:
+            values.append(key)
+    return values
+
+
 def credentials(auth: Path, suite: str) -> list[bytes]:
-    document = parse(regular(auth))
-    require(type(document) is dict and type(document.get("tokens")) is dict and
-            not document.get("OPENAI_API_KEY"), "Subscription auth must contain tokens; API-key fallback is forbidden")
-    values = [v.encode() for v in document["tokens"].values() if type(v) is str and len(v) >= 16]
-    require(values and suite and suite != "journey-fixture-token", "Seed credentials and actual original-suite token are required")
+    values = [v.encode() for v in secret_values(parse(regular(auth)))]
+    require(values, "Acceptance auth must carry session tokens or an OPENAI_API_KEY")
+    require(suite and suite != "journey-fixture-token", "Seed credentials and actual original-suite token are required")
     return [*values, suite.encode()]
 
 
@@ -336,12 +371,12 @@ def scan(data: bytes, known: list[bytes]) -> None:
 
 def seed(root: Path) -> None:
     validate_proof(parse(regular(root / "evidence/credential-boundary.json")), binding())
-    raw = os.environ.get("CODEX_AUTH_JSON", "")
-    require(raw, "Central CODEX_AUTH_JSON is empty; use existing credential maintenance")
+    raw = os.environ.get(SEED_SECRET, "")
+    require(raw, f"{SEED_SECRET} is empty or not configured. Set it at https://github.com/{CENTRAL}/settings/secrets/actions "
+                 "to an auth.json holding this lane's own Codex account session or an OPENAI_API_KEY; the fleet "
+                 "reviewer's CODEX_AUTH_JSON is never used here")
     document = parse(raw.encode())
-    require(type(document) is dict and type(document.get("tokens")) is dict and
-            any(type(v) is str and len(v) >= 16 for v in document["tokens"].values()) and
-            not document.get("OPENAI_API_KEY"), "Valid subscription auth is required")
+    require(bool(secret_values(document)), f"{SEED_SECRET} must be an auth.json with session tokens or an OPENAI_API_KEY")
     auth = root / "seed/auth.json"
     data = encoded(document)
     write_new(auth, data)
@@ -643,7 +678,14 @@ def seal(root: Path, evidence: Path, output: Path) -> dict[str, Any]:
     known = credentials(oracle, os.environ.get("GH_TOKEN", ""))
     require(regular(root / "seed/auth.json") == regular(oracle),
             "Central seed changed; refuse export and inspect isolated auth handling")
-    require(not output.exists() and not output.is_symlink(), "Export destination must be fresh")
+    if output.exists() or output.is_symlink():
+        require(not output.is_symlink(), "Export destination is a symlink; refuse it")
+        manifest = verify_artifact(output, context, known)
+        require(regular(output / "manifest.json") == encoded(manifest),
+                "Export destination manifest is not the sealed encoding; refuse to overwrite it")
+        require(all(manifest[k] == context[k] for k in ("acr_sha", "central_sha", "run_id", "run_attempt")),
+                "Export destination holds a different run's artifact; refuse to overwrite it")
+        return manifest
     validate_proof(parse(regular(evidence / "credential-boundary.json")), context)
     # Only an explicit fixed projection is copied, never raw evidence recursion.
     with tempfile.TemporaryDirectory(prefix="acr-seal-", dir=output.parent) as name:
@@ -764,7 +806,7 @@ def producer_context(acr_sha: str, run_id: str, attempt: str) -> tuple[dict[str,
 
 
 def extract_archive(data: bytes, destination: Path) -> None:
-    require(len(data) <= MAX_ARCHIVE and not destination.exists(), "Download must be bounded and destination fresh")
+    require(len(data) <= MAX_ARCHIVE, "Download must be bounded")
     allowed = evidence_names() | {"manifest.json", "goc.bundle", "ffa.bundle"}
     with zipfile.ZipFile(io.BytesIO(data)) as archive:
         entries = archive.infolist()
@@ -780,6 +822,10 @@ def extract_archive(data: bytes, destination: Path) -> None:
             require(item.file_size <= limit, "Uncompressed archive member exceeds bound")
             total += item.file_size
         require(total <= MAX_ARCHIVE, "Uncompressed archive exceeds bound")
+        if destination.exists() or destination.is_symlink():
+            require(not destination.is_symlink() and members(destination) == {item.filename: archive.read(item) for item in entries},
+                    "Download destination holds different content; refuse to overwrite it")
+            return
         destination.mkdir(mode=0o700)
         for item in entries:
             write_new(destination / item.filename, archive.read(item))
@@ -867,8 +913,11 @@ def rollback_run_root(root: Path, created: os.stat_result, marker_created: os.st
 
 
 def create_run_root(root: Path) -> Path:
+    """Create and mark <root>; a root this helper already created and marked is resumed."""
     root = run_root_path(root)
-    require(not root.exists(), "Run root must be fresh")
+    if root.exists() or root.is_symlink():
+        require_owned(root)
+        return root
     root.mkdir(mode=0o700)
     info = root.lstat()
     require(stat.S_ISDIR(info.st_mode), "Run root changed; preserve failed setup for inspection")
@@ -887,13 +936,29 @@ def create_run_root(root: Path) -> Path:
     return root
 
 
+def fixture_clone_matches(target: Path, fixture: dict[str, Any]) -> bool:
+    """True when <target> is a finished clone of the pinned upstream with the pinned commit present."""
+    if not (target / ".git").is_dir():
+        return False
+    origin = subprocess.run(["git", "-C", str(target), "remote", "get-url", "origin"], capture_output=True, check=False)
+    present = subprocess.run(["git", "-C", str(target), "cat-file", "-e", fixture["upstream_sha"] + "^{commit}"],
+                             capture_output=True, check=False)
+    return (origin.returncode == 0 and present.returncode == 0 and
+            origin.stdout.decode().strip() == "https://github.com/" + fixture["upstream"] + ".git")
+
+
 def prepare(root: Path) -> None:
     root = create_run_root(root)
     for name in ("fixtures", "evidence", "tmp", "homes"):
-        (root / name).mkdir(mode=0o700)
+        (root / name).mkdir(mode=0o700, exist_ok=True)
     for key, fixture in FIXTURES.items():
         target = root / "fixtures" / key
-        run(["git", "-c", "credential.helper=", "clone", "--no-checkout", "https://github.com/" + fixture["upstream"] + ".git", str(target)])
+        if target.exists() or target.is_symlink():
+            require(not target.is_symlink(), "Fixture path is a symlink; inspect the run root")
+            if not fixture_clone_matches(target, fixture):
+                shutil.rmtree(target)  # Owned partial clone from an interrupted run.
+        if not target.exists():
+            run(["git", "-c", "credential.helper=", "clone", "--no-checkout", "https://github.com/" + fixture["upstream"] + ".git", str(target)])
         git(target, "checkout", "--detach", fixture["upstream_sha"])
         checkout(target, fixture["upstream_sha"])
         git(target, "config", "user.name", "ACR acceptance")
@@ -920,7 +985,7 @@ def convert(acr_root: Path, root: Path) -> None:
     checkout(acr_root, context["acr_sha"])
     validate_proof(parse(regular(root / "evidence/credential-boundary.json")), context)
     credentials(root / "seed/auth.json", os.environ.get("GH_TOKEN", ""))
-    env = {k: v for k, v in os.environ.items() if k not in ("CODEX_AUTH_JSON", "CODEX_API_KEY", "OPENAI_API_KEY", "GITHUB_TOKEN")}
+    env = {k: v for k, v in os.environ.items() if k not in ("CODEX_AUTH_JSON", SEED_SECRET, "CODEX_API_KEY", "OPENAI_API_KEY", "GITHUB_TOKEN")}
     env.update(CODEX_HOME=str(root / "seed"), TMPDIR=str(root / "tmp"),
                ACR_STATE_HOME=str(root / "homes"), ACR_CODEX_LIVE="1", ACR_CODEX_LIVE_REQUIRED="1",
                ACR_CODEX_LIVE_EVIDENCE=str(root / "evidence"), PYTHONDONTWRITEBYTECODE="1")
@@ -930,6 +995,7 @@ def convert(acr_root: Path, root: Path) -> None:
         env[prefix + "_SHA"] = fixture["upstream_sha"]
         env[prefix + "_REPOSITORY"] = "https://github.com/" + fixture["repository"]
     events = root / "conversion-private.jsonl"
+    fresh_private(events)
     with events.open("xb") as handle:
         result = subprocess.run(["go", "test", "-race", "-count=1", "-json", "-timeout", "140m", "-run",
                                  "^TestCodexLiveUpstreamConversion$", "./cmd/acr"], cwd=acr_root, env=env,
@@ -984,13 +1050,14 @@ def consume(acr_root: Path, artifact: Path, root: Path) -> None:
         checkout(acr_root, context["acr_sha"])
         root = create_run_root(root)
         for name in ("home", "tmp", "state", "evidence"):
-            (root / name).mkdir(mode=0o700)
-        env = {k: v for k, v in os.environ.items() if not k.startswith(("CODEX_", "OPENAI_", "ACR_CODEX_")) and k not in ("GH_TOKEN", "GITHUB_TOKEN")}
+            (root / name).mkdir(mode=0o700, exist_ok=True)
+        env = {k: v for k, v in os.environ.items() if not k.startswith(("CODEX_", "OPENAI_", "ACR_CODEX_")) and k not in ("GH_TOKEN", "GITHUB_TOKEN", SEED_SECRET)}
         env.update(HOME=str(root / "home"), TMPDIR=str(root / "tmp"), ACR_STATE_HOME=str(root / "state"),
                    ACR_CODEX_CONSUME_REQUIRED="1", ACR_CODEX_CONSUME_MANIFEST=str(snapshot / "manifest.json"),
                    ACR_CODEX_CONSUME_EVIDENCE=str(root / "evidence"),
                    ACR_CODEX_CONSUME_GOC_SOURCE=values["goc-source"], ACR_CODEX_CONSUME_FFA_SOURCE=values["ffa-source"])
         events = root / "events.jsonl"
+        fresh_private(events)
         with events.open("xb") as handle:
             result = subprocess.run(["go", "test", "-race", "-count=1", "-json", "-timeout", "25m", "-run",
                                      "^TestCodexLivePublishedConsumption$", "./cmd/acr"], cwd=acr_root, env=env,
@@ -1000,16 +1067,21 @@ def consume(acr_root: Path, artifact: Path, root: Path) -> None:
         consumer_receipt(parse(regular(root / "evidence/consumer-result.json")), manifest, context)
 
 
+def require_owned(root: Path) -> None:
+    """Refuse unless <root> is the directory this helper created and marked."""
+    require(root.is_dir() and not root.is_symlink(), "Run root must be a helper-created directory")
+    marker = exact(parse(regular(root / ".acr-owned.json")), "schema_version root device inode")
+    info = root.stat()
+    require(type(marker["schema_version"]) is int and marker["schema_version"] == 1 and
+            marker["root"] == str(root) and type(marker["device"]) is int and
+            type(marker["inode"]) is int and marker["device"] == info.st_dev and
+            marker["inode"] == info.st_ino, "Run root ownership differs; preserve the directory for inspection")
+
+
 def clean(root: Path) -> None:
     root = run_root_path(root)
     if root.exists():
-        require(root.is_dir(), "Cleanup root must be a helper-created directory")
-        marker = exact(parse(regular(root / ".acr-owned.json")), "schema_version root device inode")
-        info = root.stat()
-        require(type(marker["schema_version"]) is int and marker["schema_version"] == 1 and
-                marker["root"] == str(root) and type(marker["device"]) is int and
-                type(marker["inode"]) is int and marker["device"] == info.st_dev and
-                marker["inode"] == info.st_ino, "Cleanup ownership differs; preserve the directory for inspection")
+        require_owned(root)
         shutil.rmtree(root)
     require(not root.exists(), "Cleanup did not remove private runtime files; refuse upload")
 

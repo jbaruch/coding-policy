@@ -135,9 +135,10 @@
           }
         },
         {
+          "name": "Set up Python 3.12.14 (pin renewal: monthly, bump to the newest stable 3.12.x in actions/python-versions versions-manifest.json as its own focused change)",
           "uses": "actions/setup-python@v6",
           "with": {
-            "python-version": "3.12"
+            "python-version": "3.12.14"
           }
         },
         {
@@ -173,11 +174,11 @@
           "id": "proof"
         },
         {
-          "name": "Seed and mask existing central subscription",
+          "name": "Seed and mask the acceptance lane's own Codex credential",
           "run": "set -euo pipefail\npython3 .github/codex-accept/contract.py seed --run-root \"$RUNNER_TEMP/acr-accept\"",
           "id": "seed",
           "env": {
-            "CODEX_AUTH_JSON": "${{ secrets.CODEX_AUTH_JSON }}"
+            "ACR_ACCEPT_CODEX_AUTH_JSON": "${{ secrets.ACR_ACCEPT_CODEX_AUTH_JSON }}"
           }
         },
         {
