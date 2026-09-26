@@ -250,18 +250,20 @@ main() {
       fi
     fi
 
+    # Repo hooks are off for the fetch: updating refs runs
+    # `reference-transaction`, and session start must never run repo code.
     # Time-bound the fetch so a hung network can't stall session start:
     # timeout/gtimeout when present, else git's own HTTP low-speed limit and ssh
     # connect/keepalive timeouts.
     # Zero or a non-number would switch the bound off; fall back to the default.
     [[ "$FETCH_TIMEOUT" =~ ^[1-9][0-9]*$ ]] || FETCH_TIMEOUT=10
     if command -v timeout >/dev/null 2>&1; then
-      fetch=(timeout "$FETCH_TIMEOUT" git fetch --quiet origin)
+      fetch=(timeout "$FETCH_TIMEOUT" git -c core.hooksPath=/dev/null fetch --quiet origin)
     elif command -v gtimeout >/dev/null 2>&1; then
-      fetch=(gtimeout "$FETCH_TIMEOUT" git fetch --quiet origin)
+      fetch=(gtimeout "$FETCH_TIMEOUT" git -c core.hooksPath=/dev/null fetch --quiet origin)
     else
       fetch=(env "GIT_SSH_COMMAND=${GIT_SSH_COMMAND:-ssh} -o ConnectTimeout=${FETCH_TIMEOUT} -o ServerAliveInterval=5 -o ServerAliveCountMax=2"
-        git -c http.lowSpeedLimit=1000 -c "http.lowSpeedTime=${FETCH_TIMEOUT}" fetch --quiet origin)
+        git -c core.hooksPath=/dev/null -c http.lowSpeedLimit=1000 -c "http.lowSpeedTime=${FETCH_TIMEOUT}" fetch --quiet origin)
     fi
     # A fetch failure (offline, auth, timeout) is a no-op, not a broken session —
     # warn and let the unverified-sync branch below report it. Comparing against

@@ -34,6 +34,34 @@ set -euo pipefail
 
 warn() { printf 'check-acr-latest: %s\n' "$1" >&2; }
 
+# Echo <text> with credentials masked: URL userinfo, GitHub tokens, OpenAI-style
+# keys, and Bearer/Basic authorization values in any casing (rules/no-secrets.md Logging). Pure bash, so it needs
+# no tool that could be missing.
+# No length floor on any pattern: a short credential is still a credential, and
+# masking an ordinary word that happens to follow "Basic" is the safe failure.
+redact() { # <text>
+  local text="$1" re
+  local -a patterns=(
+    '(://)[^/@[:space:]]+@'
+    '(gh[pousr]_)[A-Za-z0-9_]+'
+    '(github_pat_)[A-Za-z0-9_]+'
+    '(sk-)[A-Za-z0-9_-]+'
+    '([Bb][Ee][Aa][Rr][Ee][Rr][[:space:]]+)[A-Za-z0-9._~+/=-]+'
+    '([Bb][Aa][Ss][Ii][Cc][[:space:]]+)[A-Za-z0-9+/=]+'
+  )
+  for re in "${patterns[@]}"; do
+    while [[ "$text" =~ $re ]]; do
+      if [[ "${BASH_REMATCH[1]}" == "://" ]]; then
+        # Userinfo is dropped, not starred: `://***@` would match again.
+        text="${text/"${BASH_REMATCH[0]}"/"://"}"
+      else
+        text="${text/"${BASH_REMATCH[0]}"/"${BASH_REMATCH[1]}***"}"
+      fi
+    done
+  done
+  printf '%s' "$text"
+}
+
 emit() { # <status text>
   # python3 first, then jq; printed only once a tool produced it.
   local out
@@ -113,15 +141,17 @@ sys.stdout.write(", ".join(pinned))
 # Build a bounded git network command in NET_CMD: timeout/gtimeout when
 # present, otherwise git's own bounds (an HTTP low-speed limit and ssh
 # connect/keepalive timeouts), so a stalled remote cannot hang session start.
+# Repo hooks are off (`core.hooksPath=/dev/null`): a fetch that updates refs
+# runs `reference-transaction`, and session start must never run repo code.
 bounded_git() { # <seconds> <git args...>
   local secs="$1"; shift
   if command -v timeout >/dev/null; then
-    NET_CMD=(timeout "$secs" git "$@")
+    NET_CMD=(timeout "$secs" git -c core.hooksPath=/dev/null "$@")
   elif command -v gtimeout >/dev/null; then
-    NET_CMD=(gtimeout "$secs" git "$@")
+    NET_CMD=(gtimeout "$secs" git -c core.hooksPath=/dev/null "$@")
   else
     NET_CMD=(env "GIT_SSH_COMMAND=${GIT_SSH_COMMAND:-ssh} -o ConnectTimeout=${secs} -o ServerAliveInterval=5 -o ServerAliveCountMax=2"
-      git -c http.lowSpeedLimit=1000 -c "http.lowSpeedTime=${secs}" "$@")
+      git -c core.hooksPath=/dev/null -c http.lowSpeedLimit=1000 -c "http.lowSpeedTime=${secs}" "$@")
   fi
 }
 
@@ -321,6 +351,9 @@ main() {
   fi
 
   out="$("$acr" freshness run --project "$root" --policy install 2>&1)" || rc=$?
+  # ACR's output reaches the session verbatim, so a provider error carrying a
+  # credential-bearing URL or token is masked first.
+  out="$(redact "$out")"
   if (( rc != 0 )); then
     diag="$(printf '%q' "$acr") freshness run --project $(printf '%q' "$root") --policy install"
     emit "Session-start status — acr: updating ACR dependencies failed (exit ${rc}):"$'\n'"${out}"$'\n'"Run \`${diag}\` to diagnose it."
