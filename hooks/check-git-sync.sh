@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Warn at session start when the local default branch is behind origin.
+# Sync the local default branch with origin at session start, or report why not.
 #
 # A SessionStart hook implementing rules/sync-before-work.md as a deterministic
 # check: it fetches origin (throttled), and if the local default branch trails
@@ -8,24 +8,30 @@
 # relied on the agent remembering; we hit stale-checkout ("main is behind")
 # repeatedly. This surfaces it the moment a session opens.
 #
-# Design choices, shared with hooks/check-policy-freshness.sh:
+# Design choices:
 #   - It DOES something (fetches + compares refs), it does not re-state a rule.
 #   - SessionStart fires once per session, not per turn — no per-turn tax.
-#   - Throttled: the fetch runs at most once per SYNC_THROTTLE_HOURS (default 1h)
+#   - Fetches every session by default: an unverified answer would only hand the
+#     agent the fetch this hook can run in seconds. SYNC_THROTTLE_HOURS (default 0)
+#     can still space fetches out: the fetch then runs at most once per window
 #     per repo, so rapid session churn doesn't hammer the network. Without a
 #     fresh fetch this session the remote-tracking ref may be stale, so a
 #     throttled (or failed) fetch reports "sync not verified" rather than a
 #     definitive conclusion (rules/sync-before-work.md).
 #   - The fetch is time-bounded (timeout, if available) so a hung network can't
 #     stall session start.
-#   - Informative only. Never blocks (always exits 0), never exits 2.
+#   - Acts when the answer is mechanical: a default branch strictly behind
+#     origin after a fresh fetch is fast-forwarded (git refuses every unsafe
+#     case); diverged, unverified and Herdr-worker sessions are reported only.
+#   - Never blocks (always exits 0), never exits 2.
 #
 # Contract:
 #   stdin : consensus SessionStart JSON — not read (the script needs none of it).
 #   stdout: once the repo's default branch is resolved, one JSON object
 #           {"additionalContext": "<status>"} whose text begins with the
 #           "Session-start status — " marker (rules/hook-action-reporting.md) —
-#           reporting in-sync, ahead, behind, or diverged after a fresh fetch, or
+#           reporting in-sync, ahead, fast-forwarded, behind (fast-forward refused), or
+#           diverged after a fresh fetch, or
 #           "sync not verified" when the fetch was throttled or failed.
 #   exit  : always 0. Every best-effort failure emits an actionable stderr warning
 #           and continues/no-ops (rules/error-handling.md Shell Error Handling).
@@ -34,7 +40,7 @@
 #   state : $SYNC_STATE_DIR/sync-<repo-key> (default ${TMPDIR:-/tmp}/coding-policy-sync),
 #           a per-repo throttle stamp (keyed by toplevel path). Schema documented
 #           in hooks/state-schema.md: one line "<schema_version> <checked_at>".
-#   env   : SYNC_THROTTLE_HOURS (default 1), SYNC_FETCH_TIMEOUT (default 10s),
+#   env   : SYNC_THROTTLE_HOURS (default 0 = every session), SYNC_FETCH_TIMEOUT (default 10s),
 #           SYNC_STATE_DIR (tests), SYNC_NOW (test-only injected clock; defaults
 #           to `date +%s`).
 set -euo pipefail
@@ -102,10 +108,10 @@ is_herdr_worker() {
 }
 
 main() {
-  local THROTTLE_HOURS="${SYNC_THROTTLE_HOURS:-1}"
+  local THROTTLE_HOURS="${SYNC_THROTTLE_HOURS:-0}"
   local FETCH_TIMEOUT="${SYNC_FETCH_TIMEOUT:-10}"
   local STATE_DIR="${SYNC_STATE_DIR:-${TMPDIR:-/tmp}/coding-policy-sync}"
-  local rc db inside cand now top repo_key stamp sv ts should_fetch preserve_future fetch_failed counts ahead behind notice
+  local rc db inside cand now top repo_key stamp sv ts should_fetch preserve_future fetch_failed counts ahead behind
   local -a fetch
 
   # git is required to produce a signal; its absence is an expected environment
@@ -136,8 +142,8 @@ main() {
   fi
 
   if ! [[ "$THROTTLE_HOURS" =~ ^[0-9]+$ ]]; then
-    warn "SYNC_THROTTLE_HOURS='${THROTTLE_HOURS}' is not an integer — using 1"
-    THROTTLE_HOURS=1
+    warn "SYNC_THROTTLE_HOURS='${THROTTLE_HOURS}' is not an integer — using 0 (fetch every session)"
+    THROTTLE_HOURS=0
   fi
 
   # Resolve the remote default branch. Primary path: origin/HEAD's symbolic ref
@@ -298,15 +304,50 @@ main() {
     return 0
   fi
 
-  # Problem path: keep the existing actionable text, prefixed with the marker so
-  # the agent surfaces it too (rules/hook-action-reporting.md).
+  # Diverged needs judgment (which side wins), so it stays a report.
   if (( ahead > 0 )); then
-    notice="Session-start status — Local \`${db}\` has diverged from \`origin/${db}\` (${behind} behind, ${ahead} ahead) — reconcile before working (rules/sync-before-work.md): \`git fetch origin\`, then rebase \`${db}\` onto \`origin/${db}\` (a fast-forward won't apply)."
-  else
-    notice="Session-start status — Local \`${db}\` is ${behind} commit(s) behind \`origin/${db}\` — sync before working (rules/sync-before-work.md): \`git fetch origin\`, then fast-forward \`${db}\` to \`origin/${db}\`."
+    emit_notice "Session-start status — Local \`${db}\` has diverged from \`origin/${db}\` (${behind} behind, ${ahead} ahead) — reconcile before working (rules/sync-before-work.md): \`git fetch origin\`, then rebase \`${db}\` onto \`origin/${db}\` (a fast-forward won't apply)."
+    return 0
   fi
 
-  emit_notice "$notice"
+  # Strictly behind after a fresh fetch: sync it rather than asking someone to.
+  if fast_forward "$db"; then
+    emit_notice "Session-start status — git: fast-forwarded local \`${db}\` by ${behind} commit(s) to \`origin/${db}\`"
+  else
+    emit_notice "Session-start status — Local \`${db}\` is ${behind} commit(s) behind \`origin/${db}\` and the automatic fast-forward was refused (see the warning above) — sync before working (rules/sync-before-work.md): fast-forward \`${db}\` to \`origin/${db}\`."
+  fi
+  return 0
+}
+
+# Fast-forward the local default branch to origin's, never anything else.
+#
+# Both paths let git refuse every unsafe case: `merge --ff-only` on the checked-out
+# branch refuses a non-fast-forward and any change that would overwrite local
+# work; `fetch . <src>:<dst>` for a branch not checked out here only
+# fast-forwards and refuses a branch checked out in any worktree. 0 = moved,
+# 1 = refused (warned).
+#
+# Repo hooks are disabled for both (`core.hooksPath=/dev/null`): a merge runs
+# `post-merge`, and session start must not become a path that runs repo code.
+fast_forward() { # <default-branch>
+  local db="$1" current="" out rc=0
+  # `symbolic-ref --quiet` exits 1 for a detached HEAD, the one expected
+  # non-result; any other failure is a git error and refuses the fast-forward.
+  current="$(git symbolic-ref --quiet --short HEAD)" || rc=$?
+  if (( rc > 1 )); then
+    warn "git symbolic-ref HEAD failed (exit ${rc}) — cannot tell which branch is checked out, so ${db} was not fast-forwarded"
+    return 1
+  fi
+  rc=0
+  if [[ "$current" == "$db" ]]; then
+    out="$(git -c core.hooksPath=/dev/null merge --ff-only --quiet "refs/remotes/origin/${db}" 2>&1)" || rc=$?
+  else
+    out="$(git -c core.hooksPath=/dev/null fetch --quiet . "refs/remotes/origin/${db}:refs/heads/${db}" 2>&1)" || rc=$?
+  fi
+  if (( rc != 0 )); then
+    warn "fast-forward of ${db} refused (exit ${rc}): ${out//$'\n'/ }"
+    return 1
+  fi
   return 0
 }
 

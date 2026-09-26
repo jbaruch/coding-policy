@@ -12,7 +12,8 @@
 # (rules/error-handling.md aggregate-reporting carve-out).
 #
 # Covers:
-#   1. Behind        -> emits marker additionalContext naming the branch + "behind".
+#   1. Behind        -> fast-forwards the default branch (on it or off it); a
+#                       Herdr worker only reports; a refused fast-forward reports.
 #   2. Up to date    -> emits a marker "in sync" status, exit 0.
 #   3. Throttle      -> with a fixed injected clock: a call inside the window
 #                       skips the fetch and reports "not verified" (never a
@@ -87,30 +88,54 @@ main() {
 
   FAIL=0; PASS=0
 
-  # 1. behind -> notice. Clone (up to date), then move origin ahead by one
-  #    commit; the hook fetches and reports behind by 1.
+  # 1. Behind, read first from a linked worktree with HERDR_ENV set -- a Herdr
+  # worker. The shared checkout is the foreman's (rules/agent-team-operation.md
+  # Writers and Checkouts), so the hook reports the drift and moves nothing.
   mk_origin o1
   clone_from "$BARE" "$TMP/r1"
   commit_push "$SEED" "c2"
-  run "$TMP/r1" "$TMP/s1"
-  if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | jq -e '.additionalContext | test("Session-start status") and test("behind") and test("main")' >/dev/null 2>&1; then
-    pass; else fail "behind: expected marker notice, got RC=$RC OUT=$OUT"; fi
-
-  # 1b. Behind, but read from a linked worktree with HERDR_ENV set -- a Herdr
-  # worker. The shared checkout is the foreman's (rules/agent-team-operation.md
-  # Writers and Checkouts), so the notice must report the drift WITHOUT telling
-  # the worker to fetch or fast-forward it.
   git -C "$TMP/r1" worktree add -q "$TMP/r1-wt" -b feat/worker >/dev/null 2>&1 \
     || die "r1 worktree add failed"
   run "$TMP/r1-wt" "$TMP/s1b" HERDR_ENV=1
-  if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | jq -e '.additionalContext | test("Herdr worker session") and test("Do not sync") and (test("fast-forward") | not)' >/dev/null 2>&1; then
-    pass; else fail "worker session: expected a no-sync notice, got RC=$RC OUT=$OUT"; fi
+  if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | jq -e '.additionalContext | test("Herdr worker session") and test("Do not sync") and (test("fast-forward") | not)' >/dev/null 2>&1 \
+    && [[ "$(git -C "$TMP/r1" rev-parse main)" != "$(git -C "$TMP/r1" rev-parse origin/main)" ]]; then
+    pass; else fail "worker session: expected a no-sync notice and main unmoved, got RC=$RC OUT=$OUT"; fi
 
-  # 1c. The same drift from the MAIN checkout with HERDR_ENV set is the foreman:
-  # the suppression keys on the linked worktree, not on Herdr alone.
+  # 1b. The same drift from the MAIN checkout (on main) is the foreman or a
+  # standalone agent: the hook fast-forwards main and says so, without running
+  # the repo's own post-merge hook.
+  printf '#!/bin/sh\ntouch "%s"\n' "$TMP/post-merge-ran" > "$TMP/r1/.git/hooks/post-merge" \
+    || die "could not write the post-merge hook"
+  chmod +x "$TMP/r1/.git/hooks/post-merge" || die "could not make the post-merge hook executable"
   run "$TMP/r1" "$TMP/s1c" HERDR_ENV=1
-  if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | jq -e '.additionalContext | test("fast-forward")' >/dev/null 2>&1; then
-    pass; else fail "foreman session: expected the sync instruction, got RC=$RC OUT=$OUT"; fi
+  if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | jq -e '.additionalContext | test("Session-start status") and test("fast-forwarded local `main` by 1")' >/dev/null 2>&1 \
+    && [[ "$(git -C "$TMP/r1" rev-parse main)" == "$(git -C "$TMP/r1" rev-parse origin/main)" ]] \
+    && [[ ! -e "$TMP/post-merge-ran" ]]; then
+    pass; else fail "behind on main: expected a fast-forward with no repo hook run, got RC=$RC OUT=$OUT"; fi
+
+  # 1c. Behind while a feature branch is checked out: main moves without a
+  # checkout, and the feature branch is untouched.
+  mk_origin o1c
+  clone_from "$BARE" "$TMP/r1c"
+  git -C "$TMP/r1c" checkout -q -b feat/x || die "r1c checkout failed"
+  commit_push "$SEED" "c2"
+  run "$TMP/r1c" "$TMP/s1d"
+  if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | jq -e '.additionalContext | test("fast-forwarded")' >/dev/null 2>&1 \
+    && [[ "$(git -C "$TMP/r1c" rev-parse main)" == "$(git -C "$TMP/r1c" rev-parse origin/main)" ]] \
+    && [[ "$(git -C "$TMP/r1c" symbolic-ref --short HEAD)" == "feat/x" ]]; then
+    pass; else fail "behind off main: expected main fast-forwarded in place, got RC=$RC OUT=$OUT"; fi
+
+  # 1d. Behind on main with a local edit the incoming commit would overwrite:
+  # git refuses, the hook reports it, and the edit survives.
+  mk_origin o1d
+  clone_from "$BARE" "$TMP/r1d"
+  printf 'local edit\n' >> "$TMP/r1d/f" || die "r1d edit failed"
+  commit_push "$SEED" "c2"
+  run "$TMP/r1d" "$TMP/s1e"
+  if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | jq -e '.additionalContext | test("fast-forward was refused")' >/dev/null 2>&1 \
+    && grep -q "local edit" "$TMP/r1d/f" \
+    && [[ "$(git -C "$TMP/r1d" rev-parse main)" != "$(git -C "$TMP/r1d" rev-parse origin/main)" ]]; then
+    pass; else fail "refused fast-forward: expected a report and the edit kept, got RC=$RC OUT=$OUT"; fi
 
   # 2. up to date -> marker "in sync" status.
   mk_origin o2
@@ -135,19 +160,29 @@ main() {
   #    window fetches the new commit and fires "behind".
   mk_origin o3
   clone_from "$BARE" "$TMP/r3"
-  run "$TMP/r3" "$TMP/s3" SYNC_NOW=2000000               # fetch, stamp, up to date -> in sync
+  run "$TMP/r3" "$TMP/s3" SYNC_THROTTLE_HOURS=1 SYNC_NOW=2000000               # fetch, stamp, up to date -> in sync
   # This establishes the throttle stamp the next two assertions depend on, so a
   # failure here must abort, not merely tally (aggregate-reporting carve-out:
   # later checks may not depend on an earlier one merely having incremented FAIL).
   { [[ $RC -eq 0 ]] && printf '%s' "$OUT" | jq -e '.additionalContext | test("in sync")' >/dev/null 2>&1; } \
     || die "throttle setup: first call should report in sync, got RC=$RC OUT=$OUT"
   commit_push "$SEED" "c3"                                # origin moves; r3's tracking ref still old
-  run "$TMP/r3" "$TMP/s3" SYNC_NOW=2000060               # +60s: throttled -> no fetch -> not verified
+  run "$TMP/r3" "$TMP/s3" SYNC_THROTTLE_HOURS=1 SYNC_NOW=2000060               # +60s: throttled -> no fetch -> not verified
   if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | jq -e '.additionalContext | test("Session-start status") and test("not verified") and (test("in sync") | not) and (test("behind") | not)' >/dev/null 2>&1; then
     pass; else fail "throttle active: inside window should report 'not verified' (not 'in sync'/'behind'), got OUT=$OUT"; fi
-  run "$TMP/r3" "$TMP/s3" SYNC_NOW=2003601               # +>1h: fetch -> behind -> fires
-  if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | jq -e '.additionalContext | test("behind")' >/dev/null 2>&1; then
+  run "$TMP/r3" "$TMP/s3" SYNC_THROTTLE_HOURS=1 SYNC_NOW=2003601               # +>1h: fetch -> behind -> fast-forwards
+  if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | jq -e '.additionalContext | test("fast-forwarded")' >/dev/null 2>&1; then
     pass; else fail "throttle expired: past window should fetch and fire, got OUT=$OUT"; fi
+
+  # 3b. By default the hook fetches every session: a recent stamp does not stop
+  #     it, so origin moving is seen and fast-forwarded, never "not verified".
+  mk_origin o3b
+  clone_from "$BARE" "$TMP/r3b"
+  run "$TMP/r3b" "$TMP/s3b" SYNC_NOW=2000000
+  commit_push "$SEED" "c2"
+  run "$TMP/r3b" "$TMP/s3b" SYNC_NOW=2000060
+  if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | jq -e '.additionalContext | test("fast-forwarded")' >/dev/null 2>&1; then
+    pass; else fail "default: expected a fetch every session, got OUT=$OUT"; fi
 
   # 4. not a repo -> silent no-op.
   mkdir -p "$TMP/notrepo" || die "could not create $TMP/notrepo"
@@ -206,8 +241,8 @@ main() {
   stampdir9="$TMP/s9"
   mkdir -p "$stampdir9" || die "could not create $stampdir9"
   printf '2 %s\n' 2000000 > "$stampdir9/sync-$key9" || die "could not seed future stamp"
-  run "$TMP/r9" "$stampdir9" SYNC_NOW=2000060            # within window, but future schema
-  if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | jq -e '.additionalContext | test("behind")' >/dev/null 2>&1; then
+  run "$TMP/r9" "$stampdir9" SYNC_THROTTLE_HOURS=1 SYNC_NOW=2000060            # within window, but future schema
+  if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | jq -e '.additionalContext | test("fast-forwarded")' >/dev/null 2>&1; then
     pass; else fail "future stamp: expected fire (not throttled), got RC=$RC OUT=$OUT"; fi
   sv9=""; read -r sv9 _ < "$stampdir9/sync-$key9" || sv9=""
   if [[ "$sv9" == "2" ]]; then pass; else fail "future stamp: expected preserved version 2, got '$sv9'"; fi
