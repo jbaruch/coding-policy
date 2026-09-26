@@ -95,19 +95,53 @@ default_branch() {
   return 1
 }
 
+# Echo "source@requested" for each github:jbaruch/* dependency not at latest,
+# comma-separated, from `acr list --json` output. Exit 0 checked (empty output =
+# none pinned), 1 unreadable JSON, 2 no JSON tool.
+pinned_jbaruch() { # <listing>
+  if command -v python3 >/dev/null; then
+    python3 -c '
+import json, sys
+try:
+    deps = json.loads(sys.argv[1])["result"]["dependencies"]
+    pinned = [d["declaration"]["source"] + "@" + str(d["declaration"].get("requested"))
+              for d in deps
+              if str(d["declaration"].get("source", "")).startswith("github:jbaruch/")
+              and d["declaration"].get("requested") != "latest"]
+except (ValueError, KeyError, TypeError, AttributeError):
+    sys.exit(1)
+sys.stdout.write(", ".join(pinned))
+' "$1"
+  elif command -v jq >/dev/null; then
+    jq -e -r -j '[.result.dependencies[]
+      | select((.declaration.source | tostring | startswith("github:jbaruch/")) and .declaration.requested != "latest")
+      | "\(.declaration.source)@\(.declaration.requested)"] | join(", ")' <<<"$1" || return 1
+  else
+    return 2
+  fi
+}
+
+# Build the bounded `git fetch origin` command in FETCH_CMD. timeout/gtimeout
+# when present; otherwise git's own bounds: an HTTP low-speed limit and ssh
+# connect/keepalive timeouts, so a stalled remote cannot hang session start.
+bounded_fetch() { # <seconds>
+  if command -v timeout >/dev/null; then
+    FETCH_CMD=(timeout "$1" git fetch --quiet origin)
+  elif command -v gtimeout >/dev/null; then
+    FETCH_CMD=(gtimeout "$1" git fetch --quiet origin)
+  else
+    FETCH_CMD=(env "GIT_SSH_COMMAND=${GIT_SSH_COMMAND:-ssh} -o ConnectTimeout=$1 -o ServerAliveInterval=5 -o ServerAliveCountMax=2"
+      git -c http.lowSpeedLimit=1000 -c "http.lowSpeedTime=$1" fetch --quiet origin)
+  fi
+}
+
 # Echo why the checkout is not safe to update, or nothing when it is: freshly
 # fetched from origin, HEAD containing origin's default branch, and a clean tree
 # (rules/sync-before-work.md). A git failure is a reason, never a pass.
 unsafe_reason() {
-  local -a fetch=(git fetch --quiet origin)
-  local db status
-  if command -v timeout >/dev/null; then
-    fetch=(timeout "$FETCH_TIMEOUT_SEC" "${fetch[@]}")
-  elif command -v gtimeout >/dev/null; then
-    fetch=(gtimeout "$FETCH_TIMEOUT_SEC" "${fetch[@]}")
-  fi
-  local frc=0
-  "${fetch[@]}" >/dev/null 2>&1 || frc=$?
+  local db status frc=0
+  bounded_fetch "$FETCH_TIMEOUT_SEC"
+  "${FETCH_CMD[@]}" >/dev/null 2>&1 || frc=$?
   if (( frc != 0 )); then
     # git's message can carry a credential-bearing remote URL, so it stays out
     # of the status (rules/no-secrets.md Logging).
@@ -140,10 +174,6 @@ unsafe_reason() {
 
 main() {
   local root acr out rc=0 err reason in_git=1 diag
-  # Every Herdr session is off limits: a worker never writes on the hook's
-  # say-so, and the foreman never edits the shared checkout
-  # (rules/agent-team-operation.md Writers and Checkouts).
-  [[ -z "${HERDR_ENV:-}" ]] || return 0
 
   # Outside git is the one expected rev-parse failure; any other is a broken
   # repository, reported and never updated as if it were a plain directory.
@@ -196,27 +226,32 @@ main() {
   esac
 
   # The Runtime-Managed Manifest Carve-Out check (rules/dependency-management.md,
-  # consumer `agents.yaml`): name every github:jbaruch/* dependency not at latest.
-  local listing notes=""
-  if listing="$("$acr" list --json --project "$root" 2>&1)"; then
-    # shellcheck disable=SC2016  # Backticks are Markdown in the Python source, not shell expansions.
-    notes="$(python3 -c '
-import json, sys
-try:
-    deps = json.loads(sys.argv[1])["result"]["dependencies"]
-except (ValueError, KeyError, TypeError):
-    print("NOTE: `acr list --json` returned something unreadable; the latest-specifier check did not run.")
-    sys.exit(0)
-pinned = [d["declaration"]["source"] + "@" + str(d["declaration"].get("requested"))
-          for d in deps
-          if d.get("declaration", {}).get("source", "").startswith("github:jbaruch/")
-          and d["declaration"].get("requested") != "latest"]
-if pinned:
-    print("NOTE: agents.yaml pins jbaruch dependencies that must float at `latest` (Runtime-Managed Manifest Carve-Out, rules/dependency-management.md): "
-          + ", ".join(pinned) + ". Set them to `requested: latest`.")
-' "$listing")" || notes="NOTE: the latest-specifier check failed to run (python3)."
-  else
+  # consumer `agents.yaml`) runs in every session, Herdr included: it only reads.
+  local listing notes="" pinned checked=1 prc=0
+  if ! listing="$("$acr" list --json --project "$root" 2>&1)"; then
     notes="NOTE: \`acr list --json\` failed, so the latest-specifier check did not run."
+    checked=0
+  else
+    pinned="$(pinned_jbaruch "$listing")" || prc=$?
+    case "$prc" in
+      0) [[ -z "$pinned" ]] || notes="NOTE: agents.yaml pins jbaruch dependencies that must float at \`latest\` (Runtime-Managed Manifest Carve-Out, rules/dependency-management.md): ${pinned}. Set them to \`requested: latest\`." ;;
+      2) notes="NOTE: neither python3 nor jq is on PATH, so the latest-specifier check did not run; install one of them."; checked=0 ;;
+      *) notes="NOTE: \`acr list --json\` returned something unreadable, so the latest-specifier check did not run."; checked=0 ;;
+    esac
+  fi
+
+  # Every Herdr session reports only: a worker never writes on the hook's say-so,
+  # and the foreman never edits the shared checkout
+  # (rules/agent-team-operation.md Writers and Checkouts).
+  if [[ -n "${HERDR_ENV:-}" ]]; then
+    [[ -z "$notes" ]] || emit "Session-start status — acr: ${notes}"
+    return 0
+  fi
+
+  # An update the carve-out check could not vouch for is not made.
+  if (( ! checked )); then
+    emit "Session-start status — acr: ACR dependencies were not updated. ${notes}"
+    return 0
   fi
 
   # Under `tessl hook run` the environment is stripped, so a Herdr session

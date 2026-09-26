@@ -64,7 +64,15 @@
   `check-git-sync`'s fast-forward report instead of acting, since a Herdr
   worker cannot be ruled out. A failed fetch reports its exit code only (git's
   message can carry a credential-bearing URL), and an unreadable `acr
-  --version` gets reinstall guidance instead of "upgrade". Verified against acr 0.2.0
+  --version` gets reinstall guidance instead of "upgrade".
+- **The carve-out check runs in every session, and bounds its fetch without
+  `timeout`.** `check-acr-latest`'s read-only `latest`-specifier check runs
+  in Herdr sessions too (only the update is skipped), parses with python3 or
+  jq, and refuses the update when neither can run it. Both
+  `check-acr-latest` and `check-git-sync` bound `git fetch` with
+  `timeout`/`gtimeout` when present, and otherwise with git's own HTTP
+  low-speed limit and ssh connect/keepalive timeouts; stock macOS has
+  neither utility, so the fetch was unbounded there. Verified against acr 0.2.0
   on a scratch project installing `github:jbaruch/ffa-acr-dogfood`: the first
   run installed and reported `restart_required`, the second was throttled and
   silent (`hooks/tests/test_check_acr_latest.sh` covers the contract with a

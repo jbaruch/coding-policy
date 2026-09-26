@@ -28,6 +28,9 @@
 #  14. Portable mode (under tessl)    -> report, never run.
 #  15. Fetch fails with a secret URL  -> exit code only, no URL in the status.
 #  16. Unreadable acr version         -> reinstall guidance.
+#  6b. Herdr session, pinned dep      -> the carve-out NOTE, no update.
+#  17. jq only, no timeout utility    -> check and update run (bounded-fetch fallback).
+#  18. Neither python3 nor jq         -> no update, warning on stderr.
 #
 # Run: bash hooks/tests/test_check_acr_latest.sh
 set -uo pipefail
@@ -134,10 +137,16 @@ main() {
   if [[ $RC -eq 0 ]] && context | grep -q "brew install jbaruch/agentic-context-registry/acr"; then
     pass; else fail "acr missing: expected the install command, got OUT=$OUT"; fi
 
-  # 6. any Herdr session, the foreman's own checkout included -> silent, no acr call.
+  # 6. any Herdr session, the foreman's own checkout included -> no update, and
+  #    silent when nothing is pinned.
   mk_project p6
   run "$PROJECT" HERDR_ENV=1 FAKE_OUT="Updated something"
   if [[ $RC -eq 0 && -z "$OUT" && -z "$(calls)" ]]; then pass; else fail "herdr: expected silence and no acr call, got OUT=$OUT calls=$(calls)"; fi
+
+  # 6b. a Herdr session still runs the read-only carve-out check.
+  run "$PROJECT" HERDR_ENV=1 FAKE_OUT="Updated something" FAKE_LIST='{"ok":true,"result":{"dependencies":[{"declaration":{"source":"github:jbaruch/x","requested":"v1"}}]}}'
+  if [[ $RC -eq 0 && -z "$(calls)" ]] && context | grep -q "github:jbaruch/x@v1"; then
+    pass; else fail "herdr pin check: expected the NOTE and no update, got OUT=$OUT calls=$(calls)"; fi
 
   # 7. behind origin -> not updated, acr never called.
   mk_project p7
@@ -213,6 +222,35 @@ main() {
   run "$PROJECT" FAKE_VERSION=dev FAKE_OUT="Updated x"
   if [[ $RC -eq 0 && -z "$(calls)" ]] && context | grep -q "not a release version" && ! context | grep -q "brew upgrade"; then
     pass; else fail "bad version: expected reinstall guidance, got OUT=$OUT"; fi
+
+  # 17. jq only (no python3): the carve-out check still runs, and the update.
+  mk_project p17
+  local tools="$TMP/jq-tools" t real
+  mkdir -p "$tools" || die "cannot create $tools"
+  for t in bash git jq env mktemp cat rm; do
+    real="$(command -v "$t")" || die "$t required for these tests"
+    ln -sf "$real" "$tools/$t" || die "cannot link $t"
+  done
+  OUT="$(cd "$PROJECT" && env -u HERDR_ENV PATH="$tools" ACR_BIN="$TMP/acr" FAKE_CALLS="$TMP/calls" FAKE_OUT="Updated x" \
+    FAKE_LIST='{"ok":true,"result":{"dependencies":[{"declaration":{"source":"github:jbaruch/y","requested":"v2"}}]}}' \
+    "$tools/bash" "$SCRIPT" </dev/null 2>"$TMP/err")"; RC=$?
+  if [[ $RC -eq 0 ]] && [[ "$(calls)" == "freshness run --project ${PROJECT} --policy install" ]] \
+    && jq -r .additionalContext <<<"$OUT" | grep -q "github:jbaruch/y@v2"; then
+    pass; else fail "jq only: expected the check and the update (and the no-timeout fetch fallback), got OUT=$OUT calls=$(calls) err=$(cat "$TMP/err")"; fi
+  rm -f "$TMP/calls" || die "cannot reset calls"
+
+  # 18. neither python3 nor jq: the check cannot run, so no update.
+  mk_project p18
+  local bare="$TMP/bare-tools"
+  mkdir -p "$bare" || die "cannot create $bare"
+  for t in bash git env mktemp cat rm; do
+    real="$(command -v "$t")" || die "$t required for these tests"
+    ln -sf "$real" "$bare/$t" || die "cannot link $t"
+  done
+  OUT="$(cd "$PROJECT" && env -u HERDR_ENV PATH="$bare" ACR_BIN="$TMP/acr" FAKE_CALLS="$TMP/calls" FAKE_OUT="Updated x" \
+    "$bare/bash" "$SCRIPT" </dev/null 2>"$TMP/err")"; RC=$?
+  if [[ $RC -eq 0 && -z "$(calls)" ]] && grep -q "neither python3 nor jq" "$TMP/err"; then
+    pass; else fail "no JSON tool: expected no update and a warning, got OUT=$OUT calls=$(calls) err=$(cat "$TMP/err")"; fi
 
   echo "─────────────────────────────────────────────"
   if (( FAIL > 0 )); then echo "FAILED: ${FAIL} failed, ${PASS} passed"; exit 1; fi
