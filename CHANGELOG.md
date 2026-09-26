@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.278 — 2026-09-26
+
 ### Fixed
 
 - **SessionStart is a native hook, so it sees the session's environment.**
