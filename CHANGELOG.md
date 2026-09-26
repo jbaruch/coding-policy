@@ -37,7 +37,8 @@
   - The update runs only on a safe checkout (operator decision): a bounded
     fresh fetch succeeded, `HEAD` contains `origin/<default>`, the tree is
     clean, and `.agents/registry.lock` is gitignored and not committed; the
-    default branch is origin's live HEAD, asked for within the same bound.
+    default branch is origin's live HEAD, asked for within the same bound, and
+    the fetched ref must equal the tip origin advertises at that moment.
     Otherwise the status
     names the reason and nothing changes. Outside git there is no checkout to
     sync, and it updates.

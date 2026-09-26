@@ -34,6 +34,8 @@
 #  19. origin's default renamed       -> checked against origin's live HEAD.
 #  20. Lock not gitignored            -> refused, .gitignore guidance.
 #  21. Zero fetch timeout             -> default bound, update runs.
+#  22. python3 present but failing    -> jq runs the pin check.
+#  23. Fetched ref behind origin's tip -> not updated.
 #
 # Run: bash hooks/tests/test_check_acr_latest.sh
 set -uo pipefail
@@ -292,6 +294,30 @@ main() {
   run "$PROJECT" ACR_LATEST_FETCH_TIMEOUT=0 FAKE_OUT="Updated x"
   if [[ $RC -eq 0 ]] && [[ "$CALLS" == "freshness run --project ${PROJECT} --policy install" ]]; then
     pass; else fail "zero timeout: expected the default bound and an update, got OUT=$OUT err=$(cat "$TMP/err")"; fi
+
+  # 22. python3 present but failing: the pin check falls back to jq.
+  mk_project p22
+  local broken="$TMP/broken-py"
+  mkdir -p "$broken" || die "cannot create $broken"
+  printf '#!/usr/bin/env bash\nexit 2\n' > "$broken/python3" || die "cannot write the broken python3"
+  chmod +x "$broken/python3" || die "cannot make the broken python3 executable"
+  run "$PROJECT" PATH="$broken:$PATH" FAKE_OUT="Updated x" \
+    FAKE_LIST='{"ok":true,"result":{"dependencies":[{"declaration":{"source":"github:jbaruch/z","requested":"v3"}}]}}'
+  if [[ $RC -eq 0 ]] && [[ "$CALLS" == "freshness run --project ${PROJECT} --policy install" ]] \
+    && jq -r .additionalContext <<<"$OUT" | grep -q "github:jbaruch/z@v3"; then
+    pass; else fail "broken python3: expected the jq fallback to run the check, got OUT=$OUT calls=$CALLS err=$(cat "$TMP/err")"; fi
+
+  # 23. the fetched ref is not origin's live tip (here the fetch refspec skips
+  #     main while origin advances it) -> not updated.
+  mk_project p23
+  git -C "$SEED" push -q origin main:side || die "side branch push failed"
+  git -C "$PROJECT" config remote.origin.fetch "+refs/heads/side:refs/remotes/origin/side" || die "refspec config failed"
+  printf 'moved\n' >> "$SEED/agents.yaml" || die "seed edit failed"
+  git -C "$SEED" commit -q -am moved || die "seed commit failed"
+  git -C "$SEED" push -q origin main || die "seed push failed"
+  run "$PROJECT" FAKE_OUT="Updated x"
+  if [[ $RC -eq 0 && -z "$CALLS" ]] && context | grep -q "moved during the check"; then
+    pass; else fail "stale fetched ref: expected a skip, got OUT=$OUT calls=$CALLS"; fi
 
   echo "─────────────────────────────────────────────"
   if (( FAIL > 0 )); then echo "FAILED: ${FAIL} failed, ${PASS} passed"; exit 1; fi

@@ -80,8 +80,11 @@ version_at_least() { # <have> <want>
 # comma-separated, from `acr list --json` output. Exit 0 checked (empty output =
 # none pinned), 1 unreadable JSON, 2 no JSON tool.
 pinned_jbaruch() { # <listing>
+  # python3 first: exit 0 is its answer, 3 means the listing is unreadable (also
+  # an answer); any other exit is python3 failing, and jq gets the question.
+  local out rc=0
   if command -v python3 >/dev/null; then
-    python3 -c '
+    out="$(python3 -c '
 import json, sys
 try:
     deps = json.loads(sys.argv[1])["result"]["dependencies"]
@@ -90,16 +93,21 @@ try:
               if str(d["declaration"].get("source", "")).startswith("github:jbaruch/")
               and d["declaration"].get("requested") != "latest"]
 except (ValueError, KeyError, TypeError, AttributeError):
-    sys.exit(1)
+    sys.exit(3)
 sys.stdout.write(", ".join(pinned))
-' "$1"
-  elif command -v jq >/dev/null; then
+' "$1")" || rc=$?
+    case "$rc" in
+      0) printf '%s' "$out"; return 0 ;;
+      3) return 1 ;;
+    esac
+  fi
+  if command -v jq >/dev/null; then
     jq -e -r -j '[.result.dependencies[]
       | select((.declaration.source | tostring | startswith("github:jbaruch/")) and .declaration.requested != "latest")
       | "\(.declaration.source)@\(.declaration.requested)"] | join(", ")' <<<"$1" || return 1
-  else
-    return 2
+    return 0
   fi
+  return 2
 }
 
 # Build a bounded git network command in NET_CMD: timeout/gtimeout when
@@ -141,12 +149,17 @@ unsafe_reason() {
     printf "asking origin for its default branch failed (exit %s); run %sgit ls-remote --symref origin HEAD%s to see why" "$rc" '`' '`'
     return 0
   fi
-  local re='ref: refs/heads/([^[:space:]]+)[[:space:]]+HEAD'
+  local re='ref: refs/heads/([^[:space:]]+)[[:space:]]+HEAD' sha_re='(^|'$'\n'')([0-9a-f]{40,64})[[:space:]]+HEAD('$'\n''|$)' live_sha fetched_sha
   if [[ ! "$head_line" =~ $re ]]; then
     printf "origin did not name its default branch"
     return 0
   fi
   db="${BASH_REMATCH[1]}"
+  if [[ ! "$head_line" =~ $sha_re ]]; then
+    printf "origin did not advertise the commit of its default branch"
+    return 0
+  fi
+  live_sha="${BASH_REMATCH[2]}"
   rc=0
   git show-ref --verify --quiet "refs/remotes/origin/${db}" || rc=$?
   case "$rc" in
@@ -154,6 +167,16 @@ unsafe_reason() {
     1) printf 'origin/%s is missing after the fetch' "$db"; return 0 ;;
     *) printf 'git failed reading origin/%s' "$db"; return 0 ;;
   esac
+  # The fetched ref must be the tip origin advertises right now: a push between
+  # the fetch and the ls-remote would otherwise vouch for a stale commit.
+  if ! fetched_sha="$(git rev-parse --verify --quiet "refs/remotes/origin/${db}^{commit}")"; then
+    printf 'git failed resolving origin/%s' "$db"
+    return 0
+  fi
+  if [[ "$fetched_sha" != "$live_sha" ]]; then
+    printf 'origin/%s moved during the check; start a new session to check again' "$db"
+    return 0
+  fi
   rc=0
   git merge-base --is-ancestor "refs/remotes/origin/${db}" HEAD || rc=$?
   case "$rc" in
