@@ -36,7 +36,9 @@
     and reports any finding.
   - The update runs only on a safe checkout (operator decision): a bounded
     fresh fetch succeeded, `HEAD` contains `origin/<default>`, the tree is
-    clean, and `.agents/registry.lock` is not committed. Otherwise the status
+    clean, and `.agents/registry.lock` is gitignored and not committed; the
+    default branch is origin's live HEAD, asked for within the same bound.
+    Otherwise the status
     names the reason and nothing changes. Outside git there is no checkout to
     sync, and it updates.
   - No update in a Herdr session (the checkout belongs to the foreman or a
@@ -61,8 +63,8 @@
   `requested: latest`, and a new Authority of Record names consumer
   `agents.yaml`. `check-acr-latest` is its deterministic check: it names any
   `github:jbaruch/*` dependency not at `latest` (from `acr list --json`,
-  parsed with python3 or jq), refuses to update while the lock is committed,
-  and refuses to update when the check cannot run. Verified against acr 0.2.0
+  parsed with python3 or jq), refuses to update while the lock is committed
+  or not gitignored, and refuses to update when the check cannot run. Verified against acr 0.2.0
   that an untracked lock works: install, realize and `acr check` pass, and a
   fresh clone without the lock resolves and realizes cleanly.
 - **Every session-start fetch is bounded.** `check-acr-latest` and
@@ -70,7 +72,10 @@
   and otherwise with git's own HTTP low-speed limit and ssh connect/keepalive
   timeouts; stock macOS has neither utility, so the fetch was unbounded there.
   Under tessl (`hooks/session-start.sh` exports `SESSION_START_MODE`),
-  `check-git-sync` reports a behind branch instead of fast-forwarding it.
+  `check-git-sync` reports a behind branch instead of fast-forwarding it. A zero
+  or non-numeric timeout falls back to the default rather than switching the
+  bound off. Every JSON encode and parse in these hooks tries python3 and jq
+  in turn before giving up with a warning.
 
 ## 0.3.277 — 2026-09-26
 

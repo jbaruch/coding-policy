@@ -65,9 +65,17 @@ ref_exists() { # <fully-qualified-ref>
 # Emit the sync notice as additionalContext JSON. jq is required only here; its
 # absence is an expected environment condition, not a failure.
 emit_notice() { # <notice-text>
-  command -v jq >/dev/null 2>&1 || { warn "jq not found — install jq to emit the sync notice"; return 0; }
-  jq -n --arg c "$1" '{additionalContext: $c}' ||
-    warn "could not emit the sync notice as JSON — skipping sync check"
+  # jq first, then python3; printed only once a tool produced it.
+  local out
+  if command -v jq >/dev/null 2>&1 && out="$(jq -n --arg c "$1" '{additionalContext: $c}')"; then
+    printf '%s\n' "$out"
+    return 0
+  fi
+  if command -v python3 >/dev/null 2>&1 && out="$(python3 -c 'import json, sys; print(json.dumps({"additionalContext": sys.argv[1]}))' "$1")"; then
+    printf '%s\n' "$out"
+    return 0
+  fi
+  warn "neither jq nor python3 could encode the sync notice — install one of them; it was: ${1}"
   return 0
 }
 
@@ -245,7 +253,8 @@ main() {
     # Time-bound the fetch so a hung network can't stall session start:
     # timeout/gtimeout when present, else git's own HTTP low-speed limit and ssh
     # connect/keepalive timeouts.
-    [[ "$FETCH_TIMEOUT" =~ ^[0-9]+$ ]] || FETCH_TIMEOUT=10
+    # Zero or a non-number would switch the bound off; fall back to the default.
+    [[ "$FETCH_TIMEOUT" =~ ^[1-9][0-9]*$ ]] || FETCH_TIMEOUT=10
     if command -v timeout >/dev/null 2>&1; then
       fetch=(timeout "$FETCH_TIMEOUT" git fetch --quiet origin)
     elif command -v gtimeout >/dev/null 2>&1; then

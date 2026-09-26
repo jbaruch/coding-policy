@@ -35,22 +35,24 @@ set -euo pipefail
 warn() { printf 'check-acr-latest: %s\n' "$1" >&2; }
 
 emit() { # <status text>
-  if command -v python3 >/dev/null; then
-    if ! python3 -c 'import json, sys; print(json.dumps({"additionalContext": sys.argv[1]}))' "$1"; then
-      warn "python3 failed to encode the ACR status — it was: ${1}"
-    fi
-  elif command -v jq >/dev/null; then
-    if ! jq -n --arg c "$1" '{additionalContext: $c}'; then
-      warn "jq failed to encode the ACR status — it was: ${1}"
-    fi
-  else
-    warn "neither python3 nor jq is on PATH — cannot report the ACR status: ${1}"
+  # python3 first, then jq; printed only once a tool produced it.
+  local out
+  if command -v python3 >/dev/null && out="$(python3 -c 'import json, sys; print(json.dumps({"additionalContext": sys.argv[1]}))' "$1")"; then
+    printf '%s\n' "$out"
+    return 0
   fi
+  if command -v jq >/dev/null && out="$(jq -n --arg c "$1" '{additionalContext: $c}')"; then
+    printf '%s\n' "$out"
+    return 0
+  fi
+  warn "neither python3 nor jq could encode the ACR status — it was: ${1}"
   return 0
 }
 
 #: Seconds allowed for the sync-proof fetch before the update is skipped.
 FETCH_TIMEOUT_SEC="${ACR_LATEST_FETCH_TIMEOUT:-10}"
+# Zero or a non-number would switch the bound off; fall back to the default.
+[[ "$FETCH_TIMEOUT_SEC" =~ ^[1-9][0-9]*$ ]] || FETCH_TIMEOUT_SEC=10
 
 #: Oldest acr whose `freshness run --project --policy install` contract this
 #: hook relies on. Renewal: re-check at every acr minor release, and raise it
@@ -226,14 +228,14 @@ main() {
   # consumer `agents.yaml`) runs in every session, Herdr included: it only reads.
   local listing notes="" pinned checked=1 prc=0
   if ! listing="$("$acr" list --json --project "$root" 2>&1)"; then
-    notes="NOTE: \`acr list --json\` failed, so the latest-specifier check did not run."
+    notes="NOTE: \`acr list --json\` failed, so the latest-specifier check did not run; run \`$(printf '%q' "$acr") list --json --project $(printf '%q' "$root")\` to see why, and reinstall acr if it keeps failing."
     checked=0
   else
     pinned="$(pinned_jbaruch "$listing")" || prc=$?
     case "$prc" in
       0) [[ -z "$pinned" ]] || notes="NOTE: agents.yaml pins jbaruch dependencies that must float at \`latest\` (Runtime-Managed Manifest Carve-Out, rules/dependency-management.md): ${pinned}. Set them to \`requested: latest\`." ;;
       2) notes="NOTE: neither python3 nor jq is on PATH, so the latest-specifier check did not run; install one of them."; checked=0 ;;
-      *) notes="NOTE: \`acr list --json\` returned something unreadable, so the latest-specifier check did not run."; checked=0 ;;
+      *) notes="NOTE: \`acr list --json\` returned something unreadable, so the latest-specifier check did not run; run \`$(printf '%q' "$acr") list --json --project $(printf '%q' "$root")\` to inspect it, and upgrade acr (\`brew upgrade jbaruch/agentic-context-registry/acr\`) if its output format changed."; checked=0 ;;
     esac
   fi
 
@@ -271,6 +273,20 @@ main() {
       emit "Session-start status — acr: \`.agents/registry.lock\` is committed here, so updating it would be an unfocused dependency change; ACR dependencies were not updated. Untrack it (\`git rm --cached .agents/registry.lock\`, gitignore \`.agents/\`) per the Runtime-Managed Manifest Carve-Out (rules/dependency-management.md).${notes:+$'\n'}${notes}"
       return 0
     fi
+    # The carve-out covers the lock only while it is gitignored: an update must
+    # never create an unignored resolved-state file. check-ignore exits 1 for a
+    # path no rule ignores; anything above 1 is a git failure.
+    local irc=0
+    git -C "$root" check-ignore -q .agents/registry.lock || irc=$?
+    case "$irc" in
+      0) ;;
+      1)
+        emit "Session-start status — acr: \`.agents/registry.lock\` is not gitignored here, so an update would create an unignored resolved-state file; ACR dependencies were not updated. Add \`.agents/\` to \`.gitignore\` per the Runtime-Managed Manifest Carve-Out (rules/dependency-management.md).${notes:+$'\n'}${notes}"
+        return 0 ;;
+      *)
+        emit "Session-start status — acr: \`git check-ignore\` failed (exit ${irc}) for \`.agents/registry.lock\`, so ACR dependencies were not updated; run \`git -C $(printf '%q' "$root") status\` to see why."
+        return 0 ;;
+    esac
     if ! reason="$(cd "$root" && unsafe_reason)"; then
       emit "Session-start status — acr: could not enter $(printf '%q' "$root") to check it, so ACR dependencies were not updated."
       return 0

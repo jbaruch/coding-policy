@@ -32,6 +32,8 @@
 #  17. jq only, no timeout utility    -> check and update run (bounded-fetch fallback).
 #  18. Neither python3 nor jq         -> no update, warning on stderr.
 #  19. origin's default renamed       -> checked against origin's live HEAD.
+#  20. Lock not gitignored            -> refused, .gitignore guidance.
+#  21. Zero fetch timeout             -> default bound, update runs.
 #
 # Run: bash hooks/tests/test_check_acr_latest.sh
 set -uo pipefail
@@ -70,7 +72,8 @@ mk_project() { # <name>
   git clone -q "$ORIGIN" "$seed" 2>"$TMP/clone.err" || die "clone failed: $(cat "$TMP/clone.err")"
   git -C "$seed" symbolic-ref HEAD refs/heads/main || die "symbolic-ref failed in $seed"
   printf 'agents: [claude-code]\n' > "$seed/agents.yaml" || die "cannot write agents.yaml"
-  git -C "$seed" add agents.yaml || die "git add failed"
+  printf '.agents/\n' > "$seed/.gitignore" || die "cannot write .gitignore"
+  git -C "$seed" add agents.yaml .gitignore || die "git add failed"
   git -C "$seed" commit -q -m init || die "git commit failed"
   git -C "$seed" push -q origin main || die "git push failed"
   git clone -q "$ORIGIN" "$TMP/$1" 2>"$TMP/clone.err" || die "clone failed: $(cat "$TMP/clone.err")"
@@ -153,6 +156,7 @@ main() {
   if [[ $RC -eq 0 && -z "$OUT" && -z "$CALLS" ]]; then pass; else fail "herdr: expected silence and no acr call, got OUT=$OUT calls=$CALLS"; fi
 
   # 6b. a Herdr session still runs the read-only carve-out check.
+  mk_project p6b
   run "$PROJECT" HERDR_ENV=1 FAKE_OUT="Updated something" FAKE_LIST='{"ok":true,"result":{"dependencies":[{"declaration":{"source":"github:jbaruch/x","requested":"v1"}}]}}'
   if [[ $RC -eq 0 && -z "$CALLS" ]] && context | grep -q "github:jbaruch/x@v1"; then
     pass; else fail "herdr pin check: expected the NOTE and no update, got OUT=$OUT calls=$CALLS"; fi
@@ -199,7 +203,7 @@ main() {
   mk_project p12
   mkdir -p "$PROJECT/.agents" || die "cannot create .agents"
   printf 'lock\n' > "$PROJECT/.agents/registry.lock" || die "cannot write lock"
-  git -C "$PROJECT" add .agents/registry.lock || die "git add lock failed"
+  git -C "$PROJECT" add -f .agents/registry.lock || die "git add lock failed"
   git -C "$PROJECT" commit -q -m lock || die "commit lock failed"
   git -C "$PROJECT" push -q origin main || die "push lock failed"
   run "$PROJECT" FAKE_OUT="Updated something"
@@ -272,6 +276,22 @@ main() {
   run "$PROJECT" FAKE_OUT="Updated x"
   if [[ $RC -eq 0 && -z "$CALLS" ]] && context | grep -q "does not contain \`origin/develop\`"; then
     pass; else fail "renamed default: expected a skip naming origin/develop, got OUT=$OUT calls=$CALLS"; fi
+
+  # 20. no ignore rule for the lock -> not updated, .gitignore guidance.
+  mk_project p20
+  git -C "$PROJECT" rm -q --cached .gitignore || die "untrack .gitignore failed"
+  rm "$PROJECT/.gitignore" || die "rm .gitignore failed"
+  git -C "$PROJECT" commit -q -m "drop ignore" || die "commit failed"
+  git -C "$PROJECT" push -q origin main || die "push failed"
+  run "$PROJECT" FAKE_OUT="Updated x"
+  if [[ $RC -eq 0 && -z "$CALLS" ]] && context | grep -q "is not gitignored" && context | grep -q "Add \`.agents/\` to \`.gitignore\`"; then
+    pass; else fail "unignored lock: expected a refusal with .gitignore guidance, got OUT=$OUT calls=$CALLS"; fi
+
+  # 21. a zero fetch timeout never switches the bound off (the default applies).
+  mk_project p21
+  run "$PROJECT" ACR_LATEST_FETCH_TIMEOUT=0 FAKE_OUT="Updated x"
+  if [[ $RC -eq 0 ]] && [[ "$CALLS" == "freshness run --project ${PROJECT} --policy install" ]]; then
+    pass; else fail "zero timeout: expected the default bound and an update, got OUT=$OUT err=$(cat "$TMP/err")"; fi
 
   echo "─────────────────────────────────────────────"
   if (( FAIL > 0 )); then echo "FAILED: ${FAIL} failed, ${PASS} passed"; exit 1; fi

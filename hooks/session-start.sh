@@ -33,8 +33,6 @@ HOOKS=(check-git-sync check-tessl-latest check-acr-latest herdr-team-status chec
 
 warn() { printf 'session-start: %s\n' "$1" >&2; }
 
-#: The JSON tool in use: python3, jq, or empty when neither is on PATH.
-JSON_TOOL=""
 
 #: Agents whose native SessionStart entry runs this script with the session's
 #: environment; the portable (tessl-wrapped) run defers to it for them.
@@ -45,44 +43,60 @@ NATIVE_AGENTS=(claude-code codex)
 MODE=native
 
 # Print the additionalContext string of one hook output; exit 1 when the output
-# is not one object carrying a string additionalContext.
+# is not one object carrying a string additionalContext. python3 answers with
+# exit 0 or 3 (the output's verdict); any other python3 exit is python3 failing,
+# and jq gets the question instead. The trailing "x" keeps a status's own
+# trailing newlines through the command substitution.
 context_of() { # <output>
-  if [[ "$JSON_TOOL" == python3 ]]; then
-    python3 -c '
+  local out rc=0
+  if command -v python3 >/dev/null; then
+    out="$(python3 -c '
 import json, sys
 try:
     doc = json.loads(sys.argv[1])
 except ValueError:
-    sys.exit(1)
+    sys.exit(3)
 ctx = doc.get("additionalContext") if isinstance(doc, dict) else None
 if not isinstance(ctx, str):
-    sys.exit(1)
-sys.stdout.write(ctx)
-' "$1"
-  else
+    sys.exit(3)
+sys.stdout.write(ctx + "x")
+' "$1")" || rc=$?
+    case "$rc" in
+      0) printf '%s' "${out%x}"; return 0 ;;
+      3) return 1 ;;
+    esac
+  fi
+  if command -v jq >/dev/null; then
     # Raw slurp plus `fromjson?`: an output that is not JSON is the expected
     # non-result and yields no value (exit 4 under -e); a real jq error still
     # prints its own diagnostic.
     jq -e -R -s -j 'fromjson? | select(type == "object" and (.additionalContext | type) == "string") | .additionalContext' <<<"$1"
+    return
   fi
+  return 1
 }
 
 # Print the payload for this mode: the native SessionStart payload Claude Code
 # and Codex read, or the consensus {"additionalContext"} tessl translates.
+# python3 first, then jq; the payload is printed only once a tool produced it,
+# so a failed attempt never leaves partial output. Exit 1 when both failed.
 encode() { # <text>
-  if [[ "$MODE" == portable ]]; then
-    if [[ "$JSON_TOOL" == python3 ]]; then
-      python3 -c 'import json, sys; print(json.dumps({"additionalContext": sys.argv[1]}))' "$1"
-    else
-      jq -n --arg c "$1" '{additionalContext: $c}'
-    fi
-    return
+  local out
+  if command -v python3 >/dev/null && out="$(python3 -c '
+import json, sys
+mode, text = sys.argv[1], sys.argv[2]
+doc = {"additionalContext": text} if mode == "portable" else {"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": text}}
+print(json.dumps(doc))
+' "$MODE" "$1")"; then
+    printf '%s\n' "$out"
+    return 0
   fi
-  if [[ "$JSON_TOOL" == python3 ]]; then
-    python3 -c 'import json, sys; print(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": sys.argv[1]}}))' "$1"
-  else
-    jq -n --arg c "$1" '{hookSpecificOutput: {hookEventName: "SessionStart", additionalContext: $c}}'
+  if command -v jq >/dev/null && out="$(jq -n --arg m "$MODE" --arg c "$1" \
+      'if $m == "portable" then {additionalContext: $c} else {hookSpecificOutput: {hookEventName: "SessionStart", additionalContext: $c}} end')"; then
+    printf '%s\n' "$out"
+    return 0
   fi
+  return 1
 }
 
 main() {
@@ -107,11 +121,7 @@ main() {
     names+=("$name"); codes+=("$rc"); outputs+=("$out")
   done
 
-  if command -v python3 >/dev/null; then
-    JSON_TOOL=python3
-  elif command -v jq >/dev/null; then
-    JSON_TOOL=jq
-  else
+  if ! command -v python3 >/dev/null && ! command -v jq >/dev/null; then
     warn "neither python3 nor jq is on PATH — the hooks ran, but their statuses cannot be delivered; install one of them"
     return 0
   fi
@@ -137,7 +147,7 @@ main() {
     joined+="${statuses[$i]}"
   done
   if ! encode "$joined"; then
-    warn "${JSON_TOOL} failed to encode the merged status — this session gets none; run 'bash ${here}/session-start.sh' to see why"
+    warn "neither python3 nor jq could encode the merged status — this session gets none; run 'bash ${here}/session-start.sh' to see why"
   fi
   return 0
 }
