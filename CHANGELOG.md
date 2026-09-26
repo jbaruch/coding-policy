@@ -70,6 +70,8 @@
   silent (`hooks/tests/test_check_acr_latest.sh` covers the contract with a
   fake acr).
 
+## 0.3.277 — 2026-09-26
+
 ### Added
 
 - Add a separate central subscription acceptance workflow for ACR #156. Require
