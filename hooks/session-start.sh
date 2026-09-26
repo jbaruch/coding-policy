@@ -42,10 +42,10 @@ NATIVE_AGENTS=(claude-code codex)
 #: which sets TESSL_AGENT and strips the rest of the environment).
 MODE=native
 
-# Print the additionalContext string of one hook output; exit 1 when the output
-# is not one object carrying a string additionalContext. python3 answers with
-# exit 0 or 3 (the output's verdict); any other python3 exit is python3 failing,
-# and jq gets the question instead. The trailing "x" keeps a status's own
+# Print the additionalContext string of one hook output. Exit 1 when the output
+# is not one object carrying a string additionalContext (the hook's fault), and
+# 2 when no parser could answer (python3 and jq both failed or are missing). A
+# python3 exit other than its verdicts 0 and 3 hands the question to jq. The trailing "x" keeps a status's own
 # trailing newlines through the command substitution.
 context_of() { # <output>
   local out rc=0
@@ -67,13 +67,18 @@ sys.stdout.write(ctx + "x")
     esac
   fi
   if command -v jq >/dev/null; then
-    # Raw slurp plus `fromjson?`: an output that is not JSON is the expected
-    # non-result and yields no value (exit 4 under -e); a real jq error still
-    # prints its own diagnostic.
-    jq -e -R -s -j 'fromjson? | select(type == "object" and (.additionalContext | type) == "string") | .additionalContext' <<<"$1"
-    return
+    # Raw slurp plus `fromjson?`: an output that is not JSON yields no value
+    # (exit 4 under -e), the expected non-result; any other non-zero exit is
+    # jq itself failing.
+    rc=0
+    out="$(jq -e -R -s -j 'fromjson? | select(type == "object" and (.additionalContext | type) == "string") | .additionalContext + "x"' <<<"$1")" || rc=$?
+    case "$rc" in
+      0) printf '%s' "${out%x}"; return 0 ;;
+      4) return 1 ;;
+      *) return 2 ;;
+    esac
   fi
-  return 1
+  return 2
 }
 
 # Print the payload for this mode: the native SessionStart payload Claude Code
@@ -134,10 +139,17 @@ main() {
       continue
     fi
     [[ -n "${outputs[$i]//[[:space:]]/}" ]] || continue
-    if ! ctx="$(context_of "${outputs[$i]}")"; then
-      statuses+=("Session-start status — hook ${name} printed something other than one additionalContext object; run \`bash ${here}/${name}.sh\` from this repo to see it.")
-      continue
-    fi
+    rc=0
+    ctx="$(context_of "${outputs[$i]}")" || rc=$?
+    case "$rc" in
+      0) ;;
+      1)
+        statuses+=("Session-start status — hook ${name} printed something other than one additionalContext object; run \`bash ${here}/${name}.sh\` from this repo to see it.")
+        continue ;;
+      *)
+        statuses+=("Session-start status — session-start could not parse hook ${name}'s output: python3 and jq both failed. Install or repair one of them, then start a new session.")
+        continue ;;
+    esac
     statuses+=("$ctx")
   done
 

@@ -18,6 +18,7 @@
 #      portable, plus native for claude-code and codex.
 #   8. Portable run under a native agent (TESSL_AGENT=claude-code/codex) -> silent.
 #   9. Portable run under another agent -> the consensus {"additionalContext"} form.
+#  10. python3 and jq both fail to parse -> a status naming the parsers, not the hook.
 #   6. jq only, no python3  -> the same merged payload.
 #   7. Neither python3 nor jq -> the hooks still run; a warning, no payload.
 #
@@ -128,6 +129,18 @@ PY
   OUT="$(TESSL_AGENT=cursor SESSION_START_HOOKS="one two" bash "$DIR/session-start.sh" </dev/null 2>"$TMP/err")"; RC=$?
   if [[ $RC -eq 0 ]] && python3 -c 'import json,sys; d=json.loads(sys.argv[1]); assert "hookSpecificOutput" not in d; assert d["additionalContext"] == "Session-start status — one\n\nSession-start status — two"' "$OUT"; then
     pass; else fail "portable under cursor: expected the consensus payload, got RC=$RC OUT=$OUT"; fi
+
+  # 10. no parser can read a hook's output -> a status blaming the parsers, not the hook.
+  local shims="$TMP/broken-parsers" realpy
+  realpy="$(command -v python3)" || die "python3 required"
+  mkdir -p "$shims" || die "cannot create $shims"
+  printf '#!/usr/bin/env bash\ncase "${2:-}" in *json.loads*) exit 2 ;; esac\nexec %q "$@"\n' "$realpy" > "$shims/python3" \
+    || die "cannot write the python3 shim"
+  printf '#!/usr/bin/env bash\nexit 2\n' > "$shims/jq" || die "cannot write the jq shim"
+  chmod +x "$shims/python3" "$shims/jq" || die "cannot make the shims executable"
+  OUT="$(PATH="$shims:$PATH" SESSION_START_HOOKS="one" bash "$DIR/session-start.sh" </dev/null 2>"$TMP/err")"; RC=$?
+  if [[ $RC -eq 0 ]] && context | grep -q "could not parse hook one's output" && ! context | grep -q "printed something other"; then
+    pass; else fail "parser failure: expected a parser status, got RC=$RC OUT=$OUT err=$(cat "$TMP/err")"; fi
 
   echo "─────────────────────────────────────────────"
   if (( FAIL > 0 )); then echo "FAILED: ${FAIL} failed, ${PASS} passed"; exit 1; fi

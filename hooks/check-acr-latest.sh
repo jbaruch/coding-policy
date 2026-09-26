@@ -45,7 +45,7 @@ emit() { # <status text>
     printf '%s\n' "$out"
     return 0
   fi
-  warn "neither python3 nor jq could encode the ACR status — it was: ${1}"
+  warn "neither python3 nor jq could encode the ACR status — install or repair python3 or jq, then start a new session; the status was: ${1}"
   return 0
 }
 
@@ -151,12 +151,12 @@ unsafe_reason() {
   fi
   local re='ref: refs/heads/([^[:space:]]+)[[:space:]]+HEAD' sha_re='(^|'$'\n'')([0-9a-f]{40,64})[[:space:]]+HEAD('$'\n''|$)' live_sha fetched_sha
   if [[ ! "$head_line" =~ $re ]]; then
-    printf "origin did not name its default branch"
+    printf "origin did not name its default branch; run %sgit ls-remote --symref origin HEAD%s and set the remote's default branch" '`' '`'
     return 0
   fi
   db="${BASH_REMATCH[1]}"
   if [[ ! "$head_line" =~ $sha_re ]]; then
-    printf "origin did not advertise the commit of its default branch"
+    printf "origin did not advertise the commit of its default branch; run %sgit ls-remote --symref origin HEAD%s and check the remote" '`' '`'
     return 0
   fi
   live_sha="${BASH_REMATCH[2]}"
@@ -164,13 +164,13 @@ unsafe_reason() {
   git show-ref --verify --quiet "refs/remotes/origin/${db}" || rc=$?
   case "$rc" in
     0) ;;
-    1) printf 'origin/%s is missing after the fetch' "$db"; return 0 ;;
-    *) printf 'git failed reading origin/%s' "$db"; return 0 ;;
+    1) printf 'origin/%s is missing after the fetch; check %sgit config --get-all remote.origin.fetch%s covers it, then run %sgit fetch origin%s' "$db" '`' '`' '`' '`'; return 0 ;;
+    *) printf 'git failed reading origin/%s; run %sgit show-ref origin/%s%s to see why' "$db" '`' "$db" '`'; return 0 ;;
   esac
   # The fetched ref must be the tip origin advertises right now: a push between
   # the fetch and the ls-remote would otherwise vouch for a stale commit.
   if ! fetched_sha="$(git rev-parse --verify --quiet "refs/remotes/origin/${db}^{commit}")"; then
-    printf 'git failed resolving origin/%s' "$db"
+    printf 'git failed resolving origin/%s; run %sgit rev-parse origin/%s%s to see why' "$db" '`' "$db" '`'
     return 0
   fi
   if [[ "$fetched_sha" != "$live_sha" ]]; then
@@ -181,15 +181,15 @@ unsafe_reason() {
   git merge-base --is-ancestor "refs/remotes/origin/${db}" HEAD || rc=$?
   case "$rc" in
     0) ;;
-    1) printf 'this checkout does not contain %sorigin/%s%s (behind or diverged); sync it first' '`' "$db" '`'; return 0 ;;
-    *) printf 'git merge-base failed (exit %s) comparing HEAD with origin/%s' "$rc" "$db"; return 0 ;;
+    1) printf 'this checkout does not contain %sorigin/%s%s (behind or diverged); merge or rebase it onto %sorigin/%s%s first' '`' "$db" '`' '`' "$db" '`'; return 0 ;;
+    *) printf 'git merge-base failed (exit %s) comparing HEAD with origin/%s; run %sgit merge-base --is-ancestor origin/%s HEAD%s to see why' "$rc" "$db" '`' "$db" '`'; return 0 ;;
   esac
   if ! status="$(git status --porcelain --untracked-files=all)"; then
-    printf 'git status failed'
+    printf 'git status failed; run %sgit status%s to see why' '`' '`'
     return 0
   fi
   if [[ -n "$status" ]]; then
-    printf 'the working tree has uncommitted changes'
+    printf 'the working tree has uncommitted changes; commit or stash them'
   fi
   return 0
 }
@@ -311,7 +311,7 @@ main() {
         return 0 ;;
     esac
     if ! reason="$(cd "$root" && unsafe_reason)"; then
-      emit "Session-start status — acr: could not enter $(printf '%q' "$root") to check it, so ACR dependencies were not updated."
+      emit "Session-start status — acr: could not enter $(printf '%q' "$root") to check it, so ACR dependencies were not updated; check the directory exists and is readable, then start a new session."
       return 0
     fi
     if [[ -n "$reason" ]]; then
