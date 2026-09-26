@@ -11,7 +11,7 @@
 # (rules/error-handling.md aggregate-reporting carve-out).
 #
 # Covers:
-#   1. Default budget  -> wait-report.sh sees TEAMLEAD_WAIT_BUDGET_SEC=180.
+#   1. Default budget  -> wait-report.sh sees FOREMAN_WAIT_BUDGET_SEC=180.
 #   2. Argv forwarded  -> both arguments reach wait-report.sh verbatim.
 #   3. Stdout is wait-report.sh's, untouched.
 #   4. Exit code       -> 1 and 3 from wait-report.sh come back as 1 and 3.
@@ -28,16 +28,16 @@ pass() { PASS=$((PASS+1)); }
 fail() { FAIL=$((FAIL+1)); echo "  ✗ FAIL: $1" >&2; }
 
 mk_layout() { # <root> — wrapper copy plus a fake sibling wait-report.sh
-  mkdir -p "$1/herdr-standup" "$1/herdr-teamlead" || die "could not create the layout under $1"
+  mkdir -p "$1/herdr-standup" "$1/herdr-foreman" || die "could not create the layout under $1"
   cp "$SCRIPT" "$1/herdr-standup/standup-wait.sh" || die "could not copy the wrapper"
-  cat > "$1/herdr-teamlead/wait-report.sh" <<'FAKE' || die "could not write the fake wait-report.sh"
+  cat > "$1/herdr-foreman/wait-report.sh" <<'FAKE' || die "could not write the fake wait-report.sh"
 #!/usr/bin/env bash
 set -uo pipefail
-printf 'budget=%s\nargv=%s\n' "${TEAMLEAD_WAIT_BUDGET_SEC:-unset}" "$*" >> "$FAKE_CALL_FILE"
+printf 'budget=%s\nargv=%s\n' "${FOREMAN_WAIT_BUDGET_SEC:-unset}" "$*" >> "$FAKE_CALL_FILE"
 printf '{"agent":"%s","state":"idle","report_path":"%s","found":true,"elapsed_seconds":0}\n' "${1:-}" "${2:-}"
 exit "${FAKE_RC:-0}"
 FAKE
-  chmod +x "$1/herdr-teamlead/wait-report.sh" || die "could not chmod the fake"
+  chmod +x "$1/herdr-foreman/wait-report.sh" || die "could not chmod the fake"
 }
 
 run() { # [env...] — runs the wrapper in $LAYOUT with the standard argv

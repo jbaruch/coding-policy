@@ -184,7 +184,7 @@ alwaysApply: true
   3. Push-time enforcement keeps any out-of-glob change from landing on the protected branch via direct push (allowlist semantics), satisfied by form A or form B. Post-push CI checks satisfy neither
      - Form A — server-side gate: a GitHub push ruleset with path restriction, a pre-receive hook, or an equivalent server-side gate rejects the ref update
      - Form B — client-side content-only diff gate: permitted only where the platform cannot express server-side allowlist enforcement (e.g., github.com personal repos)
-       - The publishing tool runs the gate as a deterministic script (per `rules/script-delegation.md`), not agent judgment
+       - The publishing tool runs the gate as a deterministic script (per `rules/script-delegation.md`), never agent judgment and never a bounded classification
        - The gate enumerates the paths the push would change on the protected branch and direct-pushes only when every one matches a declared content glob
        - Any out-of-glob path forces an automatic branch + PR fallback — never an operator-say-so override
        - The authority-of-record rule (precondition 1) names the gate script

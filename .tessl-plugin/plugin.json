@@ -1,6 +1,6 @@
 {
   "name": "jbaruch/coding-policy",
-  "version": "0.3.248",
+  "version": "0.3.275",
   "description": "General-purpose coding policy for Baruch's AI agents",
   "private": false,
   "skills": [
@@ -8,7 +8,7 @@
     "skills/onboard-repo",
     "skills/adopt-fork-pr",
     "skills/migrate-to-plugin",
-    "skills/herdr-teamlead",
+    "skills/herdr-foreman",
     "skills/herdr-standup"
   ],
   "rules": [
@@ -47,35 +47,7 @@
             "type": "command",
             "command": "bash",
             "args": [
-              "${TESSL_PLUGIN_DIR}/hooks/check-policy-freshness.sh"
-            ]
-          },
-          {
-            "type": "command",
-            "command": "bash",
-            "args": [
-              "${TESSL_PLUGIN_DIR}/hooks/check-git-sync.sh"
-            ]
-          },
-          {
-            "type": "command",
-            "command": "bash",
-            "args": [
-              "${TESSL_PLUGIN_DIR}/hooks/check-tessl-latest.sh"
-            ]
-          },
-          {
-            "type": "command",
-            "command": "bash",
-            "args": [
-              "${TESSL_PLUGIN_DIR}/hooks/herdr-team-status.sh"
-            ]
-          },
-          {
-            "type": "command",
-            "command": "bash",
-            "args": [
-              "${TESSL_PLUGIN_DIR}/hooks/check-leftover-worktrees.sh"
+              "${TESSL_PLUGIN_DIR}/hooks/session-start.sh"
             ]
           }
         ]

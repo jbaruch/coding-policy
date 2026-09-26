@@ -226,13 +226,14 @@ read_status() { # <worktree>
 # paths are relative to the worktree git read them from, so that root is an
 # argument rather than something this function could guess.
 dirt_age_hours() { # <worktree>
-  local wt="$1" newest=999999999 rel age now
+  local wt="$1" newest="" rel age now
   now="$(clock_now)" || return 1
   for rel in ${WT_PATHS+"${WT_PATHS[@]}"}; do
     age="$(age_seconds "$now" "${wt}/${rel}")" || return 1
-    [ "$age" -lt "$newest" ] && newest="$age"
+    if [ -z "$newest" ] || [ "$age" -lt "$newest" ]; then newest="$age"; fi
   done
-  [ "$newest" -eq 999999999 ] && newest=0
+  # No readable path at all is the only case with no age to report.
+  [ -z "$newest" ] && newest=0
   # A path dated in the future is a skewed clock or a skewed mtime, never an old
   # one. It reads as just-written, and says so rather than producing the
   # negative age that would sort ahead of every real one.
@@ -312,8 +313,10 @@ main() {
     || die "${repo} is not a git repository -- run this from the worktree you are releasing from"
 
   local self_path
-  self_path="$(git -C "$repo" rev-parse --show-toplevel)" \
+  self_path="$(git -C "$repo" rev-parse --show-toplevel && printf x)" \
     || die "cannot resolve the worktree root of ${repo}"
+  self_path="${self_path%x}"
+  self_path="${self_path%$'\n'}"
 
   # A ref that does not resolve is not the same as a ref that is not there. If
   # origin/main exists in the ref store but will not resolve to a commit, the

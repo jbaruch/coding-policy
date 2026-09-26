@@ -12,23 +12,31 @@ version -- silently, because every step behaved as designed
 (jbaruch/coding-policy#452, where #384's entry published as 0.3.238 and landed
 under `## 0.3.236`).
 
-The rule is a COUNT, not a position: a branch must not increase the number of
-entry blocks parked under already-published headings. Counting sidesteps diff
+The rule is block-content IDENTITY, not a position and not a count: a branch
+must not park an entry block whose content the base does not already carry.
+Identity sidesteps diff
 attribution, which cannot answer "which entry is the new one" when two blocks
 read alike -- given two adjacent `### Added`, git marks the lower as added
 though the upper is the new entry. It also lets a deliberate archive repair
-through: moving an entry under the heading that published it leaves the count
-unchanged, while a new entry parked under a heading raises it.
+through: moving an entry under the heading that published it parks a block the
+base already holds, while a genuinely new entry parked under a heading is
+content the base has never seen.
+
+Occurrences are matched as a MULTISET, not a set: each parked block consumes
+one base occurrence, so a branch that parks a SECOND copy of an entry the base
+carries once is a new parked block rather than a member of a set that already
+contains it.
 
 Usage:
     check-changelog-placement.py --base <ref> [--changelog CHANGELOG.md]
 
-Exit 0 when the count did not rise. Exit 1 when it did. Exit 2 on a usage or
-tool error (`git` unavailable, base ref unknown, unreadable file).
+Exit 0 when the branch parks no block whose content is new to the base. Exit 1
+when it parks one. Exit 2 on a usage or tool error (`git` unavailable, base ref unknown, unreadable file).
 """
 import argparse
 import subprocess
 import sys
+from collections import Counter
 from pathlib import Path
 
 H2 = "## "
@@ -98,9 +106,21 @@ def newly_parked(original: str, text: str) -> list[str]:
     misfiling goes through. A block whose text already exists on the base is a
     move — filing a past entry under the version that published it, say — and
     a block that does not is new content parked where the stamp cannot reach.
+
+    Occurrences are consumed, not merely looked up: a set answers "is this text
+    anywhere on the base", so a branch parking two identical copies of a
+    one-occurrence block passes twice on the same evidence.
     """
-    known = set(blocks(original))
-    return [block for block in parked(text) if block not in known]
+    known = Counter(blocks(original))
+    new_blocks = []
+    for block in parked(text):
+        if known[block]:
+            # One parked copy answers one base occurrence. A SECOND copy of the
+            # same entry has no occurrence left to answer, and is new content.
+            known[block] -= 1
+        else:
+            new_blocks.append(block)
+    return new_blocks
 
 
 def main(argv=None) -> int:
@@ -142,8 +162,8 @@ def main(argv=None) -> int:
         print("  {}".format(block.splitlines()[0]), file=sys.stderr)
     print(
         "Rebase onto {} and move the new block above the topmost `## ` heading. "
-        "Moving an existing entry between headings is fine and does not raise "
-        "the count.".format(args.base), file=sys.stderr)
+        "Moving an entry the base already carries between headings is fine: it "
+        "parks no content the base has not seen.".format(args.base), file=sys.stderr)
     return 1
 
 

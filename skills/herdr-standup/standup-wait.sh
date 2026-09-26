@@ -7,7 +7,7 @@
 # skill invokes this wrapper and nothing else. Everything besides the budget —
 # the two-signal completion (report file on disk AND the `REPORT: ` marker in
 # the pane), the poll interval, the exit codes — belongs to wait-report.sh in
-# the sibling herdr-teamlead skill, which this script execs.
+# the sibling herdr-foreman skill, which this script execs.
 #
 # Contract:
 #   argv  : <agent-name> <report-path>   forwarded verbatim to wait-report.sh
@@ -26,12 +26,12 @@
 set -euo pipefail
 
 # Give-up budget for a standup answer, in seconds. Four lines take a worker
-# well under a minute; past this point the lead writes that worker's row from
+# well under a minute; past this point the foreman writes that worker's row from
 # the round log instead of chasing it.
 STANDUP_WAIT_BUDGET_SEC="${STANDUP_WAIT_BUDGET_SEC:-180}"
 
 SKILL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-WAIT_REPORT="${SKILL_DIR}/../herdr-teamlead/wait-report.sh"
+WAIT_REPORT="${SKILL_DIR}/../herdr-foreman/wait-report.sh"
 
 case "$STANDUP_WAIT_BUDGET_SEC" in
   ''|*[!0-9]*)
@@ -40,8 +40,8 @@ case "$STANDUP_WAIT_BUDGET_SEC" in
     ;;
 esac
 if [[ ! -f "$WAIT_REPORT" ]]; then
-  echo "standup-wait: wait-report.sh not found at ${WAIT_REPORT} — herdr-standup runs beside the herdr-teamlead skill; install both with \`tessl install jbaruch/coding-policy\`" >&2
+  echo "standup-wait: wait-report.sh not found at ${WAIT_REPORT} — herdr-standup runs beside the herdr-foreman skill; install both with \`tessl install jbaruch/coding-policy\`" >&2
   exit 2
 fi
 
-TEAMLEAD_WAIT_BUDGET_SEC="$STANDUP_WAIT_BUDGET_SEC" exec bash "$WAIT_REPORT" "$@"
+FOREMAN_WAIT_BUDGET_SEC="$STANDUP_WAIT_BUDGET_SEC" exec bash "$WAIT_REPORT" "$@"

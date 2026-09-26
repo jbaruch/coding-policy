@@ -43,6 +43,14 @@ PINNED_MTIME=202601010000
 #: PINNED_MTIME clears by a wide margin. Both are literals; neither moves.
 PINNED_RECENT_MTIME=202605302200
 AGED_FLOOR=1
+#: Older than the 999999999-second sentinel `dirt_age_hours` used to start from
+#: (about 31.7 years). A path this old never won the `-lt` comparison, so the
+#: loop ended still holding the sentinel and reported age 0 -- just written
+#: (#466).
+ANCIENT_MTIME=199409210000
+#: FROZEN_NOW minus ANCIENT_MTIME, in whole hours. Both are pinned, so this is
+#: a fixed expectation rather than anything the run clock can move.
+ANCIENT_AGE_HOURS=277800
 #: Below the script's own ceiling, and far above any age these fixtures reach.
 FRESH_FLOOR=875000
 #: Between the two: PINNED_MTIME is 3600h old and PINNED_RECENT_MTIME is 2h.
@@ -195,6 +203,38 @@ main() {
   run_check "$TMP/fresh" 0
   if [[ $RC -eq 1 ]] && [[ "$(verdict_for "$OUT" fresh-wt)" == "abandoned" ]]; then
     pass; else fail "LEFTOVERS_MIN_AGE_HOURS=0 blocks the same leftover, got RC=$RC OUT=$OUT"; fi
+
+  # coding-policy#466: the age sentinel doubled as a ceiling. Every path older
+  # than it left `newest` at the sentinel, which the reset then read as "no path
+  # seen" and reported as age 0 -- so the oldest possible leftover read as the
+  # freshest, and an abandoned worktree reported in_progress.
+  new_repo "$TMP/ancient"
+  git -C "$TMP/ancient" worktree add -q -b forgotten "$TMP/ancient-wt" HEAD || die "worktree add"
+  echo forgotten >> "$TMP/ancient-wt/file.txt"
+  touch -t "$ANCIENT_MTIME" "$TMP/ancient-wt/file.txt" || die "touch ancient"
+  run_check "$TMP/ancient" "$AGED_FLOOR"
+  if [[ $RC -eq 1 ]] \
+     && [[ "$(verdict_for "$OUT" ancient-wt)" == "abandoned" ]] \
+     && printf '%s' "$OUT" | grep -qF "\"age_hours\":${ANCIENT_AGE_HOURS}"; then
+    pass; else fail "a path older than the old sentinel reports its real age, got RC=$RC OUT=$OUT"; fi
+
+  # coding-policy#466: command substitution strips EVERY trailing newline, so a
+  # worktree root whose directory name ends in one came back truncated and
+  # everything downstream compared against a path that does not exist. A
+  # trailing newline in a directory name is legal and this is what it costs.
+  NEWLINE_REPO="$TMP/nl"$'\n'
+  new_repo "$NEWLINE_REPO"
+  git -C "$NEWLINE_REPO" worktree add -q -b nlbranch "$TMP/nl-wt" HEAD || die "worktree add"
+  echo lost >> "$TMP/nl-wt/file.txt"
+  age "$TMP/nl-wt/file.txt"
+  run_check "$NEWLINE_REPO" "$AGED_FLOOR"
+  if [[ $RC -eq 1 ]] && [[ "$(verdict_for "$OUT" nl-wt)" == "abandoned" ]] \
+     && printf '%s' "$OUT" | python3 -c '
+import json, sys
+doc = json.load(sys.stdin)
+sys.exit(0 if doc["self"]["path"].endswith("\n") else 1)
+'; then
+    pass; else fail "a worktree root ending in a newline is not truncated, got RC=$RC OUT=$OUT"; fi
 
   new_repo "$TMP/otherclean"
   git -C "$TMP/otherclean" worktree add -q -b tidy "$TMP/otherclean-wt" HEAD || die "worktree add"

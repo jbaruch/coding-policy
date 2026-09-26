@@ -37,6 +37,1314 @@
   and failure propagation; actual hosted installation and native proof remain
   required for Linux acceptance.
 
+## 0.3.275 — 2026-09-26
+
+### Fixed
+
+- **SessionStart statuses reach the session again.** `tessl hook run` keeps
+  only the LAST hook's output in a group: each hook overwrote the one before,
+  and the usual silent last hook (`check-leftover-worktrees`) erased them all,
+  so no consumer session ever saw a sync, version or Herdr-team status. Probed
+  on tessl 0.111.0 with a scratch plugin: `[a, d]` delivered only `d`,
+  `[a, e]` (e silent) delivered `{}`. The plugin now declares one SessionStart
+  hook, `hooks/session-start.sh`, which runs `check-git-sync`,
+  `check-tessl-latest`, `herdr-team-status` and `check-leftover-worktrees` in
+  order and merges their statuses; a hook that fails or prints non-JSON is
+  reported as its own status line naming its installed path instead of
+  vanishing. The hooks always run; the merge reads JSON with python3, or jq
+  without it, and warns when neither exists (`hooks/tests/test_session_start.sh`).
+- **Hooks do the mechanical fix instead of asking for it.** `check-git-sync`
+  now fast-forwards a local default branch strictly behind origin after a
+  fresh fetch: `merge --ff-only` on the checked-out branch, `fetch .
+  origin/<db>:<db>` otherwise, so git refuses a non-fast-forward, an overwrite
+  of local changes, and a branch checked out in another worktree; a refusal
+  is reported. Repo hooks are disabled for the fast-forward (`core.hooksPath=/dev/null`),
+  so opening a session never runs a repo's `post-merge`. Diverged branches and Herdr-worker sessions stay report-only.
+  It also fetches every session by default (`SYNC_THROTTLE_HOURS` default 0):
+  a throttled run only told the agent to run the fetch itself.
+- **`check-policy-freshness` removed.** It only warned (`run tessl update`),
+  kept one throttle stamp for the whole machine, so the first session anywhere
+  silenced every other repo for 24h, and duplicated `check-tessl-latest`,
+  which already runs `tessl update --yes` every session. On 2026-09-26 20 of
+  23 consumers tracking `latest` were stale (0.3.147–0.3.271) and were updated
+  by hand. The README now says `check-tessl-latest` updates rather than warns.
+  Filed as #539.
+
+## 0.3.274 — 2026-09-26
+
+### Changed
+
+- **`herdr-teamlead` is now `herdr-foreman` (#501).** The rules already
+  called the role the foreman; the skill, the Python package, the launcher
+  and the environment prefix still said teamlead, so a reader moved between
+  two names for one thing. Renamed with no alias (operator decision):
+  `skills/herdr-teamlead/` is `skills/herdr-foreman/`, the `teamlead/`
+  package is `foreman/`, `teamlead.sh` is `foreman.sh`, and every
+  `TEAMLEAD_*` variable is `FOREMAN_*` (`FOREMAN_HERDR_BIN` and the rest).
+  "The lead" became "the foreman" in prose, messages and help text.
+  Deliberately unchanged: the `lead` round type in config tier tables
+  (renaming it is a config schema change), the `New assignment from the
+  team lead.` opening the composer matches in live panes and recorded
+  dispatches, fixture labels, and this CHANGELOG's history.
+- **The state and config homes move with the name.** Every command whose
+  state or config comes from the default path now refuses while that home
+  is still at `~/.local/state/teamlead` or `~/.config/teamlead`, names
+  `foreman migrate-home`, and creates nothing at the new path. A command
+  given explicit `--state` and `--config` is unaffected. `migrate-home`
+  (`skills/herdr-foreman/foreman/home.py`) takes the home guard
+  `$XDG_STATE_HOME/.foreman-home.lock` exclusively before reading either
+  home, and every other command reading a default home holds that guard shared for its whole run (explicit `--state` and `--config` paths skip it),
+  so a migration never starts under a running command and a command started
+  mid-migration is refused. The guard sits beside both homes, so it does
+  not move with them; a scan of the owner locks inside the legacy home
+  alone left a window between the scan and the move. With no state root and only a legacy config home, `migrate-home` creates
+  the root so the guard still exists; a command never creates it. A failed
+  rename or link raises a state error naming the partial move instead of a
+  traceback, and a re-run finishes it. It also refuses while
+  any owner lock in the legacy home is held (a foreman older than the
+  guard), refuses `--state` and `--config`, renames each home, leaves the old path as a
+  symlink to the new one, and rewrites only the stores' `state_path`
+  identity fields, which the stores compare against the canonical state path
+  on load. Every other absolute path a record quotes (stow required reads,
+  retrospective notes, attention evidence, reset resume prompts) is history
+  and is left alone; the symlink keeps it resolving. It never merges a home
+  that exists at both paths, and a second run changes nothing. Upgrade
+  order: stop every foreman, update the installs, run `foreman migrate-home`
+  once per machine.
+- **The report classifier was re-scored under the new name.** The renamed
+  prompt and the original prompt were both run on the same 96 labelled
+  reports with `claude-sonnet-5`: both scored 0.9792 with the same two
+  disagreements, so no verdict changed with the wording.
+- **Test runs no longer see the operator's own homes.** `scripts/run-tests.sh`
+  gives every suite its own empty `XDG_STATE_HOME` and `XDG_CONFIG_HOME`,
+  so no suite reads another's leftovers, and removes them on exit
+  (`scripts/tests/test_run_tests.sh` checks both); a failed `mktemp` or
+  `mkdir` during setup reports the runner's structured JSON error instead of
+  a bare exit, and a failed cleanup warns without changing the run's exit
+  status. `classify/evaluate.sh` honours `XDG_STATE_HOME` for its default
+  corpus and asks the owner's `home.require_current`, so a legacy, split or
+  blocked home refuses, naming `migrate-home`, instead of reading an empty
+  corpus. Before, a suite that did not pass a path read, and could refuse
+  on, the machine's real foreman state, which the home migration would
+  have made an ordinary occurrence.
+- The foreman definition bullet in `rules/agent-team-operation.md` is split
+  into one directive per bullet, and `state-schema.md` names `config.py`
+  and `supervision.py` by repo-relative path (advisory carried from #526).
+
+## 0.3.273 — 2026-09-25
+
+### Fixed
+
+- **A dispatched brief is frozen, and a partitioned review is checked at its
+  tip (#460).** Two holes left open on #456. First, preflight read each
+  brief, but the worker reads it again minutes after the send, so a brief
+  rewritten in between (the realistic case is the foreman re-running
+  `compose-briefs.sh` mid-round) reached the worker unchecked. The issue
+  proposed passing checked content into `apply`; `apply` never sends a brief,
+  only its path, so that would have narrowed nothing. `apply` now copies each
+  brief to a content-addressed file under `.dispatched/` before any check
+  reads it, and a new dispatch uses that copy everywhere: the checks, its
+  identity, the prompt and the recovery that later rebuilds it. A dispatch
+  whose complete recorded identity (its fingerprint over task, fix round,
+  correction plan, work, options and brief bytes) resolves under its source
+  paths keeps them, so an upgrade does not turn its replay into new work; a
+  first cut matched on task, role, agent and paths alone, which let a later
+  correction over the same files skip the freeze. Only an applied row
+  replays that way, returning its saved receipt without sending: a retry of
+  a row never sent is frozen like new work, and a source brief rewritten
+  between the replay decision and the send is refused, so a worker never
+  reads a mutable source. A frozen copy that is a hard
+  link to its source is refused like a symlink. Second, `plan` re-proved a partition over
+  whatever `changed` list the file carried, and nothing checked it against
+  the real diff later. The issue proposed signing the result; the only party
+  able to narrow the list would also hold the key. Instead
+  `validate-partition` stamps the repo, base and head it was proven against,
+  `plan` carries that proof, and the new `verify-partition` refuses a review
+  at any other tip, or slices that do not cover exactly
+  `git diff base...head`. The slice and seat digests cover the proof, so seat
+  briefs dispatched for an older head cannot pass a plan re-pointed at a newer
+  one whose diff touches the same paths, and `plan` reads the proof and the
+  slices in one read rather than re-reading a file that may have changed.
+  The gate binds each seat to this plan's own send: the seat's latest dispatch
+  for the task must be applied, to the worker the plan assigns, under the
+  plan's task context, from a frozen brief and common brief whose bytes still
+  match their names. An older dispatch to another worker, or a newer one that
+  never applied, no longer passes. "Latest" is by event time through
+  `chronology`, never append order, and the gate reads the ledger under the
+  state lock and checks the exact bytes it verified. An existing frozen copy is inspected through one no-follow,
+  non-blocking descriptor outside the `FileExistsError` handler, so a copy
+  that vanishes or turns unreadable mid-inspection is an actionable refusal
+  rather than a traceback, and a FIFO or directory there is refused. A
+  `.dispatched/` directory that is itself a symlink is refused on freeze and
+  on the gate's read, so no frozen copy lands outside the source directory. An
+  unknown revision passed to `validate-partition` or `verify-partition` now
+  reaches its "pass a revision it holds" message instead of git's bare
+  "Needed a single revision". Revisions and proofs accept SHA-256 commit ids
+  as well as SHA-1, the shape the task ledger already records.
+
+## 0.3.272 — 2026-09-25
+
+### Added
+
+- **The Herdr foreman resets its own context at every round boundary.** This
+  closes #483. On 2026-09-23 a foreman session ran 3.5 hours, grew from 182k
+  to 906k cached tokens per turn, and died on `Prompt is too long` with the
+  fleet still running. Every earlier #483 change made a reset safe:
+  - the planner reads reservations and busy workers from the records (0.3.259)
+  - `foreman-queue` lists tasks waiting for a seat (0.3.260)
+  - handoff gaps are structured (0.3.262)
+  - `load-set` lists each decision's records (0.3.263)
+
+  This change makes the reset happen. At Step 16 the foreman curates the
+  round's lessons, saves a reset-ready stow, holds supervision for any active
+  work, and runs `teamlead foreman-reset`. The command refuses an unready
+  stow, a call from any pane but the bound foreman's own, and any state in
+  which the foreman could not stop (an unhandled event, or active work with
+  no covering hold). Otherwise it starts a detached `foreman-reset-deliver`
+  and returns.
+
+  The deliverer waits for the foreman's pane to go idle, since a foreman
+  cannot type into its own composer mid-turn. Then it sends the runtime's
+  clear command and a resume prompt, using the same composer checks as
+  worker dispatch. The resume prompt points the fresh context at the stow,
+  the supervision resume sequence and `foreman-queue`, then one Resume Route:
+  Steps 1 and 2, then the continuation step the stow names. A review caught
+  two routes in an earlier draft (the judge reference said "the step the
+  outcome names", Step 13 said "Step 1 and continue"), and `foreman-queue`
+  lists seats only, so a release-ready or closure-pending task would have
+  been replanned or lost. The stow now names that step, and Step 2 goes
+  there instead of Step 5. The prompt's commands run as written: each is
+  `bash <installed>/skills/herdr-teamlead/teamlead.sh <command> ...`, and a
+  test executes them against a fixture stow. An earlier draft said bare
+  `teamlead`, which no installed plugin puts on `PATH`, so the fresh context
+  would have stalled before reading its stow. A stow id of `latest` is
+  refused, since `memory-show --id latest` picks the newest stow rather than
+  that one. The foreman's clear
+  mechanics come from a configured worker of the same runtime kind. A pane
+  that never idles, a clear that changes nothing, or a prompt that doesn't
+  land is reported in the deliverer's log, and nothing further is sent.
+  The deliverer re-reads the pane before every keystroke and stops if the
+  foreman started another turn. It also re-checks the stow just before
+  clearing. The resume prompt names that exact stow. One reset record per
+  pane and stow (`<state>.foreman-reset.json`) makes a retried
+  `foreman-reset` replay instead of spawning a second deliverer. A reset
+  whose deliverer died is finalized, `failed` before typing and
+  `interrupted` after, and goes to the operator. The deliverer serializes on the reset record's lock, never the
+  state lock the parent `foreman-reset` still holds while it starts it. A
+  first draft missed that, and the reset would never have been delivered. A
+  failure after the first keystroke is recorded `interrupted` and never
+  retried, since the pane may be half-reset. The resume prompt carries the
+  state path onto every command, so a foreman on a non-default `--state`
+  resumes against its own records.
+  A deliverer counts as live only while its recorded process identity (start
+  time and command line) still matches, so a reused pid can't hold a reset.
+  Only a `handoff` hold lets the foreman reset over active work; a pause
+  waiting on the user never auto-resumes. A failed or interrupted reset is
+  recovered by the operator, never the foreman. That is a narrow carve-out
+  in Working Memory: the operator clears the pane and pastes the logged
+  resume prompt. The state path in that prompt is shell-quoted. Each stow gets
+  one delivery attempt and is never retried. A failure records the exact
+  resume prompt the operator pastes, and the next round resets from a new
+  stow. A resume prompt that lands but starts no turn counts as
+  interrupted. Step 16 closes only a merged or abandoned task, so fix rounds
+  reach Step 17 open. A judge round also ends in Steps 16 and 17, whatever
+  its ruling. The
+  reset is its own Step 17, and every return from Step 12 to Step 4 passes
+  through Steps 16 and 17, so fix rounds reset too, not only finished
+  tasks.
+
+  Also folded in, from deferred advisories: the migrated-gap carve-out's
+  first precondition is split, the investigator-supplied evidence exception
+  becomes a formal carve-out, and one SKILL.md bullet is split.
+  A failed reset is recovered one way only. Every deliverer diagnostic
+  and a launch failure used to tell the foreman to run `foreman-reset`
+  again, yet the record refuses a second attempt for the same stow, so the
+  advice looped. Each now names the operator recovery (clear the pane,
+  paste the logged resume prompt), and `foreman-reset` exits with a
+  distinct `error` per class: `reset_ended`, `reset_record_newer`,
+  `reset_record_unusable`, or an ordinary refused precondition. A reset
+  record written by a newer build reads as no prior reset and refuses
+  writes, instead of being reported as corrupt.
+
+## 0.3.270 — 2026-09-25
+
+### Added
+
+- **`teamlead close-member` and `check-member` replace the foreman's two most
+  repeated command chains (#508).** The foreman session audited in #483 wrote
+  four scratch scripts; #491's round preflight and #504/#505's derived bars
+  and queue absorbed two of them. The two left run once per report.
+  `close-member` refuses until the task ledger's latest event for the
+  enrollment's worker and report carries an assessed decision, then
+  acknowledges that enrollment's pending events and resolves it, citing the
+  ledger event. The order is the point: acknowledging an observation must
+  never stand in for accepting the assignment, and prose asked the foreman
+  to remember that. `check-member` reads the agent, report, the task's
+  registered base and the dispatch's send time from the owner records and
+  runs `wait-report.sh --once` with them, so none of those is looked up by
+  hand. Both compose the existing owner functions and replay safely.
+
+## 0.3.269 — 2026-09-25
+
+### Changed
+
+- **Every Herdr worker carries a tier table from config schema 5, and the
+  judge's pin is checked before it launches (#476).** A ledger audit found
+  651 of 702 assignments recorded `tier: null`. The issue read that as tier
+  selection never running outside the judge seat; the code does run it for
+  every role, and the cause was configuration: all 19 configured workers had
+  no `tiers` table, so selection returned nothing and each round inherited
+  whatever model was already live, unproven. Launch proof and `tier_billing`
+  were already recorded for any tiered assignment; they recorded nothing
+  because nothing was tiered. Config schema 5 now refuses a worker without a
+  table, except the pinned judge, so a newly added untiered worker cannot
+  quietly bring `tier: null` back; schema 4 and below keep loading as before.
+  `start-judge` also reads the capability table and refuses a pin recorded
+  inadequate before launching it, instead of the refusal arriving first at
+  `apply`, after the launch (deferred from #525). The live operator tables
+  are written from the example once this version is installed.
+
+## 0.3.268 — 2026-09-25
+
+### Changed
+
+- **Tier selection reads the capability table (#520).** The table shipped in
+  0.3.252, replaced the qualification battery, and its docstring said routing
+  read it; nothing did. `capabilities.lookup` was called from its own tests
+  alone. Planning and dispatch now assess every candidate against it. An
+  `inadequate` entry for the selected model and effort refuses that
+  candidate, naming the source; a plan left with no candidate says which
+  entries refused which workers. `unknown`, a missing entry or a missing
+  table leaves the configured row in place, so no floor moves on missing
+  evidence. Only a `benchmark`, `evaluation` or `project` source counts as
+  `adequate`, even in a hand-edited file. A cheaper configured row recorded
+  adequate for the same work is written to the plan as `cheaper_adequate`
+  and never selected; the operator owns the config. The issue proposed four
+  new capability names, which matched none of the ten already recorded, so
+  every lookup but one would have read `unknown` and the table would have
+  stayed as inert as before. Routing instead reads the recorded vocabulary,
+  owned as `ROUND_CAPABILITIES` and `VOCABULARY`, and `capability-record`
+  refuses any other name. Plan schema 10 carries `capability` and
+  `cheaper_adequate` on each tier; `TOP_MODELS` gains its renewal note.
+
+## 0.3.268 — 2026-09-25
+
+### Changed
+
+- **Each Herdr seat defaults to the cheapest round its contract allows
+  (#518, #519, #521).** A 2026-09-24 role/model audit found three defaults
+  that priced work above what its contract needs, each blocking the tier
+  tables #476 will write. Investigator and advisor consultations launched on
+  `reconciliation` and `architect`, both judgment rounds pinned to the top
+  model, though an investigator gathers evidence and decides nothing. They
+  now default to a new non-judgment `consultation` round, and `test_plan`
+  leaves the judgment set, since pre-development preparation passes nothing.
+  The judgment rounds stay available by explicit `--round` for a
+  consultation that must settle something: the exhausted-allowance
+  diagnosis input, a recorded prior High miss, a fired `security` trigger.
+  The release worker, which edits no source, defaulted to
+  `release_adjudication`; it now defaults to `release_mechanics`, which no
+  longer demands a whole-result oracle a release cannot write in advance
+  (developer `mechanical` still does). The example config's tester
+  `hostile_verify` row drops from `xhigh` to `high` on Claude and Codex:
+  #477 made recorded risk the only path to `xhigh`, and an operator copying
+  the old example pinned every tester round there anyway. `review`,
+  `hostile_verify`, `recheck` and the judge keep their top-model floors. The
+  example's Codex `consultation` row at `medium` is unmeasured and says so.
+  Escalation is read from evidence, not remembered: round-context
+  `diagnosis_input`, `security_trigger` or a recorded `prior_high_miss` moves
+  the consultation to its judgment round, and a `consultation` request
+  against that evidence is refused. Config schema 4 requires the
+  `consultation` row in every tier table; a schema-3 table keeps the
+  judgment defaults it was written against.
+
+## 0.3.267 — 2026-09-24
+
+### Fixed
+
+- **The release skill's PR body names the issues it closes, and checks they
+  closed (#517).** A 2026-09-24 triage found 16 open issues that merged PRs
+  had already fixed. Every one of those PRs wrote `Refs #N`, a bullet
+  mentioning `(#N)`, or nothing, and GitHub treats all three as mentions
+  rather than closing keywords. The cause was the Step 2 body template: it had
+  a Summary and a Test plan and no issue line, so each agent improvised one,
+  and the herdr release brief told its worker not to improvise around a
+  template that left the link out. Step 2's template now ends in a `Closes
+  #<n>` line, with `Part of #<n>` for a partial resolution and `No issue` for
+  untracked work. The new `check-closing-issues.py` reads GitHub's resolved
+  `closingIssuesReferences` before merge and refuses a body that links
+  nothing and declares no alternative. After merge, `--merged` polls each
+  closing issue until it closes, since GitHub closes them asynchronously, and
+  names any still open at the budget.
+
+## 0.3.266 — 2026-09-24
+
+### Fixed
+
+- **`teamlead apply` refuses a report marker the target pane would wrap
+  (#513).** A Grok architect finished a NanoClaw Telegram round, wrote its
+  report and ended with the correct `REPORT: <path>` line, but the 106-column
+  pane wrapped the path onto a second row. Both waits returned exit 4 and
+  `recover-report` rightly refused the split marker: a wrap cannot be told
+  from two authored rows, which is why delivery confirmation never joins rows.
+  The defence was `compose-briefs.sh`'s 100-character `REPORT` cap, whose
+  comment promised a path that "fits one row on every pane this fleet runs".
+  It did not: Grok indents five columns and keeps about four at the right
+  edge, so on that pane any path over ~93 characters wraps, and a row that
+  also carries Grok's clock wraps sooner. No brief knows its pane, so no
+  compose-time constant can keep that promise. `apply` now reads each target's
+  live width (`herdr pane layout --pane`) and refuses the whole round, before
+  any input, when a worker's display prefix, marker, path and right-edge
+  reserve (`MARKER_RIGHT_RESERVE` in `teamlead/report_delivery.py`) exceed it,
+  naming the pane width and the columns needed. It measures the bare
+  `REPORT: ` lines the brief itself assigns, and refuses an expected
+  `--report` the brief does not assign, so a shorter argument cannot stand in
+  for the marker the worker will actually print. The compose-time cap stays as
+  a coarse bound. The issue asked for recovery to accept wrapped markers; that
+  would reintroduce the row join delivery refuses, so the fix prevents the
+  wrap instead. Already-stuck reports still need an owner decision.
+  `standup-ask.sh` makes the same one-row promise on its own send path and is
+  tracked in #515.
+
+## 0.3.265 — 2026-09-24
+
+### Changed
+
+- **Per-machine installer state is no longer read as a project lock file.**
+  The fleet reviewer blocked jbaruch/nanoclaw#969 twice (reviews 5297463545
+  and 5297661951) for gitignoring `skills-lock.json`. It cited Pinning ("Lock
+  files are committed to the repo") and the file-hygiene exception naming
+  dependency lock files. That file is the `skills` installer's record of
+  skills installed into one machine's agent directories. No build, test, or
+  CI step reads it. A pinned judge ruled it out of scope, but a ruling in
+  one round's report doesn't reach the next review. The reviewer re-samples
+  the same rule text, and nothing in 0.3.259–0.3.264 changed that text. An
+  investigator confirmed that a close/reopen could not help.
+
+  Pinning now defines a lock file as one that pins dependencies this repo's
+  build, test, or CI resolves. A tool's per-machine install record is
+  installer state, which may be gitignored. The anti-abuse line is
+  mechanical: a file that records resolved dependencies and that a build,
+  test, or CI step reads is a lock file, whatever it is called. The file-hygiene lock-file exception points to the
+  definition.
+
+## 0.3.264 — 2026-09-24
+
+### Changed
+
+- **The judge checks cited evidence instead of investigating the tree.** An
+  operator caught the pinned judge doing open-ended archaeology on
+  top-tier tokens during a bot-versus-reviewers adjudication. The rule told it
+  to: adjudication "verifies the disputed facts against the tree," while
+  diagnosis had already moved that digging to the cheaper investigator seat.
+
+  Each adjudication position now cites its evidence (file and line, command
+  output, revision). The foreman copies those citations into the judge brief
+  and never supplies its own. A position with no citations goes to an
+  investigator before the judge is dispatched at all. The judge checks only what is cited and never
+  explores beyond it. A disputed fact with no citation, or one the citations
+  cannot settle, gets the new ruling `insufficient — <facts needed>`. The
+  foreman then dispatches an investigator to establish exactly those facts
+  with citations and re-dispatches the judge on the same dispute with that
+  report. The dispute was never settled, so this is not a second ruling on a
+  settled dispute. The investigator's citations are admissible evidence on
+  that re-dispatch. `insufficient` settles nothing: it binds nothing and no
+  checkpoint cites it. `blocked` narrows to questions only the operator can
+  answer (authority, intent, or a choice no tree records). A citation names
+  a file and line, or command output, at a revision, because the judge runs
+  no git command. The no-exploring limit applies to adjudication only;
+  diagnosis still reads the round history.
+
+## 0.3.263 — 2026-09-24
+
+### Added
+
+- **`teamlead load-set` lists the records one foreman decision depends on.**
+  #483 resets the foreman at every round boundary and loads per decision
+  instead of carrying the session. The records a decision needs are already
+  linked in the owner store: a task's dispatches carry their brief and common
+  paths, enrollments carry report paths, and dispatches carry review receipts
+  and recovery decisions. The command joins those links for `plan`, `brief`,
+  `gate`, `diagnose` (by task) and `wake` (by enrollment). Each set includes
+  the task core: the record, budget status and open attention items.
+
+  `gate` and `brief` read the current round, from the task's latest
+  developer assignment on. `diagnose` reads every round, including every
+  review receipt (superseded ones too) and the task's specialist assessments
+  with their reports. Imported historical corrections have no dispatch, so
+  they join from `historical_attempts` with their reports and review
+  receipts. `brief` offers a correction plan only while its last fix is
+  unspent. `brief`, `gate` and `diagnose` refuse while the task has a
+  dispatch with an unknown send outcome, so it gets reconciled first. They
+  also refuse a dispatch with no supervision enrollment, since its report
+  path would otherwise vanish from the set. Open
+  attention items come back in full, with their
+  context, consequence and resolution condition. An unknown task or
+  enrollment is refused. A missing file is listed with
+  `present: false` instead of being dropped. This is the must-load set from
+  #483 decision 2: a floor that an add-only lesson classifier may add to
+  later, and that nothing may trim. SKILL.md now requires it before each
+  decision (Step 5 plan, Step 7 brief, Step 11 wake, Step 12 gate, Step 13
+  diagnose). `load-set` and `foreman-queue` join the read-only command set,
+  so neither takes the state lock or creates a lock file. The command is read-only and refuses an
+  unusable state file.
+
+## 0.3.262 — 2026-09-23
+
+### Changed
+
+- **Foreman handoff gaps are structured, and each one says how to recover.**
+  A stow's `gaps` used to be free text, and any gap made `reset_ready` false.
+  #483 resets the foreman at every round boundary, so gaps arrive every round
+  instead of once per session. A gap that only says "something got lost"
+  gives the next foreman nothing to act on, and blocking the reset on every
+  gap would block every round.
+
+  Stow records move to version 2. Each gap is `{"missing", "task",
+  "recovery"}`, and `recovery` is exactly one of `{"reread": "/absolute/path"}`,
+  `{"ask": "<question>"}` or `{"accept": "<why the loss is safe>"}`. Anything
+  else is refused. Gaps no longer block `reset_ready`, since each one carries
+  its own recovery. A version-1 stow upgrades on read. Each free-text gap
+  becomes `{"missing": <text>, "task": "unrecorded", "recovery": {"ask":
+  <a question quoting it>}}`, because the old gap recorded no task or
+  recovery, and asking the operator is the only honest one. A migrated gap
+  names no task, so it keeps `reset_ready` false until a new stow records it
+  with its actual task. The owner's
+  first read or write of such a document persists the upgrade under its
+  lock. A document with nothing to migrate is still read with no lock and no
+  write. Lesson and source records stay at version 1.
+
+## 0.3.261 — 2026-09-23
+
+### Changed
+
+- **The Herdr foreman no longer writes throwaway helper scripts.** In the
+  #483 audit, the foreman wrote four scratch scripts (`pkg-setup.sh`,
+  `verify-setup.sh`, `check-member.sh`, `close-member.sh`), each chaining
+  three or four owner commands, and its handoff pointed at them after the
+  scratch directory was gone. The skill now forbids throwaway scratch
+  helpers and scratch-file references in handoffs. A sequence the foreman
+  repeats across tasks is deterministic orchestration, so under
+  `rules/script-delegation.md` it belongs in a tested script shipped with the
+  skill. The foreman records it as a follow-up instead of scripting it
+  locally. An earlier draft listed the sequences in `round-setup.md`
+  instead, and review showed the list restated the steps out of order and
+  without their required flags.
+
+## 0.3.260 — 2026-09-23
+
+### Added
+
+- **`teamlead foreman-queue` lists the open tasks waiting for a seat.** The
+  #483 audit found that the foreman kept the queue in its conversation. The
+  ledger recorded only "queued", and around ten times in one session the next
+  step ("admin #541 follows once `claude-check` finishes") existed nowhere
+  else. #483 resets the foreman at every round boundary, so the queue has to
+  come from durable state.
+
+  The queue is derived and never recorded, so there's no second copy to keep
+  in sync. It lists seats only. A registered open task with no developer waits
+  for `developer`. A developed task waits for `reviewer` and/or `tester` until
+  that responsibility has an assignment after its latest developer round. A
+  partitioned verifier stays listed with the slices that went out, because
+  the records hold dispatched slices but not the partition. Gating, release
+  and closure are the foreman's own in-round decisions, so they're not
+  listed. An earlier draft derived `gate`, `release` and `close` stages, and
+  review showed the records can't prove any of them. Tasks with an active
+  supervision enrollment are omitted. The command refuses an unusable state
+  file instead of printing an empty queue.
+
+  On a copy of the 2026-09-23 live state it lists 24 tasks: 13 waiting for
+  both verifiers, 6 for a developer, and 5 for a tester.
+
+## 0.3.259 — 2026-09-23
+
+### Added
+
+- **The Herdr planner now reads developer reservations and busy workers from
+  the owner records.** `rules/agent-team-operation.md` already reserved a
+  developer through its task's early fixes, but only the foreman's memory
+  enforced it. The #483 audit of the 2026-09-23 foreman session that died on
+  `Prompt is too long` found 24 forced picks, every plan after 08:25, built by
+  hand with `--exclude` from what the foreman remembered about who was busy
+  and who was reserved. At 09:22 the planner picked `codex-census`, which was
+  the live developer for media #77, and only the foreman's memory stopped it.
+  #483 resets the foreman at every round boundary, and a reset foreman would
+  have let that pick through.
+
+  `plan` now derives both from durable state. A worker whose latest applied
+  assignment is a developer round 0–3 is held to that task. The hold ends at
+  a new `task_closed` event (`teamlead close-task --record FILE`, outcome
+  `merged` or `abandoned`), and any later assignment of the worker ends it
+  too, which is how an authorized role clear already reads. A worker with an
+  active supervision enrollment is busy. Both are barred from other seats,
+  and each bar is named in the plan's `rationale` along with the command that
+  lifts it. A reserved developer can still take its own task's next fix and
+  its release. `apply` re-reads the reservations before sending, since a plan
+  can go stale. There is no override. Reusing a reserved developer elsewhere
+  requires closing its task first. `recover-role-clear` still records clears
+  that happened before this change. The same closure
+  replays from anywhere in history, so re-running an old closure after the
+  task reopened doesn't release the new developer.
+
+  `task_closed` is a new event kind, so the recovery store moves to version
+  13. An older store carrying one is refused as newer data. The legacy check
+  that refused `judge_mode` at every older version is now scoped to stores
+  below 12, so it doesn't reject every v12 store as newer data after the bump.
+  The schema doc, still saying version 11, now says 13. Run against the live state on
+  2026-09-23, the derivation finds seven holds: six from that day's rounds and
+  one stale (`acr-p0-156`, from 2026-09-18), which the planner names until a
+  `close-task` clears it.
+
+## 0.3.258 — 2026-09-23
+
+### Changed
+
+- **The Codex policy reviewer is pinned to GPT-5.6-Sol at high effort.** Both
+  review paths, this repo's own `review-codex.yml` and the fleet reviewer's
+  `fleet-review-one.sh`, used to pass no model, so the review ran on whatever
+  default the pinned Codex CLI chose for the subscription, and it could
+  change under a CLI bump without anyone deciding it. They now pass
+  `--model gpt-5.6-sol` and `model_reasoning_effort="high"`. Sol's own default
+  effort is `low`, too shallow for reading a diff against 26 rule files.
+
+  No scanner tracks a model id, so the pin renews by hand, at each Codex CLI
+  bump and each weekly capability-table refresh, as a comment beside each call
+  site says. The two literals live at both call sites, not in a shared file:
+  both run with the Codex credential on disk, and on coding-policy's own
+  path, sourcing a file would run code from the PR under review.
+
+## 0.3.257 — 2026-09-23
+
+### Changed
+
+- **The Herdr lead is now a nonworking foreman.** The role was called the
+  lead, and the name was winning arguments the rules kept losing. "Team lead"
+  brings in a senior engineer who reviews, investigates and fixes things
+  personally. The 0.3.247 rule "the lead dispatches the work instead of doing
+  it", and the list of lookups it had to name as work, were patches on that
+  picture, and the token audit (#445) showed the picture winning: the lead
+  spent its context doing crew work.
+
+  A foreman assigns the crew, watches the job, and accepts or rejects what the
+  crew delivers. The rule and the skill say *nonworking* foreman, since a
+  "working foreman" is a real construction term for one who also lays bricks.
+  `rules/agent-team-operation.md` states the role in its Two Modes section,
+  and every prose mention of the lead in the rule, `herdr-teamlead`,
+  `herdr-standup`, their references and the worker brief templates now says
+  foreman.
+
+  The report classifier's prompt keeps "the lead" for now: its measured
+  accuracy is tied to that exact prompt through the question hash every label
+  carries, so its wording changes with its next revision and a re-run eval,
+  not with a rename.
+
+  Unchanged on purpose: the skill name `herdr-teamlead`, the `teamlead` CLI and
+  package, state and ledger field names, and code literals such as
+  `<lead-label>` and the `lead` workspace label. Renaming a state field forces
+  a migration for no reader's benefit. The skill and CLI rename is a separate
+  change, with an alias for existing callers.
+
+## 0.3.256 — 2026-09-23
+
+### Fixed
+
+- **An investigation-only round can be dispatched again.** `detect-triggers`
+  refuses a round whose diff is empty and whose plan declares no surface —
+  the guard #415 added so a vacuous empty plan could not pass as "nothing
+  fired." An investigation touches no repository surface by definition: no
+  diff, no paths, no package sizes, no CLI surface. It had nothing to declare,
+  so the guard refused it, and `SKILL.md` Step 5 makes the call mandatory
+  before `plan`. The round could be routed and then could not be run (#471,
+  found by the Copilot review on #470).
+
+  The `--planned` file gains `writes_repository`. An explicit `false` opens the
+  no-surface path; omitting the field reads as `true`, so every plan written
+  before it keeps exactly its old meaning and the schema stays at version 1 —
+  the same explicit-versus-omitted distinction `.herdr/triggers.json` already
+  draws. Every trigger is quiet on such a round by construction: each
+  classifies a repository surface and this round touches none.
+
+  The claim is checked, not taken. `--roles` must name only the
+  responsibilities `rules/agent-team-operation.md` declares read-only on
+  repository content (`advisor`, `investigator`, `architect`); every other
+  planned field must be empty; and a tracked diff against the base refuses it,
+  since evidence outranks intent. Untracked files do not, so scratch in the
+  lead's shared checkout cannot spuriously block a consultation.
+
+## 0.3.255 — 2026-09-23
+
+### Changed
+
+- **`seat_paths` describes what it returns.** Its docstring promised
+  `{seat_name: [glob, ...]}`. The values come from `load_validated`, whose
+  slices carry the RESOLVED changed files `validate()` assigned — literals, not
+  patterns — and calling them globs is what made two reviewers read the
+  boundary as broader than it is. #460 raised this against `load_validated`'s
+  docstring instead, reporting that the loader "discards" the resolved paths.
+  It does not: a direct run confirms `load_validated` returns them and
+  `seat_paths` hands them straight on, so that docstring was already correct
+  and the drift was one function down (#460).
+
+- **Codex recovery prose stops at the external contract.** A paragraph in
+  `references/dispatch-recovery.md` walked through `source_prompt`'s internal
+  prompt, metadata and turn transitions, which `rules/script-as-black-box.md`
+  reserves for the script. It now states what the caller supplies and what does
+  not count as a receipt, and points at the script for the rest. The complete
+  unchanged transcript requirement, the private-copy versus actual-delivery
+  distinction, and the modern/legacy compatibility boundary are preserved; no
+  parser, test, recovery behavior or authority changes (#474).
+
+- **The judge brief says the original direction counts as tried.**
+  `_require_new_direction` compares an approved direction against recorded
+  `approaches` rows, and a task's ORIGINAL direction has none — nothing
+  approved it, and registering one at task creation would make every existing
+  ledger claim a transition that never happened. So re-approving the direction
+  the task started from is refused by the judge reading the checkpoint, not by
+  the recording command, and the brief now says so and names where the original
+  direction is written down. A task-record `direction` field, and the schema
+  bump it needs, stays open (#468).
+
+### Fixed
+
+- **A diagnosis cannot cite another task's approach.** `validate_store`
+  confirmed a diagnosis's `approach` and `approach_change` resolved to SOME
+  recorded approach, never that the approach belonged to the same task.
+  `current_diagnoses` filters the ladder by task, so a hand-edited ledger
+  pointing a diagnosis at another task's approach dropped that row out of its
+  own ladder, and the per-approach `stop` and rung checks skipped it. Both
+  fields now reject a cross-task reference by name (#468).
+
+- **A shared `SLICE_DIGEST` is refused.** `SLICE_SCOPE` and `SLICE_PATHS` are
+  both rejected under `.shared`, since each belongs to one seat. `SLICE_DIGEST`
+  is the same kind of per-seat derived value, and it was deleted from the
+  merged values before the unused-key check with no `.shared` guard — so a
+  values file carrying it there was accepted by being silently discarded rather
+  than refused as misplaced boundary metadata (#461).
+
+- **The unreadable-brief diagnostic names its repair.** The handler reported
+  the `OSError`/`UnicodeError` and stopped; `rules/error-handling.md`
+  Actionable Messages wants the next step. It now names both: restore a
+  readable UTF-8 brief at that path, or regenerate the round's briefs with
+  `compose-briefs.sh`. A brief that does not exist is still caught earlier, by
+  the existence check with its own repair, so this answers the case that
+  reaches it — a file that exists and cannot be decoded (#461).
+
+## 0.3.254 — 2026-09-23
+
+### Fixed
+
+- **A judge round records which mode it ran in.** `rules/agent-team-operation.md`
+  Judge Seat requires every judge dispatch to declare its mode at plan and at
+  apply, and says an undeclared mode is refused rather than defaulted. The CLI
+  enforced that on the way in — `require_judge_mode` at `plan` and at `apply`,
+  with the plan document carrying `judge["mode"]` — and then threw it away: the
+  assignment ledger had no field for it. Measured over the live ledger
+  (`~/.local/state/teamlead/state.json`, 702 assignments, 2026-09-01 →
+  2026-09-19): 52 judge assignments, **none** carrying a mode. An adjudication
+  and a diagnosis were indistinguishable after the fact, which is what made
+  `acr-cli-producer-migration`'s 16 judge rounds against 0 recorded diagnoses
+  unreadable — the ledger could not say whether diagnoses ran unrecorded or
+  adjudications were dispatched on an exhausted loop, and those are different
+  defects (#478).
+
+  Assignment rows gain `judge_mode`, stamped from the resolved mode the apply
+  path already computes, and state schema 8 → 9 migrates existing rows. A judge
+  row records `adjudication` or `diagnosis`; every other role records null; the
+  owner utility refuses a judge row with no declared mode rather than defaulting
+  one, so the rule's refusal now holds at the write, not only at the CLI flag.
+  History that cannot prove a mode reads `unknown` — a migrated row, or a
+  dispatch reconciled from a receipt written before the field — never a guessed
+  value.
+
+  **The mode is part of the dispatch, not only the ledger row.** Review found
+  it recorded after the send and nowhere before it: a judge interrupted
+  mid-send reconciled as `unknown`, and the dispatch fingerprint left the mode
+  out, so a diagnosis of the same brief replayed a completed adjudication.
+  Recovery store 11 → 12 puts `judge_mode` on the judge dispatch, its pre-send
+  context and its saved result, and binds it into the fingerprint. The
+  dispatch record carries its own version too: a mode-bearing judge dispatch
+  and result are record version 3, and version 1 and 2 rows are never
+  restamped. Only judge
+  dispatches carry the field; an older store already carrying it is refused as
+  unowned newer data. A malformed ledger `judge_mode` now reads as unusable
+  state instead of raising `TypeError`.
+
+  The other half of #478, refusing a developer dispatch past its approach's
+  correction allowance, was already shipped by #467 (2026-09-17): `validate_work`
+  checks `ceiling_at` on both the `plan` and `apply` paths, and
+  `validate_fix_history` closes the omit-the-number bypass. The issue's four
+  runaway tasks all ran 2026-09-05 → 2026-09-13, before that gate and before the
+  judge-diagnosis machinery landed on 2026-09-14. The three tasks that ran after
+  it land exactly on their computed allowance. Nothing is backfilled.
+
+## 0.3.253 — 2026-09-23
+
+### Added
+
+- **The first bounded classification, and the labelled corpus that scores it.**
+  `rules/script-delegation.md` gained the destination in this release; nothing
+  used it. This does, at the one point in a round where the destination is
+  right: a worker report is prose whose meaning has to be read, and the answer
+  is one of a fixed set (#482, #479).
+
+  **The measurement that says it is a classifier and not a script:** across 90
+  recorded reports the lead marked 63 `blocking` and 27 `approved`, while only 7
+  carry an explicit `## BLOCKED` heading. A grep scores about 8% recall. The
+  verdict is in the prose or it is nowhere — which is the test this release
+  settled on, where the information lives rather than how the question feels.
+
+  `classify/classify-report.sh` calls a pinned model through `codex exec
+  --output-schema`, the schema-constrained pattern `.github/codex-review`
+  already ships. Every label carries the report's hash, the question's hash and
+  the model id, so a prompt edit or a model bump is attributable — the pin takes
+  `rules/dependency-management.md` Freshness's documented-cadence branch. The
+  answer set carries `insufficient_evidence`, which routes the question back to
+  the lead reading the report as it always has. Nothing is suppressed: this
+  annotates so the lead can gate several reports in one turn instead of one turn
+  each.
+
+  **The labels were not invented for this.** The lead recorded a verdict against
+  every delivered report at the time it gated the round, and those verdicts sit
+  in the recovery store — written by a different agent, on a different day, for
+  a different purpose. `classify/evaluate.sh` builds the corpus from them and
+  scores the classifier against it, reporting accuracy, a confusion map, and the
+  disagreements, which are the useful half: a label the classifier and the lead
+  differ on is either a classifier error or a report whose verdict was never
+  legible from its own text, and only reading it says which.
+
+  **Measured on both reachable vendors, against all 90 lead-labelled reports.**
+  The Codex subscription was exhausted until 2026-09-25, so the first run used
+  the other two adapters:
+
+  | | `claude-sonnet-5` | `grok-4.6` |
+  | --- | --- | --- |
+  | Accuracy | 97.8% | 97.8% |
+  | Real blockers caught | **63 / 63** | 62 / 63 |
+  | False `blocking` | 2 | 1 |
+  | Failed calls | 0 | 0 |
+
+  The identical headline is the finding: accuracy alone ranks them equal, and
+  the confusion matrix does not. A false `blocking` makes the lead read a report
+  it reads anyway. A false `approved` waves a real blocker through. Claude made
+  none of the second kind; Grok made one, on a judge ruling that ordered a
+  further correction round — it read *"No further operator confirmation is
+  needed"*, which concerns who authorises the next attempt, as the absence of
+  one.
+
+  Both false `blocking` labels share a cause in the question rather than the
+  model. One report named defects the judge had already accepted for the
+  shipment; the other named a prerequisite outside the reviewer's scope. Each
+  says "blocking" about something that does not block this round. The prompt now
+  says so: a defect accepted for this shipment, or a finding the report places
+  outside its own scope, is not blocking.
+
+  Re-scoring that change on the same 90 reports cannot measure its benefit,
+  since it was written against two of them. It can measure its harm, which is
+  the risk that matters: a line telling the model when something is *not*
+  blocking could make it lenient. On the rerun Claude still caught 63 of 63 real
+  blockers, so it did not. The accepted-defect report flipped to `approved`; the
+  out-of-scope one still reads as blocking, now quoting an open obligation that
+  belongs to other gates, which is closer to a judgement call than an error.
+  The benefit is measured by `evaluate.sh --since <date>`, which scores only
+  reports recorded after the change.
+
+  The failure path is also verified live: a Codex call against the exhausted
+  subscription exits 2 with no verdict. A failed call is never a label.
+
+  No test calls a model. The classifier is stubbed on PATH, per the
+  `rules/testing-standards.md` Determinism clause this release added for exactly
+  this case.
+
+- **The lead annotates a round's reports in one call, then gates them
+  together.** The classifier existed and the skill never mentioned it.
+  `classify/classify-reports.sh` labels every delivered report in one call, and
+  SKILL.md Step 12 runs it before the reads, so the lead gates a round's reports
+  in one turn instead of a full-context turn per report — the saving #482 asked
+  for. The full read of every body is unchanged: a label is advisory, and a
+  report whose annotation failed lands in `unannotated` and is read as it always
+  was. A failed annotation never blocks gating.
+
+  The default adapter is now Claude, the only vendor measured adequate for the
+  job: 63 of 63 real blockers caught, against Grok's 62 and an unmeasured Codex.
+
+- **The classifier runs on any of the fleet's three vendors.** The first cut
+  called `codex exec` and nothing else, in a plugin whose purpose is running
+  `claude`, `codex` and `grok` as interchangeable workers — and pinned to the one
+  subscription that was exhausted. A classifier tied to one vendor is useless
+  exactly when that vendor is spent, which is the condition the fleet spends most
+  of its time managing.
+
+  `--agent codex|claude|grok` selects an adapter. All three constrain generation
+  to the schema — `codex exec --output-schema`, `claude --json-schema`,
+  `grok --json-schema` — and every answer then passes the same enum check, which
+  was always the real guarantee: an off-enum answer is never a label, whichever
+  vendor produced it. An earlier note in this entry's thread claimed only Codex
+  could constrain to a schema; the search that concluded it looked for Codex's
+  flag name and missed the other two.
+
+  Each vendor wraps its answer differently. Claude emits a stream of events and
+  the answer sits in the last `result` event's `structured_output`; Grok puts it
+  in `text`. `classify/extract-answer.py` unwraps both, refuses a Claude run that
+  reported an error, and refuses a Grok run that returned more than one object.
+
+  **Every adapter runs in an empty directory, with no tools, for one turn.** The
+  classifier judges the report's own text. A live probe before that constraint
+  existed let Grok search the workspace: it found this repository's own tests,
+  reasoned from them, and emitted four concatenated answers. The tests now
+  assert the room is empty when each adapter runs.
+
+  Each kind pins a classification model rather than its vendor's frontier seat
+  (`claude-sonnet-5`, `grok-4.6`, `gpt-5.6-sol`); reading one report for one
+  verdict does not need the most expensive model a vendor sells.
+
+- **A gate on supervision events, measured and then audited: 17% of the lead's
+  wakeups carry nothing it can act on.** Herdr records every change it observes
+  in a worker, and the lead acknowledges all of them. Over 1790 recorded events
+  it acknowledged 1790, each a full lead turn shipping the lead's whole
+  conversation (#445). `supervision_gate.py` decides which need the lead, and
+  `teamlead supervision-gate` reports verdicts for the ones still pending. SKILL.md
+  Step 11 now calls it between the fleet watch and the per-event delivery check,
+  and the lead acknowledges suppressed events with the gate's reason.
+
+  **It is a script, not a classifier,** and the reason is where the information
+  lives. `{"kind": "visible_observed", "data": {"sha256": "5f084..."}}` has no
+  meaning to read; deciding whether the lead is needed means joining it against
+  other state. A join is a script.
+
+  **Default-wake is the safety property.** Only named cases are suppressed, and
+  every other event wakes the lead, including a kind the module has never seen.
+  The 1790 recorded events contain none of the failure kinds (`watcher_lost`,
+  `observation_error_observed`, `report_error_observed`,
+  `unavailable_observed`), so a gate listing what to WAKE on would have been
+  silent for exactly those.
+
+  **The first version claimed 44% and was wrong, and the audit that caught it
+  is worth keeping.** It suppressed every screen hash, on the argument that no
+  state makes one the only signal. The lead's own acknowledgement outcomes said
+  otherwise. Grouping acknowledgements into the batches the lead handled them
+  in, 8 batches consisted only of would-be-suppressed events and still recorded
+  a delivery: 3 deliveries would have been lost outright and 5 delayed by 5 to
+  49 minutes. The mechanism is that a report FILE is not delivery. Delivery is
+  the file plus the `REPORT: <path>` marker in the worker's final message.
+  `report_observed` fires once, for the file, and the marker reaches the
+  supervisor only as a screen change. So a screen hash is noise before any
+  report file exists and signal after one does, which is the rule the first
+  draft had before it was "simplified" away.
+
+  With that rule restored, the same audit finds no lost delivery and one delay:
+  a judge ruling found through native recovery, whose `report_observed` arrives
+  289 seconds later, one sampling interval. Suppression falls to 307 events,
+  17%. Nearly all are rechecks, deferrals whose observed state has not moved;
+  only 2 are screen hashes, because workers mostly write a draft report before
+  their screen stops changing. A deferral is suppressed at most
+  `MAX_QUIET_RECHECKS` times in a row, since a worker whose state never moves is
+  indistinguishable from a stalled one, and only a genuine change resets that
+  run.
+
+- **One preflight call replaces a round's opening nine steps.** Dispatch is
+  Step 10 of 16, and Steps 2, 3, 4 and 8's prune were each a separate lead turn
+  that shipped the lead's whole accumulated context to run a script and read its
+  exit code. On top of them, `rules/agent-team-operation.md` puts seven more
+  obligations before planning or dispatch — measure the roster, consult lessons,
+  check the cadence, bind supervision, classify each assignment, verify
+  permission flags. None of those checks needs a lead. They are deterministic,
+  they were already scripts, and `rules/script-delegation.md` Precheck Gating
+  already names the shape: one payload saying whether the agent is needed and
+  what it needs (#445 §1).
+
+  `round-preflight.sh` composes the existing owner scripts — `roster.sh`,
+  `verify-authority.sh`, `teamlead measure`, `capability-check`,
+  `prune-worktrees.sh` — and emits one object: `ready`, the `blocking` reasons,
+  the cadences that are `due`, and each check's own payload under `checks`. It
+  reimplements none of them; each contract stays its own.
+
+  Exit 1 is a verdict, not a failure. A blocking reason names the command that
+  produced it, so the lead re-runs that one rather than the whole preflight, and
+  one failing check never hides another's result.
+
+  SKILL.md Step 2 is now the preflight. Steps 3 and 4 stay addressable for
+  callers that need one alone — `references/judge-round.md` re-runs Step 4's
+  `measure` by name — and the numbering is unchanged, since roughly 120
+  cross-references across the references cite these steps and some "Step N"
+  strings belong to other documents' own numbering. Renumbering for tidiness
+  would risk silently misrouting the lead.
+
+  What is left for the lead is the part that needs one: decomposing a request
+  into rounds, gating a report against task history, judging which lessons
+  apply, and handling what nobody anticipated.
+
+- **Briefs preempt the three frictions workers kept reporting.** 52 saved worker
+  reports carry the `## Handoff observations` section COMMON.md mandates —
+  *"unresolved assumptions, avoidable friction or repeated work"* — written at
+  the time by the workers who hit it. Read together for the first time, three
+  observations dominate, and none of them had ever been acted on because each
+  individual worker recovered fine and the cost was only visible in aggregate:
+
+  **22 of 52** recorded the same dead pointer: *"`tessl/RULES.md` is absent;
+  COMMON's resolved index was used."* An inherited parent rule reference that
+  does not resolve from a worktree. Every worker followed it, found it gone,
+  recovered through the resolved index, and wrote it up. COMMON.md now says it
+  up front, with the count, so nobody chases it and nobody reports it.
+
+  **24 of 52** recorded reading a file, truncating, and reading it again in
+  chunks: *"Initial large reads truncated; required content was reread in
+  smaller sections."* Nothing warned them. COMMON.md now does.
+
+  **9 of 52** recorded a guessed path that did not exist. COMMON.md now says to
+  confirm a filename before reading it.
+
+  The counts ride in the brief text on purpose: a worker told "24 of the last 52
+  reports recorded that round trip" reads it as a measured cost, not a style
+  preference.
+
+- **Briefs point at a repo's gates instead of sending every worker to find
+  them.** `COMMON.md` told each worker to *"read the repo's contributor
+  instructions and configured checks to identify its gates"*. Five workers in a
+  round each spent turns finding the same answer, every round, for something
+  identical across them and rarely changed.
+
+  Discovery splits in two: FINDING a file and READING it. Reading is the work.
+  Finding is waste, and a pointer removes it without putting any file's contents
+  into a worker's context.
+
+  **The repo declares its gates.** It already declares its trigger surfaces the
+  same way — `rules/agent-team-operation.md`: *"The repo states each trigger
+  surface and its package size in its own trigger declaration"* — so
+  `resolve-gates.sh` reads `.herdr/gates.json` and reports what it holds:
+  instruction files, runner entry points, and one line of notes. It parses no
+  YAML and decides nothing about which check matters; that judgment stays with
+  whoever reads the files. The preflight runs it, and the briefs carry the
+  result as the shared `GATES` value, already rendered in its `brief` field, so
+  the lead copies it rather than building a Markdown list by hand. A path the
+  declaration names but the checkout lacks is reported in `missing` and never
+  reaches a worker. This repo's own declaration ships here.
+
+  An earlier draft of this change matched a hardcoded list of filenames —
+  `AGENTS.md`, `Makefile`, `pyproject.toml` — and defended the list as hints
+  rather than an allow-list. That is the enumerated-name failure #480 retired in
+  this same release, written one layer down and in the same session: the set of
+  filenames meaning "runner" is not enumerable, and `justfile`, `Taskfile.yml`,
+  `Earthfile` and `bin/check` are all invisible to it. A declaration needs no
+  such set, and unlike a classifier it needs no inference either — the owner
+  states the truth once.
+
+  Undeclared is a first-class answer. `.github/workflows` is a location GitHub
+  defines rather than a name anyone guessed, so it is still reported; everything
+  else comes back `declared: false`, and the brief tells the worker to find the
+  gates and name them in its report, which is what the owner writes the
+  declaration from. A declared path that no longer exists lands in `missing`
+  rather than pointing a worker at nothing, and a declaration that cannot be
+  parsed is a repair, never an empty map.
+
+- **A model-capability table, refreshed on a cadence.** Routing work by how hard
+  it is needs a written-down answer to "what can this model do", and nothing
+  held one. #480 names it as a dependency the project imports, not a measurement
+  it takes: published knowledge, read and recorded with its source and the date
+  it was read (#481).
+
+  Saved at `<selected-state>.capabilities.json`, schema 1, written only by
+  `capability-record`. One entry owns one model, effort and capability, and
+  carries a verdict of `adequate`, `inadequate` or `unknown` plus the source
+  supporting it. Three commands: `capability-check` answers whether a refresh is
+  due and writes nothing, `capability-record` files a consultation's report, and
+  `capability-show` reads the table.
+
+  Staleness here is silent. Models ship monthly, a retired entry keeps routing
+  work to a model that stopped being the right choice, and nothing errors. So
+  the table comes due weekly, on the pattern the retrospective cadence already
+  uses. A table never refreshed comes due as soon as the ledger holds any work,
+  and a fleet that dispatched nothing never comes due — the table is read at
+  dispatch time, so a week with no rounds is a week where a stale table is never
+  consulted.
+
+  A refresh replaces the rows it covers and leaves the rest alone, so one report
+  about two models never retires the table.
+
+  **The source hierarchy is what keeps vendor claims out.** `benchmark`,
+  `evaluation`, `project` and `vendor`, strongest first, each entry dated so a
+  stale reading is visible. An `adequate` verdict needs a source above `vendor`,
+  because a vendor's claim about its own model would route real work on
+  marketing. A `vendor` source still records availability, deprecation, and the
+  verdicts `inadequate` and `unknown`.
+
+  **Defect detection is one capability in the table, not a separate regime.**
+  The per-model, per-effort, per-role qualification battery — a 5-case screen, a
+  20-case promotion and a weekly 5-case canary — measures in-house what
+  publication already states, and #480 rules out the reference-class objection
+  that would justify measuring it locally: this codebase is shell, Python, Go,
+  Actions and JSON manifests, inside the distribution benchmarks measure. Where
+  a model did fail here, that failure is itself a `project` source and cites its
+  issue, which is how #324's result enters the table rather than standing beside
+  it as a separate protocol.
+
+### Removed
+
+- **The tier qualification battery.** A tier row no longer needs a paired,
+  blinded screen of 5 cases, a promotion battery of 20 and a weekly canary of 5
+  per model, effort and role before live dispatch. `teamlead/qualification.py`,
+  its tests, the `qualification` tier field and `plan --preview-tiers` are gone;
+  a config still carrying `qualification` is refused with the list of allowed
+  fields (#445 §3).
+
+  **Why it could go:** it guarded against a cheap model quietly missing
+  defects, and three things already cover that. Judgment rounds are pinned to
+  the top model by `parse_tiers`, so the battery never applied where a miss
+  costs most. Every other round is independently reviewed and tested before
+  release, which catches a bad build whatever model wrote it. And which model
+  suits which job is now the capability table, sourced and dated, instead of a
+  battery nobody ran. Nobody had: 0 configured workers carry a `tiers` table
+  and 0 qualification records exist in any config, so removing it changes no
+  live dispatch. Left in, it was the first thing to fail the day a tier table
+  was wired in (#481).
+
+  Ledger rows written earlier carried a `qualification` summary inside
+  `tier`. Ledger schema 7 → 8 removes it through the owner migration, so every
+  row reads one shape, and a current row carrying one is refused.
+
+## 0.3.252 — 2026-09-23
+
+### Changed
+
+- **Escalation is no longer one-way, and a tester round is no longer expensive
+  by name.** Every branch in `select_tier` moved up and nothing moved down.
+  `needs_xhigh` carried `round_type == "hostile_verify"` as an unconditional
+  clause, and `hostile_verify` is the tester's DEFAULT round, so the rule read
+  as "every tester round runs at the top model on xhigh effort" whatever the
+  surface. `headroom_pct` appeared nowhere in the module: measured pressure
+  reached `planner.plan`, which could pick a cheaper PAIR (`planner.py:604`)
+  but never a cheaper ROUND, because `select_tier` had already resolved it
+  (#477, #445 §2).
+
+  A tester round now escalates on exactly the evidence every other round
+  escalates on — two distinct risk flags, an oversized context, a recorded
+  prior miss — and its floor is the operator's configured `hostile_verify` row.
+
+  `select_tier` gains a `headroom` input. Under measured scarcity
+  (`PRESSURE_HEADROOM_PCT`, script-owned) a non-judgment round declines the
+  discretionary step above its configured row and records
+  `de_escalated: true` with the `pressure_headroom` it decided on. The
+  operator's table is the floor: de-escalation never selects below it, and a
+  judgment round is never de-escalated, which the existing "no per-round
+  override lowers it" already required. Unmeasured headroom resolves a round
+  exactly as an unmeasured fleet always did — absent, null, a string, a bool,
+  NaN and inf all read as "no measurement", never as scarcity and never as
+  capacity.
+
+  `apply` measures nothing, so it re-reads the headroom the plan resolved
+  against rather than recomputing without it; without that, a de-escalated
+  plan would refuse itself at dispatch with "Plan tiers differ from current
+  config or fix context". Plan document schema 8 → 9, ledger schema 6 → 7 with an owner migration.
+
+  All of this was latent: no worker in the audited roster carries a tier table,
+  so `select_tier` has never resolved a non-judge round. It lands before the
+  tables do.
+
+## 0.3.251 — 2026-09-23
+
+### Changed
+
+- **The cheap round is licensed by a recorded oracle, not by a list of eight
+  task names.** `tiers.py` had a path for routing boring work to a cheap model.
+  In 702 recorded assignments it fired zero times, and it could not fire. To
+  qualify, a round needed its `task_kind` to be one of eight hardcoded strings
+  (`rebase`, `restack`, `apply_exact_patch`, `docs_only`, `check_rerun`,
+  `exact_thread_reply`, `homogeneous_search_replace`, `issue_filing`), plus ten
+  hand-typed booleans nothing validated, plus a two-file and 64,000-byte cap.
+  The ninth kind of boring work was permanently ineligible however completely
+  its plan was specified — the shape `rules/script-delegation.md` The Regex
+  Trap already forbids, since a script may only handle patterns that are fully
+  enumerable (#480).
+
+  The predicate is now one question answered from an artifact: is the expected
+  whole result written down where a later check compares against it byte for
+  byte? `oracle` carries `kind` `digest`, `patch` or `fixture` — an expected
+  sha256, or a file holding the exact patch or the complete expected output.
+  Where one exists a wrong result is loud, which is what licenses the round
+  below its floor.
+
+  The declaration is checked rather than taken. A digest of the wrong shape, a
+  digest that also carries a path, a file nobody wrote, and a path that is a
+  directory each refuse the round. That is the difference from the retired
+  `whole_result_oracle` boolean, which was the same idea implemented as an
+  assertion — #480's reading, that the concept was right and the implementation
+  wrong, is what this keeps and what it drops.
+
+  The size caps go with the names. File count and byte count were proxies for
+  difficulty, and #445 §2 already flags the context-size trigger as unsound: a
+  two-file change can require a decision, and a large enumerated rename requires
+  none. The nine other hand-typed proofs and escapes go too; where the whole
+  result is checkable, the oracle catches what they asserted.
+
+  A round context written for the retired predicate is refused by name, with
+  its replacement, rather than silently ignored. No saved context can be
+  affected — the lane never ran.
+
+  This half needs no classifier and no capability table. #480's remaining half,
+  matching a task against published capability knowledge, is the part a bounded
+  classification would answer, and the table itself is #481.
+
+  **The check that makes the licence honest.** Declaring an oracle licensed the
+  cheap round; nothing compared the result against it, so a digest was just a
+  64-character claim. `teamlead verify-oracle --plan --role --result` now does:
+  sha256 for `digest`, byte for byte against the named file for `patch` and
+  `fixture`. It reads the oracle from the saved plan, not from its caller, so a
+  round is judged against the oracle it was licensed on. A mismatch is a
+  blocking finding at SKILL.md Step 12. Oracle paths must be absolute, since a
+  plan replays at apply from wherever apply runs, and a non-string `kind`
+  licenses nothing instead of raising. The plan schema moves to 8.
+
+
+## 0.3.250 — 2026-09-23
+
+### Added
+
+- **A third destination in the reasoning/scripting split: bounded
+  classification.** `rules/script-delegation.md` offered exactly two —
+  everything deterministic to a script, everything requiring reasoning to the
+  skill. Some decisions fit neither. They are semantic, so a pure function
+  cannot answer them, and they gate work so cheap or so frequent that spending
+  a reasoning round to decide costs more than the decision saves. With two
+  boxes available those get forced into the script box by enumeration, which
+  the same rule already forbids under The Regex Trap: *"A script should only
+  handle patterns that are fully enumerable."* `tiers.py`'s eight-name
+  `MECHANICAL_TASKS` frozenset is the live instance — the ninth kind of
+  mechanical work is permanently ineligible however completely its plan is
+  specified (#479, #480).
+
+  **Which destination wins when both fit.** Picking a label is itself a
+  judgment, so a fixed-set question matched the new destination and the old
+  "judgment stays in the skill" bullet at once. The tiebreak is the one this
+  work settled on: where the information lives. When the question's input
+  carries everything the answer depends on, it is a bounded classification;
+  when it needs situational context the input does not carry, it stays in the
+  skill. A classifier that is unavailable, or answers outside its list, takes
+  the insufficient-evidence path rather than a retry that shops for another
+  answer.
+
+  Four bullets: two definitional, one safety valve, one constraint. The
+  insufficient-evidence answer hands the question back to the reasoning round,
+  which keeps a classifier that cannot tell from becoming a cheap default. The
+  label never triggers an action `rules/ship-on-green.md` calls un-undoable.
+
+  It is written as a peer of the other two destinations, not as a carve-out. An
+  earlier draft gave it five preconditions and three disqualifiers, which made
+  a peer read as a narrow exception and restated the definition as hurdles.
+
+  Five provisions were drafted and cut under review, each for a stated reason.
+  Logging "the behavior taken without it" is self-defeating: the old path for a
+  bounded classification is always the reasoning round, so recording it spends
+  the round the destination exists to avoid. It is free only in the
+  advisory-and-additive shape #482 describes, where the expensive path runs
+  regardless, and that does not generalize. A bullet repeating that the four
+  gate carve-outs exclude a classifier duplicated what those four now say
+  themselves. Logging a label's inputs and the action taken had no named
+  decision reading them, unlike every Herdr record, each of which exists
+  because a specific later step is unable to decide without it. Stamping every
+  label with its question version and model went the same way: the pin is
+  already the record under Pinning, a bump is attributable by timestamp, and
+  per-label stamping buys something only where two versions run concurrently.
+  A log with no reader and no gate also fails this repo's own standard —
+  `rules/language-diagnostics.md`: *"a deterministic check nobody runs does not
+  exist."* And a blanket "never decides a gate" is contradicted by the repo:
+  `rules/review-severity.md` classifies every finding blocking or advisory — a
+  two-value set picked by reading meaning, with no procedure that computes it —
+  and that call gates the merge today.
+
+  The surviving bullets each name what breaks without them. That was the test
+  the cut five could not pass.
+
+### Changed
+
+- **Four gate carve-outs say explicitly that a classifier does not qualify.**
+  `rules/dependency-management.md:66`, `:84`, `:102` and
+  `rules/ci-safety.md:187` each required their check to run "as a deterministic
+  script per `rules/script-delegation.md`, not agent judgment". That phrase
+  read as "not the second box", and a third box made all four ambiguous the
+  moment anyone asked whether a bounded classification counts — putting any
+  consumer that wired one up in violation of four carve-outs by accident. Those
+  four positions require a DETERMINISTIC check, which already excluded
+  reasoning; naming classification alongside it makes the existing scope
+  explicit rather than adding a new restriction (#479).
+
+- **Three consequential rules absorb the new destination.**
+  `rules/testing-standards.md` Determinism: a shipped classifier is stubbed or
+  replayed from recorded fixtures, never called live, since a live call puts
+  runtime nondeterminism back into the suite that section exists to keep out.
+  `rules/dependency-management.md` Freshness: a pinned model version is a
+  pinned dependency no scanner tracks, so it takes the documented-cadence
+  branch already there for a version baked into a script. The pin is the
+  record; nothing stamps it onto each output.
+  `rules/script-as-black-box.md`: a classification's question text, version and
+  answer space are that destination's analog of a script's constants, so skill
+  prose references them by anchor rather than restating them. The README rules
+  table and the rule's own `description:` and `applyTo:` follow (#479).
+
+  No classifier ships in this change. The category is settled in `rules/` first
+  so a consumer wiring one up does not contradict the rules it ships under.
+
+
+## 0.3.249 — 2026-09-23
+
+### Fixed
+
+- **Every skill invokes its scripts through an interpreter.** Seventeen command
+  blocks across four skills named a script by bare path. That works from a
+  clone of this repo, where git preserves mode 0755. It does not work from an
+  installed plugin: tessl packaging normalizes plugin files to 0644, so a bare
+  invocation is `permission denied` before the script runs. `skills/release` is
+  declared in `.tessl-plugin/plugin.json` and ships to consumers, which settles
+  the question #465 left open — it does run installed. `onboard-repo` (11),
+  `release` (4), `adopt-fork-pr` (1) and `migrate-to-plugin` (1) are converted
+  whole-file, since `rules/skill-authoring.md` Script References forbids mixing
+  the two conventions inside one SKILL.md. Prose references to a script's
+  contract are unchanged; only invocations gained the prefix (#465).
+
+- **The leftover-worktree detector reports an ancient path's real age.**
+  `dirt_age_hours` started from a 999999999-second sentinel and took the
+  minimum, so the sentinel doubled as a ceiling: a path older than about 31.7
+  years never won the comparison, and the reset then read the untouched
+  sentinel as "no path seen" and reported age 0. The oldest possible leftover
+  read as the freshest, and an abandoned worktree reported `in_progress`.
+  "No age seen yet" is now its own state (#466).
+
+- **Two path captures survive a trailing newline.** Command substitution strips
+  every trailing newline, so the detector's `rev-parse --show-toplevel` and the
+  hook's `pwd` truncated a worktree root or plugin directory whose name ends in
+  one, and everything downstream compared against a path that does not exist.
+  A sentinel character survives the strip (#466).
+
+- **The hook's envelope guard refuses `self: null`.** A successful detector
+  envelope always carries a `self` object; `null` appears only in the two
+  exit-2 error envelopes, which the status guard rejects before parsing. Eight
+  envelope fixtures had used `"self":null` as filler while naming a different
+  defect, so each now carries a valid object and still proves what it names
+  (#466).
+
+- **The CHANGELOG placement guard matches parked blocks as a multiset.**
+  `newly_parked` used a `set`, which answers "is this text anywhere on the
+  base" rather than "does the base still have an occurrence left". A branch
+  parking a second identical copy of a one-occurrence entry passed on the same
+  evidence twice. Its docstring and remediation diagnostic still described the
+  retired NET COUNT rule, so a reader scripting against the documented contract
+  got the wrong predicate; both now describe block-content identity (#457).
+
+### Changed
+
+- **Two release helpers' predicates live only in the scripts.** SKILL.md Step 7
+  spelled out `confirm-tessl-landed.sh`'s and `verify-github-release.sh`'s
+  Boolean conjunctions, which `rules/script-as-black-box.md` reserves for the
+  script. Both bullets keep the invocation and the exit-code gate and point
+  through `PUBLICATION.md`. `rules/ci-safety.md` still states the conjunction:
+  rules state the contract, skills carry the executable form (#458).
+
+- **Two helper assertions take their field names literally.** The suite matched
+  `carries no .version` and `carries no .current` with `grep -q`, where `.` is
+  a wildcard, so both still matched if the diagnostic stopped naming the field
+  the caller repairs. `grep -qF` now takes them literally, and
+  `registry-baseline.sh`'s absent-jq guard — previously assumed from its
+  sibling's coverage — is exercised directly (#459).
+
 ## 0.3.248 — 2026-09-19
 
 ### Fixed

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Render one standup: a Markdown file, and a block that survives a terminal.
 
-The lead reads the answers; this only lays them out. Parsing four fixed lines
+The foreman reads the answers; this only lays them out. Parsing four fixed lines
 and wrapping cells to a fixed width is a pure function of its inputs, so it
-lives here rather than in the lead's hands (`rules/script-delegation.md`).
+lives here rather than in the foreman's hands (`rules/script-delegation.md`).
 
 Two outputs, because they have different readers. The Markdown file is the
 record. The fenced block is what the operator scrolls back through a wall of

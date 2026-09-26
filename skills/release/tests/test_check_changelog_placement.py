@@ -161,13 +161,27 @@ class RepositoryTest(unittest.TestCase):
     def test_moving_an_entry_between_headings_is_allowed(self):
         # An archive repair -- filing a past entry under the version that
         # published it -- appears in the diff as an addition below a heading,
-        # exactly like the hazard. The count tells them apart (#452).
+        # exactly like the hazard. Block-content identity tells them apart: the
+        # moved block is text the base already carries (#452).
         moved = HEADED.replace(
             "## 0.3.9 — 2026-01-02\n\n### Added\n\n- **A published entry.** Already stamped.\n",
             "## 0.3.10 — 2026-01-03\n\n### Added\n\n- **A published entry.** Already stamped.\n")
         self.commit_changelog(moved)
         code, err = self.run_check()
         self.assertEqual(code, 0, err)
+
+    def test_a_second_copy_of_a_parked_entry_is_a_new_parked_block(self):
+        # coding-policy#457: `set()` dropped multiplicity, so both copies were
+        # members of the one-element set and a genuinely added duplicate went
+        # through. Occurrences are consumed one for one.
+        duplicated = HEADED.replace(
+            "### Added\n\n- **A published entry.** Already stamped.\n",
+            "### Added\n\n- **A published entry.** Already stamped.\n"
+            "\n### Added\n\n- **A published entry.** Already stamped.\n")
+        self.commit_changelog(duplicated)
+        code, err = self.run_check()
+        self.assertEqual(code, 1, err)
+        self.assertIn("whose content is new to", err)
 
     def test_a_branch_touching_no_entries_passes(self):
         self.git("checkout", "-q", "-b", "work")

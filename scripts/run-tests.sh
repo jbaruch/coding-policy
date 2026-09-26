@@ -108,6 +108,15 @@ json_str() {
   printf '"%s"' "$out"
 }
 
+XDG_RUN_HOME=""
+
+remove_xdg_run_home() {
+  if [[ -n "$XDG_RUN_HOME" ]] && ! rm -rf "$XDG_RUN_HOME"; then
+    echo "run-tests: could not remove the per-run XDG home ${XDG_RUN_HOME}; delete it by hand" >&2
+  fi
+  return 0
+}
+
 main() {
   local base="${1:-}"
   if [[ -z "$base" ]]; then
@@ -127,7 +136,12 @@ main() {
   # `set -o pipefail` propagates a `find` failure through `| sort -z` to
   # the redirection, and the `if !` catches it — a command substitution
   # can't be used because bash strips NUL bytes from its output.
-  local tmplist; tmplist="$(mktemp)"
+  local tmplist
+  if ! tmplist="$(mktemp)"; then
+    echo "run-tests: could not create the suite list (mktemp failed); check TMPDIR" >&2
+    printf '{"suites":0,"passed":0,"failed":0,"failures":[],"error":%s}\n' "$(json_str "mktemp failed")"
+    return 2
+  fi
   # `-path '*/tests/test_*.sh'` narrows to a tests/ dir, but `find`'s `*`
   # matches `/` too, so it still matches a NESTED file like
   # `tests/test_fixtures/helper.sh`. The direct-child requirement can't be
@@ -160,6 +174,17 @@ main() {
     return 2
   fi
 
+  # Each suite runs against its own empty XDG home, never the operator's and
+  # never an earlier suite's: anything a test does not pass explicitly would
+  # otherwise read, and possibly refuse on, the machine's real state and
+  # config, or files a previous suite left behind.
+  if ! XDG_RUN_HOME="$(mktemp -d)"; then
+    echo "run-tests: could not create the per-run XDG home (mktemp -d failed); check TMPDIR" >&2
+    printf '{"suites":0,"passed":0,"failed":0,"failures":[],"error":%s}\n' "$(json_str "mktemp -d failed")"
+    return 2
+  fi
+  trap remove_xdg_run_home EXIT
+
   echo "Running ${#suites[@]} test suite(s):" >&2
   echo "" >&2
 
@@ -175,9 +200,16 @@ main() {
   # suite's verdict. That ordering is what lets a suite's own 2 or 125 count
   # as a failure while a dispatch fault (same numeric codes possible) does
   # not — the value never disambiguates them, the side channel does.
-  local failed=() setup_error=""
+  local failed=() setup_error="" n=0
   for s in "${suites[@]}"; do
     echo "▶ $s" >&2
+    n=$((n + 1))
+    if ! mkdir -p "$XDG_RUN_HOME/$n/state" "$XDG_RUN_HOME/$n/config"; then
+      echo "run-tests: could not create the XDG home for ${s} under ${XDG_RUN_HOME}/${n}; check TMPDIR" >&2
+      printf '{"suites":0,"passed":0,"failed":0,"failures":[],"error":%s}\n' "$(json_str "mkdir of a per-suite XDG home failed")"
+      return 2
+    fi
+    export XDG_STATE_HOME="$XDG_RUN_HOME/$n/state" XDG_CONFIG_HOME="$XDG_RUN_HOME/$n/config"
     local suite_rc=0
     DISPATCH_FAULT_SUITE=""
     run_suite "$s" >&2 || suite_rc=$?

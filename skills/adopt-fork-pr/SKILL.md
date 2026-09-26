@@ -43,7 +43,7 @@ On **Just inspect**, report the diff and status, then finish here. On **Adopt fo
 ## Step 5 — Adopt the Branch
 
 ```bash
-.tessl/plugins/jbaruch/coding-policy/skills/adopt-fork-pr/adopt.sh <N>
+bash .tessl/plugins/jbaruch/coding-policy/skills/adopt-fork-pr/adopt.sh <N>
 ```
 
 Contract: see `skills/adopt-fork-pr/adopt.sh` — top-of-file docstring carries the branch-naming rule, the verbatim new-PR-body and original-PR-comment templates, the idempotency states, and the exit codes. It checks out the fork head, pushes it to a base-repo branch preserving the original commits, opens a same-repo PR, and comments on the original fork PR linking the adopted one. Emits `{ "state", "adopted_branch", "new_pr_url", "original_pr", "author" }`.

@@ -48,6 +48,7 @@ alwaysApply: true
 - Control the clock: inject or freeze "now" (a passed-in reference date, a mocked time source, freezegun) so a test green today is green every day
 - Compute relative dates from a fixed injected reference, never from the real clock at run time
 - Fixed past dates as fixtures are fine — the ban is on time-relative values that rot as the run date advances
+- A shipped bounded classifier is stubbed or replayed from recorded fixtures, never called live in a test
 - Flaky tests are bugs — diagnose the root cause, don't retry and hope
 
 ## Live-Upstream Future-Date Carve-Out

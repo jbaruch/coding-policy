@@ -114,7 +114,7 @@ main() {
   if [[ $ok -eq 1 ]] && printf '%s' "$ARGVTEXT" | grep -q "$REPORT"; then
     pass; else fail "prompt text: expected the four fields and the report path, got ARGV=$ARGVTEXT"; fi
 
-  # 6. A relative report path resolves in the WORKER's cwd, not the lead's.
+  # 6. A relative report path resolves in the WORKER's cwd, not the foreman's.
   RUN_SEQ=$((RUN_SEQ+1))
   OUT="$(env HERDR_ENV=1 HERDR_BIN="$FAKE" bash "$SCRIPT" worker "reports/w.md" 2>"$TMP/e6")"; RC=$?
   if [[ $RC -eq 1 && -z "$OUT" ]] && grep -q "relative" "$TMP/e6"; then

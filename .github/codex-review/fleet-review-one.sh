@@ -145,11 +145,18 @@ main() {
     # substitutions are printf's own %s — double quotes would make bash treat the
     # backticks as command substitution. Nothing here is meant to shell-expand.
     # shellcheck disable=SC2016
+    # Reviewer model pin, renewed by hand: no scanner tracks a model id. Review
+    # it whenever the Codex CLI pin bumps and at each weekly capability-table
+    # refresh (rules/dependency-management.md Freshness). Sol's own default
+    # effort is low, too shallow for a policy review. Keep in step with
+    # .github/workflows/review-codex.yml.
     { printf 'This PR targets base branch `%s`; review the diff `git diff origin/%s...HEAD`.\n\n' "$base" "$base"; cat "$prompt"; } \
       | env -u GH_TOKEN CODEX_HOME="$codex_home" codex exec \
           --json \
           --skip-git-repo-check \
           --dangerously-bypass-approvals-and-sandbox \
+          --model gpt-5.6-sol \
+          -c 'model_reasoning_effort="high"' \
           --output-schema "$schema" \
           --output-last-message "$out" \
           -

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Native Claude/Codex Stop gate; only an exact persisted Herdr lead binding
-# activates it. stdin/stdout/exit contract: teamlead/supervision_hook.py.
+# Native Claude/Codex Stop gate; only an exact persisted Herdr foreman binding
+# activates it. stdin/stdout/exit contract: foreman/supervision_hook.py.
 set -euo pipefail
 
 main() {
@@ -14,9 +14,9 @@ main() {
   # PYTHONDONTWRITEBYTECODE: the evaluator only reads, but importing it would
   # drop __pycache__ into the installed plugin tree, which the read-only
   # contract does not allow.
-  PYTHONPATH="${plugin_root}/skills/herdr-teamlead${PYTHONPATH:+:${PYTHONPATH}}" \
+  PYTHONPATH="${plugin_root}/skills/herdr-foreman${PYTHONPATH:+:${PYTHONPATH}}" \
   PYTHONDONTWRITEBYTECODE=1 \
-    python3 -m teamlead.supervision_hook || rc=$?
+    python3 -m foreman.supervision_hook || rc=$?
   if (( rc != 0 )); then
     echo "herdr-supervision-stop: Python hook failed (exit ${rc}) before completing its contract — restore the hook installation; native gating requires its structured JSON result" >&2
   fi

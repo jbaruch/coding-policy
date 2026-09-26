@@ -7,7 +7,6 @@ per `rules/stateful-artifacts.md`.
 
 | Stamp path | Owner (writer + reader) | Purpose |
 | ---------- | ----------------------- | ------- |
-| `$FRESHNESS_STATE_DIR/last-check` (default `${TMPDIR:-/tmp}/coding-policy-freshness/last-check`) | `hooks/check-policy-freshness.sh` | Throttle the `tessl outdated` registry call |
 | `$SYNC_STATE_DIR/sync-<repo-key>` (default `${TMPDIR:-/tmp}/coding-policy-sync/sync-<repo-key>`) | `hooks/check-git-sync.sh` | Throttle the `git fetch origin` call, per repo (`<repo-key>` = cksum of the repo toplevel path) |
 
 Each stamp has exactly one owner hook that both writes and reads it. No other
