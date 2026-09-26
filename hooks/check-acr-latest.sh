@@ -17,8 +17,10 @@
 #   stdout: one JSON object {"additionalContext": "<status>"} whose text begins
 #           with "Session-start status — acr: " when ACR reported something or
 #           failed, or when `acr` is missing from a project that needs it.
-#           Nothing for a project without `agents.yaml`, a throttled or
-#           no-change run, and any Herdr session. In git, the update runs
+#           Nothing for a project without `agents.yaml`, or a throttled or
+#           no-change run with no carve-out finding. A Herdr session, and a
+#           portable (tessl) session, report findings but never update. In
+#           git, the update runs
 #           only on a checkout freshly fetched, containing origin's default
 #           branch, with a clean tree; otherwise the status says why it was
 #           skipped and nothing changes.
