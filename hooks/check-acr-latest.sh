@@ -18,10 +18,14 @@
 #           with "Session-start status — acr: " when ACR reported something or
 #           failed, or when `acr` is missing from a project that needs it.
 #           Nothing for a project without `agents.yaml`, a throttled or
-#           no-change run, and a Herdr worker session.
+#           no-change run, and any Herdr session. In git, the update runs
+#           only on a checkout freshly fetched, containing origin's default
+#           branch, with a clean tree; otherwise the status says why it was
+#           skipped and nothing changes.
 #   stderr: diagnostics only.
 #   exit  : always 0.
 #   env   : ACR_BIN names the acr executable (default `acr`), as ACR's own hook does.
+#           ACR_LATEST_FETCH_TIMEOUT bounds the sync-proof fetch (seconds).
 set -euo pipefail
 
 warn() { printf 'check-acr-latest: %s\n' "$1" >&2; }
@@ -36,26 +40,91 @@ emit() { # <status text>
   fi
 }
 
-# A Herdr worker in a linked worktree must not realize files into its checkout
-# on the hook's say-so (rules/agent-team-operation.md Writers and Checkouts).
-is_herdr_worker() {
-  [[ -n "${HERDR_ENV:-}" ]] || return 1
-  local git_dir common_dir
-  git_dir="$(git rev-parse --absolute-git-dir)" || return 1
-  common_dir="$(git rev-parse --path-format=absolute --git-common-dir)" || return 1
-  [[ "$git_dir" != "$common_dir" ]]
+#: Seconds allowed for the sync-proof fetch before the update is skipped.
+FETCH_TIMEOUT_SEC="${ACR_LATEST_FETCH_TIMEOUT:-10}"
+
+# Echo origin's default branch for the repo in the working directory, or
+# return 1 when neither origin/HEAD nor origin/main nor origin/master resolves.
+default_branch() {
+  local ref cand
+  if ref="$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD)"; then
+    printf '%s' "${ref#origin/}"
+    return 0
+  fi
+  for cand in main master; do
+    if git show-ref --verify --quiet "refs/remotes/origin/${cand}"; then
+      printf '%s' "$cand"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# Echo why the checkout is not safe to update, or nothing when it is: freshly
+# fetched from origin, HEAD containing origin's default branch, and a clean tree
+# (rules/sync-before-work.md). A git failure is a reason, never a pass.
+unsafe_reason() {
+  local -a fetch=(git fetch --quiet origin)
+  local out db status
+  if command -v timeout >/dev/null; then
+    fetch=(timeout "$FETCH_TIMEOUT_SEC" "${fetch[@]}")
+  elif command -v gtimeout >/dev/null; then
+    fetch=(gtimeout "$FETCH_TIMEOUT_SEC" "${fetch[@]}")
+  fi
+  if ! out="$("${fetch[@]}" 2>&1)"; then
+    printf 'fetching origin failed (%s)' "${out//$'\n'/ }"
+    return 0
+  fi
+  if ! db="$(default_branch)"; then
+    printf "origin's default branch could not be resolved"
+    return 0
+  fi
+  if ! git merge-base --is-ancestor "refs/remotes/origin/${db}" HEAD; then
+    printf 'this checkout does not contain %sorigin/%s%s (behind or diverged); sync it first' '`' "$db" '`'
+    return 0
+  fi
+  if ! status="$(git status --porcelain --untracked-files=all)"; then
+    printf 'git status failed'
+    return 0
+  fi
+  if [[ -n "$status" ]]; then
+    printf 'the working tree has uncommitted changes'
+  fi
+  return 0
 }
 
 main() {
-  local root acr out rc=0
-  # The project root is the git toplevel, or the working directory outside git.
-  if ! root="$(git rev-parse --show-toplevel 2>&1)"; then
-    root="$PWD"
-  fi
-  [[ -f "${root}/agents.yaml" ]] || return 0
-  if is_herdr_worker; then
+  local root acr out rc=0 err reason in_git=1 diag
+  # Every Herdr session is off limits: a worker never writes on the hook's
+  # say-so, and the foreman never edits the shared checkout
+  # (rules/agent-team-operation.md Writers and Checkouts).
+  [[ -z "${HERDR_ENV:-}" ]] || return 0
+
+  # Outside git is the one expected rev-parse failure; any other is a broken
+  # repository, reported and never updated as if it were a plain directory.
+  local errf
+  if ! errf="$(mktemp)"; then
+    warn "mktemp failed — cannot check this project for ACR updates; check TMPDIR"
     return 0
   fi
+  rc=0
+  root="$(git rev-parse --show-toplevel 2>"$errf")" || rc=$?
+  err="$(cat "$errf")"
+  if ! rm -f "$errf"; then
+    warn "could not remove ${errf} — delete it by hand"
+  fi
+  if (( rc != 0 )); then
+    case "$err" in
+      *"or any of the parent directories"*) root="$PWD"; in_git=0 ;;
+      *)
+        if [[ -f "${PWD}/agents.yaml" ]]; then
+          emit "Session-start status — acr: git cannot read this repository (${err//$'\n'/ }), so ACR dependencies were not updated; fix the repository, then start a new session."
+        fi
+        return 0 ;;
+    esac
+  fi
+  rc=0
+  [[ -f "${root}/agents.yaml" ]] || return 0
 
   acr="${ACR_BIN:-acr}"
   if ! command -v "$acr" >/dev/null; then
@@ -63,9 +132,18 @@ main() {
     return 0
   fi
 
+  if (( in_git )); then
+    reason="$(cd "$root" && unsafe_reason)"
+    if [[ -n "$reason" ]]; then
+      emit "Session-start status — acr: ACR dependencies were not updated: ${reason}. Run \`$(printf '%q' "$acr") freshness run --project $(printf '%q' "$root") --policy install\` once it is."
+      return 0
+    fi
+  fi
+
   out="$("$acr" freshness run --project "$root" --policy install 2>&1)" || rc=$?
   if (( rc != 0 )); then
-    emit "Session-start status — acr: updating ACR dependencies failed (exit ${rc}):"$'\n'"${out}"$'\n'"Run \`${acr} freshness run --project ${root} --policy install\` to diagnose it."
+    diag="$(printf '%q' "$acr") freshness run --project $(printf '%q' "$root") --policy install"
+    emit "Session-start status — acr: updating ACR dependencies failed (exit ${rc}):"$'\n'"${out}"$'\n'"Run \`${diag}\` to diagnose it."
     return 0
   fi
   [[ -n "${out//[[:space:]]/}" ]] || return 0
