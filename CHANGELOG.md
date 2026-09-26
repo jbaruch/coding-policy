@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.279 — 2026-09-26
+
 ### Fixed
 
 - **Session-start git calls never run repo code, and ACR output is masked
