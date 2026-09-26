@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.275 — 2026-09-26
+
 ### Fixed
 
 - **SessionStart statuses reach the session again.** `tessl hook run` keeps
