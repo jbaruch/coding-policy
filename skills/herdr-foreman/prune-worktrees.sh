@@ -549,6 +549,12 @@ proof_holds() { # <shared> <mode> <tip> <head> <default>
   fi
 }
 
+#: The identity every commit this script writes carries: the archive commit
+#: and each notes-ref commit (`notes add`, `notes remove`). Never the
+#: operator's config, which a runner or a fresh machine may not have.
+GIT_IDENT=(GIT_AUTHOR_NAME=prune-worktrees GIT_AUTHOR_EMAIL=prune-worktrees@localhost
+           GIT_COMMITTER_NAME=prune-worktrees GIT_COMMITTER_EMAIL=prune-worktrees@localhost)
+
 #: The archive record's schema_version, written into its JSON note. The
 #: owner is this script; MIGRATIONS in `plan_archives` upgrades an older record.
 ARCHIVE_SCHEMA=1
@@ -606,17 +612,15 @@ archive_worktree() { # <shared> <real> <head> <branch|""> <ref> <trash-path> <dr
   local shared="$1" real="$2" head="$3" branch="$4" ref="$5" trash="$6" dry="$7" tree commit resolved note
   (( dry )) && return 0
   tree="$(snapshot_tree "$real" "$head")" || return 1
-  local -a ident=(GIT_AUTHOR_NAME=prune-worktrees GIT_AUTHOR_EMAIL=prune-worktrees@localhost
-                  GIT_COMMITTER_NAME=prune-worktrees GIT_COMMITTER_EMAIL=prune-worktrees@localhost)
   # The message names the ref and the source path, so two archives of one
   # parent and tree in one second are still two commits, each with its own
   # note.
-  commit="$(env "${ident[@]}" git -C "$real" commit-tree "$tree" -p "$head" \
+  commit="$(env "${GIT_IDENT[@]}" git -C "$real" commit-tree "$tree" -p "$head" \
     -m "Archive ${ref}" -m "Source: ${real}" 2>"$ERRFILE")" || return 1
   if ! note="$(mktemp 2>"$ERRFILE")"; then return 1; fi
   local ok=0
   if python3 - "$note" "$ARCHIVE_SCHEMA" "$ref" "$real" "$trash" "$head" "$branch" "$tree" 2>"$ERRFILE" <<'PY' \
-    && env "${ident[@]}" git -C "$shared" notes --ref="$ARCHIVE_NOTES" add -F "$note" "$commit" 2>"$ERRFILE" \
+    && env "${GIT_IDENT[@]}" git -C "$shared" notes --ref="$ARCHIVE_NOTES" add -F "$note" "$commit" 2>"$ERRFILE" \
     && git -C "$shared" update-ref "$ref" "$commit" "" 2>"$ERRFILE" \
     && resolved="$(git -C "$shared" rev-parse --verify --quiet "${ref}^{commit}" 2>"$ERRFILE")" \
     && [[ "$resolved" == "$commit" ]]; then
@@ -1119,14 +1123,12 @@ sys.stdout.write("\x1f".join([r["trash"], r["head"], r.get("branch") or "", r["t
       fi
       row branch-deleted "$del_branch" "$del_branch" ""
     fi
-    if ! git -C "$1" notes --ref="$ARCHIVE_NOTES" remove "$sha" 2>"$ERRFILE"; then
+    if ! env "${GIT_IDENT[@]}" git -C "$1" notes --ref="$ARCHIVE_NOTES" remove "$sha" 2>"$ERRFILE"; then
       row failed "$ref" "" "removing its record note failed, so ${ref} was kept: $(tr '\n' ' ' < "$ERRFILE")"; continue
     fi
     if ! git -C "$1" update-ref -d "$ref" "$sha" 2>"$ERRFILE"; then
       local why; why="$(tr '\n' ' ' < "$ERRFILE")"
-      if printf '%s\n' "$note_text" | env GIT_AUTHOR_NAME=prune-worktrees GIT_AUTHOR_EMAIL=prune-worktrees@localhost \
-           GIT_COMMITTER_NAME=prune-worktrees GIT_COMMITTER_EMAIL=prune-worktrees@localhost \
-           git -C "$1" notes --ref="$ARCHIVE_NOTES" add -F - "$sha" 2>"$ERRFILE"; then
+      if printf '%s\n' "$note_text" | env "${GIT_IDENT[@]}" git -C "$1" notes --ref="$ARCHIVE_NOTES" add -F - "$sha" 2>"$ERRFILE"; then
         row failed "$ref" "" "deleting ${ref} failed (${why}); its record note was restored and the archive kept"
       else
         row failed "$ref" "" "deleting ${ref} failed (${why}) and its record note could not be restored: $(tr '\n' ' ' < "$ERRFILE") — the ref is kept without a record; restore the note by hand"

@@ -71,6 +71,12 @@
     or unmigratable record, or a `schema_version` that is not an integer of
     at least 1 (a JSON `true` included), is kept and reported under
     `archives_kept`, never expired.
+  - Every commit the prune writes (the archive commit, and each notes-ref
+    commit from `notes add` and `notes remove`) carries the script's own
+    identity, never the operator's config: `notes remove` first ran without
+    one and failed on the Linux runner, which has no global identity. Both
+    test suites now run with an empty global git config, so a Mac run
+    reproduces the runner.
   - Every removal is restorable: removed rows carry `head`, archived rows
     carry `archive_ref` and `trash_path`, and locked rows carry
     `lock_reason`.

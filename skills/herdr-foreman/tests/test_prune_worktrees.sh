@@ -256,6 +256,11 @@ main() {
   # The script reports physical paths; macOS mktemp hands out a symlinked /var.
   TMP="$(cd "$TMP" && pwd -P)" || die "resolve TMP failed"
   trap cleanup EXIT
+  # The operator's git config never reaches the script under test: no global
+  # identity, as on a CI runner, so every commit the script writes must carry
+  # its own. Fixtures pass theirs with -c.
+  : > "$TMP/gitconfig" || die "cannot create an empty global git config"
+  export GIT_CONFIG_GLOBAL="$TMP/gitconfig" GIT_CONFIG_NOSYSTEM=1
   ROOT="$TMP/worktrees"
   mkdir -p "$ROOT" || die "mkdir root failed"
 
