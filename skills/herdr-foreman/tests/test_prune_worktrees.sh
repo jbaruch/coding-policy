@@ -42,7 +42,8 @@
 #  22. Half-done removal   -> a removal is reported even when its branch
 #                             deletion then fails.
 #  23. Deferred prunable   -> a prunable branch survives a skipped prune.
-#  24. Newline path        -> a record is not split by a newline in the path.
+#  24. Newline path        -> a record is not split by a newline in the path
+#                             (kept idle-unknown: the probe cannot match it).
 #  25. Branch config       -> a deleted branch's branch.<name> config goes too.
 #  26. Locked and gone     -> git keeps its metadata, so its branch is kept too.
 #  27. No -z               -> a git without `-z` decides nothing at all.
@@ -87,7 +88,7 @@
 #                             worktree, content the archive lacks, a lock,
 #                             or a process inside keeps the archive and trash.
 #  58. Missing trash        -> its archive, registration and branch are kept.
-#  59. Newline path         -> recorded whole in JSON; expires with its trash.
+#  59. Newline path         -> lsof cannot report it faithfully: never idle.
 #  60. Other remote         -> a ref of a remote other than origin proves nothing.
 #  61. Proof gone           -> reachability re-derived just before removal.
 #  62. Gitlink, embedded    -> a dirty gitlink without .gitmodules, and an
@@ -98,7 +99,9 @@
 #  65. Foreign ref name     -> a slash in the name part: never planned.
 #  66. Late process         -> a fresh probe before the forced trash removal.
 #  67. Bool schema          -> schema_version true is unparseable.
-#  68. Note removal fails   -> the ref and its record are kept.
+#  68. Interrupted expiry   -> ref gone, orphan note left; the next run
+#                             removes the orphan.
+#  69. Dry/live agreement   -> both judge origin as it is now.
 #
 # Run: bash skills/herdr-foreman/tests/test_prune_worktrees.sh
 set -uo pipefail
@@ -191,7 +194,7 @@ removed_head() { python3 -c 'import json,sys; d=json.load(sys.stdin); print(next
 lsof_turns_busy() { # <dir> <n> <path>
   mkdir -p "$1" || die "mkdir $1 failed"
   # shellcheck disable=SC2016  # The stand-in's $(...) must run in the stand-in, not here.
-  printf '#!/usr/bin/env bash\nset -euo pipefail\nprintf x >> %q\nif (( $(wc -c < %q) >= %s )); then printf "p1\\nfcwd\\nn%%s\\n" %q; fi\n' \
+  printf '#!/usr/bin/env bash\nset -euo pipefail\nprintf x >> %q\nif (( $(wc -c < %q) >= %s )); then printf "p1\\0\\nfcwd\\0n%%s\\0\\n" %q; fi\n' \
     "$1/calls" "$1/calls" "$2" "$3" > "$1/lsof" || die "write lsof stand-in failed"
   chmod +x "$1/lsof" || die "chmod lsof stand-in failed"
 }
@@ -236,6 +239,17 @@ age_trash() { # <trash>
   find "$1" -path "$1/.git" -prune -o -exec touch -h -t 202001100000 {} + || die "touch trash files failed"
 }
 
+
+has_note() { # <shared> <commit> -> 0 a note exists, 1 none; any other failure aborts the harness
+  local rc=0
+  git -C "$1" notes --ref=refs/notes/worktree-archive list "$2" >/dev/null 2>"$TMP/has_note.err" || rc=$?
+  case "$rc" in
+    0) return 0 ;;
+    1) grep -q "no note found" "$TMP/has_note.err" && return 1
+       die "git notes list exited 1 without 'no note found': $(cat "$TMP/has_note.err")" ;;
+    *) die "git notes list failed (exit $rc): $(cat "$TMP/has_note.err")" ;;
+  esac
+}
 
 # Stop the background sleeper: SIGTERM, then its exit status must be 143
 # (128 + SIGTERM); anything else means the fixture did not behave as assumed.
@@ -484,8 +498,11 @@ SHIM
   git -C "$SHARED" worktree add -q -b review/newline "$newline_path" origin/main \
     || die "fixture could not create a worktree at a newline-bearing path"
   run "$SHARED"
+  # The process probe cannot report such a path faithfully, so it is kept;
+  # the point here is that it is reported whole, as one record.
   echo "24. a newline in a worktree path does not split its record"
-  if (( RC == 0 )) && [[ "$OUT" != *'"path": "'"$ROOT"'/twentyfour-a"'* ]] && ! has_branch "$SHARED" review/newline; then pass; else fail "rc=$RC out=$OUT err=$ERRTEXT"; fi
+  if (( RC == 0 )) && [[ "$OUT" != *'"path": "'"$ROOT"'/twentyfour-a"'* ]] && [[ "$(kept_reason "$newline_path")" == idle-unknown ]] \
+    && has_branch "$SHARED" review/newline; then pass; else fail "rc=$RC out=$OUT err=$ERRTEXT"; fi
 
   # --- 25. a tracked branch's config goes with it.
   mk_repo twentyfive
@@ -916,18 +933,20 @@ SHIM
     && listed "$SHARED" "${mv1#* }" && has_branch "$SHARED" feat/mv1 && ! mentions_path "${mv1#* }"; then
     pass; else fail "missing trash: rc=$RC out=$OUT err=$ERRTEXT"; fi
 
-  # --- 59. a path holding a newline archives and expires whole.
+  # --- 59. a path lsof cannot report faithfully is never judged idle.
   mk_repo newline
-  local nlwt="$ROOT/nl"$'\n'"wt"
-  add_wt "$SHARED" feat/nl "$nlwt"; commit_in "$nlwt" n.txt
-  age_wt "$nlwt"
+  local nlwt="$ROOT/nl"$'\n'"wt" nlbusy="$ROOT/nlb"$'\n'"busy"
+  git -C "$SHARED" worktree add -q --detach "$nlwt" origin/main 2>/dev/null || die "newline worktree add failed"
+  git -C "$SHARED" worktree add -q --detach "$nlbusy" origin/main 2>/dev/null || die "newline busy worktree add failed"
+  age_wt "$nlwt"; age_wt "$nlbusy"
+  (cd "$nlbusy" && exec sleep 300) &
+  SLEEPER=$!
   idle_run
-  local nlref nltrash; nlref="$(archived_ref "$nlwt")"; nltrash="$(trash_of "$nlwt")"
-  age_trash "$nltrash"
-  later_run
-  echo "59. a worktree path with a newline is recorded whole and expires with its trash"
-  if [[ -n "$nlref" ]] && [[ "$(expired_refs)" == "$nlref" ]] && [[ ! -e "$nltrash" ]] && ! has_branch "$SHARED" feat/nl; then
-    pass; else fail "newline: ref=$nlref out=$OUT err=$ERRTEXT"; fi
+  stop_sleeper
+  echo "59. worktrees whose path holds a newline are kept as idle-unknown, a process inside or not"
+  if (( RC == 0 )) && [[ "$(kept_reason "$nlwt")" == idle-unknown && "$(kept_reason "$nlbusy")" == idle-unknown ]] \
+    && listed "$SHARED" "$nlwt" && listed "$SHARED" "$nlbusy"; then
+    pass; else fail "newline: rc=$RC out=$OUT err=$ERRTEXT"; fi
 
   # --- 51. a dirty submodule keeps an idle worktree; it is never archived.
   mk_repo submod
@@ -982,9 +1001,10 @@ SHIM
   git -C "$SHARED" worktree add -q --detach "$pg" origin/main 2>/dev/null || die "proofgone worktree add failed"
   age_wt "$pg"
   mkdir -p "$TMP/shim61" || die "mkdir shim61 failed"
-  # The second origin containment query answers "no ref holds it".
+  # The second read of origin's tips (the one just before the removal)
+  # answers that origin holds no branch at all.
   # shellcheck disable=SC2016  # The shim's "$@" and $a must expand in the shim, not here.
-  printf '#!/usr/bin/env bash\nset -euo pipefail\nfor a in "$@"; do if [[ "$a" == --contains ]]; then printf x >> %q; if [[ "$(cat %q)" == xx ]]; then exit 0; fi; fi; done\nexec %q "$@"\n' \
+  printf '#!/usr/bin/env bash\nset -euo pipefail\nfor a in "$@"; do if [[ "$a" == ls-remote ]]; then printf x >> %q; if [[ "$(cat %q)" == xx ]]; then exit 0; fi; fi; done\nexec %q "$@"\n' \
     "$TMP/shim61/n" "$TMP/shim61/n" "$real_git" > "$TMP/shim61/git" || die "shim61 write failed"
   chmod +x "$TMP/shim61/git" || die "chmod shim61 failed"
   idle_run PATH="$TMP/shim61:$PATH"
@@ -1077,9 +1097,11 @@ SHIM
   echo "67. a record whose schema_version is true is unparseable and kept"
   if [[ "$(archives_kept_reason "${bs%% *}")" == record-unparseable ]] && listed "$SHARED" "${bs#* }"; then pass; else fail "bool schema: out=$OUT"; fi
 
-  # --- 68. a failed note removal keeps the ref and its record.
+  # --- 68. an expiry interrupted between the ref and the note leaves an orphan
+  #         note, which the next live run removes.
   mk_repo notefail
-  local nf; nf="$(archive_one note1 feat/note1)"
+  local nf nf_c; nf="$(archive_one note1 feat/note1)"
+  nf_c="$(git -C "$SHARED" rev-parse "${nf%% *}")" || die "rev-parse archive failed"
   age_trash "${nf#* }"
   mkdir -p "$TMP/shim68" || die "mkdir shim68 failed"
   # shellcheck disable=SC2016  # The shim's "$@" and $a must expand in the shim, not here.
@@ -1089,10 +1111,34 @@ SHIM
   RUN_SEQ=$((RUN_SEQ+1))
   OUT="$(env WORKTREE_ROOT="$ROOT" PRUNE_NOW="$LATER_NOW" PATH="$TMP/shim68:$PATH" bash "$SCRIPT" "$SHARED" 2>"$TMP/err.$RUN_SEQ")"; RC=$?
   ERRTEXT="$(cat "$TMP/err.$RUN_SEQ")"
-  echo "68. a note removal that fails keeps the archive ref and its record, never reported expired"
+  echo "68a. a note removal that fails after the ref is gone reports a failure, not an expiry"
   if (( RC == 2 )) && [[ "$(expired_refs)" == "" ]] && [[ "$OUT" == *"notes remove refused"* ]] \
-    && git -C "$SHARED" rev-parse --verify --quiet "${nf%% *}" >/dev/null && record_of "$SHARED" "${nf%% *}" >/dev/null; then
-    pass; else fail "note removal failure: rc=$RC out=$OUT err=$ERRTEXT"; fi
+    && ! git -C "$SHARED" rev-parse --verify --quiet "${nf%% *}" >/dev/null \
+    && git -C "$SHARED" notes --ref=refs/notes/worktree-archive show "$nf_c" >/dev/null; then
+    pass; else fail "interrupted expiry: rc=$RC out=$OUT err=$ERRTEXT"; fi
+  later_run
+  echo "68b. the next live run removes the orphan note"
+  if (( RC == 0 )) && [[ "$(python3 -c 'import json,sys; print(",".join(json.load(sys.stdin)["orphan_notes_removed"]))' <<<"$OUT")" == "$nf_c" ]] \
+    && ! has_note "$SHARED" "$nf_c"; then
+    pass; else fail "orphan note: rc=$RC out=$OUT err=$ERRTEXT"; fi
+
+  # --- 69. dry run and live run agree after origin deletes a branch.
+  mk_repo agree
+  local ag="$ROOT/agree-wt"
+  git -C "$SHARED" worktree add -q --detach "$ag" origin/main 2>/dev/null || die "agree worktree add failed"
+  commit_in "$ag" gone.txt
+  git -C "$ag" push -q origin HEAD:refs/heads/side 2>/dev/null || die "push side failed"
+  git -C "$SHARED" fetch -q origin || die "fetch side failed"
+  git -C "$SEED" push -q origin --delete side 2>/dev/null || die "delete side on origin failed"
+  age_wt "$ag"
+  IDLE_ARGS=(--dry-run)
+  idle_run PRUNE_ARCHIVE_IDLE_HOURS=100000
+  IDLE_ARGS=()
+  local dry_reason; dry_reason="$(kept_reason "$ag")"
+  idle_run PRUNE_ARCHIVE_IDLE_HOURS=100000
+  echo "69. a HEAD held only by an origin branch deleted since the last fetch is kept by both dry and live runs"
+  if [[ "$dry_reason" == detached && "$(kept_reason "$ag")" == detached ]] && listed "$SHARED" "$ag"; then
+    pass; else fail "dry/live agreement: dry=$dry_reason out=$OUT err=$ERRTEXT"; fi
 
   # --- 14. usage / not a repo.
   run

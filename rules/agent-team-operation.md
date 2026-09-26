@@ -305,8 +305,9 @@ description: Running a multi-agent team — task-based specialist composition, c
 - The sweep expires an archive past the expiry window in `skills/herdr-foreman/prune-worktrees.sh`
 - Expiry removes the archive's trash worktree only once it is present, idle, unused, unchanged since the archive, and locked by the sweep alone
 - A missing trash worktree keeps its archive
-- Expiry deletes the archive ref last, after the trash worktree, the branch and the record
-- A failed expiry step keeps the archive ref
+- Expiry deletes the archive ref after the trash worktree and the branch, and its record after the ref
+- A failed expiry step before the ref deletion keeps the archive ref and its record
+- A later live run removes a record left on a commit no archive ref points at
 - An archive record the sweep cannot read or validate is kept and reported
 - The foreman reports the sweep's archives, trash moves, expiries, kept archives, kept worktrees and errors to the operator at Step 2, on every route
 - The foreman never removes a worktree by hand

@@ -930,15 +930,24 @@ Writer / reader contract:
   process inside, and matches the content fingerprint; a missing trash
   worktree keeps the archive. It reads the branch, telling absence from a git
   error. Only then does it remove the trash worktree, the branch (only when
-  its tip equals `head`), the note and the ref, in that order. Any failed
-  check or step keeps the ref; a ref deletion that fails puts the note back
+  its tip equals `head`), the ref and the note, in that order. Any failed
+  check or step before the ref deletion keeps the ref and its record
+- Invariant: an archive ref never exists without its record. The note is
+  written before the ref and removed after it
+- An expiry interrupted between the ref deletion and the note removal leaves
+  an orphan note: a note on a commit no archive ref points at. No reader takes
+  it for an archive. Each later live run removes an orphan note once its
+  commit is older than the orphan grace window (so an archive whose note is
+  written but whose ref is not yet is never touched) and lists it under
+  `orphan_notes_removed`
 - Results: `archives_expired`, `archives_kept` (with the reason),
-  `archives_migrated`; a dry run only reports
+  `archives_migrated`, `orphan_notes_removed`; a dry run only reports
 - Operator reader: restore with `git worktree add <path> <archive_ref>`, read
   one file with `git show <archive_ref>:<file>`, or use the trash worktree
   directly before it expires
-- The idle windows, the in-use test and the expiry window are that script's
-  top-of-file docstring and constants, not restated here
+- The idle windows, the in-use test, the expiry window and the orphan grace
+  window are that script's top-of-file docstring and constants, not restated
+  here
 
 Migration:
 

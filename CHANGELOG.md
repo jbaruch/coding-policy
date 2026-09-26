@@ -18,8 +18,7 @@
     fingerprint) is written first as a git note under
     `refs/notes/worktree-archive`, never over an existing note. The commit
     message names the ref and source, so two archives of one parent and tree
-    in one second are two commits with two records. JSON keeps a path holding
-    a newline whole. Then `git worktree move` renames it into the root's
+    in one second are two commits with two records. Then `git worktree move` renames it into the root's
     `.trash/`, so a writer that got in after the last check lands in the
     moved copy, and the sweep locks it with its own reason, so `git worktree
     prune` never drops its registration. A failed move leaves it in place
@@ -31,8 +30,10 @@
     whose checkout changed (`submodule-dirty`) or is populated
     (`submodule`), or an untracked directory with its own `.git`
     (`nested-repo`), which `add -A` would reduce to a bare gitlink.
-  - Reachability counts only `refs/remotes/origin/*`, the refs this run
-    fetched; a stale ref of another remote proved nothing. The removal
+  - Reachability counts only the branch tips origin holds right now, read
+    with `git ls-remote --heads origin`. A stale local ref, whether of
+    another remote or of an origin branch deleted since the last fetch,
+    proves nothing, and a dry run and a live run judge the same origin. The removal
     proof (merged, or origin holds HEAD) is re-derived immediately before
     the removal, after every other recheck, so a concurrent fetch or
     force-push that drops it keeps the worktree.
@@ -41,7 +42,11 @@
     dir, its gitdir's HEAD, index and logs/HEAD, and every modified tracked
     or untracked non-ignored file, bounded by `ACTIVITY_FILE_LIMIT`. Workers
     run `cd <worktree> && ...`, so a cwd alone never proves idleness. A
-    missing or failing probe keeps everything (`idle-unknown`). Every read
+    missing or failing probe keeps everything (`idle-unknown`). The probe is
+    NUL-framed (`lsof -F pn0`). lsof still prints a newline or other control
+    byte in a name as escaped text, so a path holding one, a backslash, or a
+    non-ASCII byte cannot be matched against its output and is never judged
+    idle. Every read
     uses `--no-optional-locks`, so judging never resets the clock. Every
     removal waits for idleness, the merged path included.
   - Immediately before a removal, and again after an archive is written,
@@ -62,10 +67,13 @@
     - The branch is read with absence told apart from a git error; an error
       keeps the archive.
     - Only then does it remove, in order: the trash worktree, the branch
-      (only when its tip equals the recorded head), the note, and the ref.
+      (only when its tip equals the recorded head), the ref, and its note.
+      The ref goes first, so a ref never exists without its record.
       Immediately before the forced removal the process probe is re-read
-      fresh and the fingerprint recomputed. A failure at any step keeps the
-      ref; a failed ref deletion puts the note back.
+      fresh and the fingerprint recomputed. A failure before the ref
+      deletion keeps the ref and its record. A failure after it leaves an
+      orphan note on an unreferenced commit, which the next live run removes
+      once the commit is older than `ORPHAN_NOTE_GRACE_HOURS`.
   - The owner migrates an older record through `MIGRATIONS` (empty: v1 is
     the first schema) and rewrites its note. A newer, missing, unparseable
     or unmigratable record, or a `schema_version` that is not an integer of

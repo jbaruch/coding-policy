@@ -130,6 +130,7 @@ Before following any route below, report the worktree sweep to the operator:
 
 - When `checks.worktrees.detail` is present, report from it every archive with
   its `archive_ref` and `trash_path`, every expired, kept or migrated archive,
+  every removed orphan note,
   every `errors` entry, and every kept worktree: list the ones kept for
   `locked`, `in-use`, `changed`, `idle-unknown`, `archive-pending`,
   `submodule`, `submodule-dirty` or `nested-repo` by path, and give the rest

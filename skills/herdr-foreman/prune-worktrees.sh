@@ -13,10 +13,11 @@
 # shared checkout, not locked and not on origin's default branch, is:
 #   * REMOVED (its branch deleted) when clean, IDLE for IDLE_HOURS, and its
 #     branch is an ancestor of origin's default branch (fully merged);
-#   * REMOVED when clean, IDLE for IDLE_HOURS, and its HEAD is contained in
-#     some refs/remotes/origin/* ref (detached included) — only origin's refs,
-#     the ones this run fetched, count; its branch, if any, is deleted at the
-#     tip that ref holds;
+#   * REMOVED when clean, IDLE for IDLE_HOURS, and its HEAD is an ancestor of
+#     a branch tip origin holds right now (detached included): the tips come
+#     from `git ls-remote --heads origin` (ORIGIN_TIPS), never from possibly
+#     stale local remote-tracking refs, so a dry run and a live run judge the
+#     same origin; its branch, if any, is deleted at that tip;
 #   * ARCHIVED then MOVED TO TRASH when dirty or holding commits origin lacks,
 #     and IDLE for ARCHIVE_IDLE_HOURS: its HEAD plus every tracked and
 #     untracked non-ignored file become one commit at
@@ -44,8 +45,10 @@
 # files count as dirty whatever `status.showUntrackedFiles` says; ignored files
 # do not, they are reproducible by the ignore's own claim.
 # "IDLE for N hours" is both: no process of this user has its cwd inside the
-# worktree (`lsof`; a missing or failing probe keeps every worktree, reason
-# idle-unknown), and the newest mtime among the worktree directory, its own
+# worktree (`lsof -F pn0`; a missing or failing probe keeps every worktree,
+# reason idle-unknown, and so does a path lsof cannot print faithfully — one
+# holding a control byte, a backslash or a non-ASCII byte, which lsof escapes),
+# and the newest mtime among the worktree directory, its own
 # gitdir's HEAD, index and logs/HEAD, and every modified tracked or untracked
 # non-ignored file is at least N hours old (a worktree holding more such files
 # than ACTIVITY_FILE_LIMIT is never idle). Every read runs with
@@ -53,8 +56,9 @@
 # before each removal, and again after an archive is written, HEAD, the branch
 # tip, the status, the age and the process probe are all read again; any
 # change keeps the worktree (reason changed). IDLE_HOURS, ARCHIVE_IDLE_HOURS,
-# ACTIVITY_FILE_LIMIT, ARCHIVE_EXPIRE_DAYS, ARCHIVE_SCHEMA and ARCHIVE_NOTES
-# are constants beside the functions that use them.
+# ACTIVITY_FILE_LIMIT, ARCHIVE_EXPIRE_DAYS, ORPHAN_NOTE_GRACE_HOURS,
+# ARCHIVE_SCHEMA and ARCHIVE_NOTES are constants beside the functions that use
+# them.
 # Expiry, each live run, for every archive record older than
 # ARCHIVE_EXPIRE_DAYS (`plan_archives`, `trash_gates`, `expire_archives`):
 #   * the record is read from its note; an older schema_version is migrated
@@ -74,8 +78,15 @@
 #   * then, in order: the process probe is re-read fresh and the fingerprint
 #     recomputed (any change keeps it); the trash worktree is force-removed
 #     past its lock (safe: its content is the archive); the branch is
-#     deleted; the note is removed; the ref is compare-and-deleted, and a
-#     failed deletion puts the note back. A failure at any step keeps the ref.
+#     deleted; the ref is compare-and-deleted; its note is removed last, so
+#     a ref never exists without its record. A failure before the ref
+#     deletion keeps the ref and its record; a failure after it leaves an
+#     orphan note on an unreferenced commit, which no reader takes for an
+#     archive.
+# Orphan notes (`remove_orphan_notes`): a note under ARCHIVE_NOTES on a commit
+# no archive ref points at, older than ORPHAN_NOTE_GRACE_HOURS (so an archive
+# whose note is written but whose ref is not yet is never taken for one), is
+# removed each live run and listed under `orphan_notes_removed`.
 # A trash worktree is never pruned or released as an ordinary worktree, even
 # when its directory is missing: expiry reports it and its branch stays held.
 # A ref not named <name>-<10 hex>-<UTC stamp>, with <name> drawn only from
@@ -122,6 +133,7 @@
 #            "archives_expired":[{"ref","head","trash_path","branch"}],
 #            "archives_kept":[{"ref","head","trash_path","reason"}],
 #            "archives_migrated":[{"ref","head"}],
+#            "orphan_notes_removed":["<commit>"],
 #            "worktrees_kept":[{"path","branch","reason"[,"lock_reason"]}],
 #            "branches_deleted":["<name>"],
 #            "branches_kept":[{"branch","reason"}],
@@ -129,7 +141,8 @@
 #           reason is one of: checked-out (a worktree claimed the branch after
 #           the inventory was taken), default-branch, detached, dirty,
 #           changed (it changed between judgment and removal), idle-unknown
-#           (the process probe could not run), in-use (a process works
+#           (the process probe could not run, or cannot print this path
+#           faithfully), in-use (a process works
 #           inside it), locked (with its lock_reason), merged-not-idle,
 #           archive-pending (an earlier archive of this path waits for its
 #           trash; carries archive_ref), nested-repo, outside-root, submodule,
@@ -161,7 +174,7 @@ warn() { printf 'prune-worktrees: %s\n' "$1" >&2; }
 
 cleanup() {
   local f
-  for f in "$ERRFILE" "$ROWS" "$CWD_FILE"; do
+  for f in "$ERRFILE" "$ROWS" "$CWD_FILE" "$ORIGIN_TIPS"; do
     if [[ -n "$f" ]] && ! rm -f "$f"; then
       warn "could not remove temp file ${f} — remove it by hand"
     fi
@@ -420,8 +433,16 @@ CWD_FILE=""
 reprobe() { CWD_STATE=""; }
 
 # 0 = some live process of this user has its cwd inside <real>, 1 = none does,
-# 2 = unknown (probe missing or failed). Unknown is never read as idle.
+# 2 = unknown (probe missing or failed, or <real> is a path lsof cannot report
+# faithfully). Unknown is never read as idle.
+# lsof escapes a newline or another control byte in a name as text (`\n`), so
+# a path holding one, a backslash, or a non-ASCII byte cannot be matched
+# against its output without guessing; such a worktree is never judged idle.
+# The listing is NUL-framed (`-F pn0`), so one name is one field.
 in_use() { # <real-path>
+  if [[ "$1" == *\\* ]] || ! LC_ALL=C python3 -c 'import sys; sys.exit(0 if all(0x20 <= b <= 0x7e for b in sys.argv[1].encode("utf-8", "surrogateescape")) else 1)' "$1"; then
+    return 2
+  fi
   if [[ -z "$CWD_STATE" ]]; then
     CWD_STATE=failed
     local lsof_bin="${PRUNE_LSOF:-lsof}" uid
@@ -432,17 +453,20 @@ in_use() { # <real-path>
     elif [[ -z "$CWD_FILE" ]] && ! CWD_FILE="$(mktemp)"; then
       CWD_FILE=""
       warn "mktemp failed — cannot hold the process probe, so no worktree is judged idle"
-    elif ! "$lsof_bin" -a -u "$uid" -d cwd -Fn >"$CWD_FILE" 2>"$ERRFILE"; then
-      warn "\`${lsof_bin} -a -u ${uid} -d cwd -Fn\` failed: $(tr '\n' ' ' < "$ERRFILE") — no worktree is judged idle"
+    elif ! "$lsof_bin" -a -u "$uid" -d cwd -F pn0 >"$CWD_FILE" 2>"$ERRFILE"; then
+      warn "\`${lsof_bin} -a -u ${uid} -d cwd -F pn0\` failed: $(tr '\n' ' ' < "$ERRFILE") — no worktree is judged idle"
     else
       CWD_STATE=ok
     fi
   fi
   [[ "$CWD_STATE" == ok ]] || return 2
-  local line cwd
-  while IFS= read -r line; do
-    [[ "$line" == n* ]] || continue
-    cwd="${line#n}"
+  local field cwd
+  while IFS= read -r -d '' field || [[ -n "$field" ]]; do
+    # A process set ends with a newline after its last NUL; it leads the
+    # next field.
+    field="${field#$'\n'}"
+    [[ "$field" == n* ]] || continue
+    cwd="${field#n}"
     if [[ "$cwd" == "$1" || "$cwd" == "$1"/* ]]; then return 0; fi
   done < "$CWD_FILE"
   return 1
@@ -525,15 +549,56 @@ recheck() { # <shared> <real> <branch|""> <state-when-judged> <window-hours>
   return 1
 }
 
-# 0 when <commit> is contained in some refs/remotes/origin/* ref, 1 when none
-# holds it, 2 on a tool failure. Only origin's refs count: they are the ones
-# this run fetched (and, live, pruned); another remote's refs may be stale.
+#: File of the branch tips origin holds right now (`git ls-remote --heads`),
+#: restricted to commits present locally. Live and dry runs both judge
+#: reachability against it, so a branch deleted on origin since the last
+#: fetch counts for neither.
+ORIGIN_TIPS=""
+
+# Record origin's current branch tips in ORIGIN_TIPS. Returns 1 on failure.
+read_origin_tips() { # <shared>
+  local listing
+  if [[ -z "$ORIGIN_TIPS" ]] && ! ORIGIN_TIPS="$(mktemp 2>"$ERRFILE")"; then ORIGIN_TIPS=""; return 1; fi
+  if ! listing="$(mktemp 2>"$ERRFILE")"; then return 1; fi
+  if ! git -C "$1" ls-remote --heads origin >"$listing" 2>"$ERRFILE"; then
+    if ! rm -f "$listing"; then warn "could not remove temp file ${listing} — remove it by hand"; fi
+    return 1
+  fi
+  local ok=0
+  if python3 - "$1" "$listing" "$ORIGIN_TIPS" 2>"$ERRFILE" <<'PY'
+import subprocess
+import sys
+
+shared, listing, out = sys.argv[1:4]
+with open(listing, encoding="utf-8") as handle:
+    shas = sorted({line.split("\t", 1)[0] for line in handle if line.strip()})
+check = subprocess.run(["git", "-C", shared, "cat-file", "--batch-check=%(objectname) %(objecttype)"],
+                       input="".join(sha + "\n" for sha in shas), capture_output=True, text=True)
+if check.returncode != 0:
+    sys.stderr.write(check.stderr)
+    sys.exit(1)
+present = [line.split(" ")[0] for line in check.stdout.splitlines() if line.endswith(" commit")]
+with open(out, "w", encoding="utf-8") as handle:
+    handle.write("".join(sha + "\n" for sha in present))
+PY
+  then ok=1; fi
+  if ! rm -f "$listing"; then warn "could not remove temp file ${listing} — remove it by hand"; fi
+  (( ok ))
+}
+
+# 0 when <commit> is an ancestor of a branch tip origin holds now, 1 when
+# none, 2 on a tool failure.
 reachable_remotely() { # <shared> <commit>
+  local -a tips=()
+  local tip
+  while IFS= read -r tip; do [[ -n "$tip" ]] && tips+=("^${tip}"); done < "$ORIGIN_TIPS"
+  (( ${#tips[@]} )) || return 1
   local out
-  if ! out="$(git -C "$1" for-each-ref --contains "$2" --format='%(refname)' refs/remotes/origin/ 2>"$ERRFILE")"; then
+  # Empty output: every commit <commit> reaches is also reached by a tip.
+  if ! out="$(git -C "$1" rev-list -n 1 "$2" "${tips[@]}" 2>"$ERRFILE")"; then
     return 2
   fi
-  [[ -n "$out" ]]
+  [[ -z "$out" ]]
 }
 
 # Re-derive the removal proof immediately before a removal: 0 when <tip> is
@@ -545,6 +610,8 @@ proof_holds() { # <shared> <mode> <tip> <head> <default>
     verdict="$(ancestry "$1" "$3" "$5")" || return 2
     [[ "$verdict" == merged ]]
   else
+    # Origin as it is now, not as it was when the run started.
+    read_origin_tips "$1" || return 2
     reachable_remotely "$1" "$4"
   fi
 }
@@ -554,6 +621,10 @@ proof_holds() { # <shared> <mode> <tip> <head> <default>
 #: operator's config, which a runner or a fresh machine may not have.
 GIT_IDENT=(GIT_AUTHOR_NAME=prune-worktrees GIT_AUTHOR_EMAIL=prune-worktrees@localhost
            GIT_COMMITTER_NAME=prune-worktrees GIT_COMMITTER_EMAIL=prune-worktrees@localhost)
+# An injected clock dates the commits too, so their ages read against it.
+if [[ -n "${PRUNE_NOW:-}" ]]; then
+  GIT_IDENT+=("GIT_AUTHOR_DATE=@${PRUNE_NOW%.*} +0000" "GIT_COMMITTER_DATE=@${PRUNE_NOW%.*} +0000")
+fi
 
 #: The archive record's schema_version, written into its JSON note. The
 #: owner is this script; MIGRATIONS in `plan_archives` upgrades an older record.
@@ -1095,13 +1166,12 @@ sys.stdout.write("\x1f".join([r["trash"], r["head"], r.get("branch") or "", r["t
         *) row failed "$ref" "" "cannot tell whether ${branch} exists, so ${ref} was kept: $(tr '\n' ' ' < "$ERRFILE")"; continue ;;
       esac
     fi
-    local note_text
-    if ! note_text="$(git -C "$1" notes --ref="$ARCHIVE_NOTES" show "$sha" 2>"$ERRFILE")"; then
+    if ! git -C "$1" notes --ref="$ARCHIVE_NOTES" show "$sha" >/dev/null 2>"$ERRFILE"; then
       row failed "$ref" "" "cannot re-read its record, so ${ref} was kept: $(tr '\n' ' ' < "$ERRFILE")"; continue
     fi
     if (( $3 )); then row expired "$ref" "$branch" "" "$sha" "$trash"; continue; fi
-    # Destructive steps, in order: trash worktree, branch, note, ref. A failure
-    # at any step keeps the ref; a ref deletion that fails puts the note back.
+    # Destructive steps, in order: trash worktree, branch, ref, note. A failure
+    # before the ref deletion keeps the ref and its record.
     # Immediately before the forced removal: a fresh probe, never the
     # snapshot trash_gates took, and a fresh fingerprint.
     local last_tree
@@ -1123,20 +1193,79 @@ sys.stdout.write("\x1f".join([r["trash"], r["head"], r.get("branch") or "", r["t
       fi
       row branch-deleted "$del_branch" "$del_branch" ""
     fi
-    if ! env "${GIT_IDENT[@]}" git -C "$1" notes --ref="$ARCHIVE_NOTES" remove "$sha" 2>"$ERRFILE"; then
-      row failed "$ref" "" "removing its record note failed, so ${ref} was kept: $(tr '\n' ' ' < "$ERRFILE")"; continue
-    fi
+    # The ref goes before its note, so a ref never exists without its record.
+    # A run interrupted between the two leaves only an orphan note on an
+    # unreferenced commit, which no reader takes for an archive and the orphan
+    # pass removes.
     if ! git -C "$1" update-ref -d "$ref" "$sha" 2>"$ERRFILE"; then
-      local why; why="$(tr '\n' ' ' < "$ERRFILE")"
-      if printf '%s\n' "$note_text" | env "${GIT_IDENT[@]}" git -C "$1" notes --ref="$ARCHIVE_NOTES" add -F - "$sha" 2>"$ERRFILE"; then
-        row failed "$ref" "" "deleting ${ref} failed (${why}); its record note was restored and the archive kept"
-      else
-        row failed "$ref" "" "deleting ${ref} failed (${why}) and its record note could not be restored: $(tr '\n' ' ' < "$ERRFILE") — the ref is kept without a record; restore the note by hand"
-      fi
-      continue
+      row failed "$ref" "" "deleting expired archive ${ref} failed, so it was kept with its record: $(tr '\n' ' ' < "$ERRFILE")"; continue
+    fi
+    if ! env "${GIT_IDENT[@]}" git -C "$1" notes --ref="$ARCHIVE_NOTES" remove "$sha" 2>"$ERRFILE"; then
+      row failed "$ref" "" "${ref} was deleted but its record note could not be removed: $(tr '\n' ' ' < "$ERRFILE") — a later live run removes the orphan note"; continue
     fi
     row expired "$ref" "$branch" "" "$sha" "$trash"
   done
+  return 0
+}
+
+#: A note on a commit no archive ref points at is an orphan (a run interrupted
+#: between deleting a ref and its note). It is removed once the commit is
+#: this many hours old, so an archive being written right now (its note lands
+#: before its ref) is never mistaken for one.
+ORPHAN_NOTE_GRACE_HOURS="${PRUNE_ORPHAN_NOTE_GRACE_HOURS:-24}"
+
+# Remove orphan archive notes; a dry run only reports them.
+remove_orphan_notes() { # <shared> <dry 0|1>
+  local orphans
+  if ! orphans="$(python3 - "$1" "$ARCHIVE_NOTES" "${PRUNE_NOW:-}" "$ORPHAN_NOTE_GRACE_HOURS" 2>"$ERRFILE" <<'PY'
+import subprocess
+import sys
+import time
+
+shared, notes_ref, now, grace = sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4])
+now = float(now) if now else time.time()
+
+
+def git(*args):
+    run = subprocess.run(["git", "-C", shared, *args], capture_output=True, text=True)
+    return run
+
+
+exists = git("rev-parse", "--verify", "--quiet", notes_ref)
+if exists.returncode == 1:
+    sys.exit(0)  # no notes ref yet: nothing to clean
+if exists.returncode != 0:
+    sys.stderr.write(exists.stderr)
+    sys.exit(1)
+notes = git("notes", "--ref=" + notes_ref, "list")
+refs = git("for-each-ref", "--format=%(objectname)", "refs/archive/worktrees/")
+for run in (notes, refs):
+    if run.returncode != 0:
+        sys.stderr.write(run.stderr)
+        sys.exit(1)
+held = set(refs.stdout.split())
+for line in notes.stdout.splitlines():
+    _, _, commit = line.partition(" ")
+    if not commit or commit in held:
+        continue
+    when = git("log", "-1", "--format=%ct", commit)
+    if when.returncode != 0:
+        sys.stderr.write(when.stderr)
+        sys.exit(1)
+    if now - int(when.stdout.strip()) >= grace * 3600:
+        print(commit)
+PY
+)"; then
+    row failed "$ARCHIVE_NOTES" "" "cannot list orphan archive notes: $(tr '\n' ' ' < "$ERRFILE")"; return 0
+  fi
+  local commit
+  while IFS= read -r commit; do
+    [[ -n "$commit" ]] || continue
+    if (( ! $2 )) && ! env "${GIT_IDENT[@]}" git -C "$1" notes --ref="$ARCHIVE_NOTES" remove "$commit" 2>"$ERRFILE"; then
+      row failed "$commit" "" "removing the orphan archive note on ${commit} failed: $(tr '\n' ' ' < "$ERRFILE")"; continue
+    fi
+    row orphan-note "$commit" "" "" "$commit" ""
+  done <<<"$orphans"
   return 0
 }
 
@@ -1227,6 +1356,10 @@ main() {
   fi
   if (( ! dry )) && ! git -C "$shared" remote set-head origin --auto >/dev/null 2>"$ERRFILE"; then
     warn "\`git -C ${shared} remote set-head origin --auto\` failed: $(tr '\n' ' ' < "$ERRFILE") — cannot confirm origin's current default branch"
+    return 1
+  fi
+  if ! read_origin_tips "$shared"; then
+    warn "cannot read origin's current branch tips: $(tr '\n' ' ' < "$ERRFILE") — refusing to judge reachability from stale refs"
     return 1
   fi
   local db
@@ -1391,13 +1524,14 @@ main() {
   fi
 
   expire_archives "$shared" "$abs_root" "$dry"
+  remove_orphan_notes "$shared" "$dry"
 
   local rc=0
   python3 - "$abs_shared" "$db" "$dry" "$ROWS" <<'PY' || rc=$?
 import json, sys
 shared, db, dry, rows_path = sys.argv[1], sys.argv[2], sys.argv[3] == "1", sys.argv[4]
 result = {"shared": shared, "default_branch": db, "dry_run": dry, "worktrees_removed": [], "worktrees_archived": [],
-          "archives_expired": [], "archives_kept": [], "archives_migrated": [],
+          "archives_expired": [], "archives_kept": [], "archives_migrated": [], "orphan_notes_removed": [],
           "worktrees_kept": [], "branches_deleted": [], "branches_kept": [], "failed": []}
 with open(rows_path, "rb") as handle:
     fields = handle.read().decode("utf-8", "surrogateescape").split("\0")
@@ -1421,6 +1555,8 @@ for index in range(0, len(fields), 6):
         elif kind == "archive-kept":
             result["archives_kept"].append({"ref": target, "head": head, "trash_path": extra or None,
                                             "reason": reason})
+        elif kind == "orphan-note":
+            result["orphan_notes_removed"].append(head)
         elif kind == "migrated":
             result["archives_migrated"].append({"ref": target, "head": head})
         elif kind == "kept":
