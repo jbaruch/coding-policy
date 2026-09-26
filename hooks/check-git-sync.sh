@@ -326,13 +326,23 @@ main() {
 # work; `fetch . <src>:<dst>` for a branch not checked out here only
 # fast-forwards and refuses a branch checked out in any worktree. 0 = moved,
 # 1 = refused (warned).
+#
+# Repo hooks are disabled for both (`core.hooksPath=/dev/null`): a merge runs
+# `post-merge`, and session start must not become a path that runs repo code.
 fast_forward() { # <default-branch>
-  local db="$1" current out rc=0
-  current="$(git symbolic-ref --quiet --short HEAD 2>/dev/null)" || current=""
+  local db="$1" current="" out rc=0
+  # `symbolic-ref --quiet` exits 1 for a detached HEAD, the one expected
+  # non-result; any other failure is a git error and refuses the fast-forward.
+  current="$(git symbolic-ref --quiet --short HEAD)" || rc=$?
+  if (( rc > 1 )); then
+    warn "git symbolic-ref HEAD failed (exit ${rc}) — cannot tell which branch is checked out, so ${db} was not fast-forwarded"
+    return 1
+  fi
+  rc=0
   if [[ "$current" == "$db" ]]; then
-    out="$(git merge --ff-only --quiet "refs/remotes/origin/${db}" 2>&1)" || rc=$?
+    out="$(git -c core.hooksPath=/dev/null merge --ff-only --quiet "refs/remotes/origin/${db}" 2>&1)" || rc=$?
   else
-    out="$(git fetch --quiet . "refs/remotes/origin/${db}:refs/heads/${db}" 2>&1)" || rc=$?
+    out="$(git -c core.hooksPath=/dev/null fetch --quiet . "refs/remotes/origin/${db}:refs/heads/${db}" 2>&1)" || rc=$?
   fi
   if (( rc != 0 )); then
     warn "fast-forward of ${db} refused (exit ${rc}): ${out//$'\n'/ }"

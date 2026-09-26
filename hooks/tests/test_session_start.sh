@@ -15,6 +15,8 @@
 #   3. A hook exits non-zero -> its own status line; the others still arrive.
 #   4. A hook prints non-JSON -> its own status line; the others still arrive.
 #   5. The plugin manifest declares session-start.sh as the only SessionStart hook.
+#   6. jq only, no python3  -> the same merged payload.
+#   7. Neither python3 nor jq -> the hooks still run; a warning, no payload.
 #
 # Run: bash hooks/tests/test_session_start.sh
 set -uo pipefail
@@ -30,10 +32,20 @@ fake_hook() { # <name> <body>
   printf '#!/usr/bin/env bash\nset -euo pipefail\n%s\n' "$2" > "$DIR/$1.sh" || die "cannot write fake hook $1"
 }
 
-# run <hook names...> -> OUT, RC
+# run <hook names...> -> OUT, RC. RUN_PATH, when set, replaces PATH for the script.
 run() {
-  OUT="$(SESSION_START_HOOKS="$*" bash "$DIR/session-start.sh" </dev/null 2>"$TMP/err")"
+  OUT="$(env ${RUN_PATH:+PATH="$RUN_PATH"} SESSION_START_HOOKS="$*" "$BASH" "$DIR/session-start.sh" </dev/null 2>"$TMP/err")"
   RC=$?
+}
+
+# A PATH holding only the named tools, linked from the real PATH.
+only_tools() { # <dir> <tool...>
+  local dir="$1" tool real; shift
+  mkdir -p "$dir" || die "cannot create $dir"
+  for tool in "$@"; do
+    real="$(command -v "$tool")" || die "$tool is required for these tests"
+    ln -s "$real" "$dir/$tool" || die "cannot link $tool into $dir"
+  done
 }
 
 context() { python3 -c 'import json,sys; print(json.loads(sys.stdin.read())["additionalContext"])' <<<"$OUT"; }
@@ -66,7 +78,7 @@ main() {
 
   # 3. a failing hook is named, and the others still arrive.
   run one broken two
-  if [[ $RC -eq 0 ]] && context | grep -q "hook broken exited 3" && context | grep -q "— one" && context | grep -q "— two"; then
+  if [[ $RC -eq 0 ]] && context | grep -qF "hook broken exited 3; run \`bash $DIR/broken.sh\`" && context | grep -q "— one" && context | grep -q "— two"; then
     pass; else fail "failed hook: expected a status naming it, got RC=$RC OUT=$OUT"; fi
 
   # 4. a hook printing non-JSON is named, and the others still arrive.
@@ -82,6 +94,20 @@ hooks = [h for g in groups for h in g["hooks"]]
 sys.exit(0 if len(hooks) == 1 and hooks[0]["args"] == ["${TESSL_PLUGIN_DIR}/hooks/session-start.sh"] else 1)
 PY
   then pass; else fail "manifest: SessionStart must declare session-start.sh alone"; fi
+
+  # 6. jq alone merges the same way.
+  command -v jq >/dev/null || die "jq required for these tests"
+  only_tools "$TMP/jq-only" bash dirname jq
+  RUN_PATH="$TMP/jq-only" run one two quiet noisy
+  if [[ $RC -eq 0 ]] && [[ "$(context)" == $'Session-start status — one\n\nSession-start status — two\n\n'"Session-start status — hook noisy printed something other than one additionalContext object; run \`bash $DIR/noisy.sh\` from this repo to see it." ]]; then
+    pass; else fail "jq only: expected the merged payload, got RC=$RC OUT=$OUT"; fi
+
+  # 7. Neither tool: the hooks still act, and the loss is warned, not silent.
+  fake_hook marker "printf 'ran\n' > \"$TMP/marker\""
+  only_tools "$TMP/bare" bash dirname
+  RUN_PATH="$TMP/bare" run marker one
+  if [[ $RC -eq 0 && -z "$OUT" && -f "$TMP/marker" ]] && grep -q "neither python3 nor jq" "$TMP/err"; then
+    pass; else fail "no JSON tool: expected hooks run, a warning and no payload, got RC=$RC OUT=$OUT err=$(cat "$TMP/err")"; fi
 
   echo "─────────────────────────────────────────────"
   if (( FAIL > 0 )); then echo "FAILED: ${FAIL} failed, ${PASS} passed"; exit 1; fi

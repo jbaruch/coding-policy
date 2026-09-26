@@ -102,11 +102,16 @@ main() {
     pass; else fail "worker session: expected a no-sync notice and main unmoved, got RC=$RC OUT=$OUT"; fi
 
   # 1b. The same drift from the MAIN checkout (on main) is the foreman or a
-  # standalone agent: the hook fast-forwards main and says so.
+  # standalone agent: the hook fast-forwards main and says so, without running
+  # the repo's own post-merge hook.
+  printf '#!/bin/sh\ntouch "%s"\n' "$TMP/post-merge-ran" > "$TMP/r1/.git/hooks/post-merge" \
+    || die "could not write the post-merge hook"
+  chmod +x "$TMP/r1/.git/hooks/post-merge" || die "could not make the post-merge hook executable"
   run "$TMP/r1" "$TMP/s1c" HERDR_ENV=1
   if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | jq -e '.additionalContext | test("Session-start status") and test("fast-forwarded local `main` by 1")' >/dev/null 2>&1 \
-    && [[ "$(git -C "$TMP/r1" rev-parse main)" == "$(git -C "$TMP/r1" rev-parse origin/main)" ]]; then
-    pass; else fail "behind on main: expected a fast-forward, got RC=$RC OUT=$OUT"; fi
+    && [[ "$(git -C "$TMP/r1" rev-parse main)" == "$(git -C "$TMP/r1" rev-parse origin/main)" ]] \
+    && [[ ! -e "$TMP/post-merge-ran" ]]; then
+    pass; else fail "behind on main: expected a fast-forward with no repo hook run, got RC=$RC OUT=$OUT"; fi
 
   # 1c. Behind while a feature branch is checked out: main moves without a
   # checkout, and the feature branch is untouched.
