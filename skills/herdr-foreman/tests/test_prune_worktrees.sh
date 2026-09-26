@@ -642,6 +642,7 @@ SHIM
   age_wt "$af"
   mkdir -p "$TMP/shim42" || die "mkdir shim42 failed"
   local real_git; real_git="$(command -v git)" || die "git not found"
+  # shellcheck disable=SC2016  # The shim's "$@" and $a must expand in the shim, not here.
   printf '#!/usr/bin/env bash\nset -euo pipefail\nfor a in "$@"; do if [[ "$a" == commit-tree ]]; then echo "commit-tree refused" >&2; exit 1; fi; done\nexec %q "$@"\n' "$real_git" > "$TMP/shim42/git" \
     || die "shim42 write failed"
   chmod +x "$TMP/shim42/git" || die "chmod shim42 failed"
