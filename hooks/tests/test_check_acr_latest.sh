@@ -335,8 +335,9 @@ main() {
 
   # 25. ACR's output is masked before it reaches the session.
   mk_project p25
-  run "$PROJECT" FAKE_RC=1 FAKE_OUT="fatal: https://jb:s3cret@github.com/x.git token ghp_abcDEF123"
-  if [[ $RC -eq 0 ]] && context | grep -q "github.com/x.git" && ! context | grep -q "s3cret" && ! context | grep -q "abcDEF123"; then
+  run "$PROJECT" FAKE_RC=1 FAKE_OUT="fatal: https://jb:s3cret@github.com/x.git token ghp_abcDEF123 BEARER upTok3n.x bEaReR mixTok3n Basic YmFzaWNzZWNyZXQ="
+  if [[ $RC -eq 0 ]] && context | grep -q "github.com/x.git" && ! context | grep -q "s3cret" && ! context | grep -q "abcDEF123" \
+    && ! context | grep -q "upTok3n" && ! context | grep -q "mixTok3n" && ! context | grep -q "YmFzaWNzZWNyZXQ"; then
     pass; else fail "redaction: expected masked credentials, got OUT=$OUT"; fi
 
   echo "─────────────────────────────────────────────"

@@ -35,7 +35,7 @@ set -euo pipefail
 warn() { printf 'check-acr-latest: %s\n' "$1" >&2; }
 
 # Echo <text> with credentials masked: URL userinfo, GitHub tokens, OpenAI-style
-# keys and bearer tokens (rules/no-secrets.md Logging). Pure bash, so it needs
+# keys, and Bearer/Basic authorization values in any casing (rules/no-secrets.md Logging). Pure bash, so it needs
 # no tool that could be missing.
 redact() { # <text>
   local text="$1" re
@@ -44,7 +44,8 @@ redact() { # <text>
     '(gh[pousr]_)[A-Za-z0-9_]+'
     '(github_pat_)[A-Za-z0-9_]+'
     '(sk-)[A-Za-z0-9_-]{16,}'
-    '([Bb]earer[[:space:]]+)[A-Za-z0-9._~+/=-]+'
+    '([Bb][Ee][Aa][Rr][Ee][Rr][[:space:]]+)[A-Za-z0-9._~+/=-]+'
+    '([Bb][Aa][Ss][Ii][Cc][[:space:]]+)[A-Za-z0-9+/=]{8,}'
   )
   for re in "${patterns[@]}"; do
     while [[ "$text" =~ $re ]]; do
