@@ -33,7 +33,9 @@
 #   env   : BOUNDED_RUN_TEST_EXPIRE_BEFORE_LAUNCH=1 (tests only) delivers the
 #           expiry before the command is launched;
 #           BOUNDED_RUN_TEST_EXPIRE_AFTER_EXIT=1 (tests only) delivers it
-#           after the command exits, before the alarm is cancelled.
+#           after the command exits, before the alarm is cancelled, and
+#           =masked delivers it once SIGALRM is blocked again (held pending,
+#           still exit 124).
 set -euo pipefail
 
 #: Seconds between SIGTERM and SIGKILL once the budget is spent.
@@ -115,7 +117,13 @@ try:
     # Cancelled inside the handler's reach: an expiry landing after the wait
     # but before this is still stopped here, never a traceback.
     signal.pthread_sigmask(signal.SIG_BLOCK, ALARM)
+    if os.environ.get("BOUNDED_RUN_TEST_EXPIRE_AFTER_EXIT") == "masked":
+        # Test seam: an expiry that lands once the mask holds it.
+        os.kill(os.getpid(), signal.SIGALRM)
     signal.alarm(0)
+    if signal.SIGALRM in signal.sigpending():
+        # Landed after the wait, held by the mask: still an expiry.
+        raise Expired()
 except Expired:
     signal.signal(signal.SIGALRM, signal.SIG_IGN)
     signal_group(signal.SIGTERM)

@@ -12,7 +12,8 @@
 #  2b. Early expiry  -> an expiry before the launch is still exit 124, with no
 #                        traceback and nothing left running.
 #  2d. Expiry at exit -> an expiry landing after the command exits, before the
-#                        alarm is cancelled, is exit 124 with no traceback.
+#                        alarm is cancelled, is exit 124 with no traceback,
+#                        and so is one the restored mask holds pending.
 #  2c. TERM-trapping  -> a command that exits on SIGTERM leaves no grandchild:
 #                        the grace-period SIGKILL reaches the whole group.
 #   3. Not startable  -> exit 125 with a diagnostic.
@@ -83,11 +84,14 @@ main() {
   if [[ $rc -eq 124 && $early_alive -eq 0 ]] && grep -q "budget" "$TMP/2b.err" && ! grep -q "Traceback" "$TMP/2b.err"; then pass
   else fail "early expiry: rc=$rc alive=$early_alive err=$(cat "$TMP/2b.err")"; fi
 
-  echo "2d. an expiry that lands as the command exits is exit 124, no traceback"
-  rc=0
-  BOUNDED_RUN_TEST_EXPIRE_AFTER_EXIT=1 bash "$RUNNER" "$HOUR" bash -c 'exit 0' 2>"$TMP/2d.err" || rc=$?
-  if [[ $rc -eq 124 ]] && grep -q "budget" "$TMP/2d.err" && ! grep -q "Traceback" "$TMP/2d.err"; then pass
-  else fail "expiry at exit: rc=$rc err=$(cat "$TMP/2d.err")"; fi
+  echo "2d. an expiry that lands as the command exits is exit 124, no traceback, held by the mask or not"
+  local when
+  for when in 1 masked; do
+    rc=0
+    BOUNDED_RUN_TEST_EXPIRE_AFTER_EXIT="$when" bash "$RUNNER" "$HOUR" bash -c 'exit 0' 2>"$TMP/2d.err" || rc=$?
+    if [[ $rc -eq 124 ]] && grep -q "budget" "$TMP/2d.err" && ! grep -q "Traceback" "$TMP/2d.err"; then pass
+    else fail "expiry at exit ($when): rc=$rc err=$(cat "$TMP/2d.err")"; fi
+  done
 
   echo "2c. a command that exits on SIGTERM cannot leave a grandchild behind"
   # The command traps TERM and exits; its grandchild ignores TERM, and holds

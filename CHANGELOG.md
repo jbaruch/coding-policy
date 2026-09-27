@@ -13,8 +13,10 @@
   - `skills/herdr-foreman/bounded-run.sh` cancelled its alarm after leaving
     the protected block, so an expiry landing as the command exited raised
     outside the handler: a Python traceback and exit 1 instead of 124. The
-    alarm is now blocked and cancelled inside the handler's reach. A new test
-    seam, `BOUNDED_RUN_TEST_EXPIRE_AFTER_EXIT=1`, delivers that expiry.
+    alarm is now blocked and cancelled inside the handler's reach, and an
+    expiry the restored mask holds pending is read with `signal.sigpending()`
+    and still exits 124. A new test seam,
+    `BOUNDED_RUN_TEST_EXPIRE_AFTER_EXIT=1|masked`, delivers each expiry.
   - `skills/herdr-foreman/sweep-worktrees.sh` proved the root's identity once,
     before the first prune. A root replaced after one repository's prune ran
     let the next prune read its moved worktrees as gone, drop their
