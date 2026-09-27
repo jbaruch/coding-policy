@@ -43,6 +43,28 @@
   change; it stays recorded so the next edit to that list lands its formatting
   in a commit of its own.
 
+## 0.3.298 — 2026-09-27
+
+### Fixed
+
+- **Four edges in the tier-pressure fields #477 added (#490).** Deferred
+  Copilot advisories from #489's last review, all latent until a worker has a
+  `tiers` table. `select_tier` recorded `de_escalated` whenever scarcity met
+  risk evidence, including on rows with nothing above them to decline: a Grok
+  row (no effort above `high`), or a Claude or Codex row already on its top
+  model at `xhigh` or `max`. It now computes the escalated tier first and
+  records a de-escalation only when that tier differs from the configured
+  one; a row whose escalation needs a missing `review` row still declines
+  under scarcity rather than refusing. The pinned judge's plan entry now
+  carries `pressure_headroom: null` and `de_escalated: false`, so every
+  schema-9 tier entry has one shape. `plan --snapshot` records
+  `snapshot_ref.source` as an absolute path: `apply` re-reads that
+  file, and a relative name resolved against apply's own working directory
+  read as unmeasured, refusing a legitimately de-escalated plan as stale. The
+  ledger's pressure check reads stored headroom through `measured_pressure`,
+  so an integer too large for a float (`10**1000`) marks the state unusable
+  instead of raising `OverflowError` out of `math.isfinite`.
+
 ## 0.3.297 — 2026-09-27
 
 ### Tests
