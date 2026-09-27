@@ -48,15 +48,39 @@ trap cleanup EXIT
 
 die() { echo "evaluate: $*" >&2; exit 2; }
 
-corpus() { # <state-file> <limit> <since-or-empty>
-  python3 - "$1" "$2" "${3-}" <<'PY'
+corpus() { # <state-file-or-empty> <limit> <since-or-empty> <state-root> <skill-dir>
+  # An empty state file reads the default home. That run checks the home and
+  # reads the store under one shared hold of the home guard
+  # (skills/herdr-foreman/foreman/home.py `guard`, `require_current`), so a
+  # migrate-home starting between the check and the read is refused instead of
+  # leaving a half-moved or empty corpus. An explicit --state is never moved
+  # and takes no guard.
+  XDG_STATE_HOME="$4" PYTHONPATH="$5" python3 - "$1" "$2" "${3-}" <<'PY'
 import json, pathlib, sys
-state, limit, since = pathlib.Path(sys.argv[1]).expanduser(), int(sys.argv[2]), sys.argv[3]
-try:
-    data = json.loads(state.read_text(encoding="utf-8"))
-except (OSError, ValueError) as exc:
-    sys.stderr.write("evaluate: cannot read {}: {}\n".format(state, exc))
-    raise SystemExit(2)
+
+explicit, limit, since = sys.argv[1], int(sys.argv[2]), sys.argv[3]
+
+
+def read(state):
+    try:
+        return json.loads(state.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        sys.stderr.write("evaluate: cannot read {}: {}\n".format(state, exc))
+        raise SystemExit(2)
+
+
+if explicit:
+    data = read(pathlib.Path(explicit).expanduser())
+else:
+    from foreman import home
+    from foreman.errors import ForemanError
+    try:
+        with home.guard(False):
+            home.require_current({"state"})
+            data = read(home.roots()["state"] / home.CURRENT / home.STATE_FILE)
+    except ForemanError as exc:
+        sys.stderr.write("evaluate: {} Or pass --state.\n".format(exc.message))
+        raise SystemExit(2)
 rows, seen = [], set()
 for dispatch in data.get("recovery", {}).get("dispatches", []):
     report = dispatch.get("report") or {}
@@ -97,35 +121,14 @@ main() {
     esac
   done
   case "$limit" in ''|*[!0-9]*) die "--limit takes a non-negative integer" ;; esac
-  if [ -z "$state" ]; then
-    # The default corpus asks the owner's own home check
-    # (skills/herdr-foreman/foreman/home.py `require_current`), so a legacy,
-    # split or blocked home refuses here exactly as it refuses the foreman,
-    # never reading the new path as an empty corpus.
-    local refusal
-    if ! refusal="$(XDG_STATE_HOME="$state_root" PYTHONPATH="${skill_dir}" python3 -c '
-import sys
-from foreman import home
-from foreman.errors import StateError
-try:
-    home.require_current({"state"})
-except StateError as exc:
-    print(exc)
-')"; then
-      die "cannot check the state home under ${state_root} (skills/herdr-foreman/foreman/home.py failed to run); pass --state"
-    fi
-    if [ -n "$refusal" ]; then
-      die "${refusal} Or pass --state."
-    fi
-    state="${state_root}/foreman/state.json"
-  fi
-
   local work
   work="$(mktemp -d "${TMPDIR:-/tmp}/classify-eval.XXXXXX")" || die "cannot create a temporary directory"
   SCRATCH="$work"
 
   local selected="${work}/corpus.json"
-  corpus "$state" "$limit" "$since" > "$selected" || die "cannot build the labelled corpus"
+  local source="${state:-the default home under ${state_root}}"
+  corpus "$state" "$limit" "$since" "$state_root" "$skill_dir" > "$selected" \
+    || die "cannot build the labelled corpus from ${source}"
   local total
   total="$(python3 -c 'import json,sys; print(len(json.load(open(sys.argv[1]))))' "$selected")" \
     || die "cannot read the corpus it just built at ${selected}"

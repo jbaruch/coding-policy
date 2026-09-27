@@ -18,7 +18,8 @@
 #   5. An unreadable report     -> exit 2 before any model call.
 #   6. --model                  -> overrides the pin and travels with the label.
 #   7. --out                    -> the same payload, byte for byte.
-#   8. Corpus building          -> recorded verdicts only, missing files dropped.
+#   8. Corpus building          -> recorded verdicts only, missing files dropped;
+#                                 the default home is read under the home guard.
 #   9. Scoring                  -> accuracy, confusion, disagreements.
 #  10. A failed classification  -> exit 1 with a partial score, never averaged
 #                                 over the ones that worked.
@@ -311,6 +312,25 @@ PY
   RC=$?
   if [[ $RC -eq 0 ]] && [[ "$(field "$OUT" corpus)" == "1" ]]; then
     pass; else fail "a migrated default home reads its corpus, got RC=$RC OUT=$OUT"; fi
+  # A migrate-home in flight holds the home guard exclusively. The default
+  # corpus is checked and read under that guard, so it is refused rather than
+  # scoring a half-moved or empty store. The holder runs evaluate while it
+  # holds the lock, so the overlap is deterministic, never a timing race.
+  local held
+  held="$(python3 - "$xdg" "$DIR/evaluate.sh" "$ERRFILE" <<'PY'
+import fcntl, os, subprocess, sys
+xdg, evaluate, errfile = sys.argv[1:4]
+with open(os.path.join(xdg, ".foreman-home.lock"), "a", encoding="utf-8") as lock:
+    fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    with open(errfile, "w", encoding="utf-8") as err:
+        run = subprocess.run(["bash", evaluate, "--corpus-only"], env={**os.environ, "XDG_STATE_HOME": xdg},
+                             stdout=subprocess.PIPE, stderr=err, text=True, check=False)
+print("{}\t{}".format(run.returncode, len(run.stdout)))
+PY
+)" || die "cannot hold the home guard under $xdg"
+  ERRTEXT="$(cat "$ERRFILE")"
+  if [[ "$held" == $'2\t0' ]] && printf '%s' "$ERRTEXT" | grep -q 'migrate-home is moving'; then
+    pass; else fail "a default corpus read during migrate-home is refused, got $held ERR=$ERRTEXT"; fi
 
   echo "▶ scoring" >&2
 

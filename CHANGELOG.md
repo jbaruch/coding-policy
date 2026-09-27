@@ -1,5 +1,21 @@
 # Changelog
 
+### Fixed
+
+- **`evaluate.sh` reads the default corpus under the home guard (#537).**
+  `skills/herdr-foreman/classify/evaluate.sh` checked the default state home
+  with `home.require_current` in one python run, then read `state.json` in a
+  second run holding nothing, so a `migrate-home` starting between the two
+  could leave it scoring a half-moved or empty corpus. The default-home path
+  now checks and reads in one run under a shared hold of
+  `$XDG_STATE_HOME/.foreman-home.lock` (`home.guard(False)`), the same guard
+  every foreman command takes, and a migration in flight refuses the
+  evaluation naming migrate-home. An explicit `--state` is never moved and
+  still takes no guard. A regression case holds the guard exclusively while
+  evaluate runs and requires the refusal; it fails against the old script.
+  Low likelihood in practice (evaluate is an operator-run offline tool and
+  migrate-home a one-time step), deferred from Copilot's advisory on #536.
+
 ## 0.3.284 — 2026-09-27
 
 ### Fixed
