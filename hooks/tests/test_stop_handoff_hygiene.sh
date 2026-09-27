@@ -107,6 +107,24 @@ mk_python_probe() { # <path>
   chmod +x "$1" || die "could not enable interpreter fixture"
 }
 
+# write_role_shim <dir> <case-pattern> <real-git>: a git stand-in that fails
+# any invocation carrying an argument matching <case-pattern> and passes every
+# other one through to the real git.
+write_role_shim() {
+  mkdir -p "$1" || die "could not create $1"
+  cat > "$1/git" <<SH || die "could not write the git shim in $1"
+#!/usr/bin/env bash
+set -euo pipefail
+for a in "\$@"; do
+  case "\$a" in
+    $2) echo "shim: role probe refused" >&2; exit 1 ;;
+  esac
+done
+exec $(printf '%q' "$3") "\$@"
+SH
+  chmod +x "$1/git" || die "could not make the git shim in $1 executable"
+}
+
 #: The owner script judges idleness at this instant (2020-01-10T00:00:00Z);
 #: an aged fixture is touched to AGED_MTIME, nine days before it.
 PRUNE_NOW=1578614400
@@ -298,37 +316,31 @@ main() {
 
   # 4g. HERDR_ENV set and the role probes fail (a git shim on PATH refuses
   #     them): the role is unknown, so the foreman-only worktree check never
-  #     runs, even from the main checkout holding case 4's spent worktree. The
-  #     hook says why and names the diagnostic command.
-  local realgit shim probe
+  #     runs, even from a main checkout holding a spent worktree. The hook says
+  #     why and names the diagnostic command. Its own origin, checkout and
+  #     worktree keep it independent of every other case.
+  mk_origin o4g; clone_from "$BARE" "$TMP/r4g"
+  g -C "$TMP/r4g" worktree add -q "$TMP/wt/r4g-wt" -b feat/r4g || die "r4g worktree add failed"
+  age_wt "$TMP/wt/r4g-wt"
+  local realgit probe
   realgit="$(command -v git)" || die "no git on PATH"
+  write_role_shim "$TMP/shim4g-both" '--absolute-git-dir|--git-common-dir' "$realgit"
+  write_role_shim "$TMP/shim4g-common" '--git-common-dir' "$realgit"
   for probe in both common; do
-    shim="$TMP/shim4g-$probe"
-    mkdir -p "$shim" || die "could not create $shim"
-    if [[ "$probe" == both ]]; then
-      # shellcheck disable=SC2016  # the shim's own "$@"/"$a" must stay literal in its source
-      printf '#!/usr/bin/env bash\nfor a in "$@"; do case "$a" in --absolute-git-dir|--git-common-dir) echo "shim: role probe refused" >&2; exit 1 ;; esac; done\nexec %q "$@"\n' "$realgit" > "$shim/git" \
-        || die "could not write the git shim"
-    else
-      # shellcheck disable=SC2016  # the shim's own "$@"/"$a" must stay literal in its source
-      printf '#!/usr/bin/env bash\nfor a in "$@"; do case "$a" in --git-common-dir) echo "shim: role probe refused" >&2; exit 1 ;; esac; done\nexec %q "$@"\n' "$realgit" > "$shim/git" \
-        || die "could not write the git shim"
-    fi
-    chmod +x "$shim/git" || die "could not make the git shim executable"
-    run_hook "$TMP/r4" '{"stop_hook_active":false}' "$shim:$PATH" HERDR_ENV=1
+    run_hook "$TMP/r4g" '{"stop_hook_active":false}' "$TMP/shim4g-$probe:$PATH" HERDR_ENV=1
     if [[ $RC -eq 0 && -z "$OUT" ]] \
        && [[ "$ERRTEXT" == *"Worktree and branch check skipped"* ]] \
        && [[ "$ERRTEXT" == *"\`git rev-parse --absolute-git-dir --path-format=absolute --git-common-dir\`"* ]] \
-       && [[ "$ERRTEXT" != *r4-wt* && "$ERRTEXT" != *"worktree check could not"* ]]; then
+       && [[ "$ERRTEXT" != *r4g-wt* && "$ERRTEXT" != *"worktree check could not"* ]]; then
       pass; else fail "unknown role ($probe probe fails): expected no worktree check and a skip report, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
   done
-  # The unknown role still gates the session's own changed files.
-  # shellcheck disable=SC2016  # The literal `$x` IS the fixture.
-  printf 'if [ $x = 1 ]; then :; fi\n' > "$TMP/r4/bad.sh" || die "r4 bad.sh failed"
-  run_hook "$TMP/r4" '{"stop_hook_active":false}' "$TMP/shim4g-both:$PATH" HERDR_ENV=1
-  if [[ $RC -eq 0 ]] && reason_has "shellcheck findings" && reason_has "Worktree and branch check skipped" && ! reason_has "r4-wt"; then
+  # The unknown role still gates the session's own changed files. A stubbed
+  # engine that reports a finding keeps the case host-independent.
+  printf '#!/usr/bin/env bash\necho hi\n' > "$TMP/r4g/new.sh" || die "r4g new.sh failed"
+  mk_stub_bin "$TMP/r4g-bin" 1 0
+  run_hook "$TMP/r4g" '{"stop_hook_active":false}' "$TMP/shim4g-both:$TMP/r4g-bin:$PATH" HERDR_ENV=1
+  if [[ $RC -eq 0 ]] && reason_has "shellcheck findings" && reason_has "Worktree and branch check skipped" && ! reason_has "r4g-wt"; then
     pass; else fail "unknown role diagnostics: expected a diagnostics block without the worktree finding, got RC=$RC OUT=$OUT ERR=$ERRTEXT"; fi
-  rm -f "$TMP/r4/bad.sh" || die "r4 bad.sh cleanup failed"
 
   # 5. dirty tree only -> allow (report-only).
   mk_origin o5; clone_from "$BARE" "$TMP/r5"
