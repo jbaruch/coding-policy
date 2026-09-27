@@ -1,7 +1,5 @@
 # Changelog
 
-## 0.3.287 — 2026-09-27
-
 ### Fixed
 
 - **A frozen-brief path with a symlinked ancestor is no longer read back
@@ -30,6 +28,10 @@
   resolution and read, a source directory swapped for a link before the read
   and before the write, a failed write followed by a clean retry, a brief
   path containing braces, and a FIFO source.
+
+## 0.3.287 — 2026-09-27
+
+### Fixed
 
 - **`foreman-reset` resolves a relative `FOREMAN_HERDR_BIN` before the
   deliverer starts (#533).** A relative `--herdr-bin` was already resolved to
