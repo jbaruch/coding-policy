@@ -50,8 +50,10 @@
     repository at session start: it runs both owner scripts live, removes
     silently, and lists only the reported items above, plus one "could not
     check" line when either script fails, times out or cannot reach `gh`.
-    It deletes nothing in a Herdr worker session, and runs `--dry-run` under
-    tessl, which strips the environment a worker check needs. Both scripts
+    It deletes nothing in a Herdr worker session. Under tessl, which strips
+    the environment a worker check needs, a linked worktree runs neither
+    script (it may be a worker's) and a main checkout runs both
+    `--dry-run`, the rule `check-git-sync` applies. Both scripts
     share a 40-second budget through the new
     `skills/herdr-foreman/bounded-run.sh`; `timeout` is absent from a stock
     macOS. The round preflight runs the sweep under the same runner with a
@@ -74,7 +76,7 @@
     instead: what the owner script would remove blocks once, naming the
     command that removes it; what it keeps for the operator is reported.
   - `skills/herdr-foreman/sweep-worktrees.sh` runs the worktree pass across
-    every repository owning a worktree under the root, for the round
+    every repository with a worktree directory under the root, for the round
     preflight; its `report` names each kept dirty or unpushed item with its
     age and command, and SKILL Step 2 relays it verbatim. A `.git` file
     counts only when its repository registers a worktree at that path; a

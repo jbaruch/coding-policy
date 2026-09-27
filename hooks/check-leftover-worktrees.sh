@@ -15,11 +15,13 @@
 # and stale branches on origin merged nowhere with no pull request. Nothing
 # else is listed: no removals, no counts, no other repository.
 #
-# Never acts in a Herdr worker session (HERDR_ENV set, even empty, in a linked worktree):
-# workers never delete (rules/agent-team-operation.md Writers and Checkouts).
-# In portable mode (SESSION_START_MODE=portable, set by hooks/session-start.sh
-# under `tessl hook run`, which strips HERDR_ENV) the scripts run --dry-run:
-# the list is the same, and nothing is deleted.
+# Never acts in a Herdr worker session (HERDR_ENV set, even empty, in a
+# linked worktree): workers never delete (rules/agent-team-operation.md
+# Writers and Checkouts). In portable mode (SESSION_START_MODE=portable, set
+# by hooks/session-start.sh under `tessl hook run`, which strips HERDR_ENV) a
+# linked worktree may be a worker's, so neither script runs there at all, and
+# a proven main checkout runs both --dry-run: the list is the same, and
+# nothing is deleted.
 #
 # Contract:
 #   stdin : consensus SessionStart JSON — not read.
@@ -31,8 +33,8 @@
 #           gh, with the command to rerun it. A missing git or python3 is
 #           that line too, a fixed JSON string printed without either tool.
 #           Silent when neither applies, outside a repository, in a
-#           repository without an origin remote, in a bare repository, and in
-#           a Herdr worker session.
+#           repository without an origin remote, in a bare repository, in
+#           a Herdr worker session, and under tessl in a linked worktree.
 #   stderr: the owner scripts' diagnostics, relayed, plus this hook's warnings.
 #   exit  : always 0 (a failure is the "could not check" line, never silence
 #           and never a failed session start).
@@ -117,6 +119,13 @@ main() {
   fi
   # A worker session: acting here would break the rule the worker runs under.
   if [[ -n "${HERDR_ENV+x}" && "$git_dir" != "$common_dir" ]]; then
+    return 0
+  fi
+  # Under tessl the environment is stripped, so an unset HERDR_ENV proves
+  # nothing: a linked worktree may be a worker's, and a worker neither fetches
+  # nor deletes. Only a proven main checkout runs the owner scripts there,
+  # and only --dry-run (the rule hooks/check-git-sync.sh applies).
+  if [[ "${SESSION_START_MODE:-native}" == portable && "$git_dir" != "$common_dir" ]]; then
     return 0
   fi
 

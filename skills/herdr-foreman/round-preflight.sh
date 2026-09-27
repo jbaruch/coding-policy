@@ -229,8 +229,8 @@ PY
     record gates failed "resolve-gates.sh exited ${rc}; the briefs carry no gate pointers and every worker searches" 0 ""
   fi
 
-  # 7. Worktree hygiene. Every repository owning a worktree under the root is
-  #    swept every round, before provisioning. Only this checkout's own prune
+  # 7. Worktree hygiene. Every repository with a worktree directory under
+  #    the root is swept every round, before provisioning. Only this checkout's own prune
   #    blocks the round; another repository's failure is reported as degraded.
   local wroot="${WORKTREE_ROOT:-${HOME}/.worktrees}" own
   if [ ! -d "$wroot" ]; then

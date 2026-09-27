@@ -34,6 +34,8 @@
 #   7. Portable mode        -> nothing deleted; the questionable list still
 #                              printed.
 #   8. No origin, no repo   -> silent.
+#  13. Portable, linked     -> under tessl a linked worktree runs neither owner
+#                              script and changes no ref.
 #  12. Malformed result     -> an owner result missing documented fields is a
 #                              could-not-check status.
 #  11. Newline path         -> a shared checkout whose name ends in a newline
@@ -396,6 +398,29 @@ main() {
      && [[ "$ctx_git" == "Session-start status — could not check this repository"*"git is not on PATH"* ]] \
      && [[ "$ctx_py" == "Session-start status — could not check this repository"*"python3 is not on PATH"* ]]; then pass
   else fail "c10: git=$ctx_git python3=$ctx_py"; fi
+
+  echo "13. under tessl a linked worktree runs neither owner script and changes no ref"
+  mk_case c13
+  quiet "wt linked" git -C "$SHARED" worktree add -q -b review/linked13 "$ROOT/linked" origin/main
+  push_branch feat/remote-merged 1
+  local stage13="$CASE/stage13" calls13="$CASE/calls13"
+  mkdir -p "$stage13/hooks" "$stage13/skills/herdr-foreman" || die "mkdir stage failed"
+  cp "$HOOK" "$stage13/hooks/" || die "stage the hook failed"
+  cp "${HERE}/../../skills/herdr-foreman/bounded-run.sh" "$stage13/skills/herdr-foreman/" || die "stage the runner failed"
+  local owner
+  for owner in prune-worktrees.sh prune-remote-branches.sh; do
+    printf '#!/usr/bin/env bash\nprintf "%%s\\n" "%s" >> %q\nexit 1\n' "$owner" "$calls13" > "$stage13/skills/herdr-foreman/$owner" \
+      || die "write the recording $owner failed"
+  done
+  local refs_before refs_after
+  refs_before="$(git -C "$SHARED" for-each-ref)" || die "for-each-ref failed"
+  local real_hook13="$HOOK"
+  HOOK="$stage13/hooks/$(basename "$real_hook13")"
+  run_hook "$ROOT/linked" SESSION_START_MODE=portable
+  HOOK="$real_hook13"
+  refs_after="$(git -C "$SHARED" for-each-ref)" || die "for-each-ref failed"
+  if [[ $RC -eq 0 && -z "$OUT" && ! -e "$calls13" && "$refs_before" == "$refs_after" ]] && on_origin feat/remote-merged; then pass
+  else fail "c13: RC=$RC OUT=$OUT ERR=$ERR calls=$(cat "$calls13" 2>&1)"; fi
 
   echo "12. an owner result missing its documented fields is a could-not-check status, never a clean one"
   mk_case c12

@@ -1,11 +1,16 @@
 #!/usr/bin/env bash
-# Prune every repository that owns a worktree under the worktree root.
+# Prune every repository with a worktree directory under the worktree root.
 #
 # `prune-worktrees.sh` decides one repository's worktrees, and a round runs it
 # for the repository in front of it. Worktrees of every other repository kept
-# accumulating under the same root. This script finds each repository owning
-# an entry under the root and runs the prune once per repository; the decision
-# predicate stays in `prune-worktrees.sh` (`rules/script-as-black-box.md`).
+# accumulating under the same root. This script finds each repository with a
+# worktree directory under the root and runs the prune once per repository;
+# the decision predicate stays in `prune-worktrees.sh`
+# (`rules/script-as-black-box.md`). A repository is found through a
+# directory on disk, never through its registrations: a worktree whose
+# directory vanished leaves a registration this sweep cannot see. The
+# `git worktree prune` each swept repository's prune runs clears it, and
+# until then it is inert, holding no files.
 #
 # Contract:
 #   argv  : <worktree-root> [--dry-run]

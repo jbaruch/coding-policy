@@ -286,7 +286,9 @@ description: Running a multi-agent team — task-based specialist composition, c
 - The worker names that drift in its report
 - The worker acts on none of it
 - A worker's repository writes happen only in the worktree its brief names, under `~/.worktrees/`
-- The foreman sweeps every repository owning a worktree under `~/.worktrees/` every round, before provisioning and after the merge
+- The foreman sweeps every repository with a worktree directory under `~/.worktrees/` every round, before provisioning and after the merge
+- A vanished worktree's leftover registration is cleared by the `git worktree prune` the prune runs for each swept repository
+- Such a registration is otherwise inert
 - The sweep runs through `skills/herdr-foreman/sweep-worktrees.sh`
 - The sweep removes worktrees and deletes local branches by the predicates `rules/agent-worktree-isolation.md` Cleanup names
 - The sweep never deletes a branch on origin
