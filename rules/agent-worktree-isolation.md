@@ -24,7 +24,7 @@ alwaysApply: true
 - Outside a Herdr team round, the agent removes its own abandoned worktree with `git worktree remove`
 - In a Herdr team round (`rules/agent-team-operation.md` Two Modes), an abandoned worktree leaves only through the foreman's sweep
 - Abandoned in a Herdr team round means idle past the windows in `skills/herdr-foreman/prune-worktrees.sh` (top-of-file docstring)
-- The sweep reaches every idle worktree under `~/.worktrees/`, a standalone agent's included (`rules/agent-team-operation.md` Writers and Checkouts)
+- See `rules/agent-team-operation.md` Writers and Checkouts for the sweep's reach and gates
 - Leave no orphans in `git worktree list`
 - Use `git worktree remove <path>`; never `rm -rf` the directory
 - When the worktree's branch lands via `skills/release/SKILL.md` Step 7, the post-merge order is mandatory: `cd` back to the base checkout → fast-forward base `main` → `git worktree remove <worktree-path>` → `git branch -d <branch>`. Teardown precedes branch delete

@@ -37,6 +37,8 @@
 #  18. Non-UTF-8 path    -> valid JSON naming it; kept idle-unknown, never a
 #                           decode traceback (skipped where the filesystem
 #                           refuses such a name, as macOS APFS does).
+#  19. Symlinked .git    -> a trash entry or a walked directory whose .git is a
+#                           symlink names no repository; the walk reports it.
 #
 # Run: bash skills/herdr-foreman/tests/test_sweep_worktrees.sh
 set -uo pipefail
@@ -304,6 +306,19 @@ main() {
       && listed "$alpha" "$bad"; then
       pass; else fail "non-UTF-8 path: rc=$RC out=$OUT err=$ERRTEXT"; fi
   fi
+
+  # --- 19. a symlinked .git, in a trash entry and in a walked directory.
+  local root19="$TMP/worktrees19" ext="$TMP/outside19"
+  mkdir -p "$root19/.trash/entry" "$root19/linked" "$ext" || die "mkdir root19 failed"
+  "${G[@]}" -C "$alpha" worktree add -q -b review/nineteen "$ext/alpha-19" origin/main 2>/dev/null || die "outside worktree failed"
+  ln -s "$ext/alpha-19/.git" "$root19/.trash/entry/.git" || die "symlink trash .git failed"
+  ln -s "$ext/alpha-19/.git" "$root19/linked/.git" || die "symlink walked .git failed"
+  run "$root19"
+  echo "19. a symlinked .git names no repository; the walked one is reported as symlinked-git"
+  if (( RC == 0 )) && [[ "$(q 'len(d["repos"])')" == 0 ]] \
+    && [[ "$(q '[s["reason"] for s in d["skipped"] if s["path"].endswith("/linked")]')" == "['symlinked-git']" ]] \
+    && listed "$alpha" "$ext/alpha-19"; then
+    pass; else fail "symlinked .git: rc=$RC out=$OUT err=$ERRTEXT"; fi
 
   run
   echo "5a. no root is exit 1 with no JSON"

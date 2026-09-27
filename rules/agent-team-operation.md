@@ -297,6 +297,7 @@ description: Running a multi-agent team — task-based specialist composition, c
 - The sweep locks each trash worktree with its own lock reason
 - A failed move keeps the archived worktree in place
 - The sweep reports a failed move with its archive ref
+- A move that lands anywhere but the recorded trash path is moved back
 - A symlinked or non-directory `.trash` keeps every archive candidate, with nothing archived
 - The sweep never archives a worktree again while its earlier archive awaits a trash worktree
 - The sweep never deletes an archived worktree before its archive expires
@@ -307,6 +308,7 @@ description: Running a multi-agent team — task-based specialist composition, c
 - A worktree that changes between judgment and removal is kept
 - The sweep expires an archive past the expiry window in `skills/herdr-foreman/prune-worktrees.sh`
 - Expiry removes the archive's trash worktree only once it is present, idle, unused, unchanged since the archive, and locked by the sweep alone
+- Unchanged covers the trash's ignored files, and no submodule or embedded repository appearing in it
 - A missing trash worktree keeps its archive
 - Expiry deletes the archive ref after the trash worktree and the branch, and its record after the ref
 - A failed expiry step before the ref deletion keeps the archive ref and its record

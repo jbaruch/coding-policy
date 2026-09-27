@@ -128,8 +128,9 @@ answer.
 
 Before following any route below, report the worktree sweep to the operator:
 
-- When `checks.worktrees.detail` is present, relay its `report` verbatim: the
-  sweep builds it (`skills/herdr-foreman/sweep-worktrees.sh`, `report_text`)
+- When `checks.worktrees.detail` is present, relay its `report` verbatim
+- The sweep builds that report (`skills/herdr-foreman/sweep-worktrees.sh`,
+  `report_text`); never reshape or summarize it
 - When `checks.worktrees` has no `detail`, report its `reason` verbatim; a
   status `ok` with no `detail` means the worktree root does not exist
 - On exit 2 there is no JSON; report the stderr diagnostic instead

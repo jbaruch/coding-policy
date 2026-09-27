@@ -108,6 +108,10 @@
 #  72. Credential URL       -> a failed remote command never relays the URL.
 #  73. Same-tree checkout   -> the full identity is re-read before the forced
 #                             trash removal.
+#  74. Ignored inventory    -> an ignored file changed in the trash keeps it.
+#  75. Trash nested repo    -> an embedded repository in the trash keeps it.
+#  76. .trash swapped       -> a move that lands outside the root comes back.
+#  77. Symlinked .git       -> a trash worktree with one keeps its archive.
 #
 # Run: bash skills/herdr-foreman/tests/test_prune_worktrees.sh
 set -uo pipefail
@@ -1237,6 +1241,67 @@ SHIM
   if (( RC == 0 )) && [[ "$(archives_kept_reason "${sd%% *}")" == *"HEAD, branch or lock changed"* ]] && listed "$SHARED" "$sd_trash" \
     && git -C "$SHARED" rev-parse --verify --quiet "${sd%% *}" >/dev/null; then
     pass; else fail "same-tree checkout: rc=$RC out=$OUT err=$ERRTEXT"; fi
+
+  # --- 74. an ignored file that changes in the trash keeps the archive.
+  mk_repo ignoredenv
+  local ie="$ROOT/ignoredenv-wt"
+  add_wt "$SHARED" feat/ienv "$ie"
+  printf '.env\n' > "$ie/.gitignore" || die "gitignore write failed"
+  git -C "$ie" -c user.name=t -c user.email=t@t add .gitignore || die "gitignore add failed"
+  git -C "$ie" -c user.name=t -c user.email=t@t commit -q -m ignore || die "gitignore commit failed"
+  printf 'TOKEN=old\n' > "$ie/.env" || die "env write failed"
+  age_wt "$ie"
+  idle_run
+  local ie_ref ie_trash; ie_ref="$(archived_ref "$ie")"; ie_trash="$(trash_of "$ie")"
+  [[ -n "$ie_trash" ]] || die "74 setup: not archived, out=$OUT err=$ERRTEXT"
+  printf 'TOKEN=new, longer\n' > "$ie_trash/.env" || die "env rewrite failed"
+  age_trash "$ie_trash"
+  later_run
+  echo "74. an ignored .env changed in the trash after archival keeps the archive and the trash"
+  if [[ "$(archives_kept_reason "$ie_ref")" == *"ignored files changed"* ]] && listed "$SHARED" "$ie_trash" && [[ -e "$ie_trash/.env" ]]; then
+    pass; else fail "ignored inventory: out=$OUT err=$ERRTEXT"; fi
+
+  # --- 75. an embedded repository created in the trash keeps the archive.
+  mk_repo trashnest
+  local tn tn_trash; tn="$(archive_one tnest feat/tnest)"; tn_trash="${tn#* }"
+  git init -q "$tn_trash/inner" || die "trash embedded init failed"
+  age_trash "$tn_trash"
+  later_run
+  echo "75. an embedded repository created in the trash keeps the archive"
+  if [[ "$(archives_kept_reason "${tn%% *}")" == *"another repository's checkout (nested-repo)"* ]] && [[ -d "$tn_trash/inner/.git" ]]; then
+    pass; else fail "trash nested repo: out=$OUT err=$ERRTEXT"; fi
+
+  # --- 76. .trash swapped for a symlink during the move: moved back, archive kept.
+  mk_repo trashswap
+  local ts="$ROOT/trashswap-wt" swap_dir="$TMP/swapped-elsewhere"
+  add_wt "$SHARED" feat/tswap "$ts"; commit_in "$ts" ts.txt
+  age_wt "$ts"
+  rm -rf "$ROOT/.trash" || die "clear .trash failed"
+  mkdir -p "$ROOT/.trash" "$swap_dir" || die "mkdir trash/swap failed"
+  mkdir -p "$TMP/shim76" || die "mkdir shim76 failed"
+  # shellcheck disable=SC2016  # The shim's "$@" must expand in the shim, not here.
+  printf '#!/usr/bin/env bash\nset -euo pipefail\nif [[ "$*" == *"worktree move"* && ! -L %q ]]; then mv %q %q; ln -s %q %q; fi\nexec %q "$@"\n' \
+    "$ROOT/.trash" "$ROOT/.trash" "$TMP/trash-aside" "$swap_dir" "$ROOT/.trash" "$real_git" > "$TMP/shim76/git" || die "shim76 write failed"
+  chmod +x "$TMP/shim76/git" || die "chmod shim76 failed"
+  idle_run PATH="$TMP/shim76:$PATH"
+  echo "76. a .trash swapped for a symlink mid-move: the worktree comes back, its archive is kept"
+  if (( RC == 2 )) && listed "$SHARED" "$ts" && [[ -e "$ts/ts.txt" ]] && [[ -n "$(archived_ref "$ts")" && -z "$(trash_of "$ts")" ]] \
+    && [[ "$OUT" == *"was moved back"* ]] && [[ -z "$(ls -A "$swap_dir")" ]]; then
+    pass; else fail "trash swap: rc=$RC out=$OUT err=$ERRTEXT"; fi
+  rm "$ROOT/.trash" || die "remove swapped symlink failed"
+  mv "$TMP/trash-aside" "$ROOT/.trash" || die "restore .trash failed"
+
+  # --- 77. a trash worktree whose .git is a symlink keeps the archive.
+  mk_repo trashlink
+  local tl tl_trash; tl="$(archive_one tlink feat/tlink)"; tl_trash="${tl#* }"
+  cp "$tl_trash/.git" "$TMP/tl-dotgit" || die "copy .git failed"
+  rm "$tl_trash/.git" || die "rm .git failed"
+  ln -s "$TMP/tl-dotgit" "$tl_trash/.git" || die "symlink .git failed"
+  age_trash "$tl_trash"
+  later_run
+  echo "77. a trash worktree whose .git is a symlink keeps the archive"
+  if [[ "$(archives_kept_reason "${tl%% *}")" == *".git is a symlink"* ]] && git -C "$SHARED" rev-parse --verify --quiet "${tl%% *}" >/dev/null; then
+    pass; else fail "symlinked .git: out=$OUT err=$ERRTEXT"; fi
 
   # --- 14. usage / not a repo.
   run

@@ -40,7 +40,10 @@
     `user:password@` from its errors but prints the rest of the URL, so a
     token in the path would leak.
   - A symlinked or non-directory `.trash` keeps every archive candidate
-    (`trash-unsafe`); nothing is archived or moved outside the root.
+    (`trash-unsafe`); nothing is archived or moved outside the root. After
+    the move, the worktree must have landed at exactly the recorded path in a
+    real `.trash`; one swapped mid-move lands elsewhere, is moved back, and
+    is reported with its archive kept.
   - Reachability counts only the branch tips origin holds right now, read
     with `git ls-remote --heads origin`. A stale local ref, whether of
     another remote or of an origin branch deleted since the last fetch,
@@ -72,8 +75,11 @@
       its own.
     - The trash worktree must exist and be registered here at that exact
       path, carry the sweep's lock and no other, sit on the recorded HEAD and
-      branch, be idle with no process inside, and snapshot to exactly the
-      recorded tree. A missing trash worktree keeps the archive, and a trash
+      branch, and be idle with no process inside. It must have a real `.git`
+      and hold no submodule or embedded repository. It must match the
+      record's `ignored` inventory, a SHA-256 over the ignored files' paths,
+      sizes, mtimes and modes (never contents), since the snapshot leaves
+      ignored files out. And it must snapshot to exactly the recorded tree. A missing trash worktree keeps the archive, and a trash
       path whose directory vanished is never pruned as an ordinary worktree.
     - The branch is read with absence told apart from a git error; an error
       keeps the archive.
@@ -115,7 +121,8 @@
     operator-facing summary: notable kept
     worktrees by path, the rest as counts. SKILL.md Step 2 relays it
     verbatim instead of shaping it. A symlinked `.trash`, or a
-    symlinked entry in it, is never followed. Missing `python3`, `git` or
+    symlinked entry in it, is never followed, and neither is a symlinked
+    `.git` anywhere (reported as `symlinked-git`). Missing `python3`, `git` or
     `bash` is exit 1 with an install message. It groups them by repository
     and runs the prune once each. A plain directory, a clone or a repository
     without origin is reported, never fatal. A worktree git cannot read is

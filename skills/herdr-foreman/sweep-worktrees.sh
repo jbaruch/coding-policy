@@ -34,7 +34,8 @@
 #           but a trash worktree is never a candidate.
 #           A skipped entry is not-a-worktree (a direct child of
 #           the root holding no checkout), clone (a repository's own main
-#           checkout), or broken-worktree (its .git file names a gitdir that
+#           checkout), symlinked-git (a directory whose .git is a symlink,
+#           never followed; a trash entry like it is ignored), or broken-worktree (its .git file names a gitdir that
 #           no longer exists). An `errors` entry is a worktree git could not
 #           read (rev-parse or worktree list failed), with its exit code and
 #           the repository owning it when its gitdir's files name one.
@@ -142,15 +143,19 @@ def discover(root):
             # outside the root.
             found.extend(("trash", os.path.join(top_path, name)) for name in trashed
                          if not os.path.islink(os.path.join(top_path, name))
+                         and not os.path.islink(os.path.join(top_path, name, ".git"))
                          and os.path.isfile(os.path.join(top_path, name, ".git")))
             continue
-        before = len(found)
+        before, reported = len(found), len(skipped)
         stack = [top_path]
         while stack:
             current = stack.pop()
             if os.path.islink(current) or not os.path.isdir(current):
                 continue
             dotgit = os.path.join(current, ".git")
+            if os.path.islink(dotgit):
+                # Never followed: it could name a checkout outside the root.
+                skipped.append({"path": current, "reason": "symlinked-git"}); continue
             if os.path.isdir(dotgit):
                 found.append(("clone", current)); continue
             if os.path.isfile(dotgit):
@@ -161,7 +166,8 @@ def discover(root):
                 errors.append({"path": current, "repo": None, "exit": None, "error": "cannot list: {}".format(exc)})
                 continue
             stack.extend(os.path.join(current, child) for child in children if child != ".git")
-        if len(found) == before:
+        # A top that held nothing and was not already reported with a reason.
+        if len(found) == before and len(skipped) == reported:
             empty_tops.append(top_path)
     return found, empty_tops
 

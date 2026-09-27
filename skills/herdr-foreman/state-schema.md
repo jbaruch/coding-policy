@@ -16,7 +16,7 @@ the utility alone records the saved notes and their separate index.
 | `<canonical-state-path>.retrospectives/` | `herdr-foreman`, through its retrospective utility | Immutable retrospective notes, versioned index, and transition coverage |
 | `<canonical-state-path>.foreman-reset.json` | `skills/herdr-foreman/foreman/foreman_reset.py` | One record per foreman round-boundary reset; see Foreman Reset Record below |
 | `refs/archive/worktrees/<name>-<pathhash>-<YYYYMMDDTHHMMSSZ>` in each repository | `skills/herdr-foreman/prune-worktrees.sh` | Archive ref: the snapshot commit of an idle dirty or unpushed worktree moved to the root's `.trash/`; see Worktree Archives below |
-| JSON note on each archive commit under `refs/notes/worktree-archive` | `skills/herdr-foreman/prune-worktrees.sh` | Archive record (`schema_version`, ref, source, trash, head, branch, stamp, tree); see Worktree Archives below |
+| JSON note on each archive commit under `refs/notes/worktree-archive` | `skills/herdr-foreman/prune-worktrees.sh` | Archive record (`schema_version`, ref, source, trash, head, branch, stamp, tree, ignored); see Worktree Archives below |
 
 ## Home Migration
 
@@ -915,6 +915,7 @@ Archive record — one JSON object, the note on the archive commit under
 | `branch` | its branch, or `null` when detached |
 | `stamp` | the ref's `YYYYMMDDTHHMMSSZ` UTC stamp |
 | `tree` | the fingerprint: the archive commit's tree id |
+| `ignored` | SHA-256 over the ignored untracked files' paths, sizes, mtimes and modes, never their contents; the snapshot leaves ignored files out, so expiry compares this instead |
 
 Writer / reader contract:
 
@@ -950,12 +951,11 @@ Writer / reader contract:
 Migration:
 
 - `ARCHIVE_SCHEMA` in the script is the current `schema_version`
-- An older record is upgraded by the owner through the `MIGRATIONS` table in
-  `plan_archives` and its note rewritten (live runs only); reported under
-  `archives_migrated`
-- Version 1 is the first schema, so the table is empty
-- A version 2 adds `MIGRATIONS[1]`, a function taking a version-1 record and
-  returning the version-2 record, and raises `ARCHIVE_SCHEMA` to 2
+- The owner alone migrates: an older record is upgraded and its note
+  rewritten on a live run, reported under `archives_migrated`; a reader never
+  migrates
+- The upgrade steps are `MIGRATIONS` in `plan_archives`
+  (`skills/herdr-foreman/prune-worktrees.sh`); version 1 is the first schema
 - A record whose version is newer than `ARCHIVE_SCHEMA` is no usable state,
   and so is one that is missing, unparseable, or older than any migration
   reaches: it is reported under `archives_kept` and never expired
