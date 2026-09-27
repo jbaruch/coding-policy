@@ -1,7 +1,5 @@
 # Changelog
 
-## 0.3.286 — 2026-09-27
-
 ### Fixed
 
 - **A frozen-brief path with a symlinked ancestor is no longer read back
@@ -26,6 +24,10 @@
   aliased directory freezing canonically, an alias retargeted between
   resolution and read, a source directory swapped for a link, and a FIFO
   source; all fail or hang on `main`.
+
+## 0.3.286 — 2026-09-27
+
+### Fixed
 
 - **Every inline diagnostic suppression now carries its cause, or is gone
   (#538).** `rules/language-diagnostics.md` Findings Are Non-Dismissible
