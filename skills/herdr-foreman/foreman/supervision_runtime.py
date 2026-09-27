@@ -305,4 +305,4 @@ def run_command(args, state_path, now, *, client=None, clock=None, sleeper=None,
             raise UsageError("CLI must supply a clock and sleeper for bounded fleet watching.", {})
         return watch(state_path, client or read_client(binary=getattr(args, "herdr_bin", None)), at,
                      clock=clock, sleeper=sleeper, probe=process_probe, duration=args.duration, interval=args.interval)
-    raise UsageError("Unknown supervision command; run foreman --help.", {})
+    raise UsageError("Unknown supervision command; run `{}`.".format(runnable.command("--help")), {})
