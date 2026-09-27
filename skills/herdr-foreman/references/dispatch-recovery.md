@@ -587,11 +587,10 @@ tool-call orderings, and where its transcripts live — sits beside it in
 
 A sender that bypasses `foreman apply` — `skills/herdr-standup/standup-ask.sh`
 — measures the marker with `foreman marker-fit --agent <name> --report <abs>`
-before it sends. It reads the worker's pane and TUI kind from `herdr agent
-get`, the width from `herdr pane layout`, and emits `agent`, `pane_id`,
-`kind`, `report`, `pane_width`, `needed` and `fits`, exiting 0 for either
-verdict. It writes nothing. The fit rule is the same `marker_columns` apply
-uses.
+before it sends. It emits `agent`, `pane_id`, `kind`, `report`,
+`pane_width`, `needed` and `fits`, exiting 0 for either verdict and non-zero
+on a Herdr or usage failure. It writes nothing. The lookup and the fit rule
+are `marker_fit` in `skills/herdr-foreman/foreman/report_delivery.py`.
 
 A Grok `/new` keeps continuity null when Herdr repeats the pre-clear ID or no
 pre-clear ID was observed. Wait normally; an unconfirmed native marker is not

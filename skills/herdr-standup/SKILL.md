@@ -61,11 +61,14 @@ pane is too narrow for its `REPORT: <path>` line and nothing was sent; the JSON
 adds `pane_width` and `needed`. Relay both to the operator, who widens the pane
 or picks a shorter reports directory, and move the worker to Step 4's list.
 Exit 1 is a precondition, including a report path over the script's coarse
-length bound, exit 2 a herdr or measurement failure. The question text and the four-line shape it demands are the
+length bound, exit 2 a herdr or measurement failure. On exit 1 or 2 nothing
+was sent: relay the diagnostic verbatim to the operator and move the worker
+to Step 4's list. The question text and the four-line shape it demands are the
 script's contract; see the header of
 `skills/herdr-standup/standup-ask.sh`.
 
-Proceed immediately to Step 3.
+Proceed immediately to Step 3 with every worker whose ask exited 0. When no
+ask exited 0, skip Step 3 and proceed immediately to Step 4.
 
 ## Step 3 — Wait for Each Answer
 

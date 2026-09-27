@@ -181,9 +181,14 @@ main() {
      && printf '%s' "$ERRTEXT" | grep -q "40 columns"; then
     pass; else fail "narrow pane: expected exit 4 with nothing sent, got RC=$RC OUT=$OUT ARGV=$ARGVTEXT ERR=$ERRTEXT"; fi
 
-  # 11. The need the refusal reported is enough: a pane that wide is asked.
-  local needed
-  needed="$(printf '%s' "$OUT" | jq -r '.needed')" || die "could not read the needed columns from: $OUT"
+  # 11. The owner's own need is enough: a pane that wide is asked, one column
+  #     narrower is not. Its setup measures the need itself through the
+  #     sibling foreman.sh, independent of check 10.
+  local fit needed
+  fit="$(env XDG_STATE_HOME="$TMP/xdg/state" XDG_CONFIG_HOME="$TMP/xdg/config" FAKE_WIDTH=1 \
+    bash "$(dirname "$SCRIPT")/../herdr-foreman/foreman.sh" marker-fit --herdr-bin "$FAKE" \
+    --agent worker --report "$REPORT")" || die "foreman marker-fit setup failed"
+  needed="$(printf '%s' "$fit" | jq -er '.needed')" || die "could not read the needed columns from: $fit"
   run FAKE_STATUS=idle FAKE_WIDTH="$needed"
   if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | jq -e '.sent == true' >/dev/null 2>&1 \
      && printf '%s' "$ARGVTEXT" | grep -q "agent prompt worker"; then
