@@ -1,7 +1,5 @@
 # Changelog
 
-## 0.3.301 — 2026-09-27
-
 ### Fixed
 
 - **The release publication contract and the plugin's hooks now run from an
@@ -34,6 +32,10 @@
   die when `cd` fails. Each has a fixture staging it under a directory whose
   name ends in a newline — for the Stop hook, the plugin root too — and each
   fixture fails against the old code.
+
+## 0.3.301 — 2026-09-27
+
+### Fixed
 
 - **The foreman reset deliverer types only into the foreman's bound native
   session (#523).** `foreman-reset-deliver` waits up to `IDLE_BUDGET_SEC` for
