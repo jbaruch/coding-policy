@@ -191,6 +191,13 @@ def parse_config(payload, source="<memory>"):
             {"source": source},
         )
 
+    # The schema-5 exemption belongs to a judge block that parses: a partial
+    # block (`{"agent": "codex"}`, no model) exempts nobody and is refused with
+    # parse_judge's own diagnostic, so load_config alone never admits an
+    # untiered worker schema 5 forbids (#527).
+    judge = parse_judge(payload, source=source)
+    pinned_judge = judge.agent if judge is not None else None
+
     agents = []
     seen = set()
     for index, entry in enumerate(raw_agents):
@@ -222,7 +229,6 @@ def parse_config(payload, source="<memory>"):
         name = entry["name"]
         if "tiers" in entry and version < 2:
             raise ConfigError("Tier tables need config schema_version 2; upgrade the operator-owned config.", {"source": source})
-        pinned_judge = payload.get("judge", {}).get("agent") if isinstance(payload.get("judge"), dict) else None
         if version >= 5 and not entry.get("tiers") and entry.get("name") != pinned_judge:
             # Without a table, tier selection returns nothing for this worker and
             # every round it takes records `tier: null`, unproven (#476).
