@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.299 — 2026-09-27
+
 ### Fixed
 
 - **The foreman reset deliverer types only into the foreman's bound native
