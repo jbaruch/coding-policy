@@ -19,7 +19,8 @@
 #           exit 4 adds "pane_width" and "needed" (columns) with sent false.
 #   stderr: diagnostics only.
 #   exit  : 0 the prompt was accepted by a worker that was idle or done,
-#           1 precondition unmet (usage, relative or over-long path, not inside Herdr,
+#           1 precondition unmet (usage, relative, over-long or control-character
+#             path, not inside Herdr,
 #             `herdr`, `jq` or the sibling foreman.sh absent),
 #           2 a herdr failure, an unreadable `agent get` payload, or a failed
 #             or unreadable `foreman marker-fit` measurement,
@@ -90,6 +91,10 @@ main() {
 
   if [[ "$REPORT_PATH" != /* ]]; then
     warn "report path '${REPORT_PATH}' is relative — pass an absolute path; the worker resolves it in its own working directory, not yours"
+    return 1
+  fi
+  if [[ "$REPORT_PATH" == *[[:cntrl:]]* ]]; then
+    warn "report path contains a control character — the worker's \`REPORT: <path>\` line must be one printable row; pass a plain absolute path"
     return 1
   fi
   case "$STANDUP_REPORT_PATH_MAX_COLS" in

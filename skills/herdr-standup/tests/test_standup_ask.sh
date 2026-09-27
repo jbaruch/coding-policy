@@ -17,6 +17,7 @@
 #                        field names plus the report path are in the text.
 #   6. Relative path  -> exit 1 before any herdr call.
 #  6b. Over-long path -> exit 1; the coarse length bound, before Herdr.
+#  6e. Control char   -> exit 1 before Herdr.
 #  6c. Bad limit      -> a non-integer override is exit 1, not an abort.
 #  6d. `0100` is 100  -> a leading zero is decimal, never octal, downstream.
 #   7. Outside Herdr  -> exit 1.
@@ -152,6 +153,13 @@ main() {
   OUT="$(env HERDR_ENV=1 HERDR_BIN="$FAKE" STANDUP_REPORT_PATH_MAX_COLS=0100 bash "$SCRIPT" worker "/very/long/reports/directory/that/keeps/going/and/going/round-3/reports/standup-answer-from-worker.md" 2>"$TMP/e6d")"; RC=$?
   if [[ $RC -eq 1 && -z "$OUT" ]] && grep -q "limit is 100" "$TMP/e6d" && ! grep -q "value too great" "$TMP/e6d"; then
     pass; else fail "leading-zero limit: expected exit 1 naming limit 100, got RC=$RC OUT=$OUT ERR=$(cat "$TMP/e6d")"; fi
+
+  # 6e. A control character in the path is a precondition, never a
+  #     measurement failure.
+  RUN_SEQ=$((RUN_SEQ+1))
+  OUT="$(env HERDR_ENV=1 HERDR_BIN="$FAKE" FAKE_ARGV_FILE="$TMP/argv6e" bash "$SCRIPT" worker "$TMP/reports/a"$'\t'"b.md" 2>"$TMP/e6e")"; RC=$?
+  if [[ $RC -eq 1 && -z "$OUT" && ! -s "$TMP/argv6e" ]] && grep -q "control character" "$TMP/e6e"; then
+    pass; else fail "control character: expected exit 1 before herdr, got RC=$RC OUT=$OUT ERR=$(cat "$TMP/e6e")"; fi
 
   # 7. Outside Herdr.
   OUT="$(env -u HERDR_ENV HERDR_BIN="$FAKE" bash "$SCRIPT" worker "$REPORT" 2>"$TMP/e7")"; RC=$?
