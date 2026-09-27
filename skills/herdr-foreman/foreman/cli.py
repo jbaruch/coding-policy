@@ -1528,7 +1528,7 @@ def cmd_foreman_reset(args, client=None, warn=None, trace=None, spawn=None):
                 "log": str(Path(str(state_path) + ".foreman-reset.log"))}, None
     plan = foreman_reset.preflight(stow, data, caller)
     native_session = foreman_reset.bound_session(data)
-    log =Path(str(state_path) + ".foreman-reset.log")
+    log = Path(str(state_path) + ".foreman-reset.log")
     # The deliverer runs from the package directory, so every path it gets is absolute.
     argv = [sys.executable, "-m", "foreman", "foreman-reset-deliver", "--pane", plan["pane_id"], "--stow", plan["stow"],
             "--state", str(state_path), "--config", str(Path(_config_path(args)).expanduser().resolve())]
