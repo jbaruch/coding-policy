@@ -21,7 +21,8 @@
     before the first prune. A root replaced after one repository's prune ran
     let the next prune read its moved worktrees as gone, drop their
     registrations and delete their branches. The root is now re-proven before
-    every prune; a change after the first stops the rest with an `errors`
+    every prune, and once after discovery whether or not it found a
+    repository; a change after the first prune stops the rest with an `errors`
     entry naming the repositories not pruned (exit 2), and the prunes that
     already ran keep their results.
   - `hooks/check-leftover-worktrees.sh` now captures `git worktree list` to a

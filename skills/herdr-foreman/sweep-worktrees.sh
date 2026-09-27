@@ -276,14 +276,15 @@ def root_changed():
     return None
 
 
+why_root = root_changed()
+if why_root:
+    root_gone(why_root)
 results, failed = [], bool(errors)
 env = dict(os.environ, WORKTREE_ROOT=root)
 for index, shared in enumerate(sorted(repos)):
-    # Re-proven before every prune, never once for the loop: a root changed
-    # after an earlier prune stops the rest, and that prune's result stands.
-    why_root = root_changed()
-    if why_root and index == 0:
-        root_gone(why_root)
+    # Re-proven before every later prune too: a root changed after an
+    # earlier prune stops the rest, and that prune's result stands.
+    why_root = root_changed() if index else None
     if why_root:
         left = sorted(repos)[index:]
         errors.append({"path": root, "repo": None, "exit": None,
