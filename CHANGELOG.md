@@ -1,5 +1,27 @@
 # Changelog
 
+### Fixed
+
+- **A judge dispatch carries its mode from reservation, and a pending send's
+  mode is checked (#495).** `assign.apply` refused a mode-less judge dispatch
+  and `_dispatch_version` refused a malformed mode, but `recovery.reserve`
+  still accepted a judge record whose `judge_mode` was absent or null, so a
+  direct caller could write a new version-1 judge row. `reserve` now refuses
+  that for new reservations and for a mode-less retry of a stored
+  `not_sent` row; stored mode-less rows still read as legacy history. The
+  store validator compared a version-3 dispatch's mode with its
+  ledger row and saved result only once the dispatch was `applied`, while
+  `reconcile` recovers an interrupted judge's mode from
+  `context_before_send`. `mark_sending` now refuses a pre-send context that
+  is not an object or names a different mode than the dispatch; a dispatch
+  with no mode must carry no `judge_mode` key at all, null included. The
+  validator checks every
+  dispatch's `context_before_send.judge_mode` against the row, pending or
+  applied, refuses a `context_before_send` that is present but not an
+  object on any status, and refuses a version-3 dispatch past `reserved`
+  with no such object, since reconcile would otherwise recover it as
+  `unknown`.
+
 ## 0.3.298 — 2026-09-27
 
 ### Fixed
