@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.284 — 2026-09-27
+
 ### Fixed
 
 - **The ACR acceptance helper no longer lets a short credential or a loosened
