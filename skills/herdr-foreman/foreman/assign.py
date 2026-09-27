@@ -213,6 +213,8 @@ def freeze_paths(paths):
     its identity, the prompt it sends and the recovery that later rebuilds
     that prompt all read the same bytes. The name carries the content's
     sha256, so the same brief freezes to the same file and a retry is unchanged.
+    The copy sits under the source directory's canonical path: `read_frozen`
+    refuses a link anywhere on the way, so an alias could never be read back (#554).
     """
     frozen = {}
     for key, source in paths.items():
@@ -223,7 +225,8 @@ def freeze_paths(paths):
                              "correct its --common/--brief path before dispatch.".format(source, exc.strerror or str(exc)),
                              {"path": source}) from None
         digest = hashlib.sha256(data).hexdigest()
-        target = Path(source).parent / FROZEN_DIR / "{}.{}{}".format(Path(source).stem, digest[:16], Path(source).suffix)
+        directory = Path(os.path.realpath(Path(source).parent))
+        target = directory / FROZEN_DIR / "{}.{}{}".format(Path(source).stem, digest[:16], Path(source).suffix)
         try:
             target.parent.mkdir(parents=True, exist_ok=True)
         except OSError as exc:
@@ -233,17 +236,17 @@ def freeze_paths(paths):
         try:
             with open(target, "xb") as handle:
                 handle.write(data)
-            exists = False
         except FileExistsError:
-            exists = True
+            pass
         except OSError as exc:
             raise UsageError("Cannot freeze brief {} at {}: {}. Make its directory writable and re-run.".format(
                 source, target, exc), {"path": str(target)}) from None
-        if exists:
-            # Inspected outside the `except` above: an error raised inside a
-            # handler never reaches a sibling handler, so it would escape as a
-            # traceback (#460).
-            _require_frozen_copy(target, digest)
+        # Inspected outside the `except` above: an error raised inside a
+        # handler never reaches a sibling handler, so it would escape as a
+        # traceback (#460). A fresh copy is read back too, through the same
+        # link-refusing walk the gate uses, so an ancestor retargeted between
+        # the canonical lookup and the write is refused here (#554).
+        _require_frozen_copy(target, digest)
         frozen[key] = str(target)
     return frozen
 
@@ -265,22 +268,62 @@ def _require_frozen_dir(directory):
                          "freeze writes real copies beside the source.".format(directory), {"path": str(directory)})
 
 
+def _open_directory_unlinked(target):
+    """A descriptor for absolute `target`'s directory, reached without following a link.
+
+    Each component is opened relative to the one before it, refusing a
+    symlink. A symlinked ancestor would let one recorded path read another
+    source's frozen copy once the link is retargeted (#554); the lexical
+    checks in `read_frozen` cannot see that, and a resolve-then-open would
+    race the retarget.
+    """
+    parts = Path(target).parent.parts
+    try:
+        fd = os.open(parts[0], os.O_RDONLY | os.O_DIRECTORY)
+    except OSError as exc:
+        raise UsageError("Cannot open frozen brief {}: {}. Restore its readability or move it aside and re-run."
+                         .format(target, exc.strerror or str(exc)), {"path": str(target)}) from None
+    try:
+        for index, name in enumerate(parts[1:], 2):
+            try:
+                child = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+            except OSError as exc:
+                if exc.errno in (errno.ELOOP, errno.ENOTDIR):
+                    raise UsageError("Frozen brief {} passes through {}, which is a link or not a directory. Dispatch "
+                                     "again with this build, which freezes under the brief's canonical directory."
+                                     .format(target, Path(*parts[:index])), {"path": str(target)}) from None
+                raise UsageError("Cannot open frozen brief {}: {}. Restore its readability or move it aside and "
+                                 "re-run.".format(target, exc.strerror or str(exc)), {"path": str(target)}) from None
+            os.close(fd)
+            fd = child
+        opened, fd = fd, None
+        return opened
+    finally:
+        if fd is not None:
+            os.close(fd)
+
+
 def _read_unlinked_regular(target):
     """The bytes of `target`, refused unless it is an unlinked regular file.
 
     A symlink could point back at a mutable file and a hard link shares its
     inode, so rewriting that file rewrites either. The checks and the read go
     through one descriptor opened without following a link, and non-blocking
-    so a FIFO planted there is refused rather than hung on.
+    so a FIFO planted there is refused rather than hung on. `target` is
+    absolute; its directory is reached by `_open_directory_unlinked`.
     """
+    target = Path(target)
+    parent = _open_directory_unlinked(target)
     try:
-        fd = os.open(target, os.O_RDONLY | os.O_NONBLOCK | getattr(os, "O_NOFOLLOW", 0))
+        fd = os.open(target.name, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW, dir_fd=parent)
     except OSError as exc:
         if exc.errno == errno.ELOOP:
             raise UsageError("Frozen brief {} is a link or not a regular file; move it aside and re-run so the "
                              "freeze writes a real copy.".format(target), {"path": str(target)}) from None
         raise UsageError("Cannot open frozen brief {}: {}. Restore its readability or move it aside and re-run."
                          .format(target, exc.strerror or str(exc)), {"path": str(target)}) from None
+    finally:
+        os.close(parent)
     try:
         # On the raw descriptor, before any file object: wrapping a directory
         # fails first and would hide that it is not a regular file.
@@ -313,15 +356,14 @@ def _require_frozen_copy(target, digest):
 def read_frozen(path):
     """The bytes a dispatch recorded at `path`, refused unless they are an intact frozen copy.
 
-    Intact: an absolute path with no `..` component, directly under
-    `FROZEN_DIR`, an unlinked regular file, and holding the content its name's
-    digest names, so the bytes read are the bytes sent. A `..` would let a
-    lexical `.dispatched` parent name a file in some other directory (#534).
+    Intact: an absolute path with no `..` component and no symlinked
+    component, directly under `FROZEN_DIR`, an unlinked regular file, and
+    holding the content its name's digest names, so the bytes read are the
+    bytes sent. A `..` would let a lexical `.dispatched` parent name a file in
+    some other directory (#534), and so would a retargeted ancestor link (#554).
     """
     target = Path(path)
     anchored = target.is_absolute() and ".." not in target.parts and target.parent.name == FROZEN_DIR
-    if anchored:
-        _require_frozen_dir(target.parent)
     data = _read_unlinked_regular(target) if anchored else None
     if data is None or hashlib.sha256(data).hexdigest()[:16] not in target.name.split("."):
         raise UsageError("Dispatched brief {} is not an intact frozen copy, so what the worker read cannot be "

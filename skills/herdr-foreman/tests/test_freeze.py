@@ -33,7 +33,7 @@ class FreezeTest(unittest.TestCase):
         for key, source in self.paths.items():
             with self.subTest(key=key):
                 copy = Path(frozen[key])
-                self.assertEqual(copy.parent, Path(source).parent / FROZEN_DIR)
+                self.assertEqual(copy.parent, Path(source).parent.resolve() / FROZEN_DIR)
                 self.assertEqual(copy.read_bytes(), Path(source).read_bytes())
 
     def test_the_same_content_freezes_to_the_same_file(self):
@@ -140,6 +140,35 @@ class FrozenPathTest(unittest.TestCase):
         self.assertTrue(Path(traversal).is_file())
         with self.assertRaisesRegex(UsageError, "not an intact frozen copy"):
             read_frozen(traversal)
+
+    def test_a_retargeted_ancestor_link_is_refused(self):
+        from foreman.assign import read_frozen
+        # alias -> source when recorded, then retargeted at other: the same
+        # path now names other's intact copy (#554).
+        alias = self.root / "alias"
+        alias.symlink_to(self.root / "other")
+        through_alias = alias / FROZEN_DIR / self.other.name
+        self.assertTrue(through_alias.is_file())
+        with self.assertRaisesRegex(UsageError, "passes through {}, which is a link".format(alias)):
+            read_frozen(str(through_alias))
+
+    def test_a_symlink_deeper_in_the_path_is_refused(self):
+        from foreman.assign import read_frozen
+        nested = self.root / "nested"
+        nested.mkdir()
+        (nested / "hop").symlink_to(self.root)
+        deep = nested / "hop" / "other" / FROZEN_DIR / self.other.name
+        self.assertTrue(deep.is_file())
+        with self.assertRaisesRegex(UsageError, "passes through {}, which is a link".format(nested / "hop")):
+            read_frozen(str(deep))
+
+    def test_a_brief_under_an_alias_freezes_under_its_canonical_directory(self):
+        from foreman.assign import read_frozen
+        alias = self.root / "alias"
+        alias.symlink_to(self.root / "source")
+        frozen = Path(freeze_paths({"brief": str(alias / "brief.md")})["brief"])
+        self.assertEqual(frozen.parent, self.root / "source" / FROZEN_DIR)
+        self.assertEqual(read_frozen(str(frozen)), b"brief in source\n")
 
     def test_a_relative_path_is_refused(self):
         from foreman.assign import read_frozen

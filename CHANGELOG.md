@@ -1,5 +1,24 @@
 # Changelog
 
+### Fixed
+
+- **A frozen-brief path with a symlinked ancestor is no longer read back
+  (#554).** #534 made `assign.read_frozen` refuse relative paths and `..`
+  components, but an ancestor could still be a link:
+  `/tmp/alias/.dispatched/brief.<digest>.md` was accepted, so retargeting
+  `alias` after dispatch made `verify-partition` and recovery read another
+  source's intact frozen copy. `read_frozen` now reaches the file through a
+  descriptor walk from `/` that opens every directory component with
+  `O_NOFOLLOW` relative to the one before it, refusing a link anywhere on the
+  path without a resolve-then-open race. `freeze_paths` freezes under the
+  source directory's `realpath`, so paths it records carry no links (macOS
+  `/tmp` and `/var` included), and it reads every copy back, fresh or
+  existing, through the same walk, so an ancestor retargeted mid-freeze is
+  refused at dispatch. A row recorded by an older build through a linked
+  directory is refused with a dispatch-again repair. Regression tests cover
+  a retargeted ancestor, a link deeper in the path, and a brief under an
+  aliased directory freezing canonically; all fail on `main`.
+
 ## 0.3.284 — 2026-09-27
 
 ### Fixed
