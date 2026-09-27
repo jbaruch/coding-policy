@@ -162,6 +162,15 @@ from its caller. A version-7 plan carrying the retired context fields is
 refused by name at apply; one without them reads unchanged, and no oracle is
 ever inferred for it.
 
+Plan schema 12 adds `oracle_pins`, a `{role: {"path", "sha256"}}` map with
+one entry per `patch` or `fixture` oracle in the `rounds.<role>.context` of a
+`mechanical` round (#488). Writer: `plan`, which hashes each such oracle file
+as it writes the plan. Reader: `verify-oracle`, which refuses an oracle on a
+round that is not `mechanical`, a `patch` or `fixture` oracle with no pin for
+its role and path, and an oracle file whose bytes no longer hash to the pin.
+A `digest` oracle carries its expected value already and takes no pin. An
+older plan pinned nothing; replan it before its round is gated.
+
 Plan schema 10 adds `capability` and `cheaper_adequate` to each entry in
 `tiers` (#520). Writer: `plan`, from the capability table beside the state.
 `capability` is `adequate` when every capability the round needs is recorded
