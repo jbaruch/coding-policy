@@ -34,20 +34,24 @@ COMMANDS = frozenset({"verify-oracle"})
 CHUNK_BYTES = 1 << 20
 
 
-def _sha256(path, what):
-    """The hex sha256 of a file, read in CHUNK_BYTES pieces."""
+RESULT_REMEDY = "Pass the file the round produced."
+ORACLE_REMEDY = "Restore the oracle file the round was licensed on, or declare a readable one and replan."
+
+
+def _sha256(path, what, remedy):
+    """The hex sha256 of a file, read in CHUNK_BYTES pieces; `remedy` tells the caller what to do on failure."""
     digest = hashlib.sha256()
     try:
         with Path(path).open("rb") as handle:
             for chunk in iter(lambda: handle.read(CHUNK_BYTES), b""):
                 digest.update(chunk)
     except OSError as exc:
-        raise UsageError("Cannot read the {} at {!r}: {}. Pass the file the round produced.".format(
-            what, str(path), exc.strerror or exc), {"path": str(path)}) from None
+        raise UsageError("Cannot read the {} at {!r}: {}. {}".format(
+            what, str(path), exc.strerror or exc, remedy), {"path": str(path)}) from None
     except ValueError as exc:
         # An embedded NUL or an unencodable character never names a file.
-        raise UsageError("The {} path {!r} is not a usable file name: {}. Pass the file the round "
-                         "produced.".format(what, str(path), exc), {"path": repr(str(path))}) from None
+        raise UsageError("The {} path {!r} is not a usable file name: {}. {}".format(
+            what, str(path), exc, remedy), {"path": repr(str(path))}) from None
     return digest.hexdigest()
 
 
@@ -93,7 +97,7 @@ def pin_oracles(rounds):
         if oracle is None or oracle_shape_problem(oracle) is not None or oracle["kind"] == "digest":
             continue
         pins[role] = {"path": oracle["path"],
-                      "sha256": _sha256(oracle["path"], "{} oracle".format(oracle["kind"]))}
+                      "sha256": _sha256(oracle["path"], "{} oracle".format(oracle["kind"]), ORACLE_REMEDY)}
     return pins
 
 
@@ -106,13 +110,13 @@ def verify(oracle, result_path):
     kind = oracle.get("kind")
     if kind not in ORACLE_KINDS:
         raise UsageError("Oracle kind {!r} is not one of {}.".format(kind, ", ".join(ORACLE_KINDS)), {})
-    observed = _sha256(result_path, "round result")
+    observed = _sha256(result_path, "round result", RESULT_REMEDY)
     if kind == "digest":
         expected = oracle.get("value")
         return {"schema_version": 1, "kind": kind, "match": observed == expected,
                 "expected": expected, "observed": observed, "result": str(result_path)}
     path = oracle.get("path")
-    expected = _sha256(path, "{} oracle".format(kind))
+    expected = _sha256(path, "{} oracle".format(kind), ORACLE_REMEDY)
     if expected != oracle.get("sha256"):
         raise UsageError("The {} oracle at {} changed since the plan was written (pinned sha256 {}, now {}); "
                          "restore the planned file or replan.".format(kind, path, oracle.get("sha256"), expected),

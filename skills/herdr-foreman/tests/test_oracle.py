@@ -157,5 +157,16 @@ class OracleTest(unittest.TestCase):
         with self.assertRaisesRegex(UsageError, "not a usable file name"):
             pin_oracles({"developer": {"context": {"oracle": {"kind": "patch", "path": "/tmp/x\ud800"}}}})
 
+    def test_each_unreadable_file_names_its_own_recovery(self):
+        # A missing result is re-passed; a missing oracle is restored and the
+        # plan redone. Telling the caller to re-pass an oracle fixes nothing.
+        missing = str(self.root / "gone")
+        with self.assertRaisesRegex(UsageError, "Cannot read the round result.*Pass the file the round produced"):
+            verify({"kind": "digest", "value": "a" * 64}, missing)
+        with self.assertRaisesRegex(UsageError, "Cannot read the patch oracle.*Restore the oracle file.*replan"):
+            verify({"kind": "patch", "path": missing, "sha256": "a" * 64}, self.result)
+        with self.assertRaisesRegex(UsageError, "Cannot read the fixture oracle.*replan"):
+            pin_oracles({"developer": {"context": {"oracle": {"kind": "fixture", "path": missing}}}})
+
 if __name__ == "__main__":
     unittest.main()
