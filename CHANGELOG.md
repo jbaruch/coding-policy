@@ -20,7 +20,24 @@
   thread: the over-cap warning in `skills/herdr-foreman/compose-briefs.sh` no
   longer promises that staying under the cap makes the marker fit one pane
   row; it names the live pane-width check in `foreman apply` instead (raised
-  by Copilot on #516).
+  by Copilot on #516). The policy review also caught that
+  `skills/herdr-standup/SKILL.md` Step 2 sent a worker whose ask exited 1 or
+  2 on to Step 3's wait for a question never asked; those workers now go to
+  Step 4 with the diagnostic relayed.
+
+## 0.3.287 — 2026-09-27
+
+### Fixed
+
+- **`foreman-reset` resolves a relative `FOREMAN_HERDR_BIN` before the
+  deliverer starts (#533).** A relative `--herdr-bin` was already resolved to
+  an absolute path, but the same value from `FOREMAN_HERDR_BIN` passed through
+  as-is: the detached deliverer inherited it and ran from the package
+  directory, so it looked for Herdr in the wrong place, and the saved resume
+  prompt omitted it. `skills/herdr-foreman/foreman/cli.py` now resolves the
+  flag, or else the environment value, the same way for the deliverer's argv
+  and the recorded resume options; a bare command name still resolves on
+  `PATH`.
 
 ## 0.3.286 — 2026-09-27
 
