@@ -1,7 +1,5 @@
 # Changelog
 
-## 0.3.296 — 2026-09-27
-
 ### Fixed
 
 - **Four hardening edges from #491's final review (#493).**
@@ -34,10 +32,17 @@
   the target path for every owner file (attention, memory, supervision,
   retrospectives and the ledger included), live or dangling, instead of
   replacing the link and leaving its target stale; a symlinked parent
-  directory is still followed. The fourth edge, the pyright include list
+  directory is still followed. Both probe with `lstat` rather than
+  `Path.is_symlink`, which raises on an unsearchable ancestor; that failure
+  is a structured error naming the path, never a traceback. The fourth
+  edge, the pyright include list
   re-sorted inside functional commit 418bab3, is already merged and needs no
   change; it stays recorded so the next edit to that list lands its formatting
   in a commit of its own.
+
+## 0.3.296 — 2026-09-27
+
+### Fixed
 
 - **Foreman error and help hints name the runnable launcher (#532).** About a
   hundred hints across `skills/herdr-foreman/foreman/` told the reader to run
