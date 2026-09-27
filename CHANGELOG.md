@@ -1,5 +1,20 @@
 # Changelog
 
+### Fixed
+
+- **A Herdr worker session no longer fetches (#541).** `hooks/check-git-sync.sh`
+  decided the worker role only after `git fetch origin`, so every worker session
+  in a linked worktree wrote the remote-tracking refs it shares with the
+  foreman's checkout — a concurrent foreman fetch could then lose the ref lock
+  and report "sync not verified". The worker check (`HERDR_ENV` set plus a
+  linked worktree) now runs before the throttle stamp and the fetch; a worker
+  reports the drift from the refs as last fetched and keeps the do-not-sync
+  notice. `hooks/check-acr-latest.sh` already returns for every Herdr session
+  before its sync-proof fetch, so it needs no change.
+  `hooks/tests/test_check_git_sync.sh` asserts a worker session leaves
+  `refs/remotes/origin/*` unchanged while origin has moved, and the foreman
+  still fetches.
+
 ## 0.3.280 — 2026-09-27
 
 ### Changed

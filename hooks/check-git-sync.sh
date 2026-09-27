@@ -23,7 +23,10 @@
 #     stall session start.
 #   - Acts when the answer is mechanical: a default branch strictly behind
 #     origin after a fresh fetch is fast-forwarded (git refuses every unsafe
-#     case); diverged, unverified and Herdr-worker sessions are reported only.
+#     case); diverged and unverified sessions are reported only.
+#   - A Herdr worker session (HERDR_ENV set, linked worktree) never fetches: the
+#     fetch writes remote-tracking refs shared with the foreman's checkout. It
+#     reports drift from the refs as last fetched.
 #   - Never blocks (always exits 0), never exits 2.
 #
 # Contract:
@@ -32,8 +35,9 @@
 #           {"additionalContext": "<status>"} whose text begins with the
 #           "Session-start status — " marker (rules/hook-action-reporting.md) —
 #           reporting in-sync, ahead, fast-forwarded, behind (fast-forward refused), or
-#           diverged after a fresh fetch, or
-#           "sync not verified" when the fetch was throttled or failed.
+#           diverged after a fresh fetch,
+#           "sync not verified" when the fetch was throttled or failed, or,
+#           for a Herdr worker session, the unfetched drift with a do-not-sync note.
 #   exit  : always 0. Every best-effort failure emits an actionable stderr warning
 #           and continues/no-ops (rules/error-handling.md Shell Error Handling).
 #           Non-repo, no origin, and no local default branch are silent no-ops —
@@ -116,11 +120,33 @@ is_herdr_worker() {
   [[ "$git_dir" != "$common_dir" ]]
 }
 
+# Count the local default branch's drift from its remote-tracking ref, as the
+# refs stand now (no fetch). --left-right --count on a three-dot range yields
+# "<ahead>\t<behind>" — ahead = local-only commits, behind = origin-only
+# commits — so a diverged branch (both > 0) can be distinguished from one that
+# is strictly behind (fast-forwardable). Sets DRIFT_AHEAD / DRIFT_BEHIND and
+# returns 0; a missing origin ref or a rev-list failure is warned and returns 1,
+# never swallowed as "up to date".
+drift_counts() { # <default-branch>
+  local db="$1" counts
+  if ! counts="$(git rev-list --left-right --count "refs/heads/${db}...refs/remotes/origin/${db}" 2>/dev/null)"; then
+    warn "could not compare ${db} against origin/${db} — run \`git status\` to inspect; skipping sync check"
+    return 1
+  fi
+  DRIFT_AHEAD="${counts%%[[:space:]]*}"
+  DRIFT_BEHIND="${counts##*[[:space:]]}"
+  if ! [[ "$DRIFT_AHEAD" =~ ^[0-9]+$ && "$DRIFT_BEHIND" =~ ^[0-9]+$ ]]; then
+    warn "unexpected ahead/behind counts '${counts}' for ${db} — run \`git status\` to inspect; skipping sync check"
+    return 1
+  fi
+  return 0
+}
+
 main() {
   local THROTTLE_HOURS="${SYNC_THROTTLE_HOURS:-0}"
   local FETCH_TIMEOUT="${SYNC_FETCH_TIMEOUT:-10}"
   local STATE_DIR="${SYNC_STATE_DIR:-${TMPDIR:-/tmp}/coding-policy-sync}"
-  local rc db inside cand now top repo_key stamp sv ts should_fetch preserve_future fetch_failed counts ahead behind
+  local rc db inside cand now top repo_key stamp sv ts should_fetch preserve_future fetch_failed ahead behind
   local -a fetch
 
   # git is required to produce a signal; its absence is an expected environment
@@ -186,6 +212,16 @@ main() {
   # report as "behind". Silent no-op when absent; ref_exists surfaces a real
   # git failure before returning "absent".
   ref_exists "refs/heads/$db" || return 0
+
+  # A worker never touches the shared checkout, and a fetch writes the
+  # remote-tracking refs that checkout shares — so a worker session neither
+  # fetches nor stamps the throttle. It reports the drift from the refs as last
+  # fetched and names whose job syncing is.
+  if is_herdr_worker; then
+    drift_counts "$db" || return 0
+    emit_notice "Session-start status — git: local \`${db}\` is ${DRIFT_BEHIND} behind / ${DRIFT_AHEAD} ahead of \`origin/${db}\` as last fetched (a Herdr worker session does not fetch). This is a Herdr worker session: the shared checkout is the foreman's (rules/agent-team-operation.md Writers and Checkouts). Do not sync it — work in this worktree and report the drift."
+    return 0
+  fi
 
   # Resolve the clock. A test may inject SYNC_NOW; otherwise read the system clock
   # and handle its failure. Validate as an integer before any arithmetic so a
@@ -284,21 +320,9 @@ main() {
     return 0
   fi
 
-  # Compare the local default branch against its remote-tracking ref. --left-right
-  # --count on a three-dot range yields "<ahead>\t<behind>" — ahead = local-only
-  # commits, behind = origin-only commits — so a diverged branch (both > 0) can be
-  # distinguished from one that is strictly behind (fast-forwardable). A missing
-  # origin ref or a rev-list failure is surfaced, not swallowed as "up to date".
-  if ! counts="$(git rev-list --left-right --count "refs/heads/${db}...refs/remotes/origin/${db}" 2>/dev/null)"; then
-    warn "could not compare ${db} against origin/${db} — run \`git status\` to inspect; skipping sync check"
-    return 0
-  fi
-  ahead="${counts%%[[:space:]]*}"
-  behind="${counts##*[[:space:]]}"
-  if ! [[ "$ahead" =~ ^[0-9]+$ && "$behind" =~ ^[0-9]+$ ]]; then
-    warn "unexpected ahead/behind counts '${counts}' for ${db} — run \`git status\` to inspect; skipping sync check"
-    return 0
-  fi
+  drift_counts "$db" || return 0
+  ahead="${DRIFT_AHEAD}"
+  behind="${DRIFT_BEHIND}"
 
   # Success path: nothing to pull from origin. Distinguish truly in-sync from
   # ahead-only — a branch ahead of origin (unpushed commits) is not "in sync".
@@ -308,13 +332,6 @@ main() {
     else
       emit_notice "Session-start status — git: local \`${db}\` is ${ahead} commit(s) ahead of \`origin/${db}\` (unpushed), none behind"
     fi
-    return 0
-  fi
-
-  # A worker never touches the shared checkout, so telling it to sync one is
-  # telling it to break the rule. Report the drift, name whose job it is.
-  if is_herdr_worker; then
-    emit_notice "Session-start status — git: local \`${db}\` is ${behind} behind / ${ahead} ahead of \`origin/${db}\`. This is a Herdr worker session: the shared checkout is the foreman's (rules/agent-team-operation.md Writers and Checkouts). Do not sync it — work in this worktree and report the drift."
     return 0
   fi
 

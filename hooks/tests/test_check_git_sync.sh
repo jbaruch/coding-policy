@@ -26,6 +26,8 @@
 #   7. Bad clock     -> silent no-op, exit 0 (never aborts SessionStart).
 #   8. Diverged      -> marker notice names divergence and recommends rebase, not
 #                       a fast-forward (local both ahead and behind origin).
+#  10. Worker fetch -> a Herdr worker session leaves refs/remotes/origin/*
+#                       unchanged while origin has moved; the foreman fetches.
 #   9. Future stamp  -> a schema_version > 1 record is not throttled on and is
 #                       preserved (not downgraded to version 1).
 #
@@ -104,10 +106,12 @@ main() {
   mk_origin o1
   clone_from "$BARE" "$TMP/r1"
   commit_push "$SEED" "c2"
+  # The foreman's earlier fetch: the worker reads drift from these refs as-is.
+  git -C "$TMP/r1" fetch -q origin || die "r1 fetch failed"
   git -C "$TMP/r1" worktree add -q "$TMP/r1-wt" -b feat/worker >/dev/null 2>&1 \
     || die "r1 worktree add failed"
   run "$TMP/r1-wt" "$TMP/s1b" HERDR_ENV=1
-  if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | jq -e '.additionalContext | test("Herdr worker session") and test("Do not sync") and (test("fast-forward") | not)' >/dev/null 2>&1 \
+  if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | jq -e '.additionalContext | test("Herdr worker session") and test("1 behind") and test("Do not sync") and (test("fast-forward") | not)' >/dev/null 2>&1 \
     && ! same_commit "$TMP/r1" main origin/main; then
     pass; else fail "worker session: expected a no-sync notice and main unmoved, got RC=$RC OUT=$OUT"; fi
 
@@ -277,6 +281,32 @@ main() {
     pass; else fail "future stamp: expected fire (not throttled), got RC=$RC OUT=$OUT"; fi
   sv9=""; read -r sv9 _ < "$stampdir9/sync-$key9" || sv9=""
   if [[ "$sv9" == "2" ]]; then pass; else fail "future stamp: expected preserved version 2, got '$sv9'"; fi
+
+  # 10. A Herdr worker never fetches: the remote-tracking refs are shared with
+  #     the foreman's checkout. Origin moves, the worker session runs, and
+  #     refs/remotes/origin/* is byte-for-byte what it was; the notice still
+  #     tells the worker not to sync. The foreman in the main checkout then
+  #     fetches and sees the new tip.
+  mk_origin o10
+  clone_from "$BARE" "$TMP/r10"
+  git -C "$TMP/r10" worktree add -q "$TMP/r10-wt" -b feat/worker >/dev/null 2>&1 \
+    || die "r10 worktree add failed"
+  commit_push "$SEED" "c2"
+  local refs10_before refs10_after refs10_foreman seed10 tip10
+  refs10_before="$(git -C "$TMP/r10" for-each-ref refs/remotes/origin)" || die "r10 for-each-ref (before) failed"
+  [[ -n "$refs10_before" ]] || die "r10 has no refs/remotes/origin refs to compare"
+  run "$TMP/r10-wt" "$TMP/s10" HERDR_ENV=1
+  refs10_after="$(git -C "$TMP/r10" for-each-ref refs/remotes/origin)" || die "r10 for-each-ref (after worker) failed"
+  if [[ "$refs10_before" == "$refs10_after" ]]; then
+    pass; else fail "worker fetch: refs/remotes/origin changed in a worker session (before=$refs10_before after=$refs10_after)"; fi
+  if [[ $RC -eq 0 ]] && printf '%s' "$OUT" | jq -e '.additionalContext | test("Herdr worker session") and test("does not fetch") and test("Do not sync")' >/dev/null 2>&1; then
+    pass; else fail "worker fetch: expected the no-fetch worker notice, got RC=$RC OUT=$OUT"; fi
+  run "$TMP/r10" "$TMP/s10f" HERDR_ENV=1
+  refs10_foreman="$(git -C "$TMP/r10" for-each-ref refs/remotes/origin)" || die "r10 for-each-ref (after foreman) failed"
+  seed10="$(git -C "$SEED" rev-parse --verify --quiet 'main^{commit}')" || die "cannot resolve main in $SEED"
+  tip10="$(git -C "$TMP/r10" rev-parse --verify --quiet 'origin/main^{commit}')" || die "cannot resolve origin/main in r10"
+  if [[ $RC -eq 0 && "$refs10_foreman" != "$refs10_before" && "$tip10" == "$seed10" ]]; then
+    pass; else fail "foreman fetch: expected the main checkout to fetch the moved origin, got RC=$RC OUT=$OUT"; fi
 
   echo "─────────────────────────────────────────────" >&2
   if [[ $FAIL -gt 0 ]]; then echo "FAILED: ${FAIL} failed, ${PASS} passed" >&2; exit 1; fi
