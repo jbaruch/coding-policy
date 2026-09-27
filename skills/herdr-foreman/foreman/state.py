@@ -75,6 +75,7 @@ import fcntl
 from contextlib import contextmanager
 from pathlib import Path
 
+from . import runnable
 from .diagnostics import stderr_warn as _warn
 from .errors import ConfigError, HerdrError, StateError, UsageError
 from .tiers import SEAT_SEPARATOR, canonical_role, parse_launch_args, parse_tiers, verify_argv
@@ -614,7 +615,8 @@ def load_state_checked(path, warn=None, *, persist_migration=True):
         return empty_state(), False
 
     if migrated and not persist_migration:
-        raise StateError("This read-only preview needs an owner migration. Run `foreman state` with the same --state path, then retry the preview; the original file is unchanged.", {"path": str(path)})
+        raise StateError("This read-only preview needs an owner migration. Run `{}` with the same --state path, then retry the preview; the original file is unchanged.".format(
+            runnable.command("state")), {"path": str(path)})
     if migrated:
         try:
             save_state(path, state)
