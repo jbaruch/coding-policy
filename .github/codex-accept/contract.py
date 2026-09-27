@@ -150,6 +150,23 @@ def regular(path: Path, limit: int = MAX_TEXT) -> bytes:
 
 
 DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+# O_NONBLOCK: a FIFO planted at an output path opens at once and fails the S_ISREG check instead of hanging.
+EXISTING_FLAGS = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
+
+
+def private_mode(fd: int, name: str) -> None:
+    """Set <fd> to 0600 after re-checking it is still a singly-linked regular file.
+
+    The link count is read right before the chmod, so a hard link added since the file was
+    opened or created refuses instead of carrying the mode change to a second name.
+    """
+    info = os.fstat(fd)
+    require(stat.S_ISREG(info.st_mode) and info.st_nlink == 1,
+            f"Output {name} is hard-linked elsewhere or was replaced mid-run; "
+            "remove it and re-run in a fresh run root")
+    os.fchmod(fd, 0o600)
+    require(stat.S_IMODE(os.fstat(fd).st_mode) == 0o600,
+            "Output file mode is not 0600; inspect the run root's filesystem and ownership")
 
 
 def write_at(dirfd: int, name: str, value: bytes) -> None:
@@ -167,15 +184,13 @@ def write_at(dirfd: int, name: str, value: bytes) -> None:
             view = memoryview(value)
             while view:
                 view = view[os.write(fd, view):]
-            os.fchmod(fd, 0o600)
+            private_mode(fd, name)  # umask can narrow the creation mode; set it exactly.
             os.fsync(fd)
-            require(stat.S_IMODE(os.fstat(fd).st_mode) == 0o600,
-                    "Output file mode is not 0600; inspect the run root's filesystem and ownership")
         finally:
             os.close(fd)
         return
     try:
-        fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=dirfd)
+        fd = os.open(name, EXISTING_FLAGS, dir_fd=dirfd)
     except OSError as exc:
         if exc.errno != errno.ELOOP:
             raise
@@ -193,11 +208,11 @@ def write_at(dirfd: int, name: str, value: bytes) -> None:
             if not chunk:
                 break
             chunks.append(chunk); size += len(chunk)
-        require(b"".join(chunks) == value, "Output already exists with different content; refuse to overwrite it")
+        require(b"".join(chunks) == value,
+                f"Output {name} already exists with different content; keep this run root for inspection "
+                "and re-run with a fresh run root")
         # Re-apply on the idempotent path too: an interrupted run can leave a permissive mode.
-        os.fchmod(fd, 0o600)
-        require(stat.S_IMODE(os.fstat(fd).st_mode) == 0o600,
-                "Output file mode is not 0600; inspect the run root's filesystem and ownership")
+        private_mode(fd, name)
     finally:
         os.close(fd)
 
@@ -213,8 +228,9 @@ def open_child(parent: int, name: str, private: bool) -> int:
     except OSError as exc:
         if exc.errno not in (errno.ELOOP, errno.ENOTDIR):
             raise
-        raise Refusal(f"Credential directory {name} is a symlink or not a directory; "
-                      "remove it and re-run seed in a fresh run root") from exc
+        kind = "Credential" if private else "Output"
+        raise Refusal(f"{kind} directory {name} is a symlink or not a directory; "
+                      "remove it and re-run in a fresh run root") from exc
     opened = False
     try:
         if private:
@@ -228,37 +244,40 @@ def open_child(parent: int, name: str, private: bool) -> int:
             os.close(fd)
 
 
-def write_new(path: Path, value: bytes) -> None:
-    """Create <path> holding <value>; an existing file with exactly <value> is success (idempotent re-run)."""
-    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    dirfd = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
-    try:
-        write_at(dirfd, path.name, value)
-    finally:
-        os.close(dirfd)
+def write_under(root: Path, path: Path, value: bytes, private: bool) -> None:
+    """Write <path> below the owned directory <root>, entirely descriptor-relative.
 
-
-def write_private(root: Path, path: Path, value: bytes) -> None:
-    """write_new for credential material under the owned run <root>, entirely descriptor-relative.
-
-    No component from <root> down is followed through a symlink; each directory is 0700 and the
-    file 0600 on every run.
+    No component from <root> down is followed through a symlink. Missing directories are created
+    0700; with <private> every directory on the way is also forced to 0700.
     """
     parts = path.relative_to(root).parts  # ValueError: a caller bug, never input
+    require(parts, "Output path names the root directory itself; pass a file below it")
     try:
         fd = os.open(root, DIR_FLAGS)
+    except FileNotFoundError as exc:
+        raise Refusal(f"Output root {root} does not exist; create it and re-run") from exc
     except OSError as exc:
         if exc.errno not in (errno.ELOOP, errno.ENOTDIR):
             raise
-        raise Refusal("Run root is a symlink or not a directory; use a fresh run root") from exc
+        raise Refusal(f"Output root {root} is a symlink or not a directory; use a fresh run root") from exc
     try:
         for name in parts[:-1]:
-            child = open_child(fd, name, private=True)
+            child = open_child(fd, name, private)
             os.close(fd)
             fd = child
         write_at(fd, parts[-1], value)
     finally:
         os.close(fd)
+
+
+def write_new(root: Path, path: Path, value: bytes) -> None:
+    """Create <path> under <root> holding <value>; an existing file with exactly <value> is success (idempotent re-run)."""
+    write_under(root, path, value, private=False)
+
+
+def write_private(root: Path, path: Path, value: bytes) -> None:
+    """write_new for credential material under the owned run <root>: each directory 0700 and the file 0600 on every run."""
+    write_under(root, path, value, private=True)
 
 
 def fresh_private(path: Path) -> None:
@@ -386,7 +405,8 @@ def proof_packages() -> dict[str, set[str]]:
             for package in (RUNTIME_PACKAGE, CLI_PACKAGE)}
 
 
-def prove_runtime(acr_root: Path, events: Path, exit_code: int, output: Path) -> dict[str, Any]:
+def prove_runtime(acr_root: Path, events: Path, exit_code: int, output: Path,
+                  root: Path | None = None) -> dict[str, Any]:
     context = binding()
     checkout(acr_root, context["acr_sha"])
     data = regular(events, MAX_TEXT_TOTAL)
@@ -394,7 +414,7 @@ def prove_runtime(acr_root: Path, events: Path, exit_code: int, output: Path) ->
     proof = {"schema_version": 1, "contract": CONTRACT, "result": "passed", **context,
              "command": PROOF_COMMAND, "exit_code": 0, "events_sha256": sha(data),
              "tests": leaves(), "coverage": COVERAGE}
-    write_new(output, encoded(proof))
+    write_new(root or output.parent, output, encoded(proof))
     return proof
 
 
@@ -442,7 +462,7 @@ def run_proof(acr_root: Path, root: Path) -> None:
         result = subprocess.run(PROOF_COMMAND, cwd=acr_root, env=env, stdout=handle,
                                 stderr=subprocess.PIPE, check=False)
     checkout(acr_root, context["acr_sha"])
-    prove_runtime(acr_root, events, result.returncode, root / "evidence/credential-boundary.json")
+    prove_runtime(acr_root, events, result.returncode, root / "evidence/credential-boundary.json", root)
 
 
 # Floor shared with codex-review/mask-secrets.sh, which masks only strings this long;
@@ -811,7 +831,7 @@ def seal(root: Path, evidence: Path, output: Path) -> dict[str, Any]:
             data = regular(evidence / relative)
             scan(data, known)
             files[member] = data
-            write_new(staging / member, data)
+            write_new(staging, staging / member, data)
         fixtures = []
         for key, spec in FIXTURES.items():
             receipt = parse(files[f"evidence/{key}/fixture-result.json"])
@@ -837,7 +857,7 @@ def seal(root: Path, evidence: Path, output: Path) -> dict[str, Any]:
                     "platform": context["host"], "codex": codex, "fixtures": fixtures,
                     "credential_boundary": {"contract": CONTRACT, "proof": "evidence/credential-boundary.json"},
                     "files": [{"path": path, "size": len(data), "sha256": sha(data)} for path, data in sorted(files.items())]}
-        write_new(staging / "manifest.json", encoded(manifest))
+        write_new(staging, staging / "manifest.json", encoded(manifest))
         verify_artifact(staging, context, known)
         scanner = Path(__file__).resolve().parents[1] / "codex-review/assert-no-secret-leak.sh"
         for path in sorted(evidence_names() | {"manifest.json"}):
@@ -943,7 +963,7 @@ def extract_archive(data: bytes, destination: Path) -> None:
             return
         destination.mkdir(mode=0o700)
         for item in entries:
-            write_new(destination / item.filename, archive.read(item))
+            write_new(destination, destination / item.filename, archive.read(item))
 
 
 def download(acr_sha: str, run_id: str, attempt: str, destination: Path) -> dict[str, Any]:
@@ -1092,7 +1112,7 @@ def installed(acr_root: Path, root: Path) -> None:
     binary_data = regular(binary, MAX_DECODED)
     require(binary_data.startswith(b"\x7fELF") and run([str(binary), "--version"]).decode().strip() == "codex-cli " + version,
             "Codex native executable or version differs")
-    write_new(root / "codex.json", encoded({"version": version, "archive_sha256": values["archive_sha256"], "binary_sha256": sha(binary_data)}))
+    write_new(root, root / "codex.json", encoded({"version": version, "archive_sha256": values["archive_sha256"], "binary_sha256": sha(binary_data)}))
 
 
 def convert(acr_root: Path, root: Path) -> None:

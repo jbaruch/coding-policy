@@ -1,5 +1,28 @@
 # Changelog
 
+### Fixed
+
+- **The ACR acceptance helper's output writes are descriptor-relative end to
+  end (#558).** Follow-ups from #550's review, in
+  `.github/codex-accept/contract.py`. `write_new` resolved its parent with
+  `Path.mkdir` and a plain `O_DIRECTORY` open, so a symlinked intermediate
+  directory was followed; it now takes the owning root and walks every
+  component through `O_NOFOLLOW` descriptors, sharing one walk
+  (`write_under`) with `write_private`. The new-file branch `fchmod`ed without
+  re-reading the link count, so a hard link added while the file was being
+  written would have carried the mode change to a second name; both branches
+  now re-check `S_ISREG` and `st_nlink == 1` immediately before the `fchmod`
+  (`private_mode`). The existing-file comparison opened without
+  `O_NONBLOCK`, so a FIFO planted at an output path hung the job waiting for a
+  writer; it now opens non-blocking and the `S_ISREG` check refuses it. The
+  different-content refusal now says what to do: keep the run root for
+  inspection and re-run with a fresh run root. `prove-runtime --output` now
+  requires the output's parent directory to exist. Regression tests cover a
+  symlinked parent at each depth, a symlinked or missing root, a hard link
+  added mid-create for both writers, a FIFO at the output path (bounded by an
+  alarm so a regression fails instead of hanging), and the new refusal text.
+  The documented threat model still scopes out a hostile same-user process.
+
 ## 0.3.284 — 2026-09-27
 
 ### Fixed

@@ -9,6 +9,7 @@ import io
 import json
 import os
 from pathlib import Path
+import signal
 import subprocess
 import sys
 import tempfile
@@ -148,7 +149,7 @@ class ProofTests(unittest.TestCase):
     def test_failed_proof_prevents_seed_even_with_present_secret(self):
         with tempfile.TemporaryDirectory() as name, mock.patch.dict(os.environ, {**ENV, "CODEX_AUTH_JSON": json.dumps({"tokens": {"access_token": SEED}})}):
             root = Path(name).resolve()
-            c.write_new(root / "evidence/credential-boundary.json", c.encoded({**proof(), "run_attempt": "1"}))
+            c.write_new(root, root / "evidence/credential-boundary.json", c.encoded({**proof(), "run_attempt": "1"}))
             with self.assertRaises(c.Refusal):
                 c.seed(root)
             self.assertFalse((root / "seed/auth.json").exists())
@@ -674,12 +675,12 @@ class ExportTests(unittest.TestCase):
         self.specs = copy.deepcopy(c.FIXTURES)
         self.patch = mock.patch.dict(c.FIXTURES, self.specs)
         self.patch.start(); self.addCleanup(self.patch.stop)
-        c.write_new(self.evidence / "credential-boundary.json", c.encoded(proof()))
+        c.write_new(self.evidence, self.evidence / "credential-boundary.json", c.encoded(proof()))
         original_run = c.subprocess.run
         with mock.patch.dict(os.environ, {"CODEX_AUTH_JSON": json.dumps({"tokens": {"access_token": SEED}})}), \
                 mock.patch.object(c.subprocess, "run", side_effect=lambda *a, **kw: original_run(*a, **kw, capture_output=True)):
             c.seed(self.root)
-        c.write_new(self.root / "codex.json", c.encoded({"version": "0.154.0", "archive_sha256": "d" * 64, "binary_sha256": "e" * 64}))
+        c.write_new(self.root, self.root / "codex.json", c.encoded({"version": "0.154.0", "archive_sha256": "d" * 64, "binary_sha256": "e" * 64}))
         for key, spec in self.specs.items():
             repo = self.root / "fixtures" / key; repo.mkdir(parents=True)
             git(repo, "init", "-q")
@@ -956,7 +957,7 @@ class ExportTests(unittest.TestCase):
                 manifest = json.loads(Path(env["ACR_CODEX_CONSUME_MANIFEST"]).read_bytes())
             finally:
                 caller_manifest.write_bytes(original)
-            c.write_new(Path(env["ACR_CODEX_CONSUME_EVIDENCE"]) / "consumer-result.json", c.encoded(consumer(manifest)))
+            c.write_new(Path(env["ACR_CODEX_CONSUME_EVIDENCE"]), Path(env["ACR_CODEX_CONSUME_EVIDENCE"]) / "consumer-result.json", c.encoded(consumer(manifest)))
             top = "TestCodexLivePublishedConsumption"
             rows = [{"Action": "start", "Package": c.CLI_PACKAGE}]
             for name in (top, top + "/GOC", top + "/FFA"):
@@ -1101,7 +1102,7 @@ class ExportTests(unittest.TestCase):
             self.assertEqual(path.stat().st_mode & 0o777, 0o600)
             self.assertEqual(path.parent.stat().st_mode & 0o777, 0o700)
         isolated = self.root / "homes/isolated/auth.json"
-        c.write_new(isolated, initial)
+        c.write_new(self.root, isolated, initial)
         isolated.write_bytes(c.encoded({"tokens": {"access_token": "synthetic-isolated-rotation-value"}}))
         manifest = self.seal()
         self.assertEqual(auth.read_bytes(), initial)
@@ -1305,7 +1306,7 @@ class ExportTests(unittest.TestCase):
         for name in ("seed", "central"):
             with self.subTest(directory=name), tempfile.TemporaryDirectory() as run, tempfile.TemporaryDirectory() as out:
                 root, outside = Path(run).resolve(), Path(out).resolve()
-                c.write_new(root / "evidence/credential-boundary.json", c.encoded(proof()))
+                c.write_new(root, root / "evidence/credential-boundary.json", c.encoded(proof()))
                 outside.chmod(0o755)
                 (root / name).symlink_to(outside, target_is_directory=True)
                 with quiet, mock.patch.dict(os.environ, {"CODEX_AUTH_JSON": json.dumps({"tokens": {"access_token": SEED}})}):
@@ -1397,7 +1398,7 @@ class ExportTests(unittest.TestCase):
                 self.assertEqual(sorted(c.secret_values(document)), sorted(tokens.values()))
         with tempfile.TemporaryDirectory() as name:
             root = Path(name).resolve()
-            c.write_new(root / "evidence/credential-boundary.json", c.encoded(proof()))
+            c.write_new(root, root / "evidence/credential-boundary.json", c.encoded(proof()))
             original_run = c.subprocess.run
             quiet = mock.patch.object(c.subprocess, "run", side_effect=lambda *a, **kw: original_run(*a, **kw, capture_output=True))
             with quiet, mock.patch.dict(os.environ, {"CODEX_AUTH_JSON": json.dumps(document)}):
@@ -1418,7 +1419,7 @@ class ExportTests(unittest.TestCase):
         env = {k: v for k, v in os.environ.items() if k != "CODEX_AUTH_JSON"}
         with tempfile.TemporaryDirectory() as name, mock.patch.dict(os.environ, env, clear=True):
             root = Path(name).resolve()
-            c.write_new(root / "evidence/credential-boundary.json", c.encoded(proof()))
+            c.write_new(root, root / "evidence/credential-boundary.json", c.encoded(proof()))
             with self.assertRaisesRegex(c.Refusal, r"CODEX_AUTH_JSON is empty.*codex login.*gh secret set CODEX_AUTH_JSON"):
                 c.seed(root)
             self.assertFalse((root / "seed/auth.json").exists())
@@ -1502,6 +1503,90 @@ def consumer(manifest):
                                          "contentHash": release["contentHash"], "install": True}})
     return {"schema_version": 1, "result": "passed", "acr_sha": CONTEXT["acr_sha"], "central_sha": CONTEXT["central_sha"],
             "producer_run_id": CONTEXT["run_id"], "producer_run_attempt": CONTEXT["run_attempt"], "host": "linux-amd64", "fixtures": fixtures}
+
+
+class WriteTests(unittest.TestCase):
+    """Descriptor-relative output writes: write_new and write_private share one walk."""
+
+    def dirs(self):
+        stack = ExitStack(); self.addCleanup(stack.close)
+        root = Path(stack.enter_context(tempfile.TemporaryDirectory())).resolve()
+        outside = Path(stack.enter_context(tempfile.TemporaryDirectory())).resolve()
+        outside.chmod(0o755)
+        return root, outside
+
+    def test_missing_parents_are_created_private_and_rerun_is_idempotent(self):
+        root, _ = self.dirs()
+        target = root / "evidence/goc/fixture-result.json"
+        c.write_new(root, target, b"{}")
+        c.write_new(root, target, b"{}")
+        self.assertEqual(target.read_bytes(), b"{}")
+        self.assertEqual(target.stat().st_mode & 0o777, 0o600)
+        for directory in (root / "evidence", root / "evidence/goc"):
+            self.assertEqual(directory.stat().st_mode & 0o777, 0o700)
+
+    def test_symlinked_parent_at_any_depth_refuses_without_writing_outside(self):
+        for link in ("evidence", "evidence/goc"):
+            with self.subTest(link=link):
+                root, outside = self.dirs()
+                (root / link).parent.mkdir(parents=True, exist_ok=True)
+                (root / link).symlink_to(outside, target_is_directory=True)
+                with self.assertRaisesRegex(c.Refusal, "Output directory .* symlink or not a directory"):
+                    c.write_new(root, root / "evidence/goc/fixture-result.json", b"{}")
+                self.assertEqual(list(outside.iterdir()), [])
+
+    def test_symlinked_or_missing_root_refuses(self):
+        root, outside = self.dirs()
+        (root / "link").symlink_to(outside, target_is_directory=True)
+        with self.assertRaisesRegex(c.Refusal, "symlink or not a directory"):
+            c.write_new(root / "link", root / "link/manifest.json", b"{}")
+        with self.assertRaisesRegex(c.Refusal, "does not exist; create it"):
+            c.write_new(root / "absent", root / "absent/manifest.json", b"{}")
+        self.assertEqual(list(outside.iterdir()), [])
+
+    def test_different_existing_content_tells_the_operator_to_keep_the_root_and_rerun_fresh(self):
+        root, _ = self.dirs()
+        c.write_new(root, root / "codex.json", b"{}")
+        with self.assertRaisesRegex(c.Refusal, "different content; keep this run root for inspection and re-run with a fresh run root"):
+            c.write_new(root, root / "codex.json", b"[]")
+        self.assertEqual((root / "codex.json").read_bytes(), b"{}")
+
+    def test_hard_link_added_while_creating_refuses_before_chmod(self):
+        for writer in (c.write_new, c.write_private):
+            with self.subTest(writer=writer.__name__):
+                root, outside = self.dirs()
+                external = outside / "linked"
+                real_write = os.write
+
+                def linking_write(fd, data):
+                    if not external.exists():
+                        os.link(root / "seed/auth.json", external)
+                    return real_write(fd, data)
+
+                with mock.patch.object(c.os, "write", side_effect=linking_write), \
+                        mock.patch.object(c.os, "fchmod", wraps=os.fchmod) as fchmod:
+                    with self.assertRaisesRegex(c.Refusal, "hard-linked elsewhere"):
+                        writer(root, root / "seed/auth.json", b"{}")
+                self.assertTrue(external.exists())
+                self.assertFalse(any(call.args[1] == 0o600 for call in fchmod.call_args_list))
+
+    def test_fifo_at_output_path_refuses_instead_of_blocking(self):
+        root, _ = self.dirs()
+        (root / "evidence").mkdir(mode=0o700)
+        fifo = root / "evidence/credential-boundary.json"
+        os.mkfifo(fifo, 0o600)
+        # No writer ever opens the FIFO: without O_NONBLOCK the read open would block
+        # forever, so a regression is turned into a failure by the alarm, not a hung job.
+        def blocked(_signum, _frame):
+            raise AssertionError("Opening a FIFO output blocked; the existing-file open lost O_NONBLOCK")
+
+        previous = signal.signal(signal.SIGALRM, blocked)
+        self.addCleanup(signal.signal, signal.SIGALRM, previous)
+        signal.alarm(10)
+        self.addCleanup(signal.alarm, 0)
+        with self.assertRaisesRegex(c.Refusal, "not a regular file"):
+            c.write_new(root, fifo, b"{}")
+        self.assertTrue(fifo.exists())
 
 
 class ProvenanceTests(unittest.TestCase):

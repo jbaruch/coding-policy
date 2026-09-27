@@ -92,7 +92,7 @@ python3 .github/codex-accept/contract.py prove-runtime --acr-root "$ACR_ROOT" --
 ```
 
 The wrapper creates the event path exclusively; the proof output must also be
-fresh. The parser requires package start/pass, test run/pass for both roots and
+fresh, and its parent directory must already exist. The parser requires package start/pass, test run/pass for both roots and
 all intermediate/leaf names, and no failure, skip, duplicate completion, foreign
 package, unexpected leaf, missing terminal package result or zero-test success.
 Timing is irrelevant. Arbitrary Go `Output` text is never copied into proof.
@@ -153,6 +153,15 @@ regular, valid and byte-identical to the retained oracle. Missing, malformed or
 unreadable oracle also refuses export. This detects accidental seed mutation;
 it does not authenticate files against a hostile process running as the same
 user. The snapshot is never exported and cleanup removes it on every path.
+
+Every helper output (proof, seed, oracle, `codex.json`, sealed and downloaded
+members) is written descriptor-relative below its owning directory: each parent
+component is opened with `O_NOFOLLOW` (created 0700 when absent), the file is
+created exclusively or compared through an `O_NOFOLLOW | O_NONBLOCK`
+descriptor, and its link count is re-checked right before the 0600 `fchmod`.
+A symlinked parent, a FIFO or other non-regular file, a hard link, or different
+existing content refuses; keep that run root for inspection and re-run with a
+fresh one.
 `CODEX_AUTH_JSON` is scoped to that single step. The suite token is scoped to conversion and sealing.
 The future ACR harness must capture it before journey setup, pass it solely to
 original-test children, clear `GITHUB_TOKEN` there, and exclude both tokens from
