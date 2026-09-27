@@ -8,6 +8,7 @@ if _ROOT not in _sys.path:
     _sys.path.insert(0, _ROOT)
 
 import errno
+import json
 import re
 import subprocess
 import tempfile
@@ -48,6 +49,9 @@ class MembersCase(unittest.TestCase):
         store.enroll(self.path, {"id": "dispatch-a", "agent": "codex-a", "task": "task-a", "report": self.report,
                                  "pane_id": "pane-a", "native_session": None}, AT)
         self.ledger = self.root / "TASK-LEDGER.md"
+        # The ledger binds the utility dispatch state; it exists wherever a
+        # dispatch was recorded, and close-member refuses a missing one.
+        self.path.write_text(json.dumps(empty_state()))
 
     def write_ledger(self, *decisions, task="task-a", report=None, dispatch="dispatch-a", state=None, version="1",
                      drop=None, base="a" * 40, fields=None):
@@ -112,7 +116,10 @@ class CloseMemberTest(MembersCase):
 
     def test_an_unusable_ledger_closes_nothing(self):
         self.emit()
-        for kwargs, why in (({"state": "/elsewhere/state.json"}, "bound to dispatch state"),
+        other = self.root / "other-state.json"
+        other.write_text("{}")
+        for kwargs, why in (({"state": str(other)}, "bound to dispatch state"),
+                            ({"state": "/elsewhere/state.json"}, "does not resolve"),
                             ({"version": "2"}, "is schema 2"), ({"drop": "evidence"}, "lacks evidence")):
             with self.subTest(why=why):
                 self.write_ledger("accepted", **kwargs)
@@ -196,7 +203,24 @@ class CloseMemberTest(MembersCase):
                 raise RuntimeError("Symlink loop from {!r}".format(missing))
             return real(path, strict=strict)
 
-        with patch.object(Path, "resolve", resolve), self.assertRaisesRegex(UsageError, "bound to dispatch state"):
+        with patch.object(Path, "resolve", resolve), self.assertRaisesRegex(UsageError, "does not resolve"):
+            members.close(self.path, "dispatch-a", self.ledger, LATER)
+        self.assertTrue(store.pending(store.load(self.path)))
+
+    def test_a_missing_dispatch_state_never_matches_by_string(self):
+        # An already-normalized missing path equals the state path as a
+        # string; the ledger must still bind a state that exists.
+        self.emit()
+        self.write_ledger("accepted", state=str(self.path))
+        real = Path.resolve
+        bound = str(self.path)
+
+        def resolve(path, strict=False):
+            if strict and str(path) == bound:
+                raise FileNotFoundError(errno.ENOENT, "No such file or directory", bound)
+            return real(path, strict=strict)
+
+        with patch.object(Path, "resolve", resolve), self.assertRaisesRegex(UsageError, "does not resolve"):
             members.close(self.path, "dispatch-a", self.ledger, LATER)
         self.assertTrue(store.pending(store.load(self.path)))
 

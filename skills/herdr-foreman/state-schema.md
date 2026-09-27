@@ -230,8 +230,8 @@ decision log, not a new machine status API or an input to `foreman.sh apply`.
 - **Readers** — a resumed foreman and `herdr-standup` read schema 1 without changing
   its meaning. `close-member` (`skills/herdr-foreman/foreman/members.py`)
   reads it too, and only through a validated schema-1 document: frontmatter
-  carrying every field above, `dispatch_state` resolving to the state the
-  command runs against, and every event carrying every field exactly once.
+  carrying every field above, `dispatch_state` naming an existing file that
+  resolves to the state the command runs against, and every event carrying every field exactly once.
   The frontmatter holds a full `base_revision` SHA and an absolute
   `dispatch_state`. Every event field other than `observed`, `evidence` and
   `assessment` holds the format the table names, in every event: an `id` matching its

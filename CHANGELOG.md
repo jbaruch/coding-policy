@@ -9,8 +9,9 @@
   refuses, closing nothing, unless `at` is a timezone-qualified ISO-8601
   timestamp, `head_revision` is a full SHA (either case) or the literal `unknown` /
   `not_applicable`, the frontmatter `base_revision` is a full SHA,
-  `dispatch_state` is an absolute path that resolves (a `~/` path, a NUL byte
-  or a symlink loop now refuses instead of passing or raising), each event's
+  `dispatch_state` is an absolute path to an existing file that resolves (a
+  `~/` path, a NUL byte, a missing file or a symlink loop now refuses instead
+  of passing or raising), each event's
   `id` matches its `## ` section heading, no id names two events, and no
   ledger line can overwrite the parser's record of that heading. Every other
   field with a documented format is checked in every event, not only the
