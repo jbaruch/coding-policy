@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.299 — 2026-09-27
+
 ### Fixed
 
 - **Four hardening edges from #491's final review (#493).**
