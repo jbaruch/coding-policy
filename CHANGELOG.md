@@ -1,7 +1,5 @@
 # Changelog
 
-## 0.3.290 — 2026-09-27
-
 ### Fixed
 
 - **`standup-ask.sh` measures the worker's live pane before asking (#515).**
@@ -29,6 +27,10 @@
   it takes no home guard and never refuses on a home awaiting migration, and
   it refuses any Unicode `Cc` control character in the path; `standup-ask.sh`
   refuses a control-character path itself as exit 1.
+
+## 0.3.290 — 2026-09-27
+
+### Fixed
 
 - **`evaluate.sh` reads the default corpus under the home guard (#537).**
   `skills/herdr-foreman/classify/evaluate.sh` checked the default state home
