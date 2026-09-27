@@ -1638,7 +1638,8 @@ if name == "dpkg-query":
 
     def test_native_host_and_installation_precede_proof_and_seed(self):
         job = self.workflow["jobs"]["convert"]
-        self.assertEqual(job["runs-on"], "ubuntu-24.04")
+        # A pinned Ubuntu release (never `ubuntu-latest`); Renovate bumps the version.
+        self.assertRegex(job["runs-on"], r"^ubuntu-\d{2}\.\d{2}$")
         self.assertNotIn("container", job)
         names = [step.get("id", step.get("name")) for step in job["steps"]]
         self.assertLess(names.index("Install native boundary prerequisites"), names.index("proof"))
