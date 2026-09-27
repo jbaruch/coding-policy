@@ -9,7 +9,8 @@
   refuses, closing nothing, unless `at` is a timezone-qualified ISO-8601
   timestamp, `head_revision` is a full lowercase SHA or the literal `unknown` /
   `not_applicable`, the frontmatter `base_revision` is a full SHA,
-  `dispatch_state` is an absolute path (a `~/` path no longer passes), each
+  `dispatch_state` is an absolute path (a `~/` path or a NUL byte no longer
+  passes), each
   event's `id` matches its `## ` section heading, and no id names two events.
   The refusal's repair hint changed with it: it used to say "append a correct
   event", which can never fix a malformed earlier event in an append-only log
@@ -17,6 +18,18 @@
   recovered ledger at a new path (`state-schema.md`, Task Ledger). Deferred
   from PR #528's review. `herdr-foreman` Step 11's `check-member` follow-up
   paragraph, which merged several directives, is now one bullet per directive.
+
+- **`foreman detect-triggers` no longer reads untracked files on a round that
+  writes nothing (#499).** `run_command` in
+  `skills/herdr-foreman/foreman/triggers.py` collected and decoded every
+  untracked file in the working tree before the `writes_repository: false`
+  branch discarded them. An unreadable scratch file in the shared checkout (a
+  dangling symlink, a permission-denied file) refused an investigation over
+  workspace state it had no part in, and a large scratch tree was scanned for
+  nothing. Untracked collection now runs only for a round that writes, and the
+  tracked-diff refusal on a no-write round is unchanged. The second item in
+  #499, naming the no-write alternative in `SKILL.md` Step 5, had already
+  landed.
 
 ## 0.3.288 — 2026-09-27
 
